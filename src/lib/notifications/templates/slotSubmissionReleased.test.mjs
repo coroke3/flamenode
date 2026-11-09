@@ -204,6 +204,26 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("有効なZWJ絵文字は維持し、偽装用の孤立ZWJは除去する", () => {
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "group-👩‍💻-👨‍👩‍👧-1",
+      });
+      assert.ok(payload.content.includes("group-👩‍💻-👨‍👩‍👧-1"), "joined emoji must not be split");
+
+      const spoofed = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "group\u200d@everyone",
+      });
+      assert.ok(spoofed.content.includes("group @\u200beveryone"));
+      assert.ok(!spoofed.content.includes("group\u200d"));
+      assert.equal(spoofed.event_id, "event-1");
+    }
+  });
+
   test("通常のグループID表示は変更しない", () => {
     for (const build of [
       buildSlotForceReleasedNotification,
