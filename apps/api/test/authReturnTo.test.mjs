@@ -39,6 +39,8 @@ test("MIG-0802 U04: OAuth completion normalizes encoded and traversed blocked pa
     "/%61pi/auth/callback/discord",
     "/api%2fauth/callback",
     "/%2561pi/auth",
+    "/%25252561pi/auth",
+    "/%2525252f%2525252fevil.example/",
     "/auth/%63omplete?next=%2Fadmin",
     "/%6fnboarding",
     "/%72ules",
