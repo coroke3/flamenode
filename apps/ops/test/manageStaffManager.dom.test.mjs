@@ -226,3 +226,71 @@ test("MIG-0723 T03: CSV owner assignment is rejected before any write", async ()
     assert.deepEqual(ui.calls, []);
   } finally { await ui.cleanup(); }
 });
+
+
+test("MIG-0723 U01b: custom permission checklist submits selected canonical keys and hides site-admin grants", async () => {
+  const ui = fixture({ reply: json(200, { ok: true, message: "追加しました。" }) });
+  try {
+    await ui.view();
+    await ui.click(".manage-staff-list-head button");
+    const assignment = ui.target.querySelector(".manage-staff-add-form .manage-staff-permission-assignment");
+    assert.ok(assignment);
+    const select = assignment.querySelector("select");
+    const setSelect = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value").set;
+    await React.act(async () => {
+      setSelect.call(select, "custom");
+      select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    assert.ok(assignment.querySelector('input[type="checkbox"][value="event.slots"]'));
+    assert.equal(assignment.querySelector('input[type="checkbox"][value="event.public_api"]'), null);
+    await ui.click('input[type="checkbox"][value="event.slots"]');
+    const form = ui.target.querySelector(".manage-staff-add-form");
+    form.elements.namedItem("display_name").value = "Bob";
+    form.elements.namedItem("x_user_id").value = "bob_1";
+    form.elements.namedItem("reason").value = "追加";
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    const body = JSON.parse(ui.calls[0].init.body);
+    assert.equal(body.permission_preset, "custom");
+    assert.equal(body.permission_keys, "event.slots");
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0723 U01b: site admin can see admin-only custom permission options", async () => {
+  const ui = fixture({ isSiteAdmin: true });
+  try {
+    await ui.view();
+    await ui.click(".manage-staff-list-head button");
+    const assignment = ui.target.querySelector(".manage-staff-add-form .manage-staff-permission-assignment");
+    const select = assignment.querySelector("select");
+    const setSelect = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value").set;
+    await React.act(async () => {
+      setSelect.call(select, "custom");
+      select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    assert.ok(assignment.querySelector('input[type="checkbox"][value="event.public_api"]'));
+    assert.ok(assignment.querySelector('input[type="checkbox"][value="xid.link_requests"]'));
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0723 U01b: editing a custom preset preserves existing keys and adds checklist selections", async () => {
+  const ui = fixture({ members: [member({ permission_preset: "custom", permission_keys: ["video.basics"] })],
+    reply: json(200, { ok: true, message: "変更しました。" }) });
+  try {
+    await ui.view();
+    await ui.click(".manage-staff-list-row");
+    const assignment = ui.target.querySelector(".manage-staff-editor .manage-staff-permission-assignment");
+    assert.ok(assignment);
+    assert.equal(assignment.querySelector('input[type="checkbox"][value="video.basics"]').checked, true);
+    await ui.click('input[type="checkbox"][value="event.slots"]');
+    const form = ui.target.querySelector(".manage-staff-editor form");
+    form.elements.namedItem("reason").value = "権限変更";
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    const body = JSON.parse(ui.calls[0].init.body);
+    assert.equal(body.permission_preset, "custom");
+    assert.equal(body.permission_keys, "video.basics,event.slots");
+  } finally { await ui.cleanup(); }
+});
