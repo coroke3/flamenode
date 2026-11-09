@@ -35,6 +35,24 @@ test("MIG-0708 U03 T01: two synchronous Active X clicks issue exactly one reques
   await m.dispose();
 });
 
+test("MIG-0708 U03: overlong next path never navigates after successful Active X switch", async () => {
+  const calls = [];
+  let refreshed = 0;
+  const m = await render(SetActiveXButton, {
+    api: { setActive: async (id) => { calls.push(id); return { ok: true }; } },
+    xUserId: "alpha", approved: true, next: "/" + "a".repeat(512),
+    onRefresh: () => { refreshed += 1; },
+  });
+  try {
+    await m.click(buttonWith(m.container, "アクティブ"));
+    await m.flush();
+    assert.deepEqual(calls, ["alpha"]);
+    assert.equal(refreshed, 1, "invalid next falls back to safe data refresh, not navigation");
+  } finally {
+    await m.dispose();
+  }
+});
+
 test("MIG-0708 U03 T02: pending/rejected and active X never show Active X button", async () => {
   for(const [approved,isActive] of [[false,false],[false,true],[true,true]]){
     const m=await render(SetActiveXButton,{api:{setActive:()=>{throw Error("unreachable");}},xUserId:"x",approved,isActive,onRefresh:()=>{}});
