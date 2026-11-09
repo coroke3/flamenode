@@ -123,7 +123,9 @@ export async function ListPage({
   const event = rawEvent.trim().slice(0, MAX_EVENT_ID_LENGTH);
   // Keep search URLs and loaders free of a truncated emoji surrogate.
   const boundedQuery = q.trim().slice(0, MAX_SEARCH_LENGTH)
-    .replace(/[\uD800-\uDBFF]$/, "");
+    .replace(/[\uD800-\uDBFF]$/, "")
+    // Replace malformed original UTF-16 while retaining valid emoji pairs.
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
   const hasQuery = boundedQuery.length > 0;
   const searchTooShort =
     hasQuery && compactSearchChars(boundedQuery).length < MIN_SEARCH_CHARS;
