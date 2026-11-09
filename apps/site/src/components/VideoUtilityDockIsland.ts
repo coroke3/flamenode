@@ -293,7 +293,7 @@ export function VideoUtilityDockIsland({
         )),
       h(VideoChapterIsland, {
         videoId, activeXId: overlay.activeXId, canPost,
-        canBulk, chapters: editableChapters,
+        canBulk: canPost && canBulk, chapters: editableChapters,
         disabledReason: postPolicy.reason,
         disabledHref: postPolicy.href,
         disabledLinkLabel: postPolicy.linkLabel,
