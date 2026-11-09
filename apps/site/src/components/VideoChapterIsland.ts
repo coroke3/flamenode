@@ -142,6 +142,9 @@ export function VideoChapterIsland({
     const prev = accessRef.current;
     accessRef.current = { videoId, activeXId, canPost };
     if (prev.videoId === videoId && prev.activeXId === activeXId && prev.canPost === canPost) return;
+    // A new video's player has not reported its time yet. Never prefill
+    // the next video's chapter draft from the previous player's position.
+    if (prev.videoId !== videoId) setPlayerSeconds(null);
     epoch.current += 1;
     pending.current = false;
     setBusy(false);
