@@ -18,7 +18,7 @@ export async function send<T extends { ok: boolean }>(
   const isFormData = body instanceof FormData;
   const headers: Record<string, string> = { accept: "application/json" };
   // Multipart content-type must be generated with the FormData boundary.
-  if (!isFormData) headers["content-type"] = "application/json";
+  if (body !== undefined && !isFormData) headers["content-type"] = "application/json";
   let response: Response;
   try {
     response = await fetchFn(path, {
