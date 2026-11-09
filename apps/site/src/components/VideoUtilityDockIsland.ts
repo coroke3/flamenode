@@ -36,6 +36,16 @@ export function resolvePlaylistQuery(search: string): string {
   }
   catch { return ""; }
 }
+/** Ignore unrelated or malformed player-ended events; absent IDs must never match. */
+export function shouldAdvancePlaylistOnEnded(
+  endedYoutubeId: unknown,
+  currentId: string,
+  playlistYoutubeId?: string | null,
+): boolean {
+  return typeof endedYoutubeId === "string" && endedYoutubeId.length > 0 &&
+    (endedYoutubeId === currentId || endedYoutubeId === playlistYoutubeId);
+}
+
 export function playlistItemHref(item: { id: string; youtube_video_id?: string | null }, playlist: string): string {
   const slug = item.youtube_video_id?.trim() || item.id;
   return `/${encodeURIComponent(slug)}${playlist ? `?playlist=${encodeURIComponent(playlist)}` : ""}`;
@@ -206,7 +216,7 @@ export function VideoUtilityDockIsland({
     if (!mounted || !autoNext || !next) return;
     const handler = (event: Event) => {
       const id = (event as CustomEvent<{ youtubeId?: string }>).detail?.youtubeId;
-      if (id !== currentId && id !== items[index]?.youtube_video_id) return;
+      if (!shouldAdvancePlaylistOnEnded(id, currentId, items[index]?.youtube_video_id)) return;
       window.location.assign(playlistItemHref(next, playlist));
     };
     window.addEventListener("flamenode:video-ended", handler);
