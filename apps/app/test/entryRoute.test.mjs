@@ -31,6 +31,33 @@ test("T01/T05: guest gets CURRENT Discord login section, OAuthCallback copy and 
   } finally { await m.unmount(); }
 });
 
+test("T02: synchronous double click initiates only one Discord CSRF preflight", async () => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    // Keep the preflight pending: the user can click again before React commits pending UI.
+    return new Promise(() => {});
+  };
+  let m;
+  try {
+    m = await entry({ status: "anonymous" });
+    const button = [...m.container.querySelectorAll("button")].find((b) => b.textContent.includes("Discord"));
+    assert.ok(button);
+    await act(async () => {
+      button.click();
+      button.click();
+    });
+    assert.equal(calls.length, 1, "the same click burst cannot start a second OAuth flow");
+    assert.equal(calls[0].url, "/api/auth/csrf");
+    assert.equal(calls[0].init.credentials, "same-origin");
+    assert.equal(button.disabled, true);
+  } finally {
+    if (m) await m.unmount();
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("T06: logged in pending terms, pending X and approved X match CURRENT section order", async () => {
   const states = [
     [onboardingState({ needsTermsAcceptance: true, canReserveSlot: false, canPost: false }), "初期設定が未完了です", "/onboarding?next=%2Fentry"],
