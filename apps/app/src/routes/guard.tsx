@@ -126,7 +126,8 @@ export function useApiResult<T>(
   } | null>(null);
   const loadRef = React.useRef(load);
   loadRef.current = load;
-  const shownIdentity = React.useRef<{ api: PersonalApi; key: string } | null>(null);
+  const snapshotRef = React.useRef(snapshot);
+  snapshotRef.current = snapshot;
 
   // Hide a previous identity synchronously during render. Waiting for the effect
   // to set LOADING would briefly expose private data from the previous API client.
@@ -135,9 +136,13 @@ export function useApiResult<T>(
 
   React.useEffect(() => {
     const ctrl = new AbortController();
-    const previous = shownIdentity.current;
-    const silent = previous?.api === api && previous.key === key;
-    shownIdentity.current = { api, key };
+    // Only an already successful snapshot for this exact identity qualifies for
+    // silent refresh. This also makes StrictMode's initial effect replay non-silent.
+    const previous = snapshotRef.current;
+    const silent =
+      previous?.api === api &&
+      previous.key === key &&
+      previous.state.status === "ok";
     if (!silent) setSnapshot({ api, key, state: LOADING });
     loadRef.current(api, ctrl.signal).then(
       (result) => {
