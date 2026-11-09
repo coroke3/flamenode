@@ -92,7 +92,9 @@ export function parseVideoMemberInputs(
 
     // フロントのpatternだけに依存せず、DB write境界でもcanonical X handleを保証する。
     // 空欄は許可するが、入力された値は英数字/underscore 20文字以内だけを保存する。
-    if (xid && !isCanonicalXId(xid)) {
+    // A non-empty supplied handle that normalizes to an empty value (e.g. "@")
+    // is invalid, not an intentionally blank/optional X identity.
+    if (item.x_user_id && !isCanonicalXId(xid)) {
       return {
         ok: false,
         message: `${name || item.x_user_id} の X ID が不正です。英数字とアンダースコア20文字以内で入力してください。`,
