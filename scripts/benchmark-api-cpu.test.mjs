@@ -170,6 +170,17 @@ test("RH-013 cache clear targets the exact server-core public event-export Cache
   assert.equal(eventExportCacheRequestUrls("event / 1").length, 8, "event IDs are encoded before cache-key encoding");
 });
 
+test("MIG-0639 SEC-575: RH-013 exposes distinct scheduled and realtime warm-cache scenarios", () => {
+  const rh013 = buildScenarios({ adminToken: "t" }).find((scenario) => scenario.id === "RH-013");
+  assert.ok(rh013);
+  assert.deepEqual(Object.keys(rh013.warmModes), ["scheduled-warm", "realtime-warm"]);
+  assert.match(rh013.warmModes["scheduled-warm"].path, /update=scheduled/);
+  assert.match(rh013.warmModes["realtime-warm"].path, /update=realtime/);
+  assert.equal(rh013.warmModes["scheduled-warm"].expectCache, "HIT");
+  assert.equal(rh013.warmModes["realtime-warm"].expectCache, "BYPASS");
+  assert.ok(rh013.warmModes["scheduled-warm"].path.includes("refresh=15"));
+});
+
 test("MIG-0639 T01: every main Hono method has exactly one scenario (named or inventory)", () => {
   const scenarios = buildScenarios({ adminToken: "t" }).filter((s) => !s.baseline && s.id !== "S4");
   const titles = scenarios.map((s) => s.title.replace(/ \(.*\)$/, ""));
