@@ -217,7 +217,7 @@ test("MIG-0723 T03: CSV owner assignment is rejected before any write", async ()
     assert.ok(textarea);
     const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value").set;
     await React.act(async () => {
-      setValue.call(textarea, "表示名,X ID,担当プリセット,公開フラグ,公開ラベル\\n代表,owner,owner,1,代表");
+      setValue.call(textarea, "表示名,X ID,担当プリセット,公開フラグ,公開ラベル\n代表,owner,owner,1,代表");
       textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     });
     const button = [...ui.target.querySelectorAll("button")].find(el => el.textContent.trim() === "CSVを反映");
