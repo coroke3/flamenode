@@ -64,6 +64,7 @@ export function EntryIndexView({
   authError: string | null;
 }): React.ReactElement {
   const [signInPending, setSignInPending] = React.useState(false);
+  const signInBusyRef = React.useRef(false);
   // Page offsets are valid only for the exact first-page snapshot, not merely a user ID.
   const [extraPageState, setExtraPageState] = React.useState<{
     owner: EntryIndexResponse;
@@ -169,8 +170,11 @@ export function EntryIndexView({
     return defaultLabel;
   };
   const startSignIn = (): void => {
-    if (signInPending) return;
+    // React state updates are asynchronous; lock before the first CSRF fetch.
+    if (signInBusyRef.current) return;
+    signInBusyRef.current = true;
     setSignInPending(true);
+    // Submission navigates away or to a failure route; do not re-enable here.
     void startDiscordSignIn(next);
   };
 
