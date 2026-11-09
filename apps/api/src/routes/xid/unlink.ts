@@ -8,6 +8,7 @@ import type { AppEnv } from "../../env.ts";
 import { sql } from "@flamenode/server-core/sql";
 import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import type { WriteAuditLogInput } from "@flamenode/server-core/audit/types";
 import { auditPreloaded, readAdminJsonBody, BODY_TOO_LARGE_MESSAGE } from "../admin/body.ts";
 import { limitXIdActionBody } from "../../middleware/bodyLimit.ts";
 import { parseDeleteLinkedXInput } from "./profileInput.ts";
@@ -85,13 +86,13 @@ export function createXIdUnlinkRoutes(guard: MiddlewareHandler<AppEnv>): Hono<Ap
       `),
     ];
     const expectedMutationChanges: number[] = [1];
-    const audits = [{
-      table_name: "x_user_account_links" as const,
+    const audits: WriteAuditLogInput[] = [{
+      table_name: "x_user_account_links",
       target_id: `${xUserId}:${authUserId}`,
-      operation: "DELETE" as const,
+      operation: "DELETE",
       before: { ...beforeLink }, after: null,
       actor_user_id: authUserId, actor_x_user_id: xUserId,
-      retention_class: "long_audit" as const, strict: true,
+      retention_class: "long_audit", strict: true,
     }];
     if (wasActive) {
       mutationStatements.push(
@@ -107,7 +108,7 @@ export function createXIdUnlinkRoutes(guard: MiddlewareHandler<AppEnv>): Hono<Ap
         after: { ...beforeUser, active_x_user_id: null },
         actor_user_id: authUserId, actor_x_user_id: xUserId,
         retention_class: "long_audit", strict: true,
-      } as typeof audits[number]);
+      });
     }
 
     try {
