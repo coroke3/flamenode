@@ -866,6 +866,40 @@ test("P2 per-chapter permission revocation closes edit while general posting sta
   });
 });
 
+test("P2 in-flight delete cannot show success or refresh after per-row permission revocation", async () => {
+  await withChapterDom(async (doc, root) => {
+    let resolveResponse;
+    let requests = 0;
+    let refreshes = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      return await new Promise((resolve) => { resolveResponse = resolve; });
+    };
+    doc.defaultView.confirm = () => true;
+    const render = (chapters) => React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true, chapters,
+      onChanged: () => { refreshes += 1; },
+    });
+    await React.act(async () => root.render(render([PRIVATE_CHAPTER])));
+    await clickButton(doc, "削除");
+    assert.equal(requests, 1, "DELETE must already be in flight before a revoke");
+    await React.act(async () => root.render(render([{ ...PRIVATE_CHAPTER, canManage: false }])));
+    assert.equal([...doc.querySelectorAll("button")].some((button) => button.textContent === "削除"), false,
+      "revoked per-row controls are hidden, even while a DELETE was pending");
+    await React.act(async () => {
+      resolveResponse({ ok: true, status: 200, json: async () => ({ ok: true, chapterId: "c1" }) });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.equal(refreshes, 0, "the revoked row's late DELETE must not refresh its viewer");
+    assert.equal(doc.querySelector('[role="status"]'), null,
+      "the revoked row's late success must never be shown");
+    await React.act(async () => root.render(render([PRIVATE_CHAPTER])));
+    assert.equal(doc.querySelector('[role="status"]'), null,
+      "regrant must not replay a stale delete success");
+  });
+});
+
 test("P2 removal of an edited chapter invalidates its editor before any update", async () => {
   await withChapterDom(async (doc, root) => {
     const render = (chapters) => React.createElement(VideoChapterIsland, {
