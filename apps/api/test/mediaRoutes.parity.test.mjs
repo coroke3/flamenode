@@ -340,6 +340,19 @@ test("T04 privacy: cache entries cannot inject redirects, cookies, MIME or stale
     assert.equal(calls.objects.length, 2, "valid cached bytes do not reread R2");
     await safeHit.arrayBuffer();
 
+    // The actual stream length is authoritative; old entries may omit or
+    // under-report Content-Length. Oversized bytes must never be served.
+    for (const headers of [
+      { "content-type": "image/png", etag: '"cached-no-length"' },
+      { "content-type": "image/png", etag: '"cached-underreported"', "content-length": "1" },
+    ]) {
+      cached = new Response(new Uint8Array(5 * 1024 * 1024 + 1), { headers });
+      const oversized = await request(key, env);
+      assert.equal(oversized.status, 200);
+      assert.equal(calls.objects.length, 3, "oversized cache body must fall back to R2");
+      await oversized.arrayBuffer();
+    }
+
     const conditional = await request(key, env, { "If-None-Match": '"cached-img"' });
     assert.equal(conditional.status, 304);
     assert.equal(conditional.headers.get("cache-control"), "no-store");
