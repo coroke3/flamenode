@@ -1031,13 +1031,18 @@ test("P2 late bulk CSV response after permission revocation cannot show success 
     await React.act(async () => {
       details.querySelector("summary").click();
     });
+    // The React DOM event plugin was loaded before JSDOM was installed in this
+    // Node test. Dispatch native events through the owning document's textarea
+    // element, and verify that controlled state accepted the input below.
     const setter = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLTextAreaElement.prototype, "value").set;
     await React.act(async () => {
       textarea.focus();
       setter.call(textarea, "0:10,Pending");
-      textarea.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
+      textarea.dispatchEvent(new doc.defaultView.InputEvent("input", {
+        bubbles: true, inputType: "insertText", data: "0:10,Pending",
+      }));
       textarea.dispatchEvent(new doc.defaultView.Event("change", { bubbles: true }));
-      textarea.dispatchEvent(new doc.defaultView.KeyboardEvent("keyup", { bubbles: true, key: "0" }));
+      textarea.dispatchEvent(new doc.defaultView.KeyboardEvent("keyup", { bubbles: true, key: "g" }));
     });
     assert.equal(textarea.value, "0:10,Pending");
     // React's controlled textarea must have accepted the synthetic input,
