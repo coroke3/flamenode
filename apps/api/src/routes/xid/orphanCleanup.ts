@@ -28,7 +28,7 @@ export function cleanupIconKey(url: string | null | undefined): string | null {
   const value = url.trim();
   if (!value.startsWith(PUBLIC_PREFIX)) return null;
   const key = value.slice(PUBLIC_PREFIX.length);
-  if (!key || key.includes("..") || key.includes("\\\\") || /[\x00-\x1f\x7f]/.test(key)) return null;
+  if (!key || key.includes("..") || key.includes("\\") || /[\x00-\x1f\x7f]/.test(key)) return null;
   const slash = key.indexOf("/");
   if (slash <= 0 || slash === key.length - 1) return null;
   const ns = key.slice(0, slash);
