@@ -57,7 +57,10 @@ function setup(user = ADMIN) {
     "all staff mutations must be directly registered on canonical parent paths",
   );
   async function send(method, path, body) {
-    return app.request("https://example.test/events/ev-1/staff" + (path === "/" ? "" : path), {
+    const url = path === "/owner-transfer"
+      ? "https://example.test/events/ev-1/owner-transfer"
+      : "https://example.test/events/ev-1/staff" + (path === "/" ? "" : path);
+    return app.request(url, {
       method, headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }, { DB: db });
