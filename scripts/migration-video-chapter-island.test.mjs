@@ -155,6 +155,10 @@ test("U03 playlist query uses first value only, trims it and retains it on navig
   assert.equal(resolvePlaylistQuery("?playlist=%20event-1%20"), "event-1");
   assert.equal(resolvePlaylistQuery("?other=1"), "");
   assert.equal(resolvePlaylistQuery("?playlist=" + "x".repeat(200)).length, 128);
+  assert.equal(resolvePlaylistQuery("?playlist=" + encodeURIComponent("x".repeat(127) + "😀")), "x".repeat(127),
+    "128 UTF-16-unit cutoff must not leave a broken high surrogate");
+  assert.equal(resolvePlaylistQuery("?playlist=" + encodeURIComponent("x".repeat(126) + "😀")), "x".repeat(126) + "😀",
+    "a complete surrogate pair at the limit must remain intact");
   assert.equal(playlistItemHref({ id: "vid", youtube_video_id: "abc-123" }, "event-1"),
     "/abc-123?playlist=event-1");
   assert.equal(playlistItemHref({ id: "vid", youtube_video_id: null }, ""),
