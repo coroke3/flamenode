@@ -8,7 +8,7 @@ import { dom, flush, fakeApi, onboarding, onboardingState, ok } from "./helpers.
 import { MemoryRouter } from "react-router-dom";
 
 const { send } = await import("../.test-dist/apps/app/src/api/write.js");
-const { useApiResult } = await import("../.test-dist/apps/app/src/routes/guard.js");
+const { useApiResult, useSession } = await import("../.test-dist/apps/app/src/routes/guard.js");
 
 const asJson = (value, status = 200) =>
   new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
@@ -387,5 +387,44 @@ test("D-16-3: StrictMode effect replay still applies the initial anonymous resul
     assert.notEqual(container.textContent, "loading");
   } finally {
     await act(async () => root.unmount());
+  }
+});
+
+
+test("D-16-4: changing Personal API identity hides the previous session user synchronously", async () => {
+  for (const nextStatus of ["anonymous", "banned", "unavailable"]) {
+    const container = dom.window.document.createElement("div");
+    const root = createRoot(container);
+    let resolveNext;
+    const firstApi = {
+      getSession: async () => ({ status: "ok", user: { id: "previous-private-user" } }),
+    };
+    const nextApi = {
+      getSession: () => new Promise((resolve) => { resolveNext = resolve; }),
+    };
+    const Demo = ({ api }) => {
+      const state = useSession(api);
+      return React.createElement(
+        "p",
+        null,
+        state.status === "ok" ? state.user.id : state.status,
+      );
+    };
+    try {
+      await act(async () => root.render(React.createElement(Demo, { api: firstApi })));
+      await flush();
+      assert.equal(container.textContent, "previous-private-user");
+
+      await act(async () => root.render(React.createElement(Demo, { api: nextApi })));
+      assert.equal(container.textContent, "loading");
+      assert.doesNotMatch(container.textContent, /previous-private-user/);
+
+      await act(async () => resolveNext({ status: nextStatus }));
+      await flush();
+      assert.equal(container.textContent, nextStatus);
+      assert.doesNotMatch(container.textContent, /previous-private-user/);
+    } finally {
+      await act(async () => root.unmount());
+    }
   }
 });
