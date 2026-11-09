@@ -168,3 +168,23 @@ test("SA-102 isolated handler returns error without mutation when D1 pre-read fa
   assert.equal(h.stats.batches, 0);
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
 });
+
+test("SA-102 isolated handler rejects oversized bodies and does not mutate state", async () => {
+  const h = setup();
+  const res = await h.send({
+    x_user_id: "x_one", x_name: "Overflow", profile_text: "A".repeat(70 * 1024),
+  });
+  assert.equal(res.status, 413);
+  assert.equal(res.headers.get("Cache-Control"), "private, no-store");
+  assert.equal(h.sqlite.prepare("SELECT x_name FROM x_users WHERE id='x_one'").get().x_name, "Before");
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(h.stats.batches, 0);
+});
+
+test("SA-102 isolated handler never emits cacheable private profile responses", async () => {
+  for (const config of [{ linked: false }, { approved: false }, {}]) {
+    const h = setup(config);
+    const res = await h.send();
+    assert.equal(res.headers.get("Cache-Control"), "private, no-store");
+  }
+});
