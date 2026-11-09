@@ -195,7 +195,7 @@ function StaffCsvImport({
     <h3>スタッフCSV</h3>
     <label className="fn-label">CSV（5列：表示名、X ID、担当プリセット、公開フラグ、公開ラベル）
       <textarea className="fn-input" rows={7} value={text}
-        onChange={event => setText(event.target.value)} disabled={busy}/>
+        onInput={event => setText(event.currentTarget.value)} disabled={busy}/>
     </label>
     <p className="fn-console-note" role="status">
       新規 {preview.counts.create} / 更新 {preview.counts.update} / エラー {preview.counts.error}
