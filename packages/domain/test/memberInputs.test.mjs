@@ -62,6 +62,26 @@ test("MIG-0651: nonempty but empty-after-normalization member X handles fail clo
   if (atHandle.ok) assert.equal(atHandle.members[0].x_user_id, "valid_x");
 });
 
+test("MIG-0651: unnamed row with nonblank malformed X ID must not disappear silently", () => {
+  for (const invalid of ["@", "@@@", "@!", " @ ", "@-", "#"]) {
+    const result = parseVideoMemberInputs(JSON.stringify([
+      { name: "", x_user_id: invalid },
+    ]), true);
+    assert.equal(result.ok, false, JSON.stringify(invalid));
+    assert.match(result.message, /X ID が不正/, JSON.stringify(invalid));
+  }
+  const blank = parseVideoMemberInputs(JSON.stringify([
+    { name: "", x_user_id: "" },
+    { name: " ", x_user_id: " " },
+  ]), true);
+  assert.deepEqual(blank, { ok: true, members: [] }, "truly blank member rows are ignored");
+  const withId = parseVideoMemberInputs(JSON.stringify([
+    { name: "", x_user_id: "@valid_x" },
+  ]), true);
+  assert.equal(withId.ok, true);
+  if (withId.ok) assert.deepEqual(withId.members.map(x => [x.name, x.x_user_id]), [["@valid_x", "valid_x"]]);
+});
+
 test("MIG-0651: chapter times preserve strict mm:ss format and fallback label", () => {
   assert.equal(parseMemberChapterTime("1:05"), 65);
   assert.equal(parseMemberChapterTime("1000:59"), 60059);
