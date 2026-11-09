@@ -323,6 +323,21 @@ test("public slot iconはD1 ACLを再確認した後にR2 Cache hitを使う", a
       assert.equal(poisoned.response.headers.get(header), null, header);
     }
     assert.equal(poisoned.state.gets, 1, "poisoned cache entry must fall back to R2");
+
+    // A syntactically valid image cache entry is still untrusted when its streamed
+    // body exceeds the public-media ceiling; reject it and read the bounded R2 object.
+    store.set("https://example.test/slot-icon/video-icons/x/icon.webp", {
+      body: new Uint8Array(5 * 1024 * 1024 + 1).buffer,
+      headers: {
+        "content-type": "image/webp",
+        etag: '"oversized"',
+      },
+    });
+    const oversized = await requestIcon(options);
+    assert.equal(oversized.response.status, 200);
+    assert.equal(oversized.response.headers.get("content-type"), "image/webp");
+    assert.equal(oversized.response.headers.get("cache-control"), "no-store");
+    assert.equal(oversized.state.gets, 1, "oversized cache body must fall back to R2");
   } finally {
     delete globalThis.caches;
   }
