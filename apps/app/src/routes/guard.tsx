@@ -181,15 +181,23 @@ export function ResultView<T>({
 }
 
 export function useSession(api: PersonalApi): SessionState {
-  const [state, setState] = React.useState<SessionState>({ status: "loading" });
+  const [snapshot, setSnapshot] = React.useState<{
+    api: PersonalApi;
+    state: SessionState;
+  } | null>(null);
+
+  // A replacement API identity must not briefly inherit the previous session's user.
+  const state = snapshot?.api === api ? snapshot.state : LOADING;
+
   React.useEffect(() => {
     const ctrl = new AbortController();
+    setSnapshot({ api, state: LOADING });
     api.getSession(ctrl.signal).then(
-      (r) => {
-        if (!ctrl.signal.aborted) setState(r);
+      (result) => {
+        if (!ctrl.signal.aborted) setSnapshot({ api, state: result });
       },
       () => {
-        if (!ctrl.signal.aborted) setState({ status: "unavailable" });
+        if (!ctrl.signal.aborted) setSnapshot({ api, state: { status: "unavailable" } });
       },
     );
     return () => ctrl.abort();
