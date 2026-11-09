@@ -144,6 +144,27 @@ test("MIG-0708 U03: stale icon response after X account switch cannot overwrite 
   }
 });
 
+test("MIG-0708 U03: A-B-A account switch rejects first A mutation completion", async () => {
+  const pending = deferred();
+  let refreshed = 0;
+  const urls = ["https://cdn.example/a.png", "https://cdn.example/b.png"];
+  const api = { setIcon: () => pending.promise };
+  const common = { api, candidates: urls, onRefresh: () => { refreshed++; } };
+  const m = await render(XIdIconPicker, { ...common, xUserId: "A", currentIconUrl: urls[0] });
+  try {
+    const buttons = [...m.container.querySelectorAll('button[aria-label="候補アイコンを選択"]')];
+    await act(async () => buttons[1].click());
+    await m.rerender({ ...common, xUserId: "B", currentIconUrl: urls[1] });
+    await m.rerender({ ...common, xUserId: "A", currentIconUrl: urls[0] });
+    await act(async () => pending.resolve({ ok: true, iconUrl: urls[1], message: "stale A completed" }));
+    await m.flush();
+    assert.equal(buttons[0].getAttribute("aria-pressed"), "true");
+    assert.equal(buttons[1].getAttribute("aria-pressed"), "false");
+    assert.equal(refreshed, 0, "a previous generation of the same X ID cannot refresh the new session");
+    assert.equal(m.container.textContent.includes("stale A completed"), false);
+  } finally { await m.dispose(); }
+});
+
 test("MIG-0708 U03: icon notices from previous account are cleared on identity switch", async () => {
   const oldUrl = "https://cdn.example/old.png";
   const newUrl = "https://cdn.example/new.png";
