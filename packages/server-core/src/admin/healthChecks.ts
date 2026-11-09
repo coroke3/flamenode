@@ -644,20 +644,22 @@ async function checkAuditLogsRetentionCandidates(
     or(isNull(auditLogsTable.retention_class), eq(auditLogsTable.retention_class, "normal")),
     lt(auditLogsTable.created_at, cutoff),
   );
-  const [countRows, sampleRows] = await Promise.all([
-    db.select({ c: sql<number>`COUNT(*)` }).from(auditLogsTable).where(where),
-    db
-      .select({
-        id: auditLogsTable.id,
-        table_name: auditLogsTable.table_name,
-        created_at: auditLogsTable.created_at,
-      })
-      .from(auditLogsTable)
-      .where(where)
-      .orderBy(auditLogsTable.created_at)
-      .limit(10),
-  ]);
-  const count = Number(countRows[0]?.c ?? 0);
+  // One D1 statement returns both the full eligible count and the first 10
+  // sample rows. The window count is computed before LIMIT; empty results
+  // correctly imply zero candidates. Along with settings and session this
+  // stays within the S2 maximum of 3 D1 statements.
+  const sampleRows = await db
+    .select({
+      id: auditLogsTable.id,
+      table_name: auditLogsTable.table_name,
+      created_at: auditLogsTable.created_at,
+      total_candidates: sql<number>`COUNT(*) OVER ()`,
+    })
+    .from(auditLogsTable)
+    .where(where)
+    .orderBy(auditLogsTable.created_at)
+    .limit(10);
+  const count = Number(sampleRows[0]?.total_candidates ?? 0);
   return {
     id: "audit_logs_retention_candidates",
     label: "audit_logs normal retention 対象",
