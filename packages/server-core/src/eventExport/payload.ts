@@ -627,7 +627,12 @@ export function buildEventExportPayloadForFormat(
  * Every other field must match exactly; never trust cached metadata alone.
  */
 export function eventExportBodyMatchesFresh(cached: string, fresh: string, format: EventExportFormat): boolean {
-  if (cached === fresh) return true;
+  if (cached === fresh) {
+    // Even an equal raw cache must be canonical JSON: duplicate keys are not safe
+    // to return verbatim to consumers with different JSON parsing behavior.
+    try { return JSON.stringify(JSON.parse(cached)) === cached; }
+    catch { return false; }
+  }
   if (format !== "v5") return false;
   try {
     const a: unknown = JSON.parse(cached);
