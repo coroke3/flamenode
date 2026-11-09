@@ -116,8 +116,14 @@ export function parseStoredPlaylistOrder(raw: string | null): string[] {
   } catch { return []; }
 }
 
-function uniquePlaylistItems(items: VideoViewerOverlayDto["playlistItems"]) {
-  return items.filter((item, i) => items.findIndex((other) => other.id === item.id) === i);
+/** Keep the first server-provided occurrence without quadratic duplicate scans. */
+export function uniquePlaylistItems(items: VideoViewerOverlayDto["playlistItems"]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
 }
 
 /** U03: no Next import, private viewer state is injected by the eventual U01 owner. */
