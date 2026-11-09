@@ -37,7 +37,7 @@ export function OnboardingTermsForm({
         onAccepted();
       } else {
         setError(
-          result.status === "ok" && typeof result.data.message === "string"
+          result.status === "ok" && result.data.ok === false
             ? result.data.message
             : "同意の保存に失敗しました。時間をおいて再試行してください。",
         );
