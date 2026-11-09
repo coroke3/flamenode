@@ -415,7 +415,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(ids.includes("chap-priv-staff"));
   });
 
-  test("RH-031 consenting admin obtains server-calculated chapter management", async () => {
+  test("RH-031 consenting admin without active approved X retains read but not write capability", async () => {
     const { env, sqlite } = setupTestEnv();
     // The shared personalSeed baseline deliberately leaves carol unconsented;
     // assert the positive admin capability only after explicit TOS acceptance.
@@ -429,7 +429,13 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(json.loggedIn, true);
     assert.equal(json.isTosAccepted, true);
     assert.equal(json.termsReacceptRequired, false);
-    assert.equal(json.viewerCanEditChapters, true);
+    assert.equal(json.activeXId, null, "seed admin has no active approved X");
+    assert.equal(json.viewerXApproved, false);
+    assert.equal(json.viewerCanEditChapters, false,
+      "admin can read private chapters but cannot write without approved active X");
+    assert.ok(json.privateChapters.length > 0, "admin private read access is preserved");
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === false),
+      "per-row edit capability must also require approved active X");
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
   });
 
