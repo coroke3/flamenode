@@ -38,7 +38,7 @@ export function playlistItemHref(item: { id: string; youtube_video_id?: string |
   return `/${encodeURIComponent(slug)}${playlist ? `?playlist=${encodeURIComponent(playlist)}` : ""}`;
 }
 export function canPostVideoChapter(overlay: VideoViewerOverlayDto, loading: boolean): boolean {
-  return !loading && overlay.loggedIn && overlay.viewerXApproved && Boolean(overlay.activeXId) &&
+  return !loading && overlay.loggedIn && overlay.viewerXApproved && Boolean(overlay.activeXId?.trim()) &&
     !overlay.isBanned && overlay.isTosAccepted && !overlay.termsReacceptRequired &&
     !overlay.authUnavailable;
 }
@@ -60,7 +60,7 @@ export function chapterPostPolicy(
     canPost: false, reason: "コメント投稿には利用規約への同意が必要です。",
     href: `/rules?next=${encodeURIComponent(currentPath)}`, linkLabel: "利用規約へ",
   };
-  if (!overlay.viewerXApproved || !overlay.activeXId) return {
+  if (!overlay.viewerXApproved || !overlay.activeXId?.trim()) return {
     canPost: false, reason: "コメント投稿には承認済み X ID が必要です。",
     href: `/dashboard/settings?next=${encodeURIComponent(currentPath)}`, linkLabel: "X ID設定へ",
   };
