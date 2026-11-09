@@ -17,11 +17,12 @@ function exportedString(source, name) {
 
 test("D-13-42: copied visibility object keys stay aligned with CURRENT generators", () => {
   const copied = read("../src/visibility/publicCacheKeys.ts");
-  const random = read("../../../src/lib/publicData/randomVideoPoolCore.ts");
-  const youtube = read("../../../src/lib/publicData/staticYoutubeRelatedBlocklistCore.ts");
+  const random = read("../../../packages/server-core/src/publicData/randomVideoPoolCore.ts");
+  const youtube = read("../../../packages/server-core/src/publicData/staticYoutubeRelatedBlocklistCore.ts");
   const top = read("../../../src/lib/publicData/staticTopSectionsCore.ts");
   const users = read("../../../src/lib/publicData/staticUserProfileCore.ts");
   const event = read("../../../packages/server-core/src/publicData/eventDetailCore.ts");
+  const release = read("../../../packages/server-core/src/publicData/eventReleaseCore.ts");
 
   for (const [name, source] of [
     ["RANDOM_VIDEO_POOL_OBJECT_KEY", random],
@@ -38,7 +39,7 @@ test("D-13-42: copied visibility object keys stay aligned with CURRENT generator
   assert.match(event, /return `events\/\$\{eventId\}\.json`/);
   assert.match(event, /return `events\/\$\{eventId\}\/base\.v1\.json`/);
   assert.match(event, /return `events\/\$\{eventId\}\/slots\.v1\.json`/);
-  assert.match(event, /return `events\/\$\{eventId\}\/release\.v1\.json`/);
+  assert.match(release, /return `events\/\$\{eventId\}\/release\.v1\.json`/);
 });
 
 test("visibility host is fail-closed for missing manifest bucket in enforce mode", async () => {
