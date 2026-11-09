@@ -83,11 +83,11 @@ test("D-13-41: Hono host deliberately does not wake notification queues", async 
 
 test("video status notification templates pass the Worker-provided site origin to every URL builder", () => {
   const source = read("../../../src/lib/notifications/templates/video.ts");
-  assert.match(source, /buildVideoApprovedNotification\\([\\s\\S]*?\\}, env\\?: NotificationUrlEnv\\)/);
-  assert.match(source, /buildVideoVisibilityChangedNotification\\([\\s\\S]*?\\}, env\\?: NotificationUrlEnv\\)/);
-  assert.match(source, /appUrl\\(videoPublicPath\\(args\\.videoId, args\\.youtubeVideoId\\), env\\)/);
-  assert.match(source, /linkLine\\([^;]+, env\\)/);
-  assert.match(source, /appUrl\\(videoPublicPath\\(args\\.videoId, args\\.youtubeVideoId\\), env\\)/);
+  assert.match(source, /buildVideoApprovedNotification\([\s\S]*?\}, env\?: NotificationUrlEnv\)/);
+  assert.match(source, /buildVideoVisibilityChangedNotification\([\s\S]*?\}, env\?: NotificationUrlEnv\)/);
+  assert.match(source, /appUrl\(videoPublicPath\(args\.videoId, args\.youtubeVideoId\), env\)/);
+  assert.match(source, /linkLine\([^;]+, env\)/);
+  assert.match(source, /appUrl\(videoPublicPath\(args\.videoId, args\.youtubeVideoId\), env\)/);
 });
 
 test("visibility manifest host uses R2 ETag preconditions for writes", async () => {
