@@ -353,10 +353,15 @@ export function VideoUtilityDockIsland({
       chapters.length === 0 ? h("p", null, "チャプターはまだありません。") :
         h("ol", null, ...chapters.map((chapter) =>
           h("li", { key: chapter.id },
-            h("button", { type: "button", "aria-label": `${chapter.timeLabel}に移動`, onClick: () => {
-              const seconds = safeChapterSeekSeconds(chapter.timeLabel);
-              if (seconds !== null) seekToTime(seconds);
-            } }, chapter.timeLabel),
+            h("button", {
+              type: "button",
+              "aria-label": `${chapter.timeLabel}に移動`,
+              disabled: safeChapterSeekSeconds(chapter.timeLabel) === null,
+              onClick: () => {
+                const seconds = safeChapterSeekSeconds(chapter.timeLabel);
+                if (seconds !== null) seekToTime(seconds);
+              },
+            }, chapter.timeLabel),
             " ", chapter.label, chapter.authorName ? ` · ${chapter.authorName}` : ""),
         )),
       h(VideoChapterIsland, {
