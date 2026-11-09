@@ -148,10 +148,10 @@ test("CURRENT chapter time validation does not round an invalid time down to zer
   assert.deepEqual(validateChapterTime("1:05"), { ok: true, seconds: 65 });
 });
 
-test("U03 playlist query uses first value only, trims it and retains it on navigation", async () => {
+test("U03 playlist query rejects duplicate keys, trims singleton and retains it on navigation", async () => {
   const { resolvePlaylistQuery, playlistItemHref } =
     await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
-  assert.equal(resolvePlaylistQuery("?playlist=first&playlist=second"), "first");
+  assert.equal(resolvePlaylistQuery("?playlist=first&playlist=second"), "", "ambiguous duplicate keys fail closed");
   assert.equal(resolvePlaylistQuery("?playlist=%20event-1%20"), "event-1");
   assert.equal(resolvePlaylistQuery("?other=1"), "");
   assert.equal(resolvePlaylistQuery("?playlist=" + "x".repeat(200)).length, 128);
