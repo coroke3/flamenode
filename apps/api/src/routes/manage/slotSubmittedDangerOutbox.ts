@@ -11,7 +11,7 @@
 import { sql, type SQL } from "@flamenode/server-core/sql";
 import { escapeDiscordMention } from "@flamenode/server-core/notifications/discordText";
 import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
-import { slotReleaseNotificationPayload } from "./slotReleaseOutbox.ts";
+import { slotReleaseNotificationPayload, legacyGroupIdForDiscordDisplay } from "./slotReleaseOutbox.ts";
 import type { SubmittedDangerKind, SubmittedDangerSelection } from "./slotSubmittedDangerSelection.ts";
 
 export type SubmittedDangerOutboxPlan = {
@@ -42,7 +42,7 @@ export function slotSubmissionReleasedPayload(
       "から提出作品が解除されました。\n" +
       "予約枠自体は引き続き確保されています。別の作品を再提出できます。",
     "状態\n対象枠数: " + ids.length +
-      (groupId ? "\n提出グループ: " + escapeDiscordMention(groupId) : ""),
+      (groupId ? "\n提出グループ: " + legacyGroupIdForDiscordDisplay(groupId) : ""),
     "次にできること\nイベントの枠一覧を開く\n" + slotsUrl +
       "\nイベントページを開く\n" + eventUrl,
   ].join("\n\n");
