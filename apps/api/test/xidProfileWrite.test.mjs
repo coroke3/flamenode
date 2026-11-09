@@ -106,3 +106,19 @@ test("SA-102 isolated handler refuses bad JSON values before any write", async (
   }
   assert.equal(h.sqlite.prepare("SELECT x_name FROM x_users WHERE id='x_one'").get().x_name, "Before");
 });
+
+test("SA-102 isolated handler rolls back queued changes and audit on stale CAS snapshot", async () => {
+  let raced = false;
+  const h = setup({ onFirst: (statement, sqlite) => {
+    if (!raced && statement.includes("SELECT x.* FROM x_users x")) {
+      raced = true;
+      sqlite.prepare("UPDATE x_users SET x_name = 'Concurrent' WHERE id = 'x_one'").run();
+    }
+  } });
+  const res = await h.send({ x_user_id: "x_one", x_name: "Stale" });
+  assert.equal(raced, true, "test must perturb the authoritative row after its read");
+  assert.equal(res.status, 409);
+  assert.equal(h.sqlite.prepare("SELECT x_name FROM x_users WHERE id='x_one'").get().x_name, "Concurrent");
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+});
