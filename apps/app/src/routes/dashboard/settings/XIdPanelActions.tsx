@@ -35,13 +35,21 @@ export function SetActiveXButton({
   const navigate = useNavigate();
   const { pending, execute } = usePendingAction();
   const [error, setError] = React.useState<string | null>(null);
+  const identityRef = React.useRef({ xUserId, generation: 0 });
+  if (identityRef.current.xUserId !== xUserId) {
+    identityRef.current = { xUserId, generation: identityRef.current.generation + 1 };
+  }
+  React.useEffect(() => { setError(null); }, [xUserId]);
   if (!approved || isActive) return null;
 
   const run = () => {
+    const requestIdentity = identityRef.current;
     void execute(async () => {
       setError(null);
       try {
         const result = await api.setActive(xUserId);
+        // Do not navigate the next account on a previous account's completion.
+        if (identityRef.current !== requestIdentity) return;
         if (!result.ok) { setError(result.message ?? "切替に失敗しました。"); return; }
         // Do not turn a malformed / external next parameter into a navigation.
         if (next && isSafeRelativePath(next)) {
@@ -49,7 +57,9 @@ export function SetActiveXButton({
         } else {
           onRefresh();
         }
-      } catch { setError(NETWORK_ERROR); }
+      } catch {
+        if (identityRef.current === requestIdentity) setError(NETWORK_ERROR);
+      }
     });
   };
   return (
