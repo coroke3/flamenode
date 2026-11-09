@@ -824,3 +824,49 @@ test("P2 late chapter-create response cannot display success or refresh the next
       "the previous video's success message must not be shown");
   });
 });
+
+
+test("P2 late bulk CSV response after permission revocation cannot show success or refresh", async () => {
+  await withChapterDom(async (doc, root) => {
+    let resolveResponse;
+    let requests = 0;
+    let refreshes = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      return await new Promise((resolve) => { resolveResponse = resolve; });
+    };
+    const render = (canBulk) => React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true, canBulk,
+      onChanged: () => { refreshes += 1; },
+    });
+    await React.act(async () => root.render(render(true)));
+    const textarea = doc.querySelector("details textarea");
+    assert.ok(textarea, "CSV editor must exist before revocation");
+    const setter = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLTextAreaElement.prototype, "value").set;
+    await React.act(async () => {
+      setter.call(textarea, "0:10,Pending");
+      textarea.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
+    });
+    await React.act(async () => {
+      doc.querySelector("details form").dispatchEvent(new doc.defaultView.Event("submit", {
+        bubbles: true, cancelable: true,
+      }));
+    });
+    assert.equal(requests, 1, "bulk request must be pending");
+    await React.act(async () => root.render(render(false)));
+    assert.equal(doc.querySelector("details"), null, "permission loss immediately hides CSV controls");
+    await React.act(async () => {
+      resolveResponse({ ok: true, status: 200, json: async () => ({
+        ok: true, inserted: 1, skipped: 0, message: "追加しました",
+      }) });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.equal(refreshes, 0, "revoked bulk result must not refresh the overlay");
+    assert.equal(doc.querySelector('[role="status"]'), null,
+      "revoked bulk result must not display a stale success");
+    await React.act(async () => root.render(render(true)));
+    assert.equal(doc.querySelector("details textarea").value, "",
+      "a new grant must not restore the old CSV draft");
+  });
+});
