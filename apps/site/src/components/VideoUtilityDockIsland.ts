@@ -30,7 +30,10 @@ export interface VideoUtilityDockIslandProps {
 }
 
 export function resolvePlaylistQuery(search: string): string {
-  try { return (new URLSearchParams(search).get("playlist") ?? "").trim().slice(0, 128); }
+  try {
+    const clipped = (new URLSearchParams(search).get("playlist") ?? "").trim().slice(0, 128);
+    return clipped.replace(/[\uD800-\uDBFF]$/, "");
+  }
   catch { return ""; }
 }
 export function playlistItemHref(item: { id: string; youtube_video_id?: string | null }, playlist: string): string {
