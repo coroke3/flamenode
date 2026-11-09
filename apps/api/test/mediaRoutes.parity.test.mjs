@@ -186,6 +186,23 @@ test("T03 slot icon rejects poisoned Cache API metadata and falls back to R2", a
     assert.equal(calls.queries.length, 1, "D1 ACL must be checked before cache lookup");
     assert.equal(calls.objects.length, 1, "poisoned Cache API entry must fall back to R2");
     await response.arrayBuffer();
+
+    cached = new Response(new Uint8Array(5 * 1024 * 1024 + 1), {
+      headers: {
+        "content-type": "image/png",
+        etag: '"oversized"',
+      },
+    });
+    const oversizedBindings = bindings({
+      row: { ...validRow, creator_icon_url: "/api/media/video-icons/owner/icon.png" },
+    });
+    const oversized = await request(`/api/media/slot-submission-icon/${SLOT}`, oversizedBindings.env);
+    assert.equal(oversized.status, 200);
+    assert.equal(oversized.headers.get("content-type"), "image/png");
+    assert.equal(oversized.headers.get("cache-control"), "no-store");
+    assert.equal(oversizedBindings.calls.queries.length, 1, "D1 ACL must be checked before oversized cache body");
+    assert.equal(oversizedBindings.calls.objects.length, 1, "oversized cache body must fall back to R2");
+    await oversized.arrayBuffer();
   } finally {
     if (previous) Object.defineProperty(globalThis, "caches", previous);
     else delete globalThis.caches;
