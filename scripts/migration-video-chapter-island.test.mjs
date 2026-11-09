@@ -954,3 +954,18 @@ test("MIG-0518 auto-next ignores missing, malformed and unrelated ended-video ID
   assert.equal(shouldAdvancePlaylistOnEnded("youtube-b", "video-a", "youtube-a"), false,
     "a different player's ended event must not advance this playlist");
 });
+
+test("MIG-0518 stored playlist order is bounded, deduplicated and fails closed", async () => {
+  const { parseStoredPlaylistOrder } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const data = ["v2", "v1", "v2", null, 4, "", "x".repeat(129), "v3"];
+  assert.deepEqual(parseStoredPlaylistOrder(JSON.stringify(data)), ["v2", "v1", "v3"]);
+  for (const bad of [null, "", "null", "{}", "[", "x".repeat(100_001)]) {
+    assert.deepEqual(parseStoredPlaylistOrder(bad), [], "reject invalid or oversized saved payload");
+  }
+  const many = Array.from({ length: 9000 }, (_, i) => "v" + i);
+  const restored = parseStoredPlaylistOrder(JSON.stringify(many));
+  assert.equal(restored.length, 500, "untrusted JSON arrays must not create unbounded reorder work");
+  assert.equal(restored[0], "v0");
+  assert.equal(restored[499], "v499");
+  assert.equal(parseStoredPlaylistOrder(JSON.stringify(["video-1"]))[0], "video-1");
+});
