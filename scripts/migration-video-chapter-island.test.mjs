@@ -224,6 +224,18 @@ test("U03 malformed public chapter times sort after valid rows without dropping 
   assert.equal(rows[4].label, "keep invalid seconds visible");
 });
 
+test("U03 chapter seek times reject malformed and out-of-range labels", async () => {
+  const { safeChapterSeekSeconds } =
+    await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  assert.equal(safeChapterSeekSeconds("0:03"), 3);
+  assert.equal(safeChapterSeekSeconds("1:00:00"), 3600);
+  assert.equal(safeChapterSeekSeconds("24:00:00"), 86400);
+  for (const bad of ["??", "", "1:61", "1:60:00", "-1:00", "1.5:00",
+    "99999999999999999999:00", "24:00:01", "1:2:3:4", "NaN:00"]) {
+    assert.equal(safeChapterSeekSeconds(bad), null, "unsafe chapter must not seek: " + bad);
+  }
+});
+
 test("U03 private playlist and chapters are excluded entirely from JS-disabled HTML", async () => {
   const { VideoUtilityDockIsland } =
     await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
