@@ -51,8 +51,15 @@ export function buildAuditViewHref(
   view: AuditViewMode,
 ): string {
   const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(searchParams)) {
-    if (key !== "view" && typeof value === "string" && value) {
+  // Do not forward unknown URL keys (e.g. token/redirect) when switching views.
+  // Only the documented audit filters are retained as scalar values.
+  const keys = [
+    "table", "operation", "actor", "operator", "record",
+    "restore_status", "limit", "since", "until",
+  ] as const;
+  for (const key of keys) {
+    const value = searchParams[key];
+    if (typeof value === "string" && value) {
       params.set(key, value);
     }
   }
