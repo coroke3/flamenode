@@ -68,7 +68,7 @@ test("SA-090/091 T08: review authorization allows admin and explicitly authorize
   seedChapterWorld(sqlite);
   insert(sqlite, "event_staff", {
     id: "s_xid_reviewer",
-    event_id: "ev1",
+    event_id: "ev2",
     x_user_id: "x_staff",
     display_name: "X ID reviewer",
     permission_preset: "xid_reviewer",
@@ -106,7 +106,7 @@ test("SA-090/091 T08 middleware carries the exact authorizing X identity and den
   seedChapterWorld(sqlite);
   insert(sqlite, "event_staff", {
     id: "s_xid_reviewer",
-    event_id: "ev1",
+    event_id: "ev2",
     x_user_id: "x_staff",
     display_name: "X ID reviewer",
     permission_preset: "xid_reviewer",
