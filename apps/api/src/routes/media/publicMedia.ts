@@ -193,6 +193,34 @@ async function getCachedPublicMediaResponse(
       const size = Number(lengthHeader);
       if (!Number.isSafeInteger(size) || size < 1 || size > MAX_PUBLIC_MEDIA_BYTES) return null;
     }
+    // Content-Length is optional and untrusted (legacy Cache API entries may omit it
+    // or under-report). Enforce the actual streamed byte count before serving or 304.
+    if (!cached.body) return null;
+    const reader = cached.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        totalBytes += value.byteLength;
+        if (totalBytes > MAX_PUBLIC_MEDIA_BYTES) {
+          await reader.cancel();
+          return null;
+        }
+        if (value.byteLength > 0) chunks.push(value);
+      }
+    } catch {
+      try { await reader.cancel(); } catch {}
+      return null;
+    }
+    if (totalBytes < 1) return null;
+    const cachedBytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      cachedBytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
     const safeHeaders = new Headers({
       "content-type": contentType,
       "etag": cachedEtag,
@@ -213,7 +241,7 @@ async function getCachedPublicMediaResponse(
     ) {
       return new Response(null, { status: 304, headers: safeHeaders });
     }
-    return new Response(cached.body, { status: 200, headers: safeHeaders });
+    return new Response(cachedBytes, { status: 200, headers: safeHeaders });
   } catch {
     // Cache miss / lookup error, continue to D1/R2 on the origin path.
     return null;
