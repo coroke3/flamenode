@@ -8,6 +8,7 @@ export function parseMemberChapterTime(raw: string): number | null {
   if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59) {
     return null;
   }
+  // The minutes field is limited to four digits; this stays in the safe integer range.
   return minutes * 60 + seconds;
 }
 
