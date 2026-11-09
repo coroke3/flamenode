@@ -115,17 +115,9 @@ export function chapterRowsForViewer(
       authorName: item.author_name,
       kind: "comment" as const,
     }));
-  const time = (s: string): number => {
-    const parts = s.split(":");
-    if (parts.length !== 2 && parts.length !== 3) return Number.POSITIVE_INFINITY;
-    if (!parts.every((part) => /^\d+$/.test(part))) return Number.POSITIVE_INFINITY;
-    const nums = parts.map(Number);
-    if (!nums.every(Number.isSafeInteger)) return Number.POSITIVE_INFINITY;
-    if (nums[nums.length - 1]! > 59) return Number.POSITIVE_INFINITY;
-    if (parts.length === 3 && nums[1]! > 59) return Number.POSITIVE_INFINITY;
-    const seconds = nums.reduce((value, n) => value * 60 + n, 0);
-    return Number.isSafeInteger(seconds) ? seconds : Number.POSITIVE_INFINITY;
-  };
+  // Reuse the same validated timestamp parser as the chapter seek handler.
+  // An invalid label remains visible but sorts after valid chapter timestamps.
+  const time = (s: string): number => safeChapterSeekSeconds(s) ?? Number.POSITIVE_INFINITY;
   return [...publicChapters, ...privateRows].sort((a, b) => {
     const aTime = time(a.timeLabel);
     const bTime = time(b.timeLabel);
