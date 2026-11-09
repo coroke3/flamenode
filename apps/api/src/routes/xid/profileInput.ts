@@ -16,6 +16,26 @@ type Parsed<T> = Invalid | Valid<T>;
 
 const INVALID_TARGET = "X ID が不正です。";
 const MISMATCHED_TARGET = "操作する X ID が一致しません。";
+/** Mirror CURRENT src/lib/utils/url.ts: only HTTP(S), no URL credentials, 500 serialized chars. */
+function normalizeProfileHttpUrl(raw: string): string | null {
+  if (!raw || raw.length > 500) return null;
+  try {
+    const url = new URL(raw);
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) {
+      return null;
+    }
+    const normalized = url.toString();
+    return normalized.length <= 500 ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeProfileContact(raw: string): string | null {
+  const value = raw.slice(0, 1200).trim();
+  return !value || value.toLowerCase() === "portfolio_contact" ? null : value;
+}
+
 
 function matchTarget(pathXId: string, bodyXId: string): Parsed<string> {
   // Unlike normalization of display handles, a URL route must be canonical.
@@ -32,22 +52,27 @@ export function parseXIdProfileInput(pathXId: string, json: unknown): Parsed<{
   xUserId: string;
   xName: string;
   profileText: string;
-  portfolioContact: string;
-  youtubeChannelRaw: string;
+  portfolioContact: string | null;
+  youtubeChannelUrl: string | null;
   otherSocialLinksRaw: string;
 }> {
   const parsed = UpdateXIdProfileBodySchema.safeParse(json);
   if (!parsed.success) return { ok: false, message: "入力内容を確認してください。" };
   const target = matchTarget(pathXId, parsed.data.x_user_id);
   if (!target.ok) return target;
-  // CURRENT updateXIdProfile normalizes these fields before validation and
-  // committing. URLs and social JSON require their own CURRENT-equivalent check.
+  const youtubeRaw = (parsed.data.youtube_channel_url ?? "").trim();
+  const youtubeChannelUrl = youtubeRaw ? normalizeProfileHttpUrl(youtubeRaw) : null;
+  if (youtubeRaw && !youtubeChannelUrl) {
+    return { ok: false, message: "YouTube チャンネル URL が不正です。" };
+  }
+  // CURRENT social link JSON normalization is still separate and mandatory
+  // before any later route is allowed to write. This pure parser does no I/O.
   return { ok: true, value: {
     xUserId: target.value,
     xName: (parsed.data.x_name ?? "").trim().slice(0, 80),
     profileText: (parsed.data.profile_text ?? "").trim().slice(0, 2000),
-    portfolioContact: (parsed.data.portfolio_contact ?? "").slice(0, 1200),
-    youtubeChannelRaw: (parsed.data.youtube_channel_url ?? "").trim(),
+    portfolioContact: normalizeProfileContact(parsed.data.portfolio_contact ?? ""),
+    youtubeChannelUrl,
     otherSocialLinksRaw: (parsed.data.other_social_links ?? "").trim(),
   } };
 }
