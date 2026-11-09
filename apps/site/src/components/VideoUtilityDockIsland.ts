@@ -98,6 +98,24 @@ export function chapterRowsForViewer(
     return time(a.timeLabel) - time(b.timeLabel);
   });
 }
+/** Restore at most the 500 server-visible playlist entries from untrusted browser storage. */
+export function parseStoredPlaylistOrder(raw: string | null): string[] {
+  if (!raw || raw.length > 100_000) return [];
+  try {
+    const stored: unknown = JSON.parse(raw);
+    if (!Array.isArray(stored)) return [];
+    const output: string[] = [];
+    const seen = new Set<string>();
+    for (const id of stored) {
+      if (output.length >= 500) break;
+      if (typeof id !== "string" || !id || id.length > 128 || seen.has(id)) continue;
+      seen.add(id);
+      output.push(id);
+    }
+    return output;
+  } catch { return []; }
+}
+
 function uniquePlaylistItems(items: VideoViewerOverlayDto["playlistItems"]) {
   return items.filter((item, i) => items.findIndex((other) => other.id === item.id) === i);
 }
@@ -182,8 +200,8 @@ export function VideoUtilityDockIsland({
   React.useEffect(() => {
     if (!mounted) return;
     try {
-      const data = playlist ? JSON.parse(localStorage.getItem(ORDER_KEY_PREFIX + playlist) ?? "[]") as unknown : [];
-      setOrder(Array.isArray(data) ? data.filter((x): x is string => typeof x === "string") : []);
+      const data = playlist ? localStorage.getItem(ORDER_KEY_PREFIX + playlist) : null;
+      setOrder(parseStoredPlaylistOrder(data));
     } catch { setOrder([]); }
     setOrderPlaylist(playlist);
     setReady(true);
