@@ -28,7 +28,7 @@ test("resolveApproveAndNextHref falls back to review queue list", () => {
 test("buildReviewDetailHref scopes manage paths by event and admin filter by query", () => {
   assert.match(coreSource, /\/admin\/videos\/\$\{videoId\}/);
   assert.match(
-    orderSource,
+    coreSource,
     /\/manage\/events\/\$\{encodeURIComponent\(scope\.eventId\)\}\/videos\/\$\{videoId\}/,
   );
   assert.match(coreSource, /adminEventFilter/);
@@ -43,4 +43,5 @@ test("findNextPendingReviewVideoId queries pending items after current cursor", 
 test("attachApproveAndNextHref is exported for same-status approve-and-next", () => {
   assert.match(coreSource, /export async function attachApproveAndNextHref/);
   assert.match(coreSource, /nextHref: resolveApproveAndNextHref/);
+  assert.match(orderSource, /@flamenode\\/server-core\\/video\\/reviewQueueOrder/);
 });
