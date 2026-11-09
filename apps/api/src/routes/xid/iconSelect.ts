@@ -98,6 +98,15 @@ export function createXIdIconSelectRoutes(guard: MiddlewareHandler<AppEnv>): Hon
               AND EXISTS (
                 SELECT 1 FROM x_user_account_links
                 WHERE x_user_id = ${xUserId} AND auth_user_id = ${authUserId}
+              )
+              AND (
+                icon_url = ${input.value.iconUrl}
+                OR EXISTS (
+                  SELECT 1 FROM videos
+                  WHERE creator_x_user_id = ${xUserId}
+                    AND creator_icon_url = ${input.value.iconUrl}
+                    AND visibility_status = 'public'
+                )
               )`),
           ...queue.statements,
         ],
