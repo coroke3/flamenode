@@ -357,3 +357,79 @@ test("revocation: Cache APIに旧200が残っていても非公開化後は404�
     else delete globalThis.caches;
   }
 });
+
+test("CURRENT Cache API ignores poisoned statuses/MIME/size and strips response headers after D1 ACL", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  let cached = null;
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match() { return cached?.clone() ?? null; },
+        async put(_key, response) { cached = response.clone(); },
+      },
+    },
+  });
+  try {
+    const key = "event-icons/event/cached-security.png";
+    const req = new Request("https://example.test/api/media/" + key);
+    const make = (request = req) => requestMedia({ key, allowed: true, request });
+    cached = new Response(null, { status: 302, headers: { location: "https://attacker.invalid/" } });
+    const redirect = await make();
+    assert.equal(redirect.response.status, 200);
+    assert.equal(redirect.response.headers.get("location"), null);
+    assert.equal(redirect.state.gets, 1);
+    await redirect.response.arrayBuffer();
+
+    cached = new Response(new Uint8Array([1, 2, 3]), {
+      headers: { "content-type": "text/html", etag: '"unsafe"' },
+    });
+    const unsafeMime = await make();
+    assert.equal(unsafeMime.state.gets, 1);
+    assert.equal(unsafeMime.response.headers.get("content-type"), "image/webp");
+    await unsafeMime.response.arrayBuffer();
+
+    cached = new Response(new Uint8Array([1, 2, 3]), {
+      headers: {
+        "content-type": "image/png", etag: '"cached"',
+        "content-length": String(MAX_PUBLIC_MEDIA_BYTES + 1),
+      },
+    });
+    const oversized = await make();
+    assert.equal(oversized.state.gets, 1, "cache content-length over the media limit is not reusable");
+    await oversized.response.arrayBuffer();
+
+    cached = new Response(new Uint8Array([1, 2, 3]), {
+      headers: {
+        "content-type": "image/png", etag: '"cached"',
+        "set-cookie": "session=do-not-forward",
+        location: "https://attacker.invalid/",
+        "content-disposition": "attachment; filename=unsafe.html",
+        "cache-control": "public, max-age=604800",
+      },
+    });
+    const hit = await make();
+    assert.equal(hit.response.status, 200);
+    assert.equal(hit.state.prepares, 1, "authorization occurs before each cached hit");
+    assert.equal(hit.state.gets, 0);
+    assert.equal(hit.response.headers.get("content-type"), "image/png");
+    assert.equal(hit.response.headers.get("cache-control"), "no-store");
+    assert.equal(hit.response.headers.get("x-content-type-options"), "nosniff");
+    for (const header of ["set-cookie", "location", "content-disposition"]) {
+      assert.equal(hit.response.headers.get(header), null, header);
+    }
+    await hit.response.arrayBuffer();
+
+    const conditional = await make(new Request(req.url, {
+      headers: { "If-None-Match": '"cached"' },
+    }));
+    assert.equal(conditional.response.status, 304);
+    assert.equal(conditional.state.prepares, 1);
+    assert.equal(conditional.state.gets, 0);
+    assert.equal(conditional.response.headers.get("cache-control"), "no-store");
+    assert.equal(conditional.response.headers.get("set-cookie"), null);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "caches", previous);
+    else delete globalThis.caches;
+  }
+});
