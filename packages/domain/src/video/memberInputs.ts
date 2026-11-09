@@ -60,7 +60,11 @@ export function parseVideoMemberInputs(
   | { ok: true; members: MemberInput[] }
   | { ok: false; message: string } {
   if (!isCollab) return { ok: true, members: [] };
-  if (typeof raw !== "string" || !raw.trim()) return { ok: true, members: [] };
+  if (raw !== null && typeof raw !== "string") {
+    // A multipart File must never be interpreted as omitted member metadata.
+    return { ok: false, message: "合作メンバーの入力が不正です。" };
+  }
+  if (raw === null || !raw.trim()) return { ok: true, members: [] };
 
   let parsed: unknown;
   try {
