@@ -67,9 +67,13 @@ export function buildSlotVideoSubmittedNotification(args: {
   });
 }
 
-/** Legacy IDs are displayed as one logical line; never let stored line breaks forge DM sections. */
+/** Legacy IDs are displayed as one bounded logical line, never as forged DM sections. */
 function groupIdForDiscordDisplay(groupId: string): string {
-  return escapeDiscordMention(groupId.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]+/g, " "));
+  const cleaned = groupId.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]+/g, " ");
+  // A malformed persisted legacy ID must not consume an entire Discord message.
+  // Preserve a surrogate pair at the UTF-16 boundary before adding an ellipsis.
+  const clipped = cleaned.slice(0, 256).replace(/[\uD800-\uDBFF]$/, "");
+  return escapeDiscordMention(clipped + (clipped.length < cleaned.length ? "…" : ""));
 }
 
 /** 運営による枠強制解放 DM。 */
