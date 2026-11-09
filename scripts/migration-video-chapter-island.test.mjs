@@ -496,6 +496,29 @@ const PRIVATE_CHAPTER = {
   id: "c1", chapter_time: "0:10", chapter_label: "秘密", note: "", visibility: "private", canManage: true,
 };
 
+test("MIG-0518 server-authorized manager can edit and bulk without active X, but cannot create a normal post", async () => {
+  await withChapterDom(async (doc, root) => {
+    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: null, canPost: false, canBulk: true,
+      chapters: [PRIVATE_CHAPTER],
+    })));
+    assert.equal([...doc.querySelectorAll("button")]
+      .some((button) => button.textContent === "現在位置にコメントする"), false,
+      "manager claim alone cannot grant normal chapter posting");
+    assert.ok(doc.querySelector("details form"), "server-granted bulk should work without active X");
+    await clickButton(doc, "編集");
+    assert.ok(doc.querySelector("form"), "server-authorized private row can be edited");
+    await clickButton(doc, "キャンセル");
+    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: null, canPost: false, canBulk: false,
+      chapters: [],
+    })));
+    assert.equal(doc.querySelector("details"), null, "revocation removes bulk controls");
+    assert.equal([...doc.querySelectorAll("button")]
+      .some((button) => button.textContent === "編集"), false);
+  });
+});
+
 test("P2 new-post form starts public after edit(private) -> cancel", async () => {
   await withChapterDom(async (doc, root) => {
     await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
