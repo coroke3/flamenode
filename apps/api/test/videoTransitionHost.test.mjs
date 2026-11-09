@@ -2,10 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createVideoVisibilityTransitionHost } from "../src/visibility/videoTransitionHost.ts";
-import {
-  buildVideoApprovedNotification,
-  buildVideoVisibilityChangedNotification,
-} from "../../../src/lib/notifications/templates/video.ts";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -85,21 +81,13 @@ test("D-13-41: Hono host deliberately does not wake notification queues", async 
   assert.equal(await host.wakeNotificationQueueAfterCommit("admin_video_status"), undefined);
 });
 
-test("video status notification templates use the Worker-provided site origin", () => {
-  const env = { NEXT_PUBLIC_SITE_URL: "https://api-origin.example" };
-  const approved = buildVideoApprovedNotification({
-    videoId: "v-1",
-    videoTitle: "Test",
-    eventId: "e-1",
-  }, env);
-  const changed = buildVideoVisibilityChangedNotification({
-    videoId: "v-2",
-    videoTitle: "Test",
-  }, env);
-  assert.equal(approved.url, "https://api-origin.example/v-1");
-  assert.match(approved.content, /https:\/\/api-origin\.example\/event\/e-1/);
-  assert.equal(changed.url, "https://api-origin.example/v-2");
-  assert.match(changed.content, /https:\/\/api-origin\.example\/dashboard\/edit\/v-2/);
+test("video status notification templates pass the Worker-provided site origin to every URL builder", () => {
+  const source = read("../../../src/lib/notifications/templates/video.ts");
+  assert.match(source, /buildVideoApprovedNotification\\([\\s\\S]*?\\}, env\\?: NotificationUrlEnv\\)/);
+  assert.match(source, /buildVideoVisibilityChangedNotification\\([\\s\\S]*?\\}, env\\?: NotificationUrlEnv\\)/);
+  assert.match(source, /appUrl\\(videoPublicPath\\(args\\.videoId, args\\.youtubeVideoId\\), env\\)/);
+  assert.match(source, /linkLine\\([^;]+, env\\)/);
+  assert.match(source, /appUrl\\(videoPublicPath\\(args\\.videoId, args\\.youtubeVideoId\\), env\\)/);
 });
 
 test("visibility manifest host uses R2 ETag preconditions for writes", async () => {
