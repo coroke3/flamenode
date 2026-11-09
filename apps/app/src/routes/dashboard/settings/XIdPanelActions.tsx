@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import type { ProfileFields, XidProfileApi } from "../../../api/xidProfile.js";
+import { isSafeRelativePath } from "../../next.js";
 
 /** MIG-0708 U03: isolated form components (not mounted until MIG-0636 contracts). */
 const NETWORK_ERROR = "通信または処理中に問題が発生しました。再読み込みしてお試しください。";
@@ -42,8 +43,7 @@ export function SetActiveXButton({
         const result = await api.setActive(xUserId);
         if (!result.ok) { setError(result.message ?? "切替に失敗しました。"); return; }
         // Do not turn a malformed / external next parameter into a navigation.
-        if (next && next.startsWith("/") && !next.startsWith("//") &&
-          !next.includes("\\") && !next.includes("://") && !/[\u0000-\u001f\u007f]/.test(next)) {
+        if (next && isSafeRelativePath(next)) {
           navigate(next);
         } else {
           onRefresh();
