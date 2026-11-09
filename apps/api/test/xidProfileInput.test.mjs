@@ -77,6 +77,21 @@ test("SA-102: social links normalize CURRENT type aliases, Email and URL values"
   ]);
 });
 
+test("SA-102: prototype property names remain literal CURRENT social link types", () => {
+  for (const type of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+    const result = parseXIdProfileInput("x_one", {
+      x_user_id: "x_one",
+      other_social_links: JSON.stringify([{ type, url: "https://example.com" }]),
+    });
+    assert.equal(result.ok, true, type);
+    if (result.ok) {
+      assert.deepEqual(JSON.parse(result.value.otherSocialLinks), [
+        { type, url: "https://example.com/" },
+      ]);
+    }
+  }
+});
+
 test("SA-102: social links reject invalid JSON, bad schemes, credentials and excess length", () => {
   const invalid = [
     "{broken", "{}", JSON.stringify({ type: "X", url: "https://x.com/x_one" }),
