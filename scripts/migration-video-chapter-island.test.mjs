@@ -249,6 +249,53 @@ test("U03 chapter sorter and seek parser share the 24-hour validation boundary",
   assert.equal(safeChapterSeekSeconds("24:00:01"), null);
 });
 
+test("U03 invalid public chapter seek buttons are visibly disabled", async () => {
+  const { JSDOM } = await import("jsdom");
+  const { createRoot } = await import("react-dom/client");
+  const { VideoUtilityDockIsland } =
+    await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://flamenode.net/v" });
+  dom.window.matchMedia = () => ({
+    matches: false, addEventListener() {}, removeEventListener() {},
+  });
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "CustomEvent", "localStorage"];
+  const prior = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const priorAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) Object.defineProperty(globalThis, key, {
+    configurable: true, writable: true, value: dom.window[key],
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    await React.act(async () => root.render(React.createElement(VideoUtilityDockIsland, {
+      videoId: "v", currentId: "v", loading: false,
+      publicChapters: [
+        { id: "ok", timeLabel: "1:02", label: "valid" },
+        { id: "bad", timeLabel: "1:61", label: "invalid" },
+      ],
+      overlay: {
+        loggedIn: false, authUnavailable: false, isBanned: false, isTosAccepted: false,
+        termsReacceptRequired: false, activeXId: null, viewerXApproved: false,
+        privateChapters: [], playlistItems: [], playlistLabel: null,
+        likeActive: false, bookmarkActive: false,
+      },
+    })));
+    const buttons = [...dom.window.document.querySelectorAll("#video-utility-chapters li button")];
+    assert.equal(buttons.length, 2);
+    assert.equal(buttons[0].disabled, false, "valid chapter stays seekable");
+    assert.equal(buttons[1].disabled, true, "invalid chapter remains visible but not interactive");
+    assert.equal(buttons[1].textContent, "1:61");
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of prior) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = priorAct;
+    dom.window.close();
+  }
+});
+
 test("U03 private playlist and chapters are excluded entirely from JS-disabled HTML", async () => {
   const { VideoUtilityDockIsland } =
     await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
