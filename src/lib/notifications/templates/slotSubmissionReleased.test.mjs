@@ -93,6 +93,22 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("legacyグループIDのタブ・ASCII/C1制御文字で表示行を汚染できない", () => {
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "legacy\t@everyone\u000b<@123>\u0085end\u007f\u001b",
+      });
+      assert.ok(payload.content.includes("legacy @\u200beveryone \\<@\u200b123\\> end "),
+        "legacy group ID must remain one readable, escaped display line");
+      for (const code of ["\t", "\u000b", "\u0085", "\u007f", "\u001b"]) {
+        assert.ok(!payload.content.includes(code), "control character must be removed");
+      }
+      assert.equal(payload.event_id, "event-1");
+    }
+  });
+
   test("通常のグループID表示は変更しない", () => {
     for (const build of [
       buildSlotForceReleasedNotification,
