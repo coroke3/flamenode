@@ -268,9 +268,12 @@ export function VideoUtilityDockIsland({
     () => chapterRowsForViewer(publicChapters, overlay),
     [publicChapters, overlay],
   );
-  // Reset only after the actual video changes, not on playlist/reorder rerenders:
-  // an already handled ended event must never navigate twice.
-  React.useEffect(() => { autoNextNavigated.current = false; }, [videoId, currentId]);
+  // Reset the latch on a committed video identity transition, not when the
+  // playlist order or next item changes. The event listener below is replaced
+  // in the same layout-effect phase before a browser event can run.
+  React.useLayoutEffect(() => {
+    autoNextNavigated.current = false;
+  }, [videoId, currentId]);
   React.useEffect(() => {
     if (!mounted || !autoNext || !next) return;
     const handler = (event: Event) => {
