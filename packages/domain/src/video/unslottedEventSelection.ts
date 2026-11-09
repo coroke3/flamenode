@@ -15,7 +15,19 @@ export class UnslottedEventSyncError extends Error {
 
 /** 枠なし投稿専用。event_ids の汎用複数選択形式を0件または1件へ縮約する。 */
 export function parseUnslottedEventIdFromForm(formData: FormData): string | null {
-  const raw = formData.get("event_ids");
+  // Reject repeated form keys instead of silently picking the first value.
+  // CURRENT and the transport DTO may otherwise interpret different event IDs
+  // from the same multipart request. Iterate without allocating getAll arrays.
+  let raw: FormDataEntryValue | null = null;
+  let seen = false;
+  for (const [key, value] of formData) {
+    if (key !== "event_ids") continue;
+    if (seen) {
+      throw new UnslottedEventSyncError("unslotted_event_selection_invalid");
+    }
+    seen = true;
+    raw = value;
+  }
   if (raw == null || raw === "") return null;
   if (typeof raw !== "string") {
     throw new UnslottedEventSyncError("unslotted_event_selection_invalid");
