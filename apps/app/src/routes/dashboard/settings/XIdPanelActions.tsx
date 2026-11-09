@@ -166,6 +166,11 @@ export function XIdCompactProfileForm({
   const { pending, execute } = usePendingAction();
   const [error, setError] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
+  const identityRef = React.useRef({ xUserId: x.id, generation: 0 });
+  if (identityRef.current.xUserId !== x.id) {
+    identityRef.current = { xUserId: x.id, generation: identityRef.current.generation + 1 };
+  }
+  React.useEffect(() => { setError(null); setMessage(null); }, [x.id]);
   const onSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
     // Node test and browser FormData implementations differ for HTMLFormElement;
@@ -180,20 +185,24 @@ export function XIdCompactProfileForm({
       youtube_channel_url: read("youtube_channel_url"),
       other_social_links: read("other_social_links"),
     };
+    const requestIdentity = identityRef.current;
     void execute(async () => {
       setError(null); setMessage(null);
       try {
         const result = await api.updateProfile(x.id, fields);
+        if (identityRef.current !== requestIdentity) return;
         if (!result.ok) { setError(result.message ?? "更新に失敗しました。"); return; }
         setMessage(result.message ?? "保存しました。");
         onRefresh();
         onCancel?.();
-      } catch { setError(NETWORK_ERROR); }
+      } catch {
+        if (identityRef.current === requestIdentity) setError(NETWORK_ERROR);
+      }
     });
   };
   return (
     <div className="xids-stack">
-      <form onSubmit={onSubmit}>
+      <form key={x.id} onSubmit={onSubmit}>
         <label className="xids-compactLabel">表示名オーバーライド（空欄で @ハンドル表示）
           <input name="x_name" className="xids-input" maxLength={80} disabled={pending}
             defaultValue={x.x_name} />
