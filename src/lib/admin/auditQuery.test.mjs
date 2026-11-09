@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildAuditViewHref,
   readAuditActorFilter,
+  readAuditDateBoundary,
   readAuditLimit,
   readAuditQueryValue,
   readAuditViewMode,
@@ -76,4 +78,26 @@ test("CURRENT audit: duplicate actor falls back to single-valued legacy operator
   assert.equal(readAuditActorFilter("", "legacy-id"), "");
   assert.equal(readAuditActorFilter(undefined, "legacy-id"), "legacy-id");
   assert.equal(readAuditActorFilter(["a", "b"], undefined), "");
+});
+
+
+test("CURRENT audit: impossible calendar days never roll into another month", () => {
+  for (const invalid of [
+    "2026-02-29", "2026-02-31", "2024-02-30", "2026-04-31",
+    "2026-00-01", "2026-13-01", "2026-12-00", "2026-12-32",
+    "2026-1-01", "2026-01-1", "not-a-date",
+  ]) {
+    assert.equal(readAuditDateBoundary(invalid, false), null, invalid + " since");
+    assert.equal(readAuditDateBoundary(invalid, true), null, invalid + " until");
+  }
+  assert.equal(readAuditDateBoundary("2024-02-29", false), Date.parse("2024-02-29T00:00:00+09:00") / 1000);
+  assert.equal(readAuditDateBoundary("2024-02-29", true), Date.parse("2024-02-29T23:59:59+09:00") / 1000);
+  assert.equal(readAuditDateBoundary("2026-02-28", true), Date.parse("2026-02-28T23:59:59+09:00") / 1000);
+});
+
+test("CURRENT audit page uses strict date boundaries for both filters", () => {
+  const page = readFileSync(new URL("../../../app/(admin)/admin/audit/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /readAuditDateBoundary\(sinceFilter, false\)/);
+  assert.match(page, /readAuditDateBoundary\(untilFilter, true\)/);
+  assert.doesNotMatch(page, /const parseDateBoundary =/);
 });
