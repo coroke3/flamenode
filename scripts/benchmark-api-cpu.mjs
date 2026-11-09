@@ -29,7 +29,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 // ---------------------------------------------------------------- pure logic
 export const BUDGETS_MS = Object.freeze({ S2: 7, S3: 8, S4: 2 });
-export const KINDS = Object.freeze(["normal", "limit", "invalid", "cold"]);
+export const KINDS = Object.freeze(["normal", "limit", "invalid", "cold", "scheduled-warm", "realtime-warm"]);
 export const MIN_SAMPLES = 50;
 
 /** Nearest-rank percentile over an ascending-sorted array. */
@@ -338,6 +338,11 @@ export function buildScenarios(ctx, { includePending = false } = {}) {
       // cache would otherwise turn warm samples into cheap hits). Seeding is idempotent and
       // done once per target through a single recursive-CTE statement per table.
       id: "RH-013", title: "GET /api/event-endpoints/:id (500 videos x 100 members)", runtimeClass: "S2",
+      // Warm-path measurements are separate from the scheduled full-rebuild control.
+      warmModes: {
+        "scheduled-warm": { path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=scheduled&refresh=15`, expectCache: "HIT" },
+        "realtime-warm": { path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=realtime`, expectCache: "BYPASS" },
+      },
       kinds: {
         // distinct client IP per request: the route has a 60/min per-IP isolate rate guard
         normal: () => ({ setup: rh013Seed(), method: "GET", path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=scheduled&refresh=15`, headers: rh013Ip(), clearCache: true, expect: [200] }),
@@ -1265,6 +1270,7 @@ async function createWranglerTarget(plan, opts) {
     if (stop.error) throw new Error(`Profiler.stop failed: ${json(stop.error)}`);
     return {
       status: res.status, bytes: buf.byteLength, d1: rec ? rec.d1 : Number(res.headers.get("x-bench-d1") ?? 0),
+      cacheState: res.headers.get("x-flamenode-cache"),
       cpuMs: profileBusyMs(stop.result.profile),
       replayStatusMismatch: rec ? rec.status !== res.status : false,
     };
@@ -1296,6 +1302,7 @@ async function createWranglerTarget(plan, opts) {
   return {
     calibration,
     name: "wrangler",
+    supportsCacheApi: true,
     get resolutionMs() { return quantumMs; },
     digits: 2,
     cpuSource: `V8 sampling profiler (${SAMPLING_US}us interval, non-idle samples) attached to wrangler dev --local (workerd) via inspector; local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim); local, not production`,
@@ -1325,8 +1332,8 @@ function tag(prefix, n) { return `${prefix}${n.toString(36)}`; }
 async function runScenario(target, sc, opts, state) {
   const samples = [];
   const note = (kind, spec, r, cpuMs) => samples.push({
-    kind, cpuMs, status: r.status, bytes: r.bytes, d1: r.d1,
-    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true,
+    kind, cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, cacheState: r.cacheState ?? null,
+    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache),
   });
   for (const kind of ["normal", "limit", "invalid"]) {
     const pk = sc.prepareKind?.[kind];
@@ -1346,6 +1353,34 @@ async function runScenario(target, sc, opts, state) {
       if (spec.clearCache) await target.clearCache?.();
       const r = await target.run(spec, await target.record(spec));
       note(kind, spec, r, r.cpuMs);
+    }
+  }
+  if (target.supportsCacheApi && sc.warmModes) {
+    for (const [kind, mode] of Object.entries(sc.warmModes)) {
+      const measure = async (sampleIndex, recordSample) => {
+        const spec = { method: "GET", path: mode.path, headers: rh013Ip(), expect: [200], expectCache: mode.expectCache };
+        if (sampleIndex === 0) {
+          const seed = rh013Seed();
+          if (seed.length) await target.exec(seed);
+        }
+        if (kind === "scheduled-warm") await target.clearCache();
+        else await target.reload(); // realtime micro-cache is isolate-local
+        // Capture replay scripts before priming so the measured request follows immediately.
+        const primeRecord = await target.record(spec);
+        const measuredRecord = recordSample ? await target.record(spec) : null;
+        const primed = await target.run(spec, primeRecord);
+        if (primed.status !== 200) throw new Error(`RH-013 ${kind} prime returned ${primed.status}`);
+        if (kind === "scheduled-warm") await sleep(25);
+        if (!recordSample) return;
+        const measured = await target.run(spec, measuredRecord);
+        note(kind, spec, measured, measured.cpuMs);
+      };
+      for (let i = 0; i < opts.warmup; i += 1) await measure(i, false);
+      for (let i = 0; i < opts.samples; i += 1) {
+        process.stderr.write(`measuring RH-013 ${kind} ${i + 1}/${opts.samples}\\r`);
+        await measure(i + opts.warmup, true);
+      }
+      process.stderr.write("\\n");
     }
   }
   return samples;
