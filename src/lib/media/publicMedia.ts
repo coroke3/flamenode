@@ -216,13 +216,13 @@ async function getCachedPublicMediaResponse(
         if (done) break;
         totalBytes += value.byteLength;
         if (totalBytes > MAX_PUBLIC_MEDIA_BYTES) {
-          await reader.cancel();
+          try { void reader.cancel().catch(() => undefined); } catch {}
           return null;
         }
         if (value.byteLength > 0) chunks.push(value);
       }
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { void reader.cancel().catch(() => undefined); } catch {}
       return null;
     }
     if (totalBytes < 1) return null;
