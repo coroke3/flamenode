@@ -8,7 +8,7 @@ import type { MiddlewareHandler } from "hono";
 import type { AppEnv } from "../../env.ts";
 
 export type XIdLinkReviewAuthorization =
-  | XAuthorizationEvidence
+  | { allowed: true; actorXUserId: string | null }
   | { allowed: false; actorXUserId: null; message: string };
 
 /**
@@ -20,9 +20,10 @@ export async function authorizeXIdLinkRequestReview(
   db: ServerCoreDb,
   user: SessionUserLike,
 ): Promise<XIdLinkReviewAuthorization> {
-  const evidence = await resolveXIdLinkRequestAuthorization(db, user);
+  const evidence: XAuthorizationEvidence =
+    await resolveXIdLinkRequestAuthorization(db, user);
   return evidence.allowed
-    ? evidence
+    ? { allowed: true, actorXUserId: evidence.actorXUserId }
     : {
         allowed: false,
         actorXUserId: null,
