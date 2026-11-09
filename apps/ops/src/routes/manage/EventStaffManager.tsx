@@ -99,7 +99,7 @@ function parseStaffCsvText(input: string): string[][] {
 }
 
 function buildStaffCsvPreview(text: string, members: readonly ManageStaffMember[], isSiteAdmin: boolean) {
-  const existing = new Set(members.map(member => member.x_user_id.replace(/^@+/, "").trim().toLowerCase()));
+  const existing = new Set(members.map(member => member.x_user_id?.replace(/^@+/, "").trim().toLowerCase()).filter((value): value is string => !!value));
   const parsed = parseStaffCsvText(text).map(row => row.map(cell => cell.trim()));
   const rows: StaffCsvRow[] = [];
   parsed.forEach((cols, index) => {
