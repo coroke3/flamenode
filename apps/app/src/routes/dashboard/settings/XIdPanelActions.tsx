@@ -76,9 +76,12 @@ export function XIdIconPicker({
   const [error, setError] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState(currentIconUrl);
-  // Keep old network completions from mutating the next account's icon display.
-  const activeXUserIdRef = React.useRef(xUserId);
-  activeXUserIdRef.current = xUserId;
+  // The same X ID can be selected again after a detour A -> B -> A.
+  // Track a monotonically increasing generation, not only the identity string.
+  const identityRef = React.useRef({ xUserId, generation: 0 });
+  if (identityRef.current.xUserId !== xUserId) {
+    identityRef.current = { xUserId, generation: identityRef.current.generation + 1 };
+  }
   // Refreshes can replace the authoritative icon after a write or account switch.
   React.useEffect(() => { setSelected(currentIconUrl); }, [currentIconUrl]);
   // Identity changes invalidate previously displayed mutation notices.
@@ -86,19 +89,19 @@ export function XIdIconPicker({
   const [upload, setUpload] = React.useState(false);
   const ref = React.useRef<HTMLInputElement>(null);
   const update = (task: () => ReturnType<XidProfileApi["setIcon"]>, successText: string) => {
-    const requestXUserId = xUserId;
+    const requestIdentity = identityRef.current;
     void execute(async () => {
       setError(null); setMessage(null);
       try {
         const result = await task();
         // The component may have changed accounts while the request was pending.
-        if (activeXUserIdRef.current !== requestXUserId) return;
+        if (identityRef.current !== requestIdentity) return;
         if (!result.ok) { setError(result.message ?? "アイコンの更新に失敗しました。"); return; }
         setMessage(result.message ?? successText);
         if (result.iconUrl) setSelected(result.iconUrl);
         onRefresh();
       } catch {
-        if (activeXUserIdRef.current === requestXUserId) setError(NETWORK_ERROR);
+        if (identityRef.current === requestIdentity) setError(NETWORK_ERROR);
       }
     });
   };
