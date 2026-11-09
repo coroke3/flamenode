@@ -17,7 +17,9 @@ async function render(Component, props) {
   const click = async button => act(async () => button.click());
   const flush = async () => { await act(async () => { for (let k=0;k<5;k++) await Promise.resolve(); }); };
   const dispose = () => act(async () => { root.unmount(); container.remove(); });
-  return { container, click, flush, dispose };
+  const rerender = nextProps => act(async () => root.render(React.createElement(MemoryRouter, {},
+    React.createElement(Component, nextProps))));
+  return { container, click, flush, dispose, rerender };
 }
 const buttonWith = (c, text) => [...c.querySelectorAll("button")].find(b => b.textContent.includes(text));
 const deferred = () => { let resolve; const promise = new Promise(r=>{resolve=r;}); return {promise,resolve}; };
@@ -97,6 +99,24 @@ test("MIG-0708 U03 T04: oversize upload is blocked before API, valid file uses f
   assert.equal(files.length,1);
   assert.equal(files[0].size,5);
   await m.dispose();
+});
+
+test("MIG-0708 U03: icon selection tracks authoritative icon changes after refresh", async () => {
+  const noop = () => {};
+  const base = { api: {}, xUserId: "alpha", candidates: ["https://cdn.example/a.png", "https://cdn.example/b.png"], onRefresh: noop };
+  const m = await render(XIdIconPicker, { ...base, currentIconUrl: base.candidates[0] });
+  try {
+    const buttons = [...m.container.querySelectorAll('button[aria-label="候補アイコンを選択"]')];
+    assert.equal(buttons.length, 2);
+    assert.equal(buttons[0].getAttribute("aria-pressed"), "true");
+    assert.equal(buttons[1].getAttribute("aria-pressed"), "false");
+    await m.rerender({ ...base, currentIconUrl: base.candidates[1] });
+    assert.equal(buttons[0].getAttribute("aria-pressed"), "false");
+    assert.equal(buttons[1].getAttribute("aria-pressed"), "true");
+    await m.rerender({ ...base, currentIconUrl: null });
+    assert.equal(buttons[0].getAttribute("aria-pressed"), "false");
+    assert.equal(buttons[1].getAttribute("aria-pressed"), "false");
+  } finally { await m.dispose(); }
 });
 
 test("MIG-0708 U03 T05: unlink cannot execute before exact confirmation",async()=>{
