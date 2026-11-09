@@ -1,6 +1,8 @@
 import * as React from "react";
 import type { ManageStaffMember } from "@flamenode/contracts";
 import {
+  ALL_PERMISSION_KEYS,
+  PERMISSION_DEFINITIONS,
   canonicalizePermissionKey,
   isAdminOnlyKey,
   type PermissionKey,
@@ -120,8 +122,10 @@ function buildStaffCsvPreview(text: string, members: readonly ManageStaffMember[
         const custom = assignment.replace(/^(custom:|カスタム[:：])/, "");
         for (const rawKey of custom.split(/[|;]/)) {
           if (!rawKey.trim()) continue;
-          const key = canonicalizePermissionKey(rawKey.trim());
-          if (!key) errors.push(`選べない権限「${rawKey.trim()}」が含まれています。`);
+          const value = rawKey.trim();
+          const key = canonicalizePermissionKey(value) ??
+            ALL_PERMISSION_KEYS.find(candidate => PERMISSION_DEFINITIONS[candidate].label === value) ?? null;
+          if (!key) errors.push(`選べない権限「${value}」が含まれています。`);
           else if (!permissionKeys.includes(key)) permissionKeys.push(key);
         }
         preset = permissionKeys.length ? "custom" : "public_staff";
