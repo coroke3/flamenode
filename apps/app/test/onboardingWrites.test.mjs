@@ -325,3 +325,44 @@ test("MIG-0710 U03: read 401/403/unavailable prevents all completion writes", as
     }
   }
 });
+
+
+test("D-16-3: changing API identity hides prior private data and applies anonymous/banned/unavailable", async () => {
+  for (const nextStatus of ["anonymous", "banned", "unavailable"]) {
+    const container = dom.window.document.createElement("div");
+    const root = createRoot(container);
+    let resolveNext;
+    const firstApi = {
+      getDashboard: async () => ({ status: "ok", data: { value: "private data from previous API" } }),
+    };
+    const nextApi = {
+      getDashboard: () => new Promise((resolve) => { resolveNext = resolve; }),
+    };
+    const Demo = ({ api }) => {
+      const state = useApiResult(api, "dashboard", (client) => client.getDashboard());
+      return React.createElement(
+        "p",
+        null,
+        state.status === "ok" ? state.data.value : state.status,
+      );
+    };
+    try {
+      await act(async () => root.render(React.createElement(Demo, { api: firstApi })));
+      await flush();
+      assert.equal(container.textContent, "private data from previous API");
+
+      // The previous identity is hidden on the render that receives the new API,
+      // before the replacement request resolves or its effect can paint old data.
+      await act(async () => root.render(React.createElement(Demo, { api: nextApi })));
+      assert.equal(container.textContent, "読み込み中...");
+      assert.doesNotMatch(container.textContent, /private data from previous API/);
+
+      await act(async () => resolveNext({ status: nextStatus }));
+      await flush();
+      assert.equal(container.textContent, nextStatus);
+      assert.doesNotMatch(container.textContent, /private data from previous API/);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  }
+});
