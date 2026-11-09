@@ -1004,6 +1004,18 @@ test("MIG-0518 video switch clears prior player-time before the next player repo
   });
 });
 
+test("MIG-0518 duplicate playlist URL keys do not select an ambiguous playlist", async () => {
+  const { resolvePlaylistQuery } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  assert.equal(resolvePlaylistQuery("?playlist=A&playlist=B"), "");
+  assert.equal(resolvePlaylistQuery("?playlist=A&playlist=A"), "",
+    "even identical duplicate URL keys are ambiguous");
+  assert.equal(resolvePlaylistQuery("?playlist=A"), "A");
+  assert.equal(resolvePlaylistQuery("?other=1&playlist=%20A%20"), "A");
+  assert.equal(resolvePlaylistQuery("?playlist="), "");
+  assert.equal(resolvePlaylistQuery("?playlist=" + "x".repeat(129)), "x".repeat(128));
+  assert.equal(resolvePlaylistQuery("?playlist=" + "x".repeat(127) + encodeURIComponent("😀")), "x".repeat(127));
+});
+
 test("MIG-0518 auto-next ignores missing, malformed and unrelated ended-video IDs", async () => {
   const { shouldAdvancePlaylistOnEnded } =
     await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
