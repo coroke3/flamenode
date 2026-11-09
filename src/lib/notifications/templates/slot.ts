@@ -67,6 +67,11 @@ export function buildSlotVideoSubmittedNotification(args: {
   });
 }
 
+/** Legacy IDs are displayed as one logical line; never let stored line breaks forge DM sections. */
+function groupIdForDiscordDisplay(groupId: string): string {
+  return escapeDiscordMention(groupId.replace(/[\r\n\u2028\u2029]+/g, " "));
+}
+
 /** 運営による枠強制解放 DM。 */
 export function buildSlotForceReleasedNotification(args: {
   eventId: string;
@@ -92,7 +97,7 @@ export function buildSlotForceReleasedNotification(args: {
       lines: [
         `対象枠数: ${args.slotIds.length}`,
         args.reservationGroupId
-          ? `予約グループ: ${escapeDiscordMention(args.reservationGroupId)}`
+          ? `予約グループ: ${groupIdForDiscordDisplay(args.reservationGroupId)}`
           : null,
       ],
     },
@@ -134,7 +139,7 @@ export function buildSlotSubmissionReleasedNotification(args: {
       lines: [
         `対象枠数: ${args.slotIds.length}`,
         args.reservationGroupId
-          ? `提出グループ: ${escapeDiscordMention(args.reservationGroupId)}`
+          ? `提出グループ: ${groupIdForDiscordDisplay(args.reservationGroupId)}`
           : null,
       ],
     },
