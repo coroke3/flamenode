@@ -20,8 +20,12 @@ const [route, eventAction, cache, eventExportData, videoVisibilityTransition] =
 
 test("scheduled payload cache HIT前にもD1の公開可否とpayload境界を検査する", () => {
   const d1Gate = route.indexOf("await loadEventExportEvent(db, eventId)");
-  const cacheHit = route.indexOf("const response = await cachedResponse()");
-  assert.ok(d1Gate >= 0 && cacheHit >= 0 && d1Gate < cacheHit);
+  const snapshot = route.indexOf("snapshot = await loadEventExportSnapshot(");
+  const freshBody = route.indexOf("body = JSON.stringify(payload)");
+  const cacheHit = route.indexOf("const response = await cachedResponse(body)");
+  assert.ok(d1Gate >= 0 && snapshot > d1Gate && freshBody > snapshot && cacheHit > freshBody,
+    "scheduled cached output may only be reused after the fresh D1 relation snapshot and public DTO");
+  assert.match(route, /cached === null \|\| !eventExportBodyMatchesFresh\(cached, freshBody, format\)/);
   assert.doesNotMatch(route, /kv\.get\(accessKey\)/);
   assert.doesNotMatch(route, /kv\.put\(accessKey/);
   assert.match(route, /event\.public_api_enabled === 1/);
@@ -124,8 +128,11 @@ test("realtimeのisolate micro-cacheはD1公開判定の後にだけ読み、ヘ
   const snapshot = route.indexOf("await loadEventExportSnapshot(");
   const cacheWrite = route.indexOf("isolateMicroCacheSet(microCacheKey, body)");
   assert.ok(d1Gate >= 0 && publicCheck > d1Gate);
-  assert.ok(cacheRead > publicCheck && cacheRead < snapshot);
-  assert.ok(cacheWrite > snapshot);
+  const freshBody = route.indexOf("body = JSON.stringify(payload)");
+  assert.ok(snapshot > publicCheck && freshBody > snapshot && cacheRead > freshBody,
+    "realtime cache HIT must be gated by fresh snapshot and serialization, not event visibility alone");
+  assert.match(route, /coalesced !== null && eventExportBodyMatchesFresh\(coalesced, body, format\)/);
+  assert.ok(cacheWrite > cacheRead);
 
   assert.match(
     route,
