@@ -12,7 +12,7 @@ test("SA-102: route and FormData X identities must refer to the same canonical X
   });
   assert.deepEqual(ok, { ok: true, value: {
     xUserId: "x_one", xName: "Creator", profileText: "About",
-    portfolioContact: "  contact ", youtubeChannelRaw: "https://www.youtube.com/@x_one",
+    portfolioContact: "contact", youtubeChannelUrl: "https://www.youtube.com/@x_one",
     otherSocialLinksRaw: "[]",
   } });
   assert.equal(parseXIdProfileInput("x_one", { x_user_id: "x_two" }).ok, false);
@@ -31,9 +31,29 @@ test("SA-102: normalizes CURRENT profile string limits without cutting surrogate
   if (!parsed.ok) return;
   assert.equal(parsed.value.xName.length, 80);
   assert.equal(parsed.value.profileText.length, 2000);
-  assert.equal(parsed.value.portfolioContact.length, 1200);
-  assert.equal(parsed.value.youtubeChannelRaw, "");
+  assert.equal(parsed.value.portfolioContact?.length, 1200);
+  assert.equal(parsed.value.youtubeChannelUrl, null);
   assert.equal(parsed.value.otherSocialLinksRaw, "");
+});
+
+test("SA-102: CURRENT URL sanitizer denies non-http, credentials and oversized links", () => {
+  for (const youtube_channel_url of [
+    "javascript:alert(1)", "https://user:password@example.com/secret",
+    "mailto:someone@example.com", "/relative/path",
+    "https://example.com/" + "a".repeat(500),
+  ]) {
+    assert.deepEqual(parseXIdProfileInput("x_one", {
+      x_user_id: "x_one", youtube_channel_url,
+    }), { ok: false, message: "YouTube チャンネル URL が不正です。" });
+  }
+  assert.equal(parseXIdProfileInput("x_one", { x_user_id: "x_one",
+    youtube_channel_url: " https://example.com/a ",
+  }).ok, true);
+  const placeholder = parseXIdProfileInput("x_one", {
+    x_user_id: "x_one", portfolio_contact: " PORTFOLIO_CONTACT ",
+  });
+  assert.equal(placeholder.ok, true);
+  if (placeholder.ok) assert.equal(placeholder.value.portfolioContact, null);
 });
 
 test("SA-103: exact normalized DELETE confirmation and matching path are mandatory", () => {
