@@ -5,9 +5,11 @@ import {
   PERMISSION_DEFINITIONS,
   canonicalizePermissionKey,
   isAdminOnlyKey,
+  type PermissionCategory,
   type PermissionKey,
 } from "@flamenode/domain/auth/permissions";
 import {
+  getPresetPermissions,
   PRESET_DEFINITIONS,
   isEventStaffPreset,
   type EventStaffPreset,
@@ -317,11 +319,94 @@ export function EventStaffManager({
       "イベントスタッフ " + (member.x_user_id ?? member.id) + " を削除", confirmText));
   };
 
-  const presetSelect = (defaultValue: string | null, lockOwner = false) =>
-    <select className="fn-select" name="permission_preset"
-      defaultValue={permittedPresets.some(([k]) => k === defaultValue) ? defaultValue! : "public_staff"}>
-      {permittedPresets.map(([value, label]) => <option key={value} value={value} disabled={lockOwner && value !== "owner"}>{label}</option>)}
-    </select>;
+  const PermissionAssignment = ({
+  initialPreset,
+  initialKeys,
+  isSiteAdmin,
+  busy,
+  lockOwner = false,
+}: {
+  initialPreset: string | null;
+  initialKeys: readonly string[];
+  isSiteAdmin: boolean;
+  busy: boolean;
+  lockOwner?: boolean;
+}): React.ReactElement => {
+  const availablePresets = PRESETS.filter(([key]) => isSiteAdmin || key !== "xid_reviewer");
+  const initial = availablePresets.some(([key]) => key === initialPreset)
+    ? initialPreset as EventStaffPreset
+    : "public_staff";
+  const [preset, setPreset] = React.useState<EventStaffPreset>(initial);
+  const [selected, setSelected] = React.useState<PermissionKey[]>(
+    () => initialKeys.filter((key): key is PermissionKey => ALL_PERMISSION_KEYS.includes(key as PermissionKey)),
+  );
+  return <section className="manage-staff-permission-assignment">
+    <label className="fn-label">担当プリセット
+      <select className="fn-select" value={preset} disabled={busy}
+        onChange={event => setPreset(event.target.value as EventStaffPreset)}>
+        {availablePresets.map(([value, label]) =>
+          <option key={value} value={value} disabled={lockOwner && value !== "owner"}>{label}</option>)}
+      </select>
+    </label>
+    <input type="hidden" name="permission_preset" value={preset}/>
+    <input type="hidden" name="permission_keys" value={preset === "custom" ? selected.join(",") : ""}/>
+    {preset === "custom" ? <PermissionChecklist
+      isSiteAdmin={isSiteAdmin} selected={selected} onChange={setSelected} disabled={busy}
+    /> : <PresetPermissionSummary preset={preset} isSiteAdmin={isSiteAdmin}/>}
+  </section>;
+};
+
+const PERMISSION_CATEGORY_LABELS: Record<PermissionCategory, string> = {
+  event: "イベント",
+  video: "作品",
+  xid: "X ID",
+  danger: "高度・危険な操作",
+};
+
+function PresetPermissionSummary({preset, isSiteAdmin}: {
+  preset: EventStaffPreset; isSiteAdmin: boolean;
+}): React.ReactElement {
+  const keys = getPresetPermissions(preset).filter(key => isSiteAdmin || !isAdminOnlyKey(key));
+  return <div className="fn-console-note">
+    <p>{PRESET_DEFINITIONS[preset].description}</p>
+    {keys.length ? <div className="manage-staff-permission-summary">
+      {keys.map(key => {
+        const definition = PERMISSION_DEFINITIONS[key];
+        return <span key={key} className={definition.dangerous ? "fn-badge fn-badge-warning" : "fn-badge fn-badge-soft"}
+          title={definition.description}>{definition.label}</span>;
+      })}
+    </div> : <span className="fn-muted">内部操作権限はありません。</span>}
+  </div>;
+}
+
+function PermissionChecklist({isSiteAdmin, selected, onChange, disabled}: {
+  isSiteAdmin: boolean; selected: PermissionKey[];
+  onChange: (keys: PermissionKey[]) => void; disabled: boolean;
+}): React.ReactElement {
+  const selectedSet = new Set(selected);
+  const visibleKeys = ALL_PERMISSION_KEYS.filter(key => isSiteAdmin || !isAdminOnlyKey(key));
+  const categories: PermissionCategory[] = ["event", "video", "xid", "danger"];
+  return <div className="manage-permission-checklist">
+    {categories.map(category => {
+      const keys = visibleKeys.filter(key => PERMISSION_DEFINITIONS[key].category === category);
+      if (!keys.length) return null;
+      return <fieldset key={category} className="manage-permission-category">
+        <legend>{PERMISSION_CATEGORY_LABELS[category]}</legend>
+        {keys.map(key => {
+          const definition = PERMISSION_DEFINITIONS[key];
+          return <label key={key} className="fn-label manage-permission-option">
+            <input type="checkbox" value={key} checked={selectedSet.has(key)} disabled={disabled}
+              onChange={event => onChange(event.target.checked
+                ? [...selectedSet, key]
+                : selected.filter(value => value !== key))}/>
+            <span>{definition.label}{definition.dangerous ? "（重要）" : ""}</span>
+            <small>{definition.description}</small>
+          </label>;
+        })}
+      </fieldset>;
+    })}
+  </div>;
+}
 
   return <section aria-label="運営メンバー編集" className="manage-permission-panel">
     {error && <p role="alert" className="fn-alert fn-alert--danger">{error}</p>}
@@ -338,12 +423,11 @@ export function EventStaffManager({
       <form className="manage-staff-add-form" onSubmit={event => submit(event)}>
         <input className="fn-input" name="display_name" placeholder="表示名" maxLength={80} required disabled={busy}/>
         <input className="fn-input" name="x_user_id" placeholder="X ID（@なし）" pattern="[A-Za-z0-9_]{1,32}" required disabled={busy}/>
-        {presetSelect("manager")}
+        <PermissionAssignment initialPreset="manager" initialKeys={[]} isSiteAdmin={isSiteAdmin} busy={busy}/>
         <select name="is_public" defaultValue="0" className="fn-select" disabled={busy}>
           <option value="0">非公開</option><option value="1">公開</option>
         </select>
         <input className="fn-input" name="public_role_label" maxLength={40} placeholder="公開肩書" disabled={busy}/>
-        <input className="fn-input" name="permission_keys" placeholder="カスタム権限（カンマ区切り）" disabled={busy}/>
         <input className="fn-input" name="reason" placeholder="追加理由" required maxLength={500} disabled={busy}/>
         <button className="fn-btn fn-btn-primary" disabled={busy}>追加</button>
         <button type="button" className="fn-btn fn-btn-ghost" disabled={busy}
@@ -367,9 +451,9 @@ export function EventStaffManager({
                 <input className="fn-input" name="display_name" defaultValue={member.display_name}
                   maxLength={80} required disabled={busy || member.x_user_id === null}/>
               </label>
-              <label className="fn-label">担当プリセット
-                {presetSelect(member.permission_preset, isLastOwner)}
-              </label>
+              <PermissionAssignment initialPreset={member.permission_preset}
+                initialKeys={member.permission_keys} isSiteAdmin={isSiteAdmin} busy={busy}
+                lockOwner={isLastOwner}/>
               <label className="fn-label">公開状態
                 <select name="is_public" className="fn-select" defaultValue={String(member.is_public ?? 0)} disabled={busy}>
                   <option value="0">非公開</option><option value="1">公開</option>
@@ -378,10 +462,6 @@ export function EventStaffManager({
               <label className="fn-label">公開肩書
                 <input className="fn-input" name="public_role_label"
                   defaultValue={member.public_role_label ?? ""} maxLength={40} disabled={busy}/>
-              </label>
-              <label className="fn-label">カスタム権限
-                <input className="fn-input" name="permission_keys"
-                  defaultValue={member.permission_keys.join(",")} disabled={busy}/>
               </label>
               <label className="fn-label">変更理由
                 <input className="fn-input" name="reason" maxLength={500} required disabled={busy}/>
