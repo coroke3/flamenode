@@ -34,7 +34,7 @@ manageRoutes.use("*", async (c, next) => {
 });
 // MIG-0655: playlist writes verify Origin BEFORE reading the Auth.js session.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
-const staffWritePaths = ["/events/:id/staff", "/events/:id/staff/:staffId"];
+const staffWritePaths = ["/events/:id/staff", "/events/:id/staff/:staffId", "/events/:id/owner-transfer"];
 const guardedWritePaths = [...playlistWritePaths, ...staffWritePaths];
 const originOptions = (c: import("hono").Context<AppEnv>) => ({
   loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
