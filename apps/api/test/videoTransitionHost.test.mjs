@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createVideoVisibilityTransitionHost } from "../src/visibility/videoTransitionHost.ts";
+import {
+  buildVideoApprovedNotification,
+  buildVideoVisibilityChangedNotification,
+} from "../../../src/lib/notifications/templates/video.ts";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -78,4 +82,54 @@ test("visibility host invalidates public and event-export caches through the inj
 test("D-13-41: Hono host deliberately does not wake notification queues", async () => {
   const host = createVideoVisibilityTransitionHost({ env: {} });
   assert.equal(await host.wakeNotificationQueueAfterCommit("admin_video_status"), undefined);
+});
+
+test("video status notification templates use the Worker-provided site origin", () => {
+  const env = { NEXT_PUBLIC_SITE_URL: "https://api-origin.example" };
+  const approved = buildVideoApprovedNotification({
+    videoId: "v-1",
+    videoTitle: "Test",
+    eventId: "e-1",
+  }, env);
+  const changed = buildVideoVisibilityChangedNotification({
+    videoId: "v-2",
+    videoTitle: "Test",
+  }, env);
+  assert.equal(approved.url, "https://api-origin.example/v-1");
+  assert.match(approved.content, /https:\\/\\/api-origin\\.example\\/event\\/e-1/);
+  assert.equal(changed.url, "https://api-origin.example/v-2");
+  assert.match(changed.content, /https:\\/\\/api-origin\\.example\\/dashboard\\/edit\\/v-2/);
+});
+
+test("visibility manifest host uses R2 ETag preconditions for writes", async () => {
+  const stored = JSON.stringify({
+    schema_version: 1,
+    revision: 0,
+    generated_at: 1,
+    entities: [],
+  });
+  const puts = [];
+  const bucket = {
+    get: async () => ({
+      text: async () => stored,
+      etag: "etag-current",
+      size: new TextEncoder().encode(stored).byteLength,
+    }),
+    put: async (key, value, options) => {
+      puts.push({ key, value, options });
+      return { etag: "etag-next" };
+    },
+  };
+  const host = createVideoVisibilityTransitionHost({
+    env: { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" },
+  });
+  const current = await host.manifest.read();
+  await host.manifest.write({
+    ...current.manifest,
+    revision: 1,
+    generated_at: 2,
+  }, { ifMatchEtag: current.etag });
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].key, "visibility/blocked-entities.v1.json");
+  assert.deepEqual(puts[0].options.onlyIf, { etagMatches: "etag-current" });
 });
