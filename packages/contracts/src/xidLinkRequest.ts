@@ -14,9 +14,11 @@ export const XIdLinkRejectBodySchema = z
   .strict()
   .transform(({ reason }) => ({ reason: (reason ?? "").trim().slice(0, 500) }));
 
+// Keep the response contract closed: unknown fields must not silently pass
+// through a migration boundary as if they were part of CURRENT parity.
 export const XIdLinkReviewResultSchema = z.object({
   ok: z.boolean(),
   message: z.string().optional(),
-});
+}).strict();
 
 export type XIdLinkReviewResult = z.infer<typeof XIdLinkReviewResultSchema>;
