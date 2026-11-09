@@ -6,6 +6,7 @@ import { isSafeRelativePath } from "../../next.js";
 /** MIG-0708 U03: isolated form components (not mounted until MIG-0636 contracts). */
 const NETWORK_ERROR = "通信または処理中に問題が発生しました。再読み込みしてお試しください。";
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const ALLOWED_ICON_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 /** A ref closes the same-tick double-click race that React pending state alone cannot prevent. */
 function usePendingAction() {
@@ -92,6 +93,12 @@ export function XIdIconPicker({
   const onFileChange = (ev: React.ChangeEvent<HTMLInputElement>) => {
     const file = ev.target.files?.[0];
     if (!file) return;
+    // The file-picker accept attribute is advisory: validate the selected blob too.
+    if (!ALLOWED_ICON_MIME_TYPES.has(file.type)) {
+      setError("画像はPNG・JPEG・WebP形式を選択してください。");
+      ev.target.value = "";
+      return;
+    }
     // Mirror target upload ceiling before attempting to transmit a large blob.
     if (file.size > MAX_UPLOAD_BYTES) {
       setError("画像は8MB以下にしてください。");
