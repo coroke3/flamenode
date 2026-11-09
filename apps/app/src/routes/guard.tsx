@@ -119,21 +119,36 @@ export function useApiResult<T>(
   load: (api: PersonalApi, signal: AbortSignal) => Promise<ApiResult<T>>,
   refreshKey = 0,
 ): DataState<T> {
-  const [state, setState] = React.useState<DataState<T>>(LOADING);
+  const [snapshot, setSnapshot] = React.useState<{
+    api: PersonalApi;
+    key: string;
+    state: DataState<T>;
+  } | null>(null);
   const loadRef = React.useRef(load);
   loadRef.current = load;
-  const shownKey = React.useRef<string | null>(null);
+  const shownIdentity = React.useRef<{ api: PersonalApi; key: string } | null>(null);
+
+  // Hide a previous identity synchronously during render. Waiting for the effect
+  // to set LOADING would briefly expose private data from the previous API client.
+  const state =
+    snapshot?.api === api && snapshot.key === key ? snapshot.state : LOADING;
+
   React.useEffect(() => {
     const ctrl = new AbortController();
-    const silent = shownKey.current === key;
-    shownKey.current = key;
-    if (!silent) setState(LOADING);
+    const previous = shownIdentity.current;
+    const silent = previous?.api === api && previous.key === key;
+    shownIdentity.current = { api, key };
+    if (!silent) setSnapshot({ api, key, state: LOADING });
     loadRef.current(api, ctrl.signal).then(
-      (r) => {
-        if (!ctrl.signal.aborted && (!silent || r.status === "ok")) setState(r);
+      (result) => {
+        if (!ctrl.signal.aborted && (!silent || result.status === "ok")) {
+          setSnapshot({ api, key, state: result });
+        }
       },
       () => {
-        if (!ctrl.signal.aborted && !silent) setState({ status: "unavailable" });
+        if (!ctrl.signal.aborted && !silent) {
+          setSnapshot({ api, key, state: { status: "unavailable" } });
+        }
       },
     );
     return () => ctrl.abort();
