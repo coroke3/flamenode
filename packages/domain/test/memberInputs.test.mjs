@@ -40,6 +40,28 @@ test("MIG-0651: member identities are canonical, duplicate X IDs rejected, and 1
   assert.equal(parseVideoMemberInputs(JSON.stringify(Array.from({length:100},(_,i)=>({name:"Person "+i,x_user_id:""}))), true).ok, true);
   assert.equal(parseVideoMemberInputs(JSON.stringify(Array.from({length:101},(_,i)=>({name:"Person "+i,x_user_id:""}))), true).ok, false);
 });
+test("MIG-0651: nonempty but empty-after-normalization member X handles fail closed", () => {
+  for (const invalidHandle of ["@", "@@@", " @ ", "@!", "@-"]) {
+    const result = parseVideoMemberInputs(JSON.stringify([
+      { name: "Not a blank X field", x_user_id: invalidHandle },
+    ]), true);
+    assert.equal(result.ok, false, JSON.stringify(invalidHandle));
+    assert.match(result.message, /X ID が不正/, JSON.stringify(invalidHandle));
+  }
+  const optionalBlank = parseVideoMemberInputs(JSON.stringify([
+    { name: "Name only", x_user_id: " " },
+  ]), true);
+  assert.equal(optionalBlank.ok, true, "an intentionally empty X handle remains optional");
+  if (optionalBlank.ok) {
+    assert.equal(optionalBlank.members[0].x_user_id, "");
+  }
+  const atHandle = parseVideoMemberInputs(JSON.stringify([
+    { name: "Valid", x_user_id: "@Valid_X" },
+  ]), true);
+  assert.equal(atHandle.ok, true);
+  if (atHandle.ok) assert.equal(atHandle.members[0].x_user_id, "valid_x");
+});
+
 test("MIG-0651: chapter times preserve strict mm:ss format and fallback label", () => {
   assert.equal(parseMemberChapterTime("1:05"), 65);
   assert.equal(parseMemberChapterTime("1000:59"), 60059);
