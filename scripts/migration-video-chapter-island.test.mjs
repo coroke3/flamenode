@@ -489,6 +489,23 @@ test("U03 switching ?playlist= never overwrites another playlist's persisted ord
   }
 });
 
+test("MIG-0518 auto-next is one-shot per video identity", async () => {
+  const source = fs.readFileSync(new URL("../apps/site/src/components/VideoUtilityDockIsland.ts", import.meta.url), "utf8");
+  const { shouldAdvancePlaylistOnEnded } =
+    await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  assert.equal(shouldAdvancePlaylistOnEnded("yt-current", "video-current", "yt-current"), true,
+    "the real player ended event remains actionable");
+  assert.equal(shouldAdvancePlaylistOnEnded("other", "video-current", "yt-current"), false);
+  assert.match(source, /autoNextNavigated\.current = true;\s*window\.location\.assign\(/,
+    "mark navigation as handled synchronously before dispatching the location change");
+  assert.match(source, /autoNextNavigated\.current\) return;/,
+    "ignore a second ended event while navigation is already pending");
+  assert.match(source, /\[videoId, currentId\]/,
+    "reset the one-shot guard when the actual video identity changes");
+  assert.doesNotMatch(source, /\[mounted, autoNext, next, playlist\]\);\s*autoNextNavigated\.current = false/,
+    "reordering a playlist must not reset the guard");
+});
+
 test("U03 same-mounted video navigation re-reads playlist URL without an unrelated storage write", async () => {
   const { JSDOM } = await import("jsdom");
   const { createRoot } = await import("react-dom/client");
