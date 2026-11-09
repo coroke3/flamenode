@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
+import {
+  UpdateXIdProfileBodySchema,
+  DeleteLinkedXIdBodySchema,
+  SetXIdIconBodySchema,
+} from "@flamenode/contracts";
+
 import { createXidRoutes } from "../src/routes/xid/index.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
@@ -330,4 +336,28 @@ test("SA-098 missing or malformed CostGuard settings deny before mutation, witho
     assert.equal(stats.batches, 0);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM audit_logs").get().count, 0);
   }
+});
+
+test("MIG-0636 U05 SA-102..104 JSON input contracts retain CURRENT field names without mounting writes", () => {
+  const profile = {
+    x_user_id: "@x-one",
+    x_name: "  display name  ",
+    profile_text: "short profile",
+    portfolio_contact: "",
+    youtube_channel_url: "https://www.youtube.com/@example",
+    other_social_links: "[]",
+  };
+  assert.deepEqual(UpdateXIdProfileBodySchema.parse(profile), profile);
+  assert.deepEqual(UpdateXIdProfileBodySchema.parse({ x_user_id: "x-one" }), { x_user_id: "x-one" });
+  assert.equal(UpdateXIdProfileBodySchema.safeParse({ x_user_id: 3 }).success, false);
+  assert.equal(UpdateXIdProfileBodySchema.safeParse({ x_user_id: "x-one", profile_text: [] }).success, false);
+  assert.deepEqual(DeleteLinkedXIdBodySchema.parse({ x_user_id: "x-one", confirm: "DELETE x-one" }), {
+    x_user_id: "x-one", confirm: "DELETE x-one",
+  });
+  assert.equal(DeleteLinkedXIdBodySchema.safeParse({ x_user_id: "x-one" }).success, false);
+  assert.equal(DeleteLinkedXIdBodySchema.safeParse({ x_user_id: "x-one", confirm: 1 }).success, false);
+  assert.deepEqual(SetXIdIconBodySchema.parse({ x_user_id: "x-one", icon_url: "/api/media/xicons/x-one/1.png" }), {
+    x_user_id: "x-one", icon_url: "/api/media/xicons/x-one/1.png",
+  });
+  assert.equal(SetXIdIconBodySchema.safeParse({ x_user_id: "x-one", icon_url: null }).success, false);
 });
