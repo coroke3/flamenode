@@ -120,6 +120,7 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `bucket.delete(<complex>)` | 1 | Generator/producer key; MIG-0907 review required |
 | `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `bucket.delete(keys)` | 1 | Generator/producer key; MIG-0907 review required |
 | `src/lib/media/iconOrphanCleanup.ts` | `bucket.delete(objectKey)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+| `apps/api/src/routes/xid/orphanCleanup.ts` | `bucket.delete(key)` | 1 | MIG-0636 SA-104 isolated Hono post-commit old icon cleanup, validated xicons/video-icons only, all D1 references checked before deletion; retain uploaded media dependency until independent S3 review |
 | `src/lib/video/resolveVideoCreatorIcon.ts` | `bucket.put(key)` | 1 | Persistent uploaded media (`video-icons/<id>/<id>/` + UUID.ext); RETAIN until separately reviewed |
 | `apps/api/src/routes/adminRead/ops.ts` | `bucket.head(objectKey)` | 1 | Admin read-only artifact existence probe; MIG-0627 review required |
 | `workers/cleanup/incrementalCache.ts` | `bucket.list(<complex>)` | 1 | Cleanup prefix listing; do not retire while old storage remains |
