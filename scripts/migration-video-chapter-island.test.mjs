@@ -450,6 +450,13 @@ test("U03 same-mounted video navigation re-reads playlist URL without an unrelat
   }
 });
 
+test("U03 playlist identity reconciliation is not keyed to playlist state changes", async () => {
+  const fs = await import("node:fs");
+  const source = fs.readFileSync(new URL("../apps/site/src/components/VideoUtilityDockIsland.ts", import.meta.url), "utf8");
+  assert.match(source, /setPlaylist\(resolvePlaylistQuery\(window\.location\.search\)\);\s*\}, \[mounted, ready, videoId, currentId\]\)/);
+  assert.doesNotMatch(source, /\[mounted, ready, videoId, currentId, playlist\]/);
+});
+
 test("U02 dirty guard compares against editor/player prefill instead of false prompting", async () => {
   const { videoChapterDraftIsDirty } = await import("../apps/site/src/components/VideoChapterIsland.ts");
   const baseline = { time: "1:01:02", label: "サビ", note: "補足", csv: "" };
