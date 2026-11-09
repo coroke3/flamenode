@@ -938,3 +938,19 @@ test("MIG-0518 video switch clears prior player-time before the next player repo
       "new player updates remain accepted");
   });
 });
+
+test("MIG-0518 auto-next ignores missing, malformed and unrelated ended-video IDs", async () => {
+  const { shouldAdvancePlaylistOnEnded } =
+    await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  for (const bad of [undefined, null, "", 0, false, {}, "other-video"]) {
+    assert.equal(shouldAdvancePlaylistOnEnded(bad, "video-a", undefined), false,
+      "missing playlist YouTube ID must not match malformed ended event: " + String(bad));
+    assert.equal(shouldAdvancePlaylistOnEnded(bad, "video-a", null), false);
+  }
+  assert.equal(shouldAdvancePlaylistOnEnded("video-a", "video-a", null), true,
+    "the active video ID remains a legitimate ended event");
+  assert.equal(shouldAdvancePlaylistOnEnded("youtube-a", "video-a", "youtube-a"), true,
+    "the active video's YouTube ID also matches");
+  assert.equal(shouldAdvancePlaylistOnEnded("youtube-b", "video-a", "youtube-a"), false,
+    "a different player's ended event must not advance this playlist");
+});
