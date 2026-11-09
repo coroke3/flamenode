@@ -210,3 +210,18 @@ test("MIG-0656 U04u: SA-056/057 legacy group IDs escape mentions only in DM payl
     }
   }finally{db.close();}
 });
+
+test("MIG-0656 target submission-release DM mirrors CURRENT safe group rendering", () => {
+  const raw="legacy\n@everyone\u202e" + "x".repeat(3000);
+  const p=slotSubmissionReleasedPayload("ev",["a"],raw,"https://app.example");
+  assert.ok(p.content.includes("提出グループ: legacy @\u200beveryone "), "mention and newline neutralized");
+  assert.ok(!p.content.includes("\n@everyone"), "untrusted ID cannot forge a separate DM section");
+  assert.ok(!p.content.includes("\u202e"), "Unicode bidi marker removed");
+  assert.ok(p.content.includes("…"), "long legacy ID is truncated");
+  assert.ok(p.content.length<2000, "DM remains within Discord text limits");
+  const exact=slotSubmissionReleasedPayload("ev",["a"],"x".repeat(254)+"😀","https://app.example");
+  assert.ok(exact.content.includes("x".repeat(254)+"😀"), "complete emoji preserved");
+  const selected=options("keep-reservation",[slot("a",{reservation_group_id:raw})]);
+  const out=buildSubmittedDangerOutboxStatements(selected);
+  assert.ok(out.dedupeKeys[0].includes(raw.trim()), "raw group ID remains unchanged for dedupe");
+});
