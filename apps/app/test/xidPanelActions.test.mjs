@@ -85,6 +85,11 @@ test("MIG-0708 U03 T04: oversize upload is blocked before API, valid file uses f
   await act(async()=>input.dispatchEvent(new dom.window.Event("change",{bubbles:true})));
   assert.equal(files.length,0);
   assert.match(m.container.querySelector('[role="alert"]').textContent,/8MB/);
+  const badType={name:"not-an-icon.txt",size:12,type:"text/plain"};
+  Object.defineProperty(input,"files",{configurable:true,value:[badType]});
+  await act(async()=>input.dispatchEvent(new dom.window.Event("change",{bubbles:true})));
+  assert.equal(files.length,0,"the accept attribute alone cannot guarantee MIME validation");
+  assert.match(m.container.querySelector('[role="alert"]').textContent,/PNG・JPEG・WebP/);
   const valid=new Blob(["hello"],{type:"image/png"});
   Object.defineProperty(input,"files",{configurable:true,value:[valid]});
   await act(async()=>input.dispatchEvent(new dom.window.Event("change",{bubbles:true})));
