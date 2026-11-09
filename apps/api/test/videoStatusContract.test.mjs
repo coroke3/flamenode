@@ -92,3 +92,30 @@ test("Transport JSON rejects structured object/array values and never confuses r
   assert.equal("caseId" in manage({ case_id: "c" }), false);
   assert.equal("adminEventFilter" in manage({ review_event_id: "e" }), false);
 });
+
+test("MIG-0603 U02a: CURRENT status actions retain their privileged write and side-effect boundaries", async () => {
+  // Static characterization only: this guards accidental CURRENT weakening
+  // while the Hono write host is not implemented. It is NOT runtime parity.
+  const { readFileSync } = await import("node:fs");
+  const adminAction = readFileSync(new URL("../../../src/lib/actions/admin.ts", import.meta.url), "utf8");
+  const manageAction = readFileSync(new URL("../../../src/lib/actions/manage-video.ts", import.meta.url), "utf8");
+  const videosRouter = readFileSync(new URL("../src/routes/videos/index.ts", import.meta.url), "utf8");
+  const manageRouter = readFileSync(new URL("../src/routes/manage/index.ts", import.meta.url), "utf8");
+  const adminRouter = readFileSync(new URL("../src/routes/admin/index.ts", import.meta.url), "utf8");
+
+  assert.match(adminAction, /requireAdminWrite\("admin_video_status"\)/);
+  assert.match(adminAction, /validateAdminVideoStatusInput\(/);
+  assert.match(adminAction, /planVideoVisibilityTransition\(/);
+  assert.match(adminAction, /executeVideoVisibilityStatusMutation\(/);
+  assert.match(manageAction, /writeGuard\(\{ feature: "manage_video_status" \}\)/);
+  assert.match(manageAction, /canEditEvent\(/);
+  assert.match(manageAction, /videoEvents\.event_id/);
+  assert.match(manageAction, /validateManageVideoStatusInput\(/);
+  assert.match(manageAction, /planVideoVisibilityTransition\(/);
+  assert.match(manageAction, /executeVideoVisibilityStatusMutation\(/);
+
+  // A partial DTO/contract must not silently become an exposed mutation API.
+  for (const router of [videosRouter, manageRouter, adminRouter]) {
+    assert.doesNotMatch(router, /createVideoStatus(?:Write)?Routes|videoStatusCandidate/);
+  }
+});
