@@ -15,14 +15,16 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 async function write(
   fetchFn: FetchLike,
   path: string,
-  payload: Record<string, string>,
+  payload?: Record<string, string>,
 ): Promise<XidRequestResult> {
   const res = await fetchFn(path, {
     method: "POST",
     credentials: "same-origin",
     cache: "no-store",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(payload),
+    headers: payload === undefined
+      ? { accept: "application/json" }
+      : { accept: "application/json", "content-type": "application/json" },
+    ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
   });
   let data: unknown;
   try {
@@ -43,7 +45,7 @@ export function createXidRequestsApi(fetchFn: FetchLike = (input, init) => fetch
     requestMerge: (source, target) =>
       write(fetchFn, "/api/xid/requests", { request_type: "merge", x_id: source, target_x_user_id: target }),
     cancelRequest: (id) =>
-      write(fetchFn, `/api/xid/requests/${encodeURIComponent(id)}/cancel`, {}),
+      write(fetchFn, `/api/xid/requests/${encodeURIComponent(id)}/cancel`),
     requestMergeRevert: (id) =>
       write(fetchFn, "/api/xid/merge-revert-requests", { parent_request_id: id }),
   };
