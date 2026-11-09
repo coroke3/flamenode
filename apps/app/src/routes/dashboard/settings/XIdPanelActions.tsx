@@ -250,18 +250,32 @@ export function DeleteXIdForm({
   const [open, setOpen] = React.useState(false);
   const [confirmation, setConfirmation] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
+  // A -> B -> A must not reuse the first A request's confirmation or result.
+  const identityRef = React.useRef({ xUserId, generation: 0 });
+  if (identityRef.current.xUserId !== xUserId) {
+    identityRef.current = { xUserId, generation: identityRef.current.generation + 1 };
+  }
+  React.useEffect(() => {
+    setOpen(false);
+    setConfirmation("");
+    setError(null);
+  }, [xUserId]);
   const expected = `DELETE ${xUserId}`;
   if (isActive) return null;
   const onDelete = () => {
     if (confirmation !== expected) return;
+    const requestIdentity = identityRef.current;
     void execute(async () => {
       setError(null);
       try {
         const result = await api.deleteXId(xUserId, confirmation);
+        if (identityRef.current !== requestIdentity) return;
         if (!result.ok) { setError(result.message ?? "削除に失敗しました。"); return; }
         setOpen(false); setConfirmation("");
         onRefresh();
-      } catch { setError(NETWORK_ERROR); }
+      } catch {
+        if (identityRef.current === requestIdentity) setError(NETWORK_ERROR);
+      }
     });
   };
   return (
