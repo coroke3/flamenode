@@ -139,3 +139,32 @@ test("SA-102 isolated handler denies a linked-X revocation raced after authoriza
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
 });
+
+test("SA-102 isolated handler denies approval revocation raced after authorization read", async () => {
+  let revoked = false;
+  const h = setup({ onFirst: (statement, sqlite) => {
+    if (!revoked && statement.includes("SELECT x.* FROM x_users x")) {
+      revoked = true;
+      sqlite.prepare("UPDATE x_users SET approval_status = 'rejected' WHERE id = ?").run("x_one");
+    }
+  } });
+  const res = await h.send({ x_user_id: "x_one", x_name: "Must not persist" });
+  assert.equal(revoked, true, "fixture must revoke approval after the authorized read");
+  assert.equal(res.status, 409);
+  assert.deepEqual(h.sqlite.prepare("SELECT x_name, approval_status FROM x_users WHERE id = 'x_one'").get(), {
+    x_name: "Before", approval_status: "rejected",
+  });
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+});
+
+test("SA-102 isolated handler returns error without mutation when D1 pre-read fails", async () => {
+  const h = setup({ onFirst: (statement) => {
+    if (statement.includes("SELECT x.* FROM x_users x")) throw new Error("transient read failure");
+  } });
+  const res = await h.send({ x_user_id: "x_one", x_name: "Never" });
+  assert.equal(res.status, 503);
+  assert.equal(h.sqlite.prepare("SELECT x_name FROM x_users WHERE id = 'x_one'").get().x_name, "Before");
+  assert.equal(h.stats.batches, 0);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
