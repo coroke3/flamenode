@@ -252,6 +252,9 @@ SELECT
         approvedXIds.map((x_user_id) => ({ x_user_id, approval_status: "approved" })),
       );
       const viewerXApproved = Boolean(activeXId && approvedXIds.includes(activeXId));
+      // SA-012..015 require an approved active X even for administrators.
+      // Keep the broader management role for private read visibility only.
+      const viewerCanWriteChapters = viewerXApproved && isTosAccepted && !termsReacceptRequired;
 
       if (viewer.is_banned === 1) {
         return c.json(
@@ -374,9 +377,8 @@ SELECT
         VideoViewerOverlayDto["privateChapters"][number] & { chapter_owner_x_id: string | null }
       >(row2?.chapters_json).map(({ chapter_owner_x_id, ...chapter }) => ({
         ...chapter,
-        viewerCanManage: isTosAccepted && !termsReacceptRequired &&
-          (viewerCanEditChapters || Boolean(viewerXApproved && activeXId &&
-            chapter_owner_x_id === activeXId)),
+        viewerCanManage: viewerCanWriteChapters &&
+          (viewerCanEditChapters || Boolean(activeXId && chapter_owner_x_id === activeXId)),
       }));
       const interactions = parseJsonArray<string>(row2?.interactions_json);
       const likeActive = interactions.includes("like");
@@ -402,7 +404,7 @@ SELECT
         bookmarkActive,
         viewerXApproved,
         // Server-side capability only; do not derive from the viewer X approval bit.
-        viewerCanEditChapters: viewerCanEditChapters && isTosAccepted && !termsReacceptRequired,
+        viewerCanEditChapters: viewerCanEditChapters && viewerCanWriteChapters,
         privateChapters,
         ...finalPlaylist,
       };
