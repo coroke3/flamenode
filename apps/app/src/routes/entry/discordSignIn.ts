@@ -23,7 +23,7 @@ export async function startDiscordSignIn(next: string): Promise<void> {
       throw new Error("csrf_invalid");
     }
     const token = (payload as { csrfToken: unknown }).csrfToken;
-    if (typeof token !== "string" || token.length === 0 || token.length > 4096) {
+    if (typeof token !== "string" || token.trim().length === 0 || token.length > 4096) {
       throw new Error("csrf_invalid");
     }
 
