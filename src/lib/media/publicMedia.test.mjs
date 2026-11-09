@@ -365,8 +365,22 @@ test("CURRENT Cache API ignores poisoned statuses/MIME/size and strips response 
     configurable: true,
     value: {
       default: {
-        async match() { return cached?.clone() ?? null; },
-        async put(_key, response) { cached = response.clone(); },
+        async match() {
+          if (!cached) return null;
+          // Cache API returns an independent body stream. Avoid Response.clone()
+          // tee branches here: cancelling an oversized returned body must not wait
+          // for an unread sibling branch in this in-memory test double.
+          return new Response(await cached.clone().arrayBuffer(), {
+            status: cached.status,
+            headers: new Headers(cached.headers),
+          });
+        },
+        async put(_key, response) {
+          cached = new Response(await response.arrayBuffer(), {
+            status: response.status,
+            headers: new Headers(response.headers),
+          });
+        },
       },
     },
   });
