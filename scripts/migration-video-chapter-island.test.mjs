@@ -887,3 +887,19 @@ test("P2 late bulk CSV response after permission revocation cannot show success 
       "a new grant must not restore the old CSV draft");
   });
 });
+
+
+test("MIG-0518 whitespace-only Active X fails closed in policy and action guards", async () => {
+  const { canPostVideoChapter, chapterPostPolicy } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const overlay = {
+    loggedIn: true, viewerXApproved: true, activeXId: " \t ",
+    isBanned: false, isTosAccepted: true, termsReacceptRequired: false,
+    authUnavailable: false,
+  };
+  assert.equal(canPostVideoChapter(overlay, false), false);
+  const policy = chapterPostPolicy(overlay, false, "/video");
+  assert.equal(policy.canPost, false);
+  assert.equal(policy.href, "/dashboard/settings?next=%2Fvideo");
+  assert.equal(canPostVideoChapter({ ...overlay, activeXId: " x-valid " }, false), true);
+  assert.equal(chapterPostPolicy({ ...overlay, activeXId: " x-valid " }, false, "/video").canPost, true);
+});
