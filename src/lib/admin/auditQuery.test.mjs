@@ -63,6 +63,25 @@ test("CURRENT audit: view switches retain only single-valued filters and replace
   assert.equal(url.searchParams.getAll("view").length, 1);
 });
 
+test("CURRENT audit: view switch drops arbitrary incoming URL keys", () => {
+  const href = buildAuditViewHref({
+    actor: "authorized-id",
+    table: "video_chapters",
+    token: "secret-leak",
+    redirect: "https://attacker.invalid/",
+    next: "/admin/permissions",
+    "prototype": "bad",
+    view: "cards",
+  }, "timeline");
+  const url = new URL(href, "https://flamenode.net");
+  assert.equal(url.searchParams.get("actor"), "authorized-id");
+  assert.equal(url.searchParams.get("table"), "video_chapters");
+  assert.equal(url.searchParams.get("view"), "timeline");
+  for (const key of ["token", "redirect", "next", "prototype"]) {
+    assert.equal(url.searchParams.has(key), false, key + " should not propagate");
+  }
+});
+
 test("CURRENT audit: bookmarked operator alias stays a normal single-value query", () => {
   const href = buildAuditViewHref({ operator: "old-id", record: "v1" }, "cards");
   const url = new URL(href, "https://flamenode.net");
