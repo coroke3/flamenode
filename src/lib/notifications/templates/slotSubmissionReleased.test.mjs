@@ -209,9 +209,9 @@ if (runTestWithTsx(import.meta.url)) {
       const payload = build({
         eventId: "event-1",
         slotIds: ["slot-1"],
-        reservationGroupId: "group-👩‍💻-👨‍👩‍👧-1",
+        reservationGroupId: "group-👩‍💻-👨‍👩‍👧-❤️‍🔥-👩🏽‍💻-1",
       });
-      assert.ok(payload.content.includes("group-👩‍💻-👨‍👩‍👧-1"), "joined emoji must not be split");
+      assert.ok(payload.content.includes("group-👩‍💻-👨‍👩‍👧-❤️‍🔥-👩🏽‍💻-1"), "joined emoji must not be split");
 
       const spoofed = build({
         eventId: "event-1",
