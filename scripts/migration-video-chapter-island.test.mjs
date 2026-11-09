@@ -1218,3 +1218,35 @@ test("MIG-0518 duplicate playlist entries preserve first occurrence and original
   assert.equal(uniquePlaylistItems(many).length, 50);
   assert.equal(uniquePlaylistItems([]).length, 0);
 });
+
+test("P2 pending DELETE completion is ignored after active X change event", async () => {
+  await withChapterDom(async (doc, root) => {
+    let resolveResponse;
+    let requests = 0;
+    let refreshes = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      return await new Promise((resolve) => { resolveResponse = resolve; });
+    };
+    doc.defaultView.confirm = () => true;
+    const render = () => React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true,
+      chapters: [PRIVATE_CHAPTER], onChanged: () => { refreshes += 1; },
+    });
+    await React.act(async () => root.render(render()));
+    await clickButton(doc, "削除");
+    assert.equal(requests, 1, "DELETE must be in flight when active X switches");
+    await React.act(async () => {
+      doc.defaultView.dispatchEvent(new doc.defaultView.CustomEvent("flamenode:active-x-changed"));
+    });
+    await React.act(async () => {
+      resolveResponse({ ok: true, status: 200, json: async () => ({ ok: true, chapterId: "c1" }) });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.equal(refreshes, 0, "old identity must not refresh after a late DELETE");
+    assert.equal(doc.querySelector('[role="status"]'), null, "old identity success must be discarded");
+    await React.act(async () => root.render(render()));
+    assert.equal(doc.querySelector('[role="status"]'), null, "old completion must not replay");
+  });
+});
