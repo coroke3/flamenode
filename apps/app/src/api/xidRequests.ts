@@ -1,12 +1,7 @@
-/**
- * MIG-0709 provisional client contract (D-16-1).
- * Replace the response parsing with packages/contracts/src/xidRequest.ts only after
- * MIG-0659 is DONE. Do not infer success from HTTP 2xx alone.
- */
-export interface XidRequestResult {
-  ok: boolean;
-  message?: string;
-}
+/** MIG-0709: consume the merged MIG-0659 response contract; never infer success from HTTP 2xx alone. */
+import { XIdRequestResultSchema, type XIdRequestResult } from "@flamenode/contracts";
+
+export type XidRequestResult = XIdRequestResult;
 
 export interface XidRequestsApi {
   requestLink(xId: string): Promise<XidRequestResult>;
@@ -16,12 +11,6 @@ export interface XidRequestsApi {
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
-
-function isResult(value: unknown): value is XidRequestResult {
-  return typeof value === "object" && value !== null
-    && "ok" in value && typeof value.ok === "boolean"
-    && (!("message" in value) || value.message === undefined || typeof value.message === "string");
-}
 
 async function write(
   fetchFn: FetchLike,
@@ -41,10 +30,11 @@ async function write(
   } catch {
     return { ok: false };
   }
-  // The final schema belongs to MIG-0659. Reject malformed / success-shaped errors.
-  if (!isResult(data)) return { ok: false };
-  if (!res.ok) return { ok: false, message: data.message };
-  return data;
+  // The shared MIG-0659 schema rejects malformed responses without treating 2xx as success.
+  const parsed = XIdRequestResultSchema.safeParse(data);
+  if (!parsed.success) return { ok: false };
+  if (!res.ok) return { ok: false, message: parsed.data.message };
+  return parsed.data;
 }
 
 export function createXidRequestsApi(fetchFn: FetchLike = (input, init) => fetch(input, init)): XidRequestsApi {
