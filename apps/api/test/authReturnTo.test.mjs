@@ -34,6 +34,35 @@ test("MIG-0802 U03/U04: OAuth completion blocks nested callback and onboarding l
   assert.equal(sanitizePostAuthReturnTo("/dashboard?tab=1"),"/dashboard?tab=1");
   assert.equal(sanitizePostAuthReturnTo("/onboarding","/entry"),"/entry");
 });
+test("MIG-0802 U04: OAuth completion normalizes encoded and traversed blocked paths", () => {
+  for (const path of [
+    "/%61pi/auth/callback/discord",
+    "/api%2fauth/callback",
+    "/%2561pi/auth",
+    "/auth/%63omplete?next=%2Fadmin",
+    "/%6fnboarding",
+    "/%72ules",
+    "/foo/../api/auth",
+    "/foo/%2e%2e/auth/complete",
+    "/%252e%252e/onboarding",
+    "/%2f%2fevil.example/",
+    "/%ZZinvalid-escape",
+    "/%00api/auth",
+  ]) {
+    assert.equal(sanitizePostAuthReturnTo(path), "/dashboard", path);
+    assert.equal(authCompleteHref(path), "/auth/complete?next=%2Fdashboard", path);
+  }
+  for (const path of [
+    "/dashboard?next=%2Fapi%2Fauth",
+    "/ruleset",
+    "/api/authentic",
+    "/profile/%E3%81%82?tab=1",
+  ]) {
+    assert.equal(sanitizePostAuthReturnTo(path), path, path);
+  }
+  assert.equal(sanitizePostAuthReturnTo("/foo/../api/auth", "/entry"), "/entry");
+});
+
 test("MIG-0802 U04: redirect landing uses exactly one encoded query parameter",()=>{
   assert.equal(authCompleteHref("/dashboard?tab=1"),"/auth/complete?next=%2Fdashboard%3Ftab%3D1");
   assert.equal(authCompleteHref("https://evil.example/"),"/auth/complete?next=%2Fdashboard");
