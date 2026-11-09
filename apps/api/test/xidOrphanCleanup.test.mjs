@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { cleanupIconKey, cleanupOldXIconAfterCommit } from "../src/routes/xid/orphanCleanup.ts";
-import { createAdminD1 } from "./helpers/sqliteD1.mjs";
+import { createAdminD1, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const OLD = "/api/media/xicons/x_one/old.png";
 const NEW = "/api/media/xicons/x_one/new.png";
@@ -39,7 +39,7 @@ test("SA-104 orphan cleanup retains any referenced old image", async () => {
   for (const makeReference of [
     (db) => db.prepare("INSERT INTO x_users (id,x_name,icon_url) VALUES ('owner','Owner',?)").run(OLD),
     (db) => db.prepare("INSERT INTO videos (id,creator_icon_url) VALUES ('video',?)").run(OLD),
-    (db) => db.prepare("INSERT INTO events (id,icon_url) VALUES ('event',?)").run(OLD),
+    (db) => seedEvent(db, { icon_url: OLD }),
     (db) => db.prepare("INSERT INTO event_groups (id,img_url) VALUES ('group',?)").run(OLD),
     (db) => db.prepare("INSERT INTO static_artifacts (id,object_key,target_type,deleted_at) VALUES ('artifact',?,'public_media',NULL)").run("xicons/x_one/old.png"),
   ]) {
