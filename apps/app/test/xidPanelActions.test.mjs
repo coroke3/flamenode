@@ -144,6 +144,27 @@ test("MIG-0708 U03: stale icon response after X account switch cannot overwrite 
   }
 });
 
+test("MIG-0708 U03: icon notices from previous account are cleared on identity switch", async () => {
+  const oldUrl = "https://cdn.example/old.png";
+  const newUrl = "https://cdn.example/new.png";
+  const api = { setIcon: async () => ({ ok: true, message: "old account saved" }) };
+  const onRefresh = () => {};
+  const m = await render(XIdIconPicker, {
+    api, xUserId: "old-x", currentIconUrl: oldUrl, candidates: [oldUrl, newUrl], onRefresh,
+  });
+  try {
+    const buttons = [...m.container.querySelectorAll('button[aria-label="候補アイコンを選択"]')];
+    await m.click(buttons[1]);
+    await m.flush();
+    assert.match(m.container.textContent, /old account saved/);
+    await m.rerender({
+      api, xUserId: "new-x", currentIconUrl: newUrl, candidates: [oldUrl, newUrl], onRefresh,
+    });
+    assert.equal(m.container.textContent.includes("old account saved"), false);
+    assert.equal(buttons[1].getAttribute("aria-pressed"), "true");
+  } finally { await m.dispose(); }
+});
+
 test("MIG-0708 U03 T05: unlink cannot execute before exact confirmation",async()=>{
   const calls=[];let refresh=0;
   const m=await render(DeleteXIdForm,{api:{deleteXId:async(...args)=>{calls.push(args);return {ok:true};}},xUserId:"foo",isActive:false,onRefresh:()=>refresh++});
