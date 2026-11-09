@@ -30,6 +30,21 @@ export function readAuditLimit(raw: AdminAuditQueryParam): number {
     : DEFAULT_AUDIT_LIMIT;
 }
 
+/** Reject impossible calendar dates before Date.parse can roll them into another month. */
+export function readAuditDateBoundary(raw: string, end: boolean): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > monthDays[month - 1]) return null;
+  const suffix = end ? "T23:59:59+09:00" : "T00:00:00+09:00";
+  const timestamp = Date.parse(`${raw}${suffix}`);
+  return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : null;
+}
+
 /** Preserve single-valued filters while dropping duplicate keys on view switches. */
 export function buildAuditViewHref(
   searchParams: AdminAuditSearchParams,
