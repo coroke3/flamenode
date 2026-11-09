@@ -61,17 +61,17 @@ type StaffCsvRow = {
 };
 
 function parseStaffCsvText(input: string): string[][] {
-  const text = input.replace(/^\\uFEFF/, "");
-  const firstRecord = text.split(/[\\r\\n]/, 1)[0] ?? "";
+  const text = input.replace(/^\uFEFF/, "");
+  const firstRecord = text.split(/[\r\n]/, 1)[0] ?? "";
   let quoted = false, commas = 0, tabs = 0;
   for (let i = 0; i < firstRecord.length; i += 1) {
     if (firstRecord[i] === '"') {
       if (quoted && firstRecord[i + 1] === '"') i += 1;
       else quoted = !quoted;
     } else if (!quoted && firstRecord[i] === ",") commas += 1;
-    else if (!quoted && firstRecord[i] === "\\t") tabs += 1;
+    else if (!quoted && firstRecord[i] === "\t") tabs += 1;
   }
-  const delimiter = tabs > commas ? "\\t" : ",";
+  const delimiter = tabs > commas ? "\t" : ",";
   const rows: string[][] = [];
   let row: string[] = [], field = "", inQuotes = false;
   for (let i = 0; i < text.length; i += 1) {
@@ -82,8 +82,8 @@ function parseStaffCsvText(input: string): string[][] {
       else field += ch;
     } else if (ch === '"') inQuotes = true;
     else if (ch === delimiter) { row.push(field); field = ""; }
-    else if (ch === "\\r") continue;
-    else if (ch === "\\n") {
+    else if (ch === "\r") continue;
+    else if (ch === "\n") {
       row.push(field);
       if (row.some(cell => cell.trim())) rows.push(row);
       row = []; field = "";
