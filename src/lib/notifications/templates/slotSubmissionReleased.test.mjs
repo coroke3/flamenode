@@ -170,6 +170,40 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("不可視フォーマット文字でメンションや表示ID境界を偽装できない", () => {
+    const invisible = ["\u00ad", "\u034f", "\u115f", "\u1160", "\u180e", "\u200b", "\u200c", "\u200d", "\u2060", "\u206a", "\u206b", "\u206c", "\u206d", "\u206e", "\u206f", "\ufeff"];
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "legacy" + invisible.join("") + "@everyone",
+      });
+      assert.ok(payload.content.includes("legacy @\u200beveryone"));
+      for (const marker of invisible) {
+        // U+200B is intentionally inserted *after* @ by the Discord escaping helper.
+        if (marker === "\u200b") {
+          assert.equal((payload.content.match(/\u200b/g) || []).length, 1);
+        } else {
+          assert.ok(!payload.content.includes(marker));
+        }
+      }
+      assert.equal(payload.event_id, "event-1");
+      assert.ok(payload.url.includes("/event/event-1"));
+    }
+  });
+
+  test("正常な絵文字バリエーションセレクタを改変しない", () => {
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "group-✈️-1",
+      });
+      assert.ok(payload.content.includes("group-✈️-1"));
+      assert.equal(payload.event_id, "event-1");
+    }
+  });
+
   test("通常のグループID表示は変更しない", () => {
     for (const build of [
       buildSlotForceReleasedNotification,
