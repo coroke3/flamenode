@@ -21,18 +21,16 @@ export function chapterManagementForOverlay(
       viewerCanManage?: boolean;
     }>;
   };
-  const sessionAuthorized = !loading && overlay.loggedIn &&
+  // CURRENT Hono SA-012..015 requires an approved active X for every write,
+  // including admin bulk and private-row update/delete. A true RH-031 manager
+  // claim without an X identity is a read capability, NOT a valid write grant.
+  const authorized = !loading && overlay.loggedIn &&
     !overlay.authUnavailable && !overlay.isBanned &&
-    overlay.isTosAccepted && !overlay.termsReacceptRequired;
-  if (!sessionAuthorized) return { canBulk: false, editableChapters: [] };
+    overlay.isTosAccepted && !overlay.termsReacceptRequired &&
+    overlay.viewerXApproved && Boolean(overlay.activeXId?.trim());
+  if (!authorized) return { canBulk: false, editableChapters: [] };
 
-  // The server RH-031 grant is sufficient for an admin/manager even without
-  // an approved active X. Ordinary authors still require their approved X
-  // identity plus an explicit per-row viewerCanManage grant from the server.
-  // Do not infer managerial rights from role names or public chapter labels.
   const canBulk = perRowOverlay.viewerCanEditChapters === true;
-  const canManageOwn = overlay.viewerXApproved && Boolean(overlay.activeXId?.trim());
-  if (!canBulk && !canManageOwn) return { canBulk: false, editableChapters: [] };
   // Public SSG chapters lack note/visibility fields, so editing them would
   // silently erase stored note content. Do not infer permission from author name.
   const publicIds = new Set(publicChapters.map((chapter) => chapter.id));
