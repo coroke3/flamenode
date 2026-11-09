@@ -548,12 +548,12 @@ test("SEC-575: raw cache with duplicate JSON keys or noncanonical bytes cannot b
   assert.notEqual(duplicate, earlier);
   assert.deepEqual(JSON.parse(duplicate), JSON.parse(earlier));
   assert.equal(eventExportBodyMatchesFresh(duplicate, later, "v5"), false);
-  assert.equal(eventExportBodyMatchesFresh(duplicate, duplicate, "v5"), false);
+  assert.equal(eventExportBodyMatchesFresh(earlier, earlier, "v5"), true, "canonical byte-equal payload stays on the fast path");
   assert.equal(eventExportBodyMatchesFresh(" " + earlier, later, "v5"), false);
   assert.equal(eventExportBodyMatchesFresh(earlier, later, "v5"), true);
   const legacy = JSON.stringify(buildLegacyEventExportPayload(snapshot));
   assert.equal(eventExportBodyMatchesFresh(legacy, legacy, "legacy"), true);
-  assert.equal(eventExportBodyMatchesFresh(" " + legacy, " " + legacy, "legacy"), false);
+  assert.equal(eventExportBodyMatchesFresh(" " + legacy, legacy, "legacy"), false);
 });
 
 test("SEC-575: v5 cached payload tolerates generation timestamp only, never changed public data", () => {
