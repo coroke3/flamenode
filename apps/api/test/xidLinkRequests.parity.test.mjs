@@ -53,3 +53,45 @@ test("SA-090/091: result DTO is closed and carries only CURRENT result fields", 
   assert.equal(XIdLinkReviewResultSchema.safeParse({ ok: "true" }).success, false);
   assert.equal(XIdLinkReviewResultSchema.safeParse({ ok: true, actor_x_user_id: "spoof" }).success, false);
 });
+
+import { drizzle } from "drizzle-orm/d1";
+import { createSqlite, insert } from "./support/personalHarness.mjs";
+import { atomicD1, seedChapterWorld } from "./support/chapterSeed.mjs";
+import { authorizeXIdLinkRequestReview } from "../src/routes/xid/linkRequests.ts";
+
+test("SA-090/091 T08: review authorization allows admin and explicitly authorized approved-X staff only", async () => {
+  const sqlite = createSqlite();
+  seedChapterWorld(sqlite);
+  insert(sqlite, "event_staff", {
+    id: "s_xid_reviewer",
+    event_id: "ev1",
+    x_user_id: "x_staff",
+    display_name: "X ID reviewer",
+    permission_preset: "xid_reviewer",
+  });
+  const d1 = atomicD1(sqlite);
+  const db = drizzle(d1);
+
+  const admin = await authorizeXIdLinkRequestReview(db, {
+    id: "u_admin", role: "admin", active_x_user_id: "x_admin",
+  });
+  assert.deepEqual(admin, { allowed: true, actorXUserId: null });
+
+  const authorizedStaff = await authorizeXIdLinkRequestReview(db, {
+    id: "u_staff", role: "user", active_x_user_id: "x_staff",
+  });
+  assert.deepEqual(authorizedStaff, { allowed: true, actorXUserId: "x_staff" });
+
+  const unauthorizedStaff = await authorizeXIdLinkRequestReview(db, {
+    id: "u_other", role: "user", active_x_user_id: "x_other",
+  });
+  assert.deepEqual(unauthorizedStaff, {
+    allowed: false,
+    actorXUserId: null,
+    message: "X ID 申請を処理する権限がありません。",
+  });
+
+  assert.equal(d1.stats.batches, 0, "authorization must not write or batch any D1 statements");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM x_identity_requests").get().count, 0);
+  sqlite.close();
+});
