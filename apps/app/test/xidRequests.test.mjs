@@ -36,17 +36,21 @@ test("SA-099/100/101: JSON body, same-origin, no-store, correct method and paths
     "/api/xid/requests", "/api/xid/requests",
     "/api/xid/requests/a%2Fb/cancel", "/api/xid/merge-revert-requests",
   ]);
-  assert.deepEqual(calls.map((x) => JSON.parse(x.init.body)), [
+  assert.deepEqual(calls.map((x) => x.init.body === undefined ? undefined : JSON.parse(x.init.body)), [
     { request_type: "link", x_id: "@Alice" },
     { request_type: "merge", x_id: "alice", target_x_user_id: "bob" },
-    {},
+    undefined,
     { parent_request_id: "parent" },
   ]);
   for (const { init } of calls) {
     assert.equal(init.method, "POST");
     assert.equal(init.credentials, "same-origin");
     assert.equal(init.cache, "no-store");
-    assert.equal(init.headers["content-type"], "application/json");
+    if (init.body === undefined) {
+      assert.equal(init.headers["content-type"], undefined, "cancel has no JSON body or content type");
+    } else {
+      assert.equal(init.headers["content-type"], "application/json");
+    }
   }
 });
 
