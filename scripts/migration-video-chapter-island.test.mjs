@@ -564,6 +564,79 @@ test("U03 same-mounted video navigation re-reads playlist URL without an unrelat
   }
 });
 
+test("MIG-0518 auto-next dispatch ignores duplicate ends, resets for the next video", async () => {
+  const { JSDOM, VirtualConsole } = await import("jsdom");
+  const { createRoot } = await import("react-dom/client");
+  const { VideoUtilityDockIsland } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  // JSDOM emits a not-implemented navigation error for each location.assign.
+  // Count only these messages; suppressing them is not a browser navigation proof.
+  const navigationErrors = [];
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on("jsdomError", (error) => {
+    if (/Not implemented: navigation/.test(error.message)) navigationErrors.push(error.message);
+    else throw error;
+  });
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.net/first?playlist=group", virtualConsole,
+  });
+  dom.window.matchMedia = () => ({
+    matches: false, addEventListener() {}, removeEventListener() {},
+  });
+  dom.window.localStorage.setItem("fn-playlist-autonext", "1");
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "CustomEvent", "localStorage"];
+  const prior = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const priorAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) {
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: dom.window[key] });
+  }
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  const playlistItems = [
+    { id: "v1", title: "First", youtube_video_id: "yt-1" },
+    { id: "v2", title: "Second", youtube_video_id: "yt-2" },
+    { id: "v3", title: "Third", youtube_video_id: "yt-3" },
+  ];
+  const overlay = {
+    loggedIn: false, authUnavailable: false, isBanned: false, isTosAccepted: false,
+    termsReacceptRequired: false, activeXId: null, likeActive: false,
+    bookmarkActive: false, viewerXApproved: false, privateChapters: [],
+    playlistLabel: "Queue", playlistItems,
+  };
+  const render = (videoId, currentId) => React.createElement(VideoUtilityDockIsland, {
+    videoId, currentId, publicChapters: [], loading: false, overlay,
+  });
+  const ended = (youtubeId) => dom.window.dispatchEvent(
+    new dom.window.CustomEvent("flamenode:video-ended", { detail: { youtubeId } }),
+  );
+  try {
+    await React.act(async () => root.render(render("v1", "yt-1")));
+    assert.equal(dom.window.document.querySelector("input[type='checkbox']").checked, true);
+    await React.act(async () => {
+      ended("other");
+      ended("yt-1");
+      ended("yt-1");
+      ended("v1");
+    });
+    assert.equal(navigationErrors.length, 1, "duplicate valid ends must issue only one navigation");
+    dom.window.history.replaceState(null, "", "/second?playlist=group");
+    await React.act(async () => root.render(render("v2", "yt-2")));
+    await React.act(async () => {
+      ended("yt-1");
+      ended("yt-2");
+      ended("yt-2");
+    });
+    assert.equal(navigationErrors.length, 2, "the next video resets the latch and also navigates only once");
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of prior) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = priorAct;
+    dom.window.close();
+  }
+});
+
 test("U03 video identity remains sole URL-to-playlist synchronization trigger", async () => {
   const fs = await import("node:fs");
   const source = fs.readFileSync(new URL("../apps/site/src/components/VideoUtilityDockIsland.ts", import.meta.url), "utf8");
