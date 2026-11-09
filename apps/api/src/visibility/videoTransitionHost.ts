@@ -3,10 +3,8 @@ import {
   buildVideoApprovedNotification,
   buildVideoVisibilityChangedNotification,
 } from "../../../../src/lib/notifications/templates/video.ts";
-import {
-  buildVideoStatusChangeNotificationBatch,
-  type VideoVisibilityTransitionHost,
-} from "@flamenode/server-core/visibility/videoTransition";
+import type { VideoVisibilityTransitionHost } from "@flamenode/server-core/visibility/videoTransition";
+import { buildVideoStatusChangeNotificationBatch } from "@flamenode/server-core/notifications/videoStatusNotify";
 import type { ServerCoreDb } from "@flamenode/server-core/db";
 import type { EdgeCachePort } from "@flamenode/server-core/ports";
 import {
