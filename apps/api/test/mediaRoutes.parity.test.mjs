@@ -360,7 +360,7 @@ test("T04 privacy: cache entries cannot inject redirects, cookies, MIME or stale
     assert.equal(conditional.headers.get("cache-control"), "no-store");
     assert.equal(conditional.headers.get("set-cookie"), null);
     assert.equal(conditional.headers.get("location"), null);
-    assert.equal(calls.queries.length, 4, "every conditional and cache hit still rechecks the D1 ACL");
+    assert.equal(calls.queries.length, 6, "every conditional, cache hit, and oversized-cache fallback still rechecks the D1 ACL");
   } finally {
     if (previous) Object.defineProperty(globalThis, "caches", previous);
     else delete globalThis.caches;
