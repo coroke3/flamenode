@@ -226,6 +226,36 @@ test("MIG-0708 U03: icon notices from previous account are cleared on identity s
   } finally { await m.dispose(); }
 });
 
+test("MIG-0708 U03: unlink confirmation resets on X switch and stale delete cannot refresh", async () => {
+  const pending = deferred();
+  const calls = [];
+  let refreshed = 0;
+  const api = { deleteXId: (id, confirmation) => {
+    calls.push([id, confirmation]);
+    return pending.promise;
+  } };
+  const props = { api, isActive: false, onRefresh: () => { refreshed++; } };
+  const m = await render(DeleteXIdForm, { ...props, xUserId: "A" });
+  try {
+    await m.click(buttonWith(m.container, "連携を解除"));
+    const input = m.container.querySelector("input");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+      setter.call(input, "DELETE A");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await m.click(buttonWith(m.container, "連携を削除する"));
+    assert.deepEqual(calls, [["A", "DELETE A"]]);
+    await m.rerender({ ...props, xUserId: "B" });
+    assert.equal(m.container.querySelector("input"), null, "the old confirmation dialog must close for B");
+    await m.rerender({ ...props, xUserId: "A" });
+    await act(async () => pending.resolve({ ok: true }));
+    await m.flush();
+    assert.equal(refreshed, 0, "A's obsolete deletion response must not refresh a new generation");
+    assert.equal(m.container.querySelector("input"), null);
+  } finally { await m.dispose(); }
+});
+
 test("MIG-0708 U03 T05: unlink cannot execute before exact confirmation",async()=>{
   const calls=[];let refresh=0;
   const m=await render(DeleteXIdForm,{api:{deleteXId:async(...args)=>{calls.push(args);return {ok:true};}},xUserId:"foo",isActive:false,onRefresh:()=>refresh++});
