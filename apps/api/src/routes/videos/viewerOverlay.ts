@@ -254,7 +254,7 @@ SELECT
       const viewerXApproved = Boolean(activeXId && approvedXIds.includes(activeXId));
       // SA-012..015 require an approved active X even for administrators.
       // Keep the broader management role for private read visibility only.
-      const viewerCanWriteChapters = viewerXApproved && isTosAccepted && !termsReacceptRequired;
+      const viewerCanWriteChapters = viewerXApproved && isTosAccepted && !termsReacceptRequired && viewer.is_banned !== 1;
 
       if (viewer.is_banned === 1) {
         return c.json(
