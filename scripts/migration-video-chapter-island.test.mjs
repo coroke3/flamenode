@@ -205,6 +205,24 @@ test("U03 private chapter merge preserves public SSR chapters and prevents dupli
   assert.equal(rows[2].label, "public");
 });
 
+test("U03 malformed public chapter times sort after valid rows without dropping SSR data", async () => {
+  const { chapterRowsForViewer } =
+    await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const overlay = { privateChapters: [
+    { id: "private-1", chapter_time: 5, chapter_label: "private", author_name: "author" },
+  ] };
+  const rows = chapterRowsForViewer([
+    { id: "malformed", timeLabel: "??", label: "keep visible" },
+    { id: "invalid-sec", timeLabel: "1:61", label: "keep invalid seconds visible" },
+    { id: "valid-hour", timeLabel: "1:00:00", label: "one hour" },
+    { id: "valid", timeLabel: "0:03", label: "three seconds" },
+  ], overlay);
+  assert.deepEqual(rows.map((row) => row.id),
+    ["valid", "private-1", "valid-hour", "malformed", "invalid-sec"]);
+  assert.equal(rows[3].label, "keep visible");
+  assert.equal(rows[4].label, "keep invalid seconds visible");
+});
+
 test("U03 private playlist and chapters are excluded entirely from JS-disabled HTML", async () => {
   const { VideoUtilityDockIsland } =
     await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
