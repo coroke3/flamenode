@@ -974,12 +974,17 @@ test("P2 late chapter-create response cannot display success or refresh the next
     const label = doc.querySelector("form input[maxlength='120']");
     const time = doc.querySelector("form input[placeholder='mm:ss']");
     assert.ok(label && time, "new post composer must be available");
+    // React DOM is imported before JSDOM globals in this Node test file.
+    // Focus + keyup also exercises its legacy input-change fallback path.
     const setInput = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLInputElement.prototype, "value").set;
     await React.act(async () => {
-      setInput.call(label, "Pending chapter");
-      label.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
-      setInput.call(time, "0:10");
-      time.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
+      for (const [field, value] of [[label, "Pending chapter"], [time, "0:10"]]) {
+        field.focus();
+        setInput.call(field, value);
+        field.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
+        field.dispatchEvent(new doc.defaultView.Event("change", { bubbles: true }));
+        field.dispatchEvent(new doc.defaultView.KeyboardEvent("keyup", { bubbles: true, key: "0" }));
+      }
     });
     await React.act(async () => {
       doc.querySelector("form").dispatchEvent(new doc.defaultView.Event("submit", {
@@ -1021,8 +1026,11 @@ test("P2 late bulk CSV response after permission revocation cannot show success 
     assert.ok(textarea, "CSV editor must exist before revocation");
     const setter = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLTextAreaElement.prototype, "value").set;
     await React.act(async () => {
+      textarea.focus();
       setter.call(textarea, "0:10,Pending");
       textarea.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
+      textarea.dispatchEvent(new doc.defaultView.Event("change", { bubbles: true }));
+      textarea.dispatchEvent(new doc.defaultView.KeyboardEvent("keyup", { bubbles: true, key: "0" }));
     });
     await React.act(async () => {
       doc.querySelector("details form").dispatchEvent(new doc.defaultView.Event("submit", {
