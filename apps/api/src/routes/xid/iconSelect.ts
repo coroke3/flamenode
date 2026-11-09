@@ -39,10 +39,10 @@ function approvedIconCandidate(
   let count = seen.size;
   for (const candidate of parsed) {
     if (typeof candidate !== "string" || !candidate || seen.has(candidate)) continue;
+    if (count >= 40) break;
     seen.add(candidate);
     count++;
     if (candidate === value) return true;
-    if (count >= 40) break;
   }
   return false;
 }
