@@ -7,6 +7,7 @@
 import type { Hono } from "hono";
 import {
   EventStaffDeleteBodySchema,
+  EventOwnerTransferBodySchema,
   EventStaffUpsertBodySchema,
 } from "@flamenode/contracts";
 import {
@@ -24,6 +25,7 @@ import {
   type EventStaffRow,
   type EventStaffAtomicExtras,
   LAST_OWNER_ERROR,
+  transferEventOwnership,
 } from "@flamenode/server-core/event/eventOwnership";
 import { generateId } from "@flamenode/server-core/id";
 import { sql } from "@flamenode/server-core/sql";
@@ -212,6 +214,45 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
   // GET /events/:id/staff remains a read: never impose a write CostGuard on it.
   app.use(base, onlyMutating(costGuardMiddleware("manage_event_staff")));
   app.use(`${base}/:staffId`, onlyMutating(costGuardMiddleware("manage_event_staff")));
+  // SA-034 owner transfer: core performs input, self-confirm, operable-owner,
+  // CAS, and strict-audit invariants in the same D1 mutation batch.
+  const transferPath = "/events/:id/owner-transfer";
+  app.use(transferPath, onlyMutating(costGuardMiddleware("manage_event_staff")));
+  app.post(transferPath, async (c) => {
+    c.header("Cache-Control", NO_STORE);
+    const request = await readAdminJsonBody(c.req.raw);
+    if (request.kind === "too_large") return deny(c, BODY_TOO_LARGE_MESSAGE, 413);
+    if (request.kind !== "ok") return deny(c, "入力エラー", 400);
+    const parsed = EventOwnerTransferBodySchema.safeParse(request.value);
+    if (!parsed.success) return deny(c, parsed.error.issues[0]?.message ?? "入力エラー", 400);
+    if (!VALID_STAFF_ID.test(parsed.data.from_staff_id) ||
+        !VALID_STAFF_ID.test(parsed.data.to_staff_id) ||
+        parsed.data.from_staff_id === parsed.data.to_staff_id) {
+      return deny(c, "移譲元または移譲先のスタッフIDが不正です。", 400);
+    }
+    const access = await permitted(c);
+    if (access instanceof Response) return access;
+    try {
+      await assertActorMayAssignOwner({
+        db: c.get("db"), eventId: access.eventId,
+        actorUserId: access.user.id, isSiteAdmin: access.user.role === "admin",
+      });
+      await transferEventOwnership({
+        db: c.get("db"), eventId: access.eventId,
+        fromStaffId: parsed.data.from_staff_id, toStaffId: parsed.data.to_staff_id,
+        actorUserId: access.user.id, reason: parsed.data.reason,
+        confirmText: parsed.data.confirm_text,
+        selfConfirmText: parsed.data.self_confirm_text,
+      });
+      await queueProjection(c, access, parsed.data.reason, false);
+      return c.json({ ok: true, pendingPublicReflection: true }, 200);
+    } catch (error) {
+      const message = domainMessage(error);
+      if (message) return deny(c, message, 409);
+      console.error("[MIG-0654] owner transfer unavailable");
+      return deny(c, GENERIC_FAILURE, 503);
+    }
+  });
   app.post(base, (c) => upsert(c, null));
   app.put(`${base}/:staffId`, (c) => {
   const id = c.req.param("staffId") ?? "";
