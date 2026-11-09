@@ -907,3 +907,34 @@ test("MIG-0518 whitespace-only Active X fails closed in policy and action guards
   assert.equal(canPostVideoChapter({ ...overlay, activeXId: " x-valid " }, false), true);
   assert.equal(chapterPostPolicy({ ...overlay, activeXId: " x-valid " }, false, "/video").canPost, true);
 });
+
+test("MIG-0518 video switch clears prior player-time before the next player reports", async () => {
+  await withChapterDom(async (doc, root) => {
+    const render = (videoId) => React.createElement(VideoChapterIsland, {
+      videoId, activeXId: "approved", canPost: true,
+    });
+    await React.act(async () => root.render(render("video-a")));
+    await React.act(async () => {
+      doc.defaultView.dispatchEvent(new doc.defaultView.CustomEvent("flamenode:player-time", {
+        detail: { time: 3661 },
+      }));
+    });
+    await clickButton(doc, "現在位置にコメントする");
+    assert.equal(doc.querySelector("input[placeholder='mm:ss']").value, "1:01:01");
+    await React.act(async () => root.render(render("video-b")));
+    assert.equal(doc.querySelector("form"), null, "switching videos must close the old draft");
+    await clickButton(doc, "現在位置にコメントする");
+    assert.equal(doc.querySelector("input[placeholder='mm:ss']").value, "0:00",
+      "video B must not inherit video A's playback time");
+    await React.act(async () => {
+      doc.defaultView.dispatchEvent(new doc.defaultView.CustomEvent("flamenode:player-time", {
+        detail: { time: 12 },
+      }));
+    });
+    await React.act(async () => {
+      [...doc.querySelectorAll("button")].find((button) => button.textContent === "現在位置").click();
+    });
+    assert.equal(doc.querySelector("input[placeholder='mm:ss']").value, "0:12",
+      "new player updates remain accepted");
+  });
+});
