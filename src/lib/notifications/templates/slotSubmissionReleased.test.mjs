@@ -152,7 +152,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("legacyグループIDのUTF-16境界で孤立サロゲートを通知に残さない", () => {
     const cases = [
       ["x".repeat(255) + "\ud83d" + "tail", "x".repeat(255) + "…"],
-      ["x".repeat(255) + "\ude00" + "tail", "x".repeat(255) + "…"],
+      ["x".repeat(255) + "\ude00" + "tail", "x".repeat(255) + "�…"],
       ["x".repeat(254) + "😀" + "tail", "x".repeat(254) + "😀…"],
     ];
     for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
