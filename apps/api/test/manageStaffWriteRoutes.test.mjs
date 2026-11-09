@@ -2,6 +2,7 @@
 // Tests use the same server-core mutation functions; CURRENT Next handlers remain mounted.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
@@ -149,6 +150,17 @@ test("U02: non-admin cannot assign privileged presets; invalid URL ID rejects", 
   assert.equal(admin.count("audit_logs"), 0);
 });
 
+
+test("U04: owner-transfer is in the parent Origin/session/writeGuard/DB guarded paths", async () => {
+  const source = await readFile(new URL("../src/routes/manage/index.ts", import.meta.url), "utf8");
+  assert.match(source, /const staffWritePaths = \[[^\n]*"\/events\/:id\/owner-transfer"\]/);
+  const origin = source.indexOf("originGuardMiddleware(");
+  const session = source.indexOf('sessionMiddleware()');
+  const write = source.indexOf("writeGuardMiddleware(");
+  const db = source.indexOf("onlyMutating(dbMiddleware)");
+  const handler = source.indexOf("registerStaffWriteRoutes(manageRoutes)");
+  assert.ok(origin >= 0 && origin < session && session < write && write < db && db < handler);
+});
 
 test("U04: owner transfer denies missing confirmation and atomically moves owner role", async () => {
   const s = setup();
