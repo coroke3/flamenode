@@ -49,6 +49,7 @@ function setup(user = ADMIN) {
     app.routes.filter((r) => ["POST", "PUT", "DELETE"].includes(r.method))
       .map((r) => [r.method, r.path]),
     [
+      ["POST", "/events/:id/owner-transfer"],
       ["POST", "/events/:id/staff"],
       ["PUT", "/events/:id/staff/:staffId"],
       ["DELETE", "/events/:id/staff/:staffId"],
@@ -145,6 +146,60 @@ test("U02: non-admin cannot assign privileged presets; invalid URL ID rejects", 
   assert.equal(admin.count("audit_logs"), 0);
 });
 
+
+test("U04: owner transfer denies missing confirmation and atomically moves owner role", async () => {
+  const s = setup();
+  s.sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES ('target_x','Target','approved')").run();
+  s.sqlite.prepare("INSERT INTO x_user_account_links (auth_user_id, x_user_id, link_role) VALUES ('admin-1','target_x','owner')").run();
+  s.sqlite.prepare(`INSERT INTO event_staff (id,event_id,x_user_id,display_name,permission_preset,is_public,created_at,updated_at)
+    VALUES ('s-target','ev-1','target_x','Target','reviewer',0,1,1)`).run();
+  const transfer = (overrides = {}) => ({
+    from_staff_id: "s-owner",
+    to_staff_id: "s-target",
+    reason: "authorized handover",
+    confirm_text: "TRANSFER ev-1",
+    self_confirm_text: "SELF CHANGE ev-1",
+    ...overrides,
+  });
+  const missingConfirm = await s.send("POST", "/owner-transfer", transfer({ confirm_text: "TRANSFER other" }));
+  assert.notEqual(missingConfirm.status, 200);
+  assert.equal(s.row("s-owner").permission_preset, "owner");
+  assert.equal(s.count("audit_logs"), 0);
+  const missingSelf = await s.send("POST", "/owner-transfer", transfer({ self_confirm_text: "" }));
+  assert.notEqual(missingSelf.status, 200);
+  assert.equal(s.row("s-owner").permission_preset, "owner");
+  assert.equal(s.count("audit_logs"), 0);
+  const success = await s.send("POST", "/owner-transfer", transfer());
+  assert.equal(success.status, 200, await success.clone().text());
+  assert.deepEqual(await success.json(), { ok: true, pendingPublicReflection: true });
+  assert.equal(s.row("s-owner").permission_preset, "manager");
+  assert.equal(s.row("s-target").permission_preset, "owner");
+  assert.equal(s.count("audit_logs"), 2, "both sides of the transfer must be audited");
+  assert.ok(s.count("static_rebuild_queue") >= 4);
+  const replay = await s.send("POST", "/owner-transfer", transfer());
+  assert.notEqual(replay.status, 200, "the original staff is no longer owner");
+  assert.equal(s.count("audit_logs"), 2, "replay must not write audit logs");
+});
+
+test("U04: owner transfer rejects missing staff, identical ids, or unprivileged actors", async () => {
+  const admin = setup();
+  const payload = { from_staff_id: "s-owner", to_staff_id: "s-owner",
+    reason: "invalid", confirm_text: "TRANSFER ev-1" };
+  const same = await admin.send("POST", "/owner-transfer", payload);
+  assert.equal(same.status, 400);
+  assert.equal(admin.count("audit_logs"), 0);
+  const absent = await admin.send("POST", "/owner-transfer", {
+    ...payload, to_staff_id: "missing",
+  });
+  assert.notEqual(absent.status, 200);
+  assert.equal(admin.count("audit_logs"), 0);
+  const viewer = setup(VIEWER);
+  const denied = await viewer.send("POST", "/owner-transfer", {
+    ...payload, to_staff_id: "s-target",
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(viewer.count("audit_logs"), 0);
+});
 
 test("U02: GET staff reader is unaffected by the write-only CostGuard", async () => {
   const app = new Hono();
