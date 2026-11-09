@@ -59,7 +59,7 @@ function profileSocialUrl(raw: unknown, type: string): string | null {
   if (type === "Email") {
     const address = value.replace(/^mailto:/i, "").split("?")[0]?.trim() ?? "";
     return address && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)
-      ? `mailto:\${address}` : null;
+      ? `mailto:${address}` : null;
   }
   if (/^mailto:/i.test(value)) return null;
   if (!value.includes("://") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return null;
