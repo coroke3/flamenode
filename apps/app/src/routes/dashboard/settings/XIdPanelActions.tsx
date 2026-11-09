@@ -76,6 +76,8 @@ export function XIdIconPicker({
   const [error, setError] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState(currentIconUrl);
+  // Refreshes can replace the authoritative icon after a write or account switch.
+  React.useEffect(() => { setSelected(currentIconUrl); }, [currentIconUrl]);
   const [upload, setUpload] = React.useState(false);
   const ref = React.useRef<HTMLInputElement>(null);
   const update = (task: () => ReturnType<XidProfileApi["setIcon"]>, successText: string) => {
