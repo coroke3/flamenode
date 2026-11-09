@@ -13,7 +13,7 @@ test("SA-102: route and FormData X identities must refer to the same canonical X
   assert.deepEqual(ok, { ok: true, value: {
     xUserId: "x_one", xName: "Creator", profileText: "About",
     portfolioContact: "contact", youtubeChannelUrl: "https://www.youtube.com/@x_one",
-    otherSocialLinksRaw: "[]",
+    otherSocialLinks: null,
   } });
   assert.equal(parseXIdProfileInput("x_one", { x_user_id: "x_two" }).ok, false);
   assert.equal(parseXIdProfileInput("x_one", { x_user_id: 33 }).ok, false);
@@ -33,7 +33,7 @@ test("SA-102: normalizes CURRENT profile string limits without cutting surrogate
   assert.equal(parsed.value.profileText.length, 2000);
   assert.equal(parsed.value.portfolioContact?.length, 1200);
   assert.equal(parsed.value.youtubeChannelUrl, null);
-  assert.equal(parsed.value.otherSocialLinksRaw, "");
+  assert.equal(parsed.value.otherSocialLinks, null);
 });
 
 test("SA-102: CURRENT URL sanitizer denies non-http, credentials and oversized links", () => {
@@ -54,6 +54,52 @@ test("SA-102: CURRENT URL sanitizer denies non-http, credentials and oversized l
   });
   assert.equal(placeholder.ok, true);
   if (placeholder.ok) assert.equal(placeholder.value.portfolioContact, null);
+});
+
+
+test("SA-102: social links normalize CURRENT type aliases, Email and URL values", () => {
+  const parsed = parseXIdProfileInput("x_one", {
+    x_user_id: "x_one",
+    other_social_links: JSON.stringify([
+      { type: "Tumbler", url: "https://example.tumblr.com" },
+      { type: "mail", url: " contact@example.com " },
+      { type: "twitter", url: "https://x.com/x_one" },
+      { type: "discord", url: "https://discord.gg/flamenode" },
+    ]),
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(JSON.parse(parsed.value.otherSocialLinks), [
+    { type: "Tumblr", url: "https://example.tumblr.com/" },
+    { type: "Email", url: "mailto:contact@example.com" },
+    { type: "X", url: "https://x.com/x_one" },
+    { type: "Discord", url: "https://discord.gg/flamenode" },
+  ]);
+});
+
+test("SA-102: social links reject invalid JSON, bad schemes, credentials and excess length", () => {
+  const invalid = [
+    "{broken", "{}", JSON.stringify({ type: "X", url: "https://x.com/x_one" }),
+    JSON.stringify([{ type: "Discord", url: "flamenode" }]),
+    JSON.stringify([{ type: "Discord", url: "mailto:contact@example.com" }]),
+    JSON.stringify([{ type: "Website", url: "https://user:pass@example.com" }]),
+    JSON.stringify([{ type: "Email", url: "not-an-address" }]),
+    JSON.stringify([{ type: "Website", url: "javascript:alert(1)" }]),
+    "x".repeat(5001),
+  ];
+  for (const other_social_links of invalid) {
+    const parsed = parseXIdProfileInput("x_one", { x_user_id: "x_one", other_social_links });
+    assert.equal(parsed.ok, false, other_social_links.slice(0, 70));
+  }
+  const entries = Array.from({ length: 10 }, (_, i) => ({ type: "Website", url: "https://example.com/" + i }));
+  const limited = parseXIdProfileInput("x_one", { x_user_id: "x_one", other_social_links: JSON.stringify(entries) });
+  assert.equal(limited.ok, true);
+  if (limited.ok) assert.equal(JSON.parse(limited.value.otherSocialLinks).length, 8);
+  const emojiBoundary = parseXIdProfileInput("x_one", { x_user_id: "x_one",
+    other_social_links: JSON.stringify([{ type: "T".repeat(39) + "😀", url: "https://example.com/" }]),
+  });
+  assert.equal(emojiBoundary.ok, true);
+  if (emojiBoundary.ok) assert.equal(JSON.parse(emojiBoundary.value.otherSocialLinks)[0].type, "T".repeat(39));
 });
 
 test("SA-103: exact normalized DELETE confirmation and matching path are mandatory", () => {
