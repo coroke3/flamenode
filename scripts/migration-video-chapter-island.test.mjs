@@ -236,6 +236,19 @@ test("U03 chapter seek times reject malformed and out-of-range labels", async ()
   }
 });
 
+test("U03 chapter sorter and seek parser share the 24-hour validation boundary", async () => {
+  const { chapterRowsForViewer, safeChapterSeekSeconds } =
+    await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const hours = ["23:59:59", "24:00:00", "24:00:01", "0:01"];
+  const rows = chapterRowsForViewer(hours.map((timeLabel, i) => ({
+    id: String(i), timeLabel, label: timeLabel,
+  })), { privateChapters: [] });
+  assert.deepEqual(rows.map((row) => row.timeLabel),
+    ["0:01", "23:59:59", "24:00:00", "24:00:01"]);
+  assert.equal(safeChapterSeekSeconds("24:00:00"), 86400);
+  assert.equal(safeChapterSeekSeconds("24:00:01"), null);
+});
+
 test("U03 private playlist and chapters are excluded entirely from JS-disabled HTML", async () => {
   const { VideoUtilityDockIsland } =
     await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
