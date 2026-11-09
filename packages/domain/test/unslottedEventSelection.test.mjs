@@ -47,6 +47,26 @@ test("MIG-0651: multiple unique IDs and oversized IDs stay fail-closed",()=>{
   invalid(selection("ok,"+"a".repeat(65)));
   invalid(selection("event-a, event-b, event-a"));
 });
+test("MIG-0651: repeated multipart event_ids keys are rejected without ambiguous first-value selection", () => {
+  for (const values of [
+    ["event-a", "event-b"],
+    ["event-a", "event-a"],
+    ["", "event-a"],
+    ["event-a", ""],
+  ]) {
+    const form = new FormData();
+    for (const value of values) form.append("event_ids", value);
+    invalid(form);
+  }
+  const form = new FormData();
+  form.append("other_field", "event-b");
+  form.append("event_ids", "event-a");
+  form.append("other_field", "event-c");
+  assert.equal(parseUnslottedEventIdFromForm(form), "event-a");
+  form.append("event_ids", new Blob(["event-a"]), "event.txt");
+  invalid(form);
+});
+
 test("MIG-0651: File input remains invalid instead of becoming an empty selection",()=>{
   const form=new FormData();
   form.set("event_ids",new Blob(["event-a"]), "selection.txt");
