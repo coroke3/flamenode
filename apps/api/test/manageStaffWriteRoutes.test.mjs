@@ -117,6 +117,24 @@ test("U02: wrong event/staff identity and unauthorized requester cannot mutate",
   assert.equal(admin.count("audit_logs"), 0);
 });
 
+test("U02: PUT rejects a canonical X collision with a different staff record", async () => {
+  const s = setup();
+  const first = await s.send("POST", "/", upsert({ x_user_id: "@first_user" }));
+  assert.equal(first.status, 200, await first.clone().text());
+  const second = await s.send("POST", "/", upsert({ x_user_id: "second_user" }));
+  assert.equal(second.status, 200, await second.clone().text());
+  const staff1 = s.sqlite.prepare("SELECT * FROM event_staff WHERE x_user_id='first_user'").get();
+  const staff2 = s.sqlite.prepare("SELECT * FROM event_staff WHERE x_user_id='second_user'").get();
+  const auditCount = s.count("audit_logs");
+  const collision = await s.send("PUT", "/" + staff1.id, upsert({
+    staff_id: staff1.id, x_user_id: "@SECOND_USER", display_name: "Must not overwrite",
+  }));
+  assert.equal(collision.status, 409, await collision.clone().text());
+  assert.equal(s.row(staff1.id).x_user_id, "first_user");
+  assert.equal(s.row(staff2.id).x_user_id, "second_user");
+  assert.equal(s.count("audit_logs"), auditCount, "rejected identity reassignment has no audit writes");
+});
+
 test("U02: non-admin cannot assign privileged presets; invalid URL ID rejects", async () => {
   const s = setup(VIEWER);
   const privileged = await s.send("POST", "/", upsert({ permission_preset: "xid_reviewer" }));
