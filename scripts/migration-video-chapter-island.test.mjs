@@ -1022,8 +1022,15 @@ test("P2 late bulk CSV response after permission revocation cannot show success 
       onChanged: () => { refreshes += 1; },
     });
     await React.act(async () => root.render(render(true)));
-    const textarea = doc.querySelector("details textarea");
+    const details = doc.querySelector("details");
+    const textarea = details?.querySelector("textarea");
     assert.ok(textarea, "CSV editor must exist before revocation");
+    // JSDOM keeps the closed <details> subtree hidden from keyboard interaction.
+    // Open it as a user would before typing or submitting; the test must trigger
+    // an actual React onChange rather than only changing the raw DOM value.
+    await React.act(async () => {
+      details.querySelector("summary").click();
+    });
     const setter = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLTextAreaElement.prototype, "value").set;
     await React.act(async () => {
       textarea.focus();
@@ -1032,8 +1039,9 @@ test("P2 late bulk CSV response after permission revocation cannot show success 
       textarea.dispatchEvent(new doc.defaultView.Event("change", { bubbles: true }));
       textarea.dispatchEvent(new doc.defaultView.KeyboardEvent("keyup", { bubbles: true, key: "0" }));
     });
+    assert.equal(textarea.value, "0:10,Pending");
     await React.act(async () => {
-      doc.querySelector("details form").dispatchEvent(new doc.defaultView.Event("submit", {
+      details.querySelector("form").dispatchEvent(new doc.defaultView.Event("submit", {
         bubbles: true, cancelable: true,
       }));
     });
