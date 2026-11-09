@@ -183,6 +183,13 @@ const annBody = (extra = {}) => ({ title: "Bench", body: "Bench body", severity:
 
 const RH013_EVENT_ID = "bench-export-event";
 const RH013_VIDEOS = 500;
+/** Exact Cache API URLs used by server-core publicJsonCacheUrl(eventExportPayloadCacheKey(...)). */
+export function eventExportCacheRequestUrls(eventId = RH013_EVENT_ID) {
+  return ["v5", "legacy"].flatMap((format) => [15, 60, 360, 1440].map((refresh) => {
+    const key = ["public-event-export", 9, encodeURIComponent(eventId), format, refresh].join(":");
+    return `https://flamenode.internal/public-json/${encodeURIComponent(key)}`;
+  }));
+}
 const RH013_MEMBERS_PER_VIDEO = 100;
 let rh013Seeded = false;
 let rh013IpSeq = 0;
@@ -1001,6 +1008,7 @@ import { sessionMiddleware } from ${JSON.stringify(sessionUrl)};
 const BUILD_ID = ${JSON.stringify(buildId)};
 const sm = sessionMiddleware();
 const STATS_KEY = ${JSON.stringify(STATS_KEY)};
+const EVENT_EXPORT_CACHE_URLS = ${JSON.stringify(eventExportCacheRequestUrls())};
 const scripts = new Map();
 const BENCH_PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
 // Bench-only upstream image stub: media proxy scenarios must never reach the network.
@@ -1061,8 +1069,13 @@ export default {
       return new Response("ok");
     }
     if (url.pathname === "/__bench/cache-clear") {
-      // about-stats caches under a fixed key; clear it so every sample takes the R2-miss path.
+      // Clear both the fixed about-stats key and every RH-013 public event-export
+      // Cache API key. The event-export server-core key is NOT the route URL:
+      // publicJsonCacheUrl(eventExportPayloadCacheKey(...)) uses flamenode.internal.
       await caches.default.delete(new Request(url.origin + "/api/public/about-stats"));
+      for (const cacheUrl of EVENT_EXPORT_CACHE_URLS) {
+        await caches.default.delete(new Request(cacheUrl));
+      }
       return new Response("ok");
     }
     if (url.pathname === "/__bench/exec") {
