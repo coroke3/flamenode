@@ -13,11 +13,11 @@ function exportedString(source, name) {
 
 test("D-13-42: copied visibility object keys stay aligned with CURRENT generators", () => {
   const copied = read("../src/visibility/publicCacheKeys.ts");
-  const random = read("../../../../src/lib/publicData/randomVideoPoolCore.ts");
-  const youtube = read("../../../../src/lib/publicData/staticYoutubeRelatedBlocklistCore.ts");
-  const top = read("../../../../src/lib/publicData/staticTopSectionsCore.ts");
-  const users = read("../../../../src/lib/publicData/staticUserProfileCore.ts");
-  const event = read("../../../../packages/server-core/src/publicData/eventDetailCore.ts");
+  const random = read("../../../src/lib/publicData/randomVideoPoolCore.ts");
+  const youtube = read("../../../src/lib/publicData/staticYoutubeRelatedBlocklistCore.ts");
+  const top = read("../../../src/lib/publicData/staticTopSectionsCore.ts");
+  const users = read("../../../src/lib/publicData/staticUserProfileCore.ts");
+  const event = read("../../../packages/server-core/src/publicData/eventDetailCore.ts");
 
   for (const [name, source] of [
     ["RANDOM_VIDEO_POOL_OBJECT_KEY", random],
