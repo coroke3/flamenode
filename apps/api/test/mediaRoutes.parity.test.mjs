@@ -284,6 +284,74 @@ test("GET-only and CURRENT signature 404 contract despite task card T02 saying 4
   assert.match(currentSource, /if \(!validSignature\)\s*\{\s*return new Response\("Not found", \{ status: 404 \}\)/);
 });
 
+test("T04 privacy: cache entries cannot inject redirects, cookies, MIME or stale public headers", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  let cached = null;
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match() { return cached?.clone() ?? null; },
+        async put(_key, response) { cached = response.clone(); },
+      },
+    },
+  });
+  try {
+    const { env, calls } = bindings();
+    const key = "/api/media/video-icons/owner/icon.png";
+    cached = new Response(null, {
+      status: 302,
+      headers: { location: "https://attacker.invalid", "cache-control": "public, max-age=604800" },
+    });
+    const ignoredRedirect = await request(key, env);
+    assert.equal(ignoredRedirect.status, 200, "cached redirects are not public media");
+    assert.equal(ignoredRedirect.headers.get("location"), null);
+    assert.equal(calls.objects.length, 1, "invalid cached response causes a fresh R2 read");
+    await ignoredRedirect.arrayBuffer();
+
+    cached = new Response(bytes, {
+      status: 200,
+      headers: { "content-type": "text/html", etag: '"bad-type"' },
+    });
+    const ignoredHtml = await request(key, env);
+    assert.equal(ignoredHtml.status, 200);
+    assert.equal(ignoredHtml.headers.get("content-type"), "image/png");
+    assert.equal(calls.objects.length, 2, "invalid cached MIME falls back to R2");
+    await ignoredHtml.arrayBuffer();
+
+    cached = new Response(bytes, {
+      status: 200,
+      headers: {
+        "content-type": "image/png", etag: '"cached-img"',
+        "set-cookie": "session=should-not-forward",
+        location: "https://attacker.invalid",
+        "content-disposition": "attachment; filename=bad.html",
+        "cache-control": "public, max-age=604800",
+      },
+    });
+    const safeHit = await request(key, env);
+    assert.equal(safeHit.status, 200);
+    assert.equal(safeHit.headers.get("content-type"), "image/png");
+    assert.equal(safeHit.headers.get("cache-control"), "no-store");
+    assert.equal(safeHit.headers.get("x-content-type-options"), "nosniff");
+    for (const header of ["set-cookie", "location", "content-disposition"]) {
+      assert.equal(safeHit.headers.get(header), null, header + " must not escape the edge cache");
+    }
+    assert.equal(calls.objects.length, 2, "valid cached bytes do not reread R2");
+    await safeHit.arrayBuffer();
+
+    const conditional = await request(key, env, { "If-None-Match": '"cached-img"' });
+    assert.equal(conditional.status, 304);
+    assert.equal(conditional.headers.get("cache-control"), "no-store");
+    assert.equal(conditional.headers.get("set-cookie"), null);
+    assert.equal(conditional.headers.get("location"), null);
+    assert.equal(calls.queries.length, 4, "every conditional and cache hit still rechecks the D1 ACL");
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "caches", previous);
+    else delete globalThis.caches;
+  }
+});
+
 test("T04 privacy: an existing image cache HIT never bypasses a revoked D1 ACL", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "caches");
   const store = new Map();
