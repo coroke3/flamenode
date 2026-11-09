@@ -557,14 +557,44 @@ test("MIG-0518 chapter management stays disabled without the trusted RH-031 clai
     { viewerCanEditChapters: true, isBanned: true },
     { viewerCanEditChapters: true, termsReacceptRequired: true },
     { viewerCanEditChapters: true, isTosAccepted: false },
-    { viewerCanEditChapters: true, viewerXApproved: false },
-    { viewerCanEditChapters: true, activeXId: null },
+    { viewerCanEditChapters: false, viewerXApproved: false },
+    { viewerCanEditChapters: false, activeXId: null },
   ]) {
     const result = chapterManagementForOverlay([], { ...overlay, ...bad }, false);
     assert.deepEqual(result, { canBulk: false, editableChapters: [] }, JSON.stringify(bad));
   }
   assert.deepEqual(chapterManagementForOverlay([], { ...overlay, viewerCanEditChapters: true }, true),
     { canBulk: false, editableChapters: [] }, "loading must not expose management");
+});
+
+test("MIG-0518 trusted server chapter manager works without approved active X", async () => {
+  const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
+  const authorizedManager = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    isTosAccepted: true, termsReacceptRequired: false,
+    viewerXApproved: false, activeXId: null, viewerCanEditChapters: true,
+    privateChapters: [
+      { id: "managed", chapter_time: 90, chapter_label: "管理対象", visibility: "private",
+        note: "保存済みノート", viewerCanManage: true },
+      { id: "denied", chapter_time: 105, chapter_label: "非対象", visibility: "private",
+        note: "表示は可能", viewerCanManage: false },
+    ],
+  };
+  const result = chapterManagementForOverlay([], authorizedManager, false);
+  assert.equal(result.canBulk, true, "the trusted server grant cannot be vetoed by unrelated active-X state");
+  assert.deepEqual(result.editableChapters, [{
+    id: "managed", chapter_time: "1:30", chapter_label: "管理対象",
+    note: "保存済みノート", visibility: "private", canManage: true,
+  }], "even managers must honor server per-row denial");
+  for (const changed of [
+    { viewerCanEditChapters: false }, { loggedIn: false }, { isBanned: true },
+    { authUnavailable: true }, { isTosAccepted: false }, { termsReacceptRequired: true },
+  ]) {
+    assert.deepEqual(chapterManagementForOverlay([], { ...authorizedManager, ...changed }, false),
+      { canBulk: false, editableChapters: [] }, JSON.stringify(changed));
+  }
+  assert.deepEqual(chapterManagementForOverlay([], authorizedManager, true),
+    { canBulk: false, editableChapters: [] }, "loading cannot expose management");
 });
 
 test("MIG-0518 authorized manager edits only complete private chapter DTOs", async () => {
