@@ -119,6 +119,31 @@ test("MIG-0708 U03: icon selection tracks authoritative icon changes after refre
   } finally { await m.dispose(); }
 });
 
+test("MIG-0708 U03: stale icon response after X account switch cannot overwrite new selection", async () => {
+  const pending = deferred();
+  const calls = [];
+  let refreshed = 0;
+  const urls = ["https://cdn.example/old.png", "https://cdn.example/new.png"];
+  const api = { setIcon: (id, url) => { calls.push([id, url]); return pending.promise; } };
+  const shared = { api, candidates: urls, onRefresh: () => { refreshed++; } };
+  const m = await render(XIdIconPicker, { ...shared, xUserId: "old-x", currentIconUrl: urls[0] });
+  try {
+    let buttons = [...m.container.querySelectorAll('button[aria-label="候補アイコンを選択"]')];
+    await act(async () => buttons[1].click());
+    assert.deepEqual(calls, [["old-x", urls[1]]]);
+    await m.rerender({ ...shared, xUserId: "new-x", currentIconUrl: urls[1] });
+    await act(async () => pending.resolve({ ok: true, iconUrl: urls[0], message: "old completed" }));
+    await m.flush();
+    buttons = [...m.container.querySelectorAll('button[aria-label="候補アイコンを選択"]')];
+    assert.equal(buttons[0].getAttribute("aria-pressed"), "false");
+    assert.equal(buttons[1].getAttribute("aria-pressed"), "true");
+    assert.equal(refreshed, 0, "old account completion must not refresh the new account");
+    assert.equal(m.container.textContent.includes("old completed"), false);
+  } finally {
+    await m.dispose();
+  }
+});
+
 test("MIG-0708 U03 T05: unlink cannot execute before exact confirmation",async()=>{
   const calls=[];let refresh=0;
   const m=await render(DeleteXIdForm,{api:{deleteXId:async(...args)=>{calls.push(args);return {ok:true};}},xUserId:"foo",isActive:false,onRefresh:()=>refresh++});
