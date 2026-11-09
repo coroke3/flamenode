@@ -43,5 +43,5 @@ test("findNextPendingReviewVideoId queries pending items after current cursor", 
 test("attachApproveAndNextHref is exported for same-status approve-and-next", () => {
   assert.match(coreSource, /export async function attachApproveAndNextHref/);
   assert.match(coreSource, /nextHref: resolveApproveAndNextHref/);
-  assert.match(orderSource, /@flamenode\\/server-core\\/video\\/reviewQueueOrder/);
+  assert.match(orderSource, /@flamenode\/server-core\/video\/reviewQueueOrder/);
 });
