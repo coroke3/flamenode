@@ -82,6 +82,14 @@ export function createXIdUnlinkRoutes(guard: MiddlewareHandler<AppEnv>): Hono<Ap
             (created_by_request_id IS NULL AND ${_link_created_by_request_id} IS NULL)
             OR created_by_request_id = ${_link_created_by_request_id}
           )
+          AND EXISTS (
+            SELECT 1 FROM "user" AS current_user
+            WHERE current_user.id = ${authUserId}
+              AND (
+                (current_user.active_x_user_id IS NULL AND ${beforeUser.active_x_user_id} IS NULL)
+                OR current_user.active_x_user_id = ${beforeUser.active_x_user_id}
+              )
+          )
           AND (${xUnlinkStillAllowedSql(authUserId, xUserId)})
       `),
     ];
