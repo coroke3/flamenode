@@ -1040,10 +1040,14 @@ test("P2 late bulk CSV response after permission revocation cannot show success 
       textarea.dispatchEvent(new doc.defaultView.KeyboardEvent("keyup", { bubbles: true, key: "0" }));
     });
     assert.equal(textarea.value, "0:10,Pending");
+    // React's controlled textarea must have accepted the synthetic input,
+    // not merely the untracked DOM .value property. A nonempty CSV enables
+    // the submit control; detect input-change wiring failure before dispatch.
+    const bulkSubmit = details.querySelector('button[type="submit"]');
+    assert.ok(bulkSubmit, "bulk submit must exist");
+    assert.equal(bulkSubmit.disabled, false, "React state must contain the CSV before submission");
     await React.act(async () => {
-      details.querySelector("form").dispatchEvent(new doc.defaultView.Event("submit", {
-        bubbles: true, cancelable: true,
-      }));
+      bulkSubmit.click();
     });
     assert.equal(requests, 1, "bulk request must be pending");
     await React.act(async () => root.render(render(false)));
