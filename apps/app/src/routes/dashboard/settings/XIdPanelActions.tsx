@@ -81,6 +81,8 @@ export function XIdIconPicker({
   activeXUserIdRef.current = xUserId;
   // Refreshes can replace the authoritative icon after a write or account switch.
   React.useEffect(() => { setSelected(currentIconUrl); }, [currentIconUrl]);
+  // Identity changes invalidate previously displayed mutation notices.
+  React.useEffect(() => { setError(null); setMessage(null); }, [xUserId]);
   const [upload, setUpload] = React.useState(false);
   const ref = React.useRef<HTMLInputElement>(null);
   const update = (task: () => ReturnType<XidProfileApi["setIcon"]>, successText: string) => {
