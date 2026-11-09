@@ -220,6 +220,95 @@ function StaffCsvImport({
   </section>;
 }
 
+const PermissionAssignment = ({
+initialPreset,
+initialKeys,
+isSiteAdmin,
+busy,
+lockOwner = false,
+}: {
+initialPreset: string | null;
+initialKeys: readonly string[];
+isSiteAdmin: boolean;
+busy: boolean;
+lockOwner?: boolean;
+}): React.ReactElement => {
+const availablePresets = PRESETS.filter(([key]) => isSiteAdmin || key !== "xid_reviewer");
+const initial = availablePresets.some(([key]) => key === initialPreset)
+  ? initialPreset as EventStaffPreset
+  : "public_staff";
+const [preset, setPreset] = React.useState<EventStaffPreset>(initial);
+const [selected, setSelected] = React.useState<PermissionKey[]>(
+  () => initialKeys.filter((key): key is PermissionKey => ALL_PERMISSION_KEYS.includes(key as PermissionKey)),
+);
+return <section className="manage-staff-permission-assignment">
+  <label className="fn-label">担当プリセット
+    <select className="fn-select" value={preset} disabled={busy}
+      onChange={event => setPreset(event.target.value as EventStaffPreset)}>
+      {availablePresets.map(([value, label]) =>
+        <option key={value} value={value} disabled={lockOwner && value !== "owner"}>{label}</option>)}
+    </select>
+  </label>
+  <input type="hidden" name="permission_preset" value={preset}/>
+  <input type="hidden" name="permission_keys" value={preset === "custom" ? selected.join(",") : ""}/>
+  {preset === "custom" ? <PermissionChecklist
+    isSiteAdmin={isSiteAdmin} selected={selected} onChange={setSelected} disabled={busy}
+  /> : <PresetPermissionSummary preset={preset} isSiteAdmin={isSiteAdmin}/>}
+</section>;
+};
+
+const PERMISSION_CATEGORY_LABELS: Record<PermissionCategory, string> = {
+event: "イベント",
+video: "作品",
+xid: "X ID",
+danger: "高度・危険な操作",
+};
+
+function PresetPermissionSummary({preset, isSiteAdmin}: {
+preset: EventStaffPreset; isSiteAdmin: boolean;
+}): React.ReactElement {
+const keys = getPresetPermissions(preset).filter(key => isSiteAdmin || !isAdminOnlyKey(key));
+return <div className="fn-console-note">
+  <p>{PRESET_DEFINITIONS[preset].description}</p>
+  {keys.length ? <div className="manage-staff-permission-summary">
+    {keys.map(key => {
+      const definition = PERMISSION_DEFINITIONS[key];
+      return <span key={key} className={definition.dangerous ? "fn-badge fn-badge-warning" : "fn-badge fn-badge-soft"}
+        title={definition.description}>{definition.label}</span>;
+    })}
+  </div> : <span className="fn-muted">内部操作権限はありません。</span>}
+</div>;
+}
+
+function PermissionChecklist({isSiteAdmin, selected, onChange, disabled}: {
+isSiteAdmin: boolean; selected: PermissionKey[];
+onChange: (keys: PermissionKey[]) => void; disabled: boolean;
+}): React.ReactElement {
+const selectedSet = new Set(selected);
+const visibleKeys = ALL_PERMISSION_KEYS.filter(key => isSiteAdmin || !isAdminOnlyKey(key));
+const categories: PermissionCategory[] = ["event", "video", "xid", "danger"];
+return <div className="manage-permission-checklist">
+  {categories.map(category => {
+    const keys = visibleKeys.filter(key => PERMISSION_DEFINITIONS[key].category === category);
+    if (!keys.length) return null;
+    return <fieldset key={category} className="manage-permission-category">
+      <legend>{PERMISSION_CATEGORY_LABELS[category]}</legend>
+      {keys.map(key => {
+        const definition = PERMISSION_DEFINITIONS[key];
+        return <label key={key} className="fn-label manage-permission-option">
+          <input type="checkbox" value={key} checked={selectedSet.has(key)} disabled={disabled}
+            onChange={event => onChange(event.target.checked
+              ? [...selectedSet, key]
+              : selected.filter(value => value !== key))}/>
+          <span>{definition.label}{definition.dangerous ? "（重要）" : ""}</span>
+          <small>{definition.description}</small>
+        </label>;
+      })}
+    </fieldset>;
+  })}
+</div>;
+}
+
 export function EventStaffManager({
   eventId, members, ownerCount, canManageMembers, isSiteAdmin,
   fetchFn, onRefresh, promptConfirm,
@@ -299,7 +388,6 @@ export function EventStaffManager({
     </p>;
   }
 
-  const permittedPresets = PRESETS.filter(([key]) => isSiteAdmin || key !== "xid_reviewer");
   const submit = (event: React.FormEvent<HTMLFormElement>, staffId?: string) => {
     event.preventDefault();
     const input = fields(event.currentTarget);
@@ -319,94 +407,7 @@ export function EventStaffManager({
       "イベントスタッフ " + (member.x_user_id ?? member.id) + " を削除", confirmText));
   };
 
-  const PermissionAssignment = ({
-  initialPreset,
-  initialKeys,
-  isSiteAdmin,
-  busy,
-  lockOwner = false,
-}: {
-  initialPreset: string | null;
-  initialKeys: readonly string[];
-  isSiteAdmin: boolean;
-  busy: boolean;
-  lockOwner?: boolean;
-}): React.ReactElement => {
-  const availablePresets = PRESETS.filter(([key]) => isSiteAdmin || key !== "xid_reviewer");
-  const initial = availablePresets.some(([key]) => key === initialPreset)
-    ? initialPreset as EventStaffPreset
-    : "public_staff";
-  const [preset, setPreset] = React.useState<EventStaffPreset>(initial);
-  const [selected, setSelected] = React.useState<PermissionKey[]>(
-    () => initialKeys.filter((key): key is PermissionKey => ALL_PERMISSION_KEYS.includes(key as PermissionKey)),
-  );
-  return <section className="manage-staff-permission-assignment">
-    <label className="fn-label">担当プリセット
-      <select className="fn-select" value={preset} disabled={busy}
-        onChange={event => setPreset(event.target.value as EventStaffPreset)}>
-        {availablePresets.map(([value, label]) =>
-          <option key={value} value={value} disabled={lockOwner && value !== "owner"}>{label}</option>)}
-      </select>
-    </label>
-    <input type="hidden" name="permission_preset" value={preset}/>
-    <input type="hidden" name="permission_keys" value={preset === "custom" ? selected.join(",") : ""}/>
-    {preset === "custom" ? <PermissionChecklist
-      isSiteAdmin={isSiteAdmin} selected={selected} onChange={setSelected} disabled={busy}
-    /> : <PresetPermissionSummary preset={preset} isSiteAdmin={isSiteAdmin}/>}
-  </section>;
-};
 
-const PERMISSION_CATEGORY_LABELS: Record<PermissionCategory, string> = {
-  event: "イベント",
-  video: "作品",
-  xid: "X ID",
-  danger: "高度・危険な操作",
-};
-
-function PresetPermissionSummary({preset, isSiteAdmin}: {
-  preset: EventStaffPreset; isSiteAdmin: boolean;
-}): React.ReactElement {
-  const keys = getPresetPermissions(preset).filter(key => isSiteAdmin || !isAdminOnlyKey(key));
-  return <div className="fn-console-note">
-    <p>{PRESET_DEFINITIONS[preset].description}</p>
-    {keys.length ? <div className="manage-staff-permission-summary">
-      {keys.map(key => {
-        const definition = PERMISSION_DEFINITIONS[key];
-        return <span key={key} className={definition.dangerous ? "fn-badge fn-badge-warning" : "fn-badge fn-badge-soft"}
-          title={definition.description}>{definition.label}</span>;
-      })}
-    </div> : <span className="fn-muted">内部操作権限はありません。</span>}
-  </div>;
-}
-
-function PermissionChecklist({isSiteAdmin, selected, onChange, disabled}: {
-  isSiteAdmin: boolean; selected: PermissionKey[];
-  onChange: (keys: PermissionKey[]) => void; disabled: boolean;
-}): React.ReactElement {
-  const selectedSet = new Set(selected);
-  const visibleKeys = ALL_PERMISSION_KEYS.filter(key => isSiteAdmin || !isAdminOnlyKey(key));
-  const categories: PermissionCategory[] = ["event", "video", "xid", "danger"];
-  return <div className="manage-permission-checklist">
-    {categories.map(category => {
-      const keys = visibleKeys.filter(key => PERMISSION_DEFINITIONS[key].category === category);
-      if (!keys.length) return null;
-      return <fieldset key={category} className="manage-permission-category">
-        <legend>{PERMISSION_CATEGORY_LABELS[category]}</legend>
-        {keys.map(key => {
-          const definition = PERMISSION_DEFINITIONS[key];
-          return <label key={key} className="fn-label manage-permission-option">
-            <input type="checkbox" value={key} checked={selectedSet.has(key)} disabled={disabled}
-              onChange={event => onChange(event.target.checked
-                ? [...selectedSet, key]
-                : selected.filter(value => value !== key))}/>
-            <span>{definition.label}{definition.dangerous ? "（重要）" : ""}</span>
-            <small>{definition.description}</small>
-          </label>;
-        })}
-      </fieldset>;
-    })}
-  </div>;
-}
 
   return <section aria-label="運営メンバー編集" className="manage-permission-panel">
     {error && <p role="alert" className="fn-alert fn-alert--danger">{error}</p>}
