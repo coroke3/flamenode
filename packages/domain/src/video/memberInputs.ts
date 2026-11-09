@@ -88,7 +88,6 @@ export function parseVideoMemberInputs(
   for (const item of result.data) {
     const xid = normalizeXId(item.x_user_id);
     const name = item.name.trim();
-    if (!name && !xid) continue;
 
     // フロントのpatternだけに依存せず、DB write境界でもcanonical X handleを保証する。
     // 空欄は許可するが、入力された値は英数字/underscore 20文字以内だけを保存する。
@@ -100,6 +99,8 @@ export function parseVideoMemberInputs(
         message: `${name || item.x_user_id} の X ID が不正です。英数字とアンダースコア20文字以内で入力してください。`,
       };
     }
+    // Do not discard unnamed rows until a supplied malformed X ID is rejected.
+    if (!name && !xid) continue;
     if (xid && seenXIds.has(xid)) {
       return {
         ok: false,
