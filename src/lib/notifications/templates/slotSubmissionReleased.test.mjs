@@ -126,6 +126,29 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("legacy予約グループIDは最大256 UTF-16単位で表示し絵文字の途中では切らない", () => {
+    const prefix255 = "x".repeat(255);
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const truncated = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: prefix255 + "😀" + "z".repeat(3000),
+      });
+      assert.ok(truncated.content.includes(prefix255 + "…"));
+      assert.ok(!truncated.content.includes("\ud83d"), "orphan UTF-16 high surrogate must never be displayed");
+      assert.ok(truncated.content.length < 2000, "malformed long legacy IDs must not overflow Discord message length");
+      const exact = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "x".repeat(254) + "😀",
+      });
+      assert.ok(exact.content.includes("x".repeat(254) + "😀"),
+        "a complete emoji at the boundary must be retained");
+      assert.ok(!exact.content.includes("x".repeat(254) + "😀…"),
+        "the exact-limit ID must not be truncated");
+    }
+  });
+
   test("通常のグループID表示は変更しない", () => {
     for (const build of [
       buildSlotForceReleasedNotification,
