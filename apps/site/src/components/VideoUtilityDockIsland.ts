@@ -173,6 +173,7 @@ export function VideoUtilityDockIsland({
   const [isMobile, setIsMobile] = React.useState(false);
   const historyOwned = React.useRef(false);
   const pendingHref = React.useRef<string | null>(null);
+  const autoNextNavigated = React.useRef(false);
   const previousTrigger = React.useRef<HTMLButtonElement | null>(null);
   const closeButton = React.useRef<HTMLButtonElement | null>(null);
   const closePanel = React.useCallback(() => {
@@ -267,11 +268,16 @@ export function VideoUtilityDockIsland({
     () => chapterRowsForViewer(publicChapters, overlay),
     [publicChapters, overlay],
   );
+  // Reset only after the actual video changes, not on playlist/reorder rerenders:
+  // an already handled ended event must never navigate twice.
+  React.useEffect(() => { autoNextNavigated.current = false; }, [videoId, currentId]);
   React.useEffect(() => {
     if (!mounted || !autoNext || !next) return;
     const handler = (event: Event) => {
       const id = (event as CustomEvent<{ youtubeId?: string }>).detail?.youtubeId;
-      if (!shouldAdvancePlaylistOnEnded(id, currentId, items[index]?.youtube_video_id)) return;
+      if (!shouldAdvancePlaylistOnEnded(id, currentId, items[index]?.youtube_video_id) ||
+          autoNextNavigated.current) return;
+      autoNextNavigated.current = true;
       window.location.assign(playlistItemHref(next, playlist));
     };
     window.addEventListener("flamenode:video-ended", handler);
