@@ -294,3 +294,33 @@ test("MIG-0723 U01b: editing a custom preset preserves existing keys and adds ch
     assert.equal(body.permission_keys, "video.basics,event.slots");
   } finally { await ui.cleanup(); }
 });
+
+
+test("MIG-0723 U01b: permission downgrade closes the editor and removes privileged member details", async () => {
+  const ui = fixture({ isSiteAdmin: true, members: [member({
+    permission_preset: "custom", permission_keys: ["event.public_api"],
+  })] });
+  try {
+    await ui.view();
+    await ui.click(".manage-staff-list-row");
+    assert.equal(ui.target.querySelector('input[type="checkbox"][value="event.public_api"]')?.checked, true);
+    await ui.view({ isSiteAdmin: false });
+    assert.equal(ui.target.querySelector(".manage-staff-editor"), null);
+    assert.equal(ui.target.querySelector('input[type="checkbox"][value="event.public_api"]'), null);
+    assert.equal(ui.target.querySelector(".manage-staff-list-head button").disabled, false);
+    assert.deepEqual(ui.calls, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0723 U01b: losing event.members immediately hides the member list and write controls", async () => {
+  const ui = fixture();
+  try {
+    await ui.view();
+    assert.match(ui.target.textContent, /Alice/);
+    await ui.view({ canManageMembers: false });
+    assert.match(ui.target.textContent, /閲覧のみ/);
+    assert.doesNotMatch(ui.target.textContent, /Alice/);
+    assert.equal(ui.target.querySelector("button"), null);
+    assert.deepEqual(ui.calls, []);
+  } finally { await ui.cleanup(); }
+});
