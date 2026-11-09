@@ -193,3 +193,21 @@ test("MIG-0656 target release DM mirrors CURRENT bounded, control-safe group dis
       "raw legacy group ID must remain in dedupe identity");
   } finally { db.close(); }
 });
+
+test("MIG-0656: CURRENT #660 malformed legacy UTF-16 rendering parity (予約グループ)", () => {
+  const cases = [
+    ["x".repeat(255) + "\ud83d" + "tail", "x".repeat(255) + "…"],
+    ["x".repeat(255) + "\ude00" + "tail", "x".repeat(255) + "�…"],
+    ["prefix\ud83dsuffix", "prefix�suffix"],
+    ["prefix\ude00suffix", "prefix�suffix"],
+    ["prefix😀suffix", "prefix😀suffix"],
+    ["x".repeat(254) + "😀" + "tail", "x".repeat(254) + "😀…"],
+  ];
+  for (const [raw, expected] of cases) {
+    const payload = slotReleaseNotificationPayload("ev-1", ["a"], raw, "https://flamenode.example");
+    assert.ok(payload.content.includes("予約グループ: " + expected), "display-only normalization");
+    assert.doesNotMatch(payload.content,
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u);
+    assert.equal(payload.event_id, "ev-1");
+  }
+});
