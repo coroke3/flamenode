@@ -22,6 +22,7 @@ import {
   buildAuditViewHref,
   MAX_AUDIT_LIMIT,
   readAuditActorFilter,
+  readAuditDateBoundary,
   readAuditLimit,
   readAuditQueryValue,
   readAuditViewMode,
@@ -92,14 +93,8 @@ export default async function AdminAuditPage({
   const sinceFilter = readAuditQueryValue(sp.since);
   const untilFilter = readAuditQueryValue(sp.until);
 
-  const parseDateBoundary = (s: string, end: boolean): number | null => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-    const suffix = end ? "T23:59:59+09:00" : "T00:00:00+09:00";
-    const t = Date.parse(`${s}${suffix}`);
-    return Number.isNaN(t) ? null : Math.floor(t / 1000);
-  };
-  const sinceUnix = sinceFilter ? parseDateBoundary(sinceFilter, false) : null;
-  const untilUnix = untilFilter ? parseDateBoundary(untilFilter, true) : null;
+  const sinceUnix = sinceFilter ? readAuditDateBoundary(sinceFilter, false) : null;
+  const untilUnix = untilFilter ? readAuditDateBoundary(untilFilter, true) : null;
   const limit = readAuditLimit(sp.limit);
 
   const db = getDatabase();
