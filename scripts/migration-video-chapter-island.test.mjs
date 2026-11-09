@@ -496,29 +496,6 @@ const PRIVATE_CHAPTER = {
   id: "c1", chapter_time: "0:10", chapter_label: "秘密", note: "", visibility: "private", canManage: true,
 };
 
-test("MIG-0518 server-authorized manager can edit and bulk without active X, but cannot create a normal post", async () => {
-  await withChapterDom(async (doc, root) => {
-    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
-      videoId: "abc", activeXId: null, canPost: false, canBulk: true,
-      chapters: [PRIVATE_CHAPTER],
-    })));
-    assert.equal([...doc.querySelectorAll("button")]
-      .some((button) => button.textContent === "現在位置にコメントする"), false,
-      "manager claim alone cannot grant normal chapter posting");
-    assert.ok(doc.querySelector("details form"), "server-granted bulk should work without active X");
-    await clickButton(doc, "編集");
-    assert.ok(doc.querySelector("form"), "server-authorized private row can be edited");
-    await clickButton(doc, "キャンセル");
-    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
-      videoId: "abc", activeXId: null, canPost: false, canBulk: false,
-      chapters: [],
-    })));
-    assert.equal(doc.querySelector("details"), null, "revocation removes bulk controls");
-    assert.equal([...doc.querySelectorAll("button")]
-      .some((button) => button.textContent === "編集"), false);
-  });
-});
-
 test("P2 new-post form starts public after edit(private) -> cancel", async () => {
   await withChapterDom(async (doc, root) => {
     await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
@@ -580,8 +557,8 @@ test("MIG-0518 chapter management stays disabled without the trusted RH-031 clai
     { viewerCanEditChapters: true, isBanned: true },
     { viewerCanEditChapters: true, termsReacceptRequired: true },
     { viewerCanEditChapters: true, isTosAccepted: false },
-    { viewerCanEditChapters: false, viewerXApproved: false },
-    { viewerCanEditChapters: false, activeXId: null },
+    { viewerCanEditChapters: true, viewerXApproved: false },
+    { viewerCanEditChapters: true, activeXId: null },
   ]) {
     const result = chapterManagementForOverlay([], { ...overlay, ...bad }, false);
     assert.deepEqual(result, { canBulk: false, editableChapters: [] }, JSON.stringify(bad));
@@ -590,34 +567,21 @@ test("MIG-0518 chapter management stays disabled without the trusted RH-031 clai
     { canBulk: false, editableChapters: [] }, "loading must not expose management");
 });
 
-test("MIG-0518 trusted server chapter manager works without approved active X", async () => {
+test("MIG-0518 RH-031 manager claim does not bypass CURRENT write requirement for active X", async () => {
   const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
-  const authorizedManager = {
+  const manager = {
     loggedIn: true, authUnavailable: false, isBanned: false,
     isTosAccepted: true, termsReacceptRequired: false,
-    viewerXApproved: false, activeXId: null, viewerCanEditChapters: true,
-    privateChapters: [
-      { id: "managed", chapter_time: 90, chapter_label: "管理対象", visibility: "private",
-        note: "保存済みノート", viewerCanManage: true },
-      { id: "denied", chapter_time: 105, chapter_label: "非対象", visibility: "private",
-        note: "表示は可能", viewerCanManage: false },
-    ],
+    viewerCanEditChapters: true, viewerXApproved: false, activeXId: null,
+    privateChapters: [{ id: "p1", chapter_time: 15, chapter_label: "管理", note: null,
+      visibility: "private", viewerCanManage: true }],
   };
-  const result = chapterManagementForOverlay([], authorizedManager, false);
-  assert.equal(result.canBulk, true, "the trusted server grant cannot be vetoed by unrelated active-X state");
-  assert.deepEqual(result.editableChapters, [{
-    id: "managed", chapter_time: "1:30", chapter_label: "管理対象",
-    note: "保存済みノート", visibility: "private", canManage: true,
-  }], "even managers must honor server per-row denial");
-  for (const changed of [
-    { viewerCanEditChapters: false }, { loggedIn: false }, { isBanned: true },
-    { authUnavailable: true }, { isTosAccepted: false }, { termsReacceptRequired: true },
-  ]) {
-    assert.deepEqual(chapterManagementForOverlay([], { ...authorizedManager, ...changed }, false),
-      { canBulk: false, editableChapters: [] }, JSON.stringify(changed));
-  }
-  assert.deepEqual(chapterManagementForOverlay([], authorizedManager, true),
-    { canBulk: false, editableChapters: [] }, "loading cannot expose management");
+  assert.deepEqual(chapterManagementForOverlay([], manager, false),
+    { canBulk: false, editableChapters: [] },
+    "Hono SA-012..015 requires approved active X even when RH-031 reports manager");
+  const backend = fs.readFileSync(new URL("../apps/api/src/routes/videos/chapters.ts", import.meta.url), "utf8");
+  assert.match(backend, /if \(!activeX\) return bulkFail\(403, SELECT_ACTIVE_X_MESSAGE\)/);
+  assert.match(backend, /if \(!activeX\) return fail\(c, 403, SELECT_ACTIVE_X_MESSAGE\)/);
 });
 
 test("MIG-0518 authorized manager edits only complete private chapter DTOs", async () => {
