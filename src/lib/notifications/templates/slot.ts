@@ -74,7 +74,7 @@ function groupIdForDiscordDisplay(groupId: string): string {
   const cleaned = groupId.replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]+/g, " ");
   // A malformed persisted legacy ID must not consume an entire Discord message.
   // Preserve a surrogate pair at the UTF-16 boundary before adding an ellipsis.
-  // Remove only a dangling high surrogate at the boundary, keeping complete emoji pairs.
+  // Preserve complete emoji pairs while removing a dangling high surrogate at the boundary.
   const clipped = cleaned.slice(0, 256).replace(/[\uD800-\uDBFF]$/, "");
   // A dangling high surrogate can already be present in an exactly 256-unit
   // malformed persisted ID; clipping removed it, so show the truncation marker.
