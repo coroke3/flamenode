@@ -171,6 +171,30 @@ test("U03: CSV creates staff with pending X IDs, atomic audits and projection", 
   assert.ok(s.count("static_rebuild_queue") >= 4);
 });
 
+test("U03: CSV updates an existing non-owner staff row without creating a second X identity", async () => {
+  const s = setup();
+  const created = await s.send("POST", "/", upsert({ x_user_id: "existing_csv" }));
+  assert.equal(created.status, 200, await created.clone().text());
+  const prior = s.sqlite.prepare("SELECT * FROM event_staff WHERE x_user_id='existing_csv'").get();
+  const beforeAuditCount = s.count("audit_logs");
+  const update = await s.send("POST", "/csv", {
+    reason: "CSV revise",
+    rows: [{
+      lineNumber: 2, display_name: "CSV Edited", x_user_id: "@EXISTING_CSV",
+      permission_preset: "reviewer", permission_keys: [],
+      is_public_staff: "1", public_role_label: "Reviewer",
+    }],
+  });
+  assert.equal(update.status, 200, await update.clone().text());
+  const after = s.row(prior.id);
+  assert.equal(after.display_name, "CSV Edited");
+  assert.equal(after.permission_preset, "reviewer");
+  assert.equal(after.x_user_id, "existing_csv");
+  assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='existing_csv'").get().n, 1);
+  assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff WHERE x_user_id='existing_csv'").get().n, 1);
+  assert.equal(s.count("audit_logs"), beforeAuditCount + 1);
+});
+
 test("U03: CSV rejects canonical duplicates, owner edits and oversized atomic batches before writes", async () => {
   const s = setup();
   const row = (id, lineNumber) => ({
