@@ -56,8 +56,8 @@ export function buildFreeVideoSubmittedNotification(args: {
       heading: "■ 次に行うこと",
       lines: [
         "作品ページで表示を確認し、必要なら編集画面から内容を修正してください。",
-        linkLine("作品ページを開く", videoPublicPath(args.videoId, args.youtubeVideoId), env),
-        linkLine("編集画面を開く", `/dashboard/edit/${args.videoId}`, env),
+        linkLine("作品ページを開く", videoPublicPath(args.videoId, args.youtubeVideoId)),
+        linkLine("編集画面を開く", `/dashboard/edit/${args.videoId}`),
       ],
     },
   ]);
@@ -107,7 +107,7 @@ export function buildVideoApprovedNotification(args: {
       heading: "■ 次に行うこと",
       lines: [
         "作品ページで表示を確認してください。",
-        linkLine("作品ページを開く", videoPublicPath(args.videoId, args.youtubeVideoId)),
+        linkLine("作品ページを開く", videoPublicPath(args.videoId, args.youtubeVideoId), env),
         ...eventLines,
       ],
     },
@@ -148,8 +148,8 @@ export function buildVideoVisibilityChangedNotification(args: {
       heading: "■ 次に行うこと",
       lines: [
         "作品ページと編集画面を確認してください。",
-        linkLine("作品ページを開く", videoPublicPath(args.videoId, args.youtubeVideoId)),
-        linkLine("編集画面を開く", `/dashboard/edit/${args.videoId}`),
+        linkLine("作品ページを開く", videoPublicPath(args.videoId, args.youtubeVideoId), env),
+        linkLine("編集画面を開く", `/dashboard/edit/${args.videoId}`, env),
       ],
     },
   ]);
