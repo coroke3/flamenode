@@ -50,7 +50,7 @@ function socialType(raw: unknown): string {
     discord: "Discord", email: "Email", mail: "Email",
     web: "Website", website: "Website", site: "Website",
   };
-  return aliases[key] ?? (type || "Other");
+  return Object.prototype.hasOwnProperty.call(aliases, key) ? aliases[key]! : (type || "Other");
 }
 
 function profileSocialUrl(raw: unknown, type: string): string | null {
