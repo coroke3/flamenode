@@ -450,10 +450,12 @@ test("U03 same-mounted video navigation re-reads playlist URL without an unrelat
   }
 });
 
-test("U03 playlist identity reconciliation is not keyed to playlist state changes", async () => {
+test("U03 video identity remains sole URL-to-playlist synchronization trigger", async () => {
   const fs = await import("node:fs");
   const source = fs.readFileSync(new URL("../apps/site/src/components/VideoUtilityDockIsland.ts", import.meta.url), "utf8");
-  assert.match(source, /setPlaylist\(resolvePlaylistQuery\(window\.location\.search\)\);\s*\}, \[mounted, ready, videoId, currentId\]\)/);
+  assert.match(source, /setPlaylist\(resolvePlaylistQuery\(window\.location\.search\)\);\s*\}, \[mounted, videoId, currentId\]\)/);
+  assert.equal((source.match(/setPlaylist\(resolvePlaylistQuery\(window\.location\.search\)\)/g) || []).length, 1,
+    "avoid duplicate URL effects that can replay stale browser state");
   assert.doesNotMatch(source, /\[mounted, ready, videoId, currentId, playlist\]/);
 });
 
