@@ -122,3 +122,20 @@ test("SA-102 isolated handler rolls back queued changes and audit on stale CAS s
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
 });
+
+test("SA-102 isolated handler denies a linked-X revocation raced after authorization read", async () => {
+  let revoked = false;
+  const h = setup({ onFirst: (statement, sqlite) => {
+    if (!revoked && statement.includes("SELECT x.* FROM x_users x")) {
+      revoked = true;
+      sqlite.prepare("DELETE FROM x_user_account_links WHERE auth_user_id = ? AND x_user_id = ?")
+        .run(USER.id, "x_one");
+    }
+  } });
+  const res = await h.send({ x_user_id: "x_one", x_name: "Must not persist" });
+  assert.equal(revoked, true, "fixture must revoke the linked-X authority after the guarded read");
+  assert.equal(res.status, 409);
+  assert.equal(h.sqlite.prepare("SELECT x_name FROM x_users WHERE id = 'x_one'").get().x_name, "Before");
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+});
