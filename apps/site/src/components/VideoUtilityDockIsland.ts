@@ -84,6 +84,23 @@ export function chapterPostPolicy(
   };
   return { canPost: true };
 }
+/**
+ * Parse the chapter timestamp before sending a seek command to the player.
+ * Invalid SSR chapter labels stay visible, but must not produce NaN, Infinity,
+ * out-of-range, or unintended zero-second seek requests.
+ */
+export function safeChapterSeekSeconds(label: string): number | null {
+  const parts = label.split(":");
+  if (parts.length !== 2 && parts.length !== 3) return null;
+  if (!parts.every((part) => /^\d+$/.test(part))) return null;
+  const nums = parts.map(Number);
+  if (!nums.every(Number.isSafeInteger)) return null;
+  if (nums[nums.length - 1]! > 59) return null;
+  if (parts.length === 3 && nums[1]! > 59) return null;
+  const seconds = nums.reduce((value, part) => value * 60 + part, 0);
+  return Number.isSafeInteger(seconds) && seconds <= 24 * 60 * 60 ? seconds : null;
+}
+
 export function chapterRowsForViewer(
   publicChapters: readonly PublicVideoChapter[],
   overlay: VideoViewerOverlayDto,
@@ -345,8 +362,8 @@ export function VideoUtilityDockIsland({
         h("ol", null, ...chapters.map((chapter) =>
           h("li", { key: chapter.id },
             h("button", { type: "button", "aria-label": `${chapter.timeLabel}に移動`, onClick: () => {
-              const seconds = chapter.timeLabel.split(":").map(Number).reduce((v, n) => v * 60 + n, 0);
-              seekToTime(seconds);
+              const seconds = safeChapterSeekSeconds(chapter.timeLabel);
+              if (seconds !== null) seekToTime(seconds);
             } }, chapter.timeLabel),
             " ", chapter.label, chapter.authorName ? ` · ${chapter.authorName}` : ""),
         )),
