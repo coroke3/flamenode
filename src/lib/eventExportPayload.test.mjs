@@ -550,5 +550,16 @@ test("SEC-575: v5 cached payload tolerates generation timestamp only, never chan
   assert.equal(eventExportBodyMatchesFresh(earlier, JSON.stringify(changed), "v5"), false);
   assert.equal(eventExportBodyMatchesFresh('not-json', later, "v5"), false);
   assert.equal(eventExportBodyMatchesFresh(earlier, later, "legacy"), false);
+  const forged = JSON.parse(earlier);
+  forged.generated_at = "not-a-timestamp";
+  assert.equal(eventExportBodyMatchesFresh(JSON.stringify(forged), later, "v5"), false,
+    "cached provenance must parse as a valid timestamp");
+  forged.generated_at = new Date((forged.generated_at_unix + 1) * 1000).toISOString();
+  assert.equal(eventExportBodyMatchesFresh(JSON.stringify(forged), later, "v5"), false,
+    "cached ISO timestamp and unix timestamp must agree");
+  const forgedFresh = JSON.parse(later);
+  forgedFresh.generated_at = "invalid";
+  assert.equal(eventExportBodyMatchesFresh(earlier, JSON.stringify(forgedFresh), "v5"), false,
+    "fresh DTO provenance mismatch must fail closed");
 });
 
