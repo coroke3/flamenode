@@ -41,14 +41,15 @@ test("SA-091: reject reason is optional, trimmed then truncated at 500 character
 
 test("SA-091: reject body fails closed on invalid types and unsolicited mutation keys", () => {
   for (const input of [null, [], { reason: null }, { reason: 5 },
-    { reason: "" , request_id: "spoof" }, { actor_x_user_id: "attacker" }]) {
+    { reason: "", request_id: "spoof" }, { actor_x_user_id: "attacker" }]) {
     assert.equal(XIdLinkRejectBodySchema.safeParse(input).success, false);
   }
 });
 
-test("SA-090/091: result DTO carries only the CURRENT result fields", () => {
+test("SA-090/091: result DTO is closed and carries only CURRENT result fields", () => {
   assert.deepEqual(XIdLinkReviewResultSchema.parse({ ok: true, message: "却下しました。" }),
     { ok: true, message: "却下しました。" });
   assert.deepEqual(XIdLinkReviewResultSchema.parse({ ok: false }), { ok: false });
   assert.equal(XIdLinkReviewResultSchema.safeParse({ ok: "true" }).success, false);
+  assert.equal(XIdLinkReviewResultSchema.safeParse({ ok: true, actor_x_user_id: "spoof" }).success, false);
 });
