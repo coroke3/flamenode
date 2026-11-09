@@ -644,8 +644,8 @@ async function checkAuditLogsRetentionCandidates(
     or(isNull(auditLogsTable.retention_class), eq(auditLogsTable.retention_class, "normal")),
     lt(auditLogsTable.created_at, cutoff),
   );
-  // One D1 statement returns both the full eligible count and the first 10
-  // sample rows. The window count is computed before LIMIT; empty results
+  // One D1 statement returns both the full eligible count and the first 5
+  // displayed sample rows. The window count is computed before LIMIT; empty results
   // correctly imply zero candidates. Along with settings and session this
   // stays within the S2 maximum of 3 D1 statements.
   const sampleRows = await db
@@ -658,14 +658,14 @@ async function checkAuditLogsRetentionCandidates(
     .from(auditLogsTable)
     .where(where)
     .orderBy(auditLogsTable.created_at)
-    .limit(10);
+    .limit(5);
   const count = Number(sampleRows[0]?.total_candidates ?? 0);
   return {
     id: "audit_logs_retention_candidates",
     label: "audit_logs normal retention 対象",
     status: count === 0 ? "ok" : "info",
     count,
-    samples: sampleRows.slice(0, 5).map((r) => `${r.id} ${r.table_name}`),
+    samples: sampleRows.map((r) => `${r.id} ${r.table_name}`),
     note:
       count > 0
         ? "normal 監査ログの削除候補です。cleanup Worker の retention 設定を確認してください。"
