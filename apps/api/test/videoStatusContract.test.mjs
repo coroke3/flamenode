@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { parseAdminVideoStatusInput, parseManageVideoStatusInput } from "../src/routes/videos/videoStatusInput.ts";
 import { test } from "node:test";
 import {
   AdminVideoStatusBodySchema,
@@ -159,5 +160,67 @@ test("MIG-0603 U02a: nested JSON values cannot bypass scalar validation", () => 
   for (const value of [[], ["1"], {}, { toString: "1" }]) {
     assert.equal(AdminVideoStatusBodySchema.safeParse({ status: value }).success, false);
     assert.equal(ManageVideoStatusBodySchema.safeParse({ event_id: value }).success, false);
+  }
+});
+
+
+const statusRequest = (body, extraHeaders = {}) => new Request("https://site.example/api/admin/videos/status", {
+  method: "POST",
+  headers: { "content-type": "application/json", ...extraHeaders },
+  body: typeof body === "string" ? body : JSON.stringify(body),
+});
+
+test("MIG-0603 U02a-2: unmounted HTTP decoder validates admin and manage scopes", async () => {
+  const a = await parseAdminVideoStatusInput(statusRequest({
+    video_id: " v1 ", status: "voided", reason: "copyright",
+    and_next: " 1 ", force_notify: "1", review_event_id: "e1",
+    unexpected: "discard",
+  }));
+  assert.equal(a.ok, true);
+  if (a.ok) {
+    assert.deepEqual(a.input, {
+      videoId: "v1", status: "voided", reason: "copyright", caseId: "",
+      andNext: false, forceNotify: true, voidReasonCategory: "",
+      adminEventFilter: "e1",
+    });
+  }
+
+  const m = await parseManageVideoStatusInput(statusRequest({
+    event_id: " e ", video_id: " v1 ", status: "public",
+    reason: "", and_next: "1", force_notify: "1",
+  }));
+  assert.equal(m.ok, true);
+  if (m.ok) {
+    assert.deepEqual(m.input, {
+      eventId: "e", videoId: "v1", status: "public",
+      reason: "", andNext: true,
+    });
+    assert.equal("forceNotify" in m.input, false);
+  }
+});
+
+test("MIG-0603 U02a-2: invalid bodies and domain validation fail before any mutation", async () => {
+  const examples = [
+    [parseAdminVideoStatusInput, "[]"],
+    [parseAdminVideoStatusInput, "not json"],
+    [parseAdminVideoStatusInput, JSON.stringify({ video_id: "v", status: ["public"] })],
+    [parseAdminVideoStatusInput, { video_id: "v", status: "voided" }],
+    [parseAdminVideoStatusInput, { video_id: "v", status: "not-a-status" }],
+    [parseManageVideoStatusInput, { event_id: "e", video_id: "v", status: "voided" }],
+    [parseManageVideoStatusInput, { event_id: "", video_id: "v", status: "public" }],
+  ];
+  for (const [parse, body] of examples) {
+    const result = await parse(statusRequest(body));
+    assert.equal(result.ok, false, JSON.stringify(body));
+    assert.equal(result.status, 400, JSON.stringify(body));
+  }
+});
+
+test("MIG-0603 U02a-2: 64KiB body limit checks both bytes and claimed length", async () => {
+  for (const parser of [parseAdminVideoStatusInput, parseManageVideoStatusInput]) {
+    const actual = await parser(statusRequest({ video_id: "v", status: "public", reason: "x".repeat(65536) }));
+    assert.deepEqual(actual, { ok: false, status: 413, message: "リクエストが大きすぎます。" });
+    const declared = await parser(statusRequest({ video_id: "v", status: "public" }, { "content-length": "100000" }));
+    assert.deepEqual(declared, { ok: false, status: 413, message: "リクエストが大きすぎます。" });
   }
 });
