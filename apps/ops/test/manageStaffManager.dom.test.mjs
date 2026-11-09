@@ -184,3 +184,45 @@ test("MIG-0723: changing events during a write clears stale busy and ignores old
     assert.equal(ui.calls.length, 1);
   } finally { await ui.cleanup(); }
 });
+
+
+test("MIG-0723 T03: staff CSV previews localized permissions and imports only clean rows", async () => {
+  const ui = fixture({ reply: json(200, { ok: true, message: "CSVを反映しました。" }) });
+  try {
+    await ui.view();
+    await ui.click("details.manage-staff-advanced summary");
+    const button = [...ui.target.querySelectorAll("button")].find(el => el.textContent.trim() === "CSVを反映");
+    assert.ok(button);
+    assert.equal(button.disabled, false, "the canonical five-column sample must be importable");
+    assert.match(ui.target.textContent, /新規 4 \/ 更新 0 \/ エラー 0/);
+    await React.act(async () => { button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+    assert.equal(ui.calls.length, 1);
+    assert.equal(ui.calls[0].url, "/api/manage/events/ev%201/staff/csv");
+    assert.equal(ui.calls[0].init.method, "POST");
+    const body = JSON.parse(ui.calls[0].init.body);
+    assert.equal(body.reason, "スタッフCSV反映");
+    assert.equal(body.rows.length, 4);
+    assert.deepEqual(body.rows[3].permission_keys, ["event.slots", "video.basics"]);
+    assert.equal(body.rows.some(row => row.errors.length), false);
+    assert.deepEqual(ui.refresh, ["refresh"]);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0723 T03: CSV owner assignment is rejected before any write", async () => {
+  const ui = fixture();
+  try {
+    await ui.view();
+    await ui.click("details.manage-staff-advanced summary");
+    const textarea = ui.target.querySelector("textarea");
+    assert.ok(textarea);
+    const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value").set;
+    await React.act(async () => {
+      setValue.call(textarea, "表示名,X ID,担当プリセット,公開フラグ,公開ラベル\\n代表,owner,owner,1,代表");
+      textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    const button = [...ui.target.querySelectorAll("button")].find(el => el.textContent.trim() === "CSVを反映");
+    assert.equal(button.disabled, true);
+    assert.match(ui.target.textContent, /代表者の追加・変更はCSVでは行えません/);
+    assert.deepEqual(ui.calls, []);
+  } finally { await ui.cleanup(); }
+});
