@@ -31,7 +31,12 @@ export interface VideoUtilityDockIslandProps {
 
 export function resolvePlaylistQuery(search: string): string {
   try {
-    const clipped = (new URLSearchParams(search).get("playlist") ?? "").trim().slice(0, 128);
+    const params = new URLSearchParams(search);
+    // Ambiguous duplicate playlist keys must not silently select the first ID.
+    // Treat them as no playlist, matching our fail-closed query policy.
+    const values = params.getAll("playlist");
+    if (values.length !== 1) return "";
+    const clipped = values[0]!.trim().slice(0, 128);
     return clipped.replace(/[\uD800-\uDBFF]$/, "");
   }
   catch { return ""; }
