@@ -20,6 +20,7 @@
  * Judged by MAX against ZERO_1102.md section 3 (S2 < 7ms, S3 < 8ms, S4 <= 2ms).
  * p50/p95/p99 are recorded but never decide pass/fail.
  */
+import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -340,8 +341,8 @@ export function buildScenarios(ctx, { includePending = false } = {}) {
       id: "RH-013", title: "GET /api/event-endpoints/:id (500 videos x 100 members)", runtimeClass: "S2",
       // Warm-path measurements are separate from the scheduled full-rebuild control.
       warmModes: {
-        "scheduled-warm": { path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=scheduled&refresh=15`, expectCache: "HIT" },
-        "realtime-warm": { path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=realtime`, expectCache: "BYPASS" },
+        "scheduled-warm": { path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=scheduled&refresh=15`, expectCache: "HIT", verifyBodyReuse: true },
+        "realtime-warm": { path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=realtime`, expectCache: "BYPASS", verifyBodyReuse: true },
       },
       kinds: {
         // distinct client IP per request: the route has a 60/min per-IP isolate rate guard
@@ -1271,6 +1272,7 @@ async function createWranglerTarget(plan, opts) {
     return {
       status: res.status, bytes: buf.byteLength, d1: rec ? rec.d1 : Number(res.headers.get("x-bench-d1") ?? 0),
       cacheState: res.headers.get("x-flamenode-cache"),
+      bodyHash: createHash("sha256").update(Buffer.from(buf)).digest("hex"),
       cpuMs: profileBusyMs(stop.result.profile),
       replayStatusMismatch: rec ? rec.status !== res.status : false,
     };
@@ -1333,7 +1335,7 @@ async function runScenario(target, sc, opts, state) {
   const samples = [];
   const note = (kind, spec, r, cpuMs) => samples.push({
     kind, cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, cacheState: r.cacheState ?? null,
-    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache),
+    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache) || r.bodyReuseMismatch === true,
   });
   for (const kind of ["normal", "limit", "invalid"]) {
     const pk = sc.prepareKind?.[kind];
@@ -1370,9 +1372,12 @@ async function runScenario(target, sc, opts, state) {
         const measuredRecord = recordSample ? await target.record(spec) : null;
         const primed = await target.run(spec, primeRecord);
         if (primed.status !== 200) throw new Error(`RH-013 ${kind} prime returned ${primed.status}`);
-        if (kind === "scheduled-warm") await sleep(25);
         if (!recordSample) return;
+        // A 1.1s gap guarantees generated_at advances while staying inside the
+        // 15s isolate-cache TTL; byte-identical output proves realtime reuse.
+        await sleep(kind === "scheduled-warm" ? 25 : 1100);
         const measured = await target.run(spec, measuredRecord);
+        if (mode.verifyBodyReuse) measured.bodyReuseMismatch = measured.bodyHash !== primed.bodyHash;
         note(kind, spec, measured, measured.cpuMs);
       };
       for (let i = 0; i < opts.warmup; i += 1) await measure(i, false);
