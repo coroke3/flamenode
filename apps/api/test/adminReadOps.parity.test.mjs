@@ -1103,7 +1103,9 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.deepEqual(canon(result.body), canon({ status: "all", results: fullResults.filter((row) => row.id === id), error: null }), id);
       if (id === "audit_logs_retention_candidates") {
         assert.equal(result.body.results[0]?.count, expectedRetention,
-          "COUNT(*) OVER () covers every eligible row even with sample LIMIT 10");
+          "COUNT(*) OVER () covers all eligible rows even with sample LIMIT 5");
+        assert.equal(result.body.results[0]?.samples.length, 5,
+          "the query must return exactly the five displayed retention samples");
       }
       assert.equal(result.headers.get("cache-control"), "private, no-store", id);
       assert.equal(result.stats.writes, 0, id);
