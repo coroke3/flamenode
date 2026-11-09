@@ -1080,18 +1080,41 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(deep.stats.statements, 1, "catalog only performs the session lookup");
     assert.deepEqual((await call("/api/admin-read/ops/health?run=1", ADMIN)).body, deep.body);
     assert.equal(new Set(HEALTH_CHECK_IDS).size, 22);
+    // More than the 10 returned samples: window COUNT must still reflect all
+    // eligible rows, not just the LIMIT 10 subset or the 5 UI samples.
+    for (let i = 0; i < 12; i++) {
+      ins("audit_logs", {
+        id: "retention-window-" + i, table_name: "retention_test",
+        target_id: "test", operation: "UPDATE", actor_user_id: "u_carol",
+        created_at: T0 - 10000 - i,
+      });
+    }
+    const daysRow = sqlite.prepare("SELECT audit_normal_retention_days AS days FROM system_settings LIMIT 1").get();
+    const retentionDays = Math.max(7, Number(daysRow?.days ?? 30) || 30);
+    const retentionCutoff = Math.floor(Date.now() / 1000) - retentionDays * 86400;
+    const expectedRetention = sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_logs WHERE (retention_class IS NULL OR retention_class = 'normal') AND created_at < ?"
+    ).get(retentionCutoff).n;
+    assert.ok(expectedRetention >= 12, "fixture exercises COUNT beyond LIMIT 10");
     const fullResults = await runHealthChecks(refDb);
     for (const id of HEALTH_CHECK_IDS) {
       const result = await call("/api/admin-read/ops/health/checks/" + encodeURIComponent(id), ADMIN);
       assert.equal(result.status, 200, id + " " + result.text.slice(0, 200));
       assert.deepEqual(canon(result.body), canon({ status: "all", results: fullResults.filter((row) => row.id === id), error: null }), id);
+      if (id === "audit_logs_retention_candidates") {
+        assert.equal(result.body.results[0]?.count, expectedRetention,
+          "COUNT(*) OVER () covers every eligible row even with sample LIMIT 10");
+      }
       assert.equal(result.headers.get("cache-control"), "private, no-store", id);
       assert.equal(result.stats.writes, 0, id);
-      // CURRENT audit retention reads settings + a COUNT + a sample (3 D1 reads),
-      // in addition to the shared session lookup. Other checks use at most 2.
-      const maximumStatements = id === "audit_logs_retention_candidates" ? 4 : 3;
-      assert.ok(result.stats.statements <= maximumStatements,
-        id + ": session + CURRENT's per-check D1 reads (max " + maximumStatements + ")");
+      // Every check, including audit retention, has a session + at most 2 D1
+      // reads. The retention count and sample share a window-count query.
+      assert.ok(result.stats.statements <= 3,
+        id + ": session + at most 2 per-check D1 reads (S2 maximum 3)");
+      if (id === "audit_logs_retention_candidates") {
+        assert.equal(result.stats.statements, 3,
+          "retention: session + settings + combined count/sample");
+      }
     }
     const unknown = await call("/api/admin-read/ops/health/checks/unknown_check", ADMIN);
     assert.equal(unknown.status, 404);
