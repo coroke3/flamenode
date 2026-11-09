@@ -71,7 +71,10 @@ export function buildSlotVideoSubmittedNotification(args: {
 function groupIdForDiscordDisplay(groupId: string): string {
   // Include invisible joiners/format markers that can disguise @mentions or ID boundaries.
   // Do not strip variation selectors or emoji sequences: normal group IDs remain readable.
-  const cleaned = groupId.replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]+/g, " ");
+  const cleaned = groupId
+    .replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u180e\u200b-\u200c\u200e-\u200f\u2028-\u202e\u2060-\u206f\ufeff]+/g, " ")
+    // Keep ZWJ only between pictographs, e.g. 👩‍💻; strip stand-alone spoofing joiners.
+    .replace(/(?<!\p{Extended_Pictographic})\u200d|\u200d(?!\p{Extended_Pictographic})/gu, " ");
   // A malformed persisted legacy ID must not consume an entire Discord message.
   // Preserve a surrogate pair at the UTF-16 boundary before adding an ellipsis.
   // Preserve complete emoji pairs while removing a dangling high surrogate at the boundary.
