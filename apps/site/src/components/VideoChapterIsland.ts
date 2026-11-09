@@ -186,10 +186,8 @@ export function VideoChapterIsland({
   const accessStable = accessRef.current.videoId === videoId &&
     accessRef.current.activeXId === activeXId &&
     accessRef.current.canPost === canPost;
-  const authorReady = mounted && accessStable && Boolean(activeXId?.trim()) && canPost;
-  // Bulk and row management use the server's explicit administrative claim.
-  // It does not create ordinary posting rights for users without active X.
-  const ready = authorReady || (mounted && accessStable && canBulk);
+  // CURRENT SA-012..015 enforces approved active X, including admin bulk.
+  const ready = mounted && accessStable && Boolean(activeXId?.trim()) && canPost;
   const start = (): number | null => {
     if (pending.current) return null;
     pending.current = true;
@@ -206,7 +204,7 @@ export function VideoChapterIsland({
   };
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!ready || (!editingId && !authorReady)) return;
+    if (!ready) return;
     if (!editingAuthorized) { setError("編集権限を確認できません。再読み込みしてください。"); return; }
     if (!label.trim()) { setError("タイトルを入力してください。"); return; }
     const parsedTime = validateChapterTime(time);
@@ -243,9 +241,7 @@ export function VideoChapterIsland({
     const generation = start();
     if (generation === null) return;
     try {
-      const result = await createChaptersBulk(videoId, {
-        csv, ...(activeXId?.trim() ? { active_x_snapshot: activeXId.trim() } : {}),
-      });
+      const result = await createChaptersBulk(videoId, { csv, active_x_snapshot: activeXId!.trim() });
       if (!end(generation)) return;
       setBulkErrors(result.errors ?? []);
       if (!result.ok) { setError(result.message ?? "一括登録に失敗しました。"); return; }
@@ -284,7 +280,7 @@ export function VideoChapterIsland({
   }
   return h("section", { "aria-label": "チャプター投稿" },
     h("h3", null, "チャプターコメント投稿"),
-    authorReady && !composerOpen ? h("button", {
+    !composerOpen ? h("button", {
       type: "button", disabled: busy,
       onClick: () => {
         const initialTime = formatChapterDraftTime(playerSeconds ?? 0);
