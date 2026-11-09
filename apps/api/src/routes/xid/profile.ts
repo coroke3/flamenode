@@ -71,7 +71,13 @@ export function createXIdProfileRoutes(guard: MiddlewareHandler<AppEnv>): Hono<A
             portfolio_contact = ${patch.portfolio_contact},
             youtube_channel_url = ${patch.youtube_channel_url},
             other_social_links = ${patch.other_social_links}
-            WHERE id = ${xUserId} AND (${expectedRowCondition({ expectedCurrent: before })})`),
+            WHERE id = ${xUserId}
+              AND (${expectedRowCondition({ expectedCurrent: before })})
+              AND approval_status = 'approved'
+              AND EXISTS (
+                SELECT 1 FROM x_user_account_links
+                WHERE x_user_id = ${xUserId} AND auth_user_id = ${authUserId}
+              )`),
           ...queue.statements,
         ],
         expectedMutationChanges: [1, ...queue.expectedChanges],
