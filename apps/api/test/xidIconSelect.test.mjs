@@ -127,3 +127,19 @@ test("SA-104 isolated route rejects icon withdrawn from public candidates after 
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
 });
+
+test("SA-104 isolated route honors CURRENT 40 distinct icon candidates including current X icon", async () => {
+  const h = setup();
+  const insert = h.sqlite.prepare("INSERT INTO videos (id,creator_x_user_id,creator_icon_url,visibility_status,created_at) VALUES (?,?,?,?,?)");
+  for (let i = 0; i < 45; i++) {
+    insert.run("bulk-" + i, "x_one", "https://example.com/bulk-" + i + ".png", "public", 1000 - i);
+  }
+  // Slot 1 belongs to x_users.icon_url; video icons 1..39 are permitted.
+  const excluded = await h.send("https://example.com/bulk-39.png");
+  assert.equal(excluded.status, 400, "41st unique candidate must be excluded");
+  assert.equal(h.stats.batches, 0, "excluded icon cannot mutate DB");
+  const included = await h.send("https://example.com/bulk-38.png");
+  assert.equal(included.status, 200, await included.text());
+  assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
+    "https://example.com/bulk-38.png");
+});
