@@ -51,6 +51,7 @@ function setup(user = ADMIN) {
       .map((r) => [r.method, r.path]),
     [
       ["POST", "/events/:id/owner-transfer"],
+      ["POST", "/events/:id/staff/csv"],
       ["POST", "/events/:id/staff"],
       ["PUT", "/events/:id/staff/:staffId"],
       ["DELETE", "/events/:id/staff/:staffId"],
@@ -150,6 +151,48 @@ test("U02: non-admin cannot assign privileged presets; invalid URL ID rejects", 
   assert.equal(admin.count("audit_logs"), 0);
 });
 
+
+test("U03: CSV creates staff with pending X IDs, atomic audits and projection", async () => {
+  const s = setup();
+  const csv = (rows) => ({
+    reason: "CSV onboarding",
+    rows: rows.map((x_user_id, i) => ({
+      lineNumber: i + 2, display_name: "CSV " + i, x_user_id,
+      permission_preset: "public_staff", permission_keys: [],
+      is_public_staff: "1", public_role_label: "",
+    })),
+  });
+  const result = await s.send("POST", "/csv", csv(["first_csv", "@SECOND_CSV"]));
+  assert.equal(result.status, 200, await result.clone().text());
+  assert.deepEqual(await result.json(), { ok: true, pendingPublicReflection: true });
+  assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff WHERE x_user_id IN ('first_csv', 'second_csv')").get().n, 2);
+  assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id IN ('first_csv', 'second_csv') AND approval_status='pending'").get().n, 2);
+  assert.equal(s.count("audit_logs"), 4, "two X creations and two staff creations are audited");
+  assert.ok(s.count("static_rebuild_queue") >= 4);
+});
+
+test("U03: CSV rejects canonical duplicates, owner edits and oversized atomic batches before writes", async () => {
+  const s = setup();
+  const row = (id, lineNumber) => ({
+    lineNumber, display_name: "CSV Staff", x_user_id: id,
+    permission_preset: "public_staff", permission_keys: [],
+    is_public_staff: "0", public_role_label: "",
+  });
+  const dup = await s.send("POST", "/csv", { reason: "import", rows: [row("@REPEATED", 2), row("repeated", 3)] });
+  assert.equal(dup.status, 409, await dup.clone().text());
+  assert.equal(s.count("audit_logs"), 0);
+  const owner = await s.send("POST", "/csv", {
+    reason: "import", rows: [{ ...row("owner_x", 2), permission_preset: "owner" }],
+  });
+  assert.notEqual(owner.status, 200);
+  assert.equal(s.row("s-owner").permission_preset, "owner");
+  assert.equal(s.count("audit_logs"), 0);
+  const rows = Array.from({ length: 100 }, (_, i) => row("csv_" + i, i + 2));
+  const tooLarge = await s.send("POST", "/csv", { reason: "import", rows });
+  assert.equal(tooLarge.status, 400, await tooLarge.clone().text());
+  assert.equal(s.count("audit_logs"), 0);
+  assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff").get().n, 1);
+});
 
 test("U04: owner-transfer is in the parent Origin/session/writeGuard/DB guarded paths", async () => {
   const source = await readFile(new URL("../src/routes/manage/index.ts", import.meta.url), "utf8");
