@@ -428,3 +428,38 @@ test("D-16-4: changing Personal API identity hides the previous session user syn
     }
   }
 });
+
+test("D-16-5: stale session completion from a replaced API cannot restore the previous user", async () => {
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  let resolveOld;
+  let resolveCurrent;
+  const oldApi = {
+    getSession: () => new Promise((resolve) => { resolveOld = resolve; }),
+  };
+  const currentApi = {
+    getSession: () => new Promise((resolve) => { resolveCurrent = resolve; }),
+  };
+  const Demo = ({ api }) => {
+    const state = useSession(api);
+    return React.createElement("p", null, state.status === "ok" ? state.user.id : state.status);
+  };
+  try {
+    await act(async () => root.render(React.createElement(Demo, { api: oldApi })));
+    assert.equal(container.textContent, "loading");
+    await act(async () => root.render(React.createElement(Demo, { api: currentApi })));
+    assert.equal(container.textContent, "loading");
+
+    await act(async () => resolveOld({ status: "ok", user: { id: "stale-private-user" } }));
+    await flush();
+    assert.equal(container.textContent, "loading");
+    assert.doesNotMatch(container.textContent, /stale-private-user/);
+
+    await act(async () => resolveCurrent({ status: "anonymous" }));
+    await flush();
+    assert.equal(container.textContent, "anonymous");
+    assert.doesNotMatch(container.textContent, /stale-private-user/);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
