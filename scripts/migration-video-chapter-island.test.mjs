@@ -500,8 +500,10 @@ test("MIG-0518 auto-next is one-shot per video identity", async () => {
     "mark navigation as handled synchronously before dispatching the location change");
   assert.match(source, /autoNextNavigated\.current\) return;/,
     "ignore a second ended event while navigation is already pending");
-  assert.match(source, /\[videoId, currentId\]/,
-    "reset the one-shot guard when the actual video identity changes");
+  assert.match(source, /React\.useLayoutEffect\(\(\) => \{\s*autoNextNavigated\.current = false;\s*\}, \[videoId, currentId\]\)/,
+    "reset the one-shot guard in the layout phase before a new video's ended event");
+  assert.doesNotMatch(source, /React\.useEffect\(\(\) => \{\s*autoNextNavigated\.current = false;/,
+    "a delayed passive effect must not leave the new video latched");
   assert.doesNotMatch(source, /\[mounted, autoNext, next, playlist\]\);\s*autoNextNavigated\.current = false/,
     "reordering a playlist must not reset the guard");
 });
