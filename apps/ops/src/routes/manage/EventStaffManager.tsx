@@ -1,5 +1,17 @@
 import * as React from "react";
 import type { ManageStaffMember } from "@flamenode/contracts";
+import {
+  ALL_PERMISSION_KEYS,
+  PERMISSION_DEFINITIONS,
+  canonicalizePermissionKey,
+  isAdminOnlyKey,
+  type PermissionKey,
+} from "@flamenode/domain/auth/permissions";
+import {
+  PRESET_DEFINITIONS,
+  isEventStaffPreset,
+  type EventStaffPreset,
+} from "@flamenode/domain/auth/permissions/presets";
 import type { OpsFetch } from "../../api/read.js";
 import {
   createManageStaffWriteClient,
@@ -29,6 +41,120 @@ function fields(form: HTMLFormElement): StaffUpsertInput {
   };
 }
 
+const CSV_SAMPLE = [
+  "表示名,X ID,担当プリセット,公開フラグ,公開ラベル",
+  "進行担当,yamada,枠管理担当,1,進行",
+  "審査担当,sato,レビュー担当,0,",
+  "作品修正担当,tanaka,作品修正担当,0,",
+  "限定担当,suzuki,カスタム:枠管理|作品基本情報,0,",
+].join("\n");
+
+type StaffCsvRow = {
+  lineNumber: number;
+  display_name: string;
+  x_user_id: string;
+  permission_preset: EventStaffPreset;
+  permission_keys: PermissionKey[];
+  is_public_staff: "0" | "1";
+  public_role_label: string;
+  action: "create" | "update";
+  errors: string[];
+  warnings: string[];
+};
+
+function parseStaffCsvText(input: string): string[][] {
+  const text = input.replace(/^\\uFEFF/, "");
+  const firstRecord = text.split(/[\\r\\n]/, 1)[0] ?? "";
+  let quoted = false, commas = 0, tabs = 0;
+  for (let i = 0; i < firstRecord.length; i += 1) {
+    if (firstRecord[i] === '"') {
+      if (quoted && firstRecord[i + 1] === '"') i += 1;
+      else quoted = !quoted;
+    } else if (!quoted && firstRecord[i] === ",") commas += 1;
+    else if (!quoted && firstRecord[i] === "\\t") tabs += 1;
+  }
+  const delimiter = tabs > commas ? "\\t" : ",";
+  const rows: string[][] = [];
+  let row: string[] = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i + 1] === '"') { field += '"'; i += 1; }
+      else if (ch === '"') inQuotes = false;
+      else field += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === delimiter) { row.push(field); field = ""; }
+    else if (ch === "\\r") continue;
+    else if (ch === "\\n") {
+      row.push(field);
+      if (row.some(cell => cell.trim())) rows.push(row);
+      row = []; field = "";
+    } else field += ch;
+  }
+  if (field.length || row.length) {
+    row.push(field);
+    if (row.some(cell => cell.trim())) rows.push(row);
+  }
+  return rows;
+}
+
+function buildStaffCsvPreview(text: string, members: readonly ManageStaffMember[], isSiteAdmin: boolean) {
+  const existing = new Set(members.map(member => member.x_user_id.replace(/^@+/, "").trim().toLowerCase()));
+  const parsed = parseStaffCsvText(text).map(row => row.map(cell => cell.trim()));
+  const rows: StaffCsvRow[] = [];
+  parsed.forEach((cols, index) => {
+    const first = cols[0]?.toLowerCase() ?? "";
+    const second = cols[1]?.toLowerCase() ?? "";
+    if (index === 0 && ["表示名", "display_name", "name"].includes(first) &&
+        ["x id", "x_id", "x user id"].includes(second)) return;
+    const [rawName = "", rawXId = "", rawAssignment = "", rawPublic = "0", rawLabel = ""] = cols;
+    const xUserId = rawXId.replace(/^@+/, "").trim().toLowerCase();
+    const errors: string[] = [];
+    let preset: EventStaffPreset = "public_staff";
+    let permissionKeys: PermissionKey[] = [];
+    const assignment = rawAssignment.trim();
+    if (isEventStaffPreset(assignment)) preset = assignment;
+    else {
+      const labelMatch = (Object.entries(PRESET_DEFINITIONS) as [EventStaffPreset, typeof PRESET_DEFINITIONS[EventStaffPreset]][])
+        .find(([, definition]) => definition.label === assignment);
+      if (labelMatch) preset = labelMatch[0];
+      else {
+        const custom = assignment.replace(/^(custom:|カスタム[:：])/, "");
+        for (const rawKey of custom.split(/[|;]/)) {
+          if (!rawKey.trim()) continue;
+          const key = canonicalizePermissionKey(rawKey.trim());
+          if (!key) errors.push(`選べない権限「${rawKey.trim()}」が含まれています。`);
+          else if (!permissionKeys.includes(key)) permissionKeys.push(key);
+        }
+        preset = permissionKeys.length ? "custom" : "public_staff";
+      }
+    }
+    if (cols.length !== 5) errors.push("正本CSVは「表示名,X ID,担当プリセット,公開フラグ,公開ラベル」の5列です。");
+    if (!/^[a-z0-9_]{1,32}$/.test(xUserId)) errors.push("X ID の形式が正しくありません。");
+    if (preset === "owner") errors.push("代表者の追加・変更はCSVでは行えません。専用の代表者移譲操作を使用してください。");
+    if (preset === "xid_reviewer" && !isSiteAdmin) errors.push("X ID確認担当プリセットは site admin だけが付与できます。");
+    if (!isSiteAdmin && permissionKeys.some(isAdminOnlyKey)) errors.push("site admin 専用権限はイベント運営者から付与できません。");
+    rows.push({
+      lineNumber: index + 1,
+      display_name: rawName.trim() || `運営メンバー ${index + 1}`,
+      x_user_id: xUserId,
+      permission_preset: preset,
+      permission_keys: permissionKeys,
+      is_public_staff: rawPublic === "1" ? "1" : "0",
+      public_role_label: rawLabel.trim(),
+      action: existing.has(xUserId) ? "update" : "create",
+      errors: [...new Set(errors)],
+      warnings: [],
+    });
+  });
+  const counts = rows.reduce((acc, row) => {
+    if (row.errors.length) acc.error += 1;
+    else acc[row.action] += 1;
+    return acc;
+  }, { create: 0, update: 0, error: 0 });
+  return { rows, counts, hasErrors: counts.error > 0 };
+}
+
 export interface EventStaffManagerProps {
   eventId: string;
   members: readonly ManageStaffMember[];
@@ -47,6 +173,50 @@ export interface EventStaffManagerProps {
  * NO route is mounted until MIG-0654's reviewed server routes and DTOs land.
  * Permission and owner invariants are always authoritative on the server.
  */
+function StaffCsvImport({
+  eventId, members, isSiteAdmin, busy, onImport,
+}: {
+  eventId: string;
+  members: readonly ManageStaffMember[];
+  isSiteAdmin: boolean;
+  busy: boolean;
+  onImport: (reason: string, rows: StaffCsvRow[]) => void;
+}): React.ReactElement {
+  const [text, setText] = React.useState(CSV_SAMPLE);
+  const [reason, setReason] = React.useState("スタッフCSV反映");
+  const preview = React.useMemo(
+    () => buildStaffCsvPreview(text, members, isSiteAdmin),
+    [text, members, isSiteAdmin],
+  );
+  return <section className="manage-staff-advanced-section">
+    <h3>スタッフCSV</h3>
+    <label className="fn-label">CSV（5列：表示名、X ID、担当プリセット、公開フラグ、公開ラベル）
+      <textarea className="fn-input" rows={7} value={text}
+        onChange={event => setText(event.target.value)} disabled={busy}/>
+    </label>
+    <p className="fn-console-note" role="status">
+      新規 {preview.counts.create} / 更新 {preview.counts.update} / エラー {preview.counts.error}
+    </p>
+    <div className="manage-staff-csv-preview">
+      {preview.rows.slice(0, 10).map(row => <p key={row.lineNumber} className="fn-console-note">
+        {row.lineNumber}行: {row.display_name} / @{row.x_user_id} / {PRESET_DEFINITIONS[row.permission_preset].label}
+        {row.errors.length ? " / " + row.errors.join("、") : ""}
+      </p>)}
+      {preview.rows.length > 10 && <p className="fn-console-note">先頭10行を表示しています（全{preview.rows.length}行）。</p>}
+      {preview.rows.length === 0 && <p className="fn-console-note">取り込む行がありません。</p>}
+    </div>
+    <label className="fn-label">反映理由
+      <input className="fn-input" value={reason} maxLength={500}
+        onChange={event => setReason(event.target.value)} disabled={busy}/>
+    </label>
+    <button type="button" className="fn-btn fn-btn-primary"
+      disabled={busy || preview.rows.length === 0 || preview.hasErrors || !reason.trim()}
+      onClick={() => onImport(reason, preview.rows)}>
+      CSVを反映
+    </button>
+  </section>;
+}
+
 export function EventStaffManager({
   eventId, members, ownerCount, canManageMembers, isSiteAdmin,
   fetchFn, onRefresh, promptConfirm,
@@ -260,7 +430,13 @@ export function EventStaffManager({
         <input name="self_confirm_text" className="fn-input" placeholder={"SELF CHANGE " + eventId} disabled={busy}/>
         <button className="fn-btn fn-btn-danger" disabled={busy}>代表権限を移譲</button>
       </form>}
-      <p className="fn-console-note">CSVプレビュー・反映は移行中です。現行の管理画面を使用してください。</p>
+      <StaffCsvImport
+        eventId={eventId}
+        members={members}
+        isSiteAdmin={isSiteAdmin}
+        busy={busy}
+        onImport={(reason, rows) => run(() => client.importCsv(eventId, reason, rows))}
+      />
     </details>
   </section>;
 }
