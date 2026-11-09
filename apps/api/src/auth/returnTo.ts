@@ -24,7 +24,10 @@ function postAuthPath(value: string): string | null {
       if (decoded === path) break;
       path = decoded;
     }
-    if (path.includes("\\") || /[\u0000-\u001f\u007f]/.test(path)) return null;
+    // Residual escapes after the bounded decoding passes could become a
+    // blocked route if another callback layer decodes the URL once more.
+    if (/%[0-9a-fA-F]{2}/.test(path) || path.includes("\\") ||
+        /[\u0000-\u001f\u007f]/.test(path)) return null;
     const canonical = new URL(path, origin);
     return canonical.origin === origin ? canonical.pathname : null;
   } catch {
