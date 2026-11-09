@@ -1,8 +1,9 @@
 ---
 /**
- * `/rules` (MIG-0501 / Recipe R-PAGE / Runtime S0). The terms are read once at build time; a source
- * failure fails the build. The consent form (SA-075) and the `?error=` notice are not emitted: they need
- * the MIG-0605 API, so `/rules` must not be cut over before that (Work Order STOP).
+ * `/rules` (MIG-0501 + MIG-0519 / Recipe R-PAGE / Runtime S0).
+ * The terms are generated at build time; the consent form is mounted only
+ * in the browser so JS-disabled visitors never see a dead submit button.
+ * Production cutover is gated by MIG-0641 (API/CostGuard) and human approval.
  */
 import { RulesView } from "@flamenode/ui";
 import PublicLayout from "../layouts/PublicLayout.astro";
@@ -17,5 +18,9 @@ const head = buildPageHead({
 const rules = await loadRulesForBuild(rulesSourceFromEnv());
 ---
 <PublicLayout head={head} currentPath="/rules">
-  <RulesView versionLabel={rules.versionLabel} updatedLabel={rules.updatedLabel} blocks={rules.blocks} />
+  <RulesView versionLabel={rules.versionLabel} updatedLabel={rules.updatedLabel} blocks={rules.blocks} showConsentMount={true} />
 </PublicLayout>
+<script>
+  import { mountRulesConsent } from "../components/RulesConsentIsland.ts";
+  mountRulesConsent();
+</script>
