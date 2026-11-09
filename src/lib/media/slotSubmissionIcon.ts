@@ -8,6 +8,7 @@ import {
 import {
   getPublicMediaNamespace,
   isPublicMediaObjectSafe,
+  MAX_PUBLIC_MEDIA_BYTES,
   normalizePublicMediaContentType,
   PUBLIC_MEDIA_CACHE_CONTROL,
 } from "./publicMedia.ts";
@@ -235,11 +236,48 @@ export async function serveSlotSubmissionIconRow(
   if (cache && cacheKey) {
     try {
       const hit = await cache.match(cacheKey);
-      if (hit) {
-        // The Cache API holds only bytes. Do not forward its legacy public TTL.
-        const headers = new Headers(hit.headers);
-        headers.set("cache-control", cacheControl);
-        return new Response(hit.body, { status: hit.status, headers });
+      if (hit?.status === 200 && hit.body) {
+        // Cache API metadata is untrusted. Rebuild only the public image headers,
+        // and enforce the same streamed byte ceiling as the origin media route.
+        const contentType = normalizePublicMediaContentType(hit.headers.get("content-type"));
+        const etag = hit.headers.get("etag");
+        if (contentType && etag) {
+          const reader = hit.body.getReader();
+          const chunks: Uint8Array[] = [];
+          let totalBytes = 0;
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              totalBytes += value.byteLength;
+              if (totalBytes > MAX_PUBLIC_MEDIA_BYTES) {
+                try { void reader.cancel().catch(() => undefined); } catch {}
+                break;
+              }
+              if (value.byteLength > 0) chunks.push(value);
+            }
+          } catch {
+            totalBytes = MAX_PUBLIC_MEDIA_BYTES + 1;
+            try { void reader.cancel().catch(() => undefined); } catch {}
+          }
+          if (totalBytes > 0 && totalBytes <= MAX_PUBLIC_MEDIA_BYTES) {
+            const bytes = new Uint8Array(totalBytes);
+            let offset = 0;
+            for (const chunk of chunks) {
+              bytes.set(chunk, offset);
+              offset += chunk.byteLength;
+            }
+            return new Response(bytes, {
+              status: 200,
+              headers: {
+                "content-type": contentType,
+                etag,
+                "cache-control": cacheControl,
+                "x-content-type-options": "nosniff",
+              },
+            });
+          }
+        }
       }
     } catch {
       // cache match failed (best effort)
