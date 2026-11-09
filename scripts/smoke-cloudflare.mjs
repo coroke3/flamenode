@@ -11,17 +11,23 @@ const DEFAULT_PROPAGATION_ATTEMPTS = 60;
 const DEFAULT_PROPAGATION_RETRY_DELAY_MS = 2_000;
 const DEFAULT_DEEP_HEALTH_ATTEMPTS = 3;
 
-function propagationRequestOptions(env = process.env, requestOptions = {}) {
-  const attemptsRaw = env.SMOKE_PROPAGATION_ATTEMPTS?.trim();
-  const delayRaw = env.SMOKE_PROPAGATION_DELAY_MS?.trim();
-  const attempts = attemptsRaw ? Number.parseInt(attemptsRaw, 10) : DEFAULT_PROPAGATION_ATTEMPTS;
-  const retryDelayMs = delayRaw ? Number.parseInt(delayRaw, 10) : DEFAULT_PROPAGATION_RETRY_DELAY_MS;
+// Cap retry work and delays so malformed configuration cannot stall deployment
+// checks or overflow Node.js setTimeout (which turns oversized delays into 1 ms).
+const MAX_SMOKE_ATTEMPTS = 1_000;
+const MAX_SMOKE_DELAY_MS = 600_000;
+
+/** Reject prefixes, decimals, unsafe or operationally excessive retry settings. */
+function smokeInteger(raw, fallback, min, max) {
+  const value = raw?.trim();
+  if (!value || !/^[0-9]+$/.test(value)) return fallback;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+}
+
+export function propagationRequestOptions(env = process.env, requestOptions = {}) {
   return {
-    attempts: Number.isFinite(attempts) && attempts > 0 ? attempts : DEFAULT_PROPAGATION_ATTEMPTS,
-    retryDelayMs:
-      Number.isFinite(retryDelayMs) && retryDelayMs >= 0
-        ? retryDelayMs
-        : DEFAULT_PROPAGATION_RETRY_DELAY_MS,
+    attempts: smokeInteger(env.SMOKE_PROPAGATION_ATTEMPTS, DEFAULT_PROPAGATION_ATTEMPTS, 1, MAX_SMOKE_ATTEMPTS),
+    retryDelayMs: smokeInteger(env.SMOKE_PROPAGATION_DELAY_MS, DEFAULT_PROPAGATION_RETRY_DELAY_MS, 0, MAX_SMOKE_DELAY_MS),
     ...requestOptions,
   };
 }
@@ -123,24 +129,10 @@ function assertStatus(response, expected, label) {
 const DEFAULT_DEGRADED_ATTEMPTS = 60;
 const DEFAULT_DEGRADED_RETRY_DELAY_MS = 2_000;
 
-function degradedRetryOptions(env = process.env, requestOptions = {}) {
-  const attemptsRaw = env.SMOKE_DEGRADED_ATTEMPTS?.trim();
-  const delayRaw = env.SMOKE_DEGRADED_DELAY_MS?.trim();
-  const attempts = attemptsRaw
-    ? Number.parseInt(attemptsRaw, 10)
-    : DEFAULT_DEGRADED_ATTEMPTS;
-  const retryDelayMs = delayRaw
-    ? Number.parseInt(delayRaw, 10)
-    : DEFAULT_DEGRADED_RETRY_DELAY_MS;
+export function degradedRetryOptions(env = process.env, requestOptions = {}) {
   return {
-    attempts:
-      Number.isFinite(attempts) && attempts > 0
-        ? attempts
-        : DEFAULT_DEGRADED_ATTEMPTS,
-    retryDelayMs:
-      Number.isFinite(retryDelayMs) && retryDelayMs >= 0
-        ? retryDelayMs
-        : DEFAULT_DEGRADED_RETRY_DELAY_MS,
+    attempts: smokeInteger(env.SMOKE_DEGRADED_ATTEMPTS, DEFAULT_DEGRADED_ATTEMPTS, 1, MAX_SMOKE_ATTEMPTS),
+    retryDelayMs: smokeInteger(env.SMOKE_DEGRADED_DELAY_MS, DEFAULT_DEGRADED_RETRY_DELAY_MS, 0, MAX_SMOKE_DELAY_MS),
     ...requestOptions,
   };
 }

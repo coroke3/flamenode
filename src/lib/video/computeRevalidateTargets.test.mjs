@@ -5,16 +5,50 @@ import {
   computeVideoRevalidatePaths,
 } from "./computeRevalidateTargets.ts";
 
-test("computeVideoRevalidatePaths includes old and new youtube paths when id changes", () => {
+test("computeVideoRevalidatePaths invalidates internal, old and new valid YouTube aliases", () => {
   const paths = computeVideoRevalidatePaths({
     videoId: "v1",
-    previousYoutubeVideoId: "old123",
-    nextYoutubeVideoId: "new456",
+    previousYoutubeVideoId: "AAAAAAAAAAA",
+    nextYoutubeVideoId: "BBBBBBBBBBB",
     primaryEventId: null,
     youtubeChanged: true,
   });
-  assert.ok(paths.includes("/old123"));
-  assert.ok(paths.includes("/new456"));
+  assert.deepEqual(paths, ["/", "/list", "/dashboard", "/v1", "/AAAAAAAAAAA", "/BBBBBBBBBBB"]);
+});
+
+test("video edits invalidate both aliases even if the YouTube ID did not change", () => {
+  const paths = computeVideoRevalidatePaths({
+    videoId: "v1",
+    previousYoutubeVideoId: "AAAAAAAAAAA",
+    nextYoutubeVideoId: "AAAAAAAAAAA",
+    primaryEventId: "event_1",
+    youtubeChanged: false,
+  });
+  assert.deepEqual(paths, [
+    "/", "/list", "/dashboard", "/v1", "/AAAAAAAAAAA",
+    "/event/event_1", "/event/event_1/slots",
+  ]);
+});
+
+test("video edits never derive cache paths from malformed legacy IDs", () => {
+  for (const youtubeId of ["/outside.example", "//outside.example", "javascript:alert(1)", "abcdefghijkl"]) {
+    const paths = computeVideoRevalidatePaths({
+      videoId: "v1",
+      previousYoutubeVideoId: youtubeId,
+      nextYoutubeVideoId: "https://youtu.be/BBBBBBBBBBB?t=5",
+      primaryEventId: null,
+      youtubeChanged: true,
+    });
+    assert.deepEqual(paths, ["/", "/list", "/dashboard", "/v1", "/BBBBBBBBBBB"]);
+  }
+  const unchanged = computeVideoRevalidatePaths({
+    videoId: "v1",
+    previousYoutubeVideoId: "AAAAAAAAAAA",
+    nextYoutubeVideoId: "BBBBBBBBBBB",
+    primaryEventId: null,
+    youtubeChanged: false,
+  });
+  assert.ok(!unchanged.includes("/BBBBBBBBBBB"), "unchanged YouTube alias should not be added");
 });
 
 test("computeStaticRebuildFlags marks creator aggregation only for a member X ID set change", () => {

@@ -20,3 +20,4 @@ coverage/
 .deploy/backups/
 .tmp/
 .astro/
+apps/ops/.test-dist/
