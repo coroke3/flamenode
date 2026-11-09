@@ -1,5 +1,4 @@
 // Compatibility bridge (MIG-0603 U02a): queue ordering and href policy live in server-core.
-import "server-only";
 export {
   adminReviewQueueFallbackHref,
   attachApproveAndNextHref,
