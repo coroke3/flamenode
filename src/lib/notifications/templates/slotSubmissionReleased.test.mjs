@@ -109,6 +109,23 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("legacy予約グループIDの双方向制御文字で通知表示を偽装できない", () => {
+    const directionalControls = ["\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"];
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "legacy" + directionalControls.join("") + "@everyone",
+      });
+      assert.ok(payload.content.includes("legacy @\u200beveryone"),
+        "the visible legacy group label is normalized while Discord mentions remain neutralized");
+      for (const control of directionalControls) {
+        assert.ok(!payload.content.includes(control), "bidirectional formatting marker must not enter DM body");
+      }
+      assert.equal(payload.event_id, "event-1");
+    }
+  });
+
   test("通常のグループID表示は変更しない", () => {
     for (const build of [
       buildSlotForceReleasedNotification,
