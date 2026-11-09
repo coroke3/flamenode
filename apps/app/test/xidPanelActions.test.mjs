@@ -77,6 +77,46 @@ test("MIG-0708 U03 T03: profile reject preserves editable field and displays ser
   await m.dispose();
 });
 
+test("MIG-0708 U03: profile form resets uncontrolled values when X identity changes", async () => {
+  const api = {};
+  const base = { icon_url: null, portfolio_contact: null, youtube_channel_url: null, other_social_links: null };
+  const props = { api, iconCandidates: [], onRefresh: () => {} };
+  const m = await render(XIdCompactProfileForm, { ...props, x: { ...base, id: "old-x", x_name: "Old name", profile_text: "Old bio" } });
+  try {
+    const input = m.container.querySelector('[name="x_name"]');
+    assert.equal(input.value, "Old name");
+    // Simulate an unsaved change; a new identity must never inherit it.
+    input.value = "Unsaved old-x edits";
+    await m.rerender({ ...props, x: { ...base, id: "new-x", x_name: "New name", profile_text: "New bio" } });
+    assert.equal(m.container.querySelector('[name="x_name"]').value, "New name");
+    assert.equal(m.container.querySelector('[name="profile_text"]').value, "New bio");
+  } finally { await m.dispose(); }
+});
+
+test("MIG-0708 U03: old profile mutation completion cannot refresh or close new X identity", async () => {
+  const pending = deferred();
+  let refreshed = 0;
+  let cancelled = 0;
+  const calls = [];
+  const api = { updateProfile: (id, fields) => { calls.push({ id, fields }); return pending.promise; } };
+  const base = { icon_url: null, profile_text: null, portfolio_contact: null, youtube_channel_url: null, other_social_links: null };
+  const props = { api, iconCandidates: [], onRefresh: () => { refreshed++; }, onCancel: () => { cancelled++; } };
+  const m = await render(XIdCompactProfileForm, { ...props, x: { ...base, id: "A", x_name: "Account A" } });
+  try {
+    await act(async () => m.container.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].id, "A");
+    await m.rerender({ ...props, x: { ...base, id: "B", x_name: "Account B" } });
+    await m.rerender({ ...props, x: { ...base, id: "A", x_name: "Account A again" } });
+    await act(async () => pending.resolve({ ok: true, message: "stale profile success" }));
+    await m.flush();
+    assert.equal(refreshed, 0);
+    assert.equal(cancelled, 0);
+    assert.equal(m.container.textContent.includes("stale profile success"), false);
+    assert.equal(m.container.querySelector('[name="x_name"]').value, "Account A again");
+  } finally { await m.dispose(); }
+});
+
 test("MIG-0708 U03 T04: oversize upload is blocked before API, valid file uses file transport", async () => {
   const files=[],api={uploadIcon:async(_id,file)=>{files.push(file);return {ok:true};}};
   const m=await render(XIdIconPicker,{api,xUserId:"foo",currentIconUrl:null,candidates:[],onRefresh:()=>{}});
