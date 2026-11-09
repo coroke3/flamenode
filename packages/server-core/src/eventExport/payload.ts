@@ -632,6 +632,10 @@ export function eventExportBodyMatchesFresh(cached: string, fresh: string, forma
   try {
     const a: unknown = JSON.parse(cached);
     const b: unknown = JSON.parse(fresh);
+    // Do not serve raw cache bytes whose parsed DTO differs from their wire form.
+    // Duplicate JSON keys or non-canonical encodings can be interpreted differently
+    // by downstream consumers, even when JSON.parse shows a matching public DTO.
+    if (JSON.stringify(a) !== cached || JSON.stringify(b) !== fresh) return false;
     if (!a || typeof a !== "object" || Array.isArray(a) || !b || typeof b !== "object" || Array.isArray(b)) return false;
     const left = a as Record<string, unknown>;
     const right = b as Record<string, unknown>;
