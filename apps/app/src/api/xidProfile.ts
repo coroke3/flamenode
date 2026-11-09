@@ -24,6 +24,8 @@ export interface XidProfileApi {
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 const jsonHeaders = { accept: "application/json", "content-type": "application/json" } as const;
 const INVALID = { ok: false } as const;
+const MAX_ICON_BYTES = 8 * 1024 * 1024;
+const ALLOWED_ICON_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 function isXidResult(value: unknown): value is XidProfileResult {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -73,6 +75,11 @@ export function createXidProfileApi(
       : Promise.resolve(INVALID),
     setIcon: (id, iconUrl) => request(fetchFn, "PUT", xPath(id) + "/icon", { icon_url: iconUrl }),
     uploadIcon: (id, file) => {
+      // Component accept/size checks can be bypassed by direct API callers.
+      // Never transmit unsupported or oversized data even before server validation.
+      if (!ALLOWED_ICON_MIME.has(file.type) || file.size > MAX_ICON_BYTES) {
+        return Promise.resolve(INVALID);
+      }
       const fd = new FormData();
       fd.set("icon_file", file);
       return request(fetchFn, "POST", xPath(id) + "/icon/upload", fd);
