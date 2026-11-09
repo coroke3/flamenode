@@ -84,7 +84,7 @@ if (runTestWithTsx(import.meta.url)) {
         slotIds: ["slot-1"],
         reservationGroupId: "legacy\\n■ 偽の管理通知\\r\\n@everyone\\u2028<@123>\\u2029end",
       });
-      assert.ok(payload.content.includes("legacy ■ 偽の管理通知  @\\u200beveryone \\<@\\u200b123\\> end"));
+      assert.ok(payload.content.includes("legacy ■ 偽の管理通知 @\u200beveryone \\<@\u200b123\\> end"));
       assert.ok(!payload.content.includes("\\n■ 偽の管理通知"));
       assert.ok(!payload.content.includes("\\r"));
       assert.ok(!payload.content.includes("\\u2028"));
