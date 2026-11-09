@@ -82,6 +82,8 @@ test("T04: rejected, malformed or unavailable CSRF always navigates to the tempo
     { ok: false, json: async () => ({ csrfToken: "csrf-demo" }) },
     { ok: true, json: async () => ({}) },
     { ok: true, json: async () => ({ csrfToken: "" }) },
+    { ok: true, json: async () => ({ csrfToken: "   " }) },
+    { ok: true, json: async () => ({ csrfToken: "\\t\\n" }) },
     { ok: true, json: async () => ({ csrfToken: 1 }) },
     { ok: true, json: async () => { throw new Error("bad JSON"); } },
   ];
