@@ -109,3 +109,21 @@ test("SA-104 isolated route rejects cross-origin requests before session and D1"
   assert.equal(h.sessionCalls, 0);
   assert.equal(h.stats.reads, 0);
 });
+
+test("SA-104 isolated route rejects icon withdrawn from public candidates after pre-read", async () => {
+  let withdrawn = false;
+  const h = setup({ onFirst: (statement, sqlite) => {
+    if (!withdrawn && statement.includes("_icon_candidates_json") && statement.includes("FROM x_users x")) {
+      withdrawn = true;
+      sqlite.prepare("UPDATE videos SET visibility_status = 'private' WHERE id = 'v1'").run();
+      sqlite.prepare("UPDATE videos SET visibility_status = 'private' WHERE id = 'v3'").run();
+    }
+  } });
+  const res = await h.send("https://example.com/new.png");
+  assert.equal(withdrawn, true);
+  assert.equal(res.status, 409);
+  assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
+    "https://example.com/old.png");
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+});
