@@ -73,7 +73,7 @@ function groupIdForDiscordDisplay(groupId: string): string {
   // Do not strip variation selectors or emoji sequences: normal group IDs remain readable.
   const cleaned = groupId
     // Preserve legitimate pictograph ZWJ sequences (👩‍💻), but mark lone joiners as controls.
-    .replace(/(?<!\p{Extended_Pictographic})\u200d|\u200d(?!\p{Extended_Pictographic})/gu, "\u200b")
+    .replace(/(?<!\p{Extended_Pictographic})(?<!\p{Extended_Pictographic}\uFE0F)(?<!\p{Extended_Pictographic}\p{Emoji_Modifier})\u200d|\u200d(?!\p{Extended_Pictographic})/gu, "\u200b")
     // Collapse adjacent invisible controls into one visible separator.
     .replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u180e\u200b-\u200c\u200e-\u200f\u2028-\u202e\u2060-\u206f\ufeff]+/g, " ");
   // A malformed persisted legacy ID must not consume an entire Discord message.
