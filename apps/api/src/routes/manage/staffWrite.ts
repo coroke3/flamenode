@@ -94,7 +94,7 @@ function assignment(data: UpsertBody, isSiteAdmin: boolean) {
 function domainMessage(error: unknown): string | null {
   if (!(error instanceof Error)) return null;
   if (error.message === LAST_OWNER_ERROR) return error.message;
-  if (/^(同じX ID|代表権限|イベント代表者|自分自身|確認|X ID確認権限|site admin 専用権限|owner を付与|イベントスタッフ)/.test(error.message)) {
+  if (/^(同じX ID|代表権限|イベント代表者|移譲元|移譲先|自分自身|確認|X ID確認権限|site admin 専用権限|owner を付与|イベントスタッフ)/.test(error.message)) {
     return error.message;
   }
   return null;
@@ -105,16 +105,16 @@ async function queueProjection(c: import("hono").Context<AppEnv>, ctx: StaffCont
   // here: persist the same D1 intent; polling recovers the wake (D-15-6).
   try {
     await enqueueStaticRebuildMany(c.get("db"), [
-    { targetType: "event_base", targetId: ctx.eventId, reason, priority: "high", requestedByUserId: ctx.user.id },
-    { targetType: "event_slots", targetId: ctx.eventId, reason, priority: "high", requestedByUserId: ctx.user.id },
-    { targetType: "events_index", targetId: "global", reason, priority: "low", requestedByUserId: ctx.user.id },
-    { targetType: "member_suggestions", targetId: "global", reason, priority: "low" },
-    ...(includeUsers ? [{ targetType: "users_index" as const, targetId: "global", reason, priority: "low" as const, requestedByUserId: ctx.user.id }] : []),
-  ], { wakeSource: "web" }, async () => ({
-    readEnv: () => null,
-    readWaitUntil: () => null,
-    readKv: () => null,
-  }));
+      { targetType: "event_base", targetId: ctx.eventId, reason, priority: "high", requestedByUserId: ctx.user.id },
+      { targetType: "event_slots", targetId: ctx.eventId, reason, priority: "high", requestedByUserId: ctx.user.id },
+      { targetType: "events_index", targetId: "global", reason, priority: "low", requestedByUserId: ctx.user.id },
+      { targetType: "member_suggestions", targetId: "global", reason, priority: "low" },
+      ...(includeUsers ? [{ targetType: "users_index" as const, targetId: "global", reason, priority: "low" as const, requestedByUserId: ctx.user.id }] : []),
+    ], { wakeSource: "web" }, async () => ({
+      readEnv: () => null,
+      readWaitUntil: () => null,
+      readKv: () => null,
+    }));
   } catch {
     // The staff/ownership write has already committed with strict audit.
     // Projection is post-commit best-effort: never turn a committed write into
