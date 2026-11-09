@@ -21,13 +21,20 @@ export function parseUnslottedEventIdFromForm(formData: FormData): string | null
     throw new UnslottedEventSyncError("unslotted_event_selection_invalid");
   }
 
-  const values = raw.split(",").map((value) => value.trim()).filter(Boolean);
-  if (values.some((value) => value.length > 64)) {
-    throw new UnslottedEventSyncError("unslotted_event_selection_invalid");
+  // This field selects at most one distinct event. Avoid materializing an
+  // unbounded array of comma-separated inputs (and a second Set allocation).
+  let selected: string | null = null;
+  let cursor = 0;
+  while (cursor <= raw.length) {
+    const comma = raw.indexOf(",", cursor);
+    const end = comma === -1 ? raw.length : comma;
+    const value = raw.slice(cursor, end).trim();
+    if (value.length > 64 || (value && selected !== null && value !== selected)) {
+      throw new UnslottedEventSyncError("unslotted_event_selection_invalid");
+    }
+    if (value && selected === null) selected = value;
+    if (comma === -1) break;
+    cursor = comma + 1;
   }
-  const unique = Array.from(new Set(values));
-  if (unique.length > 1) {
-    throw new UnslottedEventSyncError("unslotted_event_selection_invalid");
-  }
-  return unique[0] ?? null;
+  return selected;
 }
