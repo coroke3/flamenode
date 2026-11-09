@@ -224,3 +224,40 @@ test("MIG-0603 U02a-2: 64KiB body limit checks both bytes and claimed length", a
     assert.deepEqual(declared, { ok: false, status: 413, message: "リクエストが大きすぎます。" });
   }
 });
+
+
+test("MIG-0603 U02a: server-core rebuild event lookup deduplicates primary and related events", async () => {
+  const { loadVideoRebuildEventIds } = await import("../../../packages/server-core/src/video/rebuildEventIds.ts");
+  let requestedLimit;
+  const rows = [{ event_id: "event-a" }, { event_id: "event-b" }, { event_id: "event-a" }];
+  const db = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async (limit) => { requestedLimit = limit; return rows; },
+        }),
+      }),
+    }),
+  };
+  const result = await loadVideoRebuildEventIds(db, "video-1", "event-a");
+  assert.deepEqual(result, { ok: true, eventIds: ["event-a", "event-b"] });
+  assert.equal(requestedLimit, 9);
+});
+
+test("MIG-0603 U02a: server-core rebuild event lookup fails closed above the shared target limit", async () => {
+  const { loadVideoRebuildEventIds } = await import("../../../packages/server-core/src/video/rebuildEventIds.ts");
+  const rows = Array.from({ length: 9 }, (_, index) => ({ event_id: `event-${index}` }));
+  const db = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async (limit) => { assert.equal(limit, 9); return rows; },
+        }),
+      }),
+    }),
+  };
+  assert.deepEqual(await loadVideoRebuildEventIds(db, "video-1", "primary"), {
+    ok: false,
+    message: "関連イベント数が処理上限を超えています。",
+  });
+});
