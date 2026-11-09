@@ -68,7 +68,7 @@ export function videoPublicPath(
 import {
   isOpsWebhookTarget,
   type OpsWebhookTarget,
-} from "./forum";
+} from "./forum.ts";
 
 export type DiscordNotificationPayload = {
   content: string;
