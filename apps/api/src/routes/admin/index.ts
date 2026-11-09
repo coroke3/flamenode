@@ -24,6 +24,9 @@ import { apiEndpointRoutes } from "./apiEndpoints.ts";
 import { auditAdminRoutes } from "./audit.ts";
 import { listEventTemplatesForAdminApi } from "../events/templates.ts";
 import { costGuardAdminRoutes } from "./costGuard.ts";
+import { adminNotificationRoutes } from "./notifications.ts";
+import { adminPermissionsRoutes } from "./permissions.ts";
+import { adminTermsRoutes } from "./terms.ts";
 import { adminUsersRoutes, adminXUsersRoutes } from "./users.ts";
 import { mountMig0643AdminRoutes } from "./mig0643.ts";
 
@@ -57,9 +60,12 @@ export function createAdminRoutes(
   admin.route("/api-endpoints", apiEndpointRoutes);
   admin.route("/audit", auditAdminRoutes);
   admin.route("/cost-guard", costGuardAdminRoutes);
+  admin.route("/notifications", adminNotificationRoutes);
+  admin.route("/permissions", adminPermissionsRoutes);
+  admin.route("/terms", adminTermsRoutes);
   admin.route("/users", adminUsersRoutes);
   admin.route("/x-users", adminXUsersRoutes);
-  // MIG-0643 SA-050/069..073/106: all handlers inherit the parent auth/write guards.
+  // MIG-0643 routes inherit the shared admin origin, auth and read/write guards.
   mountMig0643AdminRoutes(admin);
   return admin;
 }
