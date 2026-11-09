@@ -103,7 +103,8 @@ function domainMessage(error: unknown): string | null {
 async function queueProjection(c: import("hono").Context<AppEnv>, ctx: StaffContext, reason: string, includeUsers: boolean) {
   // CURRENT performs post-commit best-effort projection. Hono has no Queue binding
   // here: persist the same D1 intent; polling recovers the wake (D-15-6).
-  await enqueueStaticRebuildMany(c.get("db"), [
+  try {
+    await enqueueStaticRebuildMany(c.get("db"), [
     { targetType: "event_base", targetId: ctx.eventId, reason, priority: "high", requestedByUserId: ctx.user.id },
     { targetType: "event_slots", targetId: ctx.eventId, reason, priority: "high", requestedByUserId: ctx.user.id },
     { targetType: "events_index", targetId: "global", reason, priority: "low", requestedByUserId: ctx.user.id },
@@ -114,6 +115,12 @@ async function queueProjection(c: import("hono").Context<AppEnv>, ctx: StaffCont
     readWaitUntil: () => null,
     readKv: () => null,
   }));
+  } catch {
+    // The staff/ownership write has already committed with strict audit.
+    // Projection is post-commit best-effort: never turn a committed write into
+    // an HTTP failure that invites clients to replay the mutation.
+    console.error("[MIG-0654] post-commit staff projection enqueue failed");
+  }
 }
 
 /** Shared POST / and PUT /:staffId; a PUT can never silently create a missing row. */
