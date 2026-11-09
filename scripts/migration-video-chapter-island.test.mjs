@@ -251,7 +251,6 @@ test("U03 chapter sorter and seek parser share the 24-hour validation boundary",
 
 test("U03 invalid public chapter seek buttons are visibly disabled", async () => {
   const { JSDOM } = await import("jsdom");
-  const { createRoot } = await import("react-dom/client");
   const { VideoUtilityDockIsland } =
     await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
   const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://flamenode.net/v" });
@@ -265,6 +264,11 @@ test("U03 invalid public chapter seek buttons are visibly disabled", async () =>
     configurable: true, writable: true, value: dom.window[key],
   });
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  // First react-dom/client import in this test module: initialize the React
+  // event plugin only AFTER installing JSDOM's document. Importing it before
+  // the document existed disabled the textarea's delegated change events in
+  // later chapter tests even though its native .value property had changed.
+  const { createRoot } = await import("react-dom/client");
   const root = createRoot(dom.window.document.getElementById("root"));
   try {
     await React.act(async () => root.render(React.createElement(VideoUtilityDockIsland, {
