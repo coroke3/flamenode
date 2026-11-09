@@ -214,11 +214,12 @@ test("U03 malformed public chapter times sort after valid rows without dropping 
   const rows = chapterRowsForViewer([
     { id: "malformed", timeLabel: "??", label: "keep visible" },
     { id: "invalid-sec", timeLabel: "1:61", label: "keep invalid seconds visible" },
+    { id: "invalid-huge", timeLabel: "99999999999999999999:00", label: "keep overflow visible" },
     { id: "valid-hour", timeLabel: "1:00:00", label: "one hour" },
     { id: "valid", timeLabel: "0:03", label: "three seconds" },
   ], overlay);
   assert.deepEqual(rows.map((row) => row.id),
-    ["valid", "private-1", "valid-hour", "malformed", "invalid-sec"]);
+    ["valid", "private-1", "valid-hour", "malformed", "invalid-sec", "invalid-huge"]);
   assert.equal(rows[3].label, "keep visible");
   assert.equal(rows[4].label, "keep invalid seconds visible");
 });
