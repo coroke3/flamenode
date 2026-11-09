@@ -353,7 +353,9 @@ test("T04 privacy: cache entries cannot inject redirects, cookies, MIME or stale
       await oversized.arrayBuffer();
     }
 
-    const conditional = await request(key, env, { "If-None-Match": '"cached-img"' });
+    // The oversized legacy cache entry is replaced by the fresh R2 response, so
+    // conditional validation must use the R2 ETag rather than the rejected cache ETag.
+    const conditional = await request(key, env, { "If-None-Match": '"test-etag"' });
     assert.equal(conditional.status, 304);
     assert.equal(conditional.headers.get("cache-control"), "no-store");
     assert.equal(conditional.headers.get("set-cookie"), null);
