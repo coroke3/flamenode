@@ -149,6 +149,22 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("legacyグループIDのUTF-16境界で孤立サロゲートを通知に残さない", () => {
+    const cases = [
+      ["x".repeat(255) + "\ud83d" + "tail", "x".repeat(255) + "…"],
+      ["x".repeat(255) + "\ude00" + "tail", "x".repeat(255) + "…"],
+      ["x".repeat(254) + "😀" + "tail", "x".repeat(254) + "😀…"],
+    ];
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      for (const [reservationGroupId, expected] of cases) {
+        const payload = build({ eventId: "event-1", slotIds: ["slot-1"], reservationGroupId });
+        assert.ok(payload.content.includes(expected));
+        assert.doesNotMatch(payload.content, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u);
+        assert.equal(payload.event_id, "event-1");
+      }
+    }
+  });
+
   test("通常のグループID表示は変更しない", () => {
     for (const build of [
       buildSlotForceReleasedNotification,
