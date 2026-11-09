@@ -9,7 +9,7 @@ const SITE = "https://app.flamenode.example";
 const USER = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "user", is_banned: 0, active_x_user_id: null };
 
-function setup({ linked = true, approved = true, onFirst } = {}) {
+function setup({ linked = true, approved = true, onFirst, bucket } = {}) {
   const { db, sqlite, stats } = createAdminD1({ onFirst });
   seedBase(sqlite, { role: "user" });
   sqlite.exec(`CREATE TABLE videos (
@@ -43,7 +43,7 @@ function setup({ linked = true, approved = true, onFirst } = {}) {
     app.request(SITE + "/api/xid/x_one/icon", {
       method: "PUT", headers: { Origin: origin, "Content-Type": "application/json" },
       body: JSON.stringify({ x_user_id, icon_url }),
-    }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
+    }, { DB: db, BUCKET: bucket, NEXT_PUBLIC_SITE_URL: SITE });
   return { sqlite, stats, send, get sessionCalls() { return sessionCalls; } };
 }
 
@@ -142,4 +142,41 @@ test("SA-104 isolated route honors CURRENT 40 distinct icon candidates including
   assert.equal(included.status, 200, await included.text());
   assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
     "https://example.com/bulk-38.png");
+});
+
+test("SA-104 isolated route removes an unreferenced R2 icon only after the audited D1 commit", async () => {
+  const order = [];
+  let h;
+  const bucket = { delete: async (key) => {
+    assert.equal(key, "xicons/x_one/old.png");
+    assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
+      "https://example.com/new.png", "R2 removal must never precede the committed D1 update");
+    assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1,
+      "strict audit must commit before cleanup");
+    order.push(key);
+  } };
+  h = setup({ bucket });
+  h.sqlite.exec(`
+    CREATE TABLE event_groups (id TEXT PRIMARY KEY, icon_url TEXT, img_url TEXT);
+    CREATE TABLE static_artifacts (id TEXT PRIMARY KEY, object_key TEXT, target_type TEXT, deleted_at INTEGER);
+  `);
+  h.sqlite.prepare("UPDATE x_users SET icon_url=? WHERE id='x_one'")
+    .run("/api/media/xicons/x_one/old.png");
+  const res = await h.send("https://example.com/new.png");
+  assert.equal(res.status, 200, await res.text());
+  assert.deepEqual(order, ["xicons/x_one/old.png"]);
+  assert.equal(h.stats.batches, 1);
+});
+
+test("SA-104 isolated route ignores orphan cleanup failures after a successful D1 commit", async () => {
+  const h = setup({ bucket: { delete: async () => { throw new Error("R2 down"); } } });
+  h.sqlite.prepare("UPDATE x_users SET icon_url=? WHERE id='x_one'")
+    .run("/api/media/xicons/x_one/old.png");
+  // event_groups/static_artifacts are missing in this fixture, so the reference
+  // check fails closed before any R2 call; the committed change still succeeds.
+  const res = await h.send("https://example.com/new.png");
+  assert.equal(res.status, 200, await res.text());
+  assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
+    "https://example.com/new.png");
+  assert.equal(h.stats.batches, 1);
 });
