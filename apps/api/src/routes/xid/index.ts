@@ -1,41 +1,73 @@
 /**
- * MIG-0636 Personal X writes. Order matches CURRENT:
- * origin -> Auth.js session -> banned/terms -> CostGuard -> mutation.
+ * MIG-0659 (D-15-8): /api/xid router. MIG-0636 (Personal X / Active X APIs) shares this file; whichever
+ * merges first creates it and the other adds its own `route(...)` line.
+ *
+ * Write stack (same order as videoWriteStack / the admin routes): no-store header, origin (pure, before any
+ * D1 read), session, writeGuard (any role, identity only), CostGuard `xid_links`, drizzle handle.
  */
-import { Hono, type Context, type MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
+import { Hono } from "hono";
 import { sessionMiddleware } from "../../auth/session.ts";
 import type { AppEnv } from "../../env.ts";
-import {
-  originGuardMiddleware,
-} from "../../middleware/writeOrigin.ts";
+import { costGuardMiddleware } from "../../middleware/costGuard.ts";
+import { dbMiddleware } from "../../middleware/db.ts";
+import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
+import { createXIdRequestRoutes } from "./requests.ts";
 import { activeXRoutes } from "./activeX.ts";
 
-export function createXidRoutes(
-  options: { session?: MiddlewareHandler<AppEnv> } = {},
-): Hono<AppEnv> {
-  const xid = new Hono<AppEnv>();
+export function xidWriteStack(session?: MiddlewareHandler<AppEnv>): MiddlewareHandler<AppEnv> {
   const originOptions = (c: Context<AppEnv>) => ({
+    loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
+    // Never derived from NODE_ENV: only the explicit preview flag.
+    allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
+  });
+  const stack: MiddlewareHandler<AppEnv>[] = [
+    (c, next) => originGuardMiddleware(originOptions(c))(c, next),
+    session ?? (sessionMiddleware() as unknown as MiddlewareHandler<AppEnv>),
+    // CURRENT writeGuard({ feature: "xid_links" }): no active-X requirement.
+    (c, next) => writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next),
+    costGuardMiddleware("xid_links") as MiddlewareHandler<AppEnv>,
+    dbMiddleware,
+  ];
+  return async (c, next) => {
+    c.header("Cache-Control", "private, no-store");
+    // A deny returned by an inner middleware must reach Hono, so it is carried out through 'inner'.
+    const run = async (index: number): Promise<Response | void> => {
+      if (index === stack.length) return next();
+      let inner: Response | void = undefined;
+      const own = await stack[index]!(c, async () => {
+        inner = await run(index + 1);
+      });
+      return own ?? inner;
+    };
+    return run(0);
+  };
+}
+
+export function createXIdRoutes(options: { session?: MiddlewareHandler<AppEnv> } = {}): Hono<AppEnv> {
+  const xid = new Hono<AppEnv>();
+  // SA-098 uses a single D1 identity/TOS/CostGuard snapshot; do not run the
+  // SA-099..101 write stack again or consume its additional D1 reads.
+  // Preserve 404/405 semantics for non-POST and unknown routes.
+  const activeOrigin = (c: Context<AppEnv>) => ({
     loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
     allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
   });
-  xid.use("*", async (c, next) => {
+  xid.use("/active", async (c, next) => {
     c.header("Cache-Control", "private, no-store");
     await next();
   });
-  // Only the mounted POST /active write needs Origin and session resolution.
-  // Unknown paths and non-mutating methods must retain Hono's 404/405
-  // behavior without consulting D1 or requiring an Origin header.
   xid.use("/active", (c, next) =>
-    c.req.method === "POST" ? originGuardMiddleware(originOptions(c))(c, next) : next(),
+    c.req.method === "POST" ? originGuardMiddleware(activeOrigin(c))(c, next) : next(),
   );
   xid.use("/active", (c, next) =>
     c.req.method === "POST" ? (options.session ?? sessionMiddleware())(c, next) : next(),
   );
-  // SA-098 shares its one D1 read between TOS, user CAS snapshot and
-  // selected linked-X access. Its route performs the remaining identity,
-  // CostGuard, strict audit, and Drizzle checks in CURRENT order.
-  xid.route("/active", activeXRoutes);
+  xid.route("/active", activeXRoutes); // MIG-0636 SA-098: own one-read write guard
+  xid.route("/", createXIdRequestRoutes(xidWriteStack(options.session))); // MIG-0659 SA-099..101
   return xid;
 }
 
-export const xidRoutes = createXidRoutes();
+// Compatibility alias for MIG-0636 existing route tests and callers.
+export const createXidRoutes = createXIdRoutes;
+export const xidRoutes = createXIdRoutes();

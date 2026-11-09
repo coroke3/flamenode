@@ -32,6 +32,7 @@ const { UsersIndexIsland } = uiBuilt ? await import("../apps/site/src/components
 const { SnapshotBuildError } = await import("../apps/site/src/lib/publicDataLoader.ts");
 const { parseSocialLinks } = await import("../src/lib/socialLinks.ts");
 const { clampPaging, totalPagesFor } = await import("../src/lib/utils/sql.ts");
+const { parseUsersIndexPage } = await import("../src/lib/publicData/usersIndexPage.ts");
 const { prepareUsersIndexItems, paginateUsersIndexItems } = await import("../src/lib/publicData/staticUsersIndexCore.ts");
 const { FIXTURE_USER_PROFILES, FIXTURE_USERS_INDEX } = await import("../apps/site/src/lib/userFixtures.ts");
 
@@ -251,6 +252,25 @@ test("T05 (G03) /user query keys: q, sort, page match CURRENT for value, empty a
   assert.equal(views.USERS_INDEX_PAGE_SIZE, 48);
 });
 
+test("MIG-0504 regression: /user page query requires full decimal number in CURRENT and Astro", () => {
+  for (const [raw, expected] of [
+    [null, 1], [undefined, 1], ["", 1], ["  ", 1],
+    [["2", "3"], 1], [{ page: "2" }, 1], [2, 1], [true, 1],
+    ["1", 1], ["2", 2], [" 2 ", 2], ["0002", 2],
+    ["2abc", 1], ["3.5", 1], ["2e2", 1], ["+2", 1],
+    ["-2", 1], ["0", 1], ["０２", 1], ["2\\n", 1],
+    ["9007199254740992", 1], ["99999999999999999999", 1],
+    ["0".repeat(31) + "2", 2], ["0".repeat(32) + "2", 1],
+  ]) {
+    assert.equal(parseUsersIndexPage(raw), expected, `shared page parser: ${JSON.stringify(raw)}`);
+    assert.equal(views.parseIndexPage(raw), expected, `Astro Island parser: ${JSON.stringify(raw)}`);
+  }
+  assert.ok(currentIndexSource.includes('import { parseUsersIndexPage } from "@/lib/publicData/usersIndexPage";'),
+    "CURRENT must import the exact same shared parser");
+  assert.ok(currentIndexSource.includes("const pageNum = parseUsersIndexPage(page);"),
+    "CURRENT /user must call the shared parser before loading the v2 index");
+});
+
 test("T05 (G03) /user/:id query keys: worksPage and collabPage slice like CURRENT (value, empty, unknown)", () => {
   const all = [...Array(40)].map((_, i) => `作品 w${String(i + 1).padStart(2, "0")}`);
   const pages = views.buildSectionPages(
@@ -398,6 +418,39 @@ test("T05 index Island: ?q= ?sort= ?page= are applied from /user/index.json like
     await act(async () => m.root.unmount());
   } finally {
     globalThis.fetch = original;
+  }
+});
+
+test("MIG-0504: Astro Island handles duplicate page keys like CURRENT without losing valid pagination", { skip: skipUi }, async () => {
+  const entries = Array.from({ length: 96 }, (_, i) => ({
+    x_id: `user${String(i).padStart(3, "0")}`,
+    x_name: `User ${String(i).padStart(3, "0")}`,
+    icon_url: null, personal_count: 0, collab_count: 0,
+    total_works: 0, sort_score: 96 - i,
+  }));
+  const props = {
+    initial: views.computeUsersIndexView(entries, "", "score", 1),
+    unavailable: false,
+    indexUrl: "/user/index.json",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => entries });
+  const firstCreatorHref = (container) => container.querySelector(".cr-icons a")?.getAttribute("href");
+  try {
+    for (const [query, expected] of [
+      ["?sort=name&page=2&page=3", "/user/user000"],
+      ["?sort=name&page=2&page=2", "/user/user000"],
+      ["?sort=name&page=2", "/user/user048"],
+    ]) {
+      const mounted = await mountIsland(`https://flamenode.net/user${query}`, h(UsersIndexIsland, props));
+      try {
+        assert.equal(firstCreatorHref(mounted.container), expected, query);
+      } finally {
+        await act(async () => mounted.root.unmount());
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

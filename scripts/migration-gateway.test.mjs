@@ -12,11 +12,34 @@ import {
   PUBLIC_ASSET_FILES,
   ROUTE_SHARD_COUNT,
   buildRouteShards,
+  isValidResolution,
   revocationKey,
   routeKeyFromPath,
   shardAssetPath,
   shardIndexForKey,
 } from "../apps/site/src/gateway/routeShards.ts";
+
+test("gateway rejects shard destinations whose URL paths normalize after validation", () => {
+  const redirect = (targetPath) => ({ type: "redirect", targetPath, status: 308, reason: "alias" });
+  const canonical = (canonicalPath) => ({
+    type: "canonical", kind: "video", id: "safe_video", canonicalPath,
+  });
+  for (const destination of [
+    "/groups/../admin", "/groups/./video", "/groups/..", "/groups/.",
+    "/groups/%2e%2e/admin", "/groups/%2E/admin", "/groups/%2fadmin",
+    "/groups/%5cadmin",
+  ]) {
+    assert.equal(isValidResolution(redirect(destination)), false, destination);
+    assert.equal(isValidResolution(canonical(destination)), false, destination);
+  }
+  for (const destination of [
+    "/video-safe", "/user/creator.alpha", "/event#event-group-slug",
+    "/user/%E3%81%82",
+  ]) {
+    assert.equal(isValidResolution(redirect(destination)), true, destination);
+    assert.equal(isValidResolution(canonical(destination)), true, destination);
+  }
+});
 
 const GENERATION = "gen-2026-10-17-001";
 
@@ -172,6 +195,60 @@ test("MIG-0512: genuine 404-page HTML is accepted, generic 404 bodies fail safel
     assert.equal(res.status, 404);
     assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
     assert.equal(await res.text(), "Not Found");
+  }
+});
+
+test("MIG-0512 regression: 200 static error assets must be non-empty HTML before relabeling", async () => {
+  const cases = [
+    { name: "plain-text", body: "raw upstream text", headers: { "Content-Type": "text/plain" } },
+    { name: "json", body: '{"error":"upstream"}', headers: { "Content-Type": "application/json" } },
+    { name: "missing-type", body: "unknown page", headers: {} },
+    { name: "missing-body", body: null, headers: { "Content-Type": "text/html" } },
+    { name: "zero-length", body: "", headers: { "Content-Type": "text/html", "Content-Length": "0" } },
+  ];
+  for (const [path, status, fallback] of [
+    ["/%2f", 404, "Not Found"],
+    ["/video-public-1", 503, "Service Unavailable"],
+  ]) {
+    for (const method of ["GET", "HEAD"]) {
+      for (const testCase of cases) {
+        // A HEAD response has no body by definition; an absent body alone
+        // cannot identify a corrupt HTML error page on HEAD.
+        if (method === "HEAD" && testCase.name === "missing-body") continue;
+        const calls = [];
+        const { env } = createEnv({ assets: { fetch: async (req) => {
+          calls.push(new URL(req.url).pathname);
+          return new Response(testCase.body, { status: 200, headers: testCase.headers });
+        } } });
+        if (status === 503) env.VISIBILITY_KV = undefined;
+        const res = await get(path, env, { method });
+        assert.equal(res.status, status, `${path} ${method} ${testCase.name}`);
+        assert.equal(res.headers.get("Content-Type"), "text/plain; charset=utf-8");
+        assert.equal(res.headers.get("Cache-Control"), "no-store, private");
+        assert.equal(res.headers.get("X-Robots-Tag"), "noindex, nofollow");
+        assert.equal(res.headers.get("Retry-After"), status === 503 ? "30" : null);
+        assert.equal(await res.text(), method === "HEAD" ? "" : fallback);
+        assert.deepEqual(calls, [status === 404 ? "/404" : "/503/"]);
+      }
+    }
+  }
+});
+
+test("MIG-0512 regression: valid 200 HTML error assets still serve GET and HEAD", async () => {
+  const html = "<html><body>Custom error</body></html>";
+  for (const [path, status] of [["/%2f", 404], ["/video-public-1", 503]]) {
+    for (const method of ["GET", "HEAD"]) {
+      const { env } = createEnv({ assets: { fetch: async () =>
+        new Response(method === "HEAD" ? null : html, {
+          status: 200, headers: { "Content-Type": "text/html; charset=utf-8" },
+        }),
+      } });
+      if (status === 503) env.VISIBILITY_KV = undefined;
+      const res = await get(path, env, { method });
+      assert.equal(res.status, status);
+      assert.equal(res.headers.get("Content-Type"), "text/html; charset=utf-8");
+      assert.equal(await res.text(), method === "HEAD" ? "" : html);
+    }
   }
 });
 
@@ -461,10 +538,13 @@ test("T02: missing, corrupt or mismatched route shard fails closed with 503", as
     wrongIndex: good.map((s) => (s.path === shardAssetPath(index) ? { ...s, body: s.body.replace(`"shard":${index}`, `"shard":${(index + 1) % ROUTE_SHARD_COUNT}`) } : s)),
     badEntry: good.map((s) => (s.path === shardAssetPath(index) ? { ...s, body: s.body.replace('"type":"canonical"', '"type":"public"') } : s)),
     offsiteRedirect: good.map((s) => ({ ...s, body: s.body.replace('"targetPath":"/video-public-1"', '"targetPath":"//evil.example"') })),
+    traversalRedirect: good.map((s) => ({ ...s, body: s.body.replace('"targetPath":"/video-public-1"', '"targetPath":"/groups/../video-public-1"') })),
+    encodedTraversalRedirect: good.map((s) => ({ ...s, body: s.body.replace('"targetPath":"/video-public-1"', '"targetPath":"/groups/%2e%2e/video-public-1"') })),
+    traversalCanonical: good.map((s) => ({ ...s, body: s.body.replace('"canonicalPath":"/video-public-1"', '"canonicalPath":"/groups/../video-public-1"') })),
   };
   for (const [name, shards] of Object.entries(variants)) {
     const { env } = createEnv({ manifest, shards, pages: { "/video-public-1/": "<html>v</html>" } });
-    const path = name === "offsiteRedirect" ? "/video-alias-1" : "/video-public-1";
+    const path = /Redirect$/.test(name) ? "/video-alias-1" : "/video-public-1";
     assert.equal((await get(path, env)).status, 503, name);
   }
 });
@@ -984,6 +1064,75 @@ test("MIG-0507: deny:video:<internal id> revokes both the YouTube-id URL and the
     assert.equal(res.status, 404, path);
     assert.equal(res.headers.get("Location"), null, path);
   }
+});
+
+test("MIG-0406 regression: corrupt R2 HTML cancels the open body before returning 503", async () => {
+  const decision = {
+    action: "serve", kind: "event", id: "spring-fest-2026",
+    key: "event/spring-fest-2026", generation: GENERATION,
+    canonicalPath: "/event/spring-fest-2026",
+  };
+  const metadata = {
+    kind: decision.kind, id: decision.id, key: decision.key, generation: decision.generation,
+  };
+  for (const [name, override] of [
+    ["wrong-identity", { customMetadata: { ...metadata, id: "other-event" } }],
+    ["wrong-MIME", { httpMetadata: { contentType: "application/json" } }],
+    ["unknown-size", { size: undefined }],
+    ["empty-body", { size: 0 }],
+  ]) {
+    let cancels = 0;
+    const body = new ReadableStream({ cancel() { cancels++; } });
+    const object = {
+      body, size: 18, httpMetadata: { contentType: "text/html" },
+      customMetadata: metadata, ...override,
+    };
+    const result = await loadR2PrebuiltHtml({ get: async () => object }, decision, "GET");
+    assert.equal(result.action, "unavailable", name);
+    assert.equal(result.reason, "corrupt_data", name);
+    assert.equal(cancels, 1, `${name}: unread R2 body must be canceled`);
+  }
+});
+
+test("MIG-0406 regression: stream cancel failure is best-effort; valid GET/HEAD remain unchanged", async () => {
+  const decision = {
+    action: "serve", kind: "event", id: "spring-fest-2026",
+    key: "event/spring-fest-2026", generation: GENERATION,
+    canonicalPath: "/event/spring-fest-2026",
+  };
+  const metadata = {
+    kind: decision.kind, id: decision.id, key: decision.key, generation: decision.generation,
+  };
+  const rejects = new ReadableStream({ cancel() { return Promise.reject(new Error("R2 cancel failed")); } });
+  const corrupt = await loadR2PrebuiltHtml({ get: async () => ({
+    body: rejects, size: 18, httpMetadata: { contentType: "application/json" },
+    customMetadata: metadata,
+  }) }, decision, "GET");
+  assert.equal(corrupt.action, "unavailable");
+  assert.equal(corrupt.reason, "corrupt_data", "a cleanup error must not suppress the original 503");
+
+  let getCancels = 0;
+  const htmlBody = new ReadableStream({
+    start(controller) { controller.enqueue(new TextEncoder().encode("<html>valid</html>")); controller.close(); },
+    cancel() { getCancels++; },
+  });
+  const ok = await loadR2PrebuiltHtml({ get: async () => ({
+    body: htmlBody, size: 18, httpMetadata: { contentType: "text/html" },
+    customMetadata: metadata,
+  }) }, decision, "GET");
+  assert.equal(ok.action, "serve");
+  assert.equal(await ok.response.text(), "<html>valid</html>");
+  assert.equal(getCancels, 0, "normal GET body must be consumed, not canceled");
+
+  let headCancels = 0;
+  const headBody = new ReadableStream({ cancel() { headCancels++; } });
+  const head = await loadR2PrebuiltHtml({ get: async () => ({
+    body: headBody, size: 18, httpMetadata: { contentType: "text/html" },
+    customMetadata: metadata,
+  }) }, decision, "HEAD");
+  assert.equal(head.action, "serve");
+  assert.equal(head.response.body, null);
+  assert.equal(headCancels, 1, "HEAD must still release the body stream");
 });
 
 test("MIG-0411 T06: rejected and synchronously throwing sends do not suppress the next request", async () => {

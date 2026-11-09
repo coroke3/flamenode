@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { findForbiddenPublicKeys } from "../src/lib/api/publicDto.ts";
 
 const root = process.cwd();
@@ -134,6 +135,53 @@ async function checkEndpoint(url) {
   }
 }
 
+/**
+ * A failed or malformed discovery response must not silently skip the detail
+ * leak probe. An empty, valid public list is the only acceptable no-detail case.
+ */
+export async function discoverVideoDetailEndpoint(baseUrl, fetchPage = fetchWithTimeout) {
+  const url = `${baseUrl}/api/videos?limit=1`;
+  let response;
+  try {
+    response = await fetchPage(url);
+  } catch (error) {
+    return {
+      kind: "fetch_error",
+      url,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (!response.ok) {
+    return { kind: "http_error", url, status: response.status };
+  }
+  let json;
+  try {
+    json = await response.json();
+  } catch {
+    return { kind: "invalid_json", url };
+  }
+  if (!json || typeof json !== "object" || !Array.isArray(json.items)) {
+    return { kind: "invalid_json", url };
+  }
+  const isInt = (value, min) => Number.isInteger(value) && value >= min;
+  // Public list envelope is { items, total, page, limit }; anything else is malformed.
+  if (!isInt(json.total, 0) || !isInt(json.page, 1) || !isInt(json.limit, 1)) {
+    return { kind: "invalid_json", url };
+  }
+  if (json.items.length === 0) {
+    return json.total === 0 ? { kind: "empty" } : { kind: "invalid_json", url };
+  }
+  if (json.total < json.items.length) return { kind: "invalid_json", url };
+  const id = json.items[0]?.id;
+  if (typeof id !== "string" || !id.trim()) {
+    return { kind: "invalid_json", url };
+  }
+  return {
+    kind: "ok",
+    endpoint: `${baseUrl}/api/videos/${encodeURIComponent(id)}`,
+  };
+}
+
 async function runLiveCheck(baseUrl) {
   if (!/^https?:\/\//i.test(baseUrl ?? "")) {
     console.error("Usage: node scripts/check-public-api-leaks.mjs --live <baseUrl>");
@@ -146,22 +194,21 @@ async function runLiveCheck(baseUrl) {
     `${normalized}/api/events?limit=5`,
     `${normalized}/api/software/suggestions?limit=5`,
   ];
-  try {
-    const listResponse = await fetchWithTimeout(
-      `${normalized}/api/videos?limit=1`,
-    );
-    if (listResponse.ok) {
-      const listJson = await listResponse.json();
-      const id = listJson?.items?.[0]?.id;
-      if (typeof id === "string" && id.trim()) {
-        endpoints.push(`${normalized}/api/videos/${encodeURIComponent(id)}`);
-      }
-    }
-  } catch {
-    // 各endpoint検査で到達不能を明示する。
+  const detail = await discoverVideoDetailEndpoint(normalized);
+  let exitCode = 0;
+  if (detail.kind === "ok") {
+    endpoints.push(detail.endpoint);
+  } else if (detail.kind === "fetch_error") {
+    console.error(`[fetch error] ${detail.url}: ${detail.message}`);
+    exitCode = 2;
+  } else if (detail.kind === "http_error") {
+    console.error(`[HTTP ${detail.status}] ${detail.url}`);
+    exitCode = 3;
+  } else if (detail.kind === "invalid_json") {
+    console.error(`[invalid json] ${detail.url}: expected items array with a valid video id`);
+    exitCode = 3;
   }
 
-  let exitCode = 0;
   for (const url of endpoints) {
     const result = await checkEndpoint(url);
     if (result.kind === "fetch_error") {
@@ -187,5 +234,10 @@ async function runLiveCheck(baseUrl) {
   );
 }
 
-if (liveIndex >= 0) await runLiveCheck(liveBaseUrl);
-else runStaticCheck();
+// Importing this module for regression tests must not run the CLI checks.
+const invoked = process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invoked) {
+  if (liveIndex >= 0) await runLiveCheck(liveBaseUrl);
+  else runStaticCheck();
+}
