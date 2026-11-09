@@ -38,13 +38,20 @@ export async function send<T extends { ok: boolean }>(
   } catch {
     return response.status === 401 ? { status: "anonymous" } : { status: "unavailable" };
   }
+  // An HTTP authentication failure is never a successful mutation, even if
+  // an upstream proxy returns a success-shaped JSON envelope.
+  if (response.status === 401) return { status: "anonymous" };
   if (
     value !== null &&
     typeof value === "object" &&
+    !Array.isArray(value) &&
     "ok" in value &&
     typeof value.ok === "boolean"
   ) {
+    // Preserve an explicit API denial so callers can display its message.
+    // Fail closed if an HTTP error misleadingly contains { ok: true }.
+    if (!response.ok && value.ok) return { status: "unavailable" };
     return { status: "ok", data: value as T };
   }
-  return response.status === 401 ? { status: "anonymous" } : { status: "unavailable" };
+  return { status: "unavailable" };
 }
