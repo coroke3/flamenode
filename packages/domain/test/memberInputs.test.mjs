@@ -55,3 +55,20 @@ test("MIG-0651: chapter times preserve strict mm:ss format and fallback label", 
   assert.equal(bad.ok,false);
   assert.match(bad.message,/時刻/);
 });
+
+test("MIG-0651: over-limit member arrays fail before deep per-member validation", () => {
+  const massive = Array.from({ length: 10_000 }, () => ({
+    name: "member", x_user_id: "", chapters: [{ time: "invalid", label: "", note: "" }],
+  }));
+  assert.deepEqual(parseVideoMemberInputs(JSON.stringify(massive), true), {
+    ok: false, message: "合作メンバーは最大100人です。",
+  }, "invalid nested member fields must not require 10,000 Zod traversals");
+  assert.deepEqual(parseVideoMemberInputs(JSON.stringify(massive), false), {
+    ok: true, members: [],
+  }, "non-collab input is intentionally ignored");
+  const atLimit = Array.from({ length: 100 }, (_, i) => ({
+    name: "Person " + i, x_user_id: "",
+  }));
+  assert.equal(parseVideoMemberInputs(JSON.stringify(atLimit), true).ok, true,
+    "the existing 100-member boundary remains accepted");
+});
