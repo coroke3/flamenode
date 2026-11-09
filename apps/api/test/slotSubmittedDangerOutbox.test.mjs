@@ -229,6 +229,8 @@ test("MIG-0656 target submission-release DM mirrors CURRENT safe group rendering
 test("MIG-0656: CURRENT #660 malformed legacy UTF-16 rendering parity (提出グループ)", () => {
   const cases = [
     ["x".repeat(255) + "\ud83d" + "tail", "x".repeat(255) + "…"],
+    ["x".repeat(255) + "\ud83d", "x".repeat(255) + "…"],
+    ["x".repeat(255) + "\ude00", "x".repeat(255) + "�"],
     ["x".repeat(255) + "\ude00" + "tail", "x".repeat(255) + "�…"],
     ["prefix\ud83dsuffix", "prefix�suffix"],
     ["prefix\ude00suffix", "prefix�suffix"],
