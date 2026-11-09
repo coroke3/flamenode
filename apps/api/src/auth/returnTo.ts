@@ -11,11 +11,33 @@ export function sanitizeAuthReturnTo(value: string | null | undefined, fallback=
   return path;
 }
 
+/** The browser normalizes dot segments and decodes percent-encoded route bytes.
+ * Inspect that canonical path rather than comparing only the raw query value.
+ * Decode up to three layers to fail closed on nested route-encoding bypasses.
+ */
+function postAuthPath(value: string): string | null {
+  const origin = "https://auth-return-target.invalid";
+  try {
+    let path = new URL(value, origin).pathname;
+    for (let i = 0; i < 3; i++) {
+      const decoded = decodeURIComponent(path);
+      if (decoded === path) break;
+      path = decoded;
+    }
+    if (path.includes("\\") || /[\u0000-\u001f\u007f]/.test(path)) return null;
+    const canonical = new URL(path, origin);
+    return canonical.origin === origin ? canonical.pathname : null;
+  } catch {
+    return null;
+  }
+}
+
 /** CURRENT authComplete redirect: prevent loops into Auth.js and onboarding. */
 export function sanitizePostAuthReturnTo(value: string | null | undefined, fallback="/dashboard"): string {
-  const candidate=sanitizeAuthReturnTo(value,fallback);
-  const path=candidate.split(/[?#]/,1)[0]||"/";
-  return BLOCKED_AUTH_PATHS.some(prefix=>path===prefix||path.startsWith(prefix+"/"))
+  const candidate = sanitizeAuthReturnTo(value, fallback);
+  const path = postAuthPath(candidate);
+  if (path === null) return fallback;
+  return BLOCKED_AUTH_PATHS.some(prefix => path === prefix || path.startsWith(prefix + "/"))
     ? fallback : candidate;
 }
 
