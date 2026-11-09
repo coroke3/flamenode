@@ -12,6 +12,7 @@ import { buildAfterXUserPublicUpdateQueueBatch } from "@flamenode/server-core/st
 import { auditPreloaded, readAdminJsonBody, BODY_TOO_LARGE_MESSAGE } from "../admin/body.ts";
 import { limitXIdActionBody } from "../../middleware/bodyLimit.ts";
 import { parseSetXIdIconInput } from "./profileInput.ts";
+import { cleanupOldXIconAfterCommit } from "./orphanCleanup.ts";
 
 type IconRow = Record<string, unknown> & {
   id: string;
@@ -122,8 +123,13 @@ export function createXIdIconSelectRoutes(guard: MiddlewareHandler<AppEnv>): Hon
     } catch {
       return c.json({ ok: false, message: "アイコンを更新できませんでした。再読み込みしてお試しください。" }, 409);
     }
-    // CURRENT also cleans up unreferenced old icons post-commit. That flow is
-    // not wired here: this route MUST remain unmounted until ported and tested.
+    // CURRENT best-effort orphan cleanup happens only after the D1 commit.
+    // Any missing table, R2 error, reused URL or uncertain reference retains
+    // the object; an unsuccessful cleanup never turns a committed write into
+    // an HTTP failure that would encourage duplicate submissions.
+    if (c.env.BUCKET) {
+      await cleanupOldXIconAfterCommit(c.env.DB, c.env.BUCKET, before.icon_url, input.value.iconUrl);
+    }
     return c.json({ ok: true, message: "アイコンを更新しました。" });
   });
   return routes;
