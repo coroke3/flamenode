@@ -73,7 +73,13 @@ function groupIdForDiscordDisplay(groupId: string): string {
   // A malformed persisted legacy ID must not consume an entire Discord message.
   // Preserve a surrogate pair at the UTF-16 boundary before adding an ellipsis.
   const clipped = cleaned.slice(0, 256).replace(/[\uD800-\uDBFF]$/, "");
-  return escapeDiscordMention(clipped + (clipped.length < cleaned.length ? "…" : ""));
+  // Corrupt legacy UTF-16 can contain isolated low/high surrogates even before truncation.
+  // Replace those code units without altering complete emoji pairs.
+  const safe = clipped.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    "�",
+  );
+  return escapeDiscordMention(safe + (clipped.length < cleaned.length ? "…" : ""));
 }
 
 /** 運営による枠強制解放 DM。 */
