@@ -21,6 +21,15 @@ test("entry/unslotted: 100 UTF-16-unit limit never splits an emoji", () => {
   assert.ok(!/[\uD800-\uDBFF]$/.test(normalizeUnslottedEventQuery(split)));
 });
 
+test("entry/unslotted: incoming malformed UTF-16 is replaced, complete emoji remain", () => {
+  assert.equal(normalizeUnslottedEventQuery("a\uD83Db"), "a�b");
+  assert.equal(normalizeUnslottedEventQuery("a\uDE00b"), "a�b");
+  assert.equal(normalizeUnslottedEventQuery("\uD83D\uDE00"), "😀");
+  assert.equal(normalizeUnslottedEventQuery("A".repeat(98) + "😀"), "A".repeat(98) + "😀");
+  assert.equal(normalizeUnslottedEventQuery("A".repeat(99) + "\uDE00tail"), "A".repeat(99) + "�");
+  assert.equal(normalizeUnslottedEventQuery("\uD83Dtail"), "�tail");
+});
+
 test("entry/unslotted page uses the tested query normalizer", () => {
   const page = readFileSync(new URL("../../../app/(auth)/entry/unslotted/page.tsx", import.meta.url), "utf8");
   assert.match(page, /event_q\?: string \| string\[\]/);
