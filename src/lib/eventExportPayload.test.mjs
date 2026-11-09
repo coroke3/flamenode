@@ -538,6 +538,24 @@ test("イベント公開APIは範囲外Unix時刻をnullまたは空文字へ閉
   assert.equal(legacy.time, "");
 });
 
+test("SEC-575: raw cache with duplicate JSON keys or noncanonical bytes cannot be a HIT", () => {
+  const earlier = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_100, "scheduled"));
+  const later = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_200, "scheduled"));
+  assert.match(earlier, /"schema_version":5/);
+  // JSON.parse produces the same object after overwriting the duplicate key.
+  // Serving the raw bytes could expose a different value to another JSON reader.
+  const duplicate = earlier.replace('"schema_version":5', '"schema_version":5,"schema_version":5');
+  assert.notEqual(duplicate, earlier);
+  assert.deepEqual(JSON.parse(duplicate), JSON.parse(earlier));
+  assert.equal(eventExportBodyMatchesFresh(duplicate, later, "v5"), false);
+  assert.equal(eventExportBodyMatchesFresh(duplicate, duplicate, "v5"), false);
+  assert.equal(eventExportBodyMatchesFresh(" " + earlier, later, "v5"), false);
+  assert.equal(eventExportBodyMatchesFresh(earlier, later, "v5"), true);
+  const legacy = JSON.stringify(buildLegacyEventExportPayload(snapshot));
+  assert.equal(eventExportBodyMatchesFresh(legacy, legacy, "legacy"), true);
+  assert.equal(eventExportBodyMatchesFresh(" " + legacy, " " + legacy, "legacy"), false);
+});
+
 test("SEC-575: v5 cached payload tolerates generation timestamp only, never changed public data", () => {
   const earlier = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_100, "scheduled"));
   const later = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_200, "scheduled"));
