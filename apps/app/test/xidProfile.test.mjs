@@ -58,6 +58,21 @@ test("MIG-0708 U02: icon selection is JSON, upload is multipart without content-
   assert.equal(calls[1].init.headers["content-type"], undefined);
 });
 
+test("MIG-0708 U02: direct icon upload rejects disallowed MIME and over 8 MiB before fetch", async () => {
+  let calls = 0;
+  const api = createXidProfileApi(async () => { calls++; return ok(); });
+  const unsupported = new Blob(["not an image"], { type: "text/plain" });
+  assert.deepEqual(await api.uploadIcon("foo", unsupported), { ok: false });
+  const unspecified = new Blob(["unknown"]);
+  assert.deepEqual(await api.uploadIcon("foo", unspecified), { ok: false });
+  const tooLarge = new Blob([new Uint8Array(8 * 1024 * 1024 + 1)], { type: "image/png" });
+  assert.deepEqual(await api.uploadIcon("foo", tooLarge), { ok: false });
+  assert.equal(calls, 0, "invalid uploads must not reach HTTP transport");
+  const allowed = new Blob(["small"], { type: "image/webp" });
+  assert.deepEqual(await api.uploadIcon("foo", allowed), { ok: true });
+  assert.equal(calls, 1);
+});
+
 test("MIG-0708 U02: 413 validation, provider failure and malformed 200 fail closed", async () => {
   const responses = [
     new Response(JSON.stringify({ ok: false, message: "画像は8MB以下にしてください。" }), { status: 413 }),
