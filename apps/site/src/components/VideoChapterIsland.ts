@@ -123,6 +123,7 @@ export function VideoChapterIsland({
       // In-flight successful writes are never displayed as the new viewer's result.
       epoch.current += 1;
       pending.current = false;
+      pendingDeleteId.current = null;
       setBusy(false);
       setTime(""); setLabel(""); setNote(""); setBulkCsv(""); setVisibility("public");
       draftBaseline.current = { time: "", label: "", note: "", csv: "" };
@@ -148,6 +149,7 @@ export function VideoChapterIsland({
     if (prev.videoId !== videoId) setPlayerSeconds(null);
     epoch.current += 1;
     pending.current = false;
+    pendingDeleteId.current = null;
     setBusy(false);
     setTime(""); setLabel(""); setNote(""); setBulkCsv(""); setVisibility("public");
     draftBaseline.current = { time: "", label: "", note: "", csv: "" };
@@ -163,6 +165,7 @@ export function VideoChapterIsland({
     if (!previous || canBulk) return;
     epoch.current += 1;
     pending.current = false;
+    pendingDeleteId.current = null;
     setBusy(false);
     setBulkCsv("");
     setBulkErrors([]);
@@ -178,6 +181,7 @@ export function VideoChapterIsland({
     if (editingAuthorized) return;
     epoch.current += 1;
     pending.current = false;
+    pendingDeleteId.current = null;
     setBusy(false);
     setEditingId(null); setComposerOpen(false);
     setTime(""); setLabel(""); setNote(""); setBulkCsv(""); setVisibility("public");
