@@ -96,9 +96,9 @@ test("video status notification templates use the Worker-provided site origin", 
     videoTitle: "Test",
   }, env);
   assert.equal(approved.url, "https://api-origin.example/v-1");
-  assert.match(approved.content, /https:\\/\\/api-origin\\.example\\/event\\/e-1/);
+  assert.match(approved.content, /https:\/\/api-origin\.example\/event\/e-1/);
   assert.equal(changed.url, "https://api-origin.example/v-2");
-  assert.match(changed.content, /https:\\/\\/api-origin\\.example\\/dashboard\\/edit\\/v-2/);
+  assert.match(changed.content, /https:\/\/api-origin\.example\/dashboard\/edit\/v-2/);
 });
 
 test("visibility manifest host uses R2 ETag preconditions for writes", async () => {
