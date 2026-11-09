@@ -46,7 +46,9 @@ export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   // Preserve the 100 UTF-16-unit limit without cutting a surrogate pair.
   const q = (url.searchParams.get("q") ?? "").trim().slice(0, MAX_SEARCH_LENGTH)
-    .replace(/[\uD800-\uDBFF]$/, "");
+    .replace(/[\uD800-\uDBFF]$/, "")
+    // Replace malformed original UTF-16 while retaining valid emoji pairs.
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
   const sort = parsePublicVideoSort(url.searchParams.get("sort")?.slice(0, 16));
   const eventId = (url.searchParams.get("event") ?? "")
     .trim()
