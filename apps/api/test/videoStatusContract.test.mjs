@@ -140,3 +140,22 @@ test("MIG-0603 U02a: public/non-public transitions are fail-closed until release
   assert.equal(monotonicVideoUpdatedAt(100, 10), 101);
   assert.equal(monotonicVideoUpdatedAt(100, 200), 200);
 });
+
+
+test("MIG-0603 U02a: malformed JSON object keys cannot override inherited fields", () => {
+  const inherited = Object.create({ status: "voided", video_id: "inherited" });
+  inherited.reason = "untrusted";
+  const parsed = AdminVideoStatusBodySchema.parse(inherited);
+  // Input validators must not accidentally accept inherited authorization-relevant values.
+  assert.equal(parsed.status, undefined);
+  assert.equal(parsed.video_id, undefined);
+  assert.equal(admin(parsed).status, "");
+  assert.equal(admin(parsed).videoId, "");
+});
+
+test("MIG-0603 U02a: nested JSON values cannot bypass scalar validation", () => {
+  for (const value of [[], ["1"], {}, { toString: "1" }]) {
+    assert.equal(AdminVideoStatusBodySchema.safeParse({ status: value }).success, false);
+    assert.equal(ManageVideoStatusBodySchema.safeParse({ event_id: value }).success, false);
+  }
+});
