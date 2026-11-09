@@ -85,7 +85,7 @@ export function createVideoVisibilityTransitionHost(
     dropIsolateEntry: options.dropIsolateEntry ?? (() => undefined),
     readEdgeCache: (): EdgeCachePort =>
       options.edgeCache ?? {
-        delete: (url) => caches.default.delete(url),
+        delete: (url) => (caches as unknown as { default: { delete(request: RequestInfo | URL): Promise<boolean> } }).default.delete(url),
       },
   };
   const notificationEnv = {
