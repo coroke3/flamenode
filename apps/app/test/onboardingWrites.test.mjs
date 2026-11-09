@@ -366,3 +366,26 @@ test("D-16-3: changing API identity hides prior private data and applies anonymo
     }
   }
 });
+
+
+test("D-16-3: StrictMode effect replay still applies the initial anonymous result", async () => {
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  const api = {
+    getDashboard: async () => ({ status: "anonymous" }),
+  };
+  const Demo = () => {
+    const state = useApiResult(api, "dashboard", (client) => client.getDashboard());
+    return React.createElement("p", null, state.status);
+  };
+  try {
+    await act(async () => root.render(
+      React.createElement(React.StrictMode, null, React.createElement(Demo)),
+    ));
+    await flush();
+    assert.equal(container.textContent, "anonymous");
+    assert.notEqual(container.textContent, "loading");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
