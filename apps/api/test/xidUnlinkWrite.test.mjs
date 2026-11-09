@@ -117,3 +117,19 @@ test("SA-103 isolated route rejects invalid confirmation, unlinked account and f
   assert.equal(cross.sessionCalls, 0);
   assert.equal(cross.stats.reads, 0);
 });
+
+test("SA-103 isolated unlink rolls back if the supposedly non-active X becomes active after preflight", async () => {
+  let switched = false;
+  const h = setup({ active: false, onFirst: (statement, sqlite) => {
+    if (!switched && statement.includes("WITH actor AS")) {
+      switched = true;
+      sqlite.prepare('UPDATE "user" SET active_x_user_id=? WHERE id=?').run("x_one", USER.id);
+    }
+  } });
+  const res = await h.send();
+  assert.equal(switched, true, "active X must change between dependency read and DELETE");
+  assert.equal(res.status, 409);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM x_user_account_links").get().n, 1);
+  assert.equal(h.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id=?').get(USER.id).active_x_user_id, "x_one");
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
