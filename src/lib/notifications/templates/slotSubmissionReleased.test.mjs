@@ -153,6 +153,9 @@ if (runTestWithTsx(import.meta.url)) {
     const cases = [
       ["x".repeat(255) + "\ud83d" + "tail", "x".repeat(255) + "…"],
       ["x".repeat(255) + "\ude00" + "tail", "x".repeat(255) + "�…"],
+      ["prefix\ud83dsuffix", "prefix�suffix"],
+      ["prefix\ude00suffix", "prefix�suffix"],
+      ["prefix😀suffix", "prefix😀suffix"],
       ["x".repeat(254) + "😀" + "tail", "x".repeat(254) + "😀…"],
     ];
     for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
