@@ -851,6 +851,8 @@ function stagedSa030Harness({ role = "admin", mutateAfterRead = false, settings 
     },
   });
   seedBase(sqlite, { role, settings });
+  seedEvent(sqlite, { id: "ev-2", title: "Second event" });
+  seedEvent(sqlite, { id: "ev-3", title: "Third event" });
   sqlite.exec(`
     CREATE TABLE event_groups (id TEXT PRIMARY KEY);
     CREATE TABLE event_group_events (
@@ -884,8 +886,16 @@ function stagedSa030Harness({ role = "admin", mutateAfterRead = false, settings 
       method: "DELETE", headers: { Origin: origin },
     }), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE },
   );
+  const add = (eventIds, path = "/api/admin/event-groups/grp-1/events",
+              origin = STAGED_WRITE_SITE) => app.request(
+    new Request(STAGED_WRITE_SITE + path, {
+      method: "POST",
+      headers: { Origin: origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ eventIds }),
+    }), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE },
+  );
   const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
-  return { sqlite, stats, remove, count };
+  return { sqlite, stats, remove, add, count };
 }
 
 test("SA-030 U04 staged: real SQLite DELETE, full restorable audit and queue are atomic", async () => {
@@ -994,5 +1004,69 @@ test("SA-030 U04 staged: production admin index does not expose incomplete DELET
     assert.equal(stats.batches, 0);
   } finally {
     sqlite.close();
+  }
+});
+
+
+test("SA-029 U04 staged: add membership writes rows, restorable audits and queue atomically", async () => {
+  const h = stagedSa030Harness();
+  try {
+    const response = await h.add(["ev-2", "ev-3", "ev-2"]);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, id: "grp-1", added: 2 });
+    assert.equal(h.count("event_group_events"), 3);
+    assert.equal(h.count("audit_logs"), 2);
+    assert.equal(h.count("static_rebuild_queue"), 1);
+    const audits = h.sqlite.prepare(
+      "SELECT target_id, operation, retention_class, after_json FROM audit_logs ORDER BY target_id",
+    ).all();
+    assert.deepEqual(audits.map((row) => row.target_id), ["grp-1:ev-2", "grp-1:ev-3"]);
+    assert.ok(audits.every((row) => row.operation === "CREATE" && row.retention_class === "restorable"));
+    assert.deepEqual(JSON.parse(audits[0].after_json), {
+      event_group_id: "grp-1", event_id: "ev-2", relation_type: "member",
+      created_at: JSON.parse(audits[0].after_json).created_at,
+      updated_at: JSON.parse(audits[0].after_json).updated_at,
+    });
+    const queue = h.sqlite.prepare("SELECT target_type, target_id, reason FROM static_rebuild_queue").get();
+    assert.deepEqual({ ...queue }, {
+      target_type: "events_index", target_id: "global", reason: "event_group_member_add",
+    });
+    assert.equal(h.stats.batches, 1);
+    assert.equal(h.stats.reads, 2, "identity/ToS + joined snapshot; production S4 adds one read");
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-029 U04 staged: 80 distinct IDs fit one atomic 49/50-query plan", async () => {
+  const h = stagedSa030Harness();
+  try {
+    const ids = Array.from({ length: 80 }, (_, i) => "bulk-" + String(i).padStart(3, "0"));
+    for (const id of ids) seedEvent(h.sqlite, { id, title: id });
+    const response = await h.add(ids);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, id: "grp-1", added: 80 });
+    assert.equal(h.count("event_group_events"), 81);
+    assert.equal(h.count("audit_logs"), 80);
+    assert.equal(h.count("static_rebuild_queue"), 1);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-029 U04 staged: invalid event IDs and 81 distinct IDs fail before mutation", async () => {
+  const h = stagedSa030Harness();
+  try {
+    const missing = await h.add(["ev-2", "missing-event"]);
+    assert.equal(missing.status, 400);
+    const tooMany = await h.add(Array.from({ length: 81 }, (_, i) => "id-" + i));
+    assert.equal(tooMany.status, 400);
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+  } finally {
+    h.sqlite.close();
   }
 });
