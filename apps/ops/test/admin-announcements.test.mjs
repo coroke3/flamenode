@@ -52,6 +52,17 @@ test("MIG-0727 U02a: denied/malformed/oversized responses never render protected
     { status: "forbidden", redirect: "/dashboard" });
   assert.deepEqual(await readAdminAnnouncements(q, async () => reply(200, { ...sample, items: [{ id: "broken" }] })),
     { status: "unavailable" });
+  assert.deepEqual(await readAdminAnnouncements(q, async () => reply(200, sample)),
+    { status: "unavailable" }, "a response with stale audience/status cannot be rendered under another filter");
+  assert.deepEqual(await readAdminAnnouncements(
+    new URLSearchParams("audience=creators&status=draft"),
+    async () => reply(200, { ...sample, status: "published" }),
+  ), { status: "unavailable" }, "a stale status filter is rejected");
+  assert.deepEqual(await readAdminAnnouncements(
+    new URLSearchParams("audience=creators&status=draft"),
+    async () => reply(200, { ...sample, audience: "admins" }),
+  ), { status: "unavailable" }, "a stale audience filter is rejected");
+
   assert.deepEqual(await readAdminAnnouncements(q, async () => reply(200, {
     ...sample, items: Array.from({ length: 51 }, () => sample.items[0]),
   })), { status: "unavailable" });
