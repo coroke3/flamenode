@@ -46,7 +46,7 @@ const jstDateTime = new Intl.DateTimeFormat("ja-JP", {
 });
 
 export function formatAnnouncementUnix(value: number | null, dateOnly = false): string {
-  if (value == null || !Number.isFinite(value)) return "—";
+  if (value == null || !Number.isFinite(value) || value === 0) return "—";
   const date = new Date(value * 1000);
   if (!Number.isFinite(date.getTime())) return "—";
   return (dateOnly ? jstDate : jstDateTime).format(date);
