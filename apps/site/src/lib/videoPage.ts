@@ -208,7 +208,10 @@ export async function loadVideoPagesForBuild(
 
     // CURRENT looks up a playlist only for the video-selected primary event.
     // Display fallback events must not inherit an unrelated event's playlist.
-    if (!eventId || eventId !== primaryEventId || scheduledTime == null || scheduledTime <= now) {
+    // Preserve CURRENT second-granularity scheduling semantics: a timestamp
+    // within the current second is not a future scheduled release, even if the
+    // supplied raw value has fractional microseconds.
+    if (!eventId || eventId !== primaryEventId || scheduledTime == null || Math.floor(scheduledTime) <= now) {
       pages.push(...built);
       return;
     }
