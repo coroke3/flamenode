@@ -42,7 +42,8 @@ export function AdminApiEndpointMutations({ data, api, onSuccess }: Props): Reac
     }
   }
 
-  const validOptions = data.eventOptions.filter(row => row.enabled === 0 && row.id.trim().length > 0);
+  // CURRENT offers all public events, including already-issued links (labelled accordingly).
+  const validOptions = data.eventOptions.filter(row => row.id.trim().length > 0);
   return <section className="fn-panel" aria-label="API発行・無効化">
     <h2>イベントAPIを有効化</h2>
     <form onSubmit={e => {
@@ -55,7 +56,7 @@ export function AdminApiEndpointMutations({ data, api, onSuccess }: Props): Reac
         <select name="event_id" className="fn-select" required value={eventId}
           onChange={e => setEventId(e.currentTarget.value)} disabled={busy}>
           <option value="">公開イベントを選択</option>
-          {validOptions.map(row => <option key={row.id} value={row.id}>{row.title} ({row.id})</option>)}
+          {validOptions.map(row => <option key={row.id} value={row.id}>{row.title} ({row.id}){row.enabled === 1 ? " / 発行済み" : ""}</option>)}
         </select></label>
       <button type="submit" className="fn-btn fn-btn-primary"
         disabled={busy || !eventId || !validOptions.some(row => row.id === eventId)}>
