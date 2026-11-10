@@ -1304,6 +1304,137 @@ test("SA-027 U03 staged: stale base_updated_at is rejected before any mutation",
 });
 
 
+
+
+function stagedSlugConflictHarness({ race = null } = {}) {
+  const { db, sqlite, stats } = createAdminD1();
+  seedBase(sqlite);
+  sqlite.exec(`
+    CREATE TABLE event_groups (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+      description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+      accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    INSERT INTO event_groups VALUES (
+      'grp-update', 'Existing group', 'existing-group', NULL, 'series',
+      NULL, NULL, NULL, 'private', 0, 10, 20
+    );
+  `);
+  if (race === "create") {
+    sqlite.exec(`
+      CREATE TRIGGER simulate_create_slug_race
+      BEFORE INSERT ON event_groups
+      WHEN NEW.id = 'grp-created'
+      BEGIN
+        INSERT INTO event_groups VALUES (
+          'concurrent-create', 'Concurrent group', NEW.slug, NULL, 'series',
+          NULL, NULL, NULL, 'private', 0, 10, 20
+        );
+      END;
+    `);
+  } else if (race === "update") {
+    sqlite.exec(`
+      CREATE TRIGGER simulate_update_slug_race
+      BEFORE UPDATE ON event_groups
+      WHEN NEW.id = 'grp-update'
+      BEGIN
+        INSERT INTO event_groups VALUES (
+          'concurrent-update', 'Concurrent group', NEW.slug, NULL, 'series',
+          NULL, NULL, NULL, 'private', 0, 10, 20
+        );
+      END;
+    `);
+  }
+  const originOptions = {
+    loadSiteUrl: () => STAGED_WRITE_SITE,
+    allowLocalPreview: () => false,
+  };
+  const app = new Hono();
+  app.use("*", originGuardMiddleware(originOptions));
+  app.use("*", async (c, next) => {
+    c.set("user", admin);
+    c.set("sessionState", "user");
+    await next();
+  });
+  app.use("*", writeGuardMiddleware(originOptions));
+  app.use("*", dbMiddleware);
+  app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+  const send = (method, path, body) => app.request(new Request(
+    STAGED_WRITE_SITE + path,
+    {
+      method,
+      headers: { Origin: STAGED_WRITE_SITE, "Content-Type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    },
+  ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+  return { sqlite, stats, create: (slug) => send("POST", "/api/admin/event-groups", {
+    id: "grp-created", name: "Created group", slug, group_type: "series",
+    visibility_status: "private", sort_order: 1,
+  }), update: (slug) => send("PATCH", "/api/admin/event-groups/grp-update", {
+    id: "grp-update", base_updated_at: 20, name: "Updated group", slug,
+    group_type: "series", visibility_status: "private",
+  }) };
+}
+
+test("SA-026/027 U03 staged: duplicate slugs are rejected before any mutation", async () => {
+  const create = stagedSlugConflictHarness();
+  const update = stagedSlugConflictHarness();
+  try {
+    create.sqlite.prepare("INSERT INTO event_groups VALUES (?, ?, ?, NULL, 'series', NULL, NULL, NULL, 'private', 0, 10, 20)")
+      .run("grp-other", "Other group", "taken-slug");
+    update.sqlite.prepare("INSERT INTO event_groups VALUES (?, ?, ?, NULL, 'series', NULL, NULL, NULL, 'private', 0, 10, 20)")
+      .run("grp-other", "Other group", "taken-slug");
+    const created = await create.create("taken-slug");
+    const updated = await update.update("taken-slug");
+    assert.equal(created.status, 400);
+    assert.equal(updated.status, 400);
+    assert.deepEqual(await created.json(), {
+      ok: false, message: "このスラッグは既に使われています。",
+    });
+    assert.deepEqual(await updated.json(), {
+      ok: false, message: "このスラッグは既に使われています。",
+    });
+    for (const h of [create, update]) {
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 2);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+      assert.equal(h.stats.batches, 0);
+    }
+  } finally {
+    create.sqlite.close();
+    update.sqlite.close();
+  }
+});
+
+test("SA-026/027 U03 staged: unique-index slug races roll back CREATE and UPDATE batches", async () => {
+  const create = stagedSlugConflictHarness({ race: "create" });
+  const update = stagedSlugConflictHarness({ race: "update" });
+  try {
+    const created = await create.create("raced-create-slug");
+    const updated = await update.update("raced-update-slug");
+    assert.equal(created.status, 500);
+    assert.equal(updated.status, 500);
+    assert.deepEqual(await created.json(), {
+      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+    });
+    assert.deepEqual(await updated.json(), {
+      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+    });
+    assert.equal(create.sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
+    assert.equal(update.sqlite.prepare("SELECT slug FROM event_groups WHERE id = 'grp-update'").get().slug, "existing-group");
+    assert.equal(update.sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
+    for (const h of [create, update]) {
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+      assert.equal(h.stats.batches, 1);
+    }
+  } finally {
+    create.sqlite.close();
+    update.sqlite.close();
+  }
+});
+
 test("SA-028 U03 staged: group DELETE atomically removes every relation with restorable snapshots", async () => {
   const { db, sqlite, stats } = createAdminD1();
   try {
