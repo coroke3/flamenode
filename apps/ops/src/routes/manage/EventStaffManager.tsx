@@ -97,13 +97,15 @@ function parseStaffCsvText(input: string): string[][] {
     row.push(field);
     if (row.some(cell => cell.trim())) rows.push(row);
   }
-  return rows;
+  return { rows, malformed: inQuotes };
 }
 
 function buildStaffCsvPreview(text: string, members: readonly ManageStaffMember[], isSiteAdmin: boolean) {
   const existing = new Set(members.map(member => member.x_user_id?.replace(/^@+/, "").trim().toLowerCase()).filter((value): value is string => !!value));
-  const parsed = parseStaffCsvText(text).map(row => row.map(cell => cell.trim()));
+  const parsedCsv = parseStaffCsvText(text);
+  const parsed = parsedCsv.rows.map(row => row.map(cell => cell.trim()));
   const rows: StaffCsvRow[] = [];
+  const seenXIds = new Set<string>();
   parsed.forEach((cols, index) => {
     const first = cols[0]?.toLowerCase() ?? "";
     const second = cols[1]?.toLowerCase() ?? "";
@@ -112,6 +114,8 @@ function buildStaffCsvPreview(text: string, members: readonly ManageStaffMember[
     const [rawName = "", rawXId = "", rawAssignment = "", rawPublic = "0", rawLabel = ""] = cols;
     const xUserId = rawXId.replace(/^@+/, "").trim().toLowerCase();
     const errors: string[] = [];
+    if (seenXIds.has(xUserId)) errors.push("同じCSV内にX IDが重複しています。");
+    seenXIds.add(xUserId);
     let preset: EventStaffPreset = "public_staff";
     let permissionKeys: PermissionKey[] = [];
     const assignment = rawAssignment.trim();
@@ -134,6 +138,9 @@ function buildStaffCsvPreview(text: string, members: readonly ManageStaffMember[
       }
     }
     if (cols.length !== 5) errors.push("正本CSVは「表示名,X ID,担当プリセット,公開フラグ,公開ラベル」の5列です。");
+    if (!rawName.trim() || rawName.trim().length > 80) errors.push("表示名は1〜80文字で入力してください。");
+    if (rawLabel.trim().length > 40) errors.push("公開ラベルは40文字以内で入力してください。");
+    if (rawPublic !== "0" && rawPublic !== "1") errors.push("公開フラグは0または1を指定してください。");
     if (!/^[a-z0-9_]{1,32}$/.test(xUserId)) errors.push("X ID の形式が正しくありません。");
     if (preset === "owner") errors.push("代表者の追加・変更はCSVでは行えません。専用の代表者移譲操作を使用してください。");
     if (preset === "xid_reviewer" && !isSiteAdmin) errors.push("X ID確認担当プリセットは site admin だけが付与できます。");
@@ -156,7 +163,9 @@ function buildStaffCsvPreview(text: string, members: readonly ManageStaffMember[
     else acc[row.action] += 1;
     return acc;
   }, { create: 0, update: 0, error: 0 });
-  return { rows, counts, hasErrors: counts.error > 0 };
+  const overLimit = rows.length > 100;
+  return { rows, counts, malformed: parsedCsv.malformed, overLimit,
+    hasErrors: counts.error > 0 || overLimit || parsedCsv.malformed };
 }
 
 export interface EventStaffManagerProps {
@@ -201,6 +210,8 @@ function StaffCsvImport({
       新規 {preview.counts.create} / 更新 {preview.counts.update} / エラー {preview.counts.error}
     </p>
     <div className="manage-staff-csv-preview">
+      {preview.malformed && <p role="alert">CSVの引用符が閉じられていません。</p>}
+      {preview.overLimit && <p role="alert">CSVは100件以内にしてください。</p>}
       {preview.rows.slice(0, 10).map(row => <p key={row.lineNumber} className="fn-console-note">
         {row.lineNumber}行: {row.display_name} / @{row.x_user_id} / {PRESET_DEFINITIONS[row.permission_preset].label}
         {row.errors.length ? " / " + row.errors.join("、") : ""}
@@ -321,6 +332,7 @@ export function EventStaffManager({
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const activeIdRef = React.useRef({ eventId, fetchFn, canManageMembers, isSiteAdmin });
+  const contextEpochRef = React.useRef(0);
   const serialRef = React.useRef(0);
   // A state update is not synchronous: two submits in one event batch must not
   // start two privileged writes before React renders the disabled controls.
@@ -331,6 +343,7 @@ export function EventStaffManager({
       activeIdRef.current.canManageMembers !== canManageMembers ||
       activeIdRef.current.isSiteAdmin !== isSiteAdmin) {
     activeIdRef.current = { eventId, fetchFn, canManageMembers, isSiteAdmin };
+    contextEpochRef.current += 1; // Remount the CSV editor: never carry another event/account input across contexts.
     serialRef.current += 1;
     inFlightRef.current = null; // A new event/identity is a separate write context.
   }
@@ -512,7 +525,7 @@ export function EventStaffManager({
         <input name="self_confirm_text" className="fn-input" placeholder={"SELF CHANGE " + eventId} disabled={busy}/>
         <button className="fn-btn fn-btn-danger" disabled={busy}>代表権限を移譲</button>
       </form>}
-      <StaffCsvImport
+      <StaffCsvImport key={contextEpochRef.current}
         members={members}
         isSiteAdmin={isSiteAdmin}
         busy={busy}
