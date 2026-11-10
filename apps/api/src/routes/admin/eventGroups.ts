@@ -394,6 +394,14 @@ export function planEventGroupMembershipAdd(
   validEventIds: readonly string[],
   existingMemberIds: readonly string[],
 ): EventGroupMembershipAddPlan {
+  // This planner is exported and can be called independently of the CURRENT
+  // input normalizer. Do not accept an empty, duplicated, or oversized request
+  // merely because the caller supplied a matching number of DB lookup rows.
+  if (requestedIds.length === 0 || requestedIds.length > EVENT_GROUP_ADD_MAX ||
+      requestedIds.some((id) => !id || id !== id.trim()) ||
+      new Set(requestedIds).size !== requestedIds.length) {
+    return { ok: false, message: "存在しないイベントは追加できません。" };
+  }
   const valid = new Set(validEventIds);
   // The D1 existence read can only authorize the requested unique IDs.
   // Reject duplicate/extra returned IDs rather than accepting a forged row
