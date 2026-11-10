@@ -268,7 +268,8 @@ test("T09: the playlist gate uses the normalized public video fields", { skip: s
     ["nonfinite schedule", { primary_event_id: "ev1", scheduled_time: "Infinity" }, []],
     ["past float schedule", { primary_event_id: "ev1", scheduled_time: NOW - 0.4 }, []],
     ["same-second past fractional schedule", { primary_event_id: "ev1", scheduled_time: NOW - 0.0001 }, []],
-    ["fractional future timestamp is still future", { primary_event_id: "ev1", scheduled_time: NOW + 0.0001 },
+    ["fractional timestamp in current second is not scheduled", { primary_event_id: "ev1", scheduled_time: NOW + 0.0001 }, []],
+    ["fractional timestamp in next second is scheduled", { primary_event_id: "ev1", scheduled_time: NOW + 1.001 },
       ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
     ["overflow timestamp is not a release", { primary_event_id: "ev1", scheduled_time: 1e16 }, []],
   ]) {
