@@ -1,4 +1,5 @@
 import type { BatchItem } from "drizzle-orm/batch";
+import { SAME_VIDEO_STATUS_MESSAGE } from "@flamenode/domain/video";
 import type { WriteAuditLogInput } from "../audit/types.ts";
 import type { QueueWakeSource } from "../queues/wakeBudget.ts";
 import type { VideoVisibilityTransitionPlan } from "../visibility/videoTransition.ts";
