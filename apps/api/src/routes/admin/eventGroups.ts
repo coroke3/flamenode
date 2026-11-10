@@ -62,7 +62,7 @@ export function parseEventGroupOptionCursor(raw: string | null): Cursor | null {
     typeof (value as Cursor).updatedAt !== "number" ||
     !Number.isSafeInteger((value as Cursor).updatedAt) ||
     typeof (value as Cursor).id !== "string" ||
-    !(value as Cursor).id ||
+    !(value as Cursor).id
   ) {
     throw new Error("event_group_cursor_invalid");
   }
