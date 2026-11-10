@@ -639,8 +639,8 @@ stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
       reason: "event_group_member_remove",
       requestedByUserId: userId,
     });
-    // Count the shared parent guard reads too. This is the D1 Free per-invocation
-    // query budget, NOT the stricter S3 pre-read/CPU acceptance check.
+    // S4 + identity/ToS + joined CostGuard/relation snapshot = 3 pre-reads.
+    // The helper separately includes these reads in the 50-query logical cap.
     const budget = planEventGroupMembershipDeleteBudget({
       callerQueryCount: 3,
       queueStatementCount: queue.statements.length,
