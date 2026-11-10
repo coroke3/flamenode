@@ -287,3 +287,40 @@ export function planEventGroupUpdateValues(
     updated_at: Math.max(now, previous.updated_at + 1),
   };
 }
+
+/**
+ * CURRENT SA-026/027 write preflight is separate from parsing and payload
+ * projection. Keep the exact business failure messages outside the D1 layer.
+ * A caller must still enforce admin write authorization, current ToS/CostGuard,
+ * uniqueness and visibility fence, before constructing the atomic audit batch.
+ */
+export type EventGroupWritePreflight =
+  | { ok: true }
+  | { ok: false; message: string };
+
+export function requireEventGroupMutationId(data: ValidEventGroupMutation): EventGroupWritePreflight {
+  return data.id?.trim()
+    ? { ok: true }
+    : { ok: false, message: "ID が必要です。" };
+}
+
+/**
+ * Detect CURRENT's optimistic concurrency mismatch before constructing a write.
+ * It is NOT a replacement for the D1 UPDATE WHERE id/updated_at CAS and
+ * expected-changes assertion, which must still execute atomically with audit.
+ */
+export function checkEventGroupUpdateCas(
+  expectedUpdatedAt: number | null | undefined,
+  existingUpdatedAt: number,
+): EventGroupWritePreflight {
+  return expectedUpdatedAt != null && expectedUpdatedAt === existingUpdatedAt
+    ? { ok: true }
+    : { ok: false, message: "他の操作で更新されています。再読み込みして確認してください。" };
+}
+
+/** CURRENT detects duplicate slugs using a read before the atomic mutation. */
+export function checkEventGroupSlugAvailable(available: boolean): EventGroupWritePreflight {
+  return available
+    ? { ok: true }
+    : { ok: false, message: "このスラッグは既に使われています。" };
+}

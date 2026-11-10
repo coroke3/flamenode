@@ -12,6 +12,9 @@ import {
   parseEventGroupOptionCursor,
   planEventGroupCreateValues,
   planEventGroupUpdateValues,
+  requireEventGroupMutationId,
+  checkEventGroupUpdateCas,
+  checkEventGroupSlugAvailable,
 } from "../src/routes/admin/eventGroups.ts";
 
 const admin = { id: "admin-1", role: "admin", is_banned: 0 };
@@ -75,6 +78,33 @@ function setup({
   );
   return { get, calls, guardCalls };
 }
+
+test("SA-027 U03: CURRENT write preflight errors and CAS boundaries", () => {
+  const build = (fields = {}) => EventGroupMutationBodySchema.parse({
+    name: "Example", slug: "example", ...fields,
+  });
+  assert.deepEqual(requireEventGroupMutationId(build()), {
+    ok: false, message: "ID が必要です。",
+  });
+  assert.deepEqual(requireEventGroupMutationId(build({ id: " grp-1 " })), { ok: true });
+  assert.deepEqual(requireEventGroupMutationId(build({ id: "   " })), {
+    ok: false, message: "ID が必要です。",
+  });
+  assert.deepEqual(checkEventGroupSlugAvailable(false), {
+    ok: false, message: "このスラッグは既に使われています。",
+  });
+  assert.deepEqual(checkEventGroupSlugAvailable(true), { ok: true });
+  for (const bad of [undefined, null, 0, 42, 42.5]) {
+    assert.deepEqual(checkEventGroupUpdateCas(bad, 43), {
+      ok: false,
+      message: "他の操作で更新されています。再読み込みして確認してください。",
+    });
+  }
+  assert.deepEqual(checkEventGroupUpdateCas(43, 43), { ok: true });
+  assert.deepEqual(checkEventGroupUpdateCas(0, 0), { ok: true });
+  // A preflight success does not guarantee DB write success: the atomic
+  // UPDATE must still CAS on updated_at and check changes() in the D1 batch.
+});
 
 test("SA-026/027 U03: create/update projections preserve CURRENT invariants", () => {
   const input = EventGroupMutationBodySchema.parse({
