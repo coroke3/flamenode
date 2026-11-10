@@ -91,18 +91,18 @@ function setup({
 
 test("SA-030 U04: canonical audited D1 delete budget respects Free 50-query cap", () => {
   const one = planEventGroupMembershipDeleteBudget({
-    callerQueryCount: 5, queueStatementCount: 1,
+    callerQueryCount: 3, queueStatementCount: 1,
     auditEntryCount: 1, distinctActorCount: 1,
   });
   // 1 delete + 1 queue + 2 changes assertions + 2 audit statements
-  // + 2 audit prep reads + 5 caller reads = 13 D1 logical queries.
-  assert.deepEqual(one, { withinLimit: true, totalQueryCount: 13, limit: 50 });
+  // + 2 audit prep reads + 3 caller reads (S4 + identity + joined settings/snapshot) = 11.
+  assert.deepEqual(one, { withinLimit: true, totalQueryCount: 11, limit: 50 });
   assert.deepEqual(planEventGroupMembershipDeleteBudget({
-    callerQueryCount: 42, queueStatementCount: 1,
+    callerQueryCount: 40, queueStatementCount: 1,
     auditEntryCount: 1, distinctActorCount: 1,
   }), { withinLimit: true, totalQueryCount: 50, limit: 50 });
   assert.deepEqual(planEventGroupMembershipDeleteBudget({
-    callerQueryCount: 43, queueStatementCount: 1,
+    callerQueryCount: 41, queueStatementCount: 1,
     auditEntryCount: 1, distinctActorCount: 1,
   }), { withinLimit: false, totalQueryCount: 51, limit: 50 });
   // SA-030 always audits exactly one deleted relation; it must reject a
@@ -842,7 +842,7 @@ function stagedSa030Harness({ role = "admin", mutateAfterRead = false } = {}) {
   const { db, sqlite, stats } = createAdminD1({
     onFirst: (statement, instance) => {
       if (mutateAfterRead && !changedAfterRead &&
-          statement.includes("FROM event_groups AS g")) {
+          statement.includes("FROM system_settings AS s")) {
         changedAfterRead = true;
         instance.prepare(
           "UPDATE event_group_events SET updated_at = 201 WHERE event_group_id = ? AND event_id = ?",
@@ -910,9 +910,9 @@ test("SA-030 U04 staged: real SQLite DELETE, full restorable audit and queue are
     assert.deepEqual(queue, { target_type: "events_index", target_id: "global",
       reason: "event_group_member_remove" });
     assert.equal(h.stats.batches, 1);
-    // 2 guard reads (TOS + CostGuard), 1 joined relation read; production S4
-    // adds another D1 SELECT => S3 pre-read count is 4, still a mount STOP.
-    assert.equal(h.stats.reads, 3);
+    // The joined settings/relation snapshot replaces the standalone CostGuard
+    // read. Real S4 adds one session SELECT: 2 observed + 1 session = 3.
+    assert.equal(h.stats.reads, 2);
   } finally {
     h.sqlite.close();
   }
