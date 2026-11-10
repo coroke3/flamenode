@@ -267,6 +267,10 @@ test("T09: the playlist gate uses the normalized public video fields", { skip: s
     ["object schedule is invalid", { primary_event_id: "ev1", scheduled_time: { value: NOW + 7 * D } }, []],
     ["nonfinite schedule", { primary_event_id: "ev1", scheduled_time: "Infinity" }, []],
     ["past float schedule", { primary_event_id: "ev1", scheduled_time: NOW - 0.4 }, []],
+    ["same-second past fractional schedule", { primary_event_id: "ev1", scheduled_time: NOW - 0.0001 }, []],
+    ["fractional future timestamp is still future", { primary_event_id: "ev1", scheduled_time: NOW + 0.0001 },
+      ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    ["overflow timestamp is not a release", { primary_event_id: "ev1", scheduled_time: 1e16 }, []],
   ]) {
     const r = build([["vid1", payload({ video: fields })]], { events: [["ev1", playlistEvent()]] });
     try {
