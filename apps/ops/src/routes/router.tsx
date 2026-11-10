@@ -36,7 +36,7 @@ export class OpsRouteErrorBoundary extends React.Component<
 /** MIG-0723 U03a: read-only staff route, still delegated to Hono per-event authorization. */
 export function ManageStaffRoute({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactElement {
   const { id } = useParams<"id">();
-  return id ? <EventStaffReadOnlyPage eventId={id} fetchFn={fetchFn} />
+  return id ? <EventStaffReadOnlyPage eventId={id} fetchFn={fetchFn} editable />
     : <p role="alert">イベントIDが不正です。</p>;
 }
 
