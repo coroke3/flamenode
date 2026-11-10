@@ -104,7 +104,7 @@ test("MIG-0650 SA-082..084: bulk permission patch updates only listed rows", () 
     const result = w.sqlite.prepare(q.sql).run(...q.params);
     assert.equal(result.changes, 1);
     assert.deepEqual(
-      w.sqlite.prepare("SELECT id, can_edit FROM video_members ORDER BY id").all(),
+      w.sqlite.prepare("SELECT id, can_edit FROM video_members ORDER BY id").all().map((row) => ({ ...row })),
       [{ id: "m1", can_edit: 0 }, { id: "m2", can_edit: 1 }, { id: "m3", can_edit: 1 }],
     );
     const empty = dialect.sqlToQuery(buildMemberPermissionBulkUpdateSql([]));
@@ -125,7 +125,7 @@ test("MIG-0650 SA-082..084: hidden removal is bounded by video ID and public fla
     ));
     assert.equal(w.sqlite.prepare(q.sql).run(...q.params).changes, 1);
     assert.deepEqual(
-      w.sqlite.prepare("SELECT id FROM video_members ORDER BY id").all(),
+      w.sqlite.prepare("SELECT id FROM video_members ORDER BY id").all().map((row) => ({ ...row })),
       [{ id: "elsewhere" }, { id: "public" }],
     );
     const empty = dialect.sqlToQuery(buildHiddenMemberBulkDeleteSql("v1", []));
@@ -152,7 +152,7 @@ test("MIG-0650 SA-082..084: X profile bulk upsert never revives rejected status"
     const q = dialect.sqlToQuery(buildXUsersBulkInsertSql(inserts));
     w.sqlite.prepare(q.sql).run(...q.params);
     assert.deepEqual(
-      w.sqlite.prepare("SELECT id, x_name, approval_status FROM x_users ORDER BY id").all(),
+      w.sqlite.prepare("SELECT id, x_name, approval_status FROM x_users ORDER BY id").all().map((row) => ({ ...row })),
       [
         { id: "new", x_name: "New", approval_status: "pending" },
         { id: "rejected", x_name: "Original", approval_status: "rejected" },
@@ -161,7 +161,7 @@ test("MIG-0650 SA-082..084: X profile bulk upsert never revives rejected status"
     const repeat = w.sqlite.prepare(q.sql).run(...q.params);
     assert.ok(repeat.changes <= 1, "rejected X identity must not be overwritten");
     assert.deepEqual(
-      w.sqlite.prepare("SELECT id, x_name, approval_status FROM x_users ORDER BY id").all(),
+      w.sqlite.prepare("SELECT id, x_name, approval_status FROM x_users ORDER BY id").all().map((row) => ({ ...row })),
       [
         { id: "new", x_name: "New", approval_status: "pending" },
         { id: "rejected", x_name: "Original", approval_status: "rejected" },
