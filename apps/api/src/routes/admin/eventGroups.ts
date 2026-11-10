@@ -44,7 +44,10 @@ export function parseEventGroupOptionCursor(raw: string | null): Cursor | null {
     !Number.isSafeInteger((value as Cursor).updatedAt) ||
     typeof (value as Cursor).id !== "string" ||
     !(value as Cursor).id ||
-    (value as Cursor).id.length > MAX_EVENT_GROUP_ID_LENGTH
+    (value as Cursor).id.length > MAX_EVENT_GROUP_ID_LENGTH ||
+    // Numeric-looking timestamps outside Date/SQLite's accepted range can
+    // still be safe integers, but must never enter the seek query.
+    (value as Cursor).updatedAt < 0
   ) {
     throw new Error("event_group_cursor_invalid");
   }
