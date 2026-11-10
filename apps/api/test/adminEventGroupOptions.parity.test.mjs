@@ -167,6 +167,7 @@ test("SA-025: malformed input is rejected before candidate SELECT without echoin
     "groupId=g1&cursor=%7Bbad",
     "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 3.5, id: "abc" })),
     "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 5, id: "" })),
+    "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: -1, id: "abc" })),
     "groupId=g1&cursor=" + encodeURIComponent("x".repeat(201)),
   ]) {
     const response = await get(query);
