@@ -15,12 +15,12 @@ import { manageNotificationCenterRoutes } from "./notificationCenter.ts";
 import { manageOverviewRoutes } from "./overview.ts";
 import { manageSlotsRoutes } from "./slots.ts";
 import { manageStaffRoutes } from "./staff.ts";
+import { registerStaffWriteRoutes } from "./staffWrite.ts";
 import { manageXLinkRequestRoutes } from "./xlink.ts";
 
 // MIG-0624: authenticated, read-only Manage screens API. Every response (success, 401, 403, 404, 503)
-// is `Cache-Control: private, no-store`. GET does not write. Scoped playlist writes
-// and PREPARED (still unmounted) slot writes use onlyMutating Origin -> session
-// -> writeGuard -> db stack in D-15-10 order.
+// is `Cache-Control: private, no-store`. GET does not write; writes (MIG-0655 playlist and MIG-0654 staff mutations)
+// go through the onlyMutating Origin -> session -> writeGuard -> db stack below (D-15-10).
 // Status mapping of CURRENT redirects/notFound: not logged in -> 401, banned -> 403 (requireAuth),
 // neither admin nor event staff (layout redirect to /dashboard) -> 403 { reason: "manage_access_required" },
 // notFound() -> 404.
@@ -32,12 +32,10 @@ manageRoutes.use("*", async (c, next) => {
   await next();
   c.header("Cache-Control", NO_STORE);
 });
-// D-15-10: only predeclared write paths verify Origin BEFORE the Auth.js session.
-// SA-060/062/063/064 remain UNMOUNTED; middleware entries are preparation only.
+// MIG-0655: playlist writes verify Origin BEFORE reading the Auth.js session.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
-// SA-058/059 chunk candidates: pre-register D-15-10 Origin -> Auth.js ->
-// identity/TOS write guard -> DB middleware, but do NOT mount either handler.
-// Parent-only registration must precede any independent D1/browser review.
+const staffWritePaths = ["/events/:id/staff", "/events/:id/staff/:staffId", "/events/:id/owner-transfer"];
+// SA-058..064 slot write candidates remain UNMOUNTED until parity and review.
 const slotWritePaths = [
   "/events/:id/slots/batch-delete",
   "/events/:id/slots/batch-release",
@@ -55,6 +53,9 @@ const submittedDangerWritePaths = [
 const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths, ...submittedDangerWritePaths];
 // Dynamic :slotId path overlaps /batch-delete etc. Apply ONLY to DELETE.
 const singleSlotDeletePath = "/events/:id/slots/:slotId";
+
+const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths, ...submittedDangerWritePaths];
+const singleSlotDeletePath = "/events/:id/slots/:slotId";
 const originOptions = (c: import("hono").Context<AppEnv>) => ({
   loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
   allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
@@ -62,20 +63,26 @@ const originOptions = (c: import("hono").Context<AppEnv>) => ({
 for (const path of scopedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) => originGuardMiddleware(originOptions(c))(c, next)));
 }
+for (const path of staffWritePaths) {
+  manageRoutes.use(path, onlyMutating((c, next) => originGuardMiddleware(originOptions(c))(c, next)));
+}
 manageRoutes.use(singleSlotDeletePath, (c, next) =>
   c.req.method === "DELETE" ? originGuardMiddleware(originOptions(c))(c, next) : next());
 manageRoutes.use("*", sessionMiddleware());
 manageRoutes.use("*", requireAuth());
-// The existing read-only /manage API remains unchanged. Only explicit mutating
-// paths use the CURRENT writeGuard(identity/TOS) -> DB adapter. Slot routes
-// are not mounted until full independent review and D1/browser parity.
+// The existing read-only /manage API remains unchanged. Every mutating
+// playlist AND staff path must receive writeGuard(identity/TOS) -> DB before
+// the handlers; onlyMutating keeps the GET staff endpoint read-only.
 for (const path of scopedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) =>
     writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));
   manageRoutes.use(path, onlyMutating(dbMiddleware));
 }
-
-// SA-061 unmounted candidate: no double guards on POST/PATCH batch endpoints.
+for (const path of staffWritePaths) {
+  manageRoutes.use(path, onlyMutating((c, next) =>
+    writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));
+  manageRoutes.use(path, onlyMutating(dbMiddleware));
+}
 manageRoutes.use(singleSlotDeletePath, (c, next) =>
   c.req.method === "DELETE"
     ? writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)
@@ -85,6 +92,7 @@ manageRoutes.use(singleSlotDeletePath, (c, next) =>
 
 manageRoutes.route("/navigation", manageNavigationRoutes);
 manageRoutes.route("/events/:id/staff", manageStaffRoutes);
+registerStaffWriteRoutes(manageRoutes);
 manageRoutes.route("/events/:id/slots", manageSlotsRoutes);
 manageRoutes.route("/events/:id/edit", manageEventEditRoutes);
 manageRoutes.route("/events/:id/videos/:videoId", manageVideoDetailRoutes);
