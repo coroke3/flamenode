@@ -13,8 +13,8 @@ import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { sql } from "@flamenode/server-core/sql";
 import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { auditPreloaded } from "./body.ts";
-import { costGuardMiddleware } from "../../middleware/costGuard.ts";
-import { onlyMutating } from "../../middleware/writeOrigin.ts";
+import { mapAuditSettings, type AuditSettingsRow } from "@flamenode/server-core/audit/settings";
+import { writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
 import type { AppEnv } from "../../env.ts";
 import { adminReadGuardMiddleware } from "../../middleware/adminReadGuard.ts";
 import { evaluateAdminWriteGuard } from "../../middleware/writeOrigin.ts";
@@ -562,8 +562,6 @@ export function planEventGroupMembershipRemove(
  * module-local CostGuard must never replace the parent origin and write guard.
  */
 export const stagedEventGroupWriteRoutes = new Hono<AppEnv>();
-stagedEventGroupWriteRoutes.use("*", onlyMutating(costGuardMiddleware("admin_event_create")));
-
 export const EVENT_GROUP_WRITE_FAILED = "更新が競合したか監査記録に失敗しました。";
 
 stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
@@ -582,20 +580,56 @@ stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
   // captures the full canonical relation row for restorable audit.
   const db = c.get("db");
   const userId = c.get("user")!.id;
-  let stored: (EventGroupMembershipRelationRow & { group_exists: string }) | null;
+  let stored: (EventGroupMembershipRelationRow & AuditSettingsRow & {
+    group_exists: string | null;
+    operation_mode: string | null;
+    disabled_features_json: string | null;
+    cost_guard_exception_until: number | null;
+    cost_guard_exception_features_json: string | null;
+  }) | null;
   try {
+    // Fold CostGuard settings into the authoritative relation snapshot. With
+    // S4 session (1) + write identity/ToS (1) + this joined read (1), S3 stays
+    // within ZERO_1102's three-pre-read limit without weakening guard order.
     stored = await c.env.DB.prepare(
       `SELECT g.id AS group_exists, m.event_group_id, m.event_id,
-              m.relation_type, m.created_at, m.updated_at
-         FROM event_groups AS g
+              m.relation_type, m.created_at, m.updated_at,
+              s.operation_mode, s.disabled_features_json,
+              s.cost_guard_exception_until, s.cost_guard_exception_features_json,
+              s.audit_normal_retention_days, s.audit_restorable_retention_days,
+              s.audit_long_retention_days, s.audit_max_payload_bytes,
+              s.audit_compact_after_days
+         FROM system_settings AS s
+         LEFT JOIN event_groups AS g ON g.id = ?
          LEFT JOIN event_group_events AS m
            ON m.event_group_id = g.id AND m.event_id = ?
-        WHERE g.id = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
-    ).bind(eventId, groupId).first<EventGroupMembershipRelationRow & { group_exists: string }>();
+        WHERE s.id = 'default' LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
+    ).bind(groupId, eventId).first<EventGroupMembershipRelationRow & AuditSettingsRow & {
+      group_exists: string | null;
+      operation_mode: string | null;
+      disabled_features_json: string | null;
+      cost_guard_exception_until: number | null;
+      cost_guard_exception_features_json: string | null;
+    }>();
   } catch {
     return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
   }
-  if (!stored) return c.json({ ok: false, message: "グループが見つかりません。" }, 404);
+  if (!stored) {
+    return writeGuardDenyResponse(c, "maintenance_mode", 503);
+  }
+  const cost = evaluateCostGuardCore({
+    feature: "admin_event_create",
+    operationMode: stored.operation_mode,
+    disabledFeaturesJson: stored.disabled_features_json,
+    exceptionUntil: stored.cost_guard_exception_until,
+    exceptionFeaturesJson: stored.cost_guard_exception_features_json,
+    now: Math.floor(Date.now() / 1000),
+  });
+  if (cost.blocked) {
+    return writeGuardDenyResponse(c, cost.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked", 503);
+  }
+  c.set("auditSettings", mapAuditSettings(stored));
+  if (!stored.group_exists) return c.json({ ok: false, message: "グループが見つかりません。" }, 404);
   const plan = planEventGroupMembershipRemove(groupId, eventId,
     stored.event_id == null ? null : stored);
   if (!plan.ok) return c.json({ ok: false, message: plan.message }, 404);
@@ -608,7 +642,7 @@ stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
     // Count the shared parent guard reads too. This is the D1 Free per-invocation
     // query budget, NOT the stricter S3 pre-read/CPU acceptance check.
     const budget = planEventGroupMembershipDeleteBudget({
-      callerQueryCount: 4,
+      callerQueryCount: 3,
       queueStatementCount: queue.statements.length,
       auditEntryCount: 1,
       distinctActorCount: 1,
