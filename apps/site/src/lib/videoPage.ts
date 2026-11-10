@@ -183,14 +183,11 @@ export async function loadVideoPagesForBuild(
   const buildWithPlaylist = async (payload: unknown, key: string): Promise<void> => {
     const built = buildVideoPages(payload, key, now, iconMap);
     const eventId = built[0]?.data.primaryEvent?.id;
-    const video = payload && typeof payload === "object" && !Array.isArray(payload)
-      ? (payload as { video?: unknown }).video
-      : null;
-    const row = video && typeof video === "object" && !Array.isArray(video)
-      ? video as Record<string, unknown>
-      : null;
-    const scheduledTime = normalizeNullableUnix(row?.scheduled_time);
-    const primaryEventId = normalizeTrimmedString(row?.primary_event_id);
+    // The visibility and primary-event lookup must use the same normalized video
+    // that the public page renders, rather than an untrusted raw snapshot field.
+    const video = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0])?.video;
+    const scheduledTime = video?.scheduled_time ?? null;
+    const primaryEventId = normalizeTrimmedString(video?.primary_event_id);
 
     // CURRENT looks up a playlist only for the video-selected primary event.
     // Display fallback events must not inherit an unrelated event's playlist.
