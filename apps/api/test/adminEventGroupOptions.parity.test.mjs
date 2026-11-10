@@ -907,6 +907,7 @@ function stagedSa030Harness({ role = "admin", mutateAfterRead = false, settings 
     },
   });
   seedBase(sqlite, { role, settings });
+  seedEvent(sqlite, { id: "ev-1", title: "Existing group event" });
   seedEvent(sqlite, { id: "ev-2", title: "Second event" });
   seedEvent(sqlite, { id: "ev-3", title: "Third event" });
   sqlite.exec(`
