@@ -16,8 +16,8 @@ import { evaluateCostGuardCore } from "@flamenode/domain/admin";
 import { MAX_SINGLE_ROW_LIMIT } from "../../lib/limits.ts";
 
 export const EVENT_GROUP_OPTION_PAGE_SIZE = 80;
-/** D1 event-group and event IDs are bounded before reaching a parameter binding. */
-export const MAX_EVENT_GROUP_ID_LENGTH = 64;
+/** Bound legacy identifiers without rejecting ordinary long-ID pagination. */
+export const MAX_EVENT_GROUP_ID_LENGTH = 128;
 const SEARCH_FAILED = "イベント候補の取得に失敗しました。もう一度お試しください。";
 
 export type EventGroupOption = {
@@ -194,6 +194,13 @@ adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
       .all<OptionRow>();
     const page = results.slice(0, EVENT_GROUP_OPTION_PAGE_SIZE);
     const last = page.at(-1);
+    // A continuation token must pass this endpoint's own cursor parser.
+    // Fail closed for an unrepresentable legacy row instead of losing pages.
+    if (results.length > EVENT_GROUP_OPTION_PAGE_SIZE && last &&
+        (last.id.length > MAX_EVENT_GROUP_ID_LENGTH ||
+         JSON.stringify({ updatedAt: last.updated_at, id: last.id }).length > 200)) {
+      return c.json({ ok: false, message: SEARCH_FAILED }, 503);
+    }
     return c.json({
       ok: true,
       options: page.map(({ id, title, start_time }) => ({ id, title, start_time })),
