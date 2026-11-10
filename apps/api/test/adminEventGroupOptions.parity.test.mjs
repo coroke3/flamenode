@@ -316,3 +316,49 @@ test("SA-025: real SQLite stable cursor uses DESC timestamp and ASC ID tie-break
     sqlite.close();
   }
 });
+
+test("SA-025: real SQLite latest-major ToS and CostGuard use one combined gate read", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE event_group_events (event_group_id TEXT, event_id TEXT)");
+    seedEvent(sqlite, { id: "ev-public", title: "Visible" });
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+    const get = async () => app.request(new Request(
+      "https://example.com/api/admin/event-groups/event-options?groupId=grp-1",
+    ), undefined, { DB: db });
+
+    const first = await get();
+    assert.equal(first.status, 200);
+    assert.equal(stats.reads, 2, "one gate and one candidate query; S4 would add one session read");
+    sqlite.prepare("INSERT INTO terms_versions (id, severity, published_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run("major-2", "major", 200, 200);
+    const beforeTos = stats.reads;
+    const reaccept = await get();
+    assert.equal(reaccept.status, 403);
+    assert.equal(stats.reads - beforeTos, 1, "ToS denial skips the candidate query");
+    sqlite.prepare('UPDATE "user" SET accepted_terms_version_id = ? WHERE id = ?')
+      .run("major-2", "admin-1");
+    const accepted = await get();
+    assert.equal(accepted.status, 200);
+    sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = ?")
+      .run('["admin_event_create"]', "default");
+    const beforeCost = stats.reads;
+    const blocked = await get();
+    assert.equal(blocked.status, 503);
+    assert.equal(stats.reads - beforeCost, 1, "CostGuard denial skips the candidate query");
+    sqlite.prepare(
+      "UPDATE system_settings SET cost_guard_exception_until = ?, cost_guard_exception_features_json = ? WHERE id = ?",
+    ).run(Math.floor(Date.now() / 1000) + 3600, '["admin_event_create"]', "default");
+    assert.equal((await get()).status, 200, "an active feature exception overrides disabled flag");
+    assert.equal(stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
