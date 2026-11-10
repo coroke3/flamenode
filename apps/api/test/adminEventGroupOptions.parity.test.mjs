@@ -1583,7 +1583,7 @@ test("SA-028 U03 staged: relation overflow is rejected before group, audit or qu
 });
 
 
-function stagedSa028Harness({ role = "admin", mutateAfterRead = false } = {}) {
+function stagedSa028Harness({ role = "admin", mutateAfterRead = false, publicGroup = false, bucket = null } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite);
   sqlite.exec(`
@@ -1606,7 +1606,7 @@ function stagedSa028Harness({ role = "admin", mutateAfterRead = false } = {}) {
     );
     INSERT INTO event_groups VALUES (
       'grp-delete', 'Delete group', 'delete-group', NULL, 'series',
-      NULL, NULL, NULL, 'private', 0, 10, 20
+      NULL, NULL, NULL, ${publicGroup ? "public" : "private"}, 0, 10, 20
     );
     INSERT INTO event_group_events VALUES
       ('grp-delete', 'ev-a', 'member', 11, 21),
@@ -1640,10 +1640,102 @@ function stagedSa028Harness({ role = "admin", mutateAfterRead = false } = {}) {
   const remove = (origin = STAGED_WRITE_SITE) => app.request(new Request(
     STAGED_WRITE_SITE + "/api/admin/event-groups/grp-delete",
     { method: "DELETE", headers: { Origin: origin } },
-  ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+  ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE, ...(bucket ? { BUCKET: bucket } : {}) });
   const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
   return { sqlite, stats, remove, count };
 }
+
+
+function stagedVisibilityManifestBucket({ failPutAt = 0 } = {}) {
+  let body = null;
+  let etag = null;
+  let puts = 0;
+  return {
+    get: async () => body === null ? null : ({
+      text: async () => body,
+      etag,
+      size: new TextEncoder().encode(body).byteLength,
+    }),
+    put: async (_key, nextBody, options = {}) => {
+      puts += 1;
+      if (puts === failPutAt) throw new Error("simulated R2 put failure");
+      const onlyIf = options.onlyIf;
+      if (onlyIf instanceof Headers && onlyIf.get("If-None-Match") === "*" && body !== null) return null;
+      if (onlyIf && !(onlyIf instanceof Headers) && onlyIf.etagMatches !== etag) return null;
+      body = nextBody;
+      etag = `etag-${puts}`;
+      return { etag };
+    },
+    readManifest: () => body === null ? null : JSON.parse(body),
+    get puts() { return puts; },
+  };
+}
+
+test("SA-028 U03 staged: public DELETE commits R2 block before the atomic D1 fence and delete", async () => {
+  const bucket = stagedVisibilityManifestBucket();
+  const h = stagedSa028Harness({ publicGroup: true, bucket });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    const manifest = bucket.readManifest();
+    assert.equal(manifest.entities.length, 1);
+    assert.equal(manifest.entities[0].entity_type, "event_group");
+    assert.equal(manifest.entities[0].entity_id, "grp-delete");
+    const fence = h.sqlite.prepare(
+      "SELECT fence_token, state FROM public_visibility_fences WHERE entity_type = 'event_group' AND entity_id = 'grp-delete'",
+    ).get();
+    assert.ok(fence);
+    assert.equal(fence.fence_token, manifest.entities[0].fence_token);
+    assert.equal(fence.state, "blocked");
+    assert.equal(h.count("event_groups"), 0);
+    assert.equal(h.count("event_group_events"), 0);
+    assert.equal(h.count("audit_logs"), 3);
+    assert.equal(h.stats.batches, 1);
+    assert.ok(bucket.puts >= 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: D1 failure compensates only the precommitted public DELETE token", async () => {
+  const bucket = stagedVisibilityManifestBucket();
+  const h = stagedSa028Harness({ publicGroup: true, mutateAfterRead: true, bucket });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+    });
+    assert.equal(h.count("event_groups"), 1);
+    assert.equal(h.count("event_group_events"), 2);
+    assert.equal(h.count("public_visibility_fences"), 0);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(bucket.readManifest()?.entities.length, 0);
+    assert.ok(bucket.puts >= 2, "precommit and compensation must both write");
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: failed R2 precommit fails closed before any D1 batch", async () => {
+  const bucket = stagedVisibilityManifestBucket({ failPutAt: 1 });
+  const h = stagedSa028Harness({ publicGroup: true, bucket });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.equal(h.count("event_groups"), 1);
+    assert.equal(h.count("event_group_events"), 2);
+    assert.equal(h.count("public_visibility_fences"), 0);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+    assert.equal(bucket.readManifest(), null);
+  } finally {
+    h.sqlite.close();
+  }
+});
 
 test("SA-028 U03 staged: stale group CAS rolls back relations, audits and rebuild queue", async () => {
   const h = stagedSa028Harness({ mutateAfterRead: true });
