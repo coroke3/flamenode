@@ -191,8 +191,16 @@ export async function loadVideoPagesForBuild(
     const raw = rawVideo && typeof rawVideo === "object" && !Array.isArray(rawVideo)
       ? rawVideo as Record<string, unknown>
       : null;
-    const scheduledTime = typeof raw?.scheduled_time === "number" || typeof raw?.scheduled_time === "string"
-      ? video?.scheduled_time ?? null
+    const rawSchedule = raw?.scheduled_time;
+    // The shared normalizer floors timestamps for legacy display compatibility.
+    // Playlist authorization must not round a past fractional timestamp up to
+    // the current second, which would turn a past release into a future release.
+    const exactScheduledTime = typeof rawSchedule === "number" || typeof rawSchedule === "string"
+      ? Number(rawSchedule)
+      : NaN;
+    const scheduledTime = Number.isFinite(exactScheduledTime) &&
+      Math.abs(exactScheduledTime) <= 8.64e12
+      ? exactScheduledTime
       : null;
     const primaryEventId = typeof raw?.primary_event_id === "string"
       ? video?.primary_event_id ?? null
