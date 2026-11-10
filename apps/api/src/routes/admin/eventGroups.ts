@@ -16,6 +16,8 @@ import { evaluateCostGuardCore } from "@flamenode/domain/admin";
 import { MAX_SINGLE_ROW_LIMIT } from "../../lib/limits.ts";
 
 export const EVENT_GROUP_OPTION_PAGE_SIZE = 80;
+/** D1 event-group and event IDs are bounded before reaching a parameter binding. */
+export const MAX_EVENT_GROUP_ID_LENGTH = 64;
 const SEARCH_FAILED = "イベント候補の取得に失敗しました。もう一度お試しください。";
 
 export type EventGroupOption = {
@@ -41,7 +43,8 @@ export function parseEventGroupOptionCursor(raw: string | null): Cursor | null {
     typeof (value as Cursor).updatedAt !== "number" ||
     !Number.isSafeInteger((value as Cursor).updatedAt) ||
     typeof (value as Cursor).id !== "string" ||
-    !(value as Cursor).id
+    !(value as Cursor).id ||
+    (value as Cursor).id.length > MAX_EVENT_GROUP_ID_LENGTH
   ) {
     throw new Error("event_group_cursor_invalid");
   }
@@ -160,7 +163,9 @@ adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
   const query = (c.req.query("q") ?? "").trim();
   let cursor: Cursor | null;
   try {
-    if (!groupId || query.length > 64) throw new Error("event_group_search_invalid");
+    if (!groupId || groupId.length > MAX_EVENT_GROUP_ID_LENGTH || query.length > 64) {
+      throw new Error("event_group_search_invalid");
+    }
     cursor = parseEventGroupOptionCursor(c.req.query("cursor") ?? null);
   } catch {
     return c.json({ ok: false, message: SEARCH_FAILED }, 400);
