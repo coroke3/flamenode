@@ -8,6 +8,10 @@ import { AdminNotifications } from "./admin/AdminNotifications.js";
 import { AdminCompatRedirect } from "./admin/AdminRedirects.js";
 import { AdminTop } from "./admin/AdminTop.js";
 import { PermissionSimulator } from "./admin/PermissionSimulator.js";
+import { StaticBuilds } from "./admin/StaticBuilds.js";
+import { YoutubeSync } from "./admin/YoutubeSync.js";
+import { YoutubePlaylists } from "./admin/YoutubePlaylists.js";
+import { YoutubeQuota } from "./admin/YoutubeQuota.js";
 import { AuthErrorView, OpsGate } from "./guard.js";
 import { ManageLayout } from "./manage/ManageLayout.js";
 import { ManageDashboard } from "./manage/ManageDashboard.js";
@@ -58,6 +62,10 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
               <Route path="permissions/simulator" element={<PermissionSimulator />} />
               <Route path="cost-guard" element={<AdminCostGuard />} />
               <Route path="notifications" element={<AdminNotifications />} />
+              <Route path="static-builds" element={<StaticBuilds />} />
+              <Route path="youtube-sync" element={<YoutubeSync />} />
+              <Route path="youtube-sync/playlists" element={<YoutubePlaylists />} />
+              <Route path="youtube-quota" element={<YoutubeQuota />} />
               <Route path="history" element={<AdminCompatRedirect />} />
               <Route path="events/new" element={<UnmigratedView />} />
               <Route path="events/templates" element={<UnmigratedView />} />
