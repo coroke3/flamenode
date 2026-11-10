@@ -124,7 +124,7 @@ test("rebuild events: SQLite D1 read is video-scoped and detects nine distinct t
     const exceeded = await loadVideoRebuildEventIds(db, "video-target", null);
     assert.deepEqual(exceeded, { ok: false, message: "関連イベント数が処理上限を超えています。" });
     assert.equal(statements.length, 1);
-    assert.match(statements[0], /WHERE.*video_id\s*=\s*\?/i);
+    assert.match(statements[0], /WHERE.*video_id"?\s*=\s*\?/i);
     assert.match(statements[0], /LIMIT\s*\?/i);
 
     sqlite.prepare("DELETE FROM video_events WHERE video_id = ? AND event_id IN (?, ?)")
