@@ -437,16 +437,34 @@ export function planEventGroupMembershipDeleteBudget(input: EventGroupDeleteBudg
   totalQueryCount: number;
   limit: number;
 } {
-  // A single DELETE, its changes() assertion, a 2-query audit chunk per four
-  // records, and one settings+actor preparation read each for any audit entry.
-  // Use canonical shared budget arithmetic, including caller D1 reads.
-  return planD1AuditMutationBudget({
+  // Invalid or omitted counts must not be coerced to zero by the shared
+  // budgeting helper. Otherwise NaN, negative or fractional estimates could
+  // undercount a write and incorrectly authorize an over-budget mutation.
+  const counts = [
+    input.callerQueryCount,
+    input.queueStatementCount,
+    input.auditEntryCount,
+    input.distinctActorCount,
+  ];
+  if (counts.some((count) => !Number.isSafeInteger(count) || count < 0) ||
+      input.auditEntryCount !== 1 || input.distinctActorCount !== 1) {
+    return { withinLimit: false, totalQueryCount: Number.POSITIVE_INFINITY, limit: 50 };
+  }
+  // SA-030 deletes exactly one relation and emits one restorable audit entry.
+  // A queue plan is supplied by the future guarded mutation caller; count all
+  // its statements and changes assertions, not only its enqueue insert.
+  const budget = planD1AuditMutationBudget({
     mutationStatementCount: 1 + input.queueStatementCount,
     mutationAssertionCount: 1 + input.queueStatementCount,
     auditEntryCount: input.auditEntryCount,
     distinctActorCount: input.distinctActorCount,
     callerQueryCount: input.callerQueryCount,
   });
+  return {
+    withinLimit: budget.withinLimit,
+    totalQueryCount: budget.totalQueryCount,
+    limit: budget.limit,
+  };
 }
 
 export type EventGroupMembershipRelationRow = {
