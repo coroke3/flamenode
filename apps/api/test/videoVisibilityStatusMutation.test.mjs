@@ -107,7 +107,7 @@ test("audit CAS error with a different current status returns retryable conflict
   assert.equal(result.retryable, true);
 });
 
-test("fence pre-commit failure is non-retryable and does not attempt a D1 compensation", async () => {
+test("fence pre-commit failure runs token-scoped compensation before non-retryable mapping", async () => {
   const calls = [];
   const result = await executeVideoVisibilityStatusMutation({
     db: {},
@@ -124,5 +124,5 @@ test("fence pre-commit failure is non-retryable and does not attempt a D1 compen
   assert.equal(result.ok, false);
   assert.equal(result.errorCode, "visibility_precommit_failed");
   assert.equal(result.retryable, false);
-  assert.equal(calls.some((entry) => entry === "compensate"), false);
+  assert.equal(calls.some((entry) => entry === "compensate"), true);
 });
