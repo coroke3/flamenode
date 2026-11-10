@@ -213,8 +213,18 @@ test("SA-029 U04: post-read membership planner preserves CURRENT validation orde
     ok: true, toAdd: ["ev-a", "ev-b"],
   });
   assert.deepEqual(planEventGroupMembershipAdd([], [], []), {
-    ok: false, message: "追加できるイベントがありません。",
+    ok: false, message: "存在しないイベントは追加できません。",
   });
+  // Even an incorrectly wired handler that skips the input normalizer must
+  // not be able to bypass the 80-unique-ID invariant or duplicate validation.
+  for (const invalid of [
+    ["ev-a", "ev-a"], [" ev-a"], [""],
+    Array.from({ length: 81 }, (_, i) => "event-" + i),
+  ]) {
+    assert.deepEqual(planEventGroupMembershipAdd(invalid, invalid, []), {
+      ok: false, message: "存在しないイベントは追加できません。",
+    });
+  }
   // Caller must not partially insert even when one requested event is absent.
   const valid80 = Array.from({ length: 80 }, (_, i) => "event-" + i);
   assert.deepEqual(planEventGroupMembershipAdd(valid80, [...valid80].reverse(), valid80.slice(0, 79)), {
