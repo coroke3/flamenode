@@ -1070,3 +1070,80 @@ test("SA-029 U04 staged: invalid event IDs and 81 distinct IDs fail before mutat
     h.sqlite.close();
   }
 });
+
+
+test("SA-026 U03 staged: private group CREATE writes canonical row, restorable audit and rebuild queue atomically", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec(`
+      CREATE TABLE event_groups (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+        description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+        accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+    `);
+    const app = new Hono();
+    const originOptions = {
+      loadSiteUrl: () => STAGED_WRITE_SITE,
+      allowLocalPreview: () => false,
+    };
+    app.use("*", originGuardMiddleware(originOptions));
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.use("*", writeGuardMiddleware(originOptions));
+    app.use("*", dbMiddleware);
+    app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+    const response = await app.request(new Request(
+      STAGED_WRITE_SITE + "/api/admin/event-groups",
+      {
+        method: "POST",
+        headers: {
+          Origin: STAGED_WRITE_SITE,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: "grp-created",
+          name: "New group",
+          slug: "new-group",
+          description: "  description  ",
+          group_type: "series",
+          visibility_status: "private",
+          sort_order: 7,
+        }),
+      },
+    ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true, id: "grp-created", pendingPublicReflection: true,
+    });
+    const group = sqlite.prepare("SELECT * FROM event_groups WHERE id = ?").get("grp-created");
+    assert.deepEqual({ ...group }, {
+      id: "grp-created", name: "New group", slug: "new-group",
+      description: "description", group_type: "series", icon_url: null,
+      img_url: null, accent_color: null, visibility_status: "private",
+      sort_order: 7, created_at: group.created_at, updated_at: group.updated_at,
+    });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1);
+    const audit = sqlite.prepare("SELECT * FROM audit_logs").get();
+    assert.equal(audit.table_name, "event_groups");
+    assert.equal(audit.target_id, "grp-created");
+    assert.equal(audit.operation, "CREATE");
+    assert.equal(audit.retention_class, "restorable");
+    assert.deepEqual(JSON.parse(audit.after_json), { ...group });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.equal(stats.batches, 1);
+  } finally {
+    sqlite.close();
+  }
+});
