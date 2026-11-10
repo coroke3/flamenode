@@ -416,7 +416,7 @@ export function planEventGroupMembershipAdd(
 export type EventGroupMembershipRelationRow = {
   event_group_id: string;
   event_id: string;
-  relation_type: "member";
+  relation_type: "member" | "primary" | "related";
   created_at: number;
   updated_at: number;
 };
@@ -461,7 +461,7 @@ export function planEventGroupMembershipRemove(
       relation.event_id !== eventId ||
       !Number.isSafeInteger(relation.updated_at) || relation.updated_at < 0 ||
       !Number.isSafeInteger(relation.created_at) || relation.created_at < 0 ||
-      relation.relation_type !== "member") {
+      !["member", "primary", "related"].includes(relation.relation_type)) {
     return { ok: false, message: "イベントはグループに追加されていません。" };
   }
   return { ok: true, expectedUpdatedAt: relation.updated_at, before: { ...relation } };
