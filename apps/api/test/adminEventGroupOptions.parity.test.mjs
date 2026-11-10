@@ -1344,7 +1344,7 @@ test("SA-027 U03 staged: private group PATCH uses CURRENT projection, CAS, audit
     }, {
       id: "grp-patch", name: "Updated group", slug: "updated-group",
       description: "updated description", group_type: "genre", icon_url: null,
-      img_url: "legacy-img", accent_color: "#abc", visibility_status: "private",
+      img_url: "legacy-img", accent_color: null, visibility_status: "private",
       sort_order: 9, created_at: 10,
     });
     assert.ok(group.updated_at > 20);
@@ -1370,6 +1370,17 @@ test("SA-027 U03 staged: private group PATCH uses CURRENT projection, CAS, audit
   } finally {
     sqlite.close();
   }
+});
+
+test("SA-027 U03 staged: omitted accent_color clears the color like CURRENT", async () => {
+  const data = EventGroupMutationBodySchema.parse({
+    name: "Updated group", slug: "updated-group", group_type: "series",
+    visibility_status: "private",
+  });
+  const projected = planEventGroupUpdateValues(data, { sort_order: 4, updated_at: 20 }, 21);
+  assert.equal(projected.accent_color, null);
+  assert.equal(projected.icon_url, null);
+  assert.equal(projected.sort_order, 0);
 });
 
 test("SA-027 U03 staged: stale base_updated_at is rejected before any mutation", async () => {
