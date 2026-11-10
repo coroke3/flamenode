@@ -63,10 +63,6 @@ export function parseEventGroupOptionCursor(raw: string | null): Cursor | null {
     !Number.isSafeInteger((value as Cursor).updatedAt) ||
     typeof (value as Cursor).id !== "string" ||
     !(value as Cursor).id ||
-    (value as Cursor).id.length > MAX_EVENT_GROUP_ID_LENGTH ||
-    // Numeric-looking timestamps outside Date/SQLite's accepted range can
-    // still be safe integers, but must never enter the seek query.
-    (value as Cursor).updatedAt < 0
   ) {
     throw new Error("event_group_cursor_invalid");
   }
@@ -158,7 +154,7 @@ adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
   const query = (c.req.query("q") ?? "").trim();
   let cursor: Cursor | null;
   try {
-    if (!groupId || groupId.length > MAX_EVENT_GROUP_ID_LENGTH || query.length > 64) {
+    if (!groupId || query.length > 64) {
       throw new Error("event_group_search_invalid");
     }
     cursor = parseEventGroupOptionCursor(c.req.query("cursor") ?? null);
@@ -218,15 +214,9 @@ adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
     const page = results.slice(0, EVENT_GROUP_OPTION_PAGE_SIZE);
     const last = page.at(-1);
     const hasMore = results.length > EVENT_GROUP_OPTION_PAGE_SIZE;
-    // Emit only cursors that the same endpoint can parse. The 200-character
-    // cap is on JSON, not only the ID: JSON escapes can expand legacy IDs.
     const nextCursor = hasMore && last
       ? JSON.stringify({ updatedAt: last.updated_at, id: last.id })
       : null;
-    if (nextCursor && (last!.id.length > MAX_EVENT_GROUP_ID_LENGTH ||
-        nextCursor.length > 200)) {
-      return c.json({ ok: false, message: SEARCH_FAILED }, 503);
-    }
     return c.json({
       ok: true,
       options: page.map(({ id, title, start_time }) => ({ id, title, start_time })),
