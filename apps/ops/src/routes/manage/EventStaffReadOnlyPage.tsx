@@ -51,11 +51,13 @@ export interface StaffReadSnapshot {
   eventId: string;
   fetchFn?: OpsFetch;
   refreshKey?: number;
+  contextEpoch?: number;
   result: OpsResult<ManageStaffResponse>;
 }
-export function currentStaffResult(eventId: string, fetchFn: OpsFetch | undefined, snapshot: StaffReadSnapshot | null, refreshKey = 0): OpsResult<ManageStaffResponse> | null {
+export function currentStaffResult(eventId: string, fetchFn: OpsFetch | undefined, snapshot: StaffReadSnapshot | null, refreshKey = 0, contextEpoch = 0): OpsResult<ManageStaffResponse> | null {
   return snapshot?.eventId === eventId && snapshot.fetchFn === fetchFn &&
-    (snapshot.refreshKey ?? 0) === refreshKey ? snapshot.result : null;
+    (snapshot.refreshKey ?? 0) === refreshKey &&
+    (snapshot.contextEpoch ?? 0) === contextEpoch ? snapshot.result : null;
 }
 
 export function EventStaffReadOnlyPage({ eventId, fetchFn, editable = false }: {
@@ -63,16 +65,25 @@ export function EventStaffReadOnlyPage({ eventId, fetchFn, editable = false }: {
 }): React.ReactElement {
   const [snapshot, setSnapshot] = React.useState<StaffReadSnapshot | null>(null);
   const [refreshKey, setRefreshKey] = React.useState(0);
+  // Render-phase identity fence: event A -> B -> A must never reaccept the
+  // old event A snapshot before passive effect cleanup runs.
+  const identityRef = React.useRef({ eventId, fetchFn, refreshKey, epoch: 0 });
+  if (identityRef.current.eventId !== eventId ||
+      identityRef.current.fetchFn !== fetchFn ||
+      identityRef.current.refreshKey !== refreshKey) {
+    identityRef.current = { eventId, fetchFn, refreshKey, epoch: identityRef.current.epoch + 1 };
+  }
+  const contextEpoch = identityRef.current.epoch;
   React.useEffect(() => {
     const controller = new AbortController();
     setSnapshot(null);
     void readManageStaff(eventId, fetchFn, controller.signal).then(result => {
-      if (!controller.signal.aborted) setSnapshot({ eventId, fetchFn, refreshKey, result });
+      if (!controller.signal.aborted) setSnapshot({ eventId, fetchFn, refreshKey, contextEpoch, result });
     });
     return () => controller.abort();
-  }, [eventId, fetchFn, refreshKey]);
+  }, [eventId, fetchFn, refreshKey, contextEpoch]);
   // React passive effects run after paint. Guard synchronously during render as well.
-  const result = currentStaffResult(eventId, fetchFn, snapshot, refreshKey);
+  const result = currentStaffResult(eventId, fetchFn, snapshot, refreshKey, contextEpoch);
   if (result === null) return <div role="status" aria-busy="true">読み込み中...</div>;
   if (result.status === "notFound") return <p role="alert">イベントまたは運営権限が見つかりません。</p>;
   if (result.status !== "ok") return <p role="alert">運営メンバーを取得できませんでした。再ログインまたは再読み込みしてください。</p>;
