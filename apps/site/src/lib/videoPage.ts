@@ -7,6 +7,7 @@
  * or a configured but broken snapshot (including a non-public or missing object the manifest allows) fails the build.
  */
 import type { VideoDetailData } from "@flamenode/ui";
+import { normalizeNullableUnix, normalizeTrimmedString } from "@flamenode/server-core/publicData/normalize";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
 import { buildPublicVideoViewModelFromStatic } from "../../../../src/lib/publicData/publicVideoDetailViewModel.ts";
 import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/staticVideoDetailCore.ts";
@@ -185,12 +186,15 @@ export async function loadVideoPagesForBuild(
     const video = payload && typeof payload === "object" && !Array.isArray(payload)
       ? (payload as { video?: unknown }).video
       : null;
-    const scheduledTime = video && typeof video === "object" && !Array.isArray(video)
-      ? (video as { scheduled_time?: unknown }).scheduled_time
+    const row = video && typeof video === "object" && !Array.isArray(video)
+      ? video as Record<string, unknown>
       : null;
+    const scheduledTime = normalizeNullableUnix(row?.scheduled_time);
+    const primaryEventId = normalizeTrimmedString(row?.primary_event_id);
 
-    // CURRENT only shows the playlist for a future-scheduled video with a public primary event.
-    if (!eventId || typeof scheduledTime !== "number" || scheduledTime <= now) {
+    // CURRENT looks up a playlist only for the video-selected primary event.
+    // Display fallback events must not inherit an unrelated event's playlist.
+    if (!eventId || eventId !== primaryEventId || scheduledTime == null || scheduledTime <= now) {
       pages.push(...built);
       return;
     }
