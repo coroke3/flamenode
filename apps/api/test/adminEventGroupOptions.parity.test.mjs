@@ -19,6 +19,8 @@ import {
   normalizeEventGroupMembershipAdd,
   normalizeEventGroupMembershipRemove,
   planEventGroupMembershipAdd,
+  planEventGroupMembershipWriteRows,
+  planEventGroupMembershipRemove,
 } from "../src/routes/admin/eventGroups.ts";
 
 const admin = { id: "admin-1", role: "admin", is_banned: 0 };
@@ -82,6 +84,54 @@ function setup({
   );
   return { get, calls, guardCalls };
 }
+
+test("SA-029/030 U04: write projections keep CURRENT INSERT shape and delete CAS snapshot", () => {
+  const added = planEventGroupMembershipWriteRows("grp-1", ["ev-b", "ev-a"], 1710000000);
+  assert.deepEqual(added, [
+    { event_group_id: "grp-1", event_id: "ev-b", relation_type: "member",
+      created_at: 1710000000, updated_at: 1710000000 },
+    { event_group_id: "grp-1", event_id: "ev-a", relation_type: "member",
+      created_at: 1710000000, updated_at: 1710000000 },
+  ]);
+  assert.notStrictEqual(added[0], added[1], "each audit after snapshot must be independent");
+  const ids80 = Array.from({ length: 80 }, (_, i) => "ev-" + i);
+  assert.equal(planEventGroupMembershipWriteRows("grp-1", ids80, 0).length, 80);
+  for (const [groupId, ids, now] of [
+    ["", ["ev"], 1], ["grp-1", [], 1],
+    ["grp-1", ["ev", "ev"], 1], ["grp-1", ["ev", " "], 1],
+    ["grp-1", [" ev"], 1], ["grp-1", Array.from({ length: 81 }, (_, i) => "ev-" + i), 1],
+    ["grp-1", ["ev"], -1], ["grp-1", ["ev"], 1.5],
+    ["grp-1", ["ev"], Number.MAX_SAFE_INTEGER + 1],
+  ]) {
+    assert.throws(() => planEventGroupMembershipWriteRows(groupId, ids, now),
+      /event_group_membership_plan_invalid/);
+  }
+
+  const relation = {
+    event_group_id: "grp-1", event_id: "ev-a", relation_type: "primary",
+    created_at: 1710000000, updated_at: 1710000001,
+  };
+  const remove = planEventGroupMembershipRemove("grp-1", "ev-a", relation);
+  assert.deepEqual(remove, {
+    ok: true, expectedUpdatedAt: 1710000001,
+    before: relation,
+  });
+  assert.notStrictEqual(remove.before, relation, "full before snapshot must not alias caller row");
+  assert.deepEqual(planEventGroupMembershipRemove("grp-1", "ev-a",
+    { ...relation, relation_type: "related" }), {
+    ok: true, expectedUpdatedAt: 1710000001,
+    before: { ...relation, relation_type: "related" },
+  }, "CURRENT removes all existing relation types, not just member");
+  const noRelation = { ok: false, message: "イベントはグループに追加されていません。" };
+  for (const bad of [null, undefined, { ...relation, event_group_id: "foreign" },
+    { ...relation, event_id: "other" }, { ...relation, updated_at: -1 },
+    { ...relation, updated_at: 1.5 }, { ...relation, created_at: -1 },
+    { ...relation, relation_type: "invalid" }]) {
+    assert.deepEqual(planEventGroupMembershipRemove("grp-1", "ev-a", bad), noRelation);
+  }
+  // This tests only projections; the future guarded route must still assert
+  // exactly 1 DELETE change atomically with audit and queue statements.
+});
 
 test("SA-029 U04: post-read membership planner preserves CURRENT validation ordering", () => {
   const input = normalizeEventGroupMembershipAdd({
