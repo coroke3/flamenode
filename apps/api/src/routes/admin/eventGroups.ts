@@ -404,3 +404,65 @@ export function planEventGroupMembershipAdd(
     ? { ok: true, toAdd }
     : { ok: false, message: "追加できるイベントがありません。" };
 }
+
+/**
+ * MIG-0653 U04: project missing group relations into CURRENT's INSERT values.
+ * This is a data-only projection, NOT authorization or an executable mutation.
+ * Call only after normalizeEventGroupMembershipAdd and the database-backed
+ * planEventGroupMembershipAdd existence/membership checks succeed. The route
+ * must separately enforce D1 batch/query limits, atomic expected changes,
+ * restorable audits, queue notifications, and admin write guards.
+ */
+export type EventGroupMembershipRelationRow = {
+  event_group_id: string;
+  event_id: string;
+  relation_type: "member";
+  created_at: number;
+  updated_at: number;
+};
+
+export function planEventGroupMembershipWriteRows(
+  groupId: string,
+  toAdd: readonly string[],
+  now: number,
+): EventGroupMembershipRelationRow[] {
+  if (!groupId || !Number.isSafeInteger(now) || now < 0 ||
+      toAdd.length === 0 || toAdd.length > EVENT_GROUP_ADD_MAX ||
+      new Set(toAdd).size !== toAdd.length ||
+      toAdd.some((id) => !id || id !== id.trim())) {
+    throw new Error("event_group_membership_plan_invalid");
+  }
+  return toAdd.map((eventId) => ({
+    event_group_id: groupId,
+    event_id: eventId,
+    relation_type: "member",
+    created_at: now,
+    updated_at: now,
+  }));
+}
+
+/**
+ * CURRENT SA-030 removes exactly one selected relation with a CAS condition on
+ * its prior updated_at, and audits a full before snapshot. This projection
+ * never issues a DELETE; the future route must assert exactly one affected
+ * row inside the same atomic audited/queued D1 batch.
+ */
+export type EventGroupMembershipRemovePlan =
+  | { ok: true; expectedUpdatedAt: number; before: EventGroupMembershipRelationRow }
+  | { ok: false; message: string };
+
+export function planEventGroupMembershipRemove(
+  groupId: string,
+  eventId: string,
+  relation: EventGroupMembershipRelationRow | null | undefined,
+): EventGroupMembershipRemovePlan {
+  if (!relation ||
+      relation.event_group_id !== groupId ||
+      relation.event_id !== eventId ||
+      !Number.isSafeInteger(relation.updated_at) || relation.updated_at < 0 ||
+      !Number.isSafeInteger(relation.created_at) || relation.created_at < 0 ||
+      relation.relation_type !== "member") {
+    return { ok: false, message: "イベントはグループに追加されていません。" };
+  }
+  return { ok: true, expectedUpdatedAt: relation.updated_at, before: { ...relation } };
+}
