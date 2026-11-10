@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
+import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import {
   EVENT_GROUP_OPTION_PAGE_SIZE,
   adminEventGroupOptionsRoutes,
@@ -13,7 +14,7 @@ function setup({
   user = admin, rows = [], failure = false,
   tosAccepted = 1, tosReaccept = 0, tosMissing = false, tosFailure = false,
   settingsMissing = false, settingsFailure = false,
-  operationMode = "normal", disabledFeatures = "[]",
+  operationMode = "normal", disabledFeatures = "[]", mounted = false,
 } = {}) {
   const calls = [];
   const guardCalls = [];
@@ -60,9 +61,14 @@ function setup({
     c.set("sessionState", user ? "user" : "none");
     await next();
   });
-  app.route("/", adminEventGroupOptionsRoutes);
+  if (mounted) {
+    // Use the real admin router with only session resolution substituted.
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+  } else {
+    app.route("/", adminEventGroupOptionsRoutes);
+  }
   const get = (query = "groupId=g1") => app.request(
-    new Request("https://example.com/event-options?" + query),
+    new Request("https://example.com" + (mounted ? "/api/admin/event-groups/event-options" : "/event-options") + "?" + query),
     undefined,
     { DB: db },
   );
@@ -104,6 +110,28 @@ test("SA-025: CURRENT write-side ToS and admin_event_create CostGuard also gate 
     assert.equal(response.headers.get("cache-control"), "private, no-store", label);
     assert.equal(calls.length, 0, label + ": denied before candidate SELECT");
     assert.ok(guardCalls.length >= 1, label);
+  }
+});
+
+test("SA-025: mounted admin GET retains session, ToS and CostGuard fences", async () => {
+  const ok = setup({ mounted: true });
+  const success = await ok.get();
+  assert.equal(success.status, 200);
+  assert.deepEqual(await success.json(), { ok: true, options: [], nextCursor: null });
+  assert.equal(ok.calls.length, 1);
+  assert.equal(ok.guardCalls.length, 2);
+
+  for (const config of [
+    { mounted: true, user: null },
+    { mounted: true, user: { ...admin, role: "moderator" } },
+    { mounted: true, tosAccepted: 0 },
+    { mounted: true, disabledFeatures: '["admin_event_create"]' },
+  ]) {
+    const { get, calls } = setup(config);
+    const denied = await get();
+    assert.ok([401, 403, 503].includes(denied.status));
+    assert.equal(denied.headers.get("cache-control"), "private, no-store");
+    assert.equal(calls.length, 0);
   }
 });
 
