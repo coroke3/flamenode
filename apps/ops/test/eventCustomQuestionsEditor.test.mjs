@@ -33,7 +33,7 @@ test("MIG-0721 editor SSR keeps CURRENT fields and option serialization",()=>{
     assert.match(html,new RegExp('name="'+name+'"'));
   }
   const document = new JSDOM(html).window.document;
-  assert.equal(document.querySelector(\'input[name="general_custom_question_options"]\').value, "A\\nB");
+  assert.equal(document.querySelector('input[name="general_custom_question_options"]').value, "A\\nB");
   assert.match(html,/カスタム質問を追加/);
   assert.match(html,/投稿時の見え方/);
   assert.match(html,/選択肢を追加/);
