@@ -140,7 +140,6 @@ test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body f
     assert.match(text(memberOne), /映像/);
     assert.match(text(memberTwo), /音/);
     assert.deepEqual([...doc.querySelectorAll(".vd-chapter-time")].map(text), ["0:24", "1:10"]);
-    assert.deepEqual([...doc.querySelectorAll(".vd-chapter-time")].map(text), ["0:24", "1:10"]);
     assert.equal(doc.querySelectorAll(".vd-related a").length, 12, "CURRENT shows 12 related");
     assert.match(text(main.querySelector(".vd-like-count")), /7/);
     assert.equal(main.querySelector("button[data-do-nothing]"), null);
