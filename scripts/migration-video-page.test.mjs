@@ -263,6 +263,8 @@ test("T09: the playlist gate uses the normalized public video fields", { skip: s
     ["numeric primary ID is absent", { primary_event_id: 12345, scheduled_time: NOW + 7 * D }, []],
     ["array primary ID is absent", { primary_event_id: ["ev1"], scheduled_time: NOW + 7 * D }, []],
     ["object primary ID is absent", { primary_event_id: { id: "ev1" }, scheduled_time: NOW + 7 * D }, []],
+    ["array schedule is invalid", { primary_event_id: "ev1", scheduled_time: [NOW + 7 * D] }, []],
+    ["object schedule is invalid", { primary_event_id: "ev1", scheduled_time: { value: NOW + 7 * D } }, []],
     ["nonfinite schedule", { primary_event_id: "ev1", scheduled_time: "Infinity" }, []],
     ["past float schedule", { primary_event_id: "ev1", scheduled_time: NOW - 0.4 }, []],
   ]) {
