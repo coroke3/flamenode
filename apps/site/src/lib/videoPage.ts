@@ -199,7 +199,7 @@ export async function loadVideoPagesForBuild(
       ? Number(rawSchedule)
       : NaN;
     const scheduledTime = Number.isFinite(exactScheduledTime) &&
-      Math.abs(exactScheduledTime) <= 8.64e12
+      Math.abs(exactScheduledTime) <= 8.64e12 && video?.scheduled_time != null
       ? exactScheduledTime
       : null;
     const primaryEventId = typeof raw?.primary_event_id === "string"
