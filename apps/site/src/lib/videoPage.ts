@@ -7,7 +7,7 @@
  * or a configured but broken snapshot (including a non-public or missing object the manifest allows) fails the build.
  */
 import type { VideoDetailData } from "@flamenode/ui";
-import { normalizeNullableUnix, normalizeTrimmedString } from "@flamenode/server-core/publicData/normalize";
+import { normalizeNullableUnix, normalizeTrimmedString } from "../../../../src/lib/publicData/normalize.ts";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
 import { buildPublicVideoViewModelFromStatic } from "../../../../src/lib/publicData/publicVideoDetailViewModel.ts";
 import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/staticVideoDetailCore.ts";
