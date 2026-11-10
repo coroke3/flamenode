@@ -275,6 +275,28 @@ test("SA-025: legacy row whose cursor exceeds limits fails closed", async () => 
   });
 });
 
+test("SA-025: JSON-escaped continuation cursor over 200 characters fails closed", async () => {
+  // 100 backslashes fit the ID cap but expand to 200 JSON characters.
+  const escapedId = "\\".repeat(100);
+  assert.ok(escapedId.length <= MAX_EVENT_GROUP_ID_LENGTH);
+  assert.ok(JSON.stringify({ updatedAt: 1921, id: escapedId }).length > 200);
+  const rows = Array.from({ length: 81 }, (_, n) => ({
+    id: n === 79 ? escapedId : "event-" + String(n).padStart(3, "0"),
+    title: "Name " + n,
+    start_time: null,
+    updated_at: 2000 - n,
+  }));
+  const { get, calls } = setup({ rows });
+  const response = await get();
+  assert.equal(response.status, 503);
+  assert.equal(calls.length, 1);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    message: "イベント候補の取得に失敗しました。もう一度お試しください。",
+  });
+});
+
 test("SA-025: real SQLite D1 rejects LIKE wildcard injection and excludes existing members", async () => {
   const { db, sqlite, stats } = createAdminD1();
   try {
