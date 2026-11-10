@@ -16,6 +16,7 @@ import { send } from "./write.js";
 
 const defaultFetch: OpsFetch = (path, init) => fetch(path, init);
 const BASE = "/api/admin/announcements";
+const READ_BASE = "/api/admin-read/announcements";
 const INVALID_INPUT = "入力内容を確認してください。";
 const TRANSPORT_FAILURE = "保存に失敗しました。再読み込みして、もう一度お試しください。";
 
@@ -46,7 +47,7 @@ export async function readAnnouncementDetail(
   signal?: AbortSignal,
 ): Promise<OpsResult<AdminAnnouncementDetailResponse>> {
   if (!id) return { status: "notFound" };
-  const response = await getJson<unknown>(fetchFn, BASE.replace("/api/admin/", "/api/admin-read/") + "/" + encodeURIComponent(id), signal);
+  const response = await getJson<unknown>(fetchFn, READ_BASE + "/" + encodeURIComponent(id), signal);
   if (response.status !== "ok") return response;
   const checked = AdminAnnouncementDetailResponseSchema.safeParse(response.data);
   return checked.success && checked.data.item.id === id
