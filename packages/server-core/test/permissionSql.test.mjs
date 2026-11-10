@@ -4,7 +4,10 @@ import { test } from "node:test";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import {
   buildHiddenEditorCountGuardSql,
+  buildHiddenMemberBulkDeleteSql,
+  buildMemberPermissionBulkUpdateSql,
   buildPermissionSetGuardSql,
+  buildXUsersBulkInsertSql,
 } from "../src/video/permissionSql.ts";
 
 const dialect = new SQLiteSyncDialect();
@@ -83,6 +86,80 @@ test("MIG-0650 SA-082..084: hidden editor count is an atomic fail-closed precond
     w.add(member("h2", "v1", "second", { is_public_member: 0 }));
     assert.throws(() => w.execGuard(guard), /./, "hidden editor race must fail closed");
     assert.doesNotThrow(() => w.execGuard(buildHiddenEditorCountGuardSql("v1", 2)));
+  } finally {
+    w.sqlite.close();
+  }
+});
+
+test("MIG-0650 SA-082..084: bulk permission patch updates only listed rows", () => {
+  const w = world();
+  try {
+    w.add(member("m1", "v1", "alice"));
+    w.add(member("m2", "v1", "bob"));
+    w.add(member("m3", "v2", "alice"));
+    const after = member("m1", "v1", "alice", {
+      can_edit: 0, edit_updated_at: 1730000000,
+    });
+    const q = dialect.sqlToQuery(buildMemberPermissionBulkUpdateSql([after]));
+    const result = w.sqlite.prepare(q.sql).run(...q.params);
+    assert.equal(result.changes, 1);
+    assert.deepEqual(
+      w.sqlite.prepare("SELECT id, can_edit FROM video_members ORDER BY id").all(),
+      [{ id: "m1", can_edit: 0 }, { id: "m2", can_edit: 1 }, { id: "m3", can_edit: 1 }],
+    );
+    const empty = dialect.sqlToQuery(buildMemberPermissionBulkUpdateSql([]));
+    assert.equal(w.sqlite.prepare(empty.sql).run(...empty.params).changes, 0);
+  } finally {
+    w.sqlite.close();
+  }
+});
+
+test("MIG-0650 SA-082..084: hidden removal is bounded by video ID and public flag", () => {
+  const w = world();
+  try {
+    w.add(member("public", "v1", "alice"));
+    w.add(member("hidden", "v1", "bob", { is_public_member: 0 }));
+    w.add(member("elsewhere", "v2", "carol", { is_public_member: 0 }));
+    const q = dialect.sqlToQuery(buildHiddenMemberBulkDeleteSql(
+      "v1", ["hidden", "public", "elsewhere"],
+    ));
+    assert.equal(w.sqlite.prepare(q.sql).run(...q.params).changes, 1);
+    assert.deepEqual(
+      w.sqlite.prepare("SELECT id FROM video_members ORDER BY id").all(),
+      [{ id: "elsewhere" }, { id: "public" }],
+    );
+    const empty = dialect.sqlToQuery(buildHiddenMemberBulkDeleteSql("v1", []));
+    assert.equal(w.sqlite.prepare(empty.sql).run(...empty.params).changes, 0);
+  } finally {
+    w.sqlite.close();
+  }
+});
+
+test("MIG-0650 SA-082..084: X profile bulk upsert never revives rejected status", () => {
+  const w = world();
+  try {
+    w.sqlite.exec(`CREATE TABLE x_users (
+      id TEXT PRIMARY KEY, x_name TEXT, icon_url TEXT, profile_text TEXT,
+      portfolio_contact TEXT, youtube_channel_url TEXT, other_social_links TEXT,
+      creative_start_date TEXT, approval_status TEXT
+    )`);
+    w.sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)")
+      .run("rejected", "Original", "rejected");
+    const inserts = [
+      { id: "rejected", x_name: "Overwritten", approval_status: "pending" },
+      { id: "new", x_name: "New", approval_status: "pending" },
+    ];
+    const q = dialect.sqlToQuery(buildXUsersBulkInsertSql(inserts));
+    w.sqlite.prepare(q.sql).run(...q.params);
+    assert.deepEqual(
+      w.sqlite.prepare("SELECT id, x_name, approval_status FROM x_users ORDER BY id").all(),
+      [
+        { id: "new", x_name: "New", approval_status: "pending" },
+        { id: "rejected", x_name: "Original", approval_status: "rejected" },
+      ],
+    );
+    assert.equal(w.sqlite.prepare(q.sql).run(...q.params).changes, 1,
+      "same X ID must remain idempotent without reviving a rejected identity");
   } finally {
     w.sqlite.close();
   }
