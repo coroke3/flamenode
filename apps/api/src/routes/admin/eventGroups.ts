@@ -130,6 +130,19 @@ adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
   }
   // CURRENT guards must run before candidate SQL, but two separate guard
   // reads plus S4 and the page would exceed ZERO_1102 S2's 3-statement cap.
+  // Validate untrusted input before the D1 guard query. The actual permission,
+  // ToS and CostGuard checks still precede every candidate SELECT.
+  const groupId = (c.req.query("groupId") ?? "").trim();
+  const query = (c.req.query("q") ?? "").trim();
+  let cursor: Cursor | null;
+  try {
+    if (!groupId || groupId.length > MAX_EVENT_GROUP_ID_LENGTH || query.length > 64) {
+      throw new Error("event_group_search_invalid");
+    }
+    cursor = parseEventGroupOptionCursor(c.req.query("cursor") ?? null);
+  } catch {
+    return c.json({ ok: false, message: SEARCH_FAILED }, 400);
+  }
   let gate: AdminEventGroupGateRow | null;
   try {
     gate = await db.prepare(EVENT_GROUP_ADMIN_GATE_SQL).bind(user.id).first<AdminEventGroupGateRow>();
@@ -159,18 +172,6 @@ adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
   }).blocked) {
     return c.json({ ok: false, message: SEARCH_FAILED }, 503);
   }
-  const groupId = (c.req.query("groupId") ?? "").trim();
-  const query = (c.req.query("q") ?? "").trim();
-  let cursor: Cursor | null;
-  try {
-    if (!groupId || groupId.length > MAX_EVENT_GROUP_ID_LENGTH || query.length > 64) {
-      throw new Error("event_group_search_invalid");
-    }
-    cursor = parseEventGroupOptionCursor(c.req.query("cursor") ?? null);
-  } catch {
-    return c.json({ ok: false, message: SEARCH_FAILED }, 400);
-  }
-
   const conditions = [
     "NOT EXISTS (SELECT 1 FROM event_group_events m WHERE m.event_group_id = ? AND m.event_id = e.id)",
   ];
