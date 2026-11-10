@@ -72,6 +72,8 @@ test("MIG-0727 U02a: list renders filters, status, time fallbacks and audit link
   assert.match(markup, /admin\/announcements\/example%2Fa\/edit/);
   assert.match(markup, /table=announcements(?:&amp;|&)record=example%2Fa/);
   assert.equal(formatAnnouncementUnix(null), "—");
+  assert.equal(formatAnnouncementUnix(0, true), "—", "CURRENT treats an unset zero publish date as absent");
+  assert.equal(formatAnnouncementUnix(0), "—", "zero timestamps must not show an epoch date");
   const empty = renderToStaticMarkup(React.createElement(MemoryRouter, null,
     React.createElement(AnnouncementsView, { data: { ...sample, items: [] } })));
   assert.match(empty, /お知らせはまだありません/);
