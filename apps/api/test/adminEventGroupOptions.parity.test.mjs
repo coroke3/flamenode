@@ -184,6 +184,23 @@ test("SA-025: malformed input is rejected before candidate SELECT without echoin
   assert.throws(() => parseEventGroupOptionCursor("[]"), /cursor_invalid/);
 });
 
+test("SA-025: malformed search never consumes the combined admin D1 gate read", async () => {
+  const { get, calls, guardCalls } = setup();
+  for (const input of [
+    "groupId=",
+    "groupId=g1&q=" + "a".repeat(65),
+    "groupId=" + "g".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1),
+    "groupId=g1&cursor=%7Bbad",
+    "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 1, id: "" })),
+  ]) {
+    const response = await get(input);
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+  }
+  assert.equal(guardCalls.length, 0, "malformed requests must not consume scarce D1 reads");
+  assert.equal(calls.length, 0, "malformed requests must not reach candidate SQL");
+});
+
 test("SA-025: escaping and cursor seek use bound values in CURRENT order", async () => {
   const { get, calls } = setup();
   const cursor = JSON.stringify({ updatedAt: 173, id: "ev-4" });
