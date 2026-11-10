@@ -11,6 +11,8 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../../env.ts";
 import { adminReadGuardMiddleware } from "../../middleware/adminReadGuard.ts";
+import { evaluateAdminWriteGuard, loadTosState } from "../../middleware/writeOrigin.ts";
+import { evaluateCostGuard } from "../../middleware/costGuard.ts";
 
 export const EVENT_GROUP_OPTION_PAGE_SIZE = 80;
 const SEARCH_FAILED = "イベント候補の取得に失敗しました。もう一度お試しください。";
@@ -57,6 +59,29 @@ adminEventGroupOptionsRoutes.use("*", async (c, next) => {
 });
 
 adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
+  // CURRENT SA-025 calls requireAdminWrite("admin_event_create") even for a
+  // candidate read. The enclosing admin GET guard alone omits ToS/CostGuard.
+  const user = c.get("user");
+  if (!user) return c.json({ ok: false, message: SEARCH_FAILED }, 401);
+  let db: D1Database;
+  try {
+    db = c.env.DB;
+  } catch {
+    return c.json({ ok: false, message: SEARCH_FAILED }, 503);
+  }
+  const identity = await evaluateAdminWriteGuard({
+    user,
+    hasDb: Boolean(db),
+    originOk: true, // HTTP GET is safe; CURRENT Server Action origin is transport-specific.
+    requiredRole: "admin",
+    loadTosState: db ? () => loadTosState(db, user.id) : undefined,
+  });
+  if (!identity.ok) {
+    return c.json({ ok: false, message: SEARCH_FAILED }, identity.status);
+  }
+  if (await evaluateCostGuard(db, "admin_event_create")) {
+    return c.json({ ok: false, message: SEARCH_FAILED }, 503);
+  }
   const groupId = (c.req.query("groupId") ?? "").trim();
   const query = (c.req.query("q") ?? "").trim();
   let cursor: Cursor | null;
@@ -85,7 +110,7 @@ adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
     "ORDER BY e.updated_at DESC, e.id ASC LIMIT ?",
   ].join(" ");
   try {
-    const { results } = await c.env.DB.prepare(statement)
+    const { results } = await db.prepare(statement)
       .bind(...params, EVENT_GROUP_OPTION_PAGE_SIZE + 1)
       .all<OptionRow>();
     const page = results.slice(0, EVENT_GROUP_OPTION_PAGE_SIZE);
