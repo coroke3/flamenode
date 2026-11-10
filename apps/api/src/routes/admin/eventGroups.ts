@@ -1088,20 +1088,27 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
     return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
   }
 
-  const relationRows = rows.flatMap((row) => {
-    if (row.relation_event_id == null) return [];
+  const relationRows: Array<{
+    event_group_id: string;
+    event_id: string;
+    relation_type: string;
+    created_at: number;
+    updated_at: number;
+  }> = [];
+  for (const row of rows) {
+    if (row.relation_event_id == null) continue;
     if (row.relation_type == null || row.relation_created_at == null ||
         row.relation_updated_at == null) {
-      throw new Error("event_group_relation_snapshot_invalid");
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
     }
-    return [{
+    relationRows.push({
       event_group_id: id,
       event_id: row.relation_event_id,
       relation_type: row.relation_type,
       created_at: row.relation_created_at,
       updated_at: row.relation_updated_at,
-    }];
-  });
+    });
+  }
   if (relationRows.length > MAX_EVENT_GROUP_DELETE_RELATIONS) {
     return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
   }
