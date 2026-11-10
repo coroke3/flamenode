@@ -1,5 +1,12 @@
-// D-16-1 provisional MIG-0723 U02: replace request DTOs with MIG-0654
-// @flamenode/contracts/manageStaffWrite after its independently reviewed merge.
+// MIG-0723 U02: validate outgoing staff mutations against the merged MIG-0654
+// canonical contracts. Hono remains the sole authority for authentication/CAS/audit.
+import {
+  EventStaffUpsertBodySchema,
+  EventStaffDeleteBodySchema,
+  EventStaffCsvBodySchema,
+  EventOwnerTransferBodySchema,
+  EventStaffWriteResultSchema,
+} from "@flamenode/contracts";
 import type { OpsFetch } from "./read.js";
 import { send, type OpsWriteResult } from "./write.js";
 
@@ -80,9 +87,10 @@ async function sendStaff(
   }, method, path, body);
   if (httpStatus === 401) return { status: "anonymous" };
   if (httpStatus === null) return UNAVAILABLE;
-  if (httpStatus >= 200 && httpStatus < 300) return result;
+  const valid = result.status === "ok" && EventStaffWriteResultSchema.safeParse(result.data).success;
+  if (httpStatus >= 200 && httpStatus < 300) return valid ? result : UNAVAILABLE;
   if ([400, 409, 422].includes(httpStatus) &&
-      result.status === "ok" && result.data.ok === false) return result;
+      valid && result.data.ok === false) return result;
   return UNAVAILABLE;
 }
 
@@ -95,17 +103,18 @@ export function createManageStaffWriteClient(fetchFn: OpsFetch = (path, init) =>
   return {
     create(eventId: string, input: StaffUpsertInput): Promise<Outcome> {
       const path = basePath(eventId);
-      if (!path || !input.reason.trim()) return Promise.resolve(UNAVAILABLE);
+      if (!path || !EventStaffUpsertBodySchema.safeParse(input).success) return Promise.resolve(UNAVAILABLE);
       return sendStaff(fetchFn, "POST", path + "/staff", input);
     },
     update(eventId: string, staffId: string, input: StaffUpsertInput): Promise<Outcome> {
       const path = basePath(eventId), staff = segment(staffId);
-      if (!path || !staff || !input.reason.trim()) return Promise.resolve(UNAVAILABLE);
+      if (!path || !staff || !EventStaffUpsertBodySchema.safeParse(input).success) return Promise.resolve(UNAVAILABLE);
       return sendStaff(fetchFn, "PUT", path + "/staff/" + staff, input);
     },
     remove(eventId: string, staffId: string, reason: string, confirmText: string): Promise<Outcome> {
       const path = basePath(eventId), staff = segment(staffId);
-      if (!path || !staff || !reason.trim()) return Promise.resolve(UNAVAILABLE);
+      if (!path || !staff || !EventStaffDeleteBodySchema.safeParse({ reason, confirm_text: confirmText }).success)
+        return Promise.resolve(UNAVAILABLE);
       return sendStaff(fetchFn, "DELETE", path + "/staff/" + staff, {
         reason, confirm_text: confirmText,
       });
@@ -114,14 +123,15 @@ export function createManageStaffWriteClient(fetchFn: OpsFetch = (path, init) =>
       const path = basePath(eventId);
       // Never submit a CSV preview known to contain errors; the server still
       // validates every row, permissions and atomicity independently.
-      if (!path || !reason.trim() || rows.some(row => row.errors.length > 0))
+      if (!path || rows.some(row => row.errors.length > 0) ||
+          !EventStaffCsvBodySchema.safeParse({ reason, rows }).success)
         return Promise.resolve(UNAVAILABLE);
       return sendStaff(fetchFn, "POST", path + "/staff/csv", { reason, rows: [...rows] });
     },
     transferOwnership(eventId: string, input: StaffTransferInput): Promise<Outcome> {
       const path = basePath(eventId);
       if (!path || !segment(input.from_staff_id) || !segment(input.to_staff_id) ||
-          !input.reason.trim() || !input.confirm_text.trim()) return Promise.resolve(UNAVAILABLE);
+          !EventOwnerTransferBodySchema.safeParse(input).success) return Promise.resolve(UNAVAILABLE);
       return sendStaff(fetchFn, "POST", path + "/owner-transfer", input);
     },
   };
