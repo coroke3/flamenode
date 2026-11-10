@@ -59,9 +59,7 @@ test("MIG-0727 U02b: create uses shared body/transport contracts; rejects invali
   assert.equal(calls[0].init.cache, "no-store");
   assert.equal(calls[0].init.credentials, "same-origin");
   assert.equal(calls[0].init.headers["content-type"], "application/json");
-  assert.deepEqual(JSON.parse(calls[0].init.body), {
-    ...input, id: undefined,
-  });
+  assert.deepEqual(JSON.parse(calls[0].init.body), input);
   assert.equal((await api.create({ ...input, title: "" })).ok, false);
   assert.equal((await api.create({ ...input, publish_at: "invalid" })).ok, false);
   assert.equal((await api.create({ ...input, target_audience: "unknown" })).ok, false);
