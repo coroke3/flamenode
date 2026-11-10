@@ -545,7 +545,19 @@ export function planEventGroupMembershipRemove(
       !["member", "primary", "related"].includes(relation.relation_type)) {
     return { ok: false, message: "イベントはグループに追加されていません。" };
   }
-  return { ok: true, expectedUpdatedAt: relation.updated_at, before: { ...relation } };
+  return {
+    ok: true,
+    expectedUpdatedAt: relation.updated_at,
+    // Keep the restorable snapshot limited to the canonical relation columns.
+    // Callers may pass a joined row containing settings/guard metadata.
+    before: {
+      event_group_id: relation.event_group_id,
+      event_id: relation.event_id,
+      relation_type: relation.relation_type,
+      created_at: relation.created_at,
+      updated_at: relation.updated_at,
+    },
+  };
 }
 
 /**
