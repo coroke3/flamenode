@@ -490,14 +490,9 @@ test("SA-025: malformed input is rejected before candidate SELECT without echoin
   for (const query of [
     "groupId=",
     "groupId=g1&q=" + "a".repeat(65),
-    "groupId=" + "g".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1),
-    "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({
-      updatedAt: 4, id: "x".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1),
-    })),
     "groupId=g1&cursor=%7Bbad",
     "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 3.5, id: "abc" })),
     "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 5, id: "" })),
-    "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: -1, id: "abc" })),
     "groupId=g1&cursor=" + encodeURIComponent("x".repeat(201)),
   ]) {
     const response = await get(query);
@@ -509,10 +504,31 @@ test("SA-025: malformed input is rejected before candidate SELECT without echoin
   }
   assert.equal(calls.length, 0);
   assert.equal(parseEventGroupOptionCursor(null), null);
+  const longLegacyId = "x".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1);
   assert.deepEqual(parseEventGroupOptionCursor(JSON.stringify({
-    updatedAt: 4, id: "x".repeat(MAX_EVENT_GROUP_ID_LENGTH),
-  })), { updatedAt: 4, id: "x".repeat(MAX_EVENT_GROUP_ID_LENGTH) });
+    updatedAt: -1, id: longLegacyId,
+  })), { updatedAt: -1, id: longLegacyId },
+  "CURRENT accepts any non-empty ID and any safe-integer timestamp");
   assert.throws(() => parseEventGroupOptionCursor("[]"), /cursor_invalid/);
+});
+
+test("SA-025: CURRENT-compatible pagination preserves long legacy IDs and safe-integer timestamps", async () => {
+  const legacyId = "legacy-" + "x".repeat(122);
+  const rows = Array.from({ length: 81 }, (_, index) => ({
+    id: index === 79 ? legacyId : "event-" + String(index).padStart(3, "0"),
+    title: "Event " + index,
+    start_time: 1000 + index,
+    updated_at: 2000 - index,
+  }));
+  const { get, calls } = setup({ rows });
+  const longGroupId = "legacy-group-" + "g".repeat(120);
+  const response = await get("groupId=" + encodeURIComponent(longGroupId));
+  assert.equal(response.status, 200);
+  const page = await response.json();
+  assert.equal(page.options.length, 80);
+  assert.equal(page.nextCursor, JSON.stringify({ updatedAt: 1921, id: legacyId }));
+  assert.equal(parseEventGroupOptionCursor(page.nextCursor).id, legacyId);
+  assert.equal(calls.length, 1);
 });
 
 test("SA-025: malformed search never consumes the combined admin D1 gate read", async () => {
@@ -520,7 +536,6 @@ test("SA-025: malformed search never consumes the combined admin D1 gate read", 
   for (const input of [
     "groupId=",
     "groupId=g1&q=" + "a".repeat(65),
-    "groupId=" + "g".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1),
     "groupId=g1&cursor=%7Bbad",
     "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 1, id: "" })),
   ]) {
