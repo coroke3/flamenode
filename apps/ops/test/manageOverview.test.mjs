@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { JSDOM } from "jsdom";
 import { loadManageOverview, normalizeManageNotifFilter, manageOverviewPath } from "../.test-dist/apps/ops/src/api/manageOverview.js";
 import { EventOverview, ManageEventOverviewContent } from "../.test-dist/apps/ops/src/routes/manage/EventOverview.js";
+import { ManageEventOverviewRoute } from "../.test-dist/apps/ops/src/routes/router.js";
 
 function validOverview(id = "ev-1", notifCategory = "all") {
   return {
@@ -120,6 +121,7 @@ test("U02a: SSR renders only validated overview projection with safe links", () 
   assert.ok(doc.querySelector('a[href="/manage/events/ev-1/videos/video-1"]'));
   assert.ok(doc.querySelector('a[href="/manage/events/ev-1?notif=x_id"]'));
   assert.equal(doc.querySelector('a[href="/manage/events/ev-1"]')?.getAttribute("aria-current"), "page");
+  assert.ok(doc.querySelector('a[href="/manage/events/ev-1/staff"]'), "overview settings subtab links to the staff route");
   assert.equal(doc.querySelectorAll('a[href^="/admin/"]').length, 0, "non-admin sees no admin actions");
 
   const loadingRoot = React.createElement(MemoryRouter, {},
@@ -138,4 +140,13 @@ test("U02a: notification schema fallback is explicit and not misrepresented as e
   assert.match(doc.body.textContent, /通知データを取得できません/);
   assert.equal(doc.querySelector('nav[aria-label="通知種別"]'), null);
   assert.match(doc.body.textContent, /公開作品/);
+});
+
+test("U02b: event overview URL route resolves an ID and renders only its loading state before authorized GET", () => {
+  const root = React.createElement(MemoryRouter, { initialEntries: ["/manage/events/ev-1"] },
+    React.createElement(Routes, null,
+      React.createElement(Route, { path: "/manage/events/:id", element: React.createElement(ManageEventOverviewRoute) })));
+  const html = renderToStaticMarkup(root);
+  assert.match(html, /読み込み中/);
+  assert.doesNotMatch(html, /テストイベント|未審査作品/);
 });
