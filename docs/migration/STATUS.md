@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 5–8 implementation tracks; Phase 4 follow-ups and Phase 9 inventory (production cutover not started)
-Current Task: MIG-0711
+Current Task: MIG-0654
 Current Owner: chatgpt
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0711
-Last Task PR: #433
+Last Completed Task: MIG-0654
+Last Task PR: #508
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0663, MIG-0664, MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -374,7 +374,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0651 | video submit / update APIs (SA-086, SA-088, SA-089) | READY | MIG-0602, MIG-0633 |
 | MIG-0652 | event create / update / delete / rename APIs (SA-021..024) | READY | MIG-0602, MIG-0305, MIG-0633 |
 | MIG-0653 | event group APIs (SA-025..030) | READY | MIG-0602, MIG-0305, MIG-0633 |
-| MIG-0654 | event staff / owner transfer APIs (SA-031..034) | READY | MIG-0602, MIG-0305, MIG-0633 |
+| MIG-0654 | event staff / owner transfer APIs (SA-031..034) | DONE | MIG-0602, MIG-0305, MIG-0633 |
 | MIG-0655 | event template save/list + YouTube playlist settings APIs (SA-035, SA-037..039) | DONE | MIG-0602, MIG-0305, MIG-0633 |
 | MIG-0656 | slot admin APIs (SA-056..064) | READY | MIG-0602, MIG-0305, MIG-0633 |
 | MIG-0657 | slot reserve / release / extend / merge APIs (SA-065..068) | READY | MIG-0602, MIG-0305, MIG-0633 |
