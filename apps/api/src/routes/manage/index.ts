@@ -54,8 +54,7 @@ const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths, ...submitted
 // Dynamic :slotId path overlaps /batch-delete etc. Apply ONLY to DELETE.
 const singleSlotDeletePath = "/events/:id/slots/:slotId";
 
-const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths, ...submittedDangerWritePaths];
-const singleSlotDeletePath = "/events/:id/slots/:slotId";
+
 const originOptions = (c: import("hono").Context<AppEnv>) => ({
   loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
   allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
