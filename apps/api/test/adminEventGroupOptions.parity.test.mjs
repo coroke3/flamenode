@@ -9,17 +9,43 @@ import {
 } from "../src/routes/admin/eventGroups.ts";
 
 const admin = { id: "admin-1", role: "admin", is_banned: 0 };
-function setup({ user = admin, rows = [], failure = false } = {}) {
+function setup({
+  user = admin, rows = [], failure = false,
+  tosAccepted = 1, tosReaccept = 0, tosMissing = false, tosFailure = false,
+  settingsMissing = false, settingsFailure = false,
+  operationMode = "normal", disabledFeatures = "[]",
+} = {}) {
   const calls = [];
+  const guardCalls = [];
   const db = {
     prepare(statement) {
+      const isSearch = statement.includes("FROM events e");
       const call = { statement, params: [] };
-      calls.push(call);
+      (isSearch ? calls : guardCalls).push(call);
       return {
         bind(...params) {
           call.params = params;
           return {
+            async first() {
+              if (statement.includes('FROM "user" u')) {
+                if (tosFailure) throw new Error("private user lookup failure");
+                return tosMissing ? null : {
+                  is_tos_accepted: tosAccepted, terms_reaccept_required: tosReaccept,
+                };
+              }
+              if (statement.includes("FROM system_settings")) {
+                if (settingsFailure) throw new Error("private settings failure");
+                return settingsMissing ? null : {
+                  operation_mode: operationMode,
+                  disabled_features_json: disabledFeatures,
+                  cost_guard_exception_until: null,
+                  cost_guard_exception_features_json: null,
+                };
+              }
+              throw new Error("unexpected test read");
+            },
             async all() {
+              if (!isSearch) throw new Error("unexpected list read");
               if (failure) throw new Error("SQL error: secret binding");
               return { results: rows };
             },
@@ -40,7 +66,7 @@ function setup({ user = admin, rows = [], failure = false } = {}) {
     undefined,
     { DB: db },
   );
-  return { get, calls };
+  return { get, calls, guardCalls };
 }
 
 test("SA-025: only authenticated admin may search, including banned denial", async () => {
@@ -56,6 +82,39 @@ test("SA-025: only authenticated admin may search, including banned denial", asy
     assert.equal(response.headers.get("cache-control"), "private, no-store");
     assert.equal(calls.length, 0);
   }
+});
+
+test("SA-025: CURRENT write-side ToS and admin_event_create CostGuard also gate GET", async () => {
+  for (const [label, config, expectedStatus] of [
+    ["tos declined", { tosAccepted: 0 }, 403],
+    ["tos reaccept", { tosReaccept: 1 }, 403],
+    ["user deleted", { tosMissing: true }, 401],
+    ["user DB outage", { tosFailure: true }, 503],
+    ["cost mode", { operationMode: "maintenance" }, 503],
+    ["feature disabled", { disabledFeatures: '["admin_event_create"]' }, 503],
+    ["settings missing", { settingsMissing: true }, 503],
+    ["settings outage", { settingsFailure: true }, 503],
+  ]) {
+    const { get, calls, guardCalls } = setup(config);
+    const response = await get();
+    assert.equal(response.status, expectedStatus, label);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "イベント候補の取得に失敗しました。もう一度お試しください。",
+    }, label);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", label);
+    assert.equal(calls.length, 0, label + ": denied before candidate SELECT");
+    assert.ok(guardCalls.length >= 1, label);
+  }
+});
+
+test("SA-025: authorized search reads ToS, CostGuard, then one bounded candidate page", async () => {
+  const { get, calls, guardCalls } = setup();
+  const response = await get();
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(guardCalls.length, 2);
+  assert.match(guardCalls[0].statement, /FROM "user" u/);
+  assert.match(guardCalls[1].statement, /FROM system_settings/);
 });
 
 test("SA-025: malformed input fails before D1 and never echoes the cursor", async () => {
