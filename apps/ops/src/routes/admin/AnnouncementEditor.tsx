@@ -51,12 +51,13 @@ export function AnnouncementForm({ mode, initial, api, onSaved }: {
         ? await api.create(raw)
         : await api.update(initial!.id, raw);
       if (!result.ok) { setError(result.message ?? "失敗しました。"); return; }
-      if (mode === "create" && !result.id) {
+      const resultId = "id" in result && typeof result.id === "string" ? result.id : undefined;
+      if (mode === "create" && !resultId) {
         setError("保存に失敗しました。再読み込みして、もう一度お試しください。");
         return;
       }
       setSuccess("保存しました。");
-      onSaved(result.id);
+      onSaved(resultId);
     } catch {
       setError("保存に失敗しました。再読み込みして、もう一度お試しください。");
     } finally {
