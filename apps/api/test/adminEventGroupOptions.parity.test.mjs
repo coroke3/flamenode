@@ -15,6 +15,9 @@ import {
   requireEventGroupMutationId,
   checkEventGroupUpdateCas,
   checkEventGroupSlugAvailable,
+  EVENT_GROUP_ADD_MAX,
+  normalizeEventGroupMembershipAdd,
+  normalizeEventGroupMembershipRemove,
 } from "../src/routes/admin/eventGroups.ts";
 
 const admin = { id: "admin-1", role: "admin", is_banned: 0 };
@@ -78,6 +81,44 @@ function setup({
   );
   return { get, calls, guardCalls };
 }
+
+test("SA-029/030 U04: CURRENT membership input normalization and 80-ID bound", () => {
+  assert.equal(EVENT_GROUP_ADD_MAX, 80);
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: "  grp-1  ",
+    eventIds: [" first ", "second", "", "first", null, 42, "  ", "second "],
+  }), { ok: true, groupId: "grp-1", eventIds: ["first", "second"] });
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: " g ", eventIds: Array.from({ length: 80 }, (_, i) => "ev-" + i),
+  }), {
+    ok: true, groupId: "g", eventIds: Array.from({ length: 80 }, (_, i) => "ev-" + i),
+  });
+  const tooMany = { ok: false,
+    message: "一度に追加できるイベントは80件までです。分けて実行してください。" };
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: "g", eventIds: Array.from({ length: 81 }, (_, i) => "ev-" + i),
+  }), tooMany);
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: "", eventIds: Array.from({ length: 81 }, (_, i) => "ev-" + i),
+  }), tooMany, "CURRENT checks max before missing group");
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: "g", eventIds: [...Array(81).fill("same"), " last "],
+  }), { ok: true, groupId: "g", eventIds: ["same", "last"] });
+  const noSelection = { ok: false, message: "追加するイベントを選択してください。" };
+  for (const bad of [undefined, null, {}, { groupId: "g", eventIds: [42, null, " "] },
+    { groupId: " ", eventIds: ["ev"] }, { groupId: 1, eventIds: ["ev"] }]) {
+    assert.deepEqual(normalizeEventGroupMembershipAdd(bad), noSelection);
+  }
+  assert.deepEqual(normalizeEventGroupMembershipRemove({ groupId: " grp ", eventId: " ev " }), {
+    ok: true, groupId: "grp", eventId: "ev",
+  });
+  const invalidRemove = { ok: false, message: "グループとイベントを指定してください。" };
+  for (const bad of [undefined, null, {}, { groupId: "grp", eventId: "" },
+    { groupId: " ", eventId: "ev" }, { groupId: 1, eventId: "ev" },
+    { groupId: "grp", eventId: 3 }]) {
+    assert.deepEqual(normalizeEventGroupMembershipRemove(bad), invalidRemove);
+  }
+});
 
 test("SA-027 U03: CURRENT write preflight errors and CAS boundaries", () => {
   const build = (fields = {}) => EventGroupMutationBodySchema.parse({

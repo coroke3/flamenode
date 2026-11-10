@@ -324,3 +324,53 @@ export function checkEventGroupSlugAvailable(available: boolean): EventGroupWrit
     ? { ok: true }
     : { ok: false, message: "このスラッグは既に使われています。" };
 }
+
+/**
+ * MIG-0653 U04: input-only membership normalization from CURRENT
+ * addEventsToGroup/removeEventFromGroup. Authorization, D1 group existence,
+ * valid-event existence, relation CAS, audit and queue remain mandatory
+ * responsibilities of future fully guarded handlers.
+ */
+export const EVENT_GROUP_ADD_MAX = 80;
+
+export type EventGroupMembershipInput =
+  | { ok: true; groupId: string; eventIds: string[] }
+  | { ok: false; message: string };
+
+export function normalizeEventGroupMembershipAdd(input: unknown): EventGroupMembershipInput {
+  const raw = input !== null && typeof input === "object"
+    ? input as Record<string, unknown>
+    : {};
+  const groupId = typeof raw.groupId === "string" ? raw.groupId.trim() : "";
+  const rawIds = Array.isArray(raw.eventIds) ? raw.eventIds : [];
+  const eventIds = [...new Set(
+    rawIds.filter((id): id is string => typeof id === "string")
+      .map((id) => id.trim()).filter(Boolean),
+  )];
+  if (eventIds.length > EVENT_GROUP_ADD_MAX) {
+    return {
+      ok: false,
+      message: `一度に追加できるイベントは${EVENT_GROUP_ADD_MAX}件までです。分けて実行してください。`,
+    };
+  }
+  if (!groupId || eventIds.length === 0) {
+    return { ok: false, message: "追加するイベントを選択してください。" };
+  }
+  return { ok: true, groupId, eventIds };
+}
+
+export type EventGroupMembershipRemoveInput =
+  | { ok: true; groupId: string; eventId: string }
+  | { ok: false; message: string };
+
+export function normalizeEventGroupMembershipRemove(input: unknown): EventGroupMembershipRemoveInput {
+  const raw = input !== null && typeof input === "object"
+    ? input as Record<string, unknown>
+    : {};
+  const groupId = typeof raw.groupId === "string" ? raw.groupId.trim() : "";
+  const eventId = typeof raw.eventId === "string" ? raw.eventId.trim() : "";
+  if (!groupId || !eventId) {
+    return { ok: false, message: "グループとイベントを指定してください。" };
+  }
+  return { ok: true, groupId, eventId };
+}
