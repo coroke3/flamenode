@@ -22,6 +22,17 @@ function makeDb() {
             async all() {
               return { results: sqlite.prepare(query).all(...params).map(row => ({ ...row })) };
             },
+            async raw() {
+              // Drizzle D1's select .all() decodes rows through the raw
+              // array interface, not only the D1 all() object interface.
+              const statement = sqlite.prepare(query);
+              statement.setReturnArrays(true);
+              try {
+                return statement.all(...params).map(row => [...row]);
+              } finally {
+                statement.setReturnArrays(false);
+              }
+            },
           };
         },
       };
