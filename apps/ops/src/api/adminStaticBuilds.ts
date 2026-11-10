@@ -1,4 +1,4 @@
-/** MIG-0735 provisional adapter. POST paths are owned by MIG-0643 and not mounted on main yet. */
+/** MIG-0735: Ops admin adapter for static-builds and YouTube sync mutation/query endpoints. */
 import {
   AdminStaticBuildsResponseSchema,
   AdminYoutubeSyncResponseSchema,

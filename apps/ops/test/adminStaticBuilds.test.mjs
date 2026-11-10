@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { YoutubeSync } from "../.test-dist/apps/ops/src/routes/admin/YoutubeSync.js";
 import { YoutubePlaylists } from "../.test-dist/apps/ops/src/routes/admin/YoutubePlaylists.js";
 import { StaticRebuildQueuePanel, staticRebuildAdminHref } from "../.test-dist/apps/ops/src/routes/admin/StaticRebuildQueuePanel.js";
+import { readFile } from "node:fs/promises";
 import { postAdminOp, mutationResultQuery, canContinueBackfill, readYoutubeSync, readYoutubePlaylists, readYoutubeQuota, getAdminOps, youtubeSyncFilterParams } from "../.test-dist/apps/ops/src/api/adminStaticBuilds.js";
 
 const response = (status, payload) => new Response(JSON.stringify(payload), {
@@ -164,4 +165,14 @@ test("MIG-0735 queue UI: linked targets are encoded and unknown future top_* can
   assert.match(html,/href="\/manage\/events\/ev%2F1"/);
   assert.match(html,/再試行/);
   assert.match(html,/失敗 1 件を一括再試行/);
+});
+
+test("MIG-0735 U03 router: static-builds and youtube routes are registered in router.tsx", async () => {
+  const routerSource = await readFile(new URL("../src/routes/router.tsx", import.meta.url), "utf8");
+  for (const path of ["static-builds", "youtube-sync", "youtube-sync/playlists", "youtube-quota"]) {
+    assert.match(routerSource, new RegExp(`<Route path="${path.replace("/", "\\/")}"`));
+  }
+  for (const component of ["StaticBuilds", "YoutubeSync", "YoutubePlaylists", "YoutubeQuota"]) {
+    assert.match(routerSource, new RegExp(`element={<${component} \\/>}`));
+  }
 });
