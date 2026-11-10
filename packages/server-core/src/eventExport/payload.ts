@@ -258,7 +258,11 @@ function buildCustomAnswersByKey(
 ): Record<string, unknown> {
   return Object.fromEntries(
     answers
-      .filter((answer) => !FORBIDDEN_PUBLIC_KEYS.has(answer.key))
+      // Reserved prototype keys are never legitimate public question IDs.
+      // Object.fromEntries creates an own "__proto__" key which can be
+      // misinterpreted by downstream consumers merging these objects.
+      .filter((answer) => !FORBIDDEN_PUBLIC_KEYS.has(answer.key) &&
+        answer.key !== "__proto__" && answer.key !== "constructor" && answer.key !== "prototype")
       .map((answer) => [answer.key, answer.value]),
   );
 }
