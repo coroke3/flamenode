@@ -102,10 +102,31 @@ test("SA-030 U04: canonical audited D1 delete budget respects Free 50-query cap"
     callerQueryCount: 43, queueStatementCount: 1,
     auditEntryCount: 1, distinctActorCount: 1,
   }), { withinLimit: false, totalQueryCount: 51, limit: 50 });
+  // SA-030 always audits exactly one deleted relation; it must reject a
+  // misleading projection for 80 audit records rather than budget a different
+  // operation and allow the writer to proceed.
   assert.deepEqual(planEventGroupMembershipDeleteBudget({
     callerQueryCount: 5, queueStatementCount: 1,
     auditEntryCount: 80, distinctActorCount: 1,
-  }), { withinLimit: false, totalQueryCount: 53, limit: 50 });
+  }), { withinLimit: false, totalQueryCount: Infinity, limit: 50 });
+  // The shared budget helper normalizes negative and NaN fields to zero;
+  // this SA-030 entrypoint MUST deny invalid caller-supplied estimates.
+  for (const invalid of [
+    { callerQueryCount: -1 },
+    { callerQueryCount: Number.NaN },
+    { callerQueryCount: Number.POSITIVE_INFINITY },
+    { callerQueryCount: 1.5 },
+    { callerQueryCount: Number.MAX_SAFE_INTEGER + 1 },
+    { queueStatementCount: -1 },
+    { auditEntryCount: 0 },
+    { distinctActorCount: 0 },
+    { distinctActorCount: 2 },
+  ]) {
+    assert.deepEqual(planEventGroupMembershipDeleteBudget({
+      callerQueryCount: 5, queueStatementCount: 1,
+      auditEntryCount: 1, distinctActorCount: 1, ...invalid,
+    }), { withinLimit: false, totalQueryCount: Infinity, limit: 50 });
+  }
 });
 
 test("SA-029/030 U04: write projections keep CURRENT INSERT shape and delete CAS snapshot", () => {
