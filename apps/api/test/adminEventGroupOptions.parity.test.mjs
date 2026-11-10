@@ -1804,7 +1804,7 @@ function stagedSa028Harness({ role = "admin", mutateAfterRead = false, publicGro
 }
 
 
-function stagedVisibilityManifestBucket({ failPutAt = 0 } = {}) {
+function stagedVisibilityManifestBucket({ failPutAt = 0, failEveryPut = false } = {}) {
   let body = null;
   let etag = null;
   let puts = 0;
@@ -1816,7 +1816,7 @@ function stagedVisibilityManifestBucket({ failPutAt = 0 } = {}) {
     }),
     put: async (_key, nextBody, options = {}) => {
       puts += 1;
-      if (puts === failPutAt) throw new Error("simulated R2 put failure");
+      if (failEveryPut || puts === failPutAt) throw new Error("simulated R2 put failure");
       const onlyIf = options.onlyIf;
       if (onlyIf instanceof Headers && onlyIf.get("If-None-Match") === "*" && body !== null) return null;
       if (onlyIf && !(onlyIf instanceof Headers) && onlyIf.etagMatches !== etag) return null;
@@ -1878,7 +1878,7 @@ test("SA-028 U03 staged: D1 failure compensates only the precommitted public DEL
 });
 
 test("SA-028 U03 staged: failed R2 precommit fails closed before any D1 batch", async () => {
-  const bucket = stagedVisibilityManifestBucket({ failPutAt: 1 });
+  const bucket = stagedVisibilityManifestBucket({ failEveryPut: true });
   const h = stagedSa028Harness({ publicGroup: true, bucket });
   try {
     const response = await h.remove();
