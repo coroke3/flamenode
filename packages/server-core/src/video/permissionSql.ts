@@ -61,3 +61,74 @@ export function buildHiddenEditorCountGuardSql(videoId: string, expectedCount: n
     END
   `;
 }
+
+/** CURRENT collaborator x_users upsert: never revive a rejected X identity. */
+export function buildXUsersBulkInsertSql(rows: readonly (typeof import("@flamenode/db/schema").xUsers.$inferInsert)[]) {
+  const payload = JSON.stringify(rows);
+  return sql`
+    INSERT INTO x_users (
+      id,
+      x_name,
+      icon_url,
+      profile_text,
+      portfolio_contact,
+      youtube_channel_url,
+      other_social_links,
+      creative_start_date,
+      approval_status
+    )
+    SELECT
+      json_extract(value, '$.id'),
+      json_extract(value, '$.x_name'),
+      json_extract(value, '$.icon_url'),
+      json_extract(value, '$.profile_text'),
+      json_extract(value, '$.portfolio_contact'),
+      json_extract(value, '$.youtube_channel_url'),
+      json_extract(value, '$.other_social_links'),
+      json_extract(value, '$.creative_start_date'),
+      json_extract(value, '$.approval_status')
+    FROM json_each(${payload})
+    WHERE 1 = 1
+    ON CONFLICT(id) DO UPDATE SET
+      id = excluded.id
+    WHERE COALESCE(x_users.approval_status, 'pending') <> 'rejected'
+  `;
+}
+
+/** SQL bulk permission mutation; exact member-set CAS must run in same D1 batch. */
+export function buildMemberPermissionBulkUpdateSql(rows: readonly VideoMemberRow[]) {
+  const payload = JSON.stringify(rows.map(toVideoMemberSnapshotRow));
+  return sql`
+    WITH patches AS (
+      SELECT
+        json_extract(value, '$.id') AS id,
+        json_extract(value, '$.can_edit') AS can_edit,
+        json_extract(value, '$.edit_granted_by_auth_user_id') AS edit_granted_by_auth_user_id,
+        json_extract(value, '$.edit_granted_at') AS edit_granted_at,
+        json_extract(value, '$.edit_updated_at') AS edit_updated_at
+      FROM json_each(${payload})
+    )
+    UPDATE video_members
+    SET
+      can_edit = (SELECT can_edit FROM patches WHERE patches.id = video_members.id),
+      edit_granted_by_auth_user_id = (
+        SELECT edit_granted_by_auth_user_id FROM patches WHERE patches.id = video_members.id
+      ),
+      edit_granted_at = (SELECT edit_granted_at FROM patches WHERE patches.id = video_members.id),
+      edit_updated_at = (SELECT edit_updated_at FROM patches WHERE patches.id = video_members.id)
+    WHERE id IN (SELECT id FROM patches)
+  `;
+}
+
+/** CAS-compatible hidden-member removal, always constrained by video_id. */
+export function buildHiddenMemberBulkDeleteSql(videoId: string, ids: readonly string[]) {
+  const payload = JSON.stringify(ids);
+  return sql`
+    DELETE FROM video_members
+    WHERE video_id = ${videoId}
+      AND is_public_member = 0
+      AND id IN (
+        SELECT CAST(value AS TEXT) FROM json_each(${payload})
+      )
+  `;
+}
