@@ -64,7 +64,7 @@ type StaffCsvRow = {
   warnings: string[];
 };
 
-function parseStaffCsvText(input: string): string[][] {
+function parseStaffCsvText(input: string): { rows: string[][]; malformed: boolean } {
   const text = input.replace(/^\uFEFF/, "");
   const firstRecord = text.split(/[\r\n]/, 1)[0] ?? "";
   let quoted = false, commas = 0, tabs = 0;
