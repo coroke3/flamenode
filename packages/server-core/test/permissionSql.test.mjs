@@ -158,8 +158,16 @@ test("MIG-0650 SA-082..084: X profile bulk upsert never revives rejected status"
         { id: "rejected", x_name: "Original", approval_status: "rejected" },
       ],
     );
-    assert.equal(w.sqlite.prepare(q.sql).run(...q.params).changes, 1,
-      "same X ID must remain idempotent without reviving a rejected identity");
+    const repeat = w.sqlite.prepare(q.sql).run(...q.params);
+    assert.ok(repeat.changes <= 1, "rejected X identity must not be overwritten");
+    assert.deepEqual(
+      w.sqlite.prepare("SELECT id, x_name, approval_status FROM x_users ORDER BY id").all(),
+      [
+        { id: "new", x_name: "New", approval_status: "pending" },
+        { id: "rejected", x_name: "Original", approval_status: "rejected" },
+      ],
+      "repeated upsert must not change the rejected or existing identity",
+    );
   } finally {
     w.sqlite.close();
   }
