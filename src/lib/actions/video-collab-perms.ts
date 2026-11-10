@@ -6,6 +6,7 @@ import { z } from "zod";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
+import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import {
   canEditVideo,
@@ -18,7 +19,6 @@ import {
   users,
   videoMembers,
   videos,
-  xUserAccountLinks,
   xUsers,
 } from "@/lib/db/schema";
 import {
@@ -429,30 +429,6 @@ function buildHiddenMemberBulkDeleteSql(videoId: string, ids: readonly string[])
   `;
 }
 
-async function loadNotifiableRecipientLinks(
-  db: DB,
-  xids: readonly string[],
-): Promise<Array<{ x_user_id: string; auth_user_id: string }>> {
-  if (xids.length === 0) return [];
-  const payload = JSON.stringify(Array.from(new Set(xids)));
-  return db
-    .select({
-      x_user_id: xUserAccountLinks.x_user_id,
-      auth_user_id: xUserAccountLinks.auth_user_id,
-    })
-    .from(xUserAccountLinks)
-    .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
-    .innerJoin(users, eq(users.id, xUserAccountLinks.auth_user_id))
-    .where(
-      and(
-        sql`lower(${xUserAccountLinks.x_user_id}) IN (
-          SELECT lower(CAST(value AS TEXT)) FROM json_each(${payload})
-        )`,
-        eq(xUsers.approval_status, "approved"),
-        eq(users.is_notification_enabled, 1),
-      )!,
-    );
-}
 
 async function applyPermissionIntentsToVideo(
   db: DB,
