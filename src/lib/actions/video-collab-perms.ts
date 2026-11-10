@@ -7,6 +7,13 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
+import {
+  buildPermissionSetGuardSql,
+  buildHiddenEditorCountGuardSql,
+  buildXUsersBulkInsertSql,
+  buildMemberPermissionBulkUpdateSql,
+  buildHiddenMemberBulkDeleteSql,
+} from "@flamenode/server-core/video/permissionSql";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import {
   canEditVideo,
@@ -30,7 +37,6 @@ import {
   buildVideoMemberBulkInsertSql,
   compareSqliteBinaryText,
   toVideoMemberSnapshotRow,
-  VIDEO_MEMBER_ROW_JSON_SQL,
 } from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
 import { isCanonicalXId, normalizeXId } from "@/lib/utils/xid";
@@ -313,122 +319,6 @@ async function canonicalizePermissionIntents(
 function sortPermissionRows(rows: readonly VideoMemberRow[]): VideoMemberRow[] {
   return [...rows].sort((left, right) => compareSqliteBinaryText(left.id, right.id));
 }
-
-function buildPermissionSetGuardSql(
-  videoId: string,
-  xids: readonly string[],
-  expectedRows: readonly VideoMemberRow[],
-) {
-  const xidsPayload = JSON.stringify([...xids].sort());
-  const expectedPayload = JSON.stringify(
-    sortPermissionRows(expectedRows).map(toVideoMemberSnapshotRow),
-  );
-  return sql`
-    SELECT CASE
-      WHEN (
-        SELECT COALESCE(json_group_array(json(row_json)), json('[]'))
-        FROM (
-          SELECT ${VIDEO_MEMBER_ROW_JSON_SQL} AS row_json
-          FROM video_members
-          WHERE video_id = ${videoId}
-            AND x_user_id IS NOT NULL
-            AND lower(x_user_id) IN (
-              SELECT lower(CAST(value AS TEXT)) FROM json_each(${xidsPayload})
-            )
-          ORDER BY id ASC
-        )
-      ) = json(${expectedPayload})
-      THEN 1
-      ELSE json_extract('video-permission-set-conflict', '$')
-    END
-  `;
-}
-
-function buildHiddenEditorCountGuardSql(videoId: string, expectedCount: number) {
-  return sql`
-    SELECT CASE
-      WHEN (
-        SELECT COUNT(*) FROM video_members
-        WHERE video_id = ${videoId} AND is_public_member = 0
-      ) = ${expectedCount}
-      THEN 1
-      ELSE json_extract('video-hidden-editor-count-conflict', '$')
-    END
-  `;
-}
-
-function buildXUsersBulkInsertSql(rows: readonly (typeof xUsers.$inferInsert)[]) {
-  const payload = JSON.stringify(rows);
-  return sql`
-    INSERT INTO x_users (
-      id,
-      x_name,
-      icon_url,
-      profile_text,
-      portfolio_contact,
-      youtube_channel_url,
-      other_social_links,
-      creative_start_date,
-      approval_status
-    )
-    SELECT
-      json_extract(value, '$.id'),
-      json_extract(value, '$.x_name'),
-      json_extract(value, '$.icon_url'),
-      json_extract(value, '$.profile_text'),
-      json_extract(value, '$.portfolio_contact'),
-      json_extract(value, '$.youtube_channel_url'),
-      json_extract(value, '$.other_social_links'),
-      json_extract(value, '$.creative_start_date'),
-      json_extract(value, '$.approval_status')
-    FROM json_each(${payload})
-    WHERE 1 = 1
-    ON CONFLICT(id) DO UPDATE SET
-      id = excluded.id
-    WHERE COALESCE(x_users.approval_status, 'pending') <> 'rejected'
-  `;
-}
-
-function buildMemberPermissionBulkUpdateSql(rows: readonly VideoMemberRow[]) {
-  const payload = JSON.stringify(rows.map(toVideoMemberSnapshotRow));
-  return sql`
-    WITH patches AS (
-      SELECT
-        json_extract(value, '$.id') AS id,
-        json_extract(value, '$.can_edit') AS can_edit,
-        json_extract(value, '$.edit_granted_by_auth_user_id') AS edit_granted_by_auth_user_id,
-        json_extract(value, '$.edit_granted_at') AS edit_granted_at,
-        json_extract(value, '$.edit_updated_at') AS edit_updated_at
-      FROM json_each(${payload})
-    )
-    UPDATE video_members
-    SET
-      can_edit = (SELECT can_edit FROM patches WHERE patches.id = video_members.id),
-      edit_granted_by_auth_user_id = (
-        SELECT edit_granted_by_auth_user_id FROM patches WHERE patches.id = video_members.id
-      ),
-      edit_granted_at = (
-        SELECT edit_granted_at FROM patches WHERE patches.id = video_members.id
-      ),
-      edit_updated_at = (
-        SELECT edit_updated_at FROM patches WHERE patches.id = video_members.id
-      )
-    WHERE id IN (SELECT id FROM patches)
-  `;
-}
-
-function buildHiddenMemberBulkDeleteSql(videoId: string, ids: readonly string[]) {
-  const payload = JSON.stringify(ids);
-  return sql`
-    DELETE FROM video_members
-    WHERE video_id = ${videoId}
-      AND is_public_member = 0
-      AND id IN (
-        SELECT CAST(value AS TEXT) FROM json_each(${payload})
-      )
-  `;
-}
-
 
 async function applyPermissionIntentsToVideo(
   db: DB,
