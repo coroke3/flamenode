@@ -212,6 +212,7 @@ const playlistLinks = (r) => [...dom(r, "AAAAAAAAA01/index.html").querySelectorA
 test("T08: future scheduled public primary event exposes the verified playlist; past video does not", { skip: skipUi }, () => {
   for (const [scheduledTime, expected] of [
     [NOW + 7 * D, ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    [String(NOW + 7 * D), ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
     [NOW - 7 * D, []],
   ]) {
     const r = build([["vid1", payload({ video: { scheduled_time: scheduledTime } })]], {
@@ -247,6 +248,23 @@ test("T09: missing, non-public, mismatched and invalid event playlist never leak
     try {
       assert.equal(r.error, null, `${label}: ${r.error ?? ""}`);
       assert.deepEqual(playlistLinks(r), [], label);
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09: a fallback display event must never inherit an unmatched primary-event playlist", { skip: skipUi }, () => {
+  for (const primaryEventId of ["unavailable-primary-event", null]) {
+    const r = build([["vid1", payload({ video: {
+      primary_event_id: primaryEventId,
+      scheduled_time: NOW + 7 * D,
+    } })]], { events: [["ev1", playlistEvent()]] });
+    try {
+      assert.equal(r.error, null, r.error ?? "");
+      assert.deepEqual(playlistLinks(r), [], "only the video-selected public primary event may supply a playlist");
+      assert.equal(dom(r, "AAAAAAAAA01/index.html").querySelector('a[href="/event/ev1"]') !== null, true,
+        "the display fallback remains available without a playlist");
     } finally {
       clean(r);
     }
