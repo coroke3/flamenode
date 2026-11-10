@@ -1725,7 +1725,7 @@ function stagedSa028Harness({ role = "admin", mutateAfterRead = false, publicGro
     );
     INSERT INTO event_groups VALUES (
       'grp-delete', 'Delete group', 'delete-group', NULL, 'series',
-      NULL, NULL, NULL, ${publicGroup ? "public" : "private"}, 0, 10, 20
+      NULL, NULL, NULL, '${publicGroup ? "public" : "private"}', 0, 10, 20
     );
     INSERT INTO event_group_events VALUES
       ('grp-delete', 'ev-a', 'member', 11, 21),
