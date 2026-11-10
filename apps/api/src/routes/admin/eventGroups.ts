@@ -563,15 +563,14 @@ export function planEventGroupMembershipRemove(
 /**
  * MIG-0653 U04 SA-030 STAGED write implementation.
  *
- * Deliberately NOT mounted by createAdminRoutes: the shared parent uses three
- * D1 pre-reads for S4 session, write identity/ToS, and CostGuard. This handler
- * requires one more authoritative relation snapshot read, exceeding ZERO_1102
- * S3's three-pre-read limit. Do not mount until that architecture is resolved,
- * and CPU/CURRENT-differential/independent-review gates have passed.
- *
- * This isolated route is testable with the parent origin/session/write/db
- * middleware and uses the same atomic audit/queue pattern as CURRENT. Its
- * module-local CostGuard must never replace the parent origin and write guard.
+ * Deliberately NOT mounted by createAdminRoutes until CPU, CURRENT
+ * differential, qualified independent review and human Lead gates pass.
+ * Within the isolated staged route, the parent session and write identity/ToS
+ * guards run before a single joined CostGuard, audit-settings and relation
+ * snapshot query: S4 (1) + write identity/ToS (1) + joined snapshot (1) = 3
+ * pre-reads. The isolated route is testable with the parent origin/session/
+ * write/db middleware, and keeps atomic audited DELETE + rebuild queue.
+ * Do not mount before the remaining acceptance gates have passed.
  */
 export const stagedEventGroupWriteRoutes = new Hono<AppEnv>();
 export const EVENT_GROUP_WRITE_FAILED = "更新が競合したか監査記録に失敗しました。";
