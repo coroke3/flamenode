@@ -622,27 +622,24 @@ test("SA-025: generated cursor accepts legacy IDs longer than 64 characters", as
   assert.deepEqual(calls[1].params, ["g1", 1921, 1921, longId, 81]);
 });
 
-test("SA-025: legacy row whose cursor exceeds limits fails closed", async () => {
+test("SA-025: CURRENT emits continuation cursors for legacy IDs beyond the write-ID bound", async () => {
+  const legacyId = "v".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1);
   const rows = Array.from({ length: 81 }, (_, n) => ({
-    id: n === 79 ? "v".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1) : "event-" + String(n).padStart(3, "0"),
+    id: n === 79 ? legacyId : "event-" + String(n).padStart(3, "0"),
     title: "Name " + n,
     start_time: null,
     updated_at: 2000 - n,
   }));
   const response = await setup({ rows }).get();
-  assert.equal(response.status, 503);
-  assert.equal(response.headers.get("cache-control"), "private, no-store");
-  assert.deepEqual(await response.json(), {
-    ok: false,
-    message: "イベント候補の取得に失敗しました。もう一度お試しください。",
-  });
+  assert.equal(response.status, 200);
+  const page = await response.json();
+  assert.equal(page.options.length, 80);
+  assert.deepEqual(JSON.parse(page.nextCursor), { updatedAt: 1921, id: legacyId });
 });
-
-test("SA-025: JSON-escaped continuation cursor over 200 characters fails closed", async () => {
-  // 100 backslashes fit the ID cap but expand to 200 JSON characters.
+test("SA-025: CURRENT emits JSON-escaped continuation cursors even when over 200 characters", async () => {
   const escapedId = "\\".repeat(100);
-  assert.ok(escapedId.length <= MAX_EVENT_GROUP_ID_LENGTH);
-  assert.ok(JSON.stringify({ updatedAt: 1921, id: escapedId }).length > 200);
+  const nextCursor = JSON.stringify({ updatedAt: 1921, id: escapedId });
+  assert.ok(nextCursor.length > 200);
   const rows = Array.from({ length: 81 }, (_, n) => ({
     id: n === 79 ? escapedId : "event-" + String(n).padStart(3, "0"),
     title: "Name " + n,
@@ -651,15 +648,11 @@ test("SA-025: JSON-escaped continuation cursor over 200 characters fails closed"
   }));
   const { get, calls } = setup({ rows });
   const response = await get();
-  assert.equal(response.status, 503);
+  assert.equal(response.status, 200);
   assert.equal(calls.length, 1);
-  assert.equal(response.headers.get("cache-control"), "private, no-store");
-  assert.deepEqual(await response.json(), {
-    ok: false,
-    message: "イベント候補の取得に失敗しました。もう一度お試しください。",
-  });
+  assert.equal((await response.json()).nextCursor, nextCursor,
+    "CURRENT does not replace a successful page with a 503 when serialized cursor exceeds the request cap");
 });
-
 test("SA-025: source-parity cursor JSON with no extra fields and bounded exact limit", async () => {
   const idAtCursor = "n".repeat(128);
   const nearBoundCursor = JSON.stringify({ updatedAt: 1921, id: idAtCursor });
