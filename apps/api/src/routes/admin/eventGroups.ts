@@ -766,6 +766,236 @@ stagedEventGroupWriteRoutes.post("/", async (c) => {
   }, 200);
 });
 
+stagedEventGroupWriteRoutes.patch("/:id", async (c) => {
+  c.header("Cache-Control", "private, no-store");
+  const body = await readAdminJsonBody(c.req.raw);
+  if (body.kind === "too_large") return c.json({ ok: false, message: BODY_TOO_LARGE_MESSAGE }, 413);
+  if (body.kind !== "ok") return c.json({ ok: false, message: "入力エラー" }, 400);
+  const parsed = EventGroupMutationBodySchema.safeParse(body.value);
+  if (!parsed.success) {
+    return c.json({
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "入力エラー",
+    }, 400);
+  }
+
+  const data = parsed.data;
+  const id = c.req.param("id").trim();
+  const bodyId = data.id?.trim();
+  if (!id || id.length > MAX_EVENT_GROUP_ID_LENGTH || (bodyId && bodyId !== id)) {
+    return c.json({ ok: false, message: "ID が必要です。" }, 400);
+  }
+  const db = c.get("db");
+  const userId = c.get("user")!.id;
+  const now = Math.floor(Date.now() / 1000);
+
+  // One bounded pre-read supplies the CURRENT group snapshot, slug conflict,
+  // CostGuard/audit settings and the current fence token/state.
+  type UpdateSnapshot = AuditSettingsRow & {
+    group_id: string | null;
+    name: string | null;
+    slug: string | null;
+    description: string | null;
+    group_type: ValidEventGroupMutation["group_type"] | null;
+    icon_url: string | null;
+    img_url: string | null;
+    accent_color: string | null;
+    visibility_status: ValidEventGroupMutation["visibility_status"] | null;
+    sort_order: number | null;
+    created_at: number | null;
+    updated_at: number | null;
+    slug_exists: number;
+    fence_token: string | null;
+    fence_state: string | null;
+    operation_mode: string | null;
+    disabled_features_json: string | null;
+    cost_guard_exception_until: number | null;
+    cost_guard_exception_features_json: string | null;
+  };
+  let snapshot: UpdateSnapshot | null;
+  try {
+    snapshot = await c.env.DB.prepare(`
+      SELECT
+        g.id AS group_id, g.name, g.slug, g.description, g.group_type,
+        g.icon_url, g.img_url, g.accent_color, g.visibility_status,
+        g.sort_order, g.created_at, g.updated_at,
+        EXISTS(SELECT 1 FROM event_groups conflict
+          WHERE conflict.slug = ? AND conflict.id <> ?) AS slug_exists,
+        f.fence_token, f.state AS fence_state,
+        s.operation_mode, s.disabled_features_json,
+        s.cost_guard_exception_until, s.cost_guard_exception_features_json,
+        s.audit_normal_retention_days, s.audit_restorable_retention_days,
+        s.audit_long_retention_days, s.audit_max_payload_bytes,
+        s.audit_compact_after_days
+      FROM system_settings s
+      LEFT JOIN event_groups g ON g.id = ?
+      LEFT JOIN public_visibility_fences f
+        ON f.entity_type = 'event_group' AND f.entity_id = ?
+      WHERE s.id = 'default'
+      LIMIT ${MAX_SINGLE_ROW_LIMIT}
+    `).bind(data.slug, id, id, id).first<UpdateSnapshot>();
+  } catch {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+  }
+  if (!snapshot) return writeGuardDenyResponse(c, "maintenance_mode", 503);
+  const cost = evaluateCostGuardCore({
+    feature: "admin_event_create",
+    operationMode: snapshot.operation_mode,
+    disabledFeaturesJson: snapshot.disabled_features_json,
+    exceptionUntil: snapshot.cost_guard_exception_until,
+    exceptionFeaturesJson: snapshot.cost_guard_exception_features_json,
+    now,
+  });
+  if (cost.blocked) {
+    return writeGuardDenyResponse(c, cost.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked", 503);
+  }
+  c.set("auditSettings", mapAuditSettings(snapshot));
+  if (!snapshot.group_id || snapshot.updated_at == null || snapshot.visibility_status == null ||
+      snapshot.sort_order == null || snapshot.created_at == null) {
+    return c.json({ ok: false, message: "グループが見つかりません。" }, 404);
+  }
+  if (snapshot.slug_exists === 1) {
+    return c.json({ ok: false, message: "このスラッグは既に使われています。" }, 400);
+  }
+  const cas = checkEventGroupUpdateCas(data.base_updated_at, snapshot.updated_at);
+  if (!cas.ok) return c.json({ ok: false, message: cas.message }, 409);
+
+  const previous = {
+    id,
+    name: snapshot.name ?? "",
+    slug: snapshot.slug ?? "",
+    description: snapshot.description,
+    group_type: snapshot.group_type ?? "series",
+    icon_url: snapshot.icon_url,
+    img_url: snapshot.img_url,
+    accent_color: snapshot.accent_color,
+    visibility_status: snapshot.visibility_status,
+    sort_order: snapshot.sort_order,
+    created_at: snapshot.created_at,
+    updated_at: snapshot.updated_at,
+  };
+  const updatedValues = planEventGroupUpdateValues(data, {
+    sort_order: snapshot.sort_order,
+    updated_at: snapshot.updated_at,
+  }, now);
+  const updatedRow = { ...previous, ...updatedValues };
+  const crossesPublicBoundary =
+    (snapshot.visibility_status === "public") !== (updatedValues.visibility_status === "public");
+  let fenceToken: string | null = null;
+  const fenceStatements = [];
+  const fenceExpected: number[] = [];
+  if (crossesPublicBoundary) {
+    fenceToken = snapshot.fence_state === "blocked" || snapshot.fence_state === "release_pending"
+      ? snapshot.fence_token
+      : null;
+    fenceToken ||= generateId("vf");
+    fenceStatements.push(buildPublicVisibilityFenceUpsertStatement(db, {
+      entityType: "event_group",
+      entityId: id,
+      fenceToken,
+      state: updatedValues.visibility_status === "public" ? "release_pending" : "blocked",
+      actorUserId: userId,
+      reason: "event_group_visibility_update",
+      now,
+    }));
+    fenceExpected.push(1);
+  }
+
+  try {
+    const queue = await buildEventGroupChangeQueueBatch(db, {
+      reason: "event_group_update",
+      requestedByUserId: userId,
+    });
+    const update = db.run(sql`
+      UPDATE event_groups SET
+        name = ${updatedValues.name},
+        slug = ${updatedValues.slug},
+        description = ${updatedValues.description},
+        group_type = ${updatedValues.group_type},
+        icon_url = ${updatedValues.icon_url},
+        accent_color = ${updatedValues.accent_color},
+        visibility_status = ${updatedValues.visibility_status},
+        sort_order = ${updatedValues.sort_order},
+        updated_at = ${updatedValues.updated_at}
+      WHERE id = ${id} AND updated_at = ${snapshot.updated_at}
+    `);
+    const mutationStatements = [update, ...fenceStatements, ...queue.statements];
+    const expectedMutationChanges = [1, ...fenceExpected, ...queue.expectedChanges];
+    const audits = [{
+      table_name: "event_groups" as const,
+      target_id: id,
+      operation: "UPDATE" as const,
+      before: { ...previous },
+      after: { ...updatedRow },
+      actor_user_id: userId,
+      retention_class: "restorable" as const,
+    }];
+    const budget = planD1AuditMutationBudget({
+      mutationStatementCount: mutationStatements.length,
+      mutationAssertionCount: expectedMutationChanges.length,
+      auditEntryCount: audits.length,
+      distinctActorCount: 1,
+      callerQueryCount: 3,
+    });
+    if (!budget.withinLimit) {
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+    }
+
+    const rawBucket = c.env.BUCKET;
+    const bucket = rawBucket as unknown as VisibilityManifestBucket | undefined;
+    if (fenceToken && !bucket) {
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+    }
+    const fenceHost = bucket ? {
+      manifest: {
+        read: () => readVisibilityManifestObject(bucket),
+        write: (manifest: Parameters<typeof putVisibilityManifestWithCas>[1], options?: {
+          ifMatchEtag?: string | null;
+          mutateOnConflict?: (latest: Parameters<typeof putVisibilityManifestWithCas>[1]) => Parameters<typeof putVisibilityManifestWithCas>[1];
+        }) => putVisibilityManifestWithCas(bucket, manifest, options?.ifMatchEtag, options?.mutateOnConflict),
+      },
+    } : null;
+    let fencePreCommitted = false;
+    try {
+      if (fenceToken && fenceHost) {
+        await preCommitPublicVisibilityFence({
+          entityType: "event_group",
+          entityId: id,
+          fenceToken,
+          reason: "event_group_visibility_update",
+        }, fenceHost);
+        fencePreCommitted = true;
+      }
+      await mutateWithAudit(db, {
+        mutationStatements,
+        expectedMutationChanges,
+        preloaded: auditPreloaded(c),
+        callerQueryCount: 3,
+        audits,
+      });
+    } catch (error) {
+      if (fenceToken && fenceHost && fencePreCommitted) {
+        await compensatePublicVisibilityFenceOnD1Failure({
+          db,
+          entityType: "event_group",
+          entityId: id,
+          fenceToken,
+          flow: "event_group_visibility",
+        }, fenceHost).catch(() => undefined);
+      }
+      console.error("[event-group] update failed");
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+    }
+    return c.json({
+      ok: true,
+      id,
+      ...(queue.statements.length > 0 ? { pendingPublicReflection: true } : {}),
+    }, 200);
+  } catch {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+  }
+});
+
 stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
   const result = normalizeEventGroupMembershipRemove({
     groupId: c.req.param("id"),
