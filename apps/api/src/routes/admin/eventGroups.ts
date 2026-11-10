@@ -374,3 +374,33 @@ export function normalizeEventGroupMembershipRemove(input: unknown): EventGroupM
   }
   return { ok: true, groupId, eventId };
 }
+
+/**
+ * MIG-0653 U04: pure membership-add post-read planner.
+ * CURRENT requires that *every requested distinct ID* names a real event,
+ * even if it is already in this group. Missing relation IDs preserve request
+ * order; failure cases do not produce any partial insert candidates.
+ *
+ * This is NOT an atomic write plan: caller must still build a guarded D1
+ * mutation, restorable audit, queue, CAS and mutation-budget assertion.
+ */
+export type EventGroupMembershipAddPlan =
+  | { ok: true; toAdd: string[] }
+  | { ok: false; message: string };
+
+export function planEventGroupMembershipAdd(
+  requestedIds: readonly string[],
+  validEventIds: readonly string[],
+  existingMemberIds: readonly string[],
+): EventGroupMembershipAddPlan {
+  const valid = new Set(validEventIds);
+  if (validEventIds.length !== requestedIds.length ||
+      requestedIds.some((id) => !valid.has(id))) {
+    return { ok: false, message: "存在しないイベントは追加できません。" };
+  }
+  const members = new Set(existingMemberIds);
+  const toAdd = requestedIds.filter((id) => !members.has(id));
+  return toAdd.length > 0
+    ? { ok: true, toAdd }
+    : { ok: false, message: "追加できるイベントがありません。" };
+}

@@ -18,6 +18,7 @@ import {
   EVENT_GROUP_ADD_MAX,
   normalizeEventGroupMembershipAdd,
   normalizeEventGroupMembershipRemove,
+  planEventGroupMembershipAdd,
 } from "../src/routes/admin/eventGroups.ts";
 
 const admin = { id: "admin-1", role: "admin", is_banned: 0 };
@@ -81,6 +82,40 @@ function setup({
   );
   return { get, calls, guardCalls };
 }
+
+test("SA-029 U04: post-read membership planner preserves CURRENT validation ordering", () => {
+  const input = normalizeEventGroupMembershipAdd({
+    groupId: " group ", eventIds: [" ev-b ", " ev-a ", " ev-c ", " ev-a "],
+  });
+  assert.equal(input.ok, true);
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-b", "ev-a", "ev-c"],
+    ["ev-a", "ev-c", "ev-b"], ["ev-a"]), {
+    ok: true, toAdd: ["ev-b", "ev-c"],
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a", "ev-b"],
+    ["ev-a", "ev-b"], ["ev-a", "ev-b"]), {
+    ok: false, message: "追加できるイベントがありません。",
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a", "ev-missing"],
+    ["ev-a"], ["ev-a"]), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a"],
+    ["ev-a", "unexpected"], []), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+  assert.deepEqual(planEventGroupMembershipAdd([], [], []), {
+    ok: false, message: "追加できるイベントがありません。",
+  });
+  // Caller must not partially insert even when one requested event is absent.
+  const valid80 = Array.from({ length: 80 }, (_, i) => "event-" + i);
+  assert.deepEqual(planEventGroupMembershipAdd(valid80, [...valid80].reverse(), valid80.slice(0, 79)), {
+    ok: true, toAdd: ["event-79"],
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(valid80, valid80.slice(0, 79), valid80.slice(0, 79)), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+});
 
 test("SA-029/030 U04: CURRENT membership input normalization and 80-ID bound", () => {
   assert.equal(EVENT_GROUP_ADD_MAX, 80);
