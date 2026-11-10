@@ -60,6 +60,32 @@ if (runUnderRootTsx(import.meta.url)) {
     `);
   }
 
+  // Execute the planned D1 writes against the migrated SQLite schema.
+  // This tests persistence, not the full audit/R2 action adapter.
+  function applyMutationPlan(sqlite, plan) {
+    assert.equal(plan.mutationStatements.length, plan.expectedMutationChanges.length);
+    sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      for (const [index, statement] of plan.mutationStatements.entries()) {
+        const { sql, params } = statement;
+        const result = sqlite.prepare(sql).run(...params);
+        const expected = plan.expectedMutationChanges[index];
+        if (expected !== null) {
+          assert.equal(result.changes, expected, `mutation ${index + 1} changed rows`);
+        }
+      }
+      sqlite.exec("COMMIT");
+    } catch (error) {
+      sqlite.exec("ROLLBACK");
+      throw error;
+    }
+    return {
+      video: sqlite.prepare("SELECT id, visibility_status, updated_at FROM videos WHERE id = ?").get("vid-1"),
+      fences: sqlite.prepare("SELECT entity_type, entity_id, fence_token, state, blocked_at FROM public_visibility_fences ORDER BY entity_type, entity_id").all(),
+      staticRebuildQueue: sqlite.prepare("SELECT * FROM static_rebuild_queue ORDER BY id").all(),
+    };
+  }
+
   function queryOf(statement) {
     const query = typeof statement.getQuery === "function"
       ? statement.getQuery()
@@ -122,9 +148,11 @@ if (runUnderRootTsx(import.meta.url)) {
           eventIds: ["evt-1"], notificationEventId: "evt-1",
           now: 1_760_000_000,
         };
-        return snapshot(useCurrent
+        const plan = useCurrent
           ? await planCurrent(db, input)
-          : await planShared(db, input, honoHost));
+          : await planShared(db, input, honoHost);
+        const planned = snapshot(plan);
+        return { planned, persisted: applyMutationPlan(sqlite, planned) };
       } finally {
         Date.now = realNow;
         globalThis.crypto.randomUUID = realRandomUUID;
@@ -139,13 +167,16 @@ if (runUnderRootTsx(import.meta.url)) {
       const current = await makePlan(nextStatus, true);
       const hono = await makePlan(nextStatus, false);
       assert.deepEqual(hono, current);
-      assert.ok(current.mutationStatements.length > 0);
-      assert.ok(current.queueBatch.statements.length > 0);
-      if (nextStatus === "voided") assert.equal(current.notificationBatch.statements.length, 1);
+      assert.equal(current.persisted.video.visibility_status, nextStatus);
+      assert.equal(current.persisted.fences.length, 1);
+      assert.equal(current.persisted.fences[0].state, "blocked");
+      assert.ok(current.planned.mutationStatements.length > 0);
+      assert.ok(current.planned.queueBatch.statements.length > 0);
+      if (nextStatus === "voided") assert.equal(current.planned.notificationBatch.statements.length, 1);
       if (nextStatus === "private") {
-        assert.equal(current.notificationBatch.statements.length, 0);
-        assert.equal(current.depublicizedFromPublic, true);
-        assert.ok(current.fenceToken);
+        assert.equal(current.planned.notificationBatch.statements.length, 0);
+        assert.equal(current.planned.depublicizedFromPublic, true);
+        assert.ok(current.planned.fenceToken);
       }
     });
   }
