@@ -9,6 +9,12 @@
  * NOT EXISTS membership filter, escaped LIKE and updated_at/id ordering.
  */
 import { Hono } from "hono";
+import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { sql } from "@flamenode/server-core/sql";
+import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
+import { auditPreloaded } from "./body.ts";
+import { costGuardMiddleware } from "../../middleware/costGuard.ts";
+import { onlyMutating } from "../../middleware/writeOrigin.ts";
 import type { AppEnv } from "../../env.ts";
 import { adminReadGuardMiddleware } from "../../middleware/adminReadGuard.ts";
 import { evaluateAdminWriteGuard } from "../../middleware/writeOrigin.ts";
@@ -528,3 +534,98 @@ export function planEventGroupMembershipRemove(
   }
   return { ok: true, expectedUpdatedAt: relation.updated_at, before: { ...relation } };
 }
+
+/**
+ * MIG-0653 U04 SA-030 STAGED write implementation.
+ *
+ * Deliberately NOT mounted by createAdminRoutes: the shared parent uses three
+ * D1 pre-reads for S4 session, write identity/ToS, and CostGuard. This handler
+ * requires one more authoritative relation snapshot read, exceeding ZERO_1102
+ * S3's three-pre-read limit. Do not mount until that architecture is resolved,
+ * and CPU/CURRENT-differential/independent-review gates have passed.
+ *
+ * This isolated route is testable with the parent origin/session/write/db
+ * middleware and uses the same atomic audit/queue pattern as CURRENT. Its
+ * module-local CostGuard must never replace the parent origin and write guard.
+ */
+export const stagedEventGroupWriteRoutes = new Hono<AppEnv>();
+stagedEventGroupWriteRoutes.use("*", onlyMutating(costGuardMiddleware("admin_event_create")));
+
+export const EVENT_GROUP_WRITE_FAILED = "更新が競合したか監査記録に失敗しました。";
+
+stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
+  const result = normalizeEventGroupMembershipRemove({
+    groupId: c.req.param("id"),
+    eventId: c.req.param("eventId"),
+  });
+  if (!result.ok) return c.json({ ok: false, message: result.message }, 400);
+  const { groupId, eventId } = result;
+  if (groupId.length > MAX_EVENT_GROUP_ID_LENGTH ||
+      eventId.length > MAX_EVENT_GROUP_ID_LENGTH) {
+    return c.json({ ok: false, message: "グループとイベントを指定してください。" }, 400);
+  }
+
+  // One joined SELECT distinguishes missing group from missing membership and
+  // captures the full canonical relation row for restorable audit.
+  const db = c.get("db");
+  const userId = c.get("user")!.id;
+  let stored: (EventGroupMembershipRelationRow & { group_exists: string }) | null;
+  try {
+    stored = await c.env.DB.prepare(
+      `SELECT g.id AS group_exists, m.event_group_id, m.event_id,
+              m.relation_type, m.created_at, m.updated_at
+         FROM event_groups AS g
+         LEFT JOIN event_group_events AS m
+           ON m.event_group_id = g.id AND m.event_id = ?
+        WHERE g.id = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
+    ).bind(eventId, groupId).first<EventGroupMembershipRelationRow & { group_exists: string }>();
+  } catch {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+  }
+  if (!stored) return c.json({ ok: false, message: "グループが見つかりません。" }, 404);
+  const plan = planEventGroupMembershipRemove(groupId, eventId,
+    stored.event_id == null ? null : stored);
+  if (!plan.ok) return c.json({ ok: false, message: plan.message }, 404);
+
+  try {
+    const queue = await buildEventGroupChangeQueueBatch(db, {
+      reason: "event_group_member_remove",
+      requestedByUserId: userId,
+    });
+    // Count the shared parent guard reads too. This is the D1 Free per-invocation
+    // query budget, NOT the stricter S3 pre-read/CPU acceptance check.
+    const budget = planEventGroupMembershipDeleteBudget({
+      callerQueryCount: 4,
+      queueStatementCount: queue.statements.length,
+      auditEntryCount: 1,
+      distinctActorCount: 1,
+    });
+    if (!budget.withinLimit) {
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+    }
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        db.run(sql`DELETE FROM event_group_events
+                   WHERE event_group_id = ${groupId}
+                     AND event_id = ${eventId}
+                     AND updated_at = ${plan.expectedUpdatedAt}`),
+        ...queue.statements,
+      ],
+      expectedMutationChanges: [1, ...queue.expectedChanges],
+      preloaded: auditPreloaded(c),
+      audits: [{
+        table_name: "event_group_events",
+        target_id: `${groupId}:${eventId}`,
+        operation: "DELETE",
+        before: { ...plan.before },
+        actor_user_id: userId,
+        retention_class: "restorable",
+      }],
+    });
+  } catch {
+    // No SQL/provider details in the HTTP body. A failed audited batch rolls
+    // back the relation DELETE and queue statement together.
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+  }
+  return c.json({ ok: true, id: groupId }, 200);
+});
