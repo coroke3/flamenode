@@ -194,19 +194,20 @@ adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
       .all<OptionRow>();
     const page = results.slice(0, EVENT_GROUP_OPTION_PAGE_SIZE);
     const last = page.at(-1);
-    // A continuation token must pass this endpoint's own cursor parser.
-    // Fail closed for an unrepresentable legacy row instead of losing pages.
-    if (results.length > EVENT_GROUP_OPTION_PAGE_SIZE && last &&
-        (last.id.length > MAX_EVENT_GROUP_ID_LENGTH ||
-         JSON.stringify({ updatedAt: last.updated_at, id: last.id }).length > 200)) {
+    const hasMore = results.length > EVENT_GROUP_OPTION_PAGE_SIZE;
+    // Emit only cursors that the same endpoint can parse. The 200-character
+    // cap is on JSON, not only the ID: JSON escapes can expand legacy IDs.
+    const nextCursor = hasMore && last
+      ? JSON.stringify({ updatedAt: last.updated_at, id: last.id })
+      : null;
+    if (nextCursor && (last!.id.length > MAX_EVENT_GROUP_ID_LENGTH ||
+        nextCursor.length > 200)) {
       return c.json({ ok: false, message: SEARCH_FAILED }, 503);
     }
     return c.json({
       ok: true,
       options: page.map(({ id, title, start_time }) => ({ id, title, start_time })),
-      nextCursor: results.length > EVENT_GROUP_OPTION_PAGE_SIZE && last
-        ? JSON.stringify({ updatedAt: last.updated_at, id: last.id })
-        : null,
+      nextCursor,
     });
   } catch {
     // No bound values, SQL details or user information leave the API on D1 failure.
