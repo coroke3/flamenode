@@ -907,7 +907,7 @@ test("SA-030 U04 staged: real SQLite DELETE, full restorable audit and queue are
       relation_type: "primary", created_at: 10, updated_at: 20,
     });
     const queue = h.sqlite.prepare("SELECT target_type, target_id, reason FROM static_rebuild_queue").get();
-    assert.deepEqual(queue, { target_type: "events_index", target_id: "global",
+    assert.deepEqual({ ...queue }, { target_type: "events_index", target_id: "global",
       reason: "event_group_member_remove" });
     assert.equal(h.stats.batches, 1);
     // The joined settings/relation snapshot replaces the standalone CostGuard
