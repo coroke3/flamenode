@@ -12,6 +12,7 @@
     "./observability/flowTrace": "./src/observability/flowTrace.ts",
     "./video/memberSetSnapshot": "./src/video/memberSetSnapshot.ts",
     "./video/reviewQueueOrder": "./src/video/reviewQueueOrder.ts",
+    "./video/visibilityStatusMutation": "./src/video/visibilityStatusMutation.ts",
     "./memberSuggestion/core": "./src/memberSuggestion/core.ts",
     "./memberSuggestion/rank": "./src/memberSuggestion/rank.ts",
     "./memberSuggestion/search": "./src/memberSuggestion/search.ts",
