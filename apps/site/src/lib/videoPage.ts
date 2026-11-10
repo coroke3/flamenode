@@ -182,10 +182,21 @@ export async function loadVideoPagesForBuild(
   const buildWithPlaylist = async (payload: unknown, key: string): Promise<void> => {
     const built = buildVideoPages(payload, key, now, iconMap);
     const eventId = built[0]?.data.primaryEvent?.id;
-    // The public renderer and playlist gate use the same normalized video fields.
+    // Normalize for rendering, but never let the generic string/number coercers
+    // turn arrays or objects into a valid authorization key or future timestamp.
     const video = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0])?.video;
-    const scheduledTime = video?.scheduled_time ?? null;
-    const primaryEventId = video?.primary_event_id ?? null;
+    const rawVideo = payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as { video?: unknown }).video
+      : null;
+    const raw = rawVideo && typeof rawVideo === "object" && !Array.isArray(rawVideo)
+      ? rawVideo as Record<string, unknown>
+      : null;
+    const scheduledTime = typeof raw?.scheduled_time === "number" || typeof raw?.scheduled_time === "string"
+      ? video?.scheduled_time ?? null
+      : null;
+    const primaryEventId = typeof raw?.primary_event_id === "string"
+      ? video?.primary_event_id ?? null
+      : null;
 
     // CURRENT looks up a playlist only for the video-selected primary event.
     // Display fallback events must not inherit an unrelated event's playlist.
