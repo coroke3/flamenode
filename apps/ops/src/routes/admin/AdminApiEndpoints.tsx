@@ -9,6 +9,8 @@ import {
   type EventExportUpdate,
 } from "../../api/adminApiEndpoints.js";
 import type { OpsFetch } from "../../api/read.js";
+import { createAdminApiEndpointWriteApi } from "../../api/adminApiEndpointWrite.js";
+import { AdminApiEndpointMutations } from "./ApiEndpointMutations.js";
 import { useApiResult } from "../useApiResult.js";
 
 /** CURRENT: src/components/admin/EventExportLinkBuilder.tsx. */
@@ -84,10 +86,12 @@ export function AdminApiEndpointsView({
   data,
   notice,
   error,
+  canWrite = false,
 }: {
   data: AdminApiEndpointsResponse;
   notice?: string;
   error?: string;
+  canWrite?: boolean;
 }): React.ReactElement {
   return (
     <section aria-label="作品情報出力API" className="fn-page">
@@ -99,14 +103,14 @@ export function AdminApiEndpointsView({
       </header>
       {notice ? <p className="fn-alert fn-alert-success" role="status">{notice}</p> : null}
       {error ? <p className="fn-alert fn-alert-danger" role="alert">{error}</p> : null}
-      <p role="note" className="fn-muted">
+      {canWrite ? null : <p role="note" className="fn-muted">
         APIの新規発行・無効化は移行準備中です。現在は設定の確認と公開リンクの取得のみ利用できます。
-      </p>
+      </p>}
 
       <section className="fn-panel" aria-label="発行可能イベント">
         <h2>公開イベント（最大100件）</h2>
         <p className="fn-muted">
-          {data.eventOptions.length}件のイベントが候補にあります。発行・無効化操作は未接続です。
+          {data.eventOptions.length}件のイベントが候補にあります。{canWrite ? "発行・無効化操作は下の操作パネルで行えます。" : "発行・無効化操作は未接続です。"}
         </p>
       </section>
       <section className="fn-panel" aria-label="発行済みAPI">
@@ -155,14 +159,20 @@ export function AdminApiEndpointsPage({
   const params = new URLSearchParams(search);
   const notice = (params.get("notice") ?? "").slice(0, 200);
   const error = (params.get("error") ?? "").slice(0, 200);
+  const [refreshKey, refresh] = React.useReducer(n => n + 1, 0);
   const result = useApiResult(
     (signal) => readAdminApiEndpoints(fetchFn, signal),
     "admin-api-endpoints",
+    refreshKey,
   );
 
   if (result.status === "loading") return <p role="status">読み込み中…</p>;
   if (result.status === "anonymous") return <p>ログインが必要です。<a href="/entry">ログイン</a></p>;
   if (result.status === "forbidden") return <p>管理者権限が必要です。<a href="/dashboard">ダッシュボードへ</a></p>;
   if (result.status !== "ok") return <p role="alert">API設定を取得できませんでした。再読み込みしてください。</p>;
-  return <AdminApiEndpointsView data={result.data} notice={notice} error={error} />;
+  return <>
+    <AdminApiEndpointsView data={result.data} notice={notice} error={error} canWrite />
+    <AdminApiEndpointMutations data={result.data}
+      api={createAdminApiEndpointWriteApi(fetchFn)} onSuccess={() => refresh()} />
+  </>;
 }
