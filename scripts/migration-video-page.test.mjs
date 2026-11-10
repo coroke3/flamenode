@@ -128,7 +128,18 @@ test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body f
     assert.match(text(main), /公開 \d{4}\/\d{2}\/\d{2}/);
     assert.match(text(main), /曲名 \/ 歌手/);
     assert.match(text(main), /After Effects, Blender/);
-    assert.equal(main.querySelectorAll(".vd-mrow").length, 2);
+    // T10: member-present visual fixture must preserve public-profile privacy and chapter ownership.
+    const memberRows = [...main.querySelectorAll(".vd-mrow")];
+    assert.equal(memberRows.length, 2, "both published members render");
+    const memberOne = memberRows.find((row) => text(row).includes("メンバー1"));
+    const memberTwo = memberRows.find((row) => text(row).includes("メンバー2"));
+    assert.ok(memberOne, "public-profile member is visible");
+    assert.ok(memberTwo, "member without a published profile is still credited");
+    assert.ok(memberOne.querySelector('a[href="/user/member_one"]'), "public profile remains navigable");
+    assert.equal(memberTwo.querySelector('a[href^="/user/"]'), null, "private profile is never linked");
+    assert.match(text(memberOne), /映像/);
+    assert.match(text(memberTwo), /音/);
+    assert.deepEqual([...doc.querySelectorAll(".vd-chapter-time")].map(text), ["0:24", "1:10"]);
     assert.deepEqual([...doc.querySelectorAll(".vd-chapter-time")].map(text), ["0:24", "1:10"]);
     assert.equal(doc.querySelectorAll(".vd-related a").length, 12, "CURRENT shows 12 related");
     assert.match(text(main.querySelector(".vd-like-count")), /7/);
