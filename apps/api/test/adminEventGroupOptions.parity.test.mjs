@@ -240,6 +240,41 @@ test("SA-025: DB failure returns generic 503 without query/SQL leakage", async (
   assert.equal(response.headers.get("cache-control"), "private, no-store");
 });
 
+test("SA-025: generated cursor accepts legacy IDs longer than 64 characters", async () => {
+  const longId = "v".repeat(96);
+  const rows = Array.from({ length: 81 }, (_, n) => ({
+    id: n === 79 ? longId : "event-" + String(n).padStart(3, "0"),
+    title: "Name " + n,
+    start_time: null,
+    updated_at: 2000 - n,
+  }));
+  const { get, calls } = setup({ rows });
+  const first = await get();
+  assert.equal(first.status, 200);
+  const page = await first.json();
+  assert.equal(page.options.length, 80);
+  assert.deepEqual(JSON.parse(page.nextCursor), { updatedAt: 1921, id: longId });
+  const second = await get("groupId=g1&cursor=" + encodeURIComponent(page.nextCursor));
+  assert.equal(second.status, 200);
+  assert.deepEqual(calls[1].params, ["g1", 1921, 1921, longId, 81]);
+});
+
+test("SA-025: legacy row whose cursor exceeds limits fails closed", async () => {
+  const rows = Array.from({ length: 81 }, (_, n) => ({
+    id: n === 79 ? "v".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1) : "event-" + String(n).padStart(3, "0"),
+    title: "Name " + n,
+    start_time: null,
+    updated_at: 2000 - n,
+  }));
+  const response = await setup({ rows }).get();
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    message: "イベント候補の取得に失敗しました。もう一度お試しください。",
+  });
+});
+
 test("SA-025: real SQLite D1 rejects LIKE wildcard injection and excludes existing members", async () => {
   const { db, sqlite, stats } = createAdminD1();
   try {
