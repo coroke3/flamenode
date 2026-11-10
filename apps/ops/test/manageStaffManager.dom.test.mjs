@@ -324,3 +324,55 @@ test("MIG-0723 U01b: losing event.members immediately hides the member list and 
     assert.deepEqual(ui.calls, []);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0723 T03: invalid CSV fields, duplicates and over-limit input never write", async () => {
+  const ui = fixture();
+  try {
+    await ui.view();
+    const textarea = ui.target.querySelector("textarea");
+    const nativeSetValue = Object.getOwnPropertyDescriptor(
+      dom.window.HTMLTextAreaElement.prototype, "value",
+    ).set;
+    const header = "表示名,X ID,担当プリセット,公開フラグ,公開ラベル";
+    const invalidInputs = [
+      [header, "Alice,alice,manager,yes,"].join("\n"),
+      [header, "Alice,alice,manager,1,", "Bob,ALICE,manager,0,"].join("\n"),
+      [header, "Alice,alice,manager,1," + "L".repeat(41)].join("\n"),
+      [header, "  ,alice,manager,1,"].join("\n"),
+      [header, '"Alice,alice,manager,1,'].join("\n"),
+      [header, ...Array.from({ length: 101 }, (_, i) =>
+        "Person" + i + ",user_" + i + ",manager,0,")].join("\n"),
+    ];
+    for (const invalid of invalidInputs) {
+      await React.act(async () => {
+        nativeSetValue.call(textarea, invalid);
+        textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      });
+      const button = [...ui.target.querySelectorAll("button")]
+        .find(el => el.textContent.trim() === "CSVを反映");
+      assert.equal(button.disabled, true, "invalid CSV must block the entire batch");
+    }
+    assert.match(ui.target.textContent, /CSVは100件以内にしてください/);
+    assert.deepEqual(ui.calls, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0723 T03: event and identity changes discard prior CSV input before a write", async () => {
+  const ui = fixture();
+  try {
+    await ui.view();
+    const before = ui.target.querySelector("textarea");
+    const nativeSetValue = Object.getOwnPropertyDescriptor(
+      dom.window.HTMLTextAreaElement.prototype, "value",
+    ).set;
+    await React.act(async () => {
+      nativeSetValue.call(before, "前イベントの担当者,oldstaff,manager,1,内部");
+      before.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    assert.match(ui.target.querySelector("textarea").value, /oldstaff/);
+    await ui.view({ eventId: "ev 2" });
+    assert.doesNotMatch(ui.target.querySelector("textarea").value, /oldstaff/);
+    assert.match(ui.target.querySelector("textarea").value, /進行担当/);
+    assert.deepEqual(ui.calls, []);
+  } finally { await ui.cleanup(); }
+});
