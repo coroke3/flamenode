@@ -6,6 +6,14 @@ const source = await readFile(
   new URL("./video-collab-perms.ts", import.meta.url),
   "utf8",
 );
+const permissionSqlSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionSql.ts", import.meta.url),
+  "utf8",
+);
+const permissionRecipientsSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionRecipients.ts", import.meta.url),
+  "utf8",
+);
 
 function actionBody(name) {
   const match = source.match(
@@ -15,13 +23,29 @@ function actionBody(name) {
   return match[0];
 }
 
-function functionBody(name) {
-  const match = source.match(
+function functionBody(name, fileSource = source) {
+  const match = fileSource.match(
     new RegExp(`(?:async )?function ${name}[\\s\\S]*?\\n}`),
   );
   assert.ok(match, `${name} が存在する`);
   return match[0];
 }
+
+test("CURRENT actionはserver-coreの権限SQLと通知先取得を唯一の実装として参照する", () => {
+  assert.match(source, /from "@flamenode\/server-core\/video\/permissionSql"/);
+  assert.match(source, /from "@flamenode\/server-core\/video\/permissionRecipients"/);
+  for (const name of [
+    "buildPermissionSetGuardSql",
+    "buildHiddenEditorCountGuardSql",
+    "buildXUsersBulkInsertSql",
+    "buildMemberPermissionBulkUpdateSql",
+    "buildHiddenMemberBulkDeleteSql",
+    "loadNotifiableRecipientLinks",
+  ]) {
+    assert.doesNotMatch(source, new RegExp(`(?:async )?function ${name}\\s*\\(`),
+      `${name} のローカル重複実装は禁止`);
+  }
+});
 
 test("single/batchすべてのactionがwriteGuardを通過する", () => {
   for (const name of [
@@ -109,7 +133,7 @@ test("permission mutationは集合CAS guardとJSON1 bulk DMLを使う", () => {
 });
 
 test("X userの同時作成は成功扱いにし、同時rejected化だけatomic assertionで拒否する", () => {
-  const builder = functionBody("buildXUsersBulkInsertSql");
+  const builder = functionBody("buildXUsersBulkInsertSql", permissionSqlSource);
   const mutation = functionBody("applyPermissionIntentsToVideo");
   assert.match(builder, /ON CONFLICT\(id\) DO UPDATE SET/);
   assert.match(builder, /id = excluded\.id/);
@@ -122,7 +146,7 @@ test("X userの同時作成は成功扱いにし、同時rejected化だけatomic
 });
 
 test("権限batchは公開メンバーの表示名・役割・コメントを書き換えない", () => {
-  const body = functionBody("buildMemberPermissionBulkUpdateSql");
+  const body = functionBody("buildMemberPermissionBulkUpdateSql", permissionSqlSource);
   assert.doesNotMatch(body, /name\s*=/);
   assert.doesNotMatch(body, /role\s*=/);
   assert.doesNotMatch(body, /comment\s*=/);
@@ -193,7 +217,7 @@ test("members_jsonからはcan_editを読まない", async () => {
 });
 
 test("通知先は承認済みX ID連携かつ通知ONのAuth userだけを一括取得する", () => {
-  const resolver = functionBody("loadNotifiableRecipientLinks");
+  const resolver = functionBody("loadNotifiableRecipientLinks", permissionRecipientsSource);
   const body = functionBody("applyPermissionIntentsToVideo");
   assert.match(resolver, /\.innerJoin\(xUsers/);
   assert.match(resolver, /\.innerJoin\(users/);
