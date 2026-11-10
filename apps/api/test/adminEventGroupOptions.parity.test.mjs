@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
+import { dbMiddleware } from "../src/middleware/db.ts";
+import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
 import { EventGroupMutationBodySchema } from "@flamenode/contracts";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
@@ -8,6 +10,7 @@ import {
   EVENT_GROUP_OPTION_PAGE_SIZE,
   MAX_EVENT_GROUP_ID_LENGTH,
   adminEventGroupOptionsRoutes,
+  stagedEventGroupWriteRoutes,
   escapeEventGroupLikeTerm,
   parseEventGroupOptionCursor,
   planEventGroupCreateValues,
@@ -804,6 +807,151 @@ test("SA-025: real SQLite latest-major ToS and CostGuard use one combined gate r
       "UPDATE system_settings SET cost_guard_exception_until = ?, cost_guard_exception_features_json = ? WHERE id = ?",
     ).run(Math.floor(Date.now() / 1000) + 3600, '["admin_event_create"]', "default");
     assert.equal((await get()).status, 200, "an active feature exception overrides disabled flag");
+    assert.equal(stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+const STAGED_WRITE_SITE = "https://app.flamenode.example";
+function stagedSa030Harness({ role = "admin", mutateAfterRead = false } = {}) {
+  let changedAfterRead = false;
+  const { db, sqlite, stats } = createAdminD1({
+    onFirst: (statement, instance) => {
+      if (mutateAfterRead && !changedAfterRead &&
+          statement.includes("FROM event_groups AS g")) {
+        changedAfterRead = true;
+        instance.prepare(
+          "UPDATE event_group_events SET updated_at = 201 WHERE event_group_id = ? AND event_id = ?",
+        ).run("grp-1", "ev-1");
+      }
+    },
+  });
+  seedBase(sqlite, { role });
+  sqlite.exec(`
+    CREATE TABLE event_groups (id TEXT PRIMARY KEY);
+    CREATE TABLE event_group_events (
+      event_group_id TEXT NOT NULL, event_id TEXT NOT NULL,
+      relation_type TEXT NOT NULL, created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL, PRIMARY KEY (event_group_id, event_id)
+    );
+    INSERT INTO event_groups (id) VALUES ('grp-1');
+    INSERT INTO event_group_events VALUES ('grp-1', 'ev-1', 'primary', 10, 20);
+  `);
+  const user = { ...admin, role };
+  const opts = {
+    loadSiteUrl: () => STAGED_WRITE_SITE,
+    allowLocalPreview: () => false,
+  };
+  const app = new Hono();
+  // Recreate the same parent admin origin/session/write/db order without
+  // modifying the shared admin index or publishing the staged write route.
+  app.use("*", originGuardMiddleware(opts));
+  app.use("*", async (c, next) => {
+    c.set("user", user);
+    c.set("sessionState", "user");
+    await next();
+  });
+  app.use("*", writeGuardMiddleware(opts));
+  app.use("*", dbMiddleware);
+  app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+  const remove = (path = "/api/admin/event-groups/grp-1/events/ev-1",
+                  origin = STAGED_WRITE_SITE) => app.request(
+    new Request(STAGED_WRITE_SITE + path, {
+      method: "DELETE", headers: { Origin: origin },
+    }), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE },
+  );
+  const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+  return { sqlite, stats, remove, count };
+}
+
+test("SA-030 U04 staged: real SQLite DELETE, full restorable audit and queue are atomic", async () => {
+  const h = stagedSa030Harness();
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, id: "grp-1" });
+    assert.equal(h.count("event_group_events"), 0);
+    assert.equal(h.count("audit_logs"), 1);
+    assert.equal(h.count("static_rebuild_queue"), 1);
+    const audit = h.sqlite.prepare("SELECT * FROM audit_logs").get();
+    assert.equal(audit.table_name, "event_group_events");
+    assert.equal(audit.target_id, "grp-1:ev-1");
+    assert.equal(audit.operation, "DELETE");
+    assert.equal(audit.retention_class, "restorable");
+    assert.deepEqual(JSON.parse(audit.before_json), {
+      event_group_id: "grp-1", event_id: "ev-1",
+      relation_type: "primary", created_at: 10, updated_at: 20,
+    });
+    const queue = h.sqlite.prepare("SELECT target_type, target_id, reason FROM static_rebuild_queue").get();
+    assert.deepEqual(queue, { target_type: "events_index", target_id: "global",
+      reason: "event_group_member_remove" });
+    assert.equal(h.stats.batches, 1);
+    // 2 guard reads (TOS + CostGuard), 1 joined relation read; production S4
+    // adds another D1 SELECT => S3 pre-read count is 4, still a mount STOP.
+    assert.equal(h.stats.reads, 3);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-030 U04 staged: stale CAS rolls back relation, queue and audit together", async () => {
+  const h = stagedSa030Harness({ mutateAfterRead: true });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.equal((await response.json()).ok, false);
+    assert.equal(h.sqlite.prepare("SELECT updated_at FROM event_group_events").get().updated_at, 201);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-030 U04 staged: missing group/member and origin/role denials never mutate", async () => {
+  const h = stagedSa030Harness();
+  const m = stagedSa030Harness({ role: "moderator" });
+  try {
+    assert.equal((await h.remove("/api/admin/event-groups/missing/events/ev-1")).status, 404);
+    assert.equal((await h.remove("/api/admin/event-groups/grp-1/events/absent")).status, 404);
+    const origin = await h.remove(undefined, "https://attacker.example");
+    assert.equal(origin.status, 403);
+    assert.equal((await origin.json()).reason, "invalid_origin");
+    assert.equal((await m.remove()).status, 403);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(m.count("event_group_events"), 1);
+    assert.equal(h.stats.batches, 0);
+    assert.equal(m.stats.batches, 0);
+  } finally {
+    h.sqlite.close();
+    m.sqlite.close();
+  }
+});
+
+test("SA-030 U04 staged: production admin index does not expose incomplete DELETE", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    const app = new Hono();
+    app.route("/api/admin", createAdminRoutes({
+      session: async (c, next) => {
+        c.set("user", admin);
+        c.set("sessionState", "user");
+        await next();
+      },
+    }));
+    const response = await app.request(
+      new Request(STAGED_WRITE_SITE + "/api/admin/event-groups/grp-1/events/ev-1", {
+        method: "DELETE",
+        headers: { Origin: STAGED_WRITE_SITE },
+      }),
+      undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE },
+    );
+    assert.equal(response.status, 404);
     assert.equal(stats.batches, 0);
   } finally {
     sqlite.close();
