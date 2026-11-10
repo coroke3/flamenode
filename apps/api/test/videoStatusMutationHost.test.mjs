@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
-import { createD1, createSqlite } from "./support/personalHarness.mjs";
+import { createSqlite } from "./support/personalHarness.mjs";
+import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import {
   createVideoVisibilityStatusMutationHost,
   executeHonoVideoVisibilityStatusMutation,
@@ -116,7 +117,7 @@ test("Hono status mutation host rereads visibility from the migrated SQLite D1 s
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run("video-reread", "missing-user", "Creator", "Video", "public", 1000, 1000);
 
-    const db = drizzle(createD1(sqlite), { schema });
+    const db = drizzle(createVideoStatusD1(sqlite), { schema });
     const host = createVideoVisibilityStatusMutationHost(
       { env: {}, get: () => ({}) },
       { mutateWithAudit: async () => [] },
