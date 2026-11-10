@@ -39,14 +39,15 @@ async function mount(element) {
   return { node, async close() { await React.act(async () => root.unmount()); node.remove(); } };
 }
 
-test("MIG-0727 U04: endpoint write controls only offer not-yet-issued public events", () => {
+test("MIG-0727 U04: endpoint controls offer all public events, labelled as CURRENT", () => {
   const html = renderToStaticMarkup(React.createElement(AdminApiEndpointMutations, {
     data, api: { enable() {}, setActive() {} }, onSuccess() {},
   }));
   assert.match(html, /イベントAPIを有効化/);
   assert.match(html, /name="event_id"/);
   assert.match(html, /value="event\/b"/);
-  assert.doesNotMatch(html, /<option[^>]+value="event\/a"/);
+  assert.match(html, /value="event\\/a"/);
+  assert.match(html, /発行済み/);
   assert.match(html, /公開イベントA/);
   assert.match(html, /無効化/);
   assert.match(html, /disabled=""/);
