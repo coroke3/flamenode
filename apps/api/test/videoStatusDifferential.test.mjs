@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import test from "node:test";
-import { createD1, createSqlite, runUnderRootTsx } from "./support/personalHarness.mjs";
+import { createSqlite, runUnderRootTsx } from "./support/personalHarness.mjs";
+import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 
 if (runUnderRootTsx(import.meta.url)) {
   registerHooks({
@@ -120,7 +121,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const sqlite = createSqlite();
     seed(sqlite);
     try {
-      const d1 = createD1(sqlite);
+      const d1 = createVideoStatusD1(sqlite);
       const db = drizzle(d1, { schema });
       const video = (
         await db.select().from(schema.videos)
