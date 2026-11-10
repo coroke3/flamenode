@@ -1145,6 +1145,21 @@ test("SA-029 U04 staged: missing group, all-existing membership, origin and role
   }
 });
 
+test("SA-029 U04 staged: missing group never enumerates candidate event membership", async () => {
+  const h = stagedSa030Harness();
+  try {
+    const response = await h.add(["ev-2"], "/api/admin/event-groups/missing/events");
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { ok: false, message: "グループが見つかりません。" });
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
 test("SA-029 U04 staged: 80 distinct IDs fit one atomic 49/50-query plan", async () => {
   const h = stagedSa030Harness();
   try {
