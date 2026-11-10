@@ -350,6 +350,15 @@ export function normalizeEventGroupMembershipAdd(input: unknown): EventGroupMemb
     : {};
   const groupId = typeof raw.groupId === "string" ? raw.groupId.trim() : "";
   const rawIds = Array.isArray(raw.eventIds) ? raw.eventIds : [];
+  // Bound both input processing and intermediate allocations. A request with
+  // thousands of duplicate IDs must not bypass the 80-item CPU guard merely
+  // because the final de-duplicated set contains only one ID.
+  if (rawIds.length > EVENT_GROUP_ADD_MAX) {
+    return {
+      ok: false,
+      message: `一度に追加できるイベントは${EVENT_GROUP_ADD_MAX}件までです。分けて実行してください。`,
+    };
+  }
   const eventIds = [...new Set(
     rawIds.filter((id): id is string => typeof id === "string")
       .map((id) => id.trim()).filter(Boolean),
