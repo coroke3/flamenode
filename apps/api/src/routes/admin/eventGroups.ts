@@ -827,6 +827,9 @@ stagedEventGroupWriteRoutes.post("/:id/events", async (c) => {
       mutationStatements,
       expectedMutationChanges,
       preloaded: auditPreloaded(c),
+      // Match the preflight's exact three caller reads: session, identity/ToS,
+      // and the joined CostGuard/membership/audit-settings snapshot.
+      callerQueryCount: 3,
       audits,
     });
     return c.json({ ok: true, id: groupId, added: insertedRows.length }, 200);
