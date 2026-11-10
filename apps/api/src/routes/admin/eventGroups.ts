@@ -1,9 +1,9 @@
 /**
  * MIG-0653 U02: SA-025 event-group membership candidate search.
  *
- * Intentionally unmounted until the admin router's existing owner PRs release
- * apps/api/src/routes/admin/index.ts. The caller supplies the existing session
- * middleware; this module also enforces admin-only access on every read.
+ * Mounted on the Draft branch under createAdminRoutes after #476/#480 merged.
+ * The parent supplies the session/admin read guard; the handler additionally
+ * enforces CURRENT's write-side ToS/CostGuard within S2's D1 query budget.
  *
  * CURRENT: src/lib/admin/eventGroupEventOptions.ts. Keep its 80-row cursor,
  * NOT EXISTS membership filter, escaped LIKE and updated_at/id ordering.
@@ -56,7 +56,7 @@ export function escapeEventGroupLikeTerm(input: string): string {
  * S4 session (1) + combined guard (1) + candidate page (1) = 3 D1 statements.
  * The major-terms CASE mirrors loadTosState in middleware/writeOrigin.ts.
  */
-export const EVENT_GROUP_ADMIN_GATE_SQL = `
+const EVENT_GROUP_ADMIN_GATE_SQL = `
 WITH latest_major AS (
   SELECT "id", "published_at" FROM "terms_versions"
   WHERE "severity" = 'major' AND "published_at" IS NOT NULL
