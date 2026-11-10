@@ -16,6 +16,7 @@ function setup({
   tosAccepted = 1, tosReaccept = 0, tosMissing = false, tosFailure = false,
   settingsMissing = false, settingsFailure = false,
   operationMode = "normal", disabledFeatures = "[]", mounted = false,
+  exceptionUntil = null, exceptionFeatures = null,
 } = {}) {
   const calls = [];
   const guardCalls = [];
@@ -30,18 +31,13 @@ function setup({
           return {
             async first() {
               if (statement.includes('FROM "user" u')) {
-                if (tosFailure) throw new Error("private user lookup failure");
+                if (tosFailure || settingsFailure) throw new Error("private gate lookup failure");
                 return tosMissing ? null : {
                   is_tos_accepted: tosAccepted, terms_reaccept_required: tosReaccept,
-                };
-              }
-              if (statement.includes("FROM system_settings")) {
-                if (settingsFailure) throw new Error("private settings failure");
-                return settingsMissing ? null : {
-                  operation_mode: operationMode,
-                  disabled_features_json: disabledFeatures,
-                  cost_guard_exception_until: null,
-                  cost_guard_exception_features_json: null,
+                  operation_mode: settingsMissing ? null : operationMode,
+                  disabled_features_json: settingsMissing ? null : disabledFeatures,
+                  cost_guard_exception_until: exceptionUntil,
+                  cost_guard_exception_features_json: exceptionFeatures,
                 };
               }
               throw new Error("unexpected test read");
@@ -120,7 +116,7 @@ test("SA-025: mounted admin GET retains session, ToS and CostGuard fences", asyn
   assert.equal(success.status, 200);
   assert.deepEqual(await success.json(), { ok: true, options: [], nextCursor: null });
   assert.equal(ok.calls.length, 1);
-  assert.equal(ok.guardCalls.length, 2);
+  assert.equal(ok.guardCalls.length, 1);
 
   for (const config of [
     { mounted: true, user: null },
@@ -141,9 +137,21 @@ test("SA-025: authorized search reads ToS, CostGuard, then one bounded candidate
   const response = await get();
   assert.equal(response.status, 200);
   assert.equal(calls.length, 1);
-  assert.equal(guardCalls.length, 2);
+  assert.equal(guardCalls.length, 1, "S2: one combined user/CostGuard read");
   assert.match(guardCalls[0].statement, /FROM "user" u/);
-  assert.match(guardCalls[1].statement, /FROM system_settings/);
+  assert.match(guardCalls[0].statement, /JOIN "system_settings" s/);
+});
+
+test("SA-025: a valid feature exception preserves CURRENT override without extra D1 reads", async () => {
+  const { get, calls, guardCalls } = setup({
+    operationMode: "maintenance", disabledFeatures: '["admin_event_create"]',
+    exceptionUntil: Math.floor(Date.now() / 1000) + 3600,
+    exceptionFeatures: '["admin_event_create"]',
+  });
+  const response = await get();
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(guardCalls.length, 1);
 });
 
 test("SA-025: malformed input fails before D1 and never echoes the cursor", async () => {
