@@ -1038,6 +1038,57 @@ test("SA-029 U04 staged: add membership writes rows, restorable audits and queue
   }
 });
 
+
+test("SA-029 U04 staged: failed membership INSERT rolls back relation, audits and rebuild queue", async () => {
+  const h = stagedSa030Harness();
+  try {
+    h.sqlite.exec(`
+      CREATE TRIGGER reject_event_group_member BEFORE INSERT ON event_group_events
+      WHEN NEW.event_id = 'ev-2'
+      BEGIN SELECT RAISE(ABORT, 'simulated membership insert failure'); END;
+    `);
+    const response = await h.add(["ev-2", "ev-3"]);
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+    });
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-029 U04 staged: missing group, all-existing membership, origin and role denials do not mutate", async () => {
+  const h = stagedSa030Harness();
+  const m = stagedSa030Harness({ role: "moderator" });
+  try {
+    assert.equal((await h.add(["ev-2"], "/api/admin/event-groups/missing/events")).status, 404);
+    const existing = await h.add(["ev-1"]);
+    assert.equal(existing.status, 400);
+    assert.deepEqual(await existing.json(), {
+      ok: false, message: "追加できるイベントがありません。",
+    });
+    const origin = await h.add(["ev-2"], undefined, "https://attacker.example");
+    assert.equal(origin.status, 403);
+    assert.equal((await origin.json()).reason, "invalid_origin");
+    assert.equal((await m.add(["ev-2"])).status, 403);
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(m.count("event_group_events"), 1);
+    assert.equal(m.count("audit_logs"), 0);
+    assert.equal(m.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+    assert.equal(m.stats.batches, 0);
+  } finally {
+    h.sqlite.close();
+    m.sqlite.close();
+  }
+});
+
 test("SA-029 U04 staged: 80 distinct IDs fit one atomic 49/50-query plan", async () => {
   const h = stagedSa030Harness();
   try {
