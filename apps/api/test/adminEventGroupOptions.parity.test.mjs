@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
+import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 import {
   EVENT_GROUP_OPTION_PAGE_SIZE,
   adminEventGroupOptionsRoutes,
@@ -221,4 +222,89 @@ test("SA-025: DB failure returns generic 503 without query/SQL leakage", async (
   });
   assert.equal(calls.length, 1);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
+});
+
+test("SA-025: real SQLite D1 rejects LIKE wildcard injection and excludes existing members", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE event_group_events (event_group_id TEXT, event_id TEXT)");
+    seedEvent(sqlite, { id: "e-percent", title: "Course 100%", updated_at: 900 });
+    seedEvent(sqlite, { id: "e-underscore", title: "Course 100_", updated_at: 800 });
+    seedEvent(sqlite, { id: "e-other", title: "Course 100X", updated_at: 700 });
+    seedEvent(sqlite, { id: "e-member", title: "Course 100%", updated_at: 1000 });
+    sqlite.prepare("INSERT INTO event_group_events (event_group_id, event_id) VALUES (?, ?)")
+      .run("grp-1", "e-member");
+
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+    const search = async (q) => {
+      const response = await app.request(
+        new Request("https://example.com/api/admin/event-groups/event-options?groupId=grp-1&q=" +
+          encodeURIComponent(q)),
+        undefined, { DB: db },
+      );
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      return response.json();
+    };
+    assert.deepEqual((await search("Course 100%")).options.map((item) => item.id), ["e-percent"]);
+    assert.deepEqual((await search("Course 100_")).options.map((item) => item.id), ["e-underscore"]);
+    assert.deepEqual((await search("Course 100")).options.map((item) => item.id),
+      ["e-percent", "e-underscore", "e-other"]);
+    assert.equal(stats.batches, 0, "candidate GET must never write D1");
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("SA-025: real SQLite stable cursor uses DESC timestamp and ASC ID tie-break", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE event_group_events (event_group_id TEXT, event_id TEXT)");
+    for (let n = 0; n < 83; n++) {
+      seedEvent(sqlite, {
+        id: "item-" + String(n).padStart(3, "0"),
+        title: "Candidate " + n,
+        updated_at: 1000 - Math.floor(n / 2),
+      });
+    }
+    sqlite.prepare("INSERT INTO event_group_events (event_group_id, event_id) VALUES (?, ?)")
+      .run("grp-1", "item-000");
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+    const page = async (cursor) => {
+      const q = new URLSearchParams({ groupId: "grp-1" });
+      if (cursor) q.set("cursor", cursor);
+      const response = await app.request(new Request(
+        "https://example.com/api/admin/event-groups/event-options?" + q.toString(),
+      ), undefined, { DB: db });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const first = await page(null);
+    assert.equal(first.options.length, 80);
+    assert.ok(first.nextCursor);
+    assert.deepEqual(first.options.slice(0, 3).map((v) => v.id),
+      ["item-001", "item-002", "item-003"]);
+    assert.equal(first.options[79].id, "item-080");
+    assert.deepEqual(JSON.parse(first.nextCursor), { updatedAt: 960, id: "item-080" });
+    const second = await page(first.nextCursor);
+    assert.deepEqual(second.options.map((v) => v.id), ["item-081", "item-082"]);
+    assert.equal(second.nextCursor, null);
+    assert.equal(stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
 });
