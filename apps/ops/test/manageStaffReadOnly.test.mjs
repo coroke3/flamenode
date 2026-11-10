@@ -147,3 +147,17 @@ test("MIG-0723 U01a: malformed UTF-16 and NUL event IDs fail closed before fetch
   }
   assert.equal(calls, 0, "malformed route parameters must never issue a network request");
 });
+
+test("MIG-0723 U03b: monotonic context epoch blocks A-B-A stale private staff data", () => {
+  const fetchFn = async () => json(200, staff());
+  const old = {
+    eventId: "ev1", fetchFn, refreshKey: 0, contextEpoch: 3,
+    result: { status: "ok", data: staff() },
+  };
+  assert.equal(currentStaffResult("ev1", fetchFn, old, 0, 3), old.result);
+  assert.equal(currentStaffResult("ev2", fetchFn, old, 0, 4), null);
+  assert.equal(currentStaffResult("ev1", fetchFn, old, 0, 5), null,
+    "returning to A must not revive A's earlier authorized snapshot");
+  assert.equal(currentStaffResult("ev1", fetchFn, old, 1, 3), null,
+    "mutation refresh must invalidate prior authorization");
+});
