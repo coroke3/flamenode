@@ -123,3 +123,30 @@ test("MIG-0723 U02: deceptive ok:true HTTP error bodies never authorize a staff 
     assert.deepEqual(await client.create("ev1", upsert), { status: "unavailable" });
   }
 });
+
+test("MIG-0723 U02: canonical MIG-0654 request schemas reject invalid writes before fetch", async () => {
+  const { client, calls } = harness();
+  const invalid = await Promise.all([
+    client.create("ev1", { ...upsert, display_name: "" }),
+    client.create("ev1", { ...upsert, permission_preset: "unknown" }),
+    client.update("ev1", "m1", { ...upsert, display_name: "X".repeat(81) }),
+    client.remove("ev1", "m1", "R".repeat(501), ""),
+    client.importCsv("ev1", "reason", []),
+    client.importCsv("ev1", "reason", [{ ...csv, is_public_staff: "yes" }]),
+    client.transferOwnership("ev1", { ...transfer, reason: "R".repeat(501) }),
+  ]);
+  for (const response of invalid) assert.deepEqual(response, { status: "unavailable" });
+  assert.deepEqual(calls, []);
+});
+
+test("MIG-0723 U02: reject malformed success/error envelopes against server contract", async () => {
+  for (const [status, body] of [
+    [200, { ok: false }],
+    [200, { ok: "true" }],
+    [409, { ok: false }],
+    [200, { ok: true, pendingPublicReflection: "yes" }],
+  ]) {
+    const { client } = harness(status, body);
+    assert.deepEqual(await client.create("ev1", upsert), { status: "unavailable" });
+  }
+});
