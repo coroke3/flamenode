@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 5–8 implementation tracks; Phase 4 follow-ups and Phase 9 inventory (production cutover not started)
-Current Task: MIG-0654
+Current Task: MIG-0735
 Current Owner: chatgpt
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0654
-Last Task PR: #508
+Last Completed Task: MIG-0735
+Last Task PR: #481
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0663, MIG-0664, MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -435,7 +435,7 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0732 | `/admin/x-link-requests`, `/admin/x-id-merges` (SA-090..097; merge gate MIG-0707, MIG-0726, MIG-0605, MIG-0644) | READY | MIG-0625 |
 | MIG-0733 | `/admin/audit` x4 (SA-009..011; merge gate MIG-0707, MIG-0726, MIG-0662) | READY | MIG-0625, MIG-0629 |
 | MIG-0734 | `/admin/cost-guard`, `/admin/notifications` (SA-016..020, 045..048; merge gate MIG-0707, MIG-0726, MIG-0637, MIG-0642) | DONE | MIG-0625 |
-| MIG-0735 | `/admin/static-builds`, `/admin/youtube-sync` x2, `/admin/youtube-quota` (SA-050, 069..073, 106; merge gate MIG-0707, MIG-0726, MIG-0643) | READY | MIG-0625 |
+| MIG-0735 | `/admin/static-builds`, `/admin/youtube-sync` x2, `/admin/youtube-quota` (SA-050, 069..073, 106; merge gate MIG-0707, MIG-0726, MIG-0643) | DONE | MIG-0625 |
 | MIG-0736 | `/admin/health`, `/admin/health/integrity`, `/admin/security`, `/admin/workers` (merge gate MIG-0707, MIG-0726, MIG-0626) | READY | MIG-0625 |
 | MIG-0737 | `/admin/spreadsheet`, `/admin/import` (RH-002..009; merge gate MIG-0707, MIG-0726, MIG-0638, MIG-0645) | READY | MIG-0625 |
 | MIG-0706 | Phase 7 Gate | BLOCKED | MIG-0704, MIG-0705 |
