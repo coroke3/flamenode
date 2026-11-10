@@ -162,6 +162,7 @@ test("T01: a video id equal to a fixed route or asset path fails the build (rout
 test("T02: non-public, tampered or blocked snapshots fail the build instead of publishing", { skip: skipUi }, () => {
   for (const [name, videos, over] of [
     ["private video", [["vid1", payload({ video: { visibility_status: "private" } })]], {}],
+    ["valid-digest mismatched video id", [["vid1", payload({ video: { id: "different-video" } })]], {}],
     ["hash mismatch", [["vid1", payload(), { sha256: "a".repeat(64) }]], {}],
     ["nonpublic envelope", [["vid1", payload(), { visibility: "private" }]], {}],
     ["blocked key", [["vid1", payload()]], { blocked: [keyOf("vid1")] }],
@@ -173,6 +174,7 @@ test("T02: non-public, tampered or blocked snapshots fail the build instead of p
         assert.equal(fs.existsSync(path.join(r.out, "AAAAAAAAA01/index.html")), false);
       } else {
         assert.notEqual(r.error, null, `${name} must fail`);
+        if (name === "valid-digest mismatched video id") assert.match(r.error, /Video snapshot|VIDEO_DETAIL_INVALID/);
       }
     } finally {
       clean(r);
