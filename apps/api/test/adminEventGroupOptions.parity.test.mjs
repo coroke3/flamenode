@@ -5,6 +5,7 @@ import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 import {
   EVENT_GROUP_OPTION_PAGE_SIZE,
+  MAX_EVENT_GROUP_ID_LENGTH,
   adminEventGroupOptionsRoutes,
   escapeEventGroupLikeTerm,
   parseEventGroupOptionCursor,
@@ -154,11 +155,15 @@ test("SA-025: a valid feature exception preserves CURRENT override without extra
   assert.equal(guardCalls.length, 1);
 });
 
-test("SA-025: malformed input fails before D1 and never echoes the cursor", async () => {
+test("SA-025: malformed input is rejected before candidate SELECT without echoing cursor", async () => {
   const { get, calls } = setup();
   for (const query of [
     "groupId=",
     "groupId=g1&q=" + "a".repeat(65),
+    "groupId=" + "g".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1),
+    "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({
+      updatedAt: 4, id: "x".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1),
+    })),
     "groupId=g1&cursor=%7Bbad",
     "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 3.5, id: "abc" })),
     "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 5, id: "" })),
@@ -173,6 +178,9 @@ test("SA-025: malformed input fails before D1 and never echoes the cursor", asyn
   }
   assert.equal(calls.length, 0);
   assert.equal(parseEventGroupOptionCursor(null), null);
+  assert.deepEqual(parseEventGroupOptionCursor(JSON.stringify({
+    updatedAt: 4, id: "x".repeat(MAX_EVENT_GROUP_ID_LENGTH),
+  })), { updatedAt: 4, id: "x".repeat(MAX_EVENT_GROUP_ID_LENGTH) });
   assert.throws(() => parseEventGroupOptionCursor("[]"), /cursor_invalid/);
 });
 
