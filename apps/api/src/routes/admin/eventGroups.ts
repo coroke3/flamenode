@@ -830,7 +830,16 @@ stagedEventGroupWriteRoutes.post("/:id/events", async (c) => {
       audits,
     });
     return c.json({ ok: true, id: groupId, added: insertedRows.length }, 200);
-  } catch {
+  } catch (error) {
+    // Keep the public response generic; emit only bounded diagnostic metadata
+    // so a failed atomic batch can be investigated without logging request data.
+    console.error("[event-group] membership add failed", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      errorCode: error && typeof error === "object" && "code" in error
+        ? String((error as { code?: unknown }).code).slice(0, 64)
+        : null,
+      errorMessage: error instanceof Error ? error.message.slice(0, 160) : null,
+    });
     return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
   }
 });
