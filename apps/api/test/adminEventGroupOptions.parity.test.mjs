@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
+import { EventGroupMutationBodySchema } from "@flamenode/contracts";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 import {
@@ -72,6 +73,50 @@ function setup({
   );
   return { get, calls, guardCalls };
 }
+
+test("SA-026/027 U03: group mutation contract matches CURRENT form bounds and coercion", () => {
+  const parsed = EventGroupMutationBodySchema.parse({
+    id: "  grp-1  ", base_updated_at: "7",
+    name: "  Sample Group  ", slug: "  sample-group  ",
+    description: "  hello  ", group_type: "collection",
+    icon_url: "  https://example.com/icon  ", img_url: "",
+    accent_color: "#aBcD", visibility_status: "private",
+    sort_order: "-9999", unrelated: "ignored by CURRENT z.object",
+  });
+  assert.deepEqual(parsed, {
+    id: "grp-1", base_updated_at: 7,
+    name: "Sample Group", slug: "sample-group",
+    description: "hello", group_type: "collection",
+    icon_url: "https://example.com/icon", img_url: "",
+    accent_color: "#aBcD", visibility_status: "private", sort_order: -9999,
+  });
+  const defaults = EventGroupMutationBodySchema.parse({ name: "a", slug: "a" });
+  assert.equal(defaults.group_type, "series");
+  assert.equal(defaults.visibility_status, "public");
+  assert.equal(defaults.sort_order, undefined, "CURRENT keeps optional sort_order absent");
+  assert.equal(defaults.base_updated_at, undefined, "update handler must enforce CAS separately");
+  assert.equal(EventGroupMutationBodySchema.parse({ name: "x", slug: "x", sort_order: 9999 }).sort_order, 9999);
+  assert.equal(EventGroupMutationBodySchema.parse({ name: "x", slug: "x", base_updated_at: null }).base_updated_at, null);
+
+  for (const bad of [
+    {}, { name: "", slug: "x" },
+    { name: "N".repeat(121), slug: "x" },
+    { name: "x", slug: "UpperCase" }, { name: "x", slug: "x".repeat(65) },
+    { name: "x", slug: "x", group_type: "unknown" },
+    { name: "x", slug: "x", visibility_status: "hidden" },
+    { name: "x", slug: "x", description: "d".repeat(2001) },
+    { name: "x", slug: "x", icon_url: "u".repeat(501) },
+    { name: "x", slug: "x", img_url: "u".repeat(501) },
+    { name: "x", slug: "x", accent_color: "#GGG" },
+    { name: "x", slug: "x", sort_order: 10000 },
+    { name: "x", slug: "x", sort_order: -10000 },
+    { name: "x", slug: "x", sort_order: 0.5 },
+    { name: "x", slug: "x", base_updated_at: -1 },
+    { name: "x", slug: "x", base_updated_at: 1.1 },
+  ]) {
+    assert.equal(EventGroupMutationBodySchema.safeParse(bad).success, false, JSON.stringify(bad).slice(0, 80));
+  }
+});
 
 test("SA-025: only authenticated admin may search, including banned denial", async () => {
   for (const [user, status, code] of [
