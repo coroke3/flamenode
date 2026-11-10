@@ -53,7 +53,16 @@ export function StaticRebuildQueuePanel({
             <td>{row.status === "failed"
               ? <button type="button" disabled={busy} onClick={() => retry(row.id)}
                 className="fn-btn fn-btn-ghost fn-btn-sm">再試行</button> : null}
-              {staticRebuildAdminHref(row.target_type, row.target_id) && <Link to={staticRebuildAdminHref(row.target_type, row.target_id)!} className="fn-btn fn-btn-ghost fn-btn-sm">関連管理</Link>}
+              {(() => {
+                const href = staticRebuildAdminHref(row.target_type, row.target_id);
+                if (!href) return null;
+                const isOpsInternal = href.startsWith("/admin") || href.startsWith("/manage");
+                return isOpsInternal ? (
+                  <Link to={href} className="fn-btn fn-btn-ghost fn-btn-sm">関連管理</Link>
+                ) : (
+                  <a href={href} className="fn-btn fn-btn-ghost fn-btn-sm">関連管理</a>
+                );
+              })()}
               {row.error && <details><summary>エラー詳細</summary><pre>{row.error}</pre></details>}
             </td>
           </tr>)}

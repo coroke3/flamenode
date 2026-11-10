@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useSearchParams } from "react-router-dom";
 import type { AdminStaticBuildsResponse } from "@flamenode/contracts";
 import { postAdminOp, readStaticBuilds, mutationResultQuery, canContinueBackfill } from "../../api/adminStaticBuilds.js";
 import { StaticRebuildQueuePanel } from "./StaticRebuildQueuePanel.js";
@@ -10,6 +11,7 @@ const TARGETS = ["top", "top_recommended", "top_latest", "top_nostalgic", "top_e
   "youtube_related_blocklist", "random_video_pool", "member_suggestions"] as const;
 
 export function StaticBuilds(): React.ReactElement {
+  const [params, setParams] = useSearchParams();
   const [data, setData] = React.useState<AdminStaticBuildsResponse | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -36,8 +38,8 @@ export function StaticBuilds(): React.ReactElement {
         return;
       }
       if (carryQuery) {
-        const query = mutationResultQuery(result.data);
-        window.history.replaceState(null, "", window.location.pathname + (query ? "?" + query : ""));
+        const queryStr = mutationResultQuery(result.data);
+        setParams(new URLSearchParams(queryStr), { replace: true });
       }
       setRefreshId(id => id + 1);
     } finally {
@@ -45,7 +47,7 @@ export function StaticBuilds(): React.ReactElement {
       setBusy(false);
     }
   }
-  const query = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  const query = params;
   const backfillKind = query.get("backfill_kind");
   const visibility = query.get("visibility_repair");
   const visibilityMessages: Record<string, string> = {
