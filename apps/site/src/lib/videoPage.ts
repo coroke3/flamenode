@@ -53,6 +53,10 @@ export function buildVideoPages(
 ): VideoPage[] {
   const detail = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0]);
   if (!detail || detail.video.visibility_status !== "public") throw new VideoPageBuildError(key);
+  // Reject a valid-digest snapshot whose entity ID disagrees with its manifest-authorized key.
+  // Otherwise an allowed object could publish a page under a different route (including its alias).
+  const snapshotId = /^snapshot\/video-detail\/([A-Za-z0-9_-]{1,64})\.json$/.exec(key)?.[1];
+  if (snapshotId && detail.video.id !== snapshotId) throw new VideoPageBuildError(key);
   const vm = buildPublicVideoViewModelFromStatic(detail);
   const { video } = vm;
   const youtubeVideoId = video.youtube_video_id?.trim() || null;
