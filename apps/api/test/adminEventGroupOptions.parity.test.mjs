@@ -238,6 +238,25 @@ test("SA-029 U04: post-read membership planner preserves CURRENT validation orde
   });
 });
 
+test("SA-029 U04: reject oversized raw membership input before de-duplication", () => {
+  // Duplicates used to collapse into a one-row set only after processing the
+  // entire attacker-controlled input. Bound the raw array for S3 CPU safety.
+  const duplicates = Array.from({ length: 10000 }, () => "ev-1");
+  const rejected = normalizeEventGroupMembershipAdd({
+    groupId: "grp-1", eventIds: duplicates,
+  });
+  assert.deepEqual(rejected, {
+    ok: false,
+    message: "一度に追加できるイベントは80件までです。分けて実行してください。",
+  });
+  const atLimit = normalizeEventGroupMembershipAdd({
+    groupId: "grp-1", eventIds: Array.from({ length: 80 }, () => "ev-1"),
+  });
+  assert.deepEqual(atLimit, {
+    ok: true, groupId: "grp-1", eventIds: ["ev-1"],
+  });
+});
+
 test("SA-029/030 U04: CURRENT membership input normalization and 80-ID bound", () => {
   assert.equal(EVENT_GROUP_ADD_MAX, 80);
   assert.deepEqual(normalizeEventGroupMembershipAdd({
