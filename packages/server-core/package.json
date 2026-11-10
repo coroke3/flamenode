@@ -12,6 +12,7 @@
     "./observability/flowTrace": "./src/observability/flowTrace.ts",
     "./video/memberSetSnapshot": "./src/video/memberSetSnapshot.ts",
     "./video/permissionSql": "./src/video/permissionSql.ts",
+    "./video/permissionRecipients": "./src/video/permissionRecipients.ts",
     "./memberSuggestion/core": "./src/memberSuggestion/core.ts",
     "./memberSuggestion/rank": "./src/memberSuggestion/rank.ts",
     "./memberSuggestion/search": "./src/memberSuggestion/search.ts",
