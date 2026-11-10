@@ -324,7 +324,11 @@ videoListRoutes.get("/", async (c) => {
     return publicServiceUnavailableResponse("static_list_unavailable");
   }
 
-  const q = (c.req.query("q") ?? "").trim().slice(0, MAX_SEARCH_LENGTH);
+  // Match CURRENT's bounded query without producing a lone high surrogate.
+  const q = (c.req.query("q") ?? "").trim().slice(0, MAX_SEARCH_LENGTH)
+    .replace(/[\uD800-\uDBFF]$/, "")
+    // Replace malformed original UTF-16 while retaining valid emoji pairs.
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
   const sort = parsePublicVideoSort(c.req.query("sort")?.slice(0, 16));
   const eventId = (c.req.query("event") ?? "").trim().slice(0, MAX_EVENT_ID_LENGTH);
   const limit = parseBoundedPositiveInt(
