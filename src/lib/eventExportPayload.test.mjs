@@ -266,6 +266,30 @@ test("旧形式のカスタム回答は互換列を上書きせずprototypeキ�
   assert.deepEqual(findForbiddenPublicKeys(payload), []);
 });
 
+test("公開DTOのcustom_answers_by_keyにprototype予約キーを混入させない", () => {
+  const poisoned = {
+    ...snapshot,
+    videos: [{
+      ...snapshot.videos[0],
+      answers: [
+        { key: "__proto__", label: "proto", answer_text: "bad", answer_json: null, sort_order: 0 },
+        { key: "constructor", label: "ctor", answer_text: "bad", answer_json: null, sort_order: 1 },
+        { key: "prototype", label: "prototype", answer_text: "bad", answer_json: null, sort_order: 2 },
+        { key: "safe_question", label: "safe", answer_text: "kept", answer_json: null, sort_order: 3 },
+      ],
+    }],
+  };
+  for (const payload of [buildEventExportPayload(poisoned), buildLegacyEventExportPayload(poisoned)]) {
+    const video = Array.isArray(payload) ? payload[0] : payload.videos[0];
+    const byKey = video.custom_answers_by_key;
+    for (const reserved of ["__proto__", "constructor", "prototype"]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(byKey, reserved), false, reserved);
+    }
+    assert.equal(byKey.safe_question, "kept");
+    assert.deepEqual(findForbiddenPublicKeys(payload), []);
+  }
+});
+
 test("形式dispatcherはv5を既定契約のまま保ちlegacyだけ配列へ変換する", () => {
   const v5 = buildEventExportPayloadForFormat(
     snapshot,
