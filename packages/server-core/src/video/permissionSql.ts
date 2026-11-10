@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import type { videoMembers } from "@flamenode/db/schema";
+import type { videoMembers, xUsers } from "@flamenode/db/schema";
 import {
   compareSqliteBinaryText,
   toVideoMemberSnapshotRow,
@@ -63,7 +63,7 @@ export function buildHiddenEditorCountGuardSql(videoId: string, expectedCount: n
 }
 
 /** CURRENT collaborator x_users upsert: never revive a rejected X identity. */
-export function buildXUsersBulkInsertSql(rows: readonly (typeof import("@flamenode/db/schema").xUsers.$inferInsert)[]) {
+export function buildXUsersBulkInsertSql(rows: readonly (typeof xUsers.$inferInsert)[]) {
   const payload = JSON.stringify(rows);
   return sql`
     INSERT INTO x_users (
