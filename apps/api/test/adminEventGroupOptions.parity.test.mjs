@@ -154,6 +154,20 @@ test("SA-029 U04: post-read membership planner preserves CURRENT validation orde
     ["ev-a", "unexpected"], []), {
     ok: false, message: "存在しないイベントは追加できません。",
   });
+  // Two identical DB rows must not mask a missing requested event.
+  // Neither may a duplicate row replace proof for a distinct event.
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a", "ev-missing"],
+    ["ev-a", "ev-a"], []), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a", "ev-b"],
+    ["ev-a", "ev-a", "ev-b"], []), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a", "ev-b"],
+    ["ev-b", "ev-a"], []), {
+    ok: true, toAdd: ["ev-a", "ev-b"],
+  });
   assert.deepEqual(planEventGroupMembershipAdd([], [], []), {
     ok: false, message: "追加できるイベントがありません。",
   });
