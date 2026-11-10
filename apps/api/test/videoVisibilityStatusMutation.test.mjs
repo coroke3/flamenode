@@ -126,3 +126,49 @@ test("fence pre-commit failure runs token-scoped compensation before non-retryab
   assert.equal(result.retryable, false);
   assert.equal(calls.some((entry) => entry === "compensate"), true);
 });
+
+
+test("failed fence compensation does not mask the original audit CAS conflict", async () => {
+  const calls = [];
+  const result = await executeVideoVisibilityStatusMutation({
+    db: {},
+    videoId: "v-1",
+    requestedStatus: "private",
+    transition: transition(),
+    reason: "moderation",
+    logTag: "admin-video-status",
+  }, host({
+    mutate: async () => {
+      calls.push("mutate");
+      throw Object.assign(new Error("CAS conflict"), { auditMutation: true });
+    },
+    isAuditMutationError: (error) => Boolean(error?.auditMutation),
+    compensate: async (_db, input) => {
+      calls.push(["compensate", input]);
+      throw new Error("R2 compensation unavailable");
+    },
+    rereadStatus: async () => {
+      calls.push("reread");
+      return "public";
+    },
+    log: (level, tag, details) => calls.push(["log", level, tag, details]),
+  }, calls));
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "concurrent_update");
+  assert.equal(result.retryable, true);
+  assert.deepEqual(calls.map((entry) => Array.isArray(entry) ? entry[0] : entry), [
+    "precommit",
+    "mutate",
+    "compensate",
+    "log",
+    "reread",
+  ]);
+  const compensation = calls.find((entry) => Array.isArray(entry) && entry[0] === "compensate");
+  assert.equal(compensation[1].videoId, "v-1");
+  assert.equal(compensation[1].fenceToken, "fence-1");
+  assert.equal(compensation[1].allowNonPublicRollback, false);
+  const warning = calls.find((entry) => Array.isArray(entry) && entry[0] === "log");
+  assert.equal(warning[1], "warn");
+  assert.match(warning[3].error.message, /R2 compensation unavailable/);
+});
