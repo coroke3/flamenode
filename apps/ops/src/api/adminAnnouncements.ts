@@ -32,7 +32,11 @@ export async function readAdminAnnouncements(
   );
   if (result.status !== "ok") return result;
   const parsed = AdminAnnouncementListResponseSchema.safeParse(result.data);
-  return parsed.success && parsed.data.items.length <= 50
+  const expected = new URLSearchParams(announcementQuery(values));
+  // A cached response for another filter must not render as if it matched the selected filters.
+  return parsed.success && parsed.data.items.length <= 50 &&
+    parsed.data.audience === expected.get("audience") &&
+    parsed.data.status === expected.get("status")
     ? { status: "ok", data: parsed.data }
     : { status: "unavailable" };
 }
