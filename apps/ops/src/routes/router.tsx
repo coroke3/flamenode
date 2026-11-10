@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Outlet, Route, Routes } from "react-router-dom";
+import { Outlet, Route, Routes, useParams } from "react-router-dom";
 import type { OpsApi } from "../api/account.js";
 import { CostGuardBanner } from "../components/layout/CostGuardBanner.js";
 import { AdminLayout } from "./admin/AdminLayout.js";
@@ -16,6 +16,7 @@ import { AuthErrorView, OpsGate } from "./guard.js";
 import { ManageLayout } from "./manage/ManageLayout.js";
 import { ManageDashboard } from "./manage/ManageDashboard.js";
 import { ManageReviewRedirect } from "./manage/ManageReviewRedirect.js";
+import { EventOverview } from "./manage/EventOverview.js";
 
 /** MIG-0707 U02: placeholder only. No protected screen data is served until its own MIG is reviewed. */
 function UnmigratedView(): React.ReactElement {
@@ -31,6 +32,14 @@ export class OpsRouteErrorBoundary extends React.Component<
     return <AuthErrorView error={this.state.error} reset={() => this.setState({ error: null })} />;
   }
 }
+/** MIG-0720 U02b: URL event ID is the only route input; Hono rechecks access on every GET. */
+export function ManageEventOverviewRoute(): React.ReactElement {
+  const { id } = useParams<"id">();
+  return id
+    ? <EventOverview eventId={id} fetchFn={fetch} />
+    : <p role="alert">イベントIDが不正です。</p>;
+}
+
 export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
   // MIG-0719: retain the MIG-0726 Admin shell and routes alongside Manage.
   const manage = (
@@ -38,6 +47,7 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
       <ManageLayout>
         <Routes>
           <Route index element={<ManageDashboard />} />
+          <Route path="events/:id" element={<ManageEventOverviewRoute />} />
           <Route path="events/:id/review" element={<ManageReviewRedirect />} />
           <Route path="*" element={<UnmigratedView />} />
         </Routes>
