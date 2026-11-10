@@ -29,26 +29,28 @@ async function request(
   return parsed.success ? parsed.data : reject(UNAVAILABLE);
 }
 
-function draft(raw: Record<string, unknown>): Record<string, unknown> | Rejected {
+function draft(raw: Record<string, unknown>):
+  | { ok: true; body: Record<string, unknown> }
+  | Rejected {
   const shape = AdminTermsDraftBodySchema.safeParse(raw);
   if (!shape.success) return reject("入力エラー");
   const checked = parseTermsDraftInput(shape.data);
-  if (!checked.ok) return checked;
-  return checked.draft;
+  if (!checked.ok) return reject(checked.message);
+  return { ok: true, body: checked.draft };
 }
 
 export function createAdminTermsApi(fetchFn: OpsFetch = defaultFetch) {
   return {
     createDraft(raw: Record<string, unknown>): Promise<AdminTermsNotificationsResult> {
       const body = draft(raw);
-      if ("ok" in body && body.ok === false) return Promise.resolve(body);
-      return request(fetchFn, "POST", BASE, body);
+      if (!body.ok) return Promise.resolve(body);
+      return request(fetchFn, "POST", BASE, body.body);
     },
     updateDraft(id: string, raw: Record<string, unknown>): Promise<AdminTermsNotificationsResult> {
       if (!id) return Promise.resolve(reject("id が必要です。"));
       const body = draft({ ...raw, id });
-      if ("ok" in body && body.ok === false) return Promise.resolve(body);
-      return request(fetchFn, "PATCH", BASE + "/" + encodeURIComponent(id), body);
+      if (!body.ok) return Promise.resolve(body);
+      return request(fetchFn, "PATCH", BASE + "/" + encodeURIComponent(id), body.body);
     },
     publish(id: string): Promise<AdminTermsNotificationsResult> {
       return id ? request(fetchFn, "POST", BASE + "/" + encodeURIComponent(id) + "/publish")
