@@ -10,6 +10,8 @@ import {
   adminEventGroupOptionsRoutes,
   escapeEventGroupLikeTerm,
   parseEventGroupOptionCursor,
+  planEventGroupCreateValues,
+  planEventGroupUpdateValues,
 } from "../src/routes/admin/eventGroups.ts";
 
 const admin = { id: "admin-1", role: "admin", is_banned: 0 };
@@ -73,6 +75,39 @@ function setup({
   );
   return { get, calls, guardCalls };
 }
+
+test("SA-026/027 U03: create/update projections preserve CURRENT invariants", () => {
+  const input = EventGroupMutationBodySchema.parse({
+    id: "  egrp-existing  ", name: "  Collection  ", slug: "  collection-1  ",
+    description: "  ", group_type: "genre", icon_url: "  /icon.png  ",
+    img_url: "  /image.png  ", accent_color: "  #abc  ", visibility_status: "private",
+  });
+  const now = 1730000000;
+  assert.deepEqual(planEventGroupCreateValues(input, "egrp-new", now), {
+    id: "egrp-new", name: "Collection", slug: "collection-1",
+    description: null, group_type: "genre", icon_url: "/icon.png",
+    img_url: null, accent_color: "#abc", visibility_status: "private",
+    sort_order: 0, created_at: now, updated_at: now,
+  });
+  assert.deepEqual(planEventGroupUpdateValues(input, { sort_order: 27, updated_at: now + 40 }, now), {
+    name: "Collection", slug: "collection-1",
+    description: null, group_type: "genre", icon_url: "/icon.png",
+    accent_color: "#abc", visibility_status: "private",
+    sort_order: 27, updated_at: now + 41,
+  });
+  const newInput = EventGroupMutationBodySchema.parse({
+    name: "New", slug: "new", sort_order: -123,
+    description: "  desc  ", icon_url: null, accent_color: "",
+  });
+  const updated = planEventGroupUpdateValues(newInput, { sort_order: 27, updated_at: now - 100 }, now);
+  assert.equal(updated.sort_order, -123);
+  assert.equal(updated.updated_at, now);
+  assert.equal(updated.description, "desc");
+  assert.equal(updated.icon_url, null);
+  assert.equal(updated.accent_color, null);
+  assert.equal(Object.hasOwn(updated, "img_url"), false, "CURRENT update leaves img_url unchanged");
+  assert.equal(Object.hasOwn(updated, "id"), false, "CURRENT update never overwrites id");
+});
 
 test("SA-026/027 U03: group mutation contract matches CURRENT form bounds and coercion", () => {
   const parsed = EventGroupMutationBodySchema.parse({

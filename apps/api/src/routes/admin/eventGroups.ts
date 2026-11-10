@@ -218,3 +218,72 @@ adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
     return c.json({ ok: false, message: SEARCH_FAILED }, 503);
   }
 });
+
+/**
+ * MIG-0653 U03 pure pre-mutation planners; no D1, audit, queue or fence writes.
+ * These must be called only after EventGroupMutationBodySchema validation.
+ * The caller remains responsible for guarded atomic mutation and full audit.
+ */
+export type ValidEventGroupMutation = import("@flamenode/contracts").EventGroupMutationBody;
+export type EventGroupCreateValues = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  group_type: ValidEventGroupMutation["group_type"];
+  icon_url: string | null;
+  img_url: null;
+  accent_color: string | null;
+  visibility_status: ValidEventGroupMutation["visibility_status"];
+  sort_order: number;
+  created_at: number;
+  updated_at: number;
+};
+export type EventGroupUpdateValues = Omit<EventGroupCreateValues,
+  "id" | "img_url" | "created_at">;
+
+function optionalGroupText(raw: string | null | undefined): string | null {
+  return raw?.trim() || null;
+}
+
+/** Exact CURRENT createEventGroup projection; img_url is intentionally null. */
+export function planEventGroupCreateValues(
+  data: ValidEventGroupMutation, id: string, now: number,
+): EventGroupCreateValues {
+  return {
+    id,
+    name: data.name,
+    slug: data.slug,
+    description: optionalGroupText(data.description),
+    group_type: data.group_type,
+    icon_url: optionalGroupText(data.icon_url),
+    img_url: null,
+    accent_color: optionalGroupText(data.accent_color),
+    visibility_status: data.visibility_status,
+    sort_order: data.sort_order ?? 0,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+/**
+ * CURRENT updateEventGroup projection: never update img_url; absent sort_order
+ * preserves the stored value, and monotonic updated_at provides CAS freshness.
+ */
+export function planEventGroupUpdateValues(
+  data: ValidEventGroupMutation,
+  previous: { sort_order: number; updated_at: number },
+  now: number,
+): EventGroupUpdateValues {
+  return {
+    name: data.name,
+    slug: data.slug,
+    description: optionalGroupText(data.description),
+    group_type: data.group_type,
+    icon_url: optionalGroupText(data.icon_url),
+    accent_color: optionalGroupText(data.accent_color),
+    visibility_status: data.visibility_status,
+    sort_order: data.sort_order ?? previous.sort_order,
+    updated_at: Math.max(now, previous.updated_at + 1),
+  };
+}
