@@ -909,12 +909,6 @@ export async function createInprocTarget(plan) {
     _sql: sql, _params: params,
     first: async () => keep(sqlite.prepare(sql).get(...params) ?? null),
     all: async () => keep({ results: sqlite.prepare(sql).all(...params) }),
-    // D1 .raw() (array rows) is what Drizzle's typed select() uses (RH-013).
-    raw: async () => {
-      const prepared = sqlite.prepare(sql);
-      prepared.setReturnArrays(true);
-      try { return keep(prepared.all(...params).map((row) => [...row])); } finally { prepared.setReturnArrays(false); }
-    },
     run: async () => keep({ results: sqlite.prepare(sql).all(...params) }),
     // drizzle's D1 driver reads rows as arrays through raw().
     raw: async () => { const st = sqlite.prepare(sql); st.setReturnArrays(true); try { return keep(st.all(...params)); } finally { st.setReturnArrays(false); } },
