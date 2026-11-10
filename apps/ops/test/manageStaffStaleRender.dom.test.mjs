@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { JSDOM } from "jsdom";
 import { EventStaffReadOnlyPage } from "../.test-dist/apps/ops/src/routes/manage/EventStaffReadOnlyPage.js";
+import { ManageStaffRoute } from "../.test-dist/apps/ops/src/routes/router.js";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "https://flamenode.test/manage/events/a/staff",
@@ -134,5 +135,34 @@ test("MIG-0723 invalid UTF-16 event ID renders a failure, not endless loading", 
     assert.match(ui.target.textContent, /取得できませんでした/);
   } finally {
     await ui.cleanup();
+  }
+});
+
+test("MIG-0723 U03a: mounted staff route resolves URL event ID and fetches authorized data", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const calls = [];
+  const fetchFn = async (url, init) => {
+    calls.push({ url, method: init.method, cache: init.cache });
+    return json(staff("event-a", "EVENT_A_MEMBER"));
+  };
+  try {
+    await React.act(async () => {
+      root.render(React.createElement(MemoryRouter, { initialEntries: ["/manage/events/event-a/staff"] },
+        React.createElement(Routes, null,
+          React.createElement(Route, { path: "/manage/events/:id/staff",
+            element: React.createElement(ManageStaffRoute, { fetchFn }) }))));
+    });
+    assert.deepEqual(calls, [{
+      url: "/api/manage/events/event-a/staff", method: "GET", cache: "no-store",
+    }]);
+    assert.match(target.textContent, /EVENT_A_MEMBER/);
+    assert.doesNotMatch(target.textContent, /メンバーを追加|削除を確定/);
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("../src/routes/router.tsx", import.meta.url), "utf8");
+    assert.match(source, /<Route path="events\/:id\/staff" element=\{<ManageStaffRoute \/>\}/);
+  } finally {
+    await React.act(async () => { root.unmount(); target.remove(); });
   }
 });
