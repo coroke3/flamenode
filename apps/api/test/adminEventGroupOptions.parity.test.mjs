@@ -1450,3 +1450,108 @@ test("SA-028 U03 staged: relation overflow is rejected before group, audit or qu
     sqlite.close();
   }
 });
+
+
+function stagedSa028Harness({ role = "admin", mutateAfterRead = false } = {}) {
+  let changedAfterRead = false;
+  const { db, sqlite, stats } = createAdminD1({
+    onFirst: (statement, instance) => {
+      if (mutateAfterRead && !changedAfterRead &&
+          statement.includes("LEFT JOIN event_groups g ON g.id = ?")) {
+        changedAfterRead = true;
+        instance.prepare("UPDATE event_groups SET updated_at = 21 WHERE id = 'grp-delete'").run();
+      }
+    },
+  });
+  seedBase(sqlite);
+  sqlite.exec(`
+    CREATE TABLE event_groups (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+      description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+      accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE event_group_events (
+      event_group_id TEXT NOT NULL, event_id TEXT NOT NULL, relation_type TEXT NOT NULL,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      PRIMARY KEY (event_group_id, event_id)
+    );
+    CREATE TABLE public_visibility_fences (
+      entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+      state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+      release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+      PRIMARY KEY (entity_type, entity_id)
+    );
+    INSERT INTO event_groups VALUES (
+      'grp-delete', 'Delete group', 'delete-group', NULL, 'series',
+      NULL, NULL, NULL, 'private', 0, 10, 20
+    );
+    INSERT INTO event_group_events VALUES
+      ('grp-delete', 'ev-a', 'member', 11, 21),
+      ('grp-delete', 'ev-b', 'primary', 12, 22);
+  `);
+  const opts = {
+    loadSiteUrl: () => STAGED_WRITE_SITE,
+    allowLocalPreview: () => false,
+  };
+  const app = new Hono();
+  app.use("*", originGuardMiddleware(opts));
+  app.use("*", async (c, next) => {
+    c.set("user", { ...admin, role });
+    c.set("sessionState", "user");
+    await next();
+  });
+  app.use("*", writeGuardMiddleware(opts));
+  app.use("*", dbMiddleware);
+  app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+  const remove = (origin = STAGED_WRITE_SITE) => app.request(new Request(
+    STAGED_WRITE_SITE + "/api/admin/event-groups/grp-delete",
+    { method: "DELETE", headers: { Origin: origin } },
+  ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+  const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+  return { sqlite, stats, remove, count };
+}
+
+test("SA-028 U03 staged: stale group CAS rolls back relations, audits and rebuild queue", async () => {
+  const h = stagedSa028Harness({ mutateAfterRead: true });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+    });
+    assert.equal(h.sqlite.prepare("SELECT updated_at FROM event_groups WHERE id = 'grp-delete'").get().updated_at, 21);
+    assert.equal(h.count("event_groups"), 1);
+    assert.equal(h.count("event_group_events"), 2);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: origin and non-admin denials never mutate group or relations", async () => {
+  const h = stagedSa028Harness();
+  const moderator = stagedSa028Harness({ role: "moderator" });
+  try {
+    const origin = await h.remove("https://attacker.example");
+    assert.equal(origin.status, 403);
+    assert.equal((await origin.json()).reason, "invalid_origin");
+    const role = await moderator.remove();
+    assert.equal(role.status, 403);
+    assert.equal(h.count("event_groups"), 1);
+    assert.equal(h.count("event_group_events"), 2);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(moderator.count("event_groups"), 1);
+    assert.equal(moderator.count("event_group_events"), 2);
+    assert.equal(moderator.count("audit_logs"), 0);
+    assert.equal(moderator.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+    assert.equal(moderator.stats.batches, 0);
+  } finally {
+    h.sqlite.close();
+    moderator.sqlite.close();
+  }
+});
