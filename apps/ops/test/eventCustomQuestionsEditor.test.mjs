@@ -32,7 +32,8 @@ test("MIG-0721 editor SSR keeps CURRENT fields and option serialization",()=>{
   for(const name of ["general_custom_questions_present","general_custom_question_key","general_custom_question_enabled","general_custom_question_required","general_custom_question_type","general_custom_question_options","general_custom_question_label","general_custom_question_description","general_custom_question_placeholder"]){
     assert.match(html,new RegExp('name="'+name+'"'));
   }
-  assert.match(html,/name="general_custom_question_options" value="A&#xA;B"/);
+  const document = new JSDOM(html).window.document;
+  assert.equal(document.querySelector(\'input[name="general_custom_question_options"]\').value, "A\\nB");
   assert.match(html,/カスタム質問を追加/);
   assert.match(html,/投稿時の見え方/);
   assert.match(html,/選択肢を追加/);
@@ -45,7 +46,8 @@ test("MIG-0721 editor honors 4-question cap and disables destructive operations"
     questions:many,disabled:false,onChange(){},
   }));
   assert.match(html,/カスタム質問は最大4件です/);
-  assert.match(html,/<button[^>]*disabled=""[^>]*>[^<]*カスタム質問を追加/);
+  const document = new JSDOM(html).window.document;
+  assert.equal([...document.querySelectorAll("button")].find(b=>b.textContent.includes("カスタム質問を追加")).disabled, true);
   const disabled=renderToStaticMarkup(React.createElement(EventCustomQuestionsEditor,{
     questions:[q(1)],disabled:true,onChange(){},
   }));
