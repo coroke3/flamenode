@@ -1401,7 +1401,7 @@ stagedEventGroupWriteRoutes.post("/:id/events", async (c) => {
               s.audit_compact_after_days
          FROM system_settings AS s
          LEFT JOIN event_groups AS g ON g.id = ?
-         LEFT JOIN events AS e ON e.id IN (${placeholders})
+         LEFT JOIN events AS e ON g.id IS NOT NULL AND e.id IN (${placeholders})
          LEFT JOIN event_group_events AS m
            ON m.event_group_id = g.id AND m.event_id = e.id
         WHERE s.id = 'default'
