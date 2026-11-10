@@ -46,7 +46,7 @@ test("MIG-0727 U04: endpoint controls offer all public events, labelled as CURRE
   assert.match(html, /イベントAPIを有効化/);
   assert.match(html, /name="event_id"/);
   assert.match(html, /value="event\/b"/);
-  assert.match(html, /value="event\\/a"/);
+  assert.match(html, /value="event\/a"/);
   assert.match(html, /発行済み/);
   assert.match(html, /公開イベントA/);
   assert.match(html, /無効化/);
