@@ -1,0 +1,89 @@
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
+import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+import {
+  buildHiddenEditorCountGuardSql,
+  buildPermissionSetGuardSql,
+} from "../src/video/permissionSql.ts";
+
+const dialect = new SQLiteSyncDialect();
+const COLS = [
+  "id", "video_id", "x_user_id", "name", "role", "comment",
+  "order_index", "can_edit", "is_public_member",
+  "edit_granted_by_auth_user_id", "edit_granted_at", "edit_updated_at",
+];
+const member = (id, videoId, xId, overrides = {}) => ({
+  id, video_id: videoId, x_user_id: xId, name: id, role: null, comment: null,
+  order_index: 0, can_edit: 1, is_public_member: 1,
+  edit_granted_by_auth_user_id: null, edit_granted_at: null,
+  edit_updated_at: null, ...overrides,
+});
+
+function world() {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec("CREATE TABLE video_members (" + COLS.map((c) => (
+    '"' + c + '" ' + (["order_index", "can_edit", "is_public_member",
+      "edit_granted_at", "edit_updated_at"].includes(c) ? "INTEGER" : "TEXT")
+  )).join(", ") + ")");
+  const add = (row) => sqlite.prepare(
+    "INSERT INTO video_members (" + COLS.join(", ") + ") VALUES (" +
+      COLS.map(() => "?").join(", ") + ")",
+  ).run(...COLS.map((key) => row[key]));
+  const execGuard = (condition) => {
+    const query = dialect.sqlToQuery(condition);
+    return sqlite.prepare(query.sql).get(...query.params);
+  };
+  return { sqlite, add, execGuard };
+}
+
+test("MIG-0650 SA-082..084: CAS guard ignores other videos, but detects a changed member", () => {
+  const w = world();
+  try {
+    const before = member("m1", "v1", "ALICE");
+    w.add(before);
+    w.add(member("m2", "v2", "alice"));
+    const guard = buildPermissionSetGuardSql("v1", ["alice"], [before]);
+    assert.doesNotThrow(() => w.execGuard(guard));
+    w.sqlite.prepare("UPDATE video_members SET can_edit = 0 WHERE id = 'm1'").run();
+    assert.throws(() => w.execGuard(guard), /./, "changed permission snapshot must fail closed");
+    w.sqlite.prepare("UPDATE video_members SET can_edit = 1 WHERE id = 'm1'").run();
+    assert.doesNotThrow(() => w.execGuard(guard));
+    w.add(member("m3", "v1", "alice"));
+    assert.throws(() => w.execGuard(guard), /./, "concurrent member insertion must fail CAS");
+  } finally {
+    w.sqlite.close();
+  }
+});
+
+test("MIG-0650 SA-082..084: empty selected X IDs match no rows, case-insensitive selection", () => {
+  const w = world();
+  try {
+    w.add(member("m1", "v1", "BoB"));
+    assert.doesNotThrow(() => w.execGuard(buildPermissionSetGuardSql("v1", [], [])));
+    assert.doesNotThrow(() => w.execGuard(buildPermissionSetGuardSql(
+      "v1", ["bOb"], [member("m1", "v1", "BoB")],
+    )));
+    assert.throws(() => w.execGuard(buildPermissionSetGuardSql(
+      "v1", ["BoB"], [],
+    )), /./, "empty expected snapshot must not authorize a real row");
+  } finally {
+    w.sqlite.close();
+  }
+});
+
+test("MIG-0650 SA-082..084: hidden editor count is an atomic fail-closed precondition", () => {
+  const w = world();
+  try {
+    w.add(member("p1", "v1", "public", { is_public_member: 1 }));
+    w.add(member("h1", "v1", "secret", { is_public_member: 0 }));
+    w.add(member("other", "v2", "secret", { is_public_member: 0 }));
+    const guard = buildHiddenEditorCountGuardSql("v1", 1);
+    assert.doesNotThrow(() => w.execGuard(guard));
+    w.add(member("h2", "v1", "second", { is_public_member: 0 }));
+    assert.throws(() => w.execGuard(guard), /./, "hidden editor race must fail closed");
+    assert.doesNotThrow(() => w.execGuard(buildHiddenEditorCountGuardSql("v1", 2)));
+  } finally {
+    w.sqlite.close();
+  }
+});
