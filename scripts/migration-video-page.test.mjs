@@ -271,6 +271,38 @@ test("T09: a fallback display event must never inherit an unmatched primary-even
   }
 });
 
+test("T09: an allowed event snapshot with invalid UTF-8 or malformed JSON fails closed", { skip: skipUi }, () => {
+  const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], {
+    events: [["ev1", playlistEvent()]],
+  });
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    const eventKey = "snapshot/event-detail/ev1.json";
+    const file = path.join(r.dir, eventKey);
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "fn-vid-invalid-"));
+    try {
+      // Source corruption must not be mistaken for an optional missing or withdrawn public event.
+      for (const bytes of [Buffer.from([0xc3, 0x28]), Buffer.from("{broken-json")]) {
+        fs.writeFileSync(file, bytes);
+        let error = null;
+        try {
+          execFileSync(process.execPath, [path.resolve("node_modules/astro/astro.js"), "build", "--outDir", out], {
+            cwd: path.resolve("apps/site"),
+            env: {
+              ...process.env, FLAMENODE_SNAPSHOT_DIR: r.dir,
+              FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(r.dir, "manifest.json"),
+              FLAMENODE_SNAPSHOT_GENERATION: "g1",
+            },
+            stdio: "pipe",
+          });
+        } catch (e) { error = `${e.stdout ?? ""}${e.stderr ?? ""}`; }
+        assert.notEqual(error, null, "corrupt event payload cannot publish a partial page");
+        assert.match(error, /snapshot|JSON|UTF-8|INVALID_JSON/i);
+      }
+    } finally { fs.rmSync(out, { recursive: true, force: true }); }
+  } finally { clean(r); }
+});
+
 test("T09: a manifest-allowed but digest-tampered event snapshot fails closed", { skip: skipUi }, () => {
   const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], {
     events: [["ev1", playlistEvent()]],
