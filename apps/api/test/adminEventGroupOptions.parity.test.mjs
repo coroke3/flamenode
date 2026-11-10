@@ -314,6 +314,49 @@ test("SA-025: source-parity cursor JSON with no extra fields and bounded exact l
   assert.deepEqual(accepted.calls[0].params, ["g1", 1921, 1921, idAtCursor, 81]);
 });
 
+test("SA-025: real SQLite pagination accepts 96-character legacy event ID", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE event_group_events (event_group_id TEXT, event_id TEXT)");
+    for (let n = 0; n < 83; n++) {
+      seedEvent(sqlite, {
+        id: n === 79 ? "v".repeat(96) : "item-" + String(n).padStart(3, "0"),
+        title: "Candidate " + n,
+        updated_at: 1000 - n,
+      });
+    }
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+    const page = async (cursor) => {
+      const params = new URLSearchParams({ groupId: "grp-1" });
+      if (cursor) params.set("cursor", cursor);
+      const response = await app.request(
+        new Request("https://example.com/api/admin/event-groups/event-options?" + params.toString()),
+        undefined, { DB: db },
+      );
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const first = await page(null);
+    assert.equal(first.options.length, 80);
+    assert.ok(first.nextCursor);
+    assert.equal(first.options[79].id, "v".repeat(96));
+    assert.deepEqual(JSON.parse(first.nextCursor), { updatedAt: 921, id: "v".repeat(96) });
+    const second = await page(first.nextCursor);
+    assert.deepEqual(second.options.map((v) => v.id), ["item-080", "item-081", "item-082"]);
+    assert.equal(second.nextCursor, null);
+    assert.equal(stats.batches, 0, "read-only legacy cursor must not mutate D1");
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("SA-025: real SQLite D1 rejects LIKE wildcard injection and excludes existing members", async () => {
   const { db, sqlite, stats } = createAdminD1();
   try {
