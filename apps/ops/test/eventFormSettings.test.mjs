@@ -5,7 +5,7 @@ import test from "node:test";
 import { DEFAULT_STAGE_PERMISSION_FIELD, createDefaultStagePermissionQuestion, filterImplicitEmptyStagePermissionQuestions, parseVideoFormSettings, resolveStagePermissionFieldsFromJson } from "../.test-dist/apps/ops/src/lib/event/formSettings.js";
 
 test("U01b-2 keeps the exact CURRENT formSettings implementation", () => {
- const current = readFileSync(new URL("../../../../src/lib/video/formSettings.ts", import.meta.url), "utf8");
+ const current = readFileSync(new URL("../../../src/lib/video/formSettings.ts", import.meta.url), "utf8");
  const port = readFileSync(new URL("../src/lib/event/formSettings.ts", import.meta.url), "utf8");
  assert.ok(port.includes(current.trimEnd()), "migrated form settings helper diverged from CURRENT");
 });
