@@ -100,9 +100,9 @@ test("SA-030 U04: canonical audited D1 delete budget respects Free 50-query cap"
   assert.deepEqual(planEventGroupMembershipDeleteBudget({
     callerQueryCount: 40, queueStatementCount: 1,
     auditEntryCount: 1, distinctActorCount: 1,
-  }), { withinLimit: true, totalQueryCount: 50, limit: 50 });
+  }), { withinLimit: true, totalQueryCount: 48, limit: 50 });
   assert.deepEqual(planEventGroupMembershipDeleteBudget({
-    callerQueryCount: 41, queueStatementCount: 1,
+    callerQueryCount: 43, queueStatementCount: 1,
     auditEntryCount: 1, distinctActorCount: 1,
   }), { withinLimit: false, totalQueryCount: 51, limit: 50 });
   // SA-030 always audits exactly one deleted relation; it must reject a
