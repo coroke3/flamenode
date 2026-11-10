@@ -260,6 +260,7 @@ test("T09: the playlist gate uses the normalized public video fields", { skip: s
       ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
     ["invalid schedule", { primary_event_id: "ev1", scheduled_time: "not-a-date" }, []],
     ["missing primary ID", { primary_event_id: "   ", scheduled_time: NOW + 7 * D }, []],
+    ["numeric primary ID is absent", { primary_event_id: 12345, scheduled_time: NOW + 7 * D }, []],
   ]) {
     const r = build([["vid1", payload({ video: fields })]], { events: [["ev1", playlistEvent()]] });
     try {
