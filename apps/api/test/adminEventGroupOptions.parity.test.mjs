@@ -1383,6 +1383,12 @@ test("SA-027 U03 staged: stale base_updated_at is rejected before any mutation",
         accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+        PRIMARY KEY (entity_type, entity_id)
+      );
       INSERT INTO event_groups VALUES (
         'grp-stale', 'Old group', 'old-group', NULL, 'series',
         NULL, NULL, NULL, 'private', 0, 10, 20
@@ -1445,6 +1451,12 @@ function stagedSlugConflictHarness({ race = null } = {}) {
       description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
       accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE public_visibility_fences (
+      entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+      state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+      release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+      PRIMARY KEY (entity_type, entity_id)
     );
     INSERT INTO event_groups VALUES (
       'grp-update', 'Existing group', 'existing-group', NULL, 'series',
