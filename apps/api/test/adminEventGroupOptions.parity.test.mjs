@@ -297,6 +297,23 @@ test("SA-025: JSON-escaped continuation cursor over 200 characters fails closed"
   });
 });
 
+test("SA-025: source-parity cursor JSON with no extra fields and bounded exact limit", async () => {
+  const idAtCursor = "n".repeat(128);
+  const nearBoundCursor = JSON.stringify({ updatedAt: 1921, id: idAtCursor });
+  assert.ok(nearBoundCursor.length <= 200);
+  assert.deepEqual(parseEventGroupOptionCursor(nearBoundCursor), { updatedAt: 1921, id: idAtCursor });
+  // A caller with a cursor too long is rejected rather than reaching candidate SQL.
+  const denied = setup();
+  const res = await denied.get("groupId=g1&cursor=" + encodeURIComponent("z".repeat(201)));
+  assert.equal(res.status, 400);
+  assert.equal(denied.calls.length, 0);
+  // A valid 128-character cursor can still seek, without any SQL interpolation.
+  const accepted = setup();
+  const response = await accepted.get("groupId=g1&cursor=" + encodeURIComponent(nearBoundCursor));
+  assert.equal(response.status, 200);
+  assert.deepEqual(accepted.calls[0].params, ["g1", 1921, 1921, idAtCursor, 81]);
+});
+
 test("SA-025: real SQLite D1 rejects LIKE wildcard injection and excludes existing members", async () => {
   const { db, sqlite, stats } = createAdminD1();
   try {
