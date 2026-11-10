@@ -531,6 +531,54 @@ test("SA-025: CURRENT-compatible pagination preserves long legacy IDs and safe-i
   assert.equal(calls.length, 1);
 });
 
+test("SA-025: real SQLite mounted route paginates long legacy IDs and group IDs", async () => {
+  const { db, sqlite } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE event_group_events (event_group_id TEXT NOT NULL, event_id TEXT NOT NULL, relation_type TEXT, created_at INTEGER, updated_at INTEGER)");
+    const insert = sqlite.prepare("INSERT INTO events (id, title, start_time, updated_at) VALUES (?, ?, ?, ?)");
+    const legacyId = "legacy-" + "x".repeat(122);
+    for (let index = 0; index < 81; index += 1) {
+      const id = index === 79 ? legacyId : "event-" + String(index).padStart(3, "0");
+      insert.run(id, "Event " + index, 1000 + index, 2000 - index);
+    }
+
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+    const longGroupId = "legacy-group-" + "g".repeat(120);
+    const request = (cursor = null) => {
+      const query = new URLSearchParams({ groupId: longGroupId });
+      if (cursor !== null) query.set("cursor", cursor);
+      return app.request(
+        new Request("https://example.com/api/admin/event-groups/event-options?" + query.toString()),
+        undefined,
+        { DB: db },
+      );
+    };
+
+    const first = await request();
+    assert.equal(first.status, 200);
+    const firstPage = await first.json();
+    assert.equal(firstPage.options.length, 80);
+    assert.deepEqual(JSON.parse(firstPage.nextCursor), { updatedAt: 1921, id: legacyId });
+
+    const second = await request(firstPage.nextCursor);
+    assert.equal(second.status, 200);
+    const secondPage = await second.json();
+    assert.deepEqual(secondPage.options, [{
+      id: "event-080", title: "Event 80", start_time: 1080,
+    }]);
+    assert.equal(secondPage.nextCursor, null);
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("SA-025: malformed search never consumes the combined admin D1 gate read", async () => {
   const { get, calls, guardCalls } = setup();
   for (const input of [
