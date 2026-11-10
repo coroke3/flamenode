@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { drizzle } from "drizzle-orm/d1";
+import * as schema from "@flamenode/db/schema";
+import { createD1, createSqlite } from "./support/personalHarness.mjs";
 import {
   createVideoVisibilityStatusMutationHost,
   executeHonoVideoVisibilityStatusMutation,
@@ -100,4 +103,31 @@ test("Hono executor composes the shared status core with the durable-outbox zero
   assert.equal(Object.hasOwn(mutationInput, "notificationWakeSource"), false);
   assert.equal(Object.hasOwn(mutationInput, "staticRebuildWakeSource"), false);
   assert.equal(mutationInput.preloaded.settings.enabled, true);
+});
+
+
+test("Hono status mutation host rereads visibility from the migrated SQLite D1 schema", async () => {
+  const sqlite = createSqlite();
+  try {
+    sqlite.prepare(`
+      INSERT INTO videos (
+        id, submitted_by_user_id, creator_display_name, title,
+        visibility_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run("video-reread", "missing-user", "Creator", "Video", "public", 1000, 1000);
+
+    const db = drizzle(createD1(sqlite), { schema });
+    const host = createVideoVisibilityStatusMutationHost(
+      { env: {}, get: () => ({}) },
+      { mutateWithAudit: async () => [] },
+    );
+
+    assert.equal(await host.rereadStatus(db, "video-reread"), "public");
+    sqlite.prepare("UPDATE videos SET visibility_status = ? WHERE id = ?")
+      .run("private", "video-reread");
+    assert.equal(await host.rereadStatus(db, "video-reread"), "private");
+    assert.equal(await host.rereadStatus(db, "missing-video"), undefined);
+  } finally {
+    sqlite.close();
+  }
 });
