@@ -239,3 +239,16 @@ test("MIG-0656 U03g: real banned/expired sessions cannot reach guarded unmounted
     assert.deepEqual(h.effects(), { batches: 0, audits: 0, queue: 0 });
   } finally { h.sqlite.close(); }
 });
+
+test("MIG-0656 main reconciliation: preserve MIG-0654 staff write routes and dual contract exports", async () => {
+  const index = readFileSync(new URL("../src/routes/manage/index.ts", import.meta.url), "utf8");
+  const barrel = readFileSync(new URL("../../../packages/contracts/src/index.ts", import.meta.url), "utf8");
+  assert.match(index, /const staffWritePaths = \["\/events\/:id\/staff", "\/events\/:id\/staff\/:staffId", "\/events\/:id\/owner-transfer"\]/);
+  assert.match(index, /for \(const path of staffWritePaths\)[\s\S]*?originGuardMiddleware/);
+  assert.match(index, /for \(const path of staffWritePaths\)[\s\S]*?writeGuardMiddleware[\s\S]*?dbMiddleware/);
+  assert.match(index, /registerStaffWriteRoutes\(manageRoutes\)/);
+  assert.match(index, /manageRoutes\.route\("\/events\/:id\/staff", manageStaffRoutes\)/);
+  assert.match(barrel, /export \* from "\.\/manageStaffWrite\.ts"/);
+  assert.match(barrel, /export \* from "\.\/slotAdminWrite\.ts"/);
+  assert.doesNotMatch(index, /slotBatch(?:AvailableDelete|LabelWrite|ReservedRelease)Routes|slotSingleReleaseRoutes|slotGeneratedChunkRoutes|slotAvailableDeleteChunkRoutes|slotSubmittedDangerRoutes/);
+});
