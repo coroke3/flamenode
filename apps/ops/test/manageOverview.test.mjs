@@ -121,8 +121,13 @@ test("U02a: SSR renders only validated overview projection with safe links", () 
   assert.ok(doc.querySelector('a[href="/manage/events/ev-1/videos/video-1"]'));
   assert.ok(doc.querySelector('a[href="/manage/events/ev-1?notif=x_id"]'));
   assert.equal(doc.querySelector('a[href="/manage/events/ev-1"]')?.getAttribute("aria-current"), "page");
-  assert.ok(doc.querySelector('a[href="/manage/events/ev-1/staff"]'), "overview settings subtab links to the staff route");
+
   assert.equal(doc.querySelectorAll('a[href^="/admin/"]').length, 0, "non-admin sees no admin actions");
+  const settingsRoot = React.createElement(MemoryRouter, { initialEntries: ["/manage/events/ev-1/edit"] },
+    React.createElement(ManageEventOverviewContent, { data }));
+  const settingsDoc = new JSDOM(renderToStaticMarkup(settingsRoot)).window.document;
+  assert.ok(settingsDoc.querySelector('a[href="/manage/events/ev-1/staff"]'),
+    "settings subtab links to the staff route when settings navigation is active");
 
   const loadingRoot = React.createElement(MemoryRouter, {},
     React.createElement(EventOverview, { eventId: "ev-1", fetchFn: async () => { throw Error("not called on SSR"); } }));
