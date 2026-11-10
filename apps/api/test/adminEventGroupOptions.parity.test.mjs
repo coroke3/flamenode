@@ -1453,16 +1453,7 @@ test("SA-028 U03 staged: relation overflow is rejected before group, audit or qu
 
 
 function stagedSa028Harness({ role = "admin", mutateAfterRead = false } = {}) {
-  let changedAfterRead = false;
-  const { db, sqlite, stats } = createAdminD1({
-    onFirst: (statement, instance) => {
-      if (mutateAfterRead && !changedAfterRead &&
-          statement.includes("LEFT JOIN event_groups g ON g.id = ?")) {
-        changedAfterRead = true;
-        instance.prepare("UPDATE event_groups SET updated_at = 21 WHERE id = 'grp-delete'").run();
-      }
-    },
-  });
+  const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite);
   sqlite.exec(`
     CREATE TABLE event_groups (
@@ -1490,6 +1481,17 @@ function stagedSa028Harness({ role = "admin", mutateAfterRead = false } = {}) {
       ('grp-delete', 'ev-a', 'member', 11, 21),
       ('grp-delete', 'ev-b', 'primary', 12, 22);
   `);
+  if (mutateAfterRead) {
+    // Simulate a concurrent group edit between the joined snapshot and CAS
+    // delete; the trigger runs inside the atomic D1 batch and must roll back.
+    sqlite.exec(`
+      CREATE TRIGGER bump_group_before_relation_delete
+      BEFORE DELETE ON event_group_events
+      BEGIN
+        UPDATE event_groups SET updated_at = 21 WHERE id = 'grp-delete';
+      END;
+    `);
+  }
   const opts = {
     loadSiteUrl: () => STAGED_WRITE_SITE,
     allowLocalPreview: () => false,
@@ -1520,7 +1522,7 @@ test("SA-028 U03 staged: stale group CAS rolls back relations, audits and rebuil
     assert.deepEqual(await response.json(), {
       ok: false, message: "更新が競合したか監査記録に失敗しました。",
     });
-    assert.equal(h.sqlite.prepare("SELECT updated_at FROM event_groups WHERE id = 'grp-delete'").get().updated_at, 21);
+    assert.equal(h.sqlite.prepare("SELECT updated_at FROM event_groups WHERE id = 'grp-delete'").get().updated_at, 20);
     assert.equal(h.count("event_groups"), 1);
     assert.equal(h.count("event_group_events"), 2);
     assert.equal(h.count("audit_logs"), 0);
