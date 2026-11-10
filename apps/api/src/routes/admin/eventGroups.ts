@@ -21,6 +21,18 @@ import { evaluateAdminWriteGuard } from "../../middleware/writeOrigin.ts";
 import { evaluateCostGuardCore } from "@flamenode/domain/admin";
 import { MAX_SINGLE_ROW_LIMIT } from "../../lib/limits.ts";
 import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
+import { EventGroupMutationBodySchema } from "@flamenode/contracts";
+import { generateId } from "@flamenode/server-core/id";
+import {
+  buildPublicVisibilityFenceUpsertStatement,
+  preCommitPublicVisibilityFence,
+  compensatePublicVisibilityFenceOnD1Failure,
+} from "@flamenode/server-core/visibility/fenceTransition";
+import {
+  readVisibilityManifestObject,
+  putVisibilityManifestWithCas,
+  type VisibilityManifestBucket,
+} from "@flamenode/server-core/visibility/manifestR2";
 
 export const EVENT_GROUP_OPTION_PAGE_SIZE = 80;
 /** Bound legacy identifiers without rejecting ordinary long-ID pagination. */
@@ -574,6 +586,185 @@ export function planEventGroupMembershipRemove(
  */
 export const stagedEventGroupWriteRoutes = new Hono<AppEnv>();
 export const EVENT_GROUP_WRITE_FAILED = "更新が競合したか監査記録に失敗しました。";
+
+stagedEventGroupWriteRoutes.post("/", async (c) => {
+  c.header("Cache-Control", "private, no-store");
+  const body = await readAdminJsonBody(c.req.raw);
+  if (body.kind === "too_large") return c.json({ ok: false, message: BODY_TOO_LARGE_MESSAGE }, 413);
+  if (body.kind !== "ok") return c.json({ ok: false, message: "入力エラー" }, 400);
+  const parsed = EventGroupMutationBodySchema.safeParse(body.value);
+  if (!parsed.success) {
+    return c.json({
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "入力エラー",
+    }, 400);
+  }
+
+  const data = parsed.data;
+  const userId = c.get("user")!.id;
+  const db = c.get("db");
+  const id = data.id?.trim() || generateId("egrp");
+  const now = Math.floor(Date.now() / 1000);
+  const createdRow = planEventGroupCreateValues(data, id, now);
+
+  // Combine slug uniqueness, CostGuard, audit retention and the current
+  // event-group fence row in one bounded read. Together with S4 and the
+  // write identity/ToS check this is the S3 three-pre-read ceiling.
+  type CreateSnapshot = AuditSettingsRow & {
+    slug_exists: number;
+    fence_token: string | null;
+    fence_state: string | null;
+    operation_mode: string | null;
+    disabled_features_json: string | null;
+    cost_guard_exception_until: number | null;
+    cost_guard_exception_features_json: string | null;
+  };
+  let snapshot: CreateSnapshot | null;
+  try {
+    snapshot = await c.env.DB.prepare(`
+      SELECT
+        EXISTS(SELECT 1 FROM event_groups WHERE slug = ?) AS slug_exists,
+        f.fence_token AS fence_token,
+        f.state AS fence_state,
+        s.operation_mode, s.disabled_features_json,
+        s.cost_guard_exception_until, s.cost_guard_exception_features_json,
+        s.audit_normal_retention_days, s.audit_restorable_retention_days,
+        s.audit_long_retention_days, s.audit_max_payload_bytes,
+        s.audit_compact_after_days
+      FROM system_settings s
+      LEFT JOIN public_visibility_fences f
+        ON f.entity_type = 'event_group' AND f.entity_id = ?
+      WHERE s.id = 'default'
+      LIMIT ${MAX_SINGLE_ROW_LIMIT}
+    `).bind(data.slug, id).first<CreateSnapshot>();
+  } catch {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+  }
+  if (!snapshot) return writeGuardDenyResponse(c, "maintenance_mode", 503);
+  const cost = evaluateCostGuardCore({
+    feature: "admin_event_create",
+    operationMode: snapshot.operation_mode,
+    disabledFeaturesJson: snapshot.disabled_features_json,
+    exceptionUntil: snapshot.cost_guard_exception_until,
+    exceptionFeaturesJson: snapshot.cost_guard_exception_features_json,
+    now,
+  });
+  if (cost.blocked) {
+    return writeGuardDenyResponse(c, cost.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked", 503);
+  }
+  c.set("auditSettings", mapAuditSettings(snapshot));
+  if (snapshot.slug_exists === 1) {
+    return c.json({ ok: false, message: "このスラッグは既に使われています。" }, 400);
+  }
+
+  let fenceToken: string | null = null;
+  const fenceStatements = [];
+  const fenceExpected: number[] = [];
+  if (data.visibility_status === "public") {
+    fenceToken = snapshot.fence_state === "blocked" || snapshot.fence_state === "release_pending"
+      ? snapshot.fence_token
+      : null;
+    fenceToken ||= generateId("vf");
+    fenceStatements.push(buildPublicVisibilityFenceUpsertStatement(db, {
+      entityType: "event_group",
+      entityId: id,
+      fenceToken,
+      state: "release_pending",
+      actorUserId: userId,
+      reason: "event_group_create",
+      now,
+    }));
+    fenceExpected.push(1);
+  }
+
+  const queue = await buildEventGroupChangeQueueBatch(db, {
+    reason: "event_group_create",
+    requestedByUserId: userId,
+  });
+  const insert = db.run(sql`
+    INSERT INTO event_groups (
+      id, name, slug, description, group_type, icon_url, img_url,
+      accent_color, visibility_status, sort_order, created_at, updated_at
+    ) VALUES (
+      ${createdRow.id}, ${createdRow.name}, ${createdRow.slug},
+      ${createdRow.description}, ${createdRow.group_type}, ${createdRow.icon_url},
+      ${createdRow.img_url}, ${createdRow.accent_color},
+      ${createdRow.visibility_status}, ${createdRow.sort_order},
+      ${createdRow.created_at}, ${createdRow.updated_at}
+    )
+  `);
+  const mutationStatements = [insert, ...fenceStatements, ...queue.statements];
+  const expectedMutationChanges = [1, ...fenceExpected, ...queue.expectedChanges];
+  const audits = [{
+    table_name: "event_groups" as const,
+    target_id: id,
+    operation: "CREATE" as const,
+    after: { ...createdRow },
+    actor_user_id: userId,
+    retention_class: "restorable" as const,
+  }];
+  const budget = planD1AuditMutationBudget({
+    mutationStatementCount: mutationStatements.length,
+    mutationAssertionCount: expectedMutationChanges.length,
+    auditEntryCount: audits.length,
+    distinctActorCount: 1,
+    callerQueryCount: 3,
+  });
+  if (!budget.withinLimit) {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+  }
+
+  const rawBucket = c.env.BUCKET;
+  const bucket = rawBucket as unknown as VisibilityManifestBucket | undefined;
+  if (fenceToken && !bucket) {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+  }
+  const fenceHost = bucket ? {
+    manifest: {
+      read: () => readVisibilityManifestObject(bucket),
+      write: (manifest: Parameters<typeof putVisibilityManifestWithCas>[1], options?: {
+        ifMatchEtag?: string | null;
+        mutateOnConflict?: (latest: Parameters<typeof putVisibilityManifestWithCas>[1]) => Parameters<typeof putVisibilityManifestWithCas>[1];
+      }) => putVisibilityManifestWithCas(bucket, manifest, options?.ifMatchEtag, options?.mutateOnConflict),
+    },
+  } : null;
+  let fencePreCommitted = false;
+  try {
+    if (fenceToken && fenceHost) {
+      await preCommitPublicVisibilityFence({
+        entityType: "event_group",
+        entityId: id,
+        fenceToken,
+        reason: "event_group_create",
+      }, fenceHost);
+      fencePreCommitted = true;
+    }
+    await mutateWithAudit(db, {
+      mutationStatements,
+      expectedMutationChanges,
+      preloaded: auditPreloaded(c),
+      callerQueryCount: 3,
+      audits,
+    });
+  } catch {
+    if (fenceToken && fenceHost && fencePreCommitted) {
+      await compensatePublicVisibilityFenceOnD1Failure({
+        db,
+        entityType: "event_group",
+        entityId: id,
+        fenceToken,
+        flow: "event_group_visibility",
+      }, fenceHost).catch(() => undefined);
+    }
+    console.error("[event-group] create failed");
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+  }
+  return c.json({
+    ok: true,
+    id,
+    ...(queue.statements.length > 0 ? { pendingPublicReflection: true } : {}),
+  }, 200);
+});
 
 stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
   const result = normalizeEventGroupMembershipRemove({
