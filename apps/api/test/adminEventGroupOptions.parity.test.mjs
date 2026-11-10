@@ -1193,6 +1193,10 @@ test("SA-026 U03 staged: private group CREATE writes canonical row, restorable a
     assert.equal(audit.retention_class, "restorable");
     assert.deepEqual(JSON.parse(audit.after_json), { ...group });
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.deepEqual({ ...sqlite.prepare("SELECT target_type, target_id, reason, priority, status, requested_by_user_id FROM static_rebuild_queue").get() }, {
+      target_type: "events_index", target_id: "global", reason: "event_group_create",
+      priority: "low", status: "pending", requested_by_user_id: "admin-1",
+    });
     assert.equal(stats.batches, 1);
   } finally {
     sqlite.close();
@@ -1287,6 +1291,10 @@ test("SA-027 U03 staged: private group PATCH uses CURRENT projection, CAS, audit
     });
     assert.deepEqual(JSON.parse(audit.after_json), { ...group });
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.deepEqual({ ...sqlite.prepare("SELECT target_type, target_id, reason, priority, status, requested_by_user_id FROM static_rebuild_queue").get() }, {
+      target_type: "events_index", target_id: "global", reason: "event_group_update",
+      priority: "low", status: "pending", requested_by_user_id: "admin-1",
+    });
     assert.equal(stats.batches, 1);
   } finally {
     sqlite.close();
@@ -1563,6 +1571,10 @@ test("SA-028 U03 staged: group DELETE atomically removes every relation with res
         before: { event_group_id: "grp-delete", event_id: "ev-b", relation_type: "primary", created_at: 12, updated_at: 22 } },
     ]);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.deepEqual({ ...sqlite.prepare("SELECT target_type, target_id, reason, priority, status, requested_by_user_id FROM static_rebuild_queue").get() }, {
+      target_type: "events_index", target_id: "global", reason: "event_group_delete",
+      priority: "low", status: "pending", requested_by_user_id: "admin-1",
+    });
     assert.equal(stats.batches, 1);
   } finally {
     sqlite.close();
