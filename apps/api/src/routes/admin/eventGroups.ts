@@ -394,7 +394,11 @@ export function planEventGroupMembershipAdd(
   existingMemberIds: readonly string[],
 ): EventGroupMembershipAddPlan {
   const valid = new Set(validEventIds);
-  if (validEventIds.length !== requestedIds.length ||
+  // The D1 existence read can only authorize the requested unique IDs.
+  // Reject duplicate/extra returned IDs rather than accepting a forged row
+  // count (or letting a duplicated lookup row conceal a missing event).
+  if (valid.size !== requestedIds.length ||
+      validEventIds.length !== valid.size ||
       requestedIds.some((id) => !valid.has(id))) {
     return { ok: false, message: "存在しないイベントは追加できません。" };
   }
