@@ -996,6 +996,249 @@ stagedEventGroupWriteRoutes.patch("/:id", async (c) => {
   }
 });
 
+
+/** CURRENT SA-028: delete a group and every membership with restorable snapshots. */
+const MAX_EVENT_GROUP_DELETE_RELATIONS = 79;
+
+stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
+  c.header("Cache-Control", "private, no-store");
+  const id = c.req.param("id").trim();
+  if (!id || id.length > MAX_EVENT_GROUP_ID_LENGTH) {
+    return c.json({ ok: false, message: "ID が必要です。" }, 400);
+  }
+  const db = c.get("db");
+  const userId = c.get("user")!.id;
+  const now = Math.floor(Date.now() / 1000);
+
+  type DeleteSnapshot = AuditSettingsRow & {
+    group_id: string | null;
+    name: string | null;
+    slug: string | null;
+    description: string | null;
+    group_type: ValidEventGroupMutation["group_type"] | null;
+    icon_url: string | null;
+    img_url: string | null;
+    accent_color: string | null;
+    visibility_status: ValidEventGroupMutation["visibility_status"] | null;
+    sort_order: number | null;
+    created_at: number | null;
+    updated_at: number | null;
+    relation_event_id: string | null;
+    relation_type: string | null;
+    relation_created_at: number | null;
+    relation_updated_at: number | null;
+    fence_token: string | null;
+    fence_state: string | null;
+    operation_mode: string | null;
+    disabled_features_json: string | null;
+    cost_guard_exception_until: number | null;
+    cost_guard_exception_features_json: string | null;
+  };
+
+  // One bounded joined read captures the group, every relation (plus one
+  // overflow sentinel), audit settings, CostGuard and the visibility fence.
+  let rows: DeleteSnapshot[];
+  try {
+    rows = (await c.env.DB.prepare(`
+      SELECT
+        g.id AS group_id, g.name, g.slug, g.description, g.group_type,
+        g.icon_url, g.img_url, g.accent_color, g.visibility_status,
+        g.sort_order, g.created_at, g.updated_at,
+        m.event_id AS relation_event_id, m.relation_type,
+        m.created_at AS relation_created_at, m.updated_at AS relation_updated_at,
+        f.fence_token, f.state AS fence_state,
+        s.operation_mode, s.disabled_features_json,
+        s.cost_guard_exception_until, s.cost_guard_exception_features_json,
+        s.audit_normal_retention_days, s.audit_restorable_retention_days,
+        s.audit_long_retention_days, s.audit_max_payload_bytes,
+        s.audit_compact_after_days
+      FROM system_settings s
+      LEFT JOIN event_groups g ON g.id = ?
+      LEFT JOIN event_group_events m ON m.event_group_id = g.id
+      LEFT JOIN public_visibility_fences f
+        ON f.entity_type = 'event_group' AND f.entity_id = g.id
+      WHERE s.id = 'default'
+      ORDER BY m.event_id ASC
+      LIMIT ${MAX_EVENT_GROUP_DELETE_RELATIONS + 1}
+    `).bind(id).all<DeleteSnapshot>()).results;
+  } catch {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+  }
+
+  const snapshot = rows[0];
+  if (!snapshot) return writeGuardDenyResponse(c, "maintenance_mode", 503);
+  const cost = evaluateCostGuardCore({
+    feature: "admin_event_create",
+    operationMode: snapshot.operation_mode,
+    disabledFeaturesJson: snapshot.disabled_features_json,
+    exceptionUntil: snapshot.cost_guard_exception_until,
+    exceptionFeaturesJson: snapshot.cost_guard_exception_features_json,
+    now,
+  });
+  if (cost.blocked) {
+    return writeGuardDenyResponse(c, cost.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked", 503);
+  }
+  c.set("auditSettings", mapAuditSettings(snapshot));
+  if (!snapshot.group_id || snapshot.updated_at == null ||
+      snapshot.created_at == null || snapshot.sort_order == null ||
+      snapshot.visibility_status == null) {
+    return c.json({ ok: false, message: "グループが見つかりません。" }, 404);
+  }
+  if (rows.length > MAX_EVENT_GROUP_DELETE_RELATIONS) {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+  }
+
+  const relationRows = rows.flatMap((row) => {
+    if (row.relation_event_id == null) return [];
+    if (row.relation_type == null || row.relation_created_at == null ||
+        row.relation_updated_at == null) {
+      throw new Error("event_group_relation_snapshot_invalid");
+    }
+    return [{
+      event_group_id: id,
+      event_id: row.relation_event_id,
+      relation_type: row.relation_type,
+      created_at: row.relation_created_at,
+      updated_at: row.relation_updated_at,
+    }];
+  });
+  if (relationRows.length > MAX_EVENT_GROUP_DELETE_RELATIONS) {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+  }
+
+  const previous = {
+    id,
+    name: snapshot.name ?? "",
+    slug: snapshot.slug ?? "",
+    description: snapshot.description,
+    group_type: snapshot.group_type ?? "series",
+    icon_url: snapshot.icon_url,
+    img_url: snapshot.img_url,
+    accent_color: snapshot.accent_color,
+    visibility_status: snapshot.visibility_status,
+    sort_order: snapshot.sort_order,
+    created_at: snapshot.created_at,
+    updated_at: snapshot.updated_at,
+  };
+  const crossesPublicBoundary = snapshot.visibility_status === "public";
+  let fenceToken: string | null = null;
+  const fenceStatements = [];
+  const fenceExpected: number[] = [];
+  if (crossesPublicBoundary) {
+    fenceToken = snapshot.fence_state === "blocked" || snapshot.fence_state === "release_pending"
+      ? snapshot.fence_token
+      : null;
+    fenceToken ||= generateId("vf");
+    fenceStatements.push(buildPublicVisibilityFenceUpsertStatement(db, {
+      entityType: "event_group",
+      entityId: id,
+      fenceToken,
+      state: "blocked",
+      actorUserId: userId,
+      reason: "event_group_delete",
+      now,
+    }));
+    fenceExpected.push(1);
+  }
+
+  try {
+    const queue = await buildEventGroupChangeQueueBatch(db, {
+      reason: "event_group_delete",
+      requestedByUserId: userId,
+    });
+    const deleteRelations = db.run(sql`
+      DELETE FROM event_group_events WHERE event_group_id = ${id}
+    `);
+    const deleteGroup = db.run(sql`
+      DELETE FROM event_groups
+      WHERE id = ${id} AND updated_at = ${snapshot.updated_at}
+    `);
+    const mutationStatements = [
+      deleteRelations, deleteGroup, ...fenceStatements, ...queue.statements,
+    ];
+    const expectedMutationChanges = [
+      relationRows.length, 1, ...fenceExpected, ...queue.expectedChanges,
+    ];
+    const audits = [
+      ...relationRows.map((row) => ({
+        table_name: "event_group_events" as const,
+        target_id: `${row.event_group_id}:${row.event_id}`,
+        operation: "DELETE" as const,
+        before: { ...row },
+        actor_user_id: userId,
+        retention_class: "restorable" as const,
+      })),
+      {
+        table_name: "event_groups" as const,
+        target_id: id,
+        operation: "DELETE" as const,
+        before: { ...previous },
+        actor_user_id: userId,
+        retention_class: "restorable" as const,
+      },
+    ];
+    const budget = planD1AuditMutationBudget({
+      mutationStatementCount: mutationStatements.length,
+      mutationAssertionCount: expectedMutationChanges.length,
+      auditEntryCount: audits.length,
+      distinctActorCount: 1,
+      callerQueryCount: 3,
+    });
+    if (!budget.withinLimit) {
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+    }
+
+    const rawBucket = c.env.BUCKET;
+    const bucket = rawBucket as unknown as VisibilityManifestBucket | undefined;
+    if (fenceToken && !bucket) {
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+    }
+    const fenceHost = bucket ? {
+      manifest: {
+        read: () => readVisibilityManifestObject(bucket),
+        write: (manifest: Parameters<typeof putVisibilityManifestWithCas>[1], options?: {
+          ifMatchEtag?: string | null;
+          mutateOnConflict?: (latest: Parameters<typeof putVisibilityManifestWithCas>[1]) => Parameters<typeof putVisibilityManifestWithCas>[1];
+        }) => putVisibilityManifestWithCas(bucket, manifest, options?.ifMatchEtag, options?.mutateOnConflict),
+      },
+    } : null;
+    let fencePreCommitted = false;
+    try {
+      if (fenceToken && fenceHost) {
+        await preCommitPublicVisibilityFence({
+          entityType: "event_group",
+          entityId: id,
+          fenceToken,
+          reason: "event_group_delete",
+        }, fenceHost);
+        fencePreCommitted = true;
+      }
+      await mutateWithAudit(db, {
+        mutationStatements,
+        expectedMutationChanges,
+        preloaded: auditPreloaded(c),
+        callerQueryCount: 3,
+        audits,
+      });
+    } catch {
+      if (fenceToken && fenceHost && fencePreCommitted) {
+        await compensatePublicVisibilityFenceOnD1Failure({
+          db,
+          entityType: "event_group",
+          entityId: id,
+          fenceToken,
+          flow: "event_group_visibility",
+        }, fenceHost).catch(() => undefined);
+      }
+      console.error("[event-group] delete failed");
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+    }
+    return c.json({ ok: true }, 200);
+  } catch {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+  }
+});
+
 stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
   const result = normalizeEventGroupMembershipRemove({
     groupId: c.req.param("id"),
