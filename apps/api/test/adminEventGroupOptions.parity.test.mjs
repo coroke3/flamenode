@@ -21,6 +21,7 @@ import {
   planEventGroupMembershipAdd,
   planEventGroupMembershipWriteRows,
   planEventGroupMembershipRemove,
+  planEventGroupMembershipDeleteBudget,
 } from "../src/routes/admin/eventGroups.ts";
 
 const admin = { id: "admin-1", role: "admin", is_banned: 0 };
@@ -84,6 +85,28 @@ function setup({
   );
   return { get, calls, guardCalls };
 }
+
+test("SA-030 U04: canonical audited D1 delete budget respects Free 50-query cap", () => {
+  const one = planEventGroupMembershipDeleteBudget({
+    callerQueryCount: 5, queueStatementCount: 1,
+    auditEntryCount: 1, distinctActorCount: 1,
+  });
+  // 1 delete + 1 queue + 2 changes assertions + 2 audit statements
+  // + 2 audit prep reads + 5 caller reads = 13 D1 logical queries.
+  assert.deepEqual(one, { withinLimit: true, totalQueryCount: 13, limit: 50 });
+  assert.deepEqual(planEventGroupMembershipDeleteBudget({
+    callerQueryCount: 42, queueStatementCount: 1,
+    auditEntryCount: 1, distinctActorCount: 1,
+  }), { withinLimit: true, totalQueryCount: 50, limit: 50 });
+  assert.deepEqual(planEventGroupMembershipDeleteBudget({
+    callerQueryCount: 43, queueStatementCount: 1,
+    auditEntryCount: 1, distinctActorCount: 1,
+  }), { withinLimit: false, totalQueryCount: 51, limit: 50 });
+  assert.deepEqual(planEventGroupMembershipDeleteBudget({
+    callerQueryCount: 5, queueStatementCount: 1,
+    auditEntryCount: 80, distinctActorCount: 1,
+  }), { withinLimit: false, totalQueryCount: 53, limit: 50 });
+});
 
 test("SA-029/030 U04: write projections keep CURRENT INSERT shape and delete CAS snapshot", () => {
   const added = planEventGroupMembershipWriteRows("grp-1", ["ev-b", "ev-a"], 1710000000);
