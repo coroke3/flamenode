@@ -12,7 +12,7 @@ import { Hono } from "hono";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { sql } from "@flamenode/server-core/sql";
 import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
-import { auditPreloaded } from "./body.ts";
+import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "./body.ts";
 import { mapAuditSettings, type AuditSettingsRow } from "@flamenode/server-core/audit/settings";
 import { writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
 import type { AppEnv } from "../../env.ts";
@@ -686,4 +686,151 @@ stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
     return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
   }
   return c.json({ ok: true, id: groupId }, 200);
+});
+
+
+/**
+ * MIG-0653 U04 SA-029 staged write. The route remains isolated until the
+ * CURRENT differential, workerd S3 measurement and independent review pass.
+ * One joined read supplies group existence, event membership, CostGuard and
+ * audit settings after the parent session + identity/ToS guards.
+ */
+stagedEventGroupWriteRoutes.post("/:id/events", async (c) => {
+  c.header("Cache-Control", "private, no-store");
+  const body = await readAdminJsonBody(c.req.raw);
+  if (body.kind === "too_large") {
+    return c.json({ ok: false, message: BODY_TOO_LARGE_MESSAGE }, 413);
+  }
+  if (body.kind !== "ok") {
+    return c.json({ ok: false, message: "追加するイベントを選択してください。" }, 400);
+  }
+  const normalized = normalizeEventGroupMembershipAdd({
+    groupId: c.req.param("id"),
+    eventIds: body.value.eventIds,
+  });
+  if (!normalized.ok) return c.json({ ok: false, message: normalized.message }, 400);
+  const { groupId, eventIds } = normalized;
+  if (groupId.length > MAX_EVENT_GROUP_ID_LENGTH ||
+      eventIds.some((id) => id.length > MAX_EVENT_GROUP_ID_LENGTH)) {
+    return c.json({ ok: false, message: "追加するイベントを選択してください。" }, 400);
+  }
+
+  const db = c.get("db");
+  const userId = c.get("user")!.id;
+  const placeholders = eventIds.map(() => "?").join(", ");
+  type MembershipAddSnapshot = EventGroupMembershipRelationRow & AuditSettingsRow & {
+    group_exists: string | null;
+    valid_event_id: string | null;
+    existing_member_id: string | null;
+    operation_mode: string | null;
+    disabled_features_json: string | null;
+    cost_guard_exception_until: number | null;
+    cost_guard_exception_features_json: string | null;
+  };
+  let rows: MembershipAddSnapshot[];
+  try {
+    rows = (await c.env.DB.prepare(
+      `SELECT g.id AS group_exists,
+              e.id AS valid_event_id,
+              m.event_id AS existing_member_id,
+              s.operation_mode, s.disabled_features_json,
+              s.cost_guard_exception_until, s.cost_guard_exception_features_json,
+              s.audit_normal_retention_days, s.audit_restorable_retention_days,
+              s.audit_long_retention_days, s.audit_max_payload_bytes,
+              s.audit_compact_after_days
+         FROM system_settings AS s
+         LEFT JOIN event_groups AS g ON g.id = ?
+         LEFT JOIN events AS e ON e.id IN (${placeholders})
+         LEFT JOIN event_group_events AS m
+           ON m.event_group_id = g.id AND m.event_id = e.id
+        WHERE s.id = 'default'
+        LIMIT ${EVENT_GROUP_ADD_MAX}`,
+    ).bind(groupId, ...eventIds).all<MembershipAddSnapshot>()).results;
+  } catch {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+  }
+  const snapshot = rows[0];
+  if (!snapshot) return writeGuardDenyResponse(c, "maintenance_mode", 503);
+  const cost = evaluateCostGuardCore({
+    feature: "admin_event_create",
+    operationMode: snapshot.operation_mode,
+    disabledFeaturesJson: snapshot.disabled_features_json,
+    exceptionUntil: snapshot.cost_guard_exception_until,
+    exceptionFeaturesJson: snapshot.cost_guard_exception_features_json,
+    now: Math.floor(Date.now() / 1000),
+  });
+  if (cost.blocked) {
+    return writeGuardDenyResponse(c, cost.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked", 503);
+  }
+  c.set("auditSettings", mapAuditSettings(snapshot));
+  if (!snapshot.group_exists) {
+    return c.json({ ok: false, message: "グループが見つかりません。" }, 404);
+  }
+
+  const validEventIds = rows.flatMap((row) => row.valid_event_id ? [row.valid_event_id] : []);
+  const existingMemberIds = rows.flatMap((row) => row.existing_member_id ? [row.existing_member_id] : []);
+  const plan = planEventGroupMembershipAdd(eventIds, validEventIds, existingMemberIds);
+  if (!plan.ok) {
+    const status = plan.message === "追加できるイベントがありません。" ? 400 : 400;
+    return c.json({ ok: false, message: plan.message }, status);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  let insertedRows: EventGroupMembershipRelationRow[];
+  try {
+    insertedRows = planEventGroupMembershipWriteRows(groupId, plan.toAdd, now);
+  } catch {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 400);
+  }
+
+  try {
+    const queue = await buildEventGroupChangeQueueBatch(db, {
+      reason: "event_group_member_add",
+      requestedByUserId: userId,
+    });
+    // One JSON1 INSERT avoids exceeding D1's 100-bind cap at 80 relations.
+    // Audit entries are chunked by mutateWithAudit; the full 80-row case is
+    // 49/50 logical queries (3 caller reads + 2 preparation + 44 batch).
+    const insert = db.run(sql`
+      INSERT INTO event_group_events (
+        event_group_id, event_id, relation_type, created_at, updated_at
+      )
+      SELECT
+        json_extract(value, '$.event_group_id'),
+        json_extract(value, '$.event_id'),
+        json_extract(value, '$.relation_type'),
+        json_extract(value, '$.created_at'),
+        json_extract(value, '$.updated_at')
+      FROM json_each(${JSON.stringify(insertedRows)})
+    `);
+    const mutationStatements = [insert, ...queue.statements];
+    const expectedMutationChanges = [insertedRows.length, ...queue.expectedChanges];
+    const audits = insertedRows.map((row) => ({
+      table_name: "event_group_events" as const,
+      target_id: `${row.event_group_id}:${row.event_id}`,
+      operation: "CREATE" as const,
+      after: { ...row },
+      actor_user_id: userId,
+      retention_class: "restorable" as const,
+    }));
+    const budget = planD1AuditMutationBudget({
+      mutationStatementCount: mutationStatements.length,
+      mutationAssertionCount: expectedMutationChanges.length,
+      auditEntryCount: audits.length,
+      distinctActorCount: 1,
+      callerQueryCount: 3,
+    });
+    if (!budget.withinLimit) {
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+    }
+    await mutateWithAudit(db, {
+      mutationStatements,
+      expectedMutationChanges,
+      preloaded: auditPreloaded(c),
+      audits,
+    });
+    return c.json({ ok: true, id: groupId, added: insertedRows.length }, 200);
+  } catch {
+    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
+  }
 });
