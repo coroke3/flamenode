@@ -238,22 +238,26 @@ test("SA-029 U04: post-read membership planner preserves CURRENT validation orde
   });
 });
 
-test("SA-029 U04: reject oversized raw membership input before de-duplication", () => {
-  // Duplicates used to collapse into a one-row set only after processing the
-  // entire attacker-controlled input. Bound the raw array for S3 CPU safety.
+test("SA-029 U04: unique-ID limit preserves CURRENT duplicate normalization", () => {
+  // CURRENT de-duplicates before enforcing the 80-distinct-ID limit. Keep
+  // duplicate-heavy inputs compatible without allocating filter/map arrays.
   const duplicates = Array.from({ length: 10000 }, () => "ev-1");
-  const rejected = normalizeEventGroupMembershipAdd({
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
     groupId: "grp-1", eventIds: duplicates,
-  });
-  assert.deepEqual(rejected, {
-    ok: false,
-    message: "一度に追加できるイベントは80件までです。分けて実行してください。",
-  });
+  }), { ok: true, groupId: "grp-1", eventIds: ["ev-1"] });
+
   const atLimit = normalizeEventGroupMembershipAdd({
-    groupId: "grp-1", eventIds: Array.from({ length: 80 }, () => "ev-1"),
+    groupId: "grp-1", eventIds: Array.from({ length: 80 }, (_, i) => "ev-" + i),
   });
   assert.deepEqual(atLimit, {
-    ok: true, groupId: "grp-1", eventIds: ["ev-1"],
+    ok: true, groupId: "grp-1", eventIds: Array.from({ length: 80 }, (_, i) => "ev-" + i),
+  });
+  const overLimit = normalizeEventGroupMembershipAdd({
+    groupId: "grp-1", eventIds: Array.from({ length: 81 }, (_, i) => "ev-" + i),
+  });
+  assert.deepEqual(overLimit, {
+    ok: false,
+    message: "一度に追加できるイベントは80件までです。分けて実行してください。",
   });
 });
 
