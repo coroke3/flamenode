@@ -837,7 +837,7 @@ test("SA-025: real SQLite latest-major ToS and CostGuard use one combined gate r
 });
 
 const STAGED_WRITE_SITE = "https://app.flamenode.example";
-function stagedSa030Harness({ role = "admin", mutateAfterRead = false } = {}) {
+function stagedSa030Harness({ role = "admin", mutateAfterRead = false, settings = "normal" } = {}) {
   let changedAfterRead = false;
   const { db, sqlite, stats } = createAdminD1({
     onFirst: (statement, instance) => {
@@ -850,7 +850,7 @@ function stagedSa030Harness({ role = "admin", mutateAfterRead = false } = {}) {
       }
     },
   });
-  seedBase(sqlite, { role });
+  seedBase(sqlite, { role, settings });
   sqlite.exec(`
     CREATE TABLE event_groups (id TEXT PRIMARY KEY);
     CREATE TABLE event_group_events (
@@ -913,6 +913,22 @@ test("SA-030 U04 staged: real SQLite DELETE, full restorable audit and queue are
     // The joined settings/relation snapshot replaces the standalone CostGuard
     // read. Real S4 adds one session SELECT: 2 observed + 1 session = 3.
     assert.equal(h.stats.reads, 2);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-030 U04 staged: joined CostGuard snapshot denies maintenance mode before mutation", async () => {
+  const h = stagedSa030Harness({ settings: "maintenance" });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).reason, "maintenance_mode");
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+    assert.equal(h.stats.reads, 2, "identity/ToS plus one joined settings/relation read");
   } finally {
     h.sqlite.close();
   }
