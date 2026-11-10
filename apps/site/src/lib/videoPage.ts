@@ -7,7 +7,6 @@
  * or a configured but broken snapshot (including a non-public or missing object the manifest allows) fails the build.
  */
 import type { VideoDetailData } from "@flamenode/ui";
-import { normalizeNullableUnix, normalizeTrimmedString } from "../../../../src/lib/publicData/normalize.ts";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
 import { buildPublicVideoViewModelFromStatic } from "../../../../src/lib/publicData/publicVideoDetailViewModel.ts";
 import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/staticVideoDetailCore.ts";
@@ -183,11 +182,10 @@ export async function loadVideoPagesForBuild(
   const buildWithPlaylist = async (payload: unknown, key: string): Promise<void> => {
     const built = buildVideoPages(payload, key, now, iconMap);
     const eventId = built[0]?.data.primaryEvent?.id;
-    // The visibility and primary-event lookup must use the same normalized video
-    // that the public page renders, rather than an untrusted raw snapshot field.
+    // The public renderer and playlist gate use the same normalized video fields.
     const video = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0])?.video;
     const scheduledTime = video?.scheduled_time ?? null;
-    const primaryEventId = normalizeTrimmedString(video?.primary_event_id);
+    const primaryEventId = video?.primary_event_id ?? null;
 
     // CURRENT looks up a playlist only for the video-selected primary event.
     // Display fallback events must not inherit an unrelated event's playlist.
