@@ -14,6 +14,7 @@ import { adminReadGuardMiddleware } from "../../middleware/adminReadGuard.ts";
 import { evaluateAdminWriteGuard } from "../../middleware/writeOrigin.ts";
 import { evaluateCostGuardCore } from "@flamenode/domain/admin";
 import { MAX_SINGLE_ROW_LIMIT } from "../../lib/limits.ts";
+import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
 
 export const EVENT_GROUP_OPTION_PAGE_SIZE = 80;
 /** Bound legacy identifiers without rejecting ordinary long-ID pagination. */
@@ -417,6 +418,37 @@ export function planEventGroupMembershipAdd(
  * must separately enforce D1 batch/query limits, atomic expected changes,
  * restorable audits, queue notifications, and admin write guards.
  */
+/**
+ * U04: fail closed before scheduling SA-030's atomic DELETE + restorable audit
+ * if the full CURRENT audit budget (caller reads, queue statements and group
+ * audit context preparation) cannot fit the D1 Free 50-query limit.
+ * The eventual writer must use the same budget inputs inside the atomic batch.
+ * This pure projection cannot make a write safe by itself.
+ */
+export type EventGroupDeleteBudgetInput = {
+  callerQueryCount: number;
+  queueStatementCount: number;
+  auditEntryCount: number;
+  distinctActorCount: number;
+};
+
+export function planEventGroupMembershipDeleteBudget(input: EventGroupDeleteBudgetInput): {
+  withinLimit: boolean;
+  totalQueryCount: number;
+  limit: number;
+} {
+  // A single DELETE, its changes() assertion, a 2-query audit chunk per four
+  // records, and one settings+actor preparation read each for any audit entry.
+  // Use canonical shared budget arithmetic, including caller D1 reads.
+  return planD1AuditMutationBudget({
+    mutationStatementCount: 1 + input.queueStatementCount,
+    mutationAssertionCount: 1 + input.queueStatementCount,
+    auditEntryCount: input.auditEntryCount,
+    distinctActorCount: input.distinctActorCount,
+    callerQueryCount: input.callerQueryCount,
+  });
+}
+
 export type EventGroupMembershipRelationRow = {
   event_group_id: string;
   event_id: string;
