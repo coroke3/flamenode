@@ -1302,3 +1302,151 @@ test("SA-027 U03 staged: stale base_updated_at is rejected before any mutation",
     sqlite.close();
   }
 });
+
+
+test("SA-028 U03 staged: group DELETE atomically removes every relation with restorable snapshots", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec(`
+      CREATE TABLE event_groups (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+        description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+        accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE event_group_events (
+        event_group_id TEXT NOT NULL, event_id TEXT NOT NULL, relation_type TEXT NOT NULL,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (event_group_id, event_id)
+      );
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+      INSERT INTO event_groups VALUES (
+        'grp-delete', 'Delete group', 'delete-group', 'description', 'series',
+        NULL, 'legacy-img', '#abc', 'private', 4, 10, 20
+      );
+      INSERT INTO event_group_events VALUES
+        ('grp-delete', 'ev-a', 'member', 11, 21),
+        ('grp-delete', 'ev-b', 'primary', 12, 22);
+    `);
+    const app = new Hono();
+    const originOptions = {
+      loadSiteUrl: () => STAGED_WRITE_SITE,
+      allowLocalPreview: () => false,
+    };
+    app.use("*", originGuardMiddleware(originOptions));
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.use("*", writeGuardMiddleware(originOptions));
+    app.use("*", dbMiddleware);
+    app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+    const response = await app.request(new Request(
+      STAGED_WRITE_SITE + "/api/admin/event-groups/grp-delete",
+      { method: "DELETE", headers: { Origin: STAGED_WRITE_SITE } },
+    ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_group_events").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 3);
+    const groupAudit = sqlite.prepare("SELECT * FROM audit_logs WHERE table_name = 'event_groups'").get();
+    assert.equal(groupAudit.target_id, "grp-delete");
+    assert.equal(groupAudit.operation, "DELETE");
+    assert.equal(groupAudit.retention_class, "restorable");
+    assert.deepEqual(JSON.parse(groupAudit.before_json), {
+      id: "grp-delete", name: "Delete group", slug: "delete-group",
+      description: "description", group_type: "series", icon_url: null,
+      img_url: "legacy-img", accent_color: "#abc", visibility_status: "private",
+      sort_order: 4, created_at: 10, updated_at: 20,
+    });
+    const relationAudits = sqlite.prepare(
+      "SELECT target_id, operation, retention_class, before_json FROM audit_logs WHERE table_name = 'event_group_events' ORDER BY target_id",
+    ).all();
+    assert.deepEqual(relationAudits.map(x => ({
+      target_id: x.target_id, operation: x.operation, retention_class: x.retention_class,
+      before: JSON.parse(x.before_json),
+    })), [
+      { target_id: "grp-delete:ev-a", operation: "DELETE", retention_class: "restorable",
+        before: { event_group_id: "grp-delete", event_id: "ev-a", relation_type: "member", created_at: 11, updated_at: 21 } },
+      { target_id: "grp-delete:ev-b", operation: "DELETE", retention_class: "restorable",
+        before: { event_group_id: "grp-delete", event_id: "ev-b", relation_type: "primary", created_at: 12, updated_at: 22 } },
+    ]);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.equal(stats.batches, 1);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: relation overflow is rejected before group, audit or queue mutation", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec(`
+      CREATE TABLE event_groups (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+        description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+        accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE event_group_events (
+        event_group_id TEXT NOT NULL, event_id TEXT NOT NULL, relation_type TEXT NOT NULL,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (event_group_id, event_id)
+      );
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+      INSERT INTO event_groups VALUES (
+        'grp-overflow', 'Overflow group', 'overflow-group', NULL, 'series',
+        NULL, NULL, NULL, 'private', 0, 10, 20
+      );
+    `);
+    const insert = sqlite.prepare(
+      "INSERT INTO event_group_events VALUES (?, ?, 'member', 10, 20)",
+    );
+    for (let i = 0; i < 80; i++) insert.run("grp-overflow", "ev-" + i);
+    const app = new Hono();
+    const originOptions = {
+      loadSiteUrl: () => STAGED_WRITE_SITE,
+      allowLocalPreview: () => false,
+    };
+    app.use("*", originGuardMiddleware(originOptions));
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.use("*", writeGuardMiddleware(originOptions));
+    app.use("*", dbMiddleware);
+    app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+    const response = await app.request(new Request(
+      STAGED_WRITE_SITE + "/api/admin/event-groups/grp-overflow",
+      { method: "DELETE", headers: { Origin: STAGED_WRITE_SITE } },
+    ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+    });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_group_events").get().n, 80);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+    assert.equal(stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
