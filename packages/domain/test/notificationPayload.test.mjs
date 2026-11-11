@@ -13,9 +13,9 @@ test("SA-084 validator rejects malformed type and payload shapes", () => {
 });
 
 test("SA-084 validator enforces UTF-8 byte cap, not JS code unit length", () => {
-  // 4,095 Japanese characters are >8 KiB after JSON encoding.
-  assert.equal(validateNotificationPayload("ok", { body: "あ".repeat(2730) }).ok, true);
-  assert.equal(validateNotificationPayload("ok", { body: "あ".repeat(2731) }).ok, false);
+  // JSON.stringify({body:...}) adds 11 UTF-8 bytes to the body string.
+  assert.equal(validateNotificationPayload("ok", { body: "あ".repeat(2727) }).ok, true);
+  assert.equal(validateNotificationPayload("ok", { body: "あ".repeat(2728) }).ok, false);
   assert.equal(validateNotificationPayload("ok", { body: "a".repeat(8200) }).ok, false);
 });
 
