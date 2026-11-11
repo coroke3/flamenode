@@ -1516,7 +1516,9 @@
 
 | `scripts/publicListUtf16Boundary.test.mjs` | TEST | PUBLIC /list and RH-032 UTF-16 search boundary regression | MIG-0505 | SAME (CURRENT Next/Hono/Astro source contract) | RETAINED | PR#654 SHA=d4659b5c17ffbc9a091691e9dc72bd25c641e689 TEST=node --test --experimental-strip-types scripts/publicListUtf16Boundary.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/42287437696 (previous HEAD: docs-evidence gate failure; rerun on corrected HEAD pending) |
 
-| `apps/api/test/legacyImport.parity.test.mjs` | TEST | RH-002:POST CURRENT row-range/CPU characterization (HTTP parity pending U02) | MIG-0645 | SAME | IN_PROGRESS | PR#478 SHA=3c83d0b3cec872689e1828d60c49154af6c6afca TEST=NOT_RUN; exact-head GitHub Actions pending |
+| `apps/api/test/legacyImport.parity.test.mjs` | TEST | RH-002:POST CURRENT row-range/CPU characterization (HTTP parity pending U02) | MIG-0645 | SAME | IN_PROGRESS | PR#478 SHA=3c83d0b3cec872689e1828d60c49154af6c6afca TEST=node --test --experimental-strip-types apps/api/test/legacyImport.parity.test.mjs; U01 boundary extensions SHA=a8fa259703d2b78610e671f98d48a6efc0df9173; final-head CI pending |
+| `apps/api/src/routes/admin/legacyImportInput.ts` | HELPER | RH-002 U02 standalone Hono-ready multipart option parsing/size-boundary helpers (not mounted) | MIG-0645 | CURRENT: app/api/admin/import/legacy/route.ts | IN_PROGRESS | PR#478 SHA=96fafd98c02c57f6c40e0b8844fa4d8e2f35fcf2 TEST=apps/api/test/legacyImportInput.parity.test.mjs; final-head CI pending |
+| `apps/api/test/legacyImportInput.parity.test.mjs` | TEST | RH-002 U02 form controls, size caps, decisions, CURRENT guard ordering and limit-pin regression | MIG-0645 | SAME | IN_PROGRESS | PR#478 SHA=7af4a001b32a3c2f5eb6dfebd83673bf2d3b154f TEST=node --test --experimental-strip-types apps/api/test/legacyImportInput.parity.test.mjs; final-head CI pending |
 
 ## Future files requiring source/target registration
 
