@@ -1,7 +1,7 @@
 import "server-only";
 
 import { and, eq, inArray } from "drizzle-orm";
-import { buildPermissionNotificationBulkInsertSql } from "@flamenode/server-core/video/permissionNotificationBulkSql";
+import { preparePermissionNotificationBulkBatch } from "@flamenode/server-core/video/permissionNotificationBatch";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 
@@ -189,63 +189,20 @@ export async function buildKnownRecipientNotificationBatch(
  * 古いsent行に吸収される。bulk builderを使うこの通知だけ、1付与遷移ごとのkeyへする。
  * 同一batch内の重複は変換前keyで検査し、同時付与はpermission CAS側が片方だけcommitする。
  */
-function scopeBulkNotificationDedupeForTransition(
-  prepared: PreparedNotification,
-): PreparedNotification {
-  if (
-    prepared.type !== "video_edit_permission_granted" ||
-    !prepared.dedupeKey
-  ) {
-    return prepared;
-  }
-  return {
-    ...prepared,
-    dedupeKey: `${prepared.dedupeKey}:transition:${crypto.randomUUID()}`,
-  };
-}
-
 /**
- * 大人数のrequired_atomic通知向けJSON1 builder。
- * 1 recipient = 1 D1 statement にせず、最大200件を1 statementへまとめる。
- * active dedupe partial uniqueとの競合は INSERT OR IGNORE でidempotentに扱うため、
- * expectedChangesはnullとする。payload自体はbind parameterのまま保持すること。
+ * CURRENT adapter: preserve its payload validator, but share the immutable
+ * SQL/outbox envelope with future Hono SA-082..084 writes. The returned
+ * runnable is not executed before the caller's audited atomic D1 batch.
  */
 export async function buildKnownRecipientNotificationBulkBatch(
   db: AnyDb,
   inputs: readonly KnownRecipientNotificationInput[],
 ): Promise<NotificationOutboxBatch> {
-  if (inputs.length === 0) {
-    return { statements: [], expectedChanges: [], rows: [] };
-  }
-  if (inputs.length > 200) throw new Error("notification_bulk_batch_limit_exceeded");
-
-  const preparedInputs = inputs.map((input) => ({
-    input,
-    prepared: prepareNotification(input),
-  }));
-  const nonNullKeys = preparedInputs
-    .map(({ prepared }) => prepared.dedupeKey)
-    .filter((key): key is string => key !== null);
-  if (new Set(nonNullKeys).size !== nonNullKeys.length) {
-    throw new Error("notification_batch_duplicate_dedupe_key");
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const rows = preparedInputs.map(({ input, prepared }) => {
-    const recipientUserId = input.recipientUserId.trim();
-    if (!recipientUserId) throw new Error("notification_recipient_required");
-    return buildNotificationRow(
-      scopeBulkNotificationDedupeForTransition(prepared),
-      recipientUserId,
-      now,
-    );
-  });
-  const statement = db.run(buildPermissionNotificationBulkInsertSql(rows));
-
+  const plan = preparePermissionNotificationBulkBatch(inputs, validateNotificationPayload);
   return {
-    statements: [statement],
-    expectedChanges: [null],
-    rows,
+    statements: plan.statement ? [db.run(plan.statement)] : [],
+    expectedChanges: plan.expectedChanges,
+    rows: plan.rows,
   };
 }
 
