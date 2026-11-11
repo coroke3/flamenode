@@ -110,7 +110,8 @@
     "./publicData/staticYoutubeRelatedBlocklistCore": "./src/publicData/staticYoutubeRelatedBlocklistCore.ts",
     "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts",
     "./video/rebuildEventIds": "./src/video/rebuildEventIds.ts",
-    "./video/memberAggregationFanOut": "./src/video/memberAggregationFanOut.ts"
+    "./video/memberAggregationFanOut": "./src/video/memberAggregationFanOut.ts",
+    "./video/permissionProfiles": "./src/video/permissionProfiles.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
