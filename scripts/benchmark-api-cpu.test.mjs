@@ -133,6 +133,11 @@ const MAIN_HONO_METHODS = new Set([
   "GET /api/admin-read/ops/integrity", "GET /api/admin-read/ops/static-builds", "GET /api/admin-read/ops/workers", "GET /api/admin-read/ops/security",
   "GET /api/admin-read/ops/youtube-playlists", "GET /api/admin-read/ops/youtube-quota", "GET /api/admin-read/ops/top",
   "GET /api/admin-read/ops/cost-guard", "GET /api/admin-read/ops/youtube-sync", "GET /api/manage/navigation",
+  "POST /api/manage/events/:id/owner-transfer",
+  "POST /api/manage/events/:id/staff/csv",
+  "POST /api/manage/events/:id/staff",
+  "PUT /api/manage/events/:id/staff/:staffId",
+  "DELETE /api/manage/events/:id/staff/:staffId",
   "GET /api/manage/events/:id/staff", "GET /api/manage/events/:id/slots", "GET /api/manage/events/:id/edit",
   "GET /api/manage/events/:id/videos/:videoId", "GET /api/manage/events/:id/videos", "GET /api/manage/events/:id/youtube-playlist",
   "POST /api/manage/events/:id/youtube-playlist/sync", "PUT /api/manage/events/:id/youtube-playlist", "GET /api/manage/events/:id/audience",
@@ -143,6 +148,13 @@ const MAIN_HONO_METHODS = new Set([
   "POST /api/admin/terms/:id/reaccept-broadcast", "POST /api/admin/terms/:id/archive",
   "POST /api/admin/notifications/retry-failed", "POST /api/admin/notifications/:id/retry",
   "POST /api/admin/notifications/:id/cancel", "POST /api/admin/notifications/:id/force-resend",
+  "POST /api/admin/static-builds/backfill",
+  "POST /api/admin/static-builds/queue/:queueId/retry",
+  "POST /api/admin/static-builds/retry-failed",
+  "POST /api/admin/static-builds/rebuild",
+  "POST /api/admin/static-builds/shared-inputs/rebuild",
+  "POST /api/admin/visibility-repair",
+  "POST /api/admin/youtube-sync/videos/:videoId/resync",
   "GET /api/admin/spreadsheet/data", "GET /api/admin/spreadsheet/export", "GET /api/admin/spreadsheet/tables", "GET /api/admin/event-templates",
   "POST /api/admin/announcements", "PUT /api/admin/announcements/:id", "DELETE /api/admin/announcements/:id",
   "POST /api/admin/api-endpoints", "PATCH /api/admin/api-endpoints/:id", "POST /api/admin/audit/settings", "POST /api/admin/audit/dry-run",
@@ -189,7 +201,7 @@ test("MIG-0639 T01: every main Hono method has exactly one scenario (named or in
   assert.equal(new Set(titles).size, titles.length, "no method has two scenarios");
   assert.deepEqual([...MAIN_HONO_METHODS].filter((m) => !titles.includes(m)), [], "methods without a scenario");
   assert.deepEqual(titles.filter((t) => !MAIN_HONO_METHODS.has(t)), [], "scenarios for methods that are not mounted");
-  assert.equal(MAIN_HONO_METHODS.size, 130);
+  assert.equal(MAIN_HONO_METHODS.size, 142);
 });
 
 test("MIG-0639 T01: the method list equals the routes mounted in apps/api/src/app.ts", async () => {
@@ -244,6 +256,39 @@ test("MIG-0639 SA-045..048, SA-049, SA-051..055, SA-099..101: all newly mounted 
   assert.equal(JSON.parse(scenarios.get("SA-101").kinds.normal(1, "safe").body).parent_request_id, "bench-xreq-safe-1");
 });
 
+
+test("MIG-0639 mounted SA-031..034 and MIG-0643 writes have real bounded D1 probes", () => {
+  const scenarios = new Map(buildScenarios({ adminToken:"t" }).map(s=>[s.id,s]));
+  const ids = ["SA-034","SA-032","SA-031-CREATE","SA-031-UPDATE","SA-033","SA-069","SA-070","SA-073","SA-071","SA-072","SA-050","SA-106"];
+  for (const id of ids) {
+    const s=scenarios.get(id);
+    assert.ok(s, id+" missing");
+    assert.deepEqual(Object.keys(s.kinds),["normal","limit","invalid"]);
+    assert.equal(s.kinds.normal(1,"qa").expect[0],200,id);
+    assert.equal(s.kinds.limit(1,"qa").expect[0],200,id);
+  }
+  for(const id of ["SA-034","SA-032","SA-031-CREATE","SA-031-UPDATE","SA-033","SA-070","SA-073","SA-050"]) {
+    assert.ok(scenarios.get(id).kinds.normal(1,"qa").setup?.length,id+" needs real D1 fixture");
+  }
+  assert.equal(JSON.parse(scenarios.get("SA-071").kinds.limit(1,"qa").body).reason.length,500);
+  assert.equal(JSON.parse(scenarios.get("SA-031-CREATE").kinds.limit(1,"qa").body).display_name.length,80);
+  assert.equal(scenarios.get("SA-073").kinds.invalid(1,"qa").headers.origin,"https://evil.invalid");
+  assert.equal(scenarios.get("SA-072").kinds.invalid(1,"qa").headers.origin,"https://evil.invalid");
+});
+
+test("MIG-0639: migrated SQLite accepts the new staff and failed-queue fixture rows", async () => {
+  const db=await migratedDb();
+  try {
+    run(db,SEED("t"));
+    const scenarios=new Map(buildScenarios({adminToken:"t"}).map(s=>[s.id,s]));
+    for(const id of ["SA-034","SA-032","SA-031-CREATE","SA-031-UPDATE","SA-033","SA-070","SA-073"]) {
+      assert.doesNotThrow(()=>run(db,scenarios.get(id).kinds.normal(2,"qa").setup),id);
+    }
+    assert.ok(count(db,"SELECT COUNT(*) AS n FROM event_staff WHERE event_id='bench-evt'")>=2);
+    assert.ok(count(db,"SELECT COUNT(*) AS n FROM static_rebuild_queue WHERE status='failed'")>=1);
+  } finally { db.close(); }
+});
+
 test("MIG-0639: inventory specs are well formed (session, origin, JSON body, fail-closed invalid kind)", () => {
   const byId = new Map(ROUTE_INVENTORY.map((r) => [r[0], r]));
   assert.equal(byId.size, ROUTE_INVENTORY.length, "inventory ids are unique");
@@ -259,7 +304,7 @@ test("MIG-0639: inventory specs are well formed (session, origin, JSON body, fai
       assert.ok(!spec.path.includes(":") && !spec.path.includes("*"), `${sc.id}/${kind} path placeholders are filled: ${spec.path}`);
       assert.ok(spec.headers["cf-connecting-ip"], `${sc.id}/${kind} has a distinct client key (public rate limiters)`);
       if (access === "w") {
-        assert.equal(spec.headers.origin, "https://bench.flamenode.invalid", `${sc.id}/${kind} sends the configured origin`);
+        assert.equal(spec.headers.origin, kind === "invalid" && row[4]?.invalidOrigin ? "https://evil.invalid" : "https://bench.flamenode.invalid", `${sc.id}/${kind} sends the configured origin`);
         assert.ok(spec.headers.cookie, `${sc.id}/${kind} carries a session`);
         assert.equal(spec.headers["content-type"], "application/json");
         if (spec.body !== undefined) JSON.parse(spec.body);
@@ -498,6 +543,26 @@ test("MIG-0639: 13 newly mounted write routes respect declared limit-case respon
     }
   }
   assert.deepEqual(failures, [], "limit-case CPU probes must actually exercise accepted bounded inputs");
+});
+
+
+// These smoke tests exercise actual local Hono handlers on the migrated D1
+// database, rather than treating 401/403 guard-only responses as CPU evidence.
+test("MIG-0639: all 12 MIG-0654/MIG-0643 write routes execute normal and boundary probes", async () => {
+  const scenarios=new Map(buildScenarios({adminToken:"t"}).map(s=>[s.id,s]));
+  const ids=["SA-034","SA-032","SA-031-CREATE","SA-031-UPDATE","SA-033","SA-069","SA-070","SA-073","SA-071","SA-072","SA-050","SA-106"];
+  const failures=[];
+  for(const id of ids) for(const kind of ["normal","limit","invalid"]) {
+    const target=await createInprocTarget({adminToken:"t"});
+    try {
+      const spec=scenarios.get(id).kinds[kind](7,"smoke"+id);
+      if(spec.setup) await target.exec(spec.setup);
+      const r=await target.run(spec);
+      if(!spec.expect.includes(r.status)) failures.push(id+"/"+kind+": expected "+spec.expect.join("/")+" got "+r.status);
+    } catch(e) { failures.push(id+"/"+kind+": "+String(e)); }
+    finally { await target.close(); }
+  }
+  assert.deepEqual(failures,[]);
 });
 
 test("MIG-0639 / PR #457: mounted RH-013 has one bounded named scenario, never a duplicate pending entry", async () => {
