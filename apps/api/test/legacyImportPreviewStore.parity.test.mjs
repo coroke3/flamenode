@@ -178,3 +178,26 @@ test("RH-002 Hono adapter: invalid credential maps to 409 re-preview; missing bu
     retryable: true, requires_repreview: false,
   } });
 });
+
+
+test("RH-002 Hono R2 adapter: preview store failure maps without leaking credentials", async () => {
+  const { legacyImportR2Adapter } = await import("../src/routes/admin/legacyImportR2Adapter.ts");
+  const { bucket } = bucketFixture();
+  bucket.put = async () => null;
+  const adapter = legacyImportR2Adapter(bucket);
+  let failure;
+  await assert.rejects(async () => {
+    try {
+      await adapter.createPreview(previewInput());
+    } catch (err) {
+      failure = err;
+      throw err;
+    }
+  }, (err) => err instanceof LegacyImportPreviewError && err.code === "claim_conflict");
+  const result = adapter.mapStoreError(failure);
+  assert.equal(result.status, 409);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.preview_error_code, "claim_conflict");
+  assert.equal(result.body.retryable, true);
+  assert.equal(result.body.preview_token, undefined);
+});
