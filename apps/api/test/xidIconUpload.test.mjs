@@ -161,6 +161,26 @@ test("SA-105 isolated upload: revoked X link between pre-read and CAS rolls back
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n,0);
 });
 
+test("SA-105 isolated upload: approval revocation after the preflight cannot create a live R2 reference",async()=>{
+  let revoked=false;
+  const h=setup({onFirst:(statement,sqlite)=>{
+    if(!revoked&&statement.includes("FROM x_users AS x")&&statement.includes("x_user_account_links")){
+      revoked=true;
+      sqlite.prepare("UPDATE x_users SET approval_status = 'rejected' WHERE id = 'x_one'").run();
+    }
+  }});
+  const res=await h.send();
+  assert.equal(revoked,true,"fixture must race after the authorized preflight");
+  assert.equal(res.status,409);
+  assert.equal(h.writes.length,2);
+  assert.deepEqual(h.deletes,h.writes.map(x=>x.key));
+  const x=h.sqlite.prepare("SELECT icon_url,approval_status FROM x_users WHERE id='x_one'").get();
+  assert.equal(x.icon_url,"https://example.com/old.png");
+  assert.equal(x.approval_status,"rejected");
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,0);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n,0);
+});
+
 test("SA-105 isolated upload: successful commit survives staging deletion error",async()=>{
   const keys=[];
   const h=setup({bucket:{
