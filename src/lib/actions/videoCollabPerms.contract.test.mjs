@@ -378,7 +378,7 @@ test("SA-082..084 video read is scoped in server-core before CURRENT authorizati
 test("SA-082..084 notification bulk SQL is shared without weakening recipient/payload guards", () => {
   assert.ok(notificationEnqueueSource.includes("preparePermissionNotificationBulkBatch(inputs, validateNotificationPayload)"));
   assert.ok(notificationBatchSource.includes("buildPermissionNotificationBulkInsertSql(rows)"));
-  assert.ok(notificationBatchSource.includes("validatePayload(input.type, input.payload)"));
+  assert.ok(notificationBatchSource.includes("validatePayload(input.type, serializablePayload)"));
   assert.ok(notificationBatchSource.includes(":transition:"));
   assert.ok(notificationBatchSource.includes("notification_bulk_batch_limit_exceeded"));
   assert.ok(permissionNotificationBulkSqlSource.includes("FROM json_each("));
