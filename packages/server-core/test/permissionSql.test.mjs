@@ -172,3 +172,59 @@ test("MIG-0650 SA-082..084: X profile bulk upsert never revives rejected status"
     w.sqlite.close();
   }
 });
+
+test("MIG-0650 SA-082..084: stale permission CAS aborts an entire SQLite mutation transaction", () => {
+  const w = world();
+  try {
+    const before = member("member-1", "video-1", "alice");
+    w.add(before);
+    w.sqlite.exec("CREATE TABLE notification_outbox (id TEXT PRIMARY KEY)");
+    const stale = buildPermissionSetGuardSql("video-1", ["alice"], [before]);
+    w.sqlite.exec("UPDATE video_members SET can_edit = 0 WHERE id = 'member-1'");
+
+    w.sqlite.exec("BEGIN");
+    try {
+      // An earlier write must also be undone when an in-batch CAS fails.
+      w.sqlite.exec("INSERT INTO notification_outbox (id) VALUES ('pending-notice')");
+      assert.throws(() => w.execGuard(stale), /./);
+      w.sqlite.exec("COMMIT");
+      assert.fail("the stale CAS transaction must not commit");
+    } catch (error) {
+      w.sqlite.exec("ROLLBACK");
+      if (error?.message === "the stale CAS transaction must not commit") throw error;
+    }
+    assert.deepEqual(w.sqlite.prepare("SELECT id FROM notification_outbox").all(), []);
+    assert.equal(
+      w.sqlite.prepare("SELECT can_edit FROM video_members WHERE id = ?").get("member-1").can_edit,
+      0,
+      "the concurrent update must remain, rather than being overwritten",
+    );
+  } finally {
+    w.sqlite.close();
+  }
+});
+
+test("MIG-0650 SA-082..084: exact permission CAS permits the matched SQLite write transaction", () => {
+  const w = world();
+  try {
+    const before = member("member-1", "video-1", "alice");
+    const after = member("member-1", "video-1", "alice", { can_edit: 0 });
+    w.add(before);
+    const query = dialect.sqlToQuery(buildMemberPermissionBulkUpdateSql([after]));
+    w.sqlite.exec("BEGIN");
+    try {
+      w.execGuard(buildPermissionSetGuardSql("video-1", ["ALICE"], [before]));
+      assert.equal(w.sqlite.prepare(query.sql).run(...query.params).changes, 1);
+      w.sqlite.exec("COMMIT");
+    } catch (error) {
+      w.sqlite.exec("ROLLBACK");
+      throw error;
+    }
+    assert.equal(
+      w.sqlite.prepare("SELECT can_edit FROM video_members WHERE id = ?").get("member-1").can_edit,
+      0,
+    );
+  } finally {
+    w.sqlite.close();
+  }
+});
