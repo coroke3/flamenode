@@ -23,12 +23,7 @@ import {
   type CanEditVideoPrivilegeMode,
   type VideoEditAccessContext,
 } from "@/lib/auth/ownership";
-import {
-  users,
-  videoMembers,
-  videos,
-  xUsers,
-} from "@/lib/db/schema";
+import { videoMembers, videos, xUsers } from "@/lib/db/schema";
 import {
   MAX_VIDEO_HIDDEN_EDITORS,
 } from "@/lib/video/atomicLimits";
