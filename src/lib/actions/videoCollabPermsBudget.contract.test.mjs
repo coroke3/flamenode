@@ -6,6 +6,10 @@ const actionSource = await readFile(
   new URL("./video-collab-perms.ts", import.meta.url),
   "utf8",
 );
+const domainInputSource = await readFile(
+  new URL("../../../packages/domain/src/video/collaboratorPermissionInput.ts", import.meta.url),
+  "utf8",
+);
 const budgetSource = await readFile(
   new URL("../../../packages/server-core/src/audit/mutateBudget.ts", import.meta.url),
   "utf8",
@@ -16,7 +20,8 @@ const notificationSource = await readFile(
 );
 
 test("100人permission batchは人数分のmutation/auditを生成しない", () => {
-  assert.match(actionSource, /MAX_COLLABORATOR_PERMISSION_BATCH/);
+  assert.match(actionSource, /permissionBatchSchema/);
+  assert.match(domainInputSource, /MAX_COLLABORATOR_PERMISSION_BATCH/);
   assert.match(actionSource, /buildPermissionSetGuardSql/);
   assert.match(actionSource, /buildMemberPermissionBulkUpdateSql/);
   assert.match(actionSource, /buildVideoMemberBulkInsertSql\(insertHiddenRows/);
