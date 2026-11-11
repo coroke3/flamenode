@@ -482,6 +482,51 @@ const xRequestRow = (i, tag) => ({
   params: [benchXRequestId(i, tag), `bench-new-${tag}-${i}`],
 });
 
+
+/** MIG-0639: live MIG-0654 staff and MIG-0643 operational write fixtures.
+ * Reset the affected local rows for every repetition so 50+ samples exercise
+ * the same mutation rather than drifting into a duplicate/no-op case.
+ */
+const benchStaff = (id, x, preset = "public_staff") => ({
+  sql: "INSERT OR REPLACE INTO event_staff (id,event_id,x_user_id,display_name,permission_preset,is_public,created_at,updated_at) VALUES (?,'bench-evt',?,'Benchmark staff',?,0,100,100)",
+  params: [id,x,preset],
+});
+const benchStaffX = (id) => ({
+  sql: "INSERT OR IGNORE INTO x_users (id,x_name,approval_status) VALUES (?, 'Benchmark staff', 'approved')",
+  params: [id],
+});
+const benchStaffSetup = (kind, i, tag, action) => {
+  const x = "bench_stf_" + action;
+  const staffId = "bench-" + action;
+  return [
+    benchStaffX(x),
+    ...(action === "create" || action === "csv" ? [{
+      sql: "DELETE FROM event_staff WHERE event_id = 'bench-evt' AND x_user_id = ?", params:[x],
+    }] : [benchStaff(staffId,x)]),
+  ];
+};
+const benchTransferSetup = () => [
+  benchStaffX("bench-to"),
+  { sql:"INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bench-to','bench-admin','owner')",params:[] },
+  benchStaff("bench-from","bench-x","owner"),
+  benchStaff("bench-to-staff","bench-to","manager"),
+];
+const benchQueueId = (i, tag) => "bench-q-" + tag + "-" + i;
+const benchFailedQueue = (i, tag) => ({
+  sql: "INSERT OR REPLACE INTO static_rebuild_queue (id,target_type,target_id,reason,priority,status,attempt_count,created_at,updated_at) VALUES (?,'event',?,'bench retry','low','failed',1,100,100)",
+  params:[benchQueueId(i,tag),"evt-" + tag + "-" + i],
+});
+const benchQueueSetup = (kind,i,tag) => [benchFailedQueue(i,tag)];
+const benchVisibilitySetup = (kind,i,tag) => [{
+  sql:"INSERT OR REPLACE INTO public_visibility_fences (entity_type,entity_id,fence_token,state,created_at,updated_at) VALUES ('event','bench-evt',?,'active',100,100)",
+  params:["bench-fence-" + tag + "-" + i],
+}];
+const benchYoutubeId = (kind,i,tag) => kind === "limit" ? "v".repeat(128) : "bench-vid";
+const benchYoutubeSetup = (kind,i,tag) => kind === "limit" ? [{
+  sql:"INSERT OR REPLACE INTO videos (id,submitted_by_user_id,creator_display_name,title,visibility_status,updated_at) VALUES (?,'bench-admin','Bench','Benchmark','public',1000)",
+  params:[benchYoutubeId(kind,i,tag)],
+}] : [];
+
 export const ROUTE_INVENTORY = [
   // [id, method, path, access, options]
   ["MIG-0661", "GET", "/api/operation-mode/banner", "p"],
@@ -539,6 +584,12 @@ export const ROUTE_INVENTORY = [
   ["HONO-AR-36", "GET", "/api/admin-read/ops/cost-guard", "a"],
   ["HONO-AR-37", "GET", "/api/admin-read/ops/youtube-sync", "a"],
   ["HONO-MG-01", "GET", "/api/manage/navigation", "s"],
+  // SA-031..034: real staff create/update/delete, CSV, and owner transfer.
+  ["SA-034", "POST", "/api/manage/events/:id/owner-transfer", "w", { setup: benchTransferSetup }],
+  ["SA-032", "POST", "/api/manage/events/:id/staff/csv", "w", { setup: (k,i,t) => benchStaffSetup(k,i,t,"csv") }],
+  ["SA-031-CREATE", "POST", "/api/manage/events/:id/staff", "w", { setup: (k,i,t) => benchStaffSetup(k,i,t,"create") }],
+  ["SA-031-UPDATE", "PUT", "/api/manage/events/:id/staff/:staffId", "w", { params: () => ({staffId:"bench-update"}), setup: (k,i,t) => benchStaffSetup(k,i,t,"update") }],
+  ["SA-033", "DELETE", "/api/manage/events/:id/staff/:staffId", "w", { params: () => ({staffId:"bench-delete"}), setup: (k,i,t) => benchStaffSetup(k,i,t,"delete") }],
   ["HONO-MG-02", "GET", "/api/manage/events/:id/staff", "s"],
   ["HONO-MG-03", "GET", "/api/manage/events/:id/slots", "s"],
   ["HONO-MG-04", "GET", "/api/manage/events/:id/edit", "s"],
@@ -572,6 +623,14 @@ export const ROUTE_INVENTORY = [
   ["SA-045", "POST", "/api/admin/notifications/:id/retry", "w", { params: notificationParams, setup: notificationSetup("failed") }],
   ["SA-046", "POST", "/api/admin/notifications/:id/cancel", "w", { params: notificationParams, setup: notificationSetup("pending") }],
   ["SA-047", "POST", "/api/admin/notifications/:id/force-resend", "w", { params: notificationParams, setup: notificationSetup("sent") }],
+  // MIG-0643: five static-build operations, visibility repair, YouTube resync.
+  ["SA-069", "POST", "/api/admin/static-builds/backfill", "w"],
+  ["SA-070", "POST", "/api/admin/static-builds/queue/:queueId/retry", "w", { params:(k,i,t) => ({queueId:k === "invalid" ? "x".repeat(129) : benchQueueId(i,t)}),setup:benchQueueSetup }],
+  ["SA-073", "POST", "/api/admin/static-builds/retry-failed", "w", { setup:benchQueueSetup, invalidOrigin:true }],
+  ["SA-071", "POST", "/api/admin/static-builds/rebuild", "w"],
+  ["SA-072", "POST", "/api/admin/static-builds/shared-inputs/rebuild", "w", { invalidOrigin:true }],
+  ["SA-050", "POST", "/api/admin/visibility-repair", "w", { setup:benchVisibilitySetup }],
+  ["SA-106", "POST", "/api/admin/youtube-sync/videos/:videoId/resync", "w", { params:(k,i,t) => ({videoId:k === "invalid" ? "x".repeat(129) : benchYoutubeId(k,i,t)}),setup:benchYoutubeSetup }],
   ["HONO-ADM-01", "GET", "/api/admin/event-templates", "a"],
   ["SA-009", "POST", "/api/admin/audit/settings", "w"],
   ["SA-010", "POST", "/api/admin/audit/dry-run", "w"],
@@ -653,6 +712,35 @@ const publicEventRows = (count) => numberedRows(
 const REASON = (k) => (k === "limit" ? "r".repeat(500) : "bench");
 /** Request bodies for the write inventory. `limit` fills the bounded text fields to their caps. */
 const WRITE_BODIES = {
+  "POST /api/manage/events/:id/owner-transfer": () => ({
+    from_staff_id:"bench-from",to_staff_id:"bench-to-staff",reason:"benchmark transfer",
+    confirm_text:"TRANSFER bench-evt",self_confirm_text:"SELF CHANGE bench-evt",
+  }),
+  "POST /api/manage/events/:id/staff/csv": (k) => ({reason:"benchmark csv",rows:[{
+    lineNumber:1,display_name:k === "limit" ? "S".repeat(80) : "Staff",
+    x_user_id:"bench_stf_csv",permission_preset:"public_staff",permission_keys:[],
+    is_public_staff:"1",public_role_label:"",
+  }]}),
+  "POST /api/manage/events/:id/staff": (k) => ({
+    display_name:k === "limit" ? "S".repeat(80) : "Staff",
+    x_user_id:"bench_stf_create",permission_preset:"public_staff",is_public:1,reason:"benchmark create",
+  }),
+  "PUT /api/manage/events/:id/staff/:staffId": (k) => ({
+    staff_id:"bench-update",display_name:k === "limit" ? "S".repeat(80) : "Staff",
+    x_user_id:"bench_stf_update",permission_preset:"public_staff",is_public:1,reason:"benchmark update",
+  }),
+  "DELETE /api/manage/events/:id/staff/:staffId": () => ({reason:"benchmark delete"}),
+  "POST /api/admin/static-builds/backfill": () => ({kind:"event_crew",mode:"restart",cursor:""}),
+  "POST /api/admin/static-builds/queue/:queueId/retry": () => undefined,
+  "POST /api/admin/static-builds/retry-failed": () => undefined,
+  "POST /api/admin/static-builds/rebuild": (k) => ({
+    target_type:"event",target_id:"bench-evt",reason:k === "limit" ? "r".repeat(500) : "benchmark rebuild",
+  }),
+  "POST /api/admin/static-builds/shared-inputs/rebuild": () => undefined,
+  "POST /api/admin/visibility-repair": (k,i,t) => ({
+    entity_type:"event",entity_id:"bench-evt",fence_token:"bench-fence-" + t + "-" + i,
+  }),
+  "POST /api/admin/youtube-sync/videos/:videoId/resync": () => undefined,
   "POST /api/xid/requests": (kind, i, tag) => {
     const unique = `bn${String(tag).replace(/[^a-z0-9]/gi, "").slice(-6)}${i.toString(36)}`;
     return { x_id: kind === "limit" ? unique.padEnd(20, "x").slice(0, 20) : unique, request_type: "link" };
@@ -718,7 +806,7 @@ export function buildRouteScenarios() {
       if (writes || ((access !== "p" || opts.session) && kind !== "invalid")) headers.cookie = ADMIN_COOKIE;
       let body;
       if (writes) {
-        headers.origin = SITE_URL;
+        headers.origin = kind === "invalid" && opts.invalidOrigin ? "https://evil.invalid" : SITE_URL;
         headers["content-type"] = "application/json";
         if (kind === "invalid") body = "{}";
         else { const b = WRITE_BODIES[key]?.(kind, i, tag); body = b === undefined ? undefined : json(b); }
@@ -738,6 +826,18 @@ export function buildRouteScenarios() {
 // Statuses a healthy run must return, pinned from an in-process probe of the main-branch app on the shared
 // fixture (MIG-0639). A different status means the fixture or the route changed and the CPU number is void.
 const ROUTE_EXPECT = {
+  "POST /api/manage/events/:id/owner-transfer": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/manage/events/:id/staff/csv": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/manage/events/:id/staff": {normal:[200],limit:[200],invalid:[400]},
+  "PUT /api/manage/events/:id/staff/:staffId": {normal:[200],limit:[200],invalid:[400]},
+  "DELETE /api/manage/events/:id/staff/:staffId": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/static-builds/backfill": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/static-builds/queue/:queueId/retry": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/static-builds/retry-failed": {normal:[200],limit:[200],invalid:[403]},
+  "POST /api/admin/static-builds/rebuild": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/static-builds/shared-inputs/rebuild": {normal:[200],limit:[200],invalid:[403]},
+  "POST /api/admin/visibility-repair": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/youtube-sync/videos/:videoId/resync": {normal:[200],limit:[200],invalid:[400]},
   "POST /api/xid/requests": { normal: [200], limit: [200], invalid: [400] },
   "POST /api/xid/requests/:id/cancel": { normal: [200], limit: [200], invalid: [404] },
   "POST /api/xid/merge-revert-requests": { normal: [200], limit: [200], invalid: [400] },
