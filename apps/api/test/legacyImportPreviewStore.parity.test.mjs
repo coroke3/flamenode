@@ -87,6 +87,32 @@ test("RH-002 shared R2 preview: create v4 and owner-bound claim with CAS, then r
   assert.equal(reclaimed.attempt, 2);
 });
 
+test("RH-002 shared R2 preview: missing or under-reported object size cannot bypass 512 KiB JSON cap", async () => {
+  for (const reportedSize of [undefined, 64]) {
+    const { bucket, records, calls } = bucketFixture();
+    const credential = await createLegacyImportPreview(bucket, previewInput(), {
+      now: 1700000000, previewToken: TOKEN,
+    });
+    const [key, stored] = [...records.entries()][0];
+    const oversized = stored.data + " ".repeat(512 * 1024);
+    records.set(key, { ...stored, data: oversized });
+    const actualGet = bucket.get;
+    bucket.get = async (lookup) => {
+      const object = await actualGet(lookup);
+      return object && { ...object, size: reportedSize };
+    };
+    await assert.rejects(
+      claimLegacyImportPreview(bucket, {
+        authUserId: "owner-a", previewToken: TOKEN, planHash: credential.planHash,
+      }, { now: 1700000001, claimId: CLAIM }),
+      (error) => error instanceof LegacyImportPreviewError && error.code === "plan_too_large",
+    );
+    assert.equal(calls.filter(([method]) => method === "put").length, 1,
+      "oversized JSON must fail before claim CAS");
+    assert.equal(JSON.parse(records.get(key).data).status, "ready");
+  }
+});
+
 test("RH-002 shared R2 preview: wrong owner cannot claim another owner's token", async () => {
   const { bucket, records } = bucketFixture();
   const input = previewInput();
