@@ -104,7 +104,7 @@ test("SA-084 no-op permission intent retains only snapshot CAS and schedules no 
   assert.equal(out.statements.length, 1);
   assert.equal(c.queries.length, 1);
   assert.match(c.queries[0].sql, /SELECT CASE/);
-  assert.doesNotMatch(c.queries[0].sql, /(?:INSERT|UPDATE|DELETE)\\s+(?:INTO\\s+|FROM\\s+)?(?:video_members|x_users)/i);
+  assert.doesNotMatch(c.queries[0].sql, /INSERT INTO|UPDATE video_members|DELETE FROM/i);
 });
 
 test("SA-084 new pending X profile requires exact DML row-change assertion", () => {
