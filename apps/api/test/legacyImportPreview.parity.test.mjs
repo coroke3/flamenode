@@ -44,7 +44,7 @@ test("RH-002 U02 preview: malformed decisions fail with CURRENT 400 before norma
 });
 
 test("RH-002 U02 preview: invalid normalized rows return CURRENT bounded 422 report", async () => {
-  const { formData, files } = await makePreview({ content: "id,title\n,\n" });
+  const { formData, files } = await makePreview({ decisions: '[{"source_key":"title","action":"custom_question","question_label":"Title"}]' });
   const result = prepareLegacyImportPreview({ formData, files, now: 1700000000 });
   assert.equal(result.ok, false);
   assert.equal(result.status, 422);
