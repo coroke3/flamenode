@@ -98,3 +98,43 @@ test("SA-082..084 notification links: distinct approved auth links are not silen
     sqlite.close();
   }
 });
+
+test("SA-082..084 notification links: hostile X IDs are bound data and never widen recipients", async () => {
+  const { sqlite, db, reads } = makeDb();
+  try {
+    sqlite.exec(`
+      INSERT INTO "user" VALUES ('allowed', 1), ('private', 0);
+      INSERT INTO x_users VALUES ('safe', 'approved'), ('hidden', 'approved');
+      INSERT INTO x_user_account_links VALUES ('safe', 'allowed'), ('hidden', 'private');
+    `);
+    const hostile = "safe') OR 1=1 --";
+    const rows = await loadNotifiableRecipientLinks(db, [
+      hostile, "missing", "HIDDEN", "SAFE", "safe",
+    ]);
+    assert.deepEqual(rows, [{ x_user_id: "safe", auth_user_id: "allowed" }]);
+    assert.equal(reads.length, 1, "a single parameterized D1 query must be used");
+    assert.doesNotMatch(reads[0], /safe'\) OR 1=1/i, "hostile identifier must not enter SQL text");
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("SA-082..084 notification links: all invalid or disabled recipients return empty", async () => {
+  const { sqlite, db, reads } = makeDb();
+  try {
+    sqlite.exec(`
+      INSERT INTO "user" VALUES ('optout', 0), ('unknown', NULL);
+      INSERT INTO x_users VALUES ('rejected', 'rejected'), ('optout', 'approved'),
+        ('unknown', 'approved');
+      INSERT INTO x_user_account_links VALUES ('rejected', 'optout'),
+        ('optout', 'optout'), ('unknown', 'unknown');
+    `);
+    assert.deepEqual(
+      await loadNotifiableRecipientLinks(db, ["rejected", "optout", "unknown", "unlinked"]),
+      [],
+    );
+    assert.equal(reads.length, 1);
+  } finally {
+    sqlite.close();
+  }
+});
