@@ -114,7 +114,8 @@
     "./video/permissionProfiles": "./src/video/permissionProfiles.ts",
     "./video/permissionMembersRead": "./src/video/permissionMembersRead.ts",
     "./video/permissionPlan": "./src/video/permissionPlan.ts",
-    "./video/permissionRebuildTargets": "./src/video/permissionRebuildTargets.ts"
+    "./video/permissionRebuildTargets": "./src/video/permissionRebuildTargets.ts",
+    "./video/permissionNotificationInputs": "./src/video/permissionNotificationInputs.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
