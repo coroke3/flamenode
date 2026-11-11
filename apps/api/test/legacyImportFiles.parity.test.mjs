@@ -101,3 +101,24 @@ test("RH-002 U02 preview: at most 250 rows is aggregate across files", async () 
   assert.equal(rejected.status, 413);
   assert.equal(rejected.body.file_ranges.length, 2);
 });
+
+test("RH-002 U02 preview: real shared CSV parser and range are used by default", async () => {
+  const formData = new FormData();
+  formData.set("range_start_0", "2");
+  formData.set("range_end_0", "3");
+  const files = [{
+    name: "legacy.csv",
+    size: 40,
+    text: async () => "id,title\n1,one\n2,two\n3,three\n4,four\n",
+  }];
+  const result = await readLegacyImportPreviewFiles({ formData, files });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.parsed, [{
+    name: "legacy.csv", rows: [
+      { id: "2", title: "two" },
+      { id: "3", title: "three" },
+    ], rowOffset: 1,
+  }]);
+  assert.equal(result.sourceRowCount, 4);
+  assert.equal(result.rowCount, 2);
+});
