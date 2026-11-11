@@ -290,7 +290,7 @@ export async function upsertVideoCollaborator(
       return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
     }
 
-    const resolved = await resolveSubjectXUserId(
+    const resolved = await resolvePermissionSubjectXUserId(
       db,
       parsed.data.x_user_id || null,
       parsed.data.user_id?.trim() || null,
