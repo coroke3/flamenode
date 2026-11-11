@@ -1,5 +1,6 @@
 import type { videoMembers, xUsers } from "@flamenode/db/schema";
 import { MAX_VIDEO_HIDDEN_EDITORS } from "@flamenode/domain/video/atomicLimits";
+import type { WriteAuditLogInput } from "../audit/types.ts";
 import { compareSqliteBinaryText, toVideoMemberSnapshotRow } from "./memberSetSnapshot.ts";
 
 /**
@@ -215,4 +216,51 @@ export function buildPermissionMemberAuditSnapshots(
     before: snapshot(existingRows),
     after: snapshot([...afterById.values()]),
   };
+}
+
+/**
+ * The two strict audit entries produced by CURRENT SA-082..084, in original
+ * order: optional newly-pending X profiles followed by permission members.
+ * The caller must enqueue these with the complete atomic D1 mutation batch.
+ */
+export function buildPermissionWriteAudits(input: {
+  videoId: string;
+  actorUserId: string;
+  privilegeMode: string;
+  existingRows: readonly VideoMemberRow[];
+  plan: ReturnType<typeof planVideoPermissionChanges>;
+}): WriteAuditLogInput[] {
+  const { videoId, actorUserId, privilegeMode, existingRows, plan } = input;
+  const audits: WriteAuditLogInput[] = [];
+  if (plan.newXUsers.length > 0) {
+    audits.push({
+      table_name: "x_users_permission_batch",
+      target_id: videoId,
+      operation: "MERGE",
+      before: null,
+      after: { id: videoId, rows: plan.newXUsers },
+      actor_user_id: actorUserId,
+      context: "video_collab_permissions",
+      reason: `共同編集者X IDをpending一括確保 privilege:${privilegeMode}`,
+      retention_class: "long_audit",
+      restore_strategy: "none",
+      strict: true,
+    });
+  }
+
+  const permissionSnapshots = buildPermissionMemberAuditSnapshots(videoId, existingRows, plan);
+  audits.push({
+    table_name: "video_member_permissions_batch",
+    target_id: videoId,
+    operation: "MERGE",
+    before: permissionSnapshots.before,
+    after: permissionSnapshots.after,
+    actor_user_id: actorUserId,
+    context: "video_collab_permissions",
+    reason: `共同編集権限を一括更新 privilege:${privilegeMode}`,
+    retention_class: "long_audit",
+    restore_strategy: "none",
+    strict: true,
+  });
+  return audits;
 }
