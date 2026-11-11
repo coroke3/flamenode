@@ -13,8 +13,14 @@ function harness({ completed = false, stage = "events" } = {}) {
     parseLegacyImportText("events.csv", "eventid,eventname\nevent-a,Event A\n"),
   ], { eventVisibility: "private", videoVisibility: "private", now: 1700000000 });
   assert.equal(plan.errors.length, 0);
-  const progress = { stage, index: 0 };
-  const next = { stage: "events", index: 1 };
+  const counts = {
+    createdEvents: 0, replacedEvents: 0, skippedEvents: 0,
+    createdVideos: 0, replacedVideos: 0, skippedVideos: 0,
+    createdXUsers: 0, createdAuthUsers: 0, createdSoftwares: 0,
+    createdCustomQuestions: 0, reusedCustomQuestions: 0,
+  };
+  const progress = { stage, index: 0, counts: { ...counts } };
+  const next = { stage: "events", index: 1, counts: { ...counts, createdEvents: 1 } };
   const claim = {
     plan, strategy: "skip_existing", planHash: "hash", attempt: 3,
     completed, progress,
@@ -163,4 +169,25 @@ test("RH-002 U02 apply: a claimed oversized event step rejects before D1 and rel
   assert.equal(response.body.requires_repreview, true);
   assert.ok(Array.isArray(response.body.errors));
   assert.ok(response.body.errors.length > 0);
+});
+
+
+test("RH-002 U02 apply: real shared canonical result DTO is used when host omits a mock mapper", async () => {
+  const { args, calls } = harness();
+  delete args.resultFromProgress;
+  const response = await runLegacyImportApplyPipeline(args);
+  assert.deepEqual(calls, ["R2-claim", "D1", "R2-advance"]);
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.result.created, {
+    events: 1, videos: 0, xUsers: 0, authUsers: 0, softwares: 0,
+  });
+  assert.deepEqual(response.body.result.replaced, { events: 0, videos: 0 });
+  assert.deepEqual(response.body.result.skipped, { events: 0, videos: 0 });
+  assert.deepEqual(response.body.result.customQuestions, { created: 0, reused: 0 });
+  assert.equal(response.body.result.complete, false);
+});
+test("RH-002 U02 CURRENT apply result bridge points to canonical shared implementation", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const current = await readFile(new URL("../../../src/lib/import/legacy/apply.ts", import.meta.url), "utf8");
+  assert.match(current, /export \{ legacyApplyResultFromProgress \} from "@flamenode\/server-core\/legacyImport\/applyResult"/);
 });
