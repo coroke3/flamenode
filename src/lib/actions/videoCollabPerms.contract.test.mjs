@@ -63,6 +63,11 @@ const permissionNotificationBulkSqlSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionNotificationBulkSql.ts", import.meta.url),
   "utf8",
 );
+
+const notificationBatchSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionNotificationBatch.ts", import.meta.url),
+  "utf8",
+);
 const notificationEnqueueSource = await readFile(
   new URL("../notifications/enqueue.ts", import.meta.url),
   "utf8",
@@ -371,11 +376,12 @@ test("SA-082..084 video read is scoped in server-core before CURRENT authorizati
 });
 
 test("SA-082..084 notification bulk SQL is shared without weakening recipient/payload guards", () => {
-  assert.ok(notificationEnqueueSource.includes('buildPermissionNotificationBulkInsertSql(rows)'));
-  assert.ok(notificationEnqueueSource.includes('prepareNotification(input)'));
-  assert.ok(notificationEnqueueSource.includes('scopeBulkNotificationDedupeForTransition(prepared)'));
-  assert.ok(notificationEnqueueSource.includes('notification_bulk_batch_limit_exceeded'));
-  assert.ok(permissionNotificationBulkSqlSource.includes('FROM json_each('));
-  assert.ok(permissionNotificationBulkSqlSource.includes('INSERT OR IGNORE INTO notification_outbox'));
-  assert.ok(permissionNotificationBulkSqlSource.includes('rows.length > 200'));
+  assert.ok(notificationEnqueueSource.includes("preparePermissionNotificationBulkBatch(inputs, validateNotificationPayload)"));
+  assert.ok(notificationBatchSource.includes("buildPermissionNotificationBulkInsertSql(rows)"));
+  assert.ok(notificationBatchSource.includes("validatePayload(input.type, input.payload)"));
+  assert.ok(notificationBatchSource.includes(":transition:"));
+  assert.ok(notificationBatchSource.includes("notification_bulk_batch_limit_exceeded"));
+  assert.ok(permissionNotificationBulkSqlSource.includes("FROM json_each("));
+  assert.ok(permissionNotificationBulkSqlSource.includes("INSERT OR IGNORE INTO notification_outbox"));
+  assert.ok(permissionNotificationBulkSqlSource.includes("rows.length > 200"));
 });
