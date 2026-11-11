@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planVideoPermissionChanges, evaluatePermissionPlanPreflight, buildPermissionMemberAuditSnapshots } from "../src/video/permissionPlan.ts";
+import { planVideoPermissionChanges, evaluatePermissionPlanPreflight, buildPermissionMemberAuditSnapshots, buildPermissionWriteAudits } from "../src/video/permissionPlan.ts";
 
 const member = (id, xid, publicMember, canEdit, extra = {}) => ({
   id, video_id: "v1", x_user_id: xid, name: id, role: null, comment: null,
@@ -197,4 +197,47 @@ test("MIG-0650 permission audit snapshot sorts UTF-8 IDs by SQLite BINARY bytes"
   });
   assert.deepEqual(snapshots.before.rows.map(row => row.id), ["Z", "a", "é", "あ"]);
   assert.deepEqual(snapshots.after, snapshots.before);
+});
+
+test("MIG-0650 write audits include pending-X and permission aggregates in CURRENT order", () => {
+  const planned = plan({ intents: [["alice", { displayName: "Alice", intent: "on" }]] });
+  const audits = buildPermissionWriteAudits({
+    videoId: "v1",
+    actorUserId: "actor",
+    privilegeMode: "event",
+    existingRows: [],
+    plan: planned,
+  });
+  assert.deepEqual(audits.map(audit => audit.table_name), [
+    "x_users_permission_batch", "video_member_permissions_batch",
+  ]);
+  assert.deepEqual(audits.map(audit => audit.operation), ["MERGE", "MERGE"]);
+  assert.deepEqual(audits.map(audit => audit.strict), [true, true]);
+  assert.deepEqual(audits.map(audit => audit.retention_class), ["long_audit", "long_audit"]);
+  assert.deepEqual(audits.map(audit => audit.restore_strategy), ["none", "none"]);
+  assert.equal(audits[0].before, null);
+  assert.deepEqual(audits[0].after, { id: "v1", rows: planned.newXUsers });
+  assert.equal(audits[0].reason, "共同編集者X IDをpending一括確保 privilege:event");
+  assert.equal(audits[1].reason, "共同編集権限を一括更新 privilege:event");
+  assert.deepEqual(audits[1].after, {
+    id: "v1", rows: planned.insertHiddenRows,
+  });
+  assert.deepEqual(audits.map(audit => audit.actor_user_id), ["actor", "actor"]);
+});
+
+test("MIG-0650 write audits omit pending-X aggregate if profiles already exist", () => {
+  const existing = member("public", "alice", 1, 0);
+  const planned = plan({
+    intents: [["alice", { displayName: "Alice", intent: "on" }]],
+    rowsByXid: new Map([["alice", [existing]]]),
+    profiles: ["alice"],
+  });
+  const audits = buildPermissionWriteAudits({
+    videoId: "v1", actorUserId: "actor", privilegeMode: "normal",
+    existingRows: [existing], plan: planned,
+  });
+  assert.deepEqual(audits.map(audit => audit.table_name), ["video_member_permissions_batch"]);
+  assert.deepEqual(audits[0].before.rows.map(row => row.can_edit), [0]);
+  assert.deepEqual(audits[0].after.rows.map(row => row.can_edit), [1]);
+  assert.equal(audits[0].reason, "共同編集権限を一括更新 privilege:normal");
 });
