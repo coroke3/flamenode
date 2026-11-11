@@ -10,6 +10,10 @@ const domainInputSource = await readFile(
   new URL("../../../packages/domain/src/video/collaboratorPermissionInput.ts", import.meta.url),
   "utf8",
 );
+const permissionMutationSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionMutationBatch.ts", import.meta.url),
+  "utf8",
+);
 const permissionPlanSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionPlan.ts", import.meta.url),
   "utf8",
@@ -26,10 +30,11 @@ const notificationSource = await readFile(
 test("100人permission batchは人数分のmutation/auditを生成しない", () => {
   assert.match(actionSource, /permissionBatchSchema/);
   assert.match(domainInputSource, /MAX_COLLABORATOR_PERMISSION_BATCH/);
-  assert.match(actionSource, /buildPermissionSetGuardSql/);
-  assert.match(actionSource, /buildMemberPermissionBulkUpdateSql/);
-  assert.match(actionSource, /buildVideoMemberBulkInsertSql\(insertHiddenRows/);
-  assert.match(actionSource, /buildHiddenMemberBulkDeleteSql/);
+  assert.match(actionSource, /buildPermissionMutationBatch\(db, \{/);
+  assert.match(permissionMutationSource, /buildPermissionSetGuardSql/);
+  assert.match(permissionMutationSource, /buildMemberPermissionBulkUpdateSql/);
+  assert.match(permissionMutationSource, /buildVideoMemberBulkInsertSql\(/);
+  assert.match(permissionMutationSource, /buildHiddenMemberBulkDeleteSql/);
   assert.match(actionSource, /buildPermissionWriteAudits\(\{/);
   assert.match(permissionPlanSource, /table_name: "video_member_permissions_batch"/);
   assert.doesNotMatch(
