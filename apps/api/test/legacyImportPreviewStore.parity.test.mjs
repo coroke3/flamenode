@@ -201,3 +201,46 @@ test("RH-002 Hono R2 adapter: preview store failure maps without leaking credent
   assert.equal(result.body.retryable, true);
   assert.equal(result.body.preview_token, undefined);
 });
+
+
+test("RH-002 Hono preview pipeline: real CSV and real R2 claim, injected read-only D1 preflight", async () => {
+  const { legacyImportR2Adapter } = await import("../src/routes/admin/legacyImportR2Adapter.ts");
+  const { runLegacyImportPreviewPipeline } =
+    await import("../src/routes/admin/legacyImportPreviewPipeline.ts");
+  const { bucket, calls } = bucketFixture();
+  const adapter = legacyImportR2Adapter(bucket);
+  const formData = new FormData();
+  formData.set("strategy", "create_only");
+  const response = await runLegacyImportPreviewPipeline({
+    formData,
+    files: [{
+      name: "events.csv",
+      size: 45,
+      text: async () => "eventid,eventname\nexample-event,Example\n",
+    }],
+    authUserId: "owner-a",
+    preflight: async (plan) => {
+      assert.equal(plan.events.length, 1);
+      assert.equal(plan.events[0].id, "example-event");
+      return { existingEventIds: [], existingVideoIds: [] };
+    },
+    createPreview: adapter.createPreview,
+    mapStoreError: adapter.mapStoreError,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.match(response.body.preview_token, /^[a-f0-9]{32}$/);
+  assert.match(response.body.plan_hash, /^[a-f0-9]{64}$/);
+  assert.equal(response.body.preview.events[0].id, "example-event");
+  const claim = await adapter.claimPreview({
+    authUserId: "owner-a",
+    previewToken: response.body.preview_token,
+    planHash: response.body.plan_hash,
+  });
+  assert.equal(claim.plan.events[0].id, "example-event");
+  assert.equal(claim.progress.stage, "system_user");
+  assert.equal(claim.attempt, 1);
+  await claim.release();
+  assert.ok(calls.filter(([method]) => method === "put").length >= 3,
+    "R2 create, claim and release must be separate conditional steps");
+});
