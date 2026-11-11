@@ -1,6 +1,5 @@
-// Pinned to CURRENT cpuBudget.ts's 250-row preview boundary.
-// The U02 parity test rejects a mismatch before the Hono route can mount.
-export const MAX_LEGACY_IMPORT_SELECTED_ROWS = 250;
+import { MAX_LEGACY_IMPORT_SELECTED_ROWS } from "./cpuBudget.ts";
+export { MAX_LEGACY_IMPORT_SELECTED_ROWS };
 import type { LegacyParsedFile } from "./parse.ts";
 
 export type LegacyImportFileRange = {
