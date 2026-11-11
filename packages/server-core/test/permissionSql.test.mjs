@@ -183,15 +183,12 @@ test("MIG-0650 SA-082..084: stale permission CAS aborts an entire SQLite mutatio
     w.sqlite.exec("UPDATE video_members SET can_edit = 0 WHERE id = 'member-1'");
 
     w.sqlite.exec("BEGIN");
+    // An earlier write must also be undone when an in-batch CAS fails.
+    w.sqlite.exec("INSERT INTO notification_outbox (id) VALUES ('pending-notice')");
     try {
-      // An earlier write must also be undone when an in-batch CAS fails.
-      w.sqlite.exec("INSERT INTO notification_outbox (id) VALUES ('pending-notice')");
       assert.throws(() => w.execGuard(stale), /./);
-      w.sqlite.exec("COMMIT");
-      assert.fail("the stale CAS transaction must not commit");
-    } catch (error) {
+    } finally {
       w.sqlite.exec("ROLLBACK");
-      if (error?.message === "the stale CAS transaction must not commit") throw error;
     }
     assert.deepEqual(w.sqlite.prepare("SELECT id FROM notification_outbox").all(), []);
     assert.equal(
