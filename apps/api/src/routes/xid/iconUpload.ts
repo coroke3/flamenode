@@ -19,6 +19,7 @@ import { buildAfterXUserPublicUpdateQueueBatch } from "@flamenode/server-core/st
 import { sql } from "@flamenode/server-core/sql";
 import type { AppEnv } from "../../env.ts";
 import { limitXIdActionBody } from "../../middleware/bodyLimit.ts";
+import { auditPreloaded } from "../admin/body.ts";
 import { validateIconImageUpload } from "./iconImage.ts";
 import { cleanupOldXIconAfterCommit } from "./orphanCleanup.ts";
 
@@ -121,6 +122,9 @@ export function createXIdIconUploadRoutes(guard: MiddlewareHandler<AppEnv>): Hon
           ...queue.statements,
         ],
         expectedMutationChanges: [1, ...queue.expectedChanges],
+        // The guarded user and settings are already read. Reuse the exact
+        // snapshots so audit does not repeat D1 settings/actor reads.
+        preloaded: auditPreloaded(c),
         audits: [{
           table_name: "x_users", target_id: before.id, operation: "UPDATE",
           before: { ...before }, after, actor_user_id: authUserId,
