@@ -18,6 +18,10 @@ const permissionPlanSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionPlan.ts", import.meta.url),
   "utf8",
 );
+const permissionPreparationSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionPreparation.ts", import.meta.url),
+  "utf8",
+);
 const budgetSource = await readFile(
   new URL("../../../packages/server-core/src/audit/mutateBudget.ts", import.meta.url),
   "utf8",
@@ -68,7 +72,8 @@ test("100人permission batchの通常最大経路はD1 Free 50-query budgetに�
   assert.ok(total <= 50);
   assert.match(budgetSource, /D1_MAX_BATCH_QUERIES = 50/);
   assert.match(budgetSource, /D1_RESERVED_CALLER_QUERIES = 18/);
-  assert.match(actionSource, /canonicalizePermissionIntents/);
+  assert.match(actionSource, /preparePermissionWrite/);
+  assert.match(permissionPreparationSource, /canonicalizePermissionIntents/);
   assert.doesNotMatch(actionSource, /Promise\.all\([^)]*resolveCanonicalXUserId/);
 });
 
