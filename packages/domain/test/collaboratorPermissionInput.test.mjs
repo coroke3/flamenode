@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { permissionBatchSchema, upsertSchema } from "../src/video/collaboratorPermissionInput.ts";
+import { permissionBatchSchema, upsertSchema, prepareCollaboratorPermissionIntents } from "../src/video/collaboratorPermissionInput.ts";
 
 const intent = (x_user_id = "@Alice") => ({ x_user_id, display_name: "Alice", intent: "on" });
 
@@ -28,4 +28,39 @@ test("MIG-0650 shared upsert preserves CURRENT can_edit / notify defaults", () =
   );
   assert.equal(upsertSchema.parse({ ...base, can_edit: "0", notify: "1", x_user_id: "@A" }).can_edit, false);
   assert.equal(upsertSchema.parse({ ...base, x_user_id: "@A" }).x_user_id, "a");
+});
+
+test("MIG-0650 shared canonical intent preparation rejects alias-collapsed duplicates", () => {
+  const result = prepareCollaboratorPermissionIntents([
+    { x_user_id: "Alice", display_name: "Original", intent: "on" },
+    { x_user_id: "@ALICE", display_name: "Shadow", intent: "off" },
+    { x_user_id: "bob", display_name: "Bob", intent: "on" },
+    { x_user_id: "BOB", display_name: "Duplicate", intent: "off" },
+  ]);
+  assert.deepEqual(result, {
+    ok: false,
+    message: "同じ X ID の権限指定が重複しています: @alice、@bob",
+  });
+});
+
+test("MIG-0650 shared canonical intent preparation preserves ordering and display fallback", () => {
+  const result = prepareCollaboratorPermissionIntents([
+    { x_user_id: " @ALICE ", display_name: "  ", intent: "on" },
+    { x_user_id: "BoB", display_name: " Bob ", intent: "off" },
+  ]);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual([...result.intents], [
+    ["alice", { displayName: "@alice", intent: "on" }],
+    ["bob", { displayName: "Bob", intent: "off" }],
+  ]);
+});
+
+test("MIG-0650 shared canonical intent preparation rejects invalid resolved IDs and supports empty", () => {
+  assert.deepEqual(prepareCollaboratorPermissionIntents([
+    { x_user_id: "../admin", display_name: "Admin", intent: "on" },
+  ]), { ok: false, message: "有効な X ID を指定してください。" });
+  const result = prepareCollaboratorPermissionIntents([]);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.intents.size, 0);
 });
