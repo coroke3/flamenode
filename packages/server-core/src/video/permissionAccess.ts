@@ -33,7 +33,9 @@ export async function loadAuthorizedPermissionVideo(
   const row = await loadPermissionVideoRow(db, videoId);
   if (!row) return null;
   const video = { ...row, submitted_by_user_id: row.submitted_by_user_id ?? "" };
-  const accessContext = await resolveVideoEditAccessContext({ db, user: actor, video });
+  const accessContext = await resolveVideoEditAccessContext({
+    db, user: actor, video, skipOwnerEditableFields: true,
+  });
 
   const requested = privilegeModeRaw.trim();
   const resolveMode = async (
