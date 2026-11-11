@@ -15,6 +15,11 @@ const permissionRecipientsSource = await readFile(
   "utf8",
 );
 
+const permissionProfilesSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionProfiles.ts", import.meta.url),
+  "utf8",
+);
+
 function actionBody(name) {
   const match = source.match(
     new RegExp(`export async function ${name}[\\s\\S]*?\\n}`),
@@ -126,7 +131,8 @@ test("aliasと現行IDが同じ正本へ収束した重複intentは共通domain�
 test("permission mutationはJSON1で対象member\/X userを一括取得する", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
   assert.match(body, /json_each\(\$\{xidsPayload\}\)/);
-  assert.match(body, /json_each\(\$\{JSON\.stringify\(grantXids\)\}\)/);
+  assert.match(body, /loadPermissionGrantProfiles\(db, grantXids\)/);
+  assert.match(permissionProfilesSource, /json_each\(\$\{JSON\.stringify\(grantXids\)\}\)/);
   assert.doesNotMatch(source, /PERMISSION_BATCH_IN_CLAUSE_SIZE/);
   assert.doesNotMatch(source, /chunkXIds/);
 });
@@ -208,7 +214,7 @@ test("対象member readが上限に達した場合は重複データを黙って
 
 test("拒否済みX IDへ編集権限を再付与しない", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
-  assert.match(body, /approval_status: xUsers\.approval_status/);
+  assert.match(permissionProfilesSource, /approval_status: xUsers\.approval_status/);
   assert.match(body, /row\.approval_status === "rejected"/);
   assert.match(body, /拒否済みの X ID には編集権限を付与できません/);
 });
