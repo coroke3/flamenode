@@ -110,7 +110,8 @@
     "./legacyImport/parse": "./src/legacyImport/parse.ts",
     "./legacyImport/range": "./src/legacyImport/range.ts",
     "./legacyImport/normalize": "./src/legacyImport/normalize.ts",
-    "./legacyImport/cpuBudget": "./src/legacyImport/cpuBudget.ts"
+    "./legacyImport/cpuBudget": "./src/legacyImport/cpuBudget.ts",
+    "./legacyImport/previewEstimate": "./src/legacyImport/previewEstimate.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
