@@ -93,11 +93,11 @@ test("permission inputは最大100件かつcanonical X handle形式だけ許可�
     new URL("../../../packages/domain/src/video/collaboratorPermissionInput.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /from "@flamenode\\/domain\\/video"/);
-  assert.match(inputSource, /\\.max\\(MAX_COLLABORATOR_PERMISSION_BATCH\\)/);
+  assert.match(source, /from "@flamenode\/domain\/video"/);
+  assert.match(inputSource, /\.max\(MAX_COLLABORATOR_PERMISSION_BATCH\)/);
   assert.match(inputSource, /isCanonicalXId/);
   assert.match(inputSource, /英数字とアンダースコア20文字以内/);
-  assert.match(inputSource, /z\\.enum\\(\\["normal", "admin", "event"\\]\\)/);
+  assert.match(inputSource, /z\.enum\(\["normal", "admin", "event"\]\)/);
 });
 
 test("bulk intentは共通のfail-closed resolverで現行X IDへ解決する", () => {
