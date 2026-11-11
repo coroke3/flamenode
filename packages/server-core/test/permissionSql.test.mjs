@@ -225,3 +225,40 @@ test("MIG-0650 SA-082..084: exact permission CAS permits the matched SQLite writ
     w.sqlite.close();
   }
 });
+
+test("MIG-0650 rejected X profile race rolls back preceding writes in one strict transaction", () => {
+  const w = world();
+  try {
+    w.sqlite.exec(`CREATE TABLE x_users (
+      id TEXT PRIMARY KEY, x_name TEXT, icon_url TEXT, profile_text TEXT,
+      portfolio_contact TEXT, youtube_channel_url TEXT, other_social_links TEXT,
+      creative_start_date TEXT, approval_status TEXT
+    )`);
+    w.sqlite.exec("CREATE TABLE notification_outbox (id TEXT PRIMARY KEY)");
+    // The preflight observed no profile, but a competing writer rejected it.
+    w.sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)")
+      .run("raced", "Rejected", "rejected");
+    const query = dialect.sqlToQuery(buildXUsersBulkInsertSql([
+      { id: "raced", x_name: "Pending", approval_status: "pending" },
+    ]));
+    w.sqlite.exec("BEGIN");
+    try {
+      w.sqlite.exec("INSERT INTO notification_outbox (id) VALUES ('queued')");
+      const result = w.sqlite.prepare(query.sql).run(...query.params);
+      // Same exact expectedChanges=1 gate as the permission mutation batch.
+      if (result.changes !== 1) throw new Error("strict expectedChanges mismatch");
+      w.sqlite.exec("COMMIT");
+      assert.fail("rejected identity must abort the strict mutation");
+    } catch (error) {
+      w.sqlite.exec("ROLLBACK");
+      assert.match(String(error), /strict expectedChanges mismatch/);
+    }
+    assert.deepEqual(w.sqlite.prepare("SELECT id FROM notification_outbox").all(), []);
+    assert.deepEqual(
+      { ...w.sqlite.prepare("SELECT x_name, approval_status FROM x_users WHERE id = ?").get("raced") },
+      { x_name: "Rejected", approval_status: "rejected" },
+    );
+  } finally {
+    w.sqlite.close();
+  }
+});
