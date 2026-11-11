@@ -8,7 +8,6 @@ import { compareSqliteBinaryText } from "./memberSetSnapshot.ts";
  * enforce the same atomic D1 CAS, change counts, audit, outbox and Queue batch.
  */
 type VideoMemberRow = typeof videoMembers.$inferSelect;
-type XUserInsert = typeof xUsers.$inferInsert;
 type Intent = { displayName: string; intent: "on" | "off" };
 
 export function planVideoPermissionChanges(input: {
@@ -138,7 +137,6 @@ export function planVideoPermissionChanges(input: {
     if (hadEffectiveEdit) revokedNames.push(label);
     else unchanged += 1;
   }
-
 
   return {
     updateRows, insertHiddenRows, deleteHiddenIds, newXUsers,
