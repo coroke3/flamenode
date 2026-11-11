@@ -80,14 +80,18 @@ test("RH-002 CURRENT: budget errors are capped at 100", () => {
 });
 
 
-test("RH-002 CURRENT: selected range exactly 250 rows is accepted, 251 rejected", () => {
+test("RH-002 CURRENT: range selection is inclusive; chunk suggestions cap at 250", () => {
   const rows = Array.from({ length: 251 }, (_, i) => ({ id: i + 1 }));
   const file = { name: "boundary.csv", rows, rowOffset: 0 };
   const allowed = selectLegacyParsedFileRange(file, { start: "2", end: "251" });
   assert.equal(allowed.file.rows.length, MAX_LEGACY_IMPORT_SELECTED_ROWS);
   assert.equal(allowed.file.rows[0].id, 2);
   assert.equal(allowed.file.rows.at(-1).id, 251);
-  assert.throws(() => selectLegacyParsedFileRange(file, { start: "1", end: "251" }), /250|上限|件/);
+  const all = selectLegacyParsedFileRange(file, { start: "1", end: "251" });
+  assert.equal(all.range.selectedRows, 251, "per-file range selector does not itself enforce aggregate 250-row cap");
+  assert.deepEqual(suggestLegacyImportRowRanges(all.range.selectedRows), [
+    { startRow: 1, endRow: 250 }, { startRow: 251, endRow: 251 },
+  ]);
 });
 
 test("RH-002 CURRENT: JSON byte limit is inclusive and counts UTF-8, not JS string length", () => {
