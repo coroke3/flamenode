@@ -503,9 +503,9 @@ const benchStaffSetup = (kind, i, tag, action) => {
     // The canonical bulk mutation invariant requires at least one operable owner.
     // Seed a distinct, approved and linked owner; the CSV subject is NOT the actor.
     ...(action === "csv" ? [
-      benchStaffX("bench_from"),
-      { sql:"INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bench_from','bench-admin','owner')",params:[] },
-      benchStaff("bench-csv-owner","bench_from","owner"),
+      benchStaffX("bst_csv_owner"),
+      { sql:"INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bst_csv_owner','bench-admin','owner')",params:[] },
+      benchStaff("bench-csv-owner","bst_csv_owner","owner"),
     ] : []),
     ...(action === "create" || action === "csv" ? [{
       sql: "DELETE FROM event_staff WHERE event_id = 'bench-evt' AND x_user_id = ?", params:[x],
@@ -531,10 +531,13 @@ const benchVisibilitySetup = (kind,i,tag) => [{
   params:["bench-fence-" + tag + "-" + i],
 }];
 const benchYoutubeId = (kind,i,tag) => kind === "limit" ? "v".repeat(128) : "bench-vid";
-const benchYoutubeSetup = (kind,i,tag) => kind === "limit" ? [{
-  sql:"INSERT OR REPLACE INTO videos (id,submitted_by_user_id,creator_display_name,title,visibility_status,updated_at) VALUES (?,'bench-admin','Bench','Benchmark','public',1000)",
-  params:[benchYoutubeId(kind,i,tag)],
-}] : [];
+const benchYoutubeSetup = (kind,i,tag) => [
+  ...(kind === "limit" ? [{
+    sql:"INSERT OR REPLACE INTO videos (id,submitted_by_user_id,creator_display_name,title,visibility_status,updated_at) VALUES (?,'bench-admin','Bench','Benchmark','public',1000)",
+    params:[benchYoutubeId(kind,i,tag)],
+  }] : []),
+  { sql:"DELETE FROM video_youtube_metadata WHERE video_id = ?",params:[benchYoutubeId(kind,i,tag)] },
+];
 
 export const ROUTE_INVENTORY = [
   // [id, method, path, access, options]
@@ -636,8 +639,8 @@ export const ROUTE_INVENTORY = [
   ["SA-069", "POST", "/api/admin/static-builds/backfill", "w"],
   ["SA-070", "POST", "/api/admin/static-builds/queue/:queueId/retry", "w", { params:(k,i,t) => ({queueId:k === "invalid" ? "x".repeat(129) : benchQueueId(i,t)}),setup:benchQueueSetup }],
   ["SA-073", "POST", "/api/admin/static-builds/retry-failed", "w", { setup:benchQueueSetup, invalidOrigin:true }],
-  ["SA-071", "POST", "/api/admin/static-builds/rebuild", "w"],
-  ["SA-072", "POST", "/api/admin/static-builds/shared-inputs/rebuild", "w", { invalidOrigin:true }],
+  ["SA-071", "POST", "/api/admin/static-builds/rebuild", "w", { setup: () => [{ sql:"DELETE FROM static_rebuild_queue WHERE target_type = 'event' AND target_id = 'bench-evt'",params:[] }] }],
+  ["SA-072", "POST", "/api/admin/static-builds/shared-inputs/rebuild", "w", { invalidOrigin:true, setup:() => [{ sql:"DELETE FROM static_rebuild_queue WHERE target_type IN ('youtube_related_blocklist','random_video_pool') AND target_id = 'global'",params:[] }] }],
   ["SA-050", "POST", "/api/admin/visibility-repair", "w", { setup:benchVisibilitySetup }],
   ["SA-106", "POST", "/api/admin/youtube-sync/videos/:videoId/resync", "w", { params:(k,i,t) => ({videoId:k === "invalid" ? "x".repeat(129) : benchYoutubeId(k,i,t)}),setup:benchYoutubeSetup }],
   ["HONO-ADM-01", "GET", "/api/admin/event-templates", "a"],
