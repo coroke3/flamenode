@@ -26,6 +26,10 @@ const budgetSource = await readFile(
   new URL("../../../packages/server-core/src/audit/mutateBudget.ts", import.meta.url),
   "utf8",
 );
+const notificationSqlSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionNotificationBulkSql.ts", import.meta.url),
+  "utf8",
+);
 const notificationSource = await readFile(
   new URL("../notifications/enqueue.ts", import.meta.url),
   "utf8",
@@ -79,8 +83,9 @@ test("100人permission batchの通常最大経路はD1 Free 50-query budgetに�
 
 test("100人通知はJSON1 bindの1 statementへまとめ、必要時だけ200件単位でchunkする", () => {
   assert.match(notificationSource, /buildKnownRecipientNotificationBulkBatch/);
-  assert.match(notificationSource, /INSERT OR IGNORE INTO notification_outbox/);
-  assert.match(notificationSource, /FROM json_each\(\$\{payload\}\)/);
+  assert.match(notificationSource, /buildPermissionNotificationBulkInsertSql\\(rows\\)/);
+  assert.match(notificationSqlSource, /INSERT OR IGNORE INTO notification_outbox/);
+  assert.match(notificationSqlSource, /FROM json_each\(\$\{payload\}\)/);
   assert.match(notificationSource, /notification_bulk_batch_limit_exceeded/);
   assert.match(actionSource, /offset \+= 200/);
   assert.match(actionSource, /notificationInputs\.slice\(offset, offset \+ 200\)/);
