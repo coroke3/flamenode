@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
+import { readAdminVideoCollabFlag } from "@flamenode/domain/video";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
@@ -24,12 +25,6 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusAction";
 import { publicVideoRevalidationPaths } from "@/lib/video/publicVideoRevalidationPaths";
-
-function formDataBoolean(formData: FormData, name: string): boolean {
-  return formData
-    .getAll(name)
-    .some((value) => value === "on" || value === "true");
-}
 
 function revalidateVideoMembersAdminPaths(input: {
   videoId: string;
@@ -96,7 +91,7 @@ export async function updateVideoMembersAdmin(
   );
   if (!rebuildEvents.ok) return { ok: false, message: rebuildEvents.message };
 
-  const isCollab = formDataBoolean(formData, "is_collab");
+  const isCollab = readAdminVideoCollabFlag(formData);
   const memberValidation = validateVideoMemberSubmission(formData, isCollab);
   if (!memberValidation.ok) return memberValidation;
 
