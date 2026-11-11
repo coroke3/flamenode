@@ -82,9 +82,14 @@ test("SA-082 normal owner requires approved linked creator X; role alone is neve
       INSERT INTO x_users VALUES ('alice', 'approved');
       INSERT INTO x_user_account_links VALUES ('u1', 'alice');
     `);
+    const queryOffset = f.queries.length;
     assert.equal(
       (await loadAuthorizedPermissionVideo(f.db, actor, "v1", "normal"))?.privilegeMode,
       "normal",
+    );
+    assert.ok(
+      f.queries.slice(queryOffset).every(query => !/system_settings/i.test(query)),
+      "video.permissions authorization must not read irrelevant general editable fields",
     );
     f.sqlite.exec("UPDATE x_users SET approval_status='rejected' WHERE id='alice'");
     assert.equal(await loadAuthorizedPermissionVideo(f.db, actor, "v1", "normal"), null);
