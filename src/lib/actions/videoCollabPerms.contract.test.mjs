@@ -30,6 +30,11 @@ const permissionPlanSource = await readFile(
   "utf8",
 );
 
+const permissionRebuildSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionRebuildTargets.ts", import.meta.url),
+  "utf8",
+);
+
 function actionBody(name) {
   const match = source.match(
     new RegExp(`export async function ${name}[\\s\\S]*?\\n}`),
@@ -275,7 +280,9 @@ test("batch監査は1人1auditでなく集合snapshotにまとめる", () => {
 test("member_suggestions dirty登録は本体mutationと同じatomic writeへ含まれる", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
   assert.match(body, /buildStaticRebuildQueueBatch\(db, \[/);
-  assert.match(body, /memberSuggestionsTarget\("video_permissions_batch"\)/);
+  assert.match(body, /permissionRebuildTargets\(\{/);
+  assert.match(permissionRebuildSource, /memberSuggestionsTarget\("video_permissions_batch"\)/);
+  assert.match(permissionRebuildSource, /visibilityStatus === "public"/);
   assert.match(body, /statements\.push\(\.\.\.queue\.statements\)/);
   assert.match(body, /staticRebuildWakeSource/);
 });
