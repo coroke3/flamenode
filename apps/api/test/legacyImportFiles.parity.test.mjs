@@ -47,9 +47,9 @@ test("RH-002 U02 preview: reject oversized file envelope without reading any fil
   const many = harness({ sizes: Array(21).fill(0) });
   assert.equal((await readLegacyImportPreviewFiles(many)).status, 400);
   assert.deepEqual(many.calls, []);
-  const aggregate = harness({ sizes: [2 * 1024 * 1024, 2 * 1024 * 1024, 1] });
+  const aggregate = harness({ sizes: [2 * 1024 * 1024, 2 * 1024 * 1024, 1], rowsPerFile: [1, 1, 1] });
   assert.match((await readLegacyImportPreviewFiles(aggregate)).body.message, /合計は4MB/);
-  assert.deepEqual(aggregate.calls, []);
+  assert.deepEqual(aggregate.calls, ["read:0", "read:1"], "CURRENT reads earlier valid files before later aggregate overflow");
 });
 
 test("RH-002 U02 preview: preserve original row numbering, filename index and totals", async () => {
@@ -121,4 +121,14 @@ test("RH-002 U02 preview: real shared CSV parser and range are used by default",
   }]);
   assert.equal(result.sourceRowCount, 4);
   assert.equal(result.rowCount, 2);
+});
+
+
+test("RH-002 U02 preview: earlier malformed content precedes later oversized-file rejection", async () => {
+  const h = harness({ sizes: [1, 2 * 1024 * 1024 + 1], rowsPerFile: [1, 1],
+    range: { range_start_0: "2" } });
+  const result = await readLegacyImportPreviewFiles(h);
+  assert.equal(result.ok, false);
+  assert.match(result.body.message, /開始位置/);
+  assert.deepEqual(h.calls, ["read:0"], "CURRENT must not inspect later file until earlier parse completes");
 });
