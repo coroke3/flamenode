@@ -42,7 +42,7 @@ test("CURRENT actionはserver-coreの権限SQLと通知先取得を唯一の実�
     "buildHiddenMemberBulkDeleteSql",
     "loadNotifiableRecipientLinks",
   ]) {
-    assert.doesNotMatch(source, new RegExp(`(?:async )?function ${name}\s*\(`),
+    assert.doesNotMatch(source, new RegExp(`(?:async )?function ${name}\\s*\\(`),
       `${name} のローカル重複実装は禁止`);
   }
 });
