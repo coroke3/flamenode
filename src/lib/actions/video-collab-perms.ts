@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
 import { loadPermissionGrantProfiles } from "@flamenode/server-core/video/permissionProfiles";
+import { loadPermissionMembersRead } from "@flamenode/server-core/video/permissionMembersRead";
 import {
   buildPermissionSetGuardSql,
   buildHiddenEditorCountGuardSql,
@@ -30,7 +31,6 @@ import {
 } from "@/lib/db/schema";
 import {
   MAX_VIDEO_HIDDEN_EDITORS,
-  MAX_VIDEO_MEMBERS,
 } from "@/lib/video/atomicLimits";
 import {
   buildVideoMemberBulkInsertSql,
@@ -294,55 +294,9 @@ async function applyPermissionIntentsToVideo(
     };
   }
 
-  const xidsPayload = JSON.stringify(xids);
-  const existingRowLimit = MAX_VIDEO_MEMBERS + MAX_VIDEO_HIDDEN_EDITORS + 1;
-  const existingRows = await db
-    .select()
-    .from(videoMembers)
-    .where(
-      and(
-        eq(videoMembers.video_id, video.id),
-        isNotNull(videoMembers.x_user_id),
-        sql`lower(${videoMembers.x_user_id}) IN (
-          SELECT lower(CAST(value AS TEXT)) FROM json_each(${xidsPayload})
-        )`,
-      )!,
-    )
-    .limit(existingRowLimit);
-  if (existingRows.length >= existingRowLimit) {
-    return {
-      ok: false,
-      message: "同じ X ID の権限行が多すぎるため、安全に更新できません。重複データを整理してください。",
-    };
-  }
-
-  const rowsByXid = new Map<string, VideoMemberRow[]>();
-  for (const row of existingRows) {
-    const key = normalizeXId(row.x_user_id ?? "");
-    if (!key) continue;
-    const current = rowsByXid.get(key) ?? [];
-    current.push(row);
-    rowsByXid.set(key, current);
-  }
-  for (const rows of rowsByXid.values()) {
-    rows.sort(
-      (left, right) =>
-        right.is_public_member - left.is_public_member ||
-        right.can_edit - left.can_edit ||
-        compareSqliteBinaryText(left.id, right.id),
-    );
-  }
-
-  const currentHiddenCountRow = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(videoMembers)
-    .where(
-      and(
-        eq(videoMembers.video_id, video.id),
-        eq(videoMembers.is_public_member, 0),
-      )!,
-    );
-  const currentHiddenEditorCount = Number(currentHiddenCountRow[0]?.count ?? 0);
+  const membersRead = await loadPermissionMembersRead(db, video.id, xids);
+  if (!membersRead.ok) return { ok: false, message: membersRead.message };
+  const { existingRows, rowsByXid, currentHiddenEditorCount } = membersRead;
   let nextHiddenEditorCount = currentHiddenEditorCount;
 
   const grantXids = xids.filter((xid) => intents.get(xid)?.intent === "on");
