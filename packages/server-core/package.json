@@ -119,7 +119,8 @@
     "./video/permissionCanonicalize": "./src/video/permissionCanonicalize.ts",
     "./video/permissionMutationBatch": "./src/video/permissionMutationBatch.ts",
     "./video/permissionPreparation": "./src/video/permissionPreparation.ts",
-    "./video/permissionSubject": "./src/video/permissionSubject.ts"
+    "./video/permissionSubject": "./src/video/permissionSubject.ts",
+    "./video/permissionVideoRead": "./src/video/permissionVideoRead.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
