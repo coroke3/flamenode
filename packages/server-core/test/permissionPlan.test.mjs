@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planVideoPermissionChanges, evaluatePermissionPlanPreflight } from "../src/video/permissionPlan.ts";
+import { planVideoPermissionChanges, evaluatePermissionPlanPreflight, buildPermissionMemberAuditSnapshots } from "../src/video/permissionPlan.ts";
 
 const member = (id, xid, publicMember, canEdit, extra = {}) => ({
   id, video_id: "v1", x_user_id: xid, name: id, role: null, comment: null,
@@ -137,4 +137,64 @@ test("MIG-0650 preflight still schedules CAS write for duplicate-hidden cleanup"
   assert.equal(candidate.updateRows.length, 0);
   assert.deepEqual(candidate.deleteHiddenIds, ["hidden"]);
   assert.deepEqual(evaluatePermissionPlanPreflight(candidate), { kind: "write_required" });
+});
+
+test("MIG-0650 permission audit snapshot retains logical column order and SQLite-binary ID order", () => {
+  const existing = [
+    member("z", "alice", 1, 0),
+    member("A", "alice", 0, 1),
+  ];
+  const p = plan({
+    intents: [["alice", { displayName: "Alice", intent: "on" }]],
+    rowsByXid: new Map([["alice", existing]]),
+    profiles: ["alice"],
+    count: 1,
+  });
+  const snapshots = buildPermissionMemberAuditSnapshots("v1", existing, p);
+  assert.deepEqual(snapshots.before.rows.map(row => row.id), ["A", "z"]);
+  assert.deepEqual(snapshots.after.rows.map(row => row.id), ["z"]);
+  assert.equal(snapshots.after.rows[0].can_edit, 1);
+  assert.deepEqual(Object.keys(snapshots.after.rows[0]), [
+    "id", "video_id", "x_user_id", "name", "role", "comment",
+    "order_index", "can_edit", "is_public_member",
+    "edit_granted_by_auth_user_id", "edit_granted_at", "edit_updated_at",
+  ]);
+  assert.equal(existing[0].can_edit, 0, "snapshot must not mutate CURRENT pre-read rows");
+});
+
+test("MIG-0650 permission audit snapshot retains unchanged rows and applies delete/insert by ID", () => {
+  const existing = [
+    member("keep", "carol", 1, 0),
+    member("hidden", "alice", 0, 1),
+  ];
+  const planned = plan({
+    intents: [
+      ["alice", { displayName: "Alice", intent: "off" }],
+      ["bob", { displayName: "Bob", intent: "on" }],
+    ],
+    rowsByXid: new Map([["alice", [existing[1]]]]),
+    profiles: ["alice", "bob"], count: 1,
+  });
+  const first = buildPermissionMemberAuditSnapshots("v1", existing, planned);
+  const second = buildPermissionMemberAuditSnapshots("v1", existing, planned);
+  assert.deepEqual(first, second, "audit output must be deterministic");
+  assert.deepEqual(first.before.rows.map(row => row.id), ["hidden", "keep"]);
+  assert.deepEqual(first.after.rows.map(row => row.id), ["keep", "new-member"]);
+  assert.equal(first.after.rows[1].can_edit, 1);
+  assert.equal(first.after.rows[1].is_public_member, 0);
+  assert.equal(existing.length, 2);
+});
+
+test("MIG-0650 permission audit snapshot sorts UTF-8 IDs by SQLite BINARY bytes", () => {
+  const existing = [
+    member("あ", "alice", 1, 1),
+    member("Z", "alice", 1, 1),
+    member("é", "alice", 1, 1),
+    member("a", "alice", 1, 1),
+  ];
+  const snapshots = buildPermissionMemberAuditSnapshots("v1", existing, {
+    updateRows: [], deleteHiddenIds: [], insertHiddenRows: [],
+  });
+  assert.deepEqual(snapshots.before.rows.map(row => row.id), ["Z", "a", "é", "あ"]);
+  assert.deepEqual(snapshots.after, snapshots.before);
 });
