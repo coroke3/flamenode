@@ -354,7 +354,16 @@ async function readStoredPreviewObject(object: R2ObjectBody): Promise<StoredPrev
       "plan_too_large",
     );
   }
-  return parseStoredPreview(await object.text());
+  // R2 metadata is not sufficient when an object is malformed or the reported
+  // size is absent/underreported. Enforce the byte cap before JSON parsing.
+  const raw = await object.text();
+  if (serializedBytes(raw) > MAX_STORED_PLAN_BYTES) {
+    throw new LegacyImportPreviewError(
+      "保存済みpreview planが大きすぎます。再度プレビューしてください。",
+      "plan_too_large",
+    );
+  }
+  return parseStoredPreview(raw);
 }
 
 /** MIG-0645: exact CURRENT R2 stored-preview size estimator now shared with Hono. */
