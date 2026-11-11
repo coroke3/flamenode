@@ -112,7 +112,8 @@
     "./legacyImport/normalize": "./src/legacyImport/normalize.ts",
     "./legacyImport/cpuBudget": "./src/legacyImport/cpuBudget.ts",
     "./legacyImport/previewEstimate": "./src/legacyImport/previewEstimate.ts",
-    "./legacyImport/applyResult": "./src/legacyImport/applyResult.ts"
+    "./legacyImport/applyResult": "./src/legacyImport/applyResult.ts",
+    "./legacyImport/progress": "./src/legacyImport/progress.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
