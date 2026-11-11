@@ -1,3 +1,4 @@
+import { selectLegacyParsedFileRange as sharedSelect, suggestLegacyImportRowRanges as sharedSuggest, MAX_LEGACY_IMPORT_SELECTED_ROWS as SHARED_RANGE_LIMIT } from "@flamenode/server-core/legacyImport/range";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -106,4 +107,11 @@ test("RH-002 CURRENT: JSON byte limit is inclusive and counts UTF-8, not JS stri
   assert.deepEqual(legacyImportCpuBudgetErrors(base), [], "exactly 128 KiB is accepted");
   base.events[0].title += "あ";
   assert.match(legacyImportCpuBudgetErrors(base).join(" "), /128KB/, "one extra UTF-8 character is rejected");
+});
+
+
+test("RH-002 CURRENT bridge: row-range canonical exports and cap are shared with Hono", () => {
+  assert.equal(selectLegacyParsedFileRange, sharedSelect);
+  assert.equal(suggestLegacyImportRowRanges, sharedSuggest);
+  assert.equal(MAX_LEGACY_IMPORT_SELECTED_ROWS, SHARED_RANGE_LIMIT);
 });
