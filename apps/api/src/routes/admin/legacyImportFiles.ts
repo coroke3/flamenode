@@ -2,7 +2,9 @@ import { parseLegacyImportText } from "@flamenode/server-core/legacyImport/parse
 import { selectLegacyParsedFileRange } from "@flamenode/server-core/legacyImport/range";
 import {
   legacyImportStringField,
-  validateLegacyImportFileEnvelope,
+  LEGACY_IMPORT_MAX_FILES,
+  LEGACY_IMPORT_MAX_FILE_BYTES,
+  LEGACY_IMPORT_MAX_TOTAL_BYTES,
   validateLegacyImportSelectedRows,
 } from "./legacyImportInput.ts";
 
@@ -60,17 +62,30 @@ export async function readLegacyImportPreviewFiles(args: {
     range: { start: string; end: string },
   ) => { file: LegacyImportParsedFile; range: LegacyImportFileRange };
 }): Promise<LegacyImportReadResult> {
-  // Reject the entire envelope before reading any potentially oversized body.
-  const envelopeError = validateLegacyImportFileEnvelope(args.files);
-  if (envelopeError) return {
-    ok: false,
-    status: envelopeError.status,
-    body: { ok: false, message: envelopeError.message },
+  // Match CURRENT RH-002 failure order: count first, then check and parse each
+  // file in sequence. An earlier malformed file takes precedence over a later
+  // oversized file. Each individual file is bounded before its text() call.
+  if (args.files.length === 0) return {
+    ok: false, status: 400, body: { ok: false, message: "JSON・CSV・TSVファイルを選択してください。" },
+  };
+  if (args.files.length > LEGACY_IMPORT_MAX_FILES) return {
+    ok: false, status: 400,
+    body: { ok: false, message: `ファイル数は最大${LEGACY_IMPORT_MAX_FILES}件です。` },
   };
 
+  let totalBytes = 0;
   const parsed: LegacyImportParsedFile[] = [];
   const fileRanges: LegacyImportFileRange[] = [];
   for (const file of args.files) {
+    if (file.size > LEGACY_IMPORT_MAX_FILE_BYTES) return {
+      ok: false, status: 400,
+      body: { ok: false, message: `${file.name}: 1ファイル2MBまでです。大きいファイルは物理分割してください。` },
+    };
+    totalBytes += file.size;
+    if (totalBytes > LEGACY_IMPORT_MAX_TOTAL_BYTES) return {
+      ok: false, status: 400,
+      body: { ok: false, message: "ファイル合計は4MBまでです。複数回に分けてください。" },
+    };
     const content = await file.text();
     try {
       const parsedFile = (args.parseText ?? parseLegacyImportText)(file.name, content);
