@@ -116,7 +116,8 @@
     "./video/permissionPlan": "./src/video/permissionPlan.ts",
     "./video/permissionRebuildTargets": "./src/video/permissionRebuildTargets.ts",
     "./video/permissionNotificationInputs": "./src/video/permissionNotificationInputs.ts",
-    "./video/permissionCanonicalize": "./src/video/permissionCanonicalize.ts"
+    "./video/permissionCanonicalize": "./src/video/permissionCanonicalize.ts",
+    "./video/permissionMutationBatch": "./src/video/permissionMutationBatch.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
