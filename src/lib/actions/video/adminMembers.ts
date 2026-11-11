@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { readAdminVideoCollabFlag } from "@flamenode/domain/video";
+import { adminVideoMembersRebuildTargets } from "@flamenode/server-core/video/adminMemberRebuildTargets";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
@@ -169,49 +170,17 @@ export async function updateVideoMembersAdmin(
           nextMembers: members,
         })
       : new Set<string>();
-    const memberAggregationChanged = affectedCreatorIds.size > 0;
     const hasMembersPlanChanges = membersPlan.statements.length > 0;
 
-    const queueItems = [
-      ...(videoPublicContentChanged
-        ? [{
-            targetType: "video" as const,
-            targetId: videoId,
-            reason: "video_members_update",
-            requestedByUserId: user.id,
-          }]
-        : []),
-      ...(hasMembersPlanChanges
-        ? [{
-            targetType: "member_suggestions" as const,
-            targetId: "global",
-            reason: "video_members_update",
-          }]
-        : []),
-      ...(videoPublicContentChanged
-        ? rebuildEvents.eventIds.map((eventId) => ({
-            targetType: "event_release" as const,
-            targetId: eventId,
-            reason: "video_members_update",
-            priority: "high" as const,
-            requestedByUserId: user.id,
-          }))
-        : []),
-      ...(isPublicVideo && memberAggregationChanged
-        ? [
-            {
-              targetType: "users_index" as const,
-              targetId: "global",
-              reason: "video_members_update",
-            },
-            ...[...affectedCreatorIds].map((xUserId) => ({
-              targetType: "user" as const,
-              targetId: xUserId,
-              reason: "video_members_update",
-            })),
-          ]
-        : []),
-    ];
+    const queueItems = adminVideoMembersRebuildTargets({
+      videoId,
+      actorUserId: user.id,
+      publicContentChanged: videoPublicContentChanged,
+      membersPlanChanged: hasMembersPlanChanges,
+      eventIds: rebuildEvents.eventIds,
+      isPublicVideo,
+      affectedCreatorIds,
+    });
 
     // 完全no-opならD1 mutation・audit・static rebuildを発生させない。
     if (plan.statements.length === 0) {
