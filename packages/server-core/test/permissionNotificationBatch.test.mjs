@@ -56,6 +56,34 @@ test("SA-084 atomic bulk uses one bound JSON1 SQL, null changes and transition-s
   assert.ok(query.params.some((p) => typeof p === "string" && p.includes("grant1:transition:id-1")));
 });
 
+test("SA-084 validates exactly the serialized notification JSON when toJSON is stateful", () => {
+  let serializeCalls = 0;
+  const result = preparePermissionNotificationBulkBatch([{
+    ...input(),
+    payload: {
+      toJSON: () => {
+        serializeCalls += 1;
+        return serializeCalls === 1 ? { content: "approved" } : { content: "x".repeat(9000) };
+      },
+    },
+  }], validateNotificationPayload, { now: 1700000003, newId: () => "uuid" });
+  assert.equal(serializeCalls, 1, "the caller's toJSON executes once before validation");
+  assert.equal(result.rows[0].payload_json, '{"content":"approved"}');
+  assert.equal(result.rows.length, 1);
+});
+
+test("SA-084 rejects a non-object JSON serialization even with a permissive injected validator", () => {
+  for (const outcome of [null, [], "content", undefined, 123]) {
+    assert.throws(() => preparePermissionNotificationBulkBatch([{
+      ...input(), payload: { toJSON: () => outcome },
+    }], () => ({ ok: true })), /JSON オブジェクトとしてシリアライズできません/);
+  }
+  const self = {}; self.me = self;
+  assert.throws(() => preparePermissionNotificationBulkBatch([{
+    ...input(), payload: self,
+  }], () => ({ ok: true })), /JSON オブジェクトとしてシリアライズできません/);
+});
+
 test("SA-084 non-grant inputs preserve dedupe, normalize correlation and channel defaults", () => {
   const generic = (type, payload) => ({ ok: !!type && payload !== null });
   const result = preparePermissionNotificationBulkBatch([{
