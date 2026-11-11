@@ -1,6 +1,6 @@
 import type { videoMembers, xUsers } from "@flamenode/db/schema";
 import { MAX_VIDEO_HIDDEN_EDITORS } from "@flamenode/domain/video/atomicLimits";
-import { compareSqliteBinaryText } from "./memberSetSnapshot.ts";
+import { compareSqliteBinaryText, toVideoMemberSnapshotRow } from "./memberSetSnapshot.ts";
 
 /**
  * SA-082..084: CPU-only change planner shared by CURRENT and Hono. This
@@ -188,4 +188,31 @@ export function evaluatePermissionPlanPreflight(
     };
   }
   return { kind: "write_required" };
+}
+
+/**
+ * SA-082..084 exact strict audit payloads. Unlike the public member-set
+ * snapshot, CURRENT permission audit sorts by SQLite BINARY member ID alone
+ * and serializes the Drizzle logical column order. Do not use order_index.
+ */
+export function buildPermissionMemberAuditSnapshots(
+  videoId: string,
+  existingRows: readonly VideoMemberRow[],
+  plan: Pick<ReturnType<typeof planVideoPermissionChanges>,
+    "updateRows" | "deleteHiddenIds" | "insertHiddenRows">,
+) {
+  const afterById = new Map(existingRows.map((row) => [row.id, row]));
+  for (const row of plan.updateRows) afterById.set(row.id, row);
+  for (const id of plan.deleteHiddenIds) afterById.delete(id);
+  for (const row of plan.insertHiddenRows) afterById.set(row.id, row);
+  const snapshot = (rows: readonly VideoMemberRow[]) => ({
+    id: videoId,
+    rows: [...rows]
+      .sort((left, right) => compareSqliteBinaryText(left.id, right.id))
+      .map(toVideoMemberSnapshotRow),
+  });
+  return {
+    before: snapshot(existingRows),
+    after: snapshot([...afterById.values()]),
+  };
 }
