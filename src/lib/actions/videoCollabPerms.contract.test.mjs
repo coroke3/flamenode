@@ -169,7 +169,8 @@ test("X userの同時作成は成功扱いにし、同時rejected化だけatomic
     /COALESCE\(x_users\.approval_status, 'pending'\) <> 'rejected'/,
   );
   assert.match(mutation, /expected\.push\(newXUsers\.length\)/);
-  assert.match(mutation, /operation: "MERGE"/);
+  assert.match(mutation, /buildPermissionWriteAudits\(\{/);
+  assert.match(permissionPlanSource, /operation: "MERGE"/);
 });
 
 test("権限batchは公開メンバーの表示名・役割・コメントを書き換えない", () => {
@@ -263,9 +264,12 @@ test("通知先は承認済みX ID連携かつ通知ONのAuth userだけを一�
 
 test("batch監査は1人1auditでなく集合snapshotにまとめる", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
-  assert.match(body, /table_name: "video_member_permissions_batch"/);
-  assert.match(body, /operation: "MERGE"/);
-  assert.match(body, /restore_strategy: "none"/);
+  assert.match(body, /buildPermissionWriteAudits\(\{/);
+  assert.match(permissionPlanSource, /table_name: "video_member_permissions_batch"/);
+  assert.match(permissionPlanSource, /table_name: "x_users_permission_batch"/);
+  assert.match(permissionPlanSource, /operation: "MERGE"/);
+  assert.match(permissionPlanSource, /restore_strategy: "none"/);
+  assert.match(body, /mutateWithAudit\(db, \{/);
 });
 
 test("member_suggestions dirty登録は本体mutationと同じatomic writeへ含まれる", () => {
