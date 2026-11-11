@@ -286,3 +286,19 @@ test("RH-002 Hono apply pipeline: actual R2 owner claim and monotonic ETag advan
     method === "put" && conditional !== null).length, 2,
     "claim and advance both require distinct R2 ETag CAS writes");
 });
+
+
+test("RH-002 Hono R2 adapter: transient storage/claim failures preserve CURRENT 503 retryability", async () => {
+  const { legacyImportR2Adapter } = await import("../src/routes/admin/legacyImportR2Adapter.ts");
+  const adapter = legacyImportR2Adapter(bucketFixture().bucket);
+  for (const method of ["mapStoreError", "mapPreviewError"]) {
+    const outcome = adapter[method](new Error("SQLITE_BUSY: database is locked"));
+    assert.equal(outcome.status, 503, method);
+    assert.equal(outcome.body.retryable, true, method);
+    assert.equal(outcome.body.requires_repreview, false, method);
+    const permanent = adapter[method](new Error("invalid record"));
+    assert.equal(permanent.status, 409);
+    assert.equal(permanent.body.retryable, false);
+    assert.equal(permanent.body.requires_repreview, true);
+  }
+});
