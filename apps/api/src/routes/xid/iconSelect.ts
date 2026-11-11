@@ -127,8 +127,15 @@ export function createXIdIconSelectRoutes(guard: MiddlewareHandler<AppEnv>): Hon
     // Any missing table, R2 error, reused URL or uncertain reference retains
     // the object; an unsuccessful cleanup never turns a committed write into
     // an HTTP failure that would encourage duplicate submissions.
-    if (c.env.BUCKET) {
-      await cleanupOldXIconAfterCommit(c.env.DB, c.env.BUCKET, before.icon_url, input.value.iconUrl);
+    // A completed atomic D1 write must not be reported as failed simply
+    // because an optional R2 binding is unavailable during postcommit GC.
+    try {
+      const bucket = c.env?.BUCKET;
+      if (bucket) {
+        await cleanupOldXIconAfterCommit(c.env.DB, bucket, before.icon_url, input.value.iconUrl);
+      }
+    } catch {
+      // Best effort only. A future cleanup can recheck all live references.
     }
     return c.json({ ok: true, message: "アイコンを更新しました。" });
   });
