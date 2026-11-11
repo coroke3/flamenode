@@ -148,6 +148,32 @@ test("RH-002 shared R2 preview: streamed body rejects oversized chunks before te
   assert.equal(JSON.parse(records.get(key).data).status, "ready");
 });
 
+test("RH-002 shared R2 preview: malformed stream cancels read without acquiring claim", async () => {
+  const { bucket, calls } = bucketFixture();
+  const credential = await createLegacyImportPreview(bucket, previewInput(), {
+    now: 1700000000, previewToken: TOKEN,
+  });
+  let cancelled = false;
+  bucket.get = async () => ({
+    size: undefined,
+    etag: "1",
+    text: async () => { throw new Error("stream-only fixture"); },
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array([123]));
+        controller.enqueue("invalid non-byte chunk");
+      },
+      cancel() { cancelled = true; },
+    }),
+  });
+  await assert.rejects(claimLegacyImportPreview(bucket, {
+    authUserId: "owner-a", previewToken: TOKEN, planHash: credential.planHash,
+  }, { now: 1700000001, claimId: CLAIM }), TypeError);
+  assert.equal(cancelled, true, "read failure must cancel the R2 body");
+  assert.equal(calls.filter(([method]) => method === "put").length, 1,
+    "malformed streamed data cannot acquire a claim");
+});
+
 test("RH-002 shared R2 preview: split multibyte UTF-8 stream still claims and releases", async () => {
   const { bucket } = bucketFixture();
   const input = previewInput();
