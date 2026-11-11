@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { z } from "zod";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
@@ -29,7 +28,6 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import {
-  MAX_COLLABORATOR_PERMISSION_BATCH,
   MAX_VIDEO_HIDDEN_EDITORS,
   MAX_VIDEO_MEMBERS,
 } from "@/lib/video/atomicLimits";
@@ -40,6 +38,7 @@ import {
 } from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
 import { isCanonicalXId, normalizeXId } from "@/lib/utils/xid";
+import { upsertSchema, permissionBatchSchema } from "@flamenode/domain/video";
 import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/enqueue";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import { mutateWithAudit } from "@/lib/audit/mutate";
@@ -98,57 +97,6 @@ async function revalidateVideoCollabPathsBestEffort(videoId: string): Promise<vo
     ],
   );
 }
-
-const optionalXIdSchema = z
-  .string()
-  .trim()
-  .max(32)
-  .optional()
-  .transform((value) => normalizeXId(value ?? ""))
-  .refine((value) => !value || isCanonicalXId(value), {
-    message: "X ID は英数字とアンダースコア20文字以内で入力してください。",
-  });
-
-const permissionXIdSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(32)
-  .transform((value) => normalizeXId(value))
-  .refine((value) => isCanonicalXId(value), {
-    message: "X ID は英数字とアンダースコア20文字以内で入力してください。",
-  });
-
-const upsertSchema = z.object({
-  video_id: z.string().trim().min(1).max(64),
-  x_user_id: optionalXIdSchema,
-  user_id: z.string().trim().max(128).optional().nullable(),
-  display_name: z.string().trim().min(1).max(80),
-  can_edit: z
-    .union([z.literal("1"), z.literal("0"), z.literal("true"), z.literal("false")])
-    .optional()
-    .transform((value) => value === "1" || value === "true" || value === undefined),
-  notify: z
-    .union([z.literal("1"), z.literal("0")])
-    .optional()
-    .transform((value) => value === "1"),
-});
-
-const permissionIntentSchema = z.object({
-  x_user_id: permissionXIdSchema,
-  display_name: z.string().trim().min(1).max(80),
-  intent: z.union([z.literal("on"), z.literal("off")]),
-});
-
-const permissionBatchSchema = z.object({
-  video_id: z.string().trim().min(1).max(64),
-  edit_privilege_mode: z.enum(["normal", "admin", "event"]).optional(),
-  notify: z.boolean().optional().default(true),
-  intents: z
-    .array(permissionIntentSchema)
-    .min(1)
-    .max(MAX_COLLABORATOR_PERMISSION_BATCH),
-});
 
 async function resolvePrivilegeMode(
   rawMode: string,
