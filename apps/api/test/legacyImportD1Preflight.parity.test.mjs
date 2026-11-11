@@ -87,7 +87,7 @@ test("RH-002 U02 real SQLite/D1 preflight: create_only conflict and skip_existin
     insert(sqlite, "events", { id: "event-a", title: "Existing event" });
     const d1 = createD1(sqlite);
     const adapter = legacyImportD1PreflightAdapter(drizzle(d1));
-    const incoming = plan("eventid,eventname\\nevent-a,Imported event\\n");
+    const incoming = plan("eventid,eventname\nevent-a,Imported event\n");
     incoming.eventStaff.push({ event_id: "event-a", permission_preset: "owner" });
     await assert.rejects(adapter.preflight(incoming, "create_only"),
       /イベント event-a は既に存在します/);
