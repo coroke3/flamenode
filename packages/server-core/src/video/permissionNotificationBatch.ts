@@ -46,12 +46,22 @@ export function preparePermissionNotificationBulkBatch(
   if (inputs.length > 200) throw new Error("notification_bulk_batch_limit_exceeded");
 
   const preparedInputs = inputs.map((input) => {
-    const check = validatePayload(input.type, input.payload);
-    if (!check.ok) throw new Error(`通知 payload が不正です: ${check.reason}`);
-    const payloadJson = JSON.stringify(input.payload);
-    if (typeof payloadJson !== "string") {
-      throw new Error("通知 payload が不正です: JSON シリアライズに失敗しました");
+    // The exact JSON bytes to be written must be what the validator checks.
+    // Checking the original object first and serializing it again allows a
+    // stateful toJSON()/getter to change its value after validation.
+    let payloadJson: string | undefined;
+    let serializablePayload: Record<string, unknown>;
+    try {
+      payloadJson = JSON.stringify(input.payload);
+      if (typeof payloadJson !== "string" || !payloadJson.startsWith("{")) {
+        throw new Error("not_a_json_object");
+      }
+      serializablePayload = JSON.parse(payloadJson) as Record<string, unknown>;
+    } catch {
+      throw new Error("通知 payload が不正です: JSON オブジェクトとしてシリアライズできません");
     }
+    const check = validatePayload(input.type, serializablePayload);
+    if (!check.ok) throw new Error(`通知 payload が不正です: ${check.reason}`);
     const prepared: PreparedNotification = {
       type: input.type,
       payloadJson,
