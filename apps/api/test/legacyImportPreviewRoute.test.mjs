@@ -142,3 +142,55 @@ test("MIG-0645 U02 Hono: missing R2 binding fails closed after D1 preflight", as
   assert.equal(stats.batches, 0);
   assert.equal(res.headers.get("cache-control"), "private, no-store");
 });
+
+test("MIG-0645 U02 Hono: replace_imported cannot overwrite a non-imported D1 event", async () => {
+  let puts = 0;
+  const bucket = { async put() { puts++; throw new Error("unexpected R2 write"); } };
+  const { request, sqlite, stats } = setup({ bucket });
+  seedEvent(sqlite, { id: "event-a", title: "Protected event" });
+  const data = new FormData();
+  data.set("strategy", "replace_imported");
+  data.set("files", new File([
+    "eventid,eventname,member,memberid,memberpost\nevent-a,Overwrite attempt,Owner,owner_x,owner\n",
+  ], "events.csv", { type: "text/csv" }));
+  const res = await request(data);
+  assert.equal(res.status, 409, JSON.stringify(await res.clone().json()));
+  assert.match((await res.json()).message, /イベント event-a は旧形式インポート由来ではないため置換できません/);
+  assert.equal(puts, 0);
+  assert.equal(stats.batches, 0);
+  assert.equal(sqlite.prepare("SELECT title FROM events WHERE id = ?").get("event-a").title,
+    "Protected event");
+});
+
+test("MIG-0645 U02 Hono: skip_existing stores real D1 collision snapshot in owner-bound R2", async () => {
+  const objects = new Map();
+  const bucket = {
+    async put(key, data) {
+      objects.set(key, String(data));
+      return { etag: "1" };
+    },
+  };
+  const { request, sqlite, stats } = setup({ bucket });
+  seedEvent(sqlite, { id: "event-a", title: "Existing event" });
+  const data = new FormData();
+  data.set("strategy", "skip_existing");
+  data.set("files", new File([
+    "eventid,eventname,member,memberid,memberpost\nevent-a,Incoming event,Owner,owner_x,owner\n",
+  ], "events.csv", { type: "text/csv" }));
+  const res = await request(data);
+  assert.equal(res.status, 200, JSON.stringify(await res.clone().json()));
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.strategy, "skip_existing");
+  assert.equal(objects.size, 1);
+  const stored = JSON.parse([...objects.values()][0]);
+  assert.equal(stored.authUserId, "admin-1");
+  assert.equal(stored.strategy, "skip_existing");
+  assert.deepEqual(stored.progress.skipExistingEventIds, ["event-a"]);
+  assert.deepEqual(stored.progress.skipExistingVideoIds, []);
+  assert.equal(stored.planHash, body.plan_hash);
+  assert.equal(stored.status, "ready");
+  assert.equal(stats.batches, 0);
+  assert.equal(sqlite.prepare("SELECT title FROM events WHERE id = ?").get("event-a").title,
+    "Existing event");
+});
