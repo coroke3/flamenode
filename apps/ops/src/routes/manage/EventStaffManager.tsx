@@ -20,6 +20,10 @@ import {
   type StaffUpsertInput,
   type StaffTransferInput,
 } from "../../api/manageStaffWrite.js";
+import { Icon } from "../../components/shared/Icon.js";
+import { ManageXIcon } from "../../components/shared/ManageXIcon.js";
+import { SaveSuccessNotice } from "../../components/shared/SaveSuccessNotice.js";
+import { presetLabel } from "./EventStaffReadOnlyList.js";
 
 const PRESETS = [
   ["owner", "代表"], ["manager", "運営"], ["slot_manager", "枠管理担当"],
@@ -327,7 +331,10 @@ export function EventStaffManager({
   const client = React.useMemo(() => createManageStaffWriteClient(fetchFn), [fetchFn]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{
+    message: string;
+    pendingPublicReflection?: boolean;
+  } | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
@@ -374,7 +381,10 @@ export function EventStaffManager({
       const result = await operation();
       if (serial !== serialRef.current || source !== activeIdRef.current) return;
       if (result.status === "ok" && result.data?.ok) {
-        setSuccess(result.data.message ?? "保存しました。");
+        setSuccess({
+          message: result.data.message ?? "保存しました。",
+          pendingPublicReflection: result.data.pendingPublicReflection,
+        });
         setAddOpen(false);
         setExpandedId(null);
         setDeleteId(null);
@@ -424,71 +434,98 @@ export function EventStaffManager({
 
   return <section aria-label="運営メンバー編集" className="manage-permission-panel">
     {error && <p role="alert" className="fn-alert fn-alert--danger">{error}</p>}
-    {success && <p role="status" className="fn-console-note">{success}</p>}
+    {success && <SaveSuccessNotice
+      message={success.message}
+      pendingPublicReflection={success.pendingPublicReflection}
+    />}
     <header className="manage-staff-list-head">
-      <h2>登録メンバー ({members.length} 件表示)</h2>
+      <h2 className="fn-console-card-title">登録メンバー ({members.length} 件表示)</h2>
       <button type="button" className="fn-btn fn-btn-primary fn-btn-sm"
         disabled={busy} onClick={() => {setAddOpen(value => !value); setExpandedId(null);}}>
-        運営メンバーを追加
+        <Icon name="plus" size={12} aria-hidden /> 運営メンバーを追加
       </button>
     </header>
     {addOpen && <section className="manage-staff-add">
-      <h3>メンバーを追加</h3>
-      <form className="manage-staff-add-form" onSubmit={event => submit(event)}>
-        <input className="fn-input" name="display_name" placeholder="表示名" maxLength={80} required disabled={busy}/>
-        <input className="fn-input" name="x_user_id" placeholder="X ID（@なし）" pattern="[A-Za-z0-9_]{1,32}" required disabled={busy}/>
-        <PermissionAssignment initialPreset="manager" initialKeys={[]} isSiteAdmin={isSiteAdmin} busy={busy}/>
-        <select name="is_public" defaultValue="0" className="fn-select" disabled={busy}>
-          <option value="0">非公開</option><option value="1">公開</option>
-        </select>
-        <input className="fn-input" name="public_role_label" maxLength={40} placeholder="公開肩書" disabled={busy}/>
-        <input className="fn-input" name="reason" placeholder="追加理由" required maxLength={500} disabled={busy}/>
-        <button className="fn-btn fn-btn-primary" disabled={busy}>追加</button>
-        <button type="button" className="fn-btn fn-btn-ghost" disabled={busy}
+      <div className="manage-staff-add-head">
+        <h3 className="fn-console-card-title">メンバーを追加</h3>
+        <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" disabled={busy}
           onClick={() => setAddOpen(false)}>閉じる</button>
+      </div>
+      <form className="manage-staff-add-form" onSubmit={event => submit(event)}>
+        <div className="manage-staff-add-fields">
+          <input className="fn-input" name="display_name" placeholder="表示名" maxLength={80} required disabled={busy}/>
+          <input className="fn-input" name="x_user_id" placeholder="X ID（@なし）" pattern="[A-Za-z0-9_]{1,32}" required disabled={busy}/>
+          <select name="is_public" defaultValue="0" className="fn-select" disabled={busy}>
+            <option value="0">非公開</option><option value="1">公開</option>
+          </select>
+          <input className="fn-input" name="public_role_label" maxLength={40} placeholder="公開肩書" disabled={busy}/>
+          <input className="fn-input" name="reason" placeholder="追加理由" required maxLength={500} disabled={busy}/>
+        </div>
+        <PermissionAssignment initialPreset="manager" initialKeys={[]} isSiteAdmin={isSiteAdmin} busy={busy}/>
+        <button className="fn-btn fn-btn-primary" disabled={busy}>追加</button>
       </form>
     </section>}
     <ul className="manage-staff-list">
       {members.map(member => {
         const expanded = expandedId === member.id;
         const isLastOwner = member.permission_preset === "owner" && ownerCount <= 1;
+        const displayName = member.x_name ?? member.display_name;
         return <li className="manage-staff-list-item" key={member.id}>
           <button type="button" className="manage-staff-list-row" disabled={busy}
             aria-expanded={expanded}
             onClick={() => { setExpandedId(expanded ? null : member.id); setDeleteId(null); }}>
-            {member.x_name ?? member.display_name} (@{member.x_user_id ?? "未連携"})
+            <ManageXIcon iconUrl={member.icon_url} label={displayName} size={36} />
+            <span className="manage-staff-list-main">
+              <strong>{displayName}</strong>
+              <span className="manage-staff-list-xid">@{member.x_user_id ?? "未連携"}</span>
+            </span>
+            <span className="manage-staff-list-badges">
+              {member.permission_preset === "owner" && <span className="fn-badge fn-badge-warning">代表者</span>}
+              <span className="fn-badge fn-badge-soft">{presetLabel(member.permission_preset)}</span>
+              <span className="fn-badge fn-badge-neutral">{member.is_public === 1 ? "公開" : "非公開"}</span>
+              {member.public_role_label && <span className="fn-badge fn-badge-soft">{member.public_role_label}</span>}
+            </span>
+            <Icon name={expanded ? "chevron-up" : "chevron-down"} size={14} aria-hidden className="manage-staff-list-chevron" />
           </button>
           {expanded && <section className="manage-staff-editor">
             <form onSubmit={event => submit(event, member.id)}>
               <input type="hidden" name="x_user_id" value={member.x_user_id ?? ""}/>
-              <label className="fn-label">表示名
-                <input className="fn-input" name="display_name" defaultValue={member.display_name}
-                  maxLength={80} required disabled={busy || member.x_user_id === null}/>
-              </label>
-              <PermissionAssignment initialPreset={member.permission_preset}
-                initialKeys={member.permission_keys} isSiteAdmin={isSiteAdmin} busy={busy}
-                lockOwner={isLastOwner}/>
-              <label className="fn-label">公開状態
-                <select name="is_public" className="fn-select" defaultValue={String(member.is_public ?? 0)} disabled={busy}>
-                  <option value="0">非公開</option><option value="1">公開</option>
-                </select>
-              </label>
-              <label className="fn-label">公開肩書
-                <input className="fn-input" name="public_role_label"
-                  defaultValue={member.public_role_label ?? ""} maxLength={40} disabled={busy}/>
-              </label>
-              <label className="fn-label">変更理由
-                <input className="fn-input" name="reason" maxLength={500} required disabled={busy}/>
-              </label>
-              <label className="fn-label">自己操作確認
-                <input className="fn-input" name="confirm_text" placeholder={"SELF CHANGE " + eventId} disabled={busy}/>
-              </label>
+              <div className="manage-permission-fields">
+                <label className="fn-label">表示名
+                  <input className="fn-input" name="display_name" defaultValue={member.display_name}
+                    maxLength={80} required disabled={busy || member.x_user_id === null}/>
+                </label>
+                <PermissionAssignment initialPreset={member.permission_preset}
+                  initialKeys={member.permission_keys} isSiteAdmin={isSiteAdmin} busy={busy}
+                  lockOwner={isLastOwner}/>
+                <label className="fn-label">公開状態
+                  <select name="is_public" className="fn-select" defaultValue={String(member.is_public ?? 0)} disabled={busy}>
+                    <option value="0">非公開</option><option value="1">公開</option>
+                  </select>
+                </label>
+                <label className="fn-label">公開肩書
+                  <input className="fn-input" name="public_role_label"
+                    defaultValue={member.public_role_label ?? ""} maxLength={40} disabled={busy}/>
+                </label>
+              </div>
+              <div className="manage-staff-editor-meta">
+                <label className="fn-label">変更理由
+                  <input className="fn-input" name="reason" maxLength={500} required disabled={busy}/>
+                </label>
+                <label className="fn-label">自己操作確認
+                  <input className="fn-input" name="confirm_text" placeholder={"SELF CHANGE " + eventId} disabled={busy}/>
+                </label>
+              </div>
               {isLastOwner && <p role="status">最後の代表者は削除・降格できません。</p>}
-              <button className="fn-btn fn-btn-primary fn-btn-sm"
-                disabled={busy || member.x_user_id === null}>変更を保存</button>
-              <button type="button" className="fn-btn fn-btn-danger fn-btn-sm"
-                disabled={busy || isLastOwner}
-                onClick={() => setDeleteId(deleteId === member.id ? null : member.id)}>削除</button>
+              <div className="manage-staff-editor-actions">
+                <button className="fn-btn fn-btn-primary fn-btn-sm"
+                  disabled={busy || member.x_user_id === null}>変更を保存</button>
+                <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" disabled={busy}
+                  onClick={() => { setExpandedId(null); setDeleteId(null); }}>閉じる</button>
+                <button type="button" className="fn-btn fn-btn-danger fn-btn-sm"
+                  disabled={busy || isLastOwner}
+                  onClick={() => setDeleteId(deleteId === member.id ? null : member.id)}>削除</button>
+              </div>
             </form>
             {deleteId === member.id && !isLastOwner && <button type="button"
               className="fn-btn fn-btn-danger fn-btn-sm" disabled={busy}
@@ -499,38 +536,40 @@ export function EventStaffManager({
     </ul>
     <details className="manage-collapsible manage-staff-advanced">
       <summary>詳細な管理（代表権移譲・CSV）</summary>
-      {members.some(m => m.permission_preset === "owner") && members.length > 1 && <form
-        className="manage-staff-advanced-form" onSubmit={event => {
-          event.preventDefault();
-          const fields = new FormData(event.currentTarget);
-          const input: StaffTransferInput = {
-            from_staff_id: String(fields.get("from_staff_id") ?? ""),
-            to_staff_id: String(fields.get("to_staff_id") ?? ""),
-            reason: String(fields.get("reason") ?? ""),
-            confirm_text: String(fields.get("confirm_text") ?? ""),
-            self_confirm_text: String(fields.get("self_confirm_text") ?? ""),
-          };
-          void run(() => client.transferOwnership(eventId, input));
-        }}>
-        <h3>代表権限の移譲</h3>
-        <select className="fn-select" name="from_staff_id" disabled={busy}>
-          {members.filter(m => m.permission_preset === "owner").map(m =>
-            <option value={m.id} key={m.id}>{m.display_name}</option>)}
-        </select>
-        <select className="fn-select" name="to_staff_id" disabled={busy}>
-          {members.map(m => <option value={m.id} key={m.id}>{m.display_name}</option>)}
-        </select>
-        <input name="reason" className="fn-input" placeholder="移譲理由" required disabled={busy}/>
-        <input name="confirm_text" className="fn-input" placeholder={"TRANSFER " + eventId} required disabled={busy}/>
-        <input name="self_confirm_text" className="fn-input" placeholder={"SELF CHANGE " + eventId} disabled={busy}/>
-        <button className="fn-btn fn-btn-danger" disabled={busy}>代表権限を移譲</button>
-      </form>}
-      <StaffCsvImport key={contextEpochRef.current}
-        members={members}
-        isSiteAdmin={isSiteAdmin}
-        busy={busy}
-        onImport={(reason, rows) => run(() => client.importCsv(eventId, reason, rows))}
-      />
+      <div className="manage-collapsible-body">
+        {members.some(m => m.permission_preset === "owner") && members.length > 1 && <form
+          className="manage-staff-advanced-form" onSubmit={event => {
+            event.preventDefault();
+            const fields = new FormData(event.currentTarget);
+            const input: StaffTransferInput = {
+              from_staff_id: String(fields.get("from_staff_id") ?? ""),
+              to_staff_id: String(fields.get("to_staff_id") ?? ""),
+              reason: String(fields.get("reason") ?? ""),
+              confirm_text: String(fields.get("confirm_text") ?? ""),
+              self_confirm_text: String(fields.get("self_confirm_text") ?? ""),
+            };
+            void run(() => client.transferOwnership(eventId, input));
+          }}>
+          <h3>代表権限の移譲</h3>
+          <select className="fn-select" name="from_staff_id" disabled={busy}>
+            {members.filter(m => m.permission_preset === "owner").map(m =>
+              <option value={m.id} key={m.id}>{m.display_name} (@{m.x_user_id ?? "未連携"})</option>)}
+          </select>
+          <select className="fn-select" name="to_staff_id" disabled={busy}>
+            {members.map(m => <option value={m.id} key={m.id}>{m.display_name} (@{m.x_user_id ?? "未連携"})</option>)}
+          </select>
+          <input name="reason" className="fn-input" placeholder="移譲理由" required disabled={busy}/>
+          <input name="confirm_text" className="fn-input" placeholder={"TRANSFER " + eventId} required disabled={busy}/>
+          <input name="self_confirm_text" className="fn-input" placeholder={"自己移譲時: SELF CHANGE " + eventId} disabled={busy}/>
+          <button className="fn-btn fn-btn-danger" disabled={busy}>代表権限を移譲</button>
+        </form>}
+        <StaffCsvImport key={contextEpochRef.current}
+          members={members}
+          isSiteAdmin={isSiteAdmin}
+          busy={busy}
+          onImport={(reason, rows) => run(() => client.importCsv(eventId, reason, rows))}
+        />
+      </div>
     </details>
   </section>;
 }

@@ -111,6 +111,8 @@ test("MIG-0723 U01a: no event.members means read-only, counts and cap are truthf
   assert.match(html, /100件を超えています/);
   assert.match(html, /event.members 権限が必要/);
   assert.match(html, /\/manage\/events\/ev%20one/);
+  assert.match(html, /\/event\/ev%20one/);
+  assert.match(html, /公開ページを見る/);
   assert.doesNotMatch(html, /削除する|メンバーを追加/);
   const privileged = render(React.createElement(EventStaffReadOnlyView, {
     eventId: "ev1", data: staff({ canManageMembers: true }),

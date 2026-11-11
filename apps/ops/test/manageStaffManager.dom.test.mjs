@@ -108,7 +108,7 @@ test("MIG-0723: last owner cannot be deleted by UI; site-only preset is hidden",
 });
 
 test("MIG-0723: completed creation writes exact body and calls refresh", async () => {
-  const ui = fixture({ reply: json(200, { ok: true, message: "追加しました。" }) });
+  const ui = fixture({ reply: json(200, { ok: true, message: "追加しました。", pendingPublicReflection: true }) });
   try {
     await ui.view();
     await ui.click(".manage-staff-list-head button");
@@ -130,6 +130,7 @@ test("MIG-0723: completed creation writes exact body and calls refresh", async (
     });
     assert.deepEqual(ui.refresh, ["refresh"]);
     assert.match(ui.target.textContent, /追加しました/);
+    assert.match(ui.target.textContent, /公開ページへの反映は、静的データの再生成が完了するまでしばらく時間がかかることがあります/);
   } finally { await ui.cleanup(); }
 });
 
@@ -374,5 +375,58 @@ test("MIG-0723 T03: event and identity changes discard prior CSV input before a 
     assert.doesNotMatch(ui.target.querySelector("textarea").value, /oldstaff/);
     assert.match(ui.target.querySelector("textarea").value, /進行担当/);
     assert.deepEqual(ui.calls, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0723 U01b: member row renders avatar, badges, chevron, and close button collapses editor", async () => {
+  const ui = fixture({
+    members: [
+      member({
+        id: "owner-1",
+        x_user_id: "owner_x",
+        display_name: "Owner Display",
+        x_name: "Owner XName",
+        permission_preset: "owner",
+        is_public: 1,
+        public_role_label: "主催",
+      }),
+      member({
+        id: "staff-2",
+        x_user_id: "staff_x",
+        display_name: "Staff Two",
+        permission_preset: "manager",
+        is_public: 0,
+        public_role_label: null,
+      }),
+    ],
+    ownerCount: 1,
+  });
+  try {
+    await ui.view();
+    const row = ui.target.querySelector(".manage-staff-list-row");
+    assert.ok(row);
+    assert.ok(row.querySelector(".manage-staff-avatar-fallback"));
+    assert.ok(row.querySelector(".manage-staff-list-main"));
+    assert.ok(row.querySelector(".manage-staff-list-badges"));
+    assert.ok(row.querySelector(".manage-staff-list-chevron"));
+    assert.match(row.textContent, /Owner XName/);
+    assert.match(row.textContent, /@owner_x/);
+    assert.match(row.textContent, /代表者/);
+    assert.match(row.textContent, /代表/);
+    assert.match(row.textContent, /公開/);
+    assert.match(row.textContent, /主催/);
+    await ui.click(".manage-staff-list-row");
+    assert.ok(ui.target.querySelector(".manage-staff-editor"));
+    const closeBtn = [...ui.target.querySelectorAll(".manage-staff-editor-actions button")]
+      .find(b => b.textContent.trim() === "閉じる");
+    assert.ok(closeBtn);
+    await React.act(async () => {
+      closeBtn.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    });
+    assert.equal(ui.target.querySelector(".manage-staff-editor"), null);
+    const options = [...ui.target.querySelectorAll("details.manage-staff-advanced option")].map(o => o.textContent);
+    assert.ok(options.some(t => t.includes("Owner Display (@owner_x)")));
+    const selfConfirm = ui.target.querySelector('input[name="self_confirm_text"]');
+    assert.equal(selfConfirm?.getAttribute("placeholder"), "自己移譲時: SELF CHANGE ev 1");
   } finally { await ui.cleanup(); }
 });

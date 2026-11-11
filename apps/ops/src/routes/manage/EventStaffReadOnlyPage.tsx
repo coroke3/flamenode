@@ -1,8 +1,8 @@
 import * as React from "react";
-import { Link } from "react-router-dom";
 import type { ManageStaffResponse } from "@flamenode/contracts";
 import { readManageStaff } from "../../api/manageStaff.js";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
+import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { EventStaffReadOnlyList } from "./EventStaffReadOnlyList.js";
 import { EventStaffManager } from "./EventStaffManager.js";
 
@@ -12,16 +12,30 @@ export function EventStaffReadOnlyView({ eventId, data, manager }: {
 }): React.ReactElement {
   const encodedId = encodeURIComponent(eventId);
   return <div className="fn-public-container fn-page">
-    <header className="fn-page-head">
-      <h1>{data.event.title} — 運営メンバー</h1>
-      <p>権限は担当プリセット、公開ページの肩書は公開肩書から解決します。</p>
-      <Link to={"/manage/events/" + encodedId}>イベント概要へ</Link>
-    </header>
+    <ConsolePageHeader
+      title={`${data.event.title} — 運営メンバー`}
+      description="権限は担当プリセット、公開ページの肩書は公開肩書から解決します。"
+      backHref={"/manage/events/" + encodedId}
+      backLabel="イベント概要へ"
+      actions={[{ href: "/event/" + encodedId, label: "公開ページを見る", variant: "primary" }]}
+    />
     <section aria-label="運営メンバー概要" className="fn-console-stat-grid fn-console-section--tight">
-      <article className="fn-card fn-console-stat"><h2>代表者</h2><strong>{data.ownerCount}</strong></article>
-      <article className="fn-card fn-console-stat"><h2>登録メンバー</h2><strong>{data.membersTruncated ? "100+" : data.members.length}</strong></article>
-      <article className="fn-card fn-console-stat"><h2>公開メンバー</h2><strong>{data.publicCount}</strong></article>
-      <article className="fn-card fn-console-stat"><h2>承認済みX名義</h2><strong>{data.approvedCount}</strong></article>
+      <article className="fn-card fn-console-stat">
+        <h2 className="fn-console-stat-label">代表者</h2>
+        <strong className="fn-console-stat-value">{data.ownerCount}</strong>
+      </article>
+      <article className="fn-card fn-console-stat">
+        <h2 className="fn-console-stat-label">登録メンバー</h2>
+        <strong className="fn-console-stat-value">{data.membersTruncated ? "100+" : data.members.length}</strong>
+      </article>
+      <article className="fn-card fn-console-stat">
+        <h2 className="fn-console-stat-label">公開メンバー</h2>
+        <strong className="fn-console-stat-value">{data.publicCount}</strong>
+      </article>
+      <article className="fn-card fn-console-stat">
+        <h2 className="fn-console-stat-label">承認済みX名義</h2>
+        <strong className="fn-console-stat-value">{data.approvedCount}</strong>
+      </article>
     </section>
     <section className="manage-section">
       {manager ?? (
