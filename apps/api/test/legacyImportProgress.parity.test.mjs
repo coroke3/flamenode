@@ -6,17 +6,19 @@ import {
   LEGACY_IMPORT_X_USER_STEP_SIZE, LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
   LEGACY_IMPORT_QUESTION_STEP_SIZE,
 } from "../src/routes/admin/legacyImportProgress.ts";
-import {
-  LEGACY_IMPORT_X_USER_STEP_SIZE as CURRENT_X_STEP,
-  LEGACY_IMPORT_SOFTWARE_STEP_SIZE as CURRENT_SOFTWARE_STEP,
-  LEGACY_IMPORT_QUESTION_STEP_SIZE as CURRENT_QUESTION_STEP,
-} from "../../../src/lib/import/legacy/apply.ts";
+
 
 const empty = () => ({
   xUsers: [], videoSoftwares: [], events: [], eventCustomQuestions: [], videos: [],
 });
 
-test("RH-002 U02 progress: chunks match CURRENT and empty stages count one", () => {
+test("RH-002 U02 progress: chunks match CURRENT and empty stages count one", async () => {
+  // apply.ts imports server-only/Next DB modules, so check its exported literals without executing it.
+  const source = await readFile(new URL("../../../src/lib/import/legacy/apply.ts", import.meta.url), "utf8");
+  const original = (name) => Number(source.match(new RegExp(`export const ${name} = (\\d+);`))?.[1]);
+  const CURRENT_X_STEP = original("LEGACY_IMPORT_X_USER_STEP_SIZE");
+  const CURRENT_SOFTWARE_STEP = original("LEGACY_IMPORT_SOFTWARE_STEP_SIZE");
+  const CURRENT_QUESTION_STEP = original("LEGACY_IMPORT_QUESTION_STEP_SIZE");
   assert.equal(LEGACY_IMPORT_X_USER_STEP_SIZE, CURRENT_X_STEP);
   assert.equal(LEGACY_IMPORT_SOFTWARE_STEP_SIZE, CURRENT_SOFTWARE_STEP);
   assert.equal(LEGACY_IMPORT_QUESTION_STEP_SIZE, CURRENT_QUESTION_STEP);
