@@ -1,3 +1,4 @@
+import type { R2Bucket, R2ObjectBody, R2PutOptions } from "@cloudflare/workers-types";
 import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize.ts";
 
