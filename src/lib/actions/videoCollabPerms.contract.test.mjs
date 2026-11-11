@@ -20,6 +20,11 @@ const permissionProfilesSource = await readFile(
   "utf8",
 );
 
+const permissionMembersSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionMembersRead.ts", import.meta.url),
+  "utf8",
+);
+
 function actionBody(name) {
   const match = source.match(
     new RegExp(`export async function ${name}[\\s\\S]*?\\n}`),
@@ -130,7 +135,8 @@ test("aliasと現行IDが同じ正本へ収束した重複intentは共通domain�
 
 test("permission mutationはJSON1で対象member\/X userを一括取得する", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
-  assert.match(body, /json_each\(\$\{xidsPayload\}\)/);
+  assert.match(body, /loadPermissionMembersRead\(db, video\.id, xids\)/);
+  assert.match(permissionMembersSource, /json_each\(\$\{xidsPayload\}\)/);
   assert.match(body, /loadPermissionGrantProfiles\(db, grantXids\)/);
   assert.match(permissionProfilesSource, /json_each\(\$\{JSON\.stringify\(grantXids\)\}\)/);
   assert.doesNotMatch(source, /PERMISSION_BATCH_IN_CLAUSE_SIZE/);
@@ -182,7 +188,7 @@ test("OFF時は全公開行の権限を落とし、全hidden editorを削除す�
 
 test("ON時もpublic+hidden重複をX ID単位で統合する", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
-  assert.match(body, /const rowsByXid = new Map/);
+  assert.match(permissionMembersSource, /const rowsByXid = new Map/);
   assert.match(body, /if \(publicRows\.length > 0\)/);
   assert.match(body, /for \(const target of publicRows\)/);
   assert.match(body, /for \(const hidden of hiddenRows\)/);
@@ -204,12 +210,13 @@ test("hidden editor上限は公開100人と分離し全intent後のnet countで�
 
 test("対象member readが上限に達した場合は重複データを黙って切り捨てない", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
+  assert.match(body, /loadPermissionMembersRead\(db, video\.id, xids\)/);
   assert.match(
-    body,
+    permissionMembersSource,
     /const existingRowLimit = MAX_VIDEO_MEMBERS \+ MAX_VIDEO_HIDDEN_EDITORS \+ 1/,
   );
-  assert.match(body, /existingRows\.length >= existingRowLimit/);
-  assert.match(body, /重複データを整理してください/);
+  assert.match(permissionMembersSource, /existingRows\.length >= existingRowLimit/);
+  assert.match(permissionMembersSource, /重複データを整理してください/);
 });
 
 test("拒否済みX IDへ編集権限を再付与しない", () => {
