@@ -3,22 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
-import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
 import { buildPermissionGrantNotificationInputs } from "@flamenode/server-core/video/permissionNotificationInputs";
 import { loadPermissionGrantProfiles } from "@flamenode/server-core/video/permissionProfiles";
 import { canonicalizePermissionIntents } from "@flamenode/server-core/video/permissionCanonicalize";
 import { loadPermissionMembersRead } from "@flamenode/server-core/video/permissionMembersRead";
+import { buildPermissionMutationBatch } from "@flamenode/server-core/video/permissionMutationBatch";
 import { permissionRebuildTargets } from "@flamenode/server-core/video/permissionRebuildTargets";
 import { planVideoPermissionChanges, evaluatePermissionPlanPreflight, buildPermissionWriteAudits } from "@flamenode/server-core/video/permissionPlan";
-import {
-  buildPermissionSetGuardSql,
-  buildHiddenEditorCountGuardSql,
-  buildXUsersBulkInsertSql,
-  buildMemberPermissionBulkUpdateSql,
-  buildHiddenMemberBulkDeleteSql,
-} from "@flamenode/server-core/video/permissionSql";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import {
   canEditVideo,
@@ -28,10 +21,6 @@ import {
   type VideoEditAccessContext,
 } from "@/lib/auth/ownership";
 import { videos } from "@/lib/db/schema";
-import {
-  buildVideoMemberBulkInsertSql,
-  toVideoMemberSnapshotRow,
-} from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 import { upsertSchema, permissionBatchSchema, prepareCollaboratorPermissionIntents, parseVideoCollaboratorDeleteInput } from "@flamenode/domain/video";
@@ -287,8 +276,15 @@ async function applyPermissionIntentsToVideo(
   const decision = evaluatePermissionPlanPreflight(plan);
   if (decision.kind !== "write_required") return decision.result;
 
-  const statements: BatchItem<"sqlite">[] = [];
-  const expected: Array<number | null> = [];
+  const mutation = buildPermissionMutationBatch(db, {
+    videoId: video.id,
+    xids,
+    existingRows,
+    currentHiddenEditorCount,
+    plan,
+  });
+  const statements = [...mutation.statements];
+  const expected: Array<number | null> = [...mutation.expectedChanges];
   const audits = buildPermissionWriteAudits({
     videoId: video.id,
     actorUserId: actor.id,
@@ -296,35 +292,6 @@ async function applyPermissionIntentsToVideo(
     existingRows,
     plan,
   });
-
-  statements.push(db.run(buildPermissionSetGuardSql(video.id, xids, existingRows)));
-  expected.push(null);
-  if (insertHiddenRows.length > 0 || deleteHiddenIds.length > 0) {
-    statements.push(
-      db.run(buildHiddenEditorCountGuardSql(video.id, currentHiddenEditorCount)),
-    );
-    expected.push(null);
-  }
-  if (newXUsers.length > 0) {
-    statements.push(db.run(buildXUsersBulkInsertSql(newXUsers)));
-    // INSERT/同時作成済みpending・approvedはいずれも1 change/rowになる。
-    // 同時にrejected化された行だけDO UPDATE WHEREが0 changeとなり、直後の
-    // changes assertionでpermission mutation全体をfail-closed rollbackする。
-    expected.push(newXUsers.length);
-
-  }
-  if (updateRows.length > 0) {
-    statements.push(db.run(buildMemberPermissionBulkUpdateSql(updateRows)));
-    expected.push(updateRows.length);
-  }
-  if (insertHiddenRows.length > 0) {
-    statements.push(db.run(buildVideoMemberBulkInsertSql(insertHiddenRows.map(toVideoMemberSnapshotRow))));
-    expected.push(insertHiddenRows.length);
-  }
-  if (deleteHiddenIds.length > 0) {
-    statements.push(db.run(buildHiddenMemberBulkDeleteSql(video.id, deleteHiddenIds)));
-    expected.push(deleteHiddenIds.length);
-  }
 
   let notificationWakeSource: "manage" | undefined;
   if (notifyXids.length > 0) {
