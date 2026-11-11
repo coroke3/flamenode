@@ -93,6 +93,9 @@ test("RH-002 U02 real SQLite/D1 preflight: create_only conflict and skip_existin
       /イベント event-a は既に存在します/);
     const snapshot = await adapter.preflight(incoming, "skip_existing");
     assert.deepEqual(snapshot, { existingEventIds: ["event-a"], existingVideoIds: [] });
+    // A matching ID is not proof that the existing record was created by legacy import.
+    await assert.rejects(adapter.preflight(incoming, "replace_imported"),
+      /イベント event-a は旧形式インポート由来ではないため置換できません/);
     assert.equal(d1.stats.writes, 0, "preflight must not mutate D1");
     assert.equal(d1.stats.batches, 0, "preflight must not open a mutation batch");
     assert.equal(sqlite.prepare("SELECT title FROM events WHERE id = ?").get("event-a").title,
