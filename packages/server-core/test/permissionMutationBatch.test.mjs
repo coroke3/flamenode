@@ -119,5 +119,5 @@ test("SA-084 new pending X profile requires exact DML row-change assertion", () 
   const index = c.queries.findIndex(q => /INSERT INTO x_users/i.test(q.sql));
   assert.ok(index > 0, "profile INSERT must occur after a snapshot guard");
   assert.equal(out.expectedChanges[index], 1, "zero changed rows must fail the enclosing strict transaction");
-  assert.equal(c.queries[index].params.includes("new-x"), true);
+  assert.ok(c.queries[index].params.some(p => typeof p === "string" && p.includes('"id":"new-x"')), "bulk X profile must be bound as JSON");
 });
