@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { buildPermissionMutationBatch } from "../src/video/permissionMutationBatch.ts";
 import { planVideoPermissionChanges } from "../src/video/permissionPlan.ts";
@@ -120,4 +121,67 @@ test("SA-084 new pending X profile requires exact DML row-change assertion", () 
   assert.ok(index > 0, "profile INSERT must occur after a snapshot guard");
   assert.equal(out.expectedChanges[index], 1, "zero changed rows must fail the enclosing strict transaction");
   assert.ok(c.queries[index].params.some(p => typeof p === "string" && p.includes('"id":"new-x"')), "bulk X profile must be bound as JSON");
+});
+
+test("SA-084 shared batch: SQLite stale snapshot aborts earlier outbox write, fresh grant commits", () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`CREATE TABLE video_members (
+      id TEXT PRIMARY KEY, video_id TEXT, x_user_id TEXT, name TEXT,
+      role TEXT, comment TEXT, order_index INTEGER, can_edit INTEGER,
+      is_public_member INTEGER, edit_granted_by_auth_user_id TEXT,
+      edit_granted_at INTEGER, edit_updated_at INTEGER
+    ); CREATE TABLE notification_outbox (id TEXT PRIMARY KEY)`);
+    const original = member("pub", "alice", 1, 0);
+    const insert = sqlite.prepare(`INSERT INTO video_members VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const values = row => [
+      row.id, row.video_id, row.x_user_id, row.name, row.role, row.comment,
+      row.order_index, row.can_edit, row.is_public_member,
+      row.edit_granted_by_auth_user_id, row.edit_granted_at, row.edit_updated_at,
+    ];
+    insert.run(...values(original));
+    const plan = makePlan([
+      ["alice", { displayName: "Alice", intent: "on" }],
+    ], [["alice", [original]]], ["alice"], 0);
+    const c = collector();
+    const batch = buildPermissionMutationBatch(c.db, {
+      videoId: "v1", xids: ["alice"], existingRows: [original],
+      currentHiddenEditorCount: 0, plan,
+    });
+    assert.deepEqual(batch.expectedChanges, [null, 1]);
+    const execute = () => {
+      c.queries.forEach((query, index) => {
+        const stmt = sqlite.prepare(query.sql);
+        if (batch.expectedChanges[index] === null) {
+          stmt.get(...query.params);
+        } else {
+          assert.equal(stmt.run(...query.params).changes, batch.expectedChanges[index]);
+        }
+      });
+    };
+    // A competing writer changes the row after our preflight read.
+    sqlite.exec("UPDATE video_members SET edit_updated_at = 42 WHERE id = 'pub'");
+    sqlite.exec("BEGIN");
+    try {
+      sqlite.exec("INSERT INTO notification_outbox VALUES ('should-rollback')");
+      assert.throws(execute, /./);
+    } finally {
+      sqlite.exec("ROLLBACK");
+    }
+    assert.equal(sqlite.prepare("SELECT count(*) AS n FROM notification_outbox").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT can_edit FROM video_members WHERE id = 'pub'").get().can_edit, 0);
+    // Restore the observed snapshot and verify the same shared plan commits.
+    sqlite.exec("UPDATE video_members SET edit_updated_at = NULL WHERE id = 'pub'");
+    sqlite.exec("BEGIN");
+    try {
+      execute();
+      sqlite.exec("COMMIT");
+    } catch (error) {
+      sqlite.exec("ROLLBACK");
+      throw error;
+    }
+    assert.equal(sqlite.prepare("SELECT can_edit FROM video_members WHERE id = 'pub'").get().can_edit, 1);
+  } finally {
+    sqlite.close();
+  }
 });
