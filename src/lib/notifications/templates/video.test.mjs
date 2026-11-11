@@ -39,10 +39,10 @@ if (runTestWithTsx(import.meta.url)) {
     assert.deepEqual(payload, {
       content: [
         "【FlameNode】作品の編集権限が付与されました",
-        "作品「@\\u200beveryone video」を共同編集できるようになりました。\\nタイトル・紹介文・メンバー情報など、許可された範囲を編集できます。",
+        "作品「@\u200beveryone video」を共同編集できるようになりました。\nタイトル・紹介文・メンバー情報など、許可された範囲を編集できます。",
         "■ 次に行うこと",
-        "編集画面を開き、担当範囲の修正を行ってください。\\n編集画面を開く\\nhttps://example.test/dashboard/edit/v1",
-      ].join("\\n\\n"),
+        "編集画面を開き、担当範囲の修正を行ってください。\n編集画面を開く\nhttps://example.test/dashboard/edit/v1",
+      ].join("\n\n"),
       video_id: "v1",
       url: "https://example.test/dashboard/edit/v1",
     });
