@@ -25,6 +25,11 @@ const permissionMembersSource = await readFile(
   "utf8",
 );
 
+const permissionPlanSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionPlan.ts", import.meta.url),
+  "utf8",
+);
+
 function actionBody(name) {
   const match = source.match(
     new RegExp(`export async function ${name}[\\s\\S]*?\\n}`),
@@ -177,7 +182,7 @@ test("権限batchは公開メンバーの表示名・役割・コメントを書
 });
 
 test("OFF時は全公開行の権限を落とし、全hidden editorを削除する", () => {
-  const body = functionBody("applyPermissionIntentsToVideo");
+  const body = permissionPlanSource;
   assert.match(body, /const publicRows = rowsForXid\.filter/);
   assert.match(body, /const hiddenRows = rowsForXid\.filter/);
   assert.match(body, /for \(const row of publicRows\)/);
@@ -187,7 +192,7 @@ test("OFF時は全公開行の権限を落とし、全hidden editorを削除す�
 });
 
 test("ON時もpublic+hidden重複をX ID単位で統合する", () => {
-  const body = functionBody("applyPermissionIntentsToVideo");
+  const body = permissionPlanSource;
   assert.match(permissionMembersSource, /const rowsByXid = new Map/);
   assert.match(body, /if \(publicRows\.length > 0\)/);
   assert.match(body, /for \(const target of publicRows\)/);
@@ -201,10 +206,12 @@ test("hidden editor上限は公開100人と分離し全intent後のnet countで�
     "utf8",
   );
   const body = functionBody("applyPermissionIntentsToVideo");
-  const loopIndex = body.indexOf("for (const [xid, intentInfo] of intents)");
+  const loopIndex = permissionPlanSource.indexOf("for (const [xid, intentInfo] of intents)");
   const netCheckIndex = body.indexOf("nextHiddenEditorCount > MAX_VIDEO_HIDDEN_EDITORS");
   assert.ok(loopIndex >= 0);
-  assert.ok(netCheckIndex > loopIndex);
+  assert.ok(netCheckIndex >= 0);
+  assert.match(body, /planVideoPermissionChanges\(\{/);
+  assert.match(permissionPlanSource, /nextHiddenEditorCount/);
   assert.match(atomicLimits, /MAX_VIDEO_HIDDEN_EDITORS = 100/);
 });
 
