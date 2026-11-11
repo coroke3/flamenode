@@ -33,8 +33,13 @@ test("SA-084 webhook target and forum thread shape have CURRENT boundaries", () 
   assert.equal(validateNotificationPayload("ok", { other: "ok" }).ok, true);
 });
 
-test("SA-084 validator fails closed for nonserializable notifications", () => {
+test("SA-084 validator fails closed for nonserializable or scalar JSON notifications", () => {
   const cycle = {}; cycle.self = cycle;
   assert.equal(validateNotificationPayload("video_edit_permission_granted", cycle).ok, false);
   assert.equal(validateNotificationPayload("video_edit_permission_granted", { data: 1n }).ok, false);
+  for (const jsonValue of [undefined, null, "not-an-object", [], 123]) {
+    assert.equal(validateNotificationPayload("video_edit_permission_granted", {
+      toJSON: () => jsonValue,
+    }).ok, false);
+  }
 });
