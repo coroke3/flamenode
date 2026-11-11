@@ -22,6 +22,15 @@ export interface ManageEventPageShellProps {
   manageStaffXUserIds?: readonly string[];
 }
 
+const HEX_COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+/** Port of CURRENT src/lib/utils/eventAccent.ts: set --manage-event-accent safely for valid hex colors only. */
+export function manageEventAccentStyle(accentColor: string | null | undefined): CSSProperties | undefined {
+  const color = accentColor?.trim();
+  if (!color || !HEX_COLOR_RE.test(color)) return undefined;
+  return { "--manage-event-accent": color } as CSSProperties;
+}
+
 /** CURRENT's mismatch is a notice only; backend access remains authoritative. */
 export function ManageEventPageShell({
   eventId, title, description, backHref = "/manage", backLabel = "担当イベント一覧へ",

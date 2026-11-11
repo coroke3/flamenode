@@ -1,5 +1,10 @@
-/** MIG-0720 U02a: event-scoped Manage overview read; no privileged cache. */
-import { ManageOverviewResponseSchema, type ManageOverviewResponse } from "@flamenode/contracts";
+/** MIG-0720 U02/U04: event-scoped Manage overview and audience reads; no privileged cache. */
+import {
+  ManageAudienceResponseSchema,
+  ManageOverviewResponseSchema,
+  type ManageAudienceResponse,
+  type ManageOverviewResponse,
+} from "@flamenode/contracts";
 import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 
 export type ManageNotifCategory = ManageOverviewResponse["notifCategory"];
@@ -34,6 +39,28 @@ export async function loadManageOverview(
   // response. In particular, never render previously authorized event data.
   if (!parsed.success || parsed.data.event.id !== eventId ||
       parsed.data.notifCategory !== category) {
+    return { status: "unavailable" };
+  }
+  return { status: "ok", data: parsed.data };
+}
+
+export function manageAudiencePath(eventId: string): string {
+  return `/api/manage/events/${encodeURIComponent(eventId)}/audience`;
+}
+
+export async function loadManageAudience(
+  fetchFn: OpsFetch,
+  eventId: string,
+  signal?: AbortSignal,
+): Promise<OpsResult<ManageAudienceResponse>> {
+  if (!eventId.trim() || eventId.length > 256 || /[\u0000-\u001f\u007f]/.test(eventId)) {
+    return { status: "notFound" };
+  }
+  const response = await getJson<unknown>(fetchFn, manageAudiencePath(eventId), signal);
+  if (response.status !== "ok") return response;
+
+  const parsed = ManageAudienceResponseSchema.safeParse(response.data);
+  if (!parsed.success || parsed.data.event.id !== eventId) {
     return { status: "unavailable" };
   }
   return { status: "ok", data: parsed.data };

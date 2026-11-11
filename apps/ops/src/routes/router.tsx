@@ -17,6 +17,9 @@ import { ManageLayout } from "./manage/ManageLayout.js";
 import { ManageDashboard } from "./manage/ManageDashboard.js";
 import { ManageReviewRedirect } from "./manage/ManageReviewRedirect.js";
 import { EventOverview } from "./manage/EventOverview.js";
+import { EventAudience } from "./manage/EventAudience.js";
+import { EventStaffReadOnlyPage } from "./manage/EventStaffReadOnlyPage.js";
+import type { OpsFetch } from "../api/read.js";
 
 /** MIG-0707 U02: placeholder only. No protected screen data is served until its own MIG is reviewed. */
 function UnmigratedView(): React.ReactElement {
@@ -33,10 +36,23 @@ export class OpsRouteErrorBoundary extends React.Component<
   }
 }
 /** MIG-0720 U02b: URL event ID is the only route input; Hono rechecks access on every GET. */
-export function ManageEventOverviewRoute(): React.ReactElement {
+export function ManageEventOverviewRoute({ fetchFn = fetch }: { fetchFn?: OpsFetch } = {}): React.ReactElement {
   const { id } = useParams<"id">();
   return id
-    ? <EventOverview eventId={id} fetchFn={fetch} />
+    ? <EventOverview eventId={id} fetchFn={fetchFn} />
+    : <p role="alert">イベントIDが不正です。</p>;
+}
+/** MIG-0720 U04: read-only audience preview route, delegated to Hono per-event authorization. */
+export function ManageEventAudienceRoute({ fetchFn = fetch }: { fetchFn?: OpsFetch } = {}): React.ReactElement {
+  const { id } = useParams<"id">();
+  return id
+    ? <EventAudience eventId={id} fetchFn={fetchFn} />
+    : <p role="alert">イベントIDが不正です。</p>;
+}
+/** MIG-0723 U03a: read-only staff route, still delegated to Hono per-event authorization. */
+export function ManageStaffRoute({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactElement {
+  const { id } = useParams<"id">();
+  return id ? <EventStaffReadOnlyPage eventId={id} fetchFn={fetchFn} editable />
     : <p role="alert">イベントIDが不正です。</p>;
 }
 
@@ -48,7 +64,9 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
         <Routes>
           <Route index element={<ManageDashboard />} />
           <Route path="events/:id" element={<ManageEventOverviewRoute />} />
+          <Route path="events/:id/audience" element={<ManageEventAudienceRoute />} />
           <Route path="events/:id/review" element={<ManageReviewRedirect />} />
+          <Route path="events/:id/staff" element={<ManageStaffRoute />} />
           <Route path="*" element={<UnmigratedView />} />
         </Routes>
       </ManageLayout>
