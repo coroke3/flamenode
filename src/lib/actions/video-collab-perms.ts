@@ -38,7 +38,7 @@ import {
 } from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
 import { isCanonicalXId, normalizeXId } from "@/lib/utils/xid";
-import { upsertSchema, permissionBatchSchema, prepareCollaboratorPermissionIntents, selectVideoPermissionNotificationTargets } from "@flamenode/domain/video";
+import { upsertSchema, permissionBatchSchema, prepareCollaboratorPermissionIntents, parseVideoCollaboratorDeleteInput, selectVideoPermissionNotificationTargets } from "@flamenode/domain/video";
 import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/enqueue";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import { mutateWithAudit } from "@/lib/audit/mutate";
@@ -732,11 +732,12 @@ export async function deleteVideoCollaborator(
   const guard = await writeGuard({ feature: "edit_video" });
   if (!guard.ok) return { ok: false, message: guard.message };
   const actor = { id: guard.user.id, role: guard.user.role ?? null };
-  const videoId = String(formData.get("video_id") ?? "").trim();
-  const rawXId = normalizeXId(String(formData.get("x_user_id") ?? ""));
-  if (!videoId || !rawXId || !isCanonicalXId(rawXId)) {
-    return { ok: false, message: "video_id と有効な X ID が必要です。" };
-  }
+  const input = parseVideoCollaboratorDeleteInput({
+    video_id: formData.get("video_id"),
+    x_user_id: formData.get("x_user_id"),
+  });
+  if (!input.ok) return { ok: false, message: input.message };
+  const { videoId, xUserId: rawXId } = input;
 
   const db = guard.db;
 
