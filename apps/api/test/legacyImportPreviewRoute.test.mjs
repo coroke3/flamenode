@@ -98,7 +98,7 @@ test("MIG-0645 U02 Hono: valid empty CSV reaches real R2 preview persistence wit
   const { request, stats } = setup({ bucket });
   const data = new FormData();
   data.set("mode", "preview");
-  data.set("files", new File(["eventid,eventname\\n"], "events.csv", { type: "text/csv" }));
+  data.set("files", new File(["eventid,eventname\n"], "events.csv", { type: "text/csv" }));
   const res = await request(data);
   assert.equal(res.status, 200, JSON.stringify(await res.clone().json()));
   const body = await res.json();
