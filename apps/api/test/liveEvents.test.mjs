@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { app } from "../src/app.ts";
 import { resetIsolateMicroCacheForTests } from "../src/routes/live/microCache.ts";
 import { resetOperationModeCachesForTests } from "../src/routes/live/operationMode.ts";
+import { handleLiveApiGet } from "../src/routes/live/events.ts";
 
 function createDb({ failAll = false } = {}) {
   const sqlite = new DatabaseSync(":memory:");
@@ -229,6 +230,27 @@ test("privacy regression: private→public transition never revives old cached r
     }
     sqlite.close();
   }
+});
+
+test("Hono live DB binding getter failure returns sanitized 503 and never calls a loader", async () => {
+  let loaderCalls = 0;
+  const env = Object.defineProperty({}, "DB", {
+    get() { throw new Error("provider-sensitive-binding-info"); },
+  });
+  for (const route of ["slots", "submissions", "summary"]) {
+    const response = await handleLiveApiGet(env, "ev-1", async () => {
+      loaderCalls++;
+      return { event_id: "ev-1" };
+    }, route);
+    assert.equal(response.status, 503, route);
+    assert.equal(response.headers.get("cache-control"), "no-store", route);
+    const body = await response.text();
+    assert.deepEqual(JSON.parse(body), {
+      error: "db_unavailable", message: "データベースに接続できません。",
+    });
+    assert.doesNotMatch(body, /provider-sensitive-binding-info/, route);
+  }
+  assert.equal(loaderCalls, 0);
 });
 
 test("D1 failure -> 503 live_api_error no-store; operation-mode D1 failure falls back to normal", async () => {
