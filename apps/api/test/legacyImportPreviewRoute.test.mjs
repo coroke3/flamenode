@@ -82,7 +82,7 @@ test("MIG-0645 U02 Hono: invalid multipart request never runs an import", async 
   assert.equal(stats.batches, 0);
 });
 
-test("MIG-0645 U02 Hono: valid empty CSV reaches real R2 preview persistence without D1 writes", async () => {
+test("MIG-0645 U02 Hono: valid event CSV reaches real D1 preflight and R2 persistence without D1 writes", async () => {
   const saved = new Map();
   const bucket = {
     async put(key, body) {
@@ -98,13 +98,14 @@ test("MIG-0645 U02 Hono: valid empty CSV reaches real R2 preview persistence wit
   const { request, stats } = setup({ bucket });
   const data = new FormData();
   data.set("mode", "preview");
-  data.set("files", new File(["eventid,eventname\n"], "events.csv", { type: "text/csv" }));
+  data.set("files", new File(["eventid,eventname,member,memberid,memberpost\nevent-a,Example,Owner,owner_x,owner\n"], "events.csv", { type: "text/csv" }));
   const res = await request(data);
   assert.equal(res.status, 200, JSON.stringify(await res.clone().json()));
   const body = await res.json();
   assert.equal(body.ok, true);
   assert.match(body.preview_token, /^[0-9a-f]{32}$/);
   assert.match(body.plan_hash, /^[0-9a-f]{64}$/);
+  assert.equal(body.preview.events[0].id, "event-a");
   assert.equal(saved.size, 1);
   assert.equal(stats.batches, 0);
   assert.equal(res.headers.get("cache-control"), "private, no-store");
