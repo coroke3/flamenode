@@ -6,12 +6,11 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
 import { buildPermissionGrantNotificationInputs } from "@flamenode/server-core/video/permissionNotificationInputs";
-import { loadPermissionGrantProfiles } from "@flamenode/server-core/video/permissionProfiles";
-import { canonicalizePermissionIntents } from "@flamenode/server-core/video/permissionCanonicalize";
-import { loadPermissionMembersRead } from "@flamenode/server-core/video/permissionMembersRead";
 import { buildPermissionMutationBatch } from "@flamenode/server-core/video/permissionMutationBatch";
+import { preparePermissionWrite } from "@flamenode/server-core/video/permissionPreparation";
+import { buildPermissionWriteAudits } from "@flamenode/server-core/video/permissionPlan";
 import { permissionRebuildTargets } from "@flamenode/server-core/video/permissionRebuildTargets";
-import { planVideoPermissionChanges, evaluatePermissionPlanPreflight, buildPermissionWriteAudits } from "@flamenode/server-core/video/permissionPlan";
+
 import { writeGuard } from "@/lib/auth/writeGuard";
 import {
   canEditVideo,
@@ -220,61 +219,18 @@ async function applyPermissionIntentsToVideo(
     notify: boolean;
   },
 ): Promise<VideoCollabPermissionBatchResult> {
-  const canonicalIntents = await canonicalizePermissionIntents(db, args.intents);
-  const prepared = prepareCollaboratorPermissionIntents(canonicalIntents);
-  if (!prepared.ok) return { ok: false, message: prepared.message };
-  const intents = prepared.intents;
-
-  const xids = Array.from(intents.keys());
-  if (xids.length === 0) {
-    return {
-      ok: true,
-      message: "変更対象がありません。",
-      granted: [],
-      revoked: [],
-      unchanged: 0,
-    };
-  }
-
-  const membersRead = await loadPermissionMembersRead(db, video.id, xids);
-  if (!membersRead.ok) return { ok: false, message: membersRead.message };
-  const { existingRows, rowsByXid, currentHiddenEditorCount } = membersRead;
-
-  const grantXids = xids.filter((xid) => intents.get(xid)?.intent === "on");
-  const existingProfiles = await loadPermissionGrantProfiles(db, grantXids);
-  const rejectedProfileIds = existingProfiles
-    .filter((row) => row.approval_status === "rejected")
-    .map((row) => normalizeXId(row.id));
-  if (rejectedProfileIds.length > 0) {
-    return {
-      ok: false,
-      message: `拒否済みの X ID には編集権限を付与できません: ${rejectedProfileIds
-        .map((xid) => `@${xid}`)
-        .join("、")}`,
-    };
-  }
-  const existingProfileIds = new Set(
-    existingProfiles.map((row) => normalizeXId(row.id)),
-  );
-
-  const plan = planVideoPermissionChanges({
-    intents,
-    rowsByXid,
-    existingProfileIds,
-    actorId: actor.id,
+  const preparation = await preparePermissionWrite(db, {
     videoId: video.id,
-    now: Math.floor(Date.now() / 1000),
+    actorId: actor.id,
+    intents: args.intents,
     notify: args.notify,
+    now: Math.floor(Date.now() / 1000),
     makeMemberId: () => generateId("vm"),
-    currentHiddenEditorCount,
   });
-  const {
-    updateRows, insertHiddenRows, deleteHiddenIds, newXUsers,
-    grantedNames, revokedNames, notifyXids, unchanged, nextHiddenEditorCount,
-  } = plan;
-
-  const decision = evaluatePermissionPlanPreflight(plan);
-  if (decision.kind !== "write_required") return decision.result;
+  if (preparation.kind === "error") return { ok: false, message: preparation.message };
+  if (preparation.kind === "terminal") return preparation.result;
+  const { xids, existingRows, currentHiddenEditorCount, plan } = preparation;
+  const { newXUsers, grantedNames, revokedNames, notifyXids, unchanged } = plan;
 
   const mutation = buildPermissionMutationBatch(db, {
     videoId: video.id,
