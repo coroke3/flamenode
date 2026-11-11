@@ -83,7 +83,7 @@ test("100人permission batchの通常最大経路はD1 Free 50-query budgetに�
 
 test("100人通知はJSON1 bindの1 statementへまとめ、必要時だけ200件単位でchunkする", () => {
   assert.match(notificationSource, /buildKnownRecipientNotificationBulkBatch/);
-  assert.match(notificationSource, /buildPermissionNotificationBulkInsertSql\\(rows\\)/);
+  assert.match(notificationSource, /buildPermissionNotificationBulkInsertSql\(rows\)/);
   assert.match(notificationSqlSource, /INSERT OR IGNORE INTO notification_outbox/);
   assert.match(notificationSqlSource, /FROM json_each\(\$\{payload\}\)/);
   assert.match(notificationSource, /notification_bulk_batch_limit_exceeded/);
