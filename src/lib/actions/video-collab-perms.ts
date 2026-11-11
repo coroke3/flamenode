@@ -6,6 +6,7 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
+import { loadPermissionGrantProfiles } from "@flamenode/server-core/video/permissionProfiles";
 import {
   buildPermissionSetGuardSql,
   buildHiddenEditorCountGuardSql,
@@ -345,20 +346,7 @@ async function applyPermissionIntentsToVideo(
   let nextHiddenEditorCount = currentHiddenEditorCount;
 
   const grantXids = xids.filter((xid) => intents.get(xid)?.intent === "on");
-  const existingProfiles =
-    grantXids.length === 0
-      ? []
-      : await db
-          .select({
-            id: xUsers.id,
-            approval_status: xUsers.approval_status,
-          })
-          .from(xUsers)
-          .where(sql`lower(${xUsers.id}) IN (
-            SELECT lower(CAST(value AS TEXT))
-            FROM json_each(${JSON.stringify(grantXids)})
-          )`)
-          .limit(grantXids.length + 1);
+  const existingProfiles = await loadPermissionGrantProfiles(db, grantXids);
   const rejectedProfileIds = existingProfiles
     .filter((row) => row.approval_status === "rejected")
     .map((row) => normalizeXId(row.id));
