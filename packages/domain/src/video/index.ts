@@ -11,3 +11,4 @@ export * from "./interactions.ts";
 export * from "./parseEventIds.ts";
 
 export * from "./collaboratorPermissionInput.ts";
+export * from "./permissionNotificationTargets.ts";
