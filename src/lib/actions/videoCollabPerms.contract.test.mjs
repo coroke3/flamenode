@@ -6,6 +6,10 @@ const source = await readFile(
   new URL("./video-collab-perms.ts", import.meta.url),
   "utf8",
 );
+const permissionMutationSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionMutationBatch.ts", import.meta.url),
+  "utf8",
+);
 const permissionSqlSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionSql.ts", import.meta.url),
   "utf8",
@@ -62,7 +66,7 @@ function functionBody(name, fileSource = source) {
 }
 
 test("CURRENT actionはserver-coreの権限SQLと通知先取得を唯一の実装として参照する", () => {
-  assert.match(source, /from "@flamenode\/server-core\/video\/permissionSql"/);
+  assert.match(source, /from "@flamenode\/server-core\/video\/permissionMutationBatch"/);
   assert.match(source, /from "@flamenode\/server-core\/video\/permissionRecipients"/);
   for (const name of [
     "buildPermissionSetGuardSql",
@@ -165,12 +169,13 @@ test("permission mutationはJSON1で対象member\/X userを一括取得する", 
 
 test("permission mutationは集合CAS guardとJSON1 bulk DMLを使う", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
-  assert.match(body, /buildPermissionSetGuardSql/);
-  assert.match(body, /buildHiddenEditorCountGuardSql/);
-  assert.match(body, /buildXUsersBulkInsertSql/);
-  assert.match(body, /buildMemberPermissionBulkUpdateSql/);
-  assert.match(body, /buildVideoMemberBulkInsertSql\(insertHiddenRows\.map\(toVideoMemberSnapshotRow\)\)/);
-  assert.match(body, /buildHiddenMemberBulkDeleteSql/);
+  assert.match(body, /buildPermissionMutationBatch\(db, \{/);
+  for (const name of [
+    "buildPermissionSetGuardSql", "buildHiddenEditorCountGuardSql",
+    "buildXUsersBulkInsertSql", "buildMemberPermissionBulkUpdateSql",
+    "buildVideoMemberBulkInsertSql", "buildHiddenMemberBulkDeleteSql",
+  ]) assert.match(permissionMutationSource, new RegExp(name));
+  assert.match(permissionMutationSource, /plan\.insertHiddenRows\.map\(toVideoMemberSnapshotRow\)/);
   assert.match(body, /mutateWithAudit\(db, \{/);
 });
 
@@ -183,7 +188,7 @@ test("X userの同時作成は成功扱いにし、同時rejected化だけatomic
     builder,
     /COALESCE\(x_users\.approval_status, 'pending'\) <> 'rejected'/,
   );
-  assert.match(mutation, /expected\.push\(newXUsers\.length\)/);
+  assert.match(permissionMutationSource, /expectedChanges\.push\(plan\.newXUsers\.length\)/);
   assert.match(mutation, /buildPermissionWriteAudits\(\{/);
   assert.match(permissionPlanSource, /operation: "MERGE"/);
 });
