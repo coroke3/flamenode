@@ -37,7 +37,7 @@ import {
   toVideoMemberSnapshotRow,
 } from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
-import { isCanonicalXId, normalizeXId } from "@/lib/utils/xid";
+import { normalizeXId } from "@/lib/utils/xid";
 import { upsertSchema, permissionBatchSchema, prepareCollaboratorPermissionIntents, parseVideoCollaboratorDeleteInput, selectVideoPermissionNotificationTargets } from "@flamenode/domain/video";
 import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/enqueue";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
