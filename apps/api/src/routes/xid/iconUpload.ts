@@ -89,7 +89,14 @@ export function createXIdIconUploadRoutes(guard: MiddlewareHandler<AppEnv>): Hon
     if (before.approval_status !== "approved") {
       return c.json({ ok: false, message: "承認済みの X ID だけを編集できます。" }, 403);
     }
-    const bucket = c.env.BUCKET;
+    // Cloudflare binding getters can throw before an R2 operation begins.
+    // Fail closed without exposing provider internals or writing any D1 state.
+    let bucket: R2Bucket | undefined;
+    try {
+      bucket = c.env?.BUCKET;
+    } catch {
+      return c.json({ ok: false, message: "ストレージが利用できません。" }, 503);
+    }
     if (!bucket) {
       return c.json({ ok: false, message: "ストレージが利用できません。" }, 503);
     }
