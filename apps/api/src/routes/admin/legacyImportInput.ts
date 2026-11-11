@@ -1,14 +1,8 @@
 import { MAX_LEGACY_IMPORT_SELECTED_ROWS } from "@flamenode/server-core/legacyImport/range";
 export { MAX_LEGACY_IMPORT_SELECTED_ROWS };
-// Values pinned to CURRENT: normalize.ts (50 decisions), cpuBudget.ts (250 rows).
-// Avoid importing Next's source tree into the Hono runtime.
-type CanonicalVisibility = "private" | "public";
-type LegacyImportStrategy = "create_only" | "skip_existing" | "replace_imported";
-type LegacyVideoFieldDecision =
-  | { source_key: string; action: "custom_question"; question_label: string }
-  | { source_key: string; action: "ignore" };
-export const MAX_LEGACY_VIDEO_FIELD_DECISIONS = 50;
-
+import { MAX_LEGACY_VIDEO_FIELD_DECISIONS } from "@flamenode/server-core/legacyImport/normalize";
+import type { CanonicalVisibility, LegacyImportStrategy, LegacyVideoFieldDecision } from "@flamenode/server-core/legacyImport/normalize";
+export { MAX_LEGACY_VIDEO_FIELD_DECISIONS };
 
 /**
  * MIG-0645 U02 input boundary, copied from CURRENT RH-002.
