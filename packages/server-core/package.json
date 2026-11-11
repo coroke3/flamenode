@@ -121,7 +121,8 @@
     "./video/permissionPreparation": "./src/video/permissionPreparation.ts",
     "./video/permissionSubject": "./src/video/permissionSubject.ts",
     "./video/permissionVideoRead": "./src/video/permissionVideoRead.ts",
-    "./video/permissionAccess": "./src/video/permissionAccess.ts"
+    "./video/permissionAccess": "./src/video/permissionAccess.ts",
+    "./video/permissionNotificationBulkSql": "./src/video/permissionNotificationBulkSql.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
