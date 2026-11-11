@@ -38,7 +38,7 @@ import {
 } from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
 import { isCanonicalXId, normalizeXId } from "@/lib/utils/xid";
-import { upsertSchema, permissionBatchSchema } from "@flamenode/domain/video";
+import { upsertSchema, permissionBatchSchema, prepareCollaboratorPermissionIntents } from "@flamenode/domain/video";
 import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/enqueue";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import { mutateWithAudit } from "@/lib/audit/mutate";
@@ -278,30 +278,9 @@ async function applyPermissionIntentsToVideo(
   },
 ): Promise<VideoCollabPermissionBatchResult> {
   const canonicalIntents = await canonicalizePermissionIntents(db, args.intents);
-  const intents = new Map<string, { displayName: string; intent: "on" | "off" }>();
-  const duplicateXids = new Set<string>();
-  for (const item of canonicalIntents) {
-    const xid = normalizeXId(item.x_user_id);
-    if (!xid || !isCanonicalXId(xid)) {
-      return { ok: false, message: "有効な X ID を指定してください。" };
-    }
-    if (intents.has(xid)) {
-      duplicateXids.add(xid);
-      continue;
-    }
-    intents.set(xid, {
-      displayName: item.display_name.trim() || `@${xid}`,
-      intent: item.intent,
-    });
-  }
-  if (duplicateXids.size > 0) {
-    return {
-      ok: false,
-      message: `同じ X ID の権限指定が重複しています: ${Array.from(duplicateXids)
-        .map((xid) => `@${xid}`)
-        .join("、")}`,
-    };
-  }
+  const prepared = prepareCollaboratorPermissionIntents(canonicalIntents);
+  if (!prepared.ok) return { ok: false, message: prepared.message };
+  const intents = prepared.intents;
 
   const xids = Array.from(intents.keys());
   if (xids.length === 0) {
