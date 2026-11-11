@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { preparePermissionNotificationBulkBatch } from "../src/video/permissionNotificationBatch.ts";
+import { validateNotificationPayload } from "@flamenode/domain/notifications/payload";
 
 const valid = (type, payload) => ({
   ok: type === "video_edit_permission_granted" &&
@@ -65,4 +66,25 @@ test("SA-084 non-grant inputs preserve dedupe, normalize correlation and channel
   assert.equal(result.rows[0].correlation_id, "trace");
   assert.equal(result.rows[0].delivery_route, "channel");
   assert.equal(result.rows[0].id, "uuid");
+});
+
+test("SA-084 real shared validator fails closed before writing Hono notification SQL", () => {
+  assert.throws(
+    () => preparePermissionNotificationBulkBatch([{
+      ...input(), payload: { content: "ok", webhook_target: "invalid" },
+    }], validateNotificationPayload),
+    /通知 payload が不正です/,
+  );
+  assert.throws(
+    () => preparePermissionNotificationBulkBatch([{
+      ...input(), payload: { content: "ok", extra: "あ".repeat(2728) },
+    }], validateNotificationPayload),
+    /通知 payload が不正です/,
+  );
+  const plan = preparePermissionNotificationBulkBatch([input()], validateNotificationPayload, {
+    now: 1700000002, newId: () => "new-uuid",
+  });
+  assert.equal(plan.rows.length, 1);
+  assert.deepEqual(plan.expectedChanges, [null]);
+  assert.equal(plan.rows[0].recipient_user_id, "user-1");
 });
