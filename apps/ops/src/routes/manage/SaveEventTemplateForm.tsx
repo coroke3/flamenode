@@ -22,27 +22,46 @@ export function SaveEventTemplateForm({
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const inFlightRef = React.useRef(false);
+  const eventIdRef = React.useRef(eventId);
+  const requestGenerationRef = React.useRef(0);
 
-  // Clear stale feedback when switching between events.
-  React.useEffect(() => {
+  // A single mounted route can switch event IDs while an old POST is pending.
+  // Invalidate its result before the new event is interactive, and release
+  // the submit lock so the new event is not blocked by an old request.
+  React.useLayoutEffect(() => {
+    if (eventIdRef.current === eventId) return;
+    eventIdRef.current = eventId;
+    requestGenerationRef.current += 1;
+    inFlightRef.current = false;
+    setBusy(false);
     setError(null);
     setSuccess(null);
   }, [eventId]);
+
+  // A late response after unmount must not redirect or refresh another route.
+  React.useEffect(() => () => {
+    requestGenerationRef.current += 1;
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     if (inFlightRef.current || busy) return;
     inFlightRef.current = true;
+    const requestGeneration = requestGenerationRef.current;
+    const isCurrentRequest = () =>
+      requestGeneration === requestGenerationRef.current && eventIdRef.current === eventId;
     setBusy(true);
     setError(null);
     setSuccess(null);
     try {
       const fd = new FormData(e.currentTarget);
       const outcome = await saveEventAsTemplate(fetchFn, {
-        event_id: String(fd.get("event_id") ?? eventId),
+        // The route's authorized event ID, not a mutable hidden form value.
+        event_id: eventId,
         name: String(fd.get("name") ?? ""),
         description: typeof fd.get("description") === "string" ? (fd.get("description") as string) : null,
       });
+      if (!isCurrentRequest()) return;
       if (outcome.status === "anonymous") {
         assign("/entry");
         return;
@@ -58,8 +77,10 @@ export function SaveEventTemplateForm({
       setSuccess(outcome.data.message ?? "保存しました。");
       onSaved?.();
     } finally {
-      inFlightRef.current = false;
-      setBusy(false);
+      if (isCurrentRequest()) {
+        inFlightRef.current = false;
+        setBusy(false);
+      }
     }
   };
 
