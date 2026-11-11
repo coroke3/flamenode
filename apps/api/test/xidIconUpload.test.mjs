@@ -23,7 +23,7 @@ const png = (size = 64) => {
   chunk("IEND",new Uint8Array(0));
   return new Uint8Array(parts);
 };
-function setup({ linked = true, approved = true, bucket = null, onFirst = null } = {}) {
+function setup({ linked = true, approved = true, bucket = null, onFirst = null, brokenBucketBinding = false } = {}) {
   const {db,sqlite,stats}=createAdminD1({onFirst});
   seedBase(sqlite,{role:"user"});
   sqlite.prepare("INSERT INTO x_users (id,x_name,icon_url,approval_status) VALUES ('x_one','Creator',?,?)")
@@ -44,9 +44,16 @@ function setup({ linked = true, approved = true, bucket = null, onFirst = null }
     form.append("x_user_id",bodyXId);
     form.append("icon_file",new File([bytes],"avatar.png",{type}));
     for(const [key,value] of Object.entries(extra))form.append(key,value);
+    const env={DB:db,NEXT_PUBLIC_SITE_URL:SITE};
+    Object.defineProperty(env,"BUCKET",{
+      enumerable:true,
+      get(){
+        if(brokenBucketBinding)throw Error("provider-secret-storage-binding");
+        return r2;
+      },
+    });
     return app.request(SITE+"/api/xid/"+pathXId+"/icon/upload",
-      {method:"POST",headers:{Origin:origin},body:form},
-      {DB:db,BUCKET:r2,NEXT_PUBLIC_SITE_URL:SITE});
+      {method:"POST",headers:{Origin:origin},body:form},env);
   };
   return {sqlite,stats,writes,deletes,send,app,
     get sessions(){return sessions;}};
@@ -126,6 +133,20 @@ test("SA-105 isolated upload: >8 MiB actual multipart stream rejected before fil
   assert.equal((await res.json()).reason,"body_too_large");
   assert.equal(h.writes.length,0);
   assert.equal(h.stats.batches,0);
+});
+
+test("SA-105 throwing Cloudflare R2 binding getter fails closed before any upload, D1 mutation or audit",async()=>{
+  const h=setup({brokenBucketBinding:true});
+  const res=await h.send();
+  assert.equal(res.status,503);
+  const body=await res.text();
+  assert.match(body,/ストレージが利用できません/);
+  assert.doesNotMatch(body,/provider-secret-storage-binding/);
+  assert.equal(h.writes.length,0);
+  assert.equal(h.stats.batches,0);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,0);
+  assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
+    "https://example.com/old.png");
 });
 
 test("SA-105 isolated upload: failed final R2 put rolls back both new object keys",async()=>{
