@@ -38,7 +38,7 @@ import {
 } from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
 import { isCanonicalXId, normalizeXId } from "@/lib/utils/xid";
-import { upsertSchema, permissionBatchSchema, prepareCollaboratorPermissionIntents } from "@flamenode/domain/video";
+import { upsertSchema, permissionBatchSchema, prepareCollaboratorPermissionIntents, selectVideoPermissionNotificationTargets } from "@flamenode/domain/video";
 import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/enqueue";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import { mutateWithAudit } from "@/lib/audit/mutate";
@@ -586,32 +586,19 @@ async function applyPermissionIntentsToVideo(
   let notificationWakeSource: "manage" | undefined;
   if (notifyXids.length > 0) {
     const links = await loadNotifiableRecipientLinks(db, notifyXids);
-    const notificationByKey = new Map<
-      string,
-      {
-        recipientUserId: string;
-        type: "video_edit_permission_granted";
-        dedupeKey: string;
-        payload: ReturnType<typeof buildVideoEditPermissionGrantedNotification>;
-        eventId: string | null;
-      }
-    >();
-    for (const link of links) {
-      if (link.auth_user_id === actor.id) continue;
-      const dedupeKey = `video_edit_permission_granted:${video.id}:x:${link.x_user_id}:user:${link.auth_user_id}`;
-      notificationByKey.set(dedupeKey, {
-        recipientUserId: link.auth_user_id,
-        type: "video_edit_permission_granted",
-        dedupeKey,
-        payload: buildVideoEditPermissionGrantedNotification({
-          videoId: video.id,
-          videoTitle: video.title,
-        }),
-        eventId: video.primary_event_id,
-      });
-    }
-
-    const notificationInputs = [...notificationByKey.values()];
+    const notificationInputs = selectVideoPermissionNotificationTargets(
+      links,
+      actor.id,
+      video.id,
+    ).map((target) => ({
+      ...target,
+      type: "video_edit_permission_granted" as const,
+      payload: buildVideoEditPermissionGrantedNotification({
+        videoId: video.id,
+        videoTitle: video.title,
+      }),
+      eventId: video.primary_event_id,
+    }));
     for (let offset = 0; offset < notificationInputs.length; offset += 200) {
       const notification = await buildKnownRecipientNotificationBulkBatch(
         db,
