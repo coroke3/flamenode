@@ -136,3 +136,55 @@ test("RH-002 U02 preview persist: create_only does not reuse existing rows", asy
   assert.equal((await persistLegacyImportPreview(a.args)).status, 200);
   assert.deepEqual(a.calls, ["estimate", "preflight", "store"]);
 });
+
+test("RH-002 preview estimator: canonical v4 envelope uses UTF-8 bytes, not JSON code units", async () => {
+  const { estimateLegacyImportStoredPlanBytes, LEGACY_IMPORT_PREVIEW_RECORD_VERSION } =
+    await import("@flamenode/server-core/legacyImport/previewEstimate");
+  assert.equal(LEGACY_IMPORT_PREVIEW_RECORD_VERSION, 4);
+  const prepared = await fixture();
+  const input = { authUserId: "日本語-管理者", strategy: prepared.strategy, plan: prepared.plan };
+  const one = estimateLegacyImportStoredPlanBytes(input);
+  const record = {
+    version: 4, previewToken: "0".repeat(32),
+    authUserId: input.authUserId, strategy: input.strategy,
+    planHash: "0".repeat(64), plan: input.plan,
+    createdAt: 0, expiresAt: 0, status: "ready", attempt: 0,
+    progress: {
+      stage: "system_user", index: 0,
+      counts: {
+        createdEvents: 0, replacedEvents: 0, skippedEvents: 0,
+        createdVideos: 0, replacedVideos: 0, skippedVideos: 0,
+        createdXUsers: 0, createdAuthUsers: 0, createdSoftwares: 0,
+        createdCustomQuestions: 0, reusedCustomQuestions: 0,
+      },
+      skipExistingEventIds: [], skipExistingVideoIds: [],
+    },
+  };
+  assert.equal(one, Buffer.byteLength(JSON.stringify(record), "utf8"));
+  assert.ok(one > JSON.stringify(record).length);
+  assert.ok(one > Buffer.byteLength(JSON.stringify(prepared.plan), "utf8"),
+    "the stored envelope, not only plan JSON, counts against 512 KiB");
+});
+
+test("RH-002 preview persistence: missing test estimator defaults to canonical shared R2 record", async () => {
+  const prepared = await fixture();
+  const a = adapters(prepared);
+  delete a.args.estimateStoredBytes;
+  const response = await persistLegacyImportPreview(a.args);
+  assert.equal(response.status, 200);
+  assert.deepEqual(a.calls, ["preflight", "store"]);
+  const { estimateLegacyImportStoredPlanBytes } =
+    await import("@flamenode/server-core/legacyImport/previewEstimate");
+  const fullBytes = estimateLegacyImportStoredPlanBytes({
+    authUserId: a.args.authUserId,
+    strategy: prepared.strategy,
+    plan: prepared.plan,
+  });
+  assert.ok(fullBytes > 0 && fullBytes < LEGACY_IMPORT_PLAN_WARN_BYTES);
+});
+
+test("RH-002 CURRENT estimator is a compatibility re-export of the canonical byte calculator", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const current = await readFile(new URL("../../../src/lib/import/legacy/previewStore.ts", import.meta.url), "utf8");
+  assert.match(current, /export \{ estimateLegacyImportStoredPlanBytes \} from "@flamenode\/server-core\/legacyImport\/previewEstimate"/);
+});
