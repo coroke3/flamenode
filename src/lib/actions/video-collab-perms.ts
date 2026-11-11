@@ -8,6 +8,7 @@ import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permi
 import { buildPermissionGrantNotificationInputs } from "@flamenode/server-core/video/permissionNotificationInputs";
 import { buildPermissionMutationBatch } from "@flamenode/server-core/video/permissionMutationBatch";
 import { preparePermissionWrite } from "@flamenode/server-core/video/permissionPreparation";
+import { resolvePermissionSubjectXUserId } from "@flamenode/server-core/video/permissionSubject";
 import { buildPermissionWriteAudits } from "@flamenode/server-core/video/permissionPlan";
 import { permissionRebuildTargets } from "@flamenode/server-core/video/permissionRebuildTargets";
 
@@ -29,10 +30,6 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusAction";
-import {
-  getLinkedXUserIdsForAuthUser,
-  resolveCanonicalXUserId,
-} from "@/lib/auth/xIdentity";
 
 export interface VideoCollabResult {
   ok: boolean;
@@ -160,53 +157,6 @@ async function loadEditableVideoForPermissions(
     if (eventAllowed) return { ...video, privilegeMode: "event" };
   }
   return null;
-}
-
-async function resolveSubjectXUserId(
-  db: DB,
-  xUserId: string | null,
-  authUserId: string | null,
-): Promise<{ ok: true; xUserId: string } | { ok: false; message: string }> {
-  if (xUserId) {
-    // A caller-supplied identity is a write target.  Do not turn an
-    // unresolved/corrupt alias into a new raw identifier here: that would
-    // bypass the common fail-closed alias policy and could create a dangling
-    // permission row.
-    const canonical = await resolveCanonicalXUserId(db, xUserId);
-    if (!canonical) {
-      return {
-        ok: false,
-        message: "指定した X ID を一意な正本として解決できません。",
-      };
-    }
-    if (authUserId) {
-      const approvedLinks = await getLinkedXUserIdsForAuthUser(db, authUserId, {
-        approvedOnly: true,
-      });
-      if (!approvedLinks.includes(canonical)) {
-        return {
-          ok: false,
-          message: "指定した認証ユーザーはその承認済み X ID に紐づいていません。",
-        };
-      }
-    }
-    return { ok: true, xUserId: canonical };
-  }
-
-  if (!authUserId) return { ok: false, message: "共同編集者の X ID が必要です。" };
-  const linked = await getLinkedXUserIdsForAuthUser(db, authUserId, {
-    approvedOnly: true,
-  });
-  if (linked.length === 0) {
-    return { ok: false, message: "指定した認証ユーザーに承認済み X ID がありません。" };
-  }
-  if (linked.length > 1) {
-    return {
-      ok: false,
-      message: "複数の X ID が紐づいているため、共同編集者の X ID を明示してください。",
-    };
-  }
-  return { ok: true, xUserId: linked[0]! };
 }
 
 async function applyPermissionIntentsToVideo(
@@ -396,7 +346,7 @@ export async function deleteVideoCollaborator(
     if (!video) {
       return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
     }
-    const resolved = await resolveSubjectXUserId(db, rawXId, null);
+    const resolved = await resolvePermissionSubjectXUserId(db, rawXId, null);
     if (!resolved.ok) return { ok: false, message: resolved.message };
 
     const result = await applyPermissionIntentsToVideo(db, actor, video, {
