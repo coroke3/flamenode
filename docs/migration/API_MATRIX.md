@@ -367,7 +367,7 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-102 | `updateXIdProfile` | `xid#normalizeXId` | profile CAS + static rebuild | U04 |
 | SA-103 | `deleteLinkedXId` | `xid#normalizeXId` | `xLinkDependencies.ts` (SQL) + link delete | U04 |
 | SA-104 | `setXIdIcon` | `xid#normalizeXId` | icon resolution + R2 | U04 |
-| SA-105 | `uploadXIdIcon` | `xid#normalizeXId` | image upload + R2 | U04 |
+| SA-105 | `uploadXIdIcon` → isolated `POST /api/xid/:xUserId/icon/upload` (UNMOUNTED, PR#475) | `xid#normalizeXId`, CURRENT `validateIconImageUpload` pure parity | U06 isolated Hono handler with 8MiB multipart boundary, 2MiB validated PNG/JPEG/WEBP image, approved linked-X preflight + D1 CAS recheck, R2 staging/final, strict X-user audit and static-rebuild batch, rollback on uncommitted error, postcommit cleanup. Public mount, S3 CPU/D1 and independent security review PENDING | U06 IN_PROGRESS (not live) |
 | SA-106 | `queueYoutubeMetadataResync` | — | ADAPTER_ONLY: sync-state CAS + wake | U04 |
 
 ### MIG-0636 G21 — X identity request-byte guard (PR #475)
