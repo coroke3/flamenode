@@ -353,8 +353,35 @@ async function readStoredPreviewObject(object: R2ObjectBody): Promise<StoredPrev
       "plan_too_large",
     );
   }
-  // R2 metadata is not sufficient when an object is malformed or the reported
-  // size is absent/underreported. Enforce the byte cap before JSON parsing.
+  // Bound the actual streamed body before allocating or parsing the full JSON.
+  // R2 size metadata can be absent or wrong; never trust it as the sole limit.
+  const stream = object.body;
+  if (stream) {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    const chunks: string[] = [];
+    let bytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > MAX_STORED_PLAN_BYTES) {
+          await reader.cancel().catch(() => undefined);
+          throw new LegacyImportPreviewError(
+            "保存済みpreview planが大きすぎます。再度プレビューしてください。",
+            "plan_too_large",
+          );
+        }
+        chunks.push(decoder.decode(value, { stream: true }));
+      }
+      chunks.push(decoder.decode());
+    } finally {
+      reader.releaseLock();
+    }
+    return parseStoredPreview(chunks.join(""));
+  }
+  // Fallback for non-stream test adapters. Still check bytes before JSON parse.
   const raw = await object.text();
   if (serializedBytes(raw) > MAX_STORED_PLAN_BYTES) {
     throw new LegacyImportPreviewError(
