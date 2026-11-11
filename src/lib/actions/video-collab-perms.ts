@@ -8,7 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
 import { loadPermissionGrantProfiles } from "@flamenode/server-core/video/permissionProfiles";
 import { loadPermissionMembersRead } from "@flamenode/server-core/video/permissionMembersRead";
-import { planVideoPermissionChanges, evaluatePermissionPlanPreflight, buildPermissionMemberAuditSnapshots } from "@flamenode/server-core/video/permissionPlan";
+import { planVideoPermissionChanges, evaluatePermissionPlanPreflight, buildPermissionWriteAudits } from "@flamenode/server-core/video/permissionPlan";
 import {
   buildPermissionSetGuardSql,
   buildHiddenEditorCountGuardSql,
@@ -36,7 +36,6 @@ import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/en
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
-import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { memberSuggestionsTarget } from "@/lib/staticRebuild/hooks";
@@ -323,7 +322,13 @@ async function applyPermissionIntentsToVideo(
 
   const statements: BatchItem<"sqlite">[] = [];
   const expected: Array<number | null> = [];
-  const audits: WriteAuditLogInput[] = [];
+  const audits = buildPermissionWriteAudits({
+    videoId: video.id,
+    actorUserId: actor.id,
+    privilegeMode: video.privilegeMode,
+    existingRows,
+    plan,
+  });
 
   statements.push(db.run(buildPermissionSetGuardSql(video.id, xids, existingRows)));
   expected.push(null);
@@ -339,19 +344,7 @@ async function applyPermissionIntentsToVideo(
     // 同時にrejected化された行だけDO UPDATE WHEREが0 changeとなり、直後の
     // changes assertionでpermission mutation全体をfail-closed rollbackする。
     expected.push(newXUsers.length);
-    audits.push({
-      table_name: "x_users_permission_batch",
-      target_id: video.id,
-      operation: "MERGE",
-      before: null,
-      after: { id: video.id, rows: newXUsers },
-      actor_user_id: actor.id,
-      context: "video_collab_permissions",
-      reason: `共同編集者X IDをpending一括確保 privilege:${video.privilegeMode}`,
-      retention_class: "long_audit",
-      restore_strategy: "none",
-      strict: true,
-    });
+
   }
   if (updateRows.length > 0) {
     statements.push(db.run(buildMemberPermissionBulkUpdateSql(updateRows)));
@@ -365,21 +358,6 @@ async function applyPermissionIntentsToVideo(
     statements.push(db.run(buildHiddenMemberBulkDeleteSql(video.id, deleteHiddenIds)));
     expected.push(deleteHiddenIds.length);
   }
-
-  const permissionSnapshots = buildPermissionMemberAuditSnapshots(video.id, existingRows, plan);
-  audits.push({
-    table_name: "video_member_permissions_batch",
-    target_id: video.id,
-    operation: "MERGE",
-    before: permissionSnapshots.before,
-    after: permissionSnapshots.after,
-    actor_user_id: actor.id,
-    context: "video_collab_permissions",
-    reason: `共同編集権限を一括更新 privilege:${video.privilegeMode}`,
-    retention_class: "long_audit",
-    restore_strategy: "none",
-    strict: true,
-  });
 
   let notificationWakeSource: "manage" | undefined;
   if (notifyXids.length > 0) {
