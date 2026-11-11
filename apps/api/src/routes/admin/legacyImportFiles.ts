@@ -1,3 +1,5 @@
+import { parseLegacyImportText } from "@flamenode/server-core/legacyImport/parse";
+import { selectLegacyParsedFileRange } from "@flamenode/server-core/legacyImport/range";
 import {
   legacyImportStringField,
   validateLegacyImportFileEnvelope,
@@ -52,8 +54,8 @@ export type LegacyImportReadResult =
 export async function readLegacyImportPreviewFiles(args: {
   formData: FormData;
   files: readonly LegacyImportFileLike[];
-  parseText: (name: string, text: string) => LegacyImportParsedFile;
-  selectRange: (
+  parseText?: (name: string, text: string) => LegacyImportParsedFile;
+  selectRange?: (
     file: LegacyImportParsedFile,
     range: { start: string; end: string },
   ) => { file: LegacyImportParsedFile; range: LegacyImportFileRange };
@@ -71,9 +73,9 @@ export async function readLegacyImportPreviewFiles(args: {
   for (const file of args.files) {
     const content = await file.text();
     try {
-      const parsedFile = args.parseText(file.name, content);
+      const parsedFile = (args.parseText ?? parseLegacyImportText)(file.name, content);
       const index = parsed.length;
-      const ranged = args.selectRange(parsedFile, {
+      const ranged = (args.selectRange ?? selectLegacyParsedFileRange)(parsedFile, {
         start: legacyImportStringField(args.formData, `range_start_${index}`),
         end: legacyImportStringField(args.formData, `range_end_${index}`),
       });
