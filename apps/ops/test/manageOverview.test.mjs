@@ -407,6 +407,122 @@ test("T04 / U03 & U05: SaveEventTemplateForm prevents double-submit, preserves i
   }
 });
 
+test("SA-035 event switch rejects late outcomes and allows the new event to save immediately", async () => {
+  const outcomes = [
+    { status: 200, payload: { ok: true, templateId: "old", message: "旧イベントを保存しました。" } },
+    { status: 401, payload: { ok: false, message: "認証切れ" } },
+    { status: 409, payload: { ok: false, message: "旧イベントが競合しました。" } },
+  ];
+  for (const outcome of outcomes) {
+    const node = document.createElement("div");
+    document.body.append(node);
+    const root = createRoot(node);
+    const calls = [];
+    const refreshed = [];
+    const redirected = [];
+    let releaseOld;
+    const oldPending = new Promise((resolve) => { releaseOld = resolve; });
+    const fetchFn = async (path, init) => {
+      const data = JSON.parse(init.body);
+      calls.push({ path, data });
+      if (data.event_id === "ev-a") return oldPending;
+      return new Response(JSON.stringify({
+        ok: true, templateId: "new", message: "新イベントを保存しました。",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const renderEvent = async (id) => {
+      await React.act(async () => {
+        root.render(React.createElement(SaveEventTemplateForm, {
+          eventId: id,
+          eventTitle: id === "ev-a" ? "イベントA" : "イベントB",
+          fetchFn,
+          assign: (url) => redirected.push(url),
+          onSaved: () => refreshed.push(id),
+        }));
+      });
+    };
+    const submit = async () => {
+      await React.act(async () => {
+        node.querySelector("form").dispatchEvent(
+          new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+        );
+      });
+    };
+
+    try {
+      await renderEvent("ev-a");
+      const hidden = node.querySelector('input[name="event_id"]');
+      hidden.value = "ev-injected"; // route ID, not the modifiable hidden input, is authoritative
+      await submit();
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].data.event_id, "ev-a");
+      assert.equal(node.querySelector('button[type="submit"]').disabled, true);
+
+      await renderEvent("ev-b");
+      assert.equal(node.querySelector('button[type="submit"]').disabled, false, "old POST cannot lock new event");
+      assert.equal(node.querySelector('input[name="name"]').value, "イベントB テンプレート");
+      assert.equal(node.querySelector('[role="alert"]'), null);
+      assert.equal(node.querySelector('[role="status"]'), null);
+
+      await submit();
+      assert.equal(calls.length, 2, "new event can POST while old event remains pending");
+      assert.equal(calls[1].data.event_id, "ev-b");
+      assert.deepEqual(refreshed, ["ev-b"]);
+      assert.match(node.querySelector('[role="status"]').textContent, /新イベントを保存しました。/);
+
+      await React.act(async () => {
+        releaseOld(new Response(JSON.stringify(outcome.payload), {
+          status: outcome.status,
+          headers: { "content-type": "application/json" },
+        }));
+      });
+      assert.deepEqual(refreshed, ["ev-b"], "stale success cannot refresh the new event");
+      assert.deepEqual(redirected, [], "stale 401 cannot redirect the new event");
+      assert.equal(node.querySelector('[role="alert"]'), null, "stale error cannot overwrite feedback");
+      assert.match(node.querySelector('[role="status"]').textContent, /新イベントを保存しました。/);
+      assert.equal(node.querySelector('button[type="submit"]').disabled, false);
+    } finally {
+      await React.act(async () => {
+        root.unmount();
+        node.remove();
+      });
+    }
+  }
+});
+
+test("SA-035 a pending save cannot invoke redirects or refresh after unmount", async () => {
+  const node = document.createElement("div");
+  document.body.append(node);
+  const root = createRoot(node);
+  const events = [];
+  let finishRequest;
+  const pending = new Promise((resolve) => { finishRequest = resolve; });
+  try {
+    await React.act(async () => {
+      root.render(React.createElement(SaveEventTemplateForm, {
+        eventId: "ev-a", eventTitle: "イベントA",
+        fetchFn: async () => pending,
+        onSaved: () => events.push("refresh"),
+        assign: (url) => events.push(url),
+      }));
+    });
+    await React.act(async () => {
+      node.querySelector("form").dispatchEvent(
+        new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+    await React.act(async () => { root.unmount(); });
+    await React.act(async () => {
+      finishRequest(new Response(JSON.stringify({ ok: false }), {
+        status: 401, headers: { "content-type": "application/json" },
+      }));
+    });
+    assert.deepEqual(events, []);
+  } finally {
+    node.remove();
+  }
+});
+
 test("T05 / U04: loadManageAudience validates DTO/eventId, sorts >100 rows as CURRENT, and does not display truncated", async () => {
   const valid = validAudience("ev-1");
   const f = fakeFetch(200, valid);
