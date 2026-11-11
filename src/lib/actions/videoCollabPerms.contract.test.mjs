@@ -241,7 +241,8 @@ test("拒否済みX IDへ編集権限を再付与しない", () => {
 });
 
 test("permission CASのID順はlocaleCompareでなくSQLite互換比較を使う", () => {
-  assert.match(source, /compareSqliteBinaryText/);
+  assert.match(permissionPlanSource, /compareSqliteBinaryText/);
+  assert.match(permissionSqlSource, /compareSqliteBinaryText/);
   assert.doesNotMatch(source, /id\.localeCompare/);
 });
 
@@ -279,7 +280,7 @@ test("batch監査は1人1auditでなく集合snapshotにまとめる", () => {
 
 test("member_suggestions dirty登録は本体mutationと同じatomic writeへ含まれる", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
-  assert.match(body, /buildStaticRebuildQueueBatch\(db, \[/);
+  assert.match(body, /buildStaticRebuildQueueBatch\(db, permissionRebuildTargets\(\{/);
   assert.match(body, /permissionRebuildTargets\(\{/);
   assert.match(permissionRebuildSource, /memberSuggestionsTarget\("video_permissions_batch"\)/);
   assert.match(permissionRebuildSource, /visibilityStatus === "public"/);
@@ -290,7 +291,7 @@ test("member_suggestions dirty登録は本体mutationと同じatomic writeへ含
 test("新規pending X ID作成時はusers_indexも同じqueue batchへ含める", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
   assert.match(body, /newXUsers\.length > 0/);
-  assert.match(body, /targetType: "users_index"/);
+  assert.match(permissionRebuildSource, /targetType: "users_index"/);
 });
 
 test("single grant/revokeとTSV batchは同じpermission mutation正本を使う", () => {
