@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { permissionBatchSchema, upsertSchema, prepareCollaboratorPermissionIntents } from "../src/video/collaboratorPermissionInput.ts";
+import { permissionBatchSchema, upsertSchema, prepareCollaboratorPermissionIntents, parseVideoCollaboratorDeleteInput } from "../src/video/collaboratorPermissionInput.ts";
 
 const intent = (x_user_id = "@Alice") => ({ x_user_id, display_name: "Alice", intent: "on" });
 
@@ -63,4 +63,25 @@ test("MIG-0650 shared canonical intent preparation rejects invalid resolved IDs 
   const result = prepareCollaboratorPermissionIntents([]);
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.intents.size, 0);
+});
+
+test("MIG-0650 delete input keeps CURRENT missing-ID error and canonicalizes handles", () => {
+  assert.deepEqual(parseVideoCollaboratorDeleteInput({ video_id: " video ", x_user_id: " @ALICE " }), {
+    ok: true, videoId: "video", xUserId: "alice",
+  });
+  for (const input of [
+    {}, { video_id: "  ", x_user_id: "alice" },
+    { video_id: "v", x_user_id: "../admin" },
+    { video_id: "v", x_user_id: "a".repeat(21) },
+  ]) {
+    assert.deepEqual(parseVideoCollaboratorDeleteInput(input), {
+      ok: false, message: "video_id と有効な X ID が必要です。",
+    });
+  }
+});
+
+test("MIG-0650 delete parser preserves CURRENT string coercion at FormData boundary", () => {
+  assert.deepEqual(parseVideoCollaboratorDeleteInput({
+    video_id: 123, x_user_id: "@BoB",
+  }), { ok: true, videoId: "123", xUserId: "bob" });
 });
