@@ -8,7 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
 import { loadPermissionGrantProfiles } from "@flamenode/server-core/video/permissionProfiles";
 import { loadPermissionMembersRead } from "@flamenode/server-core/video/permissionMembersRead";
-import { planVideoPermissionChanges } from "@flamenode/server-core/video/permissionPlan";
+import { planVideoPermissionChanges, evaluatePermissionPlanPreflight } from "@flamenode/server-core/video/permissionPlan";
 import {
   buildPermissionSetGuardSql,
   buildHiddenEditorCountGuardSql,
@@ -25,9 +25,6 @@ import {
   type VideoEditAccessContext,
 } from "@/lib/auth/ownership";
 import { videoMembers, videos } from "@/lib/db/schema";
-import {
-  MAX_VIDEO_HIDDEN_EDITORS,
-} from "@/lib/video/atomicLimits";
 import {
   buildVideoMemberBulkInsertSql,
   compareSqliteBinaryText,
@@ -327,30 +324,8 @@ async function applyPermissionIntentsToVideo(
     grantedNames, revokedNames, notifyXids, unchanged, nextHiddenEditorCount,
   } = plan;
 
-  if (
-    insertHiddenRows.length > 0 &&
-    nextHiddenEditorCount > MAX_VIDEO_HIDDEN_EDITORS
-  ) {
-    return {
-      ok: false,
-      message: `非公開編集者は最大${MAX_VIDEO_HIDDEN_EDITORS}人です。これ以上編集権を付与できません。`,
-    };
-  }
-
-  if (
-    updateRows.length === 0 &&
-    insertHiddenRows.length === 0 &&
-    deleteHiddenIds.length === 0 &&
-    newXUsers.length === 0
-  ) {
-    return {
-      ok: true,
-      message: `編集権限を反映しました（付与 0 / 解除 0 / 変更なし ${unchanged}）`,
-      granted: [],
-      revoked: [],
-      unchanged,
-    };
-  }
+  const decision = evaluatePermissionPlanPreflight(plan);
+  if (decision.kind !== "write_required") return decision.result;
 
   const statements: BatchItem<"sqlite">[] = [];
   const expected: Array<number | null> = [];
