@@ -1,3 +1,4 @@
+import { legacyApplyResultFromProgress, type LegacyApplyResultProgress } from "@flamenode/server-core/legacyImport/applyResult";
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "@flamenode/server-core/legacyImport/normalize";
 import { legacyImportCpuBudgetErrors } from "@flamenode/server-core/legacyImport/cpuBudget";
 import { legacyImportApplyCredential } from "./legacyImportApplyInput.ts";
@@ -12,7 +13,7 @@ import { legacyImportApplyProgressSummary, type LegacyImportProgress } from "./l
  * Hono host. This function does no R2 or D1 operations without those adapters.
  * Exactly one D1 step may run per call, and it must be audit-atomic.
  */
-export type LegacyImportApplyClaim<Progress extends LegacyImportProgress> = {
+export type LegacyImportApplyClaim<Progress extends LegacyImportProgress & LegacyApplyResultProgress> = {
   plan: CanonicalLegacyPlan;
   strategy: LegacyImportStrategy;
   planHash: string;
@@ -24,7 +25,7 @@ export type LegacyImportApplyClaim<Progress extends LegacyImportProgress> = {
   release: () => Promise<void>;
 };
 
-export async function runLegacyImportApplyPipeline<Progress extends LegacyImportProgress>(args: {
+export async function runLegacyImportApplyPipeline<Progress extends LegacyImportProgress & LegacyApplyResultProgress>(args: {
   formData: FormData;
   authUserId: string;
   claimPreview: (input: { authUserId: string; previewToken: string; planHash: string }) =>
@@ -37,7 +38,7 @@ export async function runLegacyImportApplyPipeline<Progress extends LegacyImport
     actorAuthUserId: string;
     progress: Progress;
   }) => Promise<LegacyImportStepResult<Progress>>;
-  resultFromProgress: (plan: CanonicalLegacyPlan, progress: Progress) => Record<string, unknown>;
+  resultFromProgress?: (plan: CanonicalLegacyPlan, progress: Progress) => Record<string, unknown>;
   mapPreviewError: (cause: unknown) => { status: 409 | 423 | 503; body: Record<string, unknown> };
   isTransientApplyFailure: (cause: unknown) => boolean;
 }): Promise<{ status: 200 | 409 | 423 | 503; body: Record<string, unknown> }> {
@@ -57,7 +58,7 @@ export async function runLegacyImportApplyPipeline<Progress extends LegacyImport
 
   const progressSummary = (progress: Progress) => legacyImportApplyProgressSummary(claim.plan, progress);
   const result = (progress: Progress, complete: boolean) => ({
-    ...args.resultFromProgress(claim.plan, progress), complete,
+    ...(args.resultFromProgress ?? legacyApplyResultFromProgress)(claim.plan, progress), complete,
   });
   const success = (progress: Progress, complete: boolean, expiresAt: number) => ({
     status: 200 as const,
