@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
+import { buildPermissionGrantNotificationInputs } from "@flamenode/server-core/video/permissionNotificationInputs";
 import { loadPermissionGrantProfiles } from "@flamenode/server-core/video/permissionProfiles";
 import { loadPermissionMembersRead } from "@flamenode/server-core/video/permissionMembersRead";
 import { permissionRebuildTargets } from "@flamenode/server-core/video/permissionRebuildTargets";
@@ -32,7 +33,7 @@ import {
 } from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
-import { upsertSchema, permissionBatchSchema, prepareCollaboratorPermissionIntents, parseVideoCollaboratorDeleteInput, selectVideoPermissionNotificationTargets } from "@flamenode/domain/video";
+import { upsertSchema, permissionBatchSchema, prepareCollaboratorPermissionIntents, parseVideoCollaboratorDeleteInput } from "@flamenode/domain/video";
 import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/enqueue";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import { mutateWithAudit } from "@/lib/audit/mutate";
@@ -362,19 +363,14 @@ async function applyPermissionIntentsToVideo(
   let notificationWakeSource: "manage" | undefined;
   if (notifyXids.length > 0) {
     const links = await loadNotifiableRecipientLinks(db, notifyXids);
-    const notificationInputs = selectVideoPermissionNotificationTargets(
+    const notificationInputs = buildPermissionGrantNotificationInputs({
       links,
-      actor.id,
-      video.id,
-    ).map((target) => ({
-      ...target,
-      type: "video_edit_permission_granted" as const,
-      payload: buildVideoEditPermissionGrantedNotification({
-        videoId: video.id,
-        videoTitle: video.title,
-      }),
+      actorUserId: actor.id,
+      videoId: video.id,
+      videoTitle: video.title,
       eventId: video.primary_event_id,
-    }));
+      buildPayload: buildVideoEditPermissionGrantedNotification,
+    });
     for (let offset = 0; offset < notificationInputs.length; offset += 200) {
       const notification = await buildKnownRecipientNotificationBulkBatch(
         db,
