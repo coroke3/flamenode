@@ -1,6 +1,5 @@
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "@flamenode/server-core/legacyImport/normalize";
-import type { LegacyImportPreparedPreview, LegacyImportPreviewSummary } from "./legacyImportPreview.ts";
-import type { LegacyImportFileRange } from "./legacyImportFiles.ts";
+import type { LegacyImportPreparedPreview } from "./legacyImportPreview.ts";
 
 /**
  * MIG-0645: unmounted, dependency-injected RH-002 preview persistence boundary.
