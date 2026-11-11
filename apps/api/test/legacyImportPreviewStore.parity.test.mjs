@@ -148,9 +148,11 @@ test("RH-002 shared R2 preview: streamed body rejects oversized chunks before te
   assert.equal(JSON.parse(records.get(key).data).status, "ready");
 });
 
-test("RH-002 shared R2 preview: bounded streamed valid body can still claim and release", async () => {
+test("RH-002 shared R2 preview: split multibyte UTF-8 stream still claims and releases", async () => {
   const { bucket } = bucketFixture();
-  const credential = await createLegacyImportPreview(bucket, previewInput(), {
+  const input = previewInput();
+  input.plan.warnings.push("日本語の警告");
+  const credential = await createLegacyImportPreview(bucket, input, {
     now: 1700000000, previewToken: TOKEN,
   });
   const originalGet = bucket.get;
@@ -158,14 +160,21 @@ test("RH-002 shared R2 preview: bounded streamed valid body can still claim and 
     const object = await originalGet(lookup);
     if (!object) return null;
     const bytes = new TextEncoder().encode(await object.text());
+    // Split the three-byte "日" code point itself; incremental decoding must
+    // preserve the original plan hash instead of producing replacement chars.
+    const marker = new TextEncoder().encode("日");
+    const offset = bytes.findIndex((v, i) =>
+      v === marker[0] && bytes[i + 1] === marker[1] && bytes[i + 2] === marker[2]);
+    assert.ok(offset > 0, "fixture must contain UTF-8 multibyte text");
+    const split = offset + 1;
     return {
       ...object,
       size: undefined,
       text: async () => { throw new Error("streaming R2 must not use text()"); },
       body: new ReadableStream({
         start(controller) {
-          controller.enqueue(bytes.subarray(0, 17));
-          controller.enqueue(bytes.subarray(17));
+          controller.enqueue(bytes.subarray(0, split));
+          controller.enqueue(bytes.subarray(split));
           controller.close();
         },
       }),
