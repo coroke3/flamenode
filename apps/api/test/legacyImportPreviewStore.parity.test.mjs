@@ -32,6 +32,10 @@ function bucketFixture() {
       records.set(key, { data, etag });
       return { etag };
     },
+    async delete(key) {
+      calls.push(["delete", key]);
+      records.delete(key);
+    },
   };
   return { bucket, records, calls };
 }
