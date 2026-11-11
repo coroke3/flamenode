@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
+import { MAX_LEGACY_VIDEO_FIELD_DECISIONS as CURRENT_DECISION_LIMIT } from "../../../src/lib/import/legacy/normalize.ts";
+import { MAX_LEGACY_IMPORT_SELECTED_ROWS as CURRENT_ROWS_LIMIT } from "../../../src/lib/import/legacy/cpuBudget.ts";
 import {
   legacyImportMode, legacyImportVisibility, legacyImportStrategy,
-  legacyImportStringField, validateLegacyImportFileEnvelope,
+  legacyImportStringField, MAX_LEGACY_VIDEO_FIELD_DECISIONS, MAX_LEGACY_IMPORT_SELECTED_ROWS,
+  validateLegacyImportFileEnvelope,
   validateLegacyImportSelectedRows, parseLegacyImportVideoFieldDecisions,
 } from "../src/routes/admin/legacyImportInput.ts";
+
+test("RH-002 U02 input boundary: pinned limits match CURRENT", () => {
+  assert.equal(MAX_LEGACY_VIDEO_FIELD_DECISIONS, CURRENT_DECISION_LIMIT);
+  assert.equal(MAX_LEGACY_IMPORT_SELECTED_ROWS, CURRENT_ROWS_LIMIT);
+});
 
 test("RH-002 U02 input boundary: mode, visibility and strategy follow CURRENT fallback", () => {
   assert.equal(legacyImportMode("apply"), "apply");
@@ -78,7 +86,7 @@ test("RH-002 U02 input boundary: decisions preserve CURRENT strict allowlist/err
 });
 
 test("RH-002 U02 input boundary: CURRENT origin and guard precede multipart parsing (not mounted)", async () => {
-  const current = await readFile(new URL("../../../../app/api/admin/import/legacy/route.ts", import.meta.url), "utf8");
+  const current = await readFile(new URL("../../../app/api/admin/import/legacy/route.ts", import.meta.url), "utf8");
   const origin = current.indexOf("await requireSameOriginWrite(request)");
   const guard = current.indexOf('await requireAdminWrite("admin_legacy_import")');
   const multipart = current.indexOf("await request.formData()");
