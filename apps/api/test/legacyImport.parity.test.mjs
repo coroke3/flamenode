@@ -78,3 +78,28 @@ test("RH-002 CURRENT: budget errors are capped at 100", () => {
     events: Array.from({ length: 101 }, (_, i) => ({ id: String(i), title: "あ".repeat(45_000) })) };
   assert.equal(legacyImportCpuBudgetErrors(plan).length, 100);
 });
+
+
+test("RH-002 CURRENT: selected range exactly 250 rows is accepted, 251 rejected", () => {
+  const rows = Array.from({ length: 251 }, (_, i) => ({ id: i + 1 }));
+  const file = { name: "boundary.csv", rows, rowOffset: 0 };
+  const allowed = selectLegacyParsedFileRange(file, { start: "2", end: "251" });
+  assert.equal(allowed.file.rows.length, MAX_LEGACY_IMPORT_SELECTED_ROWS);
+  assert.equal(allowed.file.rows[0].id, 2);
+  assert.equal(allowed.file.rows.at(-1).id, 251);
+  assert.throws(() => selectLegacyParsedFileRange(file, { start: "1", end: "251" }), /250|上限|件/);
+});
+
+test("RH-002 CURRENT: JSON byte limit is inclusive and counts UTF-8, not JS string length", () => {
+  const base = { ...emptyPlan(), events: [{ id: "e", title: "ab" }] };
+  const encodedSize = (title) => new TextEncoder().encode(JSON.stringify({
+    event: { id: "e", title }, staff: [],
+  })).byteLength;
+  const remaining = MAX_LEGACY_IMPORT_STEP_BYTES - encodedSize("ab");
+  assert.equal(remaining % 3, 0, "fixture must reach the exact Japanese UTF-8 boundary");
+  base.events[0].title += "あ".repeat(remaining / 3);
+  assert.equal(encodedSize(base.events[0].title), MAX_LEGACY_IMPORT_STEP_BYTES);
+  assert.deepEqual(legacyImportCpuBudgetErrors(base), [], "exactly 128 KiB is accepted");
+  base.events[0].title += "あ";
+  assert.match(legacyImportCpuBudgetErrors(base).join(" "), /128KB/, "one extra UTF-8 character is rejected");
+});
