@@ -1,3 +1,4 @@
+import { estimateLegacyImportStoredPlanBytes } from "@flamenode/server-core/legacyImport/previewEstimate";
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "@flamenode/server-core/legacyImport/normalize";
 import type { LegacyImportPreparedPreview } from "./legacyImportPreview.ts";
 
@@ -23,7 +24,7 @@ export type LegacyImportPersistedPreview =
 export async function persistLegacyImportPreview(args: {
   authUserId: string;
   prepared: LegacyImportPreparedPreview & { ok: true };
-  estimateStoredBytes: (input: {
+  estimateStoredBytes?: (input: {
     authUserId: string;
     strategy: LegacyImportStrategy;
     plan: CanonicalLegacyPlan;
@@ -43,7 +44,7 @@ export async function persistLegacyImportPreview(args: {
 }): Promise<LegacyImportPersistedPreview> {
   const { prepared, authUserId } = args;
   const { plan, summary, strategy, fileRanges } = prepared;
-  const storedBytes = args.estimateStoredBytes({ authUserId, strategy, plan });
+  const storedBytes = (args.estimateStoredBytes ?? estimateLegacyImportStoredPlanBytes)({ authUserId, strategy, plan });
   if (storedBytes > LEGACY_IMPORT_MAX_STORED_PLAN_BYTES) {
     return {
       status: 413,
