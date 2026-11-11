@@ -65,13 +65,26 @@ function prepareNotification(
     "type" | "payload" | "eventId" | "dedupeKey" | "deliveryRoute" | "correlationId"
   >,
 ): PreparedNotification {
-  const check = validateNotificationPayload(input.type, input.payload);
+  // Validate the exact JSON to be persisted, not the original object
+  // before a second potentially stateful toJSON() invocation.
+  let payloadJson: string | undefined;
+  let serializedPayload: Record<string, unknown>;
+  try {
+    payloadJson = JSON.stringify(input.payload);
+    if (typeof payloadJson !== "string" || !payloadJson.startsWith("{")) {
+      throw new Error("not_a_json_object");
+    }
+    serializedPayload = JSON.parse(payloadJson) as Record<string, unknown>;
+  } catch {
+    throw new Error("通知 payload が不正です: JSON オブジェクトとしてシリアライズできません");
+  }
+  const check = validateNotificationPayload(input.type, serializedPayload);
   if (!check.ok) {
     throw new Error(`通知 payload が不正です: ${check.reason}`);
   }
   return {
     type: input.type,
-    payloadJson: JSON.stringify(input.payload),
+    payloadJson,
     eventId: input.eventId ?? null,
     dedupeKey: input.dedupeKey?.trim() || null,
     deliveryRoute:
