@@ -8,18 +8,12 @@ import { buildPermissionGrantNotificationInputs } from "@flamenode/server-core/v
 import { buildPermissionMutationBatch } from "@flamenode/server-core/video/permissionMutationBatch";
 import { preparePermissionWrite } from "@flamenode/server-core/video/permissionPreparation";
 import { resolvePermissionSubjectXUserId } from "@flamenode/server-core/video/permissionSubject";
-import { loadPermissionVideoRow } from "@flamenode/server-core/video/permissionVideoRead";
+import { loadAuthorizedPermissionVideo } from "@flamenode/server-core/video/permissionAccess";
 import { buildPermissionWriteAudits } from "@flamenode/server-core/video/permissionPlan";
 import { permissionRebuildTargets } from "@flamenode/server-core/video/permissionRebuildTargets";
 
 import { writeGuard } from "@/lib/auth/writeGuard";
-import {
-  canEditVideo,
-  canUseEventPrivilegeModeForVideo,
-  resolveVideoEditAccessContext,
-  type CanEditVideoPrivilegeMode,
-  type VideoEditAccessContext,
-} from "@/lib/auth/ownership";
+import type { CanEditVideoPrivilegeMode } from "@/lib/auth/ownership";
 import { videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { upsertSchema, permissionBatchSchema, parseVideoCollaboratorDeleteInput } from "@flamenode/domain/video";
@@ -74,76 +68,13 @@ async function revalidateVideoCollabPathsBestEffort(videoId: string): Promise<vo
   );
 }
 
-async function resolvePrivilegeMode(
-  rawMode: string,
-  user: { id: string; role?: string | null },
-  video: Pick<typeof videos.$inferSelect, "id">,
-  accessContext: VideoEditAccessContext,
-): Promise<CanEditVideoPrivilegeMode> {
-  if (rawMode === "admin" && user.role === "admin") return "admin";
-  if (rawMode === "event") {
-    const canUseEvent = await canUseEventPrivilegeModeForVideo({ user, video, accessContext });
-    if (canUseEvent) return "event";
-  }
-  return "normal";
-}
-
 async function loadEditableVideoForPermissions(
   db: DB,
   actor: { id: string; role?: string | null },
   videoId: string,
   privilegeModeRaw: string,
 ): Promise<EditableVideo | null> {
-  const row = await loadPermissionVideoRow(db, videoId);
-  if (!row) return null;
-
-  const video = {
-    ...row,
-    submitted_by_user_id: row.submitted_by_user_id ?? "",
-  };
-  const accessContext = await resolveVideoEditAccessContext({
-    db,
-    user: actor,
-    video,
-  });
-  const requested = privilegeModeRaw.trim();
-  const requestedMode = await resolvePrivilegeMode(requested, actor, video, accessContext);
-  const requestedAllowed = await canEditVideo({
-    db,
-    user: actor,
-    video,
-    requiredKey: "video.permissions",
-    privilegeMode: requestedMode,
-    accessContext,
-  });
-  if (requestedAllowed) return { ...video, privilegeMode: requestedMode };
-
-  if (requested) return null;
-  if (actor.role === "admin") {
-    const adminAllowed = await canEditVideo({
-      db,
-      user: actor,
-      video,
-      requiredKey: "video.permissions",
-      privilegeMode: "admin",
-      accessContext,
-    });
-    if (adminAllowed) return { ...video, privilegeMode: "admin" };
-  }
-
-  const canUseEvent = await canUseEventPrivilegeModeForVideo({ user: actor, video, accessContext });
-  if (canUseEvent) {
-    const eventAllowed = await canEditVideo({
-      db,
-      user: actor,
-      video,
-      requiredKey: "video.permissions",
-      privilegeMode: "event",
-      accessContext,
-    });
-    if (eventAllowed) return { ...video, privilegeMode: "event" };
-  }
-  return null;
+  return loadAuthorizedPermissionVideo(db, actor, videoId, privilegeModeRaw);
 }
 
 async function applyPermissionIntentsToVideo(
