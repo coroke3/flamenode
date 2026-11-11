@@ -153,3 +153,14 @@ test("RH-002 U02 apply: release failure cannot mask atomic D1 failure", async ()
   assert.deepEqual(calls, ["R2-claim", "D1", "R2-release"]);
   assert.equal(response.status, 409);
 });
+
+test("RH-002 U02 apply: a claimed oversized event step rejects before D1 and releases R2", async () => {
+  const { args, calls, plan } = harness();
+  plan.events[0].title = "あ".repeat(50_000);
+  const response = await runLegacyImportApplyPipeline(args);
+  assert.deepEqual(calls, ["R2-claim", "R2-release"]);
+  assert.equal(response.status, 409);
+  assert.equal(response.body.requires_repreview, true);
+  assert.ok(Array.isArray(response.body.errors));
+  assert.ok(response.body.errors.length > 0);
+});
