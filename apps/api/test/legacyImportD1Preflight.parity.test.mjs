@@ -78,6 +78,30 @@ test("RH-002 U02 shared D1 preflight: validation errors reject before any DB cal
   assert.deepEqual(db.calls, []);
 });
 
+
+test("RH-002 U02 real SQLite/D1 preflight: create_only conflict and skip_existing are read-only", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { createSqlite, createD1, insert } = await import("./support/personalHarness.mjs");
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "events", { id: "event-a", title: "Existing event" });
+    const d1 = createD1(sqlite);
+    const adapter = legacyImportD1PreflightAdapter(drizzle(d1));
+    const incoming = plan("eventid,eventname\\nevent-a,Imported event\\n");
+    incoming.eventStaff.push({ event_id: "event-a", permission_preset: "owner" });
+    await assert.rejects(adapter.preflight(incoming, "create_only"),
+      /イベント event-a は既に存在します/);
+    const snapshot = await adapter.preflight(incoming, "skip_existing");
+    assert.deepEqual(snapshot, { existingEventIds: ["event-a"], existingVideoIds: [] });
+    assert.equal(d1.stats.writes, 0, "preflight must not mutate D1");
+    assert.equal(d1.stats.batches, 0, "preflight must not open a mutation batch");
+    assert.equal(sqlite.prepare("SELECT title FROM events WHERE id = ?").get("event-a").title,
+      "Existing event");
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("RH-002 U02 D1 preflight: CURRENT source retains the same SQL guards and imports", async () => {
   const { readFile } = await import("node:fs/promises");
   const current = await readFile(new URL("../../../src/lib/import/legacy/preflight.ts", import.meta.url), "utf8");
