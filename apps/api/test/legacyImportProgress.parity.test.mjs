@@ -66,3 +66,21 @@ test("RH-002 U02 progress: CURRENT single-step and R2 CAS ordering remain an int
   assert.ok(commit >= 0 && advance > commit, "D1 commit precedes R2 progress advance");
   assert.match(current.slice(advance), /committed_progress_pending/);
 });
+
+
+test("RH-002 stage progress: CURRENT and Hono share identical canonical function", async () => {
+  const { legacyImportApplyProgressSummary: shared } =
+    await import("@flamenode/server-core/legacyImport/progress");
+  assert.equal(shared, legacyImportApplyProgressSummary);
+  const source = await readFile(new URL("../../../app/api/admin/import/legacy/route.ts", import.meta.url), "utf8");
+  assert.match(source, /import \{ legacyImportApplyProgressSummary as applyProgressSummary \} from "@flamenode\/server-core\/legacyImport\/progress"/);
+  assert.doesNotMatch(source, /function applyProgressSummary\(/);
+  const claimProgress = { stage: "videos", index: 2 };
+  const plan = {
+    ...empty(), events: [1, 2, 3],
+    videos: [1, 2, 3, 4],
+    videoSoftwares: [{ label: "x" }, { label: "X" }, { label: "y" }],
+  };
+  assert.deepEqual(legacyImportApplyProgressSummary(plan, claimProgress),
+    shared(plan, claimProgress));
+});
