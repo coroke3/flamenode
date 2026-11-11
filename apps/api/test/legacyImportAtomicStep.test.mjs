@@ -69,3 +69,34 @@ test("RH-002 U02b: D1 failure is not reported as committed; release best effort"
     releaseClaim: async () => { throw new Error("R2 release unavailable"); },
   }), (error) => error === dbFailure);
 });
+
+test("RH-002 U02b/U02c: committed D1/R2 CAS error preserves HTTP recovery envelope", async () => {
+  const { legacyImportCommittedProgressPending } = await import("../src/routes/admin/legacyImportErrors.ts");
+  const calls = [];
+  const outcome = await commitLegacyImportOneStep({
+    applyStep: async () => {
+      calls.push("committed");
+      return { progress: { stage: "events", index: 2 }, complete: false };
+    },
+    advanceClaim: async () => {
+      calls.push("cas-failed");
+      throw new Error("R2 unavailable");
+    },
+    releaseClaim: async () => { calls.push("release"); },
+  });
+  assert.deepEqual(calls, ["committed", "cas-failed", "release"]);
+  assert.equal(outcome.kind, "committed_progress_pending");
+  const response = legacyImportCommittedProgressPending({
+    retryable: true,
+    planHash: "hash",
+    attempt: 4,
+    progress: { stage: outcome.step.progress.stage, index: outcome.step.progress.index, completed: 2, total: 8 },
+    result: { complete: outcome.step.complete, createdEvents: 2 },
+  });
+  assert.equal(response.status, 503);
+  assert.equal(response.body.committed, true);
+  assert.equal(response.body.kind, "committed_progress_pending");
+  assert.equal(response.body.requires_repreview, false);
+  assert.equal(response.body.retryable, true);
+  assert.deepEqual(response.body.progress, { stage: "events", index: 2, completed: 2, total: 8 });
+});
