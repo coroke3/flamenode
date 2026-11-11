@@ -55,7 +55,7 @@ function setup({ linked = true, approved = true, bucket = null, onFirst = null }
 test("SA-105 isolated upload: authorized PNG uses staged+final R2, strict audit and rebuild in one D1 batch",async()=>{
   const h=setup();
   const res=await h.send();
-  assert.equal(res.status,200,await res.text());
+  assert.equal(res.status,200);
   assert.equal(res.headers.get("Cache-Control"),"private, no-store");
   const body=await res.json();
   assert.equal(body.ok,true);
