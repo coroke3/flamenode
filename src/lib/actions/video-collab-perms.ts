@@ -8,7 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
 import { loadPermissionGrantProfiles } from "@flamenode/server-core/video/permissionProfiles";
 import { loadPermissionMembersRead } from "@flamenode/server-core/video/permissionMembersRead";
-import { planVideoPermissionChanges, evaluatePermissionPlanPreflight } from "@flamenode/server-core/video/permissionPlan";
+import { planVideoPermissionChanges, evaluatePermissionPlanPreflight, buildPermissionMemberAuditSnapshots } from "@flamenode/server-core/video/permissionPlan";
 import {
   buildPermissionSetGuardSql,
   buildHiddenEditorCountGuardSql,
@@ -27,7 +27,6 @@ import {
 import { videoMembers, videos } from "@/lib/db/schema";
 import {
   buildVideoMemberBulkInsertSql,
-  compareSqliteBinaryText,
   toVideoMemberSnapshotRow,
 } from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
@@ -258,10 +257,6 @@ async function canonicalizePermissionIntents(
   });
 }
 
-function sortPermissionRows(rows: readonly VideoMemberRow[]): VideoMemberRow[] {
-  return [...rows].sort((left, right) => compareSqliteBinaryText(left.id, right.id));
-}
-
 async function applyPermissionIntentsToVideo(
   db: DB,
   actor: { id: string; role?: string | null },
@@ -372,22 +367,13 @@ async function applyPermissionIntentsToVideo(
     expected.push(deleteHiddenIds.length);
   }
 
-  const afterById = new Map(existingRows.map((row) => [row.id, row]));
-  for (const row of updateRows) afterById.set(row.id, row);
-  for (const id of deleteHiddenIds) afterById.delete(id);
-  for (const row of insertHiddenRows) afterById.set(row.id, row);
+  const permissionSnapshots = buildPermissionMemberAuditSnapshots(video.id, existingRows, plan);
   audits.push({
     table_name: "video_member_permissions_batch",
     target_id: video.id,
     operation: "MERGE",
-    before: {
-      id: video.id,
-      rows: sortPermissionRows(existingRows).map(toVideoMemberSnapshotRow),
-    },
-    after: {
-      id: video.id,
-      rows: sortPermissionRows([...afterById.values()]).map(toVideoMemberSnapshotRow),
-    },
+    before: permissionSnapshots.before,
+    after: permissionSnapshots.after,
     actor_user_id: actor.id,
     context: "video_collab_permissions",
     reason: `共同編集権限を一括更新 privilege:${video.privilegeMode}`,
