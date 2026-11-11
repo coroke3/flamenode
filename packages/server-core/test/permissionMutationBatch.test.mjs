@@ -89,3 +89,35 @@ test("SA-084 pure builder never interpolates malicious X ID into SQL text", () =
   assert.equal(c.queries[0].sql.includes("DROP TABLE"), false);
   assert.ok(c.queries[0].params.some(p => typeof p === "string" && p.includes("DROP TABLE")));
 });
+
+test("SA-084 no-op permission intent retains only snapshot CAS and schedules no DML", () => {
+  const old = member("pub", "alice", 1, 1);
+  const plan = makePlan([
+    ["alice", { displayName: "Alice", intent: "on" }],
+  ], [["alice", [old]]], ["alice"], 0);
+  const c = collector();
+  const out = buildPermissionMutationBatch(c.db, {
+    videoId: "v1", xids: ["alice"], existingRows: [old],
+    currentHiddenEditorCount: 0, plan,
+  });
+  assert.deepEqual(out.expectedChanges, [null]);
+  assert.equal(out.statements.length, 1);
+  assert.equal(c.queries.length, 1);
+  assert.match(c.queries[0].sql, /SELECT CASE/);
+  assert.doesNotMatch(c.queries[0].sql, /(?:INSERT|UPDATE|DELETE)\\s+(?:INTO\\s+|FROM\\s+)?(?:video_members|x_users)/i);
+});
+
+test("SA-084 new pending X profile requires exact DML row-change assertion", () => {
+  const plan = makePlan([
+    ["new-x", { displayName: "New", intent: "on" }],
+  ], [], [], 0);
+  const c = collector();
+  const out = buildPermissionMutationBatch(c.db, {
+    videoId: "v1", xids: ["new-x"], existingRows: [],
+    currentHiddenEditorCount: 0, plan,
+  });
+  const index = c.queries.findIndex(q => /INSERT INTO x_users/i.test(q.sql));
+  assert.ok(index > 0, "profile INSERT must occur after a snapshot guard");
+  assert.equal(out.expectedChanges[index], 1, "zero changed rows must fail the enclosing strict transaction");
+  assert.equal(c.queries[index].params.includes("new-x"), true);
+});
