@@ -1,3 +1,4 @@
+import { isTransientDbError } from "@flamenode/domain/db/transientError";
 import {
   createLegacyImportPreview,
   claimLegacyImportPreview,
@@ -30,7 +31,7 @@ export function legacyImportR2Adapter(bucket: R2Bucket | null | undefined) {
           })
         : !bucket
           ? legacyImportPreviewFailure({ kind: "bindings_unavailable" })
-          : legacyImportPreviewFailure({ kind: "other", transientDb: false });
+          : legacyImportPreviewFailure({ kind: "other", transientDb: isTransientDbError(cause) });
       // A new preview has no active claimed state; never return the
       // apply-only HTTP 423 status from a preview-store adapter.
       return { status: mapped.status === 423 ? 409 : mapped.status, body: mapped.body };
@@ -44,7 +45,7 @@ export function legacyImportR2Adapter(bucket: R2Bucket | null | undefined) {
         });
       }
       if (!bucket) return legacyImportPreviewFailure({ kind: "bindings_unavailable" });
-      return legacyImportPreviewFailure({ kind: "other", transientDb: false });
+      return legacyImportPreviewFailure({ kind: "other", transientDb: isTransientDbError(cause) });
     },
   };
 }
