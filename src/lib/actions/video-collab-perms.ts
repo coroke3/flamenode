@@ -8,6 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
 import { buildPermissionGrantNotificationInputs } from "@flamenode/server-core/video/permissionNotificationInputs";
 import { loadPermissionGrantProfiles } from "@flamenode/server-core/video/permissionProfiles";
+import { canonicalizePermissionIntents } from "@flamenode/server-core/video/permissionCanonicalize";
 import { loadPermissionMembersRead } from "@flamenode/server-core/video/permissionMembersRead";
 import { permissionRebuildTargets } from "@flamenode/server-core/video/permissionRebuildTargets";
 import { planVideoPermissionChanges, evaluatePermissionPlanPreflight, buildPermissionWriteAudits } from "@flamenode/server-core/video/permissionPlan";
@@ -44,7 +45,6 @@ import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusActio
 import {
   getLinkedXUserIdsForAuthUser,
   resolveCanonicalXUserId,
-  resolveCanonicalXUserResolutions,
 } from "@/lib/auth/xIdentity";
 
 export interface VideoCollabResult {
@@ -220,40 +220,6 @@ async function resolveSubjectXUserId(
     };
   }
   return { ok: true, xUserId: linked[0]! };
-}
-
-async function canonicalizePermissionIntents(
-  db: DB,
-  input: readonly PermissionIntent[],
-): Promise<PermissionIntent[]> {
-  const normalized = input.map((item) => ({
-    ...item,
-    x_user_id: normalizeXId(item.x_user_id),
-  }));
-  const candidates = Array.from(
-    new Set(normalized.map((item) => item.x_user_id).filter(Boolean)),
-  );
-  if (candidates.length === 0) return normalized;
-
-  // Permission writes must use the same fail-closed identity policy as X ID
-  // lifecycle actions.  In particular, never turn a dangling/rejected or
-  // ambiguous historical alias into a new permission row.
-  const resolutions = await resolveCanonicalXUserResolutions(db, candidates);
-
-  return normalized.map((item) => {
-    const resolution = resolutions.get(item.x_user_id);
-    if (
-      resolution?.reason === "invalid_alias_target" ||
-      resolution?.reason === "ambiguous_alias" ||
-      resolution?.reason === "canonical_alias_collision" ||
-      resolution?.reason === "rejected_or_invalid"
-    ) {
-      throw new Error(`video_permission_x_user_resolution_invalid:${item.x_user_id}`);
-    }
-    return resolution?.value
-      ? { ...item, x_user_id: resolution.value }
-      : item;
-  });
 }
 
 async function applyPermissionIntentsToVideo(
