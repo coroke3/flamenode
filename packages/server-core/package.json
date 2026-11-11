@@ -114,7 +114,8 @@
     "./legacyImport/previewEstimate": "./src/legacyImport/previewEstimate.ts",
     "./legacyImport/applyResult": "./src/legacyImport/applyResult.ts",
     "./legacyImport/progress": "./src/legacyImport/progress.ts",
-    "./legacyImport/previewStore": "./src/legacyImport/previewStore.ts"
+    "./legacyImport/previewStore": "./src/legacyImport/previewStore.ts",
+    "./legacyImport/preflight": "./src/legacyImport/preflight.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
