@@ -111,11 +111,16 @@ test("bulk intentは共通のfail-closed resolverで現行X IDへ解決する", 
   assert.match(mutation, /await canonicalizePermissionIntents\(db, args\.intents\)/);
 });
 
-test("aliasと現行IDが同じ正本へ収束した重複intentは先勝ちにせず拒否する", () => {
+test("aliasと現行IDが同じ正本へ収束した重複intentは共通domainで拒否する", async () => {
   const body = functionBody("applyPermissionIntentsToVideo");
-  assert.match(body, /const duplicateXids = new Set/);
-  assert.match(body, /if \(intents\.has\(xid\)\)/);
-  assert.match(body, /同じ X ID の権限指定が重複しています/);
+  const inputSource = await readFile(
+    new URL("../../../packages/domain/src/video/collaboratorPermissionInput.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(body, /prepareCollaboratorPermissionIntents\(canonicalIntents\)/);
+  assert.match(inputSource, /const duplicateXids = new Set/);
+  assert.match(inputSource, /if \(intents\.has\(xid\)\)/);
+  assert.match(inputSource, /同じ X ID の権限指定が重複しています/);
 });
 
 test("permission mutationはJSON1で対象member\/X userを一括取得する", () => {
