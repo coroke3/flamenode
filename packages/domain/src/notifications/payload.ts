@@ -36,6 +36,12 @@ export function validateNotificationPayload(
   } catch {
     return { ok: false, reason: "payload は JSON シリアライズできません" };
   }
+  // A value with toJSON() can serialize to undefined, null or a scalar
+  // despite having an object shape before serialization. Never persist that
+  // as notification_outbox.payload_json.
+  if (typeof serialized !== "string" || !serialized.startsWith("{")) {
+    return { ok: false, reason: "payload はオブジェクトである必要があります" };
+  }
   if (new TextEncoder().encode(serialized).byteLength > MAX_PAYLOAD_BYTES) {
     return { ok: false, reason: `payload が ${MAX_PAYLOAD_BYTES} バイトを超えています` };
   }
