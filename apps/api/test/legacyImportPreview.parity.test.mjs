@@ -4,7 +4,7 @@ import { parseLegacyImportText } from "@flamenode/server-core/legacyImport/parse
 import { readLegacyImportPreviewFiles } from "../src/routes/admin/legacyImportFiles.ts";
 import { prepareLegacyImportPreview } from "../src/routes/admin/legacyImportPreview.ts";
 
-async function makePreview({ content = "id,title\nlegacy-1,Test\n", decisions, range } = {}) {
+async function makePreview({ content = "eventid,eventname\nlegacy-1,Test\n", decisions, range } = {}) {
   const formData = new FormData();
   if (decisions !== undefined) formData.set("video_custom_field_decisions", decisions);
   if (range) formData.set("range_end_0", range);
@@ -44,7 +44,7 @@ test("RH-002 U02 preview: malformed decisions fail with CURRENT 400 before norma
 });
 
 test("RH-002 U02 preview: invalid normalized rows return CURRENT bounded 422 report", async () => {
-  const { formData, files } = await makePreview({ decisions: '[{"source_key":"title","action":"custom_question","question_label":"Title"}]' });
+  const { formData, files } = await makePreview({ content: "id,title\nlegacy-1,Test\n" });
   const result = prepareLegacyImportPreview({ formData, files, now: 1700000000 });
   assert.equal(result.ok, false);
   assert.equal(result.status, 422);
