@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { Hono } from "hono";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { legacyImportPreviewRoutes } from "../src/routes/admin/legacyImportPreviewRoute.ts";
-import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
+import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
@@ -107,6 +107,38 @@ test("MIG-0645 U02 Hono: valid event CSV reaches real D1 preflight and R2 persis
   assert.match(body.plan_hash, /^[0-9a-f]{64}$/);
   assert.equal(body.preview.events[0].id, "event-a");
   assert.equal(saved.size, 1);
+  assert.equal(stats.batches, 0);
+  assert.equal(res.headers.get("cache-control"), "private, no-store");
+});
+
+test("MIG-0645 U02 Hono: D1 create-only conflict rejects before R2 persistence", async () => {
+  let r2Writes = 0;
+  const bucket = { async put() { r2Writes++; throw new Error("must not write"); } };
+  const { request, stats, sqlite } = setup({ bucket });
+  seedEvent(sqlite, { id: "event-a", title: "Existing title" });
+  const data = new FormData();
+  data.set("files", new File([
+    "eventid,eventname,member,memberid,memberpost\nevent-a,Replacement,Owner,owner_x,owner\n",
+  ], "events.csv", { type: "text/csv" }));
+  const res = await request(data);
+  assert.equal(res.status, 409, JSON.stringify(await res.clone().json()));
+  assert.match((await res.json()).message, /イベント event-a は既に存在します/);
+  assert.equal(r2Writes, 0, "conflicting preview must not persist an R2 token");
+  assert.equal(stats.batches, 0);
+  assert.equal(sqlite.prepare("SELECT title FROM events WHERE id = ?").get("event-a").title,
+    "Existing title");
+  assert.equal(res.headers.get("cache-control"), "private, no-store");
+});
+
+test("MIG-0645 U02 Hono: missing R2 binding fails closed after D1 preflight", async () => {
+  const { request, stats } = setup();
+  const data = new FormData();
+  data.set("files", new File([
+    "eventid,eventname,member,memberid,memberpost\nevent-a,Example,Owner,owner_x,owner\n",
+  ], "events.csv", { type: "text/csv" }));
+  const res = await request(data);
+  assert.equal(res.status, 503, JSON.stringify(await res.clone().json()));
+  assert.equal((await res.json()).ok, false);
   assert.equal(stats.batches, 0);
   assert.equal(res.headers.get("cache-control"), "private, no-store");
 });
