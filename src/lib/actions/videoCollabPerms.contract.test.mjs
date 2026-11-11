@@ -30,6 +30,11 @@ const permissionPlanSource = await readFile(
   "utf8",
 );
 
+const permissionCanonicalizeSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionCanonicalize.ts", import.meta.url),
+  "utf8",
+);
+
 const permissionNotificationInputsSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionNotificationInputs.ts", import.meta.url),
   "utf8",
@@ -126,7 +131,7 @@ test("permission inputは最大100件かつcanonical X handle形式だけ許可�
 });
 
 test("bulk intentは共通のfail-closed resolverで現行X IDへ解決する", () => {
-  const canonicalize = functionBody("canonicalizePermissionIntents");
+  const canonicalize = permissionCanonicalizeSource;
   const mutation = functionBody("applyPermissionIntentsToVideo");
   assert.match(canonicalize, /resolveCanonicalXUserResolutions\(db, candidates\)/);
   assert.match(canonicalize, /invalid_alias_target/);
