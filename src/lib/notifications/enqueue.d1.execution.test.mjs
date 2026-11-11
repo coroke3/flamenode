@@ -151,6 +151,48 @@ if (runTestWithTsx(import.meta.url)) {
     );
   }
 
+  test("単件通知は保存予定JSONを一度だけ生成して検証し、D1 writeまで保留する", async (t) => {
+    const { db, sqlite, state } = makeContext(t);
+    let toJsonCalls = 0;
+    const outbox = await buildNotificationOutboxStatement(db, {
+      recipientUserId: "auth-user-1",
+      type: "discord_webhook",
+      payload: {
+        toJSON() {
+          toJsonCalls += 1;
+          return toJsonCalls === 1
+            ? { content: "validated notification" }
+            : { content: "x".repeat(9000) };
+        },
+      },
+      force: true,
+    });
+    assert.ok(outbox);
+    assert.equal(toJsonCalls, 1);
+    assert.equal(outbox.row.payload_json, '{"content":"validated notification"}');
+    assert.equal(notificationCount(sqlite), 0);
+    assert.equal(state.batchCalls, 0);
+    await db.batch([outbox.statement]);
+    assert.equal(notificationCount(sqlite), 1);
+  });
+
+  test("単件通知もtoJSONがスカラーや配列を返す場合はSQLを作らない", async (t) => {
+    const { db, sqlite, state } = makeContext(t);
+    for (const invalid of [null, undefined, [], "text", 1]) {
+      await assert.rejects(
+        () => buildNotificationOutboxStatement(db, {
+          recipientUserId: "auth-user-1",
+          type: "discord_webhook",
+          payload: { toJSON: () => invalid },
+          force: true,
+        }),
+        /JSON オブジェクトとしてシリアライズできません/,
+      );
+    }
+    assert.equal(notificationCount(sqlite), 0);
+    assert.equal(state.batchCalls, 0);
+  });
+
   test("通知statementはasync返却時に実行されずD1 batchまで保留される", async (t) => {
     const { sqlite, db, state } = makeContext(t);
     const envelope = await buildNotificationOutboxStatement(db, {
