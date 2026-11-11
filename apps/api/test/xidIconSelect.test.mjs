@@ -9,7 +9,7 @@ const SITE = "https://app.flamenode.example";
 const USER = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "user", is_banned: 0, active_x_user_id: null };
 
-function setup({ linked = true, approved = true, onFirst, bucket } = {}) {
+function setup({ linked = true, approved = true, onFirst, bucket, brokenBucketBinding = false } = {}) {
   const { db, sqlite, stats } = createAdminD1({ onFirst });
   seedBase(sqlite, { role: "user" });
   sqlite.exec(`CREATE TABLE videos (
@@ -43,7 +43,13 @@ function setup({ linked = true, approved = true, onFirst, bucket } = {}) {
     app.request(SITE + "/api/xid/x_one/icon", {
       method: "PUT", headers: { Origin: origin, "Content-Type": "application/json" },
       body: JSON.stringify({ x_user_id, icon_url }),
-    }, { DB: db, BUCKET: bucket, NEXT_PUBLIC_SITE_URL: SITE });
+    }, Object.defineProperty({ DB: db, NEXT_PUBLIC_SITE_URL: SITE }, "BUCKET", {
+      enumerable: true,
+      get() {
+        if (brokenBucketBinding) throw new Error("provider-secret-postcommit-binding");
+        return bucket;
+      },
+    }));
   return { sqlite, stats, send, get sessionCalls() { return sessionCalls; } };
 }
 
@@ -165,6 +171,18 @@ test("SA-104 isolated route removes an unreferenced R2 icon only after the audit
   const res = await h.send("https://example.com/new.png");
   assert.equal(res.status, 200, await res.text());
   assert.deepEqual(order, ["xicons/x_one/old.png"]);
+  assert.equal(h.stats.batches, 1);
+});
+
+test("SA-104 after an atomic D1 commit a throwing R2 binding getter cannot turn success into 500", async () => {
+  const h = setup({ brokenBucketBinding: true });
+  h.sqlite.prepare("UPDATE x_users SET icon_url=? WHERE id='x_one'")
+    .run("/api/media/xicons/x_one/old.png");
+  const response = await h.send("https://example.com/new.png");
+  assert.equal(response.status, 200, await response.text());
+  assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
+    "https://example.com/new.png");
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1);
   assert.equal(h.stats.batches, 1);
 });
 
