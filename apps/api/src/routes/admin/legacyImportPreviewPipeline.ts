@@ -17,7 +17,7 @@ export async function runLegacyImportPreviewPipeline(args: {
   formData: FormData;
   files: readonly LegacyImportFileLike[];
   authUserId: string;
-  estimateStoredBytes: (input: {
+  estimateStoredBytes?: (input: {
     authUserId: string;
     strategy: LegacyImportStrategy;
     plan: CanonicalLegacyPlan;
