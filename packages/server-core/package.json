@@ -108,7 +108,8 @@
     "./publicData/staticYoutubeRelatedBlocklistCore": "./src/publicData/staticYoutubeRelatedBlocklistCore.ts",
     "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts",
     "./legacyImport/parse": "./src/legacyImport/parse.ts",
-    "./legacyImport/range": "./src/legacyImport/range.ts"
+    "./legacyImport/range": "./src/legacyImport/range.ts",
+    "./legacyImport/normalize": "./src/legacyImport/normalize.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
