@@ -112,7 +112,8 @@
     "./video/rebuildEventIds": "./src/video/rebuildEventIds.ts",
     "./video/memberAggregationFanOut": "./src/video/memberAggregationFanOut.ts",
     "./video/permissionProfiles": "./src/video/permissionProfiles.ts",
-    "./video/permissionMembersRead": "./src/video/permissionMembersRead.ts"
+    "./video/permissionMembersRead": "./src/video/permissionMembersRead.ts",
+    "./video/permissionPlan": "./src/video/permissionPlan.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
