@@ -207,10 +207,11 @@ test("hidden editor上限は公開100人と分離し全intent後のnet countで�
   );
   const body = functionBody("applyPermissionIntentsToVideo");
   const loopIndex = permissionPlanSource.indexOf("for (const [xid, intentInfo] of intents)");
-  const netCheckIndex = body.indexOf("nextHiddenEditorCount > MAX_VIDEO_HIDDEN_EDITORS");
+  const netCheckIndex = permissionPlanSource.indexOf("plan.nextHiddenEditorCount > MAX_VIDEO_HIDDEN_EDITORS");
   assert.ok(loopIndex >= 0);
-  assert.ok(netCheckIndex >= 0);
+  assert.ok(netCheckIndex > loopIndex);
   assert.match(body, /planVideoPermissionChanges\(\{/);
+  assert.match(body, /evaluatePermissionPlanPreflight\(plan\)/);
   assert.match(permissionPlanSource, /nextHiddenEditorCount/);
   assert.match(atomicLimits, /MAX_VIDEO_HIDDEN_EDITORS = 100/);
 });
