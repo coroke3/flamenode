@@ -134,3 +134,47 @@ test("RH-002 shared R2 preview: active claim blocks duplicate request and expire
   }, { now: 1700000062, claimId: "c".repeat(32) });
   assert.equal(reclaimed.attempt, 2);
 });
+
+
+test("RH-002 Hono adapter: real R2 token and claim bind to the authenticated owner", async () => {
+  const { legacyImportR2Adapter } = await import("../src/routes/admin/legacyImportR2Adapter.ts");
+  const { bucket, calls } = bucketFixture();
+  const adapter = legacyImportR2Adapter(bucket);
+  const owner = previewInput();
+  const credential = await adapter.createPreview(owner);
+  assert.match(credential.previewToken, /^[a-f0-9]{32}$/);
+  assert.match(credential.planHash, /^[a-f0-9]{64}$/);
+  const claimed = await adapter.claimPreview({
+    authUserId: owner.authUserId,
+    previewToken: credential.previewToken,
+    planHash: credential.planHash,
+  });
+  assert.equal(claimed.completed, false);
+  assert.equal(claimed.attempt, 1);
+  assert.ok(calls.some(([method, , etag]) => method === "put" && etag !== null));
+  await claimed.release();
+});
+
+test("RH-002 Hono adapter: invalid credential maps to 409 re-preview; missing bucket to 503", async () => {
+  const { legacyImportR2Adapter } = await import("../src/routes/admin/legacyImportR2Adapter.ts");
+  const adapter = legacyImportR2Adapter(bucketFixture().bucket);
+  try {
+    await adapter.claimPreview({
+      authUserId: "owner-a",
+      previewToken: "not-hex",
+      planHash: "wrong",
+    });
+    assert.fail("invalid credential must not be claimed");
+  } catch (cause) {
+    const mapped = adapter.mapPreviewError(cause);
+    assert.equal(mapped.status, 409);
+    assert.equal(mapped.body.requires_repreview, true);
+    assert.equal(mapped.body.preview_error_code, "invalid_token");
+  }
+  const offline = legacyImportR2Adapter(null);
+  const mapped = offline.mapPreviewError(new Error("R2 unavailable"));
+  assert.deepEqual(mapped, { status: 503, body: {
+    ok: false, message: "runtime_bindings_unavailable",
+    retryable: true, requires_repreview: false,
+  } });
+});
