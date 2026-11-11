@@ -30,6 +30,11 @@ const permissionPlanSource = await readFile(
   "utf8",
 );
 
+const permissionNotificationInputsSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionNotificationInputs.ts", import.meta.url),
+  "utf8",
+);
+
 const permissionRebuildSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionRebuildTargets.ts", import.meta.url),
   "utf8",
@@ -262,6 +267,8 @@ test("通知先は承認済みX ID連携かつ通知ONのAuth userだけを一�
   assert.match(resolver, /eq\(xUsers\.approval_status, "approved"\)/);
   assert.match(resolver, /eq\(users\.is_notification_enabled, 1\)/);
   assert.match(resolver, /json_each\(\$\{payload\}\)/);
+  assert.match(body, /buildPermissionGrantNotificationInputs\(\{/);
+  assert.match(permissionNotificationInputsSource, /selectVideoPermissionNotificationTargets\(/);
   assert.match(body, /buildKnownRecipientNotificationBulkBatch\(/);
   assert.match(body, /notificationInputs\.slice\(offset, offset \+ 200\)/);
   assert.doesNotMatch(source, /getAuthUserIdsForXUser/);
