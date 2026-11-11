@@ -1,4 +1,5 @@
 import type { videoMembers, xUsers } from "@flamenode/db/schema";
+import { MAX_VIDEO_HIDDEN_EDITORS } from "@flamenode/domain/video/atomicLimits";
 import { compareSqliteBinaryText } from "./memberSetSnapshot.ts";
 
 /**
@@ -142,4 +143,49 @@ export function planVideoPermissionChanges(input: {
     updateRows, insertHiddenRows, deleteHiddenIds, newXUsers,
     grantedNames, revokedNames, notifyXids, unchanged, nextHiddenEditorCount,
   };
+}
+
+/**
+ * Enforce CURRENT's post-plan net hidden editor limit and no-op response.
+ * A caller may return a terminal result immediately; otherwise it must run
+ * the complete atomic permission/audit/outbox/rebuild batch.
+ */
+export function evaluatePermissionPlanPreflight(
+  plan: ReturnType<typeof planVideoPermissionChanges>,
+):
+  | { kind: "limit_exceeded"; result: { ok: false; message: string } }
+  | { kind: "no_changes"; result: {
+      ok: true; message: string; granted: string[]; revoked: string[]; unchanged: number;
+    } }
+  | { kind: "write_required" } {
+  if (
+    plan.insertHiddenRows.length > 0 &&
+    plan.nextHiddenEditorCount > MAX_VIDEO_HIDDEN_EDITORS
+  ) {
+    return {
+      kind: "limit_exceeded",
+      result: {
+        ok: false,
+        message: `非公開編集者は最大${MAX_VIDEO_HIDDEN_EDITORS}人です。これ以上編集権を付与できません。`,
+      },
+    };
+  }
+  if (
+    plan.updateRows.length === 0 &&
+    plan.insertHiddenRows.length === 0 &&
+    plan.deleteHiddenIds.length === 0 &&
+    plan.newXUsers.length === 0
+  ) {
+    return {
+      kind: "no_changes",
+      result: {
+        ok: true,
+        message: `編集権限を反映しました（付与 0 / 解除 0 / 変更なし ${plan.unchanged}）`,
+        granted: [],
+        revoked: [],
+        unchanged: plan.unchanged,
+      },
+    };
+  }
+  return { kind: "write_required" };
 }
