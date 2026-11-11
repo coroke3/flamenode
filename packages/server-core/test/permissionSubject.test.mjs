@@ -102,3 +102,21 @@ test("SA-082 empty auth and X subject fails without executing any D1 statement",
     assert.equal(f.queries.length, 0);
   } finally { f.sqlite.close(); }
 });
+
+test("SA-082 ambiguous aliases and live canonical-alias collisions fail closed", async () => {
+  const f = fixture();
+  try {
+    f.sqlite.exec(`
+      INSERT INTO x_users VALUES ('alice','approved'), ('bob','approved'), ('collision','approved');
+      INSERT INTO x_user_aliases VALUES
+        ('alice','shared'), ('bob','shared'),
+        ('alice','collision');
+    `);
+    for (const candidate of ["shared", "collision"]) {
+      const denied = await resolvePermissionSubjectXUserId(f.db, candidate, null);
+      assert.equal(denied.ok, false);
+      assert.match(denied.message, /一意な正本/);
+    }
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, 3);
+  } finally { f.sqlite.close(); }
+});
