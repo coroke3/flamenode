@@ -335,10 +335,10 @@ test("single grant/revokeとTSV batchは同じpermission mutation正本を使う
 });
 
 test("single actionも統合済みaliasを現在のX IDへ解決してから権限を操作する", () => {
-  assert.match(source, /from "@flamenode\\/server-core\\/video\\/permissionSubject"/);
+  assert.match(source, /from "@flamenode\/server-core\/video\/permissionSubject"/);
   for (const action of ["upsertVideoCollaborator", "deleteVideoCollaborator"]) {
-    assert.match(actionBody(action), /resolvePermissionSubjectXUserId\\(db,/);
+    assert.match(actionBody(action), /resolvePermissionSubjectXUserId\(\s*db,/);
   }
-  assert.match(permissionSubjectSource, /resolveCanonicalXUserResolutions\\(db, \\[normalized\\]\\)/);
-  assert.match(permissionSubjectSource, /getApprovedLinkedXUserIds\\(db, authUserId\\)/);
+  assert.match(permissionSubjectSource, /resolveCanonicalXUserResolutions\(db, \[normalized\]\)/);
+  assert.match(permissionSubjectSource, /getApprovedLinkedXUserIds\(db, authUserId\)/);
 });
