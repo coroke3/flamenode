@@ -115,6 +115,7 @@
     "./video/permissionMembersRead": "./src/video/permissionMembersRead.ts",
     "./video/permissionPlan": "./src/video/permissionPlan.ts",
     "./video/permissionRebuildTargets": "./src/video/permissionRebuildTargets.ts",
+    "./video/adminMemberRebuildTargets": "./src/video/adminMemberRebuildTargets.ts",
     "./video/permissionNotificationInputs": "./src/video/permissionNotificationInputs.ts",
     "./video/permissionCanonicalize": "./src/video/permissionCanonicalize.ts",
     "./video/permissionMutationBatch": "./src/video/permissionMutationBatch.ts",
