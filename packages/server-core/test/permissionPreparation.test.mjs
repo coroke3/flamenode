@@ -76,7 +76,7 @@ test("SA-084 shared preflight loads approved X and plans a bounded grant without
     assert.deepEqual(result.plan.updateRows.map(row => [row.id, row.can_edit]), [["m1", 1]]);
     assert.equal(result.currentHiddenEditorCount, 0);
     assert.equal(f.sqlite.prepare("SELECT can_edit FROM video_members WHERE id='m1'").get().can_edit, 0);
-    assert.ok(f.queries.every(q => /^\\s*(?:select|with)\\b/i.test(q)), "preflight must only read");
+    assert.ok(f.queries.every(q => /^\s*(?:select|with)\b/i.test(q)), "preflight must only read");
   } finally { f.sqlite.close(); }
 });
 
