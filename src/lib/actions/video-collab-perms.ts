@@ -21,8 +21,7 @@ import {
 } from "@/lib/auth/ownership";
 import { videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
-import { normalizeXId } from "@/lib/utils/xid";
-import { upsertSchema, permissionBatchSchema, prepareCollaboratorPermissionIntents, parseVideoCollaboratorDeleteInput } from "@flamenode/domain/video";
+import { upsertSchema, permissionBatchSchema, parseVideoCollaboratorDeleteInput } from "@flamenode/domain/video";
 import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/enqueue";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import { mutateWithAudit } from "@/lib/audit/mutate";
