@@ -59,6 +59,15 @@ const permissionCanonicalizeSource = await readFile(
   "utf8",
 );
 
+const permissionNotificationBulkSqlSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionNotificationBulkSql.ts", import.meta.url),
+  "utf8",
+);
+const notificationEnqueueSource = await readFile(
+  new URL("../notifications/enqueue.ts", import.meta.url),
+  "utf8",
+);
+
 const permissionNotificationInputsSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionNotificationInputs.ts", import.meta.url),
   "utf8",
@@ -359,4 +368,14 @@ test("SA-082..084 video read is scoped in server-core before CURRENT authorizati
   assert.match(permissionVideoReadSource, /\.where\(eq\(videos\.id, videoId\)\)/);
   assert.match(permissionVideoReadSource, /\.limit\(1\)/);
   assert.match(permissionAccessSource, /requiredKey: "video\.permissions"/);
+});
+
+test("SA-082..084 notification bulk SQL is shared without weakening recipient/payload guards", () => {
+  assert.ok(notificationEnqueueSource.includes('buildPermissionNotificationBulkInsertSql(rows)'));
+  assert.ok(notificationEnqueueSource.includes('prepareNotification(input)'));
+  assert.ok(notificationEnqueueSource.includes('scopeBulkNotificationDedupeForTransition(prepared)'));
+  assert.ok(notificationEnqueueSource.includes('notification_bulk_batch_limit_exceeded'));
+  assert.ok(permissionNotificationBulkSqlSource.includes('FROM json_each('));
+  assert.ok(permissionNotificationBulkSqlSource.includes('INSERT OR IGNORE INTO notification_outbox'));
+  assert.ok(permissionNotificationBulkSqlSource.includes('rows.length > 200'));
 });
