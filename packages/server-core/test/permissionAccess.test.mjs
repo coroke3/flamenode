@@ -20,6 +20,11 @@ function fixture() {
       id TEXT PRIMARY KEY, video_id TEXT, x_user_id TEXT, can_edit INTEGER
     );
     CREATE TABLE video_events (video_id TEXT, event_id TEXT);
+    CREATE TABLE system_settings (
+      id TEXT PRIMARY KEY,
+      default_editable_fields TEXT,
+      upcoming_editable_fields TEXT
+    );
     CREATE TABLE event_staff (
       event_id TEXT, x_user_id TEXT, permission_preset TEXT,
       custom_permission_keys_json TEXT
