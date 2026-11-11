@@ -38,8 +38,9 @@ export function SaveEventTemplateForm({
     setSuccess(null);
   }, [eventId]);
 
-  // A late response after unmount must not redirect or refresh another route.
-  React.useEffect(() => () => {
+  // Invalidate synchronously during unmount commit. A passive cleanup could
+  // run after a late network microtask has already fired a stale callback.
+  React.useLayoutEffect(() => () => {
     requestGenerationRef.current += 1;
   }, []);
 
