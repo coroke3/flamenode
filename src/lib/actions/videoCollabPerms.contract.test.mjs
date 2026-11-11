@@ -34,6 +34,11 @@ const permissionPlanSource = await readFile(
   "utf8",
 );
 
+const permissionPreparationSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionPreparation.ts", import.meta.url),
+  "utf8",
+);
+
 const permissionCanonicalizeSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionCanonicalize.ts", import.meta.url),
   "utf8",
@@ -142,7 +147,8 @@ test("bulk intentは共通のfail-closed resolverで現行X IDへ解決する", 
   assert.match(canonicalize, /ambiguous_alias/);
   assert.match(canonicalize, /canonical_alias_collision/);
   assert.match(canonicalize, /rejected_or_invalid/);
-  assert.match(mutation, /await canonicalizePermissionIntents\(db, args\.intents\)/);
+  assert.match(mutation, /await preparePermissionWrite\(db, \{/);
+  assert.match(permissionPreparationSource, /await canonicalizePermissionIntents\(db, input\.intents\)/);
 });
 
 test("aliasと現行IDが同じ正本へ収束した重複intentは共通domainで拒否する", async () => {
@@ -151,7 +157,8 @@ test("aliasと現行IDが同じ正本へ収束した重複intentは共通domain�
     new URL("../../../packages/domain/src/video/collaboratorPermissionInput.ts", import.meta.url),
     "utf8",
   );
-  assert.match(body, /prepareCollaboratorPermissionIntents\(canonicalIntents\)/);
+  assert.match(body, /await preparePermissionWrite\(db, \{/);
+  assert.match(permissionPreparationSource, /prepareCollaboratorPermissionIntents\(canonicalIntents\)/);
   assert.match(inputSource, /const duplicateXids = new Set/);
   assert.match(inputSource, /if \(intents\.has\(xid\)\)/);
   assert.match(inputSource, /同じ X ID の権限指定が重複しています/);
@@ -159,9 +166,9 @@ test("aliasと現行IDが同じ正本へ収束した重複intentは共通domain�
 
 test("permission mutationはJSON1で対象member\/X userを一括取得する", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
-  assert.match(body, /loadPermissionMembersRead\(db, video\.id, xids\)/);
+  assert.match(permissionPreparationSource, /loadPermissionMembersRead\(db, input\.videoId, xids\)/);
   assert.match(permissionMembersSource, /json_each\(\$\{xidsPayload\}\)/);
-  assert.match(body, /loadPermissionGrantProfiles\(db, grantXids\)/);
+  assert.match(permissionPreparationSource, /loadPermissionGrantProfiles\(db, grantXids\)/);
   assert.match(permissionProfilesSource, /json_each\(\$\{JSON\.stringify\(grantXids\)\}\)/);
   assert.doesNotMatch(source, /PERMISSION_BATCH_IN_CLAUSE_SIZE/);
   assert.doesNotMatch(source, /chunkXIds/);
@@ -231,15 +238,15 @@ test("hidden editor上限は公開100人と分離し全intent後のnet countで�
   const netCheckIndex = permissionPlanSource.indexOf("plan.nextHiddenEditorCount > MAX_VIDEO_HIDDEN_EDITORS");
   assert.ok(loopIndex >= 0);
   assert.ok(netCheckIndex > loopIndex);
-  assert.match(body, /planVideoPermissionChanges\(\{/);
-  assert.match(body, /evaluatePermissionPlanPreflight\(plan\)/);
+  assert.match(permissionPreparationSource, /planVideoPermissionChanges\(\{/);
+  assert.match(permissionPreparationSource, /evaluatePermissionPlanPreflight\(plan\)/);
   assert.match(permissionPlanSource, /nextHiddenEditorCount/);
   assert.match(atomicLimits, /MAX_VIDEO_HIDDEN_EDITORS = 100/);
 });
 
 test("対象member readが上限に達した場合は重複データを黙って切り捨てない", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
-  assert.match(body, /loadPermissionMembersRead\(db, video\.id, xids\)/);
+  assert.match(permissionPreparationSource, /loadPermissionMembersRead\(db, input\.videoId, xids\)/);
   assert.match(
     permissionMembersSource,
     /const existingRowLimit = MAX_VIDEO_MEMBERS \+ MAX_VIDEO_HIDDEN_EDITORS \+ 1/,
@@ -251,8 +258,8 @@ test("対象member readが上限に達した場合は重複データを黙って
 test("拒否済みX IDへ編集権限を再付与しない", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
   assert.match(permissionProfilesSource, /approval_status: xUsers\.approval_status/);
-  assert.match(body, /row\.approval_status === "rejected"/);
-  assert.match(body, /拒否済みの X ID には編集権限を付与できません/);
+  assert.match(permissionPreparationSource, /row\.approval_status === "rejected"/);
+  assert.match(permissionPreparationSource, /拒否済みの X ID には編集権限を付与できません/);
 });
 
 test("permission CASのID順はlocaleCompareでなくSQLite互換比較を使う", () => {
