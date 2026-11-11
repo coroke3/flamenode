@@ -273,6 +273,10 @@ test("MIG-0639 mounted SA-031..034 and MIG-0643 writes have real bounded D1 prob
   const csvSeed=scenarios.get("SA-032").kinds.normal(1,"qa").setup;
   assert.ok(csvSeed.some(row=>/event_staff/.test(row.sql) && row.params.includes("owner")), "CSV must retain an operable event owner");
   assert.ok(csvSeed.some(row=>/x_user_account_links/.test(row.sql)), "CSV owner must have an approved owner link");
+  assert.ok(csvSeed.some(row=>row.params.includes("bst_csv_owner")), "CSV owner must not reuse transfer scenario X subject");
+  assert.ok(scenarios.get("SA-071").kinds.normal(1,"qa").setup.some(row=>/DELETE FROM static_rebuild_queue/.test(row.sql)), "rebuild samples must not become queue no-ops");
+  assert.ok(scenarios.get("SA-072").kinds.normal(1,"qa").setup.some(row=>/DELETE FROM static_rebuild_queue/.test(row.sql)), "shared rebuild samples must not become queue no-ops");
+  assert.ok(scenarios.get("SA-106").kinds.normal(1,"qa").setup.some(row=>/DELETE FROM video_youtube_metadata/.test(row.sql)), "resync samples must not degrade into already_pending");
   assert.equal(JSON.parse(scenarios.get("SA-071").kinds.limit(1,"qa").body).reason.length,500);
   assert.equal(JSON.parse(scenarios.get("SA-031-CREATE").kinds.limit(1,"qa").body).display_name.length,80);
   assert.equal(scenarios.get("SA-073").kinds.invalid(1,"qa").headers.origin,"https://evil.invalid");
