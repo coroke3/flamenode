@@ -9,6 +9,7 @@ import { buildPermissionGrantNotificationInputs } from "@flamenode/server-core/v
 import { buildPermissionMutationBatch } from "@flamenode/server-core/video/permissionMutationBatch";
 import { preparePermissionWrite } from "@flamenode/server-core/video/permissionPreparation";
 import { resolvePermissionSubjectXUserId } from "@flamenode/server-core/video/permissionSubject";
+import { loadPermissionVideoRow } from "@flamenode/server-core/video/permissionVideoRead";
 import { buildPermissionWriteAudits } from "@flamenode/server-core/video/permissionPlan";
 import { permissionRebuildTargets } from "@flamenode/server-core/video/permissionRebuildTargets";
 
@@ -94,20 +95,7 @@ async function loadEditableVideoForPermissions(
   videoId: string,
   privilegeModeRaw: string,
 ): Promise<EditableVideo | null> {
-  const row = (
-    await db
-      .select({
-        id: videos.id,
-        title: videos.title,
-        primary_event_id: videos.primary_event_id,
-        creator_x_user_id: videos.creator_x_user_id,
-        submitted_by_user_id: videos.submitted_by_user_id,
-        visibility_status: videos.visibility_status,
-      })
-      .from(videos)
-      .where(eq(videos.id, videoId))
-      .limit(1)
-  )[0];
+  const row = await loadPermissionVideoRow(db, videoId);
   if (!row) return null;
 
   const video = {
