@@ -1,3 +1,4 @@
+import { legacyImportCpuBudgetErrors as sharedCpuBudgetErrors, MAX_LEGACY_IMPORT_SELECTED_ROWS as SHARED_CPU_ROWS } from "@flamenode/server-core/legacyImport/cpuBudget";
 import { selectLegacyParsedFileRange as sharedSelect, suggestLegacyImportRowRanges as sharedSuggest, MAX_LEGACY_IMPORT_SELECTED_ROWS as SHARED_RANGE_LIMIT } from "@flamenode/server-core/legacyImport/range";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -114,4 +115,11 @@ test("RH-002 CURRENT bridge: row-range canonical exports and cap are shared with
   assert.equal(selectLegacyParsedFileRange, sharedSelect);
   assert.equal(suggestLegacyImportRowRanges, sharedSuggest);
   assert.equal(MAX_LEGACY_IMPORT_SELECTED_ROWS, SHARED_RANGE_LIMIT);
+});
+
+
+test("RH-002 CURRENT bridge: CPU budget function and 250-row cap share one canonical implementation", () => {
+  assert.equal(legacyImportCpuBudgetErrors, sharedCpuBudgetErrors);
+  assert.equal(MAX_LEGACY_IMPORT_SELECTED_ROWS, SHARED_CPU_ROWS);
+  assert.equal(SHARED_CPU_ROWS, SHARED_RANGE_LIMIT);
 });
