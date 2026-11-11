@@ -244,3 +244,45 @@ test("RH-002 Hono preview pipeline: real CSV and real R2 claim, injected read-on
   assert.ok(calls.filter(([method]) => method === "put").length >= 3,
     "R2 create, claim and release must be separate conditional steps");
 });
+
+
+test("RH-002 Hono apply pipeline: actual R2 owner claim and monotonic ETag advance after one injected D1 step", async () => {
+  const { legacyImportR2Adapter } = await import("../src/routes/admin/legacyImportR2Adapter.ts");
+  const { runLegacyImportApplyPipeline } =
+    await import("../src/routes/admin/legacyImportApplyPipeline.ts");
+  const { bucket, records, calls } = bucketFixture();
+  const adapter = legacyImportR2Adapter(bucket);
+  const input = previewInput();
+  const credential = await adapter.createPreview(input);
+  const formData = new FormData();
+  formData.set("preview_token", credential.previewToken);
+  formData.set("plan_hash", credential.planHash);
+  let atomicD1Steps = 0;
+  const response = await runLegacyImportApplyPipeline({
+    formData,
+    authUserId: input.authUserId,
+    claimPreview: adapter.claimPreview,
+    mapPreviewError: adapter.mapPreviewError,
+    isTransientApplyFailure: () => false,
+    applyStep: async ({ progress, actorAuthUserId }) => {
+      atomicD1Steps++;
+      assert.equal(actorAuthUserId, "owner-a");
+      assert.equal(progress.stage, "system_user");
+      return {
+        complete: false,
+        progress: { ...progress, stage: "x_users", index: 0 },
+      };
+    },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.continuation_required, true);
+  assert.equal(response.body.progress.stage, "x_users");
+  assert.equal(response.body.progress.completed, 1);
+  assert.equal(atomicD1Steps, 1, "one HTTP request commits only one D1 step");
+  assert.equal(JSON.parse([...records.values()][0].data).status, "ready");
+  assert.ok(calls.filter(([method]) => method === "put").length >= 3);
+  assert.equal(calls.filter(([method, , conditional]) =>
+    method === "put" && conditional !== null).length, 2,
+    "claim and advance both require distinct R2 ETag CAS writes");
+});
