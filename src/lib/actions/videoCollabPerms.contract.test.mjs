@@ -34,6 +34,11 @@ const permissionPlanSource = await readFile(
   "utf8",
 );
 
+const permissionSubjectSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionSubject.ts", import.meta.url),
+  "utf8",
+);
+
 const permissionPreparationSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionPreparation.ts", import.meta.url),
   "utf8",
@@ -330,7 +335,10 @@ test("single grant/revokeとTSV batchは同じpermission mutation正本を使う
 });
 
 test("single actionも統合済みaliasを現在のX IDへ解決してから権限を操作する", () => {
-  const resolver = functionBody("resolveSubjectXUserId");
-  assert.match(resolver, /resolveCanonicalXUserId/);
-  assert.match(resolver, /approvedOnly: true/);
+  assert.match(source, /from "@flamenode\\/server-core\\/video\\/permissionSubject"/);
+  for (const action of ["upsertVideoCollaborator", "deleteVideoCollaborator"]) {
+    assert.match(actionBody(action), /resolvePermissionSubjectXUserId\\(db,/);
+  }
+  assert.match(permissionSubjectSource, /resolveCanonicalXUserResolutions\\(db, \\[normalized\\]\\)/);
+  assert.match(permissionSubjectSource, /getApprovedLinkedXUserIds\\(db, authUserId\\)/);
 });
