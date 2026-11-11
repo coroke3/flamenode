@@ -169,6 +169,13 @@ test("MIG-0645 U02 Hono: skip_existing stores real D1 collision snapshot in owne
       objects.set(key, String(data));
       return { etag: "1" };
     },
+    async get(key) {
+      const value = objects.get(key);
+      return value === undefined ? null : {
+        etag: "1", size: Buffer.byteLength(value), text: async () => value,
+      };
+    },
+    async delete(key) { objects.delete(key); },
   };
   const { request, sqlite, stats } = setup({ bucket });
   seedEvent(sqlite, { id: "event-a", title: "Existing event" });
