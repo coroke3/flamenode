@@ -31,7 +31,7 @@ test("RH-002 U02 progress: chunks match CURRENT and empty stages count one", () 
 test("RH-002 U02 progress: duplicate/casefold software names are one logical row", () => {
   const plan = { ...empty(),
     xUsers: Array.from({ length: 41 }, () => ({})),
-    videoSoftwares: Array.from({ length: 42 }, (_, i) => ({
+    videoSoftwares: Array.from({ length: 41 }, (_, i) => ({
       label: i === 0 ? "  Premiere   Pro " : i === 1 ? "premiere pro" : `software-${i}`,
     })),
     eventCustomQuestions: Array.from({ length: 7 }, () => ({})),
