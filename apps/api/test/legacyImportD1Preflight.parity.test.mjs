@@ -51,6 +51,8 @@ test("RH-002 U02 shared D1 preflight: existing event blocks create_only (read-on
 test("RH-002 U02 shared D1 preflight: skip_existing returns sorted existing IDs", async () => {
   const db = readOnlyDb([{ id: "event-a" }]);
   const incoming = plan("eventid,eventname\nevent-a,Event A\n");
+  // A canonical event must include an owner even when skip_existing is used.
+  incoming.eventStaff.push({ event_id: "event-a", permission_preset: "owner" });
   const result = await preflightLegacyImportPlan(db, incoming, "skip_existing");
   assert.deepEqual(result, {
     existingEventIds: ["event-a"],
@@ -73,8 +75,8 @@ test("RH-002 U02 D1 preflight: CURRENT source retains the same SQL guards and im
   const current = await readFile(new URL("../../../src/lib/import/legacy/preflight.ts", import.meta.url), "utf8");
   const shared = await readFile(new URL("../../../packages/server-core/src/legacyImport/preflight.ts", import.meta.url), "utf8");
   for (const key of [
-    "legacy_import_question_snapshot_mismatch",
-    "legacy_import_custom_answer_snapshot_mismatch",
+    "sameQuestionDefinition",
+    "latestImportedCustomAnswerTargets",
     "existingEventIds",
     "existingVideoRows",
     "latestImportedCustomAnswerTargets",
