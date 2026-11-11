@@ -376,6 +376,11 @@ async function readStoredPreviewObject(object: R2ObjectBody): Promise<StoredPrev
         chunks.push(decoder.decode(value, { stream: true }));
       }
       chunks.push(decoder.decode());
+    } catch (cause) {
+      // A failed/aborted stream must release its R2 connection. Preserve the
+      // original read/size error even when cancellation itself also fails.
+      await reader.cancel().catch(() => undefined);
+      throw cause;
     } finally {
       reader.releaseLock();
     }
