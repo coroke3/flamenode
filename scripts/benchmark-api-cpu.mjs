@@ -500,6 +500,13 @@ const benchStaffSetup = (kind, i, tag, action) => {
   const staffId = "bench-" + action;
   return [
     benchStaffX(x),
+    // The canonical bulk mutation invariant requires at least one operable owner.
+    // Seed a distinct, approved and linked owner; the CSV subject is NOT the actor.
+    ...(action === "csv" ? [
+      benchStaffX("bench_from"),
+      { sql:"INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bench_from','bench-admin','owner')",params:[] },
+      benchStaff("bench-csv-owner","bench_from","owner"),
+    ] : []),
     ...(action === "create" || action === "csv" ? [{
       sql: "DELETE FROM event_staff WHERE event_id = 'bench-evt' AND x_user_id = ?", params:[x],
     }] : [benchStaff(staffId,x)]),
