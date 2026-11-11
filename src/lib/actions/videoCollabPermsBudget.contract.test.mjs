@@ -34,6 +34,10 @@ const notificationSource = await readFile(
   new URL("../notifications/enqueue.ts", import.meta.url),
   "utf8",
 );
+const notificationBatchSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionNotificationBatch.ts", import.meta.url),
+  "utf8",
+);
 
 test("100人permission batchは人数分のmutation/auditを生成しない", () => {
   assert.match(actionSource, /permissionBatchSchema/);
@@ -83,29 +87,18 @@ test("100人permission batchの通常最大経路はD1 Free 50-query budgetに�
 
 test("100人通知はJSON1 bindの1 statementへまとめ、必要時だけ200件単位でchunkする", () => {
   assert.match(notificationSource, /buildKnownRecipientNotificationBulkBatch/);
-  assert.match(notificationSource, /buildPermissionNotificationBulkInsertSql\(rows\)/);
+  assert.match(notificationSource, /preparePermissionNotificationBulkBatch\(inputs, validateNotificationPayload\)/);
+  assert.match(notificationBatchSource, /buildPermissionNotificationBulkInsertSql\(rows\)/);
   assert.match(notificationSqlSource, /INSERT OR IGNORE INTO notification_outbox/);
   assert.match(notificationSqlSource, /FROM json_each\(\$\{payload\}\)/);
-  assert.match(notificationSource, /notification_bulk_batch_limit_exceeded/);
+  assert.match(notificationBatchSource, /notification_bulk_batch_limit_exceeded/);
   assert.match(actionSource, /offset \+= 200/);
   assert.match(actionSource, /notificationInputs\.slice\(offset, offset \+ 200\)/);
 });
 
 test("編集権限の解除後再付与は過去sent dedupeに吸収されず新しい通知遷移になる", () => {
-  assert.match(
-    notificationSource,
-    /function scopeBulkNotificationDedupeForTransition\(/,
-  );
-  assert.match(
-    notificationSource,
-    /prepared\.type !== "video_edit_permission_granted"/,
-  );
-  assert.match(
-    notificationSource,
-    /dedupeKey: `\$\{prepared\.dedupeKey\}:transition:\$\{crypto\.randomUUID\(\)\}`/,
-  );
-  assert.match(
-    notificationSource,
-    /scopeBulkNotificationDedupeForTransition\(prepared\)/,
-  );
+  assert.match(notificationSource, /preparePermissionNotificationBulkBatch/);
+  assert.match(notificationBatchSource, /prepared\.type === "video_edit_permission_granted"/);
+  assert.ok(notificationBatchSource.includes(":transition:"));
+  assert.match(notificationBatchSource, /new Set\(nonNullKeys\)\.size !== nonNullKeys\.length/);
 });
