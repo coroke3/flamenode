@@ -121,6 +121,10 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `bucket.delete(keys)` | 1 | Generator/producer key; MIG-0907 review required |
 | `src/lib/media/iconOrphanCleanup.ts` | `bucket.delete(objectKey)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
 | `apps/api/src/routes/xid/orphanCleanup.ts` | `bucket.delete(key)` | 1 | MIG-0636 SA-104 isolated Hono post-commit old icon cleanup, validated xicons/video-icons only, all D1 references checked before deletion; retain uploaded media dependency until independent S3 review |
+| `apps/api/src/routes/xid/iconUpload.ts` | `bucket.put(stagingKey)` | 1 | MIG-0636 SA-105 isolated validated X upload; temporary xicons/staging/<id>/<id>.<id> with 2MiB image cap, no public mount; RETAIN until accepted |
+| `apps/api/src/routes/xid/iconUpload.ts` | `bucket.put(finalKey)` | 1 | MIG-0636 SA-105 isolated final xicons/<id>/<id>.<id>; D1 linked-X CAS and strict audit after R2; pre-commit rollback only; RETAIN persistent uploaded media |
+| `apps/api/src/routes/xid/iconUpload.ts` | `bucket.delete(stagingKey)` | 2 | MIG-0636 SA-105 rollback on uncommitted failure, or best-effort cleanup after commit; temporary upload key only |
+| `apps/api/src/routes/xid/iconUpload.ts` | `bucket.delete(finalKey)` | 1 | MIG-0636 SA-105 rollback of new object only before a successful D1 CAS; never remove a committed icon URL |
 | `src/lib/video/resolveVideoCreatorIcon.ts` | `bucket.put(key)` | 1 | Persistent uploaded media (`video-icons/<id>/<id>/` + UUID.ext); RETAIN until separately reviewed |
 | `apps/api/src/routes/adminRead/ops.ts` | `bucket.head(objectKey)` | 1 | Admin read-only artifact existence probe; MIG-0627 review required |
 | `workers/cleanup/incrementalCache.ts` | `bucket.list(<complex>)` | 1 | Cleanup prefix listing; do not retire while old storage remains |
