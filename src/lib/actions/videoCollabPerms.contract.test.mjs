@@ -34,6 +34,11 @@ const permissionPlanSource = await readFile(
   "utf8",
 );
 
+const permissionAccessSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionAccess.ts", import.meta.url),
+  "utf8",
+);
+
 const permissionVideoReadSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionVideoRead.ts", import.meta.url),
   "utf8",
@@ -126,10 +131,11 @@ test("single/batchともvideo.permissionsとprivilege modeをServer側で再検�
   ]) {
     assert.match(actionBody(name), /loadEditableVideoForPermissions\(/);
   }
-  assert.match(source, /requiredKey: "video\.permissions"/);
-  assert.match(source, /resolvePrivilegeMode\(/);
-  assert.match(source, /canUseEventPrivilegeModeForVideo/);
-  assert.match(source, /actor\.role === "admin"/);
+  assert.match(source, /loadAuthorizedPermissionVideo\(db, actor, videoId, privilegeModeRaw\)/);
+  assert.match(permissionAccessSource, /requiredKey: "video\.permissions"/);
+  assert.match(permissionAccessSource, /canUseEventPrivilegeModeForVideo/);
+  assert.match(permissionAccessSource, /actor\.role === "admin"/);
+  assert.match(permissionAccessSource, /if \(requested\) return null/);
 });
 
 test("permission inputは最大100件かつcanonical X handle形式だけ許可する", async () => {
@@ -349,8 +355,8 @@ test("single actionも統合済みaliasを現在のX IDへ解決してから権�
 });
 
 test("SA-082..084 video read is scoped in server-core before CURRENT authorization", () => {
-  assert.match(source, /loadPermissionVideoRow\(db, videoId\)/);
+  assert.match(permissionAccessSource, /loadPermissionVideoRow\(db, videoId\)/);
   assert.match(permissionVideoReadSource, /\.where\(eq\(videos\.id, videoId\)\)/);
   assert.match(permissionVideoReadSource, /\.limit\(1\)/);
-  assert.match(source, /requiredKey: "video\.permissions"/);
+  assert.match(permissionAccessSource, /requiredKey: "video\.permissions"/);
 });
