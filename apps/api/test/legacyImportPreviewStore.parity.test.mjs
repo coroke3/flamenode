@@ -113,6 +113,71 @@ test("RH-002 shared R2 preview: missing or under-reported object size cannot byp
   }
 });
 
+test("RH-002 shared R2 preview: streamed body rejects oversized chunks before text() allocation", async () => {
+  const { bucket, records, calls } = bucketFixture();
+  const credential = await createLegacyImportPreview(bucket, previewInput(), {
+    now: 1700000000, previewToken: TOKEN,
+  });
+  const [key, entry] = [...records.entries()][0];
+  let cancelled = false;
+  const originalGet = bucket.get;
+  bucket.get = async (lookup) => {
+    const object = await originalGet(lookup);
+    if (!object) return null;
+    const initial = new TextEncoder().encode(entry.data);
+    return {
+      ...object,
+      size: 1, // Invalidly small metadata must not bypass the byte cap.
+      text: async () => { throw new Error("streaming R2 must never call text()"); },
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(initial);
+          controller.enqueue(new Uint8Array(512 * 1024));
+        },
+        cancel() { cancelled = true; },
+      }),
+    };
+  };
+  await assert.rejects(claimLegacyImportPreview(bucket, {
+    authUserId: "owner-a", previewToken: TOKEN, planHash: credential.planHash,
+  }, { now: 1700000001, claimId: CLAIM }),
+  (error) => error instanceof LegacyImportPreviewError && error.code === "plan_too_large");
+  assert.equal(cancelled, true, "oversized streamed body must be cancelled");
+  assert.equal(calls.filter(([method]) => method === "put").length, 1,
+    "oversized body must not acquire R2 CAS claim");
+  assert.equal(JSON.parse(records.get(key).data).status, "ready");
+});
+
+test("RH-002 shared R2 preview: bounded streamed valid body can still claim and release", async () => {
+  const { bucket } = bucketFixture();
+  const credential = await createLegacyImportPreview(bucket, previewInput(), {
+    now: 1700000000, previewToken: TOKEN,
+  });
+  const originalGet = bucket.get;
+  bucket.get = async (lookup) => {
+    const object = await originalGet(lookup);
+    if (!object) return null;
+    const bytes = new TextEncoder().encode(await object.text());
+    return {
+      ...object,
+      size: undefined,
+      text: async () => { throw new Error("streaming R2 must not use text()"); },
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes.subarray(0, 17));
+          controller.enqueue(bytes.subarray(17));
+          controller.close();
+        },
+      }),
+    };
+  };
+  const claimed = await claimLegacyImportPreview(bucket, {
+    authUserId: "owner-a", previewToken: TOKEN, planHash: credential.planHash,
+  }, { now: 1700000001, claimId: CLAIM });
+  assert.equal(claimed.attempt, 1);
+  await claimed.release();
+});
+
 test("RH-002 shared R2 preview: wrong owner cannot claim another owner's token", async () => {
   const { bucket, records } = bucketFixture();
   const input = previewInput();
