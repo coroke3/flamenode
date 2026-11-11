@@ -77,6 +77,8 @@ test("SA-105 isolated upload: authorized PNG uses staged+final R2, strict audit 
   assert.deepEqual(h.sqlite.prepare("SELECT target_type FROM static_rebuild_queue").all()
     .map(x=>x.target_type).sort(),["member_suggestions","user","users_index"]);
   assert.equal(h.stats.batches,1);
+  assert.equal(h.stats.reads, 3,
+    "SA-105 guard settings/actor, linked X preflight and strict audit must reuse the guarded context");
 });
 
 test("SA-105 isolated upload: invalid identity, malformed image, MIME mismatch and 2 MiB cap never touch R2",async()=>{
