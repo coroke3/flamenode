@@ -177,7 +177,14 @@ export async function handleLiveApiGet(
   if (!id || id.length > MAX_EVENT_ID_LEN) {
     return jsonError("invalid_event_id", "イベントIDが不正です。", 400);
   }
-  const db = env.DB;
+  // Access to the Cloudflare binding itself may throw. Match CURRENT's
+  // fail-closed JSON 503 response rather than leaking a provider exception.
+  let db: D1Database | undefined;
+  try {
+    db = env?.DB;
+  } catch {
+    return jsonError("db_unavailable", "データベースに接続できません。", 503);
+  }
   if (!db) return jsonError("db_unavailable", "データベースに接続できません。", 503);
   try {
     const mode = await resolvePublicOperationMode(env, { allowD1: true });
