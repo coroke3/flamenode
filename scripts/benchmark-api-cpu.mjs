@@ -496,7 +496,7 @@ const benchStaffX = (id) => ({
   params: [id],
 });
 const benchStaffSetup = (kind, i, tag, action) => {
-  const x = "bench_stf_" + action;
+  const x = "bst_" + action;
   const staffId = "bench-" + action;
   return [
     benchStaffX(x),
@@ -506,10 +506,12 @@ const benchStaffSetup = (kind, i, tag, action) => {
   ];
 };
 const benchTransferSetup = () => [
-  benchStaffX("bench-to"),
-  { sql:"INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bench-to','bench-admin','owner')",params:[] },
-  benchStaff("bench-from","bench-x","owner"),
-  benchStaff("bench-to-staff","bench-to","manager"),
+  benchStaffX("bench_from"),
+  benchStaffX("bench_to"),
+  { sql:"INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bench_to','bench-admin','owner')",params:[] },
+  { sql:"INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bench_from','bench-admin','owner')",params:[] },
+  benchStaff("bench-from","bench_from","owner"),
+  benchStaff("bench-to-staff","bench_to","manager"),
 ];
 const benchQueueId = (i, tag) => "bench-q-" + tag + "-" + i;
 const benchFailedQueue = (i, tag) => ({
@@ -518,7 +520,7 @@ const benchFailedQueue = (i, tag) => ({
 });
 const benchQueueSetup = (kind,i,tag) => [benchFailedQueue(i,tag)];
 const benchVisibilitySetup = (kind,i,tag) => [{
-  sql:"INSERT OR REPLACE INTO public_visibility_fences (entity_type,entity_id,fence_token,state,created_at,updated_at) VALUES ('event','bench-evt',?,'active',100,100)",
+  sql:"INSERT OR REPLACE INTO public_visibility_fences (entity_type,entity_id,fence_token,state,updated_at) VALUES ('event','bench-evt',?,'blocked',100)",
   params:["bench-fence-" + tag + "-" + i],
 }];
 const benchYoutubeId = (kind,i,tag) => kind === "limit" ? "v".repeat(128) : "bench-vid";
@@ -718,16 +720,16 @@ const WRITE_BODIES = {
   }),
   "POST /api/manage/events/:id/staff/csv": (k) => ({reason:"benchmark csv",rows:[{
     lineNumber:1,display_name:k === "limit" ? "S".repeat(80) : "Staff",
-    x_user_id:"bench_stf_csv",permission_preset:"public_staff",permission_keys:[],
+    x_user_id:"bst_csv",permission_preset:"public_staff",permission_keys:[],
     is_public_staff:"1",public_role_label:"",
   }]}),
   "POST /api/manage/events/:id/staff": (k) => ({
     display_name:k === "limit" ? "S".repeat(80) : "Staff",
-    x_user_id:"bench_stf_create",permission_preset:"public_staff",is_public:1,reason:"benchmark create",
+    x_user_id:"bst_create",permission_preset:"public_staff",is_public:1,reason:"benchmark create",
   }),
   "PUT /api/manage/events/:id/staff/:staffId": (k) => ({
     staff_id:"bench-update",display_name:k === "limit" ? "S".repeat(80) : "Staff",
-    x_user_id:"bench_stf_update",permission_preset:"public_staff",is_public:1,reason:"benchmark update",
+    x_user_id:"bst_update",permission_preset:"public_staff",is_public:1,reason:"benchmark update",
   }),
   "DELETE /api/manage/events/:id/staff/:staffId": () => ({reason:"benchmark delete"}),
   "POST /api/admin/static-builds/backfill": () => ({kind:"event_crew",mode:"restart",cursor:""}),
