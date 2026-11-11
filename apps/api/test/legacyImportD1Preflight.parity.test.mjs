@@ -61,6 +61,14 @@ test("RH-002 U02 shared D1 preflight: skip_existing returns sorted existing IDs"
   assert.equal(db.calls.length, 1);
 });
 
+test("RH-002 U02 shared D1 preflight: skip_existing rejects an ownerless event", async () => {
+  const db = readOnlyDb([{ id: "event-a" }]);
+  const incoming = plan("eventid,eventname\nevent-a,Event A\n");
+  assert.deepEqual(incoming.eventStaff, []);
+  await assert.rejects(preflightLegacyImportPlan(db, incoming, "skip_existing"),
+    /イベント event-a にownerがありません/);
+});
+
 test("RH-002 U02 shared D1 preflight: validation errors reject before any DB call", async () => {
   const db = readOnlyDb();
   const incoming = plan("id,title\nlegacy-1,Incomplete\n");
@@ -79,7 +87,7 @@ test("RH-002 U02 D1 preflight: CURRENT source retains the same SQL guards and im
     "latestImportedCustomAnswerTargets",
     "existingEventIds",
     "existingVideoRows",
-    "latestImportedCustomAnswerTargets",
+    "answerMatchesAuditSnapshot",
     "MAX_EVENT_CUSTOM_QUESTIONS = 18",
   ]) {
     assert.ok(current.includes(key), "CURRENT missing " + key);
