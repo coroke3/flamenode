@@ -349,8 +349,8 @@ test("single actionも統合済みaliasを現在のX IDへ解決してから権�
 });
 
 test("SA-082..084 video read is scoped in server-core before CURRENT authorization", () => {
-  assert.match(source, /loadPermissionVideoRow\\(db, videoId\\)/);
-  assert.match(permissionVideoReadSource, /\\.where\\(eq\\(videos\\.id, videoId\\)\\)/);
-  assert.match(permissionVideoReadSource, /\\.limit\\(1\\)/);
-  assert.match(source, /requiredKey: "video\\.permissions"/);
+  assert.match(source, /loadPermissionVideoRow\(db, videoId\)/);
+  assert.match(permissionVideoReadSource, /\.where\(eq\(videos\.id, videoId\)\)/);
+  assert.match(permissionVideoReadSource, /\.limit\(1\)/);
+  assert.match(source, /requiredKey: "video\.permissions"/);
 });
