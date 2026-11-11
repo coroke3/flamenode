@@ -356,45 +356,8 @@ async function readStoredPreviewObject(object: R2ObjectBody): Promise<StoredPrev
   return parseStoredPreview(await object.text());
 }
 
-export function estimateLegacyImportStoredPlanBytes(input: {
-  authUserId: string;
-  strategy: LegacyImportStrategy;
-  plan: CanonicalLegacyPlan;
-}): number {
-  const record: StoredPreview = {
-    version: PREVIEW_VERSION,
-    previewToken: "0".repeat(32),
-    authUserId: input.authUserId,
-    strategy: input.strategy,
-    planHash: "0".repeat(64),
-    plan: input.plan,
-    createdAt: 0,
-    expiresAt: 0,
-    status: "ready",
-    attempt: 0,
-    progress: {
-      stage: "system_user",
-      index: 0,
-      counts: {
-        createdEvents: 0,
-        replacedEvents: 0,
-        skippedEvents: 0,
-        createdVideos: 0,
-        replacedVideos: 0,
-        skippedVideos: 0,
-        createdXUsers: 0,
-        createdAuthUsers: 0,
-        createdSoftwares: 0,
-        createdCustomQuestions: 0,
-        reusedCustomQuestions: 0,
-      },
-      skipExistingEventIds: [],
-      skipExistingVideoIds: [],
-    },
-  };
-  return serializedBytes(JSON.stringify(record));
-}
-
+/** MIG-0645: exact CURRENT R2 stored-preview size estimator now shared with Hono. */
+export { estimateLegacyImportStoredPlanBytes } from "@flamenode/server-core/legacyImport/previewEstimate";
 function putOptions(record: StoredPreview, etagMatches?: string): R2PutOptions {
   return {
     ...(etagMatches ? { onlyIf: { etagMatches } } : {}),
