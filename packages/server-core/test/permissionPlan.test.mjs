@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planVideoPermissionChanges } from "../src/video/permissionPlan.ts";
+import { planVideoPermissionChanges, evaluatePermissionPlanPreflight } from "../src/video/permissionPlan.ts";
 
 const member = (id, xid, publicMember, canEdit, extra = {}) => ({
   id, video_id: "v1", x_user_id: xid, name: id, role: null, comment: null,
@@ -71,4 +71,70 @@ test("MIG-0650 plan: hidden duplicates shrink on grant; profile set is not mutat
   assert.equal(result.nextHiddenEditorCount, 1);
   assert.equal(result.unchanged, 1);
   assert.deepEqual([...profiles], ["alice"]);
+});
+
+test("MIG-0650 preflight refuses a 101st hidden editor when a new hidden row is inserted", () => {
+  const candidate = plan({
+    intents: [["alice", { displayName: "Alice", intent: "on" }]],
+    count: 100,
+  });
+  assert.equal(candidate.insertHiddenRows.length, 1);
+  assert.deepEqual(evaluatePermissionPlanPreflight(candidate), {
+    kind: "limit_exceeded",
+    result: {
+      ok: false,
+      message: "非公開編集者は最大100人です。これ以上編集権を付与できません。",
+    },
+  });
+});
+
+test("MIG-0650 preflight accepts net-zero hidden editor replacement at the 100-person limit", () => {
+  const candidate = plan({
+    intents: [
+      ["alice", { displayName: "Alice", intent: "off" }],
+      ["bob", { displayName: "Bob", intent: "on" }],
+    ],
+    rowsByXid: new Map([
+      ["alice", [member("old", "alice", 0, 1)]],
+    ]),
+    profiles: ["alice", "bob"],
+    count: 100,
+  });
+  assert.deepEqual(candidate.deleteHiddenIds, ["old"]);
+  assert.equal(candidate.insertHiddenRows.length, 1);
+  assert.equal(candidate.nextHiddenEditorCount, 100);
+  assert.deepEqual(evaluatePermissionPlanPreflight(candidate), { kind: "write_required" });
+});
+
+test("MIG-0650 preflight returns CURRENT no-op message when no physical mutation is needed", () => {
+  const candidate = plan({
+    intents: [["alice", { displayName: "Alice", intent: "on" }]],
+    rowsByXid: new Map([["alice", [member("existing", "alice", 1, 1)]]]),
+    profiles: ["alice"],
+  });
+  assert.deepEqual(evaluatePermissionPlanPreflight(candidate), {
+    kind: "no_changes",
+    result: {
+      ok: true,
+      message: "編集権限を反映しました（付与 0 / 解除 0 / 変更なし 1）",
+      granted: [],
+      revoked: [],
+      unchanged: 1,
+    },
+  });
+});
+
+test("MIG-0650 preflight still schedules CAS write for duplicate-hidden cleanup", () => {
+  const candidate = plan({
+    intents: [["alice", { displayName: "Alice", intent: "on" }]],
+    rowsByXid: new Map([["alice", [
+      member("public", "alice", 1, 1),
+      member("hidden", "alice", 0, 1),
+    ]]]),
+    profiles: ["alice"],
+    count: 1,
+  });
+  assert.equal(candidate.updateRows.length, 0);
+  assert.deepEqual(candidate.deleteHiddenIds, ["hidden"]);
+  assert.deepEqual(evaluatePermissionPlanPreflight(candidate), { kind: "write_required" });
 });
