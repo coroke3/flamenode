@@ -96,3 +96,18 @@ export function prepareCollaboratorPermissionIntents(
   }
   return { ok: true, intents };
 }
+
+/** CURRENT SA-083 FormData-compatible delete input normalization. */
+export function parseVideoCollaboratorDeleteInput(input: {
+  video_id?: unknown;
+  x_user_id?: unknown;
+}):
+  | { ok: true; videoId: string; xUserId: string }
+  | { ok: false; message: string } {
+  const videoId = String(input.video_id ?? "").trim();
+  const xUserId = normalizeXId(String(input.x_user_id ?? ""));
+  if (!videoId || !xUserId || !isCanonicalXId(xUserId)) {
+    return { ok: false, message: "video_id と有効な X ID が必要です。" };
+  }
+  return { ok: true, videoId, xUserId };
+}
