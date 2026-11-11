@@ -8,6 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
 import { loadPermissionGrantProfiles } from "@flamenode/server-core/video/permissionProfiles";
 import { loadPermissionMembersRead } from "@flamenode/server-core/video/permissionMembersRead";
+import { permissionRebuildTargets } from "@flamenode/server-core/video/permissionRebuildTargets";
 import { planVideoPermissionChanges, evaluatePermissionPlanPreflight, buildPermissionWriteAudits } from "@flamenode/server-core/video/permissionPlan";
 import {
   buildPermissionSetGuardSql,
@@ -38,7 +39,6 @@ import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
-import { memberSuggestionsTarget } from "@/lib/staticRebuild/hooks";
 import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusAction";
 import {
   getLinkedXUserIdsForAuthUser,
@@ -393,27 +393,12 @@ async function applyPermissionIntentsToVideo(
   );
   if (!rebuildEvents.ok) return { ok: false, message: rebuildEvents.message };
 
-  const queue = await buildStaticRebuildQueueBatch(db, [
-    memberSuggestionsTarget("video_permissions_batch"),
-    ...(newXUsers.length > 0
-      ? [{
-          targetType: "users_index" as const,
-          targetId: "global",
-          reason: "video_permissions_new_x_user",
-          priority: "low" as const,
-          requestedByUserId: actor.id,
-        }]
-      : []),
-    ...(video.visibility_status === "public"
-      ? rebuildEvents.eventIds.map((eventId) => ({
-          targetType: "event_release" as const,
-          targetId: eventId,
-          reason: "video_permissions_batch",
-          priority: "high" as const,
-          requestedByUserId: actor.id,
-        }))
-      : []),
-  ]);
+  const queue = await buildStaticRebuildQueueBatch(db, permissionRebuildTargets({
+    hasNewXUsers: newXUsers.length > 0,
+    visibilityStatus: video.visibility_status,
+    eventIds: rebuildEvents.eventIds,
+    actorUserId: actor.id,
+  }));
   statements.push(...queue.statements);
   expected.push(...queue.expectedChanges);
 
