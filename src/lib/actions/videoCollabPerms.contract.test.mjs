@@ -34,6 +34,11 @@ const permissionPlanSource = await readFile(
   "utf8",
 );
 
+const permissionVideoReadSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionVideoRead.ts", import.meta.url),
+  "utf8",
+);
+
 const permissionSubjectSource = await readFile(
   new URL("../../../packages/server-core/src/video/permissionSubject.ts", import.meta.url),
   "utf8",
@@ -341,4 +346,11 @@ test("single actionも統合済みaliasを現在のX IDへ解決してから権�
   }
   assert.match(permissionSubjectSource, /resolveCanonicalXUserResolutions\(db, \[normalized\]\)/);
   assert.match(permissionSubjectSource, /getApprovedLinkedXUserIds\(db, authUserId\)/);
+});
+
+test("SA-082..084 video read is scoped in server-core before CURRENT authorization", () => {
+  assert.match(source, /loadPermissionVideoRow\\(db, videoId\\)/);
+  assert.match(permissionVideoReadSource, /\\.where\\(eq\\(videos\\.id, videoId\\)\\)/);
+  assert.match(permissionVideoReadSource, /\\.limit\\(1\\)/);
+  assert.match(source, /requiredKey: "video\\.permissions"/);
 });
