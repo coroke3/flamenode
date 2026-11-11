@@ -59,7 +59,7 @@ test("SA-105 isolated upload: authorized PNG uses staged+final R2, strict audit 
   assert.equal(res.headers.get("Cache-Control"),"private, no-store");
   const body=await res.json();
   assert.equal(body.ok,true);
-  assert.match(body.iconUrl,/^\/api\/media\/xicons\/x_one\/xicon-[a-zA-Z0-9_-]+\.png$/);
+  assert.match(body.iconUrl,/^\/api\/media\/xicons\/x_one\/xicon_[a-zA-Z0-9_-]+\.png$/);
   assert.equal(h.writes.length,2);
   assert.ok(h.writes[0].key.startsWith("xicons/staging/admin-1/"));
   assert.ok(h.writes[1].key.startsWith("xicons/x_one/"));
