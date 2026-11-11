@@ -24,7 +24,7 @@ import {
   type CanEditVideoPrivilegeMode,
   type VideoEditAccessContext,
 } from "@/lib/auth/ownership";
-import { videoMembers, videos } from "@/lib/db/schema";
+import { videos } from "@/lib/db/schema";
 import {
   buildVideoMemberBulkInsertSql,
   toVideoMemberSnapshotRow,
@@ -59,7 +59,6 @@ export interface VideoCollabPermissionBatchResult extends VideoCollabResult {
 }
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
-type VideoMemberRow = typeof videoMembers.$inferSelect;
 type PermissionIntent = {
   x_user_id: string;
   display_name: string;
