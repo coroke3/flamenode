@@ -107,3 +107,16 @@ test("CURRENT PK normalization rejects embedded NUL before SQLite binding", () =
   assert.throws(() => primaryKeyFromRowValues({ id: "a\0b" }, ["id"]), /invalid_row/);
   assert.deepEqual(normalizePrimaryKeyRecord(["id"], { id: "normal-id" }), { id: "normal-id" });
 });
+
+test("CURRENT composite PK fingerprint is insertion-order independent for Unicode-equivalent names", () => {
+  // localeCompare regards these distinct SQLite column names as equal.
+  const composed = "\u00e9";
+  const decomposed = "e\u0301";
+  const inOrder = { [composed]: "one", [decomposed]: "two" };
+  const inReverse = { [decomposed]: "two", [composed]: "one" };
+  assert.equal(primaryKeyFingerprint(inOrder), primaryKeyFingerprint(inReverse));
+  assert.notEqual(
+    primaryKeyFingerprint(inOrder),
+    primaryKeyFingerprint({ [composed]: "one", [decomposed]: "different" }),
+  );
+});
