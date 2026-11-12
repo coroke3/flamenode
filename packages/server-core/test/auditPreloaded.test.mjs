@@ -439,6 +439,7 @@ test("Issue #669: incomplete or corrupted settings cannot earn a preload SELECT 
       assert.ok(entry, "audit row must still be prepared with authoritative settings");
       assert.equal(w.stats.reads.length, 1, "runtime must perform the same settings read planner charged");
       assert.equal(entry.retention_class, "normal");
+      assert.equal(entry.expires_at, entry.created_at + 45 * 86400, "retain the authoritative SQLite 45-day policy, not a missing-field/default placeholder");
     } finally {
       restore();
       w.sqlite.close();
