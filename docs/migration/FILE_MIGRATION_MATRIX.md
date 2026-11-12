@@ -23,6 +23,7 @@
 
 | CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge (candidate unless proven) | File state | PR / tests / evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| `src/lib/actions/slot.atomicity.contract.test.mjs` | TEST | SA-065..068 CURRENT atomicity/limit/source-layout regression | MIG-0657 | SAME (CANONICAL domain release planner checks) | IN_PROGRESS | PR#512 SHA=b42727d7ac3064ad10b697a5698543d64a2aeaa6 TEST=src/lib/actions/slot.atomicity.contract.test.mjs (release canonical source and CURRENT adapter validation; CI pending) |
 | `packages/domain/src/slots/releaseMutations.ts` | HELPER | SA-066 pure release plan | MIG-0657 | SAME (domain release mutation planner) | IN_PROGRESS | PR#512 SHA=662e2a38d794e0d06170686de0a2cd81ac08e72e TEST=packages/domain/test/slotReleaseMutations.test.mjs; CI pending |
 | `packages/domain/test/slotReleaseMutations.test.mjs` | TEST | SA-066 singleton/edge/center, split, no mutation, bad rows | MIG-0657 | SAME (domain regression) | IN_PROGRESS | PR#512 SHA=662e2a38d794e0d06170686de0a2cd81ac08e72e TEST=node --test --experimental-strip-types packages/domain/test/slotReleaseMutations.test.mjs; CI pending |
 | `src/lib/slots/slotReleaseMutations.ts` | HELPER | SA-066 CURRENT release legacy bridge | MIG-0657 | packages/domain/src/slots/releaseMutations.ts (legacy bridge) | IN_PROGRESS | PR#512 SHA=662e2a38d794e0d06170686de0a2cd81ac08e72e TEST=packages/domain/test/slotReleaseMutations.test.mjs; CI pending |
