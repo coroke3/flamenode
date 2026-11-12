@@ -10,3 +10,8 @@ test("public media never returns cached bytes before binding and D1 authorizatio
   assert.match(source, /getEnv\(\)/);
   assert.match(source, /servePublicMedia\(env, rawKey, request\)/);
 });
+
+test("RH-023: Next invalid-key 404 does not cache denial after publication", () => {
+  assert.match(source, /if \(!isValidPublicMediaKey\(rawKey\)\)\s*\{[\s\S]*?status: 404,[\s\S]*?"Cache-Control": "no-store"/);
+  assert.match(source, /"X-Content-Type-Options": "nosniff"/);
+});
