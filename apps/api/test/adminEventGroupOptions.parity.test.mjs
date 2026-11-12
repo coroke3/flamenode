@@ -927,16 +927,21 @@ test("SA-025: real SQLite latest-major ToS and CostGuard use one combined gate r
 });
 
 const STAGED_WRITE_SITE = "https://app.flamenode.example";
-function stagedSa030Harness({ role = "admin", mutateAfterRead = false, settings = "normal" } = {}) {
+function stagedSa030Harness({ role = "admin", mutateAfterRead = false, mutateFieldWithoutTimestamp = null, settings = "normal" } = {}) {
   let changedAfterRead = false;
   const { db, sqlite, stats } = createAdminD1({
     onFirst: (statement, instance) => {
-      if (mutateAfterRead && !changedAfterRead &&
+      if ((mutateAfterRead || mutateFieldWithoutTimestamp) && !changedAfterRead &&
           statement.includes("FROM system_settings AS s")) {
         changedAfterRead = true;
+        const column = mutateAfterRead ? "updated_at"
+          : mutateFieldWithoutTimestamp === "type" ? "relation_type"
+          : mutateFieldWithoutTimestamp === "created" ? "created_at" : null;
+        if (!column) throw new Error("invalid simulated mutation");
+        const next = column === "updated_at" ? 201 : column === "created_at" ? 12 : "member";
         instance.prepare(
-          "UPDATE event_group_events SET updated_at = 201 WHERE event_group_id = ? AND event_id = ?",
-        ).run("grp-1", "ev-1");
+          `UPDATE event_group_events SET ${column} = ? WHERE event_group_id = ? AND event_id = ?`,
+        ).run(next, "grp-1", "ev-1");
       }
     },
   });
@@ -1050,6 +1055,29 @@ test("SA-030 U04 staged: stale CAS rolls back relation, queue and audit together
     assert.equal(h.stats.batches, 1);
   } finally {
     h.sqlite.close();
+  }
+});
+
+test("SA-030 U04 staged: relation field races with unchanged updated_at cannot falsify restorable audit", async () => {
+  for (const [field, column, expected] of [
+    ["type", "relation_type", "member"],
+    ["created", "created_at", 12],
+  ]) {
+    const h = stagedSa030Harness({ mutateFieldWithoutTimestamp: field });
+    try {
+      const response = await h.remove();
+      assert.equal(response.status, 500, field);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal((await response.json()).ok, false);
+      assert.equal(h.sqlite.prepare("SELECT updated_at FROM event_group_events").get().updated_at, 20);
+      assert.equal(h.sqlite.prepare(`SELECT ${column} AS value FROM event_group_events`).get().value, expected);
+      assert.equal(h.count("event_group_events"), 1, "the competing edit must not be overwritten");
+      assert.equal(h.count("audit_logs"), 0, "the old relation snapshot cannot be restored as if current");
+      assert.equal(h.count("static_rebuild_queue"), 0);
+      assert.equal(h.stats.batches, 1);
+    } finally {
+      h.sqlite.close();
+    }
   }
 });
 
