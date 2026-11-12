@@ -942,3 +942,49 @@ test("MIG-0638: direct FK preflight rejects NUL-bearing values before any D1 que
   assert.equal(normal.length, 1);
   assert.deepEqual(normal[0].binds, ["valid-id"]);
 });
+
+
+test("MIG-0638: merged CURRENT #671 primary key contracts equal unmounted Hono helpers", async () => {
+  const current = await import("../../../src/lib/admin/spreadsheet/validation.ts");
+  const target = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const outcome = fn => {
+    try { return { ok: true, result: fn() }; }
+    catch (error) { return { ok: false, code: error instanceof Error ? error.message : String(error) }; }
+  };
+  for (const [keys, pk] of [
+    [[], {}],
+    [["id"], {}],
+    [["id"], { id: "  " }],
+    [["id"], { id: "value\0truncated" }],
+    [["id", "event"], { id: "normal", event: "e:1" }],
+    [["id", "event"], { event: "e:1", id: "normal" }],
+  ]) {
+    assert.deepEqual(
+      outcome(() => target.normalizeSpreadsheetPrimaryKey(keys, pk)),
+      outcome(() => current.normalizePrimaryKeyRecord(keys, pk)),
+      "CURRENT and Hono must return identical PK normalization or error code",
+    );
+  }
+  for (const row of [
+    { id: "normal", event: "e:1" },
+    { id: "nul\0key", event: "e:1" },
+    { id: "", event: "e:1" },
+  ]) {
+    assert.deepEqual(
+      outcome(() => target.primaryKeyFromSpreadsheetRow(row, ["id", "event"])),
+      outcome(() => current.primaryKeyFromRowValues(row, ["id", "event"])),
+    );
+  }
+  for (const pk of [
+    { b: "y:z", a: "x" },
+    { a: "x:y", b: "z" },
+    { "\u00e9": "one", "e\u0301": "two" },
+    { "e\u0301": "two", "\u00e9": "one" },
+  ]) {
+    assert.equal(
+      target.spreadsheetImportPrimaryKeyFingerprint(pk),
+      current.primaryKeyFingerprint(pk),
+      "column identities and value boundaries must survive code-unit sorting",
+    );
+  }
+});
