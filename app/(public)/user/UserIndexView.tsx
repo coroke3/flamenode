@@ -9,6 +9,7 @@ import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { buildPageMetadata } from "@/lib/seo";
 import { parseUsersIndexPage } from "@/lib/publicData/usersIndexPage";
+import { readSingleSearchParam } from "@/lib/utils/singleSearchParam";
 import {
   loadStaticUsersIndex,
   setPublicRequestRoute,
@@ -30,9 +31,9 @@ export const metadata: Metadata = buildPageMetadata({
 });
 
 interface SearchParams {
-  q?: string;
-  sort?: string;
-  page?: string;
+  q?: string | string[];
+  sort?: string | string[];
+  page?: string | string[];
 }
 
 const PAGE_SIZE = 48;
@@ -56,7 +57,7 @@ type CreatorIndexEntry = Pick<
   | "total_works"
 >;
 
-function parseUsersIndexSort(value: string | undefined): UsersIndexSort {
+function parseUsersIndexSort(value: unknown): UsersIndexSort {
   return value === "name" || value === "works" ? value : "score";
 }
 
@@ -80,7 +81,8 @@ export async function UserListPage({
 }: {
   searchParams: Promise<SearchParams>;
 }): Promise<React.ReactElement> {
-  const { q = "", sort = "score", page = "1" } = await searchParams;
+  const { q: rawQuery, sort = "score", page = "1" } = await searchParams;
+  const q = readSingleSearchParam(rawQuery);
   const pageNum = parseUsersIndexPage(page);
   const sortKey = parseUsersIndexSort(sort);
   setPublicRequestRoute("/user");
@@ -124,7 +126,7 @@ export async function UserListPage({
     current = paged.current;
   }
 
-  const params = (override: Partial<SearchParams> = {}) => {
+  const params = (override: Partial<{ q: string; sort: UsersIndexSort; page: string }> = {}) => {
     const p = new URLSearchParams();
     const merged = {
       q,

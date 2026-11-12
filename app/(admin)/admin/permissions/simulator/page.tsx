@@ -4,6 +4,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { PermissionSimulatorPanel } from "@/components/admin/PermissionSimulatorPanel";
 import { simulateEventPermissions } from "@/lib/admin/permissionSimulator";
+import { firstSearchParamValue, type SearchParamValue } from "#utils/next";
 
 export const metadata: Metadata = { title: "権限シミュレーター" };
 export const dynamic = "force-dynamic";
@@ -11,11 +12,11 @@ export const dynamic = "force-dynamic";
 export default async function PermissionSimulatorPage({
   searchParams,
 }: {
-  searchParams: Promise<{ event_id?: string; x_user_id?: string }>;
+  searchParams: Promise<{ event_id?: SearchParamValue; x_user_id?: SearchParamValue }>;
 }): Promise<React.ReactElement> {
   const sp = await searchParams;
-  const eventId = (sp.event_id ?? "").trim();
-  const xUserId = (sp.x_user_id ?? "").trim();
+  const eventId = firstSearchParamValue(sp.event_id);
+  const xUserId = firstSearchParamValue(sp.x_user_id);
 
   const db = getDatabase();
   const result =
