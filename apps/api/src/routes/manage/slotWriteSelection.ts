@@ -38,6 +38,12 @@ export function selectSlotBatchRows<T extends SlotWriteReadRow>(
   rows: readonly T[],
   kind: SlotWriteBatchKind,
 ): SlotWriteSelectionResult<T> {
+  // TypeScript's union is erased at runtime. Reject unknown action kinds
+  // before selecting any reserved rows, rather than treating them as releases.
+  if (kind !== "delete-available" && kind !== "update-labels" &&
+      kind !== "release-reserved") {
+    return { ok: false, message: "不正な枠操作です。" };
+  }
   const canonicalEventId = eventId.trim();
   if (!canonicalEventId || ids.length < 1 ||
       ids.length > MAX_ATOMIC_SLOT_WRITE_ROWS ||
