@@ -602,7 +602,7 @@ test("CURRENT import preflight preserves row indices, duplicate PK errors and ap
     { video_id: "v1", event_id: "e2" },
     { video_id: "v4", event_id: "e1" },
   ]);
-  assert.equal(result.preparedRows[0].fingerprint, "e1\0v1");
+  assert.equal(result.preparedRows[0].fingerprint, JSON.stringify([["event_id", "e1"], ["video_id", "v1"]]));
   assert.throws(() => prepareSpreadsheetImportMutationRows(ctx, []), /batch_too_large/);
   assert.throws(() => prepareSpreadsheetImportMutationRows(ctx, Array.from({length: 8}, (_,i) => ({video_id: "v"+i, event_id:"e"}))), /batch_too_large/);
   assert.throws(() => prepareSpreadsheetImportMutationRows(ctx, Array.from({length: 501}, (_,i) => ({video_id:"v"+i,event_id:"e"}))), /too_many_rows/);
@@ -796,7 +796,7 @@ test("U02 upsert existing-row lookup binds composite PKs in one D1 SELECT and re
     assert.equal(reads, 1);
     assert.equal(statement, 'SELECT * FROM "video_events" WHERE ("video_id" = ? AND "event_id" = ?) OR ("video_id" = ? AND "event_id" = ?)');
     assert.deepEqual(values, ["v1", "e1", "v2", "e2"]);
-    assert.deepEqual([...existing.keys()], ["e1\0v1"]);
+    assert.deepEqual([...existing.keys()], [JSON.stringify([["event_id", "e1"], ["video_id", "v1"]])]);
     const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator");
     assert.deepEqual({ inserted: planned.inserted, updated: planned.updated, skipped: planned.skipped },
       { inserted: 1, updated: 1, skipped: 0 });
@@ -809,6 +809,67 @@ test("U02 upsert existing-row lookup binds composite PKs in one D1 SELECT and re
     await assert.rejects(() => fetchSpreadsheetExistingImportRows(db, ctx, { ...prepared, errors: [
       { index: 0, message: "invalid_row" },
     ] }, 1), /invalid_row/);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("MIG-0638: NUL-containing composite keys stay distinct through 1-D1-read UPSERT preflight", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const {
+    prepareSpreadsheetImportMutationRows,
+    fetchSpreadsheetExistingImportRows,
+    planSpreadsheetImportMutations,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true),
+    columns,
+    columnNames: columns.map(column => column.name),
+    primaryKeys: ["video_id", "event_id"],
+  };
+  // Both are legitimate, different SQLite composite TEXT keys. A legacy
+  // components.join("\\0") key would be identical: "c\\0a\\0b".
+  const rows = [
+    { video_id: "a\0b", event_id: "c", notes: "new-a" },
+    { video_id: "b", event_id: "c\0a", notes: "new-b" },
+  ];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, rows);
+  assert.deepEqual(prepared.errors, []);
+  assert.equal(prepared.preparedRows.length, 2);
+  const [keyA, keyB] = prepared.preparedRows.map(x => x.fingerprint);
+  assert.notEqual(keyA, keyB, "NUL-containing PK components must not collide");
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec("CREATE TABLE video_events (video_id TEXT, event_id TEXT, notes TEXT, PRIMARY KEY (video_id, event_id))");
+    sqlite.prepare("INSERT INTO video_events VALUES (?, ?, ?)").run("a\0b", "c", "old-a");
+    sqlite.prepare("INSERT INTO video_events VALUES (?, ?, ?)").run("b", "c\0a", "old-b");
+    let reads = 0;
+    const db = {
+      prepare(sql) {
+        reads++;
+        return { bind(...values) {
+          return { async all() { return { results: sqlite.prepare(sql).all(...values) }; } };
+        } };
+      },
+    };
+    const existing = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+    assert.equal(reads, 1, "bounded pre-read still performs one D1 query");
+    assert.equal(existing.size, 2, "each distinct row must have its own before-image");
+    assert.equal(existing.get(keyA)?.notes, "old-a");
+    assert.equal(existing.get(keyB)?.notes, "old-b");
+    const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator-1");
+    assert.deepEqual([planned.inserted, planned.updated, planned.skipped], [0, 2, 0]);
+    assert.equal(planned.mutations.length, 2);
+    assert.equal(planned.mutations[0].audit.before.notes, "old-a");
+    assert.equal(planned.mutations[1].audit.before.notes, "old-b");
+    assert.equal(planned.mutations[0].audit.after.notes, "new-a");
+    assert.equal(planned.mutations[1].audit.after.notes, "new-b");
   } finally {
     sqlite.close();
   }
