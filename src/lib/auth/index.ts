@@ -7,19 +7,12 @@ import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 import { linkDiscordAccountAtomically } from "@/lib/auth/accountLinkAdapter";
 import { configuredHttpOrigin } from "@/lib/auth/origin";
 import { authRedirectTarget } from "@flamenode/server-core/auth/redirect";
-import { applyDatabaseAuthSessionClaims } from "@flamenode/server-core/auth/config";
+import { applyDatabaseAuthSessionClaims, resolveAuthRuntimeCredentials } from "@flamenode/server-core/auth/config";
 import { logSafeAuthError } from "@/lib/auth/safeLogger";
 import {
   createTraceId,
   logFlowTrace,
 } from "@/lib/observability/flowTrace";
-
-const LOCAL_DEV_AUTH_SECRET = "flamenode-local-development-auth-secret";
-
-function envValue(value: string | null | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-}
 
 /**
  * NextAuth v5 (Auth.js) の設定。
@@ -32,15 +25,13 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
   if (!db) {
     throw new Error("AUTH_DATABASE_UNAVAILABLE");
   }
-  const authSecret =
-    envValue(env.AUTH_SECRET) ??
-    (process.env.NODE_ENV !== "production" ? LOCAL_DEV_AUTH_SECRET : undefined);
-  if (!authSecret) throw new Error("AUTH_SECRET_MISSING");
-  const discordClientId = envValue(env.AUTH_DISCORD_ID);
-  const discordClientSecret = envValue(env.AUTH_DISCORD_SECRET);
-  if (!discordClientId || !discordClientSecret) {
-    throw new Error("AUTH_DISCORD_CONFIG_MISSING");
-  }
+  const { secret: authSecret, discordClientId, discordClientSecret } =
+    resolveAuthRuntimeCredentials({
+      authSecret: env.AUTH_SECRET,
+      discordClientId: env.AUTH_DISCORD_ID,
+      discordClientSecret: env.AUTH_DISCORD_SECRET,
+      allowLocalDevSecret: process.env.NODE_ENV !== "production",
+    });
   const allowLocalPreview =
     process.env.NODE_ENV !== "production" ||
     env.FLAMENODE_LOCAL_PREVIEW === "1";
