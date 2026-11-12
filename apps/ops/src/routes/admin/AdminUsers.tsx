@@ -8,6 +8,7 @@ import { NotFoundView } from "../NotFoundView.js";
 import { GlobalEditableFieldsPanel } from "./GlobalEditableFieldsPanel.js";
 import { ManageXIcon } from "../../components/shared/ManageXIcon.js";
 import { UserAvatar } from "../../components/shared/UserAvatar.js";
+import { FnTable } from "../../components/shared/FnTable.js";
 
 const api = createAdminUsersApi();
 const statusOptions = [
@@ -22,7 +23,7 @@ function formatCreatedAt(value: number): string {
 }
 export function DiscordRows({ rows }: { rows: AdminUserRow[] }): React.ReactElement {
   return (
-    <table className="fn-table" style={{ width: "100%", marginTop: 18 }}>
+    <FnTable style={{ width: "100%", marginTop: 18 }}>
       <thead><tr><th>Discord</th><th>Active X ID</th><th>ロール</th><th>登録</th><th /></tr></thead>
       <tbody>
         {rows.map((user) => (
@@ -56,7 +57,7 @@ export function DiscordRows({ rows }: { rows: AdminUserRow[] }): React.ReactElem
         ))}
         {rows.length === 0 ? <tr><td colSpan={5}>対象ユーザーが見つかりません。</td></tr> : null}
       </tbody>
-    </table>
+    </FnTable>
   );
 }
 export function XIdRows({ rows }: { rows: AdminXUserRow[] }): React.ReactElement {
@@ -64,7 +65,7 @@ export function XIdRows({ rows }: { rows: AdminXUserRow[] }): React.ReactElement
     status === "approved" ? "承認済み" : status === "rejected" ? "却下"
       : status === "pending" ? "承認待ち" : "未設定";
   return (
-    <table className="fn-table" style={{ width: "100%", marginTop: 18 }}>
+    <FnTable style={{ width: "100%", marginTop: 18 }}>
       <thead><tr><th>X ID</th><th>Discord連携</th><th>状態</th><th /></tr></thead>
       <tbody>
         {rows.map((x) => <tr key={x.id}>
@@ -91,7 +92,7 @@ export function XIdRows({ rows }: { rows: AdminXUserRow[] }): React.ReactElement
         </tr>)}
         {rows.length === 0 ? <tr><td colSpan={4}>対象 X ID が見つかりません。</td></tr> : null}
       </tbody>
-    </table>
+    </FnTable>
   );
 }
 function UserListContent({ data, onSaved }: { data: AdminUsersResponse; onSaved: () => void }): React.ReactElement {

@@ -292,3 +292,18 @@ test("MIG-0731 U04: CURRENT Discord and X-ID list avatar parity (icon, fallback,
   assert.match(xFallback, /&lt;private&gt;/);
   assert.doesNotMatch(xFallback, /<private>/);
 });
+
+
+test("MIG-0731 U04: both admin user tables preserve CURRENT keyboard-accessible horizontal scroll", () => {
+  const discord = renderToStaticMarkup(React.createElement(DiscordRows, { rows: fixture.users }));
+  const xId = renderToStaticMarkup(React.createElement(XIdRows, { rows: [] }));
+  for (const html of [discord, xId]) {
+    assert.match(html, /class="fn-hscroll-surface"/);
+    assert.match(html, /class="fn-table-scroll fn-scroll-affordance"/);
+    assert.match(html, /横にスクロールして全体を表示できます/);
+    assert.match(html, /<table class="fn-table"/);
+    assert.match(html, /<thead>/);
+  }
+  assert.match(discord, /Discord/);
+  assert.match(xId, /Discord連携/);
+});
