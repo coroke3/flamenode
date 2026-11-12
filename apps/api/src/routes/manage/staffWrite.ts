@@ -1,0 +1,458 @@
+/**
+ * MIG-0654 U02: staff create/update/delete (SA-031/033).
+ * Parent Manage router provides Origin -> session -> writeGuard -> D1.
+ * The authoritative owner/self/CAS/audit rules remain in server-core.
+ * No production route switch, remote database or Next.js action changes.
+ */
+import type { Hono } from "hono";
+import {
+  EventStaffCsvBodySchema,
+  EventStaffDeleteBodySchema,
+  EventOwnerTransferBodySchema,
+  EventStaffUpsertBodySchema,
+} from "@flamenode/contracts";
+import {
+  canonicalizePermissionKey,
+  isAdminOnlyKey,
+  normalizePermissionKeys,
+} from "@flamenode/domain/auth/permissions";
+import { parseEventStaffPermissionKeys } from "@flamenode/domain/event";
+import { parseCanonicalXId } from "@flamenode/domain/xid";
+import {
+  assertActorMayAssignOwner,
+  bulkUpsertEventStaffWithProtection,
+  createEventStaffWithProtection,
+  deleteEventStaffWithProtection,
+  updateEventStaffWithProtection,
+  type EventStaffRow,
+  type EventStaffAtomicExtras,
+  type EventStaffBulkAtomicExtras,
+  LAST_OWNER_ERROR,
+  transferEventOwnership,
+} from "@flamenode/server-core/event/eventOwnership";
+import { generateId } from "@flamenode/server-core/id";
+import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
+import { sql } from "@flamenode/server-core/sql";
+import { enqueueStaticRebuildMany } from "@flamenode/server-core/staticRebuild/enqueue";
+import type { AppEnv } from "../../env.ts";
+import { costGuardMiddleware } from "../../middleware/costGuard.ts";
+import { onlyMutating } from "../../middleware/writeOrigin.ts";
+import { BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
+import { canEditEvent, loadManageSnapshot } from "./access.ts";
+
+const VALID_EVENT_ID = /^[a-zA-Z0-9_-]{1,64}$/;
+const VALID_STAFF_ID = /^[a-zA-Z0-9_-]{1,100}$/;
+const GENERIC_FAILURE = "スタッフ情報の取得・保存に失敗しました。再読み込みしてお試しください。";
+const NO_STORE = "private, no-store";
+
+type UpsertBody = ReturnType<typeof EventStaffUpsertBodySchema.parse>;
+type Caller = { id: string; role: string | null };
+type StaffContext = { eventId: string; user: Caller };
+
+function deny(c: import("hono").Context<AppEnv>, message: string, status: 400 | 403 | 404 | 409 | 413 | 503) {
+  return c.json({ ok: false, message }, status);
+}
+
+
+async function permitted(c: import("hono").Context<AppEnv>): Promise<StaffContext | Response> {
+  const user = c.get("user");
+  if (!user) return deny(c, "ログインが必要です。", 403);
+  const eventId = c.req.param("id") ?? "";
+  if (!VALID_EVENT_ID.test(eventId)) return deny(c, "イベントIDが不正です。", 400);
+  try {
+    const snapshot = await loadManageSnapshot(c.env.DB, user);
+    if (snapshot.rowsTruncated) return deny(c, GENERIC_FAILURE, 503);
+    if (!canEditEvent(snapshot, eventId, "event.members")) {
+      return deny(c, "このイベントのスタッフを管理する権限がありません。", 403);
+    }
+    return { eventId, user };
+  } catch {
+    console.error("[MIG-0654] staff permission read failed");
+    return deny(c, GENERIC_FAILURE, 503);
+  }
+}
+
+function assignment(data: UpsertBody, isSiteAdmin: boolean) {
+  if (data.permission_preset === "xid_reviewer" && !isSiteAdmin) {
+    throw new Error("X ID確認権限は site admin 専用です。");
+  }
+  if (data.permission_preset !== "custom") {
+    return { permission_preset: data.permission_preset, custom_permission_keys_json: null };
+  }
+  const raw = parseEventStaffPermissionKeys(data.permission_keys);
+  if (!isSiteAdmin && raw.some((key) => {
+    const canonical = canonicalizePermissionKey(key);
+    return canonical !== null && isAdminOnlyKey(canonical);
+  })) {
+    throw new Error("site admin 専用権限は付与できません。");
+  }
+  const keys = normalizePermissionKeys(raw, { allowAdminOnly: isSiteAdmin });
+  return {
+    permission_preset: keys.length ? "custom" as const : "public_staff" as const,
+    custom_permission_keys_json: keys.length ? JSON.stringify(keys) : null,
+  };
+}
+
+function assignmentFromCsv(
+  preset: UpsertBody["permission_preset"],
+  keys: readonly string[],
+  isSiteAdmin: boolean,
+) {
+  if (preset === "xid_reviewer" && !isSiteAdmin) {
+    throw new Error("X ID確認権限は site admin 専用です。");
+  }
+  if (preset !== "custom") {
+    return { permission_preset: preset, custom_permission_keys_json: null };
+  }
+  if (!isSiteAdmin && keys.some((key) => {
+    const canonical = canonicalizePermissionKey(key);
+    return canonical !== null && isAdminOnlyKey(canonical);
+  })) {
+    throw new Error("site admin 専用権限は付与できません。");
+  }
+  const normalized = normalizePermissionKeys(keys, { allowAdminOnly: isSiteAdmin });
+  return {
+    permission_preset: normalized.length ? "custom" as const : "public_staff" as const,
+    custom_permission_keys_json: normalized.length ? JSON.stringify(normalized) : null,
+  };
+}
+
+// Guarded known CURRENT domain failures may be shown; never expose a SQL, D1,
+// provider or internal stack trace in an HTTP response.
+function domainMessage(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  if (error.message === LAST_OWNER_ERROR) return error.message;
+  if (/^(同じX ID|代表権限|イベント代表者|移譲元|移譲先|自分自身|確認|X ID確認権限|site admin 専用権限|owner を付与|イベントスタッフ)/.test(error.message)) {
+    return error.message;
+  }
+  return null;
+}
+
+async function queueProjection(c: import("hono").Context<AppEnv>, ctx: StaffContext, reason: string, includeUsers: boolean) {
+  // CURRENT performs post-commit best-effort projection. Hono has no Queue binding
+  // here: persist the same D1 intent; polling recovers the wake (D-15-6).
+  try {
+    await enqueueStaticRebuildMany(c.get("db"), [
+      { targetType: "event_base", targetId: ctx.eventId, reason, priority: "high", requestedByUserId: ctx.user.id },
+      { targetType: "event_slots", targetId: ctx.eventId, reason, priority: "high", requestedByUserId: ctx.user.id },
+      { targetType: "events_index", targetId: "global", reason, priority: "low", requestedByUserId: ctx.user.id },
+      { targetType: "member_suggestions", targetId: "global", reason, priority: "low" },
+      ...(includeUsers ? [{ targetType: "users_index" as const, targetId: "global", reason, priority: "low" as const, requestedByUserId: ctx.user.id }] : []),
+    ], { wakeSource: "web" }, async () => ({
+      readEnv: () => null,
+      readWaitUntil: () => null,
+      readKv: () => null,
+    }));
+  } catch {
+    // The staff/ownership write has already committed with strict audit.
+    // Projection is post-commit best-effort: never turn a committed write into
+    // an HTTP failure that invites clients to replay the mutation.
+    console.error("[MIG-0654] post-commit staff projection enqueue failed");
+  }
+}
+
+/** Shared POST / and PUT /:staffId; a PUT can never silently create a missing row. */
+async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null) {
+  c.header("Cache-Control", NO_STORE);
+  const request = await readAdminJsonBody(c.req.raw);
+  if (request.kind === "too_large") return deny(c, BODY_TOO_LARGE_MESSAGE, 413);
+  if (request.kind !== "ok") return deny(c, "入力エラー", 400);
+  const parsed = EventStaffUpsertBodySchema.safeParse(request.value);
+  if (!parsed.success) return deny(c, parsed.error.issues[0]?.message ?? "入力エラー", 400);
+  if (parsed.data.staff_id && parsed.data.staff_id !== targetId) {
+    return deny(c, "スタッフIDが一致しません。", 400);
+  }
+  const xId = parseCanonicalXId(parsed.data.x_user_id);
+  if (!xId) return deny(c, "X IDが不正です", 400);
+  const access = await permitted(c);
+  if (access instanceof Response) return access;
+  try {
+    const isAdmin = access.user.role === "admin";
+    const a = assignment(parsed.data, isAdmin);
+    // Authorization is done before any private staff/X-user record is read.
+    // Bounded legacy scan prevents two differently formatted rows from creating
+    // duplicate canonical X identities. Fail closed when coverage is incomplete.
+    const { results } = await c.env.DB.prepare(
+      "SELECT * FROM event_staff WHERE event_id = ? LIMIT 101",
+    ).bind(access.eventId).all<EventStaffRow>();
+    if (results.length > 100) return deny(c, GENERIC_FAILURE, 503);
+    const matches = results.filter((r) => parseCanonicalXId(r.x_user_id) === xId);
+    if (matches.length > 1) return deny(c, "同じX IDを指す既存スタッフ行が複数あります。", 409);
+    const existing = targetId
+      ? results.find((r) => r.id === targetId)
+      : matches[0];
+    if (targetId && !existing) return deny(c, "スタッフが見つかりません。", 404);
+    // PUT must never adopt another staff row's canonical X identity.
+    // Otherwise changing an existing row to an already-managed X may create
+    // duplicate staff grants and ambiguity for owner/self-protection checks.
+    if (targetId && matches.some((row) => row.id !== targetId)) {
+      return deny(c, "同じX IDを指す既存スタッフが存在します。", 409);
+    }
+    if (existing && !VALID_STAFF_ID.test(existing.id)) return deny(c, GENERIC_FAILURE, 503);
+    if (a.permission_preset === "owner" && existing?.permission_preset !== "owner") {
+      await assertActorMayAssignOwner({ db: c.get("db"), eventId: access.eventId,
+        actorUserId: access.user.id, isSiteAdmin: isAdmin });
+    }
+    const userExists = await c.env.DB.prepare(
+      "SELECT id FROM x_users WHERE id = ? LIMIT 1",
+    ).bind(xId).first<{ id: string }>();
+    const extras: EventStaffAtomicExtras | undefined = userExists ? undefined : {
+      mutationStatements: [c.get("db").run(sql`
+        INSERT INTO x_users (id, x_name, approval_status)
+        VALUES (${xId}, ${parsed.data.display_name}, 'pending')
+      `)],
+      expectedMutationChanges: [1],
+      audits: [{
+        table_name: "x_users", target_id: xId, operation: "CREATE",
+        before: null, after: { id: xId, x_name: parsed.data.display_name, approval_status: "pending" },
+        actor_user_id: access.user.id, reason: "イベントスタッフ登録に伴う X ID 作成",
+        context: "event-staff-admin", retention_class: "long_audit",
+        restore_strategy: "delete_created", strict: true,
+      }],
+    };
+    const values = {
+      x_user_id: xId,
+      display_name: parsed.data.display_name,
+      permission_preset: a.permission_preset,
+      custom_permission_keys_json: a.custom_permission_keys_json,
+      is_public: parsed.data.is_public,
+      public_role_label: parsed.data.public_role_label ?? null,
+    };
+    const now = Math.floor(Date.now() / 1000);
+    if (existing) {
+      await updateEventStaffWithProtection({
+        db: c.get("db"), existing, values, actorUserId: access.user.id,
+        reason: parsed.data.reason, confirmText: parsed.data.confirm_text,
+        context: "event-staff-admin", now, atomicExtras: extras,
+      });
+    } else {
+      await createEventStaffWithProtection({
+        db: c.get("db"), id: generateId("es"), eventId: access.eventId, values,
+        actorUserId: access.user.id, reason: parsed.data.reason,
+        context: "event-staff-admin", now, atomicExtras: extras,
+      });
+    }
+    await queueProjection(c, access, parsed.data.reason, Boolean(extras));
+    return c.json({ ok: true, pendingPublicReflection: true }, 200);
+  } catch (error) {
+    const message = domainMessage(error);
+    if (message) return deny(c, message, 409);
+    console.error("[MIG-0654] staff upsert unavailable");
+    return deny(c, GENERIC_FAILURE, 503);
+  }
+}
+
+export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
+  // Register directly on the parent: its Origin/session/writeGuard/DB stack
+  // must wrap these exact canonical paths, not an unmatched nested subrouter.
+  const base = "/events/:id/staff";
+  // GET /events/:id/staff remains a read: never impose a write CostGuard on it.
+  app.use(base, onlyMutating(costGuardMiddleware("manage_event_staff")));
+  app.use(`${base}/:staffId`, onlyMutating(costGuardMiddleware("manage_event_staff")));
+  // SA-034 owner transfer: core performs input, self-confirm, operable-owner,
+  // CAS, and strict-audit invariants in the same D1 mutation batch.
+  const transferPath = "/events/:id/owner-transfer";
+  app.use(transferPath, onlyMutating(costGuardMiddleware("manage_event_staff")));
+  app.post(transferPath, async (c) => {
+    c.header("Cache-Control", NO_STORE);
+    const request = await readAdminJsonBody(c.req.raw);
+    if (request.kind === "too_large") return deny(c, BODY_TOO_LARGE_MESSAGE, 413);
+    if (request.kind !== "ok") return deny(c, "入力エラー", 400);
+    const parsed = EventOwnerTransferBodySchema.safeParse(request.value);
+    if (!parsed.success) return deny(c, parsed.error.issues[0]?.message ?? "入力エラー", 400);
+    if (!VALID_STAFF_ID.test(parsed.data.from_staff_id) ||
+        !VALID_STAFF_ID.test(parsed.data.to_staff_id) ||
+        parsed.data.from_staff_id === parsed.data.to_staff_id) {
+      return deny(c, "移譲元または移譲先のスタッフIDが不正です。", 400);
+    }
+    const access = await permitted(c);
+    if (access instanceof Response) return access;
+    try {
+      await assertActorMayAssignOwner({
+        db: c.get("db"), eventId: access.eventId,
+        actorUserId: access.user.id, isSiteAdmin: access.user.role === "admin",
+      });
+      await transferEventOwnership({
+        db: c.get("db"), eventId: access.eventId,
+        fromStaffId: parsed.data.from_staff_id, toStaffId: parsed.data.to_staff_id,
+        actorUserId: access.user.id, reason: parsed.data.reason,
+        confirmText: parsed.data.confirm_text,
+        selfConfirmText: parsed.data.self_confirm_text,
+      });
+      await queueProjection(c, access, parsed.data.reason, false);
+      return c.json({ ok: true, pendingPublicReflection: true }, 200);
+    } catch (error) {
+      const message = domainMessage(error);
+      if (message) return deny(c, message, 409);
+      console.error("[MIG-0654] owner transfer unavailable");
+      return deny(c, GENERIC_FAILURE, 503);
+    }
+  });
+  // SA-032 bulk import. The parent /:staffId write guard also matches /csv;
+  // do not register a second parallel Origin/session/writeGuard stack.
+  app.post(`${base}/csv`, async (c) => {
+    c.header("Cache-Control", NO_STORE);
+    const request = await readAdminJsonBody(c.req.raw);
+    if (request.kind === "too_large") return deny(c, BODY_TOO_LARGE_MESSAGE, 413);
+    if (request.kind !== "ok") return deny(c, "入力エラー", 400);
+    const parsed = EventStaffCsvBodySchema.safeParse(request.value);
+    if (!parsed.success) return deny(c, parsed.error.issues[0]?.message ?? "CSV入力エラー", 400);
+    const access = await permitted(c);
+    if (access instanceof Response) return access;
+    const isAdmin = access.user.role === "admin";
+    type CsvNormalized = {
+      line: number;
+      xId: string;
+      displayName: string;
+      values: {
+        x_user_id: string;
+        display_name: string;
+        permission_preset: UpsertBody["permission_preset"];
+        custom_permission_keys_json: string | null;
+        is_public: number;
+        public_role_label: string | null;
+      };
+    };
+    const normalized: CsvNormalized[] = [];
+    const seen = new Map<string, number>();
+    try {
+      for (const row of parsed.data.rows) {
+        const xId = parseCanonicalXId(row.x_user_id);
+        if (!xId) return deny(c, `${row.lineNumber}行目: X IDが不正です`, 400);
+        const previous = seen.get(xId);
+        if (previous !== undefined) {
+          return deny(c, `${row.lineNumber}行目: X IDは${previous}行目と重複しています`, 409);
+        }
+        seen.set(xId, row.lineNumber);
+        const a = assignmentFromCsv(row.permission_preset, row.permission_keys, isAdmin);
+        if (a.permission_preset === "owner") {
+          return deny(c, `${row.lineNumber}行目: 代表者の変更はCSVでは行えません。`, 409);
+        }
+        normalized.push({
+          line: row.lineNumber, xId, displayName: row.display_name,
+          values: {
+            x_user_id: xId, display_name: row.display_name,
+            permission_preset: a.permission_preset,
+            custom_permission_keys_json: a.custom_permission_keys_json,
+            is_public: Number(row.is_public_staff),
+            public_role_label: row.public_role_label || null,
+          },
+        });
+      }
+    } catch (error) {
+      const message = domainMessage(error);
+      return deny(c, message ?? "CSV入力エラー", 400);
+    }
+
+    try {
+      // Bound the legacy-canonical scan; never create duplicate staff grants
+      // if the event has more rows than we can reliably examine.
+      const staff = await c.env.DB.prepare(
+        "SELECT * FROM event_staff WHERE event_id = ? LIMIT 101",
+      ).bind(access.eventId).all<EventStaffRow>();
+      if (staff.results.length > 100) return deny(c, GENERIC_FAILURE, 503);
+      const byX = new Map<string, EventStaffRow>();
+      const requestedX = new Set(normalized.map((row) => row.xId));
+      for (const row of staff.results) {
+        const canonical = parseCanonicalXId(row.x_user_id);
+        if (!canonical || !requestedX.has(canonical)) continue;
+        if (byX.has(canonical)) {
+          return deny(c, "同じX IDを指す既存スタッフ行が複数あります。", 409);
+        }
+        byX.set(canonical, row);
+      }
+      const known = await c.env.DB.prepare(
+        `SELECT id FROM x_users WHERE id IN (${normalized.map(() => "?").join(",")})`,
+      ).bind(...normalized.map((row) => row.xId)).all<{ id: string }>();
+      const knownIds = new Set(known.results.map((row) => row.id));
+      const context = `event-staff-csv:${generateId("batch")}`;
+      const newX = normalized.filter((row) => !knownIds.has(row.xId));
+      const upserts = normalized.map((row) => {
+        const existing = byX.get(row.xId) ?? null;
+        if (existing?.permission_preset === "owner") {
+          throw new Error(`${row.line}行目: 代表者はCSVで変更できません。`);
+        }
+        if (existing && !VALID_STAFF_ID.test(existing.id)) {
+          throw new Error("既存スタッフIDが不正です。");
+        }
+        return {
+          id: existing?.id ?? generateId("es"),
+          existingId: existing?.id ?? null,
+          values: row.values,
+        };
+      });
+      const mutations = upserts.length + newX.length;
+      const budget = planD1AuditMutationBudget({
+        mutationStatementCount: mutations, mutationAssertionCount: mutations,
+        auditEntryCount: mutations, distinctActorCount: 1,
+      });
+      if (!budget.withinLimit) {
+        return deny(c, `このCSVは原子更新上限を超えています（${budget.totalQueryCount}/${budget.limit} query）。件数を分けてください`, 400);
+      }
+      const extras: EventStaffBulkAtomicExtras = {
+        mutationStatements: newX.map((row) => c.get("db").run(sql`
+          INSERT INTO x_users (id, x_name, approval_status)
+          VALUES (${row.xId}, ${row.displayName}, 'pending')
+        `)),
+        expectedMutationChanges: newX.map(() => 1),
+        audits: newX.map((row) => ({
+          table_name: "x_users", target_id: row.xId, operation: "CREATE",
+          before: null,
+          after: { id: row.xId, x_name: row.displayName, approval_status: "pending" },
+          actor_user_id: access.user.id, reason: parsed.data.reason,
+          context, retention_class: "long_audit", restore_strategy: "delete_created",
+          strict: true,
+        })),
+      };
+      await bulkUpsertEventStaffWithProtection({
+        db: c.get("db"), eventId: access.eventId, actorUserId: access.user.id,
+        reason: parsed.data.reason, context, now: Math.floor(Date.now() / 1000),
+        upserts, atomicExtras: extras,
+      });
+      await queueProjection(c, access, parsed.data.reason, newX.length > 0);
+      return c.json({ ok: true, pendingPublicReflection: true }, 200);
+    } catch (error) {
+      const message = domainMessage(error);
+      if (message) return deny(c, message, 409);
+      console.error("[MIG-0654] CSV staff mutation unavailable");
+      return deny(c, GENERIC_FAILURE, 503);
+    }
+  });
+  app.post(base, (c) => upsert(c, null));
+  app.put(`${base}/:staffId`, (c) => {
+  const id = c.req.param("staffId") ?? "";
+  if (!VALID_STAFF_ID.test(id)) return deny(c, "スタッフIDが不正です。", 400);
+  return upsert(c, id);
+});
+
+app.delete(`${base}/:staffId`, async (c) => {
+  c.header("Cache-Control", NO_STORE);
+  const staffId = c.req.param("staffId") ?? "";
+  if (!VALID_STAFF_ID.test(staffId)) return deny(c, "スタッフIDが不正です。", 400);
+  const request = await readAdminJsonBody(c.req.raw);
+  if (request.kind === "too_large") return deny(c, BODY_TOO_LARGE_MESSAGE, 413);
+  if (request.kind !== "ok") return deny(c, "入力エラー", 400);
+  const parsed = EventStaffDeleteBodySchema.safeParse(request.value);
+  if (!parsed.success) return deny(c, parsed.error.issues[0]?.message ?? "入力エラー", 400);
+  const access = await permitted(c);
+  if (access instanceof Response) return access;
+  try {
+    const existing = await c.env.DB.prepare(
+      "SELECT * FROM event_staff WHERE event_id = ? AND id = ? LIMIT 1",
+    ).bind(access.eventId, staffId).first<EventStaffRow>();
+    if (!existing) return c.json({ ok: true }, 200);
+    await deleteEventStaffWithProtection({
+      db: c.get("db"), existing, actorUserId: access.user.id,
+      reason: parsed.data.reason, confirmText: parsed.data.confirm_text,
+      context: "event-staff-admin",
+    });
+    await queueProjection(c, access, parsed.data.reason, false);
+    return c.json({ ok: true, pendingPublicReflection: true }, 200);
+  } catch (error) {
+    const message = domainMessage(error);
+    if (message) return deny(c, message, 409);
+    console.error("[MIG-0654] staff delete unavailable");
+    return deny(c, GENERIC_FAILURE, 503);
+  }
+});
+}
