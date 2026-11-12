@@ -1778,7 +1778,7 @@ test("SA-028 U03 staged: relation overflow is rejected before group, audit or qu
 });
 
 
-function stagedSa028Harness({ role = "admin", mutateAfterRead = false, publicGroup = false, bucket = null } = {}) {
+function stagedSa028Harness({ role = "admin", mutateAfterRead = false, membershipRace = null, publicGroup = false, bucket = null } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite);
   sqlite.exec(`
@@ -1818,6 +1818,29 @@ function stagedSa028Harness({ role = "admin", mutateAfterRead = false, publicGro
       END;
     `);
   }
+  // Race commits after the joined preflight SELECT but immediately before
+  // the first D1 batch statement, reproducing two invocations interleaving.
+  // A count-only changes() check would wrongly accept a same-count swap.
+  let raced = false;
+  const racedDb = membershipRace ? {
+    ...db,
+    batch: async (statements) => {
+      if (!raced) {
+        raced = true;
+        if (membershipRace === "swap") {
+          sqlite.prepare("DELETE FROM event_group_events WHERE event_group_id = 'grp-delete' AND event_id = 'ev-a'").run();
+          sqlite.prepare("INSERT INTO event_group_events VALUES ('grp-delete', 'ev-c', 'member', 13, 23)").run();
+        } else if (membershipRace === "update") {
+          sqlite.prepare("UPDATE event_group_events SET relation_type = 'primary', updated_at = 24 WHERE event_group_id = 'grp-delete' AND event_id = 'ev-a'").run();
+        } else if (membershipRace === "empty-insert") {
+          sqlite.prepare("INSERT INTO event_group_events VALUES ('grp-delete', 'ev-c', 'member', 13, 23)").run();
+        } else {
+          throw new Error("unknown membership test race");
+        }
+      }
+      return db.batch(statements);
+    },
+  } : db;
   const opts = {
     loadSiteUrl: () => STAGED_WRITE_SITE,
     allowLocalPreview: () => false,
@@ -1835,7 +1858,7 @@ function stagedSa028Harness({ role = "admin", mutateAfterRead = false, publicGro
   const remove = (origin = STAGED_WRITE_SITE) => app.request(new Request(
     STAGED_WRITE_SITE + "/api/admin/event-groups/grp-delete",
     { method: "DELETE", headers: { Origin: origin } },
-  ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE, ...(bucket ? { BUCKET: bucket } : {}) });
+  ), undefined, { DB: racedDb, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE, ...(bucket ? { BUCKET: bucket } : {}) });
   const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
   return { sqlite, stats, remove, count };
 }
@@ -1865,6 +1888,60 @@ function stagedVisibilityManifestBucket({ failPutAt = 0, failEveryPut = false } 
     get puts() { return puts; },
   };
 }
+
+test("SA-028 U03 staged: same-count relation swap is denied atomically before deleting/auditing", async () => {
+  const h = stagedSa028Harness({ membershipRace: "swap" });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500, "stale audited snapshot must fail closed");
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal(h.count("event_groups"), 1);
+    assert.deepEqual(
+      h.sqlite.prepare("SELECT event_id FROM event_group_events ORDER BY event_id").all().map((r) => r.event_id),
+      ["ev-b", "ev-c"],
+      "only the separately committed competing edit survives the rejected batch",
+    );
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: same-count relation field edit is denied before stale before-audit", async () => {
+  const h = stagedSa028Harness({ membershipRace: "update" });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.equal(h.sqlite.prepare(
+      "SELECT relation_type FROM event_group_events WHERE event_id = 'ev-a'",
+    ).get().relation_type, "primary");
+    assert.equal(h.count("event_groups"), 1);
+    assert.equal(h.count("event_group_events"), 2);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: empty preflight with concurrent insert is denied", async () => {
+  const h = stagedSa028Harness({ membershipRace: "empty-insert" });
+  try {
+    h.sqlite.exec("DELETE FROM event_group_events WHERE event_group_id = 'grp-delete'");
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.equal(h.count("event_groups"), 1);
+    assert.deepEqual(h.sqlite.prepare("SELECT event_id FROM event_group_events").all().map((r) => r.event_id), ["ev-c"]);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
 
 test("SA-028 U03 staged: public DELETE commits R2 block before the atomic D1 fence and delete", async () => {
   const bucket = stagedVisibilityManifestBucket();
