@@ -39,7 +39,7 @@ test("SA-026..030: atomic failure message stays identical to CURRENT Server Acti
   const start = source.indexOf("function eventGroupMutationError(");
   const end = source.indexOf("async function revalidateEventGroupPathsBestEffort(", start);
   assert.ok(start >= 0 && end > start, "CURRENT mutation error handler must exist");
-  const currentMessage = source.slice(start, end).match(/message:\\s*"([^"]+)"/)?.[1];
+  const currentMessage = source.slice(start, end).split('message: "')[1]?.split('"')[0];
   assert.equal(EVENT_GROUP_WRITE_FAILED, currentMessage);
   assert.equal(EVENT_GROUP_WRITE_FAILED, "保存に失敗しました。再読み込みして、もう一度お試しください。");
 });
