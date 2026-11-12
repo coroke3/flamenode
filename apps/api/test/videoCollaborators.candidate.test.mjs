@@ -159,7 +159,7 @@ import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/w
 import { createSqlite } from "./support/personalHarness.mjs";
 import { atomicD1, seedChapterWorld, SESSION_USER, SITE } from "./support/chapterSeed.mjs";
 
-function integration({ as = "u_admin", mode = "normal" } = {}) {
+function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false } = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
   sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'").run(mode);
@@ -200,6 +200,7 @@ function integration({ as = "u_admin", mode = "normal" } = {}) {
     writeGuard,
     loadWakeHost: async () => {
       wakeLoadCount++;
+      if (wakeHostRejects) throw new Error("simulated Queue binding resolution failure");
       return {
         readEnv: () => ({ QUEUE_DISPATCH_ENABLED: "0" }),
         readWaitUntil: () => null,
@@ -295,4 +296,25 @@ test("SA-082/083 fail closed before any D1 access when guard omitted CostGuard/a
 test("SA-084 candidate maps a shared preflight limit rejection to a non-success HTTP status", async () => {
   const src = await readFile(new URL("../src/routes/videos/collaborators.ts", import.meta.url), "utf8");
   assert.match(src, /preparation\.result\.ok \? 200 : 400/);
+});
+
+
+test("SA-084 Queue host-load rejection after commit does not turn durable success into HTTP 500", async () => {
+  const s = integration({ wakeHostRejects: true });
+  try {
+    const res = await s.send("POST", "/api/videos/v_pub/collaborators/batch", {
+      video_id: "v_pub",
+      edit_privilege_mode: "admin",
+      notify: false,
+      intents: [{ x_user_id: "x_other", display_name: "Other", intent: "on" }],
+    });
+    assert.equal(res.status, 200, await res.clone().text());
+    assert.equal((await res.json()).ok, true);
+    assert.equal(s.d1.stats.batches, 1);
+    assert.equal(s.count("audit_logs"), 1);
+    assert.ok(s.count("static_rebuild_queue") >= 1);
+    assert.equal(s.wakeLoads(), 1);
+  } finally {
+    s.sqlite.close();
+  }
 });
