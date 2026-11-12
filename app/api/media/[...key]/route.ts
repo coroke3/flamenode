@@ -19,7 +19,12 @@ export async function GET(
   const { key } = await params;
   const rawKey = key?.join("/") ?? "";
 
-  if (!isValidPublicMediaKey(rawKey)) return new Response("Not found", { status: 404 });
+  if (!isValidPublicMediaKey(rawKey)) {
+    return new Response("Not found", {
+      status: 404,
+      headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
+    });
+  }
 
   let env: ReturnType<typeof getEnv>;
   try {
