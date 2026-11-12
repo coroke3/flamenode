@@ -42,6 +42,18 @@ const MEDIA_UNAVAILABLE_HEADERS = {
   "retry-after": "30",
 };
 
+/** Denial or missing R2 bytes can be temporary: a republished URL must not
+ * remain a cached 404 at browsers or shared CDN edges. */
+function mediaNotFoundResponse(): Response {
+  return new Response("Not found", {
+    status: 404,
+    headers: {
+      "cache-control": PUBLIC_MEDIA_CACHE_CONTROL,
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
 function mediaUnavailableResponse(message: string): Response {
   return new Response(message, {
     status: 503,
@@ -264,7 +276,7 @@ export async function servePublicMedia(
   rawKey: string,
   request?: Request,
 ): Promise<Response> {
-  if (!isValidPublicMediaKey(rawKey)) return new Response("Not found", { status: 404 });
+  if (!isValidPublicMediaKey(rawKey)) return mediaNotFoundResponse();
 
   const namespace = getPublicMediaNamespace(rawKey)!;
 
@@ -286,7 +298,7 @@ export async function servePublicMedia(
     );
     return mediaUnavailableResponse("Media access check unavailable");
   }
-  if (allowed?.allowed !== 1) return new Response("Not found", { status: 404 });
+  if (allowed?.allowed !== 1) return mediaNotFoundResponse();
 
   // Reuse immutable image bytes without reusing the cached ACL or public HTTP headers.
   if (request) {
@@ -304,12 +316,12 @@ export async function servePublicMedia(
     );
     return mediaUnavailableResponse("Media storage unavailable");
   }
-  if (!obj) return new Response("Not found", { status: 404 });
+  if (!obj) return mediaNotFoundResponse();
 
   const contentType = normalizePublicMediaContentType(obj.httpMetadata?.contentType);
   if (!contentType || !isPublicMediaObjectSafe({ size: obj.size, contentType })) {
     await cancelR2BodyBestEffort(obj);
-    return new Response("Not found", { status: 404 });
+    return mediaNotFoundResponse();
   }
 
   const headers = new Headers();
