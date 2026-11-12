@@ -113,3 +113,121 @@ test("truncated collaborator data shows a warning and never provides write contr
   assert.equal(m.container.querySelectorAll("button,form").length, 0);
   await m.unmount();
 });
+
+
+const {
+  upsertVideoCollaborator,
+  applyVideoCollaboratorPermissionsBatch,
+} = await import("../.test-dist/apps/app/src/api/videoCollaborators.js");
+
+const writeResponse = (status, body) => new Response(JSON.stringify(body), {
+  status,
+  headers: { "content-type": "application/json" },
+});
+
+test("MIG-0715 U02 SA-082 grant sends the canonical X ID and CURRENT-equivalent PUT fields", async () => {
+  const requests = [];
+  const result = await upsertVideoCollaborator({
+    videoId: "video A/1", xUserId: "@Mixed_Case", displayName: "共同作者",
+    canEdit: true, notify: false, editPrivilegeMode: "admin",
+  }, async (url, init) => {
+    requests.push({ url, init });
+    return writeResponse(200, { ok: true, message: "作品編集への参加を付与しました。" });
+  });
+  assert.deepEqual(result, { status: "ok", data: { ok: true, message: "作品編集への参加を付与しました。" } });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "/api/videos/video%20A%2F1/collaborators/mixed_case");
+  assert.deepEqual({
+    method: requests[0].init.method,
+    credentials: requests[0].init.credentials,
+    cache: requests[0].init.cache,
+    headers: requests[0].init.headers,
+  }, {
+    method: "PUT", credentials: "same-origin", cache: "no-store",
+    headers: { accept: "application/json", "content-type": "application/json" },
+  });
+  assert.deepEqual(JSON.parse(requests[0].init.body), {
+    display_name: "共同作者",
+    can_edit: true,
+    notify: false,
+    edit_privilege_mode: "admin",
+  });
+});
+
+test("MIG-0715 U02 SA-084 revoke sends one atomic intent and no implicit notification", async () => {
+  const requests = [];
+  const result = await applyVideoCollaboratorPermissionsBatch({
+    videoId: "v-id",
+    notify: false,
+    editPrivilegeMode: "event",
+    intents: [{ x_user_id: "Person", display_name: "共同作者", intent: "off" }],
+  }, async (url, init) => {
+    requests.push({ url, init });
+    return writeResponse(200, { ok: true, revoked: ["person"], unchanged: 0 });
+  });
+  assert.equal(result.status, "ok");
+  assert.deepEqual(result.data, { ok: true, revoked: ["person"], unchanged: 0 });
+  assert.equal(requests[0].url, "/api/videos/v-id/collaborators/batch");
+  assert.equal(requests[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(requests[0].init.body), {
+    edit_privilege_mode: "event",
+    notify: false,
+    intents: [{ x_user_id: "person", display_name: "共同作者", intent: "off" }],
+  });
+});
+
+test("MIG-0715 U02 normal privilege is omitted; the server alone resolves fallback", async () => {
+  const requests = [];
+  await upsertVideoCollaborator({
+    videoId: "v", xUserId: "someone", displayName: "A",
+    canEdit: false, notify: true, editPrivilegeMode: "normal",
+  }, async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return writeResponse(409, { ok: false, message: "変更できません。" });
+  });
+  assert.deepEqual(requests, [{ display_name: "A", can_edit: false, notify: true }]);
+});
+
+test("MIG-0715 U02 fail-closed invalid X IDs and empty batches never reach HTTP", async () => {
+  let called = 0;
+  const fetchFn = async () => { called++; throw Error("must not call"); };
+  for (const xUserId of ["", "invalid/name", "a".repeat(21), "http://evil.example/u"]) {
+    const result = await upsertVideoCollaborator({
+      videoId: "v", xUserId, displayName: "A", canEdit: true, notify: false,
+    }, fetchFn);
+    assert.equal(result.status, "invalid", xUserId);
+    assert.match(result.message, /X ID/);
+  }
+  const empty = await applyVideoCollaboratorPermissionsBatch({
+    videoId: "v", notify: false, intents: [],
+  }, fetchFn);
+  assert.equal(empty.status, "invalid");
+  const partialInvalid = await applyVideoCollaboratorPermissionsBatch({
+    videoId: "v", notify: true,
+    intents: [{ x_user_id: "valid", display_name: "A", intent: "on" }, { x_user_id: "invalid/", display_name: "B", intent: "off" }],
+  }, fetchFn);
+  assert.equal(partialInvalid.status, "invalid");
+  assert.equal(called, 0);
+});
+
+test("MIG-0715 U02 preserves explicit 409/403 denial and distinguishes network/auth/invalid JSON", async () => {
+  const payload = {
+    videoId: "v", xUserId: "valid", displayName: "A",
+    canEdit: true, notify: false,
+  };
+  for (const [status, data] of [
+    [409, { ok: false, message: "競合しています。" }],
+    [403, { ok: false, message: "権限がありません。" }],
+  ]) {
+    assert.deepEqual(await upsertVideoCollaborator(payload, async () => writeResponse(status, data)),
+      { status: "ok", data }, "valid API denials remain visible");
+  }
+  assert.equal((await upsertVideoCollaborator(payload, async () => writeResponse(401, { ok: true }))).status, "anonymous");
+  assert.equal((await upsertVideoCollaborator(payload, async () => writeResponse(500, { ok: true }))).status, "unavailable");
+  assert.equal((await upsertVideoCollaborator(payload, async () => writeResponse(200, { ok: "true" }))).status, "unavailable");
+  assert.equal((await upsertVideoCollaborator(payload, async () => writeResponse(200, { ok: true, granted: [1] }))).status, "unavailable");
+  let count = 0;
+  const disconnected = await upsertVideoCollaborator(payload, async () => { count++; throw Error("connection reset"); });
+  assert.equal(disconnected.status, "unavailable", "unknown commit outcome is not success");
+  assert.equal(count, 1, "do not retry a permission-changing POST/PUT implicitly");
+});
