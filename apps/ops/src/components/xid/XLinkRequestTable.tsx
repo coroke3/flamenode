@@ -41,10 +41,11 @@ function XIdPreview({ xId, name, iconUrl, compact = false }: {
   );
 }
 
-export function XLinkRequestTable({ rows, api, onChanged }: {
+export function XLinkRequestTable({ rows, api, onChanged, allowMutations = false }: {
   rows: AdminXLinkRequestRow[];
   api: XidLinkRequestsApi;
   onChanged: () => void;
+  allowMutations?: boolean;
 }): React.ReactElement {
   const [busy, setBusy] = React.useState(false);
   const inFlight = React.useRef(false);
@@ -110,6 +111,7 @@ export function XLinkRequestTable({ rows, api, onChanged }: {
         </td>
         <td>{formatRequestTime(row.requested_at)}</td>
         <td>
+          {allowMutations ? <>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" className="fn-btn fn-btn-primary fn-btn-sm" disabled={busy}
               onClick={() => { void run("approve", row.id); }}>承認</button>
@@ -126,6 +128,7 @@ export function XLinkRequestTable({ rows, api, onChanged }: {
                 onClick={() => { setRejectingId(null); setRejectReason(""); }}>キャンセル</button>
             </div>
           </div> : null}
+          </> : <span className="fn-muted fn-text-sm">申請処理は移行準備中です。閲覧のみ可能です。</span>}
         </td>
       </tr>)}</tbody>
     </FnTable>
