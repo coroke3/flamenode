@@ -6,6 +6,8 @@ import {
   createAdminModerationApi, moderationFilters, type ModerationFilters,
 } from "../../api/adminModeration.js";
 import { useApiResult } from "../useApiResult.js";
+import { ModerationCaseStatusForm } from "./ModerationCaseStatusForm.js";
+import { ModerationFlashNotice } from "./ModerationFlashNotice.js";
 
 const api = createAdminModerationApi();
 const typeOptions = ["all", "x_reapply", "void", "duplicate", "rights", "operator"] as const;
@@ -22,8 +24,8 @@ export function requestModerationFilterSubmit(form: Pick<HTMLFormElement, "reque
   form?.requestSubmit();
 }
 
-export function AdminModerationContent({ data, filters }: {
-  data: AdminModerationResponse; filters: ModerationFilters;
+export function AdminModerationContent({ data, filters, onSaved }: {
+  data: AdminModerationResponse; filters: ModerationFilters; onSaved?: () => void;
 }): React.ReactElement {
   return <div className="fn-public-container fn-page">
     <header className="fn-page-head">
@@ -72,10 +74,12 @@ export function AdminModerationContent({ data, filters }: {
               <p style={{ whiteSpace: "pre-wrap" }}>公開理由: {row.public_reason || "—"}</p>
               <p style={{ whiteSpace: "pre-wrap" }}>内部メモ: {row.private_note || "—"}</p>
             </details></td>
-            <td>{row.status === "open" ?
-              <span aria-label="未移植操作">更新操作は未移植</span> :
-              <a href={"/admin/audit?table=video_moderation_cases&record=" +
-                encodeURIComponent(row.id)}>監査</a>}</td>
+            <td>{row.status === "open"
+              ? onSaved
+                ? <ModerationCaseStatusForm caseId={row.id} onSaved={onSaved} />
+                : <span aria-label="未移植操作">更新操作は未移植</span>
+              : <a href={"/admin/audit?table=video_moderation_cases&record=" +
+                  encodeURIComponent(row.id)}>監査</a>}</td>
           </tr>;
         })}{data.cases.length === 0 ?
           <tr><td colSpan={7}>該当するケースはありません。</td></tr> : null}</tbody>
@@ -87,9 +91,10 @@ export function AdminModerationContent({ data, filters }: {
 /** Not mounted: case updates have no approved Hono SA-044 counterpart. */
 export function AdminModeration(): React.ReactElement {
   const [params] = useSearchParams();
+  const [refreshKey, setRefreshKey] = React.useState(0);
   const filters = moderationFilters(params);
   const key = params.toString();
-  const result = useApiResult((signal) => api.list(filters, signal), "admin-moderation:" + key);
+  const result = useApiResult((signal) => api.list(filters, signal), "admin-moderation:" + key, refreshKey);
   React.useEffect(() => {
     if (result.status === "anonymous") window.location.assign("/entry");
     if (result.status === "forbidden") window.location.assign(result.redirect || "/dashboard");
@@ -97,5 +102,9 @@ export function AdminModeration(): React.ReactElement {
   if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden")
     return <div role="status" aria-busy="true">読み込み中...</div>;
   if (result.status !== "ok") return <section role="alert">モデレーション情報を取得できませんでした。</section>;
-  return <AdminModerationContent data={result.data} filters={filters} />;
+  return <>
+    <ModerationFlashNotice refreshKey={refreshKey} />
+    <AdminModerationContent data={result.data} filters={filters}
+      onSaved={() => setRefreshKey((value) => value + 1)} />
+  </>;
 }

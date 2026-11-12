@@ -172,3 +172,22 @@ test("MIG-0731 U03 flash: exact session key, one-shot display, rejection of mali
   assert.equal(consumeModerationSaveNotice(inaccessible), null);
   assert.equal(renderToStaticMarkup(React.createElement(ModerationFlashNotice)), "");
 });
+
+test("MIG-0731 U03 T04: unmounted screen wires open-case form and one-shot refresh candidate", () => {
+  const html = renderToStaticMarkup(React.createElement(AdminModerationContent, {
+    data: fixture, filters: { type: "all", status: "open", overdue: false },
+    onSaved() {},
+  }));
+  assert.match(html, /name="id" value="case\/1"/);
+  assert.match(html, /name="status"/);
+  assert.match(html, /name="video_status"/);
+  assert.match(html, /name="private_note"/);
+  assert.doesNotMatch(html, /更新操作は未移植/);
+  const terminal = renderToStaticMarkup(React.createElement(AdminModerationContent, {
+    data: { ...fixture, cases: [{ ...fixture.cases[0], status: "resolved" }] },
+    filters: { type: "all", status: "resolved", overdue: false },
+    onSaved() {},
+  }));
+  assert.match(terminal, /\/admin\/audit\?table=video_moderation_cases&amp;record=case%2F1/);
+  assert.doesNotMatch(terminal, /name="private_note"/);
+});
