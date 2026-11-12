@@ -10,7 +10,7 @@ import { AdminUserManagementTabs } from "../.test-dist/apps/ops/src/components/a
 import { AdminUserDetailContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
 import { AdminUserEditContent, canConfirmUserBan, acquireAdminUserWriteLock } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
 import { createAdminUserEditMutations } from "../.test-dist/apps/ops/src/api/adminUserEdits.js";
-import { permissionsPayload, fieldsSetFromCsv } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
+import { permissionsPayload, fieldsSetFromCsv, isValidPermissionSaveResponse, acquirePermissionSaveLock } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
 
 const response = (status, body) => new Response(JSON.stringify(body), {
   status, headers: { "content-type": "application/json" },
@@ -242,4 +242,22 @@ test("MIG-0731 U04: CURRENT legacy editable permission scope keys expand, never 
   assert.deepEqual(permissionsPayload(legacy, new Set()).default_editable_fields,
     ["title", "part", "is_collab", "members", "chapters"]);
   assert.deepEqual([...fieldsSetFromCsv("unknown-key")], []);
+});
+
+test("MIG-0731 U04: privileged permission save response is schema-validated and serialized", () => {
+  const valid = {
+    ok: true, message: "saved",
+    settings: { default_editable_fields: "title", upcoming_editable_fields: null },
+  };
+  assert.equal(isValidPermissionSaveResponse(valid), true);
+  assert.equal(isValidPermissionSaveResponse({ ...valid, message: { html: "<script>" } }), false);
+  assert.equal(isValidPermissionSaveResponse({ ...valid,
+    settings: { default_editable_fields: ["title"], upcoming_editable_fields: null } }), false);
+  assert.equal(isValidPermissionSaveResponse({ ok: true, settings: {} }), false);
+  assert.equal(isValidPermissionSaveResponse({ ok: "true" }), false);
+  const lock = { current: false };
+  assert.equal(acquirePermissionSaveLock(lock), true);
+  assert.equal(acquirePermissionSaveLock(lock), false);
+  lock.current = false;
+  assert.equal(acquirePermissionSaveLock(lock), true);
 });

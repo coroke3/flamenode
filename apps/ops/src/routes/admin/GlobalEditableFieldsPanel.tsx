@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { AdminPermissionSettings } from "@flamenode/contracts";
+import { AdminPermissionSettingsSchema, type AdminPermissionSettings } from "@flamenode/contracts";
 import {
   GENERAL_EDITABLE_FIELD_KEYS, GENERAL_EDITABLE_FIELD_LABELS, GENERAL_EDITABLE_FIELD_HELP,
   parseGeneralEditableFields, type GeneralEditableFieldKey,
@@ -32,12 +32,27 @@ type SaveResponse = {
   message?: string;
   settings?: AdminPermissionSettings;
 };
+/** A malformed API response must not overwrite a privileged policy editor. */
+export function isValidPermissionSaveResponse(value: unknown): value is SaveResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.ok === "boolean" &&
+    (row.message === undefined || typeof row.message === "string") &&
+    (row.settings === undefined || AdminPermissionSettingsSchema.safeParse(row.settings).success);
+}
+/** Do not allow a second write before React has committed disabled=busy. */
+export function acquirePermissionSaveLock(ref: { current: boolean }): boolean {
+  if (ref.current) return false;
+  ref.current = true;
+  return true;
+}
 export function GlobalEditableFieldsPanel({
   settings, onSaved,
 }: { settings: AdminPermissionSettings; onSaved?: () => void }): React.ReactElement {
   const [defaultFields, setDefaultFields] = React.useState(() => fieldsSetFromCsv(settings.default_editable_fields));
   const [upcomingFields, setUpcomingFields] = React.useState(() => fieldsSetFromCsv(settings.upcoming_editable_fields));
   const [busy, setBusy] = React.useState(false);
+  const busyRef = React.useRef(false);
   const [message, setMessage] = React.useState("");
   const [error, setError] = React.useState("");
   const skipSync = React.useRef(false);
@@ -50,7 +65,7 @@ export function GlobalEditableFieldsPanel({
 
   async function save(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (busy) return;
+    if (!acquirePermissionSaveLock(busyRef)) return;
     setBusy(true);
     setError("");
     setMessage("");
@@ -65,10 +80,12 @@ export function GlobalEditableFieldsPanel({
         window.location.assign("/entry");
         return;
       }
-      if (result.status !== "ok" || !result.data.ok) {
-        setError(result.status === "ok"
-          ? (result.data.message || "保存できませんでした。")
-          : "通信に失敗しました。再度お試しください。");
+      if (result.status !== "ok" || !isValidPermissionSaveResponse(result.data)) {
+        setError("通信に失敗しました。再度お試しください。");
+        return;
+      }
+      if (!result.data.ok) {
+        setError(result.data.message || "保存できませんでした。");
         return;
       }
       if (result.data.settings) {
@@ -78,7 +95,10 @@ export function GlobalEditableFieldsPanel({
       }
       setMessage(result.data.message || "一般作品権限を保存しました。");
       onSaved?.();
+    } catch {
+      setError("保存処理を完了できませんでした。再度お試しください。");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
