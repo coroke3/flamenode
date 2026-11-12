@@ -10,6 +10,14 @@ const releasePlannerSource = await readFile(
   new URL("../../../packages/domain/src/slots/releaseMutations.ts", import.meta.url),
   "utf8",
 );
+const reservePlannerSource = await readFile(
+  new URL("../../../packages/domain/src/slots/reserveMutations.ts", import.meta.url),
+  "utf8",
+);
+const reserveBridgeSource = await readFile(
+  new URL("../slots/slotReserveMutations.ts", import.meta.url),
+  "utf8",
+);
 const releaseBridgeSource = await readFile(
   new URL("../slots/slotReleaseMutations.ts", import.meta.url),
   "utf8",
@@ -91,7 +99,10 @@ test("releaseはreserved_x_id_snapshotをクリアする", () => {
 
 test("reserveSlotはresolveReservationXIdentityを使う", () => {
   assert.match(source, /resolveReservationXIdentity/);
-  assert.match(source, /reserved_x_id_snapshot: identity\.snapshotXId/);
+  assert.match(source, /const reserveMutations = buildSlotReserveMutationPlan/);
+  assert.match(source, /mutations: reserveMutations/);
+  assert.match(reservePlannerSource, /reserved_x_id_snapshot: input\.identity\.snapshotXId/);
+  assert.match(reserveBridgeSource, /@flamenode\/domain\/slots\/reserveMutations/);
 });
 
 test("mergeOwnSlotGroupsはsnapshot混在を拒否する", () => {

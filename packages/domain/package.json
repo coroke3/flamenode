@@ -32,7 +32,8 @@
     "./admin": "./src/admin/index.ts",
     "./user": "./src/user/index.ts",
     "./db/transientError": "./src/db/transientError.ts",
-    "./event/status": "./src/event/status.ts"
+    "./event/status": "./src/event/status.ts",
+    "./slots/reserveMutations": "./src/slots/reserveMutations.ts"
   },
   "scripts": {
     "build": "tsc",

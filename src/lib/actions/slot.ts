@@ -29,6 +29,7 @@ import {
   type SlotViewerRelation,
 } from "@/lib/slots/slotIdentityCore";
 import { buildSlotReleaseMutationPlan } from "@/lib/slots/slotReleaseMutations";
+import { buildSlotReserveMutationPlan } from "@/lib/slots/slotReserveMutations";
 import { resolveReservationXIdentity } from "@/lib/slots/reservationIdentity";
 import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
 import {
@@ -689,14 +690,15 @@ export async function reserveSlot(
     assertAdjacentSequence(targetRows, slotPartGapSec(event));
 
     const groupId = targetRows.length > 1 ? generateId("sgrp") : null;
-    const reservePatch = {
-      reserved_by_user_id: guard.user.id,
-      x_user_id: identity.canonicalXUserId,
-      reserved_x_id_snapshot: identity.snapshotXId,
-      display_name: parsed.data.display_name,
-      reservation_group_id: groupId,
-      status: "reserved" as const,
-    };
+    // U01d: authorization and snapshot selection remain in CURRENT; only
+    // immutable mutation planning is shared with the future Hono route.
+    const reserveMutations = buildSlotReserveMutationPlan({
+      rows: targetRows,
+      actorUserId: guard.user.id,
+      identity,
+      displayName: parsed.data.display_name,
+      groupId,
+    });
     const { buildChannelSlotReservedNotification } = await import(
       "@/lib/notifications/templates/slot"
     );
@@ -743,13 +745,7 @@ export async function reserveSlot(
     try {
       await commitSlotMutationPlan({
         db,
-        mutations: [
-          {
-            rows: targetRows,
-            patch: reservePatch,
-            statusGuard: "available",
-          },
-        ],
+        mutations: reserveMutations,
         eventId: anchor.event_id,
         actorUserId: guard.user.id,
         reason: "slot_user_reserve",
