@@ -8,7 +8,7 @@ import {
 } from "../.test-dist/apps/ops/src/api/adminUsers.js";
 import { AdminUserManagementTabs } from "../.test-dist/apps/ops/src/components/admin/AdminUserManagementTabs.js";
 import { AdminUserDetailContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
-import { DiscordRows, XIdRows } from "../.test-dist/apps/ops/src/routes/admin/AdminUsers.js";
+import { DiscordRows, XIdRows, formatAdminUserCreatedRelative } from "../.test-dist/apps/ops/src/routes/admin/AdminUsers.js";
 import { AdminUserEditContent, canConfirmUserBan, acquireAdminUserWriteLock } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
 import { createAdminUserEditMutations } from "../.test-dist/apps/ops/src/api/adminUserEdits.js";
 import { permissionsPayload, fieldsSetFromCsv, isValidPermissionSaveResponse, acquirePermissionSaveLock } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
@@ -332,4 +332,44 @@ test("MIG-0731 U04: CURRENT X-ID approval badge semantics survive Ops migration"
     rows: [{ ...base, approval_status: "approved", active_holder_count: 2 }],
   }));
   assert.match(active, /class="fn-badge fn-badge-soft"[^>]*>active<\/span>/);
+});
+
+test("MIG-0731 U04: CURRENT registration relative-time boundary parity (seconds and milliseconds)", () => {
+  const now = 1800000000;
+  const cases = [
+    [0, "今"], [59, "今"], [60, "1分前"], [3599, "59分前"],
+    [3600, "1時間前"], [86399, "23時間前"], [86400, "1日前"],
+    [2591999, "29日前"], [2592000, "1か月前"],
+    [31535999, "12か月前"], [31536000, "1年前"],
+  ];
+  for (const [age, expected] of cases) {
+    assert.equal(formatAdminUserCreatedRelative(now - age, now), expected, "seconds: " + age);
+    assert.equal(formatAdminUserCreatedRelative((now - age) * 1000, now), expected, "milliseconds: " + age);
+  }
+  assert.equal(formatAdminUserCreatedRelative(Number.NaN, now), "");
+  assert.equal(formatAdminUserCreatedRelative(now + 10, now), "今");
+});
+
+test("MIG-0731 U04: CURRENT Discord role badges and audit link semantics", () => {
+  const base = { ...fixture.users[0], can_create_events: 0 };
+  const cases = [
+    [{ role: "admin", is_banned: 0 }, "fn-badge-accent", "ADMIN"],
+    [{ role: "moderator", is_banned: 0 }, "fn-badge-warning", "MOD"],
+    [{ role: "user", is_banned: 0 }, "fn-badge-soft", "USER"],
+    [{ role: null, is_banned: 0 }, "fn-badge-soft", "USER"],
+    [{ role: "admin", is_banned: 1 }, "fn-badge-danger", "BAN"],
+  ];
+  for (const [fields, tone, label] of cases) {
+    const html = renderToStaticMarkup(React.createElement(DiscordRows, {
+      rows: [{ ...base, ...fields }],
+    }));
+    assert.ok(html.includes('class="fn-badge ' + tone + '">' + label + '</span>'),
+      "incorrect role badge for " + JSON.stringify(fields));
+    assert.match(html, /title="このユーザーが実行した管理操作の監査ログ"/);
+    assert.match(html, /href="\/admin\/audit\?actor=u1"/);
+  }
+  const hosted = renderToStaticMarkup(React.createElement(DiscordRows, {
+    rows: [{ ...base, can_create_events: 1 }],
+  }));
+  assert.match(hosted, /fn-badge fn-badge-accent" style="margin-left:4px">開催可/);
 });

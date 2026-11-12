@@ -17,9 +17,17 @@ const statusOptions = [
   ["tos_not_accepted", "TOS未同意"], ["no_active_x", "active Xなし"],
 ] as const;
 
-function formatCreatedAt(value: number): string {
-  const date = new Date(value < 1e12 ? value * 1000 : value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("ja-JP");
+/** CURRENT formatRelative parity. Hono sends Unix seconds; accept legacy millisecond rows too. */
+export function formatAdminUserCreatedRelative(value: number, nowSeconds = Date.now() / 1000): string {
+  if (!Number.isFinite(value)) return "";
+  const unixSeconds = value >= 1e12 ? value / 1000 : value;
+  const diff = nowSeconds - unixSeconds;
+  if (diff < 60) return "今";
+  if (diff < 3600) return `${Math.floor(diff / 60)}分前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}時間前`;
+  if (diff < 2592000) return `${Math.floor(diff / 86400)}日前`;
+  if (diff < 31536000) return `${Math.floor(diff / 2592000)}か月前`;
+  return `${Math.floor(diff / 31536000)}年前`;
 }
 export function DiscordRows({ rows }: { rows: AdminUserRow[] }): React.ReactElement {
   return (
@@ -45,13 +53,19 @@ export function DiscordRows({ rows }: { rows: AdminUserRow[] }): React.ReactElem
               : "—"}</td>
             <td>
               {user.is_banned === 1 ? <span className="fn-badge fn-badge-danger">BAN</span>
-                : <span className="fn-badge">{(user.role ?? "user").toUpperCase()}</span>}
-              {user.can_create_events === 1 ? <span className="fn-badge fn-badge-accent">開催可</span> : null}
+                : user.role === "admin" ? <span className="fn-badge fn-badge-accent">ADMIN</span>
+                : user.role === "moderator" ? <span className="fn-badge fn-badge-warning">MOD</span>
+                : <span className="fn-badge fn-badge-soft">USER</span>}
+              {user.can_create_events === 1
+                ? <span className="fn-badge fn-badge-accent" style={{ marginLeft: 4 }}>開催可</span>
+                : null}
             </td>
-            <td>{formatCreatedAt(user.created_at)}</td>
+            <td>{formatAdminUserCreatedRelative(user.created_at)}</td>
             <td>
               <a className="fn-btn fn-btn-ghost fn-btn-sm" href={"/admin/users/" + encodeURIComponent(user.id)}>詳細</a>
-              <a className="fn-btn fn-btn-ghost fn-btn-sm" href={"/admin/audit?actor=" + encodeURIComponent(user.id)}>監査</a>
+              <a className="fn-btn fn-btn-ghost fn-btn-sm"
+                title="このユーザーが実行した管理操作の監査ログ"
+                href={"/admin/audit?actor=" + encodeURIComponent(user.id)}>監査</a>
             </td>
           </tr>
         ))}
