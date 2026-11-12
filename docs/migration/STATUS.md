@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 5–8 implementation tracks; Phase 4 follow-ups and Phase 9 inventory (production cutover not started)
-Current Task: MIG-0735
+Current Task: MIG-0723
 Current Owner: chatgpt
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0735
-Last Task PR: #481
+Last Completed Task: MIG-0723
+Last Task PR: #497
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0663, MIG-0664, MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -423,7 +423,7 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0720 | `/manage/events/:id` overview + `/audience` (SA-035; merge gate MIG-0707, MIG-0719, MIG-0655) | READY | MIG-0624 |
 | MIG-0721 | Ops `EventForm` port: `/manage/events/:id/edit` (SA-021..024) + `/admin/events/new` (merge gate MIG-0707, MIG-0719, MIG-0726, MIG-0652) | READY | MIG-0624, MIG-0625 |
 | MIG-0722 | `/manage/events/:id/slots` (SA-056..064; merge gate MIG-0707, MIG-0719, MIG-0656) | READY | MIG-0624 |
-| MIG-0723 | `/manage/events/:id/staff` (SA-031..034; merge gate MIG-0707, MIG-0719, MIG-0654) | READY | MIG-0624 |
+| MIG-0723 | `/manage/events/:id/staff` (SA-031..034; merge gate MIG-0707, MIG-0719, MIG-0654) | DONE | MIG-0624 |
 | MIG-0724 | `/manage/events/:id/videos` + video detail (SA-040..042; merge gate MIG-0707, MIG-0719, MIG-0603) | READY | MIG-0624, MIG-0630 |
 | MIG-0725 | `/manage/events/:id/youtube-playlist`, `/manage/notifications`, `/manage/x-link-requests` (SA-038/039, 090/091; merge gate MIG-0707, MIG-0719, MIG-0655, MIG-0605) | READY | MIG-0624 |
 | MIG-0726 | Ops Admin shell (guard, sidebar, banner), `/admin`, permission simulator, 5 compat redirects (merge gate MIG-0707, MIG-0661) | DONE | MIG-0625 |
