@@ -1,6 +1,7 @@
 export * from "./slots/reservationLimit.ts";
 export * from "./slots/limits.ts";
 export * from "./slots/partGap.ts";
+export * from "./slots/regroupMutations.ts";
 export * from "./software/labels.ts";
 export * from "./announcements/index.ts";
 export * from "./apiEndpoints/index.ts";

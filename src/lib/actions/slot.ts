@@ -21,6 +21,7 @@ import {
 } from "@/lib/slots/limits";
 import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
 import { slotPartGapSec } from "@/lib/slots/slotPartGap";
+import { buildRegroupMutations } from "@/lib/slots/slotRegroupMutations";
 import {
   canActAsSlotActor,
   resolveSlotGroupIdentity,
@@ -503,27 +504,6 @@ async function loadBoundedGroup(
   const rows = await loadBoundedGroupStructure(db, anchor);
   const identity = resolveBoundedGroupIdentity(rows, authUserId, activeXId);
   return { rows, identity };
-}
-
-/** 同じpatchを最大2群へまとめ、D1 statement数を枠数比例にしない。 */
-function buildRegroupMutations(
-  rows: readonly SlotRow[],
-  patch: SlotPatch,
-  identity: { targetXId: string | null; adoptNullRows: boolean },
-): SlotBulkMutation[] {
-  const keepRows: SlotRow[] = [];
-  const adoptRows: SlotRow[] = [];
-  for (const row of rows) {
-    if (identity.adoptNullRows && row.x_user_id === null && identity.targetXId !== null) {
-      adoptRows.push(row);
-    } else {
-      keepRows.push(row);
-    }
-  }
-  return [
-    ...(keepRows.length ? [{ rows: keepRows, patch, statusGuard: "reserved" as const }] : []),
-    ...(adoptRows.length ? [{ rows: adoptRows, patch: { ...patch, x_user_id: identity.targetXId }, statusGuard: "reserved" as const }] : []),
-  ];
 }
 
 function orderCondition(row: SlotRow, direction: "forward" | "backward"): SQL {
