@@ -136,6 +136,47 @@ test("D1で非公開ならR2へ触れず404", async () => {
     assert.deepEqual({ prepares: state.prepares, gets: state.gets }, { prepares: 1, gets: 0 });
 });
 
+test("RH-023: a temporary 404 cannot remain cached after the image is republished", async () => {
+  const key = "event-icons/republish/a.png";
+  const denied = await requestMedia({ key, allowed: false });
+  assert.equal(denied.response.status, 404);
+  assert.equal(denied.response.headers.get("cache-control"), "no-store");
+  assert.equal(denied.response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(denied.state.gets, 0, "ACL denial still skips R2");
+  const republished = await requestMedia({ key, allowed: true });
+  assert.equal(republished.response.status, 200);
+  assert.equal(republished.response.headers.get("cache-control"), "no-store");
+
+  const invalid = await requestMedia({ key: "private/a.png", allowed: true });
+  assert.equal(invalid.response.status, 404);
+  assert.equal(invalid.response.headers.get("cache-control"), "no-store");
+  assert.equal(invalid.state.prepares, 0);
+
+  for (const unsafe of [
+    { size: MAX_PUBLIC_MEDIA_BYTES + 1, contentType: "image/png" },
+    { size: 128, contentType: "image/svg+xml" },
+  ]) {
+    const blocked = await requestMedia({ key, allowed: true, ...unsafe });
+    assert.equal(blocked.response.status, 404);
+    assert.equal(blocked.response.headers.get("cache-control"), "no-store");
+  }
+});
+
+test("RH-023: an R2 missing-object 404 is not shared-cacheable", async () => {
+  let reads = 0;
+  const response = await servePublicMedia({
+    DB: { prepare() {
+      reads++;
+      return { bind() { return { first: async () => ({ allowed: 1 }) }; } };
+    } },
+    BUCKET: { get: async () => null },
+  }, "event-icons/republish/missing.png");
+  assert.equal(reads, 1);
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+});
+
 test("公開entityは単一D1 lookup後に安全な画像だけ返す", async () => {
     const key = "event-icons/event/a.png";
     const { response, state } = await requestMedia({ key, allowed: true });
