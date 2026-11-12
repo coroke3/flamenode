@@ -41,7 +41,7 @@ export function AdminXLinkRequests(): React.ReactElement {
     <nav aria-label="X ID申請管理" style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
       <OpsLink href="/admin/x-id-merges" className="fn-btn fn-btn-sm fn-btn-ghost">統合・差し戻し</OpsLink>
     </nav>
-    <XLinkRequestTable rows={data.pending} api={api} onChanged={() => setRefreshKey(n => n + 1)} />
+    <XLinkRequestTable rows={data.pending} api={api} onChanged={() => setRefreshKey(n => n + 1)} allowMutations={false} />
     {data.recentRejected.length > 0 ? <section style={{ marginTop: 28 }}>
       <h2>直近の却下申請</h2>
       <FnTable><thead><tr><th>申請 X ID</th><th>種別</th><th>申請者ユーザー ID</th><th>申請日時</th></tr></thead>
