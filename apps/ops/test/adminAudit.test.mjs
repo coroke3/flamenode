@@ -14,6 +14,8 @@ import { JSDOM } from "jsdom";
 import { parseAuditListQuery, auditListApiPath, auditViewHref } from "../.test-dist/apps/ops/src/lib/auditListQuery.js";
 import { createAdminAuditApi } from "../.test-dist/apps/ops/src/api/adminAudit.js";
 import { AuditListContent, parseChangedKeys, parseAuditActorSnapshot } from "../.test-dist/apps/ops/src/routes/admin/AuditList.js";
+import { AdminAuditDetailRoute } from "../.test-dist/apps/ops/src/routes/router.js";
+import { MemoryRouter, Routes, Route } from "react-router-dom";
 
 const row = (overrides={}) => ({
   id:"aud-1",table_name:"videos",target_id:"v1",operation:"UPDATE",
@@ -264,7 +266,8 @@ test("MIG-0733 U02: detail page shows neighbor navigation, raw payload and gated
   assert.match(html,/href="\/admin\/audit\/aud-2"/);
   assert.match(html,/監査ログ aud-1/);
   assert.match(html,/変更履歴を読み込み中/);
-  assert.match(html,/変更履歴の読込完了後にリストア操作が利用できます/);
+  assert.match(html,/復元操作は移行準備中/);
+  assert.doesNotMatch(html,/確認テキスト:|リストア実行|競合チェック実行/);
   assert.doesNotMatch(html,/リストア実行/);
   assert.match(html,/同じ target_id を一覧表示/);
   // The target history list must not mix same-ID audit entries from unrelated tables.
@@ -394,4 +397,39 @@ test("MIG-0733: deleted operator, malformed snapshot and recorded X ID fallback"
   assert.match(malformed,/LIVE_NAME/);
   assert.match(malformed,/@recorded/);
   assert.doesNotMatch(malformed,/@new/);
+});
+
+test("MIG-0733 U04: read-only audit detail never exposes restore action without explicit acceptance flag", () => {
+  const api=createAdminAuditApi(async()=>{throw Error("SSR must not call mutation API")});
+  const view=renderToStaticMarkup(React.createElement(AuditDetailContent,{
+    id:"aud-1",state:{status:"ok",data:detailFixture},api,
+  }));
+  assert.match(view,/復元操作は移行準備中/);
+  assert.doesNotMatch(view,/確認テキスト:|リストア実行|競合チェック実行/);
+  const pending=renderToStaticMarkup(React.createElement(AuditDetailContent,{
+    id:"aud-1",state:{status:"ok",data:detailFixture},api,allowRestore:true,
+  }));
+  assert.match(pending,/変更履歴の読込完了後にリストア操作が利用できます/);
+});
+
+test("MIG-0733 U04: audit settings route is read-only until mutation acceptance", () => {
+  const api=createAdminAuditApi(async()=>{throw Error("SSR must not call mutation API")});
+  const props={state:{status:"ok",data:{settings:settingsFixture}},api,refresh:()=>{}};
+  const view=renderToStaticMarkup(React.createElement(AuditSettingsContent,props));
+  assert.match(view,/設定変更は移行準備中/);
+  assert.match(view,/normal_retention_days/);
+  assert.match(view,/max_payload_bytes/);
+  assert.doesNotMatch(view,/設定を保存|type="number"|<form/);
+  const enabled=renderToStaticMarkup(React.createElement(AuditSettingsContent,{...props,readOnly:false}));
+  assert.match(enabled,/設定を保存/);
+});
+
+test("MIG-0733 U04: detail route extracts URL id and never enables restore in Ops router", () => {
+  const screen=renderToStaticMarkup(React.createElement(MemoryRouter,{initialEntries:["/admin/audit/aud-1"]},
+    React.createElement(Routes,null,
+      React.createElement(Route,{path:"/admin/audit/:id",element:React.createElement(AdminAuditDetailRoute)}),
+    ),
+  ));
+  assert.match(screen,/読み込み中/);
+  assert.doesNotMatch(screen,/確認テキスト:|リストア実行|競合チェック実行/);
 });
