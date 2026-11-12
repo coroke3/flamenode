@@ -429,3 +429,25 @@ test("Visibility rename copy: matching token still carries old and new blocks sa
   assert.equal(state.manifest.entities.find(x => x.entity_id === "event-new").fence_token, "incoming");
   assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "video-safe"), unrelated);
 });
+
+test("Visibility compensation: D1 rename rollback does not overwrite a concurrent old-ID owner", async () => {
+  const originalOld = entry("event", "old-event", "incoming");
+  const foreignOld = entry("event", "old-event", "other-writer");
+  const ownNew = entry("event", "new-event", "incoming");
+  for (const oldEntries of [[foreignOld], [originalOld, foreignOld]]) {
+    const state = hostOf(manifestOf(...oldEntries, ownNew, other));
+    const before = structuredClone(state.manifest);
+    await compensateEventVisibilityFenceRenameOnD1Failure(
+      {
+        oldEventId: "old-event",
+        newEventId: "new-event",
+        fenceToken: "incoming",
+        previousOldEntry: originalOld,
+      },
+      state.host,
+    );
+    assert.equal(state.appliedWrites, 0, "must not replace a later writer's old-ID fence");
+    assert.equal(state.attemptedWrites, 0, "must fail closed without attempting R2 PUT");
+    assert.deepEqual(state.manifest, before, "both old and new visibility blocks stay intact");
+  }
+});
