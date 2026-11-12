@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { preCommitEventVisibilityTransition } from "@flamenode/server-core/visibility/eventTransition";
 import { preCommitPublicVisibilityFence } from "@flamenode/server-core/visibility/fenceTransition";
+import { preCommitVideoVisibilityDepublicization } from "@flamenode/server-core/visibility/videoTransition";
 
 // Exercise the actual shared core imported by both CURRENT Next and TARGET Hono.
 // The fake manifest host models R2 conditional PUT and mutateOnConflict retries.
@@ -191,4 +192,63 @@ test("Issue #659: generic case-folded duplicate X-ID tokens fail closed", async 
     /public_visibility_fence_token_mismatch/,
   );
   assert.equal(state.attemptedWrites, 0);
+});
+
+test("Visibility CAS: video precommit rejects an existing foreign token before any PUT", async () => {
+  const older = entry("video", "video-one", "earlier-video-writer");
+  const unrelated = entry("event", "event-two", "event-owner");
+  const state = hostOf(manifestOf(older, unrelated));
+  const previous = structuredClone(state.manifest);
+  await assert.rejects(
+    preCommitVideoVisibilityDepublicization(
+      { videoId: "video-one", fenceToken: "incoming" }, state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 0);
+  assert.deepEqual(state.manifest, previous);
+});
+
+test("Visibility CAS: video duplicate same-ID foreign token cannot hide behind a matching first entry", async () => {
+  const state = hostOf(manifestOf(
+    entry("video", "video-one", "incoming"),
+    entry("video", "video-one", "foreign"),
+  ));
+  await assert.rejects(
+    preCommitVideoVisibilityDepublicization(
+      { videoId: "video-one", fenceToken: "incoming" }, state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 0);
+});
+
+test("Visibility CAS: video race introduces a foreign token; conflict callback must fail closed", async () => {
+  const prior = entry("event", "event-two", "event-owner");
+  const newer = entry("video", "video-one", "second-writer");
+  const state = hostOf(manifestOf(prior), latest => ({
+    ...latest, entities: [...latest.entities, newer],
+  }));
+  await assert.rejects(
+    preCommitVideoVisibilityDepublicization(
+      { videoId: "video-one", fenceToken: "incoming" }, state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.callbacks, 1);
+  assert.equal(state.appliedWrites, 0);
+  assert.deepEqual(state.manifest.entities, [prior, newer]);
+});
+
+test("Visibility CAS: same-token video retry preserves unrelated manifest entries", async () => {
+  const old = entry("video", "video-one", "incoming");
+  const extra = entry("event_group", "group-two", "another-owner");
+  const state = hostOf(manifestOf(old, extra));
+  await preCommitVideoVisibilityDepublicization(
+    { videoId: "video-one", fenceToken: "incoming" }, state.host,
+  );
+  assert.equal(state.appliedWrites, 1);
+  assert.equal(state.reads, 2);
+  assert.equal(state.manifest.entities.find(x => x.entity_id === "video-one").fence_token, "incoming");
+  assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "group-two"), extra);
 });
