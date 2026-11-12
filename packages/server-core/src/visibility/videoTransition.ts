@@ -374,6 +374,14 @@ export async function preCommitVideoVisibilityDepublicization(
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
+  // A successful initial CAS bypasses mutateOnConflict. Preserve every
+  // previously blocked video token (including duplicate manifest keys).
+  if (manifest.entities.some(
+    (entry) => entry.entity_type === "video" &&
+      entry.entity_id === input.videoId && entry.fence_token !== input.fenceToken,
+  )) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
   const updated = upsertBlockedEntityInManifest(
     manifest,
     {
@@ -388,11 +396,10 @@ export async function preCommitVideoVisibilityDepublicization(
   await host.manifest.write(updated, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
-      const current = latest.entities.find(
-        (entry) =>
-          entry.entity_type === "video" && entry.entity_id === input.videoId,
-      );
-      if (current && current.fence_token !== input.fenceToken) {
+      if (latest.entities.some(
+        (entry) => entry.entity_type === "video" &&
+          entry.entity_id === input.videoId && entry.fence_token !== input.fenceToken,
+      )) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       return upsertBlockedEntityInManifest(
@@ -416,6 +423,10 @@ export async function preCommitVideoVisibilityDepublicization(
         entry.entity_type === "video" &&
         entry.entity_id === input.videoId &&
         entry.fence_token === input.fenceToken,
+    ) ||
+    confirmed.entities.some(
+      (entry) => entry.entity_type === "video" &&
+        entry.entity_id === input.videoId && entry.fence_token !== input.fenceToken,
     )
   ) {
     throw new Error("public_visibility_fence_token_mismatch");
