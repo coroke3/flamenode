@@ -278,11 +278,11 @@ export function isValidPreloadedAuditSettings(value: unknown): value is AuditLog
     "compact_after_days",
   ] as const;
   return Object.keys(row).length === keys.length &&
-    keys.every((key) =>
-      Object.hasOwn(row, key) &&
-      typeof row[key] === "number" &&
-      Number.isSafeInteger(row[key]) &&
-      row[key] >= 0);
+    keys.every((key) => {
+      const field = row[key];
+      return Object.hasOwn(row, key) &&
+        typeof field === "number" && Number.isSafeInteger(field) && field >= 0;
+    });
 }
 
 /** Prepare audit entries with bounded queries independent of entry count. */
