@@ -361,9 +361,9 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-096 | `executeXIdMergeRequest` | `xid#validateXIdentityRequestShape`; merge plan `xid#buildXIdMergeBeforeState`, `#buildXIdMergeAfterState` | `merge.ts` body, `xIdMergeStateMatchesSql` CAS, `mergeBudget`, `mergeAudits` | U02 |
 | SA-097 | `approveXIdMergeRevert` | `xid#isRevertDeadlineOpen`, `#validateXIdentityRequestShape`; same merge plan as SA-096 | revert body untouched (task rule) | U02 |
 | SA-098 | `setActiveXId` | `xid#normalizeXId` | approved-link read + user CAS | U04 |
-| SA-099 | `requestXIdLink` | `xid#parseXIdentityInput`, `#validateXIdentityRequestShape`, `#isXIdLinkRequestType`, `#reconcilePendingXIdRequest`, `#isRetryableXIdMutationError` | pending insert (`xidPendingInsert.ts`) + audit | MIG-0659 (`POST /api/xid/requests`) |
-| SA-100 | `cancelXIdLinkRequest` | `xid#buildXIdentityDecisionFields`, `#processedXIdRequestMessage`, `#isRetryableXIdMutationError` | request CAS + audit | MIG-0659 (`POST /api/xid/requests/:id/cancel`) |
-| SA-101 | `requestXIdMergeRevert` | `xid#isRevertDeadlineOpen` | request insert + audit | MIG-0659 (`POST /api/xid/merge-revert-requests`) |
+| SA-099 | `requestXIdLink` | `xid#parseXIdentityInput`, `#validateXIdentityRequestShape`, `#isXIdLinkRequestType`, `#reconcilePendingXIdRequest`, `#isRetryableXIdMutationError` | pending insert (`xidPendingInsert.ts`) + audit | MIG-0659 (`POST /api/xid/requests`; SPA callers: MIG-0709 `apps/app/src/routes/dashboard/settings/XIdRequestForms.tsx`, `apps/app/src/routes/onboardingXIdForm.tsx`) |
+| SA-100 | `cancelXIdLinkRequest` | `xid#buildXIdentityDecisionFields`, `#processedXIdRequestMessage`, `#isRetryableXIdMutationError` | request CAS + audit | MIG-0659 (`POST /api/xid/requests/:id/cancel`; SPA caller: MIG-0709 `apps/app/src/routes/dashboard/settings/XIdRequestActions.tsx`) |
+| SA-101 | `requestXIdMergeRevert` | `xid#isRevertDeadlineOpen` | request insert + audit | MIG-0659 (`POST /api/xid/merge-revert-requests`; SPA caller: MIG-0709 `apps/app/src/routes/dashboard/settings/XIdRequestActions.tsx`) |
 | SA-102 | `updateXIdProfile` | `xid#normalizeXId` | profile CAS + static rebuild | U04 |
 | SA-103 | `deleteLinkedXId` | `xid#normalizeXId` | `xLinkDependencies.ts` (SQL) + link delete | U04 |
 | SA-104 | `setXIdIcon` | `xid#normalizeXId` | icon resolution + R2 | U04 |
