@@ -96,3 +96,17 @@ test("MIG-0657 U01e: merge gap inherits old reservation snapshot and updates onl
   });
   assert.equal(plans[0].statusGuard, "available");
 });
+
+test("MIG-0657 U01e: nullable original display name is preserved during extension", () => {
+  const candidate = Object.freeze({ id: "candidate-null-name", status: "available" });
+  const plan = canonical({
+    rows: [candidate],
+    actorUserId: "existing-actor",
+    identity: { canonicalXUserId: null, snapshotXId: null },
+    displayName: null,
+    groupId: "old-group",
+  })[0];
+  assert.equal(plan.patch.display_name, null);
+  assert.equal(plan.patch.reservation_group_id, "old-group");
+  assert.equal(plan.statusGuard, "available");
+});

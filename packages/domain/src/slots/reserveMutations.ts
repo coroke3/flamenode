@@ -11,7 +11,7 @@ export function buildSlotReserveMutationPlan<Row>(
     rows: readonly Row[];
     actorUserId: string;
     identity: ReservationXIdentity;
-    displayName: string;
+    displayName: string | null;
     groupId: string | null;
   },
 ): Array<{
@@ -20,7 +20,7 @@ export function buildSlotReserveMutationPlan<Row>(
     reserved_by_user_id: string;
     x_user_id: string | null;
     reserved_x_id_snapshot: string | null;
-    display_name: string;
+    display_name: string | null;
     reservation_group_id: string | null;
     status: "reserved";
   };
