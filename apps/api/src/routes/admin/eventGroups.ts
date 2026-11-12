@@ -575,7 +575,8 @@ export function planEventGroupMembershipRemove(
  * Do not mount before the remaining acceptance gates have passed.
  */
 export const stagedEventGroupWriteRoutes = new Hono<AppEnv>();
-export const EVENT_GROUP_WRITE_FAILED = "更新が競合したか監査記録に失敗しました。";
+// Mirror CURRENT eventGroupMutationError: a stable, non-provider-specific failure body.
+export const EVENT_GROUP_WRITE_FAILED = "保存に失敗しました。再読み込みして、もう一度お試しください。";
 
 stagedEventGroupWriteRoutes.post("/", async (c) => {
   c.header("Cache-Control", "private, no-store");
