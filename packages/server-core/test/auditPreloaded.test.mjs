@@ -186,7 +186,7 @@ test("Issue #669: exact 50-query budget uses only matching guard-preloaded audit
     audits: [audit],
     callerQueryCount: 46,
   };
-  const settings = { max_payload_bytes: 90000 };
+  const settings = mapAuditSettings(null);
   const validPreload = {
     settings,
     actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
@@ -309,7 +309,7 @@ test("Issue #669: 80-event SA-029 with the prospective MIG-0516 marker fits 50 w
   const reused = planAtomicAuditMutationBudget({
     ...proposal,
     preloaded: {
-      settings: { max_payload_bytes: 90000 },
+      settings: mapAuditSettings(null),
       actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
     },
   });
@@ -409,6 +409,42 @@ test("Issue #669: actual SQLite 80-member insert + queue + MIG-0516 marker audit
   }
 });
 
+
+test("Issue #669: incomplete or corrupted settings cannot earn a preload SELECT credit", async () => {
+  const canonical = mapAuditSettings(null);
+  const actorSnapshot = JSON.stringify(actorSnapshotFromRow(null));
+  for (const badSettings of [
+    null, false, {}, { max_payload_bytes: 90_000 },
+    { ...canonical, normal_retention_days: "30" },
+    { ...canonical, restorable_retention_days: Number.NaN },
+    { ...canonical, compact_after_days: -1 },
+    { ...canonical, extra: true },
+  ]) {
+    const w = world();
+    const restore = freeze();
+    try {
+      const preload = {
+        settings: badSettings,
+        actorSnapshotJsonById: { "admin-1": actorSnapshot },
+      };
+      const planned = planAtomicAuditMutationBudget({
+        mutationStatements: [sql`SELECT 1`],
+        expectedMutationChanges: 0,
+        audits: [AUDIT],
+        callerQueryCount: 0,
+        preloaded: preload,
+      });
+      assert.equal(planned.preparationQueryCount, 1, "malformed settings must not earn a D1 query credit");
+      const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+      assert.ok(entry, "audit row must still be prepared with authoritative settings");
+      assert.equal(w.stats.reads.length, 1, "runtime must perform the same settings read planner charged");
+      assert.equal(entry.retention_class, "normal");
+    } finally {
+      restore();
+      w.sqlite.close();
+    }
+  }
+});
 
 test("Issue #669: corrupted preload JSON and non-string placeholders never bypass D1", async () => {
   const canonical = actorSnapshotFromRow(null);
