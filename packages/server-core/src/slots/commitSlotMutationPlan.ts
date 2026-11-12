@@ -41,6 +41,20 @@ export async function commitSlotMutationPlanCore(args: {
   const now = Math.floor(Date.now() / 1000);
   // Fail closed on empty or duplicate rows before acquiring Queue or D1
   // batch execution; the pure plan snapshots old and new column values.
+  // This core is shared by CURRENT and future Hono hosts. Never trust a
+  // caller-supplied plan to retarget another event or rewrite slot identity.
+  // Reject before the first D1/Queue read, not merely after a failed UPDATE.
+  const immutableColumns = ["id", "event_id", "version", "updated_at"] as const;
+  for (const mutation of args.mutations) {
+    if (immutableColumns.some((column) => Object.prototype.hasOwnProperty.call(mutation.patch, column))) {
+      throw new Error("slot_mutation_forbidden_identity_patch");
+    }
+    for (const row of mutation.rows) {
+      if (row.event_id !== args.eventId) {
+        throw new Error("slot_mutation_cross_event");
+      }
+    }
+  }
   const plan = buildSlotAtomicAuditPlan(args.mutations, now);
   const mutationStatements: BatchItem<"sqlite">[] = plan.updates.map(
     (mutation) =>
