@@ -449,10 +449,25 @@ test("Issue #669: incomplete or corrupted settings cannot earn a preload SELECT 
 
 test("Issue #669: corrupted preload JSON and non-string placeholders never bypass D1", async () => {
   const canonical = actorSnapshotFromRow(null);
+  const canonicalJson = JSON.stringify(canonical);
+  const duplicateKeyJson = canonicalJson.replace(
+    '"discord_id":null', '"discord_id":"forged","discord_id":null',
+  );
+  // Native JSON.parse treats the duplicate's last value as authoritative.
+  // Other JSON consumers can treat the same raw bytes differently.
+  assert.deepEqual(JSON.parse(duplicateKeyJson), canonical);
   for (const placeholder of [
     null, false, 42, {}, "", "null", "[]", "{}", "{broken-json",
     JSON.stringify({ ...canonical, extra: "injected" }),
     JSON.stringify({ ...canonical, icon_url: 17 }),
+    duplicateKeyJson,
+    " " + canonicalJson,
+    JSON.stringify({
+      icon_url: canonical.icon_url, x_name: canonical.x_name,
+      x_user_id: canonical.x_user_id, discord_name: canonical.discord_name,
+      discord_id: canonical.discord_id,
+    }),
+    canonicalJson.replace('"discord_id":null', '"disc\\u006frd_id":null'),
   ]) {
     const w = world();
     const restore = freeze();
