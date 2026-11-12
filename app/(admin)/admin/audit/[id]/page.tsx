@@ -56,13 +56,14 @@ export default async function AdminAuditDetailPage({
 
   const targetId = row.target_id;
 
-  // 同一 target_id の前後ナビ（created_at 順）
+  // 同一 table_name・target_id の前後ナビ（created_at 順）
   const [prevRows, nextRows] = await Promise.all([
     db
       .select({ id: auditLogs.id, created_at: auditLogs.created_at })
       .from(auditLogs)
       .where(
         and(
+          eq(auditLogs.table_name, row.table_name),
           eq(auditLogs.target_id, targetId),
           lt(auditLogs.created_at, row.created_at),
         ),
@@ -74,6 +75,7 @@ export default async function AdminAuditDetailPage({
       .from(auditLogs)
       .where(
         and(
+          eq(auditLogs.table_name, row.table_name),
           eq(auditLogs.target_id, targetId),
           gt(auditLogs.created_at, row.created_at),
         ),
@@ -120,7 +122,7 @@ export default async function AdminAuditDetailPage({
       />
 
       <nav
-        aria-label="同 target_id の前後遷移"
+        aria-label="同テーブル・同 target_id の前後遷移"
         style={{
           marginTop: 10,
           display: "flex",
@@ -146,7 +148,7 @@ export default async function AdminAuditDetailPage({
           </Link>
         ) : null}
         <Link
-          href={`/admin/audit?record=${encodeURIComponent(targetId)}`}
+          href={`/admin/audit?table=${encodeURIComponent(row.table_name)}&record=${encodeURIComponent(targetId)}`}
           className="fn-btn fn-btn-ghost fn-btn-sm"
         >
           同じ target_id を一覧表示
@@ -161,7 +163,7 @@ export default async function AdminAuditDetailPage({
           label="対象レコード ID"
           value={targetId}
           mono
-          link={`/admin/audit?record=${encodeURIComponent(targetId)}`}
+          link={`/admin/audit?table=${encodeURIComponent(row.table_name)}&record=${encodeURIComponent(targetId)}`}
         />
         <Meta
           label="実行者 user_id"
