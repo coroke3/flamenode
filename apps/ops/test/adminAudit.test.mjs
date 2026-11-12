@@ -267,6 +267,8 @@ test("MIG-0733 U02: detail page shows neighbor navigation, raw payload and gated
   assert.match(html,/変更履歴の読込完了後にリストア操作が利用できます/);
   assert.doesNotMatch(html,/リストア実行/);
   assert.match(html,/同じ target_id を一覧表示/);
+  // The target history list must not mix same-ID audit entries from unrelated tables.
+  assert.equal((html.match(/href="\/admin\/audit\?table=videos&amp;record=v1"/g)??[]).length,2);
   const bad=renderToStaticMarkup(React.createElement(AuditDetailContent,{
     id:"absent",api,state:{status:"notFound"},
   }));
