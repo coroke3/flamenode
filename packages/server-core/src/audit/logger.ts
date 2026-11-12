@@ -262,6 +262,29 @@ export function isValidPreloadedActorSnapshotJson(value: unknown): value is stri
   }
 }
 
+/**
+ * A preload may skip the settings SELECT only when it is the complete
+ * five-field settings snapshot the write guard supplies. Partial or malformed
+ * placeholders must pay for the authoritative D1 read.
+ */
+export function isValidPreloadedAuditSettings(value: unknown): value is AuditLogSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  const keys = [
+    "normal_retention_days",
+    "restorable_retention_days",
+    "long_audit_retention_days",
+    "max_payload_bytes",
+    "compact_after_days",
+  ] as const;
+  return Object.keys(row).length === keys.length &&
+    keys.every((key) => {
+      const field = row[key];
+      return Object.hasOwn(row, key) &&
+        typeof field === "number" && Number.isSafeInteger(field) && field >= 0;
+    });
+}
+
 /** Prepare audit entries with bounded queries independent of entry count. */
 export async function prepareAuditLogEntries(
   db: ServerCoreDb,
@@ -271,8 +294,10 @@ export async function prepareAuditLogEntries(
   const activeInputs = inputs.filter((input) => !BLOCKED_TABLES.has(input.table_name));
   if (activeInputs.length === 0) return inputs.map(() => null);
 
-  let settings = preloaded?.settings ?? DEFAULT_AUDIT_LOG_SETTINGS;
-  if (!preloaded?.settings) {
+  const preloadedSettings = preloaded?.settings;
+  const canReuseSettings = isValidPreloadedAuditSettings(preloadedSettings);
+  let settings: AuditLogSettings = canReuseSettings ? preloadedSettings : DEFAULT_AUDIT_LOG_SETTINGS;
+  if (!canReuseSettings) {
     try {
       settings = await getAuditLogSettings(db);
     } catch (error) {
