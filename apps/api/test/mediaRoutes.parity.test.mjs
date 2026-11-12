@@ -2,6 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { SLOT_SUBMISSION_ICON_LOOKUP_SQL } from "../src/routes/media/slotSubmissionIcon.ts";
 import { app } from "../src/app.ts";
 import {
   clearPublicMediaAccessCacheForTest,
@@ -498,5 +500,56 @@ test("T04 privacy: an existing image cache HIT never bypasses a revoked D1 ACL",
   } finally {
     if (previous) Object.defineProperty(globalThis, "caches", previous);
     else delete globalThis.caches;
+  }
+});
+
+
+test("private-video anonymous slot icon revocation: real SQLite joins and HTTP refuse stale public icon", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`
+      CREATE TABLE events (id TEXT PRIMARY KEY, slot_visibility_mode TEXT, visibility_status TEXT);
+      CREATE TABLE videos (id TEXT PRIMARY KEY, visibility_status TEXT, creator_icon_url TEXT);
+      CREATE TABLE slots (
+        id TEXT PRIMARY KEY, event_id TEXT, video_id TEXT,
+        status TEXT, reserved_by_user_id TEXT, x_user_id TEXT
+      );
+      INSERT INTO events VALUES ('evt-1', 'public_name', 'public');
+      INSERT INTO videos VALUES ('vid-1', 'public', 'https://images.example/icon.png');
+      INSERT INTO slots VALUES ('${SLOT}', 'evt-1', 'vid-1', 'submitted', 'u_owner', 'x_owner');
+    `);
+    const state = { reads: 0, objects: 0 };
+    const env = {
+      DB: {
+        prepare(query) {
+          assert.equal(query, SLOT_SUBMISSION_ICON_LOOKUP_SQL);
+          state.reads++;
+          return {
+            bind(slotId) {
+              return { first: async () => sqlite.prepare(query).get(slotId) ?? null };
+            },
+          };
+        },
+      },
+      BUCKET: {
+        async get() { state.objects++; throw new Error("R2 must never be touched for external icon"); },
+      },
+    };
+    const iconUrl = `/api/media/slot-submission-icon/${SLOT}`;
+    const publiclyVisible = await request(iconUrl, env);
+    assert.equal(publiclyVisible.status, 302);
+    assert.equal(publiclyVisible.headers.get("location"), "https://images.example/icon.png");
+    assert.equal(publiclyVisible.headers.get("cache-control"), "no-store");
+    sqlite.prepare("UPDATE videos SET visibility_status = 'private' WHERE id = 'vid-1'").run();
+    const revoked = await request(iconUrl, env);
+    assert.equal(revoked.status, 404, "a private video must revoke anonymous icon access immediately");
+    assert.equal(revoked.headers.get("cache-control"), "no-store");
+    assert.equal(state.reads, 2, "one fresh D1 access proof per request");
+    assert.equal(state.objects, 0, "neither HTTP response reads R2");
+    sqlite.prepare("UPDATE events SET slot_visibility_mode = 'anonymous' WHERE id = 'evt-1'").run();
+    const viewerRequired = await request(iconUrl, env);
+    assert.equal(viewerRequired.status, 404, "existing owner-only private mode remains gated");
+  } finally {
+    sqlite.close();
   }
 });
