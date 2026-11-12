@@ -319,6 +319,10 @@ export function buildSpreadsheetForeignKeyLookups(
     const seen = new Set<string>();
     for (const row of rows) {
       const value = row[foreignKey.column];
+      // This planner can also be called without a preceding row validator.
+      // SQLite TEXT bindings may truncate NUL, so a preflight SELECT must
+      // never authorize a different foreign-key value than was requested.
+      if (typeof value === "string" && value.includes("\0")) throw new Error("invalid_row");
       if (value == null || value === "" || seen.has(value)) continue;
       if (seen.size >= remainingValues) throw new Error("batch_too_large");
       seen.add(value);
