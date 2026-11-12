@@ -116,7 +116,11 @@ export function XIdRows({ rows }: { rows: AdminXUserRow[] }): React.ReactElement
     </FnTable>
   );
 }
-function UserListContent({ data, onSaved }: { data: AdminUsersResponse; onSaved: () => void }): React.ReactElement {
+function UserListContent({ data, onSaved, onAccessRevoked }: {
+  data: AdminUsersResponse;
+  onSaved: () => void;
+  onAccessRevoked: () => void;
+}): React.ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
   const view = normalizeUsersTab(searchParams.get("view"));
   const q = searchParams.get("q") ?? "";
@@ -141,7 +145,8 @@ function UserListContent({ data, onSaved }: { data: AdminUsersResponse; onSaved:
       </header>
       <AdminUserManagementTabs view={view} q={q} status={status} />
       {data.degraded ? <p role="alert">ユーザー情報を取得できませんでした。再度お試しください。</p> : null}
-      {view === "permissions" ? <GlobalEditableFieldsPanel settings={data.permissionSettings} onSaved={onSaved} /> : (
+      {view === "permissions" ? <GlobalEditableFieldsPanel settings={data.permissionSettings}
+        onSaved={onSaved} onAccessRevoked={onAccessRevoked} /> : (
         <>
           <form key={searchParams.toString()} action="/admin/users" onSubmit={(event) => {
             event.preventDefault(); submitFilters(event.currentTarget);
@@ -174,6 +179,7 @@ function UserListContent({ data, onSaved }: { data: AdminUsersResponse; onSaved:
 export function AdminUsers(): React.ReactElement {
   const [params] = useSearchParams();
   const [refreshKey, setRefreshKey] = React.useState(0);
+  const [writeDenied, setWriteDenied] = React.useState(false);
   const queryKey = params.toString();
   const query = {
     view: params.get("view"), q: params.get("q"),
@@ -187,10 +193,13 @@ export function AdminUsers(): React.ReactElement {
     "admin-users:" + queryKey, refreshKey,
   );
   React.useEffect(() => {
+    if (writeDenied) { window.location.assign("/dashboard"); return; }
     if (normalizeUsersTab(params.get("view")) === "links") window.location.assign("/admin/x-link-requests");
     if (result.status === "anonymous") window.location.assign("/entry");
     if (result.status === "forbidden") window.location.assign(result.redirect || "/dashboard");
-  }, [result, params]);
+  }, [result, params, writeDenied]);
+  // Hide the entire private users/permissions response on a denied policy write.
+  if (writeDenied) return <section role="alert">管理権限を確認できませんでした。</section>;
   if (result.status === "loading" || normalizeUsersTab(params.get("view")) === "links" ||
       result.status === "anonymous" || result.status === "forbidden") {
     return <div role="status" aria-busy="true">読み込み中...</div>;
@@ -202,5 +211,7 @@ export function AdminUsers(): React.ReactElement {
       <button type="button" className="fn-btn" onClick={() => setRefreshKey((x) => x + 1)}>再試行</button>
     </section>;
   }
-  return <UserListContent data={result.data} onSaved={() => setRefreshKey((x) => x + 1)} />;
+  return <UserListContent data={result.data}
+    onSaved={() => setRefreshKey((x) => x + 1)}
+    onAccessRevoked={() => setWriteDenied(true)} />;
 }

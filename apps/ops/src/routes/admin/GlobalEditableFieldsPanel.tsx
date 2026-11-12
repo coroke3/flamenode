@@ -4,7 +4,8 @@ import {
   GENERAL_EDITABLE_FIELD_KEYS, GENERAL_EDITABLE_FIELD_LABELS, GENERAL_EDITABLE_FIELD_HELP,
   parseGeneralEditableFields, type GeneralEditableFieldKey,
 } from "@flamenode/domain/video";
-import { send } from "../../api/write.js";
+import { sendAdminGuardedWrite } from "../../api/adminUserEdits.js";
+import type { OpsFetch } from "../../api/read.js";
 
 /**
  * MIG-0731 U01: CURRENT permissions are serialized as repeated checkbox keys,
@@ -40,6 +41,17 @@ export function isValidPermissionSaveResponse(value: unknown): value is SaveResp
     (row.message === undefined || typeof row.message === "string") &&
     (row.settings === undefined || AdminPermissionSettingsSchema.safeParse(row.settings).success);
 }
+/** The shared write transport does not classify 403. Preserve the forbidden signal here. */
+export function createEditableFieldsMutations(fetchFn: OpsFetch = (path, init) => fetch(path, init)) {
+  return {
+    save: (payload: ReturnType<typeof permissionsPayload>) =>
+      sendAdminGuardedWrite<SaveResponse>(
+        fetchFn, "PUT", "/api/admin/permissions/editable-fields", payload,
+      ),
+  };
+}
+const writes = createEditableFieldsMutations();
+
 /** Do not allow a second write before React has committed disabled=busy. */
 export function acquirePermissionSaveLock(ref: { current: boolean }): boolean {
   if (ref.current) return false;
@@ -47,8 +59,8 @@ export function acquirePermissionSaveLock(ref: { current: boolean }): boolean {
   return true;
 }
 export function GlobalEditableFieldsPanel({
-  settings, onSaved,
-}: { settings: AdminPermissionSettings; onSaved?: () => void }): React.ReactElement {
+  settings, onSaved, onAccessRevoked,
+}: { settings: AdminPermissionSettings; onSaved?: () => void; onAccessRevoked: () => void }): React.ReactElement {
   const [defaultFields, setDefaultFields] = React.useState(() => fieldsSetFromCsv(settings.default_editable_fields));
   const [upcomingFields, setUpcomingFields] = React.useState(() => fieldsSetFromCsv(settings.upcoming_editable_fields));
   const [busy, setBusy] = React.useState(false);
@@ -70,14 +82,13 @@ export function GlobalEditableFieldsPanel({
     setError("");
     setMessage("");
     try {
-      const result = await send<SaveResponse>(
-        (path, init) => fetch(path, init),
-        "PUT",
-        "/api/admin/permissions/editable-fields",
-        permissionsPayload(defaultFields, upcomingFields),
-      );
+      const result = await writes.save(permissionsPayload(defaultFields, upcomingFields));
       if (result.status === "anonymous") {
         window.location.assign("/entry");
+        return;
+      }
+      if (result.status === "forbidden") {
+        onAccessRevoked();
         return;
       }
       if (result.status !== "ok" || !isValidPermissionSaveResponse(result.data)) {

@@ -11,7 +11,7 @@ import { AdminUserDetailContent } from "../.test-dist/apps/ops/src/routes/admin/
 import { DiscordRows, XIdRows, formatAdminUserCreatedRelative } from "../.test-dist/apps/ops/src/routes/admin/AdminUsers.js";
 import { AdminUserEditContent, canConfirmUserBan, acquireAdminUserWriteLock } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
 import { createAdminUserEditMutations } from "../.test-dist/apps/ops/src/api/adminUserEdits.js";
-import { permissionsPayload, fieldsSetFromCsv, isValidPermissionSaveResponse, acquirePermissionSaveLock } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
+import { permissionsPayload, fieldsSetFromCsv, isValidPermissionSaveResponse, acquirePermissionSaveLock, createEditableFieldsMutations } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
 
 const response = (status, body) => new Response(JSON.stringify(body), {
   status, headers: { "content-type": "application/json" },
@@ -407,4 +407,62 @@ test("MIG-0731 U04: CURRENT detail hides Active X library counts when there is n
   assert.doesNotMatch(html, /Active X ライク:/);
   assert.doesNotMatch(html, /Active X ブックマーク:/);
   assert.match(html, /連携 X ID/);
+});
+
+test("MIG-0731 U04: every privileged user mutation invalidates access on 403 regardless of body", async () => {
+  for (const body of [{ ok: false, message: "Not authorized" }, { ok: true }, { error: "no access" }]) {
+    const calls = [];
+    const writes = createAdminUserEditMutations(async (path, init) => {
+      calls.push({ path, init });
+      return response(403, body);
+    });
+    for (const action of [
+      () => writes.setRole("u1", "moderator"),
+      () => writes.setBanned("u1", 1, "reason"),
+      () => writes.setNotifications("u1", 0),
+      () => writes.setCanCreateEvents("u1", 1),
+      () => writes.refreshXIcon("x1"),
+    ]) {
+      assert.deepEqual(await action(), { status: "forbidden" });
+    }
+    assert.equal(calls.length, 5);
+    assert.ok(calls.every(({ init }) => init.credentials === "same-origin" &&
+      init.cache === "no-store"));
+  }
+  const noJson = createAdminUserEditMutations(async () =>
+    new Response("forbidden", { status: 403, headers: { "content-type": "text/plain" } }));
+  assert.deepEqual(await noJson.setRole("u1", "user"), { status: "forbidden" });
+  const validError = createAdminUserEditMutations(async () => response(400, {
+    ok: false, message: "Invalid role",
+  }));
+  assert.deepEqual(await validError.setRole("u1", "user"),
+    { status: "ok", data: { ok: false, message: "Invalid role" } });
+});
+
+test("MIG-0731 U04: permission policy writes fail closed on 403 without changing shared transport", async () => {
+  const payload = permissionsPayload(new Set(["title"]), new Set());
+  const calls = [];
+  const denied = createEditableFieldsMutations(async (path, init) => {
+    calls.push({ path, init });
+    return response(403, { ok: false, message: "role revoked" });
+  });
+  assert.deepEqual(await denied.save(payload), { status: "forbidden" });
+  assert.deepEqual(calls.map((c) => c.path), ["/api/admin/permissions/editable-fields"]);
+  assert.equal(calls[0].init.method, "PUT");
+  assert.equal(calls[0].init.credentials, "same-origin");
+  assert.equal(calls[0].init.cache, "no-store");
+  assert.deepEqual(JSON.parse(calls[0].init.body), payload);
+
+  const malformedDenied = createEditableFieldsMutations(async () =>
+    new Response("no", { status: 403 }));
+  assert.deepEqual(await malformedDenied.save(payload), { status: "forbidden" });
+
+  const notLoggedIn = createEditableFieldsMutations(async () => response(401, {}));
+  assert.deepEqual(await notLoggedIn.save(payload), { status: "anonymous" });
+  const validationError = createEditableFieldsMutations(async () => response(400, {
+    ok: false, message: "Invalid payload",
+  }));
+  assert.deepEqual(await validationError.save(payload), {
+    status: "ok", data: { ok: false, message: "Invalid payload" },
+  });
 });

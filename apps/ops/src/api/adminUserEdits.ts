@@ -4,11 +4,33 @@ import { send, type OpsWriteResult } from "./write.js";
 import type { OpsFetch } from "./read.js";
 
 export type UserAdminRole = "user" | "moderator" | "admin";
-export type UserEditResult = OpsWriteResult<AdminOpsResult>;
+export type AdminGuardedWriteResult<T extends { ok: boolean }> =
+  OpsWriteResult<T> | { status: "forbidden" };
+export type UserEditResult = AdminGuardedWriteResult<AdminOpsResult>;
+
+/**
+ * Keep generic Ops send() untouched (MIG-0707 ownership). A privileged 403
+ * must invalidate the mounted admin view even when its body says {ok:false}
+ * or is not JSON. Other 4xx application errors retain their message.
+ */
+export async function sendAdminGuardedWrite<T extends { ok: boolean }>(
+  fetchFn: OpsFetch,
+  method: "POST" | "PUT",
+  path: string,
+  body: object,
+): Promise<AdminGuardedWriteResult<T>> {
+  let forbidden = false;
+  const result = await send<T>(async (url, init) => {
+    const response = await fetchFn(url, init);
+    if (response.status === 403) forbidden = true;
+    return response;
+  }, method, path, body);
+  return forbidden ? { status: "forbidden" } : result;
+}
 
 export function createAdminUserEditMutations(fetchFn: OpsFetch = (path, init) => fetch(path, init)) {
   const write = async (path: string, body: object): Promise<UserEditResult> => {
-    const result = await send<AdminOpsResult>(fetchFn, "POST", path, body);
+    const result = await sendAdminGuardedWrite<AdminOpsResult>(fetchFn, "POST", path, body);
     if (result.status !== "ok") return result;
     const parsed = AdminOpsResultSchema.safeParse(result.data);
     return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
