@@ -8,6 +8,7 @@ import {
   normalizePrimaryKeyRecord,
   primaryKeyFingerprint,
   primaryKeyFromRowValues,
+  findRowIndexByPrimaryKey,
   buildPrimaryKeyFromDisplayRow,
   buildSpreadsheetInsertPayload,
   canEditSpreadsheetGridCell,
@@ -88,4 +89,21 @@ test("canEditSpreadsheetGridCell blocks pk and secret columns", () => {
 test("buildPrimaryKeyFromDisplayRow stringifies object cells", () => {
   const pk = buildPrimaryKeyFromDisplayRow({ meta: { a: 1 } }, ["meta"]);
   assert.equal(pk.meta, '{"a":1}');
+});
+
+
+test("CURRENT composite PK fingerprints distinguish NUL delimiter collisions", () => {
+  // Legacy format yielded "c\0a\0b" for both different tuples.
+  const left = { event_id: "c", video_id: "a\0b" };
+  const right = { event_id: "c\0a", video_id: "b" };
+  assert.notEqual(primaryKeyFingerprint(left), primaryKeyFingerprint(right));
+  assert.notEqual(primaryKeyFingerprint({ a: "one" }), primaryKeyFingerprint({ b: "one" }));
+  assert.equal(primaryKeyFingerprint({ x: "1", y: "2" }), primaryKeyFingerprint({ y: "2", x: "1" }));
+  assert.equal(findRowIndexByPrimaryKey([left, right], ["event_id", "video_id"], right), 1);
+});
+
+test("CURRENT PK normalization rejects embedded NUL before SQLite binding", () => {
+  assert.throws(() => normalizePrimaryKeyRecord(["id"], { id: "a\0b" }), /invalid_row/);
+  assert.throws(() => primaryKeyFromRowValues({ id: "a\0b" }, ["id"]), /invalid_row/);
+  assert.deepEqual(normalizePrimaryKeyRecord(["id"], { id: "normal-id" }), { id: "normal-id" });
 });
