@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const slotAction = fs.readFileSync("src/lib/actions/slot.ts", "utf8");
+const slotAtomicCore = fs.readFileSync(
+  "packages/server-core/src/slots/commitSlotMutationPlan.ts",
+  "utf8",
+);
 const regroupCanonical = fs.readFileSync(
   "packages/domain/src/slots/regroupMutations.ts",
   "utf8",
@@ -38,8 +42,10 @@ test("X ID limit uses slots as source of truth and an atomic post-update guard",
 });
 
 test("notification queue is not woken by a non-notification guard", () => {
-  assert.match(slotAction, /const wakeNotification = args\.notificationWakeSource;/);
-  assert.doesNotMatch(slotAction, /extra\.length > 0 \? "web"/);
+  assert.match(slotAction, /commitSlotMutationPlanCore/);
+  assert.match(slotAtomicCore, /const wakeNotification = args\.notificationWakeSource;/);
+  assert.match(slotAtomicCore, /notificationWakeSource:\s*wakeNotification/);
+  assert.doesNotMatch(slotAtomicCore, /extra\.length > 0 \? "web"/);
 });
 
 test("migration keeps existing events backward compatible and indexes the hot path", () => {
