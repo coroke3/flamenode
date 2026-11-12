@@ -81,7 +81,7 @@ test("MIG-0659 response DTO preserves valid explicit error status while rejectin
 test("MIG-0709 U01: shared write handles network loss, invalid 401 and deceptive HTTP errors", async () => {
   const offline = createXidRequestsApi(async () => { throw new Error("offline"); });
   assert.deepEqual(await offline.requestLink("alice"), {
-    ok: false, message: "申請の保存に失敗しました。時間をおいて再試行してください.",
+    ok: false, message: "申請の保存に失敗しました。時間をおいて再試行してください。",
   });
   const unauthorized = createXidRequestsApi(async () => new Response(JSON.stringify({ ok: true, message: "success" }), { status: 401 }));
   assert.deepEqual(await unauthorized.cancelRequest("id1"), {
