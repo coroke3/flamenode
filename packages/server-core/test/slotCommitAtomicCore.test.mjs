@@ -41,3 +41,64 @@ test("MIG-0657 U01i: duplicate slot IDs reject before any SQL or wake plan", () 
   assert.match(source, /const plan = buildSlotAtomicAuditPlan\(args\.mutations, now\)/);
   assert.ok(source.indexOf("const plan = buildSlotAtomicAuditPlan") < source.indexOf("const queue = await buildSlotChangeQueueBatch"));
 });
+
+
+test("MIG-0657 U01j: cross-event source rows fail before D1 and Queue access", async () => {
+  const { commitSlotMutationPlanCore } = await import("../src/slots/commitSlotMutationPlan.ts");
+  let touches = 0;
+  const inaccessibleDb = new Proxy({}, { get() { touches++; throw new Error("unexpected D1 access"); } });
+  const loadWakeHost = async () => { touches++; throw new Error("unexpected Queue access"); };
+  const row = (id, event_id) => ({ id, event_id, version: 1, updated_at: 100, status: "available" });
+  for (const rows of [
+    [row("foreign", "another-event")],
+    [row("valid", "evt"), row("foreign", "another-event")],
+  ]) {
+    await assert.rejects(
+      commitSlotMutationPlanCore({
+        db: inaccessibleDb, eventId: "evt", actorUserId: "actor", reason: "slot_user_reserve",
+        mutations: [{ rows, patch: { status: "reserved" }, statusGuard: "available" }],
+        loadWakeHost,
+      }),
+      /slot_mutation_cross_event/,
+    );
+    assert.equal(touches, 0, "invalid plan must not touch D1, audit or Queue");
+  }
+});
+
+test("MIG-0657 U01j: immutable slot columns cannot be supplied in mutation patches", async () => {
+  const { commitSlotMutationPlanCore } = await import("../src/slots/commitSlotMutationPlan.ts");
+  let touches = 0;
+  const inaccessibleDb = new Proxy({}, { get() { touches++; throw new Error("unexpected D1 access"); } });
+  const row = { id: "slot", event_id: "evt", version: 1, updated_at: 100, status: "available" };
+  for (const column of ["id", "event_id", "version", "updated_at"]) {
+    await assert.rejects(
+      commitSlotMutationPlanCore({
+        db: inaccessibleDb, eventId: "evt", actorUserId: "actor", reason: "slot_user_reserve",
+        mutations: [{ rows: [row], patch: { status: "reserved", [column]: undefined }, statusGuard: "available" }],
+        loadWakeHost: async () => { throw new Error("unexpected Queue access"); },
+      }),
+      /slot_mutation_forbidden_identity_patch/,
+      column,
+    );
+    assert.equal(touches, 0, column + " must fail before any D1 access");
+  }
+});
+
+test("MIG-0657 U01j: ordinary same-event status patch reaches the D1 builder", async () => {
+  const { commitSlotMutationPlanCore } = await import("../src/slots/commitSlotMutationPlan.ts");
+  let calls = 0;
+  const db = { update() { calls++; throw new Error("reached D1 update builder"); } };
+  await assert.rejects(
+    commitSlotMutationPlanCore({
+      db, eventId: "evt", actorUserId: "actor", reason: "slot_user_reserve",
+      mutations: [{
+        rows: [{ id: "slot", event_id: "evt", version: 1, updated_at: 100, status: "available" }],
+        patch: { status: "reserved", display_name: "name" },
+        statusGuard: "available",
+      }],
+      loadWakeHost: async () => { throw new Error("unexpected Queue access"); },
+    }),
+    /reached D1 update builder/,
+  );
+  assert.equal(calls, 1, "ordinary CURRENT-style mutations are not rejected");
+});
