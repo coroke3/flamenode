@@ -363,3 +363,38 @@ test("SA-082/083/084 deny an unauthorized user before mutation/audit/queue", asy
     s.sqlite.close();
   }
 });
+
+
+test("SA-082/083/084 edit_video CostGuard rejects disabled feature before permission D1 reads", async () => {
+  const s = integration();
+  try {
+    s.sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+      .run(JSON.stringify(["edit_video"]));
+    const attempts = [
+      ["POST", "/api/videos/v_pub/collaborators", {
+        video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_other",
+        display_name: "Other", can_edit: "1",
+      }],
+      ["DELETE", "/api/videos/v_pub/collaborators", {
+        video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_other",
+      }],
+      ["POST", "/api/videos/v_pub/collaborators/batch", {
+        video_id: "v_pub", edit_privilege_mode: "admin",
+        intents: [{ x_user_id: "x_other", display_name: "Other", intent: "on" }],
+      }],
+    ];
+    for (const [method, path, body] of attempts) {
+      const res = await s.send(method, path, body);
+      assert.equal(res.status, 503, await res.clone().text());
+      assert.equal((await res.json()).reason, "cost_guard_blocked");
+      assert.equal(res.headers.get("cache-control"), "private, no-store");
+    }
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("video_members"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(s.wakeLoads(), 0);
+  } finally {
+    s.sqlite.close();
+  }
+});
