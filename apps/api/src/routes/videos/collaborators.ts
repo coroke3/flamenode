@@ -87,6 +87,25 @@ function hasCompleteWriteContext(c: Ctx): boolean {
 }
 
 /**
+ * The D1 transaction is already committed when mutateWithAudit asks for the
+ * Queue port. A missing runtime binding must not convert a successful write
+ * into an HTTP 500 (and induce a dangerous client retry).
+ */
+async function loadWakeHostBestEffort(host: VideoCollaboratorHost, c: Ctx): Promise<QueueWakeHost> {
+  try {
+    return await host.loadWakeHost(c);
+  } catch {
+    // sendQueueWakeBestEffort handles a null environment as dispatch-disabled.
+    // The durable notification/static rebuild rows stay pending for recovery.
+    return {
+      readEnv: () => null,
+      readWaitUntil: () => null,
+      readKv: () => null,
+    };
+  }
+}
+
+/**
  * This helper uses ONLY the request-scoped Drizzle handle supplied by the
  * authenticated write stack. It must never fetch a second D1 binding.
  */
@@ -184,7 +203,7 @@ async function executePermissionWrite(
       preloaded: auditPreloaded(c),
       notificationWakeSource,
       staticRebuildWakeSource: queue.statements.length > 0 ? "manage" : undefined,
-    }, () => host.loadWakeHost(c));
+    }, () => loadWakeHostBestEffort(host, c));
 
     return response(c, 200, {
       ok: true,
