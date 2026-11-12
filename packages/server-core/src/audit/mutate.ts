@@ -8,6 +8,7 @@ import { wakeStaticRebuildQueueAfterCommit } from "../queues/wakeStaticRebuildQu
 import type { WriteAuditLogInput } from "./types.ts";
 import {
   prepareAuditLogEntries,
+  isValidPreloadedActorSnapshotJson,
   type PreloadedAuditContext,
   type PreparedAuditLogEntry,
 } from "./logger.ts";
@@ -137,11 +138,10 @@ export function planAtomicAuditMutationBudget(
     ? 1
     : 0;
   const distinctActors = new Set(input.audits.map((audit) => audit.actor_user_id));
-  // The logger checks this exact per-actor key and skips a D1 SELECT only
-  // when it is present. Never infer a credit merely because a preload map
-  // exists (it may contain another actor's snapshot).
+  // The logger and planner apply identical shape checks. Invalid JSON or
+  // incomplete actor snapshots must never earn a D1-query credit.
   const preloadedActorCount = [...distinctActors].filter((actorId) =>
-    typeof input.preloaded?.actorSnapshotJsonById?.[actorId] === "string"
+    isValidPreloadedActorSnapshotJson(input.preloaded?.actorSnapshotJsonById?.[actorId])
   ).length;
   return planD1AuditMutationBudget({
     mutationStatementCount: input.mutationStatements.length,
