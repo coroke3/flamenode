@@ -152,7 +152,7 @@ export function AdminUserDetailContent({ data }: { data: AdminUserDetailResponse
                 ? "fn-badge-danger" : "fn-badge-warning")}>{r.status ?? "pending"}</span></td>
             <td className="fn-muted fn-td-muted">{formatAdminUserCreatedRelative(r.requested_at)}</td>
           </tr>)}</tbody>
-        </FnTable>
+        </FnTable>}
     </section>
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
       <h2>このユーザーへの管理操作 (target_id 一致)</h2>
