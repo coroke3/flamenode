@@ -337,6 +337,9 @@ export async function renameEventId(
     renameTombstone = await preCommitEventVisibilityRenameTombstone({
       eventId: oldId,
       fenceToken: renameTombstoneToken,
+      // The copied R2 fence is still the old-ID owner. If a concurrent writer
+      // replaces it before tombstone CAS, fail closed instead of rotating theirs.
+      expectedPreviousFenceToken: manifestRename?.previousOldEntry?.fence_token ?? null,
       reason: "event_id_rename_old_cleanup",
     });
   } catch (error) {

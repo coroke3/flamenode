@@ -518,3 +518,72 @@ test("Visibility tombstone: valid single-token rotation preserves previous entry
   assert.equal(rotated.reason, "preserve");
   assert.deepEqual(state.manifest.entities.find((x) => x.entity_id === "video-safe"), video);
 });
+
+test("Visibility tombstone: expected prior token rejects a different single old-ID owner before R2 PUT", async () => {
+  const foreign = entry("event", "event-old", "concurrent-owner");
+  const state = hostOf(manifestOf(foreign));
+  await assert.rejects(
+    preCommitEventVisibilityRenameTombstone({
+      eventId: "event-old", fenceToken: "rotated", expectedPreviousFenceToken: "trusted-owner",
+    }, state.host),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 0);
+  assert.deepEqual(state.manifest.entities, [foreign]);
+});
+
+test("Visibility tombstone: expected prior token rejects a concurrent single-owner CAS replacement", async () => {
+  const trusted = entry("event", "event-old", "trusted-owner");
+  const foreign = entry("event", "event-old", "race-owner");
+  const state = hostOf(manifestOf(trusted), (latest) => ({
+    ...latest, entities: [foreign],
+  }));
+  await assert.rejects(
+    preCommitEventVisibilityRenameTombstone({
+      eventId: "event-old", fenceToken: "rotated", expectedPreviousFenceToken: "trusted-owner",
+    }, state.host),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.callbacks, 1);
+  assert.equal(state.appliedWrites, 0);
+  assert.deepEqual(state.manifest.entities, [foreign]);
+});
+
+test("Visibility tombstone: expected no previous token rejects a stray R2 old-ID block", async () => {
+  const foreign = entry("event", "event-old", "orphaned-owner");
+  const state = hostOf(manifestOf(foreign));
+  await assert.rejects(
+    preCommitEventVisibilityRenameTombstone({
+      eventId: "event-old", fenceToken: "rotated", expectedPreviousFenceToken: null,
+    }, state.host),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 0);
+  assert.deepEqual(state.manifest.entities, [foreign]);
+});
+
+test("Visibility tombstone: matching explicit prior token permits safe rotation", async () => {
+  const prior = entry("event", "event-old", "trusted-owner");
+  const state = hostOf(manifestOf(prior));
+  const result = await preCommitEventVisibilityRenameTombstone({
+    eventId: "event-old", fenceToken: "rotated", expectedPreviousFenceToken: "trusted-owner",
+  }, state.host);
+  assert.deepEqual(result.previousEntry, prior);
+  assert.equal(state.appliedWrites, 1);
+  assert.equal(state.manifest.entities.find((x) => x.entity_id === "event-old").fence_token, "rotated");
+});
+
+test("Visibility tombstone: vanished expected token is not treated as permission to rotate", async () => {
+  const prior = entry("event", "event-old", "trusted-owner");
+  const state = hostOf(manifestOf(prior), (latest) => ({
+    ...latest, entities: [],
+  }));
+  await assert.rejects(
+    preCommitEventVisibilityRenameTombstone({
+      eventId: "event-old", fenceToken: "rotated", expectedPreviousFenceToken: "trusted-owner",
+    }, state.host),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.callbacks, 1);
+  assert.equal(state.appliedWrites, 0);
+});
