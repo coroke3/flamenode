@@ -994,6 +994,7 @@ test("SA-030 U04 staged: real SQLite DELETE, full restorable audit and queue are
   try {
     const response = await h.remove();
     assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", "admin mutation success is never shared-cacheable");
     assert.deepEqual(await response.json(), { ok: true, id: "grp-1" });
     assert.equal(h.count("event_group_events"), 0);
     assert.equal(h.count("audit_logs"), 1);
@@ -1024,6 +1025,7 @@ test("SA-030 U04 staged: joined CostGuard snapshot denies maintenance mode befor
   try {
     const response = await h.remove();
     assert.equal(response.status, 503);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", "admin CostGuard denial is never cacheable");
     assert.equal((await response.json()).reason, "maintenance_mode");
     assert.equal(h.count("event_group_events"), 1);
     assert.equal(h.count("audit_logs"), 0);
@@ -1040,6 +1042,7 @@ test("SA-030 U04 staged: stale CAS rolls back relation, queue and audit together
   try {
     const response = await h.remove();
     assert.equal(response.status, 500);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", "admin CAS-failure response is never cacheable");
     assert.equal((await response.json()).ok, false);
     assert.equal(h.sqlite.prepare("SELECT updated_at FROM event_group_events").get().updated_at, 201);
     assert.equal(h.count("audit_logs"), 0);
