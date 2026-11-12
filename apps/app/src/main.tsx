@@ -7,6 +7,7 @@ import "./styles/video-card.css";
 import "./styles/dashboard.css";
 import "./styles/settings.css";
 import "./styles/onboarding.css";
+import "./styles/entry.css";
 import "./styles/xid-requests.css";
 import "./styles/video-members.css";
 import "./styles/forms-a.css";
