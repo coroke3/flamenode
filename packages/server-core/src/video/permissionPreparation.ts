@@ -1,5 +1,6 @@
 import { prepareCollaboratorPermissionIntents, type CollaboratorPermissionIntent } from "@flamenode/domain/video";
 import { normalizeXId } from "@flamenode/domain/xid";
+import { MAX_COLLABORATOR_PERMISSION_BATCH } from "@flamenode/domain/video/atomicLimits";
 import type { ServerCoreDb } from "../db.ts";
 import { canonicalizePermissionIntents } from "./permissionCanonicalize.ts";
 import { loadPermissionMembersRead } from "./permissionMembersRead.ts";
@@ -23,6 +24,11 @@ export async function preparePermissionWrite(
     makeMemberId: () => string;
   },
 ) {
+  // Enforce the request cap before alias canonicalization can read D1.
+  // The post-alias domain guard remains a second boundary for direct callers.
+  if (input.intents.length > MAX_COLLABORATOR_PERMISSION_BATCH) {
+    return { kind: "error" as const, message: "権限指定が多すぎます。" };
+  }
   const canonicalIntents = await canonicalizePermissionIntents(db, input.intents);
   const prepared = prepareCollaboratorPermissionIntents(canonicalIntents);
   if (!prepared.ok) return { kind: "error" as const, message: prepared.message };

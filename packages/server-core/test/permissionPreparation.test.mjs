@@ -94,3 +94,16 @@ test("SA-084 shared preflight rejects a rejected canonical X before member reads
     assert.equal(f.sqlite.prepare("SELECT approval_status FROM x_users WHERE id='blocked'").get().approval_status, "rejected");
   } finally { f.sqlite.close(); }
 });
+
+test("SA-084 shared preflight denies 101 intents before alias D1 lookup", async () => {
+  const overLimit = Array.from({ length: 101 }, (_, i) => ({
+    x_user_id: `u${i}`, display_name: "User", intent: "on",
+  }));
+  // A null DB handle fails immediately if the preflight performs any alias read.
+  const result = await preparePermissionWrite(null, {
+    ...args,
+    makeMemberId: () => { throw new Error("must_not_allocate_member_id"); },
+    intents: overLimit,
+  });
+  assert.deepEqual(result, { kind: "error", message: "権限指定が多すぎます。" });
+});
