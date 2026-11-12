@@ -1332,6 +1332,8 @@ stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
       ],
       expectedMutationChanges: [1, ...queue.expectedChanges],
       preloaded: auditPreloaded(c),
+      // Keep the execution budget identical to the validated S4 + ToS + joined read plan.
+      callerQueryCount: 3,
       audits: [{
         table_name: "event_group_events",
         target_id: `${groupId}:${eventId}`,
