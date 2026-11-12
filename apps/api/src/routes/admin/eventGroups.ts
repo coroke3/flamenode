@@ -704,10 +704,16 @@ stagedEventGroupWriteRoutes.post("/", async (c) => {
     return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
   }
 
-  const rawBucket = c.env.BUCKET;
-  const bucket = rawBucket as unknown as VisibilityManifestBucket | undefined;
-  if (fenceToken && !bucket) {
-    return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+  // Private-only mutations never need an R2 binding. A throwing getter
+  // on a public-boundary mutation fails closed before any D1/R2 write.
+  let bucket: VisibilityManifestBucket | undefined;
+  if (fenceToken) {
+    try {
+      bucket = c.env.BUCKET as unknown as VisibilityManifestBucket | undefined;
+    } catch {
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+    }
+    if (!bucket) return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
   }
   const fenceHost = bucket ? {
     manifest: {
@@ -931,10 +937,16 @@ stagedEventGroupWriteRoutes.patch("/:id", async (c) => {
       return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
     }
 
-    const rawBucket = c.env.BUCKET;
-    const bucket = rawBucket as unknown as VisibilityManifestBucket | undefined;
-    if (fenceToken && !bucket) {
-      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+    // Private-only mutations never need an R2 binding. A throwing getter
+    // on a public-boundary mutation fails closed before any D1/R2 write.
+    let bucket: VisibilityManifestBucket | undefined;
+    if (fenceToken) {
+      try {
+        bucket = c.env.BUCKET as unknown as VisibilityManifestBucket | undefined;
+      } catch {
+        return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+      }
+      if (!bucket) return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
     }
     const fenceHost = bucket ? {
       manifest: {
@@ -1210,10 +1222,16 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
       return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
     }
 
-    const rawBucket = c.env.BUCKET;
-    const bucket = rawBucket as unknown as VisibilityManifestBucket | undefined;
-    if (fenceToken && !bucket) {
-      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+    // Private-only mutations never need an R2 binding. A throwing getter
+    // on a public-boundary mutation fails closed before any D1/R2 write.
+    let bucket: VisibilityManifestBucket | undefined;
+    if (fenceToken) {
+      try {
+        bucket = c.env.BUCKET as unknown as VisibilityManifestBucket | undefined;
+      } catch {
+        return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+      }
+      if (!bucket) return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
     }
     const fenceHost = bucket ? {
       manifest: {
