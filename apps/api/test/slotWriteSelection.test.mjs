@@ -21,6 +21,18 @@ test("MIG-0656 U02b-1: exact ID and event selection; labels include submitted, d
   ]) assert.equal(selectSlotBatchRows("event_1", ids, rows, "release-reserved").ok, false, JSON.stringify(ids));
 });
 
+test("MIG-0656 U02b-1: unknown runtime operation kind fails closed", () => {
+  // A public type union is not a runtime guarantee. A reserved row must not
+  // be accepted as a release for an unrecognized operation from a JS caller.
+  for (const kind of ["unexpected", "", null, undefined]) {
+    assert.deepEqual(selectSlotBatchRows("event_1", ["a"], [row("a")], kind), {
+      ok: false, message: "不正な枠操作です。",
+    }, String(kind));
+  }
+  assert.equal(selectSlotBatchRows("event_1", ["a"], [row("a")], "release-reserved").ok, true);
+  assert.equal(selectSlotBatchRows("event_1", ["a"], [row("a")], "update-labels").ok, true);
+});
+
 test("MIG-0656 U02b-1: group expansion includes all authoritative members and retains raw group key", () => {
   const a = row("a", "  group ");
   const b = row("b", "  group ");
