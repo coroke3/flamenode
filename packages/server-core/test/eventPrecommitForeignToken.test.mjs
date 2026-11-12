@@ -13,7 +13,7 @@ const entry = (entity_type, entity_id, fence_token) => ({
 const manifestOf = (...entities) => ({
   schema_version: 1, revision: 1, generated_at: 100, entities,
 });
-function hostOf(initial, race = null) {
+function hostOf(initial, race = null, afterWrite = null) {
   let current = structuredClone(initial);
   let etag = 1;
   let attemptedWrites = 0;
@@ -43,6 +43,12 @@ function hostOf(initial, race = null) {
         current = structuredClone(resolved);
         etag += 1;
         appliedWrites += 1;
+        // Simulate an unrelated R2 writer changing the manifest after our
+        // successful CAS but before the confirm GET.
+        if (afterWrite && appliedWrites === 1) {
+          current = afterWrite(structuredClone(current));
+          etag += 1;
+        }
       },
     },
   };
@@ -286,4 +292,44 @@ test("Visibility compensation: same-token duplicates can be released without rem
   assert.deepEqual(released.entities, [unrelated]);
   assert.equal(released.revision, 2);
   assert.equal(released.generated_at, 200);
+});
+
+test("Visibility CAS: event confirmation refuses a foreign duplicate added after successful PUT", async () => {
+  const state = hostOf(manifestOf(other), null, latest => ({
+    ...latest, entities: [...latest.entities, foreign],
+  }));
+  await assert.rejects(write(state), /public_visibility_fence_token_mismatch/);
+  assert.equal(state.attemptedWrites, 1);
+  assert.equal(state.appliedWrites, 1);
+  assert.equal(state.reads, 2);
+  assert.deepEqual(state.manifest.entities.find(x => x.fence_token === "earlier-writer"), foreign);
+});
+
+test("Visibility CAS: generic event-group confirmation refuses a post-PUT foreign duplicate", async () => {
+  const state = hostOf(manifestOf(), null, latest => ({
+    ...latest, entities: [...latest.entities, entry("event_group", "group-one", "foreign")],
+  }));
+  await assert.rejects(
+    preCommitPublicVisibilityFence(
+      { entityType: "event_group", entityId: "group-one", fenceToken: "incoming" },
+      state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 1);
+  assert.equal(state.reads, 2);
+});
+
+test("Visibility CAS: video confirmation refuses a post-PUT foreign duplicate", async () => {
+  const state = hostOf(manifestOf(), null, latest => ({
+    ...latest, entities: [...latest.entities, entry("video", "video-one", "foreign")],
+  }));
+  await assert.rejects(
+    preCommitVideoVisibilityDepublicization(
+      { videoId: "video-one", fenceToken: "incoming" }, state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 1);
+  assert.equal(state.reads, 2);
 });
