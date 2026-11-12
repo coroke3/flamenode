@@ -23,7 +23,7 @@ const validRow = {
   creator_icon_url: "/api/media/video-icons/owner/icon.png",
 };
 
-function bindings({ allowed = 1, row = validRow, r2Fail = false, d1Fail = false, sessionUser = null, bucket = true } = {}) {
+function bindings({ allowed = 1, row = validRow, r2Fail = false, r2Missing = false, d1Fail = false, sessionUser = null, bucket = true } = {}) {
   const calls = { queries: [], objects: [], session: 0 };
   const env = {
     AUTH_SECRET: SIGNING_SECRET,
@@ -62,6 +62,7 @@ function bindings({ allowed = 1, row = validRow, r2Fail = false, d1Fail = false,
       async get(key) {
         calls.objects.push(key);
         if (r2Fail) throw Error("r2 down");
+        if (r2Missing) return null;
         return {
           size: bytes.byteLength,
           body: bytes,
@@ -108,6 +109,32 @@ test("T01 invalid external/traversal key rejects before touching D1/R2", async (
   }
   assert.equal(calls.queries.length, 0);
   assert.equal(calls.objects.length, 0);
+});
+
+test("RH-023: Hono never caches temporary public-image 404 before later republish", async () => {
+  const url = "/api/media/event-icons/republish/image.png";
+  const invalid = bindings();
+  const badPath = await request("/api/media/private/hidden.png", invalid.env);
+  assert.equal(badPath.status, 404);
+  assert.equal(badPath.headers.get("cache-control"), "no-store");
+  assert.equal(badPath.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(invalid.calls.queries.length, 0);
+  const restricted = bindings({ allowed: 0 });
+  const denied = await request(url, restricted.env, { "If-None-Match": '"test-etag"' });
+  assert.equal(denied.status, 404, "conditional GET must not transform a revoked image into 304");
+  assert.equal(denied.headers.get("cache-control"), "no-store");
+  assert.equal(denied.headers.get("x-content-type-options"), "nosniff");
+  assert.deepEqual(restricted.calls.objects, []);
+  const missing = bindings({ r2Missing: true });
+  const missingResponse = await request(url, missing.env);
+  assert.equal(missingResponse.status, 404);
+  assert.equal(missingResponse.headers.get("cache-control"), "no-store");
+  assert.deepEqual(missing.calls.objects, ["event-icons/republish/image.png"]);
+  const republished = bindings({ allowed: 1 });
+  const restored = await request(url, republished.env);
+  assert.equal(restored.status, 200);
+  assert.equal(restored.headers.get("cache-control"), "no-store");
+  assert.equal(republished.calls.queries.length, 1);
 });
 
 test("T04 public ACL before R2 and failure -> 503 with retry header", async () => {
