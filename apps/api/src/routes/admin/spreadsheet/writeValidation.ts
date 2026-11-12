@@ -516,8 +516,9 @@ export const SPREADSHEET_IMPORT_APPLY_MAX_ROWS = 7;
  * Encode sorted [column, value] pairs instead so duplicate detection, D1
  * snapshot lookup and UPSERT planning share one unambiguous identity.
  */
-function spreadsheetImportPrimaryKeyFingerprint(pk: Record<string, string>): string {
-  return JSON.stringify(Object.entries(pk).sort(([a], [b]) => a.localeCompare(b)));
+export function spreadsheetImportPrimaryKeyFingerprint(pk: Record<string, string>): string {
+  // Use code-unit order: localeCompare can equate distinct Unicode column names.
+  return JSON.stringify(Object.entries(pk).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
 export interface PreparedSpreadsheetImportRow {
