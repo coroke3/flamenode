@@ -117,23 +117,47 @@ export function useApiResult<T>(
   api: PersonalApi,
   key: string,
   load: (api: PersonalApi, signal: AbortSignal) => Promise<ApiResult<T>>,
+  refreshKey = 0,
 ): DataState<T> {
-  const [state, setState] = React.useState<DataState<T>>(LOADING);
+  const [snapshot, setSnapshot] = React.useState<{
+    api: PersonalApi;
+    key: string;
+    state: DataState<T>;
+  } | null>(null);
   const loadRef = React.useRef(load);
   loadRef.current = load;
+  const snapshotRef = React.useRef(snapshot);
+  snapshotRef.current = snapshot;
+
+  // Hide a previous identity synchronously during render. Waiting for the effect
+  // to set LOADING would briefly expose private data from the previous API client.
+  const state =
+    snapshot?.api === api && snapshot.key === key ? snapshot.state : LOADING;
+
   React.useEffect(() => {
     const ctrl = new AbortController();
-    setState(LOADING);
+    // Only an already successful snapshot for this exact identity qualifies for
+    // silent refresh. This also makes StrictMode's initial effect replay non-silent.
+    const previous = snapshotRef.current;
+    const silent =
+      previous?.api === api &&
+      previous.key === key &&
+      previous.state.status === "ok";
+    if (!silent) setSnapshot({ api, key, state: LOADING });
     loadRef.current(api, ctrl.signal).then(
-      (r) => {
-        if (!ctrl.signal.aborted) setState(r);
+      (result) => {
+        if (!ctrl.signal.aborted && (!silent || result.status === "ok")) {
+          setSnapshot({ api, key, state: result });
+        }
       },
       () => {
-        if (!ctrl.signal.aborted) setState({ status: "unavailable" });
+        if (!ctrl.signal.aborted && !silent) {
+          setSnapshot({ api, key, state: { status: "unavailable" } });
+        }
       },
     );
     return () => ctrl.abort();
-  }, [api, key]);
+  }, [api, key, refreshKey]);
   return state;
 }
 
@@ -157,15 +181,23 @@ export function ResultView<T>({
 }
 
 export function useSession(api: PersonalApi): SessionState {
-  const [state, setState] = React.useState<SessionState>({ status: "loading" });
+  const [snapshot, setSnapshot] = React.useState<{
+    api: PersonalApi;
+    state: SessionState;
+  } | null>(null);
+
+  // A replacement API identity must not briefly inherit the previous session's user.
+  const state = snapshot?.api === api ? snapshot.state : LOADING;
+
   React.useEffect(() => {
     const ctrl = new AbortController();
+    setSnapshot({ api, state: LOADING });
     api.getSession(ctrl.signal).then(
-      (r) => {
-        if (!ctrl.signal.aborted) setState(r);
+      (result) => {
+        if (!ctrl.signal.aborted) setSnapshot({ api, state: result });
       },
       () => {
-        if (!ctrl.signal.aborted) setState({ status: "unavailable" });
+        if (!ctrl.signal.aborted) setSnapshot({ api, state: { status: "unavailable" } });
       },
     );
     return () => ctrl.abort();
