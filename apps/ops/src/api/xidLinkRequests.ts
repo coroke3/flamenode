@@ -5,7 +5,8 @@ import { send, type OpsWriteResult } from "./write.js";
 
 export interface LinkRequestMutationResult { ok: boolean; message?: string }
 
-export function createXidLinkRequestsApi(fetchFn: OpsFetch) {
+/** Mutations remain disabled until MIG-0605 backend parity and independent review are accepted. */
+export function createXidLinkRequestsApi(fetchFn: OpsFetch, enableMutations = false) {
   return {
     async get(signal?: AbortSignal): Promise<OpsResult<AdminXLinkRequestsResponse>> {
       const response = await getJson<unknown>(fetchFn, "/api/admin-read/x-link-requests", signal);
@@ -14,9 +15,11 @@ export function createXidLinkRequestsApi(fetchFn: OpsFetch) {
       return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
     },
     approve(id: string): Promise<OpsWriteResult<LinkRequestMutationResult>> {
+      if (!enableMutations) return Promise.resolve({ status: "unavailable" });
       return send(fetchFn, "POST", "/api/xid/link-requests/" + encodeURIComponent(id) + "/approve");
     },
     reject(id: string, reason: string): Promise<OpsWriteResult<LinkRequestMutationResult>> {
+      if (!enableMutations) return Promise.resolve({ status: "unavailable" });
       return send(fetchFn, "POST", "/api/xid/link-requests/" + encodeURIComponent(id) + "/reject", { reason: reason.trim() });
     },
   };
