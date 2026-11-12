@@ -254,13 +254,16 @@ export function isValidPreloadedActorSnapshotJson(value: unknown): value is stri
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const row = parsed as Record<string, unknown>;
     const keys = ["discord_id", "discord_name", "x_user_id", "x_name", "icon_url"] as const;
-    return Object.keys(row).length === keys.length &&
-      keys.every((key) =>
-        Object.hasOwn(row, key) && (row[key] === null || typeof row[key] === "string")) &&
-      // The guard supplies exactly JSON.stringify(actorSnapshotFromRow(row)).
-      // JSON.parse silently drops duplicate object keys; accepting that raw
-      // text would make the persisted audit actor snapshot ambiguous to other
-      // JSON readers. Reject noncanonical bytes and charge a real actor SELECT.
+    const actualKeys = Object.keys(row);
+    return actualKeys.length === keys.length &&
+      keys.every((key, index) =>
+        actualKeys[index] === key &&
+        Object.hasOwn(row, key) &&
+        (row[key] === null || typeof row[key] === "string")) &&
+      // The guard supplies exactly JSON.stringify(actorSnapshotFromRow(row))
+      // in this field order. JSON.parse silently drops duplicate keys; raw
+      // bytes with aliases, whitespace or changed order are not guard evidence.
+      // Reject and charge an authoritative D1 actor SELECT.
       JSON.stringify(row) === value;
   } catch {
     return false;
