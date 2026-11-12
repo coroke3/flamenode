@@ -82,6 +82,10 @@ function videoIdMatches(body: Record<string, unknown>, pathId: string): boolean 
   return body.video_id === undefined || body.video_id === pathId;
 }
 
+function hasCompleteWriteContext(c: Ctx): boolean {
+  return Boolean(c.get("user") && c.get("db") && c.get("auditSettings") && c.get("actorSnapshotJsonById"));
+}
+
 /**
  * This helper uses ONLY the request-scoped Drizzle handle supplied by the
  * authenticated write stack. It must never fetch a second D1 binding.
@@ -93,7 +97,7 @@ async function executePermissionWrite(
   const db = c.get("db");
   // A missing preloaded context implies the supplied writeGuard is incomplete.
   // Reject before making any video/permission D1 reads.
-  if (!actor || !db || !c.get("auditSettings") || !c.get("actorSnapshotJsonById")) {
+  if (!hasCompleteWriteContext(c) || !actor || !db) {
     return failure(c, 503, "書込認証を確認できませんでした。");
   }
 
@@ -116,7 +120,9 @@ async function executePermissionWrite(
       makeMemberId: () => generateId("vm"),
     });
     if (preparation.kind === "error") return failure(c, 400, preparation.message);
-    if (preparation.kind === "terminal") return response(c, 200, preparation.result);
+    if (preparation.kind === "terminal") {
+      return response(c, preparation.result.ok ? 200 : 400, preparation.result);
+    }
 
     const { xids, existingRows, currentHiddenEditorCount, plan } = preparation;
     const mutation = buildPermissionMutationBatch(db, {
@@ -228,7 +234,9 @@ export function createVideoCollaboratorRoutes(host: VideoCollaboratorHost): Hono
 
     const actor = c.get("user");
     const db = c.get("db");
-    if (!actor || !db) return failure(c, 503, "書込認証を確認できませんでした。");
+    if (!hasCompleteWriteContext(c) || !actor || !db) {
+      return failure(c, 503, "書込認証を確認できませんでした。");
+    }
     try {
       const video = await loadAuthorizedPermissionVideo(
         db, { id: actor.id, role: actor.role ?? null }, videoId,
@@ -264,7 +272,9 @@ export function createVideoCollaboratorRoutes(host: VideoCollaboratorHost): Hono
     if (!parsed.ok) return failure(c, 400, parsed.message);
     const actor = c.get("user");
     const db = c.get("db");
-    if (!actor || !db) return failure(c, 503, "書込認証を確認できませんでした。");
+    if (!hasCompleteWriteContext(c) || !actor || !db) {
+      return failure(c, 503, "書込認証を確認できませんでした。");
+    }
     try {
       const video = await loadAuthorizedPermissionVideo(
         db, { id: actor.id, role: actor.role ?? null }, parsed.videoId,
