@@ -7,6 +7,9 @@
     ".": "./src/index.ts",
     "./slots/reservationLimit": "./src/slots/reservationLimit.ts",
     "./slots/limits": "./src/slots/limits.ts",
+    "./slots/partGap": "./src/slots/partGap.ts",
+    "./slots/regroupMutations": "./src/slots/regroupMutations.ts",
+    "./slots/releaseMutations": "./src/slots/releaseMutations.ts",
     "./software/labels": "./src/software/labels.ts",
     "./announcements": "./src/announcements/index.ts",
     "./apiEndpoints": "./src/apiEndpoints/index.ts",
@@ -29,7 +32,10 @@
     "./admin": "./src/admin/index.ts",
     "./user": "./src/user/index.ts",
     "./db/transientError": "./src/db/transientError.ts",
-    "./event/status": "./src/event/status.ts"
+    "./event/status": "./src/event/status.ts",
+    "./slots/reserveMutations": "./src/slots/reserveMutations.ts",
+    "./slots/boundedGroup": "./src/slots/boundedGroup.ts",
+    "./slots/atomicAuditPlan": "./src/slots/atomicAuditPlan.ts"
   },
   "scripts": {
     "build": "tsc",

@@ -9,6 +9,7 @@ const [
   manageVideo,
   rules,
   slot,
+  slotAtomicCore,
   videoVisibilityTransition,
   enqueue,
 ] = await Promise.all([
@@ -18,6 +19,8 @@ const [
   readFile(new URL("../actions/manage-video.ts", import.meta.url), "utf8"),
   readFile(new URL("../actions/rules.ts", import.meta.url), "utf8"),
   readFile(new URL("../actions/slot.ts", import.meta.url), "utf8"),
+  // MIG-0657 U01i: atomic CAS+audit+Queue executor moved into server-core.
+  readFile(new URL("../../../packages/server-core/src/slots/commitSlotMutationPlan.ts", import.meta.url), "utf8"),
   // MIG-0615: the planner lives in packages/server-core.
   readFile(new URL("../../../packages/server-core/src/visibility/videoTransition.ts", import.meta.url), "utf8"),
   readFile(new URL("./enqueue.ts", import.meta.url), "utf8"),
@@ -44,7 +47,10 @@ test("slot and submit notifications enqueue in atomic batch with queue wake", ()
   assert.match(slot, /enqueueSlotReserveOpsWebhookPostCommit/);
   assert.match(slot, /runPostCommitBestEffort/);
   assert.match(slot, /notificationWakeSource/);
-  assert.match(slot, /\.\.\.extra\.map\(\(\) => null\)/);
+  assert.match(slot, /commitSlotMutationPlanCore/);
+  assert.match(slotAtomicCore, /\.\.\.extra\.map\(\(\) => null\)/);
+  assert.match(slotAtomicCore, /notificationWakeSource:\s*wakeNotification/);
+  assert.match(slotAtomicCore, /mutateWithAudit\(args\.db,/);
 });
 
 test("video status mutations enqueue notifications in atomic batch", () => {

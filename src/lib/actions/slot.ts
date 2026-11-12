@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
+import { isSlotOperatorOverrideRequested } from "@flamenode/contracts";
 import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
 import {
@@ -19,20 +19,23 @@ import {
   normalizeMaxSlotsPerVideo,
 } from "@/lib/slots/limits";
 import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
+import { slotPartGapSec } from "@/lib/slots/slotPartGap";
+import { buildRegroupMutations } from "@/lib/slots/slotRegroupMutations";
 import {
   canActAsSlotActor,
   resolveSlotGroupIdentity,
   resolveSlotViewerRelation,
   type SlotViewerRelation,
 } from "@/lib/slots/slotIdentityCore";
-import { buildReleaseGroupDecisions } from "@/lib/slots/userSlotCore";
+import { buildSlotReleaseMutationPlan } from "@/lib/slots/slotReleaseMutations";
+import { buildSlotReserveMutationPlan } from "@/lib/slots/slotReserveMutations";
+import { assertBoundedSlotGroupIntegrity } from "@/lib/slots/slotBoundedGroup";
 import { resolveReservationXIdentity } from "@/lib/slots/reservationIdentity";
-import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
+import { commitSlotMutationPlanCore } from "@flamenode/server-core/slots/commitSlotMutationPlan";
 import {
   resolveSlotReservationSubject,
   subjectsEqual,
 } from "@/lib/slot/reservationGroupsCore";
-import { buildSlotChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import {
   markPendingPublicReflection,
   type PendingPublicReflection,
@@ -114,9 +117,6 @@ const mergeSchema = z.object({
   display_name: z.string().trim().min(1).max(80),
 });
 
-function snapshot(row: SlotRow): Record<string, unknown> {
-  return { ...row };
-}
 
 function mutationError(error: unknown): SlotReserveResult {
   unstable_rethrow(error);
@@ -151,8 +151,8 @@ function eventDomainLimit(event: EventRow): number {
 }
 
 function formFlag(formData: FormData, name: string): boolean {
-  const value = String(formData.get(name) ?? "").trim().toLowerCase();
-  return value === "1" || value === "true" || value === "on";
+  // Keep CURRENT FormData stringification; delegate value semantics to the shared HTTP contract.
+  return isSlotOperatorOverrideRequested(String(formData.get(name) ?? ""));
 }
 
 async function resolveSlotOperatorOverride(args: {
@@ -180,19 +180,6 @@ async function resolveSlotOperatorOverride(args: {
     return { ok: false, message: SLOT_OPERATOR_WINDOW_MESSAGE };
   }
   return { ok: true, enabled: true };
-}
-
-function applySlotPatch(
-  before: SlotRow,
-  patch: SlotPatch,
-  now: number,
-): SlotRow {
-  return {
-    ...before,
-    ...patch,
-    updated_at: now,
-    version: before.version + 1,
-  } as SlotRow;
 }
 
 async function runSlotPostCommit(
@@ -228,17 +215,18 @@ function revalidateSlotViews(eventId: string): void {
   revalidatePath("/dashboard");
 }
 
-function slotPartGapSec(event: EventRow): number {
-  const minutes = event.slot_part_gap_minutes ?? 15;
-  return Number.isFinite(minutes) && minutes >= 0 ? minutes * 60 : 15 * 60;
-}
-
 function reservationGroupScope(groupId: string, eventId: string) {
   return and(
     eq(slots.event_id, eventId),
     eq(slots.reservation_group_id, groupId),
   )!;
 }
+
+// MIG-0657 U01i: only the Next host wake loader is adapter-local.
+// The shared server-core executor preserves CAS, audit, queue and assertion
+// ordering and is callable by a future Hono host using its own WakeHost.
+const loadNextSlotQueueWakeHost = async () =>
+  (await import("@/lib/serverCore/nextPorts")).nextQueueWakeHost;
 
 async function commitSlotMutationPlan(args: {
   db: DB;
@@ -249,144 +237,15 @@ async function commitSlotMutationPlan(args: {
   extraStatements?: BatchItem<"sqlite">[];
   notificationWakeSource?: "web";
 }): Promise<void> {
-  const now = Math.floor(Date.now() / 1000);
-  const auditedIds = new Set<string>();
-  const mutationStatements: BatchItem<"sqlite">[] = [];
-  const expectedMutationChanges: (number | null)[] = [];
-  const audits: {
-    table_name: "slots";
-    target_id: string;
-    operation: "UPDATE";
-    before: Record<string, unknown>;
-    after: Record<string, unknown>;
-    actor_user_id: string;
-    reason: string;
-    context: string;
-    retention_class: "normal";
-    restore_strategy: "update_before";
-    strict: true;
-  }[] = [];
-
-  for (const mutation of args.mutations) {
-    if (mutation.rows.length === 0) continue;
-    for (const row of mutation.rows) {
-      if (auditedIds.has(row.id)) {
-        throw new Error("同一枠を複数の更新に含めることはできません。");
-      }
-      auditedIds.add(row.id);
-    }
-    mutationStatements.push(
-      args.db
-        .update(slots)
-        .set({
-          ...mutation.patch,
-          updated_at: now,
-          version: sql`${slots.version} + 1`,
-        })
-        .where(
-          versionedSlotWhere(
-            args.eventId,
-            mutation.rows,
-            mutation.statusGuard,
-          ),
-        ),
-    );
-    expectedMutationChanges.push(mutation.rows.length);
-    for (const before of mutation.rows) {
-      audits.push({
-        table_name: "slots",
-        target_id: before.id,
-        operation: "UPDATE",
-        before: snapshot(before),
-        after: snapshot(applySlotPatch(before, mutation.patch, now)),
-        actor_user_id: args.actorUserId,
-        reason: args.reason,
-        context: "user-slot",
-        retention_class: "normal",
-        restore_strategy: "update_before",
-        strict: true,
-      });
-    }
-  }
-
-  if (mutationStatements.length === 0) {
-    throw new Error("更新対象の枠がありません。");
-  }
-
-  const queue = await buildSlotChangeQueueBatch(args.db, {
-    eventId: args.eventId,
-    reason: args.reason,
-    requestedByUserId: args.actorUserId,
-  });
-  const extra = args.extraStatements ?? [];
-  // extraStatements には通知以外の atomic guard も入る。
-  // extra の有無だけで通知 Queue を wake すると無料枠を無駄に消費するため、
-  // 実際に通知 outbox を追加した呼び出しだけ wake する。
-  const wakeNotification = args.notificationWakeSource;
-  await mutateWithAudit(args.db, {
-    mutationStatements: [
-      ...mutationStatements,
-      ...queue.statements,
-      ...extra,
-    ],
-    expectedMutationChanges: [
-      ...expectedMutationChanges,
-      ...queue.expectedChanges,
-      ...extra.map(() => null),
-    ],
-    audits,
-    notificationWakeSource: wakeNotification,
-    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
-  });
+  await commitSlotMutationPlanCore({ ...args, loadWakeHost: loadNextSlotQueueWakeHost });
 }
 
 function buildReleaseMutations(
   groupRows: readonly SlotRow[],
   anchorId: string,
 ): SlotBulkMutation[] {
-  const newGroupId = generateId("sgrp");
-  const decisions = new Map(
-    buildReleaseGroupDecisions(groupRows, anchorId, { newGroupId }).map(
-      (decision) => [decision.id, decision],
-    ),
-  );
-  const mutations: SlotBulkMutation[] = [];
-  const releasedRows = groupRows.filter(
-    (row) => decisions.get(row.id)?.release,
-  );
-  if (releasedRows.length > 0) {
-    mutations.push({
-      rows: [...releasedRows],
-      patch: {
-        reserved_by_user_id: null,
-        x_user_id: null,
-        reserved_x_id_snapshot: null,
-        display_name: null,
-        reservation_group_id: null,
-        status: "available" as const,
-      },
-      statusGuard: "reserved",
-    });
-  }
-
-  const groupByTarget = new Map<string | null, SlotRow[]>();
-  for (const row of groupRows) {
-    const decision = decisions.get(row.id);
-    if (!decision || decision.release) continue;
-    if (decision.reservation_group_id === row.reservation_group_id) continue;
-    const key = decision.reservation_group_id;
-    const current = groupByTarget.get(key) ?? [];
-    current.push(row);
-    groupByTarget.set(key, current);
-  }
-  for (const [targetGroupId, rows] of groupByTarget) {
-    mutations.push({
-      rows,
-      patch: { reservation_group_id: targetGroupId },
-      statusGuard: "reserved",
-    });
-  }
-  return mutations;
+  // The ID is generated only at the CURRENT adapter boundary, exactly as before.
+  return buildSlotReleaseMutationPlan(groupRows, anchorId, generateId("sgrp"));
 }
 
 async function loadSlot(db: DB, slotId: string): Promise<SlotRow | null> {
@@ -456,24 +315,9 @@ async function loadBoundedGroupStructure(
     .from(slots)
     .where(reservationGroupScope(groupId, anchor.event_id))
     .limit(MAX_SLOTS_PER_VIDEO + 1);
-  if (rows.length > MAX_SLOTS_PER_VIDEO) {
-    throw new Error(
-      `連続枠が上限 ${MAX_SLOTS_PER_VIDEO} 件を超えています。運営へ連絡してください。`,
-    );
-  }
-  if (rows.length === 0 || !rows.some((row) => row.id === anchor.id)) {
-    throw new Error("連続枠の完全な状態を確認できませんでした。");
-  }
-  if (
-    rows.some(
-      (row) =>
-        row.event_id !== anchor.event_id ||
-        row.reserved_by_user_id !== anchor.reserved_by_user_id ||
-        row.reserved_x_id_snapshot !== anchor.reserved_x_id_snapshot,
-    )
-  ) {
-    throw new Error("連続枠に別の利用者または状態が混在しています。");
-  }
+  // U01f: check the exact same group-membership invariants in the pure
+  // domain layer, before any status/identity checks and any D1 mutation.
+  assertBoundedSlotGroupIntegrity(rows, anchor, MAX_SLOTS_PER_VIDEO);
   return sortSlotsChronologically(rows);
 }
 
@@ -506,27 +350,6 @@ async function loadBoundedGroup(
   const rows = await loadBoundedGroupStructure(db, anchor);
   const identity = resolveBoundedGroupIdentity(rows, authUserId, activeXId);
   return { rows, identity };
-}
-
-/** 同じpatchを最大2群へまとめ、D1 statement数を枠数比例にしない。 */
-function buildRegroupMutations(
-  rows: readonly SlotRow[],
-  patch: SlotPatch,
-  identity: { targetXId: string | null; adoptNullRows: boolean },
-): SlotBulkMutation[] {
-  const keepRows: SlotRow[] = [];
-  const adoptRows: SlotRow[] = [];
-  for (const row of rows) {
-    if (identity.adoptNullRows && row.x_user_id === null && identity.targetXId !== null) {
-      adoptRows.push(row);
-    } else {
-      keepRows.push(row);
-    }
-  }
-  return [
-    ...(keepRows.length ? [{ rows: keepRows, patch, statusGuard: "reserved" as const }] : []),
-    ...(adoptRows.length ? [{ rows: adoptRows, patch: { ...patch, x_user_id: identity.targetXId }, statusGuard: "reserved" as const }] : []),
-  ];
 }
 
 function orderCondition(row: SlotRow, direction: "forward" | "backward"): SQL {
@@ -753,14 +576,15 @@ export async function reserveSlot(
     assertAdjacentSequence(targetRows, slotPartGapSec(event));
 
     const groupId = targetRows.length > 1 ? generateId("sgrp") : null;
-    const reservePatch = {
-      reserved_by_user_id: guard.user.id,
-      x_user_id: identity.canonicalXUserId,
-      reserved_x_id_snapshot: identity.snapshotXId,
-      display_name: parsed.data.display_name,
-      reservation_group_id: groupId,
-      status: "reserved" as const,
-    };
+    // U01d: authorization and snapshot selection remain in CURRENT; only
+    // immutable mutation planning is shared with the future Hono route.
+    const reserveMutations = buildSlotReserveMutationPlan({
+      rows: targetRows,
+      actorUserId: guard.user.id,
+      identity,
+      displayName: parsed.data.display_name,
+      groupId,
+    });
     const { buildChannelSlotReservedNotification } = await import(
       "@/lib/notifications/templates/slot"
     );
@@ -807,13 +631,7 @@ export async function reserveSlot(
     try {
       await commitSlotMutationPlan({
         db,
-        mutations: [
-          {
-            rows: targetRows,
-            patch: reservePatch,
-            statusGuard: "available",
-          },
-        ],
+        mutations: reserveMutations,
         eventId: anchor.event_id,
         actorUserId: guard.user.id,
         reason: "slot_user_reserve",
@@ -1002,14 +820,18 @@ export async function extendOwnSlotGroup(
     const groupId = anchor.reservation_group_id || generateId("sgrp");
     const targetXId = identity.targetXId ?? slotXUserId;
     const displayName = groupRows[0].display_name;
-    const candidatePatch = {
-      reserved_by_user_id: guard.user.id,
-      x_user_id: targetXId,
-      reserved_x_id_snapshot: groupSnapshotXId,
-      display_name: displayName,
-      reservation_group_id: groupId,
-      status: "reserved" as const,
-    };
+    // The adjacent available slot uses the same canonical reservation patch
+    // as SA-065; group membership/adoption stays guarded by the D1 CAS below.
+    const candidateMutations = buildSlotReserveMutationPlan({
+      rows: [candidate],
+      actorUserId: guard.user.id,
+      identity: {
+        canonicalXUserId: targetXId,
+        snapshotXId: groupSnapshotXId,
+      },
+      displayName,
+      groupId,
+    });
     await commitSlotMutationPlan({
       db,
       mutations: [
@@ -1018,11 +840,7 @@ export async function extendOwnSlotGroup(
           { reservation_group_id: groupId },
           identity,
         ),
-        {
-          rows: [candidate],
-          patch: candidatePatch,
-          statusGuard: "available",
-        },
+        ...candidateMutations,
       ],
       eventId: anchor.event_id,
       actorUserId: guard.user.id,
@@ -1159,14 +977,16 @@ export async function mergeOwnSlotGroups(
     const targetXId = identity.targetXId ?? slotXUserId;
     const inheritedSnapshot =
       reservedRows[0]?.reserved_x_id_snapshot ?? left.reserved_x_id_snapshot;
-    const gapPatch = {
-      reserved_by_user_id: guard.user.id,
-      x_user_id: targetXId,
-      reserved_x_id_snapshot: inheritedSnapshot,
-      display_name: parsed.data.display_name,
-      reservation_group_id: groupId,
-      status: "reserved" as const,
-    };
+    const gapMutations = buildSlotReserveMutationPlan({
+      rows: [gap],
+      actorUserId: guard.user.id,
+      identity: {
+        canonicalXUserId: targetXId,
+        snapshotXId: inheritedSnapshot,
+      },
+      displayName: parsed.data.display_name,
+      groupId,
+    });
     await commitSlotMutationPlan({
       db,
       mutations: [
@@ -1175,11 +995,7 @@ export async function mergeOwnSlotGroups(
           { display_name: parsed.data.display_name, reservation_group_id: groupId },
           identity,
         ),
-        {
-          rows: [gap],
-          patch: gapPatch,
-          statusGuard: "available",
-        },
+        ...gapMutations,
       ],
       eventId: gap.event_id,
       actorUserId: guard.user.id,

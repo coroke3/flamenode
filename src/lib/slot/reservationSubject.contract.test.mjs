@@ -9,6 +9,10 @@ const slotSource = await readFile(
   new URL("../actions/slot.ts", import.meta.url),
   "utf8",
 );
+const reservePlannerSource = await readFile(
+  new URL("../../../packages/domain/src/slots/reserveMutations.ts", import.meta.url),
+  "utf8",
+);
 const submitSource = await readFile(
   new URL("../actions/video/submitSlotVideo.ts", import.meta.url),
   "utf8",
@@ -53,8 +57,18 @@ test("legacy group ID はtrim後の値ではなく保存値で取得する", () 
 test("mergeOwnSlotGroupsはgap含む全枠へ同一display_nameを適用する", () => {
   const mergeBlock =
     slotSource.match(/export async function mergeOwnSlotGroups[\s\S]*$/)?.[0] ?? "";
-  const displayNameMatches = [...mergeBlock.matchAll(/display_name: parsed\.data\.display_name/g)];
-  assert.ok(displayNameMatches.length >= 2, "reserved rows and gap must use parsed.data.display_name");
+  // Reserved group members retain the canonical regroup patch; the available
+  // gap now receives its identical name through the shared reserve planner.
+  assert.match(
+    mergeBlock,
+    /buildRegroupMutations\(\s*reservedRows,[\s\S]*?display_name: parsed\.data\.display_name/,
+  );
+  assert.match(
+    mergeBlock,
+    /const gapMutations = buildSlotReserveMutationPlan\(\{[\s\S]*?rows: \[gap\][\s\S]*?displayName: parsed\.data\.display_name/,
+  );
+  assert.match(mergeBlock, /\.\.\.gapMutations/);
+  assert.match(reservePlannerSource, /display_name: input\.displayName/);
   assert.doesNotMatch(mergeBlock, /display_name: subject\.displayName/);
 });
 
