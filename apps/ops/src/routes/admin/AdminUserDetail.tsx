@@ -24,7 +24,9 @@ function AuditRows({ rows, empty }: { rows: AdminUserDetailAuditRow[]; empty: st
       <td>{a.table_name}</td>
       <td>{a.operation}</td>
       <td>{a.actor_user_id ?? "—"}</td>
-      <td>{a.target_id ?? "—"}</td>
+      <td>{a.target_id
+        ? <a href={"/admin/audit?record=" + encodeURIComponent(a.target_id)}>{a.target_id}</a>
+        : "—"}</td>
     </tr>)}</tbody>
   </table></div>;
 }
@@ -79,7 +81,7 @@ export function AdminUserDetailContent({ data }: { data: AdminUserDetailResponse
       <h2>投稿作品 ({recentVideos.length})</h2>
       {recentVideos.length === 0 ? <p className="fn-muted">投稿はありません。</p> :
         <ul>{recentVideos.map((v) => <li key={v.id}>
-          {v.title} / {v.status} / {dateText(v.created_at)}
+          <a href={"/admin/videos/" + encodeURIComponent(v.id)}>{v.title}</a> / {v.status} / {dateText(v.created_at)}
         </li>)}</ul>}
     </section>
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>

@@ -191,3 +191,19 @@ test("MIG-0731 U02b: writes preserve exact Hono routes, JSON keys and fail-close
   const malformed = createAdminUserEditMutations(async () => response(200, { ok: "yes" }));
   assert.deepEqual(await malformed.setRole("u1", "admin"), { status: "unavailable" });
 });
+
+test("MIG-0731 U04: CURRENT detail navigation preserves encoded video and audit record links", () => {
+  const data = {
+    ...detailFixture,
+    recentVideos: [{ id: "video/a&b", title: "My video", status: "public", created_at: 1700000000 }],
+    recentByOperator: [{
+      id: "audit1", created_at: 1700000000, table_name: "videos",
+      operation: "UPDATE", actor_user_id: "u1", target_id: "row/a&b",
+    }],
+  };
+  const html = renderToStaticMarkup(React.createElement(AdminUserDetailContent, { data }));
+  assert.match(html, /href="\/admin\/videos\/video%2Fa%26b"/);
+  assert.match(html, /href="\/admin\/audit\?record=row%2Fa%26b"/);
+  assert.match(html, /My video/);
+  assert.doesNotMatch(html, /href="\/admin\/videos\/video\/a&amp;b"/);
+});
