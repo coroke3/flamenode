@@ -125,6 +125,7 @@ export function planAtomicAuditMutationBudget(
     | "audits"
     | "postAuditStatements"
     | "callerQueryCount"
+    | "preloaded"
   >,
 ): D1AuditMutationBudget {
   const mutationAssertionCount = Array.isArray(input.expectedMutationChanges)
@@ -135,6 +136,13 @@ export function planAtomicAuditMutationBudget(
   )
     ? 1
     : 0;
+  const distinctActors = new Set(input.audits.map((audit) => audit.actor_user_id));
+  // The logger checks this exact per-actor key and skips a D1 SELECT only
+  // when it is present. Never infer a credit merely because a preload map
+  // exists (it may contain another actor's snapshot).
+  const preloadedActorCount = [...distinctActors].filter((actorId) =>
+    typeof input.preloaded?.actorSnapshotJsonById?.[actorId] === "string"
+  ).length;
   return planD1AuditMutationBudget({
     mutationStatementCount: input.mutationStatements.length,
     mutationAssertionCount,
@@ -142,10 +150,10 @@ export function planAtomicAuditMutationBudget(
     postMutationAssertionCount: input.postMutationAssertions?.length ?? 0,
     auditEntryCount: input.audits.length,
     postAuditStatementCount: input.postAuditStatements?.length ?? 0,
-    distinctActorCount: new Set(
-      input.audits.map((audit) => audit.actor_user_id),
-    ).size,
+    distinctActorCount: distinctActors.size,
     actorXValidationQueryCount,
+    preloadedSettings: Boolean(input.preloaded?.settings),
+    preloadedActorCount,
     callerQueryCount: input.callerQueryCount,
   });
 }
