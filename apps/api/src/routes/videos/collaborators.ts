@@ -36,6 +36,7 @@ import type { AppEnv } from "../../env.ts";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
 
 type Ctx = Context<AppEnv>;
+type AuthorizedVideo = NonNullable<Awaited<ReturnType<typeof loadAuthorizedPermissionVideo>>>;
 type Result = { ok: boolean; message?: string; granted?: string[]; revoked?: string[]; unchanged?: number };
 type Status = 200 | 400 | 403 | 404 | 413 | 500 | 503;
 type WriteInput = {
@@ -85,7 +86,9 @@ function videoIdMatches(body: Record<string, unknown>, pathId: string): boolean 
  * This helper uses ONLY the request-scoped Drizzle handle supplied by the
  * authenticated write stack. It must never fetch a second D1 binding.
  */
-async function executePermissionWrite(c: Ctx, host: VideoCollaboratorHost, input: WriteInput) {
+async function executePermissionWrite(
+  c: Ctx, host: VideoCollaboratorHost, input: WriteInput, authorized?: AuthorizedVideo,
+) {
   const actor = c.get("user");
   const db = c.get("db");
   // A missing preloaded context implies the supplied writeGuard is incomplete.
@@ -95,7 +98,7 @@ async function executePermissionWrite(c: Ctx, host: VideoCollaboratorHost, input
   }
 
   try {
-    const video = await loadAuthorizedPermissionVideo(
+    const video = authorized ?? await loadAuthorizedPermissionVideo(
       db,
       { id: actor.id, role: actor.role ?? null },
       input.videoId,
@@ -236,8 +239,8 @@ export function createVideoCollaboratorRoutes(host: VideoCollaboratorHost): Hono
         db, parsed.data.x_user_id || null, parsed.data.user_id?.trim() || null,
       );
       if (!subject.ok) return failure(c, 400, subject.message);
-      // Pass the resolved canonical ID and keep the privilege mode: execute
-      // recomputes the authorization in this unmapped candidate for now.
+      // The authorized video is request-local; reuse it, do not repeat the
+      // potentially expensive D1 authorization query for the same write.
       return executePermissionWrite(c, host, {
         videoId, privilegeMode: video.privilegeMode,
         notify: parsed.data.notify,
@@ -245,7 +248,7 @@ export function createVideoCollaboratorRoutes(host: VideoCollaboratorHost): Hono
           intent: parsed.data.can_edit ? "on" : "off" }],
         successMessage: parsed.data.can_edit
           ? "作品編集への参加を付与しました。" : "作品編集への参加を無効化しました。",
-      });
+      }, video);
     } catch {
       return failure(c, 500, "合作権限の読込・更新に失敗しました。");
     }
@@ -274,7 +277,7 @@ export function createVideoCollaboratorRoutes(host: VideoCollaboratorHost): Hono
         videoId: parsed.videoId, privilegeMode: video.privilegeMode, notify: false,
         intents: [{ x_user_id: subject.xUserId, display_name: "@" + subject.xUserId, intent: "off" }],
         successMessage: "作品編集への参加を解除しました。",
-      });
+      }, video);
     } catch {
       return failure(c, 500, "合作権限の読込・解除に失敗しました。");
     }
