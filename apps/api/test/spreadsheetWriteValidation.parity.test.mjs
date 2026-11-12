@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { resolveSpreadsheetTableDef } from "../src/routes/admin/spreadsheet/registry.ts";
-import { validateSpreadsheetInputValues } from "../src/routes/admin/spreadsheet/writeValidation.ts";
+import { validateSpreadsheetInputValues, spreadsheetImportPrimaryKeyFingerprint } from "../src/routes/admin/spreadsheet/writeValidation.ts";
 
 // MIG-0638 U01b: characterization of CURRENT query.ts#validateSpreadsheetInputValues.
 // The validation helper has no SQL, network, authorization or production side effects.
@@ -904,4 +904,17 @@ test("MIG-0638: distinct normal composite keys retain 1-D1-read UPSERT before-im
   } finally {
     sqlite.close();
   }
+});
+
+
+test("Hono import composite PK identity is canonical for distinct Unicode-normalized column names", () => {
+  const composed = "\u00e9";
+  const decomposed = "e\u0301";
+  const first = { [composed]: "one", [decomposed]: "two" };
+  const reversed = { [decomposed]: "two", [composed]: "one" };
+  assert.equal(spreadsheetImportPrimaryKeyFingerprint(first), spreadsheetImportPrimaryKeyFingerprint(reversed));
+  assert.notEqual(
+    spreadsheetImportPrimaryKeyFingerprint(first),
+    spreadsheetImportPrimaryKeyFingerprint({ [composed]: "one", [decomposed]: "changed" }),
+  );
 });
