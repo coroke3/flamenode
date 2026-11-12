@@ -156,11 +156,11 @@ import { Hono } from "hono";
 import { createSqlite } from "./support/personalHarness.mjs";
 import { atomicD1, seedChapterWorld, SESSION_USER, SITE } from "./support/chapterSeed.mjs";
 
-function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false, queueEnabled = false } = {}) {
+function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false, queueEnabled = false, beforeRead } = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
   sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'").run(mode);
-  const d1 = atomicD1(sqlite);
+  const d1 = atomicD1(sqlite, { beforeRead });
   const queueMessages = [];
   const env = {
     DB: d1, NEXT_PUBLIC_SITE_URL: SITE,
@@ -453,6 +453,43 @@ test("SA-084 notify=true commits a DM outbox + static queue then sends exactly t
       assert.equal(msg.recipient_user_id, undefined);
     }
     assert.equal(s.wakeLoads(), 2);
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+
+test("SA-084 concurrent permission-row insert triggers snapshot CAS rollback, no audit/queue/Queue wake", async () => {
+  let inserted = false;
+  const s = integration({
+    beforeRead(sql, sqlite) {
+      // The SELECT has returned its stale member-set snapshot; introduce a
+      // concurrent hidden editor before the hidden-count read and D1 batch.
+      if (!inserted && /from\s+"?video_members"?/i.test(sql) && sql.includes("json_each")) {
+        inserted = true;
+        sqlite.prepare(
+          "INSERT INTO video_members " +
+          "(id,video_id,x_user_id,name,role,comment,order_index,can_edit," +
+          "is_public_member,edit_granted_at,edit_updated_at) " +
+          "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ).run("race_x_other", "v_pub", "x_other", "Concurrent", null, null, 9999, 1, 0, 1, 1);
+      }
+    },
+  });
+  try {
+    const res = await s.send("POST", "/api/videos/v_pub/collaborators/batch", {
+      video_id: "v_pub", edit_privilege_mode: "admin", notify: false,
+      intents: [{ x_user_id: "x_other", display_name: "Other", intent: "on" }],
+    });
+    assert.equal(inserted, true, "the race must be injected after the stale member SELECT");
+    assert.equal(res.status, 500, await res.clone().text());
+    assert.equal((await res.json()).ok, false);
+    assert.equal(s.d1.stats.batches, 1, "a single CAS batch must reject the stale snapshot");
+    assert.equal(s.count("video_members"), 1, "only the independently injected row survives");
+    assert.equal(s.count("audit_logs"), 0, "failed CAS must not persist audit");
+    assert.equal(s.count("static_rebuild_queue"), 0, "failed CAS must not persist rebuilds");
+    assert.equal(s.count("notification_outbox"), 0);
+    assert.equal(s.wakeLoads(), 0, "no Queue notification before committed write");
   } finally {
     s.sqlite.close();
   }
