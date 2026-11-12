@@ -16,6 +16,7 @@ import { AuthErrorView, OpsGate } from "./guard.js";
 import { ManageLayout } from "./manage/ManageLayout.js";
 import { ManageDashboard } from "./manage/ManageDashboard.js";
 import { ManageReviewRedirect } from "./manage/ManageReviewRedirect.js";
+import { ManageVideosRoute, ManageVideoDetailRoute } from "./manage/ManageVideosRoute.js";
 import { EventStaffReadOnlyPage } from "./manage/EventStaffReadOnlyPage.js";
 import type { OpsFetch } from "../api/read.js";
 
@@ -49,6 +50,8 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
           <Route index element={<ManageDashboard />} />
           <Route path="events/:id/review" element={<ManageReviewRedirect />} />
           <Route path="events/:id/staff" element={<ManageStaffRoute />} />
+          <Route path="events/:id/videos" element={<ManageVideosRoute />} />
+          <Route path="events/:id/videos/:videoId" element={<ManageVideoDetailRoute />} />
           <Route path="*" element={<UnmigratedView />} />
         </Routes>
       </ManageLayout>
