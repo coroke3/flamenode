@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
-import { createVideoCollaboratorRoutes } from "../src/routes/videos/collaborators.ts";
+import { createVideoCollaboratorRoutes, createDefaultVideoCollaboratorHost } from "../src/routes/videos/collaborators.ts";
 
 const videoId = "v1";
 const route = "/v1/collaborators";
@@ -153,9 +153,6 @@ test("valid batch with missing authenticated guard context fails closed", async 
 // Candidate integration is still unmounted, but exercise the real production
 // origin/session/CostGuard/Drizzle stack against a local transactional D1 shim.
 import { Hono } from "hono";
-import { dbMiddleware } from "../src/middleware/db.ts";
-import { costGuardMiddleware } from "../src/middleware/costGuard.ts";
-import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
 import { createSqlite } from "./support/personalHarness.mjs";
 import { atomicD1, seedChapterWorld, SESSION_USER, SITE } from "./support/chapterSeed.mjs";
 
@@ -166,46 +163,20 @@ function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false 
   const d1 = atomicD1(sqlite);
   const actor = as ? SESSION_USER(as, as === "u_admin" ? "admin" : "user", "x_admin") : null;
   let wakeLoadCount = 0;
-  const originOptions = (c) => ({
-    loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL,
-    allowLocalPreview: () => false,
-  });
   const session = async (c, next) => {
     c.set("user", actor);
     c.set("sessionState", actor ? "user" : "none");
     await next();
   };
-  const stack = [
-    (c, next) => originGuardMiddleware(originOptions(c))(c, next),
-    session,
-    (c, next) => writeGuardMiddleware({
-      ...originOptions(c), requiredRole: null,
-    })(c, next),
-    costGuardMiddleware("edit_video"),
-    dbMiddleware,
-  ];
-  const writeGuard = async (c, next) => {
-    c.header("Cache-Control", "private, no-store");
-    const run = async (index) => {
-      if (index === stack.length) return next();
-      let inner;
-      const own = await stack[index](c, async () => {
-        inner = await run(index + 1);
-      });
-      return own ?? inner;
-    };
-    return run(0);
-  };
+  // Test the same unmounted guard host that an integrator would eventually
+  // import; do not duplicate middleware order in test fixtures.
+  const defaultHost = createDefaultVideoCollaboratorHost({ session });
   const host = {
-    writeGuard,
-    loadWakeHost: async () => {
+    ...defaultHost,
+    loadWakeHost: async (c) => {
       wakeLoadCount++;
       if (wakeHostRejects) throw new Error("simulated Queue binding resolution failure");
-      return {
-        readEnv: () => ({ QUEUE_DISPATCH_ENABLED: "0" }),
-        readWaitUntil: () => null,
-        readKv: () => null,
-      };
+      return defaultHost.loadWakeHost(c);
     },
   };
   const app = new Hono();
