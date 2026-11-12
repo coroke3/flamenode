@@ -15,6 +15,13 @@ export function canConfirmUserBan(reason: string, confirmedReason: string | null
   return !busy && !alreadyBanned && Boolean(confirmedReason) && reason.trim() === confirmedReason;
 }
 
+/** Prevent multiple in-flight role/BAN/notification writes before React commits state. */
+export function acquireAdminUserWriteLock(lock: { current: boolean }): boolean {
+  if (lock.current) return false;
+  lock.current = true;
+  return true;
+}
+
 /** CURRENT UserAdminForm parity candidate. Writes stay protected by Hono admin guard and atomic D1 audit. */
 export function AdminUserEditContent({ data, onSaved }: {
   data: AdminUserEditResponse;
@@ -22,13 +29,14 @@ export function AdminUserEditContent({ data, onSaved }: {
 }): React.ReactElement {
   const { user, xUserIds, truncated } = data;
   const [busy, setBusy] = React.useState(false);
+  const busyRef = React.useRef(false);
   const [banReason, setBanReason] = React.useState("");
   const [banConfirmReason, setBanConfirmReason] = React.useState<string | null>(null);
   React.useEffect(() => { setBanConfirmReason(null); }, [user.id, user.is_banned]);
   const [error, setError] = React.useState("");
   const [success, setSuccess] = React.useState("");
   async function run(action: () => Promise<UserEditResult>, message: string): Promise<void> {
-    if (busy) return;
+    if (!acquireAdminUserWriteLock(busyRef)) return;
     setBusy(true);
     setError("");
     setSuccess("");
@@ -49,6 +57,7 @@ export function AdminUserEditContent({ data, onSaved }: {
     } catch {
       setError("操作を処理できませんでした。再度お試しください。");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }

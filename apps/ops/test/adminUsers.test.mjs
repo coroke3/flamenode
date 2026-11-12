@@ -8,7 +8,7 @@ import {
 } from "../.test-dist/apps/ops/src/api/adminUsers.js";
 import { AdminUserManagementTabs } from "../.test-dist/apps/ops/src/components/admin/AdminUserManagementTabs.js";
 import { AdminUserDetailContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
-import { AdminUserEditContent, canConfirmUserBan } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
+import { AdminUserEditContent, canConfirmUserBan, acquireAdminUserWriteLock } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
 import { createAdminUserEditMutations } from "../.test-dist/apps/ops/src/api/adminUserEdits.js";
 import { permissionsPayload } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
 
@@ -223,4 +223,13 @@ test("MIG-0731 U02b BAN confirmation is bound to unchanged reason and current us
   }));
   assert.match(markup, /BAN 理由/);
   assert.doesNotMatch(markup, /role="alertdialog"/);
+});
+
+test("MIG-0731 U02b: admin mutations use a synchronous single-flight guard", () => {
+  const lock = { current: false };
+  assert.equal(acquireAdminUserWriteLock(lock), true);
+  assert.equal(lock.current, true);
+  assert.equal(acquireAdminUserWriteLock(lock), false, "second synchronous action must not start");
+  lock.current = false; // finally after request completion
+  assert.equal(acquireAdminUserWriteLock(lock), true);
 });
