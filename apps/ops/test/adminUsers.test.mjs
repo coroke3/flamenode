@@ -8,6 +8,7 @@ import {
 } from "../.test-dist/apps/ops/src/api/adminUsers.js";
 import { AdminUserManagementTabs } from "../.test-dist/apps/ops/src/components/admin/AdminUserManagementTabs.js";
 import { AdminUserDetailContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
+import { DiscordRows, XIdRows } from "../.test-dist/apps/ops/src/routes/admin/AdminUsers.js";
 import { AdminUserEditContent, canConfirmUserBan, acquireAdminUserWriteLock } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
 import { createAdminUserEditMutations } from "../.test-dist/apps/ops/src/api/adminUserEdits.js";
 import { permissionsPayload, fieldsSetFromCsv, isValidPermissionSaveResponse, acquirePermissionSaveLock } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
@@ -260,4 +261,34 @@ test("MIG-0731 U04: privileged permission save response is schema-validated and 
   assert.equal(acquirePermissionSaveLock(lock), false);
   lock.current = false;
   assert.equal(acquirePermissionSaveLock(lock), true);
+});
+
+
+test("MIG-0731 U04: CURRENT Discord and X-ID list avatar parity (icon, fallback, untrusted label)", () => {
+  const discordWithImage = renderToStaticMarkup(React.createElement(DiscordRows, {
+    rows: [{ ...fixture.users[0], image: "https://cdn.discordapp.com/avatars/u1/avatar.png" }],
+  }));
+  assert.match(discordWithImage, /<img[^>]*src="https:\/\/cdn\.discordapp\.com\/avatars\/u1\/avatar\.png"/);
+  assert.match(discordWithImage, /Tester/);
+  const discordFallback = renderToStaticMarkup(React.createElement(DiscordRows, {
+    rows: [{ ...fixture.users[0], name: "<admin>", image: null }],
+  }));
+  assert.doesNotMatch(discordFallback, /<img/);
+  assert.match(discordFallback, /&lt;admin&gt;/);
+  assert.doesNotMatch(discordFallback, /<admin>/);
+
+  const x = {
+    id: "x-user/1", x_name: "X Persona", icon_url: "https://drive.google.com/file/d/abcDEF123/view",
+    approval_status: "approved", primary_auth_user_id: null,
+    primary_auth_user_name: null, linked_auth_user_count: 0, active_holder_count: 0,
+  };
+  const xImage = renderToStaticMarkup(React.createElement(XIdRows, { rows: [x] }));
+  assert.match(xImage, /<img[^>]*src="\/api\/google-drive-image\/abcDEF123"/);
+  assert.match(xImage, /X Persona/);
+  const xFallback = renderToStaticMarkup(React.createElement(XIdRows, {
+    rows: [{ ...x, icon_url: null, x_name: "<private>" }],
+  }));
+  assert.doesNotMatch(xFallback, /<img/);
+  assert.match(xFallback, /&lt;private&gt;/);
+  assert.doesNotMatch(xFallback, /<private>/);
 });

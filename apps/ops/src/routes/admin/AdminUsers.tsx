@@ -6,6 +6,8 @@ import { AdminUserManagementTabs } from "../../components/admin/AdminUserManagem
 import { useApiResult } from "../useApiResult.js";
 import { NotFoundView } from "../NotFoundView.js";
 import { GlobalEditableFieldsPanel } from "./GlobalEditableFieldsPanel.js";
+import { ManageXIcon } from "../../components/shared/ManageXIcon.js";
+import { UserAvatar } from "../../components/shared/UserAvatar.js";
 
 const api = createAdminUsersApi();
 const statusOptions = [
@@ -18,7 +20,7 @@ function formatCreatedAt(value: number): string {
   const date = new Date(value < 1e12 ? value * 1000 : value);
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("ja-JP");
 }
-function DiscordRows({ rows }: { rows: AdminUserRow[] }): React.ReactElement {
+export function DiscordRows({ rows }: { rows: AdminUserRow[] }): React.ReactElement {
   return (
     <table className="fn-table" style={{ width: "100%", marginTop: 18 }}>
       <thead><tr><th>Discord</th><th>Active X ID</th><th>ロール</th><th>登録</th><th /></tr></thead>
@@ -26,8 +28,13 @@ function DiscordRows({ rows }: { rows: AdminUserRow[] }): React.ReactElement {
         {rows.map((user) => (
           <tr key={user.id}>
             <td>
-              <strong>{user.name ?? "—"}</strong>
-              <small style={{ display: "block" }}>{user.id.slice(0, 12)}...</small>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <UserAvatar iconUrl={user.image} label={user.name ?? user.id} size={28} useIconFallback />
+                <span>
+                  <strong>{user.name ?? "—"}</strong>
+                  <small style={{ display: "block" }}>{user.id.slice(0, 12)}...</small>
+                </span>
+              </div>
             </td>
             <td>{user.active_x_user_id
               ? <><strong>{user.active_x_name ?? "@" + user.active_x_user_id}</strong>
@@ -52,7 +59,7 @@ function DiscordRows({ rows }: { rows: AdminUserRow[] }): React.ReactElement {
     </table>
   );
 }
-function XIdRows({ rows }: { rows: AdminXUserRow[] }): React.ReactElement {
+export function XIdRows({ rows }: { rows: AdminXUserRow[] }): React.ReactElement {
   const label = (status: AdminXUserRow["approval_status"]) =>
     status === "approved" ? "承認済み" : status === "rejected" ? "却下"
       : status === "pending" ? "承認待ち" : "未設定";
@@ -61,7 +68,12 @@ function XIdRows({ rows }: { rows: AdminXUserRow[] }): React.ReactElement {
       <thead><tr><th>X ID</th><th>Discord連携</th><th>状態</th><th /></tr></thead>
       <tbody>
         {rows.map((x) => <tr key={x.id}>
-          <td><strong>{x.x_name}</strong><small style={{ display: "block" }}>@{x.id}</small></td>
+          <td>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <ManageXIcon iconUrl={x.icon_url} label={x.x_name} size={28} />
+              <span><strong>{x.x_name}</strong><small style={{ display: "block" }}>@{x.id}</small></span>
+            </div>
+          </td>
           <td>{x.primary_auth_user_id
             ? <><strong>{x.primary_auth_user_name ?? "認証ユーザー"}</strong>
                 <small style={{ display: "block" }}>{x.primary_auth_user_id.slice(0, 14)}...
