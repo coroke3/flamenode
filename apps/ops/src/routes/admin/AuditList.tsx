@@ -36,7 +36,7 @@ export function parseChangedKeys(raw: string | null): string[] {
   } catch { return []; }
 }
 
-/** Unmounted until the shared Ops router owner and MIG-0662 merge gates are satisfied. */
+/** MIG-0733 U04: read-only Ops audit list under AdminLayout/OpsGate; no restore mutation. */
 export function AuditList({
   search = typeof window === "undefined" ? "" : window.location.search,
   fetchFn = fetch,
