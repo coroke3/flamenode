@@ -9,6 +9,7 @@ import "./styles/settings.css";
 import "./styles/onboarding.css";
 import "./styles/entry.css";
 import "./styles/video-members.css";
+import "./styles/video-collab.css";
 import "./styles/forms-a.css";
 import "./styles/shared-social.css";
 import "./styles/cost-guard-banner.css";
