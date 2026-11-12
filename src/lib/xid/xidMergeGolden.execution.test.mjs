@@ -443,6 +443,63 @@ if (runTestWithTsx(import.meta.url)) {
     ],
   ];
 
+  test("Issue #492: 100-target real SQLite X ID merge completes with all audits, queue and D1 CAS", async () => {
+    // 4 user/index targets + 8 global video targets + 2 events * 3 + 82
+    // distinct videos = exactly 100 queue targets, not a mocked planner.
+    const extraVideos = Array.from({ length: 81 }, (_, index) =>
+      `('vid-extra-${index}', NULL, 'x_src', 'u-src', 'Src', 'Extra video ${index}', 100, 500)`,
+    ).join(",\n");
+    const extraSeed = `INSERT INTO videos
+      (id, primary_event_id, creator_x_user_id, submitted_by_user_id,
+       creator_display_name, title, created_at, updated_at)
+      VALUES ${extraVideos};`;
+
+    for (const { stale } of [{ stale: false }, { stale: true }]) {
+      const [, result] = await runScenario(
+        stale ? "xid-100-stale" : "xid-100-success",
+        ({ db, readRequest }) => merge.executeApprovedXIdMergeRequest(
+          db,
+          mergeInput({
+            ...readRequest("req-merge"),
+            ...(stale ? { updated_at: 999 } : {}),
+          }),
+        ),
+        { extraSeed },
+      );
+      const batch = result.log.find((entry) => entry.op === "batch");
+      assert.ok(batch, "real D1 batch must be executed");
+      assert.equal(batch.statements.length, 28, "18 base DML + CAS, queue, fence, audit and assertions");
+      assert.equal(batch.statements.filter((entry) =>
+        entry.sql.includes("INSERT INTO static_rebuild_queue")).length, 1,
+      "100 targets must occupy one JSON1 queue DML");
+      const queued = result.tables.static_rebuild_queue;
+      const audit = result.tables.audit_logs;
+      const srcVideos = result.tables.videos.filter((v) => v.creator_x_user_id === "x_src");
+      const dstVideos = result.tables.videos.filter((v) => v.creator_x_user_id === "x_tgt");
+
+      if (stale) {
+        assert.match(result.outcome.threw ?? "", /error|failed|not-valid-json|SQLITE/i);
+        assert.ok(result.log.some((entry) => entry.op === "batch.rollback"));
+        assert.equal(queued.length, 0, "no queue rows may escape a CAS rollback");
+        assert.equal(audit.length, 0, "no audit rows may escape a CAS rollback");
+        assert.equal(srcVideos.length, 82, "all source video rows must survive rollback");
+        assert.equal(result.tables.x_identity_requests.find((r) => r.id === "req-merge").status, "approved");
+      } else {
+        assert.equal(result.outcome.threw, undefined, "100-target merge must pass pre-batch budget");
+        assert.ok(result.log.some((entry) => entry.op === "batch.commit"));
+        assert.equal(queued.length, 100, "all 100 fan-out targets must be enqueued");
+        assert.equal(new Set(queued.map((entry) =>
+          `${entry.target_type}:${entry.target_id}`,
+        )).size, 100, "fan-out targets must remain unique");
+        assert.equal(queued.filter((entry) => entry.target_type === "video").length, 82);
+        assert.equal(srcVideos.length, 0, "all affected source video rows must move");
+        assert.equal(dstVideos.length, 83, "original target video and all 82 source videos remain");
+        assert.equal(audit.length, 4, "the 4 strict summary audit entries survive");
+        assert.equal(result.tables.x_identity_requests.find((r) => r.id === "req-merge").status, "done");
+      }
+    }
+  });
+
   test("golden: X ID merge / revert SQL, params, audits, queue rows, R2 fence and ordering", async () => {
     const actual = {};
     for (const [name, body, options] of scenarios) {
