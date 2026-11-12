@@ -117,10 +117,10 @@ export async function preCommitEventVisibilityTransition(
   // The first CAS write can succeed without invoking mutateOnConflict. Guard
   // its initial snapshot too, or a later D1 rollback may release a prior
   // writer's block after overwriting that writer's manifest token.
-  const existing = manifest.entities.find(
-    (entry) => entry.entity_type === "event" && entry.entity_id === input.eventId,
-  );
-  if (existing && existing.fence_token !== input.fenceToken) {
+  if (manifest.entities.some(
+    (entry) => entry.entity_type === "event" &&
+      entry.entity_id === input.eventId && entry.fence_token !== input.fenceToken,
+  )) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
   const updated = upsertBlockedEntityInManifest(
@@ -137,11 +137,10 @@ export async function preCommitEventVisibilityTransition(
   await host.manifest.write(updated, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
-      const current = latest.entities.find(
-        (entry) =>
-          entry.entity_type === "event" && entry.entity_id === input.eventId,
-      );
-      if (current && current.fence_token !== input.fenceToken) {
+      if (latest.entities.some(
+        (entry) => entry.entity_type === "event" &&
+          entry.entity_id === input.eventId && entry.fence_token !== input.fenceToken,
+      )) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       return upsertBlockedEntityInManifest(
@@ -167,6 +166,10 @@ export async function preCommitEventVisibilityTransition(
         entry.entity_type === "event" &&
         entry.entity_id === input.eventId &&
         entry.fence_token === input.fenceToken,
+    ) ||
+    confirmed.entities.some(
+      (entry) => entry.entity_type === "event" &&
+        entry.entity_id === input.eventId && entry.fence_token !== input.fenceToken,
     )
   ) {
     throw new Error("public_visibility_fence_token_mismatch");
