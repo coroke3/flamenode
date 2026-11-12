@@ -2,7 +2,9 @@
 import {
   AdminUsersResponseSchema,
   AdminUserDetailResponseSchema,
+  AdminUserEditResponseSchema,
   type AdminUserDetailResponse,
+  type AdminUserEditResponse,
   type AdminUsersResponse,
   type AdminUsersView,
 } from "@flamenode/contracts";
@@ -41,6 +43,14 @@ export function usersListPath(query: UsersQuery = {}): string {
 /** A malformed 200 response must never be rendered as a privileged user list. */
 export function createAdminUsersApi(fetchFn: OpsFetch = (path, init) => fetch(path, init)) {
   return {
+    async getUserEdit(id: string, signal?: AbortSignal): Promise<OpsResult<AdminUserEditResponse>> {
+      if (!id) return { status: "notFound" };
+      const result = await getJson<unknown>(fetchFn,
+        "/api/admin-read/users/" + encodeURIComponent(id) + "/edit", signal);
+      if (result.status !== "ok") return result;
+      const parsed = AdminUserEditResponseSchema.safeParse(result.data);
+      return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
+    },
     async getUserDetail(id: string, signal?: AbortSignal): Promise<OpsResult<AdminUserDetailResponse>> {
       if (!id) return { status: "notFound" };
       const result = await getJson<unknown>(fetchFn,

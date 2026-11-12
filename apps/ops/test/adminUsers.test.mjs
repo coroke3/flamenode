@@ -8,6 +8,8 @@ import {
 } from "../.test-dist/apps/ops/src/api/adminUsers.js";
 import { AdminUserManagementTabs } from "../.test-dist/apps/ops/src/components/admin/AdminUserManagementTabs.js";
 import { AdminUserDetailContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
+import { AdminUserEditContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
+import { createAdminUserEditMutations } from "../.test-dist/apps/ops/src/api/adminUserEdits.js";
 import { permissionsPayload } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
 
 const response = (status, body) => new Response(JSON.stringify(body), {
@@ -126,5 +128,66 @@ test("MIG-0731 U02a: detail sections render private data only as React-escaped t
   }
   assert.match(html, /Active X ライク: 2/);
   assert.match(html, /\/user\/x1/);
-  assert.match(html, /編集（移行準備中）/);
+  assert.match(html, /\/admin\/users\/u1\/edit/);
+});
+
+test("MIG-0731 U02b: authorized edit DTO GET is fail-closed and no-store", async () => {
+  const edit = {
+    user: { id: "u1", name: "Tester", role: "user", is_banned: 0,
+      can_create_events: 1, is_notification_enabled: 1 },
+    xUserIds: ["x1"], truncated: false,
+  };
+  const calls = [];
+  const api = createAdminUsersApi(async (path, init) => {
+    calls.push({ path, init }); return response(200, edit);
+  });
+  const result = await api.getUserEdit("user/1");
+  assert.equal(result.status, "ok");
+  assert.equal(calls[0].path, "/api/admin-read/users/user%2F1/edit");
+  assert.equal(calls[0].init.cache, "no-store");
+  assert.equal(calls[0].init.credentials, "same-origin");
+  const bad = createAdminUsersApi(async () => response(200, { ...edit, truncated: "no" }));
+  assert.deepEqual(await bad.getUserEdit("u1"), { status: "unavailable" });
+  const denied = createAdminUsersApi(async () => response(403, { redirect: "https://evil.example" }));
+  assert.deepEqual(await denied.getUserEdit("u1"), { status: "forbidden" });
+  const missing = createAdminUsersApi(async () => response(404, {}));
+  assert.deepEqual(await missing.getUserEdit("u1"), { status: "notFound" });
+  assert.deepEqual(await api.getUserEdit(""), { status: "notFound" });
+  assert.equal(calls.length, 1);
+  const markup = renderToStaticMarkup(React.createElement(AdminUserEditContent,
+    { data: edit, onSaved() {} }));
+  for (const label of ["ロール", "BAN 状態", "開催権限", "通知", "アイコン再計算"]) {
+    assert.ok(markup.includes(label), label);
+  }
+});
+test("MIG-0731 U02b: writes preserve exact Hono routes, JSON keys and fail-closed errors", async () => {
+  const calls = [];
+  const actions = createAdminUserEditMutations(async (path, init) => {
+    calls.push({ path, init }); return response(200, { ok: true });
+  });
+  await actions.setRole("u/1", "moderator");
+  await actions.setBanned("u/1", 1, "reason");
+  await actions.setBanned("u/1", 0);
+  await actions.setNotifications("u/1", 0);
+  await actions.setCanCreateEvents("u/1", 1);
+  await actions.refreshXIcon("x/1");
+  assert.deepEqual(calls.map(x => x.path), [
+    "/api/admin/users/u%2F1/role", "/api/admin/users/u%2F1/banned",
+    "/api/admin/users/u%2F1/banned", "/api/admin/users/u%2F1/notifications",
+    "/api/admin/users/u%2F1/can-create-events", "/api/admin/x-users/x%2F1/icon-refresh",
+  ]);
+  assert.deepEqual(calls.map(x => JSON.parse(x.init.body)), [
+    { role: "moderator" }, { is_banned: 1, reason: "reason" },
+    { is_banned: 0 }, { is_notification_enabled: 0 }, { can_create_events: 1 }, {},
+  ]);
+  assert.ok(calls.every(x => x.init.method === "POST" && x.init.credentials === "same-origin" &&
+    x.init.cache === "no-store" && x.init.headers["content-type"] === "application/json"));
+  assert.deepEqual(await actions.setBanned("u1", 1, ""), { status: "unavailable" });
+  assert.equal(calls.length, 6, "missing BAN reason must never write");
+  const bad = createAdminUserEditMutations(async () => response(500, { ok: true }));
+  assert.deepEqual(await bad.setRole("u1", "user"), { status: "unavailable" });
+  const denial = createAdminUserEditMutations(async () => response(401, {}));
+  assert.deepEqual(await denial.setRole("u1", "admin"), { status: "anonymous" });
+  const malformed = createAdminUserEditMutations(async () => response(200, { ok: "yes" }));
+  assert.deepEqual(await malformed.setRole("u1", "admin"), { status: "unavailable" });
 });

@@ -39,7 +39,7 @@ export function AdminUserDetailContent({ data }: { data: AdminUserDetailResponse
       <p>ID: {user.id} / {user.email ?? "email 未取得"} / 登録 {dateText(user.created_at)}</p>
       <nav aria-label="ユーザー管理">
         <span aria-current="page">詳細</span>
-        <span className="fn-muted" style={{ marginLeft: 16 }}>編集（移行準備中）</span>
+        <a style={{ marginLeft: 16 }} href={"/admin/users/" + encodeURIComponent(user.id) + "/edit"}>編集</a>
       </nav>
     </header>
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
