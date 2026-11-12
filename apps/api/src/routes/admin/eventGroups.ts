@@ -1377,7 +1377,9 @@ stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
         db.run(sql`DELETE FROM event_group_events
                    WHERE event_group_id = ${groupId}
                      AND event_id = ${eventId}
-                     AND updated_at = ${plan.expectedUpdatedAt}`),
+                     AND updated_at = ${plan.expectedUpdatedAt}
+                     AND relation_type = ${plan.before.relation_type}
+                     AND created_at = ${plan.before.created_at}`),
         ...queue.statements,
       ],
       expectedMutationChanges: [1, ...queue.expectedChanges],
