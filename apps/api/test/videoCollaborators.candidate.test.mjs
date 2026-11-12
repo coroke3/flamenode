@@ -156,11 +156,28 @@ import { Hono } from "hono";
 import { createSqlite } from "./support/personalHarness.mjs";
 import { atomicD1, seedChapterWorld, SESSION_USER, SITE } from "./support/chapterSeed.mjs";
 
-function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false } = {}) {
+function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false, queueEnabled = false } = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
   sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'").run(mode);
   const d1 = atomicD1(sqlite);
+  const queueMessages = [];
+  const env = {
+    DB: d1, NEXT_PUBLIC_SITE_URL: SITE,
+    QUEUE_DISPATCH_ENABLED: queueEnabled ? "1" : "0",
+    NOTIFICATION_WAKE_QUEUE: {
+      async send(message) {
+        assert.equal(d1.stats.batches, 1, "notification wake must follow D1 commit");
+        queueMessages.push(message);
+      },
+    },
+    STATIC_REBUILD_WAKE_QUEUE: {
+      async send(message) {
+        assert.equal(d1.stats.batches, 1, "static wake must follow D1 commit");
+        queueMessages.push(message);
+      },
+    },
+  };
   const actor = as ? SESSION_USER(as, as === "u_admin" ? "admin" : "user", "x_admin") : null;
   let wakeLoadCount = 0;
   const session = async (c, next) => {
@@ -185,9 +202,9 @@ function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false 
     app.request(path, {
       method, headers: { "content-type": "application/json", ...headers },
       body: data === undefined ? undefined : JSON.stringify(data),
-    }, { DB: d1, NEXT_PUBLIC_SITE_URL: SITE });
+    }, env);
   const count = (table) => sqlite.prepare('SELECT COUNT(*) AS n FROM "' + table + '"').get().n;
-  return { sqlite, d1, send, count, wakeLoads: () => wakeLoadCount };
+  return { sqlite, d1, send, count, wakeLoads: () => wakeLoadCount, queueMessages };
 }
 
 test("SA-084 authenticated middleware + real SQLite D1: permission, strict audit and rebuild queue commit together", async () => {
@@ -394,6 +411,48 @@ test("SA-082/083/084 edit_video CostGuard rejects disabled feature before permis
     assert.equal(s.count("static_rebuild_queue"), 0);
     assert.equal(s.d1.stats.batches, 0);
     assert.equal(s.wakeLoads(), 0);
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+
+test("SA-084 notify=true commits a DM outbox + static queue then sends exactly two wake-only messages", async () => {
+  const s = integration({ queueEnabled: true });
+  try {
+    const res = await s.send("POST", "/api/videos/v_pub/collaborators/batch", {
+      video_id: "v_pub",
+      edit_privilege_mode: "admin",
+      notify: true,
+      intents: [{ x_user_id: "x_other", display_name: "Other", intent: "on" }],
+    });
+    assert.equal(res.status, 200, await res.clone().text());
+    assert.equal((await res.json()).ok, true);
+    assert.equal(s.d1.stats.batches, 1, "all permission, audit and durable outbox writes are atomic");
+    assert.equal(s.count("audit_logs"), 1);
+    assert.ok(s.count("static_rebuild_queue") >= 1);
+    assert.equal(s.count("notification_outbox"), 1);
+    const outbox = s.sqlite.prepare(
+      "SELECT recipient_user_id, type, status FROM notification_outbox LIMIT 1",
+    ).get();
+    assert.deepEqual(
+      [outbox.recipient_user_id, outbox.type, outbox.status],
+      ["u_other", "video_edit_permission_granted", "pending"],
+    );
+    assert.deepEqual(
+      s.queueMessages.map((msg) => [msg.kind, msg.source]).sort(),
+      [
+        ["notification_available", "manage"],
+        ["static_rebuild_available", "manage"],
+      ],
+      "messages are doorbells only; no business payload reaches Queue",
+    );
+    for (const msg of s.queueMessages) {
+      assert.equal(msg.version, 1);
+      assert.equal(msg.video_id, undefined);
+      assert.equal(msg.recipient_user_id, undefined);
+    }
+    assert.equal(s.wakeLoads(), 2);
   } finally {
     s.sqlite.close();
   }
