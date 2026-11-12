@@ -81,7 +81,7 @@ test("MIG-0731 U03a: CURRENT filter auto-submits the exact GET form", () => {
     data: { ...fixture, cases: [] },
     filters: { type: "rights", status: "resolved", overdue: true },
   }));
-  assert.match(markup, /action="\/admin\/moderation"/);
+  assert.ok(markup.includes('action="/admin/moderation"'));
   assert.match(markup, /name="type"/);
   assert.match(markup, /name="status"/);
   assert.match(markup, /name="overdue"/);
