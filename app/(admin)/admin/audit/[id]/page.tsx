@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, asc, desc, eq, gt, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, or } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { auditLogs } from "@/lib/db/schema";
@@ -56,7 +56,7 @@ export default async function AdminAuditDetailPage({
 
   const targetId = row.target_id;
 
-  // 同一 table_name・target_id の前後ナビ（created_at 順）
+  // 同一 table_name・target_id の前後ナビ（created_at, id 順。秒単位の同時刻を含む）
   const [prevRows, nextRows] = await Promise.all([
     db
       .select({ id: auditLogs.id, created_at: auditLogs.created_at })
@@ -65,10 +65,13 @@ export default async function AdminAuditDetailPage({
         and(
           eq(auditLogs.table_name, row.table_name),
           eq(auditLogs.target_id, targetId),
-          lt(auditLogs.created_at, row.created_at),
+          or(
+            lt(auditLogs.created_at, row.created_at),
+            and(eq(auditLogs.created_at, row.created_at), lt(auditLogs.id, row.id)),
+          ),
         ),
       )
-      .orderBy(desc(auditLogs.created_at))
+      .orderBy(desc(auditLogs.created_at), desc(auditLogs.id))
       .limit(1),
     db
       .select({ id: auditLogs.id, created_at: auditLogs.created_at })
@@ -77,10 +80,13 @@ export default async function AdminAuditDetailPage({
         and(
           eq(auditLogs.table_name, row.table_name),
           eq(auditLogs.target_id, targetId),
-          gt(auditLogs.created_at, row.created_at),
+          or(
+            gt(auditLogs.created_at, row.created_at),
+            and(eq(auditLogs.created_at, row.created_at), gt(auditLogs.id, row.id)),
+          ),
         ),
       )
-      .orderBy(asc(auditLogs.created_at))
+      .orderBy(asc(auditLogs.created_at), asc(auditLogs.id))
       .limit(1),
   ]);
 
