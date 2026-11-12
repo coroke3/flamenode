@@ -318,3 +318,77 @@ test("SA-084 Queue host-load rejection after commit does not turn durable succes
     s.sqlite.close();
   }
 });
+
+
+test("SA-082/083 actual SQLite grant, revoke, repeat: strict audit + durable queue only on changes", async () => {
+  const s = integration();
+  try {
+    const path = "/api/videos/v_pub/collaborators";
+    const first = await s.send("POST", path, {
+      video_id: "v_pub", edit_privilege_mode: "admin",
+      x_user_id: "@x_other", display_name: "Other",
+      can_edit: "1", notify: "0",
+    });
+    assert.equal(first.status, 200, await first.clone().text());
+    assert.equal((await first.json()).ok, true);
+    assert.deepEqual(
+      s.sqlite.prepare("SELECT can_edit,is_public_member FROM video_members WHERE video_id=? AND x_user_id=?").all("v_pub", "x_other")
+        .map(row => [row.can_edit, row.is_public_member]),
+      [[1, 0]],
+    );
+    assert.equal(s.count("audit_logs"), 1);
+    assert.equal(s.d1.stats.batches, 1);
+
+    const second = await s.send("DELETE", path, {
+      video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "@x_other",
+    });
+    assert.equal(second.status, 200, await second.clone().text());
+    assert.equal((await second.json()).ok, true);
+    assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM video_members WHERE video_id=? AND x_user_id=?").get("v_pub", "x_other").n, 0);
+    assert.equal(s.count("audit_logs"), 2, "revoke must be audited atomically");
+    assert.equal(s.d1.stats.batches, 2);
+
+    const repeat = await s.send("DELETE", path, {
+      video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_other",
+    });
+    assert.equal(repeat.status, 200, await repeat.clone().text());
+    assert.equal((await repeat.json()).ok, true);
+    assert.equal(s.count("audit_logs"), 2, "idempotent no-op must not create an audit");
+    assert.equal(s.d1.stats.batches, 2, "idempotent no-op must not start a D1 batch");
+    assert.ok(s.count("static_rebuild_queue") >= 1);
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+test("SA-082/083/084 deny an unauthorized user before mutation/audit/queue", async () => {
+  const s = integration({ as: "u_other" });
+  try {
+    const path = "/api/videos/v_pub/collaborators";
+    const attempts = [
+      ["POST", path, {
+        video_id: "v_pub", edit_privilege_mode: "admin",
+        x_user_id: "x_staff", display_name: "Staff", can_edit: "1",
+      }],
+      ["DELETE", path, {
+        video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_staff",
+      }],
+      ["POST", path + "/batch", {
+        video_id: "v_pub", edit_privilege_mode: "admin",
+        intents: [{ x_user_id: "x_staff", display_name: "Staff", intent: "on" }],
+      }],
+    ];
+    for (const [method, routePath, data] of attempts) {
+      const res = await s.send(method, routePath, data);
+      assert.equal(res.status, 404, await res.clone().text());
+      assert.equal((await res.json()).ok, false);
+    }
+    assert.equal(s.count("video_members"), 0);
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(s.wakeLoads(), 0);
+  } finally {
+    s.sqlite.close();
+  }
+});
