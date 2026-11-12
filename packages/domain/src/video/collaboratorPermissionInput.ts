@@ -106,7 +106,8 @@ export function parseVideoCollaboratorDeleteInput(input: {
   | { ok: false; message: string } {
   const videoId = String(input.video_id ?? "").trim();
   const rawXId = String(input.x_user_id ?? "").trim();
-  // Match upsert/batch body bounds before X-ID normalization or any D1 read.
+  // Match upsert/batch body bounds before X-ID normalization or
+  // permission-specific D1 lookups. The outer writeGuard may read D1 first.
   // Preserve the legacy failure message and normal FormData coercion.
   if (videoId.length > 64 || rawXId.length > 32) {
     return { ok: false, message: "video_id と有効な X ID が必要です。" };
