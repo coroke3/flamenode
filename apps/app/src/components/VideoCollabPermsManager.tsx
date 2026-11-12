@@ -1,7 +1,6 @@
 import * as React from "react";
 import { parseCanonicalXId } from "@flamenode/domain/xid";
 import { upsertVideoCollaborator, applyVideoCollaboratorPermissionsBatch, type VideoCollaboratorWriteResult } from "../api/videoCollaborators.js";
-import "../styles/video-collab.css";
 
 const styles = { addPanel: "vcollab-addPanel", badge: "vcollab-badge", badgeAccent: "vcollab-badgeAccent", badgeOk: "vcollab-badgeOk", badgeWarn: "vcollab-badgeWarn", badges: "vcollab-badges", calloutWarn: "vcollab-calloutWarn", candidateBtn: "vcollab-candidateBtn", candidateList: "vcollab-candidateList", dialog: "vcollab-dialog", dialogBackdrop: "vcollab-dialogBackdrop", dialogBody: "vcollab-dialogBody", dialogFooter: "vcollab-dialogFooter", dialogMessage: "vcollab-dialogMessage", dialogNote: "vcollab-dialogNote", dialogTitle: "vcollab-dialogTitle", feedbackErr: "vcollab-feedbackErr", feedbackOk: "vcollab-feedbackOk", fieldRow: "vcollab-fieldRow", intro: "vcollab-intro", previewBox: "vcollab-previewBox", root: "vcollab-root", row: "vcollab-row", rowActions: "vcollab-rowActions", rowHead: "vcollab-rowHead", rowIdentity: "vcollab-rowIdentity", rowList: "vcollab-rowList", rowStatus: "vcollab-rowStatus", rowSub: "vcollab-rowSub", section: "vcollab-section", sectionHint: "vcollab-sectionHint", sectionTitle: "vcollab-sectionTitle" } as const;
 
