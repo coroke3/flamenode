@@ -1237,6 +1237,8 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
 });
 
 stagedEventGroupWriteRoutes.delete("/:id/events/:eventId", async (c) => {
+  // Membership existence and conflict responses are admin-private, including 200/404/500.
+  c.header("Cache-Control", "private, no-store");
   const result = normalizeEventGroupMembershipRemove({
     groupId: c.req.param("id"),
     eventId: c.req.param("eventId"),
