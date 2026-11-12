@@ -7,7 +7,8 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
-import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { mutateWithAudit, planAtomicAuditMutationBudget } from "@flamenode/server-core/audit/mutate";
+import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
 import { actorSnapshotFromRow, prepareAuditLogEntries } from "@flamenode/server-core/audit/logger";
 import { mapAuditSettings } from "@flamenode/server-core/audit/settings";
 import { sql } from "@flamenode/server-core/sql";
@@ -173,4 +174,101 @@ test("mutateWithAudit forwards preloaded: one batch, no settings or actor read, 
   // the preloaded actor here is the empty snapshot, so only actor_snapshot_json may differ
   assert.deepEqual({ ...pre.row, actor_snapshot_json: null }, { ...self.row, actor_snapshot_json: null });
   assert.deepEqual(JSON.parse(pre.row.actor_snapshot_json), actorSnapshotFromRow(null));
+});
+
+
+test("Issue #669: exact 50-query budget uses only matching guard-preloaded audit reads", () => {
+  const audit = { ...AUDIT, actor_user_id: "admin-1" };
+  const base = {
+    mutationStatements: [sql`INSERT INTO test_table (id) VALUES (${"a1"})`],
+    expectedMutationChanges: 1,
+    audits: [audit],
+    callerQueryCount: 46,
+  };
+  const settings = { max_payload_bytes: 90000 };
+  const validPreload = {
+    settings,
+    actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
+  };
+  const noPreload = planAtomicAuditMutationBudget(base);
+  assert.equal(noPreload.preparationQueryCount, 2);
+  assert.equal(noPreload.totalQueryCount, 52);
+  assert.equal(noPreload.withinLimit, false);
+
+  for (const [label, preload] of [
+    ["only settings", { settings }],
+    ["wrong actor key", { settings, actorSnapshotJsonById: { other: "{}" } }],
+    ["only actor", { actorSnapshotJsonById: validPreload.actorSnapshotJsonById }],
+    ["null actor placeholder", { settings, actorSnapshotJsonById: { "admin-1": null } }],
+  ]) {
+    const budget = planAtomicAuditMutationBudget({ ...base, preloaded: preload });
+    assert.equal(budget.preparationQueryCount, 1, label);
+    assert.equal(budget.totalQueryCount, 51, label);
+    assert.equal(budget.withinLimit, false, label);
+  }
+  const full = planAtomicAuditMutationBudget({ ...base, preloaded: validPreload });
+  assert.equal(full.preparationQueryCount, 0);
+  assert.equal(full.totalQueryCount, 50);
+  assert.equal(full.withinLimit, true);
+  const withActorX = planAtomicAuditMutationBudget({
+    ...base, audits: [{ ...audit, actor_x_user_id: "x1" }], preloaded: validPreload,
+  });
+  assert.equal(withActorX.preparationQueryCount, 1, "actor-X approval SELECT is not preloaded");
+  assert.equal(withActorX.totalQueryCount, 51);
+  assert.equal(withActorX.withinLimit, false);
+
+  const distinct = planD1AuditMutationBudget({
+    mutationStatementCount: 1, mutationAssertionCount: 1,
+    auditEntryCount: 1, distinctActorCount: 1, callerQueryCount: 46,
+    preloadedSettings: true, preloadedActorCount: 10000,
+  });
+  assert.equal(distinct.preparationQueryCount, 0, "credits are capped by real distinct actors");
+  const invalidCredit = planD1AuditMutationBudget({
+    mutationStatementCount: 1, mutationAssertionCount: 1,
+    auditEntryCount: 1, distinctActorCount: 1, callerQueryCount: 46,
+    preloadedSettings: true, preloadedActorCount: Number.NaN,
+  });
+  assert.equal(invalidCredit.preparationQueryCount, 1, "invalid actor counts cannot reduce the budget");
+});
+
+test("Issue #669: real SQLite audited mutation accepts fully preloaded 50/50; partial/missing fail before reads", async () => {
+  for (const mode of ["none", "settings", "actor", "wrongActor", "both"]) {
+    const w = world();
+    const restore = freeze();
+    try {
+      w.sqlite.exec("CREATE TABLE t (id TEXT PRIMARY KEY)");
+      const settings = mapAuditSettings(w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get());
+      const actor = JSON.stringify(actorSnapshotFromRow(null));
+      const preloaded = mode === "none" ? undefined : {
+        ...(mode === "settings" || mode === "wrongActor" || mode === "both" ? { settings } : {}),
+        ...(mode === "actor" || mode === "both"
+          ? { actorSnapshotJsonById: { "admin-1": actor } }
+          : mode === "wrongActor" ? { actorSnapshotJsonById: { "other": actor } } : {}),
+      };
+      const input = {
+        mutationStatements: [sql`INSERT INTO t (id) VALUES (${"a1"})`],
+        expectedMutationChanges: 1,
+        audits: [{ ...AUDIT }],
+        callerQueryCount: 46,
+        preloaded,
+      };
+      assert.equal(planAtomicAuditMutationBudget(input).withinLimit, mode === "both");
+      if (mode === "both") {
+        await mutateWithAudit(w.db, input);
+        assert.equal(w.stats.reads.length, 0, "both authoritative preflight reads were reused");
+        assert.equal(w.stats.batches, 1);
+        assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM t").get().n, 1);
+        assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1);
+      } else {
+        await assert.rejects(() => mutateWithAudit(w.db, input), /query 数が上限/);
+        assert.equal(w.stats.reads.length, 0, "budget rejects before any audit SELECT");
+        assert.equal(w.stats.batches, 0, "budget rejects before the D1 transaction");
+        assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM t").get().n, 0);
+        assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+      }
+    } finally {
+      restore();
+      w.sqlite.close();
+    }
+  }
 });
