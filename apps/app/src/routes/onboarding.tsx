@@ -2,6 +2,8 @@ import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import type { OnboardingResponse } from "@flamenode/contracts";
 import type { PersonalApi } from "../api/personal.js";
+import type { XidRequestsApi } from "../api/xidRequests.js";
+import { OnboardingXIdForm } from "./onboardingXIdForm.js";
 import { createTermsApi, type TermsApi } from "../api/terms.js";
 import { OnboardingTermsForm } from "./onboardingTermsForm.js";
 import { ResultView, useApiResult } from "./guard.js";
@@ -66,6 +68,8 @@ export function Onboarding({ api, termsApi: suppliedTermsApi }: {
           started={params.get("start") === "1"}
           termsApi={termsApi}
           onTermsAccepted={() => setRefreshKey((v) => v + 1)}
+          requestApi={api.xidRequests}
+          onRefresh={() => setRefreshKey((v) => v + 1)}
         />
       )}
     </ResultView>
@@ -78,12 +82,16 @@ export function OnboardingView({
   started,
   termsApi,
   onTermsAccepted,
+  requestApi,
+  onRefresh,
 }: {
   data: OnboardingResponse;
   next: string;
   started: boolean;
   termsApi: ReturnType<typeof createTermsApi>;
   onTermsAccepted: () => void;
+  requestApi?: XidRequestsApi;
+  onRefresh?: () => void;
 }): React.ReactElement {
   const { state, rules } = data;
   const selfHref = onboardingHref(next);
@@ -229,7 +237,7 @@ export function OnboardingView({
             指定されたアカウントを確認できませんでした。同じ X ID
             で再申請するか、別の X ID を入力してください。
           </p>
-          {/* MIG-0702: OnboardingXIdForm (initialValue = requestedXId) */}
+          {requestApi && onRefresh ? <OnboardingXIdForm api={requestApi} onRefresh={onRefresh} initialValue={state.requestedXId ?? ""} /> : null}
           <div className="onb-stepActions">
             <AppLink href={next} className="fn-btn fn-btn-primary">
               元の操作へ戻る
@@ -292,7 +300,7 @@ export function OnboardingView({
         <p className="onb-stepBody">
           運営による確認後、作品投稿が可能になります。枠の確保は利用規約同意後から利用できます。
         </p>
-        {/* MIG-0702: OnboardingXIdForm */}
+        {requestApi && onRefresh ? <OnboardingXIdForm api={requestApi} onRefresh={onRefresh} /> : null}
         {state.canReserveSlot ? (
           <div className="onb-stepActions">
             <AppLink href={reserveOnlyHref} className="fn-btn fn-btn-ghost">
