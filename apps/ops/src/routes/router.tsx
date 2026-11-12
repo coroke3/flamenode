@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Outlet, Route, Routes } from "react-router-dom";
+import { Outlet, Route, Routes, useParams } from "react-router-dom";
 import type { OpsApi } from "../api/account.js";
 import { CostGuardBanner } from "../components/layout/CostGuardBanner.js";
 import { AdminLayout } from "./admin/AdminLayout.js";
@@ -9,10 +9,16 @@ import { AdminCompatRedirect } from "./admin/AdminRedirects.js";
 import { AdminTop } from "./admin/AdminTop.js";
 import { AdminXLinkRequests } from "./admin/AdminXLinkRequests.js";
 import { PermissionSimulator } from "./admin/PermissionSimulator.js";
+import { StaticBuilds } from "./admin/StaticBuilds.js";
+import { YoutubeSync } from "./admin/YoutubeSync.js";
+import { YoutubePlaylists } from "./admin/YoutubePlaylists.js";
+import { YoutubeQuota } from "./admin/YoutubeQuota.js";
 import { AuthErrorView, OpsGate } from "./guard.js";
 import { ManageLayout } from "./manage/ManageLayout.js";
 import { ManageDashboard } from "./manage/ManageDashboard.js";
 import { ManageReviewRedirect } from "./manage/ManageReviewRedirect.js";
+import { EventStaffReadOnlyPage } from "./manage/EventStaffReadOnlyPage.js";
+import type { OpsFetch } from "../api/read.js";
 
 /** MIG-0707 U02: placeholder only. No protected screen data is served until its own MIG is reviewed. */
 function UnmigratedView(): React.ReactElement {
@@ -28,6 +34,13 @@ export class OpsRouteErrorBoundary extends React.Component<
     return <AuthErrorView error={this.state.error} reset={() => this.setState({ error: null })} />;
   }
 }
+/** MIG-0723 U03a: read-only staff route, still delegated to Hono per-event authorization. */
+export function ManageStaffRoute({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactElement {
+  const { id } = useParams<"id">();
+  return id ? <EventStaffReadOnlyPage eventId={id} fetchFn={fetchFn} editable />
+    : <p role="alert">イベントIDが不正です。</p>;
+}
+
 export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
   // MIG-0719: retain the MIG-0726 Admin shell and routes alongside Manage.
   const manage = (
@@ -36,6 +49,7 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
         <Routes>
           <Route index element={<ManageDashboard />} />
           <Route path="events/:id/review" element={<ManageReviewRedirect />} />
+          <Route path="events/:id/staff" element={<ManageStaffRoute />} />
           <Route path="*" element={<UnmigratedView />} />
         </Routes>
       </ManageLayout>
@@ -60,6 +74,10 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
               <Route path="permissions/simulator" element={<PermissionSimulator />} />
               <Route path="cost-guard" element={<AdminCostGuard />} />
               <Route path="notifications" element={<AdminNotifications />} />
+              <Route path="static-builds" element={<StaticBuilds />} />
+              <Route path="youtube-sync" element={<YoutubeSync />} />
+              <Route path="youtube-sync/playlists" element={<YoutubePlaylists />} />
+              <Route path="youtube-quota" element={<YoutubeQuota />} />
               <Route path="history" element={<AdminCompatRedirect />} />
               <Route path="events/new" element={<UnmigratedView />} />
               <Route path="events/templates" element={<UnmigratedView />} />
