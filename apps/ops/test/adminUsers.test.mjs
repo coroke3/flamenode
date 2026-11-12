@@ -373,3 +373,38 @@ test("MIG-0731 U04: CURRENT Discord role badges and audit link semantics", () =>
   }));
   assert.match(hosted, /fn-badge fn-badge-accent" style="margin-left:4px">開催可/);
 });
+
+test("MIG-0731 U04: CURRENT detail privilege badges distinguish role, BAN, TOS, email, active X", () => {
+  const render = (userChanges) => renderToStaticMarkup(React.createElement(AdminUserDetailContent, {
+    data: { ...detailFixture, user: { ...detailFixture.user, ...userChanges } },
+  }));
+  const admin = render({ role: "admin", is_banned: 1, is_tos_accepted: 0,
+    can_create_events: 1, emailVerified: null, terms_reaccept_required: 1 });
+  assert.match(admin, /class="fn-badge fn-badge-accent">role: admin/);
+  assert.match(admin, /class="fn-badge fn-badge-danger">BAN: ON/);
+  assert.match(admin, /class="fn-badge fn-badge-danger">TOS: 未同意/);
+  assert.match(admin, /class="fn-badge fn-badge-warning">email 認証: 未/);
+  assert.match(admin, /class="fn-badge fn-badge-warning">再同意要求中/);
+  assert.match(admin, /class="fn-badge fn-badge-accent">開催権限: ON/);
+  assert.match(admin, /Active X: @x1/);
+
+  const moderator = render({ role: "moderator", is_banned: 0, is_tos_accepted: 1,
+    can_create_events: 0, emailVerified: 1700000000, terms_reaccept_required: 0 });
+  assert.match(moderator, /class="fn-badge fn-badge-warning">role: moderator/);
+  assert.match(moderator, /class="fn-badge fn-badge-soft">BAN: OFF/);
+  assert.match(moderator, /class="fn-badge fn-badge-accent">TOS: 同意済/);
+  assert.match(moderator, /class="fn-badge fn-badge-accent">email 認証: 済/);
+  assert.match(moderator, /class="fn-badge fn-badge-neutral">開催権限: OFF/);
+  assert.doesNotMatch(moderator, /再同意要求中/);
+});
+
+test("MIG-0731 U04: CURRENT detail hides Active X library counts when there is no active identity", () => {
+  const html = renderToStaticMarkup(React.createElement(AdminUserDetailContent, {
+    data: { ...detailFixture, user: { ...detailFixture.user, active_x_user_id: null },
+      likeCount: 0, bookmarkCount: 0 },
+  }));
+  assert.match(html, /Active X: -/);
+  assert.doesNotMatch(html, /Active X ライク:/);
+  assert.doesNotMatch(html, /Active X ブックマーク:/);
+  assert.match(html, /連携 X ID/);
+});

@@ -55,15 +55,31 @@ export function AdminUserDetailContent({ data }: { data: AdminUserDetailResponse
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
       <h2>権限と状態</h2>
       <div className="fn-console-badge-row">
-        <span className="fn-badge">role: {user.role ?? "user"}</span>
-        <span className="fn-badge">BAN: {user.is_banned === 1 ? "ON" : "OFF"}</span>
-        <span className="fn-badge">通知: {user.is_notification_enabled === 1 ? "有効" : "停止"}</span>
-        <span className="fn-badge">開催権限: {user.can_create_events === 1 ? "ON" : "OFF"}</span>
-        <span className="fn-badge">email認証: {user.emailVerified ? "済" : "未"}</span>
-        <span className="fn-badge">TOS: {user.is_tos_accepted === 1 ? "同意済" : "未同意"}</span>
+        <span className={"fn-badge " + (user.role === "admin" ? "fn-badge-accent"
+          : user.role === "moderator" ? "fn-badge-warning" : "fn-badge-soft")}>
+          role: {user.role ?? "user"}
+        </span>
+        <span className={"fn-badge " + (user.is_banned === 1 ? "fn-badge-danger" : "fn-badge-soft")}>
+          BAN: {user.is_banned === 1 ? "ON" : "OFF"}
+        </span>
+        <span className="fn-badge fn-badge-soft">通知: {user.is_notification_enabled === 1 ? "有効" : "停止"}</span>
+        <span className={"fn-badge " + (user.can_create_events === 1 ? "fn-badge-accent" : "fn-badge-neutral")}>
+          開催権限: {user.can_create_events === 1 ? "ON" : "OFF"}
+        </span>
+        <span className="fn-badge fn-badge-soft">
+          Active X: {user.active_x_user_id ? "@" + user.active_x_user_id : "-"}
+        </span>
+        <span className={"fn-badge " + (user.emailVerified ? "fn-badge-accent" : "fn-badge-warning")}>
+          email 認証: {user.emailVerified ? "済" : "未"}
+        </span>
+        <span className={"fn-badge " + (user.is_tos_accepted === 1 ? "fn-badge-accent" : "fn-badge-danger")}>
+          TOS: {user.is_tos_accepted === 1 ? "同意済" : "未同意"}
+        </span>
         {user.terms_reaccept_required === 1 ? <span className="fn-badge fn-badge-warning">再同意要求中</span> : null}
-        <span className="fn-badge">Active X ライク: {data.likeCount}</span>
-        <span className="fn-badge">Active X ブックマーク: {data.bookmarkCount}</span>
+        {user.active_x_user_id ? <>
+          <span className="fn-badge fn-badge-soft">Active X ライク: {data.likeCount}</span>
+          <span className="fn-badge fn-badge-soft">Active X ブックマーク: {data.bookmarkCount}</span>
+        </> : null}
       </div>
     </section>
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
