@@ -918,3 +918,27 @@ test("Hono import composite PK identity is canonical for distinct Unicode-normal
     spreadsheetImportPrimaryKeyFingerprint({ [composed]: "one", [decomposed]: "changed" }),
   );
 });
+
+
+test("MIG-0638: direct FK preflight rejects NUL-bearing values before any D1 query", async () => {
+  const { buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fks = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  for (const bad of ["a\0b", "\0", "normal\0suffix"]) {
+    assert.throws(
+      () => buildSpreadsheetForeignKeyLookups(fks, [{ event_id: bad }], 3),
+      (error) => error instanceof Error && error.message === "invalid_row",
+      "no NUL-containing FK should be sent as a bound SQLite text parameter",
+    );
+    let prepares = 0;
+    const db = { prepare() { prepares++; throw new Error("Unexpected D1 read"); } };
+    await assert.rejects(
+      () => validateSpreadsheetForeignKeys(db, fks, [{ event_id: bad }], 3),
+      (error) => error instanceof Error && error.message === "invalid_row",
+    );
+    assert.equal(prepares, 0, "invalid foreign key must fail before opening D1");
+  }
+  const normal = buildSpreadsheetForeignKeyLookups(fks, [{ event_id: "valid-id" }], 3);
+  assert.equal(normal.length, 1);
+  assert.deepEqual(normal[0].binds, ["valid-id"]);
+});
