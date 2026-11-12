@@ -7,6 +7,7 @@ import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 import { linkDiscordAccountAtomically } from "@/lib/auth/accountLinkAdapter";
 import { configuredHttpOrigin } from "@/lib/auth/origin";
 import { authRedirectTarget } from "@flamenode/server-core/auth/redirect";
+import { applyDatabaseAuthSessionClaims } from "@flamenode/server-core/auth/config";
 import { logSafeAuthError } from "@/lib/auth/safeLogger";
 import {
   createTraceId,
@@ -90,25 +91,13 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
         return authRedirectTarget(url, authOrigin);
       },
       async session({ session, user }) {
-        if (session.user && user) {
-          const su = session.user as typeof session.user & {
-            id: string;
-            role?: string;
-            is_banned?: number;
-            active_x_user_id?: string | null;
-          };
-          su.id = user.id;
-          // user (DB row) に追加カラムが入っているはずなので転写する
-          const raw = user as typeof user & {
-            role?: string;
-            is_banned?: number;
-            active_x_user_id?: string | null;
-          };
-          su.role = raw.role ?? "user";
-          su.is_banned = raw.is_banned ?? 0;
-          su.active_x_user_id = raw.active_x_user_id ?? null;
-        }
-        return session;
+        // Database identity is the only authority for role/ban/Active X claims.
+        // The pure callback is shared with the future unmounted Hono Auth.js PoC.
+        return applyDatabaseAuthSessionClaims(session, user as typeof user & {
+          role?: string | null;
+          is_banned?: number | null;
+          active_x_user_id?: string | null;
+        });
       },
     },
     adapter: {
