@@ -168,6 +168,12 @@ export async function preCommitPublicVisibilityFence(
     );
   };
   const { manifest, etag } = await host.manifest.read();
+  // A successful initial R2 CAS does not run mutateOnConflict. Reject an
+  // existing foreign token here as well, before trying any PUT.
+  const existing = findManifestEntry(manifest, input.entityType, entityId);
+  if (existing && existing.fence_token !== input.fenceToken) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
   await host.manifest.write(block(manifest), {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
