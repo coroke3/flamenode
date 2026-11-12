@@ -1491,7 +1491,7 @@ test("SA-027 U03 staged: stale base_updated_at is rejected before any mutation",
 
 
 
-function stagedSlugConflictHarness({ race = null } = {}) {
+function stagedSlugConflictHarness({ race = null, publicCreate = false, publicUpdate = false, bucketGetterThrows = false } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite);
   sqlite.exec(`
@@ -1551,6 +1551,12 @@ function stagedSlugConflictHarness({ race = null } = {}) {
   app.use("*", writeGuardMiddleware(originOptions));
   app.use("*", dbMiddleware);
   app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+  const env = { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE };
+  if (bucketGetterThrows) {
+    Object.defineProperty(env, "BUCKET", {
+      get() { throw new Error("sensitive-cloudflare-R2-binding-error"); },
+    });
+  }
   const send = (method, path, body) => app.request(new Request(
     STAGED_WRITE_SITE + path,
     {
@@ -1558,15 +1564,45 @@ function stagedSlugConflictHarness({ race = null } = {}) {
       headers: { Origin: STAGED_WRITE_SITE, "Content-Type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
-  ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+  ), undefined, env);
   return { sqlite, stats, create: (slug) => send("POST", "/api/admin/event-groups", {
     id: "grp-created", name: "Created group", slug, group_type: "series",
-    visibility_status: "private", sort_order: 1,
+    visibility_status: publicCreate ? "public" : "private", sort_order: 1,
   }), update: (slug) => send("PATCH", "/api/admin/event-groups/grp-update", {
     id: "grp-update", base_updated_at: 20, name: "Updated group", slug,
-    group_type: "series", visibility_status: "private",
+    group_type: "series", visibility_status: publicUpdate ? "public" : "private",
   }) };
 }
+
+test("SA-026/027 U03: throwing R2 getter rejects public transitions but not private writes", async () => {
+  const create = stagedSlugConflictHarness({ publicCreate: true, bucketGetterThrows: true });
+  const update = stagedSlugConflictHarness({ publicUpdate: true, bucketGetterThrows: true });
+  const privateOnly = stagedSlugConflictHarness({ bucketGetterThrows: true });
+  try {
+    const created = await create.create("r2-getter-create");
+    const updated = await update.update("r2-getter-update");
+    for (const [h, response] of [[create, created], [update, updated]]) {
+      assert.equal(response.status, 503, "public mutation requires usable R2 binding");
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(await response.json(), {
+        ok: false, message: "更新が競合したか監査記録に失敗しました。",
+      });
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+      assert.equal(h.stats.batches, 0);
+    }
+    // No public visibility transition occurs, so R2 is not consulted.
+    assert.equal((await privateOnly.create("private-no-r2")).status, 200);
+    assert.equal((await privateOnly.update("updated-private-no-r2")).status, 200);
+    assert.equal(privateOnly.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(privateOnly.stats.batches, 2);
+  } finally {
+    create.sqlite.close();
+    update.sqlite.close();
+    privateOnly.sqlite.close();
+  }
+});
 
 test("SA-026/027 U03 staged: duplicate slugs are rejected before any mutation", async () => {
   const create = stagedSlugConflictHarness();
@@ -1778,7 +1814,7 @@ test("SA-028 U03 staged: relation overflow is rejected before group, audit or qu
 });
 
 
-function stagedSa028Harness({ role = "admin", mutateAfterRead = false, membershipRace = null, publicGroup = false, bucket = null } = {}) {
+function stagedSa028Harness({ role = "admin", mutateAfterRead = false, membershipRace = null, publicGroup = false, bucket = null, bucketGetterThrows = false } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite);
   sqlite.exec(`
@@ -1855,10 +1891,16 @@ function stagedSa028Harness({ role = "admin", mutateAfterRead = false, membershi
   app.use("*", writeGuardMiddleware(opts));
   app.use("*", dbMiddleware);
   app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+  const env = { DB: racedDb, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE, ...(bucket ? { BUCKET: bucket } : {}) };
+  if (bucketGetterThrows) {
+    Object.defineProperty(env, "BUCKET", {
+      get() { throw new Error("sensitive-cloudflare-R2-binding-error"); },
+    });
+  }
   const remove = (origin = STAGED_WRITE_SITE) => app.request(new Request(
     STAGED_WRITE_SITE + "/api/admin/event-groups/grp-delete",
     { method: "DELETE", headers: { Origin: origin } },
-  ), undefined, { DB: racedDb, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE, ...(bucket ? { BUCKET: bucket } : {}) });
+  ), undefined, env);
   const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
   return { sqlite, stats, remove, count };
 }
@@ -1940,6 +1982,33 @@ test("SA-028 U03 staged: empty preflight with concurrent insert is denied", asyn
     assert.equal(h.stats.batches, 1);
   } finally {
     h.sqlite.close();
+  }
+});
+
+test("SA-028 U03: throwing R2 getter denies public delete before D1 mutation; private still works", async () => {
+  const publicGroup = stagedSa028Harness({ publicGroup: true, bucketGetterThrows: true });
+  const privateGroup = stagedSa028Harness({ publicGroup: false, bucketGetterThrows: true });
+  try {
+    const failed = await publicGroup.remove();
+    assert.equal(failed.status, 503);
+    assert.equal(failed.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(await failed.json(), {
+      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+    });
+    assert.equal(publicGroup.count("event_groups"), 1);
+    assert.equal(publicGroup.count("event_group_events"), 2);
+    assert.equal(publicGroup.count("audit_logs"), 0);
+    assert.equal(publicGroup.count("static_rebuild_queue"), 0);
+    assert.equal(publicGroup.stats.batches, 0);
+
+    const succeeded = await privateGroup.remove();
+    assert.equal(succeeded.status, 200);
+    assert.equal(succeeded.headers.get("cache-control"), "private, no-store");
+    assert.equal(privateGroup.count("event_groups"), 0);
+    assert.equal(privateGroup.count("audit_logs"), 3);
+  } finally {
+    publicGroup.sqlite.close();
+    privateGroup.sqlite.close();
   }
 });
 
