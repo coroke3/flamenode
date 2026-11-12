@@ -360,15 +360,19 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-095 | `rejectXIdMergeRevert` | `xid#buildXIdentityDecisionFields` | merge body untouched (task rule) | U02 |
 | SA-096 | `executeXIdMergeRequest` | `xid#validateXIdentityRequestShape`; merge plan `xid#buildXIdMergeBeforeState`, `#buildXIdMergeAfterState` | `merge.ts` body, `xIdMergeStateMatchesSql` CAS, `mergeBudget`, `mergeAudits` | U02 |
 | SA-097 | `approveXIdMergeRevert` | `xid#isRevertDeadlineOpen`, `#validateXIdentityRequestShape`; same merge plan as SA-096 | revert body untouched (task rule) | U02 |
-| SA-098 | `setActiveXId` | `xid#normalizeXId` | approved-link read + user CAS | U04 |
+| SA-098 | `setActiveXId` → Hono `POST /api/xid/active` (MIG-0636 U02, PR#475 CI/review pending) | `xid#normalizeXId`; `SetActiveXBodySchema` | approved linked X + user CAS + strict UPDATE audit; HTTP origin/session/CostGuard, 64KiB G21 | U04 (TARGET IN_PROGRESS; CURRENT retained) |
 | SA-099 | `requestXIdLink` | `xid#parseXIdentityInput`, `#validateXIdentityRequestShape`, `#isXIdLinkRequestType`, `#reconcilePendingXIdRequest`, `#isRetryableXIdMutationError` | pending insert (`xidPendingInsert.ts`) + audit | MIG-0659 (`POST /api/xid/requests`; SPA callers: MIG-0709 `apps/app/src/routes/dashboard/settings/XIdRequestForms.tsx`, `apps/app/src/routes/onboardingXIdForm.tsx`) |
 | SA-100 | `cancelXIdLinkRequest` | `xid#buildXIdentityDecisionFields`, `#processedXIdRequestMessage`, `#isRetryableXIdMutationError` | request CAS + audit | MIG-0659 (`POST /api/xid/requests/:id/cancel`; SPA caller: MIG-0709 `apps/app/src/routes/dashboard/settings/XIdRequestActions.tsx`) |
 | SA-101 | `requestXIdMergeRevert` | `xid#isRevertDeadlineOpen` | request insert + audit | MIG-0659 (`POST /api/xid/merge-revert-requests`; SPA caller: MIG-0709 `apps/app/src/routes/dashboard/settings/XIdRequestActions.tsx`) |
 | SA-102 | `updateXIdProfile` | `xid#normalizeXId` | profile CAS + static rebuild | U04 |
 | SA-103 | `deleteLinkedXId` | `xid#normalizeXId` | `xLinkDependencies.ts` (SQL) + link delete | U04 |
 | SA-104 | `setXIdIcon` | `xid#normalizeXId` | icon resolution + R2 | U04 |
-| SA-105 | `uploadXIdIcon` | `xid#normalizeXId` | image upload + R2 | U04 |
+| SA-105 | `uploadXIdIcon` → isolated `POST /api/xid/:xUserId/icon/upload` (UNMOUNTED, PR#475) | `xid#normalizeXId`, CURRENT `validateIconImageUpload` pure parity | U06 isolated Hono handler with 8MiB multipart boundary, 2MiB validated PNG/JPEG/WEBP image, approved linked-X preflight + D1 CAS recheck, R2 staging/final, strict X-user audit and static-rebuild batch, rollback on uncommitted error, postcommit cleanup. Public mount, S3 CPU/D1 and independent security review PENDING | U06 IN_PROGRESS (not live) |
 | SA-106 | `queueYoutubeMetadataResync` | `POST /api/admin/youtube-sync/videos/:videoId/resync` (MIG-0643, caller: MIG-0735 `apps/ops/src/routes/admin/YoutubeSync.tsx`) | ADAPTER_ONLY: sync-state CAS + strict audit; wake=0 per D-13-41 (cron), no Next cache revalidation | MOUNTED |
+
+### MIG-0636 G21 — X identity request-byte guard (PR #475)
+
+SA-098..104: 64 KiB (65,536 bytes), SA-105: 8 MiB (8,388,608 bytes). Hono checks declared Content-Length (when present) and bytes actually consumed, returns 413 for oversized input, 400 for malformed Content-Length, and never treats missing or forged Content-Length as authorization to skip the body check. G21 is not production-cutover approval; SA-099..101 are owned by MIG-0659 and remaining MIG-0636 handlers still pending.
 
 ## MIG-0611 Hono Personal read APIs (Phase 6)
 

@@ -37,6 +37,8 @@ export type Variables = {
   db: ServerCoreDb;
   /** Set by writeGuardMiddleware from its single user read ({ [userId]: json }). */
   actorSnapshotJsonById: Record<string, string>;
+  /** MIG-0636: one pre-read supplies selected identity and full user CAS snapshot. */
+  xidSelected: { before: Record<string, unknown>; canonicalXId: string };
 };
 
 export type AppEnv = {

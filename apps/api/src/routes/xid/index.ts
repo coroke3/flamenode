@@ -13,6 +13,7 @@ import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { dbMiddleware } from "../../middleware/db.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { createXIdRequestRoutes } from "./requests.ts";
+import { activeXRoutes } from "./activeX.ts";
 
 export function xidWriteStack(session?: MiddlewareHandler<AppEnv>): MiddlewareHandler<AppEnv> {
   const originOptions = (c: Context<AppEnv>) => ({
@@ -45,8 +46,28 @@ export function xidWriteStack(session?: MiddlewareHandler<AppEnv>): MiddlewareHa
 
 export function createXIdRoutes(options: { session?: MiddlewareHandler<AppEnv> } = {}): Hono<AppEnv> {
   const xid = new Hono<AppEnv>();
+  // SA-098 uses a single D1 identity/TOS/CostGuard snapshot; do not run the
+  // SA-099..101 write stack again or consume its additional D1 reads.
+  // Preserve 404/405 semantics for non-POST and unknown routes.
+  const activeOrigin = (c: Context<AppEnv>) => ({
+    loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
+    allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
+  });
+  xid.use("/active", async (c, next) => {
+    c.header("Cache-Control", "private, no-store");
+    await next();
+  });
+  xid.use("/active", (c, next) =>
+    c.req.method === "POST" ? originGuardMiddleware(activeOrigin(c))(c, next) : next(),
+  );
+  xid.use("/active", (c, next) =>
+    c.req.method === "POST" ? (options.session ?? sessionMiddleware())(c, next) : next(),
+  );
+  xid.route("/active", activeXRoutes); // MIG-0636 SA-098: own one-read write guard
   xid.route("/", createXIdRequestRoutes(xidWriteStack(options.session))); // MIG-0659 SA-099..101
   return xid;
 }
 
+// Compatibility alias for MIG-0636 existing route tests and callers.
+export const createXidRoutes = createXIdRoutes;
 export const xidRoutes = createXIdRoutes();
