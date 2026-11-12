@@ -84,6 +84,7 @@
     "./publicData/publicApi": "./src/publicData/publicApi.ts",
     "./auth/approvedX": "./src/auth/approvedX.ts",
     "./auth/redirect": "./src/auth/redirect.ts",
+    "./auth/config": "./src/auth/config.ts",
     "./auth/approvedXPredicate": "./src/auth/approvedXPredicate.ts",
     "./video/generalEditPermissions": "./src/video/generalEditPermissions.ts",
     "./auth/ownership": "./src/auth/ownership.ts",
