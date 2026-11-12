@@ -89,6 +89,26 @@ test("T02: network errors, non-JSON and invalid responses cannot be mistaken for
   }
 });
 
+test("T02: a successful HTTP body carrying guard denial cannot redirect or commit Active X", async () => {
+  // A contradictory 2xx result must not cause a navigation side effect,
+  // followed by a successful account-switch event in the caller.
+  for (const reason of ["unauthenticated", "tos_required", "banned", "unknown_reason"]) {
+    const destinations = [];
+    const response = fakeFetch(json({ ok: true, message: "changed", reason }));
+    const result = await switchActiveX("second", response, (path) => destinations.push(path));
+    assert.deepEqual(result, { ok: false, message: "X ID の切り替えに失敗しました。" }, reason);
+    assert.deepEqual(destinations, [], reason);
+    assert.equal(response.calls.length, 1);
+  }
+  // An actual denied response still carries its original guard navigation.
+  const redirects = [];
+  const denied = await switchActiveX("second", fakeFetch(json({
+    ok: false, reason: "active_x_required", message: "identity required",
+  }, 403)), (path) => redirects.push(path));
+  assert.deepEqual(denied, { ok: false, message: "identity required", reason: "active_x_required" });
+  assert.deepEqual(redirects, ["/onboarding?next=%2Flist%3Fsort%3Dnew"]);
+});
+
 test("T03: header injects the client and JS-off account markup has no inactive switch controls", () => {
   // Root test:unit runs before @flamenode/ui is built, so verify SiteHeader's
   // wiring at source level and SSR render only the already build-independent AccountSlot.
