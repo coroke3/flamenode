@@ -358,6 +358,10 @@ function validateSpreadsheetInputValues(
       throw new Error("column_not_editable");
     }
     const value = row[key];
+    // Reject any value SQLite could persist differently from the audit snapshot.
+    if (typeof value === "string" && value.includes("\0")) {
+      throw new Error("invalid_row");
+    }
     const meta = ctx.columns.find((column) => column.name === key)!;
     if (value == null && meta.notNull) throw new Error("not_null_violation");
     const policy = getSpreadsheetColumnPolicy(ctx.def.table, key, meta.enumValues);
@@ -714,6 +718,7 @@ export async function updateSpreadsheetCell(opts: {
     opts.primaryKey,
   );
   validateSpreadsheetInputValues(ctx, primaryKey);
+  validateSpreadsheetInputValues(ctx, { [opts.column]: opts.value });
 
   const beforeRaw = await fetchRowByPkRaw(ctx, primaryKey);
   if (!beforeRaw) throw new Error("row_not_found");
@@ -744,6 +749,8 @@ async function insertSpreadsheetRowWithContext(
     // secret・CostGuard・visibility_status を単発 API から直接書けてしまう。
     assertColumnEditable(ctx, column);
   }
+  // Fail closed before any foreign-key D1 pre-read.
+  validateSpreadsheetInputValues(ctx, opts.row);
   await validateSpreadsheetForeignKeys(ctx, [opts.row]);
   const pendingPublicReflection = await executeSpreadsheetMutations([
     buildInsertMutation(ctx, opts.row, opts.operatorId),
