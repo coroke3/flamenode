@@ -17,6 +17,11 @@ function formatSeconds(value: number | null): string {
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("ja-JP");
 }
 
+/** CURRENT AutoSubmitSelect / AutoSubmitCheckbox parity for GET filters. */
+export function requestModerationFilterSubmit(form: Pick<HTMLFormElement, "requestSubmit"> | null): void {
+  form?.requestSubmit();
+}
+
 export function AdminModerationContent({ data, filters }: {
   data: AdminModerationResponse; filters: ModerationFilters;
 }): React.ReactElement {
@@ -27,14 +32,17 @@ export function AdminModerationContent({ data, filters }: {
     </header>
     <form method="get" action="/admin/moderation"
       style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
-      <label>種別 <select name="type" defaultValue={filters.type} className="fn-select">
+      <label>種別 <select name="type" defaultValue={filters.type} className="fn-select"
+          onChange={(event) => requestModerationFilterSubmit(event.currentTarget.form)}>
         {typeOptions.map((t) => <option key={t} value={t}>{t === "all" ? "type すべて" : t}</option>)}
       </select></label>
-      <label>状態 <select name="status" defaultValue={filters.status} className="fn-select">
+      <label>状態 <select name="status" defaultValue={filters.status} className="fn-select"
+          onChange={(event) => requestModerationFilterSubmit(event.currentTarget.form)}>
         {statusOptions.map((s) => <option key={s} value={s}>{s === "all" ? "status すべて" : s}</option>)}
       </select></label>
       <label className="fn-btn fn-btn-ghost fn-btn-sm">
-        <input type="checkbox" name="overdue" value="1" defaultChecked={filters.overdue} />
+        <input type="checkbox" name="overdue" value="1" defaultChecked={filters.overdue}
+          onChange={(event) => requestModerationFilterSubmit(event.currentTarget.form)} />
         期限切れのみ
       </label>
       <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">絞り込み</button>

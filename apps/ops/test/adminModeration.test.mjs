@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   moderationFilters, moderationReadPath, createAdminModerationApi,
 } from "../.test-dist/apps/ops/src/api/adminModeration.js";
-import { AdminModerationContent } from "../.test-dist/apps/ops/src/routes/admin/AdminModeration.js";
+import { AdminModerationContent, requestModerationFilterSubmit } from "../.test-dist/apps/ops/src/routes/admin/AdminModeration.js";
 
 const resp = (status, payload) => new Response(JSON.stringify(payload), {
   status, headers: { "content-type": "application/json" },
@@ -67,4 +67,20 @@ test("MIG-0731 U03a: unmounted display includes overdue + escaped private note, 
   assert.match(markup, /\/user\/x%2F1/);
   assert.match(markup, /更新操作は未移植/);
   assert.doesNotMatch(markup, /\/api\/admin\/moderation/);
+});
+
+test("MIG-0731 U03a: CURRENT filter auto-submits the exact GET form", () => {
+  let submitted = 0;
+  requestModerationFilterSubmit({ requestSubmit() { submitted++; } });
+  requestModerationFilterSubmit(null);
+  assert.equal(submitted, 1);
+  const markup = renderToStaticMarkup(React.createElement(AdminModerationContent, {
+    data: { ...fixture, cases: [] },
+    filters: { type: "rights", status: "resolved", overdue: true },
+  }));
+  assert.match(markup, /action="\/admin\/moderation"/);
+  assert.match(markup, /name="type"/);
+  assert.match(markup, /name="status"/);
+  assert.match(markup, /name="overdue"/);
+  assert.match(markup, /value="1"/);
 });
