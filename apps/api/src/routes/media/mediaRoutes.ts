@@ -120,7 +120,7 @@ mediaRoutes.get("/slot-submission-icon/:slotId", async (c) => {
 // RH-023 — invalid keys are rejected before any cache/D1/R2 I/O.
 mediaRoutes.get("/*", async (c) => {
   const key = pathValue(c, "/api/media/");
-  if (!isValidPublicMediaKey(key)) return notFound();
+  if (!isValidPublicMediaKey(key)) return notFound(true);
 
   try {
     const { DB, BUCKET } = c.env ?? {};
