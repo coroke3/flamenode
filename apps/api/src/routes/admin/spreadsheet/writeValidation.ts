@@ -36,6 +36,9 @@ export function validateSpreadsheetInputValues(
       throw new Error("column_not_editable");
     }
     const value = row[key];
+    // A NUL in a JS string is silently truncated by node:sqlite TEXT bind.
+    // Never validate/audit one value and store another (also applies to PKs).
+    if (typeof value === "string" && value.includes("\0")) throw new Error("invalid_row");
     const meta = ctx.columns.find((column) => column.name === key)!;
     if (value == null && meta.notNull) throw new Error("not_null_violation");
     const policy = getSpreadsheetColumnPolicy(ctx.def.table, key, meta.enumValues);
@@ -122,6 +125,9 @@ export function normalizeSpreadsheetPrimaryKey(
     if (value === undefined || String(value).trim() === "") {
       throw new Error("missing_primary_key");
     }
+    // Some SQLite bindings truncate embedded NUL bytes at write/read time.
+    // Refuse ambiguous primary-key identity before any SELECT or mutation.
+    if (String(value).includes("\0")) throw new Error("invalid_row");
   }
   const normalized: Record<string, string> = {};
   for (const key of primaryKeys) normalized[key] = String(pk[key]);
