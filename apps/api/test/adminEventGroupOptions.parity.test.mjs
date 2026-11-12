@@ -6,6 +6,7 @@ import { dbMiddleware } from "../src/middleware/db.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
 import { EventGroupMutationBodySchema } from "@flamenode/contracts";
 import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
+import { planAtomicAuditMutationBudget } from "@flamenode/server-core/audit/mutate";
 import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
@@ -116,6 +117,37 @@ test("SA-029 U04: 80件一括追加とMIG-0516 build markerのD1予算競合を�
   assert.equal(queue.acceptedTargetCount, 1);
   assert.equal(queue.statements.length, 1, "current queue projection must remain one SQL statement");
   assert.equal(queue.expectedChanges.length, 1);
+
+  // The route uses this concrete atomic-input planner for preflight and
+  // execute. It cannot accidentally ignore newly appended queue statements
+  // or changed audit actors as the queue builder evolves.
+  const audits = Array.from({ length: EVENT_GROUP_ADD_MAX }, (_, i) => ({
+    table_name: "event_group_events",
+    target_id: `grp-1:event-${i}`,
+    operation: "CREATE",
+    actor_user_id: "admin-1",
+    after: { event_id: `event-${i}` },
+  }));
+  const atomic = {
+    mutationStatements: [{}, ...queue.statements],
+    expectedMutationChanges: [EVENT_GROUP_ADD_MAX, ...queue.expectedChanges],
+    audits,
+    callerQueryCount: 3,
+    preloaded: {
+      settings: { max_payload_bytes: 90000 },
+      actorSnapshotJsonById: { "admin-1": "{}" },
+    },
+  };
+  const realPlan = planAtomicAuditMutationBudget(atomic);
+  assert.equal(realPlan.mutationStatementCount, atomic.mutationStatements.length);
+  assert.equal(realPlan.mutationAssertionCount, atomic.expectedMutationChanges.length);
+  assert.equal(realPlan.auditChunkCount, 20);
+  const projectedMarkerPlan = planAtomicAuditMutationBudget({
+    ...atomic,
+    mutationStatements: [...atomic.mutationStatements, {}],
+    expectedMutationChanges: [...atomic.expectedMutationChanges, 1],
+  });
+  assert.equal(projectedMarkerPlan.totalQueryCount, realPlan.totalQueryCount + 2);
 
   const baselineInput = {
     mutationStatementCount: 1 + queue.statements.length, // JSON1 INSERT + queue
