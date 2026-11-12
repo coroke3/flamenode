@@ -371,6 +371,7 @@ export async function compensateEventVisibilityFenceRenameOnD1Failure(
         entry.entity_type === "event" &&
         entry.entity_id === input.newEventId,
     );
+    const previousOldEntry = input.previousOldEntry;
     if (
       !currentNewEntry || currentNewEntry.fence_token !== input.fenceToken ||
       manifest.entities.some((entry) =>
@@ -380,11 +381,11 @@ export async function compensateEventVisibilityFenceRenameOnD1Failure(
       // Restoring the old ID via upsert removes *all* entries for that key.
       // A concurrent writer may now own the old ID: never erase its block
       // during a failed D1 rename compensation.
-      (input.previousOldEntry !== null &&
+      (previousOldEntry !== null &&
         manifest.entities.some((entry) =>
           entry.entity_type === "event" &&
           entry.entity_id === input.oldEventId &&
-          entry.fence_token !== input.previousOldEntry.fence_token))
+          entry.fence_token !== previousOldEntry.fence_token))
     ) {
       return;
     }
