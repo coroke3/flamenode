@@ -988,3 +988,49 @@ test("MIG-0638: merged CURRENT #671 primary key contracts equal unmounted Hono h
     );
   }
 });
+
+
+test("MIG-0638 U02: CURRENT and Hono import preview tokens are cross-verifiable", async () => {
+  const current = await import("../../../src/lib/admin/spreadsheet/importPreviewToken.ts");
+  const hono = await import("../src/routes/admin/spreadsheet/importPreviewToken.ts");
+  const secret = "preview-test-secret-longer-than-thirty-two-chars";
+  const input = {
+    operatorUserId: "operator-cross-runtime",
+    table: "video_events",
+    mode: "upsert",
+    columns: ["event_id", "video_id", "notes"],
+    primaryKeys: ["video_id", "event_id"],
+    schemaColumns: [
+      { name: "video_id", type: "TEXT", notNull: true, pk: 1, enumValues: ["b", "a"] },
+      { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+      { name: "notes", type: "TEXT", notNull: false, pk: 0, defaultValue: null },
+    ],
+    rows: [
+      { video_id: "video:x", event_id: "event:y", notes: "a:b" },
+      { notes: null, event_id: "other", video_id: "video:2" },
+    ],
+  };
+  const a = await current.buildSpreadsheetImportPreviewBinding(input);
+  const b = await hono.buildSpreadsheetImportPreviewBinding(input);
+  assert.deepEqual(b, a, "schema and payload hashes must match actual CURRENT");
+  const options = { now: 1800000000, nonce: "12345678-1234-4234-8234-123456789abc" };
+  const issuedCurrent = await current.issueSpreadsheetImportPreviewToken(a, secret, options);
+  const issuedHono = await hono.issueSpreadsheetImportPreviewToken(b, secret, options);
+  assert.equal(issuedHono.token, issuedCurrent.token, "signed tokens must be byte-identical");
+  assert.deepEqual(issuedHono.claims, issuedCurrent.claims);
+  assert.deepEqual(
+    await hono.verifySpreadsheetImportPreviewToken(issuedCurrent.token, secret, b, { now: options.now + 1 }),
+    issuedCurrent.claims,
+    "Hono must accept CURRENT-issued preview token",
+  );
+  assert.deepEqual(
+    await current.verifySpreadsheetImportPreviewToken(issuedHono.token, secret, a, { now: options.now + 1 }),
+    issuedHono.claims,
+    "CURRENT must accept Hono-issued preview token",
+  );
+  const changedRows = await hono.buildSpreadsheetImportPreviewBinding({
+    ...input, rows: [{ ...input.rows[0], notes: "modified" }, input.rows[1]],
+  });
+  assert.equal(await current.verifySpreadsheetImportPreviewToken(issuedHono.token, secret, changedRows, { now: options.now + 1 }), null);
+  assert.equal(await hono.verifySpreadsheetImportPreviewToken(issuedCurrent.token, secret, b, { now: options.now + 300 }), null);
+});
