@@ -75,7 +75,22 @@ test("MIG-0659 response DTO preserves valid explicit error status while rejectin
   const denied = createXidRequestsApi(async () => new Response(JSON.stringify({ ok: false, message: "権限がありません" }), { status: 403 }));
   assert.deepEqual(await denied.cancelRequest("r1"), { ok: false, message: "権限がありません" });
   const misleading = createXidRequestsApi(async () => new Response(JSON.stringify({ ok: true, message: "成功" }), { status: 503 }));
-  assert.deepEqual(await misleading.requestMergeRevert("r1"), { ok: false, message: "成功" });
+  assert.deepEqual(await misleading.requestMergeRevert("r1"), { ok: false, message: "申請の保存に失敗しました。時間をおいて再試行してください。" });
+});
+
+test("MIG-0709 U01: shared write handles network loss, invalid 401 and deceptive HTTP errors", async () => {
+  const offline = createXidRequestsApi(async () => { throw new Error("offline"); });
+  assert.deepEqual(await offline.requestLink("alice"), {
+    ok: false, message: "申請の保存に失敗しました。時間をおいて再試行してください.",
+  });
+  const unauthorized = createXidRequestsApi(async () => new Response(JSON.stringify({ ok: true, message: "success" }), { status: 401 }));
+  assert.deepEqual(await unauthorized.cancelRequest("id1"), {
+    ok: false, message: "ログイン状態を再確認してください。",
+  });
+  const denied = createXidRequestsApi(async () => new Response(JSON.stringify({ ok: true, message: "success" }), { status: 403 }));
+  const result = await denied.requestMergeRevert("id1");
+  assert.equal(result.ok, false);
+  assert.doesNotMatch(result.message ?? "", /success/);
 });
 
 test("settings: X ID submission rejects invalid handles locally and prevents a double POST", async () => {
