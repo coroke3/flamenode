@@ -49,7 +49,11 @@ export const SLOT_BATCH_RELEASE_SNAPSHOT_SQL = [
   " SELECT DISTINCT picked.reservation_group_id FROM slots picked",
   " WHERE picked.event_id = ?",
   " AND picked.id IN (SELECT value FROM json_each(?))",
+  // Exclude ASCII-space-only IDs, which CURRENT JS trim() treats as solo.
+  // Otherwise their members can consume the four-row sentinel before a real group.
+  // Unicode whitespace is still filtered by the pure JS planner (fail-closed).
   " AND picked.reservation_group_id IS NOT NULL",
+  " AND trim(picked.reservation_group_id) <> ''",
   " ) LIMIT 4",
   ") s) AS grouped_slots_json",
 ].join("\n");
