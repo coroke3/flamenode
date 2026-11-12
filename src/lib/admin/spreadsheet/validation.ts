@@ -155,9 +155,9 @@ export function primaryKeyFromRowValues(
 export function primaryKeyFingerprint(
   primaryKey: Record<string, string>,
 ): string {
-  // Preserve column identity and component boundaries, avoiding delimiter collisions.
+  // Preserve column identity and component boundaries. Locale-aware comparators\n  // can sort distinct Unicode column names as equal, depending on entry order.
   return JSON.stringify(
-    Object.entries(primaryKey).sort(([a], [b]) => a.localeCompare(b)),
+    Object.entries(primaryKey).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   );
 }
 
