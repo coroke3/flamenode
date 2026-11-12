@@ -31,6 +31,7 @@ import {
 import { buildSlotReleaseMutationPlan } from "@/lib/slots/slotReleaseMutations";
 import { buildSlotReserveMutationPlan } from "@/lib/slots/slotReserveMutations";
 import { assertBoundedSlotGroupIntegrity } from "@/lib/slots/slotBoundedGroup";
+import { buildSlotAtomicAuditPlan } from "@/lib/slots/slotAtomicAuditPlan";
 import { resolveReservationXIdentity } from "@/lib/slots/reservationIdentity";
 import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
 import {
@@ -119,9 +120,6 @@ const mergeSchema = z.object({
   display_name: z.string().trim().min(1).max(80),
 });
 
-function snapshot(row: SlotRow): Record<string, unknown> {
-  return { ...row };
-}
 
 function mutationError(error: unknown): SlotReserveResult {
   unstable_rethrow(error);
@@ -187,19 +185,6 @@ async function resolveSlotOperatorOverride(args: {
   return { ok: true, enabled: true };
 }
 
-function applySlotPatch(
-  before: SlotRow,
-  patch: SlotPatch,
-  now: number,
-): SlotRow {
-  return {
-    ...before,
-    ...patch,
-    updated_at: now,
-    version: before.version + 1,
-  } as SlotRow;
-}
-
 async function runSlotPostCommit(
   flow: string,
   eventId: string,
@@ -250,32 +235,12 @@ async function commitSlotMutationPlan(args: {
   notificationWakeSource?: "web";
 }): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
-  const auditedIds = new Set<string>();
-  const mutationStatements: BatchItem<"sqlite">[] = [];
-  const expectedMutationChanges: (number | null)[] = [];
-  const audits: {
-    table_name: "slots";
-    target_id: string;
-    operation: "UPDATE";
-    before: Record<string, unknown>;
-    after: Record<string, unknown>;
-    actor_user_id: string;
-    reason: string;
-    context: string;
-    retention_class: "normal";
-    restore_strategy: "update_before";
-    strict: true;
-  }[] = [];
-
-  for (const mutation of args.mutations) {
-    if (mutation.rows.length === 0) continue;
-    for (const row of mutation.rows) {
-      if (auditedIds.has(row.id)) {
-        throw new Error("同一枠を複数の更新に含めることはできません。");
-      }
-      auditedIds.add(row.id);
-    }
-    mutationStatements.push(
+  // MIG-0657 U01g: pure, shared preflight proves one audit row per unique
+  // slot and preserves the snapshot/updated_at/version delta before any D1
+  // update or Queue work. SQL CAS and strict audit batch remain in CURRENT.
+  const plan = buildSlotAtomicAuditPlan(args.mutations, now);
+  const mutationStatements: BatchItem<"sqlite">[] = plan.updates.map(
+    (mutation) =>
       args.db
         .update(slots)
         .set({
@@ -290,28 +255,35 @@ async function commitSlotMutationPlan(args: {
             mutation.statusGuard,
           ),
         ),
-    );
-    expectedMutationChanges.push(mutation.rows.length);
-    for (const before of mutation.rows) {
-      audits.push({
-        table_name: "slots",
-        target_id: before.id,
-        operation: "UPDATE",
-        before: snapshot(before),
-        after: snapshot(applySlotPatch(before, mutation.patch, now)),
-        actor_user_id: args.actorUserId,
-        reason: args.reason,
-        context: "user-slot",
-        retention_class: "normal",
-        restore_strategy: "update_before",
-        strict: true,
-      });
-    }
-  }
-
-  if (mutationStatements.length === 0) {
-    throw new Error("更新対象の枠がありません。");
-  }
+  );
+  const expectedMutationChanges = plan.updates.map(
+    (mutation) => mutation.expectedChanges,
+  );
+  const audits: {
+    table_name: "slots";
+    target_id: string;
+    operation: "UPDATE";
+    before: Record<string, unknown>;
+    after: Record<string, unknown>;
+    actor_user_id: string;
+    reason: string;
+    context: string;
+    retention_class: "normal";
+    restore_strategy: "update_before";
+    strict: true;
+  }[] = plan.auditDeltas.map((delta) => ({
+    table_name: "slots",
+    target_id: delta.targetId,
+    operation: "UPDATE",
+    before: delta.before,
+    after: delta.after,
+    actor_user_id: args.actorUserId,
+    reason: args.reason,
+    context: "user-slot",
+    retention_class: "normal",
+    restore_strategy: "update_before",
+    strict: true,
+  }));
 
   const queue = await buildSlotChangeQueueBatch(args.db, {
     eventId: args.eventId,

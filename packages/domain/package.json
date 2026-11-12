@@ -34,7 +34,8 @@
     "./db/transientError": "./src/db/transientError.ts",
     "./event/status": "./src/event/status.ts",
     "./slots/reserveMutations": "./src/slots/reserveMutations.ts",
-    "./slots/boundedGroup": "./src/slots/boundedGroup.ts"
+    "./slots/boundedGroup": "./src/slots/boundedGroup.ts",
+    "./slots/atomicAuditPlan": "./src/slots/atomicAuditPlan.ts"
   },
   "scripts": {
     "build": "tsc",

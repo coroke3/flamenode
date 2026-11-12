@@ -14,6 +14,14 @@ const reservePlannerSource = await readFile(
   new URL("../../../packages/domain/src/slots/reserveMutations.ts", import.meta.url),
   "utf8",
 );
+const atomicPlannerSource = await readFile(
+  new URL("../../../packages/domain/src/slots/atomicAuditPlan.ts", import.meta.url),
+  "utf8",
+);
+const atomicBridgeSource = await readFile(
+  new URL("../slots/slotAtomicAuditPlan.ts", import.meta.url),
+  "utf8",
+);
 const reserveBridgeSource = await readFile(
   new URL("../slots/slotReserveMutations.ts", import.meta.url),
   "utf8",
@@ -67,8 +75,14 @@ test("slot CASはversionedSlotWhereでid+version+updated_at+snapshotを比較す
   assert.match(source, /from "@\/lib\/slots\/versionedPredicate"/);
   assert.match(source, /versionedSlotWhere\(/);
   assert.match(source, /version: sql`\$\{slots\.version\} \+ 1`/);
-  assert.match(source, /before: snapshot\(before\)/);
-  assert.match(source, /after: snapshot\(applySlotPatch\(before, mutation\.patch, now\)\)/);
+  assert.match(source, /const plan = buildSlotAtomicAuditPlan\\(args\\.mutations, now\\)/);
+  assert.match(source, /versionedSlotWhere\\(/);
+  assert.match(source, /version: sql`\\$\\{slots\\.version\\} \\+ 1`/);
+  assert.match(source, /before: delta\\.before/);
+  assert.match(source, /after: delta\\.after/);
+  assert.match(atomicPlannerSource, /before: \\{ \\.\\.\\.row \\}/);
+  assert.match(atomicPlannerSource, /version: row\\.version \\+ 1/);
+  assert.match(atomicBridgeSource, /@flamenode\\/domain\\/slots\\/atomicAuditPlan/);
   assert.doesNotMatch(source, /function expectedRowCondition/);
   assert.doesNotMatch(source, /function planSlotUpdate/);
 });
