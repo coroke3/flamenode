@@ -158,3 +158,37 @@ test("Issue #659: generic same-token retry and nonconflicting CAS still work", a
   assert.equal(state.manifest.entities.find(x => x.entity_id === "group-one").fence_token, "incoming");
   assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "video-two"), added);
 });
+
+test("Issue #659: duplicate same-ID manifest entries cannot hide a prior foreign event token", async () => {
+  const state = hostOf(manifestOf(entry("event", "event-one", "incoming"), foreign, other));
+  const before = structuredClone(state.manifest);
+  await assert.rejects(write(state), /public_visibility_fence_token_mismatch/);
+  assert.equal(state.attemptedWrites, 0);
+  assert.deepEqual(state.manifest, before);
+});
+
+test("Issue #659: CAS retry rejects a later duplicate foreign token after a matching first entry", async () => {
+  const state = hostOf(manifestOf(other), latest => ({
+    ...latest,
+    entities: [...latest.entities, entry("event", "event-one", "incoming"), foreign],
+  }));
+  await assert.rejects(write(state), /public_visibility_fence_token_mismatch/);
+  assert.equal(state.callbacks, 1);
+  assert.equal(state.appliedWrites, 0);
+  assert.deepEqual(state.manifest.entities.slice(1), [entry("event", "event-one", "incoming"), foreign]);
+});
+
+test("Issue #659: generic case-folded duplicate X-ID tokens fail closed", async () => {
+  const state = hostOf(manifestOf(
+    entry("x_user", "userx", "incoming"),
+    entry("x_user", "USERX", "foreign"),
+  ));
+  await assert.rejects(
+    preCommitPublicVisibilityFence(
+      { entityType: "x_user", entityId: "UserX", fenceToken: "incoming" },
+      state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 0);
+});
