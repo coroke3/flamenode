@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { preCommitEventVisibilityTransition } from "@flamenode/server-core/visibility/eventTransition";
 import { preCommitPublicVisibilityFence } from "@flamenode/server-core/visibility/fenceTransition";
 import { preCommitVideoVisibilityDepublicization } from "@flamenode/server-core/visibility/videoTransition";
+import { releaseBlockedEntityInManifest } from "@flamenode/server-core/visibility/manifestCore";
 
 // Exercise the actual shared core imported by both CURRENT Next and TARGET Hono.
 // The fake manifest host models R2 conditional PUT and mutateOnConflict retries.
@@ -251,4 +252,38 @@ test("Visibility CAS: same-token video retry preserves unrelated manifest entrie
   assert.equal(state.reads, 2);
   assert.equal(state.manifest.entities.find(x => x.entity_id === "video-one").fence_token, "incoming");
   assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "group-two"), extra);
+});
+
+test("Visibility compensation: release refuses to remove a duplicate foreign event token", () => {
+  const prior = manifestOf(
+    entry("event", "event-one", "incoming"),
+    entry("event", "event-one", "other-writer"),
+    entry("video", "video-two", "safe-owner"),
+  );
+  const before = structuredClone(prior);
+  const released = releaseBlockedEntityInManifest(prior, "event", "event-one", "incoming", 200);
+  assert.equal(released, null, "must fail closed instead of deleting the other owner's fence");
+  assert.deepEqual(prior, before, "the R2 manifest input must remain unchanged");
+});
+
+test("Visibility compensation: case-folded duplicate X user with foreign token is protected", () => {
+  const prior = manifestOf(
+    entry("x_user", "USERX", "incoming"),
+    entry("x_user", "userx", "foreign"),
+  );
+  assert.equal(releaseBlockedEntityInManifest(prior, "x_user", "UserX", "incoming", 200), null);
+});
+
+test("Visibility compensation: same-token duplicates can be released without removing other entities", () => {
+  const unrelated = entry("event_group", "group-two", "keep");
+  const prior = manifestOf(
+    entry("video", "video-one", "incoming"),
+    entry("video", "video-one", "incoming"),
+    unrelated,
+  );
+  const released = releaseBlockedEntityInManifest(prior, "video", "video-one", "incoming", 200);
+  assert.ok(released);
+  assert.deepEqual(released.entities, [unrelated]);
+  assert.equal(released.revision, 2);
+  assert.equal(released.generated_at, 200);
 });
