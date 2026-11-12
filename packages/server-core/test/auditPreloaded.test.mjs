@@ -320,3 +320,91 @@ test("Issue #669: 80-event SA-029 with the prospective MIG-0516 marker fits 50 w
   assert.equal(reused.totalQueryCount, 49);
   assert.equal(reused.withinLimit, true);
 });
+
+
+test("Issue #669: actual SQLite 80-member insert + queue + MIG-0516 marker audits all 80 under D1 50", async () => {
+  const w = world();
+  const restore = freeze();
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const payload = Array.from({ length: 80 }, (_, i) => ({
+      event_group_id: "test-66", event_id: `event-${String(i).padStart(3, "0")}`,
+      relation_type: "member", created_at: now, updated_at: now,
+    }));
+    const queue = await buildEventGroupChangeQueueBatch(w.db, {
+      reason: "event_group_member_add", requestedByUserId: "admin-1",
+    });
+    assert.equal(queue.statements.length, 1);
+    assert.deepEqual(queue.expectedChanges, [1]);
+    const mutation = w.db.run(sql`
+      INSERT INTO event_group_events
+        (event_group_id, event_id, relation_type, created_at, updated_at)
+      SELECT
+        json_extract(value, '$.event_group_id'),
+        json_extract(value, '$.event_id'),
+        json_extract(value, '$.relation_type'),
+        json_extract(value, '$.created_at'),
+        json_extract(value, '$.updated_at')
+      FROM json_each(${JSON.stringify(payload)})
+    `);
+    // SQL and strict expected-changes assertion mirror MIG-0516's builder.
+    // This is a projected cross-PR integration test, NOT a mounted route.
+    const marker = w.db.run(sql`
+      UPDATE public_build_state
+      SET requested_at = MAX(requested_at, ${Date.now()})
+      WHERE id = 1
+    `);
+    const audits = payload.map((row) => ({
+      table_name: "event_group_events",
+      target_id: `${row.event_group_id}:${row.event_id}`,
+      operation: "CREATE", after: { ...row },
+      actor_user_id: "admin-1", retention_class: "restorable",
+    }));
+    const fullPreload = {
+      settings: mapAuditSettings(w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get()),
+      actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
+    };
+    const input = {
+      mutationStatements: [mutation, ...queue.statements, marker],
+      expectedMutationChanges: [80, ...queue.expectedChanges, 1],
+      audits,
+      callerQueryCount: 3,
+      preloaded: fullPreload,
+    };
+    const budget = planAtomicAuditMutationBudget(input);
+    assert.equal(budget.totalQueryCount, 49);
+    assert.equal(budget.auditChunkCount, 20);
+    assert.equal(budget.mutationStatementCount, 3);
+    assert.equal(budget.mutationAssertionCount, 3);
+    assert.equal(budget.preparationQueryCount, 0);
+    assert.equal(budget.withinLimit, true);
+
+    // Same exact queued marker and audits, but without the guard's read
+    // snapshots, must refuse 51/50 *before* any D1 read or write.
+    const noPreload = { ...input, preloaded: undefined };
+    assert.equal(planAtomicAuditMutationBudget(noPreload).totalQueryCount, 51);
+    await assert.rejects(() => mutateWithAudit(w.db, noPreload), /query 数が上限/);
+    assert.equal(w.stats.reads.length, 0);
+    assert.equal(w.stats.batches, 0);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM event_group_events WHERE event_group_id = 'test-66'").get().n, 0);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+    assert.equal(w.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get().requested_at, 0);
+
+    await mutateWithAudit(w.db, input);
+    assert.equal(w.stats.reads.length, 0, "guard preloads eliminate *actual* audit preparation queries");
+    assert.equal(w.stats.batches, 1);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM event_group_events WHERE event_group_id = 'test-66'").get().n, 80);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'event_group_events' AND operation = 'CREATE'").get().n, 80);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue WHERE target_type = 'events_index'").get().n, 1);
+    assert.equal(w.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get().requested_at, Date.now());
+    const rows = w.sqlite.prepare("SELECT target_id, after_json, retention_class FROM audit_logs ORDER BY target_id").all();
+    assert.equal(new Set(rows.map((row) => row.target_id)).size, 80);
+    assert.ok(rows.every((row) =>
+      row.retention_class === "restorable" && JSON.parse(row.after_json).event_group_id === "test-66"
+    ), "all audits are independently restorable with complete snapshots");
+  } finally {
+    restore();
+    w.sqlite.close();
+  }
+});
