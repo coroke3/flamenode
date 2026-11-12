@@ -310,7 +310,7 @@ test("Issue #669: 80-event SA-029 with the prospective MIG-0516 marker fits 50 w
     ...proposal,
     preloaded: {
       settings: { max_payload_bytes: 90000 },
-      actorSnapshotJsonById: { "admin-1": "{}" },
+      actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
     },
   });
   assert.equal(reused.mutationStatementCount, 3);
@@ -410,8 +410,13 @@ test("Issue #669: actual SQLite 80-member insert + queue + MIG-0516 marker audit
 });
 
 
-test("Issue #669: malformed preloaded actor placeholders never bypass the real snapshot read", async () => {
-  for (const placeholder of [null, false, 42, {}]) {
+test("Issue #669: corrupted preload JSON and non-string placeholders never bypass D1", async () => {
+  const canonical = actorSnapshotFromRow(null);
+  for (const placeholder of [
+    null, false, 42, {}, "", "null", "[]", "{}", "{broken-json",
+    JSON.stringify({ ...canonical, extra: "injected" }),
+    JSON.stringify({ ...canonical, icon_url: 17 }),
+  ]) {
     const w = world();
     const restore = freeze();
     try {
