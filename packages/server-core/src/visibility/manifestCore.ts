@@ -164,6 +164,17 @@ export function releaseBlockedEntityInManifest(
   if (!current || current.fence_token !== fenceToken) {
     return null;
   }
+  // A malformed/legacy manifest can contain duplicate keys. Releasing our
+  // token must never remove another writer's block with the same entity key.
+  // The filter below removes ALL matching keys, so fail closed on any
+  // conflicting token before it runs.
+  const hasForeignToken = manifest.entities.some((entry) => {
+    const entryId =
+      entry.entity_type === "x_user" ? entry.entity_id.toLowerCase() : entry.entity_id;
+    return entry.entity_type === entityType &&
+      entryId === normalizedId && entry.fence_token !== fenceToken;
+  });
+  if (hasForeignToken) return null;
   const entities = manifest.entities.filter((entry) => {
     const entryId =
       entry.entity_type === "x_user"
