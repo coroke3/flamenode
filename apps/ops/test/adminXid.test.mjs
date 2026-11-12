@@ -34,12 +34,19 @@ test("MIG-0732 U01: read fails closed for malformed and unavailable response", a
   assert.deepEqual(await createXidLinkRequestsApi(async () => json(503, {})).get(),
     { status: "unavailable" });
 });
-test("MIG-0732 U01: approve and reject preserve request ID path and trimmed reason", async () => {
+test("MIG-0732 U01: mutations fail closed by default; enabled client preserves request ID and trimmed reason", async () => {
   const calls = [];
-  const api = createXidLinkRequestsApi(async (path, init) => {
+  const mockFetch = async (path, init) => {
     calls.push({ path, init });
     return json(200, { ok: true, message: "処理しました。" });
-  });
+  };
+  const readOnly = createXidLinkRequestsApi(mockFetch);
+  assert.deepEqual(await readOnly.approve("a/b"), { status: "unavailable" });
+  assert.deepEqual(await readOnly.reject("a/b", "  理由  "), { status: "unavailable" });
+  assert.deepEqual(calls, [], "inactive controls must never call an unmounted backend");
+  // Explicit opt-in is tested only in this isolated client fixture; the Ops
+  // production route keeps allowMutations=false until MIG-0605/0644 parity.
+  const api = createXidLinkRequestsApi(mockFetch, true);
   assert.equal((await api.approve("a/b")).status, "ok");
   assert.equal((await api.reject("a/b", "  理由  ")).status, "ok");
   assert.equal(calls[0].path, "/api/xid/link-requests/a%2Fb/approve");
@@ -50,10 +57,16 @@ test("MIG-0732 U01: approve and reject preserve request ID path and trimmed reas
     assert.equal(call.init.credentials, "same-origin");
   }
 });
-test("MIG-0732 U01: table preserves action labels and empty state", () => {
+test("MIG-0732 U01: read-only table hides destructive controls; opt-in preserves labels", () => {
   const api = createXidLinkRequestsApi(async () => json(200, { ok: true }));
-  const html = renderToStaticMarkup(React.createElement(XLinkRequestTable, {
+  const readOnlyHtml = renderToStaticMarkup(React.createElement(XLinkRequestTable, {
     rows: [pending], api, onChanged: () => {},
+  }));
+  assert.ok(readOnlyHtml.includes("閲覧のみ可能です"), "production uses read-only state");
+  assert.ok(!readOnlyHtml.includes(">承認</button>"));
+  assert.ok(!readOnlyHtml.includes(">却下</button>"));
+  const html = renderToStaticMarkup(React.createElement(XLinkRequestTable, {
+    rows: [pending], api, onChanged: () => {}, allowMutations: true,
   }));
   for (const label of ["承認", "却下", "Xで確認", "FlameNode", "Discord", "example"]) {
     assert.ok(html.includes(label === "Discord" ? "Example" : label), label);
