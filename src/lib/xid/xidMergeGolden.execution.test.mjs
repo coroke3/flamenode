@@ -500,6 +500,50 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("Issue #492: real SQLite queue fan-out 99/101 boundary fails closed without loss", async () => {
+    for (const targetCount of [99, 101]) {
+      // Base seed has 1 source video. 4 user/index + 8 global + 6 event
+      // projections = 18 fixed targets, so extras = N - 19.
+      const extraCount = targetCount - 19;
+      const extraSeed = `INSERT INTO videos
+        (id, primary_event_id, creator_x_user_id, submitted_by_user_id,
+         creator_display_name, title, created_at, updated_at)
+        VALUES ${Array.from({ length: extraCount }, (_, i) =>
+          `('vid-edge-${i}', NULL, 'x_src', 'u-src', 'Src', 'Edge ${i}', 100, 500)`
+        ).join(", ")};`;
+      const [, result] = await runScenario(
+        `xid-${targetCount}-fanout`,
+        ({ db, readRequest }) => merge.executeApprovedXIdMergeRequest(
+          db, mergeInput(readRequest("req-merge")),
+        ),
+        { extraSeed },
+      );
+      const batch = result.log.find((entry) => entry.op === "batch");
+      const sourceRows = result.tables.videos.filter((v) => v.creator_x_user_id === "x_src");
+      const queueRows = result.tables.static_rebuild_queue;
+      const audits = result.tables.audit_logs;
+      if (targetCount === 99) {
+        assert.equal(result.outcome.threw, undefined);
+        assert.ok(batch, "99 targets must reach the atomic batch");
+        assert.equal(batch.statements.length, 28);
+        assert.equal(queueRows.length, 99);
+        assert.equal(new Set(queueRows.map((r) => `${r.target_type}:${r.target_id}`)).size, 99);
+        assert.equal(sourceRows.length, 0);
+        assert.equal(audits.length, 4);
+        assert.ok(result.log.some((r) => r.op === "batch.commit"));
+      } else {
+        assert.equal(result.outcome.threw, "x_id_merge_static_rebuild_target_limit_exceeded");
+        assert.equal(batch, undefined, "101-target request must not start a D1 batch");
+        assert.equal(queueRows.length, 0);
+        assert.equal(audits.length, 0);
+        assert.equal(sourceRows.length, 83, "source rows remain in place");
+        assert.equal(result.tables.x_identity_requests.find((r) => r.id === "req-merge").status, "approved");
+        assert.equal(result.log.filter((r) => r.op === "r2.put").length, 0,
+          "limit must fail before any external visibility fence precommit");
+      }
+    }
+  });
+
   test("golden: X ID merge / revert SQL, params, audits, queue rows, R2 fence and ordering", async () => {
     const actual = {};
     for (const [name, body, options] of scenarios) {
