@@ -268,7 +268,9 @@ export async function prepareAuditLogEntries(
     await Promise.all(
       actorUserIds.slice(offset, offset + 4).map(async (actorUserId) => {
         const known = preloaded?.actorSnapshotJsonById?.[actorUserId];
-        if (known !== undefined) {
+        // The budget planner only credits string snapshots. A malformed
+        // preloaded placeholder must not bypass the authoritative D1 read.
+        if (typeof known === "string") {
           actorJsonById.set(actorUserId, known);
           return;
         }
