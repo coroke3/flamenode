@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   moderationFilters, moderationReadPath, createAdminModerationApi,
 } from "../.test-dist/apps/ops/src/api/adminModeration.js";
-import { AdminModerationContent, requestModerationFilterSubmit } from "../.test-dist/apps/ops/src/routes/admin/AdminModeration.js";
+import { AdminModerationContent, requestModerationFilterSubmit, onModerationReadCompleted } from "../.test-dist/apps/ops/src/routes/admin/AdminModeration.js";
 import { ModerationCaseStatusForm, parseModerationFormInput } from "../.test-dist/apps/ops/src/routes/admin/ModerationCaseStatusForm.js";
 import { MODERATION_FLASH_KEY, parseModerationSaveNotice, storeModerationSaveNotice,
   consumeModerationSaveNotice, ModerationFlashNotice } from "../.test-dist/apps/ops/src/routes/admin/ModerationFlashNotice.js";
@@ -190,4 +190,18 @@ test("MIG-0731 U03 T04: unmounted screen wires open-case form and one-shot refre
   }));
   assert.match(terminal, /\/admin\/audit\?table=video_moderation_cases&amp;record=case%2F1/);
   assert.doesNotMatch(terminal, /name="private_note"/);
+});
+
+test("MIG-0731 U03 T04: success flash is gated by finished authorized GET, not refresh request", () => {
+  let consumed = 0;
+  const fire = () => { consumed++; };
+  const valid = { status: "ok", data: fixture };
+  onModerationReadCompleted({ aborted: false }, valid, fire);
+  assert.equal(consumed, 1);
+  onModerationReadCompleted({ aborted: true }, valid, fire);
+  onModerationReadCompleted({ aborted: false }, { status: "anonymous" }, fire);
+  onModerationReadCompleted({ aborted: false }, { status: "forbidden" }, fire);
+  onModerationReadCompleted({ aborted: false }, { status: "unavailable" }, fire);
+  onModerationReadCompleted({ aborted: false }, { status: "notFound" }, fire);
+  assert.equal(consumed, 1, "no flash before success or after abort/denial/error");
 });

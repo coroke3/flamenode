@@ -2,6 +2,7 @@
 import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import type { AdminModerationResponse } from "@flamenode/contracts";
+import type { OpsResult } from "../../api/read.js";
 import {
   createAdminModerationApi, moderationFilters, type ModerationFilters,
 } from "../../api/adminModeration.js";
@@ -22,6 +23,18 @@ function formatSeconds(value: number | null): string {
 /** CURRENT AutoSubmitSelect / AutoSubmitCheckbox parity for GET filters. */
 export function requestModerationFilterSubmit(form: Pick<HTMLFormElement, "requestSubmit"> | null): void {
   form?.requestSubmit();
+}
+
+/** Complete the flash transition only for an authorized, non-aborted GET success.
+ * useApiResult preserves old data during same-key refresh, so refreshKey alone
+ * would display the flash before the network response has finished.
+ */
+export function onModerationReadCompleted(
+  signal: Pick<AbortSignal, "aborted">,
+  result: OpsResult<AdminModerationResponse>,
+  showNotice: () => void,
+): void {
+  if (!signal.aborted && result.status === "ok") showNotice();
 }
 
 export function AdminModerationContent({ data, filters, onSaved }: {
@@ -92,9 +105,14 @@ export function AdminModerationContent({ data, filters, onSaved }: {
 export function AdminModeration(): React.ReactElement {
   const [params] = useSearchParams();
   const [refreshKey, setRefreshKey] = React.useState(0);
+  const [successfulReadKey, setSuccessfulReadKey] = React.useState(0);
   const filters = moderationFilters(params);
   const key = params.toString();
-  const result = useApiResult((signal) => api.list(filters, signal), "admin-moderation:" + key, refreshKey);
+  const result = useApiResult(async (signal) => {
+    const response = await api.list(filters, signal);
+    onModerationReadCompleted(signal, response, () => setSuccessfulReadKey((value) => value + 1));
+    return response;
+  }, "admin-moderation:" + key, refreshKey);
   React.useEffect(() => {
     if (result.status === "anonymous") window.location.assign("/entry");
     if (result.status === "forbidden") window.location.assign(result.redirect || "/dashboard");
@@ -103,7 +121,7 @@ export function AdminModeration(): React.ReactElement {
     return <div role="status" aria-busy="true">読み込み中...</div>;
   if (result.status !== "ok") return <section role="alert">モデレーション情報を取得できませんでした。</section>;
   return <>
-    <ModerationFlashNotice refreshKey={refreshKey} />
+    <ModerationFlashNotice refreshKey={successfulReadKey} />
     <AdminModerationContent data={result.data} filters={filters}
       onSaved={() => setRefreshKey((value) => value + 1)} />
   </>;
