@@ -37,8 +37,21 @@ export function onModerationReadCompleted(
   if (!signal.aborted && result.status === "ok") showNotice();
 }
 
-export function AdminModerationContent({ data, filters, onSaved }: {
+
+/** React Router GET-filter transport; no document reload of the Ops SPA. */
+export function moderationGetSearchParams(formData: FormData): URLSearchParams {
+  const next = new URLSearchParams();
+  for (const name of ["type", "status"] as const) {
+    const value = formData.get(name);
+    if (typeof value === "string") next.set(name, value);
+  }
+  if (formData.get("overdue") === "1") next.set("overdue", "1");
+  return next;
+}
+
+export function AdminModerationContent({ data, filters, onSaved, onFilterChange }: {
   data: AdminModerationResponse; filters: ModerationFilters; onSaved?: () => void;
+  onFilterChange?: (params: URLSearchParams) => void;
 }): React.ReactElement {
   return <div className="fn-public-container fn-page">
     <header className="fn-page-head">
@@ -46,6 +59,12 @@ export function AdminModerationContent({ data, filters, onSaved }: {
       <p>重複、権利、void、X ID再申請などのケースを最大100件表示します。</p>
     </header>
     <form method="get" action="/admin/moderation"
+      key={filters.type + ":" + filters.status + ":" + filters.overdue}
+      onSubmit={(event) => {
+        if (!onFilterChange) return; // pure-view fallback: native GET navigation
+        event.preventDefault();
+        onFilterChange(moderationGetSearchParams(new FormData(event.currentTarget)));
+      }}
       style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
       <label>種別 <select name="type" defaultValue={filters.type} className="fn-select"
           onChange={(event) => requestModerationFilterSubmit(event.currentTarget.form)}>
@@ -103,7 +122,7 @@ export function AdminModerationContent({ data, filters, onSaved }: {
 
 /** Not mounted: case updates have no approved Hono SA-044 counterpart. */
 export function AdminModeration(): React.ReactElement {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [successfulReadKey, setSuccessfulReadKey] = React.useState(0);
   const filters = moderationFilters(params);
@@ -123,6 +142,7 @@ export function AdminModeration(): React.ReactElement {
   return <>
     <ModerationFlashNotice refreshKey={successfulReadKey} />
     <AdminModerationContent data={result.data} filters={filters}
-      onSaved={() => setRefreshKey((value) => value + 1)} />
+      onSaved={() => setRefreshKey((value) => value + 1)}
+      onFilterChange={(next) => setParams(next)} />
   </>;
 }

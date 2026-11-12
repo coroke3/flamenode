@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   moderationFilters, moderationReadPath, createAdminModerationApi,
 } from "../.test-dist/apps/ops/src/api/adminModeration.js";
-import { AdminModerationContent, requestModerationFilterSubmit, onModerationReadCompleted } from "../.test-dist/apps/ops/src/routes/admin/AdminModeration.js";
+import { AdminModerationContent, requestModerationFilterSubmit, onModerationReadCompleted, moderationGetSearchParams } from "../.test-dist/apps/ops/src/routes/admin/AdminModeration.js";
 import { ModerationCaseStatusForm, parseModerationFormInput } from "../.test-dist/apps/ops/src/routes/admin/ModerationCaseStatusForm.js";
 import { MODERATION_FLASH_KEY, parseModerationSaveNotice, storeModerationSaveNotice,
   consumeModerationSaveNotice, ModerationFlashNotice } from "../.test-dist/apps/ops/src/routes/admin/ModerationFlashNotice.js";
@@ -204,4 +204,25 @@ test("MIG-0731 U03 T04: success flash is gated by finished authorized GET, not r
   onModerationReadCompleted({ aborted: false }, { status: "unavailable" }, fire);
   onModerationReadCompleted({ aborted: false }, { status: "notFound" }, fire);
   assert.equal(consumed, 1, "no flash before success or after abort/denial/error");
+});
+
+test("MIG-0731 U03: SPA filter preserves GET semantics and strips unselected overdue", () => {
+  const fd = new FormData();
+  fd.set("type", "rights");
+  fd.set("status", "rejected");
+  fd.set("overdue", "1");
+  assert.equal(moderationGetSearchParams(fd).toString(), "type=rights&status=rejected&overdue=1");
+  fd.delete("overdue");
+  assert.equal(moderationGetSearchParams(fd).toString(), "type=rights&status=rejected");
+  fd.set("extraneous", "secret");
+  assert.equal(moderationGetSearchParams(fd).has("extraneous"), false);
+  const markup = renderToStaticMarkup(React.createElement(AdminModerationContent, {
+    data: { ...fixture, cases: [] },
+    filters: { type: "rights", status: "rejected", overdue: false },
+    onFilterChange() {},
+  }));
+  assert.match(markup, /method="get"/);
+  assert.match(markup, /action="\\/admin\\/moderation"/);
+  assert.match(markup, /name="type"/);
+  assert.match(markup, /name="status"/);
 });
