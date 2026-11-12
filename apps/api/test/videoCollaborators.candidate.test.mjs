@@ -21,8 +21,10 @@ function fixture({ guardState = true } = {}) {
       c.header("Cache-Control", "private, no-store");
       if (guardState) {
         c.set("user", { id: "actor", role: null });
-        c.set("auditSettings", {});
-        c.set("actorSnapshotJsonById", { actor: "{}" });
+        if (guardState !== "missingPreload") {
+          c.set("auditSettings", {});
+          c.set("actorSnapshotJsonById", { actor: "{}" });
+        }
         c.set("db", new Proxy({}, {
           get() {
             prematureReads++;
@@ -271,4 +273,26 @@ test("SA-084 production write stack rejects anonymous and maintenance requests",
       s.sqlite.close();
     }
   }
+});
+
+
+test("SA-082/083 fail closed before any D1 access when guard omitted CostGuard/audit preloads", async () => {
+  const f = fixture({ guardState: "missingPreload" });
+  const requests = [
+    ["POST", route, {
+      video_id: videoId, x_user_id: "@alice", display_name: "Alice", can_edit: "1",
+    }],
+    ["DELETE", route, { video_id: videoId, x_user_id: "@alice" }],
+  ];
+  for (const [method, path, body] of requests) {
+    const res = await f.request(method, path, body);
+    assert.equal(res.status, 503);
+    assert.equal((await res.json()).ok, false);
+  }
+  assert.deepEqual(f.stats(), { guarded: 2, wakeCalls: 0, prematureReads: 0 });
+});
+
+test("SA-084 candidate maps a shared preflight limit rejection to a non-success HTTP status", async () => {
+  const src = await readFile(new URL("../src/routes/videos/collaborators.ts", import.meta.url), "utf8");
+  assert.match(src, /preparation\.result\.ok \? 200 : 400/);
 });
