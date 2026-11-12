@@ -49,11 +49,13 @@ export const SLOT_BATCH_RELEASE_SNAPSHOT_SQL = [
   " SELECT DISTINCT picked.reservation_group_id FROM slots picked",
   " WHERE picked.event_id = ?",
   " AND picked.id IN (SELECT value FROM json_each(?))",
-  // Exclude ASCII-space-only IDs, which CURRENT JS trim() treats as solo.
-  // Otherwise their members can consume the four-row sentinel before a real group.
-  // Unicode whitespace is still filtered by the pure JS planner (fail-closed).
+  // CURRENT JS trim() treats *all* ECMAScript whitespace-only keys as solo,
+  // not just ASCII spaces. SQLite trim() defaults to U+0020 only; specify the
+  // 25-character String.trim() whitespace set explicitly. Keep RAW equality
+  // for real groups, and exclude blank-key siblings before the LIMIT 4 sentinel.
   " AND picked.reservation_group_id IS NOT NULL",
-  " AND trim(picked.reservation_group_id) <> ''",
+  " AND trim(picked.reservation_group_id,",
+  "   char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)) <> ''",
   " ) LIMIT 4",
   ") s) AS grouped_slots_json",
 ].join("\n");
