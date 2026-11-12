@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { preCommitEventVisibilityTransition } from "@flamenode/server-core/visibility/eventTransition";
+import {
+  preCommitEventVisibilityTransition,
+  preCommitEventVisibilityFenceRename,
+  compensateEventVisibilityFenceRenameOnD1Failure,
+  compensateEventVisibilityRenameTombstoneOnD1Failure,
+} from "@flamenode/server-core/visibility/eventTransition";
 import { preCommitPublicVisibilityFence } from "@flamenode/server-core/visibility/fenceTransition";
 import { preCommitVideoVisibilityDepublicization } from "@flamenode/server-core/visibility/videoTransition";
 import { releaseBlockedEntityInManifest } from "@flamenode/server-core/visibility/manifestCore";
@@ -332,4 +337,95 @@ test("Visibility CAS: video confirmation refuses a post-PUT foreign duplicate", 
   );
   assert.equal(state.attemptedWrites, 1);
   assert.equal(state.reads, 2);
+});
+
+test("Visibility rename copy: a foreign duplicate on old or new event ID stops the first PUT", async () => {
+  const owned = entry("event", "event-old", "incoming");
+  const irrelevant = entry("video", "video-safe", "video-owner");
+  const rename = { oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming" };
+  for (const conflictingId of ["event-old", "event-new"]) {
+    const state = hostOf(manifestOf(owned, irrelevant, entry("event", conflictingId, "foreign")));
+    const before = structuredClone(state.manifest);
+    await assert.rejects(
+      preCommitEventVisibilityFenceRename(rename, state.host),
+      /public_visibility_fence_token_mismatch/,
+    );
+    assert.equal(state.attemptedWrites, 0, `foreign duplicate at ${conflictingId} must not be overwritten`);
+    assert.deepEqual(state.manifest, before);
+  }
+});
+
+test("Visibility rename copy: a racing foreign new-ID token during CAS prevents overwrite", async () => {
+  const owned = entry("event", "event-old", "incoming");
+  const foreignNew = entry("event", "event-new", "other-writer");
+  const state = hostOf(manifestOf(owned), latest => ({
+    ...latest, entities: [...latest.entities, foreignNew],
+  }));
+  await assert.rejects(
+    preCommitEventVisibilityFenceRename(
+      { oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming" }, state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.callbacks, 1);
+  assert.equal(state.appliedWrites, 0);
+  assert.deepEqual(state.manifest.entities, [owned, foreignNew]);
+});
+
+test("Visibility rename copy: confirmation catches a new foreign duplicate after successful PUT", async () => {
+  const owned = entry("event", "event-old", "incoming");
+  const foreignNew = entry("event", "event-new", "other-writer");
+  const state = hostOf(manifestOf(owned), null, latest => ({
+    ...latest, entities: [...latest.entities, foreignNew],
+  }));
+  await assert.rejects(
+    preCommitEventVisibilityFenceRename(
+      { oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming" }, state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.appliedWrites, 1);
+  assert.equal(state.reads, 2);
+  assert.deepEqual(state.manifest.entities.find(x => x.fence_token === "other-writer"), foreignNew);
+});
+
+test("Visibility rename compensation: a foreign duplicate on new ID prevents wholesale deletion", async () => {
+  const ownNew = entry("event", "event-new", "incoming");
+  const foreignNew = entry("event", "event-new", "other-writer");
+  const unrelated = entry("video", "video-safe", "other-video");
+  const state = hostOf(manifestOf(ownNew, foreignNew, unrelated));
+  const before = structuredClone(state.manifest);
+  await compensateEventVisibilityFenceRenameOnD1Failure(
+    { oldEventId: "event-old", newEventId: "event-new",
+      fenceToken: "incoming", previousOldEntry: null }, state.host,
+  );
+  assert.equal(state.appliedWrites, 0);
+  assert.deepEqual(state.manifest, before);
+});
+
+test("Visibility tombstone compensation: a duplicate foreign old-ID token cannot be removed", async () => {
+  const own = entry("event", "event-old", "incoming");
+  const foreign = entry("event", "event-old", "other-writer");
+  const state = hostOf(manifestOf(own, foreign));
+  const before = structuredClone(state.manifest);
+  await compensateEventVisibilityRenameTombstoneOnD1Failure(
+    { eventId: "event-old", fenceToken: "incoming", previousEntry: null }, state.host,
+  );
+  assert.equal(state.appliedWrites, 0);
+  assert.deepEqual(state.manifest, before);
+});
+
+test("Visibility rename copy: matching token still carries old and new blocks safely", async () => {
+  const owned = entry("event", "event-old", "incoming");
+  const unrelated = entry("video", "video-safe", "unrelated");
+  const state = hostOf(manifestOf(owned, unrelated));
+  const precommit = await preCommitEventVisibilityFenceRename(
+    { oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming" }, state.host,
+  );
+  assert.equal(state.appliedWrites, 1);
+  assert.equal(state.reads, 2);
+  assert.deepEqual(precommit.previousOldEntry, owned);
+  assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "event-old"), owned);
+  assert.equal(state.manifest.entities.find(x => x.entity_id === "event-new").fence_token, "incoming");
+  assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "video-safe"), unrelated);
 });
