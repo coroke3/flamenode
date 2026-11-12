@@ -36,13 +36,13 @@ function Meta({label,value,href}:{label:string;value:string;href?:string}):React
     {href?<a href={href}>{value}</a>:<span>{value}</span>}</div>;
 }
 type AuditPayloads = {before:string|null;after:string|null;inverse:string|null};
-export function AuditDetail({id,fetchFn=fetch}:{id:string;fetchFn?:OpsFetch}):React.ReactElement {
+export function AuditDetail({id,fetchFn=fetch,allowRestore=false}:{id:string;fetchFn?:OpsFetch;allowRestore?:boolean}):React.ReactElement {
   const api=React.useMemo(()=>createAdminAuditApi(fetchFn),[fetchFn]);
   const state=useApiResult((signal)=>api.detail(id,signal),id);
-  return <AuditDetailContent id={id} state={state} api={api}/>;
+  return <AuditDetailContent id={id} state={state} api={api} allowRestore={allowRestore}/>;
 }
-export function AuditDetailContent({id,state,api}:{
-  id:string;state:OpsDataState<AdminAuditDetailResponse>;api:AuditAuditApi;
+export function AuditDetailContent({id,state,api,allowRestore=false}:{
+  id:string;state:OpsDataState<AdminAuditDetailResponse>;api:AuditAuditApi;allowRestore?:boolean;
 }):React.ReactElement {
   return <section className="fn-public-container fn-page" aria-label="監査ログ詳細">
     <p><a href="/admin/audit">監査ログ一覧へ</a></p>
@@ -51,11 +51,11 @@ export function AuditDetailContent({id,state,api}:{
       :state.status==="anonymous"?<p role="alert">ログインが必要です。</p>
       :state.status==="forbidden"?<p role="alert">閲覧権限がありません。</p>
       :state.status!=="ok"?<p role="alert">監査ログの詳細を取得できません。</p>
-      :<AuditDetailBody id={id} detail={state.data} api={api}/>}
+      :<AuditDetailBody id={id} detail={state.data} api={api} allowRestore={allowRestore}/>}
   </section>;
 }
-function AuditDetailBody({id,detail,api}:{
-  id:string;detail:AdminAuditDetailResponse;api:AuditAuditApi;
+function AuditDetailBody({id,detail,api,allowRestore}:{
+  id:string;detail:AdminAuditDetailResponse;api:AuditAuditApi;allowRestore:boolean;
 }):React.ReactElement {
   const row=detail.row;
   const [payload,setPayload]=React.useState<{status:"loading"}|{status:"error"}|
@@ -121,11 +121,13 @@ function AuditDetailBody({id,detail,api}:{
         :<AuditDiffDetail before={payload.value.before} after={payload.value.after}
           inverse={payload.value.inverse} changedKeys={changedKeys}/>}
     </section>
-    {row.restore_status!=="restorable" || payload.status==="ok"
-      ? <AuditRestoreForm auditId={row.id} restoreStatus={row.restore_status}
-          unavailableMessage={row.restore_unavailable_message}
-          reasonCode={row.restore_unavailable_reason_code} api={api}/>
-      : <p role="status">変更履歴の読込完了後にリストア操作が利用できます。</p>}
+    {!allowRestore
+      ? <p role="status">監査ログの復元操作は移行準備中です。履歴の閲覧のみ利用できます。</p>
+      : row.restore_status!=="restorable" || payload.status==="ok"
+        ? <AuditRestoreForm auditId={row.id} restoreStatus={row.restore_status}
+            unavailableMessage={row.restore_unavailable_message}
+            reasonCode={row.restore_unavailable_reason_code} api={api}/>
+        : <p role="status">変更履歴の読込完了後にリストア操作が利用できます。</p>}
   </>;
 }
 export function AuditDiffDetail({before,after,inverse,changedKeys}:{
