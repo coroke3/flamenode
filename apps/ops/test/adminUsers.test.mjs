@@ -8,7 +8,7 @@ import {
 } from "../.test-dist/apps/ops/src/api/adminUsers.js";
 import { AdminUserManagementTabs } from "../.test-dist/apps/ops/src/components/admin/AdminUserManagementTabs.js";
 import { AdminUserDetailContent, formatAdminVideoDate } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
-import { DiscordRows, XIdRows, formatAdminUserCreatedRelative } from "../.test-dist/apps/ops/src/routes/admin/AdminUsers.js";
+import { DiscordRows, XIdRows, UserListContent, formatAdminUserCreatedRelative } from "../.test-dist/apps/ops/src/routes/admin/AdminUsers.js";
 import { AdminUserEditContent, canConfirmUserBan, acquireAdminUserWriteLock } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
 import { createAdminUserEditMutations } from "../.test-dist/apps/ops/src/api/adminUserEdits.js";
 import { permissionsPayload, fieldsSetFromCsv, isValidPermissionSaveResponse, acquirePermissionSaveLock, createEditableFieldsMutations } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
@@ -589,4 +589,44 @@ test("MIG-0731 U04: CURRENT detail uses relative audit/registration/application 
     data: { ...data, user: { ...data.user, emailVerified: null } },
   }));
   assert.doesNotMatch(unverified, /class="fn-console-note">email認証/);
+});
+
+
+test("MIG-0731 U04: degraded admin-read never renders a policy write form or private list", () => {
+  for (const view of ["permissions", "discord", "xid"]) {
+    let saved = 0;
+    const html = renderToStaticMarkup(React.createElement(MemoryRouter, {
+      initialEntries: ["/admin/users?view=" + view],
+    }, React.createElement(UserListContent, {
+      data: { ...fixture, view, degraded: true,
+        users: [{ ...fixture.users[0], name: "private-admin-name" }],
+        permissionSettings: { default_editable_fields: "title", upcoming_editable_fields: "members" },
+      },
+      onSaved() { saved++; },
+      onAccessRevoked() {},
+    })));
+    assert.match(html, /role="alert"/);
+    assert.match(html, /読み取りに失敗したため/);
+    assert.match(html, /再試行/);
+    assert.doesNotMatch(html, /一般作品の編集権限/);
+    assert.doesNotMatch(html, /<form\b/);
+    assert.doesNotMatch(html, /<table\b/);
+    assert.doesNotMatch(html, /private-admin-name/);
+    assert.doesNotMatch(html, /name="default_editable_fields"/);
+    assert.equal(saved, 0, "SSR must not trigger retry automatically");
+  }
+});
+
+test("MIG-0731 U04: a healthy authorized permission read still renders the save form", () => {
+  const html = renderToStaticMarkup(React.createElement(MemoryRouter, {
+    initialEntries: ["/admin/users?view=permissions"],
+  }, React.createElement(UserListContent, {
+    data: { ...fixture, view: "permissions", degraded: false },
+    onSaved() {},
+    onAccessRevoked() {},
+  })));
+  assert.match(html, /一般作品の編集権限/);
+  assert.match(html, /<form\b/);
+  assert.match(html, /name="default_editable_fields"/);
+  assert.doesNotMatch(html, /読み取りに失敗したため/);
 });

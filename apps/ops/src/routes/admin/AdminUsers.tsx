@@ -116,7 +116,7 @@ export function XIdRows({ rows }: { rows: AdminXUserRow[] }): React.ReactElement
     </FnTable>
   );
 }
-function UserListContent({ data, onSaved, onAccessRevoked }: {
+export function UserListContent({ data, onSaved, onAccessRevoked }: {
   data: AdminUsersResponse;
   onSaved: () => void;
   onAccessRevoked: (destination: "/entry" | "/dashboard") => void;
@@ -127,6 +127,15 @@ function UserListContent({ data, onSaved, onAccessRevoked }: {
   const status = searchParams.get("status") ?? "";
   const page = data.paging.page;
   const totalPages = Math.max(1, Math.ceil(data.paging.total / data.paging.pageSize));
+  // Failed D1 reads return a typed, empty fallback. Never let it seed a
+  // permission editor that could overwrite real policy settings on save.
+  if (data.degraded) {
+    return <section className="fn-public-container fn-page" role="alert">
+      <h1 className="fn-page-title">ユーザー管理情報を取得できませんでした。</h1>
+      <p>読み取りに失敗したため、一覧と権限設定の表示を停止しました。</p>
+      <button className="fn-btn fn-btn-primary" type="button" onClick={onSaved}>再試行</button>
+    </section>;
+  }
   function submitFilters(form: HTMLFormElement): void {
     const formData = new FormData(form);
     const params = new URLSearchParams({ view });
@@ -144,7 +153,6 @@ function UserListContent({ data, onSaved, onAccessRevoked }: {
           "Discordログイン済みユーザーと X ID の現在の紐付けを確認・管理します。"}</p>
       </header>
       <AdminUserManagementTabs view={view} q={q} status={status} />
-      {data.degraded ? <p role="alert">ユーザー情報を取得できませんでした。再度お試しください。</p> : null}
       {view === "permissions" ? <GlobalEditableFieldsPanel settings={data.permissionSettings}
         onSaved={onSaved} onAccessRevoked={onAccessRevoked} /> : (
         <>
