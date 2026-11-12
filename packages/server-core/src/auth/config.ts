@@ -26,3 +26,39 @@ export function applyDatabaseAuthSessionClaims<TSession extends { user?: object 
   });
   return session;
 }
+
+
+/**
+ * U01 (partial): Web Standard-safe Auth.js credential resolution.
+ * These are the same CURRENT fallback and error codes; no environment, Host,
+ * cookie or OAuth request is read inside this module. The caller explicitly
+ * controls whether the local-only fallback is allowed.
+ */
+const LOCAL_DEV_AUTH_SECRET = "flamenode-local-development-auth-secret";
+
+export type AuthRuntimeCredentials = {
+  secret: string;
+  discordClientId: string;
+  discordClientSecret: string;
+};
+
+export function resolveAuthRuntimeCredentials(input: {
+  authSecret: string | null | undefined;
+  discordClientId: string | null | undefined;
+  discordClientSecret: string | null | undefined;
+  allowLocalDevSecret: boolean;
+}): AuthRuntimeCredentials {
+  const nonEmpty = (value: string | null | undefined) => {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : undefined;
+  };
+  const secret = nonEmpty(input.authSecret) ??
+    (input.allowLocalDevSecret ? LOCAL_DEV_AUTH_SECRET : undefined);
+  if (!secret) throw new Error("AUTH_SECRET_MISSING");
+  const discordClientId = nonEmpty(input.discordClientId);
+  const discordClientSecret = nonEmpty(input.discordClientSecret);
+  if (!discordClientId || !discordClientSecret) {
+    throw new Error("AUTH_DISCORD_CONFIG_MISSING");
+  }
+  return { secret, discordClientId, discordClientSecret };
+}
