@@ -8,7 +8,7 @@ import {
 } from "../.test-dist/apps/ops/src/api/adminUsers.js";
 import { AdminUserManagementTabs } from "../.test-dist/apps/ops/src/components/admin/AdminUserManagementTabs.js";
 import { AdminUserDetailContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
-import { AdminUserEditContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
+import { AdminUserEditContent, canConfirmUserBan } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
 import { createAdminUserEditMutations } from "../.test-dist/apps/ops/src/api/adminUserEdits.js";
 import { permissionsPayload } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
 
@@ -206,4 +206,21 @@ test("MIG-0731 U04: CURRENT detail navigation preserves encoded video and audit 
   assert.match(html, /href="\/admin\/audit\?record=row%2Fa%26b"/);
   assert.match(html, /My video/);
   assert.doesNotMatch(html, /href="\/admin\/videos\/video\/a&amp;b"/);
+});
+
+test("MIG-0731 U02b BAN confirmation is bound to unchanged reason and current user state", () => {
+  assert.equal(canConfirmUserBan("rule violation", "rule violation", false, false), true);
+  assert.equal(canConfirmUserBan(" rule violation ", "rule violation", false, false), true);
+  assert.equal(canConfirmUserBan("changed", "rule violation", false, false), false);
+  assert.equal(canConfirmUserBan("", "", false, false), false);
+  assert.equal(canConfirmUserBan("rule violation", null, false, false), false);
+  assert.equal(canConfirmUserBan("rule violation", "rule violation", true, false), false);
+  assert.equal(canConfirmUserBan("rule violation", "rule violation", false, true), false);
+  const markup = renderToStaticMarkup(React.createElement(AdminUserEditContent, {
+    data: { user: { id: "u1", name: "Tester", role: "user", is_banned: 0,
+      can_create_events: 0, is_notification_enabled: 1 }, xUserIds: [], truncated: false },
+    onSaved() {},
+  }));
+  assert.match(markup, /BAN 理由/);
+  assert.doesNotMatch(markup, /role="alertdialog"/);
 });

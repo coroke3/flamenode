@@ -5,9 +5,15 @@ import { createAdminUsersApi } from "../../api/adminUsers.js";
 import { createAdminUserEditMutations, type UserEditResult } from "../../api/adminUserEdits.js";
 import { useApiResult } from "../useApiResult.js";
 import { NotFoundView } from "../NotFoundView.js";
+import { ConfirmDialog } from "../../components/shared/ConfirmDialog.js";
 
 const readApi = createAdminUsersApi();
 const writes = createAdminUserEditMutations();
+
+/** A reason change, stale user state, or pending write invalidates BAN confirmation. */
+export function canConfirmUserBan(reason: string, confirmedReason: string | null, busy: boolean, alreadyBanned: boolean): boolean {
+  return !busy && !alreadyBanned && Boolean(confirmedReason) && reason.trim() === confirmedReason;
+}
 
 /** CURRENT UserAdminForm parity candidate. Writes stay protected by Hono admin guard and atomic D1 audit. */
 export function AdminUserEditContent({ data, onSaved }: {
@@ -17,6 +23,8 @@ export function AdminUserEditContent({ data, onSaved }: {
   const { user, xUserIds, truncated } = data;
   const [busy, setBusy] = React.useState(false);
   const [banReason, setBanReason] = React.useState("");
+  const [banConfirmReason, setBanConfirmReason] = React.useState<string | null>(null);
+  React.useEffect(() => { setBanConfirmReason(null); }, [user.id, user.is_banned]);
   const [error, setError] = React.useState("");
   const [success, setSuccess] = React.useState("");
   async function run(action: () => Promise<UserEditResult>, message: string): Promise<void> {
@@ -80,13 +88,13 @@ export function AdminUserEditContent({ data, onSaved }: {
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             <input className="fn-input" type="text" value={banReason} maxLength={500}
               placeholder="BAN 理由 (必須)" aria-label="BAN 理由"
-              onChange={(event) => setBanReason(event.target.value)} />
+              onChange={(event) => {
+                setBanReason(event.target.value);
+                setBanConfirmReason(null);
+              }} />
             <button type="button" className="fn-btn fn-btn-danger fn-btn-sm"
               disabled={busy || !banReason.trim()}
-              onClick={() => {
-                if (!window.confirm("このユーザーを BAN します。\n理由: " + banReason)) return;
-                void run(() => writes.setBanned(user.id, 1, banReason), "BAN しました。");
-              }}>BAN</button>
+              onClick={() => { if (!busy && banReason.trim()) setBanConfirmReason(banReason.trim()); }}>BAN</button>
           </div>}
       </section>
       <section>
@@ -121,6 +129,22 @@ export function AdminUserEditContent({ data, onSaved }: {
               </button>)}
           </div>}
       </section>
+      <ConfirmDialog
+        open={banConfirmReason !== null}
+        title="ユーザーを BAN"
+        message={"このユーザーを BAN します。\n理由: " + (banConfirmReason ?? "")}
+        confirmLabel="BAN する"
+        cancelLabel="キャンセル"
+        tone="danger"
+        busy={!canConfirmUserBan(banReason, banConfirmReason, busy, user.is_banned === 1)}
+        onConfirm={() => {
+          if (!canConfirmUserBan(banReason, banConfirmReason, busy, user.is_banned === 1)) return;
+          const reason = banConfirmReason!;
+          setBanConfirmReason(null);
+          void run(() => writes.setBanned(user.id, 1, reason), "BAN しました。");
+        }}
+        onCancel={() => setBanConfirmReason(null)}
+      />
     </div>
   </div>;
 }
