@@ -53,15 +53,20 @@ adminModerationCaseOnlyRoutes.post("/:caseId/status", async (c) => {
   if (!parsed || !parsed.ok) return reply(parsed?.status ?? 400,
     { ok: false, message: parsed?.message ?? "入力エラー" });
   const { status, private_note } = parsed.value;
-  const current = await c.env.DB.prepare("SELECT * FROM video_moderation_cases WHERE id = ? LIMIT 1")
-    .bind(id).first<Snapshot>();
-  if (!current) return reply(404, { ok: false, message: "case が見つかりません。" });
+  // One read proves case existence and video existence, staying inside the
+  // S3 pre-read budget with session and CostGuard. Exclude the derived flag
+  // from the full-row CAS and strict audit before/after snapshots.
+  const row = await c.env.DB.prepare(
+    "SELECT c.*, CASE WHEN v.id IS NULL THEN 0 ELSE 1 END AS _video_exists " +
+    "FROM video_moderation_cases c LEFT JOIN videos v ON v.id = c.video_id " +
+    "WHERE c.id = ? LIMIT 1",
+  ).bind(id).first<Snapshot & { _video_exists: number }>();
+  if (!row) return reply(404, { ok: false, message: "case が見つかりません。" });
+  const { _video_exists: videoExists, ...current } = row;
   if (current.status !== "open") return current.status === status
     ? reply(200, { ok: true, message: "case は既にこの状態です。" })
     : reply(409, { ok: false, message: "既に更新された case です。" });
-  const video = await c.env.DB.prepare("SELECT id FROM videos WHERE id = ? LIMIT 1")
-    .bind(current.video_id).first<{ id: string }>();
-  if (!video) return reply(404, { ok: false, message: "対象作品が見つかりません。" });
+  if (videoExists !== 1) return reply(404, { ok: false, message: "対象作品が見つかりません。" });
   const actor = c.get("user")!.id;
   const after: Snapshot = { ...current, status, private_note: private_note || current.private_note,
     resolved_by_user_id: actor, resolved_at: Math.floor(Date.now() / 1000) };

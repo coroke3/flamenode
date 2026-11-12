@@ -92,6 +92,8 @@ test("MIG-0731 U03b one case-only transition yields CAS update and strict audit 
   assert.equal(state.audits()[0].context, "admin_moderation_update");
   assert.equal(state.audits()[0].retention_class, "long_audit");
   assert.equal(JSON.parse(state.audits()[0].before_json).status, "open");
+  assert.equal(Object.hasOwn(JSON.parse(state.audits()[0].before_json), "_video_exists"), false,
+    "derived existence flag must never pollute audit snapshots or CAS");
   assert.equal(JSON.parse(state.audits()[0].after_json).status, "resolved");
   assert.equal(state.stats.batches, 1);
   const repeat = await state.request({ status: "resolved" });
@@ -114,7 +116,7 @@ test("MIG-0731 U03b never writes on video change, invalid status, missing video"
 test("MIG-0731 U03b stale CAS rolls back update and audit", async () => {
   let modified = false;
   const state = setup({ onFirst: (query, sqlite) => {
-    if (!modified && /SELECT \* FROM video_moderation_cases/.test(query)) {
+    if (!modified && /FROM video_moderation_cases c/.test(query)) {
       modified = true;
       sqlite.prepare("UPDATE video_moderation_cases SET private_note = 'concurrent' WHERE id='c1'").run();
     }
@@ -129,4 +131,13 @@ test("MIG-0731 U03b stale CAS rolls back update and audit", async () => {
 test("MIG-0731 U03b candidate is not mounted in production admin routes", async () => {
   const source = await readFile(new URL("../src/routes/admin/index.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /adminModerationCaseOnlyRoutes/);
+});
+
+test("MIG-0731 U03b reads case and video existence using one bounded D1 statement", async () => {
+  const statements = [];
+  const state = setup({ onFirst: (statement) => statements.push(statement) });
+  const response = await state.request({ status: "rejected", private_note: "merged read" });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(statements.filter(s => s.includes("FROM video_moderation_cases c LEFT JOIN videos v")).length, 1);
+  assert.equal(statements.filter(s => s.includes("SELECT id FROM videos")).length, 0);
 });
