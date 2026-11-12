@@ -51,3 +51,124 @@ export async function getEditPermissions({
     return { status: "unavailable" };
   }
 }
+
+
+/**
+ * MIG-0715 U02 / D-16-1: provisional write client. Do not mount a save UI or
+ * claim route parity until MIG-0650 supplies the canonical Hono contracts.
+ * CURRENT: upsertVideoCollaborator / applyVideoCollaboratorPermissionsBatch.
+ */
+import { parseCanonicalXId } from "@flamenode/domain/xid";
+import { send, type WriteResult } from "./write.js";
+
+export type CollaboratorPrivilegeMode = "normal" | "admin" | "event";
+
+export interface VideoCollaboratorResult {
+  ok: boolean;
+  message?: string;
+  granted?: string[];
+  revoked?: string[];
+  unchanged?: number;
+}
+
+export type VideoCollaboratorWriteResult =
+  | WriteResult<VideoCollaboratorResult>
+  | { status: "invalid"; message: string };
+
+export interface CollaboratorPermissionIntent {
+  x_user_id: string;
+  display_name: string;
+  intent: "on" | "off";
+}
+
+export interface UpsertVideoCollaboratorInput {
+  videoId: string;
+  xUserId: string;
+  displayName: string;
+  canEdit: boolean;
+  notify: boolean;
+  editPrivilegeMode?: CollaboratorPrivilegeMode;
+}
+
+export interface ApplyVideoCollaboratorBatchInput {
+  videoId: string;
+  notify: boolean;
+  intents: readonly CollaboratorPermissionIntent[];
+  editPrivilegeMode?: CollaboratorPrivilegeMode;
+}
+
+const INVALID_X_ID_MESSAGE = "X ID は英数字とアンダースコア20文字以内で入力してください。";
+
+function writePath(videoId: string): string {
+  return `/api/videos/${encodeURIComponent(videoId)}/collaborators`;
+}
+
+function privilegeFields(mode: CollaboratorPrivilegeMode | undefined): {
+  edit_privilege_mode?: "admin" | "event";
+} {
+  return mode === "admin" || mode === "event"
+    ? { edit_privilege_mode: mode }
+    : {};
+}
+
+function validatedWriteResult(result: WriteResult<VideoCollaboratorResult>): VideoCollaboratorWriteResult {
+  if (result.status !== "ok") return result;
+  const data = result.data;
+  // send() validates the ok boolean. Keep optional message/batch summary strict:
+  // malformed 200 responses must never be presented as a successful grant.
+  if (
+    (data.message !== undefined && typeof data.message !== "string") ||
+    (data.granted !== undefined && (!Array.isArray(data.granted) || !data.granted.every((x) => typeof x === "string"))) ||
+    (data.revoked !== undefined && (!Array.isArray(data.revoked) || !data.revoked.every((x) => typeof x === "string"))) ||
+    (data.unchanged !== undefined && (!Number.isSafeInteger(data.unchanged) || data.unchanged < 0))
+  ) return { status: "unavailable" };
+  return result;
+}
+
+/** SA-082 provisional: same-origin PUT; server alone decides the grant. */
+export async function upsertVideoCollaborator(
+  input: UpsertVideoCollaboratorInput,
+  fetchFn: FetchLike = (url, init) => fetch(url, init),
+): Promise<VideoCollaboratorWriteResult> {
+  const xId = parseCanonicalXId(input.xUserId);
+  if (!xId) return { status: "invalid", message: INVALID_X_ID_MESSAGE };
+  return validatedWriteResult(await send<VideoCollaboratorResult>(
+    fetchFn,
+    "PUT",
+    `${writePath(input.videoId)}/${encodeURIComponent(xId)}`,
+    {
+      display_name: input.displayName,
+      can_edit: input.canEdit,
+      notify: input.notify,
+      ...privilegeFields(input.editPrivilegeMode),
+    },
+  ));
+}
+
+/** SA-084 provisional: no client-side optimistic permission changes or retries. */
+export async function applyVideoCollaboratorPermissionsBatch(
+  input: ApplyVideoCollaboratorBatchInput,
+  fetchFn: FetchLike = (url, init) => fetch(url, init),
+): Promise<VideoCollaboratorWriteResult> {
+  const intents: CollaboratorPermissionIntent[] = [];
+  if (!input.intents.length) return { status: "invalid", message: "変更する編集権限がありません。" };
+  for (const intent of input.intents) {
+    const xId = parseCanonicalXId(intent.x_user_id);
+    if (!xId) return { status: "invalid", message: INVALID_X_ID_MESSAGE };
+    intents.push({
+      x_user_id: xId,
+      display_name: intent.display_name,
+      intent: intent.intent,
+    });
+  }
+  return validatedWriteResult(await send<VideoCollaboratorResult>(
+    fetchFn,
+    "POST",
+    `${writePath(input.videoId)}/batch`,
+    {
+      ...privilegeFields(input.editPrivilegeMode),
+      notify: input.notify,
+      intents,
+    },
+  ));
+}
