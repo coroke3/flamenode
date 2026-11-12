@@ -103,6 +103,7 @@ test("slot submission icon lookup SQLはACL条件を満たす行だけ返す前�
     );
     ${createTable} videos (
       id TEXT PRIMARY KEY,
+      visibility_status TEXT,
       creator_icon_url TEXT
     );
     ${createTable} slots (
@@ -114,12 +115,25 @@ test("slot submission icon lookup SQLはACL条件を満たす行だけ返す前�
       x_user_id TEXT
     );
     INSERT INTO events VALUES ('evt-1', 'public', 'public_name');
-    INSERT INTO videos VALUES ('vid-1', '/api/media/video-icons/x/icon.webp');
+    INSERT INTO videos VALUES ('vid-1', 'public', '/api/media/video-icons/x/icon.webp');
     INSERT INTO slots VALUES ('${VALID_SLOT_ID}', 'evt-1', 'vid-1', 'submitted', 'user-1', 'x');
   `);
   const row = db.prepare(SLOT_SUBMISSION_ICON_LOOKUP_SQL).get(VALID_SLOT_ID);
   assert.equal(row?.slot_status, "submitted");
   assert.equal(row?.creator_icon_url, "/api/media/video-icons/x/icon.webp");
+  // A submitted video's private transition must immediately revoke anonymous
+  // public_name icon access without waiting for any Cache API or R2 expiry.
+  db.prepare("UPDATE videos SET visibility_status = 'private' WHERE id = 'vid-1'").run();
+  const hidden = db.prepare(SLOT_SUBMISSION_ICON_LOOKUP_SQL).get(VALID_SLOT_ID);
+  assert.equal(hidden?.creator_icon_url, null, "private video icon is not publicly readable");
+  assert.equal(resolveSlotSubmissionIconAccess(hidden, null).allowed, false);
+  // Owner-only anonymous mode keeps the existing private-icon relation; it
+  // still requires the separate auth/slot-owner gate before any response.
+  db.prepare("UPDATE events SET slot_visibility_mode = 'anonymous' WHERE id = 'evt-1'").run();
+  const ownerOnly = db.prepare(SLOT_SUBMISSION_ICON_LOOKUP_SQL).get(VALID_SLOT_ID);
+  assert.equal(ownerOnly?.creator_icon_url, "/api/media/video-icons/x/icon.webp");
+  assert.equal(resolveSlotSubmissionIconAccess(ownerOnly, null).allowed, false);
+  assert.equal(resolveSlotSubmissionIconAccess(ownerOnly, { id: "user-1", active_x_user_id: "x" }).allowed, true);
   db.close();
 });
 
