@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseVideoMemberInputs, normalizeMemberChapters, parseMemberChapterTime } from "@flamenode/domain/video";
+import { parseVideoMemberInputs, normalizeMemberChapters, parseMemberChapterTime, MAX_MEMBERS_JSON_BYTES } from "@flamenode/domain/video";
 import {
   parseVideoMemberInputs as legacyParse,
   normalizeMemberChapters as legacyNormalize,
@@ -126,4 +126,17 @@ test("MIG-0651: over-limit member arrays fail before deep per-member validation"
   }));
   assert.equal(parseVideoMemberInputs(JSON.stringify(atLimit), true).ok, true,
     "the existing 100-member boundary remains accepted");
+});
+
+
+test("MIG-0651: 8 MiB shared member JSON byte cap rejects early, including multibyte UTF-8", () => {
+  const tooManyAscii = "x".repeat(MAX_MEMBERS_JSON_BYTES + 1);
+  const tooManyUtf8 = "あ".repeat(Math.floor(MAX_MEMBERS_JSON_BYTES / 3) + 1);
+  const expected = { ok: false, message: "合作メンバーの入力が大きすぎます。" };
+  assert.deepEqual(parseVideoMemberInputs(tooManyAscii, true), expected);
+  assert.deepEqual(parseVideoMemberInputs(tooManyUtf8, true), expected,
+    "UTF-16 length is below the cap but UTF-8 exceeds it");
+  assert.deepEqual(parseVideoMemberInputs(tooManyAscii, false), { ok: true, members: [] },
+    "non-collaboration continues to ignore members_json");
+  assert.deepEqual(parseVideoMemberInputs("[]", true), { ok: true, members: [] });
 });
