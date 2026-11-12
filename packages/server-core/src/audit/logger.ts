@@ -242,6 +242,26 @@ export type PreloadedAuditContext = {
   actorSnapshotJsonById?: Readonly<Record<string, string>>;
 };
 
+/**
+ * Reuse only the canonical five-field actor snapshot produced by the write guard.
+ * The audit budget must apply this same check before crediting a skipped D1 SELECT.
+ * A syntactically valid but incomplete/corrupted JSON string is not audit evidence.
+ */
+export function isValidPreloadedActorSnapshotJson(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const row = parsed as Record<string, unknown>;
+    const keys = ["discord_id", "discord_name", "x_user_id", "x_name", "icon_url"] as const;
+    return Object.keys(row).length === keys.length &&
+      keys.every((key) =>
+        Object.hasOwn(row, key) && (row[key] === null || typeof row[key] === "string"));
+  } catch {
+    return false;
+  }
+}
+
 /** Prepare audit entries with bounded queries independent of entry count. */
 export async function prepareAuditLogEntries(
   db: ServerCoreDb,
@@ -268,9 +288,9 @@ export async function prepareAuditLogEntries(
     await Promise.all(
       actorUserIds.slice(offset, offset + 4).map(async (actorUserId) => {
         const known = preloaded?.actorSnapshotJsonById?.[actorUserId];
-        // The budget planner only credits string snapshots. A malformed
-        // preloaded placeholder must not bypass the authoritative D1 read.
-        if (typeof known === "string") {
+        // Budget and runtime both reuse only canonical actor snapshots.
+        // Invalid strings and non-strings are charged a fresh D1 SELECT.
+        if (isValidPreloadedActorSnapshotJson(known)) {
           actorJsonById.set(actorUserId, known);
           return;
         }
