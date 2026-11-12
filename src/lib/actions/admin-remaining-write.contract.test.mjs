@@ -4,6 +4,10 @@ import { test } from "node:test";
 
 const names = ["admin.ts", "api-endpoints.ts", "permissions-admin.ts", "youtube-sync-admin.ts", "notification-admin.ts", "static-rebuild-admin.ts", "video-collab-perms.ts", "event-template-admin.ts"];
 const sources = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await readFile(new URL(`./${name}`, import.meta.url), "utf8")])));
+const permissionMutationSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionMutationBatch.ts", import.meta.url),
+  "utf8",
+);
 
 test("remaining admin mutations use canonical guards and atomic audit", () => {
   const features = {
@@ -37,9 +41,12 @@ test("CAS snapshots and same-batch side effects remain explicit", () => {
     }
     assert.match(
       sources[name],
-      /expectedRowCondition|buildPermissionSetGuardSql|operation: "CREATE"/,
+      /expectedRowCondition|buildPermissionMutationBatch|buildPermissionSetGuardSql|operation: "CREATE"/,
     );
   }
+  assert.match(sources["video-collab-perms.ts"], /buildPermissionMutationBatch\(db, \{/);
+  assert.match(permissionMutationSource, /buildPermissionSetGuardSql/);
+  assert.match(permissionMutationSource, /buildHiddenEditorCountGuardSql/);
   assert.match(sources["admin.ts"], /planVideoVisibilityTransition/);
   assert.match(sources["admin.ts"], /buildVideoStatusChangeNotificationBatch|planVideoVisibilityTransition/);
   // Force-resend must use the route-aware builder so channel notifications can

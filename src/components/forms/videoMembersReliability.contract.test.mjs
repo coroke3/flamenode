@@ -128,7 +128,10 @@ test("完全no-opの参加者保存はvideos.updated_at・score dirty・static r
   assert.match(source, /if \(videoPublicContentChanged\) \{[\s\S]*?\.update\(videos\)/);
   assert.match(source, /if \(plan\.statements\.length === 0\)/);
   assert.match(source, /参加者設定に変更はありません/);
-  assert.match(source, /\.\.\.\(videoPublicContentChanged[\s\S]*?targetType: "video"/);
+  const targets = await read("packages/server-core/src/video/adminMemberRebuildTargets.ts");
+  assert.match(source, /adminVideoMembersRebuildTargets\(\{/);
+  assert.match(source, /queue = await buildStaticRebuildQueueBatch\(db, queueItems\)/);
+  assert.match(targets, /\.\.\.\(publicContentChanged[\s\S]*?targetType: "video"/);
 });
 
 test("member-set CASのID順はlocaleCompareに依存しない", async () => {

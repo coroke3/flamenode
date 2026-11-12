@@ -11,6 +11,7 @@
     "./announcements": "./src/announcements/index.ts",
     "./apiEndpoints": "./src/apiEndpoints/index.ts",
     "./eventTemplates": "./src/eventTemplates/index.ts",
+    "./notifications/payload": "./src/notifications/payload.ts",
     "./datetime": "./src/datetime.ts",
     "./auth/permissions": "./src/auth/permissions/index.ts",
     "./auth/permissions/presets": "./src/auth/permissions/presets.ts",

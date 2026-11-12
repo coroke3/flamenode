@@ -58,10 +58,7 @@ export function videoPublicPath(
   return `/${youtubeVideoId?.trim() || videoId}`;
 }
 
-import {
-  isOpsWebhookTarget,
-  type OpsWebhookTarget,
-} from "./forum";
+import type { OpsWebhookTarget } from "./forum";
 
 export type DiscordNotificationPayload = {
   content: string;
@@ -74,63 +71,5 @@ export type DiscordNotificationPayload = {
 };
 
 /** 通知 payload に必須キーが入っているかを検証する。 */
-export interface NotificationPayloadCheck {
-  ok: boolean;
-  reason?: string;
-}
-
-const MAX_PAYLOAD_BYTES = 8 * 1024;
-const MAX_TYPE_LENGTH = 64;
-
-export function validateNotificationPayload(
-  type: unknown,
-  payload: unknown,
-): NotificationPayloadCheck {
-  if (typeof type !== "string" || type.length === 0) {
-    return { ok: false, reason: "type が文字列ではありません" };
-  }
-  if (type.length > MAX_TYPE_LENGTH) {
-    return { ok: false, reason: `type が ${MAX_TYPE_LENGTH} 文字を超えています` };
-  }
-  if (!/^[a-z0-9_]+$/i.test(type)) {
-    return { ok: false, reason: "type は英数と _ のみ使用可能です" };
-  }
-  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
-    return { ok: false, reason: "payload はオブジェクトである必要があります" };
-  }
-
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(payload);
-  } catch {
-    return { ok: false, reason: "payload は JSON シリアライズできません" };
-  }
-  if (Buffer.byteLength(serialized, "utf8") > MAX_PAYLOAD_BYTES) {
-    return { ok: false, reason: `payload が ${MAX_PAYLOAD_BYTES} バイトを超えています` };
-  }
-
-  const content = (payload as Record<string, unknown>).content;
-  if (content !== undefined && typeof content !== "string") {
-    return { ok: false, reason: "payload.content は文字列である必要があります" };
-  }
-  // Discord message content 上限は 2000。長い運用文面を落とさない。
-  if (typeof content === "string" && content.length > 2000) {
-    return { ok: false, reason: "payload.content は 2000 文字以内にしてください" };
-  }
-
-  const record = payload as Record<string, unknown>;
-  const webhookTarget = record.webhook_target;
-  if (webhookTarget !== undefined && !isOpsWebhookTarget(webhookTarget)) {
-    return { ok: false, reason: "payload.webhook_target が不正です" };
-  }
-  const threadName = record.thread_name;
-  if (threadName !== undefined) {
-    if (typeof threadName !== "string") {
-      return { ok: false, reason: "payload.thread_name は文字列である必要があります" };
-    }
-    if (threadName.length > 100) {
-      return { ok: false, reason: "payload.thread_name は 100 文字以内にしてください" };
-    }
-  }
-  return { ok: true };
-}
+// Shared validator is pure and byte-identical to CURRENT; Next keeps its public import path.
+export { validateNotificationPayload, type NotificationPayloadCheck } from "@flamenode/domain/notifications/payload";

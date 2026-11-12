@@ -1,0 +1,505 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { readFile } from "node:fs/promises";
+import { createVideoCollaboratorRoutes, createDefaultVideoCollaboratorHost } from "../src/routes/videos/collaborators.ts";
+
+const videoId = "v1";
+const route = "/v1/collaborators";
+const jsonHeaders = { "content-type": "application/json" };
+const canonicalBatch = {
+  video_id: videoId,
+  intents: [{ x_user_id: "@alice", display_name: "Alice", intent: "on" }],
+};
+
+function fixture({ guardState = true } = {}) {
+  let guarded = 0;
+  let wakeCalls = 0;
+  let prematureReads = 0;
+  const host = {
+    writeGuard: async (c, next) => {
+      guarded++;
+      c.header("Cache-Control", "private, no-store");
+      if (guardState) {
+        c.set("user", { id: "actor", role: null });
+        if (guardState !== "missingPreload") {
+          c.set("auditSettings", {});
+          c.set("actorSnapshotJsonById", { actor: "{}" });
+        }
+        c.set("db", new Proxy({}, {
+          get() {
+            prematureReads++;
+            throw Error("unexpected D1 read");
+          },
+        }));
+      }
+      await next();
+    },
+    loadWakeHost: async () => {
+      wakeCalls++;
+      throw Error("Queue port must not be reached before a valid atomic write");
+    },
+  };
+  const app = createVideoCollaboratorRoutes(host);
+  async function request(method, path, body) {
+    return app.request(path, {
+      method,
+      headers: jsonHeaders,
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    }, { NEXT_PUBLIC_SITE_URL: "https://example.test" });
+  }
+  return {
+    request,
+    stats: () => ({ guarded, wakeCalls, prematureReads }),
+  };
+}
+
+test("MIG-0650 candidate is explicitly unmounted in the active videos router", async () => {
+  const source = await readFile(
+    new URL("../src/routes/videos/index.ts", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /collaborators\.ts/);
+  assert.doesNotMatch(source, /createVideoCollaboratorRoutes/);
+});
+
+test("SA-082 invalid upsert is rejected before D1 or Queue wake", async () => {
+  const f = fixture();
+  const res = await f.request("POST", route, {
+    video_id: videoId, x_user_id: "http://evil.invalid/",
+    display_name: "Invalid", can_edit: "1",
+  });
+  assert.equal(res.status, 400);
+  assert.equal(res.headers.get("cache-control"), "private, no-store");
+  assert.equal((await res.json()).ok, false);
+  assert.deepEqual(f.stats(), { guarded: 1, wakeCalls: 0, prematureReads: 0 });
+});
+
+test("SA-082 path and submitted video IDs must match", async () => {
+  const f = fixture();
+  const res = await f.request("POST", route, {
+    video_id: "other-video", x_user_id: "@alice", display_name: "Alice",
+  });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).message, /video_id/);
+  assert.deepEqual(f.stats(), { guarded: 1, wakeCalls: 0, prematureReads: 0 });
+});
+
+test("SA-083 delete rejects oversized video ID before D1", async () => {
+  const f = fixture();
+  const res = await f.request("DELETE", "/" + "v".repeat(65) + "/collaborators", {
+    x_user_id: "alice",
+  });
+  assert.equal(res.status, 400);
+  assert.deepEqual(f.stats(), { guarded: 1, wakeCalls: 0, prematureReads: 0 });
+});
+
+test("SA-083 delete rejects missing or malformed X identities before D1", async () => {
+  const f = fixture();
+  for (const bad of [{}, { x_user_id: "../admin" }, { x_user_id: "a".repeat(33) }]) {
+    const res = await f.request("DELETE", route, bad);
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).message, /X ID/);
+  }
+  assert.deepEqual(f.stats(), { guarded: 3, wakeCalls: 0, prematureReads: 0 });
+});
+
+test("SA-084 rejects empty, 101-row and malformed batches before D1", async () => {
+  const f = fixture();
+  for (const intents of [
+    [],
+    Array.from({ length: 101 }, (_, i) => ({
+      x_user_id: "user" + i, display_name: "User", intent: "on",
+    })),
+    [{ x_user_id: "admin/evil", display_name: "Admin", intent: "on" }],
+  ]) {
+    const res = await f.request("POST", route + "/batch", { video_id: videoId, intents });
+    assert.equal(res.status, 400);
+    assert.equal((await res.json()).ok, false);
+  }
+  assert.deepEqual(f.stats(), { guarded: 3, wakeCalls: 0, prematureReads: 0 });
+});
+
+test("SA-084 rejects mismatching video ID before authorization DB query", async () => {
+  const f = fixture();
+  const res = await f.request("POST", route + "/batch", {
+    ...canonicalBatch, video_id: "other",
+  });
+  assert.equal(res.status, 400);
+  assert.deepEqual(f.stats(), { guarded: 1, wakeCalls: 0, prematureReads: 0 });
+});
+
+test("all endpoints limit body bytes even without Content-Length honesty", async () => {
+  const f = fixture();
+  const huge = JSON.stringify({ video_id: videoId, extra: "x".repeat(66000) });
+  for (const [method, path] of [
+    ["POST", route], ["DELETE", route], ["POST", route + "/batch"],
+  ]) {
+    const res = await f.request(method, path, huge);
+    assert.equal(res.status, 413);
+    assert.match((await res.json()).message, /大きすぎ/);
+  }
+  assert.deepEqual(f.stats(), { guarded: 3, wakeCalls: 0, prematureReads: 0 });
+});
+
+test("valid batch with missing authenticated guard context fails closed", async () => {
+  const f = fixture({ guardState: false });
+  const res = await f.request("POST", route + "/batch", canonicalBatch);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).ok, false);
+  assert.deepEqual(f.stats(), { guarded: 1, wakeCalls: 0, prematureReads: 0 });
+});
+
+
+// Candidate integration is still unmounted, but exercise the real production
+// origin/session/CostGuard/Drizzle stack against a local transactional D1 shim.
+import { Hono } from "hono";
+import { createSqlite } from "./support/personalHarness.mjs";
+import { atomicD1, seedChapterWorld, SESSION_USER, SITE } from "./support/chapterSeed.mjs";
+
+function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false, queueEnabled = false, beforeBatch } = {}) {
+  const sqlite = createSqlite();
+  seedChapterWorld(sqlite);
+  sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'").run(mode);
+  const realD1 = atomicD1(sqlite);
+  // For a deterministic concurrent write, inject only AFTER all preflight
+  // reads and immediately BEFORE the actual atomic D1 transaction starts.
+  // Drizzle's SELECTs may use .raw() rather than .all(), so the support
+  // adapter's beforeRead hook cannot observe the permission snapshot.
+  const d1 = beforeBatch ? {
+    ...realD1,
+    async batch(items) {
+      beforeBatch(sqlite);
+      return realD1.batch(items);
+    },
+  } : realD1;
+  const queueMessages = [];
+  const env = {
+    DB: d1, NEXT_PUBLIC_SITE_URL: SITE,
+    QUEUE_DISPATCH_ENABLED: queueEnabled ? "1" : "0",
+    NOTIFICATION_WAKE_QUEUE: {
+      async send(message) {
+        assert.equal(d1.stats.batches, 1, "notification wake must follow D1 commit");
+        queueMessages.push(message);
+      },
+    },
+    STATIC_REBUILD_WAKE_QUEUE: {
+      async send(message) {
+        assert.equal(d1.stats.batches, 1, "static wake must follow D1 commit");
+        queueMessages.push(message);
+      },
+    },
+  };
+  const actor = as ? SESSION_USER(as, as === "u_admin" ? "admin" : "user", "x_admin") : null;
+  let wakeLoadCount = 0;
+  const session = async (c, next) => {
+    c.set("user", actor);
+    c.set("sessionState", actor ? "user" : "none");
+    await next();
+  };
+  // Test the same unmounted guard host that an integrator would eventually
+  // import; do not duplicate middleware order in test fixtures.
+  const defaultHost = createDefaultVideoCollaboratorHost({ session });
+  const host = {
+    ...defaultHost,
+    loadWakeHost: async (c) => {
+      wakeLoadCount++;
+      if (wakeHostRejects) throw new Error("simulated Queue binding resolution failure");
+      return defaultHost.loadWakeHost(c);
+    },
+  };
+  const app = new Hono();
+  app.route("/api/videos", createVideoCollaboratorRoutes(host));
+  const send = (method, path, data, headers = { Origin: SITE }) =>
+    app.request(path, {
+      method, headers: { "content-type": "application/json", ...headers },
+      body: data === undefined ? undefined : JSON.stringify(data),
+    }, env);
+  const count = (table) => sqlite.prepare('SELECT COUNT(*) AS n FROM "' + table + '"').get().n;
+  return { sqlite, d1, send, count, wakeLoads: () => wakeLoadCount, queueMessages };
+}
+
+test("SA-084 authenticated middleware + real SQLite D1: permission, strict audit and rebuild queue commit together", async () => {
+  const s = integration();
+  try {
+    const input = {
+      video_id: "v_pub", edit_privilege_mode: "admin", notify: false,
+      intents: [{ x_user_id: "x_other", display_name: "Other", intent: "on" }],
+    };
+    const res = await s.send("POST", "/api/videos/v_pub/collaborators/batch", input);
+    assert.equal(res.status, 200, await res.clone().text());
+    const result = await res.json();
+    assert.equal(result.ok, true);
+    assert.equal(result.granted.length, 1);
+    const rows = s.sqlite.prepare("SELECT can_edit,is_public_member FROM video_members WHERE video_id='v_pub' AND x_user_id='x_other'").all();
+    assert.deepEqual(rows.map(x => [x.can_edit, x.is_public_member]), [[1, 0]]);
+    assert.equal(s.count("audit_logs"), 1);
+    assert.equal(s.sqlite.prepare("SELECT table_name FROM audit_logs LIMIT 1").get().table_name, "video_member_permissions_batch");
+    assert.ok(s.count("static_rebuild_queue") >= 1);
+    assert.equal(s.d1.stats.batches, 1, "DML + audit + rebuild are a single atomic D1 batch");
+    assert.equal(s.wakeLoads(), 1, "load wake host only AFTER the atomic commit");
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+test("SA-084 production origin guard rejects cross-site request before any D1 read", async () => {
+  const s = integration();
+  try {
+    const res = await s.send("POST", "/api/videos/v_pub/collaborators/batch", {
+      video_id: "v_pub", edit_privilege_mode: "admin", intents: canonicalBatch.intents,
+    }, { Origin: "https://evil.example" });
+    assert.equal(res.status, 403);
+    assert.equal((await res.json()).reason, "invalid_origin");
+    assert.equal(s.d1.stats.reads, 0);
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.wakeLoads(), 0);
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+test("SA-084 production write stack rejects anonymous and maintenance requests", async () => {
+  for (const cfg of [{ as: null, expected: 401 }, { mode: "maintenance", expected: 503 }]) {
+    const s = integration(cfg);
+    try {
+      const res = await s.send("POST", "/api/videos/v_pub/collaborators/batch", {
+        video_id: "v_pub", edit_privilege_mode: "admin", intents: canonicalBatch.intents,
+      });
+      assert.equal(res.status, cfg.expected, await res.clone().text());
+      assert.equal(s.count("audit_logs"), 0);
+      assert.equal(s.count("video_members"), 0);
+      assert.equal(s.wakeLoads(), 0);
+    } finally {
+      s.sqlite.close();
+    }
+  }
+});
+
+
+test("SA-082/083 fail closed before any D1 access when guard omitted CostGuard/audit preloads", async () => {
+  const f = fixture({ guardState: "missingPreload" });
+  const requests = [
+    ["POST", route, {
+      video_id: videoId, x_user_id: "@alice", display_name: "Alice", can_edit: "1",
+    }],
+    ["DELETE", route, { video_id: videoId, x_user_id: "@alice" }],
+  ];
+  for (const [method, path, body] of requests) {
+    const res = await f.request(method, path, body);
+    assert.equal(res.status, 503);
+    assert.equal((await res.json()).ok, false);
+  }
+  assert.deepEqual(f.stats(), { guarded: 2, wakeCalls: 0, prematureReads: 0 });
+});
+
+test("SA-084 candidate maps a shared preflight limit rejection to a non-success HTTP status", async () => {
+  const src = await readFile(new URL("../src/routes/videos/collaborators.ts", import.meta.url), "utf8");
+  assert.match(src, /preparation\.result\.ok \? 200 : 400/);
+});
+
+
+test("SA-084 Queue host-load rejection after commit does not turn durable success into HTTP 500", async () => {
+  const s = integration({ wakeHostRejects: true });
+  try {
+    const res = await s.send("POST", "/api/videos/v_pub/collaborators/batch", {
+      video_id: "v_pub",
+      edit_privilege_mode: "admin",
+      notify: false,
+      intents: [{ x_user_id: "x_other", display_name: "Other", intent: "on" }],
+    });
+    assert.equal(res.status, 200, await res.clone().text());
+    assert.equal((await res.json()).ok, true);
+    assert.equal(s.d1.stats.batches, 1);
+    assert.equal(s.count("audit_logs"), 1);
+    assert.ok(s.count("static_rebuild_queue") >= 1);
+    assert.equal(s.wakeLoads(), 1);
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+
+test("SA-082/083 actual SQLite grant, revoke, repeat: strict audit + durable queue only on changes", async () => {
+  const s = integration();
+  try {
+    const path = "/api/videos/v_pub/collaborators";
+    const first = await s.send("POST", path, {
+      video_id: "v_pub", edit_privilege_mode: "admin",
+      x_user_id: "@x_other", display_name: "Other",
+      can_edit: "1", notify: "0",
+    });
+    assert.equal(first.status, 200, await first.clone().text());
+    assert.equal((await first.json()).ok, true);
+    assert.deepEqual(
+      s.sqlite.prepare("SELECT can_edit,is_public_member FROM video_members WHERE video_id=? AND x_user_id=?").all("v_pub", "x_other")
+        .map(row => [row.can_edit, row.is_public_member]),
+      [[1, 0]],
+    );
+    assert.equal(s.count("audit_logs"), 1);
+    assert.equal(s.d1.stats.batches, 1);
+
+    const second = await s.send("DELETE", path, {
+      video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "@x_other",
+    });
+    assert.equal(second.status, 200, await second.clone().text());
+    assert.equal((await second.json()).ok, true);
+    assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM video_members WHERE video_id=? AND x_user_id=?").get("v_pub", "x_other").n, 0);
+    assert.equal(s.count("audit_logs"), 2, "revoke must be audited atomically");
+    assert.equal(s.d1.stats.batches, 2);
+
+    const repeat = await s.send("DELETE", path, {
+      video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_other",
+    });
+    assert.equal(repeat.status, 200, await repeat.clone().text());
+    assert.equal((await repeat.json()).ok, true);
+    assert.equal(s.count("audit_logs"), 2, "idempotent no-op must not create an audit");
+    assert.equal(s.d1.stats.batches, 2, "idempotent no-op must not start a D1 batch");
+    assert.ok(s.count("static_rebuild_queue") >= 1);
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+test("SA-082/083/084 deny an unauthorized user before mutation/audit/queue", async () => {
+  const s = integration({ as: "u_other" });
+  try {
+    const path = "/api/videos/v_pub/collaborators";
+    const attempts = [
+      ["POST", path, {
+        video_id: "v_pub", edit_privilege_mode: "admin",
+        x_user_id: "x_staff", display_name: "Staff", can_edit: "1",
+      }],
+      ["DELETE", path, {
+        video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_staff",
+      }],
+      ["POST", path + "/batch", {
+        video_id: "v_pub", edit_privilege_mode: "admin",
+        intents: [{ x_user_id: "x_staff", display_name: "Staff", intent: "on" }],
+      }],
+    ];
+    for (const [method, routePath, data] of attempts) {
+      const res = await s.send(method, routePath, data);
+      assert.equal(res.status, 404, await res.clone().text());
+      assert.equal((await res.json()).ok, false);
+    }
+    assert.equal(s.count("video_members"), 0);
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(s.wakeLoads(), 0);
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+
+test("SA-082/083/084 edit_video CostGuard rejects disabled feature before permission D1 reads", async () => {
+  const s = integration();
+  try {
+    s.sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+      .run(JSON.stringify(["edit_video"]));
+    const attempts = [
+      ["POST", "/api/videos/v_pub/collaborators", {
+        video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_other",
+        display_name: "Other", can_edit: "1",
+      }],
+      ["DELETE", "/api/videos/v_pub/collaborators", {
+        video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_other",
+      }],
+      ["POST", "/api/videos/v_pub/collaborators/batch", {
+        video_id: "v_pub", edit_privilege_mode: "admin",
+        intents: [{ x_user_id: "x_other", display_name: "Other", intent: "on" }],
+      }],
+    ];
+    for (const [method, path, body] of attempts) {
+      const res = await s.send(method, path, body);
+      assert.equal(res.status, 503, await res.clone().text());
+      assert.equal((await res.json()).reason, "cost_guard_blocked");
+      assert.equal(res.headers.get("cache-control"), "private, no-store");
+    }
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("video_members"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(s.wakeLoads(), 0);
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+
+test("SA-084 notify=true commits a DM outbox + static queue then sends exactly two wake-only messages", async () => {
+  const s = integration({ queueEnabled: true });
+  try {
+    const res = await s.send("POST", "/api/videos/v_pub/collaborators/batch", {
+      video_id: "v_pub",
+      edit_privilege_mode: "admin",
+      notify: true,
+      intents: [{ x_user_id: "x_other", display_name: "Other", intent: "on" }],
+    });
+    assert.equal(res.status, 200, await res.clone().text());
+    assert.equal((await res.json()).ok, true);
+    assert.equal(s.d1.stats.batches, 1, "all permission, audit and durable outbox writes are atomic");
+    assert.equal(s.count("audit_logs"), 1);
+    assert.ok(s.count("static_rebuild_queue") >= 1);
+    assert.equal(s.count("notification_outbox"), 1);
+    const outbox = s.sqlite.prepare(
+      "SELECT recipient_user_id, type, status FROM notification_outbox LIMIT 1",
+    ).get();
+    assert.deepEqual(
+      [outbox.recipient_user_id, outbox.type, outbox.status],
+      ["u_other", "video_edit_permission_granted", "pending"],
+    );
+    assert.deepEqual(
+      s.queueMessages.map((msg) => [msg.kind, msg.source]).sort(),
+      [
+        ["notification_available", "manage"],
+        ["static_rebuild_available", "manage"],
+      ],
+      "messages are doorbells only; no business payload reaches Queue",
+    );
+    for (const msg of s.queueMessages) {
+      assert.equal(msg.version, 1);
+      assert.equal(msg.video_id, undefined);
+      assert.equal(msg.recipient_user_id, undefined);
+    }
+    assert.equal(s.wakeLoads(), 2);
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+
+test("SA-084 concurrent permission-row insert triggers snapshot CAS rollback, no audit/queue/Queue wake", async () => {
+  let inserted = false;
+  const s = integration({
+    beforeBatch(sqlite) {
+      // Another writer inserts a hidden editor between stale preflight reads
+      // and the first permission-set CAS statement in the D1 transaction.
+      inserted = true;
+      sqlite.prepare(
+        "INSERT INTO video_members " +
+        "(id,video_id,x_user_id,name,role,comment,order_index,can_edit," +
+        "is_public_member,edit_granted_at,edit_updated_at) " +
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      ).run("race_x_other", "v_pub", "x_other", "Concurrent", null, null, 9999, 1, 0, 1, 1);
+    },
+  });
+  try {
+    const res = await s.send("POST", "/api/videos/v_pub/collaborators/batch", {
+      video_id: "v_pub", edit_privilege_mode: "admin", notify: false,
+      intents: [{ x_user_id: "x_other", display_name: "Other", intent: "on" }],
+    });
+    assert.equal(inserted, true, "the race must be injected before the atomic CAS batch");
+    assert.equal(res.status, 500, await res.clone().text());
+    assert.equal((await res.json()).ok, false);
+    assert.equal(s.d1.stats.batches, 1, "a single CAS batch must reject the stale snapshot");
+    assert.equal(s.count("video_members"), 1, "only the independently injected row survives");
+    assert.equal(s.count("audit_logs"), 0, "failed CAS must not persist audit");
+    assert.equal(s.count("static_rebuild_queue"), 0, "failed CAS must not persist rebuilds");
+    assert.equal(s.count("notification_outbox"), 0);
+    assert.equal(s.wakeLoads(), 0, "no Queue notification before committed write");
+  } finally {
+    s.sqlite.close();
+  }
+});

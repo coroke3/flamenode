@@ -9,6 +9,7 @@ const submit = read("../actions/video/submitSlotVideo.ts");
 const updateVideoAction = read("../actions/video/updateVideo.ts");
 const update = read("./videoSavePlan.ts");
 const adminMembers = read("../actions/video/adminMembers.ts");
+const adminMemberTargets = read("../../../packages/server-core/src/video/adminMemberRebuildTargets.ts");
 const helperSources = [
   read("./syncVideoEvents.ts"),
   read("./replaceVideoMembers.ts"),
@@ -156,8 +157,10 @@ test("作品保存は x_users プロフィール更新 plan を呼ばない", ()
 });
 
 test("メンバー更新は users_index を enqueue する", () => {
-  assert.match(adminMembers, /targetType: "users_index"/);
-  assert.match(adminMembers, /reason: "video_members_update"/);
+  assert.match(adminMembers, /adminVideoMembersRebuildTargets\(\{/);
+  assert.match(adminMembers, /buildStaticRebuildQueueBatch\(db, queueItems\)/);
+  assert.match(adminMemberTargets, /targetType: "users_index"/);
+  assert.match(adminMemberTargets, /reason: "video_members_update"/);
   assert.match(update, /creatorAggregationChanged/);
   assert.match(update, /video_members_update/);
 });
