@@ -63,6 +63,25 @@ test("SA-063 U02c-2a: >3-member group is rejected by four-row sentinel",()=>{
     assert.equal(selectBatchReservedReleaseSnapshot("e1",["a"],r).ok,false);
   }finally{db.close();}
 });
+test("SA-063 U02c-2a: blank solo group cannot displace a real group at LIMIT 4",()=>{
+  const db=setup([
+    row("solo",{group:"   "}),
+    ...["blank1","blank2","blank3","blank4","blank5"].map(id=>row(id,{group:"   "})),
+    row("group1",{group:"real"}),
+    row("group2",{group:"real"}),
+  ]);
+  try{
+    const r=read(db,["solo","group1"]);
+    // CURRENT treats whitespace-only reservation group keys as solo.
+    // The SQL should not allow an arbitrary four blank-key siblings to
+    // crowd out the real group's members before the JS planner can verify it.
+    assert.deepEqual(JSON.parse(r.grouped_slots_json).map(x=>x.id).sort(),["group1","group2"]);
+    const selection=selectBatchReservedReleaseSnapshot("e1",["solo","group1"],r);
+    assert.equal(selection.ok,true);
+    if(selection.ok)assert.deepEqual(selection.rows.map(x=>x.id).sort(),
+      ["group1","group2","solo"]);
+  }finally{db.close();}
+});
 test("SA-063 U02c-2a: mixed owners or nonreserved group member rejected",()=>{
   for(const b of [row("b",{group:"g",owner:"u2"}),row("b",{group:"g",status:"submitted"})]){
     const db=setup([row("a",{group:"g"}),b]);
