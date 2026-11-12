@@ -6,6 +6,9 @@ import {
   moderationFilters, moderationReadPath, createAdminModerationApi,
 } from "../.test-dist/apps/ops/src/api/adminModeration.js";
 import { AdminModerationContent, requestModerationFilterSubmit } from "../.test-dist/apps/ops/src/routes/admin/AdminModeration.js";
+import { ModerationCaseStatusForm, parseModerationFormInput } from "../.test-dist/apps/ops/src/routes/admin/ModerationCaseStatusForm.js";
+import { MODERATION_FLASH_KEY, parseModerationSaveNotice, storeModerationSaveNotice,
+  consumeModerationSaveNotice, ModerationFlashNotice } from "../.test-dist/apps/ops/src/routes/admin/ModerationFlashNotice.js";
 
 const resp = (status, payload) => new Response(JSON.stringify(payload), {
   status, headers: { "content-type": "application/json" },
@@ -83,4 +86,89 @@ test("MIG-0731 U03a: CURRENT filter auto-submits the exact GET form", () => {
   assert.match(markup, /name="status"/);
   assert.match(markup, /name="overdue"/);
   assert.match(markup, /value="1"/);
+});
+
+test("MIG-0731 U03 form: correct SA-044 path, body, no-store and safe failure handling", async () => {
+  const calls = [];
+  const client = createAdminModerationApi(async (path, init) => {
+    calls.push({ path, init }); return resp(200, { ok: true, message: "saved", pendingPublicReflection: true });
+  });
+  const good = await client.resolveCase("case/a&b", {
+    status: "resolved", video_status: "private", private_note: "reason",
+  });
+  assert.deepEqual(good, { status: "ok", data: {
+    ok: true, message: "saved", pendingPublicReflection: true,
+  } });
+  assert.equal(calls[0].path, "/api/admin/moderation/cases/case%2Fa%26b/status");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.credentials, "same-origin");
+  assert.equal(calls[0].init.cache, "no-store");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    status: "resolved", video_status: "private", private_note: "reason",
+  });
+  assert.deepEqual(await client.resolveCase("", {
+    status: "resolved", video_status: "", private_note: "",
+  }), { status: "unavailable" });
+  assert.equal(calls.length, 1);
+  const invalid = createAdminModerationApi(async () => resp(200, { ok: "yes" }));
+  assert.deepEqual(await invalid.resolveCase("c1", {
+    status: "resolved", video_status: "", private_note: "",
+  }), { status: "unavailable" });
+  const anonymous = createAdminModerationApi(async () => resp(401, { ok: false }));
+  assert.deepEqual(await anonymous.resolveCase("c1", {
+    status: "resolved", video_status: "", private_note: "",
+  }), { status: "anonymous" });
+  const proxyError = createAdminModerationApi(async () => resp(501, { ok: true }));
+  assert.deepEqual(await proxyError.resolveCase("c1", {
+    status: "resolved", video_status: "", private_note: "",
+  }), { status: "unavailable" });
+});
+test("MIG-0731 U03 form: mirrors CURRENT status/video/note controls but remains unmounted", () => {
+  const html = renderToStaticMarkup(React.createElement(ModerationCaseStatusForm, {
+    caseId: "c1", onSaved() {},
+  }));
+  for (const item of ["resolved", "rejected", "cancelled", "expired", "pending", "public", "private", "voided"]) {
+    assert.match(html, new RegExp('value="' + item + '"'));
+  }
+  assert.match(html, /name="private_note"/);
+  assert.match(html, /maxLength="2000"/i);
+  const formData = new FormData();
+  formData.set("status", "rejected");
+  formData.set("video_status", "voided");
+  formData.set("private_note", "reviewed");
+  assert.deepEqual(parseModerationFormInput(formData), {
+    ok: true, body: { status: "rejected", video_status: "voided", private_note: "reviewed" },
+  });
+  formData.set("status", "open");
+  assert.deepEqual(parseModerationFormInput(formData), { ok: false });
+  formData.set("status", "resolved");
+  formData.set("private_note", "x".repeat(2001));
+  assert.deepEqual(parseModerationFormInput(formData), { ok: false });
+});
+test("MIG-0731 U03 flash: exact session key, one-shot display, rejection of malicious persisted data", () => {
+  assert.equal(MODERATION_FLASH_KEY, "flamenode:moderation-save-notice");
+  const map = new Map();
+  const storage = {
+    setItem(k, v) { map.set(k, v); },
+    getItem(k) { return map.get(k) ?? null; },
+    removeItem(k) { map.delete(k); },
+  };
+  storeModerationSaveNotice({
+    message: "saved", pendingPublicReflection: true,
+  }, storage);
+  assert.deepEqual(consumeModerationSaveNotice(storage), {
+    message: "saved", pendingPublicReflection: true,
+  });
+  assert.equal(consumeModerationSaveNotice(storage), null, "consumed only once");
+  assert.equal(parseModerationSaveNotice('{"message":"ok","style":{"color":"red"}}').message, "ok");
+  for (const raw of ["", "{", "null", "[]", '{"message":""}',
+    '{"message":{},"pendingPublicReflection":true}',
+    '{"message":"good","pendingPublicReflection":"true"}', "x".repeat(4097)]) {
+    assert.equal(parseModerationSaveNotice(raw), null);
+  }
+  const inaccessible = { setItem() { throw Error("blocked"); },
+    getItem() { throw Error("blocked"); }, removeItem() { throw Error("blocked"); } };
+  assert.doesNotThrow(() => storeModerationSaveNotice({ message: "ok" }, inaccessible));
+  assert.equal(consumeModerationSaveNotice(inaccessible), null);
+  assert.equal(renderToStaticMarkup(React.createElement(ModerationFlashNotice)), "");
 });
