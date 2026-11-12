@@ -27,6 +27,12 @@ const memberInputSchema = z.object({
   chapters: z.array(memberChapterSchema).max(30).optional().default([]),
 });
 
+/** Defense-in-depth: the future Hono multipart request is capped at 8 MiB (D-15-3).
+ * A single members_json field cannot be larger than the complete HTTP body.
+ * CURRENT Server Actions share this validator and reject the same oversized field.
+ */
+export const MAX_MEMBERS_JSON_BYTES = 8 * 1024 * 1024;
+
 const membersJsonSchema = z.array(memberInputSchema).max(
   MAX_VIDEO_MEMBERS,
   `合作メンバーは最大${MAX_VIDEO_MEMBERS}人です。`,
@@ -65,6 +71,13 @@ export function parseVideoMemberInputs(
     return { ok: false, message: "合作メンバーの入力が不正です。" };
   }
   if (raw === null || !raw.trim()) return { ok: true, members: [] };
+
+  // Guard JSON.parse memory before allocating nested arrays or Zod objects.
+  // UTF-8 matters: a short UTF-16 string can exceed the multipart byte cap.
+  if (raw.length > MAX_MEMBERS_JSON_BYTES ||
+      new TextEncoder().encode(raw).byteLength > MAX_MEMBERS_JSON_BYTES) {
+    return { ok: false, message: "合作メンバーの入力が大きすぎます。" };
+  }
 
   let parsed: unknown;
   try {
