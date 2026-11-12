@@ -63,6 +63,9 @@ test("U02a: reject malformed, mismatched, duplicate, excessive and inconsistent 
     const api = createXIdMergesApi(async () => json(status, { redirect: "/dashboard" }));
     assert.notEqual((await api.get("requests", "mg1")).status, "ok");
   }
+  // An unknown selected id is legitimate when its row has fallen out of the bounded list.
+  const notFoundInList = { ...requests, requests: [{ ...merge, id: "other", impact: [], preview: [] }] };
+  assert.equal((await createXIdMergesApi(async () => json(200, notFoundInList)).get("requests", "mg1")).status, "ok");
   const inconsistent = { ...requests, requests: [{ ...merge, id: "other" }] };
   assert.equal((await createXIdMergesApi(async () => json(200, inconsistent)).get("requests", "mg1")).status, "unavailable");
 });
