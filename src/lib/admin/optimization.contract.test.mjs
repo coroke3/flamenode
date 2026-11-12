@@ -37,7 +37,7 @@ const [
   readFile(new URL("./securityChecks.ts", import.meta.url), "utf8"),
   readFile(new URL("./spreadsheet/discovery.ts", import.meta.url), "utf8"),
   readFile(new URL("./xIdMergeImpact.ts", import.meta.url), "utf8"),
-  readFile(new URL("./permissionIntegrityChecks.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../packages/server-core/src/admin/permissionIntegrityChecks.ts", import.meta.url), "utf8"),
   readFile(new URL("../staticRebuild/liveApi.ts", import.meta.url), "utf8"),
   readFile(new URL("../publicData/loader.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../packages/domain/src/auth/permissions/presets.ts", import.meta.url), "utf8"),

@@ -13,6 +13,9 @@ import type {
   AdminYoutubeSyncResponse,
 } from "@flamenode/contracts";
 import { derivePlaylistSyncHealth } from "./playlistHealth.ts";
+import { INTEGRITY_CHECK_IDS, runIntegrityCheckById } from "@flamenode/server-core/admin/integrityChecks";
+import { HEALTH_CHECK_IDS, runHealthCheckById } from "@flamenode/server-core/admin/healthChecks";
+import { dbMiddleware } from "../../middleware/db.ts";
 import { loadWorkerMonitoring } from "./workerMonitoring.ts";
 import {
   STATIC_BACKFILL_KINDS,
@@ -229,15 +232,13 @@ adminOpsRoutes.get("/notifications", async (c) => {
 // Default view = the 5 operational checks, as ONE UNION ALL statement (session + 1; CURRENT 9 queries). A failure
 // is CURRENT's page error (Promise.all rejects): error "query_failed", no results.
 //
-// STOP (recorded, not implemented): ?deep=1 / ?run=1 runs the 22-check runHealthChecks(), which scans whole tables
-// (like_count drift loads every video with stored likes into JS, orphan joins, slot pairs). That cannot meet S2
-// (<= 3 statements, bounded LIMIT, 7 ms) and is a background-job (B) / build-time report, not an API read.
-// The API answers 501 for deep runs; the SPA must not link to it until that job exists.
+// Deep requests only return the allowlisted check catalog, without running unbounded checks.
+// Each selected diagnostic is requested separately by /ops/health/checks/:checkId.
 adminOpsRoutes.get("/health", async (c) => {
   const statusQ = c.req.query("status");
   const status = statusQ === "warn" || statusQ === "info" || statusQ === "ok" ? statusQ : "all";
   if (c.req.query("deep") === "1" || c.req.query("run") === "1") {
-    return c.json({ error: "deep_unsupported" }, 501);
+    return c.json({ status, results: [], error: null, checkIds: [...HEALTH_CHECK_IDS] } satisfies AdminHealthResponse);
   }
   const now = Math.floor(Date.now() / 1000);
   let results: AdminHealthResponse["results"] = [];
@@ -317,17 +318,32 @@ adminOpsRoutes.get("/health", async (c) => {
   return c.json(body);
 });
 
+// MIG-0626 U06: One existing CURRENT health check per admin-only request; unknown IDs fail closed.
+adminOpsRoutes.get("/health/checks/:checkId", dbMiddleware, async (c) => {
+  const id = c.req.param("checkId");
+  if (!id || !HEALTH_CHECK_IDS.some((checkId) => checkId === id)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  const result = await runHealthCheckById(c.get("db"), id);
+  return c.json({ status: "all", results: result ? [result] : [], error: null } satisfies AdminHealthResponse);
+});
+
 // ---- /ops/integrity (health/integrity/page.tsx; src/lib/admin/integrityChecks.ts) ----
-// CURRENT renders only the "run" prompt without ?run=1 (no query), and with ?run=1 runs 28 table-scanning checks
-// (runIntegrityChecks, ~910 lines of check definitions) in one page load.
-//
-// STOP (recorded, not implemented): 28 scans cannot fit one S2 request (<= 3 D1 statements). The run=1 view is answered
-// 501. Follow-up design (not built here): GET /ops/integrity/:checkId, one window-count statement per check
-// (session + 1, LIMIT 10 sample), called one by one by the SPA; this needs the 28 makeCheck definitions ported from
-// drizzle sql`` fragments to plain SQL with a per-check parity test.
+// MIG-0626 U05: CURRENT exposes the full read-only result set. To fit the S2 request
+// budget, return an allowlisted check ID catalog and execute only the requested check.
+// The enclosing adminReadRoutes guard enforces session -> non-banned -> admin.
 adminOpsRoutes.get("/integrity", (c) => {
-  if (c.req.query("run") === "1") return c.json({ error: "integrity_run_unsupported" }, 501);
-  const body: AdminIntegrityResponse = { ran: false, results: [] };
+  const body: AdminIntegrityResponse = { ran: false, results: [], checkIds: [...INTEGRITY_CHECK_IDS] };
+  return c.json(body);
+});
+
+adminOpsRoutes.get("/integrity/:checkId", dbMiddleware, async (c) => {
+  const id = c.req.param("checkId");
+  if (!id || !INTEGRITY_CHECK_IDS.some((checkId) => checkId === id)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  const result = await runIntegrityCheckById(c.get("db"), id);
+  const body: AdminIntegrityResponse = { ran: true, results: result ? [result] : [] };
   return c.json(body);
 });
 
