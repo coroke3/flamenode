@@ -89,3 +89,21 @@ test("empty request is accepted", async () => {
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true, bytes: 0 });
 });
+
+
+test("used request body cannot bypass or crash the preflight clone", async () => {
+  const app = new Hono();
+  app.use("/xid", async (c, next) => {
+    await c.req.text();
+    await next();
+  });
+  app.use("/xid", limitXIdActionBody("SA-098"));
+  app.post("/xid", (c) => c.json({ ok: true }));
+  const response = await app.request("http://localhost/xid", {
+    method: "POST",
+    body: "already read by upstream middleware",
+  });
+  assert.equal(response.status, 400);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await response.json(), { ok: false, reason: "body_unreadable" });
+});
