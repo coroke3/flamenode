@@ -1,0 +1,2227 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { Hono } from "hono";
+import { dbMiddleware } from "../src/middleware/db.ts";
+import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
+import { EventGroupMutationBodySchema } from "@flamenode/contracts";
+import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
+import { planAtomicAuditMutationBudget } from "@flamenode/server-core/audit/mutate";
+import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
+import { createAdminRoutes } from "../src/routes/admin/index.ts";
+import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
+import {
+  EVENT_GROUP_OPTION_PAGE_SIZE,
+  MAX_EVENT_GROUP_ID_LENGTH,
+  adminEventGroupOptionsRoutes,
+  stagedEventGroupWriteRoutes,
+  escapeEventGroupLikeTerm,
+  parseEventGroupOptionCursor,
+  planEventGroupCreateValues,
+  planEventGroupUpdateValues,
+  requireEventGroupMutationId,
+  checkEventGroupUpdateCas,
+  checkEventGroupSlugAvailable,
+  EVENT_GROUP_ADD_MAX,
+  EVENT_GROUP_WRITE_FAILED,
+  normalizeEventGroupMembershipAdd,
+  normalizeEventGroupMembershipRemove,
+  planEventGroupMembershipAdd,
+  planEventGroupMembershipWriteRows,
+  planEventGroupMembershipRemove,
+  planEventGroupMembershipDeleteBudget,
+} from "../src/routes/admin/eventGroups.ts";
+
+test("SA-026..030: atomic failure message stays identical to CURRENT Server Action", () => {
+  // CURRENT is server-only; inspect its constant return value without importing Next.
+  const source = readFileSync(
+    new URL("../../../src/lib/actions/event-group-admin.ts", import.meta.url), "utf8",
+  );
+  const start = source.indexOf("function eventGroupMutationError(");
+  const end = source.indexOf("async function revalidateEventGroupPathsBestEffort(", start);
+  assert.ok(start >= 0 && end > start, "CURRENT mutation error handler must exist");
+  const currentMessage = source.slice(start, end).split('message: "')[1]?.split('"')[0];
+  assert.equal(EVENT_GROUP_WRITE_FAILED, currentMessage);
+  assert.equal(EVENT_GROUP_WRITE_FAILED, "保存に失敗しました。再読み込みして、もう一度お試しください。");
+});
+
+const admin = { id: "admin-1", role: "admin", is_banned: 0 };
+function setup({
+  user = admin, rows = [], failure = false,
+  tosAccepted = 1, tosReaccept = 0, tosMissing = false, tosFailure = false,
+  settingsMissing = false, settingsFailure = false,
+  operationMode = "normal", disabledFeatures = "[]", mounted = false,
+  exceptionUntil = null, exceptionFeatures = null,
+} = {}) {
+  const calls = [];
+  const guardCalls = [];
+  const db = {
+    prepare(statement) {
+      const isSearch = statement.includes("FROM events e");
+      const call = { statement, params: [] };
+      (isSearch ? calls : guardCalls).push(call);
+      return {
+        bind(...params) {
+          call.params = params;
+          return {
+            async first() {
+              if (statement.includes('FROM "user" u')) {
+                if (tosFailure || settingsFailure) throw new Error("private gate lookup failure");
+                return tosMissing ? null : {
+                  is_tos_accepted: tosAccepted, terms_reaccept_required: tosReaccept,
+                  operation_mode: settingsMissing ? null : operationMode,
+                  disabled_features_json: settingsMissing ? null : disabledFeatures,
+                  cost_guard_exception_until: exceptionUntil,
+                  cost_guard_exception_features_json: exceptionFeatures,
+                };
+              }
+              throw new Error("unexpected test read");
+            },
+            async all() {
+              if (!isSearch) throw new Error("unexpected list read");
+              if (failure) throw new Error("SQL error: secret binding");
+              return { results: rows };
+            },
+          };
+        },
+      };
+    },
+  };
+  const app = new Hono();
+  app.use("*", async (c, next) => {
+    c.set("user", user);
+    c.set("sessionState", user ? "user" : "none");
+    await next();
+  });
+  if (mounted) {
+    // Use the real admin router with only session resolution substituted.
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+  } else {
+    app.route("/", adminEventGroupOptionsRoutes);
+  }
+  const get = (query = "groupId=g1") => app.request(
+    new Request("https://example.com" + (mounted ? "/api/admin/event-groups/event-options" : "/event-options") + "?" + query),
+    undefined,
+    { DB: db },
+  );
+  return { get, calls, guardCalls };
+}
+
+test("SA-029 U04: 80件一括追加とMIG-0516 build markerのD1予算競合を検出する", async () => {
+  // Use the same queue builder and the same query-budget formula as the staged handler.
+  // This is a merger STOP test: #436 appends one DML + one changes() assertion.
+  const queue = await buildEventGroupChangeQueueBatch(
+    { run: (statement) => statement },
+    { reason: "event_group_member_add", requestedByUserId: "admin-1" },
+  );
+  assert.equal(queue.acceptedTargetCount, 1);
+  assert.equal(queue.statements.length, 1, "current queue projection must remain one SQL statement");
+  assert.equal(queue.expectedChanges.length, 1);
+
+  // The route uses this concrete atomic-input planner for preflight and
+  // execute. It cannot accidentally ignore newly appended queue statements
+  // or changed audit actors as the queue builder evolves.
+  const audits = Array.from({ length: EVENT_GROUP_ADD_MAX }, (_, i) => ({
+    table_name: "event_group_events",
+    target_id: `grp-1:event-${i}`,
+    operation: "CREATE",
+    actor_user_id: "admin-1",
+    after: { event_id: `event-${i}` },
+  }));
+  const atomic = {
+    mutationStatements: [{}, ...queue.statements],
+    expectedMutationChanges: [EVENT_GROUP_ADD_MAX, ...queue.expectedChanges],
+    audits,
+    callerQueryCount: 3,
+    preloaded: {
+      settings: { max_payload_bytes: 90000 },
+      actorSnapshotJsonById: { "admin-1": "{}" },
+    },
+  };
+  const realPlan = planAtomicAuditMutationBudget(atomic);
+  assert.equal(realPlan.mutationStatementCount, atomic.mutationStatements.length);
+  assert.equal(realPlan.mutationAssertionCount, atomic.expectedMutationChanges.length);
+  assert.equal(realPlan.auditChunkCount, 20);
+  const projectedMarkerPlan = planAtomicAuditMutationBudget({
+    ...atomic,
+    mutationStatements: [...atomic.mutationStatements, {}],
+    expectedMutationChanges: [...atomic.expectedMutationChanges, 1],
+  });
+  assert.equal(projectedMarkerPlan.totalQueryCount, realPlan.totalQueryCount + 2);
+
+  const baselineInput = {
+    mutationStatementCount: 1 + queue.statements.length, // JSON1 INSERT + queue
+    mutationAssertionCount: 1 + queue.expectedChanges.length,
+    auditEntryCount: EVENT_GROUP_ADD_MAX,
+    distinctActorCount: 1,
+    callerQueryCount: 3, // S4, identity/ToS, joined membership read
+  };
+  const baseline = planD1AuditMutationBudget(baselineInput);
+  assert.equal(baseline.totalQueryCount, 49);
+  assert.equal(baseline.withinLimit, true);
+
+  const withBuildMarker = planD1AuditMutationBudget({
+    ...baselineInput,
+    mutationStatementCount: baselineInput.mutationStatementCount + 1,
+    mutationAssertionCount: baselineInput.mutationAssertionCount + 1,
+  });
+  assert.equal(withBuildMarker.totalQueryCount, 51);
+  assert.equal(withBuildMarker.withinLimit, false,
+    "MIG-0516 cannot be merged until the actual 80-member planner saves two queries");
+});
+
+test("SA-030 U04: canonical audited D1 delete budget respects Free 50-query cap", () => {
+  const one = planEventGroupMembershipDeleteBudget({
+    callerQueryCount: 3, queueStatementCount: 1,
+    auditEntryCount: 1, distinctActorCount: 1,
+  });
+  // 1 delete + 1 queue + 2 changes assertions + 2 audit statements
+  // + 2 audit prep reads + 3 caller reads (S4 + identity + joined settings/snapshot) = 11.
+  assert.deepEqual(one, { withinLimit: true, totalQueryCount: 11, limit: 50 });
+  assert.deepEqual(planEventGroupMembershipDeleteBudget({
+    callerQueryCount: 40, queueStatementCount: 1,
+    auditEntryCount: 1, distinctActorCount: 1,
+  }), { withinLimit: true, totalQueryCount: 48, limit: 50 });
+  assert.deepEqual(planEventGroupMembershipDeleteBudget({
+    callerQueryCount: 43, queueStatementCount: 1,
+    auditEntryCount: 1, distinctActorCount: 1,
+  }), { withinLimit: false, totalQueryCount: 51, limit: 50 });
+  // SA-030 always audits exactly one deleted relation; it must reject a
+  // misleading projection for 80 audit records rather than budget a different
+  // operation and allow the writer to proceed.
+  assert.deepEqual(planEventGroupMembershipDeleteBudget({
+    callerQueryCount: 5, queueStatementCount: 1,
+    auditEntryCount: 80, distinctActorCount: 1,
+  }), { withinLimit: false, totalQueryCount: Infinity, limit: 50 });
+  // The shared budget helper normalizes negative and NaN fields to zero;
+  // this SA-030 entrypoint MUST deny invalid caller-supplied estimates.
+  for (const invalid of [
+    { callerQueryCount: -1 },
+    { callerQueryCount: Number.NaN },
+    { callerQueryCount: Number.POSITIVE_INFINITY },
+    { callerQueryCount: 1.5 },
+    { callerQueryCount: Number.MAX_SAFE_INTEGER + 1 },
+    { queueStatementCount: -1 },
+    { auditEntryCount: 0 },
+    { distinctActorCount: 0 },
+    { distinctActorCount: 2 },
+  ]) {
+    assert.deepEqual(planEventGroupMembershipDeleteBudget({
+      callerQueryCount: 5, queueStatementCount: 1,
+      auditEntryCount: 1, distinctActorCount: 1, ...invalid,
+    }), { withinLimit: false, totalQueryCount: Infinity, limit: 50 });
+  }
+});
+
+test("SA-029/030 U04: write projections keep CURRENT INSERT shape and delete CAS snapshot", () => {
+  const added = planEventGroupMembershipWriteRows("grp-1", ["ev-b", "ev-a"], 1710000000);
+  assert.deepEqual(added, [
+    { event_group_id: "grp-1", event_id: "ev-b", relation_type: "member",
+      created_at: 1710000000, updated_at: 1710000000 },
+    { event_group_id: "grp-1", event_id: "ev-a", relation_type: "member",
+      created_at: 1710000000, updated_at: 1710000000 },
+  ]);
+  assert.notStrictEqual(added[0], added[1], "each audit after snapshot must be independent");
+  const ids80 = Array.from({ length: 80 }, (_, i) => "ev-" + i);
+  assert.equal(planEventGroupMembershipWriteRows("grp-1", ids80, 0).length, 80);
+  for (const [groupId, ids, now] of [
+    ["", ["ev"], 1], ["grp-1", [], 1],
+    ["grp-1", ["ev", "ev"], 1], ["grp-1", ["ev", " "], 1],
+    ["grp-1", [" ev"], 1], ["grp-1", Array.from({ length: 81 }, (_, i) => "ev-" + i), 1],
+    ["grp-1", ["ev"], -1], ["grp-1", ["ev"], 1.5],
+    ["grp-1", ["ev"], Number.MAX_SAFE_INTEGER + 1],
+  ]) {
+    assert.throws(() => planEventGroupMembershipWriteRows(groupId, ids, now),
+      /event_group_membership_plan_invalid/);
+  }
+
+  const relation = {
+    event_group_id: "grp-1", event_id: "ev-a", relation_type: "primary",
+    created_at: 1710000000, updated_at: 1710000001,
+  };
+  const remove = planEventGroupMembershipRemove("grp-1", "ev-a", relation);
+  assert.deepEqual(remove, {
+    ok: true, expectedUpdatedAt: 1710000001,
+    before: relation,
+  });
+  assert.notStrictEqual(remove.before, relation, "full before snapshot must not alias caller row");
+  assert.deepEqual(planEventGroupMembershipRemove("grp-1", "ev-a",
+    { ...relation, relation_type: "related" }), {
+    ok: true, expectedUpdatedAt: 1710000001,
+    before: { ...relation, relation_type: "related" },
+  }, "CURRENT removes all existing relation types, not just member");
+  const noRelation = { ok: false, message: "イベントはグループに追加されていません。" };
+  for (const bad of [null, undefined, { ...relation, event_group_id: "foreign" },
+    { ...relation, event_id: "other" }, { ...relation, updated_at: -1 },
+    { ...relation, updated_at: 1.5 }, { ...relation, created_at: -1 },
+    { ...relation, relation_type: "invalid" }]) {
+    assert.deepEqual(planEventGroupMembershipRemove("grp-1", "ev-a", bad), noRelation);
+  }
+  // This tests only projections; the future guarded route must still assert
+  // exactly 1 DELETE change atomically with audit and queue statements.
+});
+
+test("SA-029 U04: post-read membership planner preserves CURRENT validation ordering", () => {
+  const input = normalizeEventGroupMembershipAdd({
+    groupId: " group ", eventIds: [" ev-b ", " ev-a ", " ev-c ", " ev-a "],
+  });
+  assert.equal(input.ok, true);
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-b", "ev-a", "ev-c"],
+    ["ev-a", "ev-c", "ev-b"], ["ev-a"]), {
+    ok: true, toAdd: ["ev-b", "ev-c"],
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a", "ev-b"],
+    ["ev-a", "ev-b"], ["ev-a", "ev-b"]), {
+    ok: false, message: "追加できるイベントがありません。",
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a", "ev-missing"],
+    ["ev-a"], ["ev-a"]), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a"],
+    ["ev-a", "unexpected"], []), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+  // Two identical DB rows must not mask a missing requested event.
+  // Neither may a duplicate row replace proof for a distinct event.
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a", "ev-missing"],
+    ["ev-a", "ev-a"], []), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a", "ev-b"],
+    ["ev-a", "ev-a", "ev-b"], []), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(["ev-a", "ev-b"],
+    ["ev-b", "ev-a"], []), {
+    ok: true, toAdd: ["ev-a", "ev-b"],
+  });
+  assert.deepEqual(planEventGroupMembershipAdd([], [], []), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+  // Even an incorrectly wired handler that skips the input normalizer must
+  // not be able to bypass the 80-unique-ID invariant or duplicate validation.
+  for (const invalid of [
+    ["ev-a", "ev-a"], [" ev-a"], [""],
+    Array.from({ length: 81 }, (_, i) => "event-" + i),
+  ]) {
+    assert.deepEqual(planEventGroupMembershipAdd(invalid, invalid, []), {
+      ok: false, message: "存在しないイベントは追加できません。",
+    });
+  }
+  // Caller must not partially insert even when one requested event is absent.
+  const valid80 = Array.from({ length: 80 }, (_, i) => "event-" + i);
+  assert.deepEqual(planEventGroupMembershipAdd(valid80, [...valid80].reverse(), valid80.slice(0, 79)), {
+    ok: true, toAdd: ["event-79"],
+  });
+  assert.deepEqual(planEventGroupMembershipAdd(valid80, valid80.slice(0, 79), valid80.slice(0, 79)), {
+    ok: false, message: "存在しないイベントは追加できません。",
+  });
+});
+
+test("SA-029 U04: unique-ID limit preserves CURRENT duplicate normalization", () => {
+  // CURRENT de-duplicates before enforcing the 80-distinct-ID limit. Keep
+  // duplicate-heavy inputs compatible without allocating filter/map arrays.
+  const duplicates = Array.from({ length: 10000 }, () => "ev-1");
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: "grp-1", eventIds: duplicates,
+  }), { ok: true, groupId: "grp-1", eventIds: ["ev-1"] });
+
+  const atLimit = normalizeEventGroupMembershipAdd({
+    groupId: "grp-1", eventIds: Array.from({ length: 80 }, (_, i) => "ev-" + i),
+  });
+  assert.deepEqual(atLimit, {
+    ok: true, groupId: "grp-1", eventIds: Array.from({ length: 80 }, (_, i) => "ev-" + i),
+  });
+  const overLimit = normalizeEventGroupMembershipAdd({
+    groupId: "grp-1", eventIds: Array.from({ length: 81 }, (_, i) => "ev-" + i),
+  });
+  assert.deepEqual(overLimit, {
+    ok: false,
+    message: "一度に追加できるイベントは80件までです。分けて実行してください。",
+  });
+});
+
+test("SA-029/030 U04: CURRENT membership input normalization and 80-ID bound", () => {
+  assert.equal(EVENT_GROUP_ADD_MAX, 80);
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: "  grp-1  ",
+    eventIds: [" first ", "second", "", "first", null, 42, "  ", "second "],
+  }), { ok: true, groupId: "grp-1", eventIds: ["first", "second"] });
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: " g ", eventIds: Array.from({ length: 80 }, (_, i) => "ev-" + i),
+  }), {
+    ok: true, groupId: "g", eventIds: Array.from({ length: 80 }, (_, i) => "ev-" + i),
+  });
+  const tooMany = { ok: false,
+    message: "一度に追加できるイベントは80件までです。分けて実行してください。" };
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: "g", eventIds: Array.from({ length: 81 }, (_, i) => "ev-" + i),
+  }), tooMany);
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: "", eventIds: Array.from({ length: 81 }, (_, i) => "ev-" + i),
+  }), tooMany, "CURRENT checks max before missing group");
+  assert.deepEqual(normalizeEventGroupMembershipAdd({
+    groupId: "g", eventIds: [...Array(81).fill("same"), " last "],
+  }), { ok: true, groupId: "g", eventIds: ["same", "last"] });
+  const noSelection = { ok: false, message: "追加するイベントを選択してください。" };
+  for (const bad of [undefined, null, {}, { groupId: "g", eventIds: [42, null, " "] },
+    { groupId: " ", eventIds: ["ev"] }, { groupId: 1, eventIds: ["ev"] }]) {
+    assert.deepEqual(normalizeEventGroupMembershipAdd(bad), noSelection);
+  }
+  assert.deepEqual(normalizeEventGroupMembershipRemove({ groupId: " grp ", eventId: " ev " }), {
+    ok: true, groupId: "grp", eventId: "ev",
+  });
+  const invalidRemove = { ok: false, message: "グループとイベントを指定してください。" };
+  for (const bad of [undefined, null, {}, { groupId: "grp", eventId: "" },
+    { groupId: " ", eventId: "ev" }, { groupId: 1, eventId: "ev" },
+    { groupId: "grp", eventId: 3 }]) {
+    assert.deepEqual(normalizeEventGroupMembershipRemove(bad), invalidRemove);
+  }
+});
+
+test("SA-027 U03: CURRENT write preflight errors and CAS boundaries", () => {
+  const build = (fields = {}) => EventGroupMutationBodySchema.parse({
+    name: "Example", slug: "example", ...fields,
+  });
+  assert.deepEqual(requireEventGroupMutationId(build()), {
+    ok: false, message: "ID が必要です。",
+  });
+  assert.deepEqual(requireEventGroupMutationId(build({ id: " grp-1 " })), { ok: true });
+  assert.deepEqual(requireEventGroupMutationId(build({ id: "   " })), {
+    ok: false, message: "ID が必要です。",
+  });
+  assert.deepEqual(checkEventGroupSlugAvailable(false), {
+    ok: false, message: "このスラッグは既に使われています。",
+  });
+  assert.deepEqual(checkEventGroupSlugAvailable(true), { ok: true });
+  for (const bad of [undefined, null, 0, 42, 42.5]) {
+    assert.deepEqual(checkEventGroupUpdateCas(bad, 43), {
+      ok: false,
+      message: "他の操作で更新されています。再読み込みして確認してください。",
+    });
+  }
+  assert.deepEqual(checkEventGroupUpdateCas(43, 43), { ok: true });
+  assert.deepEqual(checkEventGroupUpdateCas(0, 0), { ok: true });
+  // A preflight success does not guarantee DB write success: the atomic
+  // UPDATE must still CAS on updated_at and check changes() in the D1 batch.
+});
+
+test("SA-026/027 U03: create/update projections preserve CURRENT invariants", () => {
+  const input = EventGroupMutationBodySchema.parse({
+    id: "  egrp-existing  ", name: "  Collection  ", slug: "  collection-1  ",
+    description: "  ", group_type: "genre", icon_url: "  /icon.png  ",
+    img_url: "  /image.png  ", accent_color: "  #abc  ", visibility_status: "private",
+  });
+  const now = 1730000000;
+  assert.deepEqual(planEventGroupCreateValues(input, "egrp-new", now), {
+    id: "egrp-new", name: "Collection", slug: "collection-1",
+    description: null, group_type: "genre", icon_url: "/icon.png",
+    img_url: null, accent_color: "#abc", visibility_status: "private",
+    sort_order: 0, created_at: now, updated_at: now,
+  });
+  assert.deepEqual(planEventGroupUpdateValues(input, { sort_order: 27, updated_at: now + 40 }, now), {
+    name: "Collection", slug: "collection-1",
+    description: null, group_type: "genre", icon_url: "/icon.png",
+    accent_color: "#abc", visibility_status: "private",
+    sort_order: 27, updated_at: now + 41,
+  });
+  const newInput = EventGroupMutationBodySchema.parse({
+    name: "New", slug: "new", sort_order: -123,
+    description: "  desc  ", icon_url: null, accent_color: "",
+  });
+  const updated = planEventGroupUpdateValues(newInput, { sort_order: 27, updated_at: now - 100 }, now);
+  assert.equal(updated.sort_order, -123);
+  assert.equal(updated.updated_at, now);
+  assert.equal(updated.description, "desc");
+  assert.equal(updated.icon_url, null);
+  assert.equal(updated.accent_color, null);
+  assert.equal(Object.hasOwn(updated, "img_url"), false, "CURRENT update leaves img_url unchanged");
+  assert.equal(Object.hasOwn(updated, "id"), false, "CURRENT update never overwrites id");
+});
+
+test("SA-026/027 U03: group mutation contract matches CURRENT form bounds and coercion", () => {
+  const parsed = EventGroupMutationBodySchema.parse({
+    id: "  grp-1  ", base_updated_at: "7",
+    name: "  Sample Group  ", slug: "  sample-group  ",
+    description: "  hello  ", group_type: "collection",
+    icon_url: "  https://example.com/icon  ", img_url: "",
+    accent_color: "#aBcD", visibility_status: "private",
+    sort_order: "-9999", unrelated: "ignored by CURRENT z.object",
+  });
+  assert.deepEqual(parsed, {
+    id: "grp-1", base_updated_at: 7,
+    name: "Sample Group", slug: "sample-group",
+    description: "hello", group_type: "collection",
+    icon_url: "https://example.com/icon", img_url: "",
+    accent_color: "#aBcD", visibility_status: "private", sort_order: -9999,
+  });
+  const defaults = EventGroupMutationBodySchema.parse({ name: "a", slug: "a" });
+  assert.equal(defaults.group_type, "series");
+  assert.equal(defaults.visibility_status, "public");
+  assert.equal(defaults.sort_order, undefined, "CURRENT keeps optional sort_order absent");
+  assert.equal(defaults.base_updated_at, undefined, "update handler must enforce CAS separately");
+  assert.equal(EventGroupMutationBodySchema.parse({ name: "x", slug: "x", sort_order: 9999 }).sort_order, 9999);
+  assert.equal(EventGroupMutationBodySchema.parse({ name: "x", slug: "x", base_updated_at: null }).base_updated_at, null);
+
+  for (const bad of [
+    {}, { name: "", slug: "x" },
+    { name: "N".repeat(121), slug: "x" },
+    { name: "x", slug: "UpperCase" }, { name: "x", slug: "x".repeat(65) },
+    { name: "x", slug: "x", group_type: "unknown" },
+    { name: "x", slug: "x", visibility_status: "hidden" },
+    { name: "x", slug: "x", description: "d".repeat(2001) },
+    { name: "x", slug: "x", icon_url: "u".repeat(501) },
+    { name: "x", slug: "x", img_url: "u".repeat(501) },
+    { name: "x", slug: "x", accent_color: "#GGG" },
+    { name: "x", slug: "x", sort_order: 10000 },
+    { name: "x", slug: "x", sort_order: -10000 },
+    { name: "x", slug: "x", sort_order: 0.5 },
+    { name: "x", slug: "x", base_updated_at: -1 },
+    { name: "x", slug: "x", base_updated_at: 1.1 },
+  ]) {
+    assert.equal(EventGroupMutationBodySchema.safeParse(bad).success, false, JSON.stringify(bad).slice(0, 80));
+  }
+});
+
+test("SA-025: only authenticated admin may search, including banned denial", async () => {
+  for (const [user, status, code] of [
+    [null, 401, "unauthorized"],
+    [{ ...admin, role: "moderator" }, 403, "forbidden"],
+    [{ ...admin, is_banned: 1 }, 403, "account_disabled"],
+  ]) {
+    const { get, calls } = setup({ user });
+    const response = await get();
+    assert.equal(response.status, status);
+    assert.equal((await response.json()).error, code);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("SA-025: CURRENT write-side ToS and admin_event_create CostGuard also gate GET", async () => {
+  for (const [label, config, expectedStatus] of [
+    ["tos declined", { tosAccepted: 0 }, 403],
+    ["tos reaccept", { tosReaccept: 1 }, 403],
+    ["user deleted", { tosMissing: true }, 401],
+    ["user DB outage", { tosFailure: true }, 503],
+    ["cost mode", { operationMode: "maintenance" }, 503],
+    ["feature disabled", { disabledFeatures: '["admin_event_create"]' }, 503],
+    ["settings missing", { settingsMissing: true }, 503],
+    ["settings outage", { settingsFailure: true }, 503],
+  ]) {
+    const { get, calls, guardCalls } = setup(config);
+    const response = await get();
+    assert.equal(response.status, expectedStatus, label);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "イベント候補の取得に失敗しました。もう一度お試しください。",
+    }, label);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", label);
+    assert.equal(calls.length, 0, label + ": denied before candidate SELECT");
+    assert.ok(guardCalls.length >= 1, label);
+  }
+});
+
+test("SA-025: mounted admin GET retains session, ToS and CostGuard fences", async () => {
+  const ok = setup({ mounted: true });
+  const success = await ok.get();
+  assert.equal(success.status, 200);
+  assert.deepEqual(await success.json(), { ok: true, options: [], nextCursor: null });
+  assert.equal(ok.calls.length, 1);
+  assert.equal(ok.guardCalls.length, 1);
+
+  for (const config of [
+    { mounted: true, user: null },
+    { mounted: true, user: { ...admin, role: "moderator" } },
+    { mounted: true, tosAccepted: 0 },
+    { mounted: true, disabledFeatures: '["admin_event_create"]' },
+  ]) {
+    const { get, calls } = setup(config);
+    const denied = await get();
+    assert.ok([401, 403, 503].includes(denied.status));
+    assert.equal(denied.headers.get("cache-control"), "private, no-store");
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("SA-025: authorized search reads ToS, CostGuard, then one bounded candidate page", async () => {
+  const { get, calls, guardCalls } = setup();
+  const response = await get();
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(guardCalls.length, 1, "S2: one combined user/CostGuard read");
+  assert.match(guardCalls[0].statement, /FROM "user" u/);
+  assert.match(guardCalls[0].statement, /JOIN "system_settings" s/);
+});
+
+test("SA-025: a valid feature exception preserves CURRENT override without extra D1 reads", async () => {
+  const { get, calls, guardCalls } = setup({
+    operationMode: "maintenance", disabledFeatures: '["admin_event_create"]',
+    exceptionUntil: Math.floor(Date.now() / 1000) + 3600,
+    exceptionFeatures: '["admin_event_create"]',
+  });
+  const response = await get();
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(guardCalls.length, 1);
+});
+
+test("SA-025: malformed input is rejected before candidate SELECT without echoing cursor", async () => {
+  const { get, calls } = setup();
+  for (const query of [
+    "groupId=",
+    "groupId=g1&q=" + "a".repeat(65),
+    "groupId=g1&cursor=%7Bbad",
+    "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 3.5, id: "abc" })),
+    "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 5, id: "" })),
+    "groupId=g1&cursor=" + encodeURIComponent("x".repeat(201)),
+  ]) {
+    const response = await get(query);
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      message: "イベント候補の取得に失敗しました。もう一度お試しください。",
+    });
+  }
+  assert.equal(calls.length, 0);
+  assert.equal(parseEventGroupOptionCursor(null), null);
+  const longLegacyId = "x".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1);
+  assert.deepEqual(parseEventGroupOptionCursor(JSON.stringify({
+    updatedAt: -1, id: longLegacyId,
+  })), { updatedAt: -1, id: longLegacyId },
+  "CURRENT accepts any non-empty ID and any safe-integer timestamp");
+  assert.throws(() => parseEventGroupOptionCursor("[]"), /cursor_invalid/);
+});
+
+test("SA-025: CURRENT-compatible pagination preserves long legacy IDs and safe-integer timestamps", async () => {
+  const legacyId = "legacy-" + "x".repeat(122);
+  const rows = Array.from({ length: 81 }, (_, index) => ({
+    id: index === 79 ? legacyId : "event-" + String(index).padStart(3, "0"),
+    title: "Event " + index,
+    start_time: 1000 + index,
+    updated_at: 2000 - index,
+  }));
+  const { get, calls } = setup({ rows });
+  const longGroupId = "legacy-group-" + "g".repeat(120);
+  const response = await get("groupId=" + encodeURIComponent(longGroupId));
+  assert.equal(response.status, 200);
+  const page = await response.json();
+  assert.equal(page.options.length, 80);
+  assert.equal(page.nextCursor, JSON.stringify({ updatedAt: 1921, id: legacyId }));
+  assert.equal(parseEventGroupOptionCursor(page.nextCursor).id, legacyId);
+  assert.equal(calls.length, 1);
+});
+
+test("SA-025: real SQLite mounted route paginates long legacy IDs and group IDs", async () => {
+  const { db, sqlite } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE event_group_events (event_group_id TEXT NOT NULL, event_id TEXT NOT NULL, relation_type TEXT, created_at INTEGER, updated_at INTEGER)");
+    const insert = sqlite.prepare("INSERT INTO events (id, title, start_time, updated_at) VALUES (?, ?, ?, ?)");
+    const legacyId = "legacy-" + "x".repeat(122);
+    for (let index = 0; index < 81; index += 1) {
+      const id = index === 79 ? legacyId : "event-" + String(index).padStart(3, "0");
+      insert.run(id, "Event " + index, 1000 + index, 2000 - index);
+    }
+
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+    const longGroupId = "legacy-group-" + "g".repeat(120);
+    const request = (cursor = null) => {
+      const query = new URLSearchParams({ groupId: longGroupId });
+      if (cursor !== null) query.set("cursor", cursor);
+      return app.request(
+        new Request("https://example.com/api/admin/event-groups/event-options?" + query.toString()),
+        undefined,
+        { DB: db },
+      );
+    };
+
+    const first = await request();
+    assert.equal(first.status, 200);
+    const firstPage = await first.json();
+    assert.equal(firstPage.options.length, 80);
+    assert.deepEqual(JSON.parse(firstPage.nextCursor), { updatedAt: 1921, id: legacyId });
+
+    const second = await request(firstPage.nextCursor);
+    assert.equal(second.status, 200);
+    const secondPage = await second.json();
+    assert.deepEqual(secondPage.options, [{
+      id: "event-080", title: "Event 80", start_time: 1080,
+    }]);
+    assert.equal(secondPage.nextCursor, null);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("SA-025: malformed search never consumes the combined admin D1 gate read", async () => {
+  const { get, calls, guardCalls } = setup();
+  for (const input of [
+    "groupId=",
+    "groupId=g1&q=" + "a".repeat(65),
+    "groupId=g1&cursor=%7Bbad",
+    "groupId=g1&cursor=" + encodeURIComponent(JSON.stringify({ updatedAt: 1, id: "" })),
+  ]) {
+    const response = await get(input);
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+  }
+  assert.equal(guardCalls.length, 0, "malformed requests must not consume scarce D1 reads");
+  assert.equal(calls.length, 0, "malformed requests must not reach candidate SQL");
+});
+
+test("SA-025: escaping and cursor seek use bound values in CURRENT order", async () => {
+  const { get, calls } = setup();
+  const cursor = JSON.stringify({ updatedAt: 173, id: "ev-4" });
+  const term = "a%b_c\\d";
+  const response = await get(
+    "groupId=%20group-1%20&q=" + encodeURIComponent(" " + term + " ") +
+      "&cursor=" + encodeURIComponent(cursor),
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, options: [], nextCursor: null });
+  assert.equal(calls.length, 1);
+  const { statement, params } = calls[0];
+  assert.match(statement, /NOT EXISTS \(SELECT 1 FROM event_group_events/);
+  assert.match(statement, /e\.title LIKE \? ESCAPE/);
+  assert.match(statement, /e\.updated_at < \? OR \(e\.updated_at = \? AND e\.id > \?\)/);
+  assert.match(statement, /ORDER BY e\.updated_at DESC, e\.id ASC LIMIT \?/);
+  assert.deepEqual(params, [
+    "group-1",
+    "%" + escapeEventGroupLikeTerm(term) + "%",
+    173, 173, "ev-4", EVENT_GROUP_OPTION_PAGE_SIZE + 1,
+  ]);
+  assert.equal(escapeEventGroupLikeTerm(term), "a\\%b\\_c\\\\d");
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+});
+
+test("SA-025: 81st row only indicates continuation; 80 options and stable cursor", async () => {
+  const rows = Array.from({ length: 81 }, (_, n) => ({
+    id: "event-" + String(n).padStart(3, "0"),
+    title: "Name " + n,
+    start_time: n === 1 ? null : 1000 + n,
+    updated_at: 2000 - n,
+  }));
+  const { get, calls } = setup({ rows });
+  const response = await get();
+  assert.equal(response.status, 200);
+  const page = await response.json();
+  assert.equal(page.ok, true);
+  assert.equal(page.options.length, 80);
+  assert.deepEqual(page.options[1], { id: "event-001", title: "Name 1", start_time: null });
+  assert.ok(page.options.every((option) => !("updated_at" in option)));
+  assert.deepEqual(JSON.parse(page.nextCursor), { updatedAt: 1921, id: "event-079" });
+  assert.deepEqual(calls[0].params, ["g1", 81]);
+});
+
+test("SA-025: DB failure returns generic 503 without query/SQL leakage", async () => {
+  const { get, calls } = setup({ failure: true });
+  const response = await get("groupId=g1&q=PRIVATE");
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    message: "イベント候補の取得に失敗しました。もう一度お試しください。",
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+});
+
+test("SA-025: generated cursor accepts legacy IDs longer than 64 characters", async () => {
+  const longId = "v".repeat(96);
+  const rows = Array.from({ length: 81 }, (_, n) => ({
+    id: n === 79 ? longId : "event-" + String(n).padStart(3, "0"),
+    title: "Name " + n,
+    start_time: null,
+    updated_at: 2000 - n,
+  }));
+  const { get, calls } = setup({ rows });
+  const first = await get();
+  assert.equal(first.status, 200);
+  const page = await first.json();
+  assert.equal(page.options.length, 80);
+  assert.deepEqual(JSON.parse(page.nextCursor), { updatedAt: 1921, id: longId });
+  const second = await get("groupId=g1&cursor=" + encodeURIComponent(page.nextCursor));
+  assert.equal(second.status, 200);
+  assert.deepEqual(calls[1].params, ["g1", 1921, 1921, longId, 81]);
+});
+
+test("SA-025: CURRENT emits continuation cursors for legacy IDs beyond the write-ID bound", async () => {
+  const legacyId = "v".repeat(MAX_EVENT_GROUP_ID_LENGTH + 1);
+  const rows = Array.from({ length: 81 }, (_, n) => ({
+    id: n === 79 ? legacyId : "event-" + String(n).padStart(3, "0"),
+    title: "Name " + n,
+    start_time: null,
+    updated_at: 2000 - n,
+  }));
+  const response = await setup({ rows }).get();
+  assert.equal(response.status, 200);
+  const page = await response.json();
+  assert.equal(page.options.length, 80);
+  assert.deepEqual(JSON.parse(page.nextCursor), { updatedAt: 1921, id: legacyId });
+});
+test("SA-025: CURRENT emits JSON-escaped continuation cursors even when over 200 characters", async () => {
+  const escapedId = "\\".repeat(100);
+  const nextCursor = JSON.stringify({ updatedAt: 1921, id: escapedId });
+  assert.ok(nextCursor.length > 200);
+  const rows = Array.from({ length: 81 }, (_, n) => ({
+    id: n === 79 ? escapedId : "event-" + String(n).padStart(3, "0"),
+    title: "Name " + n,
+    start_time: null,
+    updated_at: 2000 - n,
+  }));
+  const { get, calls } = setup({ rows });
+  const response = await get();
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal((await response.json()).nextCursor, nextCursor,
+    "CURRENT does not replace a successful page with a 503 when serialized cursor exceeds the request cap");
+});
+test("SA-025: source-parity cursor JSON with no extra fields and bounded exact limit", async () => {
+  const idAtCursor = "n".repeat(128);
+  const nearBoundCursor = JSON.stringify({ updatedAt: 1921, id: idAtCursor });
+  assert.ok(nearBoundCursor.length <= 200);
+  assert.deepEqual(parseEventGroupOptionCursor(nearBoundCursor), { updatedAt: 1921, id: idAtCursor });
+  // A caller with a cursor too long is rejected rather than reaching candidate SQL.
+  const denied = setup();
+  const res = await denied.get("groupId=g1&cursor=" + encodeURIComponent("z".repeat(201)));
+  assert.equal(res.status, 400);
+  assert.equal(denied.calls.length, 0);
+  // A valid 128-character cursor can still seek, without any SQL interpolation.
+  const accepted = setup();
+  const response = await accepted.get("groupId=g1&cursor=" + encodeURIComponent(nearBoundCursor));
+  assert.equal(response.status, 200);
+  assert.deepEqual(accepted.calls[0].params, ["g1", 1921, 1921, idAtCursor, 81]);
+});
+
+test("SA-025: real SQLite pagination accepts 96-character legacy event ID", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE event_group_events (event_group_id TEXT, event_id TEXT)");
+    for (let n = 0; n < 83; n++) {
+      seedEvent(sqlite, {
+        id: n === 79 ? "v".repeat(96) : "item-" + String(n).padStart(3, "0"),
+        title: "Candidate " + n,
+        updated_at: 1000 - n,
+      });
+    }
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+    const page = async (cursor) => {
+      const params = new URLSearchParams({ groupId: "grp-1" });
+      if (cursor) params.set("cursor", cursor);
+      const response = await app.request(
+        new Request("https://example.com/api/admin/event-groups/event-options?" + params.toString()),
+        undefined, { DB: db },
+      );
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const first = await page(null);
+    assert.equal(first.options.length, 80);
+    assert.ok(first.nextCursor);
+    assert.equal(first.options[79].id, "v".repeat(96));
+    assert.deepEqual(JSON.parse(first.nextCursor), { updatedAt: 921, id: "v".repeat(96) });
+    const second = await page(first.nextCursor);
+    assert.deepEqual(second.options.map((v) => v.id), ["item-080", "item-081", "item-082"]);
+    assert.equal(second.nextCursor, null);
+    assert.equal(stats.batches, 0, "read-only legacy cursor must not mutate D1");
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("SA-025: real SQLite D1 rejects LIKE wildcard injection and excludes existing members", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE event_group_events (event_group_id TEXT, event_id TEXT)");
+    seedEvent(sqlite, { id: "e-percent", title: "Course 100%", updated_at: 900 });
+    seedEvent(sqlite, { id: "e-underscore", title: "Course 100_", updated_at: 800 });
+    seedEvent(sqlite, { id: "e-other", title: "Course 100X", updated_at: 700 });
+    seedEvent(sqlite, { id: "e-member", title: "Course 100%", updated_at: 1000 });
+    sqlite.prepare("INSERT INTO event_group_events (event_group_id, event_id) VALUES (?, ?)")
+      .run("grp-1", "e-member");
+
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+    const search = async (q) => {
+      const response = await app.request(
+        new Request("https://example.com/api/admin/event-groups/event-options?groupId=grp-1&q=" +
+          encodeURIComponent(q)),
+        undefined, { DB: db },
+      );
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      return response.json();
+    };
+    assert.deepEqual((await search("Course 100%")).options.map((item) => item.id), ["e-percent"]);
+    assert.deepEqual((await search("Course 100_")).options.map((item) => item.id), ["e-underscore"]);
+    assert.deepEqual((await search("Course 100")).options.map((item) => item.id),
+      ["e-percent", "e-underscore", "e-other"]);
+    assert.equal(stats.batches, 0, "candidate GET must never write D1");
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("SA-025: real SQLite stable cursor uses DESC timestamp and ASC ID tie-break", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE event_group_events (event_group_id TEXT, event_id TEXT)");
+    for (let n = 0; n < 83; n++) {
+      seedEvent(sqlite, {
+        id: "item-" + String(n).padStart(3, "0"),
+        title: "Candidate " + n,
+        updated_at: 1000 - Math.floor(n / 2),
+      });
+    }
+    sqlite.prepare("INSERT INTO event_group_events (event_group_id, event_id) VALUES (?, ?)")
+      .run("grp-1", "item-000");
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+    const page = async (cursor) => {
+      const q = new URLSearchParams({ groupId: "grp-1" });
+      if (cursor) q.set("cursor", cursor);
+      const response = await app.request(new Request(
+        "https://example.com/api/admin/event-groups/event-options?" + q.toString(),
+      ), undefined, { DB: db });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const first = await page(null);
+    assert.equal(first.options.length, 80);
+    assert.ok(first.nextCursor);
+    assert.deepEqual(first.options.slice(0, 3).map((v) => v.id),
+      ["item-001", "item-002", "item-003"]);
+    assert.equal(first.options[79].id, "item-080");
+    assert.deepEqual(JSON.parse(first.nextCursor), { updatedAt: 960, id: "item-080" });
+    const second = await page(first.nextCursor);
+    assert.deepEqual(second.options.map((v) => v.id), ["item-081", "item-082"]);
+    assert.equal(second.nextCursor, null);
+    assert.equal(stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("SA-025: real SQLite latest-major ToS and CostGuard use one combined gate read", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE event_group_events (event_group_id TEXT, event_id TEXT)");
+    seedEvent(sqlite, { id: "ev-public", title: "Visible" });
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.route("/api/admin", createAdminRoutes({ session: async (_c, next) => next() }));
+    const get = async () => app.request(new Request(
+      "https://example.com/api/admin/event-groups/event-options?groupId=grp-1",
+    ), undefined, { DB: db });
+
+    const first = await get();
+    assert.equal(first.status, 200);
+    assert.equal(stats.reads, 2, "one gate and one candidate query; S4 would add one session read");
+    sqlite.prepare("INSERT INTO terms_versions (id, severity, published_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run("major-2", "major", 200, 200);
+    const beforeTos = stats.reads;
+    const reaccept = await get();
+    assert.equal(reaccept.status, 403);
+    assert.equal(stats.reads - beforeTos, 1, "ToS denial skips the candidate query");
+    sqlite.prepare('UPDATE "user" SET accepted_terms_version_id = ? WHERE id = ?')
+      .run("major-2", "admin-1");
+    const accepted = await get();
+    assert.equal(accepted.status, 200);
+    sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = ?")
+      .run('["admin_event_create"]', "default");
+    const beforeCost = stats.reads;
+    const blocked = await get();
+    assert.equal(blocked.status, 503);
+    assert.equal(stats.reads - beforeCost, 1, "CostGuard denial skips the candidate query");
+    sqlite.prepare(
+      "UPDATE system_settings SET cost_guard_exception_until = ?, cost_guard_exception_features_json = ? WHERE id = ?",
+    ).run(Math.floor(Date.now() / 1000) + 3600, '["admin_event_create"]', "default");
+    assert.equal((await get()).status, 200, "an active feature exception overrides disabled flag");
+    assert.equal(stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+const STAGED_WRITE_SITE = "https://app.flamenode.example";
+function stagedSa030Harness({ role = "admin", mutateAfterRead = false, mutateFieldWithoutTimestamp = null, settings = "normal" } = {}) {
+  let changedAfterRead = false;
+  const { db, sqlite, stats } = createAdminD1({
+    onFirst: (statement, instance) => {
+      if ((mutateAfterRead || mutateFieldWithoutTimestamp) && !changedAfterRead &&
+          statement.includes("FROM system_settings AS s")) {
+        changedAfterRead = true;
+        const column = mutateAfterRead ? "updated_at"
+          : mutateFieldWithoutTimestamp === "type" ? "relation_type"
+          : mutateFieldWithoutTimestamp === "created" ? "created_at" : null;
+        if (!column) throw new Error("invalid simulated mutation");
+        const next = column === "updated_at" ? 201 : column === "created_at" ? 12 : "member";
+        instance.prepare(
+          `UPDATE event_group_events SET ${column} = ? WHERE event_group_id = ? AND event_id = ?`,
+        ).run(next, "grp-1", "ev-1");
+      }
+    },
+  });
+  seedBase(sqlite, { role, settings });
+  seedEvent(sqlite, { id: "ev-1", title: "Existing group event" });
+  seedEvent(sqlite, { id: "ev-2", title: "Second event" });
+  seedEvent(sqlite, { id: "ev-3", title: "Third event" });
+  sqlite.exec(`
+    CREATE TABLE event_groups (id TEXT PRIMARY KEY);
+    CREATE TABLE event_group_events (
+      event_group_id TEXT NOT NULL, event_id TEXT NOT NULL,
+      relation_type TEXT NOT NULL, created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL, PRIMARY KEY (event_group_id, event_id)
+    );
+    INSERT INTO event_groups (id) VALUES ('grp-1');
+    INSERT INTO event_group_events VALUES ('grp-1', 'ev-1', 'primary', 10, 20);
+  `);
+  const user = { ...admin, role };
+  const opts = {
+    loadSiteUrl: () => STAGED_WRITE_SITE,
+    allowLocalPreview: () => false,
+  };
+  const app = new Hono();
+  // Recreate the same parent admin origin/session/write/db order without
+  // modifying the shared admin index or publishing the staged write route.
+  app.use("*", originGuardMiddleware(opts));
+  app.use("*", async (c, next) => {
+    c.set("user", user);
+    c.set("sessionState", "user");
+    await next();
+  });
+  app.use("*", writeGuardMiddleware(opts));
+  app.use("*", dbMiddleware);
+  app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+  const remove = (path = "/api/admin/event-groups/grp-1/events/ev-1",
+                  origin = STAGED_WRITE_SITE) => app.request(
+    new Request(STAGED_WRITE_SITE + path, {
+      method: "DELETE", headers: { Origin: origin },
+    }), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE },
+  );
+  const add = (eventIds, path = "/api/admin/event-groups/grp-1/events",
+              origin = STAGED_WRITE_SITE) => app.request(
+    new Request(STAGED_WRITE_SITE + path, {
+      method: "POST",
+      headers: { Origin: origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ eventIds }),
+    }), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE },
+  );
+  const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+  return { sqlite, stats, remove, add, count };
+}
+
+test("SA-030 U04 staged: real SQLite DELETE, full restorable audit and queue are atomic", async () => {
+  const h = stagedSa030Harness();
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", "admin mutation success is never shared-cacheable");
+    assert.deepEqual(await response.json(), { ok: true, id: "grp-1" });
+    assert.equal(h.count("event_group_events"), 0);
+    assert.equal(h.count("audit_logs"), 1);
+    assert.equal(h.count("static_rebuild_queue"), 1);
+    const audit = h.sqlite.prepare("SELECT * FROM audit_logs").get();
+    assert.equal(audit.table_name, "event_group_events");
+    assert.equal(audit.target_id, "grp-1:ev-1");
+    assert.equal(audit.operation, "DELETE");
+    assert.equal(audit.retention_class, "restorable");
+    assert.deepEqual(JSON.parse(audit.before_json), {
+      event_group_id: "grp-1", event_id: "ev-1",
+      relation_type: "primary", created_at: 10, updated_at: 20,
+    });
+    const queue = h.sqlite.prepare("SELECT target_type, target_id, reason FROM static_rebuild_queue").get();
+    assert.deepEqual({ ...queue }, { target_type: "events_index", target_id: "global",
+      reason: "event_group_member_remove" });
+    assert.equal(h.stats.batches, 1);
+    // The joined settings/relation snapshot replaces the standalone CostGuard
+    // read. Real S4 adds one session SELECT: 2 observed + 1 session = 3.
+    assert.equal(h.stats.reads, 2);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-030 U04 staged: joined CostGuard snapshot denies maintenance mode before mutation", async () => {
+  const h = stagedSa030Harness({ settings: "maintenance" });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", "admin CostGuard denial is never cacheable");
+    assert.equal((await response.json()).reason, "maintenance_mode");
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+    assert.equal(h.stats.reads, 2, "identity/ToS plus one joined settings/relation read");
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-030 U04 staged: stale CAS rolls back relation, queue and audit together", async () => {
+  const h = stagedSa030Harness({ mutateAfterRead: true });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", "admin CAS-failure response is never cacheable");
+    assert.equal((await response.json()).ok, false);
+    assert.equal(h.sqlite.prepare("SELECT updated_at FROM event_group_events").get().updated_at, 201);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-030 U04 staged: relation field races with unchanged updated_at cannot falsify restorable audit", async () => {
+  for (const [field, column, expected] of [
+    ["type", "relation_type", "member"],
+    ["created", "created_at", 12],
+  ]) {
+    const h = stagedSa030Harness({ mutateFieldWithoutTimestamp: field });
+    try {
+      const response = await h.remove();
+      assert.equal(response.status, 500, field);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal((await response.json()).ok, false);
+      assert.equal(h.sqlite.prepare("SELECT updated_at FROM event_group_events").get().updated_at, 20);
+      assert.equal(h.sqlite.prepare(`SELECT ${column} AS value FROM event_group_events`).get().value, expected);
+      assert.equal(h.count("event_group_events"), 1, "the competing edit must not be overwritten");
+      assert.equal(h.count("audit_logs"), 0, "the old relation snapshot cannot be restored as if current");
+      assert.equal(h.count("static_rebuild_queue"), 0);
+      assert.equal(h.stats.batches, 1);
+    } finally {
+      h.sqlite.close();
+    }
+  }
+});
+
+test("SA-030 U04 staged: missing group/member and origin/role denials never mutate", async () => {
+  const h = stagedSa030Harness();
+  const m = stagedSa030Harness({ role: "moderator" });
+  try {
+    assert.equal((await h.remove("/api/admin/event-groups/missing/events/ev-1")).status, 404);
+    assert.equal((await h.remove("/api/admin/event-groups/grp-1/events/absent")).status, 404);
+    const origin = await h.remove(undefined, "https://attacker.example");
+    assert.equal(origin.status, 403);
+    assert.equal((await origin.json()).reason, "invalid_origin");
+    assert.equal((await m.remove()).status, 403);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(m.count("event_group_events"), 1);
+    assert.equal(h.stats.batches, 0);
+    assert.equal(m.stats.batches, 0);
+  } finally {
+    h.sqlite.close();
+    m.sqlite.close();
+  }
+});
+
+test("SA-030 U04 staged: production admin index does not expose incomplete DELETE", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    const app = new Hono();
+    app.route("/api/admin", createAdminRoutes({
+      session: async (c, next) => {
+        c.set("user", admin);
+        c.set("sessionState", "user");
+        await next();
+      },
+    }));
+    const response = await app.request(
+      new Request(STAGED_WRITE_SITE + "/api/admin/event-groups/grp-1/events/ev-1", {
+        method: "DELETE",
+        headers: { Origin: STAGED_WRITE_SITE },
+      }),
+      undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE },
+    );
+    assert.equal(response.status, 404);
+    assert.equal(stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("SA-029 U04 staged: add membership writes rows, restorable audits and queue atomically", async () => {
+  const h = stagedSa030Harness();
+  try {
+    const response = await h.add(["ev-2", "ev-3", "ev-2"]);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, id: "grp-1", added: 2 });
+    assert.equal(h.count("event_group_events"), 3);
+    assert.equal(h.count("audit_logs"), 2);
+    assert.equal(h.count("static_rebuild_queue"), 1);
+    const audits = h.sqlite.prepare(
+      "SELECT target_id, operation, retention_class, after_json FROM audit_logs ORDER BY target_id",
+    ).all();
+    assert.deepEqual(audits.map((row) => row.target_id), ["grp-1:ev-2", "grp-1:ev-3"]);
+    assert.ok(audits.every((row) => row.operation === "CREATE" && row.retention_class === "restorable"));
+    assert.deepEqual(JSON.parse(audits[0].after_json), {
+      event_group_id: "grp-1", event_id: "ev-2", relation_type: "member",
+      created_at: JSON.parse(audits[0].after_json).created_at,
+      updated_at: JSON.parse(audits[0].after_json).updated_at,
+    });
+    const queue = h.sqlite.prepare("SELECT target_type, target_id, reason FROM static_rebuild_queue").get();
+    assert.deepEqual({ ...queue }, {
+      target_type: "events_index", target_id: "global", reason: "event_group_member_add",
+    });
+    assert.equal(h.stats.batches, 1);
+    assert.equal(h.stats.reads, 2, "identity/ToS + joined snapshot; production S4 adds one read");
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+
+test("SA-029 U04 staged: failed membership INSERT rolls back relation, audits and rebuild queue", async () => {
+  const h = stagedSa030Harness();
+  try {
+    h.sqlite.exec(`
+      CREATE TRIGGER reject_event_group_member BEFORE INSERT ON event_group_events
+      WHEN NEW.event_id = 'ev-2'
+      BEGIN SELECT RAISE(ABORT, 'simulated membership insert failure'); END;
+    `);
+    const response = await h.add(["ev-2", "ev-3"]);
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
+    });
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-029 U04 staged: missing group, all-existing membership, origin and role denials do not mutate", async () => {
+  const h = stagedSa030Harness();
+  const m = stagedSa030Harness({ role: "moderator" });
+  try {
+    assert.equal((await h.add(["ev-2"], "/api/admin/event-groups/missing/events")).status, 404);
+    const existing = await h.add(["ev-1"]);
+    assert.equal(existing.status, 400);
+    assert.deepEqual(await existing.json(), {
+      ok: false, message: "追加できるイベントがありません。",
+    });
+    const origin = await h.add(["ev-2"], undefined, "https://attacker.example");
+    assert.equal(origin.status, 403);
+    assert.equal((await origin.json()).reason, "invalid_origin");
+    assert.equal((await m.add(["ev-2"])).status, 403);
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(m.count("event_group_events"), 1);
+    assert.equal(m.count("audit_logs"), 0);
+    assert.equal(m.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+    assert.equal(m.stats.batches, 0);
+  } finally {
+    h.sqlite.close();
+    m.sqlite.close();
+  }
+});
+
+test("SA-029 U04 staged: missing group never enumerates candidate event membership", async () => {
+  const h = stagedSa030Harness();
+  try {
+    const response = await h.add(["ev-2"], "/api/admin/event-groups/missing/events");
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { ok: false, message: "グループが見つかりません。" });
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-029 U04 staged: 80 distinct IDs fit one atomic 49/50-query plan", async () => {
+  const h = stagedSa030Harness();
+  try {
+    const ids = Array.from({ length: 80 }, (_, i) => "bulk-" + String(i).padStart(3, "0"));
+    for (const id of ids) seedEvent(h.sqlite, { id, title: id });
+    const response = await h.add(ids);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, id: "grp-1", added: 80 });
+    assert.equal(h.count("event_group_events"), 81);
+    assert.equal(h.count("audit_logs"), 80);
+    assert.equal(h.count("static_rebuild_queue"), 1);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-029 U04 staged: invalid event IDs and 81 distinct IDs fail before mutation", async () => {
+  const h = stagedSa030Harness();
+  try {
+    const missing = await h.add(["ev-2", "missing-event"]);
+    assert.equal(missing.status, 400);
+    const tooMany = await h.add(Array.from({ length: 81 }, (_, i) => "id-" + i));
+    assert.equal(tooMany.status, 400);
+    assert.equal(h.count("event_group_events"), 1);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+
+test("SA-026 U03 staged: private group CREATE writes canonical row, restorable audit and rebuild queue atomically", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec(`
+      CREATE TABLE event_groups (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+        description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+        accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+    `);
+    const app = new Hono();
+    const originOptions = {
+      loadSiteUrl: () => STAGED_WRITE_SITE,
+      allowLocalPreview: () => false,
+    };
+    app.use("*", originGuardMiddleware(originOptions));
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.use("*", writeGuardMiddleware(originOptions));
+    app.use("*", dbMiddleware);
+    app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+    const response = await app.request(new Request(
+      STAGED_WRITE_SITE + "/api/admin/event-groups",
+      {
+        method: "POST",
+        headers: {
+          Origin: STAGED_WRITE_SITE,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: "grp-created",
+          name: "New group",
+          slug: "new-group",
+          description: "  description  ",
+          group_type: "series",
+          visibility_status: "private",
+          sort_order: 7,
+        }),
+      },
+    ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true, id: "grp-created", pendingPublicReflection: true,
+    });
+    const group = sqlite.prepare("SELECT * FROM event_groups WHERE id = ?").get("grp-created");
+    assert.deepEqual({ ...group }, {
+      id: "grp-created", name: "New group", slug: "new-group",
+      description: "description", group_type: "series", icon_url: null,
+      img_url: null, accent_color: null, visibility_status: "private",
+      sort_order: 7, created_at: group.created_at, updated_at: group.updated_at,
+    });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1);
+    const audit = sqlite.prepare("SELECT * FROM audit_logs").get();
+    assert.equal(audit.table_name, "event_groups");
+    assert.equal(audit.target_id, "grp-created");
+    assert.equal(audit.operation, "CREATE");
+    assert.equal(audit.retention_class, "restorable");
+    assert.deepEqual(JSON.parse(audit.after_json), { ...group });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.deepEqual({ ...sqlite.prepare("SELECT target_type, target_id, reason, priority, status, requested_by_user_id FROM static_rebuild_queue").get() }, {
+      target_type: "events_index", target_id: "global", reason: "event_group_create",
+      priority: "low", status: "pending", requested_by_user_id: "admin-1",
+    });
+    assert.equal(stats.batches, 1);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("SA-027 U03 staged: private group PATCH uses CURRENT projection, CAS, audit and rebuild queue atomically", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec(`
+      CREATE TABLE event_groups (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+        description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+        accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+      INSERT INTO event_groups VALUES (
+        'grp-patch', 'Old group', 'old-group', 'old description', 'series',
+        NULL, 'legacy-img', '#abc', 'private', 4, 10, 20
+      );
+    `);
+    const app = new Hono();
+    const originOptions = {
+      loadSiteUrl: () => STAGED_WRITE_SITE,
+      allowLocalPreview: () => false,
+    };
+    app.use("*", originGuardMiddleware(originOptions));
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.use("*", writeGuardMiddleware(originOptions));
+    app.use("*", dbMiddleware);
+    app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+    const response = await app.request(new Request(
+      STAGED_WRITE_SITE + "/api/admin/event-groups/grp-patch",
+      {
+        method: "PATCH",
+        headers: {
+          Origin: STAGED_WRITE_SITE,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: "grp-patch",
+          base_updated_at: 20,
+          name: "Updated group",
+          slug: "updated-group",
+          description: "  updated description  ",
+          group_type: "genre",
+          visibility_status: "private",
+          sort_order: 9,
+        }),
+      },
+    ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true, id: "grp-patch", pendingPublicReflection: true,
+    });
+    const group = sqlite.prepare("SELECT * FROM event_groups WHERE id = ?").get("grp-patch");
+    assert.deepEqual({
+      id: group.id, name: group.name, slug: group.slug, description: group.description,
+      group_type: group.group_type, icon_url: group.icon_url, img_url: group.img_url,
+      accent_color: group.accent_color, visibility_status: group.visibility_status,
+      sort_order: group.sort_order, created_at: group.created_at,
+    }, {
+      id: "grp-patch", name: "Updated group", slug: "updated-group",
+      description: "updated description", group_type: "genre", icon_url: null,
+      img_url: "legacy-img", accent_color: null, visibility_status: "private",
+      sort_order: 9, created_at: 10,
+    });
+    assert.ok(group.updated_at > 20);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1);
+    const audit = sqlite.prepare("SELECT * FROM audit_logs").get();
+    assert.equal(audit.table_name, "event_groups");
+    assert.equal(audit.target_id, "grp-patch");
+    assert.equal(audit.operation, "UPDATE");
+    assert.equal(audit.retention_class, "restorable");
+    assert.deepEqual(JSON.parse(audit.before_json), {
+      id: "grp-patch", name: "Old group", slug: "old-group",
+      description: "old description", group_type: "series", icon_url: null,
+      img_url: "legacy-img", accent_color: "#abc", visibility_status: "private",
+      sort_order: 4, created_at: 10, updated_at: 20,
+    });
+    assert.deepEqual(JSON.parse(audit.after_json), { ...group });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.deepEqual({ ...sqlite.prepare("SELECT target_type, target_id, reason, priority, status, requested_by_user_id FROM static_rebuild_queue").get() }, {
+      target_type: "events_index", target_id: "global", reason: "event_group_update",
+      priority: "low", status: "pending", requested_by_user_id: "admin-1",
+    });
+    assert.equal(stats.batches, 1);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("SA-027 U03 staged: omitted accent_color clears the color like CURRENT", async () => {
+  const data = EventGroupMutationBodySchema.parse({
+    name: "Updated group", slug: "updated-group", group_type: "series",
+    visibility_status: "private",
+  });
+  const projected = planEventGroupUpdateValues(data, { sort_order: 4, updated_at: 20 }, 21);
+  assert.equal(projected.accent_color, null);
+  assert.equal(projected.icon_url, null);
+  assert.equal(projected.sort_order, 4, "CURRENT preserves the prior sort_order when omitted");
+});
+
+test("SA-027 U03 staged: stale base_updated_at is rejected before any mutation", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec(`
+      CREATE TABLE event_groups (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+        description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+        accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+      INSERT INTO event_groups VALUES (
+        'grp-stale', 'Old group', 'old-group', NULL, 'series',
+        NULL, NULL, NULL, 'private', 0, 10, 20
+      );
+    `);
+    const app = new Hono();
+    const originOptions = {
+      loadSiteUrl: () => STAGED_WRITE_SITE,
+      allowLocalPreview: () => false,
+    };
+    app.use("*", originGuardMiddleware(originOptions));
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.use("*", writeGuardMiddleware(originOptions));
+    app.use("*", dbMiddleware);
+    app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+    const response = await app.request(new Request(
+      STAGED_WRITE_SITE + "/api/admin/event-groups/grp-stale",
+      {
+        method: "PATCH",
+        headers: {
+          Origin: STAGED_WRITE_SITE,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: "grp-stale",
+          base_updated_at: 19,
+          name: "Should not save",
+          slug: "should-not-save",
+          group_type: "series",
+          visibility_status: "private",
+        }),
+      },
+    ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "他の操作で更新されています。再読み込みして確認してください。",
+    });
+    assert.equal(sqlite.prepare("SELECT name FROM event_groups WHERE id = ?").get("grp-stale").name, "Old group");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+    assert.equal(stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+
+
+function stagedSlugConflictHarness({ race = null, publicCreate = false, publicUpdate = false, bucketGetterThrows = false } = {}) {
+  const { db, sqlite, stats } = createAdminD1();
+  seedBase(sqlite);
+  sqlite.exec(`
+    CREATE TABLE event_groups (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+      description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+      accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE public_visibility_fences (
+      entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+      state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+      release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+      PRIMARY KEY (entity_type, entity_id)
+    );
+    INSERT INTO event_groups VALUES (
+      'grp-update', 'Existing group', 'existing-group', NULL, 'series',
+      NULL, NULL, NULL, 'private', 0, 10, 20
+    );
+  `);
+  if (race === "create") {
+    sqlite.exec(`
+      CREATE TRIGGER simulate_create_slug_race
+      BEFORE INSERT ON event_groups
+      WHEN NEW.id = 'grp-created'
+      BEGIN
+        INSERT INTO event_groups VALUES (
+          'concurrent-create', 'Concurrent group', NEW.slug, NULL, 'series',
+          NULL, NULL, NULL, 'private', 0, 10, 20
+        );
+      END;
+    `);
+  } else if (race === "update") {
+    sqlite.exec(`
+      CREATE TRIGGER simulate_update_slug_race
+      BEFORE UPDATE ON event_groups
+      WHEN NEW.id = 'grp-update'
+      BEGIN
+        INSERT INTO event_groups VALUES (
+          'concurrent-update', 'Concurrent group', NEW.slug, NULL, 'series',
+          NULL, NULL, NULL, 'private', 0, 10, 20
+        );
+      END;
+    `);
+  }
+  const originOptions = {
+    loadSiteUrl: () => STAGED_WRITE_SITE,
+    allowLocalPreview: () => false,
+  };
+  const app = new Hono();
+  app.use("*", originGuardMiddleware(originOptions));
+  app.use("*", async (c, next) => {
+    c.set("user", admin);
+    c.set("sessionState", "user");
+    await next();
+  });
+  app.use("*", writeGuardMiddleware(originOptions));
+  app.use("*", dbMiddleware);
+  app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+  const env = { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE };
+  if (bucketGetterThrows) {
+    Object.defineProperty(env, "BUCKET", {
+      get() { throw new Error("sensitive-cloudflare-R2-binding-error"); },
+    });
+  }
+  const send = (method, path, body) => app.request(new Request(
+    STAGED_WRITE_SITE + path,
+    {
+      method,
+      headers: { Origin: STAGED_WRITE_SITE, "Content-Type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    },
+  ), undefined, env);
+  return { sqlite, stats, create: (slug) => send("POST", "/api/admin/event-groups", {
+    id: "grp-created", name: "Created group", slug, group_type: "series",
+    visibility_status: publicCreate ? "public" : "private", sort_order: 1,
+  }), update: (slug) => send("PATCH", "/api/admin/event-groups/grp-update", {
+    id: "grp-update", base_updated_at: 20, name: "Updated group", slug,
+    group_type: "series", visibility_status: publicUpdate ? "public" : "private",
+  }) };
+}
+
+test("SA-026/027 U03: throwing R2 getter rejects public transitions but not private writes", async () => {
+  const create = stagedSlugConflictHarness({ publicCreate: true, bucketGetterThrows: true });
+  const update = stagedSlugConflictHarness({ publicUpdate: true, bucketGetterThrows: true });
+  const privateOnly = stagedSlugConflictHarness({ bucketGetterThrows: true });
+  try {
+    const created = await create.create("r2-getter-create");
+    const updated = await update.update("r2-getter-update");
+    for (const [h, response] of [[create, created], [update, updated]]) {
+      assert.equal(response.status, 503, "public mutation requires usable R2 binding");
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(await response.json(), {
+        ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
+      });
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+      assert.equal(h.stats.batches, 0);
+    }
+    // No public visibility transition occurs, so R2 is not consulted.
+    assert.equal((await privateOnly.create("private-no-r2")).status, 200);
+    assert.equal((await privateOnly.update("updated-private-no-r2")).status, 200);
+    assert.equal(privateOnly.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(privateOnly.stats.batches, 2);
+  } finally {
+    create.sqlite.close();
+    update.sqlite.close();
+    privateOnly.sqlite.close();
+  }
+});
+
+test("SA-026/027 U03 staged: duplicate slugs are rejected before any mutation", async () => {
+  const create = stagedSlugConflictHarness();
+  const update = stagedSlugConflictHarness();
+  try {
+    create.sqlite.prepare("INSERT INTO event_groups VALUES (?, ?, ?, NULL, 'series', NULL, NULL, NULL, 'private', 0, 10, 20)")
+      .run("grp-other", "Other group", "taken-slug");
+    update.sqlite.prepare("INSERT INTO event_groups VALUES (?, ?, ?, NULL, 'series', NULL, NULL, NULL, 'private', 0, 10, 20)")
+      .run("grp-other", "Other group", "taken-slug");
+    const created = await create.create("taken-slug");
+    const updated = await update.update("taken-slug");
+    assert.equal(created.status, 400);
+    assert.equal(updated.status, 400);
+    assert.deepEqual(await created.json(), {
+      ok: false, message: "このスラッグは既に使われています。",
+    });
+    assert.deepEqual(await updated.json(), {
+      ok: false, message: "このスラッグは既に使われています。",
+    });
+    for (const h of [create, update]) {
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 2);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+      assert.equal(h.stats.batches, 0);
+    }
+  } finally {
+    create.sqlite.close();
+    update.sqlite.close();
+  }
+});
+
+test("SA-026/027 U03 staged: unique-index slug races roll back CREATE and UPDATE batches", async () => {
+  const create = stagedSlugConflictHarness({ race: "create" });
+  const update = stagedSlugConflictHarness({ race: "update" });
+  try {
+    const created = await create.create("raced-create-slug");
+    const updated = await update.update("raced-update-slug");
+    assert.equal(created.status, 500);
+    assert.equal(updated.status, 500);
+    assert.deepEqual(await created.json(), {
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
+    });
+    assert.deepEqual(await updated.json(), {
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
+    });
+    assert.equal(create.sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
+    assert.equal(update.sqlite.prepare("SELECT slug FROM event_groups WHERE id = 'grp-update'").get().slug, "existing-group");
+    assert.equal(update.sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
+    for (const h of [create, update]) {
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+      assert.equal(h.stats.batches, 1);
+    }
+  } finally {
+    create.sqlite.close();
+    update.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: group DELETE atomically removes every relation with restorable snapshots", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec(`
+      CREATE TABLE event_groups (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+        description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+        accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE event_group_events (
+        event_group_id TEXT NOT NULL, event_id TEXT NOT NULL, relation_type TEXT NOT NULL,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (event_group_id, event_id)
+      );
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+      INSERT INTO event_groups VALUES (
+        'grp-delete', 'Delete group', 'delete-group', 'description', 'series',
+        NULL, 'legacy-img', '#abc', 'private', 4, 10, 20
+      );
+      INSERT INTO event_group_events VALUES
+        ('grp-delete', 'ev-a', 'member', 11, 21),
+        ('grp-delete', 'ev-b', 'primary', 12, 22);
+    `);
+    const app = new Hono();
+    const originOptions = {
+      loadSiteUrl: () => STAGED_WRITE_SITE,
+      allowLocalPreview: () => false,
+    };
+    app.use("*", originGuardMiddleware(originOptions));
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.use("*", writeGuardMiddleware(originOptions));
+    app.use("*", dbMiddleware);
+    app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+    const response = await app.request(new Request(
+      STAGED_WRITE_SITE + "/api/admin/event-groups/grp-delete",
+      { method: "DELETE", headers: { Origin: STAGED_WRITE_SITE } },
+    ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_group_events").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 3);
+    const groupAudit = sqlite.prepare("SELECT * FROM audit_logs WHERE table_name = 'event_groups'").get();
+    assert.equal(groupAudit.target_id, "grp-delete");
+    assert.equal(groupAudit.operation, "DELETE");
+    assert.equal(groupAudit.retention_class, "restorable");
+    assert.deepEqual(JSON.parse(groupAudit.before_json), {
+      id: "grp-delete", name: "Delete group", slug: "delete-group",
+      description: "description", group_type: "series", icon_url: null,
+      img_url: "legacy-img", accent_color: "#abc", visibility_status: "private",
+      sort_order: 4, created_at: 10, updated_at: 20,
+    });
+    const relationAudits = sqlite.prepare(
+      "SELECT target_id, operation, retention_class, before_json FROM audit_logs WHERE table_name = 'event_group_events' ORDER BY target_id",
+    ).all();
+    assert.deepEqual(relationAudits.map(x => ({
+      target_id: x.target_id, operation: x.operation, retention_class: x.retention_class,
+      before: JSON.parse(x.before_json),
+    })), [
+      { target_id: "grp-delete:ev-a", operation: "DELETE", retention_class: "restorable",
+        before: { event_group_id: "grp-delete", event_id: "ev-a", relation_type: "member", created_at: 11, updated_at: 21 } },
+      { target_id: "grp-delete:ev-b", operation: "DELETE", retention_class: "restorable",
+        before: { event_group_id: "grp-delete", event_id: "ev-b", relation_type: "primary", created_at: 12, updated_at: 22 } },
+    ]);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.deepEqual({ ...sqlite.prepare("SELECT target_type, target_id, reason, priority, status, requested_by_user_id FROM static_rebuild_queue").get() }, {
+      target_type: "events_index", target_id: "global", reason: "event_group_delete",
+      priority: "low", status: "pending", requested_by_user_id: "admin-1",
+    });
+    assert.equal(stats.batches, 1);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: relation overflow is rejected before group, audit or queue mutation", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    sqlite.exec(`
+      CREATE TABLE event_groups (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+        description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+        accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE event_group_events (
+        event_group_id TEXT NOT NULL, event_id TEXT NOT NULL, relation_type TEXT NOT NULL,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (event_group_id, event_id)
+      );
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+      INSERT INTO event_groups VALUES (
+        'grp-overflow', 'Overflow group', 'overflow-group', NULL, 'series',
+        NULL, NULL, NULL, 'private', 0, 10, 20
+      );
+    `);
+    const insert = sqlite.prepare(
+      "INSERT INTO event_group_events VALUES (?, ?, 'member', 10, 20)",
+    );
+    for (let i = 0; i < 80; i++) insert.run("grp-overflow", "ev-" + i);
+    const app = new Hono();
+    const originOptions = {
+      loadSiteUrl: () => STAGED_WRITE_SITE,
+      allowLocalPreview: () => false,
+    };
+    app.use("*", originGuardMiddleware(originOptions));
+    app.use("*", async (c, next) => {
+      c.set("user", admin);
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.use("*", writeGuardMiddleware(originOptions));
+    app.use("*", dbMiddleware);
+    app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+    const response = await app.request(new Request(
+      STAGED_WRITE_SITE + "/api/admin/event-groups/grp-overflow",
+      { method: "DELETE", headers: { Origin: STAGED_WRITE_SITE } },
+    ), undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE });
+
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
+    });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_group_events").get().n, 80);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+    assert.equal(stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+function stagedSa028Harness({ role = "admin", mutateAfterRead = false, membershipRace = null, publicGroup = false, bucket = null, bucketGetterThrows = false } = {}) {
+  const { db, sqlite, stats } = createAdminD1();
+  seedBase(sqlite);
+  sqlite.exec(`
+    CREATE TABLE event_groups (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+      description TEXT, group_type TEXT NOT NULL, icon_url TEXT, img_url TEXT,
+      accent_color TEXT, visibility_status TEXT NOT NULL, sort_order INTEGER,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE event_group_events (
+      event_group_id TEXT NOT NULL, event_id TEXT NOT NULL, relation_type TEXT NOT NULL,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      PRIMARY KEY (event_group_id, event_id)
+    );
+    CREATE TABLE public_visibility_fences (
+      entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+      state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+      release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER,
+      PRIMARY KEY (entity_type, entity_id)
+    );
+    INSERT INTO event_groups VALUES (
+      'grp-delete', 'Delete group', 'delete-group', NULL, 'series',
+      NULL, NULL, NULL, '${publicGroup ? "public" : "private"}', 0, 10, 20
+    );
+    INSERT INTO event_group_events VALUES
+      ('grp-delete', 'ev-a', 'member', 11, 21),
+      ('grp-delete', 'ev-b', 'primary', 12, 22);
+  `);
+  if (mutateAfterRead) {
+    // Simulate a concurrent group edit between the joined snapshot and CAS
+    // delete; the trigger runs inside the atomic D1 batch and must roll back.
+    sqlite.exec(`
+      CREATE TRIGGER bump_group_before_relation_delete
+      BEFORE DELETE ON event_group_events
+      BEGIN
+        UPDATE event_groups SET updated_at = 21 WHERE id = 'grp-delete';
+      END;
+    `);
+  }
+  // Race commits after the joined preflight SELECT but immediately before
+  // the first D1 batch statement, reproducing two invocations interleaving.
+  // A count-only changes() check would wrongly accept a same-count swap.
+  let raced = false;
+  const racedDb = membershipRace ? {
+    ...db,
+    batch: async (statements) => {
+      if (!raced) {
+        raced = true;
+        if (membershipRace === "swap") {
+          sqlite.prepare("DELETE FROM event_group_events WHERE event_group_id = 'grp-delete' AND event_id = 'ev-a'").run();
+          sqlite.prepare("INSERT INTO event_group_events VALUES ('grp-delete', 'ev-c', 'member', 13, 23)").run();
+        } else if (membershipRace === "update") {
+          sqlite.prepare("UPDATE event_group_events SET relation_type = 'primary', updated_at = 24 WHERE event_group_id = 'grp-delete' AND event_id = 'ev-a'").run();
+        } else if (membershipRace === "empty-insert") {
+          sqlite.prepare("INSERT INTO event_group_events VALUES ('grp-delete', 'ev-c', 'member', 13, 23)").run();
+        } else {
+          throw new Error("unknown membership test race");
+        }
+      }
+      return db.batch(statements);
+    },
+  } : db;
+  const opts = {
+    loadSiteUrl: () => STAGED_WRITE_SITE,
+    allowLocalPreview: () => false,
+  };
+  const app = new Hono();
+  app.use("*", originGuardMiddleware(opts));
+  app.use("*", async (c, next) => {
+    c.set("user", { ...admin, role });
+    c.set("sessionState", "user");
+    await next();
+  });
+  app.use("*", writeGuardMiddleware(opts));
+  app.use("*", dbMiddleware);
+  app.route("/api/admin/event-groups", stagedEventGroupWriteRoutes);
+  const env = { DB: racedDb, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE, ...(bucket ? { BUCKET: bucket } : {}) };
+  if (bucketGetterThrows) {
+    Object.defineProperty(env, "BUCKET", {
+      get() { throw new Error("sensitive-cloudflare-R2-binding-error"); },
+    });
+  }
+  const remove = (origin = STAGED_WRITE_SITE) => app.request(new Request(
+    STAGED_WRITE_SITE + "/api/admin/event-groups/grp-delete",
+    { method: "DELETE", headers: { Origin: origin } },
+  ), undefined, env);
+  const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+  return { sqlite, stats, remove, count };
+}
+
+
+function stagedVisibilityManifestBucket({ failPutAt = 0, failEveryPut = false } = {}) {
+  let body = null;
+  let etag = null;
+  let puts = 0;
+  return {
+    get: async () => body === null ? null : ({
+      text: async () => body,
+      etag,
+      size: new TextEncoder().encode(body).byteLength,
+    }),
+    put: async (_key, nextBody, options = {}) => {
+      puts += 1;
+      if (failEveryPut || puts === failPutAt) throw new Error("simulated R2 put failure");
+      const onlyIf = options.onlyIf;
+      if (onlyIf instanceof Headers && onlyIf.get("If-None-Match") === "*" && body !== null) return null;
+      if (onlyIf && !(onlyIf instanceof Headers) && onlyIf.etagMatches !== etag) return null;
+      body = nextBody;
+      etag = `etag-${puts}`;
+      return { etag };
+    },
+    readManifest: () => body === null ? null : JSON.parse(body),
+    get puts() { return puts; },
+  };
+}
+
+test("SA-028 U03 staged: same-count relation swap is denied atomically before deleting/auditing", async () => {
+  const h = stagedSa028Harness({ membershipRace: "swap" });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500, "stale audited snapshot must fail closed");
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal(h.count("event_groups"), 1);
+    assert.deepEqual(
+      h.sqlite.prepare("SELECT event_id FROM event_group_events ORDER BY event_id").all().map((r) => r.event_id),
+      ["ev-b", "ev-c"],
+      "only the separately committed competing edit survives the rejected batch",
+    );
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: same-count relation field edit is denied before stale before-audit", async () => {
+  const h = stagedSa028Harness({ membershipRace: "update" });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.equal(h.sqlite.prepare(
+      "SELECT relation_type FROM event_group_events WHERE event_id = 'ev-a'",
+    ).get().relation_type, "primary");
+    assert.equal(h.count("event_groups"), 1);
+    assert.equal(h.count("event_group_events"), 2);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: empty preflight with concurrent insert is denied", async () => {
+  const h = stagedSa028Harness({ membershipRace: "empty-insert" });
+  try {
+    h.sqlite.exec("DELETE FROM event_group_events WHERE event_group_id = 'grp-delete'");
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.equal(h.count("event_groups"), 1);
+    assert.deepEqual(h.sqlite.prepare("SELECT event_id FROM event_group_events").all().map((r) => r.event_id), ["ev-c"]);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03: throwing R2 getter denies public delete before D1 mutation; private still works", async () => {
+  const publicGroup = stagedSa028Harness({ publicGroup: true, bucketGetterThrows: true });
+  const privateGroup = stagedSa028Harness({ publicGroup: false, bucketGetterThrows: true });
+  try {
+    const failed = await publicGroup.remove();
+    assert.equal(failed.status, 503);
+    assert.equal(failed.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(await failed.json(), {
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
+    });
+    assert.equal(publicGroup.count("event_groups"), 1);
+    assert.equal(publicGroup.count("event_group_events"), 2);
+    assert.equal(publicGroup.count("audit_logs"), 0);
+    assert.equal(publicGroup.count("static_rebuild_queue"), 0);
+    assert.equal(publicGroup.stats.batches, 0);
+
+    const succeeded = await privateGroup.remove();
+    assert.equal(succeeded.status, 200);
+    assert.equal(succeeded.headers.get("cache-control"), "private, no-store");
+    assert.equal(privateGroup.count("event_groups"), 0);
+    assert.equal(privateGroup.count("audit_logs"), 3);
+  } finally {
+    publicGroup.sqlite.close();
+    privateGroup.sqlite.close();
+  }
+});
+
+test("SA-028 U03: exact D1 Free 50-query group DELETE boundaries (private/public)", async () => {
+  for (const { publicGroup, max } of [{ publicGroup: false, max: 75 }, { publicGroup: true, max: 71 }]) {
+    const nStatements = publicGroup ? 4 : 3;
+    const budget = (n) => planD1AuditMutationBudget({ mutationStatementCount: nStatements,
+      mutationAssertionCount: nStatements, preMutationAssertionCount: 1,
+      auditEntryCount: n + 1, distinctActorCount: 1, callerQueryCount: 3 });
+    assert.equal(budget(max).totalQueryCount, 50);
+    assert.equal(budget(max + 1).totalQueryCount, 52);
+    for (const n of [max, max + 1]) {
+      const bucket = publicGroup ? stagedVisibilityManifestBucket() : null;
+      const h = stagedSa028Harness({ publicGroup, bucket });
+      try {
+        h.sqlite.exec("DELETE FROM event_group_events WHERE event_group_id = 'grp-delete'");
+        const insert = h.sqlite.prepare("INSERT INTO event_group_events VALUES ('grp-delete', ?, 'member', 10, 20)");
+        for (let i = 0; i < n; i++) insert.run(`event-${i}`);
+        const response = await h.remove();
+        const accepted = n === max;
+        assert.equal(response.status, accepted ? 200 : 503, `${publicGroup ? "public" : "private"}/${n}`);
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.equal(h.stats.batches, accepted ? 1 : 0);
+        assert.equal(h.count("audit_logs"), accepted ? n + 1 : 0);
+        assert.equal(h.count("static_rebuild_queue"), accepted ? 1 : 0);
+        assert.equal(h.count("event_groups"), accepted ? 0 : 1);
+        assert.equal(h.count("event_group_events"), accepted ? 0 : n);
+        if (bucket) assert.equal(bucket.puts > 0, accepted);
+      } finally { h.sqlite.close(); }
+    }
+  }
+});
+test("SA-028 U03 staged: public DELETE commits R2 block before the atomic D1 fence and delete", async () => {
+  const bucket = stagedVisibilityManifestBucket();
+  const h = stagedSa028Harness({ publicGroup: true, bucket });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    const manifest = bucket.readManifest();
+    assert.equal(manifest.entities.length, 1);
+    assert.equal(manifest.entities[0].entity_type, "event_group");
+    assert.equal(manifest.entities[0].entity_id, "grp-delete");
+    const fence = h.sqlite.prepare(
+      "SELECT fence_token, state FROM public_visibility_fences WHERE entity_type = 'event_group' AND entity_id = 'grp-delete'",
+    ).get();
+    assert.ok(fence);
+    assert.equal(fence.fence_token, manifest.entities[0].fence_token);
+    assert.equal(fence.state, "blocked");
+    assert.equal(h.count("event_groups"), 0);
+    assert.equal(h.count("event_group_events"), 0);
+    assert.equal(h.count("audit_logs"), 3);
+    assert.equal(h.stats.batches, 1);
+    assert.ok(bucket.puts >= 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: D1 failure compensates only the precommitted public DELETE token", async () => {
+  const bucket = stagedVisibilityManifestBucket();
+  const h = stagedSa028Harness({ publicGroup: true, mutateAfterRead: true, bucket });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
+    });
+    assert.equal(h.count("event_groups"), 1);
+    assert.equal(h.count("event_group_events"), 2);
+    assert.equal(h.count("public_visibility_fences"), 0);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(bucket.readManifest()?.entities.length, 0);
+    assert.ok(bucket.puts >= 2, "precommit and compensation must both write");
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: failed R2 precommit fails closed before any D1 batch", async () => {
+  const bucket = stagedVisibilityManifestBucket({ failEveryPut: true });
+  const h = stagedSa028Harness({ publicGroup: true, bucket });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.equal(h.count("event_groups"), 1);
+    assert.equal(h.count("event_group_events"), 2);
+    assert.equal(h.count("public_visibility_fences"), 0);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+    assert.equal(bucket.readManifest(), null);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: stale group CAS rolls back relations, audits and rebuild queue", async () => {
+  const h = stagedSa028Harness({ mutateAfterRead: true });
+  try {
+    const response = await h.remove();
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
+    });
+    assert.equal(h.sqlite.prepare("SELECT updated_at FROM event_groups WHERE id = 'grp-delete'").get().updated_at, 20);
+    assert.equal(h.count("event_groups"), 1);
+    assert.equal(h.count("event_group_events"), 2);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 1);
+  } finally {
+    h.sqlite.close();
+  }
+});
+
+test("SA-028 U03 staged: origin and non-admin denials never mutate group or relations", async () => {
+  const h = stagedSa028Harness();
+  const moderator = stagedSa028Harness({ role: "moderator" });
+  try {
+    const origin = await h.remove("https://attacker.example");
+    assert.equal(origin.status, 403);
+    assert.equal((await origin.json()).reason, "invalid_origin");
+    const role = await moderator.remove();
+    assert.equal(role.status, 403);
+    assert.equal(h.count("event_groups"), 1);
+    assert.equal(h.count("event_group_events"), 2);
+    assert.equal(h.count("audit_logs"), 0);
+    assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(moderator.count("event_groups"), 1);
+    assert.equal(moderator.count("event_group_events"), 2);
+    assert.equal(moderator.count("audit_logs"), 0);
+    assert.equal(moderator.count("static_rebuild_queue"), 0);
+    assert.equal(h.stats.batches, 0);
+    assert.equal(moderator.stats.batches, 0);
+  } finally {
+    h.sqlite.close();
+    moderator.sqlite.close();
+  }
+});
