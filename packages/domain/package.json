@@ -33,7 +33,8 @@
     "./user": "./src/user/index.ts",
     "./db/transientError": "./src/db/transientError.ts",
     "./event/status": "./src/event/status.ts",
-    "./slots/reserveMutations": "./src/slots/reserveMutations.ts"
+    "./slots/reserveMutations": "./src/slots/reserveMutations.ts",
+    "./slots/boundedGroup": "./src/slots/boundedGroup.ts"
   },
   "scripts": {
     "build": "tsc",

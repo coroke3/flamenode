@@ -4,6 +4,7 @@ export * from "./slots/partGap.ts";
 export * from "./slots/regroupMutations.ts";
 export * from "./slots/releaseMutations.ts";
 export * from "./slots/reserveMutations.ts";
+export * from "./slots/boundedGroup.ts";
 export * from "./software/labels.ts";
 export * from "./announcements/index.ts";
 export * from "./apiEndpoints/index.ts";

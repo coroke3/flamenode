@@ -30,6 +30,7 @@ import {
 } from "@/lib/slots/slotIdentityCore";
 import { buildSlotReleaseMutationPlan } from "@/lib/slots/slotReleaseMutations";
 import { buildSlotReserveMutationPlan } from "@/lib/slots/slotReserveMutations";
+import { assertBoundedSlotGroupIntegrity } from "@/lib/slots/slotBoundedGroup";
 import { resolveReservationXIdentity } from "@/lib/slots/reservationIdentity";
 import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
 import {
@@ -414,24 +415,9 @@ async function loadBoundedGroupStructure(
     .from(slots)
     .where(reservationGroupScope(groupId, anchor.event_id))
     .limit(MAX_SLOTS_PER_VIDEO + 1);
-  if (rows.length > MAX_SLOTS_PER_VIDEO) {
-    throw new Error(
-      `連続枠が上限 ${MAX_SLOTS_PER_VIDEO} 件を超えています。運営へ連絡してください。`,
-    );
-  }
-  if (rows.length === 0 || !rows.some((row) => row.id === anchor.id)) {
-    throw new Error("連続枠の完全な状態を確認できませんでした。");
-  }
-  if (
-    rows.some(
-      (row) =>
-        row.event_id !== anchor.event_id ||
-        row.reserved_by_user_id !== anchor.reserved_by_user_id ||
-        row.reserved_x_id_snapshot !== anchor.reserved_x_id_snapshot,
-    )
-  ) {
-    throw new Error("連続枠に別の利用者または状態が混在しています。");
-  }
+  // U01f: check the exact same group-membership invariants in the pure
+  // domain layer, before any status/identity checks and any D1 mutation.
+  assertBoundedSlotGroupIntegrity(rows, anchor, MAX_SLOTS_PER_VIDEO);
   return sortSlotsChronologically(rows);
 }
 

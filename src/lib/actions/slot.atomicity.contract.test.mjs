@@ -193,6 +193,8 @@ test("利用者枠操作は slotIdentityCore で Active 一致を判定し authU
   assert.match(source, /canActAsSlotActor/);
   assert.match(source, /resolveSlotGroupIdentity/);
   assert.match(source, /loadBoundedGroupStructure/);
+  assert.match(source, /assertBoundedSlotGroupIntegrity\(rows, anchor, MAX_SLOTS_PER_VIDEO\)/);
+  assert.match(source, /\.limit\(MAX_SLOTS_PER_VIDEO \+ 1\)/);
   assert.match(source, /resolveBoundedGroupIdentity/);
   assert.match(
     source,
