@@ -17,7 +17,7 @@ if (runTestWithTsx(import.meta.url)) {
   });
 
   process.env.NEXT_PUBLIC_SITE_URL = "https://example.test";
-  const { buildSlotSubmissionReleasedNotification } = await import("./slot.ts");
+  const { buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification } = await import("./slot.ts");
 
   test("提出解除通知は予約維持と再提出導線を明示する", () => {
     const payload = buildSlotSubmissionReleasedNotification({
@@ -31,4 +31,211 @@ if (runTestWithTsx(import.meta.url)) {
     assert.match(payload.content, /提出グループ: group-1/);
     assert.match(payload.content, /event-1/);
   });
+  test("枠解放・提出解除DMのlegacy予約グループIDを本文だけエスケープする", () => {
+    const groupId = "legacy@everyone<@123456789>";
+    const cases = [
+      ["予約グループ", buildSlotForceReleasedNotification],
+      ["提出グループ", buildSlotSubmissionReleasedNotification],
+    ];
+    for (const [prefix, build] of cases) {
+      const payload = build({
+        eventId: "event-1",
+        eventTitle: "イベント",
+        slotIds: ["slot-1", "slot-2"],
+        reservationGroupId: groupId,
+      });
+      assert.ok(payload.content.includes(prefix + ": legacy@\u200beveryone"));
+      assert.ok(payload.content.includes("\\<@\u200b123456789\\>"));
+      assert.ok(!payload.content.includes(prefix + ": " + groupId));
+      assert.equal(payload.event_id, "event-1");
+      assert.equal(payload.url.includes("/event/event-1"), true);
+    }
+  });
+
+  test("枠解放・提出解除DMは@here、role/user形式のメンションも無害化する", () => {
+    const groupIds = [
+      "@here",
+      "<@&123456789>",
+      "<@!123456789>",
+      "<@123456789>",
+      "@everyone @here",
+    ];
+    for (const build of [
+      buildSlotForceReleasedNotification,
+      buildSlotSubmissionReleasedNotification,
+    ]) {
+      for (const reservationGroupId of groupIds) {
+        const payload = build({
+          eventId: "event-1",
+          slotIds: ["slot-1"],
+          reservationGroupId,
+        });
+        assert.ok(!payload.content.includes(reservationGroupId), reservationGroupId);
+        assert.ok(payload.content.includes("@\u200b") || payload.content.includes("\\<"), reservationGroupId);
+        assert.equal(payload.event_id, "event-1");
+      }
+    }
+  });
+
+  test("legacyグループIDの改行・Unicode行区切りで偽の通知行を挿入できない", () => {
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "legacy\n■ 偽の管理通知\r\n@everyone\u2028<@123>\u2029end",
+      });
+      assert.ok(payload.content.includes("legacy ■ 偽の管理通知 @\u200beveryone \\<@\u200b123\\> end"));
+      assert.ok(!payload.content.includes("\n■ 偽の管理通知"));
+      assert.ok(!payload.content.includes("\r"));
+      assert.ok(!payload.content.includes("\u2028"));
+      assert.ok(!payload.content.includes("\u2029"));
+      assert.equal(payload.event_id, "event-1");
+    }
+  });
+
+  test("legacyグループIDのタブ・ASCII/C1制御文字で表示行を汚染できない", () => {
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "legacy\t@everyone\u000b<@123>\u0085end\u007f\u001b",
+      });
+      assert.ok(payload.content.includes("legacy @\u200beveryone \\<@\u200b123\\> end "),
+        "legacy group ID must remain one readable, escaped display line");
+      for (const code of ["\t", "\u000b", "\u0085", "\u007f", "\u001b"]) {
+        assert.ok(!payload.content.includes(code), "control character must be removed");
+      }
+      assert.equal(payload.event_id, "event-1");
+    }
+  });
+
+  test("legacy予約グループIDの双方向制御文字で通知表示を偽装できない", () => {
+    const directionalControls = ["\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"];
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "legacy" + directionalControls.join("") + "@everyone",
+      });
+      assert.ok(payload.content.includes("legacy @\u200beveryone"),
+        "the visible legacy group label is normalized while Discord mentions remain neutralized");
+      for (const control of directionalControls) {
+        assert.ok(!payload.content.includes(control), "bidirectional formatting marker must not enter DM body");
+      }
+      assert.equal(payload.event_id, "event-1");
+    }
+  });
+
+  test("legacy予約グループIDは最大256 UTF-16単位で表示し絵文字の途中では切らない", () => {
+    const prefix255 = "x".repeat(255);
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const truncated = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: prefix255 + "😀" + "z".repeat(3000),
+      });
+      assert.ok(truncated.content.includes(prefix255 + "…"));
+      assert.ok(!truncated.content.includes("\ud83d"), "orphan UTF-16 high surrogate must never be displayed");
+      assert.ok(truncated.content.length < 2000, "malformed long legacy IDs must not overflow Discord message length");
+      const exact = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "x".repeat(254) + "😀",
+      });
+      assert.ok(exact.content.includes("x".repeat(254) + "😀"),
+        "a complete emoji at the boundary must be retained");
+      assert.ok(!exact.content.includes("x".repeat(254) + "😀…"),
+        "the exact-limit ID must not be truncated");
+    }
+  });
+
+  test("legacyグループIDのUTF-16境界で孤立サロゲートを通知に残さない", () => {
+    const cases = [
+      ["x".repeat(255) + "\ud83d" + "tail", "x".repeat(255) + "…"],
+      ["x".repeat(255) + "\ud83d", "x".repeat(255) + "…"],
+      ["x".repeat(255) + "\ude00", "x".repeat(255) + "�"],
+      ["x".repeat(255) + "\ude00" + "tail", "x".repeat(255) + "�…"],
+      ["prefix\ud83dsuffix", "prefix�suffix"],
+      ["prefix\ude00suffix", "prefix�suffix"],
+      ["prefix😀suffix", "prefix😀suffix"],
+      ["x".repeat(254) + "😀" + "tail", "x".repeat(254) + "😀…"],
+    ];
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      for (const [reservationGroupId, expected] of cases) {
+        const payload = build({ eventId: "event-1", slotIds: ["slot-1"], reservationGroupId });
+        assert.ok(payload.content.includes(expected));
+        assert.doesNotMatch(payload.content, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u);
+        assert.equal(payload.event_id, "event-1");
+      }
+    }
+  });
+
+  test("不可視フォーマット文字でメンションや表示ID境界を偽装できない", () => {
+    const invisible = ["\u00ad", "\u034f", "\u115f", "\u1160", "\u180e", "\u200b", "\u200c", "\u200d", "\u2060", "\u206a", "\u206b", "\u206c", "\u206d", "\u206e", "\u206f", "\ufeff"];
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "legacy" + invisible.join("") + "@everyone",
+      });
+      assert.ok(payload.content.includes("legacy @\u200beveryone"));
+      for (const marker of invisible) {
+        // U+200B is intentionally inserted *after* @ by the Discord escaping helper.
+        if (marker === "\u200b") {
+          assert.equal((payload.content.match(/\u200b/g) || []).length, 1);
+        } else {
+          assert.ok(!payload.content.includes(marker));
+        }
+      }
+      assert.equal(payload.event_id, "event-1");
+      assert.ok(payload.url.includes("/event/event-1"));
+    }
+  });
+
+  test("正常な絵文字バリエーションセレクタを改変しない", () => {
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "group-✈️-1",
+      });
+      assert.ok(payload.content.includes("group-✈️-1"));
+      assert.equal(payload.event_id, "event-1");
+    }
+  });
+
+  test("有効なZWJ絵文字は維持し、偽装用の孤立ZWJは除去する", () => {
+    for (const build of [buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "group-👩‍💻-👨‍👩‍👧-❤️‍🔥-👩🏽‍💻-1",
+      });
+      assert.ok(payload.content.includes("group-👩‍💻-👨‍👩‍👧-❤️‍🔥-👩🏽‍💻-1"), "joined emoji must not be split");
+
+      const spoofed = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "group\u200d@everyone",
+      });
+      assert.ok(spoofed.content.includes("group @\u200beveryone"));
+      assert.ok(!spoofed.content.includes("group\u200d"));
+      assert.equal(spoofed.event_id, "event-1");
+    }
+  });
+
+  test("通常のグループID表示は変更しない", () => {
+    for (const build of [
+      buildSlotForceReleasedNotification,
+      buildSlotSubmissionReleasedNotification,
+    ]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "sgrp_safe-123",
+      });
+      assert.match(payload.content, /グループ: sgrp_safe-123/);
+    }
+  });
+
 }

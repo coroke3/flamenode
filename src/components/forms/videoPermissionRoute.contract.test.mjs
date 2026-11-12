@@ -39,6 +39,22 @@ test("権限管理ページはquery無しの正当なadmin/event運営をServer�
   assert.match(permissionPageSource, /privilegeMode: "event"/);
 });
 
+test("重複privilegedクエリは例外を起こさずTARGETと同じく未指定として扱う", async () => {
+  const targetSource = await readFile(
+    new URL("../../../apps/api/src/routes/personal/edit/permissions.ts", import.meta.url),
+    "utf8",
+  );
+
+  // Next may pass string[] for ?privileged=admin&privileged=event.
+  assert.match(permissionPageSource, /privileged\?: string \| string\[\]/);
+  assert.match(
+    permissionPageSource,
+    /typeof sp\.privileged === "string" \? sp\.privileged : undefined/,
+  );
+  assert.doesNotMatch(permissionPageSource, /sp\.privileged\?\.trim\(\)/);
+  assert.match(targetSource, /queries\?\.length === 1 \? queries\[0\] : undefined/);
+});
+
 test("明示privilege mode時は別modeへ勝手にfallbackしない", () => {
   const fallbackBlock = permissionPageSource.match(
     /if \(!canEditPermissions && !hasExplicitPrivilegeMode\) \{[\s\S]*?\n  }\n\n  if \(!canEditPermissions\)/,
