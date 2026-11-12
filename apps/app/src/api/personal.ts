@@ -6,6 +6,7 @@
  *   200 -> ok(body)   401 -> anonymous   403 -> banned   anything else / network / bad JSON -> unavailable
  * "unavailable" must never be shown as logout or as a role change (UX-AUTH-005).
  */
+import { EntryIndexResponseSchema, type EntryIndexResponse } from "@flamenode/contracts";
 import type {
   DashboardResponse,
   LibraryResponse,
@@ -46,6 +47,7 @@ export interface PersonalApi {
   getLibrary(query: LibraryQuery, signal?: AbortSignal): Promise<ApiResult<LibraryResponse>>;
   getSettings(query: SettingsQuery, signal?: AbortSignal): Promise<ApiResult<SettingsResponse>>;
   getOnboarding(signal?: AbortSignal): Promise<ApiResult<OnboardingResponse>>;
+  getEntryIndex(signal?: AbortSignal, offset?: number): Promise<ApiResult<EntryIndexResponse>>;
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -93,5 +95,12 @@ export function createPersonalApi(fetchFn: FetchLike = (input, init) => fetch(in
     getSettings: (q, signal) =>
       read(fetchFn, url("settings", { tab: q.tab, x: q.x, onboarding: q.onboarding }), signal),
     getOnboarding: (signal) => read(fetchFn, url("onboarding"), signal),
+    async getEntryIndex(signal, offset) {
+      const result = await read<unknown>(fetchFn, url("entry", { offset: offset == null ? undefined : String(offset) }), signal);
+      if (result.status !== "ok") return result;
+      // Do not let a malformed or partial read look like a valid entry state.
+      const parsed = EntryIndexResponseSchema.safeParse(result.data);
+      return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
+    },
   };
 }
