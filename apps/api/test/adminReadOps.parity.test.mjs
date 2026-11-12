@@ -247,8 +247,8 @@ if (runUnderRootTsx(import.meta.url)) {
     const row = (await refDb.select().from(S.auditLogs).where(eq(S.auditLogs.id, auditId)).limit(1))[0];
     if (!row) return null;
     const [prevRows, nextRows] = await Promise.all([
-      refDb.select({ id: S.auditLogs.id, created_at: S.auditLogs.created_at }).from(S.auditLogs).where(and(eq(S.auditLogs.target_id, row.target_id), lt(S.auditLogs.created_at, row.created_at))).orderBy(desc(S.auditLogs.created_at)).limit(1),
-      refDb.select({ id: S.auditLogs.id, created_at: S.auditLogs.created_at }).from(S.auditLogs).where(and(eq(S.auditLogs.target_id, row.target_id), sql`${S.auditLogs.created_at} > ${row.created_at}`)).orderBy(asc(S.auditLogs.created_at)).limit(1),
+      refDb.select({ id: S.auditLogs.id, created_at: S.auditLogs.created_at }).from(S.auditLogs).where(and(eq(S.auditLogs.table_name, row.table_name), eq(S.auditLogs.target_id, row.target_id), lt(S.auditLogs.created_at, row.created_at))).orderBy(desc(S.auditLogs.created_at)).limit(1),
+      refDb.select({ id: S.auditLogs.id, created_at: S.auditLogs.created_at }).from(S.auditLogs).where(and(eq(S.auditLogs.table_name, row.table_name), eq(S.auditLogs.target_id, row.target_id), sql`${S.auditLogs.created_at} > ${row.created_at}`)).orderBy(asc(S.auditLogs.created_at)).limit(1),
     ]);
     return canon({ row, prev: prevRows[0] ?? null, next: nextRows[0] ?? null });
   }
@@ -630,6 +630,23 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(a2.prev.id, "a1");
     assert.equal(a2.next.id, "a5");
     assert.equal((await call("/api/admin-read/audit/nope", ADMIN)).status, 404);
+  });
+
+  test("T02 audit neighbors exclude another table reusing the same target_id", async () => {
+    // The unrelated row is nearer to a2 than the actual videos/a5 neighbor.
+    ins("audit_logs", { id: "a-cross-table", table_name: "announcements", target_id: "v1", operation: "UPDATE", actor_user_id: "u_carol", created_at: T0 + 25 });
+    try {
+      const r = (await get("/audit/a2")).body;
+      assert.equal(r.prev.id, "a1");
+      assert.equal(r.next.id, "a5");
+      const ref = await refAuditDetail("a2");
+      assert.deepEqual({ prev: r.prev, next: r.next }, { prev: ref.prev, next: ref.next });
+      const unrelated = (await get("/audit/a-cross-table")).body;
+      assert.equal(unrelated.prev, null);
+      assert.equal(unrelated.next, null);
+    } finally {
+      sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run("a-cross-table");
+    }
   });
 
   test("S2 budget: a 120 KB / non-ASCII payload never 503s or exceeds 64 KiB; chunks reassemble exactly", async () => {
