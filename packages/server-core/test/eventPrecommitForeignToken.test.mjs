@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   preCommitEventVisibilityTransition,
   preCommitEventVisibilityFenceRename,
+  preCommitEventVisibilityRenameTombstone,
   compensateEventVisibilityFenceRenameOnD1Failure,
   compensateEventVisibilityRenameTombstoneOnD1Failure,
 } from "@flamenode/server-core/visibility/eventTransition";
@@ -450,4 +451,70 @@ test("Visibility compensation: D1 rename rollback does not overwrite a concurren
     assert.equal(state.attemptedWrites, 0, "must fail closed without attempting R2 PUT");
     assert.deepEqual(state.manifest, before, "both old and new visibility blocks stay intact");
   }
+});
+
+test("Visibility tombstone: mixed old-ID tokens on initial GET must not be rotated or erased", async () => {
+  const beforeEntries = [
+    entry("event", "event-old", "existing-owner"),
+    entry("event", "event-old", "foreign-owner"),
+    entry("video", "video-safe", "unrelated"),
+  ];
+  const state = hostOf(manifestOf(...beforeEntries));
+  await assert.rejects(
+    preCommitEventVisibilityRenameTombstone(
+      { eventId: "event-old", fenceToken: "rotated" }, state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 0, "never issue the first R2 CAS PUT");
+  assert.deepEqual(state.manifest.entities, beforeEntries);
+});
+
+test("Visibility tombstone: ETag CAS conflict with a duplicate foreign old-ID token fails closed", async () => {
+  const old = entry("event", "event-old", "original");
+  const foreign = entry("event", "event-old", "concurrent-owner");
+  const state = hostOf(manifestOf(old), (latest) => ({
+    ...latest, entities: [...latest.entities, foreign],
+  }));
+  await assert.rejects(
+    preCommitEventVisibilityRenameTombstone(
+      { eventId: "event-old", fenceToken: "rotated" }, state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.callbacks, 1, "CAS retry inspects new owners before overwriting");
+  assert.equal(state.appliedWrites, 0);
+  assert.deepEqual(state.manifest.entities, [old, foreign]);
+});
+
+test("Visibility tombstone: post-PUT foreign duplicate is rejected at confirmation", async () => {
+  const foreign = entry("event", "event-old", "post-put-owner");
+  const state = hostOf(manifestOf(entry("event", "event-old", "original")), null, (latest) => ({
+    ...latest, entities: [...latest.entities, foreign],
+  }));
+  await assert.rejects(
+    preCommitEventVisibilityRenameTombstone(
+      { eventId: "event-old", fenceToken: "rotated" }, state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.appliedWrites, 1);
+  assert.equal(state.reads, 2);
+  assert.deepEqual(state.manifest.entities.find((x) => x.fence_token === "post-put-owner"), foreign);
+});
+
+test("Visibility tombstone: valid single-token rotation preserves previous entry and unrelated blocks", async () => {
+  const prior = { ...entry("event", "event-old", "previous"), blocked_at: 55, reason: "preserve" };
+  const video = entry("video", "video-safe", "unrelated");
+  const state = hostOf(manifestOf(prior, video));
+  const precommit = await preCommitEventVisibilityRenameTombstone(
+    { eventId: "event-old", fenceToken: "rotated" }, state.host,
+  );
+  assert.equal(state.appliedWrites, 1);
+  assert.deepEqual(precommit.previousEntry, prior);
+  const rotated = state.manifest.entities.find((x) => x.entity_id === "event-old");
+  assert.equal(rotated.fence_token, "rotated");
+  assert.equal(rotated.blocked_at, 55);
+  assert.equal(rotated.reason, "preserve");
+  assert.deepEqual(state.manifest.entities.find((x) => x.entity_id === "video-safe"), video);
 });

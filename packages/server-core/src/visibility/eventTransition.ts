@@ -304,6 +304,18 @@ export async function preCommitEventVisibilityRenameTombstone(
 ): Promise<EventVisibilityRenameTombstonePrecommit> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
+  // Tombstone rotation intentionally replaces a SINGLE prior token: a rename
+  // must not erase another writer's block hidden in duplicate manifest keys.
+  // A single previous token is still permitted to rotate (CURRENT contract).
+  const hasMixedOldIdTokens = (snapshot: PublicVisibilityBlockedEntitiesManifest) => {
+    const tokens = snapshot.entities
+      .filter((entry) => entry.entity_type === "event" && entry.entity_id === input.eventId)
+      .map((entry) => entry.fence_token);
+    return tokens.some((token) => token !== tokens[0]);
+  };
+  if (hasMixedOldIdTokens(manifest)) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
   const previousEntry =
     manifest.entities.find(
       (entry) =>
@@ -323,6 +335,9 @@ export async function preCommitEventVisibilityRenameTombstone(
   await host.manifest.write(next, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
+      if (hasMixedOldIdTokens(latest)) {
+        throw new Error("public_visibility_fence_token_mismatch");
+      }
       const previous = latest.entities.find(
         (entry) =>
           entry.entity_type === "event" && entry.entity_id === input.eventId,
@@ -348,7 +363,12 @@ export async function preCommitEventVisibilityRenameTombstone(
     (entry) =>
       entry.entity_type === "event" && entry.entity_id === input.eventId,
   );
-  if (!confirmedEntry || confirmedEntry.fence_token !== input.fenceToken) {
+  if (
+    !confirmedEntry || confirmedEntry.fence_token !== input.fenceToken ||
+    confirmed.entities.some((entry) =>
+      entry.entity_type === "event" && entry.entity_id === input.eventId &&
+      entry.fence_token !== input.fenceToken)
+  ) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
   return {
