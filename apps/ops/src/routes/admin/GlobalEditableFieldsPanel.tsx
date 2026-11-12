@@ -1,5 +1,9 @@
 import * as React from "react";
 import type { AdminPermissionSettings } from "@flamenode/contracts";
+import {
+  GENERAL_EDITABLE_FIELD_KEYS, GENERAL_EDITABLE_FIELD_LABELS, GENERAL_EDITABLE_FIELD_HELP,
+  parseGeneralEditableFields, type GeneralEditableFieldKey,
+} from "@flamenode/domain/video";
 import { send } from "../../api/write.js";
 
 /**
@@ -7,26 +11,15 @@ import { send } from "../../api/write.js";
  * so the Hono JSON boundary receives arrays, not a comma-separated string.
  * Labels track CURRENT generalEditPermissions; U04 validates the final schema.
  */
-const fields = [
-  ["title", "タイトル"], ["youtube_url", "YouTube URL"],
-  ["display_name", "表示名"], ["icon_url", "アイコン"],
-  ["profile_text", "プロフィール文"], ["youtube_channel_url", "YouTubeチャンネルURL"],
-  ["other_social_links", "SNS・外部リンク"], ["part", "部"],
-  ["music", "楽曲"], ["music_reference_url", "楽曲参照URL"],
-  ["credit", "クレジット"], ["intro_comment", "紹介コメント"],
-  ["used_software", "使用ソフト"], ["highlights", "見どころ"],
-  ["production_story", "制作エピソード"], ["closing_comment", "締めコメント"],
-  ["custom_answers", "カスタム質問の回答"], ["stage_permission", "ステージ・権利確認の回答"],
-  ["event_ids", "所属イベント"], ["is_collab", "合作状態"],
-  ["members", "メンバー"], ["chapters", "チャプター"],
-] as const;
-type Field = (typeof fields)[number][0];
-const allowed = new Set<string>(fields.map(([key]) => key));
-function fromCsv(csv: string | null): Set<Field> {
-  return new Set((csv ?? "").split(",").map(s => s.trim()).filter(s => allowed.has(s)) as Field[]);
+// Keep CURRENT legacy section-key expansion and exact field order from domain.
+type Field = GeneralEditableFieldKey;
+const fields = GENERAL_EDITABLE_FIELD_KEYS.map((key) =>
+  [key, GENERAL_EDITABLE_FIELD_LABELS[key]] as const);
+export function fieldsSetFromCsv(csv: string | null): Set<Field> {
+  return parseGeneralEditableFields(csv);
 }
 function values(set: Set<Field>): Field[] {
-  return fields.map(([name]) => name).filter((name) => set.has(name));
+  return GENERAL_EDITABLE_FIELD_KEYS.filter((name) => set.has(name));
 }
 export function permissionsPayload(defaultFields: Set<Field>, upcomingFields: Set<Field>) {
   return {
@@ -42,8 +35,8 @@ type SaveResponse = {
 export function GlobalEditableFieldsPanel({
   settings, onSaved,
 }: { settings: AdminPermissionSettings; onSaved?: () => void }): React.ReactElement {
-  const [defaultFields, setDefaultFields] = React.useState(() => fromCsv(settings.default_editable_fields));
-  const [upcomingFields, setUpcomingFields] = React.useState(() => fromCsv(settings.upcoming_editable_fields));
+  const [defaultFields, setDefaultFields] = React.useState(() => fieldsSetFromCsv(settings.default_editable_fields));
+  const [upcomingFields, setUpcomingFields] = React.useState(() => fieldsSetFromCsv(settings.upcoming_editable_fields));
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
   const [error, setError] = React.useState("");
@@ -51,8 +44,8 @@ export function GlobalEditableFieldsPanel({
   React.useEffect(() => {
     if (busy) return;
     if (skipSync.current) { skipSync.current = false; return; }
-    setDefaultFields(fromCsv(settings.default_editable_fields));
-    setUpcomingFields(fromCsv(settings.upcoming_editable_fields));
+    setDefaultFields(fieldsSetFromCsv(settings.default_editable_fields));
+    setUpcomingFields(fieldsSetFromCsv(settings.upcoming_editable_fields));
   }, [settings.default_editable_fields, settings.upcoming_editable_fields, busy]);
 
   async function save(event: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -80,8 +73,8 @@ export function GlobalEditableFieldsPanel({
       }
       if (result.data.settings) {
         skipSync.current = true;
-        setDefaultFields(fromCsv(result.data.settings.default_editable_fields));
-        setUpcomingFields(fromCsv(result.data.settings.upcoming_editable_fields));
+        setDefaultFields(fieldsSetFromCsv(result.data.settings.default_editable_fields));
+        setUpcomingFields(fieldsSetFromCsv(result.data.settings.upcoming_editable_fields));
       }
       setMessage(result.data.message || "一般作品権限を保存しました。");
       onSaved?.();
@@ -113,7 +106,12 @@ export function GlobalEditableFieldsPanel({
                         return next;
                       });
                     }} />
-                  {label}
+                  <span>
+                    <strong style={{ display: "block" }}>{label}</strong>
+                    <small className="fn-muted" style={{ display: "block" }}>
+                      {GENERAL_EDITABLE_FIELD_HELP[field]}
+                    </small>
+                  </span>
                 </label>
               ))}
             </fieldset>

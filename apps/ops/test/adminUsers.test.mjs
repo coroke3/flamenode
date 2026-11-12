@@ -10,7 +10,7 @@ import { AdminUserManagementTabs } from "../.test-dist/apps/ops/src/components/a
 import { AdminUserDetailContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
 import { AdminUserEditContent, canConfirmUserBan, acquireAdminUserWriteLock } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
 import { createAdminUserEditMutations } from "../.test-dist/apps/ops/src/api/adminUserEdits.js";
-import { permissionsPayload } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
+import { permissionsPayload, fieldsSetFromCsv } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
 
 const response = (status, body) => new Response(JSON.stringify(body), {
   status, headers: { "content-type": "application/json" },
@@ -232,4 +232,14 @@ test("MIG-0731 U02b: admin mutations use a synchronous single-flight guard", () 
   assert.equal(acquireAdminUserWriteLock(lock), false, "second synchronous action must not start");
   lock.current = false; // finally after request completion
   assert.equal(acquireAdminUserWriteLock(lock), true);
+});
+
+test("MIG-0731 U04: CURRENT legacy editable permission scope keys expand, never disappear", () => {
+  const legacy = fieldsSetFromCsv("video.basics,video.members,video.member_chapters");
+  assert.deepEqual([...legacy].sort(), ["title", "part", "is_collab", "members", "chapters"].sort());
+  const json = fieldsSetFromCsv('["video.credits","title","invalid-key"]');
+  assert.deepEqual([...json].sort(), ["music", "music_reference_url", "credit", "title"].sort());
+  assert.deepEqual(permissionsPayload(legacy, new Set()).default_editable_fields,
+    ["title", "part", "is_collab", "members", "chapters"]);
+  assert.deepEqual([...fieldsSetFromCsv("unknown-key")], []);
 });
