@@ -1,3 +1,4 @@
+import { legacyImportApplyProgressSummary as applyProgressSummary } from "@flamenode/server-core/legacyImport/progress";
 import { NextResponse } from "next/server";
 import {
   CloudflareBindingsUnavailableError,
@@ -26,9 +27,6 @@ import {
 import {
   applyLegacyImportPlanStep,
   legacyApplyResultFromProgress,
-  LEGACY_IMPORT_QUESTION_STEP_SIZE,
-  LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
-  LEGACY_IMPORT_X_USER_STEP_SIZE,
 } from "@/lib/import/legacy/apply";
 import { preflightLegacyImportPlan } from "@/lib/import/legacy/preflight";
 import {
@@ -38,7 +36,6 @@ import {
   LegacyImportPreviewError,
   LEGACY_IMPORT_PLAN_WARN_BYTES,
   MAX_STORED_PLAN_BYTES,
-  type LegacyImportApplyProgress,
 } from "@/lib/import/legacy/previewStore";
 import type { CanonicalLegacyPlan } from "@/lib/import/legacy/normalize";
 
@@ -178,36 +175,6 @@ function writeGuardErrorResponse(
         ? 503
         : 403;
   return error(guard.reason, status);
-}
-
-function applyProgressSummary(
-  plan: CanonicalLegacyPlan,
-  progress: LegacyImportApplyProgress,
-): { stage: string; index: number; completed: number; total: number } {
-  const softwareCount = new Set(
-    plan.videoSoftwares
-      .map((row) => row.label.trim().replace(/\s+/g, " ").toLowerCase())
-      .filter(Boolean),
-  ).size;
-  const sizes = {
-    system_user: 1,
-    x_users: Math.max(1, Math.ceil(plan.xUsers.length / LEGACY_IMPORT_X_USER_STEP_SIZE)),
-    softwares: Math.max(1, Math.ceil(softwareCount / LEGACY_IMPORT_SOFTWARE_STEP_SIZE)),
-    events: Math.max(1, plan.events.length),
-    custom_questions: Math.max(
-      1,
-      Math.ceil(plan.eventCustomQuestions.length / LEGACY_IMPORT_QUESTION_STEP_SIZE),
-    ),
-    videos: Math.max(1, plan.videos.length),
-  };
-  const stages = ["system_user", "x_users", "softwares", "events", "custom_questions", "videos"] as const;
-  const total = stages.reduce((sum, stage) => sum + sizes[stage], 0);
-  const completed = progress.stage === "complete"
-    ? total
-    : stages
-        .slice(0, stages.indexOf(progress.stage))
-        .reduce((sum, stage) => sum + sizes[stage], 0) + progress.index;
-  return { stage: progress.stage, index: progress.index, completed, total };
 }
 
 export async function POST(request: Request): Promise<NextResponse> {

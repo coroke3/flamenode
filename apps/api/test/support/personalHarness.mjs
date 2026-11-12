@@ -59,6 +59,20 @@ export function createD1(sqlite) {
       async first() {
         return run(sql, params).results[0] ?? null;
       },
+      async raw() {
+        // Drizzle's D1 select().all() consumes positional arrays, not
+        // D1 .all()'s named result objects. Preserve the normal read counters.
+        if (!READ.test(sql)) stats.writes += 1;
+        stats.statements += 1;
+        stats.maxBinds = Math.max(stats.maxBinds, params.length);
+        const prepared = sqlite.prepare(sql);
+        prepared.setReturnArrays(true);
+        try {
+          return prepared.all(...params);
+        } finally {
+          prepared.setReturnArrays(false);
+        }
+      },
     };
     self.__sql = sql;
     self.__params = params;

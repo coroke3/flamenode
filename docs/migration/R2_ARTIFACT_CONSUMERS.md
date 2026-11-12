@@ -113,6 +113,8 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `packages/server-core/src/visibility/manifestR2.ts` | `bucket.put(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Visibility revocation state; RETAIN |
 | `src/lib/import/legacy/previewStore.ts` | `bucket.put(key)` | 5 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
 | `src/lib/import/legacy/previewStore.ts` | `bucket.get(key)` | 2 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+| `packages/server-core/src/legacyImport/previewStore.ts` | `bucket.put(key)` | 5 | MIG-0645 Draft port of CURRENT owner-bound preview R2 v4 create/claim/advance/complete/release; same five conditional put sites, do not remove production key or enable without security review |
+| `packages/server-core/src/legacyImport/previewStore.ts` | `bucket.get(key)` | 2 | MIG-0645 Draft port of CURRENT preview lookup/currentClaim (owner-hashed key, size bound and ETag); retain while both implementations coexist |
 | `src/lib/video/resolveVideoCreatorIcon.ts` | `bucket.delete(uploadedKey)` | 1 | Generator/producer key; MIG-0907 review required |
 | `src/lib/event/eventIdReuse.ts` | `bucket.head(key)` | 1 | Generator/producer key; MIG-0907 review required |
 | `src/lib/admin/staticSharedInputDiagnostics.ts` | `bucket.head(key)` | 1 | Generator/producer key; MIG-0907 review required |

@@ -353,48 +353,52 @@ async function readStoredPreviewObject(object: R2ObjectBody): Promise<StoredPrev
       "plan_too_large",
     );
   }
-  return parseStoredPreview(await object.text());
+  // Bound the actual streamed body before allocating or parsing the full JSON.
+  // R2 size metadata can be absent or wrong; never trust it as the sole limit.
+  const stream = object.body;
+  if (stream) {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    const chunks: string[] = [];
+    let bytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > MAX_STORED_PLAN_BYTES) {
+          await reader.cancel().catch(() => undefined);
+          throw new LegacyImportPreviewError(
+            "保存済みpreview planが大きすぎます。再度プレビューしてください。",
+            "plan_too_large",
+          );
+        }
+        chunks.push(decoder.decode(value, { stream: true }));
+      }
+      chunks.push(decoder.decode());
+    } catch (cause) {
+      // A failed/aborted stream must release its R2 connection. Preserve the
+      // original read/size error even when cancellation itself also fails.
+      await reader.cancel().catch(() => undefined);
+      throw cause;
+    } finally {
+      reader.releaseLock();
+    }
+    return parseStoredPreview(chunks.join(""));
+  }
+  // Fallback for non-stream test adapters. Still check bytes before JSON parse.
+  const raw = await object.text();
+  if (serializedBytes(raw) > MAX_STORED_PLAN_BYTES) {
+    throw new LegacyImportPreviewError(
+      "保存済みpreview planが大きすぎます。再度プレビューしてください。",
+      "plan_too_large",
+    );
+  }
+  return parseStoredPreview(raw);
 }
 
-export function estimateLegacyImportStoredPlanBytes(input: {
-  authUserId: string;
-  strategy: LegacyImportStrategy;
-  plan: CanonicalLegacyPlan;
-}): number {
-  const record: StoredPreview = {
-    version: PREVIEW_VERSION,
-    previewToken: "0".repeat(32),
-    authUserId: input.authUserId,
-    strategy: input.strategy,
-    planHash: "0".repeat(64),
-    plan: input.plan,
-    createdAt: 0,
-    expiresAt: 0,
-    status: "ready",
-    attempt: 0,
-    progress: {
-      stage: "system_user",
-      index: 0,
-      counts: {
-        createdEvents: 0,
-        replacedEvents: 0,
-        skippedEvents: 0,
-        createdVideos: 0,
-        replacedVideos: 0,
-        skippedVideos: 0,
-        createdXUsers: 0,
-        createdAuthUsers: 0,
-        createdSoftwares: 0,
-        createdCustomQuestions: 0,
-        reusedCustomQuestions: 0,
-      },
-      skipExistingEventIds: [],
-      skipExistingVideoIds: [],
-    },
-  };
-  return serializedBytes(JSON.stringify(record));
-}
-
+/** MIG-0645: exact CURRENT R2 stored-preview size estimator now shared with Hono. */
+export { estimateLegacyImportStoredPlanBytes } from "@flamenode/server-core/legacyImport/previewEstimate";
 function putOptions(record: StoredPreview, etagMatches?: string): R2PutOptions {
   return {
     ...(etagMatches ? { onlyIf: { etagMatches } } : {}),

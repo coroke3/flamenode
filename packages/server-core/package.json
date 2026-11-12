@@ -106,7 +106,16 @@
     "./publicData/randomVideoPoolCore": "./src/publicData/randomVideoPoolCore.ts",
     "./publicData/staticRecommendCore": "./src/publicData/staticRecommendCore.ts",
     "./publicData/staticYoutubeRelatedBlocklistCore": "./src/publicData/staticYoutubeRelatedBlocklistCore.ts",
-    "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts"
+    "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts",
+    "./legacyImport/parse": "./src/legacyImport/parse.ts",
+    "./legacyImport/range": "./src/legacyImport/range.ts",
+    "./legacyImport/normalize": "./src/legacyImport/normalize.ts",
+    "./legacyImport/cpuBudget": "./src/legacyImport/cpuBudget.ts",
+    "./legacyImport/previewEstimate": "./src/legacyImport/previewEstimate.ts",
+    "./legacyImport/applyResult": "./src/legacyImport/applyResult.ts",
+    "./legacyImport/progress": "./src/legacyImport/progress.ts",
+    "./legacyImport/previewStore": "./src/legacyImport/previewStore.ts",
+    "./legacyImport/preflight": "./src/legacyImport/preflight.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
