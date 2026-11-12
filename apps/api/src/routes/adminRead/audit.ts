@@ -178,15 +178,22 @@ adminAuditRoutes.get("/:id", async (c) => {
   if (!found) return c.json(NOT_FOUND, 404);
   const { before_len, after_len, inverse_len, ...row } = found;
 
-  // Navigate only within the same table and target; CURRENT runs these as two statements.
+  // Navigate by (created_at, id) within the same table/target, including rows logged in the same second.
   const { results } = await c.env.DB.prepare(
     `SELECT 'prev' AS kind, id, created_at FROM (
-       SELECT id, created_at FROM audit_logs WHERE table_name = ? AND target_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1)
+       SELECT id, created_at FROM audit_logs
+       WHERE table_name = ? AND target_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
+       ORDER BY created_at DESC, id DESC LIMIT 1)
      UNION ALL
      SELECT 'next' AS kind, id, created_at FROM (
-       SELECT id, created_at FROM audit_logs WHERE table_name = ? AND target_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1)`,
+       SELECT id, created_at FROM audit_logs
+       WHERE table_name = ? AND target_id = ? AND (created_at > ? OR (created_at = ? AND id > ?))
+       ORDER BY created_at ASC, id ASC LIMIT 1)`,
   )
-    .bind(row.table_name, row.target_id, row.created_at, row.table_name, row.target_id, row.created_at)
+    .bind(
+      row.table_name, row.target_id, row.created_at, row.created_at, row.id,
+      row.table_name, row.target_id, row.created_at, row.created_at, row.id,
+    )
     .all<{ kind: "prev" | "next"; id: string; created_at: number }>();
   const neighbor = (kind: "prev" | "next") => {
     const found = results.find((entry) => entry.kind === kind);
