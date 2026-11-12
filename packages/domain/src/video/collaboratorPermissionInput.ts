@@ -105,7 +105,13 @@ export function parseVideoCollaboratorDeleteInput(input: {
   | { ok: true; videoId: string; xUserId: string }
   | { ok: false; message: string } {
   const videoId = String(input.video_id ?? "").trim();
-  const xUserId = normalizeXId(String(input.x_user_id ?? ""));
+  const rawXId = String(input.x_user_id ?? "").trim();
+  // Match upsert/batch body bounds before X-ID normalization or any D1 read.
+  // Preserve the legacy failure message and normal FormData coercion.
+  if (videoId.length > 64 || rawXId.length > 32) {
+    return { ok: false, message: "video_id と有効な X ID が必要です。" };
+  }
+  const xUserId = normalizeXId(rawXId);
   if (!videoId || !xUserId || !isCanonicalXId(xUserId)) {
     return { ok: false, message: "video_id と有効な X ID が必要です。" };
   }

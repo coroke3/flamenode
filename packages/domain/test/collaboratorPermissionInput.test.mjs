@@ -85,3 +85,16 @@ test("MIG-0650 delete parser preserves CURRENT string coercion at FormData bound
     video_id: 123, x_user_id: "@BoB",
   }), { ok: true, videoId: "123", xUserId: "bob" });
 });
+
+test("MIG-0650 delete input rejects oversized IDs before X-ID normalization", () => {
+  const reject = { ok: false, message: "video_id と有効な X ID が必要です。" };
+  assert.deepEqual(parseVideoCollaboratorDeleteInput({
+    video_id: "v".repeat(65), x_user_id: "alice",
+  }), reject);
+  assert.deepEqual(parseVideoCollaboratorDeleteInput({
+    video_id: "v", x_user_id: "@" + "a".repeat(32),
+  }), reject);
+  assert.deepEqual(parseVideoCollaboratorDeleteInput({
+    video_id: "v".repeat(64), x_user_id: "  @ALICE  ",
+  }), { ok: true, videoId: "v".repeat(64), xUserId: "alice" });
+});
