@@ -420,7 +420,7 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0717 | `/dashboard/edit/:id` screen (SA-089; merge gate MIG-0651, MIG-0648, MIG-0650) | BLOCKED | MIG-0714 |
 | MIG-0718 | Personal SPA CostGuardBanner (merge gate MIG-0661, MIG-0701) | DONE | MIG-0611 |
 | MIG-0719 | Ops Manage shell (guard, sidebar, banner), `/manage`, review redirect, `apps/ops/wrangler.toml` (merge gate MIG-0707, MIG-0661, MIG-0628, D-17) | DONE | MIG-0624, MIG-0608 |
-| MIG-0720 | `/manage/events/:id` overview + `/audience` (SA-035; merge gate MIG-0707, MIG-0719, MIG-0655) | READY | MIG-0624 |
+| MIG-0720 | `/manage/events/:id` overview + `/audience` (SA-035; merge gate MIG-0707, MIG-0719, MIG-0655) | DONE | MIG-0624 |
 | MIG-0721 | Ops `EventForm` port: `/manage/events/:id/edit` (SA-021..024) + `/admin/events/new` (merge gate MIG-0707, MIG-0719, MIG-0726, MIG-0652) | READY | MIG-0624, MIG-0625 |
 | MIG-0722 | `/manage/events/:id/slots` (SA-056..064; merge gate MIG-0707, MIG-0719, MIG-0656) | READY | MIG-0624 |
 | MIG-0723 | `/manage/events/:id/staff` (SA-031..034; merge gate MIG-0707, MIG-0719, MIG-0654) | DONE | MIG-0624 |
@@ -441,6 +441,8 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0706 | Phase 7 Gate | BLOCKED | MIG-0704, MIG-0705 |
 
 2026-11-04 MIG-0719 merge-time integration (PR #458): Ops `/manage` shell, dashboard, navigation, CostGuard banner and legacy review redirect only. Current Next production routes remain authoritative; detail pages still depend on MIG-0720..0725 and final MIG-0704. Prior source HEAD `d94d002e06051c7d405481711108da170a3c10e4` passed both mandatory CI jobs in [Actions 41782799319](https://github.com/coroke3/flamenode/actions/runs/41782799319) and received [independent-agent APPROVE](https://github.com/coroke3/flamenode/pull/458#issuecomment-6624639329). The updated documentation commit must also receive fresh exact-HEAD CI and independent review before the individually authorized squash merge. No deployment, Worker Routes, remote data or secrets are changed.
+
+2026-11-12 MIG-0720 merge-time integration (PR #462, squash `fff2905ff3b8661adfdf8f991016a5bc8c4296a5`): Ops `/manage/events/:id` overview, `/manage/events/:id/audience`, `SaveEventTemplateForm` (SA-035), and `ManageEventPageShell` / `ManageEventTabs` / `ManageEventMoreMenu` landed on `main`. Source HEAD `ff128c4ee8feffd428aa49734bb85121658ad04a` passed both mandatory CI jobs in [Actions 43116095631](https://github.com/coroke3/flamenode/actions/runs/43116095631) and received [independent-agent APPROVE](https://github.com/coroke3/flamenode/pull/462#issuecomment-6825219359). `MIG-0704` remains `BLOCKED` on `MIG-0721`, `MIG-0722`, `MIG-0724`, and `MIG-0725`. No deployment, Worker Routes, remote data or secrets are changed.
 
 ## Phase 8 — Auth
 
