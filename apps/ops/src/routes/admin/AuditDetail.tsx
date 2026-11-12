@@ -80,21 +80,22 @@ function AuditDetailBody({id,detail,api}:{
     return ()=>controller.abort();
   },[api,id,detail]);
   const targetLink=TARGET_LINKS[row.table_name]?.(row.target_id);
+  const historyHref="/admin/audit?table="+encodeURIComponent(row.table_name)+"&record="+encodeURIComponent(row.target_id);
   const changedKeys=jsonKeys(row.changed_keys_json);
   return <>
     <header className="fn-page-head"><h1>監査ログ {row.id}</h1><p>{dateJst(row.created_at)}</p></header>
-    <nav aria-label="同 target_id の前後遷移" className="fn-panel-actions">
+    <nav aria-label="同テーブル・同 target_id の前後遷移" className="fn-panel-actions">
       {detail.prev&&<a href={"/admin/audit/"+encodeURIComponent(detail.prev.id)}>
         前 ({dateJst(detail.prev.created_at)})</a>}
       {detail.next&&<a href={"/admin/audit/"+encodeURIComponent(detail.next.id)}>
         次 ({dateJst(detail.next.created_at)})</a>}
-      <a href={"/admin/audit?record="+encodeURIComponent(row.target_id)}>同じ target_id を一覧表示</a>
+      <a href={historyHref}>同じ target_id を一覧表示</a>
     </nav>
     <section className="fn-panel" aria-label="基本情報">
       <Meta label="ID" value={row.id}/><Meta label="テーブル" value={row.table_name}/>
       <Meta label="操作種別" value={row.operation}/>
       <Meta label="対象レコード ID" value={row.target_id}
-        href={"/admin/audit?record="+encodeURIComponent(row.target_id)}/>
+        href={historyHref}/>
       <Meta label="実行者 user_id" value={row.actor_user_id}
         href={"/admin/users/"+encodeURIComponent(row.actor_user_id)}/>
       {row.context&&<Meta label="コンテキスト" value={row.context}/>}
