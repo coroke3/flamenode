@@ -9,6 +9,7 @@
     "./slots/limits": "./src/slots/limits.ts",
     "./slots/partGap": "./src/slots/partGap.ts",
     "./slots/regroupMutations": "./src/slots/regroupMutations.ts",
+    "./slots/releaseMutations": "./src/slots/releaseMutations.ts",
     "./software/labels": "./src/software/labels.ts",
     "./announcements": "./src/announcements/index.ts",
     "./apiEndpoints": "./src/apiEndpoints/index.ts",
