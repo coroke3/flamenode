@@ -1165,18 +1165,22 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
       created_at: row.created_at,
       updated_at: row.updated_at,
     })));
+    // Iterate each bounded snapshot row once, probing the composite
+    // (event_group_id, event_id) PK instead of scanning json_each for every
+    // live relation (which is quadratic at the allowed 70+ member boundary).
+    // Equal counts plus every snapshot row matching live makes this exact:
+    // the snapshot is read from a table whose composite PK is unique.
     const relationSnapshotCas = db.run(assertCondition(sql`
       (SELECT COUNT(*) FROM event_group_events WHERE event_group_id = ${id}) = ${relationRows.length}
       AND NOT EXISTS (
-        SELECT 1 FROM event_group_events live
-        WHERE live.event_group_id = ${id}
-          AND NOT EXISTS (
-            SELECT 1 FROM json_each(${expectedRelationsJson}) snapshot
-            WHERE json_extract(snapshot.value, '$.event_id') = live.event_id
-              AND json_extract(snapshot.value, '$.relation_type') = live.relation_type
-              AND json_extract(snapshot.value, '$.created_at') = live.created_at
-              AND json_extract(snapshot.value, '$.updated_at') = live.updated_at
-          )
+        SELECT 1 FROM json_each(${expectedRelationsJson}) snapshot
+        LEFT JOIN event_group_events live
+          ON live.event_group_id = ${id}
+          AND live.event_id = json_extract(snapshot.value, '$.event_id')
+        WHERE live.event_id IS NULL
+          OR live.relation_type IS NOT json_extract(snapshot.value, '$.relation_type')
+          OR live.created_at IS NOT json_extract(snapshot.value, '$.created_at')
+          OR live.updated_at IS NOT json_extract(snapshot.value, '$.updated_at')
       )
     `));
     const deleteRelations = db.run(sql`
