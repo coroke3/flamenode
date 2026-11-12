@@ -478,7 +478,7 @@ if (runTestWithTsx(import.meta.url)) {
       const dstVideos = result.tables.videos.filter((v) => v.creator_x_user_id === "x_tgt");
 
       if (stale) {
-        assert.match(result.outcome.threw ?? "", /error|failed|not-valid-json|SQLITE/i);
+        assert.equal(result.outcome.threw, "malformed JSON", "stale CAS must trigger SQLite fail-closed error");
         assert.ok(result.log.some((entry) => entry.op === "batch.rollback"));
         assert.equal(queued.length, 0, "no queue rows may escape a CAS rollback");
         assert.equal(audit.length, 0, "no audit rows may escape a CAS rollback");
