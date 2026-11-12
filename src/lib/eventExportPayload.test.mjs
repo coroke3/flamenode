@@ -562,6 +562,42 @@ test("イベント公開APIは範囲外Unix時刻をnullまたは空文字へ閉
   assert.equal(legacy.time, "");
 });
 
+test("SEC-575 U01: warm v5 HIT compares large raw bodies without reparsing private relation DTOs", () => {
+  const longSnapshot = {
+    ...snapshot,
+    event: { ...snapshot.event, explanation: "public text ".repeat(48_000) },
+  };
+  const earlier = JSON.stringify(buildEventExportPayload(longSnapshot, 1_700_000_100, "scheduled"));
+  const fresh = JSON.stringify(buildEventExportPayload(longSnapshot, 1_700_000_200, "scheduled"));
+  assert.ok(earlier.length > 500_000, "exercise a realistic large payload");
+  const originalParse = JSON.parse;
+  try {
+    JSON.parse = () => { throw new Error("cache comparator must not parse multi-megabyte DTOs"); };
+    assert.equal(eventExportBodyMatchesFresh(earlier, fresh, "v5"), true,
+      "fresh public DTO differs only in generated_at and generated_at_unix");
+    assert.equal(eventExportBodyMatchesFresh(fresh, fresh, "v5"), true,
+      "byte-identical fast path remains available");
+    assert.equal(eventExportBodyMatchesFresh(earlier, fresh, "legacy"), false);
+  } finally {
+    JSON.parse = originalParse;
+  }
+  assert.equal(eventExportBodyMatchesFresh(
+    earlier, fresh.replace('"status":"public"', '"status":"private"'), "v5",
+  ), false, "a public/private relation transition cannot become a HIT");
+  assert.equal(eventExportBodyMatchesFresh(
+    earlier.replace('"generated_at_unix":1700000100', '"generated_at_unix":1.7000001e9'), fresh, "v5",
+  ), false, "noncanonical numeric encodings are rejected");
+  assert.equal(eventExportBodyMatchesFresh(
+    earlier.replace('"generated_at":"2023', '"generated_at":"2022'), fresh, "v5",
+  ), false, "ISO date must agree exactly with the unix provenance");
+  assert.equal(eventExportBodyMatchesFresh(
+    earlier.replace('"schema_version":5', '"schema_version":5,"schema_version":5'), fresh, "v5",
+  ), false, "duplicate JSON keys are rejected without parsing");
+  assert.equal(eventExportBodyMatchesFresh(
+    earlier.replace('"generated_at":', '"unknown":0,"generated_at":'), fresh, "v5",
+  ), false, "unknown or reordered provenance keys are rejected");
+});
+
 test("SEC-575: raw cache with duplicate JSON keys or noncanonical bytes cannot be a HIT", () => {
   const earlier = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_100, "scheduled"));
   const later = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_200, "scheduled"));
