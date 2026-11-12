@@ -33,6 +33,10 @@ import { buildPermissionGrantDm } from "@flamenode/server-core/video/permissionG
 import { loadVideoRebuildEventIds } from "@flamenode/server-core/video/rebuildEventIds";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { AppEnv } from "../../env.ts";
+import { sessionMiddleware } from "../../auth/session.ts";
+import { dbMiddleware } from "../../middleware/db.ts";
+import { costGuardMiddleware } from "../../middleware/costGuard.ts";
+import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
 
 type Ctx = Context<AppEnv>;
@@ -52,6 +56,74 @@ export type VideoCollaboratorHost = {
   writeGuard: MiddlewareHandler<AppEnv>;
   loadWakeHost: (c: Ctx) => Promise<QueueWakeHost>;
 };
+
+
+/**
+ * Unmounted future host wiring: origin (without D1) -> session -> identity/TOS
+ * -> CostGuard(edit_video) -> Drizzle. The active router does not import this.
+ * All denied requests receive no-store, including a failed origin/session.
+ *
+ * Exposed alongside the candidate routes so a later owner can validate and
+ * mount one reviewed guard stack instead of reassembling it ad hoc.
+ */
+export function createDefaultVideoCollaboratorHost(
+  options: { session?: MiddlewareHandler<AppEnv> } = {},
+): VideoCollaboratorHost {
+  const originOptions = (c: Ctx) => ({
+    loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
+    allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
+  });
+  const stack: MiddlewareHandler<AppEnv>[] = [
+    (c, next) => originGuardMiddleware(originOptions(c))(c, next),
+    options.session ?? (sessionMiddleware() as unknown as MiddlewareHandler<AppEnv>),
+    (c, next) => writeGuardMiddleware({
+      ...originOptions(c),
+      requiredRole: null,
+      // No approved Active X requirement for permission management itself.
+      // CostGuard must still execute before the handler, even for admins.
+    })(c, next),
+    costGuardMiddleware("edit_video") as MiddlewareHandler<AppEnv>,
+    dbMiddleware,
+  ];
+  return {
+    writeGuard: async (c, next) => {
+      c.header("Cache-Control", "private, no-store");
+      const run = async (index: number): Promise<Response | void> => {
+        if (index === stack.length) return next();
+        let inner: Response | void;
+        const own = await stack[index]!(c, async () => {
+          inner = await run(index + 1);
+        });
+        return own ?? inner;
+      };
+      return run(0);
+    },
+    loadWakeHost: async (c) => ({
+      readEnv: () => {
+        try {
+          return c.env as unknown as Readonly<Record<string, unknown>>;
+        } catch {
+          return null;
+        }
+      },
+      readWaitUntil: () => {
+        try {
+          const ctx = c.executionCtx;
+          return ctx.waitUntil.bind(ctx);
+        } catch {
+          return null;
+        }
+      },
+      readKv: () => {
+        try {
+          return c.env.KV ?? null;
+        } catch {
+          return null;
+        }
+      },
+    }),
+  };
+}
 
 function response(c: Ctx, status: Status, body: Result) {
   c.header("Cache-Control", "private, no-store");
