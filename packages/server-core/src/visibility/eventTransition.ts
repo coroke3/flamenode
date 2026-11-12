@@ -114,6 +114,15 @@ export async function preCommitEventVisibilityTransition(
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
+  // The first CAS write can succeed without invoking mutateOnConflict. Guard
+  // its initial snapshot too, or a later D1 rollback may release a prior
+  // writer's block after overwriting that writer's manifest token.
+  const existing = manifest.entities.find(
+    (entry) => entry.entity_type === "event" && entry.entity_id === input.eventId,
+  );
+  if (existing && existing.fence_token !== input.fenceToken) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
   const updated = upsertBlockedEntityInManifest(
     manifest,
     {
