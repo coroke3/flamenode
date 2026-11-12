@@ -2012,6 +2012,35 @@ test("SA-028 U03: throwing R2 getter denies public delete before D1 mutation; pr
   }
 });
 
+test("SA-028 U03: exact D1 Free 50-query group DELETE boundaries (private/public)", async () => {
+  for (const { publicGroup, max } of [{ publicGroup: false, max: 75 }, { publicGroup: true, max: 71 }]) {
+    const nStatements = publicGroup ? 4 : 3;
+    const budget = (n) => planD1AuditMutationBudget({ mutationStatementCount: nStatements,
+      mutationAssertionCount: nStatements, preMutationAssertionCount: 1,
+      auditEntryCount: n + 1, distinctActorCount: 1, callerQueryCount: 3 });
+    assert.equal(budget(max).totalQueryCount, 50);
+    assert.equal(budget(max + 1).totalQueryCount, 52);
+    for (const n of [max, max + 1]) {
+      const bucket = publicGroup ? stagedVisibilityManifestBucket() : null;
+      const h = stagedSa028Harness({ publicGroup, bucket });
+      try {
+        h.sqlite.exec("DELETE FROM event_group_events WHERE event_group_id = 'grp-delete'");
+        const insert = h.sqlite.prepare("INSERT INTO event_group_events VALUES ('grp-delete', ?, 'member', 10, 20)");
+        for (let i = 0; i < n; i++) insert.run(`event-${i}`);
+        const response = await h.remove();
+        const accepted = n === max;
+        assert.equal(response.status, accepted ? 200 : 503, `${publicGroup ? "public" : "private"}/${n}`);
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.equal(h.stats.batches, accepted ? 1 : 0);
+        assert.equal(h.count("audit_logs"), accepted ? n + 1 : 0);
+        assert.equal(h.count("static_rebuild_queue"), accepted ? 1 : 0);
+        assert.equal(h.count("event_groups"), accepted ? 0 : 1);
+        assert.equal(h.count("event_group_events"), accepted ? 0 : n);
+        if (bucket) assert.equal(bucket.puts > 0, accepted);
+      } finally { h.sqlite.close(); }
+    }
+  }
+});
 test("SA-028 U03 staged: public DELETE commits R2 block before the atomic D1 fence and delete", async () => {
   const bucket = stagedVisibilityManifestBucket();
   const h = stagedSa028Harness({ publicGroup: true, bucket });
