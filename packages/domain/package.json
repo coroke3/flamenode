@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./slots/reservationLimit": "./src/slots/reservationLimit.ts",
     "./slots/limits": "./src/slots/limits.ts",
+    "./slots/partGap": "./src/slots/partGap.ts",
     "./software/labels": "./src/software/labels.ts",
     "./announcements": "./src/announcements/index.ts",
     "./apiEndpoints": "./src/apiEndpoints/index.ts",

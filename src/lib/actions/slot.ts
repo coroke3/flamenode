@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
+import { isSlotOperatorOverrideRequested } from "@flamenode/contracts";
 import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { mutateWithAudit } from "@/lib/audit/mutate";
@@ -19,6 +20,7 @@ import {
   normalizeMaxSlotsPerVideo,
 } from "@/lib/slots/limits";
 import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
+import { slotPartGapSec } from "@/lib/slots/slotPartGap";
 import {
   canActAsSlotActor,
   resolveSlotGroupIdentity,
@@ -151,8 +153,8 @@ function eventDomainLimit(event: EventRow): number {
 }
 
 function formFlag(formData: FormData, name: string): boolean {
-  const value = String(formData.get(name) ?? "").trim().toLowerCase();
-  return value === "1" || value === "true" || value === "on";
+  // Keep CURRENT FormData stringification; delegate value semantics to the shared HTTP contract.
+  return isSlotOperatorOverrideRequested(String(formData.get(name) ?? ""));
 }
 
 async function resolveSlotOperatorOverride(args: {
@@ -226,11 +228,6 @@ function revalidateSlotViews(eventId: string): void {
   revalidatePath("/manage");
   revalidatePath(`/admin/events/${eventId}/slots`);
   revalidatePath("/dashboard");
-}
-
-function slotPartGapSec(event: EventRow): number {
-  const minutes = event.slot_part_gap_minutes ?? 15;
-  return Number.isFinite(minutes) && minutes >= 0 ? minutes * 60 : 15 * 60;
 }
 
 function reservationGroupScope(groupId: string, eventId: string) {
