@@ -59,6 +59,12 @@ export async function switchActiveX(
   }
 
   const reason = response.status === 401 ? "unauthenticated" : payload?.reason;
+  // Success and a guard denial are mutually exclusive. A malformed response
+  // must never navigate to onboarding AND dispatch ACTIVE_X_CHANGED_EVENT.
+  // Only an actual error response may carry a redirect reason.
+  if (response.ok && payload?.ok && reason) {
+    return { ok: false, message: FAILURE_MESSAGE };
+  }
   if (reason) redirectForGuardReason(navigate, reason, currentPath());
 
   if (!payload) {
