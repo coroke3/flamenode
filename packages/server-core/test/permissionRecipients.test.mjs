@@ -138,3 +138,20 @@ test("SA-082..084 notification links: all invalid or disabled recipients return 
     sqlite.close();
   }
 });
+
+
+test("SA-082..084 notification links: rejects oversized xids before JSON and D1 reads", async () => {
+  const { sqlite, db, reads } = makeDb();
+  try {
+    const excessive = Array.from({ length: 101 }, (_, i) => `recipient_${i}`);
+    await assert.rejects(
+      loadNotifiableRecipientLinks(db, excessive),
+      /notification_recipient_batch_limit_exceeded/,
+    );
+    assert.equal(reads.length, 0);
+    assert.deepEqual(await loadNotifiableRecipientLinks(db, excessive.slice(0, 100)), []);
+    assert.equal(reads.length, 1, "100-item legal batch uses one bounded D1 query");
+  } finally {
+    sqlite.close();
+  }
+});
