@@ -169,10 +169,12 @@ test("投稿候補はvideos snapshotから導出し候補履歴を二重書込�
 });
 
 test("FormData parserとUIはatomic上限の共通定数を使う", () => {
-  const memberParser = read("./memberInputs.ts");
+  const memberParserBridge = read("./memberInputs.ts");
+  const memberParser = read("../../../packages/domain/src/video/memberInputs.ts");
   const videoSchema = read("./videoFormSchema.ts");
   const videoForm = read("../../components/forms/VideoForm.tsx");
   const memberForm = read("../../components/forms/VideoMembersField.tsx");
+  assert.match(memberParserBridge, /from "@flamenode\/domain\/video"/);
   assert.match(
     memberParser,
     /\.max\(\s*MAX_VIDEO_MEMBERS/,
@@ -191,7 +193,11 @@ test("FormData parserとUIはatomic上限の共通定数を使う", () => {
 });
 
 test("主要行の監査は投影ではなく完全なbefore/after rowを保持する", () => {
-  assert.match(create, /after: \{ \.\.\.videoAfter \}/);
+  const insertPlan = read("../../../packages/server-core/src/video/freeVideoInsertPlan.ts");
+  assert.match(create, /buildFreeVideoInsertPlan\(db, videoAfter, userId\)/);
+  assert.match(create, /appendVideoAtomicWritePlan\([\s\S]*?buildFreeVideoInsertPlan/);
+  assert.match(insertPlan, /after: \{ \.\.\.videoAfter \}/);
+  assert.match(insertPlan, /strict: true/);
   assert.match(submit, /before: existingVideo \? \{ \.\.\.existingVideo \} : null/);
   assert.match(submit, /after: \{ \.\.\.videoAfter \}/);
   assert.match(update, /before: \{ \.\.\.plan\.target \}/);

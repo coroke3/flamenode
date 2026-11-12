@@ -6,13 +6,15 @@ import { eq } from "drizzle-orm";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { validateActiveXSnapshot } from "@/lib/auth/activeXSnapshotCore";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
-import { videos, events } from "@/lib/db/schema";
+import { events } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildFreeVideoSubmittedNotification } from "@/lib/notifications/templates/video";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
-import { topVideoVisibilityTargets } from "@/lib/staticRebuild/hooks";
+import { buildFreeVideoRebuildTargets } from "@flamenode/server-core/video/freeVideoRebuildTargets";
+import { buildFreeVideoRow } from "@flamenode/server-core/video/freeVideoRow";
+import { buildFreeVideoInsertPlan } from "@flamenode/server-core/video/freeVideoInsertPlan";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
@@ -177,42 +179,19 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     return { ok: false, message: CREATE_FREE_VIDEO_UNEXPECTED_ERROR_MESSAGE };
   }
   if (!iconResolved.ok) return iconResolved;
-  const videoAfter: typeof videos.$inferSelect = {
-    id: videoId,
-    primary_event_id: eventId,
-    creator_x_user_id: activeX,
-    submitted_by_user_id: userId,
-    collaboration_type: parsed.data.is_collab ? "collab" : "individual",
-    part: parsed.data.part?.trim() || null,
-    source_type: "youtube",
-    creator_display_name: parsed.data.display_name,
-    creator_display_name_yomi: null,
-    creator_icon_url: iconResolved.value.iconUrl,
-    creator_youtube_channel_url: snapshotYoutubeChannelUrl(
-      parsed.data.youtube_channel_url,
-    ),
-    creator_profile_text: parsed.data.profile_text ?? null,
-    creator_other_social_links: normalizeSocialLinksForStorage(
-      parsed.data.other_social_links,
-    ),
-    title: parsed.data.title,
-    music: parsed.data.music ?? null,
-    credit: parsed.data.credit ?? null,
-    music_reference_url: parsed.data.music_reference_url ?? null,
-    closing_comment: parsed.data.closing_comment ?? null,
-    youtube_video_id: youtubeId,
-    intro_comment: parsed.data.intro_comment ?? null,
-    highlights: parsed.data.highlights ?? null,
-    production_story: parsed.data.production_story ?? null,
-    visibility_status: "public",
-    scheduling_type: "manual",
-    scheduled_time: scheduledTime,
-    app_like_count: 0,
-    score: 0,
-    score_updated_at: null,
-    created_at: now,
-    updated_at: now,
-  };
+  const videoAfter = buildFreeVideoRow({
+    videoId,
+    eventId,
+    activeX,
+    userId,
+    data: parsed.data,
+    iconUrl: iconResolved.value.iconUrl,
+    creatorYoutubeChannelUrl: snapshotYoutubeChannelUrl(parsed.data.youtube_channel_url),
+    creatorOtherSocialLinks: normalizeSocialLinksForStorage(parsed.data.other_social_links),
+    youtubeId,
+    scheduledTime,
+    now,
+  });
 
   let staticRebuildEnqueued = false;
   const wakeSentKinds = new Set<QueueWakeKind>();
@@ -223,19 +202,10 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       buildUnslottedEventEligibilityAssertionPlan(db, eventId, now),
     );
 
-    plan.statements.push(db.insert(videos).values(videoAfter));
-    plan.expectedChanges.push(1);
-    plan.audits.push({
-      table_name: "videos",
-      target_id: videoId,
-      operation: "CREATE",
-      before: null,
-      after: { ...videoAfter },
-      actor_user_id: userId,
-      context: "video-save:create-free",
-      retention_class: "normal",
-      strict: true,
-    });
+    appendVideoAtomicWritePlan(
+      plan,
+      buildFreeVideoInsertPlan(db, videoAfter, userId),
+    );
 
     appendVideoAtomicWritePlan(
       plan,
@@ -324,51 +294,12 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       notificationWakeSource = "web";
     }
 
-    const queueTargets = [
-      {
-        targetType: "video" as const,
-        targetId: videoId,
-        reason: "video_create",
-        priority: "high" as const,
-        requestedByUserId: userId,
-      },
-      { targetType: "list_recent" as const, targetId: "global", reason: "video_create" },
-      { targetType: "list_popular" as const, targetId: "global", reason: "video_create" },
-      { targetType: "search_index" as const, targetId: "global", reason: "video_create" },
-      { targetType: "users_index" as const, targetId: "global", reason: "video_create" },
-      { targetType: "member_suggestions" as const, targetId: "global", reason: "video_create" },
-      ...topVideoVisibilityTargets("video_create"),
-      {
-        targetType: "random_video_pool" as const,
-        targetId: "global",
-        reason: "video_create",
-        priority: "normal" as const,
-        requestedByUserId: userId,
-      },
-      { targetType: "user" as const, targetId: activeX, reason: "video_create" },
-      ...(eventId
-        ? [
-            {
-              targetType: "event_base" as const,
-              targetId: eventId,
-              reason: "video_create",
-              priority: "high" as const,
-            },
-            {
-              targetType: "event_slots" as const,
-              targetId: eventId,
-              reason: "video_create",
-              priority: "high" as const,
-            },
-            {
-              targetType: "event_release" as const,
-              targetId: eventId,
-              reason: "video_create",
-              priority: "high" as const,
-            },
-          ]
-        : []),
-    ];
+    const queueTargets = buildFreeVideoRebuildTargets({
+      videoId,
+      userId,
+      activeXId: activeX,
+      eventId,
+    });
     const queue = await buildStaticRebuildQueueBatch(db, queueTargets);
     staticRebuildEnqueued = queue.statements.length > 0;
     plan.statements.push(...queue.statements);

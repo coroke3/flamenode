@@ -5,6 +5,9 @@ import {
   type DelimiterChar,
 } from "#utils/delimited";
 import { normalizeXId } from "#utils/xid";
+import { parseMemberChapterTime } from "@flamenode/domain/video";
+export { parseMemberChapterTime };
+
 import { MAX_VIDEO_MEMBERS } from "./atomicLimits.ts";
 
 export interface VideoMemberChapterInput {
@@ -36,16 +39,7 @@ export interface ParsedVideoMemberCsv {
   warnings: string[];
 }
 
-export function parseMemberChapterTime(raw: string): number | null {
-  const match = raw.trim().match(/^(\d{1,4}):([0-5]?\d)$/);
-  if (!match) return null;
-  const minutes = Number(match[1]);
-  const seconds = Number(match[2]);
-  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59) {
-    return null;
-  }
-  return minutes * 60 + seconds;
-}
+
 
 export function normalizeMemberChapterTime(raw: string): string | null {
   const parsed = parseMemberChapterTime(raw);
