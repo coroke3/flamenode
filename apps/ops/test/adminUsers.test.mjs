@@ -7,6 +7,7 @@ import {
   normalizeUsersTab, usersListPath, usersPageHref, createAdminUsersApi,
 } from "../.test-dist/apps/ops/src/api/adminUsers.js";
 import { AdminUserManagementTabs } from "../.test-dist/apps/ops/src/components/admin/AdminUserManagementTabs.js";
+import { AdminUserDetailContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
 import { permissionsPayload } from "../.test-dist/apps/ops/src/routes/admin/GlobalEditableFieldsPanel.js";
 
 const response = (status, body) => new Response(JSON.stringify(body), {
@@ -75,4 +76,55 @@ test("MIG-0731 U01: admin tab navigation preserves q/status only where CURRENT d
   assert.match(html, /view=xid&amp;q=A%26B/);
   assert.match(html, /view=permissions/);
   assert.match(html, /\/admin\/x-link-requests/);
+});
+
+const detailFixture = {
+  user: {
+    id: "u1", name: "<script>alert(1)</script>", email: null, emailVerified: null,
+    discord_id: "discord1", role: "user", can_create_events: 1,
+    is_tos_accepted: 1, terms_reaccept_required: 0, is_banned: 0,
+    is_notification_enabled: 1, active_x_user_id: "x1", created_at: 1700000000000,
+  },
+  xIds: [{ id: "x1", x_name: "creator", icon_url: null, approval_status: "approved" }],
+  recentVideos: [{ id: "v1", title: "Video One", status: "public", created_at: 1700000000 }],
+  recentByOperator: [], recentOnUser: [],
+  likeCount: 2, bookmarkCount: 3, linkRequests: [],
+};
+
+test("MIG-0731 U02a: detail GET uses authorized no-store API and rejects malformed responses", async () => {
+  const seen = [];
+  const api = createAdminUsersApi(async (path, init) => {
+    seen.push({ path, init });
+    return response(200, detailFixture);
+  });
+  const result = await api.getUserDetail("u/1");
+  assert.equal(result.status, "ok");
+  assert.equal(result.data.user.id, "u1");
+  assert.equal(seen[0].path, "/api/admin-read/users/u%2F1");
+  assert.equal(seen[0].init.credentials, "same-origin");
+  assert.equal(seen[0].init.cache, "no-store");
+  assert.equal(seen[0].init.method, "GET");
+  const malformed = createAdminUsersApi(async () => response(200, { user: { id: "u1" } }));
+  assert.deepEqual(await malformed.getUserDetail("u1"), { status: "unavailable" });
+  const forbidden = createAdminUsersApi(async () => response(403, { redirect: "https://evil.example" }));
+  assert.deepEqual(await forbidden.getUserDetail("u1"), { status: "forbidden" });
+  const anonymous = createAdminUsersApi(async () => response(401, {}));
+  assert.deepEqual(await anonymous.getUserDetail("u1"), { status: "anonymous" });
+  const notFound = createAdminUsersApi(async () => response(404, {}));
+  assert.deepEqual(await notFound.getUserDetail("u1"), { status: "notFound" });
+  assert.deepEqual(await api.getUserDetail(""), { status: "notFound" });
+  assert.equal(seen.length, 1, "empty ID must not fetch");
+});
+
+test("MIG-0731 U02a: detail sections render private data only as React-escaped text", () => {
+  const html = renderToStaticMarkup(React.createElement(AdminUserDetailContent, { data: detailFixture }));
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script>/);
+  for (const label of ["IDの主体整理", "権限と状態", "連携 X ID", "投稿作品", "連携申請履歴",
+    "このユーザーへの管理操作", "このユーザーが実行した管理操作"]) {
+    assert.ok(html.includes(label), label);
+  }
+  assert.match(html, /Active X ライク: 2/);
+  assert.match(html, /\/user\/x1/);
+  assert.match(html, /編集（移行準備中）/);
 });
