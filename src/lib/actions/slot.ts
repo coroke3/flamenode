@@ -934,14 +934,18 @@ export async function extendOwnSlotGroup(
     const groupId = anchor.reservation_group_id || generateId("sgrp");
     const targetXId = identity.targetXId ?? slotXUserId;
     const displayName = groupRows[0].display_name;
-    const candidatePatch = {
-      reserved_by_user_id: guard.user.id,
-      x_user_id: targetXId,
-      reserved_x_id_snapshot: groupSnapshotXId,
-      display_name: displayName,
-      reservation_group_id: groupId,
-      status: "reserved" as const,
-    };
+    // The adjacent available slot uses the same canonical reservation patch
+    // as SA-065; group membership/adoption stays guarded by the D1 CAS below.
+    const candidateMutations = buildSlotReserveMutationPlan({
+      rows: [candidate],
+      actorUserId: guard.user.id,
+      identity: {
+        canonicalXUserId: targetXId,
+        snapshotXId: groupSnapshotXId,
+      },
+      displayName,
+      groupId,
+    });
     await commitSlotMutationPlan({
       db,
       mutations: [
@@ -950,11 +954,7 @@ export async function extendOwnSlotGroup(
           { reservation_group_id: groupId },
           identity,
         ),
-        {
-          rows: [candidate],
-          patch: candidatePatch,
-          statusGuard: "available",
-        },
+        ...candidateMutations,
       ],
       eventId: anchor.event_id,
       actorUserId: guard.user.id,
@@ -1091,14 +1091,16 @@ export async function mergeOwnSlotGroups(
     const targetXId = identity.targetXId ?? slotXUserId;
     const inheritedSnapshot =
       reservedRows[0]?.reserved_x_id_snapshot ?? left.reserved_x_id_snapshot;
-    const gapPatch = {
-      reserved_by_user_id: guard.user.id,
-      x_user_id: targetXId,
-      reserved_x_id_snapshot: inheritedSnapshot,
-      display_name: parsed.data.display_name,
-      reservation_group_id: groupId,
-      status: "reserved" as const,
-    };
+    const gapMutations = buildSlotReserveMutationPlan({
+      rows: [gap],
+      actorUserId: guard.user.id,
+      identity: {
+        canonicalXUserId: targetXId,
+        snapshotXId: inheritedSnapshot,
+      },
+      displayName: parsed.data.display_name,
+      groupId,
+    });
     await commitSlotMutationPlan({
       db,
       mutations: [
@@ -1107,11 +1109,7 @@ export async function mergeOwnSlotGroups(
           { display_name: parsed.data.display_name, reservation_group_id: groupId },
           identity,
         ),
-        {
-          rows: [gap],
-          patch: gapPatch,
-          statusGuard: "available",
-        },
+        ...gapMutations,
       ],
       eventId: gap.event_id,
       actorUserId: guard.user.id,

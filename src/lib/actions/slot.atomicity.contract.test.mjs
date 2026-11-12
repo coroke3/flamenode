@@ -117,7 +117,10 @@ test("extendOwnSlotGroupは既存groupのsnapshotを継承する", () => {
     source.match(
       /export async function extendOwnSlotGroup[\s\S]*?(?=export async function mergeOwnSlotGroups)/,
     )?.[0] ?? "";
-  assert.match(extendBlock, /reserved_x_id_snapshot: groupSnapshotXId/);
+  assert.match(extendBlock, /snapshotXId: groupSnapshotXId/);
+  assert.match(extendBlock, /const candidateMutations = buildSlotReserveMutationPlan/);
+  assert.match(extendBlock, /\.\.\.candidateMutations/);
+  assert.match(reservePlannerSource, /reserved_x_id_snapshot: input\.identity\.snapshotXId/);
 });
 
 test("mergeOwnSlotGroupsはx_user_id混在を拒否しidentityでgapへtargetXIdを書く", () => {
@@ -127,7 +130,10 @@ test("mergeOwnSlotGroupsはx_user_id混在を拒否しidentityでgapへtargetXId
   assert.match(mergeBlock, /left\.x_user_id !== right\.x_user_id/);
   assert.match(mergeBlock, /resolveBoundedGroupIdentity/);
   assert.match(mergeBlock, /buildRegroupMutations\(\s*reservedRows/);
-  assert.match(mergeBlock, /x_user_id:\s*targetXId/);
+  assert.match(mergeBlock, /canonicalXUserId:\s*targetXId/);
+  assert.match(mergeBlock, /snapshotXId:\s*inheritedSnapshot/);
+  assert.match(mergeBlock, /\.\.\.gapMutations/);
+  assert.match(reservePlannerSource, /x_user_id: input\.identity\.canonicalXUserId/);
 });
 
 test("extendOwnSlotGroupはidentityでx_user_idを継承し別Xへの書換えを拒否する", () => {
@@ -138,7 +144,9 @@ test("extendOwnSlotGroupはidentityでx_user_idを継承し別Xへの書換え�
   assert.match(extendBlock, /groupXUserId !== slotXUserId/);
   assert.match(extendBlock, /identity\.targetXId/);
   assert.match(extendBlock, /buildRegroupMutations\(\s*groupRows/);
-  assert.match(extendBlock, /x_user_id:\s*targetXId/);
+  assert.match(extendBlock, /canonicalXUserId:\s*targetXId/);
+  assert.match(extendBlock, /\.\.\.candidateMutations/);
+  assert.match(reservePlannerSource, /x_user_id: input\.identity\.canonicalXUserId/);
 });
 
 test("20枠reserveは1 bulk mutation+queue+通知+完全auditがD1上限内", () => {

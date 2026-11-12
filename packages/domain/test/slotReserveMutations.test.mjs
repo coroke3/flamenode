@@ -56,3 +56,43 @@ test("MIG-0657 U01d: frozen identity and rows remain unmodified after planning",
   assert.equal(plan.patch.x_user_id, "existing");
   assert.equal(plan.patch.reserved_x_id_snapshot, "snapshot");
 });
+
+test("MIG-0657 U01e: adjacent extend uses the same available-CAS patch and original group snapshot", () => {
+  const candidate = Object.freeze({ id: "candidate", status: "available" });
+  const plans = canonical({
+    rows: [candidate],
+    actorUserId: "actor",
+    identity: { canonicalXUserId: "linked-x", snapshotXId: "old-x-snapshot" },
+    displayName: "same-owner",
+    groupId: "existing-group",
+  });
+  assert.equal(plans.length, 1);
+  assert.deepEqual(plans[0].rows, [candidate]);
+  assert.equal(plans[0].statusGuard, "available");
+  assert.equal(plans[0].patch.reserved_x_id_snapshot, "old-x-snapshot");
+  assert.equal(plans[0].patch.x_user_id, "linked-x");
+  assert.equal(plans[0].patch.reservation_group_id, "existing-group");
+  assert.equal(candidate.status, "available");
+});
+
+test("MIG-0657 U01e: merge gap inherits old reservation snapshot and updates only the gap", () => {
+  const gap = Object.freeze({ id: "gap", status: "available" });
+  const plans = canonical({
+    rows: [gap],
+    actorUserId: "merging-actor",
+    identity: { canonicalXUserId: null, snapshotXId: "pending-original" },
+    displayName: "merged-name",
+    groupId: "new-group",
+  });
+  assert.equal(plans.length, 1);
+  assert.deepEqual(plans[0].rows.map(row => row.id), ["gap"]);
+  assert.deepEqual(plans[0].patch, {
+    reserved_by_user_id: "merging-actor",
+    x_user_id: null,
+    reserved_x_id_snapshot: "pending-original",
+    display_name: "merged-name",
+    reservation_group_id: "new-group",
+    status: "reserved",
+  });
+  assert.equal(plans[0].statusGuard, "available");
+});
