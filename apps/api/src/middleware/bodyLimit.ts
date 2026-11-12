@@ -43,7 +43,14 @@ export function limitXIdActionBody(action: XIdWriteAction): MiddlewareHandler<Ap
     }
 
     let readBytes = 0;
-    const reader = c.req.raw.clone().body?.getReader();
+    // A previous middleware may have consumed the request body. Request.clone()
+    // then throws synchronously; fail closed with the normal sanitized response.
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      reader = c.req.raw.clone().body?.getReader();
+    } catch {
+      return deny("body_unreadable", 400);
+    }
     if (reader) {
       try {
         while (true) {
