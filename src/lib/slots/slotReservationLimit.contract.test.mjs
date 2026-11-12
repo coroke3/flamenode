@@ -3,6 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const slotAction = fs.readFileSync("src/lib/actions/slot.ts", "utf8");
+const regroupCanonical = fs.readFileSync(
+  "packages/domain/src/slots/regroupMutations.ts",
+  "utf8",
+);
+const regroupBridge = fs.readFileSync(
+  "src/lib/slots/slotRegroupMutations.ts",
+  "utf8",
+);
 const limitGuard = fs.readFileSync(
   "src/lib/slots/slotReservationLimitGuard.ts",
   "utf8",
@@ -44,8 +52,17 @@ test("migration keeps existing events backward compatible and indexes the hot pa
 });
 
 
-test("extend and merge bulk regroup instead of one UPDATE per slot", () => {
-  assert.match(slotAction, /function buildRegroupMutations/);
-  assert.match(slotAction, /...buildRegroupMutations\(\s*groupRows/);
-  assert.match(slotAction, /...buildRegroupMutations\(\s*reservedRows/);
+test("extend and merge use shared bounded domain regroup plans, not one UPDATE per slot", () => {
+  assert.match(
+    slotAction,
+    /import \{ buildRegroupMutations \} from "@\/lib\/slots\/slotRegroupMutations"/,
+  );
+  assert.match(
+    regroupBridge,
+    /export \{ buildRegroupMutations \} from "@flamenode\/domain\/slots\/regroupMutations"/,
+  );
+  assert.match(regroupCanonical, /export function buildRegroupMutations/);
+  assert.match(regroupCanonical, /statusGuard: "reserved"/);
+  assert.match(slotAction, /\.\.\.buildRegroupMutations\(\s*groupRows/);
+  assert.match(slotAction, /\.\.\.buildRegroupMutations\(\s*reservedRows/);
 });
