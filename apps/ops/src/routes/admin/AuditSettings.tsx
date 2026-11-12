@@ -19,14 +19,14 @@ export function retentionShortened(before:Settings,after:Settings):boolean {
 export function validAuditSettings(value:Settings):boolean {
   return FIELDS.every(({key,min,max})=>Number.isSafeInteger(value[key])&&value[key]>=min&&value[key]<=max);
 }
-export function AuditSettings({fetchFn=fetch}:{fetchFn?:OpsFetch}):React.ReactElement {
+export function AuditSettings({fetchFn=fetch,readOnly=true}:{fetchFn?:OpsFetch;readOnly?:boolean}):React.ReactElement {
   const api=React.useMemo(()=>createAdminAuditApi(fetchFn),[fetchFn]);
   const [refreshKey,setRefreshKey]=React.useState(0);
   const state=useApiResult(signal=>api.settings(signal),"audit-settings",refreshKey);
-  return <AuditSettingsContent state={state} api={api} refresh={()=>setRefreshKey(v=>v+1)}/>;
+  return <AuditSettingsContent state={state} api={api} refresh={()=>setRefreshKey(v=>v+1)} readOnly={readOnly}/>;
 }
-export function AuditSettingsContent({state,api,refresh}:{
-  state:OpsDataState<AdminAuditSettingsResponse>;api:AuditAuditApi;refresh:()=>void;
+export function AuditSettingsContent({state,api,refresh,readOnly=true}:{
+  state:OpsDataState<AdminAuditSettingsResponse>;api:AuditAuditApi;refresh:()=>void;readOnly?:boolean;
 }):React.ReactElement {
   return <section className="fn-public-container fn-page" aria-label="監査ログ設定">
     <header className="fn-page-head"><h1>監査ログ設定</h1>
@@ -36,8 +36,15 @@ export function AuditSettingsContent({state,api,refresh}:{
       :state.status==="anonymous"?<p role="alert">ログインが必要です。</p>
       :state.status==="forbidden"?<p role="alert">権限がありません。</p>
       :state.status!=="ok"?<p role="alert">監査設定の取得に失敗しました。</p>
-      :<AuditSettingsForm key={JSON.stringify(state.data.settings)} initial={state.data.settings}
-        api={api} onSaved={refresh}/>}
+      :readOnly
+        ? <section className="fn-panel" aria-label="現在の監査設定">
+            <p role="status">設定変更は移行準備中です。現在値のみ表示します。</p>
+            <dl>{FIELDS.map(({key,label,unit})=><React.Fragment key={key}>
+              <dt>{label} ({key})</dt><dd>{state.data.settings[key].toLocaleString()} {unit}</dd>
+            </React.Fragment>)}</dl>
+          </section>
+        : <AuditSettingsForm key={JSON.stringify(state.data.settings)} initial={state.data.settings}
+            api={api} onSaved={refresh}/>}
   </section>;
 }
 export function AuditSettingsForm({initial,api,onSaved}:{initial:Settings;api:AuditAuditApi;onSaved:()=>void}):React.ReactElement {
