@@ -2,6 +2,8 @@ import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import type { OnboardingResponse } from "@flamenode/contracts";
 import type { PersonalApi } from "../api/personal.js";
+import { createTermsApi, type TermsApi } from "../api/terms.js";
+import { OnboardingTermsForm } from "./onboardingTermsForm.js";
 import { ResultView, useApiResult } from "./guard.js";
 import { onboardingHref, sanitizeOnboardingNext } from "./next.js";
 import { AppLink, useDocumentTitle } from "./ui/AppLink.js";
@@ -29,18 +31,43 @@ function renderMarkdown(markdown: string): React.ReactNode[] {
 
 /**
  * CURRENT app/(auth)/onboarding/page.tsx, read-only part (MIG-0701): guard next is the sanitized self href.
- * Not here (MIG-0702): the terms agree form, the X ID request forms and maybeMarkOnboardingComplete.
+ * U02 (MIG-0710) adds the terms form; the X ID request forms remain MIG-0709 and maybeMarkOnboardingComplete is U03.
  * Class names that were CSS-module members in CURRENT are plain `onb-*` classes until the stylesheet port lands.
  */
-export function Onboarding({ api }: { api: PersonalApi }): React.ReactElement {
+export function Onboarding({ api, termsApi: suppliedTermsApi }: {
+  api: PersonalApi;
+  /** Optional injection for U03 read-only/one-write parity tests. */
+  termsApi?: TermsApi;
+}): React.ReactElement {
   useDocumentTitle("初期設定");
   const [params] = useSearchParams();
   const next = sanitizeOnboardingNext(params.get("next"), "/dashboard");
   const selfHref = onboardingHref(next);
-  const state = useApiResult(api, "onboarding", (a, signal) => a.getOnboarding(signal));
+  const [refreshKey, setRefreshKey] = React.useState(0);
+  const defaultTermsApi = React.useMemo(() => createTermsApi(), []);
+  const termsApi = suppliedTermsApi ?? defaultTermsApi;
+  const state = useApiResult(api, "onboarding", (a, signal) => a.getOnboarding(signal), refreshKey);
+  const completionSent = React.useRef(false);
+  React.useEffect(() => {
+    // CURRENT's page marks completion after reading the onboarding snapshot.
+    // The POST is an idempotent auxiliary marker, never a UI/auth signal.
+    if (state.status !== "ok" || completionSent.current) return;
+    completionSent.current = true; // StrictMode and refreshKey must not double-submit.
+    void termsApi.complete().catch(() => {
+      // CURRENT ignores completion-marker errors; keep the read-only page visible.
+    });
+  }, [state.status, termsApi]);
   return (
     <ResultView state={state} next={selfHref}>
-      {(data) => <OnboardingView data={data} next={next} started={params.get("start") === "1"} />}
+      {(data) => (
+        <OnboardingView
+          data={data}
+          next={next}
+          started={params.get("start") === "1"}
+          termsApi={termsApi}
+          onTermsAccepted={() => setRefreshKey((v) => v + 1)}
+        />
+      )}
     </ResultView>
   );
 }
@@ -49,10 +76,14 @@ export function OnboardingView({
   data,
   next,
   started,
+  termsApi,
+  onTermsAccepted,
 }: {
   data: OnboardingResponse;
   next: string;
   started: boolean;
+  termsApi: ReturnType<typeof createTermsApi>;
+  onTermsAccepted: () => void;
 }): React.ReactElement {
   const { state, rules } = data;
   const selfHref = onboardingHref(next);
@@ -84,7 +115,12 @@ export function OnboardingView({
           <h2 id="ob-step-terms" className="fn-sr-only">
             利用規約への同意
           </h2>
-          <TermsReader versionLabel={versionLabel} termsBody={renderMarkdown(body)} />
+          <OnboardingTermsForm
+            versionLabel={versionLabel}
+            termsBody={renderMarkdown(body)}
+            api={termsApi}
+            onAccepted={onTermsAccepted}
+          />
         </section>
       </div>
     );
@@ -269,36 +305,3 @@ export function OnboardingView({
   );
 }
 
-/** Display half of CURRENT OnboardingTermsForm (full-text toggle + version line); the agree checkbox/submit is MIG-0702. */
-function TermsReader({
-  versionLabel,
-  termsBody,
-}: {
-  versionLabel: string;
-  termsBody: React.ReactNode;
-}): React.ReactElement {
-  const [expanded, setExpanded] = React.useState(false);
-  return (
-    <div className="onb-termsForm">
-      <button
-        type="button"
-        className="fn-btn fn-btn-ghost fn-btn-sm onb-termsToggle"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((v) => !v)}
-      >
-        {expanded ? "利用規約全文を閉じる" : "利用規約全文を表示"}
-      </button>
-
-      {expanded ? (
-        <article className="onb-termsBody" aria-label="利用規約全文">
-          {termsBody}
-        </article>
-      ) : null}
-
-      <p className="onb-termsVersion" role="status">
-        同意対象バージョン: {versionLabel}
-      </p>
-      {/* MIG-0702: agree checkbox + "同意して続ける" (acceptOnboardingTerms) */}
-    </div>
-  );
-}
