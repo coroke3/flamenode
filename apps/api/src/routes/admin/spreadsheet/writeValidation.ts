@@ -503,6 +503,17 @@ export function buildSpreadsheetAuditedDelete(
  */
 export const SPREADSHEET_IMPORT_PREVIEW_MAX_ROWS = 500;
 export const SPREADSHEET_IMPORT_APPLY_MAX_ROWS = 7;
+
+/**
+ * Composite primary keys may contain NUL bytes: concatenating components
+ * with "\\0" is ambiguous (["a\\0b","c"] and ["a","b\\0c"] collide).
+ * Encode sorted [column, value] pairs instead so duplicate detection, D1
+ * snapshot lookup and UPSERT planning share one unambiguous identity.
+ */
+function spreadsheetImportPrimaryKeyFingerprint(pk: Record<string, string>): string {
+  return JSON.stringify(Object.entries(pk).sort(([a], [b]) => a.localeCompare(b)));
+}
+
 export interface PreparedSpreadsheetImportRow {
   row: Record<string, string | null>;
   pk: Record<string, string>;
@@ -530,7 +541,7 @@ export function prepareSpreadsheetImportMutationRows(
         if (!isSpreadsheetColumnEditable(ctx.def, key)) throw new Error("column_not_editable");
       }
       const pk = primaryKeyFromSpreadsheetRow(row, ctx.primaryKeys);
-      const fingerprint = Object.entries(pk).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v).join("\0");
+      const fingerprint = spreadsheetImportPrimaryKeyFingerprint(pk);
       if (seenPks.has(fingerprint)) throw new Error("duplicate_primary_key");
       seenPks.add(fingerprint);
       if (Object.keys(row).length === 0) throw new Error("empty_row");
@@ -677,8 +688,7 @@ export async function fetchSpreadsheetExistingImportRows(
   const keys: Record<string, string>[] = [];
   for (const entry of prepared.preparedRows) {
     const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, entry.pk);
-    const fingerprint = Object.entries(pk).sort(([a], [b]) => a.localeCompare(b))
-      .map(([, value]) => value).join("\0");
+    const fingerprint = spreadsheetImportPrimaryKeyFingerprint(pk);
     if (seen.has(fingerprint)) throw new Error("duplicate_primary_key");
     seen.add(fingerprint);
     keys.push(pk);
@@ -700,8 +710,7 @@ export async function fetchSpreadsheetExistingImportRows(
       if (value == null || String(value).trim() === "") throw new Error("invalid_snapshot");
       rawPk[key] = String(value);
     }
-    const fingerprint = Object.entries(rawPk).sort(([a], [b]) => a.localeCompare(b))
-      .map(([, value]) => value).join("\0");
+    const fingerprint = spreadsheetImportPrimaryKeyFingerprint(rawPk);
     if (!seen.has(fingerprint) || out.has(fingerprint)) throw new Error("invalid_snapshot");
     for (const column of ctx.columns) {
       if (!Object.prototype.hasOwnProperty.call(row, column.name) || row[column.name] === undefined) {
