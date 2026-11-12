@@ -466,3 +466,47 @@ test("MIG-0731 U04: permission policy writes fail closed on 403 without changing
     status: "ok", data: { ok: false, message: "Invalid payload" },
   });
 });
+
+
+test("MIG-0731 U04: linked-X detail uses CURRENT cards, active marker, approval tones, escaped labels", () => {
+  const data = { ...detailFixture,
+    xIds: [
+      { id: "x/active", x_name: "<unsafe>", icon_url: null, approval_status: "approved" },
+      { id: "x-pending", x_name: "Pending", icon_url: null, approval_status: "pending" },
+      { id: "x-rejected", x_name: "Rejected", icon_url: null, approval_status: "rejected" },
+    ],
+    user: { ...detailFixture.user, active_x_user_id: "x/active" },
+  };
+  const html = renderToStaticMarkup(React.createElement(AdminUserDetailContent, { data }));
+  assert.match(html, /class="fn-console-xid-grid"/);
+  assert.match(html, /class="fn-console-xid-card fn-console-xid-card--active"/);
+  assert.match(html, /class="fn-badge fn-badge-soft">Active<\/span>/);
+  assert.match(html, /class="fn-badge fn-badge-accent">承認<\/span>/);
+  assert.match(html, /class="fn-badge fn-badge-warning">待ち<\/span>/);
+  assert.match(html, /class="fn-badge fn-badge-danger">却下<\/span>/);
+  assert.match(html, /href="\/user\/x%2Factive"/);
+  assert.match(html, /&lt;unsafe&gt;/);
+  assert.doesNotMatch(html, /<unsafe>/);
+  assert.equal((html.match(/class="fn-console-xid-card/g) ?? []).length, 3);
+});
+
+test("MIG-0731 U04: linked-X request table preserves CURRENT status badges, scrolling and escaping", () => {
+  const data = { ...detailFixture, linkRequests: [
+    { id: "r1", requested_x_id: "x&y", link_type: "merge", target_x_user_id: null, status: "rejected", requested_at: 1700000000 },
+    { id: "r2", requested_x_id: "alias", link_type: "alias", target_x_user_id: "<x>", status: "approved", requested_at: 1700000000 },
+    { id: "r3", requested_x_id: null, link_type: null, target_x_user_id: null, status: null, requested_at: 1700000000 },
+  ] };
+  const html = renderToStaticMarkup(React.createElement(AdminUserDetailContent, { data }));
+  assert.match(html, /class="fn-hscroll-surface"/);
+  assert.match(html, /class="fn-table-scroll fn-scroll-affordance"/);
+  assert.match(html, /横にスクロールして全体を表示できます/);
+  assert.match(html, /class="fn-badge fn-badge-danger">merge<\/span>/);
+  assert.match(html, /class="fn-badge fn-badge-warning">alias<\/span>/);
+  assert.match(html, /class="fn-badge fn-badge-soft">new<\/span>/);
+  assert.match(html, /class="fn-badge fn-badge-danger">rejected<\/span>/);
+  assert.match(html, /class="fn-badge fn-badge-accent">approved<\/span>/);
+  assert.match(html, /class="fn-badge fn-badge-warning">pending<\/span>/);
+  assert.match(html, /&lt;x&gt;/);
+  assert.doesNotMatch(html, /<x>/);
+  assert.match(html, /@x&amp;y/);
+});

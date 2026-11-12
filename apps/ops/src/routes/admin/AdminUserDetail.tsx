@@ -6,6 +6,7 @@ import type {
 import { createAdminUsersApi } from "../../api/adminUsers.js";
 import { useApiResult } from "../useApiResult.js";
 import { NotFoundView } from "../NotFoundView.js";
+import { FnTable } from "../../components/shared/FnTable.js";
 
 const api = createAdminUsersApi();
 
@@ -85,13 +86,27 @@ export function AdminUserDetailContent({ data }: { data: AdminUserDetailResponse
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
       <h2>連携 X ID ({xIds.length})</h2>
       {xIds.length === 0 ? <p className="fn-muted">未連携です。</p> :
-        <ul>{xIds.map((x, i) => <li key={x.id + ":" + i}>
-          <strong>{x.x_name}</strong> @{x.id}
-          {user.active_x_user_id === x.id ? " / Active" : ""}
-          {" / " + (x.approval_status ?? "未設定")}
-          {" "}
-          <a href={"/user/" + encodeURIComponent(x.id)}>Xプロフィールを確認</a>
-        </li>)}</ul>}
+        <div className="fn-console-xid-grid">{xIds.map((x, i) =>
+          <section key={x.id + "-user-xid-" + i}
+            className={"fn-console-xid-card" + (user.active_x_user_id === x.id
+              ? " fn-console-xid-card--active" : "")}>
+            <div><strong>{x.x_name}</strong>
+              <div className="fn-muted fn-text-sm">@{x.id}</div>
+            </div>
+            <div className="fn-console-badge-row">
+              {user.active_x_user_id === x.id
+                ? <span className="fn-badge fn-badge-soft">Active</span> : null}
+              {x.approval_status === "approved"
+                ? <span className="fn-badge fn-badge-accent">承認</span>
+                : x.approval_status === "pending"
+                  ? <span className="fn-badge fn-badge-warning">待ち</span>
+                  : <span className="fn-badge fn-badge-danger">却下</span>}
+            </div>
+            <a className="fn-btn fn-btn-ghost fn-btn-sm" href={"/user/" + encodeURIComponent(x.id)}>
+              Xプロフィールを確認
+            </a>
+          </section>)}
+        </div>}
     </section>
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
       <h2>投稿作品 ({recentVideos.length})</h2>
@@ -103,14 +118,20 @@ export function AdminUserDetailContent({ data }: { data: AdminUserDetailResponse
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
       <h2>X ID 連携申請履歴 ({linkRequests.length})</h2>
       {linkRequests.length === 0 ? <p className="fn-muted">申請はありません。</p> :
-        <div style={{ overflowX: "auto" }}><table className="fn-table">
+        <FnTable>
           <thead><tr><th>申請 X ID</th><th>種別</th><th>target</th><th>状態</th><th>申請日時</th></tr></thead>
           <tbody>{linkRequests.map((r) => <tr key={r.id}>
             <td>{r.requested_x_id ? "@" + r.requested_x_id : "—"}</td>
-            <td>{r.link_type ?? "new"}</td><td>{r.target_x_user_id ?? "—"}</td>
-            <td>{r.status ?? "pending"}</td><td>{dateText(r.requested_at)}</td>
+            <td><span className={"fn-badge " + (r.link_type === "merge"
+              ? "fn-badge-danger" : r.link_type === "alias"
+                ? "fn-badge-warning" : "fn-badge-soft")}>{r.link_type ?? "new"}</span></td>
+            <td className="fn-td-mono">{r.target_x_user_id ?? "—"}</td>
+            <td><span className={"fn-badge " + (r.status === "approved"
+              ? "fn-badge-accent" : r.status === "rejected"
+                ? "fn-badge-danger" : "fn-badge-warning")}>{r.status ?? "pending"}</span></td>
+            <td className="fn-muted fn-td-muted">{dateText(r.requested_at)}</td>
           </tr>)}</tbody>
-        </table></div>}
+        </FnTable>
     </section>
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
       <h2>このユーザーへの管理操作 (target_id 一致)</h2>
