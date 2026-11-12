@@ -815,12 +815,11 @@ test("U02 upsert existing-row lookup binds composite PKs in one D1 SELECT and re
 });
 
 
-test("MIG-0638: NUL-containing composite keys stay distinct through 1-D1-read UPSERT preflight", async () => {
-  const { DatabaseSync } = await import("node:sqlite");
+
+test("MIG-0638: embedded NUL input fails closed before D1 binds can truncate values", async () => {
   const {
-    prepareSpreadsheetImportMutationRows,
+    normalizeSpreadsheetPrimaryKey, prepareSpreadsheetImportMutationRows,
     fetchSpreadsheetExistingImportRows,
-    planSpreadsheetImportMutations,
   } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
   const columns = [
     { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
@@ -833,22 +832,54 @@ test("MIG-0638: NUL-containing composite keys stay distinct through 1-D1-read UP
     columnNames: columns.map(column => column.name),
     primaryKeys: ["video_id", "event_id"],
   };
-  // Both are legitimate, different SQLite composite TEXT keys. A legacy
-  // components.join("\\0") key would be identical: "c\\0a\\0b".
+  // The old NUL-separated fingerprint could not distinguish these PKs.
+  const pairA = { video_id: "a\0b", event_id: "c", notes: "first" };
+  const pairB = { video_id: "b", event_id: "c\0a", notes: "second" };
+  assert.equal(["c", "a\0b"].join("\0"), ["c\0a", "b"].join("\0"));
+  assert.throws(() => normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pairA), /invalid_row/);
+  assert.throws(() => validateSpreadsheetInputValues(ctx, { notes: "visible\0lost" }), /invalid_row/);
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [pairA, pairB]);
+  assert.deepEqual(prepared.errors, [
+    { index: 0, message: "invalid_row" },
+    { index: 1, message: "invalid_row" },
+  ]);
+  assert.equal(prepared.preparedRows.length, 0);
+  let reads = 0;
+  const db = { prepare() { reads++; throw new Error("DB must not be read"); } };
+  await assert.rejects(() => fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1), /invalid_row/);
+  assert.equal(reads, 0, "invalid NUL PK must never reach the D1 binding");
+});
+
+test("MIG-0638: distinct normal composite keys retain 1-D1-read UPSERT before-images", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const {
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+    planSpreadsheetImportMutations,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true), columns,
+    columnNames: columns.map(column => column.name),
+    primaryKeys: ["video_id", "event_id"],
+  };
   const rows = [
-    { video_id: "a\0b", event_id: "c", notes: "new-a" },
-    { video_id: "b", event_id: "c\0a", notes: "new-b" },
+    { video_id: "a-b", event_id: "c", notes: "new-a" },
+    { video_id: "b", event_id: "c-a", notes: "new-b" },
   ];
   const prepared = prepareSpreadsheetImportMutationRows(ctx, rows);
   assert.deepEqual(prepared.errors, []);
   assert.equal(prepared.preparedRows.length, 2);
   const [keyA, keyB] = prepared.preparedRows.map(x => x.fingerprint);
-  assert.notEqual(keyA, keyB, "NUL-containing PK components must not collide");
+  assert.notEqual(keyA, keyB);
   const sqlite = new DatabaseSync(":memory:");
   try {
     sqlite.exec("CREATE TABLE video_events (video_id TEXT, event_id TEXT, notes TEXT, PRIMARY KEY (video_id, event_id))");
-    sqlite.prepare("INSERT INTO video_events VALUES (?, ?, ?)").run("a\0b", "c", "old-a");
-    sqlite.prepare("INSERT INTO video_events VALUES (?, ?, ?)").run("b", "c\0a", "old-b");
+    sqlite.prepare("INSERT INTO video_events VALUES (?, ?, ?)").run("a-b", "c", "old-a");
+    sqlite.prepare("INSERT INTO video_events VALUES (?, ?, ?)").run("b", "c-a", "old-b");
     let reads = 0;
     const db = {
       prepare(sql) {
@@ -859,8 +890,8 @@ test("MIG-0638: NUL-containing composite keys stay distinct through 1-D1-read UP
       },
     };
     const existing = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
-    assert.equal(reads, 1, "bounded pre-read still performs one D1 query");
-    assert.equal(existing.size, 2, "each distinct row must have its own before-image");
+    assert.equal(reads, 1);
+    assert.equal(existing.size, 2);
     assert.equal(existing.get(keyA)?.notes, "old-a");
     assert.equal(existing.get(keyB)?.notes, "old-b");
     const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator-1");
