@@ -6,6 +6,14 @@ import { MAX_ATOMIC_SLOT_ROWS } from "../slots/atomicLimits.ts";
 import { MAX_SLOTS_PER_VIDEO } from "../slots/limits.ts";
 
 const source = await readFile(new URL("./slot.ts", import.meta.url), "utf8");
+const releasePlannerSource = await readFile(
+  new URL("../../../packages/domain/src/slots/releaseMutations.ts", import.meta.url),
+  "utf8",
+);
+const releaseBridgeSource = await readFile(
+  new URL("../slots/slotReleaseMutations.ts", import.meta.url),
+  "utf8",
+);
 const uiSource = await readFile(
   new URL("../../components/event/SlotGrid.tsx", import.meta.url),
   "utf8",
@@ -64,7 +72,10 @@ test("複数枠機能を維持し、業務上限はmax_slots_per_videoを正本�
   assert.match(source, /eventDomainLimit/);
   assert.doesNotMatch(source, /max_consecutive_slots_per_entry/);
   assert.match(source, /reservation_group_id/);
-  assert.match(source, /buildReleaseGroupDecisions/);
+  // The D1/authorization adapter now delegates pure group planning to domain.
+  assert.match(source, /return buildSlotReleaseMutationPlan\\(groupRows, anchorId, generateId\\("sgrp"\\)\\)/);
+  assert.match(releasePlannerSource, /buildReleaseGroupDecisions/);
+  assert.match(releaseBridgeSource, /@flamenode\\/domain\\/slots\\/releaseMutations/);
   assert.match(source, /extendOwnSlotGroup/);
   assert.match(source, /mergeOwnSlotGroups/);
   assert.match(uiSource, /maxSlotsPerVideo/);
@@ -73,7 +84,9 @@ test("複数枠機能を維持し、業務上限はmax_slots_per_videoを正本�
 });
 
 test("releaseはreserved_x_id_snapshotをクリアする", () => {
-  assert.match(source, /reserved_x_id_snapshot: null/);
+  assert.match(releasePlannerSource, /reserved_x_id_snapshot: null/);
+  assert.match(releasePlannerSource, /status: "available"/);
+  assert.match(source, /return buildSlotReleaseMutationPlan/);
 });
 
 test("reserveSlotはresolveReservationXIdentityを使う", () => {
