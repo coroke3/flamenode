@@ -72,7 +72,7 @@ test("利用者slot操作は共通atomic plannerだけで書き込む", () => {
 });
 
 test("slot CASはversionedSlotWhereでid+version+updated_at+snapshotを比較する", () => {
-  assert.match(source, /from "@\/lib\/slots\/versionedPredicate"/);
+  assert.match(source, /from "@flamenode\/server-core\/slots\/versionedPredicate"/);
   assert.match(source, /versionedSlotWhere\(/);
   assert.match(source, /version: sql`\$\{slots\.version\} \+ 1`/);
   assert.match(source, /const plan = buildSlotAtomicAuditPlan\(args\.mutations, now\)/);

@@ -33,7 +33,7 @@ import { buildSlotReserveMutationPlan } from "@/lib/slots/slotReserveMutations";
 import { assertBoundedSlotGroupIntegrity } from "@/lib/slots/slotBoundedGroup";
 import { buildSlotAtomicAuditPlan } from "@/lib/slots/slotAtomicAuditPlan";
 import { resolveReservationXIdentity } from "@/lib/slots/reservationIdentity";
-import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
+import { versionedSlotWhere } from "@flamenode/server-core/slots/versionedPredicate";
 import {
   resolveSlotReservationSubject,
   subjectsEqual,
