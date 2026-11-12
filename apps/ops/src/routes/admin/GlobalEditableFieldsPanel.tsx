@@ -60,7 +60,7 @@ export function acquirePermissionSaveLock(ref: { current: boolean }): boolean {
 }
 export function GlobalEditableFieldsPanel({
   settings, onSaved, onAccessRevoked,
-}: { settings: AdminPermissionSettings; onSaved?: () => void; onAccessRevoked: () => void }): React.ReactElement {
+}: { settings: AdminPermissionSettings; onSaved?: () => void; onAccessRevoked: (destination: "/entry" | "/dashboard") => void }): React.ReactElement {
   const [defaultFields, setDefaultFields] = React.useState(() => fieldsSetFromCsv(settings.default_editable_fields));
   const [upcomingFields, setUpcomingFields] = React.useState(() => fieldsSetFromCsv(settings.upcoming_editable_fields));
   const [busy, setBusy] = React.useState(false);
@@ -84,11 +84,11 @@ export function GlobalEditableFieldsPanel({
     try {
       const result = await writes.save(permissionsPayload(defaultFields, upcomingFields));
       if (result.status === "anonymous") {
-        window.location.assign("/entry");
+        onAccessRevoked("/entry");
         return;
       }
       if (result.status === "forbidden") {
-        onAccessRevoked();
+        onAccessRevoked("/dashboard");
         return;
       }
       if (result.status !== "ok" || !isValidPermissionSaveResponse(result.data)) {

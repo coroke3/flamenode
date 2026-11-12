@@ -119,7 +119,7 @@ export function XIdRows({ rows }: { rows: AdminXUserRow[] }): React.ReactElement
 function UserListContent({ data, onSaved, onAccessRevoked }: {
   data: AdminUsersResponse;
   onSaved: () => void;
-  onAccessRevoked: () => void;
+  onAccessRevoked: (destination: "/entry" | "/dashboard") => void;
 }): React.ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
   const view = normalizeUsersTab(searchParams.get("view"));
@@ -179,7 +179,7 @@ function UserListContent({ data, onSaved, onAccessRevoked }: {
 export function AdminUsers(): React.ReactElement {
   const [params] = useSearchParams();
   const [refreshKey, setRefreshKey] = React.useState(0);
-  const [writeDenied, setWriteDenied] = React.useState(false);
+  const [writeRedirect, setWriteRedirect] = React.useState<"/entry" | "/dashboard" | null>(null);
   const queryKey = params.toString();
   const query = {
     view: params.get("view"), q: params.get("q"),
@@ -193,13 +193,13 @@ export function AdminUsers(): React.ReactElement {
     "admin-users:" + queryKey, refreshKey,
   );
   React.useEffect(() => {
-    if (writeDenied) { window.location.assign("/dashboard"); return; }
+    if (writeRedirect) { window.location.assign(writeRedirect); return; }
     if (normalizeUsersTab(params.get("view")) === "links") window.location.assign("/admin/x-link-requests");
     if (result.status === "anonymous") window.location.assign("/entry");
     if (result.status === "forbidden") window.location.assign(result.redirect || "/dashboard");
-  }, [result, params, writeDenied]);
+  }, [result, params, writeRedirect]);
   // Hide the entire private users/permissions response on a denied policy write.
-  if (writeDenied) return <section role="alert">管理権限を確認できませんでした。</section>;
+  if (writeRedirect) return <section role="alert">管理画面へのアクセスが終了しました。</section>;
   if (result.status === "loading" || normalizeUsersTab(params.get("view")) === "links" ||
       result.status === "anonymous" || result.status === "forbidden") {
     return <div role="status" aria-busy="true">読み込み中...</div>;
@@ -213,5 +213,5 @@ export function AdminUsers(): React.ReactElement {
   }
   return <UserListContent data={result.data}
     onSaved={() => setRefreshKey((x) => x + 1)}
-    onAccessRevoked={() => setWriteDenied(true)} />;
+    onAccessRevoked={setWriteRedirect} />;
 }

@@ -26,7 +26,7 @@ export function acquireAdminUserWriteLock(lock: { current: boolean }): boolean {
 export function AdminUserEditContent({ data, onSaved, onAccessRevoked }: {
   data: AdminUserEditResponse;
   onSaved: () => void;
-  onAccessRevoked: () => void;
+  onAccessRevoked: (destination: "/entry" | "/dashboard") => void;
 }): React.ReactElement {
   const { user, xUserIds, truncated } = data;
   const [busy, setBusy] = React.useState(false);
@@ -44,11 +44,11 @@ export function AdminUserEditContent({ data, onSaved, onAccessRevoked }: {
     try {
       const result = await action();
       if (result.status === "anonymous") {
-        window.location.assign("/entry");
+        onAccessRevoked("/entry");
         return;
       }
       if (result.status === "forbidden") {
-        onAccessRevoked();
+        onAccessRevoked("/dashboard");
         return;
       }
       if (result.status !== "ok" || !result.data.ok) {
@@ -166,16 +166,16 @@ export function AdminUserEditContent({ data, onSaved, onAccessRevoked }: {
 export function AdminUserEdit(): React.ReactElement {
   const { id } = useParams<"id">();
   const [refreshKey, setRefreshKey] = React.useState(0);
-  const [writeDenied, setWriteDenied] = React.useState(false);
+  const [writeRedirect, setWriteRedirect] = React.useState<"/entry" | "/dashboard" | null>(null);
   const result = useApiResult((signal) => readApi.getUserEdit(id ?? "", signal),
     "admin-user-edit:" + (id ?? ""), refreshKey);
   React.useEffect(() => {
-    if (writeDenied) { window.location.assign("/dashboard"); return; }
+    if (writeRedirect) { window.location.assign(writeRedirect); return; }
     if (result.status === "anonymous") window.location.assign("/entry");
     if (result.status === "forbidden") window.location.assign(result.redirect || "/dashboard");
-  }, [result, writeDenied]);
+  }, [result, writeRedirect]);
   // A denied admin write removes the private editor before redirect completes.
-  if (writeDenied) return <section role="alert">管理権限を確認できませんでした。</section>;
+  if (writeRedirect) return <section role="alert">管理画面へのアクセスが終了しました。</section>;
   if (!id || result.status === "notFound") return <NotFoundView />;
   if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden") {
     return <div role="status" aria-busy="true">読み込み中...</div>;
@@ -186,5 +186,5 @@ export function AdminUserEdit(): React.ReactElement {
   </section>;
   return <AdminUserEditContent data={result.data}
     onSaved={() => setRefreshKey((x) => x + 1)}
-    onAccessRevoked={() => setWriteDenied(true)} />;
+    onAccessRevoked={setWriteRedirect} />;
 }
