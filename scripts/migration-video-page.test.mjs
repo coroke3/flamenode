@@ -72,6 +72,13 @@ function build(videos, over = {}) {
     fs.writeFileSync(path.join(dir, key), JSON.stringify(envelope(key, p, o)));
     keys.push(key);
   }
+  for (const [eventId, eventPayload] of over.events ?? []) {
+    const eventKey = `snapshot/event-detail/${eventId}.json`;
+    fs.mkdirSync(path.dirname(path.join(dir, eventKey)), { recursive: true });
+    fs.writeFileSync(path.join(dir, eventKey), JSON.stringify(envelope(eventKey, eventPayload)));
+    keys.push(eventKey);
+  }
+  for (const id of over.manifestOnlyEventIds ?? []) keys.push(`snapshot/event-detail/${id}.json`);
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ schemaVersion: 1, generation: "g1", allowedKeys: keys, blockedKeys: over.blocked ?? [] }));
   const env = { ...process.env, FLAMENODE_SNAPSHOT_DIR: dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(dir, "manifest.json"), FLAMENODE_SNAPSHOT_GENERATION: "g1" };
   try {
@@ -121,7 +128,17 @@ test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body f
     assert.match(text(main), /公開 \d{4}\/\d{2}\/\d{2}/);
     assert.match(text(main), /曲名 \/ 歌手/);
     assert.match(text(main), /After Effects, Blender/);
-    assert.equal(main.querySelectorAll(".vd-mrow").length, 2);
+    // T10: member-present visual fixture must preserve public-profile privacy and chapter ownership.
+    const memberRows = [...main.querySelectorAll(".vd-mrow")];
+    assert.equal(memberRows.length, 2, "both published members render");
+    const memberOne = memberRows.find((row) => text(row).includes("メンバー1"));
+    const memberTwo = memberRows.find((row) => text(row).includes("メンバー2"));
+    assert.ok(memberOne, "public-profile member is visible");
+    assert.ok(memberTwo, "member without a published profile is still credited");
+    assert.ok(memberOne.querySelector('a[href="/user/member_one"]'), "public profile remains navigable");
+    assert.equal(memberTwo.querySelector('a[href^="/user/"]'), null, "private profile is never linked");
+    assert.match(text(memberOne), /映像/);
+    assert.match(text(memberTwo), /音/);
     assert.deepEqual([...doc.querySelectorAll(".vd-chapter-time")].map(text), ["0:24", "1:10"]);
     assert.equal(doc.querySelectorAll(".vd-related a").length, 12, "CURRENT shows 12 related");
     assert.match(text(main.querySelector(".vd-like-count")), /7/);
@@ -145,6 +162,7 @@ test("T01: a video id equal to a fixed route or asset path fails the build (rout
 test("T02: non-public, tampered or blocked snapshots fail the build instead of publishing", { skip: skipUi }, () => {
   for (const [name, videos, over] of [
     ["private video", [["vid1", payload({ video: { visibility_status: "private" } })]], {}],
+    ["valid-digest mismatched video id", [["vid1", payload({ video: { id: "different-video" } })]], {}],
     ["hash mismatch", [["vid1", payload(), { sha256: "a".repeat(64) }]], {}],
     ["nonpublic envelope", [["vid1", payload(), { visibility: "private" }]], {}],
     ["blocked key", [["vid1", payload()]], { blocked: [keyOf("vid1")] }],
@@ -156,6 +174,7 @@ test("T02: non-public, tampered or blocked snapshots fail the build instead of p
         assert.equal(fs.existsSync(path.join(r.out, "AAAAAAAAA01/index.html")), false);
       } else {
         assert.notEqual(r.error, null, `${name} must fail`);
+        if (name === "valid-digest mismatched video id") assert.match(r.error, /Video snapshot|VIDEO_DETAIL_INVALID/);
       }
     } finally {
       clean(r);
@@ -182,4 +201,163 @@ test("snapshot env: a partly set env fails the build instead of falling back to 
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
   }
+});
+
+const playlistEvent = (visibility = "public", playlistId = "PLabcdefghijklmnop", id = "ev1") => ({
+  event: { id, visibility_status: visibility, youtube_playlist_id: playlistId },
+});
+const playlistLinks = (r) => [...dom(r, "AAAAAAAAA01/index.html").querySelectorAll('main a[href^="https://www.youtube.com/playlist?list="]')]
+  .map((a) => a.getAttribute("href"));
+
+test("T08: future scheduled public primary event exposes the verified playlist; past video does not", { skip: skipUi }, () => {
+  for (const [scheduledTime, expected] of [
+    [NOW + 7 * D, ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    [String(NOW + 7 * D), ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    [NOW - 7 * D, []],
+  ]) {
+    const r = build([["vid1", payload({ video: { scheduled_time: scheduledTime } })]], {
+      events: [["ev1", playlistEvent()]],
+    });
+    try {
+      assert.equal(r.error, null, r.error ?? "");
+      assert.deepEqual(playlistLinks(r), expected);
+      assert.deepEqual(
+        [...dom(r, "vid1/index.html").querySelectorAll('main a[href^="https://www.youtube.com/playlist?list="]')].map((a) => a.getAttribute("href")),
+        expected,
+        "canonical and internal-id alias display the same playlist",
+      );
+      assert.equal(page.includes("loadPublicEventYoutubePlaylistIdR2Only"), true, "CURRENT uses verified event-base R2 reader");
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09: missing, non-public, mismatched and invalid event playlist never leaks a link", { skip: skipUi }, () => {
+  for (const [label, events] of [
+    ["missing", []],
+    ["manifest lists missing object", []],
+    ["non-public", [["ev1", playlistEvent("private")]]],
+    ["wrong event ID", [["ev1", playlistEvent("public", "PLabcdefghijklmnop", "another")]]],
+    ["invalid playlist ID", [["ev1", playlistEvent("public", "INVALID!")]]],
+  ]) {
+    const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], {
+      events,
+      manifestOnlyEventIds: label === "manifest lists missing object" ? ["ev1"] : [],
+    });
+    try {
+      assert.equal(r.error, null, `${label}: ${r.error ?? ""}`);
+      assert.deepEqual(playlistLinks(r), [], label);
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09: the playlist gate uses the normalized public video fields", { skip: skipUi }, () => {
+  for (const [label, fields, expected] of [
+    ["trimmed primary ID", { primary_event_id: " ev1 ", scheduled_time: NOW + 7 * D },
+      ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    ["invalid schedule", { primary_event_id: "ev1", scheduled_time: "not-a-date" }, []],
+    ["missing primary ID", { primary_event_id: "   ", scheduled_time: NOW + 7 * D }, []],
+    ["numeric primary ID is absent", { primary_event_id: 12345, scheduled_time: NOW + 7 * D }, []],
+    ["array primary ID is absent", { primary_event_id: ["ev1"], scheduled_time: NOW + 7 * D }, []],
+    ["object primary ID is absent", { primary_event_id: { id: "ev1" }, scheduled_time: NOW + 7 * D }, []],
+    ["array schedule is invalid", { primary_event_id: "ev1", scheduled_time: [NOW + 7 * D] }, []],
+    ["object schedule is invalid", { primary_event_id: "ev1", scheduled_time: { value: NOW + 7 * D } }, []],
+    ["nonfinite schedule", { primary_event_id: "ev1", scheduled_time: "Infinity" }, []],
+    ["past float schedule", { primary_event_id: "ev1", scheduled_time: NOW - 0.4 }, []],
+    ["same-second past fractional schedule", { primary_event_id: "ev1", scheduled_time: NOW - 0.0001 }, []],
+    ["fractional timestamp in current second is not scheduled", { primary_event_id: "ev1", scheduled_time: NOW + 0.0001 }, []],
+    ["fractional timestamp beyond the next second is scheduled", { primary_event_id: "ev1", scheduled_time: NOW + 7 * D + 0.25 },
+      ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    ["overflow timestamp is not a release", { primary_event_id: "ev1", scheduled_time: 1e16 }, []],
+  ]) {
+    const r = build([["vid1", payload({ video: fields })]], { events: [["ev1", playlistEvent()]] });
+    try {
+      assert.equal(r.error, null, `${label}: ${r.error ?? ""}`);
+      assert.deepEqual(playlistLinks(r), expected, label);
+    } finally { clean(r); }
+  }
+});
+
+test("T09: a fallback display event must never inherit an unmatched primary-event playlist", { skip: skipUi }, () => {
+  for (const primaryEventId of ["unavailable-primary-event", null]) {
+    const r = build([["vid1", payload({ video: {
+      primary_event_id: primaryEventId,
+      scheduled_time: NOW + 7 * D,
+    } })]], { events: [["ev1", playlistEvent()]] });
+    try {
+      assert.equal(r.error, null, r.error ?? "");
+      assert.deepEqual(playlistLinks(r), [], "only the video-selected public primary event may supply a playlist");
+      assert.equal(dom(r, "AAAAAAAAA01/index.html").querySelector('a[href="/event/ev1"]') !== null, true,
+        "the display fallback remains available without a playlist");
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09: an allowed event snapshot with invalid UTF-8 or malformed JSON fails closed", { skip: skipUi }, () => {
+  const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], {
+    events: [["ev1", playlistEvent()]],
+  });
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    const eventKey = "snapshot/event-detail/ev1.json";
+    const file = path.join(r.dir, eventKey);
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "fn-vid-invalid-"));
+    try {
+      // Source corruption must not be mistaken for an optional missing or withdrawn public event.
+      for (const bytes of [Buffer.from([0xc3, 0x28]), Buffer.from("{broken-json")]) {
+        fs.writeFileSync(file, bytes);
+        let error = null;
+        try {
+          execFileSync(process.execPath, [path.resolve("node_modules/astro/astro.js"), "build", "--outDir", out], {
+            cwd: path.resolve("apps/site"),
+            env: {
+              ...process.env, FLAMENODE_SNAPSHOT_DIR: r.dir,
+              FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(r.dir, "manifest.json"),
+              FLAMENODE_SNAPSHOT_GENERATION: "g1",
+            },
+            stdio: "pipe",
+          });
+        } catch (e) { error = `${e.stdout ?? ""}${e.stderr ?? ""}`; }
+        assert.notEqual(error, null, "corrupt event payload cannot publish a partial page");
+        assert.match(error, /snapshot|JSON|UTF-8|INVALID_JSON/i);
+      }
+    } finally { fs.rmSync(out, { recursive: true, force: true }); }
+  } finally { clean(r); }
+});
+
+test("T09: a manifest-allowed but digest-tampered event snapshot fails closed", { skip: skipUi }, () => {
+  const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], {
+    events: [["ev1", playlistEvent()]],
+    // Tampering is modeled by overwriting an already verified event object in its own snapshot.
+  });
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    const eventKey = "snapshot/event-detail/ev1.json";
+    const file = path.join(r.dir, eventKey);
+    const envelopeData = JSON.parse(fs.readFileSync(file, "utf-8"));
+    envelopeData.payload.event.youtube_playlist_id = "DIFFERENT_PLAYLIST_ID";
+    fs.writeFileSync(file, JSON.stringify(envelopeData));
+    // A fresh build with the tampered envelope must reject the snapshot rather than expose stale data.
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "fn-vid-tamper-"));
+    try {
+      let error = null;
+      try {
+        execFileSync(process.execPath, [path.resolve("node_modules/astro/astro.js"), "build", "--outDir", out], {
+          cwd: path.resolve("apps/site"),
+          env: {
+            ...process.env, FLAMENODE_SNAPSHOT_DIR: r.dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(r.dir, "manifest.json"),
+            FLAMENODE_SNAPSHOT_GENERATION: "g1",
+          },
+          stdio: "pipe",
+        });
+      } catch (e) { error = `${e.stdout ?? ""}${e.stderr ?? ""}`; }
+      assert.notEqual(error, null);
+      assert.match(error, /digest|hash|checksum|sha256|snapshot/i);
+    } finally { fs.rmSync(out, { recursive: true, force: true }); }
+  } finally { clean(r); }
 });
