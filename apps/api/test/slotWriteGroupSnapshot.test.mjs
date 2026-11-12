@@ -85,6 +85,44 @@ test("SA-063 U02c-2a: JS whitespace-only groups cannot displace real group at LI
     }finally{db.close();}
   }
 });
+test("SA-063: SQL blank-key exclusion matches every BMP ECMAScript String.trim whitespace",()=>{
+  const blanks=[];
+  for(let cp=0;cp<=0xffff;cp++){
+    const ch=String.fromCharCode(cp);
+    if(ch.trim()==="")blanks.push(ch);
+  }
+  assert.equal(blanks.length,25,"JavaScript trim whitespace baseline changed; review SQL code-point set");
+  for(const blank of blanks){
+    const db=setup([
+      row("solo",{group:blank}),
+      ...["b1","b2","b3","b4","b5"].map(id=>row(id,{group:blank})),
+      row("group1",{group:"live\u3000"}),
+      row("group2",{group:"live\u3000"}),
+    ]);
+    try{
+      const r=read(db,["solo","group1"]);
+      assert.deepEqual(JSON.parse(r.grouped_slots_json).map(x=>x.id).sort(),
+        ["group1","group2"],"unexpected group query member for U+"+blank.codePointAt(0).toString(16));
+      const selected=selectBatchReservedReleaseSnapshot("e1",["solo","group1"],r);
+      assert.equal(selected.ok,true,"U+"+blank.codePointAt(0).toString(16));
+      if(selected.ok)assert.deepEqual(selected.rows.map(x=>x.id).sort(),
+        ["group1","group2","solo"]);
+    }finally{db.close();}
+  }
+});
+test("SA-063: non-trimmable Unicode controls remain raw group identities",()=>{
+  // These are not JavaScript trim whitespace. Treating them as solo would
+  // silently drop another member of a real reservation group.
+  for(const raw of ["\u0085","\u180e","\u200b"]){
+    assert.notEqual(raw.trim(),"");
+    const db=setup([row("a",{group:raw}),row("b",{group:raw})]);
+    try{
+      const result=plan(db,["a"]);
+      assert.equal(result.ok,true,"U+"+raw.codePointAt(0).toString(16));
+      if(result.ok)assert.deepEqual(result.rows.map(x=>x.id).sort(),["a","b"]);
+    }finally{db.close();}
+  }
+});
 test("SA-063 U02c-2a: mixed owners or nonreserved group member rejected",()=>{
   for(const b of [row("b",{group:"g",owner:"u2"}),row("b",{group:"g",status:"submitted"})]){
     const db=setup([row("a",{group:"g"}),b]);
