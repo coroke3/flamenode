@@ -13,6 +13,7 @@ import {
   releaseBlockedEntityInManifest,
   upsertBlockedEntityInManifest,
   type PublicVisibilityBlockedEntity,
+  type PublicVisibilityBlockedEntitiesManifest,
 } from "./manifestCore.ts";
 
 type EventVisibilityStatus = typeof events.$inferSelect["visibility_status"];
@@ -192,20 +193,20 @@ export async function preCommitEventVisibilityFenceRename(
 ): Promise<EventVisibilityFenceRenamePrecommit> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
+  // Moving a fence copies the SAME token to a new ID. A duplicate R2 key
+  // carrying another token must never be silently overwritten by the copy.
+  const hasForeignRenameToken = (snapshot: PublicVisibilityBlockedEntitiesManifest) =>
+    snapshot.entities.some(
+      (entry) => entry.entity_type === "event" &&
+        (entry.entity_id === input.oldEventId || entry.entity_id === input.newEventId) &&
+        entry.fence_token !== input.fenceToken,
+    );
   const previousOldEntry =
     manifest.entities.find(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.oldEventId,
     ) ?? null;
-  const currentNewEntry =
-    manifest.entities.find(
-      (entry) =>
-        entry.entity_type === "event" && entry.entity_id === input.newEventId,
-    ) ?? null;
-  if (
-    (previousOldEntry && previousOldEntry.fence_token !== input.fenceToken) ||
-    (currentNewEntry && currentNewEntry.fence_token !== input.fenceToken)
-  ) {
+   if (hasForeignRenameToken(manifest)) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
 
@@ -240,14 +241,7 @@ export async function preCommitEventVisibilityFenceRename(
         (entry) =>
           entry.entity_type === "event" && entry.entity_id === input.oldEventId,
       ) ?? null;
-      const current = latest.entities.find(
-        (entry) =>
-          entry.entity_type === "event" && entry.entity_id === input.newEventId,
-      );
-      if (
-        (previous && previous.fence_token !== input.fenceToken) ||
-        (current && current.fence_token !== input.fenceToken)
-      ) {
+       if (hasForeignRenameToken(latest)) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       const withoutNew = {
@@ -283,6 +277,7 @@ export async function preCommitEventVisibilityFenceRename(
   if (
     !confirmedEntry ||
     confirmedEntry.fence_token !== input.fenceToken ||
+    hasForeignRenameToken(confirmed) ||
     previousOldEntry !== null &&
     !confirmed.entities.some(
       (entry) =>
@@ -376,7 +371,13 @@ export async function compensateEventVisibilityFenceRenameOnD1Failure(
         entry.entity_type === "event" &&
         entry.entity_id === input.newEventId,
     );
-    if (!currentNewEntry || currentNewEntry.fence_token !== input.fenceToken) {
+    if (
+      !currentNewEntry || currentNewEntry.fence_token !== input.fenceToken ||
+      manifest.entities.some((entry) =>
+        entry.entity_type === "event" &&
+        entry.entity_id === input.newEventId &&
+        entry.fence_token !== input.fenceToken)
+    ) {
       return;
     }
     const withoutNew = {
@@ -431,7 +432,13 @@ export async function compensateEventVisibilityRenameTombstoneOnD1Failure(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.eventId,
     );
-    if (!currentEntry || currentEntry.fence_token !== input.fenceToken) {
+    if (
+      !currentEntry || currentEntry.fence_token !== input.fenceToken ||
+      manifest.entities.some((entry) =>
+        entry.entity_type === "event" &&
+        entry.entity_id === input.eventId &&
+        entry.fence_token !== input.fenceToken)
+    ) {
       return;
     }
     const withoutCurrent = {
