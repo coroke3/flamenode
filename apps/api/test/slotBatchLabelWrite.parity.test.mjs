@@ -1,3 +1,4 @@
+import { canonicalSlotAuditSnapshotJson } from "./helpers/slotAuditSnapshot.mjs";
 // MIG-0656 U02c-0: unmounted Hono+node:sqlite SA-064 audit/queue/CAS proof.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -61,7 +62,7 @@ function setup({ actor = admin, staff = false, settings = "normal", onFirst = un
     c.set("sessionState", actor ? "user" : "none");
     c.set("db", drizzle(c.env.DB, { schema }));
     if (actor) c.set("actorSnapshotJsonById",
-      { [actor.id]: JSON.stringify({id:actor.id,role:actor.role}) });
+      { [actor.id]: canonicalSlotAuditSnapshotJson(sqlite, actor.id) });
     await next();
   });
   app.route("/api/manage/events/:id/slots", slotBatchLabelWriteRoutes);
@@ -293,4 +294,18 @@ test("MIG-0656 U04t: CostGuard change between middleware and label scope denies 
       assert.equal(s.stats.batches,0,"no D1 mutation batch when scoped policy already denies");
     }finally{s.sqlite.close();}
   }
+});
+
+
+test("MIG-0656 U04: fake writeGuard uses the actual canonical 5-field audit actor snapshot", () => {
+  const s = setup();
+  try {
+    assert.deepEqual(JSON.parse(canonicalSlotAuditSnapshotJson(s.sqlite, "admin-1")), {
+      discord_id: "d-1",
+      discord_name: "Admin",
+      x_user_id: null,
+      x_name: null,
+      icon_url: null,
+    });
+  } finally { s.sqlite.close(); }
 });

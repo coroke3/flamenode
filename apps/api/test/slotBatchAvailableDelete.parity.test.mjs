@@ -1,3 +1,4 @@
+import { canonicalSlotAuditSnapshotJson } from "./helpers/slotAuditSnapshot.mjs";
 // MIG-0656 U02c-1: unmounted SA-062 Hono+SQLite D1 parity.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -56,7 +57,7 @@ function setup({actor=admin,staff=false,settings="normal",onFirst}={}) {
     c.set("user",actor);
     c.set("sessionState",actor?"user":"none");
     c.set("db",drizzle(c.env.DB,{schema}));
-    if(actor)c.set("actorSnapshotJsonById",{[actor.id]:JSON.stringify({id:actor.id,role:actor.role})});
+    if(actor)c.set("actorSnapshotJsonById",{[actor.id]:canonicalSlotAuditSnapshotJson(sqlite, actor.id)});
     await next();
   });
   app.route("/api/manage/events/:id/slots",slotBatchAvailableDeleteRoutes);

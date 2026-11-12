@@ -1,3 +1,4 @@
+import { canonicalSlotAuditSnapshotJson } from "./helpers/slotAuditSnapshot.mjs";
 // MIG-0656 U03p: SA-058 one-chunk Hono + SQLite D1 parity, TEST-ONLY mounted.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -46,7 +47,7 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst,
     c.set("sessionState",parentSessionState ?? (actor?"user":"none"));
     c.set("db",drizzle(c.env.DB,{schema}));
     if(actor)c.set("actorSnapshotJsonById",{
-      [actor.id]:JSON.stringify({id:actor.id,role:actor.role}),
+      [actor.id]:canonicalSlotAuditSnapshotJson(sqlite, actor.id),
     });
     await next();
   });

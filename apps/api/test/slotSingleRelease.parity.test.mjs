@@ -1,3 +1,4 @@
+import { canonicalSlotAuditSnapshotJson } from "./helpers/slotAuditSnapshot.mjs";
 // MIG-0656 U02c-5d: UNMOUNTED SA-060 Hono / SQLite D1 parity candidate.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -79,7 +80,7 @@ function setup({ actor = ADMIN, staff = false, count = 20,
     c.set("db", drizzle(c.env.DB, { schema }));
     if (actor) {
       c.set("actorSnapshotJsonById", {
-        [actor.id]: JSON.stringify({ id: actor.id, role: actor.role }),
+        [actor.id]: canonicalSlotAuditSnapshotJson(sqlite, actor.id),
       });
     }
     await next();

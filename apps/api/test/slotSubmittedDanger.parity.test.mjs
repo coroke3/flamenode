@@ -1,3 +1,4 @@
+import { canonicalSlotAuditSnapshotJson } from "./helpers/slotAuditSnapshot.mjs";
 // MIG-0656 U03f: real Hono candidate + SQLite D1 batch, still UNMOUNTED.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -100,7 +101,7 @@ function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
     c.set("sessionState",parentSessionState ?? (actor?"user":"none"));
     c.set("db",drizzle(c.env.DB,{schema}));
     if(actor)c.set("actorSnapshotJsonById",{
-      [actor.id]:JSON.stringify({id:actor.id,role:actor.role}),
+      [actor.id]:canonicalSlotAuditSnapshotJson(sqlite, actor.id),
     });
     await next();
   });
