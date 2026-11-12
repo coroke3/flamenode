@@ -90,7 +90,7 @@ export function createDefaultVideoCollaboratorHost(
       c.header("Cache-Control", "private, no-store");
       const run = async (index: number): Promise<Response | void> => {
         if (index === stack.length) return next();
-        let inner: Response | void;
+        let inner: Response | void = undefined;
         const own = await stack[index]!(c, async () => {
           inner = await run(index + 1);
         });
