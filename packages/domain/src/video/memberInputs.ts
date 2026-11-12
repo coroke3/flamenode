@@ -70,14 +70,14 @@ export function parseVideoMemberInputs(
     // A multipart File must never be interpreted as omitted member metadata.
     return { ok: false, message: "合作メンバーの入力が不正です。" };
   }
-  if (raw === null || !raw.trim()) return { ok: true, members: [] };
-
-  // Guard JSON.parse memory before allocating nested arrays or Zod objects.
+  if (raw === null) return { ok: true, members: [] };
+  // Guard JSON.parse (and trim) before allocating nested arrays or Zod objects.
   // UTF-8 matters: a short UTF-16 string can exceed the multipart byte cap.
   if (raw.length > MAX_MEMBERS_JSON_BYTES ||
       new TextEncoder().encode(raw).byteLength > MAX_MEMBERS_JSON_BYTES) {
     return { ok: false, message: "合作メンバーの入力が大きすぎます。" };
   }
+  if (!raw.trim()) return { ok: true, members: [] };
 
   let parsed: unknown;
   try {
