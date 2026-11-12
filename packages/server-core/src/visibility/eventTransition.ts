@@ -206,7 +206,7 @@ export async function preCommitEventVisibilityFenceRename(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.oldEventId,
     ) ?? null;
-   if (hasForeignRenameToken(manifest)) {
+  if (hasForeignRenameToken(manifest)) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
 
@@ -241,7 +241,7 @@ export async function preCommitEventVisibilityFenceRename(
         (entry) =>
           entry.entity_type === "event" && entry.entity_id === input.oldEventId,
       ) ?? null;
-       if (hasForeignRenameToken(latest)) {
+      if (hasForeignRenameToken(latest)) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       const withoutNew = {
