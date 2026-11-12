@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
+import { actorSnapshotFromRow } from "@flamenode/server-core/audit/logger";
 import { AdminYoutubeResyncVideoIdSchema, AdminYoutubeResyncResultSchema } from "@flamenode/contracts/admin/staticRebuildOps";
 import { youtubeSyncAdminRoutes } from "../src/routes/admin/youtubeSync.ts";
 import { originGuardMiddleware, writeGuardMiddleware, onlyMutating } from "../src/middleware/writeOrigin.ts";
@@ -39,7 +40,7 @@ function setup({ mutateBeforeBatch } = {}) {
     c.set("user", ADMIN);
     c.set("db", drizzle(d1, { schema }));
     // In production writeGuard preloads the actor snapshot in the same user read.
-    c.set("actorSnapshotJsonById", { "admin-1": "{}" });
+    c.set("actorSnapshotJsonById", { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) });
     await next();
   });
   app.route("/api/admin/youtube-sync", youtubeSyncAdminRoutes);
