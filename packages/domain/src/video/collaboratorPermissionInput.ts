@@ -70,6 +70,11 @@ export function prepareCollaboratorPermissionIntents(
 ):
   | { ok: true; intents: Map<string, { displayName: string; intent: "on" | "off" }> }
   | { ok: false; message: string } {
+  // Future Hono callers must not bypass the Zod array cap after alias resolution.
+  // Bound the work before creating Maps/normalizing hostile oversized inputs.
+  if (canonicalIntents.length > MAX_COLLABORATOR_PERMISSION_BATCH) {
+    return { ok: false, message: "権限指定が多すぎます。" };
+  }
   const intents = new Map<string, { displayName: string; intent: "on" | "off" }>();
   const duplicateXids = new Set<string>();
   for (const item of canonicalIntents) {

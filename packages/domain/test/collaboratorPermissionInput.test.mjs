@@ -98,3 +98,15 @@ test("MIG-0650 delete input rejects oversized IDs before X-ID normalization", ()
     video_id: "v".repeat(64), x_user_id: "  @ALICE  ",
   }), { ok: true, videoId: "v".repeat(64), xUserId: "alice" });
 });
+
+test("MIG-0650 canonical intent preparation enforces 100-item cap even without Zod", () => {
+  const intents = Array.from({ length: 101 }, (_, i) => ({
+    x_user_id: `user_${i}`, display_name: "User", intent: "on",
+  }));
+  assert.deepEqual(prepareCollaboratorPermissionIntents(intents), {
+    ok: false, message: "権限指定が多すぎます。",
+  });
+  const atLimit = prepareCollaboratorPermissionIntents(intents.slice(0, 100));
+  assert.equal(atLimit.ok, true);
+  if (atLimit.ok) assert.equal(atLimit.intents.size, 100);
+});
