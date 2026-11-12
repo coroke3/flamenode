@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyDatabaseAuthSessionClaims } from "../src/auth/config.ts";
+import { applyDatabaseAuthSessionClaims, resolveAuthRuntimeCredentials } from "../src/auth/config.ts";
 
 test("MIG-0802 U01: DB callback overwrites stale session role, ban and Active X without losing profile", () => {
   const session = {
@@ -55,4 +55,53 @@ test("MIG-0802 U01: empty user/session cases preserve CURRENT callback semantics
   assert.equal(applyDatabaseAuthSessionClaims(withoutDbUser, null), withoutDbUser);
   assert.deepEqual(withoutDbUser.user, { id: "kept", role: "admin" });
   assert.deepEqual(applyDatabaseAuthSessionClaims({}, undefined), {});
+});
+
+
+test("MIG-0802 U01: shared Auth credentials exactly preserve CURRENT trimming and configured precedence", () => {
+  const values = {
+    authSecret: "  synthetic-auth-secret  ",
+    discordClientId: "  client-id ",
+    discordClientSecret: " client-secret  ",
+    allowLocalDevSecret: false,
+  };
+  assert.deepEqual(resolveAuthRuntimeCredentials(values), {
+    secret: "synthetic-auth-secret",
+    discordClientId: "client-id",
+    discordClientSecret: "client-secret",
+  });
+  assert.deepEqual(values, {
+    authSecret: "  synthetic-auth-secret  ",
+    discordClientId: "  client-id ",
+    discordClientSecret: " client-secret  ",
+    allowLocalDevSecret: false,
+  });
+});
+
+test("MIG-0802 U01: no production auth fallback and explicit local-only secret fallback", () => {
+  const base = { authSecret: " \t ", discordClientId: "d", discordClientSecret: "s" };
+  assert.throws(
+    () => resolveAuthRuntimeCredentials({ ...base, allowLocalDevSecret: false }),
+    /AUTH_SECRET_MISSING/,
+  );
+  const local = resolveAuthRuntimeCredentials({ ...base, allowLocalDevSecret: true });
+  assert.equal(local.secret, "flamenode-local-development-auth-secret");
+  assert.equal(local.discordClientId, "d");
+  assert.equal(local.discordClientSecret, "s");
+  assert.throws(
+    () => resolveAuthRuntimeCredentials({
+      ...base, authSecret: "signed-secret", discordClientId: " ", allowLocalDevSecret: false,
+    }),
+    /AUTH_DISCORD_CONFIG_MISSING/,
+  );
+  assert.throws(
+    () => resolveAuthRuntimeCredentials({
+      ...base, authSecret: "signed-secret", discordClientSecret: null, allowLocalDevSecret: true,
+    }),
+    /AUTH_DISCORD_CONFIG_MISSING/,
+  );
+  const explicit = resolveAuthRuntimeCredentials({
+    ...base, authSecret: "explicit", allowLocalDevSecret: true,
+  });
+  assert.equal(explicit.secret, "explicit", "explicit secret has precedence over local fallback");
 });
