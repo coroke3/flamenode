@@ -16,20 +16,33 @@ function dateText(value: number | null): string {
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("ja-JP");
 }
 
-function AuditRows({ rows, empty }: { rows: AdminUserDetailAuditRow[]; empty: string }): React.ReactElement {
+/** CURRENT shows the actor on the target timeline, but the record on the operator timeline. */
+function AuditRows({ rows, empty, timeline }: {
+  rows: AdminUserDetailAuditRow[];
+  empty: string;
+  timeline: "target" | "operator";
+}): React.ReactElement {
   if (rows.length === 0) return <p className="fn-muted">{empty}</p>;
-  return <div style={{ overflowX: "auto" }}><table className="fn-table" style={{ width: "100%" }}>
-    <thead><tr><th>日時</th><th>テーブル</th><th>操作</th><th>実行者</th><th>対象</th></tr></thead>
+  return <FnTable>
+    <thead><tr>
+      <th>日時</th><th>テーブル</th><th>操作</th>
+      <th>{timeline === "target" ? "実行者" : "レコード"}</th>
+    </tr></thead>
     <tbody>{rows.map((a) => <tr key={a.id}>
-      <td>{dateText(a.created_at)}</td>
-      <td>{a.table_name}</td>
-      <td>{a.operation}</td>
-      <td>{a.actor_user_id ?? "—"}</td>
-      <td>{a.target_id
-        ? <a href={"/admin/audit?record=" + encodeURIComponent(a.target_id)}>{a.target_id}</a>
-        : "—"}</td>
+      <td className="fn-muted fn-td-nowrap">{dateText(a.created_at)}</td>
+      <td className="fn-td-mono">{a.table_name}</td>
+      <td><span className={"fn-badge " + (a.operation === "DELETE"
+        ? "fn-badge-danger" : a.operation === "CREATE"
+          ? "fn-badge-accent" : "fn-badge-soft")}>{a.operation}</span></td>
+      <td className={timeline === "target" ? "fn-td-secondary" : "fn-td-mono fn-td-ellipsis"}>
+        {timeline === "target"
+          ? (a.actor_user_id ?? "-")
+          : a.target_id
+            ? <a href={"/admin/audit?record=" + encodeURIComponent(a.target_id)}>{a.target_id}</a>
+            : "—"}
+      </td>
     </tr>)}</tbody>
-  </table></div>;
+  </FnTable>;
 }
 
 /** MIG-0731 U02a: read-only CURRENT detail fields, no role/BAN writes. */
@@ -135,11 +148,11 @@ export function AdminUserDetailContent({ data }: { data: AdminUserDetailResponse
     </section>
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
       <h2>このユーザーへの管理操作 (target_id 一致)</h2>
-      <AuditRows rows={data.recentOnUser} empty="該当する履歴はありません。" />
+      <AuditRows rows={data.recentOnUser} empty="該当する履歴はありません。" timeline="target" />
     </section>
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
       <h2>このユーザーが実行した管理操作 (operator 一致)</h2>
-      <AuditRows rows={data.recentByOperator} empty="該当する履歴はありません。" />
+      <AuditRows rows={data.recentByOperator} empty="該当する履歴はありません。" timeline="operator" />
     </section>
   </div>;
 }

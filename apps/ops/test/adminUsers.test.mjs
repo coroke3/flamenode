@@ -510,3 +510,47 @@ test("MIG-0731 U04: linked-X request table preserves CURRENT status badges, scro
   assert.doesNotMatch(html, /<x>/);
   assert.match(html, /@x&amp;y/);
 });
+
+
+test("MIG-0731 U04: two audit timelines use CURRENT-specific fourth column and action tones", () => {
+  const data = { ...detailFixture,
+    recentOnUser: [
+      { id: "t1", created_at: 1700000000, table_name: "users",
+        operation: "DELETE", actor_user_id: "admin<1>", target_id: "u1" },
+      { id: "t2", created_at: 1700000001, table_name: "users",
+        operation: "CREATE", actor_user_id: null, target_id: "u1" },
+    ],
+    recentByOperator: [
+      { id: "o1", created_at: 1700000002, table_name: "videos",
+        operation: "UPDATE", actor_user_id: "u1", target_id: "record/a&b" },
+    ],
+  };
+  const html = renderToStaticMarkup(React.createElement(AdminUserDetailContent, { data }));
+  const target = html.split("このユーザーへの管理操作 (target_id 一致)")[1]
+    .split("このユーザーが実行した管理操作 (operator 一致)")[0];
+  const operator = html.split("このユーザーが実行した管理操作 (operator 一致)")[1];
+  assert.match(target, /<th>実行者<\/th>/);
+  assert.doesNotMatch(target, /<th>レコード<\/th>/);
+  assert.match(target, /class="fn-badge fn-badge-danger">DELETE<\/span>/);
+  assert.match(target, /class="fn-badge fn-badge-accent">CREATE<\/span>/);
+  assert.match(target, /admin&lt;1&gt;/);
+  assert.doesNotMatch(target, /<admin/);
+  assert.match(operator, /<th>レコード<\/th>/);
+  assert.doesNotMatch(operator, /<th>実行者<\/th>/);
+  assert.match(operator, /class="fn-badge fn-badge-soft">UPDATE<\/span>/);
+  assert.match(operator, /href="\/admin\/audit\?record=record%2Fa%26b"/);
+  for (const section of [target, operator]) {
+    assert.match(section, /class="fn-hscroll-surface"/);
+    assert.match(section, /横にスクロールして全体を表示できます/);
+  }
+});
+
+test("MIG-0731 U04: empty audit timelines do not expose table headers or stale data", () => {
+  const html = renderToStaticMarkup(React.createElement(AdminUserDetailContent, {
+    data: { ...detailFixture, recentOnUser: [], recentByOperator: [] },
+  }));
+  const section = html.split("このユーザーへの管理操作 (target_id 一致)")[1];
+  assert.equal((section.match(/該当する履歴はありません。/g) ?? []).length, 2);
+  assert.doesNotMatch(section, /<th>実行者<\/th>/);
+  assert.doesNotMatch(section, /<th>レコード<\/th>/);
+});
