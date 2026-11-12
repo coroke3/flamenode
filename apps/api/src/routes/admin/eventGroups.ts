@@ -9,7 +9,7 @@
  * NOT EXISTS membership filter, escaped LIKE and updated_at/id ordering.
  */
 import { Hono } from "hono";
-import { assertCondition, mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { assertCondition, mutateWithAudit, planAtomicAuditMutationBudget } from "@flamenode/server-core/audit/mutate";
 import { sql } from "@flamenode/server-core/sql";
 import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "./body.ts";
@@ -1529,25 +1529,22 @@ stagedEventGroupWriteRoutes.post("/:id/events", async (c) => {
       actor_user_id: userId,
       retention_class: "restorable" as const,
     }));
-    const budget = planD1AuditMutationBudget({
-      mutationStatementCount: mutationStatements.length,
-      mutationAssertionCount: expectedMutationChanges.length,
-      auditEntryCount: audits.length,
-      distinctActorCount: 1,
-      callerQueryCount: 3,
-    });
-    if (!budget.withinLimit) {
-      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
-    }
-    await mutateWithAudit(db, {
+    // The preflight must use the same concrete statements, audit actors,
+    // and preloaded guard context as mutateWithAudit. A separate hand-counted
+    // budget can drift when a queue builder gains marker DML/assertions.
+    const atomicMutation = {
       mutationStatements,
       expectedMutationChanges,
       preloaded: auditPreloaded(c),
-      // Match the preflight's exact three caller reads: session, identity/ToS,
-      // and the joined CostGuard/membership/audit-settings snapshot.
+      // S4 session, identity/ToS, joined CostGuard/membership/audit-settings read.
       callerQueryCount: 3,
       audits,
-    });
+    };
+    const budget = planAtomicAuditMutationBudget(atomicMutation);
+    if (!budget.withinLimit) {
+      return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
+    }
+    await mutateWithAudit(db, atomicMutation);
     return c.json({ ok: true, id: groupId, added: insertedRows.length }, 200);
   } catch (error) {
     // Keep the public response generic; emit only bounded diagnostic metadata
