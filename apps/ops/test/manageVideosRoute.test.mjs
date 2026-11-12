@@ -11,6 +11,13 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https
 for (const key of ["window", "document", "navigator", "HTMLElement", "Node"]) {
   Object.defineProperty(globalThis, key, { configurable: true, value: dom.window[key] });
 }
+// jsdom does not supply ResizeObserver; TableScroll uses it only for visual affordances.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver = ResizeObserverStub;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import("react-dom/client");
 const response = (status, value) => new Response(JSON.stringify(value), {
