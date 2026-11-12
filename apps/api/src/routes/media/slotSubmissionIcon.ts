@@ -70,7 +70,12 @@ SELECT
   s.x_user_id AS slot_x_user_id,
   e.slot_visibility_mode,
   e.visibility_status AS event_visibility_status,
-  v.creator_icon_url
+  CASE
+    WHEN e.slot_visibility_mode = 'public_name'
+      AND v.visibility_status IS NOT 'public'
+    THEN NULL
+    ELSE v.creator_icon_url
+  END AS creator_icon_url
 FROM slots s
 INNER JOIN events e ON e.id = s.event_id
 LEFT JOIN videos v ON v.id = s.video_id
