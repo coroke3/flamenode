@@ -5,6 +5,7 @@ import {
   buildEventExportPayload,
   buildEventExportPayloadForFormat,
   buildLegacyEventExportPayload,
+  eventExportBodyMatchesFresh,
 } from "./api/eventExportPayload.ts";
 import { findForbiddenPublicKeys } from "./api/publicDto.ts";
 
@@ -265,6 +266,30 @@ test("旧形式のカスタム回答は互換列を上書きせずprototypeキ�
   assert.deepEqual(findForbiddenPublicKeys(payload), []);
 });
 
+test("公開DTOのcustom_answers_by_keyにprototype予約キーを混入させない", () => {
+  const poisoned = {
+    ...snapshot,
+    videos: [{
+      ...snapshot.videos[0],
+      answers: [
+        { key: "__proto__", label: "proto", answer_text: "bad", answer_json: null, sort_order: 0 },
+        { key: "constructor", label: "ctor", answer_text: "bad", answer_json: null, sort_order: 1 },
+        { key: "prototype", label: "prototype", answer_text: "bad", answer_json: null, sort_order: 2 },
+        { key: "safe_question", label: "safe", answer_text: "kept", answer_json: null, sort_order: 3 },
+      ],
+    }],
+  };
+  for (const payload of [buildEventExportPayload(poisoned), buildLegacyEventExportPayload(poisoned)]) {
+    const video = Array.isArray(payload) ? payload[0] : payload.videos[0];
+    const byKey = video.custom_answers_by_key;
+    for (const reserved of ["__proto__", "constructor", "prototype"]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(byKey, reserved), false, reserved);
+    }
+    assert.equal(byKey.safe_question, "kept");
+    assert.deepEqual(findForbiddenPublicKeys(payload), []);
+  }
+});
+
 test("形式dispatcherはv5を既定契約のまま保ちlegacyだけ配列へ変換する", () => {
   const v5 = buildEventExportPayloadForFormat(
     snapshot,
@@ -350,8 +375,8 @@ test("イベントAPIはformatなし/v5をv5、legacyを旧形式として受け
   assert.doesNotMatch(route, /s-maxage=60|stale-while-revalidate=60/);
 
   const authCheck = route.indexOf("loadEventExportEvent(db, eventId)");
-  const cacheHitCheck = route.indexOf("const response = await cachedResponse()");
-  assert.ok(authCheck >= 0 && cacheHitCheck > authCheck, "D1公開可否確認をKV HITより先に行う");
+  const cacheHitCheck = route.indexOf("const response = await cachedResponse(body)");
+  assert.ok(authCheck >= 0 && cacheHitCheck > route.indexOf("body = JSON.stringify(payload)"), "D1公開関係行の再生成後にのみCache APIを照合");
 });
 
 test("管理画面はv5を既定にし旧形式互換を明示選択できる", async () => {
@@ -536,3 +561,83 @@ test("イベント公開APIは範囲外Unix時刻をnullまたは空文字へ閉
   assert.equal(legacy.data, "");
   assert.equal(legacy.time, "");
 });
+
+test("SEC-575 U01: warm v5 HIT compares large raw bodies without reparsing private relation DTOs", () => {
+  const longSnapshot = {
+    ...snapshot,
+    event: { ...snapshot.event, explanation: "public text ".repeat(48_000) },
+  };
+  const earlier = JSON.stringify(buildEventExportPayload(longSnapshot, 1_700_000_100, "scheduled"));
+  const fresh = JSON.stringify(buildEventExportPayload(longSnapshot, 1_700_000_200, "scheduled"));
+  assert.ok(earlier.length > 500_000, "exercise a realistic large payload");
+  const originalParse = JSON.parse;
+  try {
+    JSON.parse = () => { throw new Error("cache comparator must not parse multi-megabyte DTOs"); };
+    assert.equal(eventExportBodyMatchesFresh(earlier, fresh, "v5"), true,
+      "fresh public DTO differs only in generated_at and generated_at_unix");
+    assert.equal(eventExportBodyMatchesFresh(fresh, fresh, "v5"), true,
+      "byte-identical fast path remains available");
+    assert.equal(eventExportBodyMatchesFresh(earlier, fresh, "legacy"), false);
+  } finally {
+    JSON.parse = originalParse;
+  }
+  assert.equal(eventExportBodyMatchesFresh(
+    earlier, fresh.replace('"status":"public"', '"status":"private"'), "v5",
+  ), false, "a public/private relation transition cannot become a HIT");
+  assert.equal(eventExportBodyMatchesFresh(
+    earlier.replace('"generated_at_unix":1700000100', '"generated_at_unix":1.7000001e9'), fresh, "v5",
+  ), false, "noncanonical numeric encodings are rejected");
+  assert.equal(eventExportBodyMatchesFresh(
+    earlier.replace('"generated_at":"2023', '"generated_at":"2022'), fresh, "v5",
+  ), false, "ISO date must agree exactly with the unix provenance");
+  assert.equal(eventExportBodyMatchesFresh(
+    earlier.replace('"schema_version":5', '"schema_version":5,"schema_version":5'), fresh, "v5",
+  ), false, "duplicate JSON keys are rejected without parsing");
+  assert.equal(eventExportBodyMatchesFresh(
+    earlier.replace('"generated_at":', '"unknown":0,"generated_at":'), fresh, "v5",
+  ), false, "unknown or reordered provenance keys are rejected");
+});
+
+test("SEC-575: raw cache with duplicate JSON keys or noncanonical bytes cannot be a HIT", () => {
+  const earlier = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_100, "scheduled"));
+  const later = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_200, "scheduled"));
+  assert.match(earlier, /"schema_version":5/);
+  // JSON.parse produces the same object after overwriting the duplicate key.
+  // Serving the raw bytes could expose a different value to another JSON reader.
+  const duplicate = earlier.replace('"schema_version":5', '"schema_version":5,"schema_version":5');
+  assert.notEqual(duplicate, earlier);
+  assert.deepEqual(JSON.parse(duplicate), JSON.parse(earlier));
+  assert.equal(eventExportBodyMatchesFresh(duplicate, later, "v5"), false);
+  assert.equal(eventExportBodyMatchesFresh(earlier, earlier, "v5"), true, "canonical byte-equal payload stays on the fast path");
+  assert.equal(eventExportBodyMatchesFresh(" " + earlier, later, "v5"), false);
+  assert.equal(eventExportBodyMatchesFresh(earlier, later, "v5"), true);
+  const legacy = JSON.stringify(buildLegacyEventExportPayload(snapshot));
+  assert.equal(eventExportBodyMatchesFresh(legacy, legacy, "legacy"), true);
+  assert.equal(eventExportBodyMatchesFresh(" " + legacy, legacy, "legacy"), false);
+});
+
+test("SEC-575: v5 cached payload tolerates generation timestamp only, never changed public data", () => {
+  const earlier = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_100, "scheduled"));
+  const later = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_200, "scheduled"));
+  assert.equal(eventExportBodyMatchesFresh(earlier, later, "v5"), true);
+  const changed = JSON.parse(later);
+  changed.event.title = "private revoked content";
+  assert.equal(eventExportBodyMatchesFresh(earlier, JSON.stringify(changed), "v5"), false);
+  changed.event.title = snapshot.event.title;
+  changed.event.public_staff = [];
+  assert.equal(eventExportBodyMatchesFresh(earlier, JSON.stringify(changed), "v5"), false);
+  assert.equal(eventExportBodyMatchesFresh('not-json', later, "v5"), false);
+  assert.equal(eventExportBodyMatchesFresh(earlier, later, "legacy"), false);
+  const forged = JSON.parse(earlier);
+  forged.generated_at = "not-a-timestamp";
+  assert.equal(eventExportBodyMatchesFresh(JSON.stringify(forged), later, "v5"), false,
+    "cached provenance must parse as a valid timestamp");
+  forged.generated_at = new Date((forged.generated_at_unix + 1) * 1000).toISOString();
+  assert.equal(eventExportBodyMatchesFresh(JSON.stringify(forged), later, "v5"), false,
+    "cached ISO timestamp and unix timestamp must agree");
+  const forgedFresh = JSON.parse(later);
+  forgedFresh.generated_at = "invalid";
+  assert.equal(eventExportBodyMatchesFresh(earlier, JSON.stringify(forgedFresh), "v5"), false,
+    "fresh DTO provenance mismatch must fail closed");
+});
+
