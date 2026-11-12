@@ -1,3 +1,6 @@
+/* MIG-0724: Ops shared CSS loads video-review styling without Node.js ESM CSS imports. */
+@import "./video-review.css";
+
 /* Generated from CURRENT src/components/ui/EmptyState.module.css; prefix=empty. */
 .empty-empty {
   display: grid;
