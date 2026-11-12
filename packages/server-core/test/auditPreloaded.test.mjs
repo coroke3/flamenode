@@ -408,3 +408,40 @@ test("Issue #669: actual SQLite 80-member insert + queue + MIG-0516 marker audit
     w.sqlite.close();
   }
 });
+
+
+test("Issue #669: malformed preloaded actor placeholders never bypass the real snapshot read", async () => {
+  for (const placeholder of [null, false, 42, {}]) {
+    const w = world();
+    const restore = freeze();
+    try {
+      const settings = mapAuditSettings(
+        w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get(),
+      );
+      const preload = {
+        settings,
+        actorSnapshotJsonById: { "admin-1": placeholder },
+      };
+      const planned = planAtomicAuditMutationBudget({
+        mutationStatements: [sql`SELECT 1`],
+        expectedMutationChanges: 0,
+        audits: [AUDIT],
+        callerQueryCount: 0,
+        preloaded: preload,
+      });
+      assert.equal(planned.preparationQueryCount, 1, "the invalid actor cannot earn a D1 credit");
+      const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+      assert.equal(w.stats.reads.length, 1, "the logger must perform the read charged by the planner");
+      assert.deepEqual(JSON.parse(entry.actor_snapshot_json), {
+        discord_id: "d-1",
+        discord_name: "Admin",
+        x_user_id: "x1",
+        x_name: "XN",
+        icon_url: "https://i/x.png",
+      });
+    } finally {
+      restore();
+      w.sqlite.close();
+    }
+  }
+});
