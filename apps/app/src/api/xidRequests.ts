@@ -10,33 +10,24 @@ export interface XidRequestsApi {
   requestMergeRevert(parentRequestId: string): Promise<XidRequestResult>;
 }
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+import { send, type FetchLike } from "./write.js";
 
 async function write(
   fetchFn: FetchLike,
   path: string,
   payload?: Record<string, string>,
 ): Promise<XidRequestResult> {
-  const res = await fetchFn(path, {
-    method: "POST",
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: payload === undefined
-      ? { accept: "application/json" }
-      : { accept: "application/json", "content-type": "application/json" },
-    ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
-  });
-  let data: unknown;
-  try {
-    data = await res.json();
-  } catch {
-    return { ok: false };
+  // D-16-2 shared write transport owns same-origin, no-store, JSON/no-body,
+  // network failures and 401 precedence. Validate the MIG-0659 body separately.
+  const response = await send<XidRequestResult>(fetchFn, "POST", path, payload);
+  if (response.status === "anonymous") {
+    return { ok: false, message: "ログイン状態を再確認してください。" };
   }
-  // The shared MIG-0659 schema rejects malformed responses without treating 2xx as success.
-  const parsed = XIdRequestResultSchema.safeParse(data);
-  if (!parsed.success) return { ok: false };
-  if (!res.ok) return { ok: false, message: parsed.data.message };
-  return parsed.data;
+  if (response.status === "unavailable") {
+    return { ok: false, message: "申請の保存に失敗しました。時間をおいて再試行してください。" };
+  }
+  const parsed = XIdRequestResultSchema.safeParse(response.data);
+  return parsed.success ? parsed.data : { ok: false };
 }
 
 export function createXidRequestsApi(fetchFn: FetchLike = (input, init) => fetch(input, init)): XidRequestsApi {
