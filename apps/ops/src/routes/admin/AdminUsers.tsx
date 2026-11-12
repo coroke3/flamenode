@@ -80,8 +80,15 @@ export function XIdRows({ rows }: { rows: AdminXUserRow[] }): React.ReactElement
                 <small style={{ display: "block" }}>{x.primary_auth_user_id.slice(0, 14)}...
                 {x.linked_auth_user_count > 1 ? " ほか " + (x.linked_auth_user_count - 1) + "件" : ""}</small></>
             : <span className="fn-badge fn-badge-warning">Discord未連携</span>}</td>
-          <td><span className="fn-badge">{label(x.approval_status)}</span>
-            {x.active_holder_count > 0 ? <span className="fn-badge fn-badge-soft">active</span> : null}
+          <td>
+            <span className={"fn-badge " + (x.approval_status === "approved"
+              ? "fn-badge-accent" : x.approval_status === "rejected"
+                ? "fn-badge-danger" : "fn-badge-warning")}>
+              {label(x.approval_status)}
+            </span>
+            {x.active_holder_count > 0
+              ? <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>active</span>
+              : null}
           </td>
           <td><a className="fn-btn fn-btn-ghost fn-btn-sm"
             href={x.primary_auth_user_id

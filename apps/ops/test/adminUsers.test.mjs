@@ -307,3 +307,29 @@ test("MIG-0731 U04: both admin user tables preserve CURRENT keyboard-accessible 
   assert.match(discord, /Discord/);
   assert.match(xId, /Discord連携/);
 });
+
+
+test("MIG-0731 U04: CURRENT X-ID approval badge semantics survive Ops migration", () => {
+  const base = {
+    id: "x1", x_name: "Account", icon_url: null,
+    primary_auth_user_id: null, primary_auth_user_name: null,
+    linked_auth_user_count: 0, active_holder_count: 0,
+  };
+  for (const [status, tone, label] of [
+    ["approved", "accent", "承認済み"],
+    ["rejected", "danger", "却下"],
+    ["pending", "warning", "承認待ち"],
+    [null, "warning", "未設定"],
+    ["imported", "warning", "未設定"],
+  ]) {
+    const html = renderToStaticMarkup(React.createElement(XIdRows, {
+      rows: [{ ...base, approval_status: status }],
+    }));
+    assert.ok(html.includes('class="fn-badge fn-badge-' + tone + '">' + label + "</span>"),
+      "incorrect approval status badge for " + String(status));
+  }
+  const active = renderToStaticMarkup(React.createElement(XIdRows, {
+    rows: [{ ...base, approval_status: "approved", active_holder_count: 2 }],
+  }));
+  assert.match(active, /class="fn-badge fn-badge-soft"[^>]*>active<\/span>/);
+});
