@@ -30,40 +30,32 @@ const releaseBridgeSource = await readFile(
   new URL("../slots/slotReleaseMutations.ts", import.meta.url),
   "utf8",
 );
+const coreSource = await readFile(
+  new URL("../../../packages/server-core/src/slots/commitSlotMutationPlan.ts", import.meta.url),
+  "utf8",
+);
 const uiSource = await readFile(
   new URL("../../components/event/SlotGrid.tsx", import.meta.url),
   "utf8",
 );
 
-test("利用者slot操作は共通atomic plannerだけで書き込む", () => {
+test("利用者slot操作は共有server-core経由でのみ原子的に書き込む", () => {
   for (const name of [
-    "reserveSlot",
-    "releaseOwnSlot",
-    "extendOwnSlotGroup",
-    "mergeOwnSlotGroups",
-  ]) {
-    assert.match(source, new RegExp(`export async function ${name}`));
-  }
-  assert.equal((source.match(/mutateWithAudit\(/g) ?? []).length, 1);
-  const commit =
-    source.match(/async function commitSlotMutationPlan[\s\S]*?async function loadSlot/)?.[0] ??
-    "";
+    "reserveSlot", "releaseOwnSlot", "extendOwnSlotGroup", "mergeOwnSlotGroups",
+  ]) assert.match(source, new RegExp(`export async function ${name}`));
+  assert.equal((source.match(/mutateWithAudit\(/g) ?? []).length, 0);
+  assert.equal((coreSource.match(/mutateWithAudit\(/g) ?? []).length, 1);
+  assert.match(source, /await commitSlotMutationPlanCore\(\{ \.\.\.args, loadWakeHost: loadNextSlotQueueWakeHost \}\)/);
+  assert.match(source, /import\("@\/lib\/serverCore\/nextPorts"\)/);
+  assert.doesNotMatch(coreSource, /next\/|nextPorts|getCloudflareContext|process\.env/);
+  const commit=coreSource;
   assert.match(commit, /const queue = await buildSlotChangeQueueBatch/);
-  assert.match(
-    commit,
-    /mutationStatements:\s*\[[\s\S]*?\.\.\.mutationStatements,[\s\S]*?\.\.\.queue\.statements,[\s\S]*?\.\.\.extra,/,
-  );
-  assert.match(
-    commit,
-    /expectedMutationChanges:\s*\[[\s\S]*?\.\.\.expectedMutationChanges,[\s\S]*?\.\.\.queue\.expectedChanges,[\s\S]*?\.\.\.extra\.map\(\(\) => null\),/,
-  );
+  assert.match(commit, /mutationStatements:\s*\[[\s\S]*?\.\.\.mutationStatements,[\s\S]*?\.\.\.queue\.statements,[\s\S]*?\.\.\.extra,/);
+  assert.match(commit, /expectedMutationChanges:\s*\[[\s\S]*?\.\.\.expectedMutationChanges,[\s\S]*?\.\.\.queue\.expectedChanges,[\s\S]*?\.\.\.extra\.map\(\(\) => null\),/);
   assert.match(commit, /audits,/);
   assert.match(commit, /notificationWakeSource:\s*wakeNotification/);
-  assert.match(
-    commit,
-    /staticRebuildWakeSource:\s*queue\.statements\.length > 0 \? "web" : undefined/,
-  );
-  assert.match(source, /versionedSlotWhere/);
+  assert.match(commit, /staticRebuildWakeSource:\s*queue\.statements\.length > 0 \? "web" : undefined/);
+  assert.match(commit, /mutateWithAudit\(args\.db,[\s\S]*?args\.loadWakeHost\)/);
   assert.match(source, /buildOpsChannelWebhookStatement/);
   assert.match(source, /extraStatements\.push\(channelNotification\.statement\)/);
   assert.match(source, /extraStatements,[\s\S]*?notificationWakeSource,/);
@@ -71,20 +63,19 @@ test("利用者slot操作は共通atomic plannerだけで書き込む", () => {
   assert.doesNotMatch(source, /rollbackReservedSlots/);
 });
 
-test("slot CASはversionedSlotWhereでid+version+updated_at+snapshotを比較する", () => {
-  assert.match(source, /from "@flamenode\/server-core\/slots\/versionedPredicate"/);
-  assert.match(source, /versionedSlotWhere\(/);
-  assert.match(source, /version: sql`\$\{slots\.version\} \+ 1`/);
-  assert.match(source, /const plan = buildSlotAtomicAuditPlan\(args\.mutations, now\)/);
-  assert.match(source, /versionedSlotWhere\(/);
-  assert.match(source, /version: sql`\$\{slots\.version\} \+ 1`/);
-  assert.match(source, /before: delta\.before/);
-  assert.match(source, /after: delta\.after/);
+test("slot CASは共通executorのversionedSlotWhereでid+version+updated_at+snapshotを比較する", () => {
+  assert.match(source, /@flamenode\/server-core\/slots\/commitSlotMutationPlan/);
+  assert.match(coreSource, /from "\.\/versionedPredicate\.ts"/);
+  assert.match(coreSource, /versionedSlotWhere\(/);
+  assert.match(coreSource, /version: sql`\$\{slots\.version\} \+ 1`/);
+  assert.match(coreSource, /const plan = buildSlotAtomicAuditPlan\(args\.mutations, now\)/);
+  assert.match(coreSource, /before: delta\.before/);
+  assert.match(coreSource, /after: delta\.after/);
   assert.match(atomicPlannerSource, /before: \{ \.\.\.row \}/);
   assert.match(atomicPlannerSource, /version: row\.version \+ 1/);
   assert.match(atomicBridgeSource, /@flamenode\/domain\/slots\/atomicAuditPlan/);
-  assert.doesNotMatch(source, /function expectedRowCondition/);
-  assert.doesNotMatch(source, /function planSlotUpdate/);
+  assert.doesNotMatch(coreSource, /function expectedRowCondition/);
+  assert.doesNotMatch(coreSource, /function planSlotUpdate/);
 });
 
 test("複数枠機能を維持し、業務上限はmax_slots_per_videoを正本にする", () => {

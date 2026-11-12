@@ -6,7 +6,6 @@ import { z } from "zod";
 import { isSlotOperatorOverrideRequested } from "@flamenode/contracts";
 import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
 import {
@@ -31,14 +30,12 @@ import {
 import { buildSlotReleaseMutationPlan } from "@/lib/slots/slotReleaseMutations";
 import { buildSlotReserveMutationPlan } from "@/lib/slots/slotReserveMutations";
 import { assertBoundedSlotGroupIntegrity } from "@/lib/slots/slotBoundedGroup";
-import { buildSlotAtomicAuditPlan } from "@/lib/slots/slotAtomicAuditPlan";
 import { resolveReservationXIdentity } from "@/lib/slots/reservationIdentity";
-import { versionedSlotWhere } from "@flamenode/server-core/slots/versionedPredicate";
+import { commitSlotMutationPlanCore } from "@flamenode/server-core/slots/commitSlotMutationPlan";
 import {
   resolveSlotReservationSubject,
   subjectsEqual,
 } from "@/lib/slot/reservationGroupsCore";
-import { buildSlotChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import {
   markPendingPublicReflection,
   type PendingPublicReflection,
@@ -225,6 +222,12 @@ function reservationGroupScope(groupId: string, eventId: string) {
   )!;
 }
 
+// MIG-0657 U01i: only the Next host wake loader is adapter-local.
+// The shared server-core executor preserves CAS, audit, queue and assertion
+// ordering and is callable by a future Hono host using its own WakeHost.
+const loadNextSlotQueueWakeHost = async () =>
+  (await import("@/lib/serverCore/nextPorts")).nextQueueWakeHost;
+
 async function commitSlotMutationPlan(args: {
   db: DB;
   mutations: readonly SlotBulkMutation[];
@@ -234,82 +237,7 @@ async function commitSlotMutationPlan(args: {
   extraStatements?: BatchItem<"sqlite">[];
   notificationWakeSource?: "web";
 }): Promise<void> {
-  const now = Math.floor(Date.now() / 1000);
-  // MIG-0657 U01g: pure, shared preflight proves one audit row per unique
-  // slot and preserves the snapshot/updated_at/version delta before any D1
-  // update or Queue work. SQL CAS and strict audit batch remain in CURRENT.
-  const plan = buildSlotAtomicAuditPlan(args.mutations, now);
-  const mutationStatements: BatchItem<"sqlite">[] = plan.updates.map(
-    (mutation) =>
-      args.db
-        .update(slots)
-        .set({
-          ...mutation.patch,
-          updated_at: now,
-          version: sql`${slots.version} + 1`,
-        })
-        .where(
-          versionedSlotWhere(
-            args.eventId,
-            mutation.rows,
-            mutation.statusGuard,
-          ),
-        ),
-  );
-  const expectedMutationChanges = plan.updates.map(
-    (mutation) => mutation.expectedChanges,
-  );
-  const audits: {
-    table_name: "slots";
-    target_id: string;
-    operation: "UPDATE";
-    before: Record<string, unknown>;
-    after: Record<string, unknown>;
-    actor_user_id: string;
-    reason: string;
-    context: string;
-    retention_class: "normal";
-    restore_strategy: "update_before";
-    strict: true;
-  }[] = plan.auditDeltas.map((delta) => ({
-    table_name: "slots",
-    target_id: delta.targetId,
-    operation: "UPDATE",
-    before: delta.before,
-    after: delta.after,
-    actor_user_id: args.actorUserId,
-    reason: args.reason,
-    context: "user-slot",
-    retention_class: "normal",
-    restore_strategy: "update_before",
-    strict: true,
-  }));
-
-  const queue = await buildSlotChangeQueueBatch(args.db, {
-    eventId: args.eventId,
-    reason: args.reason,
-    requestedByUserId: args.actorUserId,
-  });
-  const extra = args.extraStatements ?? [];
-  // extraStatements には通知以外の atomic guard も入る。
-  // extra の有無だけで通知 Queue を wake すると無料枠を無駄に消費するため、
-  // 実際に通知 outbox を追加した呼び出しだけ wake する。
-  const wakeNotification = args.notificationWakeSource;
-  await mutateWithAudit(args.db, {
-    mutationStatements: [
-      ...mutationStatements,
-      ...queue.statements,
-      ...extra,
-    ],
-    expectedMutationChanges: [
-      ...expectedMutationChanges,
-      ...queue.expectedChanges,
-      ...extra.map(() => null),
-    ],
-    audits,
-    notificationWakeSource: wakeNotification,
-    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
-  });
+  await commitSlotMutationPlanCore({ ...args, loadWakeHost: loadNextSlotQueueWakeHost });
 }
 
 function buildReleaseMutations(
