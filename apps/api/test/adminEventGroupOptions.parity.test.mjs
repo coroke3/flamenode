@@ -4,6 +4,8 @@ import { Hono } from "hono";
 import { dbMiddleware } from "../src/middleware/db.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
 import { EventGroupMutationBodySchema } from "@flamenode/contracts";
+import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
+import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 import {
@@ -88,6 +90,38 @@ function setup({
   );
   return { get, calls, guardCalls };
 }
+
+test("SA-029 U04: 80件一括追加とMIG-0516 build markerのD1予算競合を検出する", async () => {
+  // Use the same queue builder and the same query-budget formula as the staged handler.
+  // This is a merger STOP test: #436 appends one DML + one changes() assertion.
+  const queue = await buildEventGroupChangeQueueBatch(
+    { run: (statement) => statement },
+    { reason: "event_group_member_add", requestedByUserId: "admin-1" },
+  );
+  assert.equal(queue.acceptedTargetCount, 1);
+  assert.equal(queue.statements.length, 1, "current queue projection must remain one SQL statement");
+  assert.equal(queue.expectedChanges.length, 1);
+
+  const baselineInput = {
+    mutationStatementCount: 1 + queue.statements.length, // JSON1 INSERT + queue
+    mutationAssertionCount: 1 + queue.expectedChanges.length,
+    auditEntryCount: EVENT_GROUP_ADD_MAX,
+    distinctActorCount: 1,
+    callerQueryCount: 3, // S4, identity/ToS, joined membership read
+  };
+  const baseline = planD1AuditMutationBudget(baselineInput);
+  assert.equal(baseline.totalQueryCount, 49);
+  assert.equal(baseline.withinLimit, true);
+
+  const withBuildMarker = planD1AuditMutationBudget({
+    ...baselineInput,
+    mutationStatementCount: baselineInput.mutationStatementCount + 1,
+    mutationAssertionCount: baselineInput.mutationAssertionCount + 1,
+  });
+  assert.equal(withBuildMarker.totalQueryCount, 51);
+  assert.equal(withBuildMarker.withinLimit, false,
+    "MIG-0516 cannot be merged until the actual 80-member planner saves two queries");
+});
 
 test("SA-030 U04: canonical audited D1 delete budget respects Free 50-query cap", () => {
   const one = planEventGroupMembershipDeleteBudget({
