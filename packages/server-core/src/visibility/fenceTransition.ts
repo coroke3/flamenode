@@ -37,6 +37,21 @@ function findManifestEntry(
   );
 }
 
+/** Duplicate manifest keys must not let an earlier matching entry hide a foreign token. */
+function hasForeignManifestToken(
+  manifest: PublicVisibilityBlockedEntitiesManifest,
+  entityType: PublicVisibilityFenceEntityType,
+  entityId: string,
+  fenceToken: string,
+): boolean {
+  return manifest.entities.some(
+    (entry) =>
+      entry.entity_type === entityType &&
+      normalizeEntityId(entityType, entry.entity_id) === entityId &&
+      entry.fence_token !== fenceToken,
+  );
+}
+
 export function buildPublicVisibilityFenceUpsertStatement(
   db: ServerCoreDb,
   input: {
@@ -170,15 +185,13 @@ export async function preCommitPublicVisibilityFence(
   const { manifest, etag } = await host.manifest.read();
   // A successful initial R2 CAS does not run mutateOnConflict. Reject an
   // existing foreign token here as well, before trying any PUT.
-  const existing = findManifestEntry(manifest, input.entityType, entityId);
-  if (existing && existing.fence_token !== input.fenceToken) {
+  if (hasForeignManifestToken(manifest, input.entityType, entityId, input.fenceToken)) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
   await host.manifest.write(block(manifest), {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
-      const current = findManifestEntry(latest, input.entityType, entityId);
-      if (current && current.fence_token !== input.fenceToken) {
+      if (hasForeignManifestToken(latest, input.entityType, entityId, input.fenceToken)) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       return block(latest);
@@ -188,7 +201,10 @@ export async function preCommitPublicVisibilityFence(
   const { manifest: confirmed } =
     await host.manifest.read();
   const entry = findManifestEntry(confirmed, input.entityType, entityId);
-  if (!entry || entry.fence_token !== input.fenceToken) {
+  if (
+    !entry || entry.fence_token !== input.fenceToken ||
+    hasForeignManifestToken(confirmed, input.entityType, entityId, input.fenceToken)
+  ) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
 }
