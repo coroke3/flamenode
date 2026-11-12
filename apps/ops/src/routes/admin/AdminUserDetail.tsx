@@ -7,13 +7,18 @@ import { createAdminUsersApi } from "../../api/adminUsers.js";
 import { useApiResult } from "../useApiResult.js";
 import { NotFoundView } from "../NotFoundView.js";
 import { FnTable } from "../../components/shared/FnTable.js";
+import { formatAdminUserCreatedRelative } from "./AdminUsers.js";
 
 const api = createAdminUsersApi();
 
-function dateText(value: number | null): string {
-  if (value === null) return "—";
+/** CURRENT video timestamps display a JST date only; audit/history dates are relative. */
+const videoDateFormatter = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
+});
+export function formatAdminVideoDate(value: number): string {
+  if (!Number.isFinite(value)) return "—";
   const date = new Date(value < 1e12 ? value * 1000 : value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("ja-JP");
+  return Number.isNaN(date.getTime()) ? "—" : videoDateFormatter.format(date);
 }
 
 /** CURRENT shows the actor on the target timeline, but the record on the operator timeline. */
@@ -29,7 +34,7 @@ function AuditRows({ rows, empty, timeline }: {
       <th>{timeline === "target" ? "実行者" : "レコード"}</th>
     </tr></thead>
     <tbody>{rows.map((a) => <tr key={a.id}>
-      <td className="fn-muted fn-td-nowrap">{dateText(a.created_at)}</td>
+      <td className="fn-muted fn-td-nowrap">{formatAdminUserCreatedRelative(a.created_at)}</td>
       <td className="fn-td-mono">{a.table_name}</td>
       <td><span className={"fn-badge " + (a.operation === "DELETE"
         ? "fn-badge-danger" : a.operation === "CREATE"
@@ -52,7 +57,10 @@ export function AdminUserDetailContent({ data }: { data: AdminUserDetailResponse
     <header className="fn-page-head">
       <a href="/admin/users">ユーザー管理へ</a>
       <h1 className="fn-page-title">{user.name ?? user.id}</h1>
-      <p>ID: {user.id} / {user.email ?? "email 未取得"} / 登録 {dateText(user.created_at)}</p>
+      <p>ID: {user.id} / {user.email ?? "email 未取得"} / 登録 {formatAdminUserCreatedRelative(user.created_at)}</p>
+      {user.emailVerified
+        ? <p className="fn-console-note">email認証 {formatAdminUserCreatedRelative(user.emailVerified)}</p>
+        : null}
       <nav aria-label="ユーザー管理">
         <span aria-current="page">詳細</span>
         <a style={{ marginLeft: 16 }} href={"/admin/users/" + encodeURIComponent(user.id) + "/edit"}>編集</a>
@@ -125,7 +133,7 @@ export function AdminUserDetailContent({ data }: { data: AdminUserDetailResponse
       <h2>投稿作品 ({recentVideos.length})</h2>
       {recentVideos.length === 0 ? <p className="fn-muted">投稿はありません。</p> :
         <ul>{recentVideos.map((v) => <li key={v.id}>
-          <a href={"/admin/videos/" + encodeURIComponent(v.id)}>{v.title}</a> / {v.status} / {dateText(v.created_at)}
+          <a href={"/admin/videos/" + encodeURIComponent(v.id)}>{v.title}</a> / {v.status} / {formatAdminVideoDate(v.created_at)}
         </li>)}</ul>}
     </section>
     <section className="fn-card" style={{ padding: 20, marginTop: 16 }}>
@@ -142,7 +150,7 @@ export function AdminUserDetailContent({ data }: { data: AdminUserDetailResponse
             <td><span className={"fn-badge " + (r.status === "approved"
               ? "fn-badge-accent" : r.status === "rejected"
                 ? "fn-badge-danger" : "fn-badge-warning")}>{r.status ?? "pending"}</span></td>
-            <td className="fn-muted fn-td-muted">{dateText(r.requested_at)}</td>
+            <td className="fn-muted fn-td-muted">{formatAdminUserCreatedRelative(r.requested_at)}</td>
           </tr>)}</tbody>
         </FnTable>
     </section>

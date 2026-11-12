@@ -7,7 +7,7 @@ import {
   normalizeUsersTab, usersListPath, usersPageHref, createAdminUsersApi,
 } from "../.test-dist/apps/ops/src/api/adminUsers.js";
 import { AdminUserManagementTabs } from "../.test-dist/apps/ops/src/components/admin/AdminUserManagementTabs.js";
-import { AdminUserDetailContent } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
+import { AdminUserDetailContent, formatAdminVideoDate } from "../.test-dist/apps/ops/src/routes/admin/AdminUserDetail.js";
 import { DiscordRows, XIdRows, formatAdminUserCreatedRelative } from "../.test-dist/apps/ops/src/routes/admin/AdminUsers.js";
 import { AdminUserEditContent, canConfirmUserBan, acquireAdminUserWriteLock } from "../.test-dist/apps/ops/src/routes/admin/AdminUserEdit.js";
 import { createAdminUserEditMutations } from "../.test-dist/apps/ops/src/api/adminUserEdits.js";
@@ -553,4 +553,40 @@ test("MIG-0731 U04: empty audit timelines do not expose table headers or stale d
   assert.equal((section.match(/該当する履歴はありません。/g) ?? []).length, 2);
   assert.doesNotMatch(section, /<th>実行者<\/th>/);
   assert.doesNotMatch(section, /<th>レコード<\/th>/);
+});
+
+
+test("MIG-0731 U04: CURRENT video date is formatted in explicit JST, not runner timezone", () => {
+  assert.equal(formatAdminVideoDate(Date.UTC(2020, 0, 1, 0, 0) / 1000), "2020/01/01");
+  assert.equal(formatAdminVideoDate(Date.UTC(2019, 11, 31, 16, 0) / 1000), "2020/01/01");
+  assert.equal(formatAdminVideoDate(Date.UTC(2019, 11, 31, 14, 59) / 1000), "2019/12/31");
+  assert.equal(formatAdminVideoDate(Number.NaN), "—");
+  assert.equal(formatAdminVideoDate(Number.POSITIVE_INFINITY), "—");
+});
+
+test("MIG-0731 U04: CURRENT detail uses relative audit/registration/application times and verified-email note", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const data = {
+    ...detailFixture,
+    user: { ...detailFixture.user, created_at: (now - 120) * 1000,
+      emailVerified: (now - 3700) * 1000 },
+    recentVideos: [{ id: "v1", title: "Video One", status: "public",
+      created_at: Date.UTC(2019, 11, 31, 16, 0) / 1000 }],
+    recentOnUser: [{ id: "a1", table_name: "users", operation: "CREATE",
+      actor_user_id: "admin", target_id: "u1", created_at: now - 120 }],
+    recentByOperator: [],
+    linkRequests: [{ id: "r1", requested_x_id: "x1", link_type: "new",
+      target_x_user_id: null, status: "pending", requested_at: now - 120 }],
+  };
+  const html = renderToStaticMarkup(React.createElement(AdminUserDetailContent, { data }));
+  assert.match(html, /登録 2分前/);
+  assert.match(html, /email認証 1時間前/);
+  assert.match(html, /Video One/);
+  assert.match(html, /2020\/01\/01/);
+  const relativeCount = (html.match(/2分前/g) ?? []).length;
+  assert.ok(relativeCount >= 3, "registration, application and audit should use relative timestamps");
+  const unverified = renderToStaticMarkup(React.createElement(AdminUserDetailContent, {
+    data: { ...data, user: { ...data.user, emailVerified: null } },
+  }));
+  assert.doesNotMatch(unverified, /class="fn-console-note">email認証/);
 });
