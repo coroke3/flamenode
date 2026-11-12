@@ -9,7 +9,7 @@
  * NOT EXISTS membership filter, escaped LIKE and updated_at/id ordering.
  */
 import { Hono } from "hono";
-import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { assertCondition, mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { sql } from "@flamenode/server-core/sql";
 import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "./body.ts";
@@ -1143,6 +1143,30 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
       reason: "event_group_delete",
       requestedByUserId: userId,
     });
+    // A concurrent remove+add (or field update) can preserve the number of
+    // relations, so changes() alone cannot guarantee the before-audit rows
+    // match the rows actually deleted. Snapshot equality is tested inside
+    // the same atomic D1 batch, before either DELETE executes.
+    const expectedRelationsJson = JSON.stringify(relationRows.map((row) => ({
+      event_id: row.event_id,
+      relation_type: row.relation_type,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    })));
+    const relationSnapshotCas = db.run(assertCondition(sql`
+      (SELECT COUNT(*) FROM event_group_events WHERE event_group_id = ${id}) = ${relationRows.length}
+      AND NOT EXISTS (
+        SELECT 1 FROM event_group_events live
+        WHERE live.event_group_id = ${id}
+          AND NOT EXISTS (
+            SELECT 1 FROM json_each(${expectedRelationsJson}) snapshot
+            WHERE json_extract(snapshot.value, '$.event_id') = live.event_id
+              AND json_extract(snapshot.value, '$.relation_type') = live.relation_type
+              AND json_extract(snapshot.value, '$.created_at') = live.created_at
+              AND json_extract(snapshot.value, '$.updated_at') = live.updated_at
+          )
+      )
+    `));
     const deleteRelations = db.run(sql`
       DELETE FROM event_group_events WHERE event_group_id = ${id}
     `);
@@ -1177,6 +1201,7 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
     const budget = planD1AuditMutationBudget({
       mutationStatementCount: mutationStatements.length,
       mutationAssertionCount: expectedMutationChanges.length,
+      preMutationAssertionCount: 1,
       auditEntryCount: audits.length,
       distinctActorCount: 1,
       callerQueryCount: 3,
@@ -1213,6 +1238,7 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
       await mutateWithAudit(db, {
         mutationStatements,
         expectedMutationChanges,
+        preMutationAssertions: [relationSnapshotCas],
         preloaded: auditPreloaded(c),
         callerQueryCount: 3,
         audits,
