@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Hono } from "hono";
 import { dbMiddleware } from "../src/middleware/db.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
@@ -21,6 +22,7 @@ import {
   checkEventGroupUpdateCas,
   checkEventGroupSlugAvailable,
   EVENT_GROUP_ADD_MAX,
+  EVENT_GROUP_WRITE_FAILED,
   normalizeEventGroupMembershipAdd,
   normalizeEventGroupMembershipRemove,
   planEventGroupMembershipAdd,
@@ -28,6 +30,19 @@ import {
   planEventGroupMembershipRemove,
   planEventGroupMembershipDeleteBudget,
 } from "../src/routes/admin/eventGroups.ts";
+
+test("SA-026..030: atomic failure message stays identical to CURRENT Server Action", () => {
+  // CURRENT is server-only; inspect its constant return value without importing Next.
+  const source = readFileSync(
+    new URL("../../../src/lib/actions/event-group-admin.ts", import.meta.url), "utf8",
+  );
+  const start = source.indexOf("function eventGroupMutationError(");
+  const end = source.indexOf("async function revalidateEventGroupPathsBestEffort(", start);
+  assert.ok(start >= 0 && end > start, "CURRENT mutation error handler must exist");
+  const currentMessage = source.slice(start, end).match(/message:\\s*"([^"]+)"/)?.[1];
+  assert.equal(EVENT_GROUP_WRITE_FAILED, currentMessage);
+  assert.equal(EVENT_GROUP_WRITE_FAILED, "保存に失敗しました。再読み込みして、もう一度お試しください。");
+});
 
 const admin = { id: "admin-1", role: "admin", is_banned: 0 };
 function setup({
@@ -1172,7 +1187,7 @@ test("SA-029 U04 staged: failed membership INSERT rolls back relation, audits an
     const response = await h.add(["ev-2", "ev-3"]);
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), {
-      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
     });
     assert.equal(h.count("event_group_events"), 1);
     assert.equal(h.count("audit_logs"), 0);
@@ -1613,7 +1628,7 @@ test("SA-026/027 U03: throwing R2 getter rejects public transitions but not priv
       assert.equal(response.status, 503, "public mutation requires usable R2 binding");
       assert.equal(response.headers.get("cache-control"), "private, no-store");
       assert.deepEqual(await response.json(), {
-        ok: false, message: "更新が競合したか監査記録に失敗しました。",
+        ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
       });
       assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
       assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
@@ -1671,10 +1686,10 @@ test("SA-026/027 U03 staged: unique-index slug races roll back CREATE and UPDATE
     assert.equal(created.status, 500);
     assert.equal(updated.status, 500);
     assert.deepEqual(await created.json(), {
-      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
     });
     assert.deepEqual(await updated.json(), {
-      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
     });
     assert.equal(create.sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
     assert.equal(update.sqlite.prepare("SELECT slug FROM event_groups WHERE id = 'grp-update'").get().slug, "existing-group");
@@ -1829,7 +1844,7 @@ test("SA-028 U03 staged: relation overflow is rejected before group, audit or qu
 
     assert.equal(response.status, 503);
     assert.deepEqual(await response.json(), {
-      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
     });
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_groups").get().n, 1);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_group_events").get().n, 80);
@@ -2021,7 +2036,7 @@ test("SA-028 U03: throwing R2 getter denies public delete before D1 mutation; pr
     assert.equal(failed.status, 503);
     assert.equal(failed.headers.get("cache-control"), "private, no-store");
     assert.deepEqual(await failed.json(), {
-      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
     });
     assert.equal(publicGroup.count("event_groups"), 1);
     assert.equal(publicGroup.count("event_group_events"), 2);
@@ -2103,7 +2118,7 @@ test("SA-028 U03 staged: D1 failure compensates only the precommitted public DEL
     const response = await h.remove();
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), {
-      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
     });
     assert.equal(h.count("event_groups"), 1);
     assert.equal(h.count("event_group_events"), 2);
@@ -2141,7 +2156,7 @@ test("SA-028 U03 staged: stale group CAS rolls back relations, audits and rebuil
     const response = await h.remove();
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), {
-      ok: false, message: "更新が競合したか監査記録に失敗しました。",
+      ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
     });
     assert.equal(h.sqlite.prepare("SELECT updated_at FROM event_groups WHERE id = 'grp-delete'").get().updated_at, 20);
     assert.equal(h.count("event_groups"), 1);
