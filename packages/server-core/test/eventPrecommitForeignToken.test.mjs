@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { preCommitEventVisibilityTransition } from "@flamenode/server-core/visibility/eventTransition";
+import { preCommitPublicVisibilityFence } from "@flamenode/server-core/visibility/fenceTransition";
 
 // Exercise the actual shared core imported by both CURRENT Next and TARGET Hono.
 // The fake manifest host models R2 conditional PUT and mutateOnConflict retries.
@@ -111,4 +112,49 @@ test("Issue #659: nonconflicting concurrent manifest additions survive ETag retr
   assert.equal(state.manifest.entities.find(x => x.entity_id === "event-one").fence_token, "incoming");
   assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "group-two"), added);
   assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "video-one"), other);
+});
+
+test("Issue #659: generic event_group precommit rejects an existing foreign token before PUT", async () => {
+  const prior = entry("event_group", "group-one", "older-group-owner");
+  const state = hostOf(manifestOf(other, prior));
+  await assert.rejects(
+    preCommitPublicVisibilityFence(
+      { entityType: "event_group", entityId: "group-one", fenceToken: "incoming" },
+      state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 0);
+  assert.deepEqual(state.manifest.entities, [other, prior]);
+});
+
+test("Issue #659: generic X user fence comparison is case insensitive and preserves the previous token", async () => {
+  const prior = entry("x_user", "UserX", "older-user-owner");
+  const state = hostOf(manifestOf(prior));
+  await assert.rejects(
+    preCommitPublicVisibilityFence(
+      { entityType: "x_user", entityId: "USERX", fenceToken: "incoming" },
+      state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 0);
+  assert.deepEqual(state.manifest.entities, [prior]);
+});
+
+test("Issue #659: generic same-token retry and nonconflicting CAS still work", async () => {
+  const prior = entry("event_group", "group-one", "incoming");
+  const added = entry("video", "video-two", "another-writer");
+  const state = hostOf(manifestOf(prior), latest => ({
+    ...latest,
+    entities: [...latest.entities, added],
+  }));
+  await preCommitPublicVisibilityFence(
+    { entityType: "event_group", entityId: "group-one", fenceToken: "incoming" },
+    state.host,
+  );
+  assert.equal(state.callbacks, 1);
+  assert.equal(state.appliedWrites, 1);
+  assert.equal(state.manifest.entities.find(x => x.entity_id === "group-one").fence_token, "incoming");
+  assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "video-two"), added);
 });
