@@ -222,7 +222,7 @@ test("MIG-0731 U03: SPA filter preserves GET semantics and strips unselected ove
     onFilterChange() {},
   }));
   assert.match(markup, /method="get"/);
-  assert.match(markup, /action="\\/admin\\/moderation"/);
+  assert.ok(markup.includes('action="/admin/moderation"'));
   assert.match(markup, /name="type"/);
   assert.match(markup, /name="status"/);
 });
