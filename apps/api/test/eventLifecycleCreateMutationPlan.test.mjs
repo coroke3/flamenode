@@ -110,7 +110,11 @@ function createAtomicCreateHarness() {
   return { sqlite, d1, db: drizzle(d1, { schema }) };
 }
 
-function createExecutableWritePlan(db, queue = { statements: [], expectedChanges: [], acceptedTargetCount: 0 }) {
+function createExecutableWritePlan(
+  db,
+  queue = { statements: [], expectedChanges: [], acceptedTargetCount: 0 },
+  ownerRow = owner,
+) {
   const questionRows = createQuestions(2);
   const planned = planEventCreateQuestionBatch({
     templateGeneralQuestions: questionRows,
@@ -118,7 +122,7 @@ function createExecutableWritePlan(db, queue = { statements: [], expectedChanges
   });
   assert.equal(planned.ok, true);
   const plan = planEventCreateAtomicWrite({
-    db, eventRow: event, ownerRow: owner,
+    db, eventRow: event, ownerRow,
     questionRows, questionChunks: planned.chunks,
     queue,
     actorUserId: "u_admin", hasRenameTombstone: false,
@@ -341,6 +345,37 @@ test("MIG-0652 U02 SQLite T08: revoking a linked owner after planning but before
   }
 });
 
+test("MIG-0652 U02 SQLite T09: forged owner display name cannot be audited or committed", async () => {
+  const { sqlite, d1, db } = createAtomicCreateHarness();
+  seedCreateActor(sqlite);
+  const plan = createExecutableWritePlan(db,
+    { statements: [], expectedChanges: [], acceptedTargetCount: 0 },
+    { ...owner, display_name: "FORGED" });
+  assert.equal(plan.preMutationAssertions.length, 1);
+  await assert.rejects(mutateWithAudit(db, plan));
+  assert.equal(d1.stats.batches, 1);
+  for (const table of ["events", "event_staff", "event_custom_questions", "audit_logs"]) {
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0);
+  }
+});
+
+test("MIG-0652 U02 SQLite T10: changed X display name after preflight invalidates owner snapshot", async () => {
+  const { sqlite, d1, db } = createAtomicCreateHarness();
+  seedCreateActor(sqlite);
+  const queue = await buildEventChangeQueueBatch(db, {
+    eventId: "ev_create", reason: "event_create", requestedByUserId: "u_admin", priority: "high",
+  });
+  const plan = createExecutableWritePlan(db, queue);
+  sqlite.prepare("UPDATE x_users SET x_name = 'Renamed' WHERE id = 'x_approved'").run();
+  await assert.rejects(mutateWithAudit(db, plan));
+  assert.equal(d1.stats.batches, 1);
+  for (const table of ["events", "event_staff", "event_custom_questions", "static_rebuild_queue", "audit_logs"]) {
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0,
+      table + " must not survive stale owner display");
+  }
+  assert.equal(sqlite.prepare("SELECT x_name FROM x_users WHERE id = 'x_approved'").get().x_name, "Renamed");
+});
+
 test("MIG-0652 U02 atomic create: event, owner, ordered question chunks and strict audits are bundled", () => {
   const result = makePlan();
   assert.equal(result.ok, true);
@@ -455,6 +490,7 @@ test("MIG-0652 U02 atomic create: source keeps unmounted route and no premature 
   assert.match(core, /mutationAssertionCount: mutationStatements.length/);
   assert.match(core, /preMutationAssertionCount: preMutationAssertions.length/);
   assert.match(core, /approval_status/);
+  assert.match(core, /xUsers\.x_name\} = \$\{ownerRow\.display_name/);
   assert.doesNotMatch(core, /staticRebuildWakeSource:/);
   assert.match(source, /const mutationStatements = \[/);
   assert.match(source, /context: "event-create:owner"/);
