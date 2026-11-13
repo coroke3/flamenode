@@ -164,11 +164,15 @@ export function classifySpreadsheetAuditHistoryCandidate(
         return "legacy_ambiguous";
       }
       const data = value as Record<string, unknown>;
-      const present = expectedPk.every(([key]) =>
-        Object.prototype.hasOwnProperty.call(data, key) &&
-        typeof data[key] === "string" &&
-        data[key] !== "[REDACTED]",
-      );
+      const present = expectedPk.every(([key]) => {
+        const value = data[key];
+        return Object.prototype.hasOwnProperty.call(data, key) &&
+          typeof value === "string" &&
+          value !== "[REDACTED]" &&
+          // Audit sanitization may truncate long text fields; a truncated
+          // primary key cannot prove or disprove historical row identity.
+          !value.endsWith("…[truncated]");
+      });
       if (!present) return "legacy_ambiguous";
       parts.push(expectedPk.every(([key, expected]) => data[key] === expected)
         ? "match" : "other");
