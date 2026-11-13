@@ -40,10 +40,13 @@ if (runTestWithTsx(import.meta.url)) {
     });
   }
 
-  test("MIG-0516追加後の最大対応mergeはFree 50 query超過を事前拒否する", async () => {
-    // merge.ts builds 20 base DML + visibility fence + one <=100-target queue
-    // DML + a build-request marker. Five strict assertions cover
-    // x_users/request/fence/queue/marker; 3 or 4 audits share one chunk.
+  test("MIG-0516 + #668: 100-target X ID merge with actual public build marker fits hard 50-query cap", async () => {
+    // Issue #492: the real merge plan now has 18 base DML after
+    // consolidating two alias deletes and the staff promotion/remap.
+    // No CAS, audit, fence or queue assertions are removed.
+    // At 100 targets, MIG-0516's actual queue builder supplies both the
+    // JSON1 upsert and build-marker UPDATE; the marker also has a strict
+    // changes() assertion. Nothing is simulated or excluded from the budget.
     const queue = await buildStaticRebuildQueueBatch(
       { run: (query) => query },
       Array.from({ length: 100 }, (_, index) => ({
@@ -58,18 +61,19 @@ if (runTestWithTsx(import.meta.url)) {
 
     for (const auditCount of [3, 4]) {
       const budget = plan({
-        mutations: 20 + 1 + queue.statements.length,
+        mutations: 18 + 1 + queue.statements.length,
         assertions: 2 + 1 + queue.expectedChanges.length,
         audits: auditCount,
         callerReads: 18,
       });
       assert.equal(budget.preparationQueryCount, 2);
-      assert.equal(budget.mutationStatementCount, 23);
+      assert.equal(budget.mutationStatementCount, 21);
       assert.equal(budget.mutationAssertionCount, 5);
       assert.equal(budget.integrityAssertionCount, 2);
       assert.equal(budget.auditQueryCount, 2);
-      assert.equal(budget.totalQueryCount, 52);
-      assert.equal(budget.withinLimit, false);
+      assert.equal(budget.totalQueryCount, 50);
+      assert.equal(budget.withinLimit, true);
+
     }
   });
 
