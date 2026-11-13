@@ -1250,3 +1250,74 @@ test("Issue #653: oversized current public metadata cannot keep revoked old R2 o
     assert.equal(JSON.stringify(written).includes("Private title"), false);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test("Issue #653: orphan-only GA4 success cannot retain now-private event or retired creator metadata", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    assert.match(String(input), /analyticsdata.googleapis.com/);
+    return new Response(JSON.stringify({
+      dimensionHeaders: [{ name: "dateRange" }, { name: "customEvent:video_id" }],
+      metricHeaders: [{ name: "eventCount" }],
+      rowCount: 1,
+      rows: [{
+        dimensionValues: [{ value: "last_30" }, { value: "not-in-D1" }],
+        metricValues: [{ value: "19" }],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const token = JSON.stringify({
+    access_token: "cached-token",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
+  try {
+    for (const stale of [
+      { primary_event_id: "event-now-private",
+        primary_event_title: "Formerly public event", display_name: "creator" },
+      { primary_event_id: null,
+        primary_event_title: null, display_name: "Removed public creator alias" },
+    ]) {
+      const prior = JSON.stringify({
+        schema_version: 1, generated_at: 1_700_000_000,
+        items: [{
+          id: "video-a", title: "A", youtube_video_id: "yt-a",
+          icon_url: null, status: "public", rank: 1,
+          scheduled_time: 1_700_000_000,
+          ...stale, views_2d: 0, views_5d: 0,
+          views_7d: 0, views_30d: 7,
+        }],
+      });
+      let reads = 0;
+      let writes = 0;
+      let output = null;
+      const db = recentDb();
+      const env = enabledGa4Env({
+        DB: db,
+        KV: { async get() { return token; } },
+        R2: {
+          async get(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            reads += 1;
+            return { size: Buffer.byteLength(prior),
+              async text() { return prior; } };
+          },
+          async put(key, body) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            writes += 1;
+            output = JSON.parse(String(body));
+          },
+        },
+      });
+      const result = await syncGa4Trending(env);
+      assert.equal(result.failed, 0);
+      assert.equal(result.processed, 0);
+      assert.equal(db.reads, 1, "no extra D1 privacy query");
+      assert.equal(reads, 1);
+      assert.equal(writes, 1, "stale public R2 metadata must not be preserved");
+      assert.deepEqual(output.items, []);
+      assert.equal(JSON.stringify(output).includes("Formerly public event"), false);
+      assert.equal(JSON.stringify(output).includes("Removed public creator alias"), false);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
