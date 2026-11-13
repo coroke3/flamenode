@@ -285,12 +285,26 @@ export function isValidPreloadedAuditSettings(value: unknown): value is AuditLog
     "max_payload_bytes",
     "compact_after_days",
   ] as const;
-  return Object.keys(row).length === keys.length &&
-    keys.every((key) => {
-      const field = row[key];
-      return Object.hasOwn(row, key) &&
-        typeof field === "number" && Number.isSafeInteger(field) && field >= 0;
+  try {
+    // mapAuditSettings produces a plain, enumerable data-only snapshot.
+    // Do not execute caller-defined getters while estimating the D1 budget:
+    // they could throw or return different values between planning and use.
+    const prototype = Object.getPrototypeOf(row);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    if (Reflect.ownKeys(row).length !== keys.length) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(row);
+    return keys.every((key) => {
+      const field = descriptors[key];
+      return Boolean(
+        field?.enumerable && Object.hasOwn(field, "value") &&
+        typeof field.value === "number" &&
+        Number.isSafeInteger(field.value) && field.value >= 0
+      );
     });
+  } catch {
+    // Invalid or exotic preload objects must pay for a real settings SELECT.
+    return false;
+  }
 }
 
 /** Prepare audit entries with bounded queries independent of entry count. */
