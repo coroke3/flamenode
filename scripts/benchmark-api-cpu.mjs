@@ -20,6 +20,7 @@
  * Judged by MAX against ZERO_1102.md section 3 (S2 < 7ms, S3 < 8ms, S4 <= 2ms).
  * p50/p95/p99 are recorded but never decide pass/fail.
  */
+import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -70,12 +71,22 @@ export function judge(maxMs, budgetMs, { resolutionMs = 0, noiseMs = 0, kind = "
   return "INCONCLUSIVE";
 }
 
-/** Group raw samples {kind, cpuMs, status, bytes, d1} into per-kind summaries. */
+/** Number of rows delivered to application code; NOT Cloudflare D1 billed rows_read. */
+export function returnedRows(mode, value) {
+  if (mode === "first") return value == null ? 0 : 1;
+  if (mode === "raw") return Array.isArray(value) ? value.length : 0;
+  if (mode === "batch") return Array.isArray(value)
+    ? value.reduce((sum, result) => sum + (Array.isArray(result?.results) ? result.results.length : 0), 0)
+    : 0;
+  return Array.isArray(value?.results) ? value.results.length : 0;
+}
+
+/** Group raw samples {kind, cpuMs, status, bytes, d1, d1RowsReturned, d1PerQueryRows} into per-kind summaries. */
 export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) {
   const budget = BUDGETS_MS[runtimeClass];
   const budgetKind = runtimeClass === "S4" ? "le" : "lt";
   const kinds = {};
-  for (const kind of KINDS) {
+  for (const kind of [...new Set([...KINDS, ...samples.map((s) => s.kind)])]) {
     const rows = samples.filter((s) => s.kind === kind);
     const cpu = summarize(rows.map((r) => r.cpuMs));
     kinds[kind] = {
@@ -84,6 +95,16 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
       unexpectedStatus: rows.filter((r) => r.unexpected).length,
       maxBytes: rows.reduce((m, r) => Math.max(m, r.bytes ?? 0), 0),
       maxD1Statements: rows.reduce((m, r) => Math.max(m, r.d1 ?? 0), 0),
+      // Returned-result proxy; missing counts stay unknown, never become zero.
+      d1RowsReturned: (() => {
+        const counts = rows.map((r) => r.d1RowsReturned)
+          .filter((v) => Number.isSafeInteger(v) && v >= 0).sort((a, b) => a - b);
+        return counts.length ? {
+          min: counts[0], median: percentile(counts, 50),
+          max: counts[counts.length - 1], total: counts.reduce((a, b) => a + b, 0),
+        } : null;
+      })(),
+      d1PerQueryRowsBySample: rows.map((r) => r.d1PerQueryRows ?? null),
     };
   }
   const maxima = Object.values(kinds).map((k) => k.max).filter((v) => v != null);
@@ -101,7 +122,7 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
 export function parseArgs(argv) {
   const out = {
     mode: "wrangler", samples: MIN_SAMPLES, coldSamples: MIN_SAMPLES, warmup: 10,
-    port: 8788, inspectorPort: 9239, d1: "replay", samplingUs: 100, only: null, out: null, dryRun: false, skipCold: false,
+    port: 8788, inspectorPort: 9239, d1: "replay", samplingUs: 100, only: null, out: null, dryRun: false, skipCold: false, includePending: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -123,6 +144,7 @@ export function parseArgs(argv) {
     else if (a === "--out") out.out = next();
     else if (a === "--dry-run") out.dryRun = true;
     else if (a === "--skip-cold") out.skipCold = true;
+    else if (a === "--include-pending") out.includePending = true;
     else throw new Error(`Unsupported argument: ${a}`);
   }
   if (!["replay", "sim"].includes(out.d1)) throw new Error("--d1 must be replay|sim");
@@ -139,14 +161,14 @@ export function formatMs(v, digits) {
 
 export function renderMarkdown(results, { digits, label }) {
   const lines = [
-    `| scenario | class | kind | n | p50 | p95 | p99 | max (ms) | D1 stmts | bytes | unexpected status |`,
-    `| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |`,
+    `| scenario | class | kind | n | p50 | p95 | p99 | max (ms) | D1 stmts | D1 returned rows proxy (min/med/max/total) | bytes | unexpected status |`,
+    `| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |`,
   ];
   for (const r of results) {
-    for (const kind of KINDS) {
+    for (const kind of Object.keys(r.agg.kinds)) {
       const k = r.agg.kinds[kind];
       lines.push(
-        `| ${r.id} ${r.title} | ${r.runtimeClass} | ${kind} | ${k.n} | ${formatMs(k.p50, digits)} | ${formatMs(k.p95, digits)} | ${formatMs(k.p99, digits)} | ${formatMs(k.max, digits)} | ${k.maxD1Statements} | ${k.maxBytes} | ${k.unexpectedStatus} |`,
+        `| ${r.id} ${r.title} | ${r.runtimeClass} | ${kind} | ${k.n} | ${formatMs(k.p50, digits)} | ${formatMs(k.p95, digits)} | ${formatMs(k.p99, digits)} | ${formatMs(k.max, digits)} | ${k.maxD1Statements} | ${k.d1RowsReturned ? [k.d1RowsReturned.min, k.d1RowsReturned.median, k.d1RowsReturned.max, k.d1RowsReturned.total].join("/") : "-"} | ${k.maxBytes} | ${k.unexpectedStatus} |`,
       );
     }
   }
@@ -168,6 +190,10 @@ const SITE_URL = "https://bench.flamenode.invalid";
 const SESSION_TOKEN = "bench-admin-session-token";
 const ADMIN_COOKIE = `authjs.session-token=${SESSION_TOKEN}`;
 const STATS_KEY = "top/sections/stats.v1.json";
+const BENCH_ETAG = "bench-etag";
+// Bench-only upstream image stub: media proxy scenarios must never reach the network.
+const BENCH_PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+const benchFetchStub = async () => new Response(BENCH_PNG, { headers: { "content-type": "image/png" } });
 const MAX_STATS_BYTES = 64 * 1024;
 
 function adminHeaders() {
@@ -178,6 +204,13 @@ const annBody = (extra = {}) => ({ title: "Bench", body: "Bench body", severity:
 
 const RH013_EVENT_ID = "bench-export-event";
 const RH013_VIDEOS = 500;
+/** Exact Cache API URLs used by server-core publicJsonCacheUrl(eventExportPayloadCacheKey(...)). */
+export function eventExportCacheRequestUrls(eventId = RH013_EVENT_ID) {
+  return ["v5", "legacy"].flatMap((format) => [15, 60, 360, 1440].map((refresh) => {
+    const key = ["public-event-export", 9, encodeURIComponent(eventId), format, refresh].join(":");
+    return `https://flamenode.internal/public-json/${encodeURIComponent(key)}`;
+  }));
+}
 const RH013_MEMBERS_PER_VIDEO = 100;
 let rh013Seeded = false;
 let rh013IpSeq = 0;
@@ -199,7 +232,7 @@ function rh013Seed() {
   ];
 }
 
-export function buildScenarios(ctx) {
+export function buildScenarios(ctx, { includePending = false } = {}) {
   const stats = (padBytes) => {
     const base = { schema_version: 1, generated_at: 1_700_000_000, stats: { public_videos: 3000, creators: 800, public_events: 20 } };
     if (padBytes <= 0) return json(base);
@@ -214,11 +247,31 @@ export function buildScenarios(ctx) {
     sql: `INSERT INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, public_api_enabled) VALUES (?, 'bench event', 'event', 'public', 1000, 2000, 10, 20, 0)`,
     params: [id],
   });
+  // MIG-0639: seed bounded collections in one recursive SQL statement per table.
+  // Unique per-sample IDs prevent 15s isolate response caching from hiding the scan cost.
+  const liveEventId = (endpoint, i, tag) => `live-${endpoint}-${tag}-${i}`;
+  const liveSlotRows = (id, count) => numberedRows(
+    count,
+    "INSERT INTO slots (id, event_id, start_time, status) SELECT ? || '-slot-' || n, ?, n, 'available' FROM seq",
+    [id, id],
+  );
+  const liveVideoRows = (id, count) => [
+    numberedRows(count, "INSERT INTO videos (id, submitted_by_user_id, creator_display_name, title, visibility_status, updated_at) SELECT ? || '-v-' || n, 'bench-admin', 'Bench', 'Bench', 'public', 1000 + n FROM seq", [id]),
+    numberedRows(count, "INSERT INTO video_events (video_id, event_id) SELECT ? || '-v-' || n, ? FROM seq", [id, id]),
+  ];
+  const liveSpec = (endpoint, count, i, tag) => {
+    const id = liveEventId(endpoint, i, tag);
+    const rows = endpoint === "submissions" ? liveVideoRows(id, count) : [liveSlotRows(id, count)];
+    return { method: "GET", path: `/api/live/events/${id}/${endpoint}`, setup: [eventRow(id), ...rows], expect: [200] };
+  };
+  const invalidLive = (endpoint) => ({
+    method: "GET", path: `/api/live/events/${"e".repeat(129)}/${endpoint}`, expect: [400],
+  });
   const LONG_TITLE = "T".repeat(200);
   const LONG_BODY = "B".repeat(8000);
   const LONG_EVENT_ID = "e".repeat(128);
 
-  return [
+  const core = [
     {
       id: "RH-018", title: "GET /api/health", runtimeClass: "S2",
       kinds: {
@@ -306,11 +359,40 @@ export function buildScenarios(ctx) {
       // cache would otherwise turn warm samples into cheap hits). Seeding is idempotent and
       // done once per target through a single recursive-CTE statement per table.
       id: "RH-013", title: "GET /api/event-endpoints/:id (500 videos x 100 members)", runtimeClass: "S2",
+      // Warm-path measurements are separate from the scheduled full-rebuild control.
+      warmModes: {
+        "scheduled-warm": { path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=scheduled&refresh=15`, expectCache: "HIT", verifyBodyReuse: true },
+        "realtime-warm": { path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=realtime`, expectCache: "BYPASS", verifyBodyReuse: true },
+      },
       kinds: {
         // distinct client IP per request: the route has a 60/min per-IP isolate rate guard
         normal: () => ({ setup: rh013Seed(), method: "GET", path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=scheduled&refresh=15`, headers: rh013Ip(), clearCache: true, expect: [200] }),
         limit: () => ({ setup: rh013Seed(), method: "GET", path: `/api/event-endpoints/${RH013_EVENT_ID}?format=legacy&update=scheduled&refresh=1440`, headers: rh013Ip(), clearCache: true, expect: [200] }),
         invalid: () => ({ method: "GET", path: `/api/event-endpoints/${RH013_EVENT_ID}?format=xxx`, headers: rh013Ip(), expect: [400] }),
+      },
+    },
+    {
+      id: "RH-020", title: "GET /api/live/events/:id/slots (6000-slot D-12 cap)", runtimeClass: "S2",
+      kinds: {
+        normal: (i, tag) => liveSpec("slots", 1, i, tag),
+        limit: (i, tag) => liveSpec("slots", 6000, i, tag),
+        invalid: () => invalidLive("slots"),
+      },
+    },
+    {
+      id: "RH-021", title: "GET /api/live/events/:id/submissions (50 public videos)", runtimeClass: "S2",
+      kinds: {
+        normal: (i, tag) => liveSpec("submissions", 1, i, tag),
+        limit: (i, tag) => liveSpec("submissions", 50, i, tag),
+        invalid: () => invalidLive("submissions"),
+      },
+    },
+    {
+      id: "RH-022", title: "GET /api/live/events/:id/summary (6000-slot counts)", runtimeClass: "S2",
+      kinds: {
+        normal: (i, tag) => liveSpec("summary", 1, i, tag),
+        limit: (i, tag) => liveSpec("summary", 6000, i, tag),
+        invalid: () => invalidLive("summary"),
       },
     },
     {
@@ -331,13 +413,603 @@ export function buildScenarios(ctx) {
       },
     },
   ];
+  // MIG-0639: every other main Hono method (inventory below), then BASELINE last (noise floor of the same run).
+  const baseline = core.pop();
+  return [...core, ...buildRouteScenarios(), ...(includePending ? buildPendingScenarios() : []), baseline];
 }
 
+// ------------------------------------------------ MIG-0639 route inventory
+// One entry per remaining main Hono method (taken from `app.routes`; RH-017/018/020..022/026/029 and
+// SA-004..008 have their own scenarios above). Access classes:
+//   p = public (anonymous), s = signed-in reader, a = admin reader, w = admin write (origin + JSON body).
+// Kinds for this generic inventory (fixture = the shared minimal rows in SEED):
+//   normal  valid request on the shared fixture, with a session when the route needs one
+//   limit   same request with every bounded input at its cap (limit/page/q, long reasons, long csv)
+//   invalid public: 129-char id or garbage query. session reads: no session. writes: session + empty body.
+// Data-depth upper bounds (6000 slots, 50 videos, 500 videos x 100 members, spreadsheet page) have their own
+// named scenarios; this table does NOT claim data-depth coverage for the other methods.
+const numberedRows = (limit, sql, params) => ({
+  sql: `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ${limit}) ${sql}`,
+  params,
+});
+const BENCH_IP = (kind, i) => `${{ normal: "10.20", limit: "10.21", invalid: "10.22" }[kind]}.${(i >> 8) & 255}.${i & 255}`;
+const BIG_Q = `?limit=100&page=1000&q=${"a".repeat(100)}`;
+
+const RELEASE_KEY = "events/bench-evt/release.v1.json";
+const releaseArtifact = (videos, members) => json({
+  schema_version: 1, generated_at: 1_700_000_000,
+  event: { id: "bench-evt", title: "bench event", visibility_status: "public" },
+  videos: Array.from({ length: videos }, (_, v) => ({
+    id: `rv-${v}`, title: `Video ${v}`, youtube_video_id: `yt${v}`, visibility_status: "public", collaboration_type: "individual",
+    creator_display_name: "Bench", scheduled_time: 1_700_000_000 + v,
+    members: Array.from({ length: members }, (_, m) => ({ name: `Member ${m}`, x_user_id: `mx${m}`, role: "edit", comment: "c", order_index: m })),
+  })),
+  total: videos,
+});
+const MANIFEST_KEY = "visibility/blocked-entities.v1.json";
+const emptyManifest = json({ schema_version: 1, revision: 1, generated_at: 1_700_000_000, entities: [] });
+const staffArtifact = (n) => json({
+  generated_at: 1_700_000_000,
+  event: { id: "bench-evt", title: "bench event", visibility_status: "public" },
+  public_staff: Array.from({ length: n }, (_, k) => ({ display_name: `Staff ${k}`, public_role_label: "staff", x_user_id: `Staff_${k}`, x_name: `Staff ${k}`, icon_url: "/icon.jpg", has_public_profile: true, permission_preset: "owner" })),
+});
+const recentArtifact = (n) => json({
+  generated_at: 1_700_000_000, total: n,
+  items: Array.from({ length: n }, (_, k) => ({ id: `rv${k}`, title: `Video ${k}`, youtube_video_id: `yt${k}`, display_name: "Bench", icon_url: "https://img.invalid/1.png", scheduled_time: 1_700_000_000 + k, status: "public" })),
+});
+const videoOverlayArtifact = json({
+  version: 1, generated_at: 1000,
+  video: { id: "bench-vid", title: "Bench video", visibility_status: "public", scheduled_time: 2000, primary_event_id: "bench-evt" },
+  public_events: [], public_chapters: [],
+});
+const prep = (normal, limit, invalid = normal) => ({ normal: { r2Objects: normal }, limit: { r2Objects: limit }, invalid: { r2Objects: invalid } });
+const tplRow = (id) => ({ sql: `INSERT INTO event_templates (id, name, settings_json, created_by_user_id, created_at, updated_at) VALUES (?, 'bench tpl', '{}', 'bench-admin', 10, 10)`, params: [id] });
+const chapterRow = (id) => ({ sql: `INSERT INTO video_chapters (id, video_id, chapter_time, chapter_label, visibility, created_at, updated_at) VALUES (?, 'bench-vid', 7, 'bench', 'public', 10, 10)`, params: [id] });
+
+// MIG-0639 / SA-045..048: deterministic local-only notification rows.
+// Each request gets its own outbox ID so retry/cancel/force writes cannot consume a later sample.
+const benchNotificationId = (i, tag) => `bench-notif-${tag}-${i}`;
+const notificationRow = (id, status = "failed") => ({
+  sql: "INSERT OR REPLACE INTO notification_outbox (id,recipient_user_id,type,payload_json,delivery_route,status,attempt_count,created_at) VALUES (?, 'bench-admin', 'video_approved', '{\"content\":\"bench\"}', 'dm', ?, 5, 100)",
+  params: [id, status],
+});
+const notificationParams = (kind, i, tag) => ({ id: benchNotificationId(i, tag) });
+const notificationSetup = (status) => (kind, i, tag) => [notificationRow(benchNotificationId(i, tag), status)];
+
+// MIG-0639 / SA-049,051..055: local drafts/published terms, isolated across samples.
+const benchTermsId = (i, tag) => `bench-terms-${tag}-${i}`;
+const termsParams = (kind, i, tag) => ({ id: benchTermsId(i, tag) });
+const termsRow = (id, status) => ({
+  sql: "INSERT OR REPLACE INTO terms_versions (id,version_label,body_markdown,status,severity,published_at,created_by_user_id,created_at,updated_at) VALUES (?, 'bench-v1', 'bench body', ?, 'major', ?, 'bench-admin', 100, 100)",
+  params: [id, status, status === "published" ? 900 : null],
+});
+const termsSetup = (status) => (kind, i, tag) => [
+  termsRow(benchTermsId(i, tag), status),
+  ...(status === "published" ? [{ sql: `UPDATE "user" SET accepted_terms_version_id = ? WHERE id = 'bench-admin'`, params: [benchTermsId(i, tag)] }] : []),
+];
+
+// MIG-0639 / SA-099..100: owned X-ID request rows on local D1 only.
+const benchXRequestId = (i, tag) => `bench-xreq-${tag}-${i}`;
+const xMergeParentRow = (i, tag) => [
+  { sql: "INSERT OR REPLACE INTO x_users (id,x_name,approval_status) VALUES ('bench-x-source','Bench Source','approved')", params: [] },
+  {
+  sql: "INSERT OR REPLACE INTO x_identity_requests (id,request_type,requested_by_auth_user_id,requested_x_id,source_x_user_id,target_x_user_id,restore_snapshot_json,revert_deadline_at,status,requested_at,updated_at) VALUES (?, 'merge', 'bench-admin', NULL, 'bench-x-source', 'bench-x', '{\"v\":1}', 4102444800, 'done', 50, 60)",
+  params: [benchXRequestId(i, tag)],
+  },
+];
+const xRequestRow = (i, tag) => ({
+  sql: "INSERT OR REPLACE INTO x_identity_requests (id, request_type, requested_by_auth_user_id, requested_x_id, status, requested_at, updated_at) VALUES (?, 'new_link', 'bench-admin', ?, 'pending', 10, 10)",
+  params: [benchXRequestId(i, tag), `bench-new-${tag}-${i}`],
+});
+
+
+/** MIG-0639: live MIG-0654 staff and MIG-0643 operational write fixtures.
+ * Reset the affected local rows for every repetition so 50+ samples exercise
+ * the same mutation rather than drifting into a duplicate/no-op case.
+ */
+const benchStaff = (id, x, preset = "public_staff") => ({
+  sql: "INSERT OR REPLACE INTO event_staff (id,event_id,x_user_id,display_name,permission_preset,is_public,created_at,updated_at) VALUES (?,'bench-evt',?,'Benchmark staff',?,0,100,100)",
+  params: [id,x,preset],
+});
+const benchStaffX = (id) => ({
+  sql: "INSERT OR IGNORE INTO x_users (id,x_name,approval_status) VALUES (?, 'Benchmark staff', 'approved')",
+  params: [id],
+});
+const benchStaffSetup = (kind, i, tag, action) => {
+  const x = "bst_" + action;
+  const staffId = "bench-" + action;
+  return [
+    benchStaffX(x),
+    // The canonical bulk mutation invariant requires at least one operable owner.
+    // Seed a distinct, approved and linked owner; the CSV subject is NOT the actor.
+    ...(action === "csv" ? [
+      benchStaffX("bst_csv_owner"),
+      { sql:"INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bst_csv_owner','bench-admin','owner')",params:[] },
+      benchStaff("bench-csv-owner","bst_csv_owner","owner"),
+    ] : []),
+    ...(action === "create" || action === "csv" ? [{
+      sql: "DELETE FROM event_staff WHERE event_id = 'bench-evt' AND x_user_id = ?", params:[x],
+    }] : [benchStaff(staffId,x)]),
+  ];
+};
+const benchTransferSetup = () => [
+  benchStaffX("bench_from"),
+  benchStaffX("bench_to"),
+  { sql:"INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bench_to','bench-admin','owner')",params:[] },
+  { sql:"INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bench_from','bench-admin','owner')",params:[] },
+  benchStaff("bench-from","bench_from","owner"),
+  benchStaff("bench-to-staff","bench_to","manager"),
+];
+const benchQueueId = (i, tag) => "bench-q-" + tag + "-" + i;
+const benchFailedQueue = (i, tag) => ({
+  sql: "INSERT OR REPLACE INTO static_rebuild_queue (id,target_type,target_id,reason,priority,status,attempt_count,created_at,updated_at) VALUES (?,'event',?,'bench retry','low','failed',1,100,100)",
+  params:[benchQueueId(i,tag),"evt-" + tag + "-" + i],
+});
+const benchQueueSetup = (kind,i,tag) => [benchFailedQueue(i,tag)];
+const benchVisibilitySetup = (kind,i,tag) => [{
+  sql:"INSERT OR REPLACE INTO public_visibility_fences (entity_type,entity_id,fence_token,state,updated_at) VALUES ('event','bench-evt',?,'blocked',100)",
+  params:["bench-fence-" + tag + "-" + i],
+}];
+const benchYoutubeId = (kind,i,tag) => kind === "limit" ? "v".repeat(128) : "bench-vid";
+const benchYoutubeSetup = (kind,i,tag) => [
+  ...(kind === "limit" ? [{
+    sql:"INSERT OR REPLACE INTO videos (id,submitted_by_user_id,creator_display_name,title,visibility_status,updated_at) VALUES (?,'bench-admin','Bench','Benchmark','public',1000)",
+    params:[benchYoutubeId(kind,i,tag)],
+  }] : []),
+  { sql:"DELETE FROM video_youtube_metadata WHERE video_id = ?",params:[benchYoutubeId(kind,i,tag)] },
+];
+
+export const ROUTE_INVENTORY = [
+  // [id, method, path, access, options]
+  ["MIG-0661", "GET", "/api/operation-mode/banner", "p"],
+  ["RH-027", "OPTIONS", "/api/public/events/:id/staff", "p", { headers: (k) => ({ origin: k === "invalid" ? "https://evil.invalid" : "https://pvsf.jp", "access-control-request-method": "GET" }) }],
+  ["RH-028", "GET", "/api/public/events/:id/staff", "p", { prepare: prep({ [MANIFEST_KEY]: emptyManifest, "events/bench-evt/base.v1.json": staffArtifact(1) }, { [MANIFEST_KEY]: emptyManifest, "events/bench-evt/base.v1.json": staffArtifact(100) }) }],
+  ["HONO-PERS-01", "POST", "/api/personal/terms/accept", "w"],
+  ["HONO-PERS-02", "POST", "/api/personal/onboarding/terms", "w"],
+  ["HONO-PERS-03", "POST", "/api/personal/onboarding/complete", "w"],
+  ["HONO-PERS-04", "GET", "/api/personal/session", "s"],
+  ["HONO-PERS-05", "GET", "/api/personal/dashboard", "s"],
+  ["HONO-PERS-06", "GET", "/api/personal/library", "s"],
+  ["HONO-PERS-07", "GET", "/api/personal/settings", "s"],
+  ["HONO-PERS-08", "GET", "/api/personal/onboarding", "s"],
+  ["HONO-PERS-09", "GET", "/api/personal/entry", "s"],
+  ["HONO-PERS-10", "GET", "/api/personal/entry/slotted", "s"],
+  ["HONO-PERS-11", "GET", "/api/personal/entry/unslotted", "s"],
+  ["HONO-PERS-12", "GET", "/api/personal/edit/:id/permissions", "s"],
+  ["HONO-PERS-13", "GET", "/api/personal/edit/:id/form-options", "s"],
+  ["HONO-PERS-14", "GET", "/api/personal/edit/:id", "s"],
+  ["HONO-AR-01", "GET", "/api/admin-read/cost-guard-banner", "a"],
+  ["HONO-AR-02", "GET", "/api/admin-read/users/:id/edit", "a"],
+  ["HONO-AR-03", "GET", "/api/admin-read/users", "a"],
+  ["HONO-AR-04", "GET", "/api/admin-read/users/:id", "a"],
+  ["HONO-AR-05", "GET", "/api/admin-read/videos", "a"],
+  ["HONO-AR-06", "GET", "/api/admin-read/videos/:id/members", "a"],
+  ["HONO-AR-07", "GET", "/api/admin-read/videos/:id", "a"],
+  ["HONO-AR-08", "GET", "/api/admin-read/event-groups", "a"],
+  ["HONO-AR-09", "GET", "/api/admin-read/event-groups/:id", "a"],
+  ["HONO-AR-10", "GET", "/api/admin-read/events/templates", "a"],
+  ["HONO-AR-11", "GET", "/api/admin-read/events/new", "a"],
+  ["HONO-AR-12", "GET", "/api/admin-read/events", "a"],
+  ["HONO-AR-13", "GET", "/api/admin-read/moderation", "a"],
+  ["HONO-AR-14", "GET", "/api/admin-read/x-link-requests", "a"],
+  ["HONO-AR-15", "GET", "/api/admin-read/x-id-merges", "a"],
+  ["HONO-AR-16", "GET", "/api/admin-read/announcements", "a"],
+  ["HONO-AR-17", "GET", "/api/admin-read/announcements/:id", "a"],
+  ["HONO-AR-18", "GET", "/api/admin-read/rules", "a"],
+  ["HONO-AR-19", "GET", "/api/admin-read/rules/:id", "a"],
+  ["HONO-AR-20", "GET", "/api/admin-read/permissions/simulator", "a"],
+  ["HONO-AR-21", "GET", "/api/admin-read/api-endpoints", "a"],
+  ["HONO-AR-22", "GET", "/api/admin-read/audit-settings", "a"],
+  ["HONO-AR-23", "GET", "/api/admin-read/audit", "a"],
+  ["HONO-AR-24", "GET", "/api/admin-read/audit/restore", "a"],
+  ["HONO-AR-25", "GET", "/api/admin-read/audit/:id", "a"],
+  ["HONO-AR-26", "GET", "/api/admin-read/audit/:id/payload/:field", "a", { nq: "", lq: "?offset=12000" }],
+  ["HONO-AR-27", "GET", "/api/admin-read/ops/notifications", "a"],
+  ["HONO-AR-28", "GET", "/api/admin-read/ops/health", "a"],
+  ["HONO-AR-29", "GET", "/api/admin-read/ops/integrity", "a"],
+  ["HONO-AR-30", "GET", "/api/admin-read/ops/static-builds", "a"],
+  ["HONO-AR-31", "GET", "/api/admin-read/ops/workers", "a"],
+  ["HONO-AR-32", "GET", "/api/admin-read/ops/security", "a"],
+  ["HONO-AR-33", "GET", "/api/admin-read/ops/youtube-playlists", "a"],
+  ["HONO-AR-34", "GET", "/api/admin-read/ops/youtube-quota", "a"],
+  ["HONO-AR-35", "GET", "/api/admin-read/ops/top", "a"],
+  ["HONO-AR-36", "GET", "/api/admin-read/ops/cost-guard", "a"],
+  ["HONO-AR-37", "GET", "/api/admin-read/ops/youtube-sync", "a"],
+  ["HONO-MG-01", "GET", "/api/manage/navigation", "s"],
+  // SA-031..034: real staff create/update/delete, CSV, and owner transfer.
+  ["SA-034", "POST", "/api/manage/events/:id/owner-transfer", "w", { setup: benchTransferSetup }],
+  ["SA-032", "POST", "/api/manage/events/:id/staff/csv", "w", { setup: (k,i,t) => benchStaffSetup(k,i,t,"csv") }],
+  ["SA-031-CREATE", "POST", "/api/manage/events/:id/staff", "w", { setup: (k,i,t) => benchStaffSetup(k,i,t,"create") }],
+  ["SA-031-UPDATE", "PUT", "/api/manage/events/:id/staff/:staffId", "w", { params: () => ({staffId:"bench-update"}), setup: (k,i,t) => benchStaffSetup(k,i,t,"update") }],
+  ["SA-033", "DELETE", "/api/manage/events/:id/staff/:staffId", "w", { params: () => ({staffId:"bench-delete"}), setup: (k,i,t) => benchStaffSetup(k,i,t,"delete") }],
+  ["HONO-MG-02", "GET", "/api/manage/events/:id/staff", "s"],
+  ["HONO-MG-03", "GET", "/api/manage/events/:id/slots", "s"],
+  ["HONO-MG-04", "GET", "/api/manage/events/:id/edit", "s"],
+  ["HONO-MG-05", "GET", "/api/manage/events/:id/videos/:videoId", "s"],
+  ["HONO-MG-06", "GET", "/api/manage/events/:id/videos", "s"],
+  ["HONO-MG-07", "GET", "/api/manage/events/:id/youtube-playlist", "s"],
+  ["SA-038", "PUT", "/api/manage/events/:id/youtube-playlist", "w"],
+  ["SA-039", "POST", "/api/manage/events/:id/youtube-playlist/sync", "w"],
+  ["HONO-MG-08", "GET", "/api/manage/events/:id/audience", "s"],
+  ["HONO-MG-09", "GET", "/api/manage/events/:id", "s"],
+  ["HONO-MG-10", "GET", "/api/manage/notifications", "s"],
+  ["HONO-MG-11", "GET", "/api/manage/x-link-requests", "s"],
+  ["HONO-MG-12", "GET", "/api/manage", "s"],
+  ["RH-003", "GET", "/api/admin/spreadsheet/data", "a", { nq: "?table=events&page=1&limit=50", setup: (k) => (k === "limit" ? [spreadsheetRows(60)] : undefined) }],
+  ["RH-007", "GET", "/api/admin/spreadsheet/export", "a", { nq: "?table=events&format=csv", setup: (k) => (k === "limit" ? [spreadsheetRows(120)] : undefined) }],
+  ["RH-009", "GET", "/api/admin/spreadsheet/tables", "a"],
+  // SA-045..048: verified handler contracts from apps/api/src/routes/admin/notifications.ts
+  // SA-049 / SA-051..055: exact handler names and contracts per MIG-0642 parity suite
+  ["SA-099", "POST", "/api/xid/requests", "w"],
+  ["SA-100", "POST", "/api/xid/requests/:id/cancel", "w", { params: (kind, i, tag) => ({ id: benchXRequestId(i, tag) }), setup: (kind, i, tag) => [xRequestRow(i, tag)] }],
+  ["SA-101", "POST", "/api/xid/merge-revert-requests", "w", { setup: (kind, i, tag) => xMergeParentRow(i, tag) }],
+  ["SA-049", "PUT", "/api/admin/permissions/editable-fields", "w"],
+  ["SA-051", "POST", "/api/admin/terms", "w"],
+  ["SA-052", "PATCH", "/api/admin/terms/:id", "w", { params: termsParams, setup: termsSetup("draft") }],
+  ["SA-053", "POST", "/api/admin/terms/:id/publish", "w", { params: termsParams, setup: termsSetup("draft") }],
+  ["SA-054", "POST", "/api/admin/terms/:id/reaccept-broadcast", "w", { params: termsParams, setup: termsSetup("published") }],
+  ["SA-055", "POST", "/api/admin/terms/:id/archive", "w", { params: termsParams, setup: termsSetup("draft") }],
+  ["SA-048", "POST", "/api/admin/notifications/retry-failed", "w", { setup: (kind, i, tag) => kind === "limit"
+    ? Array.from({ length: 10 }, (_, n) => notificationRow(`${benchNotificationId(i, tag)}-${n}`, "failed"))
+    : notificationSetup("failed")(kind, i, tag) }],
+  ["SA-045", "POST", "/api/admin/notifications/:id/retry", "w", { params: notificationParams, setup: notificationSetup("failed") }],
+  ["SA-046", "POST", "/api/admin/notifications/:id/cancel", "w", { params: notificationParams, setup: notificationSetup("pending") }],
+  ["SA-047", "POST", "/api/admin/notifications/:id/force-resend", "w", { params: notificationParams, setup: notificationSetup("sent") }],
+  // MIG-0643: five static-build operations, visibility repair, YouTube resync.
+  ["SA-069", "POST", "/api/admin/static-builds/backfill", "w"],
+  ["SA-070", "POST", "/api/admin/static-builds/queue/:queueId/retry", "w", { params:(k,i,t) => ({queueId:k === "invalid" ? "x".repeat(129) : benchQueueId(i,t)}),setup:benchQueueSetup }],
+  ["SA-073", "POST", "/api/admin/static-builds/retry-failed", "w", { setup:benchQueueSetup, invalidOrigin:true }],
+  ["SA-071", "POST", "/api/admin/static-builds/rebuild", "w", { setup: () => [{ sql:"DELETE FROM static_rebuild_queue WHERE target_type = 'event' AND target_id = 'bench-evt'",params:[] }] }],
+  ["SA-072", "POST", "/api/admin/static-builds/shared-inputs/rebuild", "w", { invalidOrigin:true, setup:() => [{ sql:"DELETE FROM static_rebuild_queue WHERE target_type IN ('youtube_related_blocklist','random_video_pool') AND target_id = 'global'",params:[] }] }],
+  ["SA-050", "POST", "/api/admin/visibility-repair", "w", { setup:benchVisibilitySetup }],
+  ["SA-106", "POST", "/api/admin/youtube-sync/videos/:videoId/resync", "w", { params:(k,i,t) => ({videoId:k === "invalid" ? "x".repeat(129) : benchYoutubeId(k,i,t)}),setup:benchYoutubeSetup }],
+  ["HONO-ADM-01", "GET", "/api/admin/event-templates", "a"],
+  ["SA-009", "POST", "/api/admin/audit/settings", "w"],
+  ["SA-010", "POST", "/api/admin/audit/dry-run", "w"],
+  ["SA-016", "POST", "/api/admin/cost-guard/mode", "w"],
+  ["SA-017", "POST", "/api/admin/cost-guard/maintenance", "w"],
+  ["SA-018", "POST", "/api/admin/cost-guard/override", "w"],
+  ["SA-019", "POST", "/api/admin/cost-guard/disabled-features", "w", { setup: () => [{ sql: `UPDATE system_settings SET disabled_features_json = NULL WHERE id = 'default'`, params: [] }] }],
+  ["SA-020", "POST", "/api/admin/cost-guard/override/clear", "w"],
+  ["HONO-ADM-02", "POST", "/api/admin/users/:userId/role", "w"],
+  ["HONO-ADM-03", "POST", "/api/admin/users/:userId/banned", "w"],
+  ["HONO-ADM-04", "POST", "/api/admin/users/:userId/notifications", "w"],
+  ["HONO-ADM-05", "POST", "/api/admin/users/:userId/can-create-events", "w"],
+  ["HONO-ADM-06", "POST", "/api/admin/x-users/:xUserId/icon-refresh", "w"],
+  ["HONO-ADM-07", "POST", "/api/admin/event-templates", "w"],
+  ["SA-036", "DELETE", "/api/admin/event-templates/:id", "w", { params: (k, i, tag) => ({ id: `tpl-${tag}-${i}` }), setup: (k, i, tag) => [tplRow(`tpl-${tag}-${i}`)] }],
+  // RH-014 limit = D-12: the signed-in viewer owns exactly MAX_VIEWER_SLOTS (100) slots (fails closed above that or above 64 KiB).
+  ["RH-014", "GET", "/api/events/:id/slots/viewer-overlay", "p", { session: true, params: (k) => (k === "limit" ? { id: "bench-evt-own" } : {}), setup: (k) => (k === "limit" ? [ownEventRow(), ownSlotRows(100)] : undefined) }],
+  // RH-015 limit = MIG-0631 T17: a full page of 60 public events with a 2,000-char explanation each.
+  ["RH-015", "GET", "/api/events", "p", { lq: "?page=1&limit=60", setup: (k) => (k === "limit" ? [publicEventRows(60)] : undefined) }],
+  // RH-012 limit = MIG-0631 T17: 500 videos x 100 members in the event_release artifact (EVENT_RELEASE_MAX_*).
+  ["RH-012", "GET", "/api/event-endpoints/:id/release", "p", { prepare: prep({ [RELEASE_KEY]: releaseArtifact(1, 1) }, { [RELEASE_KEY]: releaseArtifact(500, 100) }) }],
+  ["RH-032", "GET", "/api/videos", "p", { lq: "?limit=48&page=1&sort=recent", prepare: prep({ "list/recent.json": recentArtifact(5) }, { "list/recent.json": recentArtifact(200) }) }],
+  ["RH-031", "GET", "/api/videos/:id/viewer-overlay", "p", { session: true, prepare: prep({ "videos/bench-vid.json": videoOverlayArtifact }, { "videos/bench-vid.json": videoOverlayArtifact }) }],
+  ["RH-030", "GET", "/api/videos/:id", "p"],
+  ["SA-012", "POST", "/api/videos/:videoId/chapters", "w"],
+  ["SA-015", "POST", "/api/videos/:videoId/chapters/bulk", "w"],
+  ["SA-013", "PUT", "/api/videos/chapters/:chapterId", "w"],
+  ["SA-014", "DELETE", "/api/videos/chapters/:chapterId", "w", { params: (k, i, tag) => ({ chapterId: `ch-${tag}-${i}` }), setup: (k, i, tag) => [chapterRow(`ch-${tag}-${i}`)] }],
+  ["SA-087", "POST", "/api/videos/:videoId/interaction", "w"],
+  ["RH-001", "GET", "/api/account/summary", "s"],
+  ["RH-016", "GET", "/api/google-drive-image/:id", "p"],
+  ["RH-033", "GET", "/api/youtube-thumbnail/:id/:size", "p"],
+  ["RH-024", "GET", "/api/media/manage-x-icon/*", "p"],
+  ["RH-025", "GET", "/api/media/slot-submission-icon/:slotId", "p"],
+  ["RH-023", "GET", "/api/media/*", "p"],
+  ["RH-019", "GET", "/api/internal/x-users/search", "s"],
+];
+
+function routeParam(pattern, name) {
+  if (name === "videoId") return "bench-vid";
+  if (name === "userId") return "bench-target";
+  if (name === "xUserId") return "bench-x";
+  if (name === "slotId") return "bench-slot";
+  if (name === "chapterId") return "bench-chapter";
+  if (name === "field") return "before";
+  if (name === "size") return "hqdefault";
+  if (/\/google-drive-image\/:id/.test(pattern)) return "bench-drive-id-123456";
+  if (/\/youtube-thumbnail\/:id/.test(pattern)) return "dQw4w9WgXcQ";
+  if (/\/(events|event-endpoints)\/:id/.test(pattern)) return "bench-evt";
+  if (/\/(videos|personal\/edit)\/:id/.test(pattern)) return "bench-vid";
+  if (/\/users\/:id/.test(pattern)) return "bench-target";
+  if (/\/announcements\/:id/.test(pattern)) return "bench-ann";
+  if (/\/rules\/:id/.test(pattern)) return "bench-terms";
+  if (/\/audit\/:id/.test(pattern)) return "bench-audit";
+  if (/event-groups\/:id/.test(pattern)) return "bench-group";
+  return "bench-missing";
+}
+
+const fillRoute = (pattern, longId, dyn = {}) => pattern
+  .replace(/:([A-Za-z]+)/g, (_, name) => dyn[name] ?? (longId && name === "id" ? "e".repeat(129) : routeParam(pattern, name)))
+  .replace("*", pattern.includes("manage-x-icon") ? "bench/icon.png" : "public/bench.png");
+
+// Spreadsheet max page (MIG-0605 F-7): enough `events` rows that the page (50) / export (99) caps are what bound the work.
+const spreadsheetRows = (count) => numberedRows(count, "INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, public_api_enabled) SELECT 'sp-' || n, 'spreadsheet row ' || n, 'event', 'public', n, n + 1, 1, 1, 0 FROM seq", []);
+const ownEventRow = () => ({
+  sql: `INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, public_api_enabled) VALUES ('bench-evt-own', 'own slots event', 'event', 'public', 1000, 2000, 10, 20, 0)`,
+  params: [],
+});
+const ownSlotRows = (count) => numberedRows(
+  count,
+  "INSERT OR REPLACE INTO slots (id, event_id, start_time, status, reserved_by_user_id, display_name, reserved_x_id_snapshot) SELECT 'own-' || n, 'bench-evt-own', n, 'reserved', 'bench-admin', ?, 'bench-x' FROM seq",
+  ["N".repeat(200)],
+);
+const publicEventRows = (count) => numberedRows(
+  count,
+  "INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, public_api_enabled, explanation) SELECT 'pub15-' || n, 'public event ' || n, 'event', 'public', 2000000000 + n, 2000000100 + n, 1, 1, 0, ? FROM seq",
+  ["E".repeat(2000)],
+);
+const REASON = (k) => (k === "limit" ? "r".repeat(500) : "bench");
+/** Request bodies for the write inventory. `limit` fills the bounded text fields to their caps. */
+const WRITE_BODIES = {
+  "POST /api/manage/events/:id/owner-transfer": () => ({
+    from_staff_id:"bench-from",to_staff_id:"bench-to-staff",reason:"benchmark transfer",
+    confirm_text:"TRANSFER bench-evt",self_confirm_text:"SELF CHANGE bench-evt",
+  }),
+  "POST /api/manage/events/:id/staff/csv": (k) => ({reason:"benchmark csv",rows:[{
+    lineNumber:1,display_name:k === "limit" ? "S".repeat(80) : "Staff",
+    x_user_id:"bst_csv",permission_preset:"public_staff",permission_keys:[],
+    is_public_staff:"1",public_role_label:"",
+  }]}),
+  "POST /api/manage/events/:id/staff": (k) => ({
+    display_name:k === "limit" ? "S".repeat(80) : "Staff",
+    x_user_id:"bst_create",permission_preset:"public_staff",is_public:1,reason:"benchmark create",
+  }),
+  "PUT /api/manage/events/:id/staff/:staffId": (k) => ({
+    staff_id:"bench-update",display_name:k === "limit" ? "S".repeat(80) : "Staff",
+    x_user_id:"bst_update",permission_preset:"public_staff",is_public:1,reason:"benchmark update",
+  }),
+  "DELETE /api/manage/events/:id/staff/:staffId": () => ({reason:"benchmark delete"}),
+  "POST /api/admin/static-builds/backfill": () => ({kind:"event_crew",mode:"restart",cursor:""}),
+  "POST /api/admin/static-builds/queue/:queueId/retry": () => undefined,
+  "POST /api/admin/static-builds/retry-failed": () => undefined,
+  "POST /api/admin/static-builds/rebuild": (k) => ({
+    target_type:"event",target_id:"bench-evt",reason:k === "limit" ? "r".repeat(500) : "benchmark rebuild",
+  }),
+  "POST /api/admin/static-builds/shared-inputs/rebuild": () => undefined,
+  "POST /api/admin/visibility-repair": (k,i,t) => ({
+    entity_type:"event",entity_id:"bench-evt",fence_token:"bench-fence-" + t + "-" + i,
+  }),
+  "POST /api/admin/youtube-sync/videos/:videoId/resync": () => undefined,
+  "POST /api/xid/requests": (kind, i, tag) => {
+    const unique = `bn${String(tag).replace(/[^a-z0-9]/gi, "").slice(-6)}${i.toString(36)}`;
+    return { x_id: kind === "limit" ? unique.padEnd(20, "x").slice(0, 20) : unique, request_type: "link" };
+  },
+  "POST /api/xid/requests/:id/cancel": () => undefined,
+  "POST /api/xid/merge-revert-requests": (kind, i, tag) => ({ parent_request_id: benchXRequestId(i, tag) }),
+  "PUT /api/admin/permissions/editable-fields": (kind) => ({ default_editable_fields: kind === "limit" ? ["title", "description"] : [], upcoming_editable_fields: kind === "limit" ? ["title"] : [] }),
+  "POST /api/admin/terms": (kind, i, tag) => ({ id: benchTermsId(i, tag), version_label: kind === "limit" ? "v".repeat(80) : "benchmark-v1", body_markdown: kind === "limit" ? "x".repeat(40000) : "benchmark body", severity: "major" }),
+  "PATCH /api/admin/terms/:id": (kind) => ({ version_label: kind === "limit" ? "v".repeat(80) : "benchmark-v2", body_markdown: kind === "limit" ? "x".repeat(40000) : "updated benchmark body", severity: "major" }),
+  "POST /api/admin/terms/:id/publish": () => ({}),
+  "POST /api/admin/terms/:id/reaccept-broadcast": (kind) => ({ confirm: "TERMS", content: kind === "limit" ? "n".repeat(1000) : "benchmark" }),
+  "POST /api/admin/terms/:id/archive": () => ({}),
+
+  "POST /api/admin/notifications/retry-failed": () => ({}),
+  "POST /api/admin/notifications/:id/retry": () => ({}),
+  "POST /api/admin/notifications/:id/cancel": (kind) => ({ reason: kind === "limit" ? "r".repeat(500) : "bench" }),
+  "POST /api/admin/notifications/:id/force-resend": () => ({}),
+  "POST /api/personal/terms/accept": () => ({}),
+  "POST /api/personal/onboarding/terms": () => ({}),
+  "POST /api/personal/onboarding/complete": () => ({}),
+  "PUT /api/manage/events/:id/youtube-playlist": (k) => ({ playlist_id: "", sync_mode: "off", sync_interval_minutes: k === "limit" ? "10080" : "720" }),
+  "POST /api/manage/events/:id/youtube-playlist/sync": () => ({}),
+  "POST /api/admin/audit/settings": () => ({}),
+  "POST /api/admin/audit/dry-run": (k) => ({ audit_id: "bench-missing", reason: REASON(k) }),
+  "POST /api/admin/cost-guard/mode": (k) => ({ mode: "normal", reason: REASON(k) }),
+  "POST /api/admin/cost-guard/maintenance": (k) => ({ is_maintenance_mode: "0", reason: REASON(k) }),
+  "POST /api/admin/cost-guard/override": (k) => ({ reason: REASON(k), confirm: "OVERRIDE", features: ["edit_video"] }),
+  "POST /api/admin/cost-guard/disabled-features": (k) => ({ reason: REASON(k), confirm: "APPLY", features: [], expected_disabled_features_json: "null" }),
+  "POST /api/admin/cost-guard/override/clear": (k) => ({ reason: REASON(k), confirm: "CLEAR" }),
+  "POST /api/admin/users/:userId/role": (k, i) => ({ role: i % 2 ? "user" : "moderator" }),
+  "POST /api/admin/users/:userId/banned": (k) => ({ is_banned: "0", reason: REASON(k) }),
+  "POST /api/admin/users/:userId/notifications": (k, i) => ({ is_notification_enabled: i % 2 ? "1" : "0" }),
+  "POST /api/admin/users/:userId/can-create-events": (k, i) => ({ can_create_events: i % 2 ? "1" : "0" }),
+  "POST /api/admin/x-users/:xUserId/icon-refresh": () => ({}),
+  "POST /api/admin/event-templates": (k, i, tag) => ({ event_id: "bench-evt", name: k === "limit" ? "N".repeat(80) : `tpl-${tag}-${i}`, description: k === "limit" ? "D".repeat(500) : "bench" }),
+  "DELETE /api/admin/event-templates/:id": () => undefined,
+  "POST /api/videos/:videoId/chapters": (k, i) => ({ chapter_time: `${(i % 50) + 1}:00`, chapter_label: k === "limit" ? "L".repeat(120) : "bench", note: k === "limit" ? "N".repeat(1000) : null, visibility: "public", active_x_snapshot: "bench-x" }),
+  "POST /api/videos/:videoId/chapters/bulk": (k) => ({ active_x_snapshot: "bench-x", csv: k === "limit" ? Array.from({ length: 8 }, (_, n) => `${n + 1}:00,${"L".repeat(100)}`).join("\n") : "1:00,bench" }),
+  "PUT /api/videos/chapters/:chapterId": (k) => ({ chapter_time: "1:00", chapter_label: k === "limit" ? "L".repeat(120) : "bench", visibility: "public" }),
+  "DELETE /api/videos/chapters/:chapterId": () => undefined,
+  "POST /api/videos/:videoId/interaction": (k, i) => ({ kind: i % 2 ? "like" : "bookmark" }),
+};
+
+/** The previously pending RH-013 route is now mounted and has a named bounded scenario.
+ * Keep this extension point for future unmounted routes; do not duplicate RH-013.
+ */
+export function buildPendingScenarios() {
+  return [];
+}
+
+export function buildRouteScenarios() {
+  return ROUTE_INVENTORY.map(([id, method, pattern, access, opts = {}]) => {
+    const writes = access === "w";
+    const key = `${method} ${pattern}`;
+    const expected = ROUTE_EXPECT[key];
+    if (!expected) throw new Error(`ROUTE_EXPECT is missing ${key}`);
+    const make = (kind) => (i, tag) => {
+      const longId = kind === "invalid" && access === "p";
+      let query = opts.nq ?? "";
+      if (kind === "limit") query = opts.lq ?? opts.nq ?? (method === "GET" ? BIG_Q : "");
+      if (kind === "invalid" && access === "p") query = "?limit=-5&page=0&q=%00";
+      const headers = { "cf-connecting-ip": BENCH_IP(kind, i), ...(opts.headers?.(kind) ?? {}) };
+      if (writes || ((access !== "p" || opts.session) && kind !== "invalid")) headers.cookie = ADMIN_COOKIE;
+      let body;
+      if (writes) {
+        headers.origin = kind === "invalid" && opts.invalidOrigin ? "https://evil.invalid" : SITE_URL;
+        headers["content-type"] = "application/json";
+        if (kind === "invalid") body = "{}";
+        else { const b = WRITE_BODIES[key]?.(kind, i, tag); body = b === undefined ? undefined : json(b); }
+      }
+      const dyn = opts.params?.(kind, i, tag) ?? {};
+      const setup = kind === "invalid" ? undefined : opts.setup?.(kind, i, tag);
+      return { method, path: fillRoute(pattern, longId, dyn) + query, headers, body, expect: expected[kind], ...(setup ? { setup } : {}) };
+    };
+    return {
+      id, title: `${method} ${pattern}`, runtimeClass: opts.cls ?? (method === "GET" || method === "OPTIONS" ? "S2" : "S3"),
+      ...(opts.prepare ? { prepareKind: opts.prepare } : {}),
+      kinds: { normal: make("normal"), limit: make("limit"), invalid: make("invalid") },
+    };
+  });
+}
+
+// Statuses a healthy run must return, pinned from an in-process probe of the main-branch app on the shared
+// fixture (MIG-0639). A different status means the fixture or the route changed and the CPU number is void.
+const ROUTE_EXPECT = {
+  "POST /api/manage/events/:id/owner-transfer": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/manage/events/:id/staff/csv": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/manage/events/:id/staff": {normal:[200],limit:[200],invalid:[400]},
+  "PUT /api/manage/events/:id/staff/:staffId": {normal:[200],limit:[200],invalid:[400]},
+  "DELETE /api/manage/events/:id/staff/:staffId": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/static-builds/backfill": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/static-builds/queue/:queueId/retry": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/static-builds/retry-failed": {normal:[200],limit:[200],invalid:[403]},
+  "POST /api/admin/static-builds/rebuild": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/static-builds/shared-inputs/rebuild": {normal:[200],limit:[200],invalid:[403]},
+  "POST /api/admin/visibility-repair": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/youtube-sync/videos/:videoId/resync": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/xid/requests": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/xid/requests/:id/cancel": { normal: [200], limit: [200], invalid: [404] },
+  "POST /api/xid/merge-revert-requests": { normal: [200], limit: [200], invalid: [400] },
+  "PUT /api/admin/permissions/editable-fields": { normal: [200], limit: [200], invalid: [200] },
+  "POST /api/admin/terms": { normal: [200], limit: [200], invalid: [400] },
+  "PATCH /api/admin/terms/:id": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/terms/:id/publish": { normal: [200], limit: [200], invalid: [404] },
+  "POST /api/admin/terms/:id/reaccept-broadcast": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/terms/:id/archive": { normal: [200], limit: [200], invalid: [404] },
+
+  "POST /api/admin/notifications/retry-failed": { normal: [200], limit: [200], invalid: [200] },
+  "POST /api/admin/notifications/:id/retry": { normal: [200], limit: [200], invalid: [404] },
+  "POST /api/admin/notifications/:id/cancel": { normal: [200], limit: [200], invalid: [404] },
+  "POST /api/admin/notifications/:id/force-resend": { normal: [200], limit: [200], invalid: [404] },
+  "GET /api/operation-mode/banner": { normal: [200], limit: [200], invalid: [200] },
+  "OPTIONS /api/public/events/:id/staff": { normal: [204], limit: [204], invalid: [403] },
+  "GET /api/public/events/:id/staff": { normal: [200], limit: [200], invalid: [404] },
+  "POST /api/personal/terms/accept": { normal: [200], limit: [200], invalid: [200] },
+  "POST /api/personal/onboarding/terms": { normal: [200], limit: [200], invalid: [200] },
+  "POST /api/personal/onboarding/complete": { normal: [200], limit: [200], invalid: [200] },
+  "GET /api/personal/session": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/personal/dashboard": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/personal/library": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/personal/settings": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/personal/onboarding": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/personal/entry": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/personal/entry/slotted": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/personal/entry/unslotted": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/personal/edit/:id/permissions": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/personal/edit/:id/form-options": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/personal/edit/:id": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/cost-guard-banner": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/users/:id/edit": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/users": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/users/:id": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/videos": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/videos/:id/members": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/videos/:id": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/event-groups": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/event-groups/:id": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/events/templates": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/events/new": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/events": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/moderation": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/x-link-requests": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/x-id-merges": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/announcements": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/announcements/:id": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/rules": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/rules/:id": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/permissions/simulator": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/api-endpoints": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/audit-settings": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/audit": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/audit/restore": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/audit/:id": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/audit/:id/payload/:field": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/notifications": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/health": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/integrity": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/static-builds": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/workers": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/security": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/youtube-playlists": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/youtube-quota": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/top": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/cost-guard": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin-read/ops/youtube-sync": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage/navigation": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage/events/:id/staff": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage/events/:id/slots": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage/events/:id/edit": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage/events/:id/videos/:videoId": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage/events/:id/videos": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage/events/:id/youtube-playlist": { normal: [200], limit: [200], invalid: [401] },
+  "PUT /api/manage/events/:id/youtube-playlist": { normal: [200], limit: [200], invalid: [200] },
+  "POST /api/manage/events/:id/youtube-playlist/sync": { normal: [409], limit: [409], invalid: [409] },
+  "GET /api/manage/events/:id/audience": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage/events/:id": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage/notifications": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage/x-link-requests": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/manage": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin/spreadsheet/data": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin/spreadsheet/export": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin/spreadsheet/tables": { normal: [200], limit: [200], invalid: [401] },
+  "GET /api/admin/event-templates": { normal: [200], limit: [200], invalid: [200] },
+  "POST /api/admin/audit/settings": { normal: [200], limit: [200], invalid: [200] },
+  "POST /api/admin/audit/dry-run": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/cost-guard/mode": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/cost-guard/maintenance": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/cost-guard/override": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/cost-guard/disabled-features": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/cost-guard/override/clear": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/users/:userId/role": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/users/:userId/banned": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/users/:userId/notifications": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/users/:userId/can-create-events": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/x-users/:xUserId/icon-refresh": { normal: [400], limit: [400], invalid: [400] },
+  "POST /api/admin/event-templates": { normal: [200], limit: [200], invalid: [400] },
+  "DELETE /api/admin/event-templates/:id": { normal: [200], limit: [200], invalid: [404] },
+  "GET /api/events/:id/slots/viewer-overlay": { normal: [200], limit: [200], invalid: [404] },
+  "GET /api/events": { normal: [200], limit: [200], invalid: [200] },
+  "GET /api/event-endpoints/:id/release": { normal: [200], limit: [200], invalid: [404] },
+  "GET /api/videos": { normal: [200], limit: [200], invalid: [200] },
+  "GET /api/videos/:id/viewer-overlay": { normal: [200], limit: [200], invalid: [503] },
+  "GET /api/videos/:id": { normal: [200], limit: [200], invalid: [404] },
+  "POST /api/videos/:videoId/chapters": { normal: [200], limit: [200], invalid: [409] },
+  "POST /api/videos/:videoId/chapters/bulk": { normal: [200], limit: [200], invalid: [409] },
+  "PUT /api/videos/chapters/:chapterId": { normal: [200], limit: [200], invalid: [400] },
+  "DELETE /api/videos/chapters/:chapterId": { normal: [200], limit: [200], invalid: [200] },
+  "POST /api/videos/:videoId/interaction": { normal: [200], limit: [200], invalid: [400] },
+  "GET /api/account/summary": { normal: [200], limit: [200], invalid: [200] },
+  "GET /api/google-drive-image/:id": { normal: [200], limit: [200], invalid: [200] },
+  "GET /api/youtube-thumbnail/:id/:size": { normal: [200], limit: [200], invalid: [404] },
+  "GET /api/media/manage-x-icon/*": { normal: [404], limit: [404], invalid: [404] },
+  "GET /api/media/slot-submission-icon/:slotId": { normal: [404], limit: [404], invalid: [404] },
+  "GET /api/media/*": { normal: [404], limit: [404], invalid: [404] },
+  "GET /api/internal/x-users/search": { normal: [200], limit: [503], invalid: [401] },
+};
+
 // ------------------------------------------------------------ shared seeding
-const SEED = (adminToken) => [
+export const SEED = (adminToken) => [
   { sql: `INSERT OR REPLACE INTO "user" (id, name, role, is_banned, is_tos_accepted) VALUES ('bench-admin', 'Bench Admin', 'admin', 0, 1)`, params: [] },
   { sql: `INSERT OR REPLACE INTO "session" ("sessionToken", "userId", "expires") VALUES (?, 'bench-admin', ?)`, params: [SESSION_TOKEN, Date.now() + 365 * 24 * 3600 * 1000] },
   { sql: `INSERT OR REPLACE INTO system_settings (id, operation_mode) VALUES ('default', 'normal')`, params: [] },
+  // MIG-0639 shared fixtures for the generic Hono method inventory (minimal rows; deep inputs are seeded per sample).
+  { sql: `INSERT OR REPLACE INTO "user" (id, name, role, is_banned, is_tos_accepted) VALUES ('bench-target', 'Bench Target', 'user', 0, 1)`, params: [] },
+  { sql: `INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, public_api_enabled) VALUES ('bench-evt', 'bench event', 'event', 'public', 1000, 2000, 10, 20, 1)`, params: [] },
+  { sql: `INSERT OR REPLACE INTO videos (id, submitted_by_user_id, creator_display_name, title, visibility_status, updated_at) VALUES ('bench-vid', 'bench-admin', 'Bench', 'Bench video', 'public', 1000)`, params: [] },
+  { sql: `INSERT OR REPLACE INTO video_events (video_id, event_id) VALUES ('bench-vid', 'bench-evt')`, params: [] },
+  { sql: `INSERT OR REPLACE INTO slots (id, event_id, start_time, status) VALUES ('bench-slot', 'bench-evt', 1000, 'available')`, params: [] },
+  { sql: `INSERT OR REPLACE INTO x_users (id, x_name, approval_status) VALUES ('bench-x', 'Bench X', 'approved')`, params: [] },
+  { sql: `INSERT OR REPLACE INTO x_user_account_links (x_user_id, auth_user_id, link_role) VALUES ('bench-x', 'bench-admin', 'owner')`, params: [] },
+  { sql: `UPDATE "user" SET active_x_user_id = 'bench-x' WHERE id = 'bench-admin'`, params: [] },
+  { sql: `INSERT OR REPLACE INTO event_groups (id, name, slug) VALUES ('bench-group', 'Bench group', 'bench-group')`, params: [] },
+  { sql: `INSERT OR REPLACE INTO announcements (id, title, body, severity, is_published, target_audience, created_by_user_id, created_at, updated_at) VALUES ('bench-ann', 'Bench', 'Bench', 'info', 1, 'all', 'bench-admin', 10, 10)`, params: [] },
+  { sql: `INSERT OR REPLACE INTO terms_versions (id, version_label, body_markdown, created_by_user_id) VALUES ('bench-terms', 'bench', 'bench terms', 'bench-admin')`, params: [] },
+  // 24,000-char payload: two 12,000-char chunks for GET /audit/:id/payload/:field.
+  { sql: `INSERT OR REPLACE INTO audit_logs (id, table_name, target_id, operation, before_json, actor_user_id, created_at) VALUES ('bench-audit', 'announcements', 'bench-ann', 'UPDATE', '{"title":"' || replace(hex(zeroblob(12000)), '0', 'a') || '"}', 'bench-admin', 10)`, params: [] },
+  { sql: `INSERT OR REPLACE INTO video_chapters (id, video_id, chapter_time, chapter_label, visibility, created_at, updated_at) VALUES ('bench-chapter', 'bench-vid', 5, 'bench', 'public', 10, 10)`, params: [] },
   ...Array.from({ length: 100 }, (_, n) => ({
     sql: `INSERT OR REPLACE INTO software_catalog (id, name, normalized_name, category, is_active, is_verified) VALUES (?, ?, ?, 'edit', 1, ?)`,
     params: [`sw-${n}`, `aaaa Software ${n}`, `aaaa software ${n}`, n % 2],
@@ -353,7 +1025,7 @@ function materializeMigrations() {
 }
 
 // ------------------------------------------------------------ target: inproc
-async function createInprocTarget(plan) {
+export async function createInprocTarget(plan) {
   const { DatabaseSync } = await import("node:sqlite");
   const mig = await materializeMigrations();
   const sqlite = new DatabaseSync(":memory:");
@@ -363,40 +1035,56 @@ async function createInprocTarget(plan) {
   fs.rmSync(mig.workspace, { recursive: true, force: true });
 
   let stmts = 0;
+  let d1RowsReturned = 0;
+  let d1PerQueryRows = [];
+  const countD1 = (mode, value) => {
+    const n = returnedRows(mode, value);
+    d1RowsReturned += n;
+    d1PerQueryRows.push(n);
+    return value;
+  };
   let rec = null; // when set, every D1/R2 result is appended in call order (replay script)
   const keep = (v) => { if (rec) rec.push(v); return v; };
   const make = (sql, params) => ({
     _sql: sql, _params: params,
-    first: async () => keep(sqlite.prepare(sql).get(...params) ?? null),
-    all: async () => keep({ results: sqlite.prepare(sql).all(...params) }),
-    // D1 .raw() (array rows) is what Drizzle's typed select() uses (RH-013).
-    raw: async () => {
-      const prepared = sqlite.prepare(sql);
-      prepared.setReturnArrays(true);
-      try { return keep(prepared.all(...params).map((row) => [...row])); } finally { prepared.setReturnArrays(false); }
-    },
-    run: async () => keep({ results: sqlite.prepare(sql).all(...params) }),
+    first: async () => keep(countD1("first", sqlite.prepare(sql).get(...params) ?? null)),
+    all: async () => keep(countD1("all", { results: sqlite.prepare(sql).all(...params) })),
+    run: async () => keep(countD1("run", { results: sqlite.prepare(sql).all(...params) })),
+    // drizzle's D1 driver reads rows as arrays through raw().
+    raw: async () => { const st = sqlite.prepare(sql); st.setReturnArrays(true); try { return keep(countD1("raw", st.all(...params))); } finally { st.setReturnArrays(false); } },
   });
   const db = {
-    prepare: (sql) => ({ bind: (...params) => { stmts += 1; return make(sql, params); } }),
+    // D1 allows first()/all()/run()/raw() straight on prepare() (no bind); count a statement on either path.
+    prepare: (sql) => {
+      const unbound = make(sql, []);
+      const counted = (fn) => (...a) => { stmts += 1; return fn(...a); };
+      return {
+        bind: (...params) => { stmts += 1; return make(sql, params); },
+        _sql: sql, _params: [],
+        first: counted(unbound.first), all: counted(unbound.all), run: counted(unbound.run), raw: counted(unbound.raw),
+      };
+    },
     batch: async (list) => {
       sqlite.exec("BEGIN");
       try {
         const out = list.map((s) => ({ results: sqlite.prepare(s._sql).all(...s._params) }));
         sqlite.exec("COMMIT");
+        for (const result of out) countD1("all", result);
         return keep(out);
       } catch (e) { sqlite.exec("ROLLBACK"); throw e; }
     },
   };
-  let r2Body = null;
+  const r2Objects = new Map();
   const bucket = {
     get: async (key) => {
-      if (key !== STATS_KEY || r2Body == null) return keep(null);
-      keep({ size: Buffer.byteLength(r2Body), text: r2Body });
-      return { size: Buffer.byteLength(r2Body), json: async () => JSON.parse(r2Body), body: null };
+      const body = r2Objects.get(key);
+      if (body == null) return keep(null);
+      const size = Buffer.byteLength(body);
+      keep({ size, text: body, etag: BENCH_ETAG });
+      return { size, etag: BENCH_ETAG, json: async () => JSON.parse(body), text: async () => body, body: null };
     },
   };
-  const env = { DB: db, BUCKET: bucket, BUILD_COMMIT_SHA: "a".repeat(40), WORKER_ADMIN_TOKEN: plan.adminToken, NEXT_PUBLIC_SITE_URL: SITE_URL };
+  const env = { DB: db, BUCKET: bucket, BUILD_COMMIT_SHA: "a".repeat(40), WORKER_ADMIN_TOKEN: plan.adminToken, NEXT_PUBLIC_SITE_URL: SITE_URL, ADMIN_SPREADSHEET_ENABLED: "1", AUTH_SECRET: "bench-auth-secret" };
   const { app } = await import(pathToFileURL(APP_PATH).href);
   const { sessionMiddleware } = await import(pathToFileURL(SESSION_PATH).href);
   const sm = sessionMiddleware();
@@ -407,9 +1095,14 @@ async function createInprocTarget(plan) {
   const fetchOnce = async (spec) => {
     const url = `http://bench.local${spec.path}`;
     stmts = 0;
+    d1RowsReturned = 0;
+    d1PerQueryRows = [];
     const headers = new Headers(spec.headers ?? {});
     const before = performance.now();
     let res;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = benchFetchStub;
+    try {
     if (spec.path.startsWith("/__bench/session")) {
       const vars = {};
       const c = { req: { url, header: (n) => headers.get(n) ?? undefined }, env, set: (k, v) => { vars[k] = v; }, header() {} };
@@ -420,9 +1113,10 @@ async function createInprocTarget(plan) {
     } else {
       res = await app.fetch(new Request(url, { method: spec.method, headers, body: spec.body }), env);
     }
+    } finally { globalThis.fetch = realFetch; }
     const cpuMs = performance.now() - before;
     const buf = await res.arrayBuffer();
-    return { status: res.status, bytes: buf.byteLength, cpuMs, d1: stmts };
+    return { status: res.status, bytes: buf.byteLength, cpuMs, d1: stmts, d1RowsReturned, d1PerQueryRows: [...d1PerQueryRows], debug: process.env.BENCH_DEBUG ? Buffer.from(buf).toString("utf8").slice(0, 240) : undefined };
   };
 
   return {
@@ -431,7 +1125,7 @@ async function createInprocTarget(plan) {
     digits: 3,
     cpuSource: "performance.now() wall delta around app.fetch (Node/V8, node:sqlite as D1; WALL-TIME PROXY, not workerd CPU)",
     supportsCold: false,
-    setR2: async (body) => { r2Body = body; },
+    setR2: async (body, key = STATS_KEY) => { if (body == null) r2Objects.delete(key); else r2Objects.set(key, body); },
     exec,
     record: async () => null,
     run: async (spec) => fetchOnce(spec),
@@ -440,7 +1134,7 @@ async function createInprocTarget(plan) {
       rec = [];
       try {
         const r = await fetchOnce(spec);
-        return { script: rec, status: r.status, d1: r.d1 };
+        return { script: rec, status: r.status, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows };
       } finally { rec = null; }
     },
     close: async () => { sqlite.close(); },
@@ -457,36 +1151,94 @@ import { sessionMiddleware } from ${JSON.stringify(sessionUrl)};
 const BUILD_ID = ${JSON.stringify(buildId)};
 const sm = sessionMiddleware();
 const STATS_KEY = ${JSON.stringify(STATS_KEY)};
+const EVENT_EXPORT_CACHE_URLS = ${JSON.stringify(eventExportCacheRequestUrls())};
 const scripts = new Map();
+const BENCH_PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+// Bench-only upstream image stub: media proxy scenarios must never reach the network.
+globalThis.fetch = async () => new Response(BENCH_PNG, { headers: { "content-type": "image/png" } });
 
 // Replay env: D1/R2 return the results recorded by the in-process run, in call order,
 // so the measured CPU is the app's own work without wrangler's local D1/R2 simulator.
+function returnedRows(mode, value) {
+  if (mode === "first") return value == null ? 0 : 1;
+  if (mode === "raw") return Array.isArray(value) ? value.length : 0;
+  if (mode === "batch") return Array.isArray(value)
+    ? value.reduce((sum, entry) => sum + (Array.isArray(entry?.results) ? entry.results.length : 0), 0)
+    : 0;
+  return Array.isArray(value?.results) ? value.results.length : 0;
+}
+
+// Count rows returned to this app by D1-compatible calls, not billed D1 rows_read.
+function rowCounters() {
+  let rowsReturned = 0;
+  const perQueryRows = [];
+  return {
+    observe(mode, value) {
+      const n = returnedRows(mode, value);
+      rowsReturned += n;
+      perQueryRows.push(n);
+      return value;
+    },
+    totals() { return { rowsReturned, perQueryRows: [...perQueryRows] }; },
+  };
+}
+
 function replayEnv(env, script) {
   let k = 0;
+  const rows = rowCounters();
   const next = () => {
     if (k >= script.length) throw new Error("bench replay script exhausted");
     return script[k++];
   };
-  const stmt = { bind: () => stmt, first: async () => next(), all: async () => next(), raw: async () => next(), run: async () => next() };
+  const stmt = {
+    bind: () => stmt,
+    first: async () => rows.observe("first", next()),
+    all: async () => rows.observe("all", next()),
+    run: async () => rows.observe("run", next()),
+    raw: async () => rows.observe("raw", next()),
+  };
   return [{
     ...env,
-    DB: { prepare: () => stmt, batch: async () => next() },
-    BUCKET: { get: async () => { const v = next(); return v && { size: v.size, json: async () => JSON.parse(v.text), body: null }; } },
-  }, () => k];
+    DB: {
+      prepare: () => stmt,
+      batch: async () => {
+        const result = next();
+        if (Array.isArray(result)) {
+          for (const entry of result) rows.observe("all", entry);
+        }
+        return result;
+      },
+    },
+    BUCKET: { get: async () => { const v = next(); return v && { size: v.size, etag: v.etag, json: async () => JSON.parse(v.text), text: async () => v.text, body: null }; } },
+  }, () => ({ statements: k, ...rows.totals() })];
 }
 
 function counting(env) {
   let n = 0;
+  const rows = rowCounters();
   const DB = env.DB;
+  const wrap = (statement) => ({
+    // D1.batch must receive native prepared objects, not the counting wrappers.
+    _benchInner: statement,
+    bind: (...params) => wrap(statement.bind(...params)),
+    first: async (...args) => rows.observe("first", await statement.first(...args)),
+    all: async (...args) => rows.observe("all", await statement.all(...args)),
+    run: async (...args) => rows.observe("run", await statement.run(...args)),
+    raw: async (...args) => rows.observe("raw", await statement.raw(...args)),
+  });
   const wrapped = {
     ...env,
     DB: {
-      prepare: (s) => { n += 1; return DB.prepare(s); },
-      batch: (list) => DB.batch(list),
-      exec: (s) => DB.exec(s),
+      prepare: (sql) => { n += 1; return wrap(DB.prepare(sql)); },
+      batch: async (list) => {
+        const result = await DB.batch(list.map((stmt) => stmt._benchInner ?? stmt));
+        for (const entry of result) rows.observe("all", entry);
+        return result;
+      },
+      exec: (sql) => DB.exec(sql),
     },
   };
-  return [wrapped, () => n];
+  return [wrapped, () => ({ statements: n, ...rows.totals() })];
 }
 
 export default {
@@ -514,8 +1266,13 @@ export default {
       return new Response("ok");
     }
     if (url.pathname === "/__bench/cache-clear") {
-      // about-stats caches under a fixed key; clear it so every sample takes the R2-miss path.
+      // Clear both the fixed about-stats key and every RH-013 public event-export
+      // Cache API key. The event-export server-core key is NOT the route URL:
+      // publicJsonCacheUrl(eventExportPayloadCacheKey(...)) uses flamenode.internal.
       await caches.default.delete(new Request(url.origin + "/api/public/about-stats"));
+      for (const cacheUrl of EVENT_EXPORT_CACHE_URLS) {
+        await caches.default.delete(new Request(cacheUrl));
+      }
       return new Response("ok");
     }
     if (url.pathname === "/__bench/exec") {
@@ -525,8 +1282,9 @@ export default {
       return new Response("ok");
     }
     if (url.pathname === "/__bench/r2") {
-      if (request.method === "PUT") await env.BUCKET.put(STATS_KEY, await request.text());
-      else await env.BUCKET.delete(STATS_KEY);
+      const key = url.searchParams.get("key") ?? STATS_KEY;
+      if (request.method === "PUT") await env.BUCKET.put(key, await request.text());
+      else await env.BUCKET.delete(key);
       return new Response("ok");
     }
     if (url.pathname === "/__bench/script") {
@@ -542,11 +1300,18 @@ export default {
       const vars = {};
       const c = { req: { url: request.url, header: (n) => request.headers.get(n) ?? undefined }, env: benchEnv, set: (k, v) => { vars[k] = v; }, header() {} };
       await sm(c, async () => {});
-      return Response.json({ state: vars.sessionState }, { headers: { "x-bench-d1": String(count()) } });
+      return Response.json({ state: vars.sessionState }, { headers: {
+        "x-bench-d1": String(count().statements),
+        "x-bench-returned-rows": String(count().rowsReturned),
+        "x-bench-query-rows": count().perQueryRows.join(","),
+      } });
     }
     const res = await app.fetch(request, benchEnv, ctx);
     const out = new Response(res.body, res);
-    out.headers.set("x-bench-d1", String(count()));
+    const d1Stats = count();
+    out.headers.set("x-bench-d1", String(d1Stats.statements));
+    out.headers.set("x-bench-returned-rows", String(d1Stats.rowsReturned));
+    out.headers.set("x-bench-query-rows", d1Stats.perQueryRows.join(","));
     return out;
   },
 };
@@ -578,6 +1343,8 @@ async function createWranglerTarget(plan, opts) {
     `BUILD_COMMIT_SHA = "${"a".repeat(40)}"`,
     `WORKER_ADMIN_TOKEN = "${plan.adminToken}"`,
     `NEXT_PUBLIC_SITE_URL = "${SITE_URL}"`,
+    'ADMIN_SPREADSHEET_ENABLED = "1"',
+    'AUTH_SECRET = "bench-auth-secret"',
     "",
     "[[d1_databases]]",
     'binding = "DB"',
@@ -702,6 +1469,13 @@ async function createWranglerTarget(plan, opts) {
     if (stop.error) throw new Error(`Profiler.stop failed: ${json(stop.error)}`);
     return {
       status: res.status, bytes: buf.byteLength, d1: rec ? rec.d1 : Number(res.headers.get("x-bench-d1") ?? 0),
+      d1RowsReturned: res.headers.has("x-bench-returned-rows")
+        ? Number(res.headers.get("x-bench-returned-rows")) : null,
+      d1PerQueryRows: (res.headers.get("x-bench-query-rows") || "")
+        .split(",").filter(Boolean).map(Number),
+      replayRowsMismatch: rec ? Number(res.headers.get("x-bench-returned-rows")) !== rec.d1RowsReturned : false,
+      cacheState: res.headers.get("x-flamenode-cache"),
+      bodyHash: createHash("sha256").update(Buffer.from(buf)).digest("hex"),
       cpuMs: profileBusyMs(stop.result.profile),
       replayStatusMismatch: rec ? rec.status !== res.status : false,
     };
@@ -733,11 +1507,15 @@ async function createWranglerTarget(plan, opts) {
   return {
     calibration,
     name: "wrangler",
+    supportsCacheApi: true,
     get resolutionMs() { return quantumMs; },
     digits: 2,
     cpuSource: `V8 sampling profiler (${SAMPLING_US}us interval, non-idle samples) attached to wrangler dev --local (workerd) via inspector; local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim); local, not production`,
     supportsCold: true,
-    setR2: async (body) => { if (body == null) await post("/__bench/r2", undefined, "DELETE"); else await post("/__bench/r2", body, "PUT"); },
+    setR2: async (body, key = STATS_KEY) => {
+      const q = `/__bench/r2?key=${encodeURIComponent(key)}`;
+      if (body == null) await post(q, undefined, "DELETE"); else await post(q, body, "PUT");
+    },
     exec,
     clearCache: async () => { await post("/__bench/cache-clear"); },
     record: async () => null,
@@ -759,12 +1537,13 @@ function tag(prefix, n) { return `${prefix}${n.toString(36)}`; }
 async function runScenario(target, sc, opts, state) {
   const samples = [];
   const note = (kind, spec, r, cpuMs) => samples.push({
-    kind, cpuMs, status: r.status, bytes: r.bytes, d1: r.d1,
-    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true,
+    kind, cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, cacheState: r.cacheState ?? null,
+    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache) || r.bodyReuseMismatch === true,
   });
   for (const kind of ["normal", "limit", "invalid"]) {
     const pk = sc.prepareKind?.[kind];
-    if (pk) await target.setR2(pk.r2);
+    if (pk?.r2 !== undefined) await target.setR2(pk.r2);
+    for (const [key, body] of Object.entries(pk?.r2Objects ?? {})) await target.setR2(body, key);
     const make = sc.kinds[kind];
     const runTag = tag("k", ++state.tagSeq);
     for (let i = 0; i < opts.warmup; i += 1) {
@@ -781,6 +1560,37 @@ async function runScenario(target, sc, opts, state) {
       note(kind, spec, r, r.cpuMs);
     }
   }
+  if (target.supportsCacheApi && sc.warmModes) {
+    for (const [kind, mode] of Object.entries(sc.warmModes)) {
+      const measure = async (sampleIndex, recordSample) => {
+        const spec = { method: "GET", path: mode.path, headers: rh013Ip(), expect: [200], expectCache: mode.expectCache };
+        if (sampleIndex === 0) {
+          const seed = rh013Seed();
+          if (seed.length) await target.exec(seed);
+        }
+        if (kind === "scheduled-warm") await target.clearCache();
+        else await target.reload(); // realtime micro-cache is isolate-local
+        // Capture replay scripts before priming so the measured request follows immediately.
+        const primeRecord = await target.record(spec);
+        const measuredRecord = recordSample ? await target.record(spec) : null;
+        const primed = await target.run(spec, primeRecord);
+        if (primed.status !== 200) throw new Error(`RH-013 ${kind} prime returned ${primed.status}`);
+        if (!recordSample) return;
+        // A 1.1s gap guarantees generated_at advances while staying inside the
+        // 15s isolate-cache TTL; byte-identical output proves realtime reuse.
+        await sleep(kind === "scheduled-warm" ? 25 : 1100);
+        const measured = await target.run(spec, measuredRecord);
+        if (mode.verifyBodyReuse) measured.bodyReuseMismatch = measured.bodyHash !== primed.bodyHash;
+        note(kind, spec, measured, measured.cpuMs);
+      };
+      for (let i = 0; i < opts.warmup; i += 1) await measure(i, false);
+      for (let i = 0; i < opts.samples; i += 1) {
+        process.stderr.write(`measuring RH-013 ${kind} ${i + 1}/${opts.samples}\\r`);
+        await measure(i + opts.warmup, true);
+      }
+      process.stderr.write("\\n");
+    }
+  }
   return samples;
 }
 
@@ -788,8 +1598,11 @@ async function runScenario(target, sc, opts, state) {
 async function runCold(target, scenarios, opts) {
   const live = scenarios;
   const coldSamples = new Map(live.map((s) => [s.id, []]));
-  const statsScenario = scenarios.find((s) => s.id === "RH-026");
-  if (statsScenario) await target.setR2(statsScenario.prepareKind.normal.r2);
+  for (const sc of scenarios) {
+    const pk = sc.prepareKind?.normal;
+    if (pk?.r2 !== undefined) await target.setR2(pk.r2);
+    for (const [key, body] of Object.entries(pk?.r2Objects ?? {})) await target.setR2(body, key);
+  }
   for (let round = 0; round < opts.coldSamples; round += 1) {
     const plan = [];
     for (const sc of live) {
@@ -802,7 +1615,7 @@ async function runCold(target, scenarios, opts) {
     const order = plan.map((_, n) => plan[(n + round) % plan.length]);
     for (const { sc, spec, rec } of order) {
       const r = await target.run(spec, rec);
-      coldSamples.get(sc.id).push({ kind: "cold", cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true });
+      coldSamples.get(sc.id).push({ kind: "cold", cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true });
     }
     process.stderr.write(`cold round ${round + 1}/${opts.coldSamples}\r`);
   }
@@ -825,7 +1638,7 @@ function createReplayTarget(inproc, wr) {
 export async function main(argv) {
   const opts = parseArgs(argv);
   const plan = { adminToken: `bench-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}` };
-  const scenarios = buildScenarios(plan).filter((s) => !opts.only || opts.only.includes(s.id) || s.id === "BASELINE");
+  const scenarios = buildScenarios(plan, { includePending: opts.includePending }).filter((s) => !opts.only || opts.only.includes(s.id) || s.id === "BASELINE");
 
   if (opts.dryRun) {
     const fake = Array.from({ length: opts.samples }, (_, i) => ({ kind: "normal", cpuMs: (i % 7) + 0.5, status: 200, bytes: 10, d1: 2, unexpected: false }));
