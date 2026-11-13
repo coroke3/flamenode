@@ -447,6 +447,47 @@ test("Issue #669: incomplete or corrupted settings cannot earn a preload SELECT 
   }
 });
 
+test("Issue #677: throwing settings preload getter and Proxy pay for the authoritative D1 read", async () => {
+  for (const makePreload of [
+    (actorJson) => ({
+      get settings() { throw new Error("private settings getter error"); },
+      actorSnapshotJsonById: { "admin-1": actorJson },
+    }),
+    (actorJson) => new Proxy({
+      actorSnapshotJsonById: { "admin-1": actorJson },
+    }, {
+      get(target, property, receiver) {
+        if (property === "settings") throw new Error("private provider Proxy error");
+        return Reflect.get(target, property, receiver);
+      },
+    }),
+  ]) {
+    const w = world();
+    const restore = freeze();
+    try {
+      const preload = makePreload(JSON.stringify(actorSnapshotFromRow(null)));
+      const proposal = {
+        mutationStatements: [sql`SELECT 1`],
+        expectedMutationChanges: 0,
+        audits: [AUDIT],
+        callerQueryCount: 0,
+        preloaded: preload,
+      };
+      const budget = planAtomicAuditMutationBudget(proposal);
+      assert.equal(budget.preparationQueryCount, 1,
+        "throwing settings access must never earn a D1 read credit");
+      const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+      assert.ok(entry, "logger falls back to authoritative settings");
+      assert.equal(w.stats.reads.length, 1,
+        "runtime must perform the same settings read as the planner charged");
+      assert.equal(entry.expires_at - entry.created_at, 45 * 86400);
+    } finally {
+      restore();
+      w.sqlite.close();
+    }
+  }
+});
+
 test("Issue #677: throwing actor preload accessor fails closed in budget and logger", async () => {
   const w = world();
   const restore = freeze();
