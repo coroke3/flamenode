@@ -84,7 +84,7 @@ test("Hono executor composes the shared status core with the durable-outbox zero
       mutationStatements: ["video-update"],
       expectedMutationChanges: [1],
       audits: [{ table_name: "videos", target_id: "v-1", operation: "UPDATE" }],
-      notificationBatch: { statements: ["notification-outbox"] },
+      notificationBatch: { statements: ["notification-outbox"], expectedChanges: [1] },
       queueBatch: { statements: ["static-rebuild-outbox"] },
       visibilityChanged: true,
       fenceToken: null,
@@ -99,8 +99,8 @@ test("Hono executor composes the shared status core with the durable-outbox zero
     message: "ステータスを更新しました。",
     pendingPublicReflection: true,
   });
-  assert.deepEqual(mutationInput.mutationStatements, ["video-update"]);
-  assert.deepEqual(mutationInput.expectedMutationChanges, [1]);
+  assert.deepEqual(mutationInput.mutationStatements, ["video-update", "notification-outbox"]);
+  assert.deepEqual(mutationInput.expectedMutationChanges, [1, 1]);
   assert.equal(Object.hasOwn(mutationInput, "notificationWakeSource"), false);
   assert.equal(Object.hasOwn(mutationInput, "staticRebuildWakeSource"), false);
   assert.equal(mutationInput.preloaded.settings.enabled, true);
