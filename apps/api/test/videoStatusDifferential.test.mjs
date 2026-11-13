@@ -184,7 +184,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // The R2 bucket below implements real CAS precommit on the shared Hono
   // manifest adapter. This is still not a live Cloudflare binding, and does
   // not replace complete CURRENT Action/HTTP/authorization parity.
-  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false, replaceR2FenceOwner = false) {
+  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false, replaceR2FenceOwner = false, enableWake = false) {
     const sqlite = createSqlite();
     seed(sqlite);
     const d1 = createVideoStatusD1(sqlite);
@@ -200,6 +200,7 @@ if (runUnderRootTsx(import.meta.url)) {
         .where(eq(schema.videos.id, "vid-1")).limit(1))[0];
       assert.ok(video);
       const events = [];
+      const pendingWakePromises = [];
       const objects = new Map();
       let etagVersion = 0;
       const bucket = {
@@ -245,8 +246,11 @@ if (runUnderRootTsx(import.meta.url)) {
           DB: d1, BUCKET: bucket,
           KV: { async get() { return null; }, async put() {}, async delete() {} },
           NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+          QUEUE_DISPATCH_ENABLED: enableWake ? "1" : "0",
+          NOTIFICATION_WAKE_QUEUE: { async send(message) { events.push(["queue.send", "notification", message.kind]); } },
+          STATIC_REBUILD_WAKE_QUEUE: { async send(message) { events.push(["queue.send", "static-rebuild", message.kind]); } },
         },
-        ctx: { waitUntil() {} },
+        ctx: { waitUntil(promise) { pendingWakePromises.push(promise); } },
       };
       const transitionHost = createVideoVisibilityTransitionHost({
         env: { BUCKET: bucket, NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL },
@@ -276,11 +280,13 @@ if (runUnderRootTsx(import.meta.url)) {
       const mutationInput = {
         db, videoId: "vid-1", requestedStatus: nextStatus, transition,
         reason: "audited differential", logTag: "status-differential",
+        ...(enableWake ? { notificationWakeSource: "admin", staticRebuildWakeSource: "admin" } : {}),
       };
       // Exercise CURRENT's actual Next mutation bridge rather than Hono twice.
       const result = useCurrent
         ? await executeCurrentStatusMutation(mutationInput)
         : await executeHonoVideoVisibilityStatusMutation(mutationInput, auditedHost);
+      await Promise.all(pendingWakePromises);
       if (replaceR2FenceOwner) {
         assert.equal(result.ok, false, "R2 owner changes must stop before D1");
         assert.equal(result.errorCode, "visibility_precommit_failed");
@@ -380,6 +386,40 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(current.events.filter((event) => event[0] === "r2.put").length, 1,
       "the original precommit is the only R2 put, never an unauthorized compensation");
     assert.equal(current.events.filter((event) => event[0] === "r2.concurrent-owner").length, 1);
+  });
+
+  test("CURRENT wakes both queues only after committed audit/outbox while Hono keeps durable outbox and zero wakes", async () => {
+    const current = await executeAuditedStatus("voided", true, false, false, true);
+    const hono = await executeAuditedStatus("voided", false, false, false, true);
+    const currentWake = current.events.filter((event) => event[0] === "queue.send");
+    const honoWake = hono.events.filter((event) => event[0] === "queue.send");
+    assert.deepEqual(currentWake.map((event) => event.slice(1)), [
+      ["notification", "notification_available"],
+      ["static-rebuild", "static_rebuild_available"],
+    ], "CURRENT sends one wake per committed outbox kind");
+    assert.deepEqual(honoWake, [],
+      "Hono must not wake directly; recovery cron owns outbox delivery");
+    assert.equal(current.batches, 1);
+    assert.equal(hono.batches, 1);
+    assert.deepEqual(current.notifications, hono.notifications,
+      "both paths persist the same notification outbox row");
+    assert.deepEqual(current.queue, hono.queue,
+      "both paths persist the same static rebuild queue");
+    assert.equal(current.notifications.length, 1);
+    assert.equal(current.queue.length > 0, true);
+    assert.equal(current.events.filter((event) => event[0] === "r2.put").length, 1,
+      "the visibility fence is committed before any wake");
+  });
+
+  test("stale D1 CAS never wakes either queue even when both wake sources are requested", async () => {
+    for (const useCurrent of [true, false]) {
+      const result = await executeAuditedStatus("voided", useCurrent, true, false, true);
+      assert.equal(result.result.ok, false);
+      assert.equal(result.batches, 1, "the D1 CAS batch was attempted and rolled back");
+      assert.deepEqual(result.events.filter((event) => event[0] === "queue.send"), []);
+      assert.deepEqual(result.notifications, [], "notification outbox rolled back");
+      assert.deepEqual(result.queue, [], "static rebuild outbox rolled back");
+    }
   });
 
   for (const nextStatus of ["private", "voided"]) {
