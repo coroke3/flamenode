@@ -248,6 +248,7 @@ async function loadExistingTrendingItemCount(
         item.icon_url !== current.icon_url ||
         item.primary_event_id !== current.primary_event_id ||
         item.primary_event_title !== current.primary_event_title ||
+        item.scheduled_time !== current.scheduled_time ||
         (item.display_name !== "unknown" && item.display_name !== current.display_name) ||
         (item.youtube_video_id !== null && item.youtube_video_id !== current.youtube_video_id)
       ) return 0;
