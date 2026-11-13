@@ -906,6 +906,16 @@ test("MIG-0652 U04 SQLite T30: audited archive stays within D1 Free invocation q
       f.d1.stats.statements <= D1_MAX_BATCH_QUERIES,
       variant.name + " executed " + f.d1.stats.statements + " logical D1 queries, above " + D1_MAX_BATCH_QUERIES,
     );
+    // This Draft still carries the synchronous main planner. PR #679 adds
+    // exactly one D1 SELECT for public-boundary token ownership. Include that
+    // prospective read in the real-session query ceiling until both PRs are
+    // independently reviewed and combined on the integration HEAD.
+    const futureFenceSelectCount = variant.status === "public" ? 1 : 0;
+    assert.ok(
+      f.d1.stats.statements + futureFenceSelectCount <= D1_MAX_BATCH_QUERIES,
+      variant.name + " future merged path would use " +
+        (f.d1.stats.statements + futureFenceSelectCount) + " logical D1 queries",
+    );
     assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
     assert.equal(f.read("audit_logs", "WHERE target_id = '" + EVENT + "'").length, 1);
     assert.ok(f.read("static_rebuild_queue").some((row) => row.reason === "event_private"));
