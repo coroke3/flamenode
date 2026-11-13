@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [cloudflare, auth, authRoute, authRouteError, origin, currentUser, session, layoutHeaderUser, requestAuthContext, publicLayout, ...authLayouts] = await Promise.all([
+const [cloudflare, auth, sharedAuthConfig, authRoute, authRouteError, origin, currentUser, session, layoutHeaderUser, requestAuthContext, publicLayout, ...authLayouts] = await Promise.all([
   readFile(new URL("../cloudflare.ts", import.meta.url), "utf8"),
   readFile(new URL("./index.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../packages/server-core/src/auth/config.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../app/api/auth/[...nextauth]/route.ts", import.meta.url), "utf8"),
   readFile(new URL("./authRouteError.ts", import.meta.url), "utf8"),
   readFile(new URL("./origin.ts", import.meta.url), "utf8"),
@@ -51,9 +52,15 @@ test("Auth origin・Host・Discord scopeは固定設定をfail-closedで使う",
   assert.match(origin, /LOCALHOST_FORBIDDEN/);
   assert.match(auth, /trustHost: true/);
   assert.doesNotMatch(auth, /AUTH_TRUST_HOST/);
-  assert.match(auth, /params: \{ scope: "identify email" \}/);
-  assert.match(auth, /allowDangerousEmailAccountLinking:\s*true/);
+  // MIG-0802: this OAuth policy now lives in server-core, but CURRENT must
+  // still use the exact provider options. Test both ownership and wiring.
+  assert.match(auth, /from "@flamenode\\/server-core\\/auth\\/config"/);
+  assert.match(auth, /Discord\\(discordProviderOptions\\(\\{ discordClientId, discordClientSecret \\}\\)\\)/);
+  assert.match(sharedAuthConfig, /params: \\{ scope: "identify email" \\}/);
+  assert.match(sharedAuthConfig, /allowDangerousEmailAccountLinking:\\s*true/);
+  assert.match(sharedAuthConfig, /https:\\/\\/discord\\.com\\/api\\/oauth2\\/authorize/);
   assert.doesNotMatch(auth, /identify email guilds/);
+  assert.doesNotMatch(sharedAuthConfig, /identify email guilds/);
   assert.doesNotMatch(auth, /redirect\(\{ url, baseUrl \}\)/);
 });
 
