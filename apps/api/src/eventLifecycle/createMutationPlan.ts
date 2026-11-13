@@ -84,7 +84,7 @@ export function planEventCreateAtomicWrite(input: {
   // CURRENT createEvent requires the selected Active X identity to be both
   // approved and linked to the authenticated caller. Reassert ownership
   // *inside* the same atomic D1 batch: even a stale/forged future Hono
-  // preflight must never create an event with an unapproved owner.
+  // preflight must never create an event with an unapproved owner or stale display name.
   const preMutationAssertions: BatchItem<"sqlite">[] = [
     db.run(assertCondition(sql`EXISTS (
       SELECT 1 FROM ${users}
@@ -96,6 +96,7 @@ export function planEventCreateAtomicWrite(input: {
         AND ${users.active_x_user_id} = ${ownerRow.x_user_id}
         AND ${xUserAccountLinks.x_user_id} = ${ownerRow.x_user_id}
         AND ${xUsers.approval_status} = 'approved'
+        AND ${xUsers.x_name} = ${ownerRow.display_name}
     )`)),
   ];
 
