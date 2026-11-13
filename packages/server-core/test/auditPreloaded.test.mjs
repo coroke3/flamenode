@@ -9,7 +9,7 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
 import { mutateWithAudit, planAtomicAuditMutationBudget } from "@flamenode/server-core/audit/mutate";
 import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
-import { actorSnapshotFromRow, prepareAuditLogEntries } from "@flamenode/server-core/audit/logger";
+import { actorSnapshotFromRow, isValidPreloadedAuditSettings, prepareAuditLogEntries } from "@flamenode/server-core/audit/logger";
 import { mapAuditSettings } from "@flamenode/server-core/audit/settings";
 import { sql } from "@flamenode/server-core/sql";
 import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
@@ -186,7 +186,7 @@ test("Issue #669: exact 50-query budget uses only matching guard-preloaded audit
     audits: [audit],
     callerQueryCount: 46,
   };
-  const settings = { max_payload_bytes: 90000 };
+  const settings = mapAuditSettings(null);
   const validPreload = {
     settings,
     actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
@@ -309,7 +309,7 @@ test("Issue #669: 80-event SA-029 with the prospective MIG-0516 marker fits 50 w
   const reused = planAtomicAuditMutationBudget({
     ...proposal,
     preloaded: {
-      settings: { max_payload_bytes: 90000 },
+      settings: mapAuditSettings(null),
       actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
     },
   });
@@ -410,12 +410,341 @@ test("Issue #669: actual SQLite 80-member insert + queue + MIG-0516 marker audit
 });
 
 
+test("Issue #669: incomplete or corrupted settings cannot earn a preload SELECT credit", async () => {
+  const canonical = mapAuditSettings(null);
+  const actorSnapshot = JSON.stringify(actorSnapshotFromRow(null));
+  for (const badSettings of [
+    null, false, {}, { max_payload_bytes: 90_000 },
+    { ...canonical, normal_retention_days: "30" },
+    { ...canonical, restorable_retention_days: Number.NaN },
+    { ...canonical, compact_after_days: -1 },
+    { ...canonical, extra: true },
+  ]) {
+    const w = world();
+    const restore = freeze();
+    try {
+      const preload = {
+        settings: badSettings,
+        actorSnapshotJsonById: { "admin-1": actorSnapshot },
+      };
+      const planned = planAtomicAuditMutationBudget({
+        mutationStatements: [sql`SELECT 1`],
+        expectedMutationChanges: 0,
+        audits: [AUDIT],
+        callerQueryCount: 0,
+        preloaded: preload,
+      });
+      assert.equal(planned.preparationQueryCount, 1, "malformed settings must not earn a D1 query credit");
+      const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+      assert.ok(entry, "audit row must still be prepared with authoritative settings");
+      assert.equal(w.stats.reads.length, 1, "runtime must perform the same settings read planner charged");
+      assert.equal(entry.retention_class, "normal");
+      assert.equal(entry.expires_at, entry.created_at + 45 * 86400, "retain the authoritative SQLite 45-day policy, not a missing-field/default placeholder");
+    } finally {
+      restore();
+      w.sqlite.close();
+    }
+  }
+});
+
+test("Issue #677: throwing settings preload getter and Proxy pay for the authoritative D1 read", async () => {
+  for (const makePreload of [
+    (actorJson) => ({
+      get settings() { throw new Error("private settings getter error"); },
+      actorSnapshotJsonById: { "admin-1": actorJson },
+    }),
+    (actorJson) => new Proxy({
+      actorSnapshotJsonById: { "admin-1": actorJson },
+    }, {
+      get(target, property, receiver) {
+        if (property === "settings") throw new Error("private provider Proxy error");
+        return Reflect.get(target, property, receiver);
+      },
+    }),
+  ]) {
+    const w = world();
+    const restore = freeze();
+    try {
+      const preload = makePreload(JSON.stringify(actorSnapshotFromRow(null)));
+      const proposal = {
+        mutationStatements: [sql`SELECT 1`],
+        expectedMutationChanges: 0,
+        audits: [AUDIT],
+        callerQueryCount: 0,
+        preloaded: preload,
+      };
+      const budget = planAtomicAuditMutationBudget(proposal);
+      assert.equal(budget.preparationQueryCount, 1,
+        "throwing settings access must never earn a D1 read credit");
+      const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+      assert.ok(entry, "logger falls back to authoritative settings");
+      assert.equal(w.stats.reads.length, 1,
+        "runtime must perform the same settings read as the planner charged");
+      assert.equal(entry.expires_at - entry.created_at, 45 * 86400);
+    } finally {
+      restore();
+      w.sqlite.close();
+    }
+  }
+});
+
+test("Issue #677: throwing settings preload at 50-query edge fails closed before writes", async () => {
+  for (const kind of ["getter", "proxy"]) {
+    for (const callerQueryCount of [45, 46]) {
+      const w = world();
+      const restore = freeze();
+      try {
+        w.sqlite.exec("CREATE TABLE t (id TEXT PRIMARY KEY)");
+        const actorJson = JSON.stringify(actorSnapshotFromRow(null));
+        const preload = kind === "getter"
+          ? {
+              get settings() { throw new Error("unsafe settings getter"); },
+              actorSnapshotJsonById: { "admin-1": actorJson },
+            }
+          : new Proxy({
+              actorSnapshotJsonById: { "admin-1": actorJson },
+            }, {
+              get(target, key, receiver) {
+                if (key === "settings") throw new Error("unsafe settings Proxy");
+                return Reflect.get(target, key, receiver);
+              },
+            });
+        const input = {
+          mutationStatements: [sql`INSERT INTO t (id) VALUES (${kind + callerQueryCount})`],
+          expectedMutationChanges: 1,
+          audits: [AUDIT],
+          callerQueryCount,
+          preloaded: preload,
+        };
+        const budget = planAtomicAuditMutationBudget(input);
+        assert.equal(budget.preparationQueryCount, 1, "settings D1 SELECT is not credited");
+        assert.equal(budget.totalQueryCount, callerQueryCount + 5);
+        if (callerQueryCount === 45) {
+          assert.equal(budget.withinLimit, true, "50/50 is valid");
+          await mutateWithAudit(w.db, input);
+          assert.equal(w.stats.reads.length, 1, "authoritative settings SELECT is executed");
+          assert.equal(w.stats.batches, 1);
+          assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM t").get().n, 1);
+          const stored = w.sqlite.prepare("SELECT * FROM audit_logs").get();
+          assert.ok(stored);
+          assert.equal(stored.expires_at - stored.created_at, 45 * 86400);
+        } else {
+          assert.equal(budget.withinLimit, false, "51/50 must be rejected");
+          await assert.rejects(() => mutateWithAudit(w.db, input), /query 数が上限/);
+          assert.equal(w.stats.reads.length, 0, "reject before all audit SELECTs");
+          assert.equal(w.stats.batches, 0, "reject before D1 mutation batch");
+          assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM t").get().n, 0);
+          assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+        }
+      } finally {
+        restore();
+        w.sqlite.close();
+      }
+    }
+  }
+});
+
+test("Issue #677: throwing actor preload accessor fails closed in budget and logger", async () => {
+  const w = world();
+  const restore = freeze();
+  let getterCalls = 0;
+  try {
+    const canonical = mapAuditSettings(
+      w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get(),
+    );
+    const preload = {
+      settings: canonical,
+      actorSnapshotJsonById: new Proxy({}, {
+        get() {
+          getterCalls += 1;
+          throw new Error("never expose this private provider exception");
+        },
+      }),
+    };
+    const input = {
+      mutationStatements: [sql`SELECT 1`],
+      expectedMutationChanges: 0,
+      audits: [AUDIT],
+      callerQueryCount: 0,
+      preloaded: preload,
+    };
+    const budget = planAtomicAuditMutationBudget(input);
+    assert.equal(budget.preparationQueryCount, 1, "invalid actor must pay for a D1 SELECT");
+    const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+    assert.ok(entry);
+    assert.equal(w.stats.reads.length, 1);
+    assert.deepEqual(JSON.parse(entry.actor_snapshot_json), {
+      discord_id: "d-1", discord_name: "Admin",
+      x_user_id: "x1", x_name: "XN", icon_url: "https://i/x.png",
+    }, "stored actor snapshot comes from actual D1, not the hostile accessor");
+    assert.equal(getterCalls, 2, "both exported paths guard their single accessor read");
+  } finally {
+    restore();
+    w.sqlite.close();
+  }
+});
+
+test("Issue #677: settings preload snapshots descriptors rather than reading Proxy get traps", async () => {
+  const w = world();
+  const restore = freeze();
+  try {
+    const canonical = mapAuditSettings(
+      w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get(),
+    );
+    let getCalls = 0;
+    const deceptive = new Proxy({ ...canonical }, {
+      get(target, property, receiver) {
+        if (property === "normal_retention_days") {
+          getCalls += 1;
+          return 9999; // not the value inspected by property descriptors
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    assert.equal(isValidPreloadedAuditSettings(deceptive), true);
+    const preload = {
+      settings: deceptive,
+      actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
+    };
+    const budget = planAtomicAuditMutationBudget({
+      mutationStatements: [sql`SELECT 1`],
+      expectedMutationChanges: 0,
+      audits: [AUDIT],
+      callerQueryCount: 0,
+      preloaded: preload,
+    });
+    assert.equal(budget.preparationQueryCount, 0, "descriptor-valid preload can avoid the D1 SELECT");
+    const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+    assert.ok(entry);
+    assert.equal(w.stats.reads.length, 0, "runtime and planner agree on zero reads");
+    assert.equal(entry.expires_at - entry.created_at, 45 * 86400,
+      "audit retention must come from the validated snapshot, not Proxy get");
+    assert.equal(getCalls, 0, "no caller-controlled get trap may run after validation");
+  } finally {
+    restore();
+    w.sqlite.close();
+  }
+});
+
+test("Issue #677: atomic mutation snapshots changing preloads once for budget and runtime", async () => {
+  const w = world();
+  const restore = freeze();
+  try {
+    w.sqlite.exec("CREATE TABLE t (id TEXT PRIMARY KEY)");
+    const canonical = mapAuditSettings(
+      w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get(),
+    );
+    const actorJson = JSON.stringify(actorSnapshotFromRow(null));
+    let descriptorReads = 0;
+    let actorGets = 0;
+    const settings = new Proxy({ ...canonical }, {
+      getOwnPropertyDescriptor(target, key) {
+        const desc = Reflect.getOwnPropertyDescriptor(target, key);
+        if (key === "normal_retention_days") {
+          descriptorReads += 1;
+          return { ...desc, value: descriptorReads === 1 ? canonical.normal_retention_days : -1 };
+        }
+        return desc;
+      },
+    });
+    const actorSnapshotJsonById = new Proxy({ "admin-1": actorJson }, {
+      get(target, key, receiver) {
+        if (key === "admin-1") {
+          actorGets += 1;
+          return actorGets === 1 ? actorJson : "{}";
+        }
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const audit = { ...AUDIT, after: { id: "race-safe" } };
+    const input = {
+      mutationStatements: [sql`INSERT INTO t (id) VALUES (${"race-safe"})`],
+      expectedMutationChanges: 1,
+      audits: [audit],
+      callerQueryCount: 46, // would be 52/50 if both invalid second reads were charged
+      preloaded: { settings, actorSnapshotJsonById },
+    };
+    await mutateWithAudit(w.db, input);
+    assert.equal(w.stats.reads.length, 0, "no unbudgeted settings or actor SELECT");
+    assert.equal(w.stats.batches, 1);
+    assert.equal(descriptorReads, 1, "single validated settings descriptor snapshot");
+    assert.equal(actorGets, 1, "single validated actor JSON snapshot");
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM t").get().n, 1);
+    const stored = w.sqlite.prepare("SELECT * FROM audit_logs").get();
+    assert.ok(stored);
+    assert.equal(stored.expires_at - stored.created_at, 45 * 86400);
+    assert.equal(stored.actor_snapshot_json, actorJson);
+  } finally {
+    restore();
+    w.sqlite.close();
+  }
+});
+
+test("Issue #677: exotic settings preload is rejected without invoking accessors", async () => {
+  const canonical = mapAuditSettings(null);
+  const actorSnapshot = JSON.stringify(actorSnapshotFromRow(null));
+  let getterCalls = 0;
+  const accessor = { ...canonical };
+  Object.defineProperty(accessor, "max_payload_bytes", {
+    enumerable: true,
+    get() { getterCalls += 1; throw new Error("sensitive getter must never execute"); },
+  });
+  const symbolKey = { ...canonical, [Symbol("hidden")]: 123 };
+  const hiddenKey = { ...canonical };
+  Object.defineProperty(hiddenKey, "secret", { value: "hidden", enumerable: false });
+  const inherited = Object.assign(Object.create({ inherited: true }), canonical);
+  const hostileProxy = new Proxy({ ...canonical }, {
+    ownKeys() { throw new Error("provider private details"); },
+  });
+  for (const badSettings of [accessor, symbolKey, hiddenKey, inherited, hostileProxy]) {
+    const w = world();
+    const restore = freeze();
+    try {
+      assert.equal(isValidPreloadedAuditSettings(badSettings), false);
+      const preload = {
+        settings: badSettings,
+        actorSnapshotJsonById: { "admin-1": actorSnapshot },
+      };
+      const budget = planAtomicAuditMutationBudget({
+        mutationStatements: [sql`SELECT 1`],
+        expectedMutationChanges: 0,
+        audits: [AUDIT],
+        callerQueryCount: 0,
+        preloaded: preload,
+      });
+      assert.equal(budget.preparationQueryCount, 1);
+      const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+      assert.equal(w.stats.reads.length, 1, "authoritative settings D1 SELECT");
+      assert.equal(entry.expires_at - entry.created_at, 45 * 86400);
+      assert.equal(getterCalls, 0, "never execute a preload property getter");
+    } finally {
+      restore();
+      w.sqlite.close();
+    }
+  }
+});
+
 test("Issue #669: corrupted preload JSON and non-string placeholders never bypass D1", async () => {
   const canonical = actorSnapshotFromRow(null);
+  const canonicalJson = JSON.stringify(canonical);
+  const duplicateKeyJson = canonicalJson.replace(
+    '"discord_id":null', '"discord_id":"forged","discord_id":null',
+  );
+  // Native JSON.parse treats the duplicate's last value as authoritative.
+  // Other JSON consumers can treat the same raw bytes differently.
+  assert.deepEqual(JSON.parse(duplicateKeyJson), canonical);
   for (const placeholder of [
     null, false, 42, {}, "", "null", "[]", "{}", "{broken-json",
     JSON.stringify({ ...canonical, extra: "injected" }),
     JSON.stringify({ ...canonical, icon_url: 17 }),
+    duplicateKeyJson,
+    " " + canonicalJson,
+    JSON.stringify({
+      icon_url: canonical.icon_url, x_name: canonical.x_name,
+      x_user_id: canonical.x_user_id, discord_name: canonical.discord_name,
+      discord_id: canonical.discord_id,
+    }),
+    canonicalJson.replace('"discord_id":null', '"disc\\u006frd_id":null'),
   ]) {
     const w = world();
     const restore = freeze();
