@@ -83,3 +83,101 @@ export function parseSpreadsheetAuditIdentityV1(
     return null;
   }
 }
+
+/**
+ * Candidate selection for a FUTURE explicit per-record history endpoint.
+ * This is not a query or a combined visible history: legacy candidates are
+ * potentially ambiguous until their stored snapshots are checked.
+ */
+export type SpreadsheetAuditHistoryLookup = {
+  table_name: string;
+  v1: SpreadsheetAuditIdentityV1;
+  legacy: { context: "admin_spreadsheet"; target_id: string };
+};
+
+export function buildSpreadsheetAuditHistoryLookup(
+  tableName: string,
+  primaryKey: Record<string, string>,
+): SpreadsheetAuditHistoryLookup {
+  if (!tableName || typeof tableName !== "string") throw new Error("unknown_table");
+  // Validate once through V1, including no NUL or missing components.
+  const v1 = buildSpreadsheetAuditIdentityV1(primaryKey);
+  return {
+    table_name: tableName,
+    v1,
+    // Preserve the CURRENT audit writer's exact legacy localeCompare+colon
+    // encoding for historical lookup only. This may collide across tuples.
+    legacy: {
+      context: "admin_spreadsheet",
+      target_id: Object.entries(primaryKey)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, value]) => value)
+        .join(":"),
+    },
+  };
+}
+
+export type SpreadsheetAuditHistoryCandidate = {
+  table_name: string;
+  context: string | null;
+  target_id: string;
+  before_json: string | null;
+  after_json: string | null;
+};
+
+export type SpreadsheetAuditHistoryRelation =
+  | "v1_exact"
+  | "legacy_snapshot_exact"
+  | "legacy_ambiguous"
+  | "other";
+
+/**
+ * Legacy matching requires the actual full PK in every available snapshot.
+ * Missing/redacted/malformed snapshots must NEVER turn a colon collision into
+ * a false positive. A matching before and conflicting after are ambiguous.
+ *
+ * The return value only classifies a candidate row fetched under the trusted
+ * table_name+context+target_id predicates. It does not authorize restore,
+ * bypass existing audit permission checks, or mutate historical audit IDs.
+ */
+export function classifySpreadsheetAuditHistoryCandidate(
+  lookup: SpreadsheetAuditHistoryLookup,
+  row: SpreadsheetAuditHistoryCandidate,
+): SpreadsheetAuditHistoryRelation {
+  if (row.table_name !== lookup.table_name) return "other";
+  if (row.context === SPREADSHEET_AUDIT_PK_V1_CONTEXT) {
+    return row.target_id === lookup.v1.target_id &&
+      parseSpreadsheetAuditIdentityV1(row) !== null ? "v1_exact" : "other";
+  }
+  if (row.context !== lookup.legacy.context ||
+      row.target_id !== lookup.legacy.target_id) return "other";
+
+  const expectedPk = parseSpreadsheetAuditIdentityV1(lookup.v1);
+  if (!expectedPk) return "legacy_ambiguous";
+  const parts: string[] = [];
+  for (const snapshot of [row.before_json, row.after_json]) {
+    if (snapshot === null) continue;
+    if (snapshot.length > 128_000) return "legacy_ambiguous";
+    try {
+      const value: unknown = JSON.parse(snapshot);
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return "legacy_ambiguous";
+      }
+      const data = value as Record<string, unknown>;
+      const present = expectedPk.every(([key]) =>
+        Object.prototype.hasOwnProperty.call(data, key) &&
+        typeof data[key] === "string" &&
+        data[key] !== "[REDACTED]",
+      );
+      if (!present) return "legacy_ambiguous";
+      parts.push(expectedPk.every(([key, expected]) => data[key] === expected)
+        ? "match" : "other");
+    } catch {
+      return "legacy_ambiguous";
+    }
+  }
+  if (parts.length === 0) return "legacy_ambiguous";
+  if (parts.every((x) => x === "match")) return "legacy_snapshot_exact";
+  if (parts.every((x) => x === "other")) return "other";
+  return "legacy_ambiguous";
+}
