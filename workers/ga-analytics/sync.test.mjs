@@ -206,7 +206,10 @@ test("syncGa4Trending fail-closed: does not put trending.json on GA failure", as
     GA4_SERVICE_ACCOUNT_EMAIL: "svc@example.com",
     GA4_SERVICE_ACCOUNT_PRIVATE_KEY: "test-private-key",
     R2: {
-      get() { throw Error("unexpected R2 recent read"); },
+      get(key) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        return null; // No last-success artifact: nothing needs privacy repair.
+      },
       put(key) {
         putCalls += 1;
         assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
@@ -1001,4 +1004,127 @@ test("GA4 matched video count excludes duplicate rows and unsafe 30d views", () 
     { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 2 },
     { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 3 },
   ]), 2);
+});
+
+
+test("Issue #653: GA4 HTTP failure removes revoked R2 rows using current D1 public metadata", async () => {
+  const previous = JSON.stringify({
+    schema_version: 1,
+    generated_at: 1_700_000_000,
+    items: [
+      { id: "video-a", title: "Stale public title", status: "public", rank: 1,
+        views_2d: 3, views_5d: 4, views_7d: 5, views_30d: 6 },
+      { id: "revoked", title: "Private title", status: "public", rank: 2,
+        views_2d: 2, views_5d: 3, views_7d: 4, views_30d: 5 },
+    ],
+  });
+  const db = recentDb([{ id: "video-a", title: "Current public title",
+    youtube_video_id: "yt-a", display_name: "Current", status: "public" }]);
+  let reads = 0;
+  const writes = [];
+  const logs = [];
+  const originalLog = console.log;
+  const originalFetch = globalThis.fetch;
+  console.log = (value) => logs.push(JSON.parse(String(value)));
+  globalThis.fetch = async (input) => {
+    assert.match(String(input), /analyticsdata.googleapis.com/);
+    return new Response("GA4 unavailable", { status: 500 });
+  };
+  const env = enabledGa4Env({
+    DB: db,
+    KV: { async get() {
+      return JSON.stringify({ access_token: "cached",
+        expires_at: Math.floor(Date.now() / 1000) + 3600 });
+    } },
+    R2: {
+      async get(key) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        reads += 1;
+        return { size: Buffer.byteLength(previous), async text() { return previous; } };
+      },
+      async put(key, body) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        writes.push(JSON.parse(String(body)));
+      },
+    },
+  });
+  try {
+    await assert.rejects(() => syncGa4Trending(env), /ga4_report_http_500/);
+    assert.equal(db.reads, 1, "repair must not add D1 queries");
+    assert.equal(reads, 1);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].schema_version, 1);
+    assert.equal(writes[0].items.length, 1);
+    assert.equal(writes[0].items[0].id, "video-a");
+    assert.equal(writes[0].items[0].title, "Current public title");
+    assert.equal(writes[0].items[0].rank, 1);
+    assert.equal(writes[0].items[0].views_30d, 6);
+    assert.equal(JSON.stringify(writes[0]).includes("Private title"), false);
+    assert.equal(logs.at(-1).r2_written, true);
+    assert.equal(logs.at(-1).privacy_rewrite_on_ga4_failure, true);
+  } finally {
+    console.log = originalLog;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Issue #653: GA4 failure preserves fully public last-good R2 without extra PUT", async () => {
+  const previous = JSON.stringify({
+    schema_version: 1, generated_at: 1_700_000_000,
+    items: [{ id: "video-a", title: "A", status: "public", rank: 1,
+      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4 }],
+  });
+  let puts = 0;
+  let gets = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("GA4 failure", { status: 500 });
+  const env = enabledGa4Env({
+    KV: { async get() {
+      return JSON.stringify({ access_token: "cached",
+        expires_at: Math.floor(Date.now() / 1000) + 3600 });
+    } },
+    R2: {
+      async get() { gets += 1; return { async text() { return previous; } }; },
+      async put() { puts += 1; },
+    },
+  });
+  try {
+    await assert.rejects(() => syncGa4Trending(env), /ga4_report_http_500/);
+    assert.equal(gets, 1);
+    assert.equal(puts, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("Issue #653: revoked-only or malformed old R2 is cleared on GA4 failure", async () => {
+  const previousCases = [
+    { schema_version: 1, generated_at: 1_700_000_000,
+      items: [{ id: "revoked", title: "Do not serve", status: "public", rank: 1,
+        views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4 }] },
+    { schema_version: 99, generated_at: 1_700_000_000,
+      items: [{ id: "video-a", title: "Wrong schema", status: "public", rank: 1,
+        views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4 }] },
+  ];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("GA4 failure", { status: 500 });
+  try {
+    for (const previous of previousCases) {
+      let output = null;
+      const env = enabledGa4Env({
+        KV: { async get() {
+          return JSON.stringify({ access_token: "cached",
+            expires_at: Math.floor(Date.now() / 1000) + 3600 });
+        } },
+        R2: {
+          async get() { return { async text() { return JSON.stringify(previous); } }; },
+          async put(key, body) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            output = JSON.parse(String(body));
+          },
+        },
+      });
+      await assert.rejects(() => syncGa4Trending(env), /ga4_report_http_500/);
+      assert.equal(output?.schema_version, 1);
+      assert.deepEqual(output?.items, []);
+    }
+  } finally { globalThis.fetch = originalFetch; }
 });
