@@ -87,12 +87,17 @@ export async function executeVideoVisibilityStatusMutation<DB>(
     return { ok: false, message: transition.validationError };
   }
 
+  // The planner returns notification INSERTs separately from its video/fence
+  // and static-rebuild statements. They must enter this SAME audited D1 batch;
+  // a wake source alone does not persist an outbox row.
   const mutationStatements = [
     ...transition.mutationStatements,
+    ...transition.notificationBatch.statements,
     ...(input.extraStatements ?? []),
   ];
   const expectedMutationChanges = [
     ...transition.expectedMutationChanges,
+    ...transition.notificationBatch.expectedChanges,
     ...(input.extraExpected ?? []),
   ];
   const audits = [...transition.audits, ...(input.extraAudits ?? [])];
