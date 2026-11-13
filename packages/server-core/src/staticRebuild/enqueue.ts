@@ -165,11 +165,15 @@ export async function buildStaticRebuildQueueBatch(
   // Invalidate the next public build in the same atomic D1 batch as the
   // source mutation's queue invalidation. Keep the scheduler's millisecond
   // clock separate from the queue rows' existing second timestamps.
-  // MAX avoids losing a newer request when an older clock wins a race.
+  // Advance the generation even if two writes share a millisecond, or a
+  // writer's clock is behind the build hook. The next requested_at must be
+  // strictly greater than BOTH the previous request and last_hook_at.
+  // Otherwise the scheduler's requested_at <= last_hook_at gate can silently
+  // skip a committed public change. This remains a single D1 UPDATE.
   statements.push(
     db.run(sql`
       UPDATE public_build_state
-      SET requested_at = MAX(requested_at, ${nowMs})
+      SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ${nowMs})
       WHERE id = 1
     `),
   );

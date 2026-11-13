@@ -45,7 +45,7 @@
           ]
         },
         {
-          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at, ?) WHERE id = 1",
+          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ?) WHERE id = 1",
           "params": [
             1800000000000
           ]
@@ -138,7 +138,7 @@
           ]
         },
         {
-          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at, ?) WHERE id = 1",
+          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ?) WHERE id = 1",
           "params": [
             1800000000000
           ]
@@ -231,7 +231,7 @@
           ]
         },
         {
-          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at, ?) WHERE id = 1",
+          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ?) WHERE id = 1",
           "params": [
             1800000000000
           ]
@@ -315,7 +315,7 @@
           ]
         },
         {
-          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at, ?) WHERE id = 1",
+          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ?) WHERE id = 1",
           "params": [
             1800000000000
           ]
@@ -694,7 +694,7 @@
           ]
         },
         {
-          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at, ?) WHERE id = 1",
+          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ?) WHERE id = 1",
           "params": [
             1800000000000
           ]
@@ -793,7 +793,7 @@
           ]
         },
         {
-          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at, ?) WHERE id = 1",
+          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ?) WHERE id = 1",
           "params": [
             1800000000000
           ]
@@ -887,7 +887,7 @@
           ]
         },
         {
-          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at, ?) WHERE id = 1",
+          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ?) WHERE id = 1",
           "params": [
             1800000000000
           ]
@@ -1019,7 +1019,7 @@
           ]
         },
         {
-          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at, ?) WHERE id = 1",
+          "sql": "UPDATE public_build_state SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ?) WHERE id = 1",
           "params": [
             1800000000000
           ]

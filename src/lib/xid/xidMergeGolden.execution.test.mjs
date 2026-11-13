@@ -451,7 +451,7 @@ if (runTestWithTsx(import.meta.url)) {
     assert.deepEqual(steps[queueIndex + 1].params, [queueTargetCount], "queue assertion remains strict");
     assert.match(steps[queueIndex + 1].sql, /WHEN changes\(\) = \?/);
     const marker = steps[queueIndex + 2];
-    assert.match(marker.sql, /UPDATE public_build_state[\s\S]*requested_at = MAX\(requested_at, \?\)[\s\S]*WHERE id = 1/);
+    assert.match(marker.sql, /UPDATE public_build_state[\s\S]*requested_at = MAX\(requested_at \+ 1, last_hook_at \+ 1, \?\)[\s\S]*WHERE id = 1/);
     assert.deepEqual(marker.params, [1_760_000_000_000], "marker uses frozen epoch milliseconds");
     assert.equal(steps.filter((entry) => entry.sql.includes("UPDATE public_build_state")).length, 1);
     assert.match(steps[queueIndex + 3].sql, /WHEN changes\(\) = \?/);

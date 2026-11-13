@@ -7,7 +7,7 @@ import { buildStaticRebuildQueueBatch } from "@flamenode/server-core/staticRebui
 import { asBatchRunnable } from "@flamenode/server-core/audit/mutate";
 
 const FIXED_NOW = 1_800_000_000_000;
-function world({ requestedAt = 0, hasMigration = true } = {}) {
+function world({ requestedAt = 0, lastHookAt = 0, hasMigration = true } = {}) {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(`
     CREATE TABLE static_rebuild_queue (
@@ -23,9 +23,10 @@ function world({ requestedAt = 0, hasMigration = true } = {}) {
   if (hasMigration) {
     sqlite.exec(`CREATE TABLE public_build_state (
       id INTEGER PRIMARY KEY CHECK (id = 1),
-      requested_at INTEGER NOT NULL DEFAULT 0
+      requested_at INTEGER NOT NULL DEFAULT 0,
+      last_hook_at INTEGER NOT NULL DEFAULT 0
     );`);
-    sqlite.prepare("INSERT INTO public_build_state(id, requested_at) VALUES (1, ?)").run(requestedAt);
+    sqlite.prepare("INSERT INTO public_build_state(id, requested_at, last_hook_at) VALUES (1, ?, ?)").run(requestedAt, lastHookAt);
   }
   const stats = { batches: 0, statements: [] };
   const prepare = (query, params = []) => ({
@@ -84,7 +85,7 @@ test("T01: public mutation updates requested_at atomically in milliseconds", asy
     assert.equal(batch.statements.length, 2);
     assert.equal(w.stats.batches, 1);
     assert.match(w.stats.statements[1].sql, /UPDATE public_build_state/);
-    assert.match(w.stats.statements[1].sql, /requested_at = MAX\(requested_at, \?\)/);
+    assert.ok(w.stats.statements[1].sql.includes("requested_at = MAX(requested_at + 1, last_hook_at + 1, ?)"));
     assert.deepEqual(w.stats.statements[1].params, [FIXED_NOW]);
     assert.equal(w.sqlite.prepare("SELECT requested_at FROM public_build_state").get().requested_at, FIXED_NOW);
     assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
@@ -104,12 +105,38 @@ test("T02: no public queue invalidation does not mark a build", async () => {
   } finally { w.sqlite.close(); }
 });
 
-test("T03: an older enqueue never moves requested_at backwards", async () => {
+test("T03: an older enqueue advances even when requested_at is newer than its clock", async () => {
   const w = world({ requestedAt: FIXED_NOW + 10000 });
   try {
     const batch = await batchAt(w, [item], FIXED_NOW);
     assert.deepEqual(batch.expectedChanges, [1, 1]);
-    assert.equal(w.sqlite.prepare("SELECT requested_at FROM public_build_state").get().requested_at, FIXED_NOW + 10000);
+    assert.equal(w.sqlite.prepare("SELECT requested_at FROM public_build_state").get().requested_at, FIXED_NOW + 10001);
+  } finally { w.sqlite.close(); }
+});
+
+test("T04: two public mutations in the same millisecond have distinct build generations", async () => {
+  const w = world();
+  try {
+    await batchAt(w, [item], FIXED_NOW);
+    const first = w.sqlite.prepare("SELECT requested_at FROM public_build_state").get().requested_at;
+    await batchAt(w, [item], FIXED_NOW);
+    const second = w.sqlite.prepare("SELECT requested_at FROM public_build_state").get().requested_at;
+    assert.equal(first, FIXED_NOW);
+    assert.equal(second, first + 1);
+    assert.equal(w.stats.batches, 2, "both mutations commit their atomic queue and marker");
+  } finally { w.sqlite.close(); }
+});
+
+test("T05: a slow writer must mark after an already claimed build hook", async () => {
+  const lastHookAt = FIXED_NOW + 5_000;
+  const w = world({ requestedAt: FIXED_NOW - 1000, lastHookAt });
+  try {
+    await batchAt(w, [item], FIXED_NOW);
+    const state = w.sqlite.prepare("SELECT requested_at, last_hook_at FROM public_build_state").get();
+    assert.equal(state.requested_at, lastHookAt + 1);
+    assert.ok(state.requested_at > state.last_hook_at,
+      "requested_at <= last_hook_at would permanently skip this committed change");
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
   } finally { w.sqlite.close(); }
 });
 
