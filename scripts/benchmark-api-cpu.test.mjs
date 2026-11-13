@@ -48,7 +48,12 @@ test("local migrated D1 records per-query result rows and carries them into repl
     assert.ok(spec.expect.includes(result.status), "the benchmark must exercise the real endpoint");
     assert.ok(result.d1RowsReturned > 0, "D1 must return visible event/slot rows");
     assert.equal(result.d1PerQueryRows.reduce((a, b) => a + b, 0), result.d1RowsReturned);
-    const replay = await target.recordForReplay(spec);
+    // The CURRENT live endpoint can cache an identical request in-isolate.
+    // Use a fresh seeded event ID so replay records actual D1 results rather
+    // than an empty script from an unrelated cache HIT.
+    const fresh = scenario.kinds.normal(2, "row-proxy-replay");
+    if (fresh.setup) await target.exec(fresh.setup);
+    const replay = await target.recordForReplay(fresh);
     assert.equal(replay.d1PerQueryRows.reduce((a, b) => a + b, 0), replay.d1RowsReturned);
     assert.ok(replay.script.length > 0, "replay preserves actual DB/R2 results");
   } finally {
