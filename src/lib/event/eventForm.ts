@@ -1,9 +1,9 @@
 import { z } from "zod";
+import { normalizeOptionalEventId, buildVideoFormSettingsJsonCore } from "@flamenode/domain/event";
 import {
   MAX_SLOTS_PER_VIDEO,
   MIN_SLOTS_PER_VIDEO,
 } from "@/lib/slots/limits";
-import { MAX_STAGE_PERMISSION_QUESTIONS } from "@/lib/event/eventLimits";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { DEFAULT_STAGE_PERMISSION_FIELD } from "@/lib/video/formSettings";
 import {
@@ -16,14 +16,8 @@ import {
   normalizeYoutubeDescriptionTemplate,
 } from "@/lib/event/youtubeDescriptionTemplate";
 
-/** URL / route-safe event IDs used for newly-created events and admin rename. */
-export const EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-
-function normalizeOptionalEventId(value: unknown): unknown {
-  // EventForm intentionally leaves ID blank to request an auto-generated ID.
-  // Treat the browser's empty string as omitted instead of failing `.min(1)`.
-  return typeof value === "string" && value.trim() === "" ? undefined : value;
-}
+// Retain the CURRENT create/rename import surface while sharing the exact ID rule.
+export { EVENT_ID_PATTERN } from "@flamenode/domain/event";
 
 export const eventSchema = z.object({
   id: z.preprocess(
@@ -110,24 +104,8 @@ export const eventSchema = z.object({
 
 export type EventFormData = z.infer<typeof eventSchema>;
 
-const PART_NAME_MAX_LEN = 40;
-const PART_MAX_COUNT = 20;
-
-export function buildPartsJson(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const seen = new Set<string>();
-  const parts: string[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const truncated = trimmed.slice(0, PART_NAME_MAX_LEN);
-    if (seen.has(truncated)) continue;
-    seen.add(truncated);
-    parts.push(truncated);
-    if (parts.length >= PART_MAX_COUNT) break;
-  }
-  return parts.length === 0 ? null : JSON.stringify(parts);
-}
+// CURRENT route imports remain stable while the pure parts planner lives in domain.
+export { buildPartsJson } from "@flamenode/domain/event";
 
 export function resolveSubmittedEventVisibility(
   data: Pick<EventFormData, "visibility_status">,
@@ -135,52 +113,9 @@ export function resolveSubmittedEventVisibility(
   return normalizeEventVisibility(data.visibility_status);
 }
 
-function boolFormValue(value: FormDataEntryValue | undefined): boolean {
-  return String(value ?? "") === "1";
-}
-
-function cleanQuestionId(
-  value: FormDataEntryValue | undefined,
-  index: number,
-): string {
-  const fallback =
-    index === 0 ? "stage_permission" : `stage_permission_${index + 1}`;
-  const cleaned = String(value ?? "")
-    .trim()
-    .replace(/[^A-Za-z0-9_-]/g, "_")
-    .slice(0, 64);
-  return cleaned || fallback;
-}
-
+/** Preserve CURRENT's Next-facing signature and fallback labels. */
 export function buildVideoFormSettingsJson(formData: FormData): string {
-  const ids = formData.getAll("custom_question_id");
-  const enabled = formData.getAll("custom_question_enabled");
-  const required = formData.getAll("custom_question_required");
-  const labels = formData.getAll("custom_question_label");
-  const descriptions = formData.getAll("custom_question_description");
-  const placeholders = formData.getAll("custom_question_placeholder");
-  const sentQuestionArray =
-    String(formData.get("custom_questions_present") ?? "") === "1";
-
-  if (sentQuestionArray || ids.length > 0) {
-    const stagePermissions = ids.slice(0, MAX_STAGE_PERMISSION_QUESTIONS).map((id, index) => ({
-      id: cleanQuestionId(id, index),
-      enabled: boolFormValue(enabled[index]),
-      required: boolFormValue(required[index]),
-      label:
-        String(labels[index] ?? "").trim().slice(0, 120) ||
-        DEFAULT_STAGE_PERMISSION_FIELD.label,
-      description:
-        String(descriptions[index] ?? "").trim().slice(0, 1000) ||
-        DEFAULT_STAGE_PERMISSION_FIELD.description,
-      placeholder:
-        String(placeholders[index] ?? "").trim().slice(0, 500) ||
-        DEFAULT_STAGE_PERMISSION_FIELD.placeholder,
-    }));
-    return JSON.stringify({ stage_permissions: stagePermissions });
-  }
-
-  return JSON.stringify({ stage_permissions: [] });
+  return buildVideoFormSettingsJsonCore(formData, DEFAULT_STAGE_PERMISSION_FIELD);
 }
 
 export function parseEventForm(
