@@ -8,11 +8,12 @@
  * mounts a route. Old-ID reuse requires its separate, verified R2 precommit
  * and MUST NOT use this no-tombstone planner.
  */
+import { sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { events, eventStaff, eventCustomQuestions } from "@flamenode/db/schema";
+import { events, eventStaff, eventCustomQuestions, users, xUsers, xUserAccountLinks } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "@flamenode/server-core/db";
 import type { WriteAuditLogInput } from "@flamenode/server-core/audit/types";
-import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutate";
+import { assertCondition, planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutate";
 import type { buildEventChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { MAX_EVENT_CREATE_QUESTIONS, MAX_EVENT_CREATE_QUESTIONS_PER_INSERT } from "@flamenode/domain/event";
 
@@ -30,6 +31,7 @@ export type EventCreateAtomicWritePlan =
       ok: true;
       mutationStatements: BatchItem<"sqlite">[];
       expectedMutationChanges: number[];
+      preMutationAssertions: BatchItem<"sqlite">[];
       audits: WriteAuditLogInput[];
       budget: ReturnType<typeof planD1AuditMutationBudget>;
     };
@@ -79,6 +81,24 @@ export function planEventCreateAtomicWrite(input: {
     keys.add(row.question_key);
   }
 
+  // CURRENT createEvent requires the selected Active X identity to be both
+  // approved and linked to the authenticated caller. Reassert ownership
+  // *inside* the same atomic D1 batch: even a stale/forged future Hono
+  // preflight must never create an event with an unapproved owner.
+  const preMutationAssertions: BatchItem<"sqlite">[] = [
+    db.run(assertCondition(sql`EXISTS (
+      SELECT 1 FROM ${users}
+      INNER JOIN ${xUserAccountLinks}
+        ON ${xUserAccountLinks.auth_user_id} = ${users.id}
+      INNER JOIN ${xUsers}
+        ON ${xUsers.id} = ${xUserAccountLinks.x_user_id}
+      WHERE ${users.id} = ${actorUserId}
+        AND ${users.active_x_user_id} = ${ownerRow.x_user_id}
+        AND ${xUserAccountLinks.x_user_id} = ${ownerRow.x_user_id}
+        AND ${xUsers.approval_status} = 'approved'
+    )`)),
+  ];
+
   const mutationStatements: BatchItem<"sqlite">[] = [
     db.insert(events).values(eventRow),
     db.insert(eventStaff).values(ownerRow),
@@ -111,9 +131,10 @@ export function planEventCreateAtomicWrite(input: {
   const budget = planD1AuditMutationBudget({
     mutationStatementCount: mutationStatements.length,
     mutationAssertionCount: mutationStatements.length,
+    preMutationAssertionCount: preMutationAssertions.length,
     auditEntryCount: audits.length,
     distinctActorCount: 1,
   });
   if (!budget.withinLimit) return { ok: false, message: EVENT_CREATE_PLAN_FAILURE };
-  return { ok: true, mutationStatements, expectedMutationChanges, audits, budget };
+  return { ok: true, mutationStatements, expectedMutationChanges, preMutationAssertions, audits, budget };
 }
