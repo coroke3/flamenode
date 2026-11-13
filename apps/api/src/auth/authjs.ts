@@ -40,7 +40,7 @@ function strictConfiguredOrigin(value: string): string {
   } catch {
     throw new Error("AUTH_ORIGIN_INVALID");
   }
-  const hostname = parsed.hostname.toLowerCase().replace(/\\.$/, "");
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
   // This non-production host deliberately requires HTTPS (even though CURRENT
   // may allow HTTP on a non-loopback origin). Never enable the loopback
   // allowance or rely on request Host to derive the configured origin.
@@ -50,7 +50,7 @@ function strictConfiguredOrigin(value: string): string {
     parsed.pathname !== "/" || parsed.search || parsed.hash ||
     hostname === "localhost" ||
     hostname === "[::1]" ||
-    /^127(?:\\.\\d{1,3}){3}$/.test(hostname)
+    /^127(?:\.\d{1,3}){3}$/.test(hostname)
   ) {
     throw new Error("AUTH_ORIGIN_INVALID");
   }
