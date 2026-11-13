@@ -447,6 +447,46 @@ test("Issue #669: incomplete or corrupted settings cannot earn a preload SELECT 
   }
 });
 
+test("Issue #677: throwing actor preload accessor fails closed in budget and logger", async () => {
+  const w = world();
+  const restore = freeze();
+  let getterCalls = 0;
+  try {
+    const canonical = mapAuditSettings(
+      w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get(),
+    );
+    const preload = {
+      settings: canonical,
+      actorSnapshotJsonById: new Proxy({}, {
+        get() {
+          getterCalls += 1;
+          throw new Error("never expose this private provider exception");
+        },
+      }),
+    };
+    const input = {
+      mutationStatements: [sql`SELECT 1`],
+      expectedMutationChanges: 0,
+      audits: [AUDIT],
+      callerQueryCount: 0,
+      preloaded: preload,
+    };
+    const budget = planAtomicAuditMutationBudget(input);
+    assert.equal(budget.preparationQueryCount, 1, "invalid actor must pay for a D1 SELECT");
+    const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+    assert.ok(entry);
+    assert.equal(w.stats.reads.length, 1);
+    assert.deepEqual(JSON.parse(entry.actor_snapshot_json), {
+      discord_id: "d-1", discord_name: "Admin",
+      x_user_id: "x1", x_name: "XN", icon_url: "https://i/x.png",
+    }, "stored actor snapshot comes from actual D1, not the hostile accessor");
+    assert.equal(getterCalls, 2, "both exported paths guard their single accessor read");
+  } finally {
+    restore();
+    w.sqlite.close();
+  }
+});
+
 test("Issue #677: settings preload snapshots descriptors rather than reading Proxy get traps", async () => {
   const w = world();
   const restore = freeze();

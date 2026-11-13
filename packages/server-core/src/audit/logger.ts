@@ -339,17 +339,26 @@ export function snapshotPreloadedAuditContext(
   const settings = snapshotPreloadedAuditSettings(rawSettings) ?? undefined;
   const actorSnapshotJsonById: Record<string, string> = Object.create(null);
   for (const actorId of new Set(actorUserIds)) {
-    let rawActor: unknown;
-    try {
-      rawActor = preloaded.actorSnapshotJsonById?.[actorId];
-    } catch {
-      // Invalid actor metadata must be reread from D1.
-    }
-    if (isValidPreloadedActorSnapshotJson(rawActor)) {
-      actorSnapshotJsonById[actorId] = rawActor;
-    }
+    const actorJson = readCanonicalPreloadedActorJson(preloaded, actorId);
+    if (actorJson !== null) actorSnapshotJsonById[actorId] = actorJson;
   }
   return { settings, actorSnapshotJsonById };
+}
+
+/**
+ * Read a canonical actor preload without allowing a throwing accessor/Proxy
+ * to abort D1 budget planning or audit preparation before a real actor read.
+ */
+export function readCanonicalPreloadedActorJson(
+  preloaded: PreloadedAuditContext | undefined,
+  actorUserId: string,
+): string | null {
+  try {
+    const candidate = preloaded?.actorSnapshotJsonById?.[actorUserId];
+    return isValidPreloadedActorSnapshotJson(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Prepare audit entries with bounded queries independent of entry count. */
@@ -380,10 +389,10 @@ export async function prepareAuditLogEntries(
   for (let offset = 0; offset < actorUserIds.length; offset += 4) {
     await Promise.all(
       actorUserIds.slice(offset, offset + 4).map(async (actorUserId) => {
-        const known = preloaded?.actorSnapshotJsonById?.[actorUserId];
+        const known = readCanonicalPreloadedActorJson(preloaded, actorUserId);
         // Budget and runtime both reuse only canonical actor snapshots.
-        // Invalid strings and non-strings are charged a fresh D1 SELECT.
-        if (isValidPreloadedActorSnapshotJson(known)) {
+        // Invalid strings, throwing accessors and non-strings pay for D1.
+        if (known !== null) {
           actorJsonById.set(actorUserId, known);
           return;
         }

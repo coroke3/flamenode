@@ -8,7 +8,7 @@ import { wakeStaticRebuildQueueAfterCommit } from "../queues/wakeStaticRebuildQu
 import type { WriteAuditLogInput } from "./types.ts";
 import {
   prepareAuditLogEntries,
-  isValidPreloadedActorSnapshotJson,
+  readCanonicalPreloadedActorJson,
   isValidPreloadedAuditSettings,
   snapshotPreloadedAuditContext,
   type PreloadedAuditContext,
@@ -143,7 +143,7 @@ export function planAtomicAuditMutationBudget(
   // The logger and planner apply identical shape checks. Invalid JSON or
   // incomplete actor snapshots must never earn a D1-query credit.
   const preloadedActorCount = [...distinctActors].filter((actorId) =>
-    isValidPreloadedActorSnapshotJson(input.preloaded?.actorSnapshotJsonById?.[actorId])
+    readCanonicalPreloadedActorJson(input.preloaded, actorId) !== null
   ).length;
   return planD1AuditMutationBudget({
     mutationStatementCount: input.mutationStatements.length,
