@@ -123,10 +123,12 @@ export async function executeVideoVisibilityStatusMutation<DB>(
           traceId,
           allowNonPublicRollback: !transition.depublicizedFromPublic,
         });
-      } catch (compensationError) {
+      } catch {
+        // Provider/D1/R2 exceptions can contain SQL, request bodies or
+        // credentials. Do not send exception objects to console adapters.
         host.log("warn", `[${logTag}] visibility compensation failed`, {
           traceId,
-          error: compensationError,
+          error_code: "visibility_compensation_failed",
         });
       }
     }
@@ -147,7 +149,9 @@ export async function executeVideoVisibilityStatusMutation<DB>(
       };
     }
     if (host.isVisibilityPrecommitFailure(error)) {
-      host.log("error", `[${logTag}] visibility precommit failed`, { traceId, error });
+      host.log("error", `[${logTag}] visibility precommit failed`, {
+        traceId, error_code: "visibility_precommit_failed",
+      });
       return {
         ok: false,
         message: "公開ブロックの記録に失敗しました。",
@@ -156,7 +160,9 @@ export async function executeVideoVisibilityStatusMutation<DB>(
         retryable: false,
       };
     }
-    host.log("error", `[${logTag}] mutation failed`, { traceId, error });
+    host.log("error", `[${logTag}] mutation failed`, {
+      traceId, error_code: "mutation_failed",
+    });
     return {
       ok: false,
       message: `承認処理に失敗しました。状態を再取得してもう一度お試しください。エラーID: ${traceId}`,
