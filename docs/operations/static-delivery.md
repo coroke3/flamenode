@@ -164,6 +164,10 @@ rows and does not replace usable public static detail.
 成功したリクエストだけ、実際のzone hostとcanonical path（query除外）をkeyとするCache APIから
 画像byteを再利用する。内部Cache API用のstorage copyには `s-maxage=604800` を設定するが、
 HTTP 200/304/公開枠アイコンの公開レスポンスは必ず `Cache-Control: no-store` とする。
+RH-023公開メディアの404も全経路（不正URL・D1公開ACL拒否・R2欠損・安全性検証失敗）で
+`Cache-Control: no-store` と `X-Content-Type-Options: nosniff` を付ける。
+非公開→再公開やR2アップロード直後に古い404がブラウザ/CDNに残ることを防ぐためであり、
+**D1 ACLの失効チェックや200/304のCache API処理は変えない**。
 従来のisolate内ACL cache（positive 10分 / negative 1分）は廃止。画像リクエスト1件につき
 D1 readが最低1回必要となり、R2 GETはCache API HITなら省略できる。D1 free枠、レイテンシへの影響は
 導入前に計測・承認する。既にブラウザ/CDNに保存済みの旧 `public, s-maxage=604800` レスポンスは
