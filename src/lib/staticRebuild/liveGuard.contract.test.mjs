@@ -86,6 +86,12 @@ test("CURRENT never reuses identity-bearing payloads and clears a private summar
   assert.ok(check >= 0 && deleteIndex > check, "revoked event visibility deletes the cached summary");
 });
 
+test("SEC-572: CURRENT live error logging never serializes raw provider errors or event IDs", () => {
+  assert.match(source, /console\\.error\\("\\[live-api\\] GET failed"\\)/);
+  assert.doesNotMatch(source, /console\\.error\\("\\[live-api\\] GET failed",/);
+  assert.doesNotMatch(source, /console\\.error\\([^\\n]*eventId:\\s*id/);
+});
+
 test("live API routes pass a stable route name for the cache key", async () => {
   for (const name of ["summary", "slots", "submissions"]) {
     const route = await readFile(
