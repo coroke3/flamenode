@@ -321,6 +321,21 @@ export function isValidPreloadedAuditSettings(value: unknown): value is AuditLog
 }
 
 /**
+ * A settings accessor can throw before the shape validator receives a value.
+ * The planner and logger must both charge the authoritative D1 SELECT instead
+ * of aborting with a caller-controlled exception.
+ */
+export function readCanonicalPreloadedAuditSettings(
+  preloaded: PreloadedAuditContext | undefined,
+): AuditLogSettings | null {
+  try {
+    return snapshotPreloadedAuditSettings(preloaded?.settings);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Freeze guard-provided audit preloads once per mutation. Both the D1 budget
  * planner and the actual logger must consume identical validated values,
  * even if the caller supplied mutable objects or dynamic Proxy traps.
@@ -330,13 +345,7 @@ export function snapshotPreloadedAuditContext(
   actorUserIds: readonly string[],
 ): PreloadedAuditContext | undefined {
   if (!preloaded) return undefined;
-  let rawSettings: unknown;
-  try {
-    rawSettings = preloaded.settings;
-  } catch {
-    // Invalid settings must be reread from D1.
-  }
-  const settings = snapshotPreloadedAuditSettings(rawSettings) ?? undefined;
+  const settings = readCanonicalPreloadedAuditSettings(preloaded) ?? undefined;
   const actorSnapshotJsonById: Record<string, string> = Object.create(null);
   for (const actorId of new Set(actorUserIds)) {
     const actorJson = readCanonicalPreloadedActorJson(preloaded, actorId);
@@ -370,7 +379,7 @@ export async function prepareAuditLogEntries(
   const activeInputs = inputs.filter((input) => !BLOCKED_TABLES.has(input.table_name));
   if (activeInputs.length === 0) return inputs.map(() => null);
 
-  const preloadedSettings = snapshotPreloadedAuditSettings(preloaded?.settings);
+  const preloadedSettings = readCanonicalPreloadedAuditSettings(preloaded);
   // The planner credits only descriptor-valid preloads, and runtime uses the
   // same detached primitive snapshot rather than the caller's mutable object.
   let settings: AuditLogSettings = preloadedSettings ?? DEFAULT_AUDIT_LOG_SETTINGS;
