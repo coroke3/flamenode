@@ -376,3 +376,12 @@ Columns are LOCAL maxima in ms per kind (overall max includes cold). `verdict (j
 | RH-025 | GET /api/media/slot-submission-icon/:slotId | S2 | MIG-0646 | 7.03 | 8.89 | 8.58 | 38.51 | 38.51 | cold: 3.37 / 7.72 / 38.51 | 0 | 0 | FAIL |
 | RH-023 | GET /api/media/* | S2 | MIG-0646 | 43.50 | 6.71 | 6.27 | 4.56 | 43.50 | normal: 3.61 / 6.81 / 43.50 | 0 | 0 | FAIL |
 | RH-019 | GET /api/internal/x-users/search | S2 | MIG-0648 | 7.54 | 9.17 | 10.47 | 18.54 | 18.54 | cold: 3.36 / 5.39 / 18.54 | 1 | 0 | FAIL |
+
+
+## MIG-0639: D1 returned-result row proxy (2026-11-13, CI pending)
+
+The local API benchmark additionally collects `d1RowsReturned` and `d1PerQueryRows` from `first()`, `all()`, `raw()` and D1 batch results in both the Node SQLite adapter and local workerd (sim/replay) wrapper. The per-request `d1PerQueryRows` array counts each result-returning D1 invocation; `aggregate().kinds[kind].d1PerQueryRowsBySample` retains these arrays per sample. `d1RowsReturned` summarizes min / nearest-rank median / max / total per request kind and appears as `D1 returned rows proxy` in the Markdown report. Missing row data is reported as unknown, not zero. Replay compares the result-row count seen by its mock worker against the recorded SQLite result count and treats mismatches as invalid samples.
+
+**Not a D1 billing metric:** This counts rows *returned to the application*, including zero for pure writes and unsuccessful reads. It cannot account for rows examined by SQLite scans, index seeks, or Cloudflare D1's billed `rows_read` / `rows_written` metadata. The replay also uses synthetic local results, not live Cloudflare D1 reads. The proxy must not be substituted for actual D1 billed rows in security/performance acceptance or used to pass the 500-video × 100-member RH-013 budget. For that gate, record actual Cloudflare non-production D1 query/rows-read evidence plus warm/cold local workerd CPU under the quiet-host BASELINE criterion; none has been measured by this code change.
+
+Source commits: `1d04f9ee57df2c8f1c7aff583c1d8315bbc1d3d1`, `471fa239d3b125990d372e084f3edf8a2e7e352f`; regression `ff7310592dea4c067f13ad700e3b449ea8bd6a49`. No production API, remote D1/R2/Queue, routing, secrets or deployments changed.
