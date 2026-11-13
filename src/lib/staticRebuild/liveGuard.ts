@@ -41,10 +41,9 @@ export async function handleLiveApiGet<T>(
   try {
     db = getDatabase();
   } catch (err) {
-    console.error("[live-api] database binding unavailable", {
-      eventId: id,
-      err,
-    });
+    // The missing-binding exception may include credential material or the
+    // requested event ID; the diagnostic must not serialize either.
+    console.error("[live-api] database binding unavailable");
     return jsonErrorResponse(
       {
         error: "db_unavailable",
