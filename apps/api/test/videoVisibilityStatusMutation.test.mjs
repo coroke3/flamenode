@@ -107,6 +107,36 @@ test("audit CAS error with a different current status returns retryable conflict
   assert.equal(result.retryable, true);
 });
 
+test("shared CURRENT/Hono status failures log fixed codes, never provider SQL or tokens", async () => {
+  const secret = "Authorization:Bearer private-credential password=secret";
+  for (const [name, overrides, expectedCode] of [
+    ["precommit", {
+      preCommit: async () => { throw new Error("public_visibility_manifest_missing " + secret); },
+      isVisibilityPrecommitFailure: () => true,
+    }, "visibility_precommit_failed"],
+    ["mutation", {
+      mutate: async () => { throw new Error("D1 SQL SELECT token FROM sessions " + secret); },
+    }, "mutation_failed"],
+  ]) {
+    const calls = [];
+    const result = await executeVideoVisibilityStatusMutation({
+      db: {}, videoId: "v-1", requestedStatus: "private",
+      transition: transition(), reason: "moderation", logTag: "admin-video-status",
+    }, host({
+      ...overrides,
+      log: (level, tag, details) => calls.push(["log", level, tag, details]),
+    }, calls));
+    assert.equal(result.ok, false, name);
+    assert.equal(result.errorCode, expectedCode, name);
+    assert.equal(result.traceId, "trace-1", name);
+    const logged = calls.filter((entry) => Array.isArray(entry) && entry[0] === "log");
+    assert.equal(logged.length, 1, name);
+    assert.equal(logged[0][1], "error", name);
+    assert.deepEqual(logged[0][3], { traceId: "trace-1", error_code: expectedCode }, name);
+    assert.doesNotMatch(JSON.stringify(logged), /private-credential|password=secret|SELECT token/, name);
+  }
+});
+
 test("fence pre-commit failure runs token-scoped compensation before non-retryable mapping", async () => {
   const calls = [];
   const result = await executeVideoVisibilityStatusMutation({
@@ -145,7 +175,7 @@ test("failed fence compensation does not mask the original audit CAS conflict", 
     isAuditMutationError: (error) => Boolean(error?.auditMutation),
     compensate: async (_db, input) => {
       calls.push(["compensate", input]);
-      throw new Error("R2 compensation unavailable");
+      throw new Error("R2 compensation unavailable Authorization:Bearer compensation-secret");
     },
     rereadStatus: async () => {
       calls.push("reread");
@@ -170,5 +200,8 @@ test("failed fence compensation does not mask the original audit CAS conflict", 
   assert.equal(compensation[1].allowNonPublicRollback, false);
   const warning = calls.find((entry) => Array.isArray(entry) && entry[0] === "log");
   assert.equal(warning[1], "warn");
-  assert.match(warning[3].error.message, /R2 compensation unavailable/);
+  assert.deepEqual(warning[3], {
+    traceId: "trace-1", error_code: "visibility_compensation_failed",
+  });
+  assert.doesNotMatch(JSON.stringify(warning), /compensation-secret|Authorization:Bearer/);
 });
