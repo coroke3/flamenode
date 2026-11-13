@@ -40,12 +40,13 @@ if (runTestWithTsx(import.meta.url)) {
     });
   }
 
-  test("実production plannerは最小・通常・最大対応mergeをFree 50 query以内に収める", async () => {
+  test("MIG-0516 + #668: 100-target X ID merge with actual public build marker fits hard 50-query cap", async () => {
     // Issue #492: the real merge plan now has 18 base DML after
     // consolidating two alias deletes and the staff promotion/remap.
     // No CAS, audit, fence or queue assertions are removed.
-    // At 100 targets, the existing queue path uses one DML; MIG-0516 adds
-    // one build-marker DML and one strict changes() assertion.
+    // At 100 targets, MIG-0516's actual queue builder supplies both the
+    // JSON1 upsert and build-marker UPDATE; the marker also has a strict
+    // changes() assertion. Nothing is simulated or excluded from the budget.
     const queue = await buildStaticRebuildQueueBatch(
       { run: (query) => query },
       Array.from({ length: 100 }, (_, index) => ({
@@ -55,8 +56,8 @@ if (runTestWithTsx(import.meta.url)) {
       })),
     );
     assert.equal(queue.acceptedTargetCount, 100);
-    assert.equal(queue.statements.length, 1);
-    assert.equal(queue.expectedChanges.length, 1);
+    assert.equal(queue.statements.length, 2);
+    assert.deepEqual(queue.expectedChanges, [100, 1]);
 
     for (const auditCount of [3, 4]) {
       const budget = plan({
@@ -66,24 +67,13 @@ if (runTestWithTsx(import.meta.url)) {
         callerReads: 18,
       });
       assert.equal(budget.preparationQueryCount, 2);
-      assert.equal(budget.mutationStatementCount, 20);
-      assert.equal(budget.mutationAssertionCount, 4);
+      assert.equal(budget.mutationStatementCount, 21);
+      assert.equal(budget.mutationAssertionCount, 5);
       assert.equal(budget.integrityAssertionCount, 2);
       assert.equal(budget.auditQueryCount, 2);
-      assert.equal(budget.totalQueryCount, 48);
+      assert.equal(budget.totalQueryCount, 50);
       assert.equal(budget.withinLimit, true);
 
-      // The independently owned #436 enqueue builder appends exactly one
-      // build-marker UPDATE and a mandatory changes() assertion.
-      // Count these *real planned operations* rather than raising the limit.
-      const withBuildMarker = plan({
-        mutations: 18 + 1 + queue.statements.length + 1,
-        assertions: 2 + 1 + queue.expectedChanges.length + 1,
-        audits: auditCount,
-        callerReads: 18,
-      });
-      assert.equal(withBuildMarker.totalQueryCount, 50);
-      assert.equal(withBuildMarker.withinLimit, true);
     }
   });
 

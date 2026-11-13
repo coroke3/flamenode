@@ -275,17 +275,14 @@ test("Issue #669: real SQLite audited mutation accepts fully preloaded 50/50; pa
 });
 
 
-test("Issue #669: 80-event SA-029 with the prospective MIG-0516 marker fits 50 without dropping audits", async () => {
+test("MIG-0516 + Issue #669: 80-event SA-029 uses the real queue marker and fits 50 without dropping audits", async () => {
   const queue = await buildEventGroupChangeQueueBatch(
     { run: (query) => query },
     { reason: "event_group_member_add", requestedByUserId: "admin-1" },
   );
   assert.equal(queue.acceptedTargetCount, 1);
-  assert.equal(queue.statements.length, 1, "actual current events_index upsert is one DML");
-  assert.deepEqual(queue.expectedChanges, [1]);
-  const now = 1800000000000;
-  const marker = sql`UPDATE public_build_state
-    SET requested_at = MAX(requested_at, ${now}) WHERE id = 1`;
+  assert.equal(queue.statements.length, 2, "actual events_index upsert and build-state marker are two DML");
+  assert.deepEqual(queue.expectedChanges, [1, 1]);
   const audits = Array.from({ length: 80 }, (_, i) => ({
     table_name: "event_group_events",
     target_id: `grp:${i}`,
@@ -295,8 +292,8 @@ test("Issue #669: 80-event SA-029 with the prospective MIG-0516 marker fits 50 w
     retention_class: "restorable",
   }));
   const proposal = {
-    mutationStatements: [sql`SELECT 1`, ...queue.statements, marker],
-    expectedMutationChanges: [80, ...queue.expectedChanges, 1],
+    mutationStatements: [sql`SELECT 1`, ...queue.statements],
+    expectedMutationChanges: [80, ...queue.expectedChanges],
     audits,
     callerQueryCount: 3,
   };
@@ -309,7 +306,7 @@ test("Issue #669: 80-event SA-029 with the prospective MIG-0516 marker fits 50 w
   const reused = planAtomicAuditMutationBudget({
     ...proposal,
     preloaded: {
-      settings: { max_payload_bytes: 90000 },
+      settings: mapAuditSettings(null),
       actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
     },
   });
@@ -334,8 +331,8 @@ test("Issue #669: actual SQLite 80-member insert + queue + MIG-0516 marker audit
     const queue = await buildEventGroupChangeQueueBatch(w.db, {
       reason: "event_group_member_add", requestedByUserId: "admin-1",
     });
-    assert.equal(queue.statements.length, 1);
-    assert.deepEqual(queue.expectedChanges, [1]);
+    assert.equal(queue.statements.length, 2);
+    assert.deepEqual(queue.expectedChanges, [1, 1]);
     const mutation = w.db.run(sql`
       INSERT INTO event_group_events
         (event_group_id, event_id, relation_type, created_at, updated_at)
@@ -347,13 +344,10 @@ test("Issue #669: actual SQLite 80-member insert + queue + MIG-0516 marker audit
         json_extract(value, '$.updated_at')
       FROM json_each(${JSON.stringify(payload)})
     `);
-    // SQL and strict expected-changes assertion mirror MIG-0516's builder.
-    // This is a projected cross-PR integration test, NOT a mounted route.
-    const marker = w.db.run(sql`
-      UPDATE public_build_state
-      SET requested_at = MAX(requested_at, ${Date.now()})
-      WHERE id = 1
-    `);
+    // MIG-0516's actual buildEventGroupChangeQueueBatch already includes
+    // the build-state UPDATE and strict changes()=1 assertion.
+    // Do not add a second hypothetical marker; this is an executable
+    // combined real-SQLite regression, not a mounted route.
     const audits = payload.map((row) => ({
       table_name: "event_group_events",
       target_id: `${row.event_group_id}:${row.event_id}`,
@@ -365,8 +359,8 @@ test("Issue #669: actual SQLite 80-member insert + queue + MIG-0516 marker audit
       actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
     };
     const input = {
-      mutationStatements: [mutation, ...queue.statements, marker],
-      expectedMutationChanges: [80, ...queue.expectedChanges, 1],
+      mutationStatements: [mutation, ...queue.statements],
+      expectedMutationChanges: [80, ...queue.expectedChanges],
       audits,
       callerQueryCount: 3,
       preloaded: fullPreload,

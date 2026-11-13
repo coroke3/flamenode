@@ -117,8 +117,8 @@ test("100 target UPSERTも1 JSON bindでbind上限内", async () => {
       reason: "test_enqueue",
     }));
     const batch = await buildStaticRebuildQueueBatch(db, items);
-    assert.equal(batch.statements.length, 1);
-    assert.deepEqual(batch.expectedChanges, [100]);
+    assert.equal(batch.statements.length, 2);
+    assert.deepEqual(batch.expectedChanges, [100, 1]);
     for (const statement of batch.statements) {
       const query =
         typeof statement.getQuery === "function"
