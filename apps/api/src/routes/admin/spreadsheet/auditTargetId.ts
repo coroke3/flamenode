@@ -148,20 +148,41 @@ export type SpreadsheetAuditHistoryRelation =
  */
 export function classifySpreadsheetAuditHistoryCandidate(
   lookup: SpreadsheetAuditHistoryLookup,
-  row: SpreadsheetAuditHistoryCandidate,
+  row: unknown,
 ): SpreadsheetAuditHistoryRelation {
-  if (row.table_name !== lookup.table_name) return "other";
-  if (row.context === SPREADSHEET_AUDIT_PK_V1_CONTEXT) {
-    return row.target_id === lookup.v1.target_id &&
-      parseSpreadsheetAuditIdentityV1(row) !== null ? "v1_exact" : "other";
+  if (!row || typeof row !== "object") return "other";
+  const candidate = row as Partial<SpreadsheetAuditHistoryCandidate>;
+  let tableName: unknown;
+  let context: unknown;
+  let targetId: unknown;
+  try {
+    tableName = candidate.table_name;
+    context = candidate.context;
+    targetId = candidate.target_id;
+  } catch {
+    // Untrusted candidate identity accessors cannot establish any match.
+    return "other";
   }
-  if (row.context !== lookup.legacy.context ||
-      row.target_id !== lookup.legacy.target_id) return "other";
+  if (tableName !== lookup.table_name) return "other";
+  if (context === SPREADSHEET_AUDIT_PK_V1_CONTEXT) {
+    return targetId === lookup.v1.target_id &&
+      parseSpreadsheetAuditIdentityV1({ context, target_id: targetId }) !== null
+      ? "v1_exact" : "other";
+  }
+  if (context !== lookup.legacy.context ||
+      targetId !== lookup.legacy.target_id) return "other";
 
   const expectedPk = parseSpreadsheetAuditIdentityV1(lookup.v1);
   if (!expectedPk) return "legacy_ambiguous";
+  let snapshots: readonly unknown[];
+  try {
+    snapshots = [candidate.before_json, candidate.after_json];
+  } catch {
+    // The row identifies a possible legacy match, but snapshot proof is bad.
+    return "legacy_ambiguous";
+  }
   const parts: string[] = [];
-  for (const snapshot of [row.before_json, row.after_json]) {
+  for (const snapshot of snapshots) {
     if (snapshot === null) continue;
     // JSON.parse coerces objects via toString(). A malformed D1/HTTP row
     // must never prove a legacy PK solely by providing coercible non-TEXT.
