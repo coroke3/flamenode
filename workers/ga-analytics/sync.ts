@@ -274,6 +274,7 @@ async function repairTrendingAfterGa4Failure(
   if (!old) return false;
 
   let retained: TrendingItem[] | null = null;
+  let retainedGeneratedAt: number | null = null;
   let shouldRewrite = true;
   if (isOversizedR2Object(old, GA4_TRENDING_MAX_OBJECT_BYTES)) {
     await cancelR2BodyBestEffort(old);
@@ -306,6 +307,14 @@ async function repairTrendingAfterGa4Failure(
                 views_30d: item.views_30d,
               }));
               retained = rankTrendingItems(recent, periods);
+              // Reused GA4 counters are still old measurements. A privacy
+              // rewrite must not masquerade as a freshly collected report.
+              const oldDate = new Date(normalized.generatedAt * 1000);
+              if (retained.length > 0 && Number.isFinite(oldDate.getTime())) {
+                retainedGeneratedAt = normalized.generatedAt;
+              } else {
+                retained = [];
+              }
             }
           }
         }
@@ -317,7 +326,7 @@ async function repairTrendingAfterGa4Failure(
   }
 
   if (!shouldRewrite) return false;
-  const generatedAt = Math.floor(Date.now() / 1000);
+  const generatedAt = retainedGeneratedAt ?? Math.floor(Date.now() / 1000);
   await putTrendingPayload(env, {
     schema_version: TRENDING_SCHEMA_VERSION,
     generated_at: generatedAt,
