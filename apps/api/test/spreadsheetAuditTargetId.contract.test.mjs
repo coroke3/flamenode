@@ -5,6 +5,8 @@ import {
   SPREADSHEET_AUDIT_PK_V1_CONTEXT,
   SPREADSHEET_AUDIT_PK_V1_PREFIX,
   buildSpreadsheetAuditIdentityV1,
+  buildSpreadsheetAuditHistoryLookup,
+  classifySpreadsheetAuditHistoryCandidate,
   parseSpreadsheetAuditIdentityV1,
 } from "../src/routes/admin/spreadsheet/auditTargetId.ts";
 import {
@@ -145,6 +147,114 @@ test("Issue #674: real SQLite audit lookup isolates new composite IDs and preser
       4,
       "historical audit rows are never rewritten",
     );
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("Issue #674: full legacy before/after snapshots distinguish colliding same-table PKs", () => {
+  const target = { left: "x:y", right: "z" };
+  const other = { left: "x", right: "y:z" };
+  const lookup = buildSpreadsheetAuditHistoryLookup("video_events", target);
+  assert.equal(lookup.legacy.target_id, "x:y:z");
+  const mk = (id, before, after) => ({
+    id, table_name: "video_events", context: "admin_spreadsheet",
+    target_id: "x:y:z",
+    before_json: before == null ? null : JSON.stringify(before),
+    after_json: after == null ? null : JSON.stringify(after),
+  });
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("create", null, target)), "legacy_snapshot_exact");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("delete", target, null)), "legacy_snapshot_exact");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("update", target, { ...target, title: "updated" })), "legacy_snapshot_exact");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("colliding", null, other)), "other");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("opposite", other, other)), "other");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("mixed", target, other)), "legacy_ambiguous");
+});
+
+test("Issue #674: missing, redacted, numeric and malformed legacy snapshots never prove identity", () => {
+  const lookup = buildSpreadsheetAuditHistoryLookup("video_events", { left: "x:y", right: "z" });
+  const candidate = (before_json, after_json) => ({
+    table_name: "video_events", context: "admin_spreadsheet",
+    target_id: lookup.legacy.target_id, before_json, after_json,
+  });
+  for (const pair of [
+    [null, null],
+    [JSON.stringify({ left: "x:y" }), null],
+    [JSON.stringify({ left: "x:y", right: "[REDACTED]" }), null],
+    [JSON.stringify({ left: "x:y", right: 7 }), null],
+    ["{bad json", null],
+    ["null", null],
+    [JSON.stringify(["x:y", "z"]), null],
+    [JSON.stringify({ left: "x:y", right: "z" }), "unparseable"],
+    [JSON.stringify({ left: "x:y", right: "z" }), JSON.stringify({ left: "x", right: "y:z" })],
+  ]) {
+    assert.equal(
+      classifySpreadsheetAuditHistoryCandidate(lookup, candidate(...pair)),
+      "legacy_ambiguous", JSON.stringify(pair),
+    );
+  }
+});
+
+test("Issue #674: context and table-name guard prevent V1-prefix and cross-table misattribution", () => {
+  const lookup = buildSpreadsheetAuditHistoryLookup("video_events", { id: "v-a" });
+  const asRow = (context, target_id, table_name = "video_events") => ({
+    context, target_id, table_name, before_json: null, after_json: null,
+  });
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(
+    lookup, asRow(lookup.v1.context, lookup.v1.target_id)), "v1_exact");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(
+    lookup, asRow("admin_spreadsheet", lookup.v1.target_id)), "other");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(
+    lookup, asRow(lookup.v1.context, lookup.v1.target_id, "video_members")), "other");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(
+    lookup, asRow(lookup.v1.context, "spk:v1:[[\\\"id\\\",\\\"other\\\"]]")), "other");
+  const spoof = buildSpreadsheetAuditHistoryLookup("video_events", { id: lookup.v1.target_id });
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(
+    spoof, asRow("admin_spreadsheet", lookup.v1.target_id)), "legacy_ambiguous");
+});
+
+test("Issue #674: bounded SQLite candidate fetch can classify mixed new/old history without rewriting it", () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`CREATE TABLE audit_logs (
+      id TEXT PRIMARY KEY NOT NULL,
+      table_name TEXT NOT NULL,
+      context TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      before_json TEXT,
+      after_json TEXT
+    ); CREATE INDEX audit_table_target ON audit_logs (table_name, target_id);`);
+    const insert = sqlite.prepare(
+      "INSERT INTO audit_logs (id, table_name, context, target_id, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    const pkA = { left: "x:y", right: "z" };
+    const pkB = { left: "x", right: "y:z" };
+    const lookup = buildSpreadsheetAuditHistoryLookup("video_events", pkA);
+    const v1Other = buildSpreadsheetAuditHistoryLookup("video_events", pkB);
+    insert.run("old-match", "video_events", "admin_spreadsheet", "x:y:z", null, JSON.stringify(pkA));
+    insert.run("old-collision", "video_events", "admin_spreadsheet", "x:y:z", null, JSON.stringify(pkB));
+    insert.run("old-unknown", "video_events", "admin_spreadsheet", "x:y:z", null, "{}");
+    insert.run("new-match", "video_events", lookup.v1.context, lookup.v1.target_id, null, JSON.stringify(pkA));
+    insert.run("new-other", "video_events", v1Other.v1.context, v1Other.v1.target_id, null, JSON.stringify(pkB));
+    insert.run("other-table", "video_members", "admin_spreadsheet", "x:y:z", null, JSON.stringify(pkA));
+
+    // A future history endpoint could fetch both identity candidates in ONE
+    // bounded statement. It must then separate ambiguous legacy rows instead
+    // of rendering them as confirmed matches for one composite PK.
+    const getCandidates = sqlite.prepare(`SELECT table_name, context, target_id, before_json, after_json
+      FROM audit_logs WHERE table_name = ? AND (
+        (context = ? AND target_id = ?) OR (context = ? AND target_id = ?))
+      ORDER BY id LIMIT ?`);
+    const rows = getCandidates.all(
+      lookup.table_name, lookup.v1.context, lookup.v1.target_id,
+      lookup.legacy.context, lookup.legacy.target_id, 10,
+    );
+    assert.equal(rows.length, 4);
+    const tags = rows.map((row) => classifySpreadsheetAuditHistoryCandidate(lookup, row));
+    assert.deepEqual(tags.sort(), [
+      "legacy_ambiguous", "legacy_snapshot_exact", "other", "v1_exact",
+    ].sort());
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 6);
   } finally {
     sqlite.close();
   }
