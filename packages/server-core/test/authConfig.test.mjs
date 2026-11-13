@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyDatabaseAuthSessionClaims, resolveAuthRuntimeCredentials } from "../src/auth/config.ts";
+import { applyDatabaseAuthSessionClaims, discordProviderOptions, resolveAuthRuntimeCredentials } from "../src/auth/config.ts";
 
 test("MIG-0802 U01: DB callback overwrites stale session role, ban and Active X without losing profile", () => {
   const session = {
@@ -104,4 +104,48 @@ test("MIG-0802 U01: no production auth fallback and explicit local-only secret f
     ...base, authSecret: "explicit", allowLocalDevSecret: true,
   });
   assert.equal(explicit.secret, "explicit", "explicit secret has precedence over local fallback");
+});
+
+test("MIG-0802 U01: Discord provider uses exact CURRENT linking policy, OAuth endpoint and scope", () => {
+  const credentials = {
+    discordClientId: "synthetic-client",
+    discordClientSecret: "synthetic-secret",
+    secret: "synthetic-auth-secret",
+  };
+  const options = discordProviderOptions(credentials);
+  assert.deepEqual(options, {
+    clientId: "synthetic-client",
+    clientSecret: "synthetic-secret",
+    allowDangerousEmailAccountLinking: true,
+    authorization: {
+      url: "https://discord.com/api/oauth2/authorize",
+      params: { scope: "identify email" },
+    },
+  }, "the explicit Discord URL and email-linking flag must not drift from CURRENT");
+  assert.deepEqual(credentials, {
+    discordClientId: "synthetic-client",
+    discordClientSecret: "synthetic-secret",
+    secret: "synthetic-auth-secret",
+  }, "credential input must be read-only");
+  assert.equal("secret" in options, false, "the Auth.js session secret is configured separately");
+  assert.equal("redirect_uri" in options.authorization.params, false,
+    "the runtime must continue constructing the callback URL");
+});
+
+test("MIG-0802 U01: resolved credentials pass through the exact shared Discord provider options", () => {
+  const resolved = resolveAuthRuntimeCredentials({
+    authSecret: " shared-secret ",
+    discordClientId: "  my-client-id  ",
+    discordClientSecret: "  my-client-secret ",
+    allowLocalDevSecret: false,
+  });
+  assert.deepEqual(discordProviderOptions(resolved), {
+    clientId: "my-client-id",
+    clientSecret: "my-client-secret",
+    allowDangerousEmailAccountLinking: true,
+    authorization: {
+      url: "https://discord.com/api/oauth2/authorize",
+      params: { scope: "identify email" },
+    },
+  });
 });
