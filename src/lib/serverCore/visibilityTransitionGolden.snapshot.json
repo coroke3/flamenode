@@ -3292,7 +3292,7 @@
       {
         "entity_type": "event",
         "entity_id": "evt-1",
-        "fence_token": "vf_00000000-0000-4000-8000-000000000003",
+        "fence_token": "vf_00000000-0000-4000-8000-000000000001",
         "state": "blocked",
         "reason": "r",
         "requirements_json": null,
