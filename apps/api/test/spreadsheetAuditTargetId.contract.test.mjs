@@ -87,6 +87,54 @@ test("Issue #674: malformed runtime identity values never throw or masquerade as
   }), "other", "malformed V1 row must not be classified as a confirmed match");
 });
 
+test("Issue #674: throwing V1 accessor or Proxy cannot escape decoder fail-closed", () => {
+  const valid = buildSpreadsheetAuditIdentityV1({ id: "record-a" });
+  for (const row of [
+    { ...valid, get context() { throw Error("context getter"); } },
+    { ...valid, get target_id() { throw Error("target getter"); } },
+    new Proxy(valid, { has() { throw Error("has trap"); } }),
+    new Proxy(valid, { get() { throw Error("get trap"); } }),
+  ]) {
+    assert.doesNotThrow(() => parseSpreadsheetAuditIdentityV1(row));
+    assert.equal(parseSpreadsheetAuditIdentityV1(row), null,
+      "untrusted accessors must never establish a V1 audit match");
+  }
+});
+
+test("Issue #674: malformed history rows and coerced snapshots cannot prove legacy attribution", () => {
+  const pk = { left: "x:y", right: "z" };
+  const lookup = buildSpreadsheetAuditHistoryLookup("video_events", pk);
+  const valid = {
+    table_name: "video_events", context: lookup.legacy.context,
+    target_id: lookup.legacy.target_id,
+    before_json: JSON.stringify(pk), after_json: null,
+  };
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, valid),
+    "legacy_snapshot_exact", "actual SQLite TEXT snapshot still proves the PK");
+  for (const row of [
+    null, undefined, 0, false, "", [], Object.create(null),
+    { ...valid, get table_name() { throw Error("table getter"); } },
+    { ...valid, get context() { throw Error("context getter"); } },
+    { ...valid, get target_id() { throw Error("target getter"); } },
+  ]) {
+    assert.doesNotThrow(() => classifySpreadsheetAuditHistoryCandidate(lookup, row));
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, row), "other",
+      "malformed row identity must never become a confirmed history match");
+  }
+  for (const row of [
+    { ...valid, before_json: new String(JSON.stringify(pk)) },
+    { ...valid, before_json: { toString: () => JSON.stringify(pk) } },
+    { ...valid, before_json: 42 },
+    { ...valid, before_json: undefined },
+    { ...valid, get before_json() { throw Error("snapshot getter"); } },
+    { ...valid, get after_json() { throw Error("snapshot getter"); } },
+  ]) {
+    assert.doesNotThrow(() => classifySpreadsheetAuditHistoryCandidate(lookup, row));
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, row), "legacy_ambiguous",
+      "non-TEXT or throwing snapshot cannot establish a historical composite PK");
+  }
+});
+
 test("Issue #674: invalid or noncanonical V1 representations fail closed", () => {
   for (const bad of [
     {}, { id: "" }, { id: "  " }, { id: "ab\0cd" }, { "bad\0key": "x" },
