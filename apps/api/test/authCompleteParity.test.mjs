@@ -13,7 +13,7 @@ process.env.TSX_TSCONFIG_PATH ??= fileURLToPath(
 );
 
 if (runTestWithTsx(import.meta.url)) {
-  const { createHarness } = await loadAuthBaseline();
+  const { createHarness, authRequest, setCookies } = await loadAuthBaseline();
   const {
     AUTH_COMPLETE_RETRY_DELAYS_MS,
     resolveUnmountedAuthCompleteSession,
@@ -108,6 +108,18 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(response.status, 303);
     assertUncachedAuthRedirect(response);
     assert.equal(locationPath(response), "/manage/events?tab=1");
+    const refreshed = setCookies(response)[BASELINE_COOKIES.sessionToken.name];
+    assert.equal(refreshed?.value, token,
+      "the internal Auth.js session-renewal cookie must survive the outer 303");
+    const { expires, ...attributes } = refreshed.attributes;
+    assert.deepEqual({ attributes, hasExpires: expires !== undefined },
+      BASELINE_COOKIES.sessionToken.observedOnRead);
+    // A cookie delivered by /auth/complete remains legible to CURRENT NextAuth.
+    const current = await authRequest("session", {
+      cookieHeader: BASELINE_COOKIES.sessionToken.name + "=" + refreshed.value,
+    });
+    assert.equal(current.status, 200);
+    assert.equal((await current.json())?.user?.id, "user-mock-valid");
   });
 
   test("U03a: banned and missing sessions never redirect to requested protected path", async (t) => {
@@ -156,6 +168,8 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(response.status, 303);
     assertUncachedAuthRedirect(response);
     assert.equal(locationPath(response), "/entry?error=auth_temporarily_unavailable");
+    assert.equal(response.headers.getSetCookie().length, 0,
+      "a failed session read must not forward partial authentication cookies");
     assert.equal(unmountedAuthCompleteDestination({ kind: "unavailable", attempts: 4 }, "/dashboard"),
       "/entry?error=auth_temporarily_unavailable");
   });
