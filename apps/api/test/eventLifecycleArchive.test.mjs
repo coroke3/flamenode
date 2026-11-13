@@ -64,6 +64,11 @@ test("MIG-0652 U04 SA-024 T07: code preserves R2 block -> audited D1 -> cache or
   assert.ok(source.includes('costGuardMiddleware("manage_event_archive")'));
   assert.ok(source.includes("await planEventVisibilityTransition({"),
     "the Hono archive must await the D1 fence lookup added by PR #679 before composing its mutation batch");
+  assert.ok(source.includes("const callerQueryCount = D1_RESERVED_CALLER_QUERIES +"),
+    "PR #679 additional D1 fence read must be charged before the R2 precommit");
+  assert.ok(source.includes("(visibilityTransition.fenceToken ? 1 : 0)"));
+  assert.equal((source.match(/      callerQueryCount,|            callerQueryCount,/g) ?? []).length, 2,
+    "both preflight planner and audited mutation must use the same caller D1 reserve");
   assert.ok(source.includes("runEventWriteBehindVisibilityFence({"));
   assert.ok(source.includes("compensateEventVisibilityFenceOnD1Failure(db, {"));
   assert.ok(source.includes("await mutateWithAudit(db, {"));
