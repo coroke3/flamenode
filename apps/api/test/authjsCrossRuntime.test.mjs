@@ -378,6 +378,36 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(storedSession(sqlite), undefined);
   });
 
+  test("U01: configured HTTPS origin normalizes CURRENT trailing slash and refuses loopback", async (t) => {
+    const { d1 } = createHarness(t);
+    const { configuredHttpOrigin } = await import("../../../src/lib/auth/origin.ts");
+    const base = input(d1);
+    for (const value of [
+      base.authOrigin + "/",
+      " " + base.authOrigin + "/ ",
+      base.authOrigin + ":443/",
+    ]) {
+      assert.equal(configuredHttpOrigin(value, "AUTH_URL"), base.authOrigin);
+      assert.doesNotThrow(() => buildUnmountedAuthConfig({
+        ...base, authOrigin: value, siteOrigin: base.siteOrigin,
+      }), value);
+      assert.doesNotThrow(() => buildUnmountedAuthConfig({
+        ...base, authOrigin: base.authOrigin, siteOrigin: value,
+      }), value);
+    }
+    for (const value of [
+      "https://localhost", "https://localhost.",
+      "https://127.0.0.1", "https://127.8.1.2",
+      "https://[::1]",
+    ]) {
+      assert.throws(() => configuredHttpOrigin(value, "AUTH_URL"),
+        /AUTH_URL_LOCALHOST_FORBIDDEN/, value);
+      assert.throws(() => buildUnmountedAuthConfig({
+        ...base, authOrigin: value,
+      }), /AUTH_ORIGIN_INVALID/, value);
+    }
+  });
+
   test("U01: explicit HTTPS origin, configured origin match and secret fail closed", async (t) => {
     const { d1 } = createHarness(t);
     const base = input(d1);
