@@ -9,7 +9,7 @@ import type { WriteAuditLogInput } from "./types.ts";
 import {
   prepareAuditLogEntries,
   readCanonicalPreloadedActorJson,
-  isValidPreloadedAuditSettings,
+  readCanonicalPreloadedAuditSettings,
   snapshotPreloadedAuditContext,
   type PreloadedAuditContext,
   type PreparedAuditLogEntry,
@@ -154,7 +154,7 @@ export function planAtomicAuditMutationBudget(
     postAuditStatementCount: input.postAuditStatements?.length ?? 0,
     distinctActorCount: distinctActors.size,
     actorXValidationQueryCount,
-    preloadedSettings: isValidPreloadedAuditSettings(input.preloaded?.settings),
+    preloadedSettings: readCanonicalPreloadedAuditSettings(input.preloaded) !== null,
     preloadedActorCount,
     callerQueryCount: input.callerQueryCount,
   });
