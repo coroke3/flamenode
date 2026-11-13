@@ -62,7 +62,8 @@ test("MIG-0652 U04 SA-024 T07: code preserves R2 block -> audited D1 -> cache or
   const source = await readFile(new URL("../src/eventLifecycle/archiveRoute.ts", import.meta.url), "utf8");
   assert.ok(source.includes('eventLifecycleRoutes.delete("/:eventId"'));
   assert.ok(source.includes('costGuardMiddleware("manage_event_archive")'));
-  assert.ok(source.includes("planEventVisibilityTransition({"));
+  assert.ok(source.includes("await planEventVisibilityTransition({"),
+    "the Hono archive must await the D1 fence lookup added by PR #679 before composing its mutation batch");
   assert.ok(source.includes("runEventWriteBehindVisibilityFence({"));
   assert.ok(source.includes("compensateEventVisibilityFenceOnD1Failure(db, {"));
   assert.ok(source.includes("await mutateWithAudit(db, {"));
