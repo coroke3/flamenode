@@ -25,6 +25,10 @@ export function createUnmountedAuthCompleteRoutes(
     // Rebuild session request against explicit configured auth origin only;
     // arbitrary Host/X-Forwarded-Host headers are never trusted.
     const sessionCookie = c.req.raw.headers.get("cookie");
+    // Auth.js can extend a database session on GET /session. Its Set-Cookie
+    // must reach the browser or the DB and client expirations can diverge.
+    // Only the last successfully parsed session response may set this value.
+    let sessionSetCookies: string[] = [];
     const result = await resolveUnmountedAuthCompleteSession<CompleteSession>(
       async () => {
         const config = buildUnmountedAuthConfig(input);
@@ -33,7 +37,9 @@ export function createUnmountedAuthCompleteRoutes(
         if (sessionCookie) headers.set("cookie", sessionCookie);
         const response = await invokeUnmountedAuth(new Request(url, { headers }), config);
         if (!response.ok) throw new Error("AUTH_COMPLETE_SESSION_READ_UNAVAILABLE");
-        return await response.json() as CompleteSession | null;
+        const session = await response.json() as CompleteSession | null;
+        sessionSetCookies = response.headers.getSetCookie();
+        return session;
       },
       wait,
     );
@@ -46,6 +52,13 @@ export function createUnmountedAuthCompleteRoutes(
     const response = c.redirect(unmountedAuthCompleteDestination(result, next), 303);
     response.headers.set("Cache-Control", "private, no-store");
     response.headers.set("Vary", "Cookie");
+    // A failed retry sequence has no trustworthy session result: never replay
+    // cookies obtained during an earlier, partial attempt on that error path.
+    if (result.kind !== "unavailable") {
+      for (const cookie of sessionSetCookies) {
+        response.headers.append("Set-Cookie", cookie);
+      }
+    }
     return response;
   });
   return router;
