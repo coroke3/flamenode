@@ -10,6 +10,12 @@ if (runUnderRootTsx(import.meta.url)) {
       if (specifier === "server-only") {
         return { url: "data:text/javascript,export%20{}", shortCircuit: true };
       }
+      if (specifier === "next/navigation") {
+        return {
+          url: "data:text/javascript,export%20function%20unstable_rethrow()%20%7B%7D",
+          shortCircuit: true,
+        };
+      }
       if (specifier === "@opennextjs/cloudflare") {
         return {
           url: "data:text/javascript," + encodeURIComponent(
@@ -31,6 +37,9 @@ if (runUnderRootTsx(import.meta.url)) {
   );
   const { createVideoVisibilityTransitionHost } = await import(
     "../src/visibility/videoTransitionHost.ts"
+  );
+  const { executeVideoVisibilityStatusMutation: executeCurrentStatusMutation } = await import(
+    "../../../src/lib/video/videoVisibilityStatusAction.ts"
   );
   const {
     createVideoVisibilityStatusMutationHost,
@@ -194,6 +203,10 @@ if (runUnderRootTsx(import.meta.url)) {
       const objects = new Map();
       let etagVersion = 0;
       const bucket = {
+        async delete(key) {
+          events.push(["r2.delete", key]);
+          return objects.delete(key);
+        },
         async get(key) {
           events.push(["r2.get", key]);
           const row = objects.get(key);
@@ -228,7 +241,11 @@ if (runUnderRootTsx(import.meta.url)) {
         },
       };
       globalThis.__visibilityGoldenContext = {
-        env: { DB: d1, BUCKET: bucket, NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL },
+        env: {
+          DB: d1, BUCKET: bucket,
+          KV: { async get() { return null; }, async put() {}, async delete() {} },
+          NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+        },
         ctx: { waitUntil() {} },
       };
       const transitionHost = createVideoVisibilityTransitionHost({
@@ -255,11 +272,15 @@ if (runUnderRootTsx(import.meta.url)) {
           if (key === "actorSnapshotJsonById") return {};
           throw new Error(`unexpected audit preload: ${key}`);
         },
-      }, { createTraceId: () => "trace-audited" });
-      const result = await executeHonoVideoVisibilityStatusMutation({
+      });
+      const mutationInput = {
         db, videoId: "vid-1", requestedStatus: nextStatus, transition,
         reason: "audited differential", logTag: "status-differential",
-      }, auditedHost);
+      };
+      // Exercise CURRENT's actual Next mutation bridge rather than Hono twice.
+      const result = useCurrent
+        ? await executeCurrentStatusMutation(mutationInput)
+        : await executeHonoVideoVisibilityStatusMutation(mutationInput, auditedHost);
       if (replaceR2FenceOwner) {
         assert.equal(result.ok, false, "R2 owner changes must stop before D1");
         assert.equal(result.errorCode, "visibility_precommit_failed");
@@ -302,7 +323,7 @@ if (runUnderRootTsx(import.meta.url)) {
   }
 
   for (const nextStatus of ["private", "voided"]) {
-    test(`CURRENT/Hono planners persist matching audited D1 video/fence/queue/outbox rows for ${nextStatus}`, async () => {
+    test(`CURRENT Next/Hono host persist matching audited D1 video/fence/queue/outbox rows for ${nextStatus}`, async () => {
       const current = await executeAuditedStatus(nextStatus, true);
       const hono = await executeAuditedStatus(nextStatus, false);
       assert.deepEqual(hono, current, "identical persisted SQLite state and audited execution");
@@ -328,7 +349,7 @@ if (runUnderRootTsx(import.meta.url)) {
   test("stale D1 CAS rolls back audit/outbox/rebuild and compensates only its R2 fence token", async () => {
     const current = await executeAuditedStatus("private", true, true);
     const hono = await executeAuditedStatus("private", false, true);
-    assert.deepEqual(hono, current, "CURRENT/Hono plans preserve identical rollback semantics");
+    assert.deepEqual(hono, current, "CURRENT Next/Hono mutation adapters preserve identical rollback semantics");
     assert.equal(current.batches, 1, "an atomic D1 batch was attempted");
     assert.equal(current.video.visibility_status, "public");
     assert.equal(current.video.updated_at, 2000, "the competing update is untouched");
@@ -347,7 +368,7 @@ if (runUnderRootTsx(import.meta.url)) {
   test("concurrent R2 fence ownership supersedes the stale caller without clearing the winner", async () => {
     const current = await executeAuditedStatus("private", true, false, true);
     const hono = await executeAuditedStatus("private", false, false, true);
-    assert.deepEqual(hono, current, "both planners must reject a lost R2 fence owner");
+    assert.deepEqual(hono, current, "CURRENT Next and Hono hosts must reject a lost R2 fence owner");
     assert.equal(current.batches, 0, "no audited D1 mutation may run after lost R2 CAS ownership");
     assert.equal(current.video.visibility_status, "public");
     assert.deepEqual(current.fences, []);
