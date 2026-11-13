@@ -415,6 +415,24 @@ export async function syncGa4Trending(
     return emptyResult({ processed: 0, failed: 0, skipped: 1 });
   }
   if (!hasRequiredGa4Config(env)) {
+    // Missing GA4 credentials/KV must not keep revoked videos visible in a
+    // previously published R2 ranking. The D1 public projection and R2 may
+    // still be available even when the GA4 configuration is incomplete.
+    // A failed/partial D1 read cannot authorize rewriting the old ranking.
+    let privacyRewriteOnConfigFailure = false;
+    let privacyRepairError: ReturnType<typeof safeErrorSummary> | undefined;
+    if (env.DB && env.R2) {
+      try {
+        const recent = await loadRecentListPayload(env, signal);
+        if (!Array.isArray(recent.items)) throw new Error("ga4_recent_d1_invalid_result");
+        privacyRewriteOnConfigFailure = await repairTrendingAfterGa4Failure(
+          env, recent, signal,
+        );
+      } catch (error) {
+        signal?.throwIfAborted();
+        privacyRepairError = safeErrorSummary(error);
+      }
+    }
     logGa4TrendingEvent({
       service: "flamenode-sync-jobs",
       worker: "sync-jobs",
@@ -422,7 +440,9 @@ export async function syncGa4Trending(
       enabled: true,
       result: "failed",
       error_name: "config_missing",
-      r2_written: false,
+      r2_written: privacyRewriteOnConfigFailure,
+      privacy_rewrite_on_config_failure: privacyRewriteOnConfigFailure,
+      ...(privacyRepairError ? { privacy_repair_error: privacyRepairError } : {}),
     });
     return emptyResult({ processed: 0, failed: 1, skipped: 0 });
   }
