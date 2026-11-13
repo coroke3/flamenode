@@ -11,6 +11,11 @@ import { preCommitPublicVisibilityFence } from "@flamenode/server-core/visibilit
 import { preCommitVideoVisibilityDepublicization } from "@flamenode/server-core/visibility/videoTransition";
 import { releaseBlockedEntityInManifest } from "@flamenode/server-core/visibility/manifestCore";
 
+import {
+  planEventVisibilityTransition,
+} from "@flamenode/server-core/visibility/eventTransition";
+import { planPublicVisibilityFenceTransition } from "@flamenode/server-core/visibility/fenceTransition";
+
 // Exercise the actual shared core imported by both CURRENT Next and TARGET Hono.
 // The fake manifest host models R2 conditional PUT and mutateOnConflict retries.
 const entry = (entity_type, entity_id, fence_token) => ({
@@ -71,6 +76,106 @@ const write = (state, token = "incoming") =>
   );
 const foreign = entry("event", "event-one", "earlier-writer");
 const other = entry("video", "video-one", "video-fence");
+
+
+function planningDb(existingFence, { failRead = false } = {}) {
+  const calls = { selects: 0, upserts: [] };
+  const db = {
+    select() {
+      return { from() {
+        return { where() {
+          return { async limit() {
+            calls.selects += 1;
+            if (failRead) throw new Error("authoritative D1 fence unavailable");
+            return existingFence ? [existingFence] : [];
+          } };
+        } };
+      } };
+    },
+    insert() {
+      return { values(values) {
+        return { onConflictDoUpdate({ set }) {
+          calls.upserts.push({ values, set });
+          return { kind: "fence_upsert" };
+        } };
+      } };
+    },
+  };
+  return { db, calls };
+}
+
+test("Issue #659: event D1 fence planner preserves active tokens and rotates released tokens", async () => {
+  for (const [state, expectedReuse] of [
+    ["blocked", true], ["release_pending", true],
+    ["released", false], [null, false],
+  ]) {
+    const { db, calls } = planningDb(
+      state ? { state, fence_token: "vf_existing", entity_type: "event", entity_id: "event-one" } : null,
+    );
+    const plan = await planEventVisibilityTransition({
+      db, eventId: "event-one", previousStatus: "private", nextStatus: "public",
+      actorUserId: "actor", now: 1760000100,
+    });
+    assert.equal(calls.selects, 1, "one authoritative read before deciding token ownership");
+    assert.equal(calls.upserts.length, 1);
+    assert.equal(plan.mutationStatements.length, 1);
+    assert.deepEqual(plan.expectedMutationChanges, [1]);
+    assert.equal(calls.upserts[0].set.state, "release_pending");
+    assert.equal(calls.upserts[0].set.fence_token, plan.fenceToken);
+    assert.equal(plan.fenceToken === "vf_existing", expectedReuse, state ?? "missing");
+    assert.match(plan.fenceToken, /^vf_/);
+  }
+});
+
+test("Issue #659: generic event-group D1 planner preserves active token, not released token", async () => {
+  for (const state of ["blocked", "release_pending", "released"]) {
+    const { db, calls } = planningDb({
+      state, fence_token: "vf_existing", entity_type: "event_group", entity_id: "group-one",
+    });
+    const plan = await planPublicVisibilityFenceTransition({
+      db, entityType: "event_group", entityId: "group-one",
+      previousStatus: "public", nextStatus: "private",
+      isPublic: (status) => status === "public",
+      actorUserId: "actor", now: 1760000100,
+    });
+    assert.equal(calls.selects, 1);
+    assert.equal(plan.mutationStatements.length, 1);
+    assert.equal(calls.upserts[0].set.state, "blocked");
+    assert.equal(calls.upserts[0].set.fence_token, plan.fenceToken);
+    assert.equal(plan.fenceToken === "vf_existing", state !== "released");
+  }
+});
+
+test("Issue #659: no public boundary means no D1 read, and failed fence read is fail-closed", async () => {
+  const { db, calls } = planningDb({ state: "blocked", fence_token: "vf_existing" });
+  const same = await planEventVisibilityTransition({
+    db, eventId: "event-one", previousStatus: "private", nextStatus: "private",
+    actorUserId: "actor", now: 1760000100,
+  });
+  assert.equal(same.fenceToken, null);
+  assert.equal(calls.selects, 0);
+  assert.equal(calls.upserts.length, 0);
+  const generic = await planPublicVisibilityFenceTransition({
+    db, entityType: "event_group", entityId: "group-one",
+    previousStatus: "private", nextStatus: "draft",
+    isPublic: (status) => status === "public",
+    actorUserId: "actor", now: 1760000100,
+  });
+  assert.equal(generic.fenceToken, null);
+  assert.equal(calls.selects, 0);
+  assert.equal(calls.upserts.length, 0);
+
+  const failing = planningDb(null, { failRead: true });
+  await assert.rejects(
+    planEventVisibilityTransition({
+      db: failing.db, eventId: "event-one", previousStatus: "public", nextStatus: "private",
+      actorUserId: "actor", now: 1760000100,
+    }),
+    /authoritative D1 fence unavailable/,
+  );
+  assert.equal(failing.calls.selects, 1);
+  assert.equal(failing.calls.upserts.length, 0, "never plan a D1 write from an unknown owner");
+});
 
 test("Issue #659: initial R2 snapshot with another event token is rejected before ANY PUT", async () => {
   const state = hostOf(manifestOf(foreign, other));
