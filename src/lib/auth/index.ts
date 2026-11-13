@@ -7,7 +7,7 @@ import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 import { linkDiscordAccountAtomically } from "@/lib/auth/accountLinkAdapter";
 import { configuredHttpOrigin } from "@/lib/auth/origin";
 import { authRedirectTarget } from "@flamenode/server-core/auth/redirect";
-import { applyDatabaseAuthSessionClaims, resolveAuthRuntimeCredentials } from "@flamenode/server-core/auth/config";
+import { applyDatabaseAuthSessionClaims, discordProviderOptions, resolveAuthRuntimeCredentials } from "@flamenode/server-core/auth/config";
 import { logSafeAuthError } from "@/lib/auth/safeLogger";
 import {
   createTraceId,
@@ -59,19 +59,7 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
     trustHost: true,
     session: { strategy: "database" },
     providers: [
-      Discord({
-        clientId: discordClientId,
-        clientSecret: discordClientSecret,
-        // Discord は verified email を返す前提。メールだけ先に存在する user
-        // （部分登録・移行残骸）へ、未ログイン状態でも Discord account を安全に紐付ける。
-        allowDangerousEmailAccountLinking: true,
-        // `authorization` だけ `params` を渡すとデフォルトの `url` が消え、
-        // Auth.js が OIDC discovery へ落ちて `new URL(undefined)` → Invalid URL になる。
-        authorization: {
-          url: "https://discord.com/api/oauth2/authorize",
-          params: { scope: "identify email" },
-        },
-      }),
+      Discord(discordProviderOptions({ discordClientId, discordClientSecret })),
     ],
     pages: {
       signIn: "/entry",
