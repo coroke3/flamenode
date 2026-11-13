@@ -294,19 +294,37 @@ async function repairTrendingAfterGa4Failure(
           const distinct = new Set(normalized.items.map((item) => item.id));
           if (distinct.size === normalized.items.length) {
             const visible = normalized.items.filter((item) => publicIds.has(item.id));
-            if (visible.length === normalized.items.length) {
+            // Even if all video IDs remain public, a linked event may have
+            // become private, or its title/creator/icon may have changed.
+            // Build using the CURRENT D1 public DTO, not cached R2 metadata.
+            const periods = visible.map((item) => ({
+              video_id: item.id,
+              views_2d: item.views_2d,
+              views_5d: item.views_5d,
+              views_7d: item.views_7d,
+              views_30d: item.views_30d,
+            }));
+            const current = rankTrendingItems(recent, periods);
+            const displayFields = [
+              "id", "title", "youtube_video_id", "display_name",
+              "icon_url", "primary_event_id", "primary_event_title",
+              "scheduled_time", "status", "rank", "video_id",
+            ] as const;
+            const entirelyCurrent =
+              visible.length === normalized.items.length &&
+              current.length === normalized.items.length &&
+              current.every((row, index) => {
+                const prior = normalized.items[index];
+                return displayFields.every(
+                  (field) => row[field] === (field === "video_id"
+                    ? (prior.video_id ?? prior.id)
+                    : prior[field]),
+                );
+              });
+            if (entirelyCurrent) {
               shouldRewrite = false;
             } else {
-              // Rebuild display metadata from the current D1 public rows,
-              // never reuse an old title/icon for a now-private entity.
-              const periods = visible.map((item) => ({
-                video_id: item.id,
-                views_2d: item.views_2d,
-                views_5d: item.views_5d,
-                views_7d: item.views_7d,
-                views_30d: item.views_30d,
-              }));
-              retained = rankTrendingItems(recent, periods);
+              retained = current;
               // Reused GA4 counters are still old measurements. A privacy
               // rewrite must not masquerade as a freshly collected report.
               const oldDate = new Date(normalized.generatedAt * 1000);
