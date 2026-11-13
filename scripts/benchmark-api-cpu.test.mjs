@@ -6,8 +6,55 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, ROUTE_INVENTORY, SEED, aggregate, buildPendingScenarios, buildScenarios, createInprocTarget, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, summarize,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, ROUTE_INVENTORY, SEED, aggregate, buildPendingScenarios, buildScenarios, createInprocTarget, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
 } from "./benchmark-api-cpu.mjs";
+
+test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {
+  assert.equal(returnedRows("first", null), 0);
+  assert.equal(returnedRows("first", { id: "v" }), 1);
+  assert.equal(returnedRows("all", { results: [{ id: 1 }, { id: 2 }] }), 2);
+  assert.equal(returnedRows("raw", [[1], [2], [3]]), 3);
+  assert.equal(returnedRows("run", { results: [] }), 0);
+  assert.equal(returnedRows("batch", [{ results: [{ id: 1 }] }, { results: [] }, { results: [1, 2] }]), 3);
+  const samples = [
+    { kind: "normal", cpuMs: 1, d1: 1, d1RowsReturned: 4, d1PerQueryRows: [1, 3] },
+    { kind: "normal", cpuMs: 2, d1: 1, d1RowsReturned: 1, d1PerQueryRows: [1] },
+    { kind: "normal", cpuMs: 3, d1: 1, d1RowsReturned: 3, d1PerQueryRows: [2, 1] },
+  ];
+  const k = aggregate(samples, { runtimeClass: "S2", resolutionMs: 0.1 }).kinds.normal;
+  assert.deepEqual(k.d1RowsReturned, { min: 1, median: 3, max: 4, total: 8 });
+  assert.deepEqual(k.d1PerQueryRowsBySample, [[1, 3], [1], [2, 1]]);
+  const absent = aggregate([{ kind: "normal", cpuMs: 1 }], {
+    runtimeClass: "S2", resolutionMs: 0.1,
+  }).kinds.normal;
+  assert.equal(absent.d1RowsReturned, null, "unknown rows must not masquerade as 0");
+  const md = renderMarkdown([{
+    id: "RH-013", title: "fixture", runtimeClass: "S2",
+    agg: aggregate(samples, { runtimeClass: "S2", resolutionMs: 0.1 }),
+  }], { digits: 2, label: "test only" });
+  assert.match(md, /D1 returned rows proxy \(min\/med\/max\/total\)/);
+  assert.match(md, /\| 1\/3\/4\/8 \|/);
+});
+
+test("local migrated D1 records per-query result rows and carries them into replay fixtures", async () => {
+  const plan = { adminToken: "t" };
+  const scenario = buildScenarios(plan).find((candidate) => candidate.id === "RH-020");
+  assert.ok(scenario, "live event slot benchmark is mounted");
+  const target = await createInprocTarget(plan);
+  try {
+    const spec = scenario.kinds.normal(1, "row-proxy");
+    if (spec.setup) await target.exec(spec.setup);
+    const result = await target.run(spec);
+    assert.ok(spec.expect.includes(result.status), "the benchmark must exercise the real endpoint");
+    assert.ok(result.d1RowsReturned > 0, "D1 must return visible event/slot rows");
+    assert.equal(result.d1PerQueryRows.reduce((a, b) => a + b, 0), result.d1RowsReturned);
+    const replay = await target.recordForReplay(spec);
+    assert.equal(replay.d1PerQueryRows.reduce((a, b) => a + b, 0), replay.d1RowsReturned);
+    assert.ok(replay.script.length > 0, "replay preserves actual DB/R2 results");
+  } finally {
+    await target.close();
+  }
+});
 
 test("percentile uses nearest rank on an ascending array", () => {
   const sorted = Array.from({ length: 100 }, (_, i) => i + 1);
