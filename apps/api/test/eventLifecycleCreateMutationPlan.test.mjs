@@ -219,6 +219,68 @@ test("MIG-0652 U02 SQLite T04: failed strict audit rolls back event, questions A
   }
 });
 
+test("MIG-0652 U02 SQLite T05: existing pending event rebuild target is coalesced with CREATE", async () => {
+  const { sqlite, d1, db } = createAtomicCreateHarness();
+  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  insert(sqlite, "static_rebuild_queue", {
+    id: "old_pending", target_type: "event_base", target_id: "ev_create",
+    reason: "older_event_update", priority: "low", status: "pending",
+    attempt_count: 0, requested_by_user_id: null, created_at: 100, updated_at: 100,
+  });
+  const queue = await buildEventChangeQueueBatch(db, {
+    eventId: "ev_create", reason: "event_create", requestedByUserId: "u_admin", priority: "high",
+  });
+  assert.ok(queue.acceptedTargetCount > 1);
+  const plan = createExecutableWritePlan(db, queue);
+  await mutateWithAudit(db, plan);
+  assert.equal(d1.stats.batches, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n,
+    queue.acceptedTargetCount, "the active target must be updated, not duplicated");
+  const row = sqlite.prepare(
+    "SELECT id, reason, priority, status, requested_by_user_id, updated_at " +
+    "FROM static_rebuild_queue WHERE target_type = 'event_base' AND target_id = 'ev_create'",
+  ).get();
+  assert.equal(row.id, "old_pending", "retain the original active queue row ID");
+  assert.equal(row.reason, "event_create");
+  assert.equal(row.priority, "high");
+  assert.equal(row.status, "pending");
+  assert.equal(row.requested_by_user_id, "u_admin");
+  assert.ok(row.updated_at > 100, "UPSERT must mark an already-pending target dirty");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+});
+
+test("MIG-0652 U02 SQLite T06: audit failure rolls back updates to a pre-existing queue target", async () => {
+  const { sqlite, d1, db } = createAtomicCreateHarness();
+  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  insert(sqlite, "static_rebuild_queue", {
+    id: "old_pending", target_type: "event_base", target_id: "ev_create",
+    reason: "older_event_update", priority: "low", status: "pending",
+    attempt_count: 0, requested_by_user_id: null, created_at: 100, updated_at: 100,
+  });
+  const queue = await buildEventChangeQueueBatch(db, {
+    eventId: "ev_create", reason: "event_create", requestedByUserId: "u_admin", priority: "high",
+  });
+  const plan = createExecutableWritePlan(db, queue);
+  sqlite.exec("CREATE TRIGGER reject_audit_queue_update BEFORE INSERT ON audit_logs " +
+    "BEGIN SELECT RAISE(ABORT, 'audit-write-denied'); END");
+  await assert.rejects(mutateWithAudit(db, plan), /audit-write-denied/);
+  assert.equal(d1.stats.batches, 1);
+  const rows = sqlite.prepare(
+    "SELECT id, reason, priority, status, requested_by_user_id, updated_at FROM static_rebuild_queue",
+  ).all();
+  assert.equal(rows.length, 1, "new queue fan-out targets must be rolled back");
+  assert.equal(rows[0].id, "old_pending");
+  assert.equal(rows[0].reason, "older_event_update");
+  assert.equal(rows[0].priority, "low");
+  assert.equal(rows[0].status, "pending");
+  assert.equal(rows[0].requested_by_user_id, null);
+  assert.equal(rows[0].updated_at, 100, "the existing queue UPSERT must also roll back");
+  for (const table of ["events", "event_staff", "event_custom_questions", "audit_logs"]) {
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0,
+      table + " cannot commit when the strict audit fails");
+  }
+});
+
 test("MIG-0652 U02 atomic create: event, owner, ordered question chunks and strict audits are bundled", () => {
   const result = makePlan();
   assert.equal(result.ok, true);
