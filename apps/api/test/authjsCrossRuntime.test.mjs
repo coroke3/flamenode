@@ -254,6 +254,32 @@ if (runTestWithTsx(import.meta.url)) {
       .get(SESSIONS.valid.sessionToken);
   }
 
+  // Auth.js Core may return HTTP 302 on sign-out; verify effects, not a fixed 200.
+  function assertAuthJsSignoutAccepted(response) {
+    assert.ok([200, 302, 303].includes(response.status),
+      "signout should succeed or redirect: " + response.status);
+    if (response.status >= 300) {
+      const location = response.headers.get("location");
+      assert.ok(location, "success redirect requires Location");
+      assert.equal(new URL(location, AUTH_BASELINE_ENV.AUTH_URL).origin,
+        AUTH_BASELINE_ENV.AUTH_URL, "redirect must remain on configured origin");
+    }
+  }
+
+  // Auth.js rejects MissingCSRF using a redirect to its error page.
+  function assertAuthJsCsrfDenied(response) {
+    assert.ok([302, 403].includes(response.status),
+      "CSRF denial cannot be a successful action: " + response.status);
+    if (response.status === 302) {
+      const location = response.headers.get("location");
+      assert.ok(location, "CSRF denial redirect requires Location");
+      const next = new URL(location, AUTH_BASELINE_ENV.AUTH_URL);
+      assert.equal(next.origin, AUTH_BASELINE_ENV.AUTH_URL);
+      assert.equal(next.pathname, "/entry");
+      assert.ok(next.searchParams.has("error"));
+    }
+  }
+
   test("U02b T03: Hono native signout invalidates CURRENT NextAuth session and clears cookie", async (t) => {
     const { d1, sqlite } = createHarness(t);
     const app = createUnmountedAuthRoutes(input(d1));
@@ -268,7 +294,7 @@ if (runTestWithTsx(import.meta.url)) {
     const response = await postHonoSignout(app, {
       sessionToken: SESSIONS.valid.sessionToken, csrfCookie, csrfToken,
     });
-    assert.equal(response.status, 200);
+    assertAuthJsSignoutAccepted(response);
     const cleared = setCookies(response)[BASELINE_COOKIES.sessionToken.name];
     assert.ok(cleared, "Hono must clear the shared Auth.js session cookie");
     assert.equal(cleared.value, "");
@@ -278,7 +304,7 @@ if (runTestWithTsx(import.meta.url)) {
     const current = await authRequest("session", {
       cookies: { [BASELINE_COOKIES.sessionToken.name]: SESSIONS.valid.sessionToken },
     });
-    assert.equal(current.status, 200);
+    assertAuthJsSignoutAccepted(current);
     assert.equal(await current.json(), null,
       "CURRENT must reject cookie after Hono signout");
   });
@@ -296,7 +322,7 @@ if (runTestWithTsx(import.meta.url)) {
       csrfCookie,
       csrfToken: `${csrfToken}wrong`,
     });
-    assert.equal(forbidden.status, 403);
+    assertAuthJsCsrfDenied(forbidden);
     assert.ok(storedSession(sqlite), "CSRF mismatch must leave D1 session intact");
     const current = await authRequest("session", {
       cookies: { [BASELINE_COOKIES.sessionToken.name]: SESSIONS.valid.sessionToken },
@@ -312,7 +338,7 @@ if (runTestWithTsx(import.meta.url)) {
     const forbidden = await postHonoSignout(app, {
       sessionToken: SESSIONS.valid.sessionToken, csrfToken,
     });
-    assert.equal(forbidden.status, 403);
+    assertAuthJsCsrfDenied(forbidden);
     assert.ok(storedSession(sqlite), "missing CSRF cookie must leave session intact");
   });
 
@@ -325,7 +351,7 @@ if (runTestWithTsx(import.meta.url)) {
     const hono = await postHonoSignout(createUnmountedAuthRoutes(input(d1)), {
       sessionToken: SESSIONS.valid.sessionToken, csrfCookie, csrfToken,
     });
-    assert.equal(hono.status, 200);
+    assertAuthJsSignoutAccepted(hono);
     assert.equal(setCookies(hono)[BASELINE_COOKIES.sessionToken.name]?.value, "");
     assert.equal(storedSession(sqlite), undefined,
       "CURRENT CSRF credentials must work on Hono with the same AUTH_SECRET");
@@ -347,7 +373,7 @@ if (runTestWithTsx(import.meta.url)) {
       },
       body: { csrfToken },
     });
-    assert.equal(current.status, 200);
+    assertAuthJsSignoutAccepted(current);
     assert.equal(setCookies(current)[BASELINE_COOKIES.sessionToken.name]?.value, "");
     assert.equal(storedSession(sqlite), undefined);
   });
