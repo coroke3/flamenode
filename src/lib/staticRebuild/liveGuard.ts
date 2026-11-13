@@ -40,7 +40,7 @@ export async function handleLiveApiGet<T>(
   let db: DB | null;
   try {
     db = getDatabase();
-  } catch (err) {
+  } catch {
     // The missing-binding exception may include credential material or the
     // requested event ID; the diagnostic must not serialize either.
     console.error("[live-api] database binding unavailable");
