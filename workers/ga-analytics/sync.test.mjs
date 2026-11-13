@@ -1059,6 +1059,11 @@ test("Issue #653: GA4 HTTP failure removes revoked R2 rows using current D1 publ
     assert.equal(writes[0].items[0].title, "Current public title");
     assert.equal(writes[0].items[0].rank, 1);
     assert.equal(writes[0].items[0].views_30d, 6);
+    assert.equal(writes[0].generated_at, 1_700_000_000,
+      "a privacy rewrite cannot call old GA4 measurements fresh");
+    assert.deepEqual(writes[0].windows.views_2d, {
+      start_date: "2023-11-13", end_date: "2023-11-14",
+    });
     assert.equal(JSON.stringify(writes[0]).includes("Private title"), false);
     assert.equal(logs.at(-1).r2_written, true);
     assert.equal(logs.at(-1).privacy_rewrite_on_ga4_failure, true);
