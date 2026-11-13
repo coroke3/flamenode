@@ -223,9 +223,34 @@ async function loadExistingTrendingItemCount(
     const retainedIds = new Set<string>();
     for (const item of normalized.items) {
       // The producer emits one ranked row per video. A corrupted old R2
-      // artifact with duplicate IDs must not be retained on GA4 failure.
+      // artifact with duplicate IDs must not be retained on an empty report.
       if (!publicIds.has(item.id) || retainedIds.has(item.id)) return 0;
       retainedIds.add(item.id);
+    }
+    // A video can remain public while its linked event has become private.
+    // Matching the ID alone would preserve the now-private event title in R2
+    // whenever GA4 responds with zero/orphan-only views. Cross-check old
+    // display metadata against the CURRENT D1 public projection too.
+    const currentRows = rankTrendingItems(recent, normalized.items.map((item) => ({
+      video_id: item.id,
+      views_2d: item.views_2d,
+      views_5d: item.views_5d,
+      views_7d: item.views_7d,
+      views_30d: item.views_30d,
+    })));
+    if (currentRows.length !== normalized.items.length) return 0;
+    const currentById = new Map(currentRows.map((item) => [item.id, item]));
+    for (const item of normalized.items) {
+      const current = currentById.get(item.id);
+      if (
+        !current ||
+        item.title !== current.title ||
+        item.icon_url !== current.icon_url ||
+        item.primary_event_id !== current.primary_event_id ||
+        item.primary_event_title !== current.primary_event_title ||
+        (item.display_name !== "unknown" && item.display_name !== current.display_name) ||
+        (item.youtube_video_id !== null && item.youtube_video_id !== current.youtube_video_id)
+      ) return 0;
     }
     return normalized.items.length;
   } catch {
