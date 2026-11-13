@@ -3,21 +3,16 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { getDatabaseAsync, getEnvAsync } from "@/lib/cloudflare";
-import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
+
 import { linkDiscordAccountAtomically } from "@/lib/auth/accountLinkAdapter";
 import { configuredHttpOrigin } from "@/lib/auth/origin";
+import { authRedirectTarget } from "@flamenode/server-core/auth/redirect";
+import { applyDatabaseAuthSessionClaims, authAdapterTables, authRuntimeDefaults, discordProviderOptions, resolveAuthRuntimeCredentials } from "@flamenode/server-core/auth/config";
 import { logSafeAuthError } from "@/lib/auth/safeLogger";
 import {
   createTraceId,
   logFlowTrace,
 } from "@/lib/observability/flowTrace";
-
-const LOCAL_DEV_AUTH_SECRET = "flamenode-local-development-auth-secret";
-
-function envValue(value: string | null | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-}
 
 /**
  * NextAuth v5 (Auth.js) の設定。
@@ -30,15 +25,13 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
   if (!db) {
     throw new Error("AUTH_DATABASE_UNAVAILABLE");
   }
-  const authSecret =
-    envValue(env.AUTH_SECRET) ??
-    (process.env.NODE_ENV !== "production" ? LOCAL_DEV_AUTH_SECRET : undefined);
-  if (!authSecret) throw new Error("AUTH_SECRET_MISSING");
-  const discordClientId = envValue(env.AUTH_DISCORD_ID);
-  const discordClientSecret = envValue(env.AUTH_DISCORD_SECRET);
-  if (!discordClientId || !discordClientSecret) {
-    throw new Error("AUTH_DISCORD_CONFIG_MISSING");
-  }
+  const { secret: authSecret, discordClientId, discordClientSecret } =
+    resolveAuthRuntimeCredentials({
+      authSecret: env.AUTH_SECRET,
+      discordClientId: env.AUTH_DISCORD_ID,
+      discordClientSecret: env.AUTH_DISCORD_SECRET,
+      allowLocalDevSecret: process.env.NODE_ENV !== "production",
+    });
   const allowLocalPreview =
     process.env.NODE_ENV !== "production" ||
     env.FLAMENODE_LOCAL_PREVIEW === "1";
@@ -52,71 +45,31 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
   );
   if (authOrigin !== siteOrigin) throw new Error("AUTH_ORIGIN_MISMATCH");
 
-  const drizzleAdapter = DrizzleAdapter(db as never, {
-    usersTable: users as never,
-    accountsTable: accounts as never,
-    sessionsTable: sessions as never,
-    verificationTokensTable: verificationTokens as never,
-  } as never);
+  // Shared canonical table identity, with the existing CURRENT adapter
+  // callbacks and atomic Discord account-linking behavior left untouched.
+  const drizzleAdapter = DrizzleAdapter(db as never, authAdapterTables() as never);
   const baseConfig: NextAuthConfig = {
+    // Shared CURRENT defaults; origin validation and redirect policy remain
+    // bound to configured AUTH_URL/NEXT_PUBLIC_SITE_URL above.
+    ...authRuntimeDefaults(),
     secret: authSecret,
     // Adapter/Drizzle failure stacks can include sessionToken bind values.
     logger: { error: logSafeAuthError },
-    // Auth.jsのHost検査は通すが、redirect先は検証済み設定originだけを使う。
-    trustHost: true,
-    session: { strategy: "database" },
     providers: [
-      Discord({
-        clientId: discordClientId,
-        clientSecret: discordClientSecret,
-        // Discord は verified email を返す前提。メールだけ先に存在する user
-        // （部分登録・移行残骸）へ、未ログイン状態でも Discord account を安全に紐付ける。
-        allowDangerousEmailAccountLinking: true,
-        // `authorization` だけ `params` を渡すとデフォルトの `url` が消え、
-        // Auth.js が OIDC discovery へ落ちて `new URL(undefined)` → Invalid URL になる。
-        authorization: {
-          url: "https://discord.com/api/oauth2/authorize",
-          params: { scope: "identify email" },
-        },
-      }),
+      Discord(discordProviderOptions({ discordClientId, discordClientSecret })),
     ],
-    pages: {
-      signIn: "/entry",
-      error: "/entry",
-    },
     callbacks: {
       async redirect({ url }) {
-        if (url.startsWith("/")) {
-          return `${authOrigin}${url}`;
-        }
-        try {
-          const target = new URL(url);
-          if (target.origin === authOrigin) return target.href;
-        } catch {
-          /* fall through */
-        }
-        return `${authOrigin}/dashboard`;
+        return authRedirectTarget(url, authOrigin);
       },
       async session({ session, user }) {
-        if (session.user && user) {
-          const su = session.user as typeof session.user & {
-            id: string;
-            role?: string;
-            is_banned?: number;
-            active_x_user_id?: string | null;
-          };
-          su.id = user.id;
-          // user (DB row) に追加カラムが入っているはずなので転写する
-          const raw = user as typeof user & {
-            role?: string;
-            is_banned?: number;
-            active_x_user_id?: string | null;
-          };
-          su.role = raw.role ?? "user";
-          su.is_banned = raw.is_banned ?? 0;
-          su.active_x_user_id = raw.active_x_user_id ?? null;
-        }
-        return session;
+        // Database identity is the only authority for role/ban/Active X claims.
+        // The pure callback is shared with the future unmounted Hono Auth.js PoC.
+        return applyDatabaseAuthSessionClaims(session, user as typeof user & {
+          role?: string | null;
+          is_banned?: number | null;
+          active_x_user_id?: string | null;
+        });
       },
     },
     adapter: {
