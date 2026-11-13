@@ -253,6 +253,29 @@ test("Hono live DB binding getter failure returns sanitized 503 and never calls 
   assert.equal(loaderCalls, 0);
 });
 
+test("SEC-572: Hono live failures never log SQL, provider exception text or event identifiers", async () => {
+  const { db, sqlite } = createDb();
+  const originalError = console.error;
+  const logged = [];
+  console.error = (...args) => logged.push(args);
+  try {
+    const res = await handleLiveApiGet({ DB: db }, "ev-1", async () => {
+      throw new Error("SQL SELECT * FROM private_table; secret=visible-in-logs");
+    }, "slots");
+    assert.equal(res.status, 503);
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await res.json(), {
+      error: "live_api_error",
+      message: "ライブデータの取得に失敗しました。しばらくしてから再度お試しください。",
+    });
+    assert.deepEqual(logged, [["[live-api] GET failed"]], "stable diagnostic only");
+    assert.doesNotMatch(JSON.stringify(logged), /secret=|private_table|ev-1|SELECT/);
+  } finally {
+    console.error = originalError;
+    sqlite.close();
+  }
+});
+
 test("D1 failure -> 503 live_api_error no-store; operation-mode D1 failure falls back to normal", async () => {
   const { db } = createDb({ failAll: true });
   const res = await get("/api/live/events/ev-1/slots", { DB: db });
