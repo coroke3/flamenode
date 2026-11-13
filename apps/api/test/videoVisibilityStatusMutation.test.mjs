@@ -7,6 +7,7 @@ function transition(overrides = {}) {
     mutationStatements: ["video-update"],
     expectedMutationChanges: [1],
     audits: [{ table_name: "videos", target_id: "v-1", operation: "UPDATE" }],
+    notificationBatch: { statements: [], expectedChanges: [] },
     queueBatch: { statements: ["rebuild"], expectedChanges: [1], acceptedTargetCount: 1 },
     fenceToken: "fence-1",
     depublicizedFromPublic: true,
@@ -48,6 +49,43 @@ test("pre-commit fence is awaited before the atomic audited mutation", async () 
   assert.equal(calls[0], "precommit");
   assert.equal(calls[1][0], "mutate");
   assert.deepEqual(calls[1][1].expectedMutationChanges, [1]);
+});
+
+test("notification outbox SQL joins the video, fence, and rebuild writes in the same audit batch", async () => {
+  const calls = [];
+  const result = await executeVideoVisibilityStatusMutation({
+    db: {},
+    videoId: "v-1",
+    requestedStatus: "voided",
+    transition: transition({
+      mutationStatements: ["video-status-CAS", "fence-upsert", "rebuild-queue"],
+      expectedMutationChanges: [1, 1, null],
+      notificationBatch: {
+        statements: ["notification-outbox-insert"],
+        expectedChanges: [1],
+      },
+    }),
+    reason: "moderation",
+    logTag: "admin-video-status",
+    notificationWakeSource: "admin",
+    staticRebuildWakeSource: "admin",
+  }, host({}, calls));
+
+  assert.equal(result.ok, true);
+  const mutation = calls.find((entry) => Array.isArray(entry) && entry[0] === "mutate");
+  assert.ok(mutation, "one atomic audited mutation is invoked");
+  assert.deepEqual(mutation[1].mutationStatements, [
+    "video-status-CAS",
+    "fence-upsert",
+    "rebuild-queue",
+    "notification-outbox-insert",
+  ]);
+  assert.deepEqual(mutation[1].expectedMutationChanges, [1, 1, null, 1]);
+  assert.equal(mutation[1].notificationWakeSource, "admin");
+  assert.equal(mutation[1].staticRebuildWakeSource, "admin");
+  assert.deepEqual(calls.map((entry) => Array.isArray(entry) ? entry[0] : entry), [
+    "precommit", "mutate",
+  ], "the outbox is not executed as a separate postcommit write");
 });
 
 test("validation errors stop before any external mutation", async () => {
