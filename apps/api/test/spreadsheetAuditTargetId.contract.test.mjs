@@ -181,6 +181,7 @@ test("Issue #674: missing, redacted, numeric and malformed legacy snapshots neve
     [null, null],
     [JSON.stringify({ left: "x:y" }), null],
     [JSON.stringify({ left: "x:y", right: "[REDACTED]" }), null],
+    [JSON.stringify({ left: "x:y", right: "z…[truncated]" }), null],
     [JSON.stringify({ left: "x:y", right: 7 }), null],
     ["{bad json", null],
     ["null", null],
