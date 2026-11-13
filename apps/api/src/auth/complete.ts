@@ -56,8 +56,13 @@ export function unmountedAuthCompleteDestination(
   result: CompleteResolution<CompleteSession>,
   next: string | null | undefined,
 ): string {
-  if (result.kind === "unavailable") return "/entry?error=auth_temporarily_unavailable";
-  if (result.kind === "missing") return "/entry";
-  if (result.session.user?.is_banned === 1) return "/entry?error=AccessDenied";
-  return sanitizePostAuthReturnTo(next, "/dashboard");
+  // Narrow the authenticated variant explicitly before accessing its session.
+  // The non-authenticated variant combines two kind literals in one union arm.
+  if (result.kind === "authenticated") {
+    if (result.session.user?.is_banned === 1) return "/entry?error=AccessDenied";
+    return sanitizePostAuthReturnTo(next, "/dashboard");
+  }
+  return result.kind === "unavailable"
+    ? "/entry?error=auth_temporarily_unavailable"
+    : "/entry";
 }
