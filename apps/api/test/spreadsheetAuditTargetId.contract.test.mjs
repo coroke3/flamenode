@@ -135,6 +135,37 @@ test("Issue #674: malformed history rows and coerced snapshots cannot prove lega
   }
 });
 
+test("Issue #674: legacy snapshot budget counts UTF-8 bytes, not UTF-16 code units", () => {
+  const table_name = "video_events";
+  // 43k CJK code units fit below the old 128k .length guard but exceed
+  // the 128k UTF-8 budget. Never parse/attribute this oversized audit row.
+  const oversizedPk = { id: "界".repeat(43_000) };
+  const oversizedSnapshot = JSON.stringify(oversizedPk);
+  assert.ok(oversizedSnapshot.length < 128_000);
+  assert.ok(Buffer.byteLength(oversizedSnapshot, "utf8") > 128_000);
+  const oversizedLookup = buildSpreadsheetAuditHistoryLookup(table_name, oversizedPk);
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(oversizedLookup, {
+    table_name,
+    context: oversizedLookup.legacy.context,
+    target_id: oversizedLookup.legacy.target_id,
+    before_json: oversizedSnapshot,
+    after_json: null,
+  }), "legacy_ambiguous", "oversized multibyte snapshots cannot prove historical PK identity");
+
+  // A real, bounded multibyte TEXT snapshot must still prove attribution.
+  const boundedPk = { id: "界".repeat(30_000) };
+  const boundedSnapshot = JSON.stringify(boundedPk);
+  assert.ok(Buffer.byteLength(boundedSnapshot, "utf8") < 128_000);
+  const lookup = buildSpreadsheetAuditHistoryLookup(table_name, boundedPk);
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, {
+    table_name,
+    context: lookup.legacy.context,
+    target_id: lookup.legacy.target_id,
+    before_json: boundedSnapshot,
+    after_json: null,
+  }), "legacy_snapshot_exact");
+});
+
 test("Issue #674: invalid or noncanonical V1 representations fail closed", () => {
   for (const bad of [
     {}, { id: "" }, { id: "  " }, { id: "ab\0cd" }, { "bad\0key": "x" },
