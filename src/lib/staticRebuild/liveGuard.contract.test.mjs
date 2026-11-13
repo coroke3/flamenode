@@ -9,7 +9,7 @@ const source = await readFile(
 
 test("live API guard converts binding failures to a private 503 response", () => {
   assert.match(source, /const NO_STORE_HEADERS = \{ \"Cache-Control\": \"no-store\" \}/);
-  assert.match(source, /try \{\s*db = getDatabase\(\);[\s\S]*?catch \(err\)/);
+  assert.match(source, /try \{\s*db = getDatabase\(\);[\s\S]*?catch \{/);
   assert.match(source, /error: \"db_unavailable\"/);
   assert.match(source, /function jsonErrorResponse\([\s\S]*?headers: NO_STORE_HEADERS/);
 });
@@ -53,8 +53,44 @@ test("live API micro-cache stores only successful non-null payload strings", () 
   );
   assert.match(
     source,
-    /return "public, s-maxage=5, stale-while-revalidate=30"/,
+    /return "no-store"/,
   );
+});
+
+test("private event transition is checked before serving a cached CURRENT response", async () => {
+  const sourceApi = await readFile(new URL("./liveApi.ts", import.meta.url), "utf8");
+  const checkIndex = source.indexOf("await isLiveEventPublic(db, id)");
+  const cacheRead = source.indexOf("isolateMicroCacheGet(microCacheKey)");
+  const sendResponse = source.indexOf("return new NextResponse(body");
+  assert.ok(checkIndex > cacheRead && checkIndex < sendResponse,
+    "cached CURRENT payload must re-check public visibility before response");
+  const helper = sourceApi.slice(sourceApi.indexOf("export async function isLiveEventPublic("),
+    sourceApi.indexOf("export async function getLiveEventSummary("));
+  assert.ok(helper.includes('eq(events.visibility_status, "public")'),
+    "visibility helper must enforce public status at the DB layer");
+  assert.ok(helper.includes("eq(events.id, eventId)"),
+    "visibility check must be scoped to the requested event");
+  assert.ok(source.includes('error: "not_found"'),
+    "private events must respond 404 after cache hits");
+  assert.match(source, /return "no-store"/,
+    "CDN may not retain public content after an event becomes private");
+});
+
+test("CURRENT never reuses identity-bearing payloads and clears a private summary", () => {
+  assert.match(source, /const cacheable = routeName === "summary"/);
+  assert.match(source, /cacheable \? isolateMicroCacheGet\(microCacheKey\) : null/);
+  assert.match(source, /if \(cacheable\) isolateMicroCacheSet\(microCacheKey, body\)/);
+  assert.match(source, /if \(cacheable\) isolateMicroCacheDelete\(microCacheKey\)/);
+  const check = source.indexOf("await isLiveEventPublic(db, id)");
+  const deleteIndex = source.indexOf("isolateMicroCacheDelete(microCacheKey)");
+  assert.ok(check >= 0 && deleteIndex > check, "revoked event visibility deletes the cached summary");
+});
+
+test("SEC-572: CURRENT live error logging never serializes raw provider errors or event IDs", () => {
+  assert.match(source, /console\.error\("\[live-api\] GET failed"\)/);
+  assert.match(source, /console\.error\("\[live-api\] database binding unavailable"\)/);
+  assert.doesNotMatch(source, /console\.error\("\[live-api\] GET failed",/);
+  assert.doesNotMatch(source, /console\.error\([^\n]*eventId:\s*id/);
 });
 
 test("live API routes pass a stable route name for the cache key", async () => {
