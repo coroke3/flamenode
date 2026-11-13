@@ -82,15 +82,17 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(await response.json(), null);
   });
 
-  test("U01: sign-in and sign-out are not mounted during this PoC", async (t) => {
+  test("U01/U02b: OAuth sign-in, callbacks and GET signout are never mounted", async (t) => {
     const { d1, sqlite } = createHarness(t);
     const app = createUnmountedAuthRoutes(input(d1));
-    for (const path of ["signin/discord", "callback/discord", "signout"]) {
+    for (const path of ["signin/discord", "callback/discord"]) {
       for (const method of ["GET", "POST"]) {
         const response = await app.request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/${path}`, { method });
         assert.equal(response.status, 404, `${method} ${path} must remain unavailable`);
       }
     }
+    assert.equal((await app.request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/signout`)).status, 404,
+      "GET signout should not expose a signout page or unsafe GET action");
     const row = sqlite.prepare('SELECT "sessionToken" FROM "session" WHERE "sessionToken" = ?')
       .get(SESSIONS.valid.sessionToken);
     assert.equal(row.sessionToken, SESSIONS.valid.sessionToken);
@@ -226,6 +228,128 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(after.status, 200);
     assert.equal(await after.json(), null,
       "revocation in legacy runtime must invalidate auth in the target runtime");
+  });
+
+
+  // U02b: only the synthetic test router can receive POST signout. OAuth
+  // login/callback remains unmounted and account linking stays fail-closed.
+  async function postHonoSignout(app, { sessionToken, csrfCookie, csrfToken }) {
+    const sessionCookie = BASELINE_COOKIES.sessionToken.name;
+    const csrfCookieName = BASELINE_COOKIES.csrfToken.name;
+    return app.request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/signout`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: [
+          `${sessionCookie}=${sessionToken}`,
+          ...(csrfCookie ? [`${csrfCookieName}=${csrfCookie}`] : []),
+        ].join("; "),
+      },
+      body: new URLSearchParams({ csrfToken }),
+    });
+  }
+
+  function storedSession(sqlite) {
+    return sqlite.prepare('SELECT "sessionToken" FROM "session" WHERE "sessionToken" = ?')
+      .get(SESSIONS.valid.sessionToken);
+  }
+
+  test("U02b T03: Hono native signout invalidates CURRENT NextAuth session and clears cookie", async (t) => {
+    const { d1, sqlite } = createHarness(t);
+    const app = createUnmountedAuthRoutes(input(d1));
+    const name = BASELINE_COOKIES.csrfToken.name;
+    const csrfResponse = await app.request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/csrf`);
+    assert.equal(csrfResponse.status, 200);
+    const { csrfToken } = await csrfResponse.json();
+    const csrfCookie = setCookies(csrfResponse)[name]?.value;
+    assert.ok(csrfToken && csrfCookie);
+    assert.ok(storedSession(sqlite), "the seeded session must exist before signout");
+
+    const response = await postHonoSignout(app, {
+      sessionToken: SESSIONS.valid.sessionToken, csrfCookie, csrfToken,
+    });
+    assert.equal(response.status, 200);
+    const cleared = setCookies(response)[BASELINE_COOKIES.sessionToken.name];
+    assert.ok(cleared, "Hono must clear the shared Auth.js session cookie");
+    assert.equal(cleared.value, "");
+    assert.deepEqual(withoutVolatile(cleared), BASELINE_COOKIES.sessionToken.observedOnSignOut);
+    assert.equal(storedSession(sqlite), undefined, "Hono must delete shared D1 session row");
+
+    const current = await authRequest("session", {
+      cookies: { [BASELINE_COOKIES.sessionToken.name]: SESSIONS.valid.sessionToken },
+    });
+    assert.equal(current.status, 200);
+    assert.equal(await current.json(), null,
+      "CURRENT must reject cookie after Hono signout");
+  });
+
+  test("U02b T04: wrong CSRF form token must not revoke an authenticated session", async (t) => {
+    const { d1, sqlite } = createHarness(t);
+    const app = createUnmountedAuthRoutes(input(d1));
+    const csrf = await app.request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/csrf`);
+    assert.equal(csrf.status, 200);
+    const { csrfToken } = await csrf.json();
+    const csrfCookie = setCookies(csrf)[BASELINE_COOKIES.csrfToken.name]?.value;
+    assert.ok(csrfCookie && csrfToken);
+    const forbidden = await postHonoSignout(app, {
+      sessionToken: SESSIONS.valid.sessionToken,
+      csrfCookie,
+      csrfToken: `${csrfToken}wrong`,
+    });
+    assert.equal(forbidden.status, 403);
+    assert.ok(storedSession(sqlite), "CSRF mismatch must leave D1 session intact");
+    const current = await authRequest("session", {
+      cookies: { [BASELINE_COOKIES.sessionToken.name]: SESSIONS.valid.sessionToken },
+    });
+    assert.equal((await current.json())?.user?.id, USERS.valid.id);
+  });
+
+  test("U02b T04: absent CSRF cookie must not revoke D1 session", async (t) => {
+    const { d1, sqlite } = createHarness(t);
+    const app = createUnmountedAuthRoutes(input(d1));
+    const csrf = await app.request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/csrf`);
+    const { csrfToken } = await csrf.json();
+    const forbidden = await postHonoSignout(app, {
+      sessionToken: SESSIONS.valid.sessionToken, csrfToken,
+    });
+    assert.equal(forbidden.status, 403);
+    assert.ok(storedSession(sqlite), "missing CSRF cookie must leave session intact");
+  });
+
+  test("U02b: CURRENT-issued CSRF token and cookie authorize test-only Hono signout", async (t) => {
+    const { d1, sqlite } = createHarness(t);
+    const legacy = await authRequest("csrf");
+    const { csrfToken } = await legacy.json();
+    const csrfCookie = setCookies(legacy)[BASELINE_COOKIES.csrfToken.name]?.value;
+    assert.ok(csrfToken && csrfCookie);
+    const hono = await postHonoSignout(createUnmountedAuthRoutes(input(d1)), {
+      sessionToken: SESSIONS.valid.sessionToken, csrfCookie, csrfToken,
+    });
+    assert.equal(hono.status, 200);
+    assert.equal(setCookies(hono)[BASELINE_COOKIES.sessionToken.name]?.value, "");
+    assert.equal(storedSession(sqlite), undefined,
+      "CURRENT CSRF credentials must work on Hono with the same AUTH_SECRET");
+  });
+
+  test("U02b: Hono-issued CSRF token and cookie authorize CURRENT NextAuth signout", async (t) => {
+    const { d1, sqlite } = createHarness(t);
+    const hono = await createUnmountedAuthRoutes(input(d1)).request(
+      `${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/csrf`,
+    );
+    const { csrfToken } = await hono.json();
+    const csrfCookie = setCookies(hono)[BASELINE_COOKIES.csrfToken.name]?.value;
+    assert.ok(csrfCookie && csrfToken);
+    const current = await authRequest("signout", {
+      method: "POST",
+      cookies: {
+        [BASELINE_COOKIES.sessionToken.name]: SESSIONS.valid.sessionToken,
+        [BASELINE_COOKIES.csrfToken.name]: csrfCookie,
+      },
+      body: { csrfToken },
+    });
+    assert.equal(current.status, 200);
+    assert.equal(setCookies(current)[BASELINE_COOKIES.sessionToken.name]?.value, "");
+    assert.equal(storedSession(sqlite), undefined);
   });
 
   test("U01: explicit HTTPS origin, configured origin match and secret fail closed", async (t) => {

@@ -2,8 +2,9 @@
  * MIG-0802 U01: UNMOUNTED @auth/core 0.41.3 request adapter (synthetic PoC).
  *
  * Never import this module from apps/api/src/app.ts or production entrypoints.
- * For this bounded stage, only GET /api/auth/session and GET /api/auth/csrf
- * are exposed by routes/auth.ts; OAuth sign-in and sign-out are deliberately
+ * Only GET /api/auth/session, GET /api/auth/csrf, POST /api/auth/signout
+ * are exposed by the isolated test-only routes/auth.ts. Sign-out is handled
+ * by Auth.js itself with CSRF verification; OAuth sign-in/callback remain
  * unavailable until the audited atomic Discord account linker is ported.
  */
 import { Auth, type AuthConfig } from "@auth/core";
