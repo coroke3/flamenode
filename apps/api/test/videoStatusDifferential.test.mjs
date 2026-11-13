@@ -39,6 +39,9 @@ if (runUnderRootTsx(import.meta.url)) {
   const { planVideoVisibilityTransition: planShared } = await import(
     "@flamenode/server-core/visibility/videoTransition"
   );
+  const { PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY: MANIFEST_KEY } = await import(
+    "@flamenode/server-core/visibility/manifestCore"
+  );
 
   function seed(sqlite) {
     sqlite.exec(`
@@ -169,8 +172,9 @@ if (runUnderRootTsx(import.meta.url)) {
 
   // Execute the REAL audited D1 batch from the shared status executor, as
   // opposed to applying only the planner's video/fence SQL in isolation.
-  // R2 precommit is deliberately a seam here: this is D1 persistence parity,
-  // not yet the full CURRENT Action/R2 CAS/HTTP differential acceptance.
+  // The R2 bucket below implements real CAS precommit on the shared Hono
+  // manifest adapter. This is still not a live Cloudflare binding, and does
+  // not replace complete CURRENT Action/HTTP/authorization parity.
   async function executeAuditedStatus(nextStatus, useCurrent) {
     const sqlite = createSqlite();
     seed(sqlite);
@@ -186,7 +190,31 @@ if (runUnderRootTsx(import.meta.url)) {
       const video = (await db.select().from(schema.videos)
         .where(eq(schema.videos.id, "vid-1")).limit(1))[0];
       assert.ok(video);
-      const bucket = { async get() { return null; }, async put() { return {}; } };
+      const events = [];
+      const objects = new Map();
+      let etagVersion = 0;
+      const bucket = {
+        async get(key) {
+          events.push(["r2.get", key]);
+          const row = objects.get(key);
+          return row ? {
+            etag: row.etag,
+            size: new TextEncoder().encode(row.text).byteLength,
+            text: async () => row.text,
+          } : null;
+        },
+        async put(key, value, options) {
+          events.push(["r2.put", key]);
+          const current = objects.get(key);
+          const condition = options?.onlyIf;
+          if (condition instanceof Headers &&
+              condition.get("If-None-Match") === "*" && current) return null;
+          if (condition && !(condition instanceof Headers) &&
+              condition.etagMatches !== current?.etag) return null;
+          objects.set(key, { text: value, etag: `etag-${++etagVersion}` });
+          return { key };
+        },
+      };
       globalThis.__visibilityGoldenContext = {
         env: { DB: d1, BUCKET: bucket, NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL },
         ctx: { waitUntil() {} },
@@ -203,19 +231,14 @@ if (runUnderRootTsx(import.meta.url)) {
       const transition = useCurrent
         ? await planCurrent(db, input)
         : await planShared(db, input, transitionHost);
-      const events = [];
-      const auditedHost = {
-        ...createVideoVisibilityStatusMutationHost({
-          env: { BUCKET: bucket, NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL },
-          get(key) {
-            if (key === "auditSettings") return undefined;
-            if (key === "actorSnapshotJsonById") return {};
-            throw new Error(`unexpected audit preload: ${key}`);
-          },
-        }, { createTraceId: () => "trace-audited" }),
-        preCommit: async (entry) => { events.push(["precommit", entry.videoId, entry.fenceToken]); },
-        compensate: async () => { events.push(["compensate"]); },
-      };
+      const auditedHost = createVideoVisibilityStatusMutationHost({
+        env: { BUCKET: bucket, NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL },
+        get(key) {
+          if (key === "auditSettings") return undefined;
+          if (key === "actorSnapshotJsonById") return {};
+          throw new Error(`unexpected audit preload: ${key}`);
+        },
+      }, { createTraceId: () => "trace-audited" });
       const result = await executeHonoVideoVisibilityStatusMutation({
         db, videoId: "vid-1", requestedStatus: nextStatus, transition,
         reason: "audited differential", logTag: "status-differential",
@@ -226,6 +249,7 @@ if (runUnderRootTsx(import.meta.url)) {
       return {
         result,
         events,
+        manifest: objects.has(MANIFEST_KEY) ? JSON.parse(objects.get(MANIFEST_KEY).text) : null,
         batches: d1.stats.batches,
         video: sqlite.prepare(
           "SELECT id, visibility_status, updated_at FROM videos WHERE id = ?"
@@ -265,7 +289,13 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(current.notifications[0].type, "video_voided");
         assert.equal(current.notifications[0].status, "pending");
       }
-      assert.deepEqual(current.events.map((e) => e[0]), ["precommit"]);
+      assert.ok(current.events.some((entry) => entry[0] === "r2.put"),
+        "the real Hono R2 manifest CAS adapter must precommit a block");
+      assert.ok(current.manifest?.entities.some((entry) =>
+        entry.entity_type === "video" &&
+        entry.entity_id === "vid-1" &&
+        entry.fence_token === current.fences[0].fence_token
+      ), "the R2 manifest must retain the exact D1 fence token after commit");
     });
   }
 
