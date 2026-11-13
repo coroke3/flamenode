@@ -488,6 +488,62 @@ test("Issue #677: throwing settings preload getter and Proxy pay for the authori
   }
 });
 
+test("Issue #677: throwing settings preload at 50-query edge fails closed before writes", async () => {
+  for (const kind of ["getter", "proxy"]) {
+    for (const callerQueryCount of [45, 46]) {
+      const w = world();
+      const restore = freeze();
+      try {
+        w.sqlite.exec("CREATE TABLE t (id TEXT PRIMARY KEY)");
+        const actorJson = JSON.stringify(actorSnapshotFromRow(null));
+        const preload = kind === "getter"
+          ? {
+              get settings() { throw new Error("unsafe settings getter"); },
+              actorSnapshotJsonById: { "admin-1": actorJson },
+            }
+          : new Proxy({
+              actorSnapshotJsonById: { "admin-1": actorJson },
+            }, {
+              get(target, key, receiver) {
+                if (key === "settings") throw new Error("unsafe settings Proxy");
+                return Reflect.get(target, key, receiver);
+              },
+            });
+        const input = {
+          mutationStatements: [sql`INSERT INTO t (id) VALUES (${kind + callerQueryCount})`],
+          expectedMutationChanges: 1,
+          audits: [AUDIT],
+          callerQueryCount,
+          preloaded: preload,
+        };
+        const budget = planAtomicAuditMutationBudget(input);
+        assert.equal(budget.preparationQueryCount, 1, "settings D1 SELECT is not credited");
+        assert.equal(budget.totalQueryCount, callerQueryCount + 5);
+        if (callerQueryCount === 45) {
+          assert.equal(budget.withinLimit, true, "50/50 is valid");
+          await mutateWithAudit(w.db, input);
+          assert.equal(w.stats.reads.length, 1, "authoritative settings SELECT is executed");
+          assert.equal(w.stats.batches, 1);
+          assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM t").get().n, 1);
+          const stored = w.sqlite.prepare("SELECT * FROM audit_logs").get();
+          assert.ok(stored);
+          assert.equal(stored.expires_at - stored.created_at, 45 * 86400);
+        } else {
+          assert.equal(budget.withinLimit, false, "51/50 must be rejected");
+          await assert.rejects(() => mutateWithAudit(w.db, input), /query 数が上限/);
+          assert.equal(w.stats.reads.length, 0, "reject before all audit SELECTs");
+          assert.equal(w.stats.batches, 0, "reject before D1 mutation batch");
+          assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM t").get().n, 0);
+          assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+        }
+      } finally {
+        restore();
+        w.sqlite.close();
+      }
+    }
+  }
+});
+
 test("Issue #677: throwing actor preload accessor fails closed in budget and logger", async () => {
   const w = world();
   const restore = freeze();
