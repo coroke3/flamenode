@@ -3,11 +3,11 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { getDatabaseAsync, getEnvAsync } from "@/lib/cloudflare";
-import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
+
 import { linkDiscordAccountAtomically } from "@/lib/auth/accountLinkAdapter";
 import { configuredHttpOrigin } from "@/lib/auth/origin";
 import { authRedirectTarget } from "@flamenode/server-core/auth/redirect";
-import { applyDatabaseAuthSessionClaims, authRuntimeDefaults, discordProviderOptions, resolveAuthRuntimeCredentials } from "@flamenode/server-core/auth/config";
+import { applyDatabaseAuthSessionClaims, authAdapterTables, authRuntimeDefaults, discordProviderOptions, resolveAuthRuntimeCredentials } from "@flamenode/server-core/auth/config";
 import { logSafeAuthError } from "@/lib/auth/safeLogger";
 import {
   createTraceId,
@@ -45,12 +45,9 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
   );
   if (authOrigin !== siteOrigin) throw new Error("AUTH_ORIGIN_MISMATCH");
 
-  const drizzleAdapter = DrizzleAdapter(db as never, {
-    usersTable: users as never,
-    accountsTable: accounts as never,
-    sessionsTable: sessions as never,
-    verificationTokensTable: verificationTokens as never,
-  } as never);
+  // Shared canonical table identity, with the existing CURRENT adapter
+  // callbacks and atomic Discord account-linking behavior left untouched.
+  const drizzleAdapter = DrizzleAdapter(db as never, authAdapterTables() as never);
   const baseConfig: NextAuthConfig = {
     // Shared CURRENT defaults; origin validation and redirect policy remain
     // bound to configured AUTH_URL/NEXT_PUBLIC_SITE_URL above.

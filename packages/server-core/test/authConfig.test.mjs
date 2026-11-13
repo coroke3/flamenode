@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyDatabaseAuthSessionClaims, authRuntimeDefaults, discordProviderOptions, resolveAuthRuntimeCredentials } from "../src/auth/config.ts";
+import { accounts, sessions, users, verificationTokens } from "@flamenode/db/schema";
+import { applyDatabaseAuthSessionClaims, authAdapterTables, authRuntimeDefaults, discordProviderOptions, resolveAuthRuntimeCredentials } from "../src/auth/config.ts";
 
 test("MIG-0802 U01: DB callback overwrites stale session role, ban and Active X without losing profile", () => {
   const session = {
@@ -175,4 +176,27 @@ test("MIG-0802 U01: each Auth.js config build receives independent option object
     session: { strategy: "database" },
     pages: { signIn: "/entry", error: "/entry" },
   }, "mutation by a request cannot persist into another Auth.js config");
+});
+
+test("MIG-0802 U01: Auth.js adapter maps exact canonical D1 schema objects without fallback", () => {
+  const tables = authAdapterTables();
+  assert.deepEqual(Object.keys(tables).sort(), [
+    "accountsTable", "sessionsTable", "usersTable", "verificationTokensTable",
+  ]);
+  assert.strictEqual(tables.usersTable, users);
+  assert.strictEqual(tables.accountsTable, accounts);
+  assert.strictEqual(tables.sessionsTable, sessions);
+  assert.strictEqual(tables.verificationTokensTable, verificationTokens);
+  assert.equal("account" in tables, false);
+  assert.equal("secret" in tables, false);
+});
+
+test("MIG-0802 U01: Auth.js adapter table map object is fresh without altering schema identity", () => {
+  const first = authAdapterTables();
+  const second = authAdapterTables();
+  assert.notStrictEqual(first, second);
+  assert.strictEqual(first.accountsTable, second.accountsTable);
+  first.accountsTable = null;
+  assert.strictEqual(second.accountsTable, accounts,
+    "adapter customization in one runtime must not leak into the other");
 });

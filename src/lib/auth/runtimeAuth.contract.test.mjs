@@ -51,6 +51,10 @@ test("Auth origin・Host・Discord scopeは固定設定をfail-closedで使う",
   assert.match(auth, /env\.FLAMENODE_LOCAL_PREVIEW === "1"/);
   assert.match(origin, /LOCALHOST_FORBIDDEN/);
   assert.match(auth, /\.\.\.authRuntimeDefaults\(\)/);
+  assert.match(auth, /DrizzleAdapter\(db as never, authAdapterTables\(\) as never\)/);
+  assert.match(sharedAuthConfig, /from "@flamenode\/db\/schema"/);
+  assert.match(sharedAuthConfig, /export function authAdapterTables\(\)/);
+  assert.doesNotMatch(auth, /usersTable: users as never/);
   assert.match(sharedAuthConfig, /trustHost:\s*true/);
   assert.match(sharedAuthConfig, /strategy:\s*"database"/);
   assert.match(sharedAuthConfig, /signIn:\s*"\/entry"/);

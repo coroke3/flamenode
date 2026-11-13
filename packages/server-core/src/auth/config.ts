@@ -1,3 +1,5 @@
+import { accounts, sessions, users, verificationTokens } from "@flamenode/db/schema";
+
 /**
  * MIG-0802 U01 (partial): Next-independent session callback used by the
  * CURRENT Auth.js bridge and the future Hono @auth/core config.
@@ -98,5 +100,23 @@ export function authRuntimeDefaults() {
     trustHost: true as const,
     session: { strategy: "database" as const },
     pages: { signIn: "/entry" as const, error: "/entry" as const },
+  };
+}
+
+/**
+ * MIG-0802 U01: Auth.js Drizzle adapter uses the exact canonical D1 tables
+ * in BOTH CURRENT (NextAuth) and the future unmounted Hono Auth.js PoC.
+ *
+ * The old Next bridge imported these four objects via @/lib/db/schema, which
+ * re-exports the exact same references from @flamenode/db/schema. Keep this
+ * mapping centralized; a copied/fallback schema risks separate tables,
+ * mismatched columns and account-linking bypasses.
+ */
+export function authAdapterTables() {
+  return {
+    usersTable: users,
+    accountsTable: accounts,
+    sessionsTable: sessions,
+    verificationTokensTable: verificationTokens,
   };
 }
