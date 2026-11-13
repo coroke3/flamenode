@@ -62,3 +62,25 @@ export function resolveAuthRuntimeCredentials(input: {
   }
   return { secret, discordClientId, discordClientSecret };
 }
+
+/**
+ * U01 (partial): Discord OAuth provider options shared between CURRENT
+ * NextAuth and a future unmounted @auth/core host.
+ *
+ * Keep the explicit authorization URL: supplying params without url causes
+ * Auth.js to attempt OIDC discovery instead of Discord's OAuth endpoint.
+ * The email-linking policy is CURRENT behavior, not a new authorization grant.
+ */
+export function discordProviderOptions(
+  credentials: Pick<AuthRuntimeCredentials, "discordClientId" | "discordClientSecret">,
+) {
+  return {
+    clientId: credentials.discordClientId,
+    clientSecret: credentials.discordClientSecret,
+    allowDangerousEmailAccountLinking: true,
+    authorization: {
+      url: "https://discord.com/api/oauth2/authorize",
+      params: { scope: "identify email" },
+    },
+  };
+}
