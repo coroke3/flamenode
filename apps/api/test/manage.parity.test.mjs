@@ -514,7 +514,12 @@ if (runUnderRootTsx(import.meta.url)) {
       authSecret: "test-secret",
     };
     const before = 1_800_000_059;
+    const sameBucket = before - 1;
     const after = before + 1;
+    const currentSameBucket = await resolveManageXIconUrl({
+      ...input, options: { now: sameBucket },
+    });
+    const honoSameBucket = await honoIconUrl({ ...input, now: sameBucket });
     const currentBefore = await resolveManageXIconUrl({
       ...input, options: { now: before },
     });
@@ -524,10 +529,13 @@ if (runUnderRootTsx(import.meta.url)) {
     });
     const honoAfter = await honoIconUrl({ ...input, now: after });
 
+    assert.equal(currentSameBucket, honoSameBucket, "CURRENT/Hono parity earlier in the same bucket");
+    assert.equal(currentSameBucket, currentBefore, "CURRENT signs identically within a minute");
+    assert.equal(honoSameBucket, honoBefore, "Hono signs identically within a minute");
     assert.equal(currentBefore, honoBefore, "signature and expiry parity before boundary");
     assert.equal(currentAfter, honoAfter, "signature and expiry parity after boundary");
     assert.notEqual(currentBefore, currentAfter, "a new minute bucket intentionally rotates the signature");
-    for (const [url, now] of [[currentBefore, before], [currentAfter, after]]) {
+    for (const [url, now] of [[currentSameBucket, sameBucket], [currentBefore, before], [currentAfter, after]]) {
       assert.ok(url);
       const signed = new URL(url, "https://x.test");
       assert.equal(
