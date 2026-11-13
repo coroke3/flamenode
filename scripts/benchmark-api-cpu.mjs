@@ -71,7 +71,17 @@ export function judge(maxMs, budgetMs, { resolutionMs = 0, noiseMs = 0, kind = "
   return "INCONCLUSIVE";
 }
 
-/** Group raw samples {kind, cpuMs, status, bytes, d1} into per-kind summaries. */
+/** Number of rows delivered to application code; NOT Cloudflare D1 billed rows_read. */
+export function returnedRows(mode, value) {
+  if (mode === "first") return value == null ? 0 : 1;
+  if (mode === "raw") return Array.isArray(value) ? value.length : 0;
+  if (mode === "batch") return Array.isArray(value)
+    ? value.reduce((sum, result) => sum + (Array.isArray(result?.results) ? result.results.length : 0), 0)
+    : 0;
+  return Array.isArray(value?.results) ? value.results.length : 0;
+}
+
+/** Group raw samples {kind, cpuMs, status, bytes, d1, d1RowsReturned, d1PerQueryRows} into per-kind summaries. */
 export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) {
   const budget = BUDGETS_MS[runtimeClass];
   const budgetKind = runtimeClass === "S4" ? "le" : "lt";
@@ -85,6 +95,16 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
       unexpectedStatus: rows.filter((r) => r.unexpected).length,
       maxBytes: rows.reduce((m, r) => Math.max(m, r.bytes ?? 0), 0),
       maxD1Statements: rows.reduce((m, r) => Math.max(m, r.d1 ?? 0), 0),
+      // Returned-result proxy; missing counts stay unknown, never become zero.
+      d1RowsReturned: (() => {
+        const counts = rows.map((r) => r.d1RowsReturned)
+          .filter((v) => Number.isSafeInteger(v) && v >= 0).sort((a, b) => a - b);
+        return counts.length ? {
+          min: counts[0], median: percentile(counts, 50),
+          max: counts[counts.length - 1], total: counts.reduce((a, b) => a + b, 0),
+        } : null;
+      })(),
+      d1PerQueryRowsBySample: rows.map((r) => r.d1PerQueryRows ?? null),
     };
   }
   const maxima = Object.values(kinds).map((k) => k.max).filter((v) => v != null);
@@ -141,14 +161,14 @@ export function formatMs(v, digits) {
 
 export function renderMarkdown(results, { digits, label }) {
   const lines = [
-    `| scenario | class | kind | n | p50 | p95 | p99 | max (ms) | D1 stmts | bytes | unexpected status |`,
-    `| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |`,
+    `| scenario | class | kind | n | p50 | p95 | p99 | max (ms) | D1 stmts | D1 returned rows proxy (min/med/max/total) | bytes | unexpected status |`,
+    `| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |`,
   ];
   for (const r of results) {
     for (const kind of Object.keys(r.agg.kinds)) {
       const k = r.agg.kinds[kind];
       lines.push(
-        `| ${r.id} ${r.title} | ${r.runtimeClass} | ${kind} | ${k.n} | ${formatMs(k.p50, digits)} | ${formatMs(k.p95, digits)} | ${formatMs(k.p99, digits)} | ${formatMs(k.max, digits)} | ${k.maxD1Statements} | ${k.maxBytes} | ${k.unexpectedStatus} |`,
+        `| ${r.id} ${r.title} | ${r.runtimeClass} | ${kind} | ${k.n} | ${formatMs(k.p50, digits)} | ${formatMs(k.p95, digits)} | ${formatMs(k.p99, digits)} | ${formatMs(k.max, digits)} | ${k.maxD1Statements} | ${k.d1RowsReturned ? [k.d1RowsReturned.min, k.d1RowsReturned.median, k.d1RowsReturned.max, k.d1RowsReturned.total].join("/") : "-"} | ${k.maxBytes} | ${k.unexpectedStatus} |`,
       );
     }
   }
@@ -1015,15 +1035,23 @@ export async function createInprocTarget(plan) {
   fs.rmSync(mig.workspace, { recursive: true, force: true });
 
   let stmts = 0;
+  let d1RowsReturned = 0;
+  let d1PerQueryRows = [];
+  const countD1 = (mode, value) => {
+    const n = returnedRows(mode, value);
+    d1RowsReturned += n;
+    d1PerQueryRows.push(n);
+    return value;
+  };
   let rec = null; // when set, every D1/R2 result is appended in call order (replay script)
   const keep = (v) => { if (rec) rec.push(v); return v; };
   const make = (sql, params) => ({
     _sql: sql, _params: params,
-    first: async () => keep(sqlite.prepare(sql).get(...params) ?? null),
-    all: async () => keep({ results: sqlite.prepare(sql).all(...params) }),
-    run: async () => keep({ results: sqlite.prepare(sql).all(...params) }),
+    first: async () => keep(countD1("first", sqlite.prepare(sql).get(...params) ?? null)),
+    all: async () => keep(countD1("all", { results: sqlite.prepare(sql).all(...params) })),
+    run: async () => keep(countD1("run", { results: sqlite.prepare(sql).all(...params) })),
     // drizzle's D1 driver reads rows as arrays through raw().
-    raw: async () => { const st = sqlite.prepare(sql); st.setReturnArrays(true); try { return keep(st.all(...params)); } finally { st.setReturnArrays(false); } },
+    raw: async () => { const st = sqlite.prepare(sql); st.setReturnArrays(true); try { return keep(countD1("raw", st.all(...params))); } finally { st.setReturnArrays(false); } },
   });
   const db = {
     // D1 allows first()/all()/run()/raw() straight on prepare() (no bind); count a statement on either path.
@@ -1041,6 +1069,7 @@ export async function createInprocTarget(plan) {
       try {
         const out = list.map((s) => ({ results: sqlite.prepare(s._sql).all(...s._params) }));
         sqlite.exec("COMMIT");
+        countD1("batch", out);
         return keep(out);
       } catch (e) { sqlite.exec("ROLLBACK"); throw e; }
     },
@@ -1066,6 +1095,8 @@ export async function createInprocTarget(plan) {
   const fetchOnce = async (spec) => {
     const url = `http://bench.local${spec.path}`;
     stmts = 0;
+    d1RowsReturned = 0;
+    d1PerQueryRows = [];
     const headers = new Headers(spec.headers ?? {});
     const before = performance.now();
     let res;
@@ -1085,7 +1116,7 @@ export async function createInprocTarget(plan) {
     } finally { globalThis.fetch = realFetch; }
     const cpuMs = performance.now() - before;
     const buf = await res.arrayBuffer();
-    return { status: res.status, bytes: buf.byteLength, cpuMs, d1: stmts, debug: process.env.BENCH_DEBUG ? Buffer.from(buf).toString("utf8").slice(0, 240) : undefined };
+    return { status: res.status, bytes: buf.byteLength, cpuMs, d1: stmts, d1RowsReturned, d1PerQueryRows: [...d1PerQueryRows], debug: process.env.BENCH_DEBUG ? Buffer.from(buf).toString("utf8").slice(0, 240) : undefined };
   };
 
   return {
@@ -1103,7 +1134,7 @@ export async function createInprocTarget(plan) {
       rec = [];
       try {
         const r = await fetchOnce(spec);
-        return { script: rec, status: r.status, d1: r.d1 };
+        return { script: rec, status: r.status, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows };
       } finally { rec = null; }
     },
     close: async () => { sqlite.close(); },
@@ -1440,7 +1471,7 @@ function tag(prefix, n) { return `${prefix}${n.toString(36)}`; }
 async function runScenario(target, sc, opts, state) {
   const samples = [];
   const note = (kind, spec, r, cpuMs) => samples.push({
-    kind, cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, cacheState: r.cacheState ?? null,
+    kind, cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, cacheState: r.cacheState ?? null,
     unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache) || r.bodyReuseMismatch === true,
   });
   for (const kind of ["normal", "limit", "invalid"]) {
@@ -1518,7 +1549,7 @@ async function runCold(target, scenarios, opts) {
     const order = plan.map((_, n) => plan[(n + round) % plan.length]);
     for (const { sc, spec, rec } of order) {
       const r = await target.run(spec, rec);
-      coldSamples.get(sc.id).push({ kind: "cold", cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true });
+      coldSamples.get(sc.id).push({ kind: "cold", cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true });
     }
     process.stderr.write(`cold round ${round + 1}/${opts.coldSamples}\r`);
   }
