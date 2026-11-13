@@ -51,10 +51,18 @@ export function planEventCreateAtomicWrite(input: {
 }): EventCreateAtomicWritePlan {
   const { db, eventRow, ownerRow, questionRows, questionChunks, queue, actorUserId } = input;
   const bad = (): EventCreateAtomicWritePlan => ({ ok: false, message: EVENT_CREATE_INVALID_PLAN });
+  // CURRENT createEvent always disables the public export API on creation
+  // and creates one publicly listed, fixed-role owner without extra grants.
+  // Reject a malformed future Hono adapter instead of silently increasing
+  // publication or owner permissions in its first atomic D1 batch.
   if (input.hasRenameTombstone || !eventRow.id || !ownerRow.id ||
+      eventRow.public_api_enabled !== 0 ||
       ownerRow.event_id !== eventRow.id || !actorUserId ||
       ownerRow.approved_by_auth_user_id !== actorUserId ||
-      ownerRow.permission_preset !== "owner" || !ownerRow.x_user_id ||
+      ownerRow.permission_preset !== "owner" ||
+      ownerRow.custom_permission_keys_json !== null ||
+      ownerRow.is_public !== 1 ||
+      ownerRow.public_role_label !== "主催" || !ownerRow.x_user_id ||
       questionRows.length > MAX_EVENT_CREATE_QUESTIONS ||
       queue.statements.length !== queue.expectedChanges.length) return bad();
 
