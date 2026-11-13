@@ -517,7 +517,7 @@ test("MIG-0652 U02 atomic create: source keeps unmounted route and no premature 
   assert.match(core, /preMutationAssertionCount: preMutationAssertions.length/);
   assert.match(core, /approval_status/);
   assert.match(core, /xUsers\.x_name\} = \$\{ownerRow\.display_name/);
-  assert.match(core, /EVENT_ID_PATTERN\\.test\\(eventRow\\.id\\)/);
+  assert.ok(core.includes("EVENT_ID_PATTERN.test(eventRow.id)"));
   assert.doesNotMatch(core, /staticRebuildWakeSource:/);
   assert.match(source, /const mutationStatements = \[/);
   assert.match(source, /context: "event-create:owner"/);
