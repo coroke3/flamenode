@@ -226,7 +226,7 @@ export async function handleLiveApiGet(
         "Cache-Control": LIVE_API_CACHE_CONTROL,
       },
     });
-  } catch (err) {
+  } catch {
     // D1/provider exceptions can include private SQL and request identifiers.
     // Do not serialize untrusted exception objects into persistent logs.
     console.error("[live-api] GET failed");
