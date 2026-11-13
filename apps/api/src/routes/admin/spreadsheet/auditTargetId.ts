@@ -58,9 +58,16 @@ export function buildSpreadsheetAuditIdentityV1(
  * Return ordered pairs (not an object) to avoid prototype-key ambiguity.
  */
 export function parseSpreadsheetAuditIdentityV1(
-  identity: { context: string | null; target_id: string },
+  identity: unknown,
 ): SpreadsheetAuditPkParts | null {
-  if (identity.context !== SPREADSHEET_AUDIT_PK_V1_CONTEXT ||
+  // D1/HTTP audit rows are runtime data, not TypeScript objects. Reject
+  // malformed context/target_id values without throwing or mistaking a
+  // forged legacy ID for the future V1 format.
+  if (!identity || typeof identity !== "object" ||
+      !("context" in identity) ||
+      identity.context !== SPREADSHEET_AUDIT_PK_V1_CONTEXT ||
+      !("target_id" in identity) ||
+      typeof identity.target_id !== "string" ||
       !identity.target_id.startsWith(SPREADSHEET_AUDIT_PK_V1_PREFIX)) {
     return null;
   }
