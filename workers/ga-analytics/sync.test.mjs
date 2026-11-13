@@ -1076,8 +1076,14 @@ test("Issue #653: GA4 HTTP failure removes revoked R2 rows using current D1 publ
 test("Issue #653: GA4 failure preserves fully public last-good R2 without extra PUT", async () => {
   const previous = JSON.stringify({
     schema_version: 1, generated_at: 1_700_000_000,
-    items: [{ id: "video-a", title: "A", status: "public", rank: 1,
-      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4 }],
+    items: [{
+      id: "video-a", title: "A", youtube_video_id: "yt-a",
+      display_name: "creator", icon_url: null,
+      primary_event_id: null, primary_event_title: null,
+      scheduled_time: 1_700_000_000, status: "public", rank: 1,
+      video_id: "video-a", views_2d: 1, views_5d: 2,
+      views_7d: 3, views_30d: 4,
+    }],
   });
   let puts = 0;
   let gets = 0;
@@ -1131,5 +1137,72 @@ test("Issue #653: revoked-only or malformed old R2 is cleared on GA4 failure", a
       assert.equal(output?.schema_version, 1);
       assert.deepEqual(output?.items, []);
     }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("Issue #653: GA4 failure removes now-private event title for an otherwise public video", async () => {
+  const old = JSON.stringify({
+    schema_version: 1, generated_at: 1_700_000_000,
+    items: [{
+      id: "video-a", title: "A", youtube_video_id: "yt-a",
+      display_name: "creator", icon_url: null, primary_event_id: "private-event",
+      primary_event_title: "Formerly public event", scheduled_time: 1_700_000_000,
+      status: "public", rank: 1, video_id: "video-a",
+      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+    }],
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("GA4 unavailable", { status: 500 });
+  let putBody = null;
+  const env = enabledGa4Env({
+    KV: { async get() {
+      return JSON.stringify({ access_token: "cached",
+        expires_at: Math.floor(Date.now() / 1000) + 3600 });
+    } },
+    R2: {
+      async get() { return { async text() { return old; } }; },
+      async put(key, body) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        putBody = JSON.parse(String(body));
+      },
+    },
+  });
+  try {
+    await assert.rejects(() => syncGa4Trending(env), /ga4_report_http_500/);
+    assert.equal(putBody?.items.length, 1);
+    assert.equal(putBody.items[0].id, "video-a");
+    assert.equal(putBody.items[0].primary_event_id, null);
+    assert.equal(putBody.items[0].primary_event_title, null);
+    assert.equal(JSON.stringify(putBody).includes("Formerly public event"), false);
+    assert.equal(putBody.generated_at, 1_700_000_000);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("Issue #653: GA4 invalid JSON also scrubs old private rows", async () => {
+  const old = JSON.stringify({
+    schema_version: 1, generated_at: 1_700_000_000,
+    items: [{ id: "private-id", title: "Revoked", status: "public",
+      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4 }],
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response("{invalid JSON", { status: 200, headers: { "content-type": "application/json" } });
+  let output = null;
+  const env = enabledGa4Env({
+    KV: { async get() {
+      return JSON.stringify({ access_token: "cached",
+        expires_at: Math.floor(Date.now() / 1000) + 3600 });
+    } },
+    R2: {
+      async get() { return { async text() { return old; } }; },
+      async put(key, body) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        output = JSON.parse(String(body));
+      },
+    },
+  });
+  try {
+    await assert.rejects(() => syncGa4Trending(env), /ga4_report_invalid_json/);
+    assert.deepEqual(output?.items, []);
   } finally { globalThis.fetch = originalFetch; }
 });
