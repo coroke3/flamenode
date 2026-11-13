@@ -229,7 +229,7 @@ if (!underTsx) {
     assert.equal(batch.length, 8);
     assert.equal(norm(batch[2].sql), norm(expected.sql));
     assert.deepEqual(batch[2].params, expected.params);
-    assert.match(norm(batch[4].sql), /^UPDATE public_build_state SET requested_at = MAX\(requested_at, \?\) WHERE id = 1$/);
+    assert.match(norm(batch[4].sql), /^UPDATE public_build_state SET requested_at = MAX\(requested_at \+ 1, last_hook_at \+ 1, \?\) WHERE id = 1$/);
     assert.deepEqual(batch[4].params, [NOW_MS]);
     assert.equal(norm(batch[5].sql), norm(batch[3].sql));
     assert.deepEqual(batch[5].params, [1]);
