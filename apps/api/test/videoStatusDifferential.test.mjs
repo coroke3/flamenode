@@ -175,7 +175,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // The R2 bucket below implements real CAS precommit on the shared Hono
   // manifest adapter. This is still not a live Cloudflare binding, and does
   // not replace complete CURRENT Action/HTTP/authorization parity.
-  async function executeAuditedStatus(nextStatus, useCurrent) {
+  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false) {
     const sqlite = createSqlite();
     seed(sqlite);
     const d1 = createVideoStatusD1(sqlite);
@@ -204,7 +204,8 @@ if (runUnderRootTsx(import.meta.url)) {
           } : null;
         },
         async put(key, value, options) {
-          events.push(["r2.put", key]);
+          events.push(["r2.put", key, options?.onlyIf instanceof Headers
+            ? "create-if-absent" : options?.onlyIf?.etagMatches ?? null]);
           const current = objects.get(key);
           const condition = options?.onlyIf;
           if (condition instanceof Headers &&
@@ -231,6 +232,11 @@ if (runUnderRootTsx(import.meta.url)) {
       const transition = useCurrent
         ? await planCurrent(db, input)
         : await planShared(db, input, transitionHost);
+      if (forceStaleCas) {
+        // A competing write happens after planning and before the atomic CAS.
+        sqlite.prepare("UPDATE videos SET updated_at = ? WHERE id = ?")
+          .run(2_000, "vid-1");
+      }
       const auditedHost = createVideoVisibilityStatusMutationHost({
         env: { BUCKET: bucket, NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL },
         get(key) {
@@ -243,9 +249,14 @@ if (runUnderRootTsx(import.meta.url)) {
         db, videoId: "vid-1", requestedStatus: nextStatus, transition,
         reason: "audited differential", logTag: "status-differential",
       }, auditedHost);
-      assert.deepEqual(result, {
-        ok: true, message: "ステータスを更新しました。", pendingPublicReflection: true,
-      });
+      if (forceStaleCas) {
+        assert.equal(result.ok, false, "the stale CAS must fail");
+        assert.equal(result.retryable, true, "a D1 CAS failure is recoverable");
+      } else {
+        assert.deepEqual(result, {
+          ok: true, message: "ステータスを更新しました。", pendingPublicReflection: true,
+        });
+      }
       return {
         result,
         events,
@@ -298,6 +309,25 @@ if (runUnderRootTsx(import.meta.url)) {
       ), "the R2 manifest must retain the exact D1 fence token after commit");
     });
   }
+
+  test("stale D1 CAS rolls back audit/outbox/rebuild and compensates only its R2 fence token", async () => {
+    const current = await executeAuditedStatus("private", true, true);
+    const hono = await executeAuditedStatus("private", false, true);
+    assert.deepEqual(hono, current, "CURRENT/Hono plans preserve identical rollback semantics");
+    assert.equal(current.batches, 1, "an atomic D1 batch was attempted");
+    assert.equal(current.video.visibility_status, "public");
+    assert.equal(current.video.updated_at, 2000, "the competing update is untouched");
+    assert.deepEqual(current.fences, [], "failed CAS does not commit D1 fence");
+    assert.deepEqual(current.audits, [], "strict audit must not survive a failed CAS");
+    assert.deepEqual(current.notifications, [], "notification outbox must roll back");
+    assert.deepEqual(current.queue, [], "rebuild queue must roll back");
+    assert.deepEqual(current.manifest?.entities, [],
+      "R2 blocker with the original token is removed after failed D1 mutation");
+    const puts = current.events.filter((event) => event[0] === "r2.put");
+    assert.equal(puts.length, 2, "one conditional precommit and one compensated release");
+    assert.equal(puts[0][2], "create-if-absent", "first R2 write is never unconditional");
+    assert.equal(puts[1][2], "etag-1", "compensation releases by exact R2 CAS etag");
+  });
 
   for (const nextStatus of ["private", "voided"]) {
     test(`CURRENT and Hono transition planners match SQLite mutation/audit/outbox plans for ${nextStatus}`, async () => {
