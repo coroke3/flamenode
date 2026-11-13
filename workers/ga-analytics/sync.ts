@@ -420,7 +420,7 @@ export async function syncGa4Trending(
     // still be available even when the GA4 configuration is incomplete.
     // A failed/partial D1 read cannot authorize rewriting the old ranking.
     let privacyRewriteOnConfigFailure = false;
-    let privacyRepairError: ReturnType<typeof safeErrorSummary> | undefined;
+    let privacyRepairError: "privacy_repair_failed" | undefined;
     if (env.DB && env.R2) {
       try {
         const recent = await loadRecentListPayload(env, signal);
@@ -430,7 +430,10 @@ export async function syncGa4Trending(
         );
       } catch (error) {
         signal?.throwIfAborted();
-        privacyRepairError = safeErrorSummary(error);
+        // GA4 config is already missing; D1/R2 adapter exception messages may
+        // include SQL, bound values or signed URLs. The structured log needs
+        // only a fixed marker, never a provider-supplied diagnostic string.
+        privacyRepairError = "privacy_repair_failed";
       }
     }
     logGa4TrendingEvent({
