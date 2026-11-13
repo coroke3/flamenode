@@ -101,6 +101,59 @@ test("SA-090/091 T08: review authorization allows admin and explicitly authorize
 });
 
 
+test("SA-090/091 SEC: review DB failures deny 503 without logging provider SQL or credentials", async () => {
+  const secret = "token=private-review-secret";
+  const badDb = new Proxy({}, {
+    get(_target, property) {
+      if (property === "select") {
+        throw new Error("SELECT * FROM private_accounts " + secret);
+      }
+      return undefined;
+    },
+  });
+  let downstreamCalls = 0;
+  const app = new Hono();
+  app.use("*", async (c, next) => {
+    c.set("user", { id: "u_staff", role: "user", active_x_user_id: "x_staff" });
+    c.set("db", badDb);
+    await next();
+  });
+  app.use("*", xidLinkRequestReviewAuthorizationMiddleware);
+  app.get("/review", (c) => {
+    downstreamCalls++;
+    return c.json({ ok: true });
+  });
+  const originalError = console.error;
+  const logged = [];
+  console.error = (...args) => logged.push(args);
+  try {
+    const response = await app.request("/review");
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "時間をおいて再試行してください。",
+    });
+    assert.equal(downstreamCalls, 0, "a broken authorization query must not call the handler");
+    assert.deepEqual(logged, [["[xid] review authorization failed"]]);
+    assert.doesNotMatch(JSON.stringify(logged), /private-review-secret|private_accounts|SELECT|token=/);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("SA-090/091 SEC: downstream failures remain separate from authorization failures", async () => {
+  const app = new Hono();
+  app.onError((_error, c) => c.json({ ok: false, error: "mutation_failed" }, 502));
+  app.use("*", async (c, next) => {
+    c.set("user", { id: "u_admin", role: "admin", active_x_user_id: null });
+    await next();
+  });
+  app.use("*", xidLinkRequestReviewAuthorizationMiddleware);
+  app.get("/review", () => { throw new Error("mutation failure after permission was granted"); });
+  const response = await app.request("/review");
+  assert.equal(response.status, 502);
+  assert.deepEqual(await response.json(), { ok: false, error: "mutation_failed" });
+});
+
 test("SA-090/091 T08 middleware carries the exact authorizing X identity and denies unauthorized staff", async () => {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
