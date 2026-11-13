@@ -97,7 +97,9 @@ eventLifecycleRoutes.delete("/:eventId", costGuardMiddleware("manage_event_archi
 
     const now = Math.max(Math.floor(Date.now() / 1000), before.updated_at + 1);
     const after = { ...before, visibility_status: "private" as const, updated_at: now };
-    const visibilityTransition = planEventVisibilityTransition({
+    // The shared visibility planner may read D1 to reuse an active fence token.
+    // Resolve it before spreading statements or touching the R2 manifest.
+    const visibilityTransition = await planEventVisibilityTransition({
       db, eventId,
       previousStatus: before.visibility_status,
       nextStatus: "private",
