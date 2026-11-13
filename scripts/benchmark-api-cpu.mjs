@@ -1069,7 +1069,7 @@ export async function createInprocTarget(plan) {
       try {
         const out = list.map((s) => ({ results: sqlite.prepare(s._sql).all(...s._params) }));
         sqlite.exec("COMMIT");
-        countD1("batch", out);
+        for (const result of out) countD1("all", result);
         return keep(out);
       } catch (e) { sqlite.exec("ROLLBACK"); throw e; }
     },
@@ -1159,32 +1159,86 @@ globalThis.fetch = async () => new Response(BENCH_PNG, { headers: { "content-typ
 
 // Replay env: D1/R2 return the results recorded by the in-process run, in call order,
 // so the measured CPU is the app's own work without wrangler's local D1/R2 simulator.
+function returnedRows(mode, value) {
+  if (mode === "first") return value == null ? 0 : 1;
+  if (mode === "raw") return Array.isArray(value) ? value.length : 0;
+  if (mode === "batch") return Array.isArray(value)
+    ? value.reduce((sum, entry) => sum + (Array.isArray(entry?.results) ? entry.results.length : 0), 0)
+    : 0;
+  return Array.isArray(value?.results) ? value.results.length : 0;
+}
+
+// Count rows returned to this app by D1-compatible calls, not billed D1 rows_read.
+function rowCounters() {
+  let rowsReturned = 0;
+  const perQueryRows = [];
+  return {
+    observe(mode, value) {
+      const n = returnedRows(mode, value);
+      rowsReturned += n;
+      perQueryRows.push(n);
+      return value;
+    },
+    totals() { return { rowsReturned, perQueryRows: [...perQueryRows] }; },
+  };
+}
+
 function replayEnv(env, script) {
   let k = 0;
+  const rows = rowCounters();
   const next = () => {
     if (k >= script.length) throw new Error("bench replay script exhausted");
     return script[k++];
   };
-  const stmt = { bind: () => stmt, first: async () => next(), all: async () => next(), run: async () => next(), raw: async () => next() };
+  const stmt = {
+    bind: () => stmt,
+    first: async () => rows.observe("first", next()),
+    all: async () => rows.observe("all", next()),
+    run: async () => rows.observe("run", next()),
+    raw: async () => rows.observe("raw", next()),
+  };
   return [{
     ...env,
-    DB: { prepare: () => stmt, batch: async () => next() },
+    DB: {
+      prepare: () => stmt,
+      batch: async () => {
+        const result = next();
+        if (Array.isArray(result)) {
+          for (const entry of result) rows.observe("all", entry);
+        }
+        return result;
+      },
+    },
     BUCKET: { get: async () => { const v = next(); return v && { size: v.size, etag: v.etag, json: async () => JSON.parse(v.text), text: async () => v.text, body: null }; } },
-  }, () => k];
+  }, () => ({ statements: k, ...rows.totals() })];
 }
 
 function counting(env) {
   let n = 0;
+  const rows = rowCounters();
   const DB = env.DB;
+  const wrap = (statement) => ({
+    // D1.batch must receive native prepared objects, not the counting wrappers.
+    _benchInner: statement,
+    bind: (...params) => wrap(statement.bind(...params)),
+    first: async (...args) => rows.observe("first", await statement.first(...args)),
+    all: async (...args) => rows.observe("all", await statement.all(...args)),
+    run: async (...args) => rows.observe("run", await statement.run(...args)),
+    raw: async (...args) => rows.observe("raw", await statement.raw(...args)),
+  });
   const wrapped = {
     ...env,
     DB: {
-      prepare: (s) => { n += 1; return DB.prepare(s); },
-      batch: (list) => DB.batch(list),
-      exec: (s) => DB.exec(s),
+      prepare: (sql) => { n += 1; return wrap(DB.prepare(sql)); },
+      batch: async (list) => {
+        const result = await DB.batch(list.map((stmt) => stmt._benchInner ?? stmt));
+        for (const entry of result) rows.observe("all", entry);
+        return result;
+      },
+      exec: (sql) => DB.exec(sql),
     },
   };
-  return [wrapped, () => n];
+  return [wrapped, () => ({ statements: n, ...rows.totals() })];
 }
 
 export default {
@@ -1246,11 +1300,18 @@ export default {
       const vars = {};
       const c = { req: { url: request.url, header: (n) => request.headers.get(n) ?? undefined }, env: benchEnv, set: (k, v) => { vars[k] = v; }, header() {} };
       await sm(c, async () => {});
-      return Response.json({ state: vars.sessionState }, { headers: { "x-bench-d1": String(count()) } });
+      return Response.json({ state: vars.sessionState }, { headers: {
+        "x-bench-d1": String(count().statements),
+        "x-bench-returned-rows": String(count().rowsReturned),
+        "x-bench-query-rows": count().perQueryRows.join(","),
+      } });
     }
     const res = await app.fetch(request, benchEnv, ctx);
     const out = new Response(res.body, res);
-    out.headers.set("x-bench-d1", String(count()));
+    const d1Stats = count();
+    out.headers.set("x-bench-d1", String(d1Stats.statements));
+    out.headers.set("x-bench-returned-rows", String(d1Stats.rowsReturned));
+    out.headers.set("x-bench-query-rows", d1Stats.perQueryRows.join(","));
     return out;
   },
 };
@@ -1408,6 +1469,11 @@ async function createWranglerTarget(plan, opts) {
     if (stop.error) throw new Error(`Profiler.stop failed: ${json(stop.error)}`);
     return {
       status: res.status, bytes: buf.byteLength, d1: rec ? rec.d1 : Number(res.headers.get("x-bench-d1") ?? 0),
+      d1RowsReturned: res.headers.has("x-bench-returned-rows")
+        ? Number(res.headers.get("x-bench-returned-rows")) : null,
+      d1PerQueryRows: (res.headers.get("x-bench-query-rows") || "")
+        .split(",").filter(Boolean).map(Number),
+      replayRowsMismatch: rec ? Number(res.headers.get("x-bench-returned-rows")) !== rec.d1RowsReturned : false,
       cacheState: res.headers.get("x-flamenode-cache"),
       bodyHash: createHash("sha256").update(Buffer.from(buf)).digest("hex"),
       cpuMs: profileBusyMs(stop.result.profile),
@@ -1472,7 +1538,7 @@ async function runScenario(target, sc, opts, state) {
   const samples = [];
   const note = (kind, spec, r, cpuMs) => samples.push({
     kind, cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, cacheState: r.cacheState ?? null,
-    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache) || r.bodyReuseMismatch === true,
+    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache) || r.bodyReuseMismatch === true,
   });
   for (const kind of ["normal", "limit", "invalid"]) {
     const pk = sc.prepareKind?.[kind];
@@ -1549,7 +1615,7 @@ async function runCold(target, scenarios, opts) {
     const order = plan.map((_, n) => plan[(n + round) % plan.length]);
     for (const { sc, spec, rec } of order) {
       const r = await target.run(spec, rec);
-      coldSamples.get(sc.id).push({ kind: "cold", cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true });
+      coldSamples.get(sc.id).push({ kind: "cold", cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true });
     }
     process.stderr.write(`cold round ${round + 1}/${opts.coldSamples}\r`);
   }
