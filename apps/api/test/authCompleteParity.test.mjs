@@ -122,7 +122,6 @@ if (runTestWithTsx(import.meta.url)) {
       });
       assert.equal(response.status, 303);
       assertUncachedAuthRedirect(response);
-    assertUncachedAuthRedirect(response);
       assert.equal(locationPath(response), expected);
     }
   });
@@ -141,7 +140,6 @@ if (runTestWithTsx(import.meta.url)) {
       });
       assert.equal(response.status, 303);
       assertUncachedAuthRedirect(response);
-    assertUncachedAuthRedirect(response);
       assert.equal(locationPath(response), "/dashboard", candidate);
     }
   });
