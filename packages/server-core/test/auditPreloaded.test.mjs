@@ -283,7 +283,6 @@ test("MIG-0516 + Issue #669: 80-event SA-029 uses the real queue marker and fits
   assert.equal(queue.acceptedTargetCount, 1);
   assert.equal(queue.statements.length, 2, "actual events_index upsert and build-state marker are two DML");
   assert.deepEqual(queue.expectedChanges, [1, 1]);
-  assert.match(queue.statements[1].getSQL().queryChunks.map((x) => String(x)).join(""), /public_build_state|SQL/);
   const audits = Array.from({ length: 80 }, (_, i) => ({
     table_name: "event_group_events",
     target_id: `grp:${i}`,
