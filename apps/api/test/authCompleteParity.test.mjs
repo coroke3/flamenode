@@ -35,6 +35,12 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(target.origin, origin, "redirect cannot escape configured origin");
     return target.pathname + target.search + target.hash;
   };
+  // Auth-complete's 303 is derived from Cookie/session/ban state, unlike a static redirect.
+  // A cache must never reuse the location for a different authenticated user.
+  const assertUncachedAuthRedirect = (response) => {
+    assert.match(response.headers.get("cache-control") ?? "", /\bno-store\b/i);
+    assert.match(response.headers.get("vary") ?? "", /(?:^|,)\s*cookie\s*(?:,|$)/i);
+  };
   const input = (d1) => ({
     d1,
     authSecret: AUTH_BASELINE_ENV.AUTH_SECRET,
@@ -100,6 +106,7 @@ if (runTestWithTsx(import.meta.url)) {
       headers: { cookie, host: "attacker.invalid", "x-forwarded-host": "attacker.invalid" },
     });
     assert.equal(response.status, 303);
+    assertUncachedAuthRedirect(response);
     assert.equal(locationPath(response), "/manage/events?tab=1");
   });
 
@@ -114,6 +121,8 @@ if (runTestWithTsx(import.meta.url)) {
         headers: { cookie: BASELINE_COOKIES.sessionToken.name + "=" + token },
       });
       assert.equal(response.status, 303);
+      assertUncachedAuthRedirect(response);
+    assertUncachedAuthRedirect(response);
       assert.equal(locationPath(response), expected);
     }
   });
@@ -131,6 +140,8 @@ if (runTestWithTsx(import.meta.url)) {
         headers: { cookie },
       });
       assert.equal(response.status, 303);
+      assertUncachedAuthRedirect(response);
+    assertUncachedAuthRedirect(response);
       assert.equal(locationPath(response), "/dashboard", candidate);
     }
   });
@@ -145,6 +156,7 @@ if (runTestWithTsx(import.meta.url)) {
       headers: { cookie: BASELINE_COOKIES.sessionToken.name + "=" + SESSIONS.valid.sessionToken },
     });
     assert.equal(response.status, 303);
+    assertUncachedAuthRedirect(response);
     assert.equal(locationPath(response), "/entry?error=auth_temporarily_unavailable");
     assert.equal(unmountedAuthCompleteDestination({ kind: "unavailable", attempts: 4 }, "/dashboard"),
       "/entry?error=auth_temporarily_unavailable");
