@@ -101,6 +101,30 @@ test("MIG-0652 U02 atomic create: missing approved actor linkage and mismatched 
   for (const change of invalid) assert.deepEqual(makePlan(change), { ok: false, message: EVENT_CREATE_INVALID_PLAN });
 });
 
+test("MIG-0652 U02 atomic create: initial public API and owner grants cannot be escalated", () => {
+  // CURRENT createEvent fixes public_api_enabled=0 and initial owner fields.
+  // Even a future Hono adapter with a malformed "validated" row must never
+  // silently enable event export or grant extra owner permissions.
+  const invalid = [
+    { eventRow: { ...event, public_api_enabled: 1 } },
+    { eventRow: { ...event, public_api_enabled: undefined } },
+    { ownerRow: { ...owner, is_public: 0 } },
+    { ownerRow: { ...owner, public_role_label: "admin" } },
+    { ownerRow: { ...owner, custom_permission_keys_json: '["admin_manage_users"]' } },
+    { ownerRow: { ...owner, custom_permission_keys_json: undefined } },
+  ];
+  for (const changed of invalid) {
+    assert.deepEqual(makePlan(changed),
+      { ok: false, message: EVENT_CREATE_INVALID_PLAN });
+  }
+  // Public event creation is still valid; it must *not* auto-enable public API.
+  const publicPlan = makePlan({ eventRow: { ...event, visibility_status: "public" } });
+  assert.equal(publicPlan.ok, true);
+  assert.equal(publicPlan.audits[0].after.public_api_enabled, 0);
+  assert.equal(publicPlan.audits[1].after.permission_preset, "owner");
+  assert.equal(publicPlan.audits[1].after.public_role_label, "主催");
+});
+
 test("MIG-0652 U02 atomic create: forged tombstone reuse cannot bypass R2 precommit", () => {
   assert.deepEqual(makePlan({ hasRenameTombstone: true }),
     { ok: false, message: EVENT_CREATE_INVALID_PLAN });
@@ -152,4 +176,7 @@ test("MIG-0652 U02 atomic create: source keeps unmounted route and no premature 
   assert.match(source, /const mutationStatements = \[/);
   assert.match(source, /context: "event-create:owner"/);
   assert.match(source, /restore_strategy: "delete_created"/);
+  assert.match(source, /public_api_enabled: 0/);
+  assert.match(core, /eventRow\.public_api_enabled !== 0/);
+  assert.match(core, /ownerRow\.custom_permission_keys_json !== null/);
 });
