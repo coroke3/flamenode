@@ -64,7 +64,7 @@ function logEventVisibilityCompensationFailure(
  * に追加する。再公開時も一度 blocked として manifest に載せ、event artifact
  * の生成が完了するまで古い成果物を公開しない。
  */
-export function planEventVisibilityTransition(input: {
+export async function planEventVisibilityTransition(input: {
   db: ServerCoreDb;
   eventId: string;
   previousStatus: EventVisibilityStatus;
@@ -72,7 +72,7 @@ export function planEventVisibilityTransition(input: {
   actorUserId: string;
   reason?: string | null;
   now: number;
-}): EventVisibilityTransitionPlan {
+}): Promise<EventVisibilityTransitionPlan> {
   const fence = planEventVisibilityFence(input);
   if (!fence) {
     return {
@@ -83,7 +83,14 @@ export function planEventVisibilityTransition(input: {
     };
   }
 
-  const fenceToken = generateId("vf");
+  // Existing blocked/release_pending D1 fence already owns the R2 manifest
+  // token. Reuse it or the precommit's foreign-token protection would also
+  // reject a legitimate private -> public transition after a prior block.
+  const existing = await getPublicVisibilityFence(input.db, "event", input.eventId);
+  const reusableToken = existing &&
+    (existing.state === "blocked" || existing.state === "release_pending")
+    ? existing.fence_token : null;
+  const fenceToken = reusableToken || generateId("vf");
   const { state, depublicizedFromPublic } = fence;
 
   return {

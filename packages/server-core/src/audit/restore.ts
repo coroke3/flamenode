@@ -463,7 +463,7 @@ export async function restoreAuditLog(
     if (log.table_name === "events") {
       const previousStatus = String(current?.visibility_status ?? "");
       const nextStatus = String(target.visibility_status ?? "");
-      const transition = planEventVisibilityTransition({
+      const transition = await planEventVisibilityTransition({
         db,
         eventId: log.target_id,
         previousStatus: previousStatus as "private" | "public",

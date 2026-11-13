@@ -1219,7 +1219,7 @@ async function applyEvent(
     snapshotDigest(nextStaff),
   ]);
   const visibilityTransition = existing
-    ? planEventVisibilityTransition({
+    ? await planEventVisibilityTransition({
         db,
         eventId: event.id,
         previousStatus: existing.visibility_status,

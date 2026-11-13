@@ -3137,7 +3137,7 @@
           "expectedMutationChanges": [
             1
           ],
-          "fenceToken": "vf_00000000-0000-4000-8000-000000000002",
+          "fenceToken": "vf_00000000-0000-4000-8000-000000000001",
           "depublicizedFromPublic": false
         },
         "draft_to_archived": {
@@ -3145,7 +3145,7 @@
           "expectedMutationChanges": [
             1
           ],
-          "fenceToken": "vf_00000000-0000-4000-8000-000000000003",
+          "fenceToken": "vf_00000000-0000-4000-8000-000000000001",
           "depublicizedFromPublic": false
         },
         "unchanged": {
@@ -3158,6 +3158,15 @@
     },
     "log": [
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "batch",
         "statements": [
           {
@@ -3192,6 +3201,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "batch",
         "statements": [
           {
@@ -3199,7 +3217,7 @@
             "params": [
               "event",
               "evt-1",
-              "vf_00000000-0000-4000-8000-000000000002",
+              "vf_00000000-0000-4000-8000-000000000001",
               "release_pending",
               "r",
               null,
@@ -3207,7 +3225,7 @@
               1760000100,
               "u-actor",
               1760000100,
-              "vf_00000000-0000-4000-8000-000000000002",
+              "vf_00000000-0000-4000-8000-000000000001",
               "release_pending",
               "r",
               null,
@@ -3226,6 +3244,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "batch",
         "statements": [
           {
@@ -3233,7 +3260,7 @@
             "params": [
               "event",
               "evt-1",
-              "vf_00000000-0000-4000-8000-000000000003",
+              "vf_00000000-0000-4000-8000-000000000001",
               "blocked",
               "r",
               null,
@@ -3241,7 +3268,7 @@
               null,
               "u-actor",
               1760000100,
-              "vf_00000000-0000-4000-8000-000000000003",
+              "vf_00000000-0000-4000-8000-000000000001",
               "blocked",
               "r",
               null,

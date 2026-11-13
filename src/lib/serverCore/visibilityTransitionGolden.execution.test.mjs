@@ -811,7 +811,11 @@ if (runTestWithTsx(import.meta.url)) {
           ["draft_to_archived", "draft", "archived"],
           ["unchanged", "public", "public"],
         ]) {
-          const plan = eventTransition.planEventVisibilityTransition({ ...base, previousStatus, nextStatus });
+          const plan = await eventTransition.planEventVisibilityTransition({ ...base, previousStatus, nextStatus });
+          if (key === "private_to_public" || key === "draft_to_archived") {
+            assert.equal(plan.fenceToken, out.public_to_private.fenceToken,
+              "re-publish and repeated block preserve the D1/R2 fence token");
+          }
           out[key] = summarizePlan(plan);
           if (plan.mutationStatements.length > 0) await exec(db, plan.mutationStatements);
         }
