@@ -9,7 +9,7 @@ const source = await readFile(
 
 test("live API guard converts binding failures to a private 503 response", () => {
   assert.match(source, /const NO_STORE_HEADERS = \{ \"Cache-Control\": \"no-store\" \}/);
-  assert.match(source, /try \{\s*db = getDatabase\(\);[\s\S]*?catch \(err\)/);
+  assert.match(source, /try \{\s*db = getDatabase\(\);[\s\S]*?catch \{/);
   assert.match(source, /error: \"db_unavailable\"/);
   assert.match(source, /function jsonErrorResponse\([\s\S]*?headers: NO_STORE_HEADERS/);
 });
@@ -88,6 +88,7 @@ test("CURRENT never reuses identity-bearing payloads and clears a private summar
 
 test("SEC-572: CURRENT live error logging never serializes raw provider errors or event IDs", () => {
   assert.match(source, /console\.error\("\[live-api\] GET failed"\)/);
+  assert.match(source, /console\.error\("\[live-api\] database binding unavailable"\)/);
   assert.doesNotMatch(source, /console\.error\("\[live-api\] GET failed",/);
   assert.doesNotMatch(source, /console\.error\([^\n]*eventId:\s*id/);
 });
