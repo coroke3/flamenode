@@ -18,6 +18,7 @@ import {
   planEventVisibilityTransition,
   compensateEventVisibilityFenceOnD1Failure,
 } from "@flamenode/server-core/visibility/eventTransition";
+import { D1_RESERVED_CALLER_QUERIES } from "@flamenode/server-core/audit/mutateBudget";
 import { buildEventChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import type { AppEnv } from "../env.ts";
 import { BODY_TOO_LARGE_MESSAGE, auditPreloaded, readAdminJsonBody } from "../routes/admin/body.ts";
@@ -135,13 +136,20 @@ eventLifecycleRoutes.delete("/:eventId", costGuardMiddleware("manage_event_archi
       retention_class: "long_audit" as const,
       strict: true,
     };
-    // Preserve CURRENT's conservative 18-query reserve and one-audit budget.
+    // Preserve the conservative caller reserve and explicitly charge the
+    // extra authoritative D1 fence SELECT on a public visibility boundary
+    // (the async server-core planner introduced by PR #679). Keep the same
+    // budget on both this preflight and mutateWithAudit; never undercount an
+    // R2 precommit that happens before the D1 batch.
+    const callerQueryCount = D1_RESERVED_CALLER_QUERIES +
+      (visibilityTransition.fenceToken ? 1 : 0);
     // All limit checks happen BEFORE an externally visible R2 manifest write.
     const budget = planD1AuditMutationBudget({
       mutationStatementCount: mutationStatements.length,
       mutationAssertionCount: mutationStatements.length,
       auditEntryCount: 1,
       distinctActorCount: 1,
+      callerQueryCount,
     });
     if (!budget.withinLimit) {
       return c.json({ ok: false, message: ARCHIVE_BUDGET_FAILURE }, 409);
@@ -168,6 +176,7 @@ eventLifecycleRoutes.delete("/:eventId", costGuardMiddleware("manage_event_archi
             mutationStatements,
             expectedMutationChanges,
             preloaded: auditPreloaded(c),
+            callerQueryCount,
             audits: [audit],
             // D-0603-1: Hono intentionally sends zero Queue wakes.
             // The static rebuild queue rows remain in the atomic D1 batch.
