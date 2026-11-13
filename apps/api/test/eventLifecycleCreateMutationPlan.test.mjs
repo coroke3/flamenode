@@ -14,7 +14,8 @@ import {
   EVENT_CREATE_PLAN_FAILURE,
   planEventCreateAtomicWrite,
 } from "../src/eventLifecycle/createMutationPlan.ts";
-import { createSqlite, createD1 } from "./support/personalHarness.mjs";
+import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { createSqlite, createD1, insert } from "./support/personalHarness.mjs";
 
 const db = drizzle(createD1(createSqlite()), { schema });
 const now = 1794115200;
@@ -61,6 +62,108 @@ const makePlan = (overrides = {}) => {
     ...overrides,
   });
 };
+
+/** Transactional D1 on the complete migrated schema; unlike createD1 this fake
+ * models D1 batch BEGIN/ROLLBACK and per-statement changes() assertions. */
+function createAtomicCreateHarness() {
+  const sqlite = createSqlite();
+  const stats = { batches: 0, statements: 0, maxBinds: 0 };
+  const execSql = (sqlText, params, arrays = false) => {
+    stats.statements += 1;
+    stats.maxBinds = Math.max(stats.maxBinds, params.length);
+    const stmt = sqlite.prepare(sqlText);
+    if (arrays) stmt.setReturnArrays(true);
+    try {
+      return stmt.all(...params).map(row => arrays ? [...row] : { ...row });
+    } finally {
+      if (arrays) stmt.setReturnArrays(false);
+    }
+  };
+  const prepare = (sqlText, params = []) => ({
+    bind: (...args) => prepare(sqlText, args),
+    all: async () => ({ results: execSql(sqlText, params), success: true }),
+    first: async () => execSql(sqlText, params)[0] ?? null,
+    raw: async () => execSql(sqlText, params, true),
+    _sql: sqlText, _params: params,
+  });
+  const d1 = {
+    stats, prepare: (sqlText) => prepare(sqlText),
+    batch: async (statements) => {
+      stats.batches += 1;
+      sqlite.exec("BEGIN");
+      try {
+        const result = statements.map(s => {
+          const results = execSql(s._sql, s._params);
+          const changes = sqlite.prepare("SELECT changes() AS n").get().n;
+          return { results, success: true, meta: { changes } };
+        });
+        sqlite.exec("COMMIT");
+        return result;
+      } catch (error) {
+        sqlite.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
+  return { sqlite, d1, db: drizzle(d1, { schema }) };
+}
+
+function createExecutableWritePlan(db) {
+  const questionRows = createQuestions(2);
+  const planned = planEventCreateQuestionBatch({
+    templateGeneralQuestions: questionRows,
+    submittedGeneral: { present: false }, stageQuestions: [],
+  });
+  assert.equal(planned.ok, true);
+  const plan = planEventCreateAtomicWrite({
+    db, eventRow: event, ownerRow: owner,
+    questionRows, questionChunks: planned.chunks,
+    queue: { statements: [], expectedChanges: [], acceptedTargetCount: 0 },
+    actorUserId: "u_admin", hasRenameTombstone: false,
+  });
+  assert.equal(plan.ok, true);
+  return plan;
+}
+
+test("MIG-0652 U02 SQLite T01: strict CREATE audit, event, owner and questions commit atomically", async () => {
+  const { sqlite, d1, db } = createAtomicCreateHarness();
+  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  const plan = createExecutableWritePlan(db);
+  const ids = await mutateWithAudit(db, plan);
+  assert.equal(ids.length, 4, "one strict audit per inserted source row");
+  assert.equal(d1.stats.batches, 1);
+  assert.deepEqual(
+    sqlite.prepare("SELECT id, public_api_enabled FROM events").all(),
+    [{ id: "ev_create", public_api_enabled: 0 }],
+  );
+  assert.deepEqual(
+    sqlite.prepare("SELECT id, permission_preset, custom_permission_keys_json, is_public, public_role_label FROM event_staff").all(),
+    [{ id: "es_owner", permission_preset: "owner", custom_permission_keys_json: null, is_public: 1, public_role_label: "主催" }],
+  );
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 2);
+  const auditRows = sqlite.prepare("SELECT table_name, operation, after_json FROM audit_logs ORDER BY created_at, rowid").all();
+  assert.equal(auditRows.length, 4);
+  assert.deepEqual(new Set(auditRows.map(row => row.table_name)),
+    new Set(["events", "event_staff", "event_custom_questions"]));
+  assert.ok(auditRows.every(row => row.operation === "CREATE"));
+  assert.ok(auditRows.some(row => row.table_name === "events" && JSON.parse(row.after_json).public_api_enabled === 0));
+  assert.ok(d1.stats.maxBinds <= 100, "Cloudflare D1 has a 100-bind per query ceiling");
+});
+
+test("MIG-0652 U02 SQLite T02: owner insert collision rolls back earlier event INSERT and all strict audits", async () => {
+  const { sqlite, d1, db } = createAtomicCreateHarness();
+  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  // Force the second DML (owner INSERT) to fail after the event INSERT would
+  // otherwise have succeeded. This must roll back the whole D1 batch.
+  insert(sqlite, "event_staff", owner);
+  const plan = createExecutableWritePlan(db);
+  await assert.rejects(mutateWithAudit(db, plan));
+  assert.equal(d1.stats.batches, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM events WHERE id = 'ev_create'").get().n, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff WHERE id = 'es_owner'").get().n, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
 
 test("MIG-0652 U02 atomic create: event, owner, ordered question chunks and strict audits are bundled", () => {
   const result = makePlan();
