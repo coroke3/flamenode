@@ -87,9 +87,9 @@ test("CURRENT never reuses identity-bearing payloads and clears a private summar
 });
 
 test("SEC-572: CURRENT live error logging never serializes raw provider errors or event IDs", () => {
-  assert.match(source, /console\\.error\\("\\[live-api\\] GET failed"\\)/);
-  assert.doesNotMatch(source, /console\\.error\\("\\[live-api\\] GET failed",/);
-  assert.doesNotMatch(source, /console\\.error\\([^\\n]*eventId:\\s*id/);
+  assert.match(source, /console\.error\("\[live-api\] GET failed"\)/);
+  assert.doesNotMatch(source, /console\.error\("\[live-api\] GET failed",/);
+  assert.doesNotMatch(source, /console\.error\([^\n]*eventId:\s*id/);
 });
 
 test("live API routes pass a stable route name for the cache key", async () => {
