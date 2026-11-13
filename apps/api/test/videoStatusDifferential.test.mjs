@@ -32,6 +32,10 @@ if (runUnderRootTsx(import.meta.url)) {
   const { createVideoVisibilityTransitionHost } = await import(
     "../src/visibility/videoTransitionHost.ts"
   );
+  const {
+    createVideoVisibilityStatusMutationHost,
+    executeHonoVideoVisibilityStatusMutation,
+  } = await import("../src/visibility/videoStatusMutationHost.ts");
   const { planVideoVisibilityTransition: planShared } = await import(
     "@flamenode/server-core/visibility/videoTransition"
   );
@@ -161,6 +165,108 @@ if (runUnderRootTsx(import.meta.url)) {
     } finally {
       sqlite.close();
     }
+  }
+
+  // Execute the REAL audited D1 batch from the shared status executor, as
+  // opposed to applying only the planner's video/fence SQL in isolation.
+  // R2 precommit is deliberately a seam here: this is D1 persistence parity,
+  // not yet the full CURRENT Action/R2 CAS/HTTP differential acceptance.
+  async function executeAuditedStatus(nextStatus, useCurrent) {
+    const sqlite = createSqlite();
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const realNow = Date.now;
+    const realRandomUUID = globalThis.crypto.randomUUID;
+    Date.now = () => 1_760_000_000_000;
+    let uuid = 0;
+    globalThis.crypto.randomUUID = () =>
+      `00000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`;
+    try {
+      const video = (await db.select().from(schema.videos)
+        .where(eq(schema.videos.id, "vid-1")).limit(1))[0];
+      assert.ok(video);
+      const bucket = { async get() { return null; }, async put() { return {}; } };
+      globalThis.__visibilityGoldenContext = {
+        env: { DB: d1, BUCKET: bucket, NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL },
+        ctx: { waitUntil() {} },
+      };
+      const transitionHost = createVideoVisibilityTransitionHost({
+        env: { BUCKET: bucket, NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL },
+      });
+      const input = {
+        video, nextStatus, actorUserId: "u-actor",
+        context: "admin_video_status", reason: "audited differential",
+        eventIds: ["evt-1"], notificationEventId: "evt-1",
+        now: 1_760_000_000,
+      };
+      const transition = useCurrent
+        ? await planCurrent(db, input)
+        : await planShared(db, input, transitionHost);
+      const events = [];
+      const auditedHost = {
+        ...createVideoVisibilityStatusMutationHost({
+          env: { BUCKET: bucket, NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL },
+          get(key) {
+            if (key === "auditSettings") return undefined;
+            if (key === "actorSnapshotJsonById") return {};
+            throw new Error(`unexpected audit preload: ${key}`);
+          },
+        }, { createTraceId: () => "trace-audited" }),
+        preCommit: async (entry) => { events.push(["precommit", entry.videoId, entry.fenceToken]); },
+        compensate: async () => { events.push(["compensate"]); },
+      };
+      const result = await executeHonoVideoVisibilityStatusMutation({
+        db, videoId: "vid-1", requestedStatus: nextStatus, transition,
+        reason: "audited differential", logTag: "status-differential",
+      }, auditedHost);
+      assert.deepEqual(result, {
+        ok: true, message: "ステータスを更新しました。", pendingPublicReflection: true,
+      });
+      return {
+        result,
+        events,
+        batches: d1.stats.batches,
+        video: sqlite.prepare(
+          "SELECT id, visibility_status, updated_at FROM videos WHERE id = ?"
+        ).get("vid-1"),
+        fences: sqlite.prepare(
+          "SELECT entity_type, entity_id, fence_token, state FROM public_visibility_fences ORDER BY entity_id"
+        ).all(),
+        audits: sqlite.prepare(
+          "SELECT table_name, target_id, operation, before_json, after_json, actor_snapshot_json, reason, context, retention_class FROM audit_logs ORDER BY target_id"
+        ).all(),
+        notifications: sqlite.prepare(
+          "SELECT recipient_user_id, type, payload_json, status, dedupe_key, event_id FROM notification_outbox ORDER BY id"
+        ).all(),
+        queue: sqlite.prepare(
+          "SELECT target_type, target_id, status FROM static_rebuild_queue ORDER BY target_type, target_id"
+        ).all(),
+      };
+    } finally {
+      Date.now = realNow;
+      globalThis.crypto.randomUUID = realRandomUUID;
+      delete globalThis.__visibilityGoldenContext;
+      sqlite.close();
+    }
+  }
+
+  for (const nextStatus of ["private", "voided"]) {
+    test(`CURRENT/Hono planners persist matching audited D1 video/fence/queue/outbox rows for ${nextStatus}`, async () => {
+      const current = await executeAuditedStatus(nextStatus, true);
+      const hono = await executeAuditedStatus(nextStatus, false);
+      assert.deepEqual(hono, current, "identical persisted SQLite state and audited execution");
+      assert.equal(current.video.visibility_status, nextStatus);
+      assert.equal(current.batches, 1, "one atomic D1 batch includes audit and outbox");
+      assert.equal(current.audits.length, 1, "strict audit row committed");
+      assert.ok(current.queue.length > 0, "rebuild queue committed");
+      assert.equal(current.notifications.length, nextStatus === "voided" ? 1 : 0);
+      if (nextStatus === "voided") {
+        assert.equal(current.notifications[0].type, "video_voided");
+        assert.equal(current.notifications[0].status, "pending");
+      }
+      assert.deepEqual(current.events.map((e) => e[0]), ["precommit"]);
+    });
   }
 
   for (const nextStatus of ["private", "voided"]) {
