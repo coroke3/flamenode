@@ -15,6 +15,7 @@ import {
   planEventCreateAtomicWrite,
 } from "../src/eventLifecycle/createMutationPlan.ts";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { buildEventChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { createSqlite, createD1, insert } from "./support/personalHarness.mjs";
 
 const db = drizzle(createD1(createSqlite()), { schema });
@@ -109,7 +110,7 @@ function createAtomicCreateHarness() {
   return { sqlite, d1, db: drizzle(d1, { schema }) };
 }
 
-function createExecutableWritePlan(db) {
+function createExecutableWritePlan(db, queue = { statements: [], expectedChanges: [], acceptedTargetCount: 0 }) {
   const questionRows = createQuestions(2);
   const planned = planEventCreateQuestionBatch({
     templateGeneralQuestions: questionRows,
@@ -119,7 +120,7 @@ function createExecutableWritePlan(db) {
   const plan = planEventCreateAtomicWrite({
     db, eventRow: event, ownerRow: owner,
     questionRows, questionChunks: planned.chunks,
-    queue: { statements: [], expectedChanges: [], acceptedTargetCount: 0 },
+    queue,
     actorUserId: "u_admin", hasRenameTombstone: false,
   });
   assert.equal(plan.ok, true);
@@ -165,6 +166,57 @@ test("MIG-0652 U02 SQLite T02: owner insert collision rolls back earlier event I
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff WHERE id = 'es_owner'").get().n, 1);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 0);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
+
+test("MIG-0652 U02 SQLite T03: actual event-create rebuild queue commits in the audited D1 batch", async () => {
+  const { sqlite, d1, db } = createAtomicCreateHarness();
+  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  const queue = await buildEventChangeQueueBatch(db, {
+    eventId: "ev_create", reason: "event_create", requestedByUserId: "u_admin", priority: "high",
+  });
+  assert.ok(queue.acceptedTargetCount > 0);
+  const plan = createExecutableWritePlan(db, queue);
+  assert.equal(plan.mutationStatements.length, 3 + queue.statements.length);
+  assert.equal(plan.expectedMutationChanges.length, plan.mutationStatements.length);
+  assert.equal(plan.budget.withinLimit, true);
+  await mutateWithAudit(db, plan);
+
+  assert.equal(d1.stats.batches, 1, "all CREATE and Queue statements share one audited D1 batch");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM events").get().n, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff").get().n, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+  const queued = sqlite.prepare("SELECT target_id, reason, status FROM static_rebuild_queue").all();
+  assert.equal(queued.length, queue.acceptedTargetCount);
+  assert.ok(queued.some(row => row.target_id === "ev_create"));
+  assert.ok(queued.every(row => row.status === "pending" && row.reason === "event_create"));
+  assert.ok(d1.stats.maxBinds <= 100);
+  // This unit does not execute Hono's auth/Origin/CostGuard reads. The 18-query
+  // reserve in the planner covers those future calls; this counts actual D1
+  // execution in the isolated plan, not a production invocation.
+  assert.ok(d1.stats.statements <= plan.budget.totalQueryCount,
+    "SQLite D1 execution must not outgrow the conservative planned query budget");
+});
+
+test("MIG-0652 U02 SQLite T04: failed strict audit rolls back event, questions AND queue writes", async () => {
+  const { sqlite, d1, db } = createAtomicCreateHarness();
+  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  const queue = await buildEventChangeQueueBatch(db, {
+    eventId: "ev_create", reason: "event_create", requestedByUserId: "u_admin", priority: "high",
+  });
+  const plan = createExecutableWritePlan(db, queue);
+  // Fail on the audit INSERT, *after* the D1 batch has written the event,
+  // owner, custom questions and static rebuild queue rows.
+  sqlite.exec(
+    "CREATE TRIGGER reject_create_audit BEFORE INSERT ON audit_logs " +
+    "BEGIN SELECT RAISE(ABORT, 'audit-write-denied'); END",
+  );
+  await assert.rejects(mutateWithAudit(db, plan), /audit-write-denied/);
+  assert.equal(d1.stats.batches, 1);
+  for (const table of ["events", "event_staff", "event_custom_questions", "static_rebuild_queue", "audit_logs"]) {
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0,
+      table + " must not survive a strict audit INSERT failure");
+  }
 });
 
 test("MIG-0652 U02 atomic create: event, owner, ordered question chunks and strict audits are bundled", () => {
