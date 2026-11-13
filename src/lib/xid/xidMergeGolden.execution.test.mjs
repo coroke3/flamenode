@@ -443,6 +443,21 @@ if (runTestWithTsx(import.meta.url)) {
     ],
   ];
 
+  function assertAtomicPublicBuildMarker(batch, queueTargetCount) {
+    const steps = batch.statements;
+    const queueIndex = steps.findIndex((entry) => entry.sql.includes("INSERT INTO static_rebuild_queue"));
+    assert.ok(queueIndex >= 0, "queue DML must exist");
+    assert.equal(steps.filter((entry) => entry.sql.includes("INSERT INTO static_rebuild_queue")).length, 1);
+    assert.deepEqual(steps[queueIndex + 1].params, [queueTargetCount], "queue assertion remains strict");
+    assert.match(steps[queueIndex + 1].sql, /WHEN changes\(\) = \?/);
+    const marker = steps[queueIndex + 2];
+    assert.match(marker.sql, /UPDATE public_build_state[\s\S]*requested_at = MAX\(requested_at, \?\)[\s\S]*WHERE id = 1/);
+    assert.deepEqual(marker.params, [1_760_000_000_000], "marker uses frozen epoch milliseconds");
+    assert.equal(steps.filter((entry) => entry.sql.includes("UPDATE public_build_state")).length, 1);
+    assert.match(steps[queueIndex + 3].sql, /WHEN changes\(\) = \?/);
+    assert.deepEqual(steps[queueIndex + 3].params, [1], "marker UPDATE requires the migration-0065 singleton");
+  }
+
   test("Issue #492: 100-target real SQLite X ID merge completes with all audits, queue and D1 CAS", async () => {
     // 4 user/index targets + 8 global video targets + 2 events * 3 + 82
     // distinct videos = exactly 100 queue targets, not a mocked planner.
@@ -468,7 +483,8 @@ if (runTestWithTsx(import.meta.url)) {
       );
       const batch = result.log.find((entry) => entry.op === "batch");
       assert.ok(batch, "real D1 batch must be executed");
-      assert.equal(batch.statements.length, 28, "18 base DML + CAS, queue, fence, audit and assertions");
+      assert.equal(batch.statements.length, 30, "18 base DML + queue + marker UPDATE and strict assertion, fence, audit and CAS");
+      assertAtomicPublicBuildMarker(batch, 100);
       assert.equal(batch.statements.filter((entry) =>
         entry.sql.includes("INSERT INTO static_rebuild_queue")).length, 1,
       "100 targets must occupy one JSON1 queue DML");
@@ -525,7 +541,8 @@ if (runTestWithTsx(import.meta.url)) {
       if (targetCount === 99) {
         assert.equal(result.outcome.threw, undefined);
         assert.ok(batch, "99 targets must reach the atomic batch");
-        assert.equal(batch.statements.length, 28);
+        assert.equal(batch.statements.length, 30);
+        assertAtomicPublicBuildMarker(batch, 99);
         assert.equal(queueRows.length, 99);
         assert.equal(new Set(queueRows.map((r) => `${r.target_type}:${r.target_id}`)).size, 99);
         assert.equal(sourceRows.length, 0);
