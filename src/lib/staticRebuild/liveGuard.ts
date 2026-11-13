@@ -105,7 +105,9 @@ export async function handleLiveApiGet<T>(
       },
     });
   } catch (err) {
-    console.error("[live-api] GET failed", { eventId: id, err });
+    // Provider errors can contain SQL, credentials or user-controlled event IDs.
+    // Keep a stable operational marker without serializing the raw exception.
+    console.error("[live-api] GET failed");
     return jsonErrorResponse(
       {
         error: "live_api_error",
