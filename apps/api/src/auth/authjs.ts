@@ -34,17 +34,23 @@ export type UnmountedAuthInputs = {
 function strictConfiguredOrigin(value: string): string {
   let parsed: URL;
   try {
-    parsed = new URL(value);
+    // CURRENT's configuredHttpOrigin trims whitespace and accepts the optional
+    // trailing slash/default TLS port. Compare normalized origins, not raw URLs.
+    parsed = new URL(value.trim());
   } catch {
     throw new Error("AUTH_ORIGIN_INVALID");
   }
-  // The synthetic PoC only accepts explicit HTTPS origins: no userinfo, path,
-  // query, fragment, Host-derived URL or permissive loopback fallback.
+  const hostname = parsed.hostname.toLowerCase().replace(/\\.$/, "");
+  // This non-production host deliberately requires HTTPS (even though CURRENT
+  // may allow HTTP on a non-loopback origin). Never enable the loopback
+  // allowance or rely on request Host to derive the configured origin.
   if (
     parsed.protocol !== "https:" ||
-    parsed.origin !== value ||
     parsed.username || parsed.password ||
-    parsed.pathname !== "/" || parsed.search || parsed.hash
+    parsed.pathname !== "/" || parsed.search || parsed.hash ||
+    hostname === "localhost" ||
+    hostname === "[::1]" ||
+    /^127(?:\\.\\d{1,3}){3}$/.test(hostname)
   ) {
     throw new Error("AUTH_ORIGIN_INVALID");
   }
