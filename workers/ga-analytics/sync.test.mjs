@@ -1321,3 +1321,74 @@ test("Issue #653: orphan-only GA4 success cannot retain now-private event or ret
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("Issue #653: orphan-only GA4 success invalidates a stale scheduled time, but keeps current R2", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    assert.match(String(input), /analyticsdata.googleapis.com/);
+    return new Response(JSON.stringify({
+      dimensionHeaders: [{ name: "dateRange" }, { name: "customEvent:video_id" }],
+      metricHeaders: [{ name: "eventCount" }],
+      rowCount: 1,
+      rows: [{
+        dimensionValues: [{ value: "last_30" }, { value: "unrelated-video" }],
+        metricValues: [{ value: "12" }],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const token = JSON.stringify({
+    access_token: "cached-token",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
+  try {
+    for (const scheduledTime of [1_700_000_000, 1_700_000_600]) {
+      const previous = JSON.stringify({
+        schema_version: 1, generated_at: 1_700_000_000,
+        items: [{
+          id: "video-a", title: "A", youtube_video_id: "yt-a",
+          display_name: "creator", icon_url: null,
+          primary_event_id: null, primary_event_title: null,
+          scheduled_time: scheduledTime, status: "public", rank: 1,
+          video_id: "video-a",
+          views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 7,
+        }],
+      });
+      const db = recentDb();
+      let reads = 0;
+      let writes = 0;
+      let written = null;
+      const env = enabledGa4Env({
+        DB: db,
+        KV: { async get() { return token; } },
+        R2: {
+          async get(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            reads += 1;
+            return { size: Buffer.byteLength(previous), async text() { return previous; } };
+          },
+          async put(key, body) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            writes += 1;
+            written = JSON.parse(String(body));
+          },
+        },
+      });
+      if (scheduledTime === 1_700_000_000) {
+        await assert.rejects(() => syncGa4Trending(env),
+          /ga4_empty_report_preserving_existing/);
+        assert.equal(writes, 0, "current public ranking is preserved");
+      } else {
+        const outcome = await syncGa4Trending(env);
+        assert.equal(outcome.failed, 0);
+        assert.equal(writes, 1, "stale schedule must not outlive D1");
+        assert.deepEqual(written.items, []);
+        assert.equal(JSON.stringify(written).includes(String(scheduledTime)), false);
+      }
+      assert.equal(reads, 1);
+      assert.equal(db.reads, 1, "no extra D1 privacy query");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
