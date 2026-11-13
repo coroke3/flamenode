@@ -7,7 +7,7 @@ import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 import { linkDiscordAccountAtomically } from "@/lib/auth/accountLinkAdapter";
 import { configuredHttpOrigin } from "@/lib/auth/origin";
 import { authRedirectTarget } from "@flamenode/server-core/auth/redirect";
-import { applyDatabaseAuthSessionClaims, discordProviderOptions, resolveAuthRuntimeCredentials } from "@flamenode/server-core/auth/config";
+import { applyDatabaseAuthSessionClaims, authRuntimeDefaults, discordProviderOptions, resolveAuthRuntimeCredentials } from "@flamenode/server-core/auth/config";
 import { logSafeAuthError } from "@/lib/auth/safeLogger";
 import {
   createTraceId,
@@ -52,19 +52,15 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
     verificationTokensTable: verificationTokens as never,
   } as never);
   const baseConfig: NextAuthConfig = {
+    // Shared CURRENT defaults; origin validation and redirect policy remain
+    // bound to configured AUTH_URL/NEXT_PUBLIC_SITE_URL above.
+    ...authRuntimeDefaults(),
     secret: authSecret,
     // Adapter/Drizzle failure stacks can include sessionToken bind values.
     logger: { error: logSafeAuthError },
-    // Auth.jsのHost検査は通すが、redirect先は検証済み設定originだけを使う。
-    trustHost: true,
-    session: { strategy: "database" },
     providers: [
       Discord(discordProviderOptions({ discordClientId, discordClientSecret })),
     ],
-    pages: {
-      signIn: "/entry",
-      error: "/entry",
-    },
     callbacks: {
       async redirect({ url }) {
         return authRedirectTarget(url, authOrigin);

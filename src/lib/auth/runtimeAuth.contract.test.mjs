@@ -50,7 +50,11 @@ test("Auth origin・Host・Discord scopeは固定設定をfail-closedで使う",
   assert.match(auth, /AUTH_ORIGIN_MISMATCH/);
   assert.match(auth, /env\.FLAMENODE_LOCAL_PREVIEW === "1"/);
   assert.match(origin, /LOCALHOST_FORBIDDEN/);
-  assert.match(auth, /trustHost: true/);
+  assert.match(auth, /\.\.\.authRuntimeDefaults\(\)/);
+  assert.match(sharedAuthConfig, /trustHost:\s*true/);
+  assert.match(sharedAuthConfig, /strategy:\s*"database"/);
+  assert.match(sharedAuthConfig, /signIn:\s*"\/entry"/);
+  assert.match(sharedAuthConfig, /error:\s*"\/entry"/);
   assert.doesNotMatch(auth, /AUTH_TRUST_HOST/);
   // MIG-0802: this OAuth policy now lives in server-core, but CURRENT must
   // still use the exact provider options. Test both ownership and wiring.

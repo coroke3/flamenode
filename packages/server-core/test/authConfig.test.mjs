@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyDatabaseAuthSessionClaims, discordProviderOptions, resolveAuthRuntimeCredentials } from "../src/auth/config.ts";
+import { applyDatabaseAuthSessionClaims, authRuntimeDefaults, discordProviderOptions, resolveAuthRuntimeCredentials } from "../src/auth/config.ts";
 
 test("MIG-0802 U01: DB callback overwrites stale session role, ban and Active X without losing profile", () => {
   const session = {
@@ -148,4 +148,31 @@ test("MIG-0802 U01: resolved credentials pass through the exact shared Discord p
       params: { scope: "identify email" },
     },
   });
+});
+
+
+test("MIG-0802 U01: shared Auth.js defaults preserve CURRENT database sessions, pages and Host policy", () => {
+  const options = authRuntimeDefaults();
+  assert.deepEqual(options, {
+    trustHost: true,
+    session: { strategy: "database" },
+    pages: { signIn: "/entry", error: "/entry" },
+  });
+  assert.deepEqual(Object.keys(options).sort(), ["pages", "session", "trustHost"],
+    "shared pure defaults must not carry secret, provider, adapter or callbacks");
+});
+
+test("MIG-0802 U01: each Auth.js config build receives independent option objects", () => {
+  const first = authRuntimeDefaults();
+  const second = authRuntimeDefaults();
+  assert.notStrictEqual(first, second);
+  assert.notStrictEqual(first.session, second.session);
+  assert.notStrictEqual(first.pages, second.pages);
+  first.pages.signIn = "/untrusted-mutation";
+  first.session.strategy = "mutated";
+  assert.deepEqual(second, {
+    trustHost: true,
+    session: { strategy: "database" },
+    pages: { signIn: "/entry", error: "/entry" },
+  }, "mutation by a request cannot persist into another Auth.js config");
 });

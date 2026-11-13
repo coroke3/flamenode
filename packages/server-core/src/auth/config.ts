@@ -84,3 +84,19 @@ export function discordProviderOptions(
     },
   };
 }
+
+/**
+ * U01: exact CURRENT Auth.js framework-independent options.
+ * Callers must validate configured AUTH_URL/NEXT_PUBLIC_SITE_URL before use:
+ * trustHost alone is not a redirect, origin or account-linking safety policy.
+ *
+ * A fresh object per request matches CURRENT's buildAuthConfig behavior, and
+ * prevents one request's library code from mutating the next request's config.
+ */
+export function authRuntimeDefaults() {
+  return {
+    trustHost: true as const,
+    session: { strategy: "database" as const },
+    pages: { signIn: "/entry" as const, error: "/entry" as const },
+  };
+}
