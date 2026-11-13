@@ -3,9 +3,16 @@ export type NotificationUrlEnv = {
   NODE_ENV?: string;
 };
 
+function defaultNotificationUrlEnv(): NotificationUrlEnv {
+  const runtime = globalThis as typeof globalThis & {
+    process?: { env?: NotificationUrlEnv };
+  };
+  return runtime.process?.env ?? {};
+}
+
 /** 通知リンクの正本originを検証する。 */
 export function notificationSiteOrigin(
-  env: NotificationUrlEnv = process.env,
+  env: NotificationUrlEnv = defaultNotificationUrlEnv(),
 ): string {
   const raw = env.NEXT_PUBLIC_SITE_URL?.trim();
   if (!raw) throw new Error("NEXT_PUBLIC_SITE_URL_MISSING");
@@ -40,7 +47,7 @@ export function notificationSiteOrigin(
 /** 通知内で使う絶対URLを、設定済み公開originからだけ組み立てる。 */
 export function appUrl(
   path: string,
-  env: NotificationUrlEnv = process.env,
+  env: NotificationUrlEnv = defaultNotificationUrlEnv(),
 ): string {
   if (/^[a-z][a-z0-9+.-]*:/i.test(path) || /^[/\\]{2}/.test(path)) {
     throw new Error("NOTIFICATION_PATH_MUST_BE_RELATIVE");
@@ -61,7 +68,7 @@ export function videoPublicPath(
 import {
   isOpsWebhookTarget,
   type OpsWebhookTarget,
-} from "./forum";
+} from "./forum.ts";
 
 export type DiscordNotificationPayload = {
   content: string;
@@ -105,7 +112,7 @@ export function validateNotificationPayload(
   } catch {
     return { ok: false, reason: "payload は JSON シリアライズできません" };
   }
-  if (Buffer.byteLength(serialized, "utf8") > MAX_PAYLOAD_BYTES) {
+  if (new TextEncoder().encode(serialized).byteLength > MAX_PAYLOAD_BYTES) {
     return { ok: false, reason: `payload が ${MAX_PAYLOAD_BYTES} バイトを超えています` };
   }
 

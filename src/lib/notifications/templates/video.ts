@@ -1,12 +1,12 @@
-import type { NotificationActor } from "../actor";
-import { formatOpsActorSection } from "../actor";
-import { appUrl, videoPublicPath } from "../format";
+import type { NotificationActor } from "../actor.ts";
+import { formatOpsActorSection } from "../actor.ts";
+import { appUrl, videoPublicPath, type NotificationUrlEnv } from "../format.ts";
 import {
   buildDiscordPayload,
   buildNotificationBlocks,
   escapeDiscordMention,
   linkLine,
-} from "./common";
+} from "./common.ts";
 
 function opsThreadActorLabel(actor: NotificationActor | null): string {
   if (!actor) return "unknown";
@@ -76,15 +76,15 @@ export function buildVideoApprovedNotification(args: {
   eventId?: string | null;
   eventTitle?: string | null;
   noteStaticDelay?: boolean;
-}): ReturnType<typeof buildDiscordPayload> {
-  const videoUrl = appUrl(videoPublicPath(args.videoId, args.youtubeVideoId));
+}, env?: NotificationUrlEnv): ReturnType<typeof buildDiscordPayload> {
+  const videoUrl = appUrl(videoPublicPath(args.videoId, args.youtubeVideoId), env);
   const title = escapeDiscordMention(args.videoTitle);
   const eventLines: string[] = [];
   if (args.eventId) {
     const eventLabel = args.eventTitle
       ? `イベント「${escapeDiscordMention(args.eventTitle)}」`
       : "イベント";
-    eventLines.push(linkLine(`${eventLabel}を見る`, `/event/${args.eventId}`));
+    eventLines.push(linkLine(`${eventLabel}を見る`, `/event/${args.eventId}`, env));
   }
   const content = buildNotificationBlocks([
     {
@@ -107,7 +107,7 @@ export function buildVideoApprovedNotification(args: {
       heading: "■ 次に行うこと",
       lines: [
         "作品ページで表示を確認してください。",
-        linkLine("作品ページを開く", videoPublicPath(args.videoId, args.youtubeVideoId)),
+        linkLine("作品ページを開く", videoPublicPath(args.videoId, args.youtubeVideoId), env),
         ...eventLines,
       ],
     },
@@ -126,8 +126,8 @@ export function buildVideoVisibilityChangedNotification(args: {
   videoTitle: string;
   youtubeVideoId?: string | null;
   reason?: string | null;
-}): ReturnType<typeof buildDiscordPayload> {
-  const videoUrl = appUrl(videoPublicPath(args.videoId, args.youtubeVideoId));
+}, env?: NotificationUrlEnv): ReturnType<typeof buildDiscordPayload> {
+  const videoUrl = appUrl(videoPublicPath(args.videoId, args.youtubeVideoId), env);
   const title = escapeDiscordMention(args.videoTitle);
   const reasonText =
     args.reason?.trim() ||
@@ -148,8 +148,8 @@ export function buildVideoVisibilityChangedNotification(args: {
       heading: "■ 次に行うこと",
       lines: [
         "作品ページと編集画面を確認してください。",
-        linkLine("作品ページを開く", videoPublicPath(args.videoId, args.youtubeVideoId)),
-        linkLine("編集画面を開く", `/dashboard/edit/${args.videoId}`),
+        linkLine("作品ページを開く", videoPublicPath(args.videoId, args.youtubeVideoId), env),
+        linkLine("編集画面を開く", `/dashboard/edit/${args.videoId}`, env),
       ],
     },
   ]);
