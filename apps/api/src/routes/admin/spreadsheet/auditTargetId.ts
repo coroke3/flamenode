@@ -60,18 +60,17 @@ export function buildSpreadsheetAuditIdentityV1(
 export function parseSpreadsheetAuditIdentityV1(
   identity: unknown,
 ): SpreadsheetAuditPkParts | null {
-  // D1/HTTP audit rows are runtime data, not TypeScript objects. Reject
-  // malformed context/target_id values without throwing or mistaking a
-  // forged legacy ID for the future V1 format.
-  if (!identity || typeof identity !== "object" ||
-      !("context" in identity) ||
-      identity.context !== SPREADSHEET_AUDIT_PK_V1_CONTEXT ||
-      !("target_id" in identity) ||
-      typeof identity.target_id !== "string" ||
-      !identity.target_id.startsWith(SPREADSHEET_AUDIT_PK_V1_PREFIX)) {
-    return null;
-  }
   try {
+    // D1/HTTP inputs are runtime data. Even getters/Proxies on a malformed
+    // identity may throw before JSON.parse; all such values fail closed.
+    if (!identity || typeof identity !== "object" ||
+        !("context" in identity) ||
+        identity.context !== SPREADSHEET_AUDIT_PK_V1_CONTEXT ||
+        !("target_id" in identity) ||
+        typeof identity.target_id !== "string" ||
+        !identity.target_id.startsWith(SPREADSHEET_AUDIT_PK_V1_PREFIX)) {
+      return null;
+    }
     const json = identity.target_id.slice(SPREADSHEET_AUDIT_PK_V1_PREFIX.length);
     const value: unknown = JSON.parse(json);
     if (!Array.isArray(value) || value.length === 0) return null;
@@ -164,7 +163,11 @@ export function classifySpreadsheetAuditHistoryCandidate(
   const parts: string[] = [];
   for (const snapshot of [row.before_json, row.after_json]) {
     if (snapshot === null) continue;
-    if (snapshot.length > 128_000) return "legacy_ambiguous";
+    // JSON.parse coerces objects via toString(). A malformed D1/HTTP row
+    // must never prove a legacy PK solely by providing coercible non-TEXT.
+    if (typeof snapshot !== "string" || snapshot.length > 128_000) {
+      return "legacy_ambiguous";
+    }
     try {
       const value: unknown = JSON.parse(snapshot);
       if (!value || typeof value !== "object" || Array.isArray(value)) {
