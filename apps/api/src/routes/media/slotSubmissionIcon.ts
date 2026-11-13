@@ -8,6 +8,7 @@ import {
 import {
   getPublicMediaNamespace,
   isPublicMediaObjectSafe,
+  MAX_PUBLIC_MEDIA_BYTES,
   normalizePublicMediaContentType,
   PUBLIC_MEDIA_CACHE_CONTROL,
 } from "./publicMedia.ts";
@@ -69,7 +70,12 @@ SELECT
   s.x_user_id AS slot_x_user_id,
   e.slot_visibility_mode,
   e.visibility_status AS event_visibility_status,
-  v.creator_icon_url
+  CASE
+    WHEN e.slot_visibility_mode = 'public_name'
+      AND v.visibility_status IS NOT 'public'
+    THEN NULL
+    ELSE v.creator_icon_url
+  END AS creator_icon_url
 FROM slots s
 INNER JOIN events e ON e.id = s.event_id
 LEFT JOIN videos v ON v.id = s.video_id
@@ -231,7 +237,49 @@ export async function serveSlotSubmissionIconRow(
   if (cache && cacheKey) {
     try {
       const hit = await cache.match(cacheKey);
-      if (hit) return hit;
+      if (hit?.status === 200 && hit.body) {
+        // Cache API metadata is untrusted. Rebuild only the public image headers,
+        // and enforce the same streamed byte ceiling as the origin media route.
+        const contentType = normalizePublicMediaContentType(hit.headers.get("content-type"));
+        const etag = hit.headers.get("etag");
+        if (contentType && etag) {
+          const reader = hit.body.getReader();
+          const chunks: Uint8Array[] = [];
+          let totalBytes = 0;
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              totalBytes += value.byteLength;
+              if (totalBytes > MAX_PUBLIC_MEDIA_BYTES) {
+                try { void reader.cancel().catch(() => undefined); } catch {}
+                break;
+              }
+              if (value.byteLength > 0) chunks.push(value);
+            }
+          } catch {
+            totalBytes = MAX_PUBLIC_MEDIA_BYTES + 1;
+            try { void reader.cancel().catch(() => undefined); } catch {}
+          }
+          if (totalBytes > 0 && totalBytes <= MAX_PUBLIC_MEDIA_BYTES) {
+            const bytes = new Uint8Array(totalBytes);
+            let offset = 0;
+            for (const chunk of chunks) {
+              bytes.set(chunk, offset);
+              offset += chunk.byteLength;
+            }
+            return new Response(bytes, {
+              status: 200,
+              headers: {
+                "content-type": contentType,
+                etag,
+                "cache-control": cacheControl,
+                "x-content-type-options": "nosniff",
+              },
+            });
+          }
+        }
+      }
     } catch {
       // cache match failed (best effort)
     }
@@ -260,7 +308,9 @@ export async function serveSlotSubmissionIconRow(
   const response = new Response(obj.body, { headers });
   if (cache && cacheKey) {
     try {
-      await cachePublicResponse(cache, cacheKey, response.clone(), options?.waitUntil);
+      const cacheCopy = response.clone();
+      cacheCopy.headers.set("cache-control", "public, max-age=0, s-maxage=604800");
+      await cachePublicResponse(cache, cacheKey, cacheCopy, options?.waitUntil);
     } catch {
       // cache put failed (best effort)
     }

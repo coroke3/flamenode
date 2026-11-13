@@ -2,6 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { SLOT_SUBMISSION_ICON_LOOKUP_SQL } from "../src/routes/media/slotSubmissionIcon.ts";
 import { app } from "../src/app.ts";
 import {
   clearPublicMediaAccessCacheForTest,
@@ -21,7 +23,7 @@ const validRow = {
   creator_icon_url: "/api/media/video-icons/owner/icon.png",
 };
 
-function bindings({ allowed = 1, row = validRow, r2Fail = false, d1Fail = false, sessionUser = null, bucket = true } = {}) {
+function bindings({ allowed = 1, row = validRow, r2Fail = false, r2Missing = false, d1Fail = false, sessionUser = null, bucket = true } = {}) {
   const calls = { queries: [], objects: [], session: 0 };
   const env = {
     AUTH_SECRET: SIGNING_SECRET,
@@ -60,6 +62,7 @@ function bindings({ allowed = 1, row = validRow, r2Fail = false, d1Fail = false,
       async get(key) {
         calls.objects.push(key);
         if (r2Fail) throw Error("r2 down");
+        if (r2Missing) return null;
         return {
           size: bytes.byteLength,
           body: bytes,
@@ -108,6 +111,32 @@ test("T01 invalid external/traversal key rejects before touching D1/R2", async (
   assert.equal(calls.objects.length, 0);
 });
 
+test("RH-023: Hono never caches temporary public-image 404 before later republish", async () => {
+  const url = "/api/media/event-icons/republish/image.png";
+  const invalid = bindings();
+  const badPath = await request("/api/media/private/hidden.png", invalid.env);
+  assert.equal(badPath.status, 404);
+  assert.equal(badPath.headers.get("cache-control"), "no-store");
+  assert.equal(badPath.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(invalid.calls.queries.length, 0);
+  const restricted = bindings({ allowed: 0 });
+  const denied = await request(url, restricted.env, { "If-None-Match": '"test-etag"' });
+  assert.equal(denied.status, 404, "conditional GET must not transform a revoked image into 304");
+  assert.equal(denied.headers.get("cache-control"), "no-store");
+  assert.equal(denied.headers.get("x-content-type-options"), "nosniff");
+  assert.deepEqual(restricted.calls.objects, []);
+  const missing = bindings({ r2Missing: true });
+  const missingResponse = await request(url, missing.env);
+  assert.equal(missingResponse.status, 404);
+  assert.equal(missingResponse.headers.get("cache-control"), "no-store");
+  assert.deepEqual(missing.calls.objects, ["event-icons/republish/image.png"]);
+  const republished = bindings({ allowed: 1 });
+  const restored = await request(url, republished.env);
+  assert.equal(restored.status, 200);
+  assert.equal(restored.headers.get("cache-control"), "no-store");
+  assert.equal(republished.calls.queries.length, 1);
+});
+
 test("T04 public ACL before R2 and failure -> 503 with retry header", async () => {
   const p = bindings({ allowed: 0 });
   assert.equal((await request("/api/media/video-icons/owner/icon.png", p.env)).status, 404);
@@ -149,6 +178,103 @@ test("T02 signed X icon: valid GET/304 and tampered/expired/missing secret -> 40
   const withoutSecret = { ...bad.env, AUTH_SECRET: undefined };
   assert.equal((await request(valid, withoutSecret)).status, 404);
   assert.deepEqual(bad.calls.objects, []);
+});
+
+test("T03 slot icon rejects poisoned Cache API metadata and falls back to R2", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  let cached = new Response(bytes, {
+    headers: {
+      "content-type": "text/html",
+      etag: '"poisoned"',
+      "set-cookie": "session=attacker",
+      location: "https://attacker.invalid",
+      "content-disposition": "attachment; filename=bad.html",
+      "cache-control": "public, max-age=604800",
+    },
+  });
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match() { return cached?.clone() ?? null; },
+        async put(_key, response) { cached = response.clone(); },
+      },
+    },
+  });
+  try {
+    const { env, calls } = bindings({
+      row: { ...validRow, creator_icon_url: "/api/media/video-icons/owner/icon.png" },
+    });
+    const response = await request(`/api/media/slot-submission-icon/${SLOT}`, env);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "image/png");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("set-cookie"), null);
+    assert.equal(response.headers.get("location"), null);
+    assert.equal(response.headers.get("content-disposition"), null);
+    assert.equal(calls.queries.length, 1, "D1 ACL must be checked before cache lookup");
+    assert.equal(calls.objects.length, 1, "poisoned Cache API entry must fall back to R2");
+    await response.arrayBuffer();
+
+    cached = new Response(new Uint8Array(5 * 1024 * 1024 + 1), {
+      headers: {
+        "content-type": "image/png",
+        etag: '"oversized"',
+      },
+    });
+    const oversizedBindings = bindings({
+      row: { ...validRow, creator_icon_url: "/api/media/video-icons/owner/icon.png" },
+    });
+    const oversized = await request(`/api/media/slot-submission-icon/${SLOT}`, oversizedBindings.env);
+    assert.equal(oversized.status, 200);
+    assert.equal(oversized.headers.get("content-type"), "image/png");
+    assert.equal(oversized.headers.get("cache-control"), "no-store");
+    assert.equal(oversizedBindings.calls.queries.length, 1, "D1 ACL must be checked before oversized cache body");
+    assert.equal(oversizedBindings.calls.objects.length, 1, "oversized cache body must fall back to R2");
+    await oversized.arrayBuffer();
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "caches", previous);
+    else delete globalThis.caches;
+  }
+});
+
+test("T03 public slot icon cache HIT cannot bypass a fresh slot/event visibility probe", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  const store = new Map();
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match(req) { return store.get(req.url)?.clone() ?? null; },
+        async put(req, response) { store.set(req.url, response.clone()); },
+      },
+    },
+  });
+  try {
+    const key = `/api/media/slot-submission-icon/${SLOT}`;
+    const first = bindings();
+    const publicResponse = await request(key, first.env);
+    assert.equal(publicResponse.status, 200);
+    await publicResponse.arrayBuffer();
+    assert.equal(store.size, 1, "public response bytes are cached internally");
+    assert.equal(first.calls.queries.length, 1);
+    assert.equal(first.calls.objects.length, 1);
+
+    // The same URL is now private. The next request must stop at the fresh D1
+    // slot/event probe and must not read the previously cached image or R2.
+    const revoked = bindings({
+      row: { ...validRow, event_visibility_status: "private" },
+    });
+    const denied = await request(key, revoked.env);
+    assert.equal(denied.status, 404);
+    assert.equal(denied.headers.get("cache-control"), "no-store");
+    assert.equal(revoked.calls.queries.length, 1, "visibility is re-read before Cache API");
+    assert.equal(revoked.calls.objects.length, 0, "revoked slot must not read R2");
+    assert.equal(store.size, 1, "denial does not overwrite or return the stale cache entry");
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "caches", previous);
+    else delete globalThis.caches;
+  }
 });
 
 test("T03 public slot icon requires only one D1 probe, no session; private hides from guests", async () => {
@@ -240,7 +366,7 @@ test("T04: throwing Cloudflare binding getters fail closed without leaking provi
   }
 });
 
-test("T04: public Cache API HIT does not touch a throwing DB or BUCKET getter", async () => {
+test("T04: cached public image must fail closed when D1 binding is missing", async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, "caches");
   const { env, calls } = bindings();
   const sentinel = "CACHE_HIT_MUST_NOT_READ_BINDINGS";
@@ -264,8 +390,8 @@ test("T04: public Cache API HIT does not touch a throwing DB or BUCKET getter", 
   });
   try {
     const response = await request("/api/media/video-icons/owner/icon.png", env);
-    assert.equal(response.status, 200);
-    assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("cache-control"), "no-store");
     assert.equal(calls.queries.length, 0);
     assert.equal(calls.objects.length, 0);
   } finally {
@@ -282,4 +408,175 @@ test("GET-only and CURRENT signature 404 contract despite task card T02 saying 4
   const currentSource = readFileSync(new URL("../../../src/lib/media/manageXIcon.ts", import.meta.url), "utf8");
   assert.match(nextRoute, /serveManageXIcon/);
   assert.match(currentSource, /if \(!validSignature\)\s*\{\s*return new Response\("Not found", \{ status: 404 \}\)/);
+});
+
+test("T04 privacy: cache entries cannot inject redirects, cookies, MIME or stale public headers", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  let cached = null;
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match() { return cached?.clone() ?? null; },
+        async put(_key, response) { cached = response.clone(); },
+      },
+    },
+  });
+  try {
+    const { env, calls } = bindings();
+    const key = "/api/media/video-icons/owner/icon.png";
+    cached = new Response(null, {
+      status: 302,
+      headers: { location: "https://attacker.invalid", "cache-control": "public, max-age=604800" },
+    });
+    const ignoredRedirect = await request(key, env);
+    assert.equal(ignoredRedirect.status, 200, "cached redirects are not public media");
+    assert.equal(ignoredRedirect.headers.get("location"), null);
+    assert.equal(calls.objects.length, 1, "invalid cached response causes a fresh R2 read");
+    await ignoredRedirect.arrayBuffer();
+
+    cached = new Response(bytes, {
+      status: 200,
+      headers: { "content-type": "text/html", etag: '"bad-type"' },
+    });
+    const ignoredHtml = await request(key, env);
+    assert.equal(ignoredHtml.status, 200);
+    assert.equal(ignoredHtml.headers.get("content-type"), "image/png");
+    assert.equal(calls.objects.length, 2, "invalid cached MIME falls back to R2");
+    await ignoredHtml.arrayBuffer();
+
+    cached = new Response(bytes, {
+      status: 200,
+      headers: {
+        "content-type": "image/png", etag: '"cached-img"',
+        "set-cookie": "session=should-not-forward",
+        location: "https://attacker.invalid",
+        "content-disposition": "attachment; filename=bad.html",
+        "cache-control": "public, max-age=604800",
+      },
+    });
+    const safeHit = await request(key, env);
+    assert.equal(safeHit.status, 200);
+    assert.equal(safeHit.headers.get("content-type"), "image/png");
+    assert.equal(safeHit.headers.get("cache-control"), "no-store");
+    assert.equal(safeHit.headers.get("x-content-type-options"), "nosniff");
+    for (const header of ["set-cookie", "location", "content-disposition"]) {
+      assert.equal(safeHit.headers.get(header), null, header + " must not escape the edge cache");
+    }
+    assert.equal(calls.objects.length, 2, "valid cached bytes do not reread R2");
+    await safeHit.arrayBuffer();
+
+    // The actual stream length is authoritative; old entries may omit or
+    // under-report Content-Length. Oversized bytes must never be served.
+    for (const [index, headers] of [
+      { "content-type": "image/png", etag: '"cached-no-length"' },
+      { "content-type": "image/png", etag: '"cached-underreported"', "content-length": "1" },
+    ].entries()) {
+      cached = new Response(new Uint8Array(5 * 1024 * 1024 + 1), { headers });
+      const oversized = await request(key, env);
+      assert.equal(oversized.status, 200);
+      assert.equal(calls.objects.length, 3 + index, "oversized cache body must fall back to R2");
+      await oversized.arrayBuffer();
+    }
+
+    // The oversized legacy cache entry is replaced by the fresh R2 response, so
+    // conditional validation must use the R2 ETag rather than the rejected cache ETag.
+    const conditional = await request(key, env, { "If-None-Match": '"test-etag"' });
+    assert.equal(conditional.status, 304);
+    assert.equal(conditional.headers.get("cache-control"), "no-store");
+    assert.equal(conditional.headers.get("set-cookie"), null);
+    assert.equal(conditional.headers.get("location"), null);
+    assert.equal(calls.queries.length, 6, "every conditional, cache hit, and oversized-cache fallback still rechecks the D1 ACL");
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "caches", previous);
+    else delete globalThis.caches;
+  }
+});
+
+test("T04 privacy: an existing image cache HIT never bypasses a revoked D1 ACL", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  const store = new Map();
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match(req) { return store.get(req.url)?.clone() ?? null; },
+        async put(req, res) { store.set(req.url, res.clone()); },
+      },
+    },
+  });
+  try {
+    const { env, calls } = bindings();
+    let allowed = true;
+    env.DB.prepare = (sql) => {
+      calls.queries.push(sql);
+      return { bind: () => ({ first: async () => allowed ? { allowed: 1 } : null }) };
+    };
+    const key = "/api/media/event-icons/event/revoked.png";
+    const first = await request(key, env);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get("cache-control"), "no-store");
+    assert.equal(store.size, 1);
+    allowed = false;
+    const revoked = await request(key, env);
+    assert.equal(revoked.status, 404);
+    assert.equal(calls.queries.length, 2, "every request must recheck visibility in D1");
+    assert.equal(calls.objects.length, 1, "revocation must not read cached/R2 bytes");
+    const conditional = await request(key, env, { "If-None-Match": '"test-etag"' });
+    assert.equal(conditional.status, 404, "revoked media must not return 304");
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "caches", previous);
+    else delete globalThis.caches;
+  }
+});
+
+
+test("private-video anonymous slot icon revocation: real SQLite joins and HTTP refuse stale public icon", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`
+      CREATE TABLE events (id TEXT PRIMARY KEY, slot_visibility_mode TEXT, visibility_status TEXT);
+      CREATE TABLE videos (id TEXT PRIMARY KEY, visibility_status TEXT, creator_icon_url TEXT);
+      CREATE TABLE slots (
+        id TEXT PRIMARY KEY, event_id TEXT, video_id TEXT,
+        status TEXT, reserved_by_user_id TEXT, x_user_id TEXT
+      );
+      INSERT INTO events VALUES ('evt-1', 'public_name', 'public');
+      INSERT INTO videos VALUES ('vid-1', 'public', 'https://images.example/icon.png');
+      INSERT INTO slots VALUES ('${SLOT}', 'evt-1', 'vid-1', 'submitted', 'u_owner', 'x_owner');
+    `);
+    const state = { reads: 0, objects: 0 };
+    const env = {
+      DB: {
+        prepare(query) {
+          assert.equal(query, SLOT_SUBMISSION_ICON_LOOKUP_SQL);
+          state.reads++;
+          return {
+            bind(slotId) {
+              return { first: async () => sqlite.prepare(query).get(slotId) ?? null };
+            },
+          };
+        },
+      },
+      BUCKET: {
+        async get() { state.objects++; throw new Error("R2 must never be touched for external icon"); },
+      },
+    };
+    const iconUrl = `/api/media/slot-submission-icon/${SLOT}`;
+    const publiclyVisible = await request(iconUrl, env);
+    assert.equal(publiclyVisible.status, 302);
+    assert.equal(publiclyVisible.headers.get("location"), "https://images.example/icon.png");
+    assert.equal(publiclyVisible.headers.get("cache-control"), "no-store");
+    sqlite.prepare("UPDATE videos SET visibility_status = 'private' WHERE id = 'vid-1'").run();
+    const revoked = await request(iconUrl, env);
+    assert.equal(revoked.status, 404, "a private video must revoke anonymous icon access immediately");
+    assert.equal(revoked.headers.get("cache-control"), "no-store");
+    assert.equal(state.reads, 2, "one fresh D1 access proof per request");
+    assert.equal(state.objects, 0, "neither HTTP response reads R2");
+    sqlite.prepare("UPDATE events SET slot_visibility_mode = 'anonymous' WHERE id = 'evt-1'").run();
+    const viewerRequired = await request(iconUrl, env);
+    assert.equal(viewerRequired.status, 404, "existing owner-only private mode remains gated");
+  } finally {
+    sqlite.close();
+  }
 });

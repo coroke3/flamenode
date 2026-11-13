@@ -527,9 +527,9 @@ Code landing only: Worker traffic still uses CURRENT Next handler until an autho
 
 | CURRENT RH | TARGET route | Authorization / caching | Failure parity | Owner |
 | --- | --- | --- | --- | --- |
-| RH-023 `GET app/api/media/[...key]` | `GET /api/media/*` | cache HIT before bindings; on MISS public artifact/entity D1 ACL, allowlisted namespace/MIME, <=5MiB R2, public Cache-Control, ETag/304 | invalid/hidden 404, DB/R2 unavailable 503 + Retry-After 30 | `apps/api/src/routes/media/publicMedia.ts` |
+| RH-023 `GET app/api/media/[...key]` | `GET /api/media/*` | **every request** public artifact/entity D1 ACL before optional Cache API byte HIT/304; allowlisted namespace/MIME, <=5MiB R2 on byte MISS; HTTP `no-store`; no isolate ACL memoization (security correction PR#579) | invalid/hidden 404 even on old cache HIT, DB/R2 unavailable 503 + Retry-After 30 | `apps/api/src/routes/media/publicMedia.ts` |
 | RH-024 `GET app/api/media/manage-x-icon/[...key]` | `GET /api/media/manage-x-icon/*` | HMAC-SHA256/5min TTL using AUTH_SECRET, R2 only, private max-age, 304 | tamper/expired/missing secret/unsafe R2 -> **404** (CURRENT; task card T02's 403 is incorrect) | `apps/api/src/routes/media/manageXIcon.ts` |
-| RH-025 `GET app/api/media/slot-submission-icon/[slotId]` | `GET /api/media/slot-submission-icon/:slotId` | D1 submitted/public probe before conditional Auth.js lookup; public_name shared cache, private owner-only/no-store | missing/unauthorized 404, D1/R2 unavailable 503 + Retry-After 30 | `apps/api/src/routes/media/slotSubmissionIcon.ts` |
+| RH-025 `GET app/api/media/slot-submission-icon/[slotId]` | `GET /api/media/slot-submission-icon/:slotId` | D1 submitted/public probe before conditional Auth.js lookup; public_name byte cache *after ACL* but external `no-store`, private owner-only/no-store (PR#579) | missing/unauthorized 404, D1/R2 unavailable 503 + Retry-After 30 | `apps/api/src/routes/media/slotSubmissionIcon.ts` |
 
 These routes are Hono code only. CURRENT Next handlers remain intact until separate traffic cutover. CI regression: `apps/api/test/mediaRoutes.parity.test.mjs`. No remote D1/R2/secret/route writes.
 

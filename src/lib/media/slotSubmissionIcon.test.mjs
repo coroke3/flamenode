@@ -46,7 +46,7 @@ test("public_nameは匿名でも許可しprivate cacheは使わない", () => {
   );
   assert.equal(access.allowed, true);
   if (access.allowed) {
-    assert.match(access.cacheControl, /^public,/);
+    assert.equal(access.cacheControl, "no-store");
   }
 });
 
@@ -103,6 +103,7 @@ test("slot submission icon lookup SQLはACL条件を満たす行だけ返す前�
     );
     ${createTable} videos (
       id TEXT PRIMARY KEY,
+      visibility_status TEXT,
       creator_icon_url TEXT
     );
     ${createTable} slots (
@@ -114,12 +115,25 @@ test("slot submission icon lookup SQLはACL条件を満たす行だけ返す前�
       x_user_id TEXT
     );
     INSERT INTO events VALUES ('evt-1', 'public', 'public_name');
-    INSERT INTO videos VALUES ('vid-1', '/api/media/video-icons/x/icon.webp');
+    INSERT INTO videos VALUES ('vid-1', 'public', '/api/media/video-icons/x/icon.webp');
     INSERT INTO slots VALUES ('${VALID_SLOT_ID}', 'evt-1', 'vid-1', 'submitted', 'user-1', 'x');
   `);
   const row = db.prepare(SLOT_SUBMISSION_ICON_LOOKUP_SQL).get(VALID_SLOT_ID);
   assert.equal(row?.slot_status, "submitted");
   assert.equal(row?.creator_icon_url, "/api/media/video-icons/x/icon.webp");
+  // A submitted video's private transition must immediately revoke anonymous
+  // public_name icon access without waiting for any Cache API or R2 expiry.
+  db.prepare("UPDATE videos SET visibility_status = 'private' WHERE id = 'vid-1'").run();
+  const hidden = db.prepare(SLOT_SUBMISSION_ICON_LOOKUP_SQL).get(VALID_SLOT_ID);
+  assert.equal(hidden?.creator_icon_url, null, "private video icon is not publicly readable");
+  assert.equal(resolveSlotSubmissionIconAccess(hidden, null).allowed, false);
+  // Owner-only anonymous mode keeps the existing private-icon relation; it
+  // still requires the separate auth/slot-owner gate before any response.
+  db.prepare("UPDATE events SET slot_visibility_mode = 'anonymous' WHERE id = 'evt-1'").run();
+  const ownerOnly = db.prepare(SLOT_SUBMISSION_ICON_LOOKUP_SQL).get(VALID_SLOT_ID);
+  assert.equal(ownerOnly?.creator_icon_url, "/api/media/video-icons/x/icon.webp");
+  assert.equal(resolveSlotSubmissionIconAccess(ownerOnly, null).allowed, false);
+  assert.equal(resolveSlotSubmissionIconAccess(ownerOnly, { id: "user-1", active_x_user_id: "x" }).allowed, true);
   db.close();
 });
 
@@ -196,7 +210,7 @@ test("https外部iconは302、httpは404", async () => {
   });
   assert.equal(https.response.status, 302);
   assert.equal(https.response.headers.get("location"), "https://cdn.example/icon.png");
-  assert.match(https.response.headers.get("cache-control") ?? "", /^public,/);
+  assert.equal(https.response.headers.get("cache-control"), "no-store");
   assert.equal(https.response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(https.state.gets, 0);
 
@@ -252,7 +266,7 @@ test("R2 iconはACL通過後に安全objectだけ返す", async () => {
   assert.equal(state.prepares, 1);
   assert.equal(state.gets, 1);
   assert.equal(response.headers.get("content-type"), "image/webp");
-  assert.match(response.headers.get("cache-control") ?? "", /^public,/);
+  assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
 test("public slot iconはD1 ACLを再確認した後にR2 Cache hitを使う", async () => {
@@ -295,12 +309,49 @@ test("public slot iconはD1 ACLを再確認した後にR2 Cache hitを使う", a
     assert.equal(first.state.prepares, 1);
     assert.equal(first.state.gets, 1);
     assert.equal(second.response.status, 200);
+    assert.equal(second.response.headers.get("cache-control"), "no-store");
     assert.equal(second.state.prepares, 1);
     assert.equal(second.state.gets, 0);
     assert.deepEqual(
       [...store.keys()],
       ["https://example.test/slot-icon/video-icons/x/icon.webp"],
     );
+
+    // Poisoned legacy cache metadata must not escape; invalid MIME falls back to R2.
+    store.set("https://example.test/slot-icon/video-icons/x/icon.webp", {
+      body: new Uint8Array([9, 9, 9]).buffer,
+      headers: {
+        "content-type": "text/html",
+        etag: '"poisoned"',
+        "set-cookie": "session=attacker",
+        location: "https://attacker.invalid",
+        "content-disposition": "attachment; filename=bad.html",
+        "cache-control": "public, max-age=604800",
+      },
+    });
+    const poisoned = await requestIcon(options);
+    assert.equal(poisoned.response.status, 200);
+    assert.equal(poisoned.response.headers.get("content-type"), "image/webp");
+    assert.equal(poisoned.response.headers.get("cache-control"), "no-store");
+    for (const header of ["set-cookie", "location", "content-disposition"]) {
+      assert.equal(poisoned.response.headers.get(header), null, header);
+    }
+    assert.equal(poisoned.state.gets, 1, "poisoned cache entry must fall back to R2");
+
+    // A syntactically valid image cache entry is still untrusted when its streamed
+    // body exceeds the public-media ceiling; reject it and read the bounded R2 object.
+    store.set("https://example.test/slot-icon/video-icons/x/icon.webp", {
+      body: new Uint8Array(5 * 1024 * 1024 + 1).buffer,
+      headers: {
+        "content-type": "image/webp",
+        etag: '"oversized"',
+      },
+    });
+    const oversized = await requestIcon(options);
+    assert.equal(oversized.response.status, 200);
+    assert.equal(oversized.response.headers.get("content-type"), "image/webp");
+    assert.equal(oversized.response.headers.get("cache-control"), "no-store");
+    assert.equal(oversized.state.gets, 1, "oversized cache body must fall back to R2");
   } finally {
     delete globalThis.caches;
   }
