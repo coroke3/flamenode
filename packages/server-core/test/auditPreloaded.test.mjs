@@ -447,6 +447,48 @@ test("Issue #669: incomplete or corrupted settings cannot earn a preload SELECT 
   }
 });
 
+test("Issue #677: settings preload snapshots descriptors rather than reading Proxy get traps", async () => {
+  const w = world();
+  const restore = freeze();
+  try {
+    const canonical = mapAuditSettings(
+      w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get(),
+    );
+    let getCalls = 0;
+    const deceptive = new Proxy({ ...canonical }, {
+      get(target, property, receiver) {
+        if (property === "normal_retention_days") {
+          getCalls += 1;
+          return 9999; // not the value inspected by property descriptors
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    assert.equal(isValidPreloadedAuditSettings(deceptive), true);
+    const preload = {
+      settings: deceptive,
+      actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
+    };
+    const budget = planAtomicAuditMutationBudget({
+      mutationStatements: [sql`SELECT 1`],
+      expectedMutationChanges: 0,
+      audits: [AUDIT],
+      callerQueryCount: 0,
+      preloaded: preload,
+    });
+    assert.equal(budget.preparationQueryCount, 0, "descriptor-valid preload can avoid the D1 SELECT");
+    const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+    assert.ok(entry);
+    assert.equal(w.stats.reads.length, 0, "runtime and planner agree on zero reads");
+    assert.equal(entry.expires_at - entry.created_at, 45 * 86400,
+      "audit retention must come from the validated snapshot, not Proxy get");
+    assert.equal(getCalls, 0, "no caller-controlled get trap may run after validation");
+  } finally {
+    restore();
+    w.sqlite.close();
+  }
+});
+
 test("Issue #677: exotic settings preload is rejected without invoking accessors", async () => {
   const canonical = mapAuditSettings(null);
   const actorSnapshot = JSON.stringify(actorSnapshotFromRow(null));

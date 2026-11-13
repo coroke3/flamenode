@@ -275,8 +275,8 @@ export function isValidPreloadedActorSnapshotJson(value: unknown): value is stri
  * five-field settings snapshot the write guard supplies. Partial or malformed
  * placeholders must pay for the authoritative D1 read.
  */
-export function isValidPreloadedAuditSettings(value: unknown): value is AuditLogSettings {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+function snapshotPreloadedAuditSettings(value: unknown): AuditLogSettings | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const keys = [
     "normal_retention_days",
@@ -286,25 +286,38 @@ export function isValidPreloadedAuditSettings(value: unknown): value is AuditLog
     "compact_after_days",
   ] as const;
   try {
-    // mapAuditSettings produces a plain, enumerable data-only snapshot.
-    // Do not execute caller-defined getters while estimating the D1 budget:
-    // they could throw or return different values between planning and use.
+    // Inspect descriptors, not property values: a Proxy may return different
+    // data from its get trap after the shape check has already succeeded.
     const prototype = Object.getPrototypeOf(row);
-    if (prototype !== Object.prototype && prototype !== null) return false;
-    if (Reflect.ownKeys(row).length !== keys.length) return false;
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    if (Reflect.ownKeys(row).length !== keys.length) return null;
     const descriptors = Object.getOwnPropertyDescriptors(row);
-    return keys.every((key) => {
+    if (!keys.every((key) => {
       const field = descriptors[key];
       return Boolean(
         field?.enumerable && Object.hasOwn(field, "value") &&
         typeof field.value === "number" &&
         Number.isSafeInteger(field.value) && field.value >= 0
       );
-    });
+    })) return null;
+
+    // Use only these validated primitive values downstream. Never read
+    // caller-controlled properties (or invoke get traps) after validation.
+    return {
+      normal_retention_days: descriptors.normal_retention_days.value as number,
+      restorable_retention_days: descriptors.restorable_retention_days.value as number,
+      long_audit_retention_days: descriptors.long_audit_retention_days.value as number,
+      max_payload_bytes: descriptors.max_payload_bytes.value as number,
+      compact_after_days: descriptors.compact_after_days.value as number,
+    };
   } catch {
-    // Invalid or exotic preload objects must pay for a real settings SELECT.
-    return false;
+    // Invalid or exotic preloads must pay for a real settings SELECT.
+    return null;
   }
+}
+
+export function isValidPreloadedAuditSettings(value: unknown): value is AuditLogSettings {
+  return snapshotPreloadedAuditSettings(value) !== null;
 }
 
 /** Prepare audit entries with bounded queries independent of entry count. */
@@ -316,10 +329,11 @@ export async function prepareAuditLogEntries(
   const activeInputs = inputs.filter((input) => !BLOCKED_TABLES.has(input.table_name));
   if (activeInputs.length === 0) return inputs.map(() => null);
 
-  const preloadedSettings = preloaded?.settings;
-  const canReuseSettings = isValidPreloadedAuditSettings(preloadedSettings);
-  let settings: AuditLogSettings = canReuseSettings ? preloadedSettings : DEFAULT_AUDIT_LOG_SETTINGS;
-  if (!canReuseSettings) {
+  const preloadedSettings = snapshotPreloadedAuditSettings(preloaded?.settings);
+  // The planner credits only descriptor-valid preloads, and runtime uses the
+  // same detached primitive snapshot rather than the caller's mutable object.
+  let settings: AuditLogSettings = preloadedSettings ?? DEFAULT_AUDIT_LOG_SETTINGS;
+  if (!preloadedSettings) {
     try {
       settings = await getAuditLogSettings(db);
     } catch (error) {
