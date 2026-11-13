@@ -40,7 +40,13 @@ export function createUnmountedAuthCompleteRoutes(
     const next = new URL(c.req.url).searchParams.get("next");
     // Use 303 for the test-only navigation; CURRENT Next page handles its own
     // redirect status, which requires an additional final HTTP-level audit.
-    return c.redirect(unmountedAuthCompleteDestination(result, next), 303);
+    // This redirect depends on private session state. Never let an intermediary
+    // reuse one visitor's destination (including a banned/login-state result)
+    // for another visitor or a later authentication state.
+    const response = c.redirect(unmountedAuthCompleteDestination(result, next), 303);
+    response.headers.set("Cache-Control", "private, no-store");
+    response.headers.set("Vary", "Cookie");
+    return response;
   });
   return router;
 }
