@@ -133,12 +133,13 @@ test("MIG-0652 U02 SQLite T01: strict CREATE audit, event, owner and questions c
   const ids = await mutateWithAudit(db, plan);
   assert.equal(ids.length, 4, "one strict audit per inserted source row");
   assert.equal(d1.stats.batches, 1);
+  // node:sqlite rows have a null prototype; compare enumerable column values.
   assert.deepEqual(
-    sqlite.prepare("SELECT id, public_api_enabled FROM events").all(),
+    sqlite.prepare("SELECT id, public_api_enabled FROM events").all().map(row => ({ ...row })),
     [{ id: "ev_create", public_api_enabled: 0 }],
   );
   assert.deepEqual(
-    sqlite.prepare("SELECT id, permission_preset, custom_permission_keys_json, is_public, public_role_label FROM event_staff").all(),
+    sqlite.prepare("SELECT id, permission_preset, custom_permission_keys_json, is_public, public_role_label FROM event_staff").all().map(row => ({ ...row })),
     [{ id: "es_owner", permission_preset: "owner", custom_permission_keys_json: null, is_public: 1, public_role_label: "主催" }],
   );
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 2);
