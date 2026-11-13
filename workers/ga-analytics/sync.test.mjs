@@ -184,7 +184,7 @@ test("Issue #653: missing GA4 config with failed D1 never rewrites R2", async ()
   try {
     const result = await syncGa4Trending({
       GA4_SYNC_ENABLED: "1",
-      DB: { prepare() { throw new Error("synthetic D1 unavailable"); } },
+      DB: { prepare() { throw new Error("synthetic D1 unavailable SQL SELECT secret FROM sessions WHERE token='private-credential' Authorization:Bearer runtime-secret"); } },
       R2: {
         get() { r2Reads++; throw new Error("unexpected R2 read"); },
         put() { writes++; },
@@ -196,7 +196,10 @@ test("Issue #653: missing GA4 config with failed D1 never rewrites R2", async ()
     assert.equal(writes, 0);
     assert.equal(logs.at(-1).error_name, "config_missing");
     assert.equal(logs.at(-1).r2_written, false);
-    assert.ok(logs.at(-1).privacy_repair_error, "D1 failure remains diagnosable");
+    assert.equal(logs.at(-1).privacy_repair_error, "privacy_repair_failed",
+      "the fixed failure marker is sufficient without serializing D1 errors");
+    assert.doesNotMatch(JSON.stringify(logs), /private-credential|runtime-secret|SELECT secret FROM/,
+      "provider SQL and credentials must not be emitted by the config-missing path");
   } finally {
     console.log = originalLog;
   }
