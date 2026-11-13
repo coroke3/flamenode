@@ -1,6 +1,6 @@
 /**
  * GA4 trending 同期: D1 公開作品 → GA4 report → rank → analytics/trending.json。
- * D1/GA4 失敗時は R2 put しない（fail-closed）。
+ * D1失敗時はR2 putしない。GA4失敗時は旧ランキングの公開撤回をR2へ反映する。
  */
 import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { ExternalRequestBudget } from "../shared/externalApi.ts";
