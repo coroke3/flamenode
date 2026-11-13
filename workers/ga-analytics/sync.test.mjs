@@ -90,12 +90,15 @@ test("syncGa4Trending fails closed with config_missing when secrets are absent",
   console.log = (value) => {
     logLine = String(value);
   };
+  const db = recentDb();
+  let r2Reads = 0;
   const env = {
-    DB: recentDb(),
+    DB: db,
     GA4_SYNC_ENABLED: "1",
     R2: {
       get() {
-        throw new Error("unexpected R2 get");
+        r2Reads += 1;
+        return null;
       },
       put() {
         putCalls += 1;
@@ -107,6 +110,8 @@ test("syncGa4Trending fails closed with config_missing when secrets are absent",
   try {
     const result = await syncGa4Trending(env);
     assert.equal(result.failed, 1);
+    assert.equal(db.reads, 1, "read D1 allow-list even without GA4 credentials");
+    assert.equal(r2Reads, 1, "inspect existing ranking before preserving it");
     assert.equal(putCalls, 0);
     const event = JSON.parse(logLine);
     assert.equal(event.job, "ga4-trending-sync");
@@ -114,6 +119,84 @@ test("syncGa4Trending fails closed with config_missing when secrets are absent",
     assert.equal(event.error_name, "config_missing");
     assert.equal(event.r2_written, false);
     assert.equal(event.GA4_SERVICE_ACCOUNT_PRIVATE_KEY, undefined);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test("Issue #653: missing GA4 config still removes revoked R2 videos with one D1 read", async () => {
+  const db = recentDb([{
+    id: "video-a", title: "Current public", youtube_video_id: "yt-a",
+    display_name: "creator", scheduled_time: 1_700_000_000, status: "public",
+  }]);
+  const previous = JSON.stringify({
+    schema_version: 1, generated_at: 1_700_000_000,
+    items: [
+      { id: "video-a", title: "Stale title", status: "public", rank: 1,
+        views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4 },
+      { id: "revoked", title: "Private information", status: "public", rank: 2,
+        views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4 },
+    ],
+  });
+  let r2Reads = 0;
+  const writes = [];
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (line) => logs.push(JSON.parse(String(line)));
+  try {
+    const result = await syncGa4Trending({
+      DB: db, GA4_SYNC_ENABLED: "1", // Intentionally no GA4 credentials or KV.
+      R2: {
+        async get(key) {
+          assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+          r2Reads++;
+          return { size: Buffer.byteLength(previous), async text() { return previous; } };
+        },
+        async put(key, body) {
+          assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+          writes.push(JSON.parse(String(body)));
+        },
+      },
+    });
+    assert.equal(result.failed, 1, "config missing remains a failed sync");
+    assert.equal(result.external_api_calls, 0, "never contact GA4 without credentials");
+    assert.equal(db.reads, 1);
+    assert.equal(r2Reads, 1);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0].items.map((item) => item.id), ["video-a"]);
+    assert.equal(writes[0].items[0].title, "Current public");
+    assert.equal(writes[0].generated_at, 1_700_000_000, "old views are not fresh GA4 data");
+    assert.equal(JSON.stringify(writes[0]).includes("Private information"), false);
+    assert.equal(logs.at(-1).error_name, "config_missing");
+    assert.equal(logs.at(-1).r2_written, true);
+    assert.equal(logs.at(-1).privacy_rewrite_on_config_failure, true);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test("Issue #653: missing GA4 config with failed D1 never rewrites R2", async () => {
+  let r2Reads = 0;
+  let writes = 0;
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (line) => logs.push(JSON.parse(String(line)));
+  try {
+    const result = await syncGa4Trending({
+      GA4_SYNC_ENABLED: "1",
+      DB: { prepare() { throw new Error("synthetic D1 unavailable"); } },
+      R2: {
+        get() { r2Reads++; throw new Error("unexpected R2 read"); },
+        put() { writes++; },
+      },
+    });
+    assert.equal(result.failed, 1);
+    assert.equal(result.external_api_calls, 0);
+    assert.equal(r2Reads, 0, "D1 must succeed before inspecting retained R2");
+    assert.equal(writes, 0);
+    assert.equal(logs.at(-1).error_name, "config_missing");
+    assert.equal(logs.at(-1).r2_written, false);
+    assert.ok(logs.at(-1).privacy_repair_error, "D1 failure remains diagnosable");
   } finally {
     console.log = originalLog;
   }
