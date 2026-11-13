@@ -186,7 +186,12 @@ export function classifySpreadsheetAuditHistoryCandidate(
     if (snapshot === null) continue;
     // JSON.parse coerces objects via toString(). A malformed D1/HTTP row
     // must never prove a legacy PK solely by providing coercible non-TEXT.
-    if (typeof snapshot !== "string" || snapshot.length > 128_000) {
+    // The audit/history response budget is in UTF-8 bytes, not JS UTF-16
+    // code units. Multibyte PK values must not bypass the bounded parser.
+    // Check code units first to avoid allocating for obviously huge inputs.
+    if (typeof snapshot !== "string" ||
+        snapshot.length > 128_000 ||
+        new TextEncoder().encode(snapshot).byteLength > 128_000) {
       return "legacy_ambiguous";
     }
     try {
