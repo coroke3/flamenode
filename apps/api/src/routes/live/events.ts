@@ -227,7 +227,9 @@ export async function handleLiveApiGet(
       },
     });
   } catch (err) {
-    console.error("[live-api] GET failed", { eventId: id, err });
+    // D1/provider exceptions can include private SQL and request identifiers.
+    // Do not serialize untrusted exception objects into persistent logs.
+    console.error("[live-api] GET failed");
     return jsonError(
       "live_api_error",
       "ライブデータの取得に失敗しました。しばらくしてから再度お試しください。",
