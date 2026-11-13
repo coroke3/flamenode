@@ -478,20 +478,73 @@ if (runUnderRootTsx(import.meta.url)) {
 
   // ---------------- staff ----------------
   test("T-staff: staff page equals CURRENT for every user and event", async () => {
-    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
-      for (const eventId of ["evA", "evB", "evC", "evD", "evNull", "evTie1", "evTie2", "missingEvent", "nope"]) {
-        const r = await call(`/api/manage/events/${eventId}/staff`, `tok-${name}`);
-        const ref = await refStaff(name, eventId);
-        if (ref === 404) {
-          assert.equal(r.status, 404, `${name} ${eventId}`);
-          assert.equal(r.headers.get("cache-control"), "private, no-store");
-          continue;
+    // Both CURRENT and Hono sign internal profile icons in 60-second buckets.
+    // Calling them sequentially against the wall clock can cross that bucket:
+    // identical behavior then produces different exp/sig values. Freeze the
+    // clock for this isolated comparison, without discarding signature parity.
+    const realDateNow = Date.now;
+    const frozenNow = Math.floor(realDateNow() / 60_000) * 60_000 + 30_000;
+    Date.now = () => frozenNow;
+    try {
+      for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+        for (const eventId of ["evA", "evB", "evC", "evD", "evNull", "evTie1", "evTie2", "missingEvent", "nope"]) {
+          const r = await call(`/api/manage/events/${eventId}/staff`, `tok-${name}`);
+          const ref = await refStaff(name, eventId);
+          if (ref === 404) {
+            assert.equal(r.status, 404, `${name} ${eventId}`);
+            assert.equal(r.headers.get("cache-control"), "private, no-store");
+            continue;
+          }
+          assert.equal(r.status, 200, `${name} ${eventId}`);
+          assert.deepEqual(r.body, canon(ref), `${name} ${eventId}`);
+          record("staff", r);
         }
-        assert.equal(r.status, 200, `${name} ${eventId}`);
-        assert.deepEqual(r.body, canon(ref), `${name} ${eventId}`);
-        record("staff", r);
       }
+    } finally {
+      Date.now = realDateNow;
     }
+  });
+
+
+  test("Issue #681: CURRENT and Hono staff icon signatures match on both sides of a 60s boundary", async () => {
+    const { resolveManageXIconUrl: honoIconUrl } = await import("../src/routes/manage/icon.ts");
+    const input = {
+      iconUrl: "/api/media/xicons/mgr.png",
+      approvalStatus: "approved",
+      authSecret: "test-secret",
+    };
+    const before = 1_800_000_059;
+    const after = before + 1;
+    const currentBefore = await resolveManageXIconUrl({
+      ...input, options: { now: before },
+    });
+    const honoBefore = await honoIconUrl({ ...input, now: before });
+    const currentAfter = await resolveManageXIconUrl({
+      ...input, options: { now: after },
+    });
+    const honoAfter = await honoIconUrl({ ...input, now: after });
+
+    assert.equal(currentBefore, honoBefore, "signature and expiry parity before boundary");
+    assert.equal(currentAfter, honoAfter, "signature and expiry parity after boundary");
+    assert.notEqual(currentBefore, currentAfter, "a new minute bucket intentionally rotates the signature");
+    for (const [url, now] of [[currentBefore, before], [currentAfter, after]]) {
+      assert.ok(url);
+      const signed = new URL(url, "https://x.test");
+      assert.equal(
+        await verifyManageXIconSignatureInput({
+          key: "xicons/mgr.png",
+          expiresAt: Number(signed.searchParams.get("exp")),
+          signature: signed.searchParams.get("sig"),
+          secret: "test-secret",
+          now,
+        }),
+        true,
+        "signed URL must still authenticate against CURRENT verifier",
+      );
+    }
+    const expiryBefore = Number(new URL(currentBefore, "https://x.test").searchParams.get("exp"));
+    const expiryAfter = Number(new URL(currentAfter, "https://x.test").searchParams.get("exp"));
+    assert.equal(expiryAfter - expiryBefore, 60, "bucket boundary advances expiry exactly one minute");
   });
 
   test("T-staff: owner-0 event, read-only reviewers, icon rules", async () => {
