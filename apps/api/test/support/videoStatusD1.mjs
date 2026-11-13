@@ -10,6 +10,20 @@ export function createVideoStatusD1(sqlite) {
   const base = createD1(sqlite);
   return {
     ...base,
+    // Real Cloudflare D1 batch() commits all statements or none. The generic
+    // personal test harness does not wrap them in a transaction, so status
+    // mutation tests must add the real D1 atomicity boundary explicitly.
+    async batch(statements) {
+      sqlite.exec("BEGIN IMMEDIATE");
+      try {
+        const result = await base.batch(statements);
+        sqlite.exec("COMMIT");
+        return result;
+      } catch (error) {
+        sqlite.exec("ROLLBACK");
+        throw error;
+      }
+    },
     prepare(sql) {
       const original = base.prepare(sql);
       return {
