@@ -10,6 +10,7 @@ import {
   prepareAuditLogEntries,
   isValidPreloadedActorSnapshotJson,
   isValidPreloadedAuditSettings,
+  snapshotPreloadedAuditContext,
   type PreloadedAuditContext,
   type PreparedAuditLogEntry,
 } from "./logger.ts";
@@ -405,7 +406,13 @@ export async function mutateWithAudit(
     );
   }
 
-  const budget = planAtomicAuditMutationBudget(input);
+  const stablePreloaded = snapshotPreloadedAuditContext(
+    input.preloaded,
+    input.audits.map((audit) => audit.actor_user_id),
+  );
+  // Budget and preparation must use the same immutable preload values.
+  // In particular, a Proxy must not change shape or values between checks.
+  const budget = planAtomicAuditMutationBudget({ ...input, preloaded: stablePreloaded });
   if (!budget.withinLimit) {
     throw new AuditMutationError(
       `監査前処理と D1 batch の query 数が上限を超えるため拒否しました（caller${budget.callerQueryCount} + 前処理${budget.preparationQueryCount} + batch${budget.batchQueryCount}/${budget.limit}）。`,
@@ -416,7 +423,7 @@ export async function mutateWithAudit(
   const preparedEntries = await prepareAuditLogEntries(
     db,
     input.audits.map((audit) => ({ ...audit, strict: true })),
-    input.preloaded,
+    stablePreloaded,
   );
   const entries = preparedEntries.map((entry, index) => {
     if (!entry) {

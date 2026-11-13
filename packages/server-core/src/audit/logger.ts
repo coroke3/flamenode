@@ -320,6 +320,38 @@ export function isValidPreloadedAuditSettings(value: unknown): value is AuditLog
   return snapshotPreloadedAuditSettings(value) !== null;
 }
 
+/**
+ * Freeze guard-provided audit preloads once per mutation. Both the D1 budget
+ * planner and the actual logger must consume identical validated values,
+ * even if the caller supplied mutable objects or dynamic Proxy traps.
+ */
+export function snapshotPreloadedAuditContext(
+  preloaded: PreloadedAuditContext | undefined,
+  actorUserIds: readonly string[],
+): PreloadedAuditContext | undefined {
+  if (!preloaded) return undefined;
+  let rawSettings: unknown;
+  try {
+    rawSettings = preloaded.settings;
+  } catch {
+    // Invalid settings must be reread from D1.
+  }
+  const settings = snapshotPreloadedAuditSettings(rawSettings) ?? undefined;
+  const actorSnapshotJsonById: Record<string, string> = Object.create(null);
+  for (const actorId of new Set(actorUserIds)) {
+    let rawActor: unknown;
+    try {
+      rawActor = preloaded.actorSnapshotJsonById?.[actorId];
+    } catch {
+      // Invalid actor metadata must be reread from D1.
+    }
+    if (isValidPreloadedActorSnapshotJson(rawActor)) {
+      actorSnapshotJsonById[actorId] = rawActor;
+    }
+  }
+  return { settings, actorSnapshotJsonById };
+}
+
 /** Prepare audit entries with bounded queries independent of entry count. */
 export async function prepareAuditLogEntries(
   db: ServerCoreDb,

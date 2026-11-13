@@ -489,6 +489,60 @@ test("Issue #677: settings preload snapshots descriptors rather than reading Pro
   }
 });
 
+test("Issue #677: atomic mutation snapshots changing preloads once for budget and runtime", async () => {
+  const w = world();
+  const restore = freeze();
+  try {
+    w.sqlite.exec("CREATE TABLE t (id TEXT PRIMARY KEY)");
+    const canonical = mapAuditSettings(
+      w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get(),
+    );
+    const actorJson = JSON.stringify(actorSnapshotFromRow(null));
+    let descriptorReads = 0;
+    let actorGets = 0;
+    const settings = new Proxy({ ...canonical }, {
+      getOwnPropertyDescriptor(target, key) {
+        const desc = Reflect.getOwnPropertyDescriptor(target, key);
+        if (key === "normal_retention_days") {
+          descriptorReads += 1;
+          return { ...desc, value: descriptorReads === 1 ? canonical.normal_retention_days : -1 };
+        }
+        return desc;
+      },
+    });
+    const actorSnapshotJsonById = new Proxy({ "admin-1": actorJson }, {
+      get(target, key, receiver) {
+        if (key === "admin-1") {
+          actorGets += 1;
+          return actorGets === 1 ? actorJson : "{}";
+        }
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const audit = { ...AUDIT, after: { id: "race-safe" } };
+    const input = {
+      mutationStatements: [sql`INSERT INTO t (id) VALUES (${"race-safe"})`],
+      expectedMutationChanges: 1,
+      audits: [audit],
+      callerQueryCount: 46, // would be 52/50 if both invalid second reads were charged
+      preloaded: { settings, actorSnapshotJsonById },
+    };
+    await mutateWithAudit(w.db, input);
+    assert.equal(w.stats.reads.length, 0, "no unbudgeted settings or actor SELECT");
+    assert.equal(w.stats.batches, 1);
+    assert.equal(descriptorReads, 1, "single validated settings descriptor snapshot");
+    assert.equal(actorGets, 1, "single validated actor JSON snapshot");
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM t").get().n, 1);
+    const stored = w.sqlite.prepare("SELECT * FROM audit_logs").get();
+    assert.ok(stored);
+    assert.equal(stored.expires_at - stored.created_at, 45 * 86400);
+    assert.equal(stored.actor_snapshot_json, actorJson);
+  } finally {
+    restore();
+    w.sqlite.close();
+  }
+});
+
 test("Issue #677: exotic settings preload is rejected without invoking accessors", async () => {
   const canonical = mapAuditSettings(null);
   const actorSnapshot = JSON.stringify(actorSnapshotFromRow(null));
