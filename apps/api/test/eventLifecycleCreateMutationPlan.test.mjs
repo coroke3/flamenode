@@ -84,6 +84,7 @@ function createAtomicCreateHarness() {
     all: async () => ({ results: execSql(sqlText, params), success: true }),
     first: async () => execSql(sqlText, params)[0] ?? null,
     raw: async () => execSql(sqlText, params, true),
+    run: async () => ({ results: execSql(sqlText, params), success: true }),
     _sql: sqlText, _params: params,
   });
   const d1 = {
