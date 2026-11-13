@@ -404,6 +404,32 @@ test("MIG-0652 U02 atomic create: empty questions do not emit an empty Drizzle I
   assert.equal(result.audits.length, 2);
 });
 
+test("MIG-0652 U02 atomic create: unsafe event IDs rejected before any D1 mutation", () => {
+  for (const id of [
+    "", "..", "with/slash", "with.dot", "with space",
+    " with-space", "日本語", "x".repeat(65), "line\nfeed",
+    "foo%2Fbar", "trailing ", "one:two",
+  ]) {
+    assert.deepEqual(makePlan({ eventRow: { ...event, id } }),
+      { ok: false, message: EVENT_CREATE_INVALID_PLAN },
+      "malformed event ID must fail: " + JSON.stringify(id));
+  }
+});
+
+test("MIG-0652 U02 atomic create: route-safe 64-character event ID remains valid", () => {
+  const id = "A".repeat(64);
+  const rows = createQuestions(2).map(row => ({ ...row, event_id: id }));
+  const plan = makePlan({
+    eventRow: { ...event, id },
+    ownerRow: { ...owner, event_id: id },
+    questionRows: rows,
+  });
+  assert.equal(plan.ok, true);
+  assert.equal(plan.audits[0].target_id, id);
+  assert.equal(plan.audits[1].after.event_id, id);
+  assert.ok(plan.audits.slice(2).every(audit => audit.after.event_id === id));
+});
+
 test("MIG-0652 U02 atomic create: missing approved actor linkage and mismatched event IDs fail closed", () => {
   const invalid = [
     { ownerRow: { ...owner, event_id: "other" } },
@@ -491,6 +517,7 @@ test("MIG-0652 U02 atomic create: source keeps unmounted route and no premature 
   assert.match(core, /preMutationAssertionCount: preMutationAssertions.length/);
   assert.match(core, /approval_status/);
   assert.match(core, /xUsers\.x_name\} = \$\{ownerRow\.display_name/);
+  assert.match(core, /EVENT_ID_PATTERN\\.test\\(eventRow\\.id\\)/);
   assert.doesNotMatch(core, /staticRebuildWakeSource:/);
   assert.match(source, /const mutationStatements = \[/);
   assert.match(source, /context: "event-create:owner"/);
