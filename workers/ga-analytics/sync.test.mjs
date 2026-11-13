@@ -1206,3 +1206,47 @@ test("Issue #653: GA4 invalid JSON also scrubs old private rows", async () => {
     assert.deepEqual(output?.items, []);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test("Issue #653: oversized current public metadata cannot keep revoked old R2 on GA4 failure", async () => {
+  const previous = JSON.stringify({
+    schema_version: 1, generated_at: 1_700_000_000,
+    items: [
+      { id: "video-a", title: "Old title", status: "public", rank: 1,
+        views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4 },
+      { id: "revoked", title: "Private title", status: "public", rank: 2,
+        views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4 },
+    ],
+  });
+  const db = recentDb([{
+    id: "video-a", title: "X".repeat(1_050_000),
+    youtube_video_id: "yt-a", display_name: "creator",
+    scheduled_time: 1_700_000_000, status: "public",
+  }]);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("GA4 unavailable", { status: 500 });
+  let written = null;
+  let writes = 0;
+  const env = enabledGa4Env({
+    DB: db,
+    KV: { async get() {
+      return JSON.stringify({ access_token: "cached",
+        expires_at: Math.floor(Date.now() / 1000) + 3600 });
+    } },
+    R2: {
+      async get() { return { async text() { return previous; } }; },
+      async put(key, body) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        written = JSON.parse(String(body));
+        writes += 1;
+      },
+    },
+  });
+  try {
+    await assert.rejects(() => syncGa4Trending(env), /ga4_report_http_500/);
+    assert.equal(db.reads, 1);
+    assert.equal(writes, 1, "oversized candidate must never be PUT");
+    assert.equal(written?.schema_version, 1);
+    assert.deepEqual(written?.items, []);
+    assert.equal(JSON.stringify(written).includes("Private title"), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
