@@ -42,15 +42,20 @@ export const xidLinkRequestReviewAuthorizationMiddleware: MiddlewareHandler<AppE
     if (!user) {
       return c.json({ ok: false, message: "ログインが必要です。" }, 401);
     }
+    let evidence: XIdLinkReviewAuthorization;
     try {
-      const evidence = await authorizeXIdLinkRequestReview(c.get("db"), user);
-      if (!evidence.allowed) {
-        return c.json({ ok: false, message: evidence.message }, 403);
-      }
-      c.set("xidLinkRequestActorXUserId", evidence.actorXUserId);
-      await next();
-    } catch (error) {
-      console.error("[xid] review authorization failed", error);
+      evidence = await authorizeXIdLinkRequestReview(c.get("db"), user);
+    } catch {
+      // D1/provider exceptions can contain SQL, credentials and request data.
+      // The authorization boundary must never serialize the raw exception.
+      console.error("[xid] review authorization failed");
       return c.json({ ok: false, message: "時間をおいて再試行してください。" }, 503);
     }
+    if (!evidence.allowed) {
+      return c.json({ ok: false, message: evidence.message }, 403);
+    }
+    c.set("xidLinkRequestActorXUserId", evidence.actorXUserId);
+    // Downstream mutation failures belong to the route's own error handler;
+    // this catch must handle authorization only, not disguise later errors.
+    await next();
   };
