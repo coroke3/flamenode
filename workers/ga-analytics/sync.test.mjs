@@ -338,7 +338,7 @@ test("syncGa4Trending preserves existing trending when GA returns empty periods"
       views_7d: { start_date: "2026-07-25", end_date: "2026-07-31" },
       views_30d: { start_date: "2026-07-02", end_date: "2026-07-31" },
     },
-    items: [{ id: "video-a", title: "A", rank: 1, views_2d: 10, views_5d: 20, views_7d: 30, views_30d: 40 }],
+    items: [{ id: "video-a", title: "A", youtube_video_id: "yt-a", display_name: "creator", scheduled_time: 1_700_000_000, rank: 1, views_2d: 10, views_5d: 20, views_7d: 30, views_30d: 40 }],
   });
   const env = {
     DB: recentDb(),
@@ -592,7 +592,7 @@ test("MIG-0517: GA4 orphan rows do not erase existing public rankings", async ()
   const prior = JSON.stringify({
     schema_version: 1,
     generated_at: 1_700_000_000,
-    items: [{ id: "video-a", title: "A", rank: 1, views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 2 }],
+    items: [{ id: "video-a", title: "A", youtube_video_id: "yt-a", display_name: "creator", scheduled_time: 1_700_000_000, rank: 1, views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 2 }],
   });
   const token = JSON.stringify({
     access_token: "cached-token",
