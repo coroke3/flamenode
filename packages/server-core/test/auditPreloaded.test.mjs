@@ -9,7 +9,7 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
 import { mutateWithAudit, planAtomicAuditMutationBudget } from "@flamenode/server-core/audit/mutate";
 import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
-import { actorSnapshotFromRow, prepareAuditLogEntries } from "@flamenode/server-core/audit/logger";
+import { actorSnapshotFromRow, isValidPreloadedAuditSettings, prepareAuditLogEntries } from "@flamenode/server-core/audit/logger";
 import { mapAuditSettings } from "@flamenode/server-core/audit/settings";
 import { sql } from "@flamenode/server-core/sql";
 import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
@@ -440,6 +440,50 @@ test("Issue #669: incomplete or corrupted settings cannot earn a preload SELECT 
       assert.equal(w.stats.reads.length, 1, "runtime must perform the same settings read planner charged");
       assert.equal(entry.retention_class, "normal");
       assert.equal(entry.expires_at, entry.created_at + 45 * 86400, "retain the authoritative SQLite 45-day policy, not a missing-field/default placeholder");
+    } finally {
+      restore();
+      w.sqlite.close();
+    }
+  }
+});
+
+test("Issue #677: exotic settings preload is rejected without invoking accessors", async () => {
+  const canonical = mapAuditSettings(null);
+  const actorSnapshot = JSON.stringify(actorSnapshotFromRow(null));
+  let getterCalls = 0;
+  const accessor = { ...canonical };
+  Object.defineProperty(accessor, "max_payload_bytes", {
+    enumerable: true,
+    get() { getterCalls += 1; throw new Error("sensitive getter must never execute"); },
+  });
+  const symbolKey = { ...canonical, [Symbol("hidden")]: 123 };
+  const hiddenKey = { ...canonical };
+  Object.defineProperty(hiddenKey, "secret", { value: "hidden", enumerable: false });
+  const inherited = Object.assign(Object.create({ inherited: true }), canonical);
+  const hostileProxy = new Proxy({ ...canonical }, {
+    ownKeys() { throw new Error("provider private details"); },
+  });
+  for (const badSettings of [accessor, symbolKey, hiddenKey, inherited, hostileProxy]) {
+    const w = world();
+    const restore = freeze();
+    try {
+      assert.equal(isValidPreloadedAuditSettings(badSettings), false);
+      const preload = {
+        settings: badSettings,
+        actorSnapshotJsonById: { "admin-1": actorSnapshot },
+      };
+      const budget = planAtomicAuditMutationBudget({
+        mutationStatements: [sql`SELECT 1`],
+        expectedMutationChanges: 0,
+        audits: [AUDIT],
+        callerQueryCount: 0,
+        preloaded: preload,
+      });
+      assert.equal(budget.preparationQueryCount, 1);
+      const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+      assert.equal(w.stats.reads.length, 1, "authoritative settings D1 SELECT");
+      assert.equal(entry.expires_at - entry.created_at, 45 * 86400);
+      assert.equal(getterCalls, 0, "never execute a preload property getter");
     } finally {
       restore();
       w.sqlite.close();
