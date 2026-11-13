@@ -1,6 +1,6 @@
 /**
  * GA4 trending 同期: D1 公開作品 → GA4 report → rank → analytics/trending.json。
- * D1/GA4 失敗時は R2 put しない（fail-closed）。
+ * D1失敗時はR2 putしない。GA4失敗時は旧ランキングの公開撤回をR2へ反映する。
  */
 import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { ExternalRequestBudget } from "../shared/externalApi.ts";
@@ -223,9 +223,35 @@ async function loadExistingTrendingItemCount(
     const retainedIds = new Set<string>();
     for (const item of normalized.items) {
       // The producer emits one ranked row per video. A corrupted old R2
-      // artifact with duplicate IDs must not be retained on GA4 failure.
+      // artifact with duplicate IDs must not be retained on an empty report.
       if (!publicIds.has(item.id) || retainedIds.has(item.id)) return 0;
       retainedIds.add(item.id);
+    }
+    // A video can remain public while its linked event has become private.
+    // Matching the ID alone would preserve the now-private event title in R2
+    // whenever GA4 responds with zero/orphan-only views. Cross-check old
+    // display metadata against the CURRENT D1 public projection too.
+    const currentRows = rankTrendingItems(recent, normalized.items.map((item) => ({
+      video_id: item.id,
+      views_2d: item.views_2d,
+      views_5d: item.views_5d,
+      views_7d: item.views_7d,
+      views_30d: item.views_30d,
+    })));
+    if (currentRows.length !== normalized.items.length) return 0;
+    const currentById = new Map(currentRows.map((item) => [item.id, item]));
+    for (const item of normalized.items) {
+      const current = currentById.get(item.id);
+      if (
+        !current ||
+        item.title !== current.title ||
+        item.icon_url !== current.icon_url ||
+        item.primary_event_id !== current.primary_event_id ||
+        item.primary_event_title !== current.primary_event_title ||
+        item.scheduled_time !== current.scheduled_time ||
+        (item.display_name !== "unknown" && item.display_name !== current.display_name) ||
+        (item.youtube_video_id !== null && item.youtube_video_id !== current.youtube_video_id)
+      ) return 0;
     }
     return normalized.items.length;
   } catch {
@@ -256,6 +282,122 @@ async function putTrendingPayload(
   // do not report an unwritten failure and trigger duplicate retries.
 }
 
+/**
+ * A GA4 outage must not preserve an R2 ranking with IDs revoked since its
+ * previous generation. D1 has already supplied a complete, current public
+ * allow-list (or the caller would have failed before reaching GA4).
+ *
+ * This is a writer-side safety repair, not a CDN/SSG invalidation guarantee.
+ * No extra D1 read is made; a healthy last-good public-only ranking is kept.
+ */
+async function repairTrendingAfterGa4Failure(
+  env: Ga4TrendingSyncEnv,
+  recent: RecentListPayload,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  signal?.throwIfAborted();
+  const old = await env.R2.get(GA4_TRENDING_OUTPUT_KEY);
+  if (!old) return false;
+
+  let retained: TrendingItem[] | null = null;
+  let retainedGeneratedAt: number | null = null;
+  let shouldRewrite = true;
+  if (isOversizedR2Object(old, GA4_TRENDING_MAX_OBJECT_BYTES)) {
+    await cancelR2BodyBestEffort(old);
+  } else {
+    const body = await old.text();
+    signal?.throwIfAborted();
+    if (!isOversizedUtf8Text(body, GA4_TRENDING_MAX_OBJECT_BYTES)) {
+      try {
+        const payload = JSON.parse(body) as TrendingOutputPayload;
+        const normalized = normalizeStaticTrending(payload);
+        if (
+          normalized && Array.isArray(payload.items) &&
+          normalized.items.length === payload.items.length &&
+          normalized.items.length <= 200
+        ) {
+          const publicIds = publicRecentIds(recent);
+          const distinct = new Set(normalized.items.map((item) => item.id));
+          if (distinct.size === normalized.items.length) {
+            const visible = normalized.items.filter((item) => publicIds.has(item.id));
+            // Even if all video IDs remain public, a linked event may have
+            // become private, or its title/creator/icon may have changed.
+            // Build using the CURRENT D1 public DTO, not cached R2 metadata.
+            const periods = visible.map((item) => ({
+              video_id: item.id,
+              views_2d: item.views_2d,
+              views_5d: item.views_5d,
+              views_7d: item.views_7d,
+              views_30d: item.views_30d,
+            }));
+            const current = rankTrendingItems(recent, periods);
+            const displayFields = [
+              "id", "title", "youtube_video_id", "display_name",
+              "icon_url", "primary_event_id", "primary_event_title",
+              "scheduled_time", "status", "rank", "video_id",
+            ] as const;
+            const entirelyCurrent =
+              visible.length === normalized.items.length &&
+              current.length === normalized.items.length &&
+              current.every((row, index) => {
+                const prior = normalized.items[index];
+                return displayFields.every(
+                  (field) => row[field] === (field === "video_id"
+                    ? (prior.video_id ?? prior.id)
+                    : prior[field]),
+                );
+              });
+            if (entirelyCurrent) {
+              shouldRewrite = false;
+            } else {
+              retained = current;
+              // Reused GA4 counters are still old measurements. A privacy
+              // rewrite must not masquerade as a freshly collected report.
+              const oldDate = new Date(normalized.generatedAt * 1000);
+              if (retained.length > 0 && Number.isFinite(oldDate.getTime())) {
+                retainedGeneratedAt = normalized.generatedAt;
+              } else {
+                retained = [];
+              }
+            }
+          }
+        }
+      } catch {
+        // Malformed/untrustworthy old artifact: replace it with an empty,
+        // reader-compatible payload rather than keeping unknown public IDs.
+      }
+    }
+  }
+
+  if (!shouldRewrite) return false;
+  const generatedAt = retainedGeneratedAt ?? Math.floor(Date.now() / 1000);
+  const rewritten: TrendingOutputPayload = {
+    schema_version: TRENDING_SCHEMA_VERSION,
+    generated_at: generatedAt,
+    source: "ga4",
+    ranking_rule: [...TRENDING_RANKING_RULE],
+    windows: buildTrendingWindows(new Date(generatedAt * 1000)),
+    items: retained ?? [],
+  };
+  try {
+    await putTrendingPayload(env, rewritten, signal);
+  } catch (error) {
+    if (!(error instanceof Error) ||
+      error.message !== "ga4_trending_output_exceeds_size_limit") throw error;
+    // A valid public title may grow beyond the R2 public-reader 1 MiB cap.
+    // Leaving the old object would also leave any revoked private rows.
+    // Publish a bounded empty artifact instead of silently failing repair.
+    const clearedAt = Math.floor(Date.now() / 1000);
+    await putTrendingPayload(env, {
+      ...rewritten,
+      generated_at: clearedAt,
+      windows: buildTrendingWindows(new Date(clearedAt * 1000)),
+      items: [],
+    }, signal);
+  }
+  return true;
+}
+
 export async function syncGa4Trending(
   env: Ga4TrendingSyncEnv,
   signal?: AbortSignal,
@@ -273,6 +415,27 @@ export async function syncGa4Trending(
     return emptyResult({ processed: 0, failed: 0, skipped: 1 });
   }
   if (!hasRequiredGa4Config(env)) {
+    // Missing GA4 credentials/KV must not keep revoked videos visible in a
+    // previously published R2 ranking. The D1 public projection and R2 may
+    // still be available even when the GA4 configuration is incomplete.
+    // A failed/partial D1 read cannot authorize rewriting the old ranking.
+    let privacyRewriteOnConfigFailure = false;
+    let privacyRepairError: "privacy_repair_failed" | undefined;
+    if (env.DB && env.R2) {
+      try {
+        const recent = await loadRecentListPayload(env, signal);
+        if (!Array.isArray(recent.items)) throw new Error("ga4_recent_d1_invalid_result");
+        privacyRewriteOnConfigFailure = await repairTrendingAfterGa4Failure(
+          env, recent, signal,
+        );
+      } catch (error) {
+        signal?.throwIfAborted();
+        // GA4 config is already missing; D1/R2 adapter exception messages may
+        // include SQL, bound values or signed URLs. The structured log needs
+        // only a fixed marker, never a provider-supplied diagnostic string.
+        privacyRepairError = "privacy_repair_failed";
+      }
+    }
     logGa4TrendingEvent({
       service: "flamenode-sync-jobs",
       worker: "sync-jobs",
@@ -280,7 +443,9 @@ export async function syncGa4Trending(
       enabled: true,
       result: "failed",
       error_name: "config_missing",
-      r2_written: false,
+      r2_written: privacyRewriteOnConfigFailure,
+      privacy_rewrite_on_config_failure: privacyRewriteOnConfigFailure,
+      ...(privacyRepairError ? { privacy_repair_error: privacyRepairError } : {}),
     });
     return emptyResult({ processed: 0, failed: 1, skipped: 0 });
   }
@@ -288,6 +453,7 @@ export async function syncGa4Trending(
   // OAuth token exchange と runReport ページングで共有する外部 API 予算
   const budget = new ExternalRequestBudget(16);
   const startedAt = Date.now();
+  let privacyRewriteOnGa4Failure = false;
 
   try {
     const recent = await loadRecentListPayload(env, signal);
@@ -319,12 +485,18 @@ export async function syncGa4Trending(
       });
       return emptyResult({ processed: 0, failed: 0, skipped: 0 });
     }
-    const { periods, quota } = await fetchVideoViewPeriods(
-      env,
-      budget,
-      fetch,
-      signal,
-    );
+    let report: Awaited<ReturnType<typeof fetchVideoViewPeriods>>;
+    try {
+      report = await fetchVideoViewPeriods(env, budget, fetch, signal);
+    } catch (ga4Error) {
+      // A failure to reach GA4 cannot leave now-private R2 rows intact.
+      // Still rethrow for normal job retry/error reporting.
+      privacyRewriteOnGa4Failure = await repairTrendingAfterGa4Failure(
+        env, recent, signal,
+      );
+      throw ga4Error;
+    }
+    const { periods, quota } = report;
     const items = rankTrendingItems(recent, periods);
     // A report with rows only for removed/private/unknown videos is just as
     // unusable as an empty GA4 report. Do not replace a working public ranking
@@ -380,7 +552,8 @@ export async function syncGa4Trending(
       job: "ga4-trending-sync",
       enabled: true,
       result: "failed",
-      r2_written: false,
+      r2_written: privacyRewriteOnGa4Failure,
+      privacy_rewrite_on_ga4_failure: privacyRewriteOnGa4Failure,
       error: safeErrorSummary(error),
       external_api_calls: budget.used,
       duration_ms: Date.now() - startedAt,
