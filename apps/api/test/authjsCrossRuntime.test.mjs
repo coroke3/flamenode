@@ -109,6 +109,125 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM "account"').get().n, before);
   });
 
+
+  // U02a tests only session READ + sliding renewal. Hono still cannot issue
+  // a new login session, sign out, or link an OAuth account in this PoC.
+  function sessionClaims(body) {
+    return body?.user ? {
+      id: body.user.id,
+      role: body.user.role,
+      is_banned: body.user.is_banned,
+      active_x_user_id: body.user.active_x_user_id,
+    } : null;
+  }
+
+  test("U02a: CURRENT renewed session cookie is readable by unmounted Hono/Auth.js", async (t) => {
+    const { d1 } = createHarness(t);
+    const name = BASELINE_COOKIES.sessionToken.name;
+    const legacy = await authRequest("session", {
+      cookies: { [name]: SESSIONS.valid.sessionToken },
+    });
+    assert.equal(legacy.status, 200);
+    const legacyClaims = sessionClaims(await legacy.json());
+    assert.equal(legacyClaims.id, USERS.valid.id);
+    const renewed = setCookies(legacy)[name];
+    assert.equal(renewed?.value, SESSIONS.valid.sessionToken);
+    assert.deepEqual(withoutVolatile(renewed), BASELINE_COOKIES.sessionToken.observedOnRead);
+
+    const target = await createUnmountedAuthRoutes(input(d1)).request(
+      `${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/session`, {
+        headers: { cookie: `${name}=${renewed.value}` },
+      },
+    );
+    assert.equal(target.status, 200);
+    assert.deepEqual(sessionClaims(await target.json()), legacyClaims);
+    assert.equal(setCookies(target)[name]?.value, SESSIONS.valid.sessionToken,
+      "reading the legacy renewal must not mint a different session token");
+  });
+
+  test("U02a: Hono/Auth.js renewed session cookie is readable by CURRENT NextAuth", async (t) => {
+    const { d1 } = createHarness(t);
+    const name = BASELINE_COOKIES.sessionToken.name;
+    const target = await createUnmountedAuthRoutes(input(d1)).request(
+      `${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/session`, {
+        headers: { cookie: `${name}=${SESSIONS.valid.sessionToken}` },
+      },
+    );
+    assert.equal(target.status, 200);
+    const targetClaims = sessionClaims(await target.json());
+    const renewed = setCookies(target)[name];
+    assert.equal(renewed?.value, SESSIONS.valid.sessionToken);
+    assert.deepEqual(withoutVolatile(renewed), BASELINE_COOKIES.sessionToken.observedOnRead);
+
+    const current = await authRequest("session", {
+      cookieHeader: `${name}=${renewed.value}`,
+    });
+    assert.equal(current.status, 200);
+    assert.deepEqual(sessionClaims(await current.json()), targetClaims);
+    assert.equal(targetClaims.id, USERS.valid.id);
+    assert.equal(setCookies(current)[name]?.value, SESSIONS.valid.sessionToken);
+  });
+
+  for (const [scenario, token, userId, isBanned] of [
+    ["banned", SESSIONS.banned.sessionToken, USERS.banned.id, 1],
+    ["expired", SESSIONS.expired.sessionToken, null, null],
+    ["deleted", SESSIONS.deletedToken, null, null],
+  ]) {
+    test(`U02a: ${scenario} session resolves consistently in both runtimes`, async (t) => {
+      const { d1 } = createHarness(t);
+      const name = BASELINE_COOKIES.sessionToken.name;
+      const cookieHeader = `${name}=${token}`;
+      const target = await createUnmountedAuthRoutes(input(d1)).request(
+        `${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/session`, {
+          headers: { cookie: cookieHeader },
+        },
+      );
+      const current = await authRequest("session", { cookieHeader });
+      assert.equal(target.status, 200);
+      assert.equal(current.status, 200);
+      assert.deepEqual(sessionClaims(await target.json()), sessionClaims(await current.json()));
+      const targetCookie = setCookies(target)[name];
+      const currentCookie = setCookies(current)[name];
+      assert.deepEqual(withoutVolatile(targetCookie), withoutVolatile(currentCookie));
+      const result = sessionClaims(userId ? {
+        user: { id: userId, role: "user", is_banned: isBanned, active_x_user_id: null },
+      } : null);
+      const actual = sessionClaims(await authRequest("session", { cookieHeader }).then(r => r.json()));
+      assert.deepEqual(actual, result);
+    });
+  }
+
+  test("U02a: CURRENT logout revokes D1 session so unmounted Hono rejects old cookie", async (t) => {
+    const { d1, sqlite } = createHarness(t);
+    const sessionName = BASELINE_COOKIES.sessionToken.name;
+    const csrfName = BASELINE_COOKIES.csrfToken.name;
+    const csrfResponse = await authRequest("csrf");
+    const { csrfToken } = await csrfResponse.json();
+    const csrfCookie = setCookies(csrfResponse)[csrfName];
+    assert.ok(csrfToken && csrfCookie?.value);
+    const signout = await authRequest("signout", {
+      method: "POST",
+      cookies: {
+        [sessionName]: SESSIONS.valid.sessionToken,
+        [csrfName]: csrfCookie.value,
+      },
+      body: { csrfToken },
+    });
+    assert.equal(setCookies(signout)[sessionName]?.value, "");
+    assert.equal(sqlite.prepare(
+      'SELECT "sessionToken" FROM "session" WHERE "sessionToken" = ?',
+    ).get(SESSIONS.valid.sessionToken), undefined);
+
+    const after = await createUnmountedAuthRoutes(input(d1)).request(
+      `${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/session`, {
+        headers: { cookie: `${sessionName}=${SESSIONS.valid.sessionToken}` },
+      },
+    );
+    assert.equal(after.status, 200);
+    assert.equal(await after.json(), null,
+      "revocation in legacy runtime must invalidate auth in the target runtime");
+  });
+
   test("U01: explicit HTTPS origin, configured origin match and secret fail closed", async (t) => {
     const { d1 } = createHarness(t);
     const base = input(d1);
