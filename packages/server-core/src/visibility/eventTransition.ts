@@ -13,6 +13,7 @@ import {
   releaseBlockedEntityInManifest,
   upsertBlockedEntityInManifest,
   type PublicVisibilityBlockedEntity,
+  type PublicVisibilityBlockedEntitiesManifest,
 } from "./manifestCore.ts";
 
 type EventVisibilityStatus = typeof events.$inferSelect["visibility_status"];
@@ -63,7 +64,7 @@ function logEventVisibilityCompensationFailure(
  * に追加する。再公開時も一度 blocked として manifest に載せ、event artifact
  * の生成が完了するまで古い成果物を公開しない。
  */
-export function planEventVisibilityTransition(input: {
+export async function planEventVisibilityTransition(input: {
   db: ServerCoreDb;
   eventId: string;
   previousStatus: EventVisibilityStatus;
@@ -71,7 +72,7 @@ export function planEventVisibilityTransition(input: {
   actorUserId: string;
   reason?: string | null;
   now: number;
-}): EventVisibilityTransitionPlan {
+}): Promise<EventVisibilityTransitionPlan> {
   const fence = planEventVisibilityFence(input);
   if (!fence) {
     return {
@@ -82,7 +83,14 @@ export function planEventVisibilityTransition(input: {
     };
   }
 
-  const fenceToken = generateId("vf");
+  // Existing blocked/release_pending D1 fence already owns the R2 manifest
+  // token. Reuse it or the precommit's foreign-token protection would also
+  // reject a legitimate private -> public transition after a prior block.
+  const existing = await getPublicVisibilityFence(input.db, "event", input.eventId);
+  const reusableToken = existing &&
+    (existing.state === "blocked" || existing.state === "release_pending")
+    ? existing.fence_token : null;
+  const fenceToken = reusableToken || generateId("vf");
   const { state, depublicizedFromPublic } = fence;
 
   return {
@@ -114,6 +122,15 @@ export async function preCommitEventVisibilityTransition(
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
+  // The first CAS write can succeed without invoking mutateOnConflict. Guard
+  // its initial snapshot too, or a later D1 rollback may release a prior
+  // writer's block after overwriting that writer's manifest token.
+  if (manifest.entities.some(
+    (entry) => entry.entity_type === "event" &&
+      entry.entity_id === input.eventId && entry.fence_token !== input.fenceToken,
+  )) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
   const updated = upsertBlockedEntityInManifest(
     manifest,
     {
@@ -128,11 +145,10 @@ export async function preCommitEventVisibilityTransition(
   await host.manifest.write(updated, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
-      const current = latest.entities.find(
-        (entry) =>
-          entry.entity_type === "event" && entry.entity_id === input.eventId,
-      );
-      if (current && current.fence_token !== input.fenceToken) {
+      if (latest.entities.some(
+        (entry) => entry.entity_type === "event" &&
+          entry.entity_id === input.eventId && entry.fence_token !== input.fenceToken,
+      )) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       return upsertBlockedEntityInManifest(
@@ -158,6 +174,10 @@ export async function preCommitEventVisibilityTransition(
         entry.entity_type === "event" &&
         entry.entity_id === input.eventId &&
         entry.fence_token === input.fenceToken,
+    ) ||
+    confirmed.entities.some(
+      (entry) => entry.entity_type === "event" &&
+        entry.entity_id === input.eventId && entry.fence_token !== input.fenceToken,
     )
   ) {
     throw new Error("public_visibility_fence_token_mismatch");
@@ -180,20 +200,20 @@ export async function preCommitEventVisibilityFenceRename(
 ): Promise<EventVisibilityFenceRenamePrecommit> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
+  // Moving a fence copies the SAME token to a new ID. A duplicate R2 key
+  // carrying another token must never be silently overwritten by the copy.
+  const hasForeignRenameToken = (snapshot: PublicVisibilityBlockedEntitiesManifest) =>
+    snapshot.entities.some(
+      (entry) => entry.entity_type === "event" &&
+        (entry.entity_id === input.oldEventId || entry.entity_id === input.newEventId) &&
+        entry.fence_token !== input.fenceToken,
+    );
   const previousOldEntry =
     manifest.entities.find(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.oldEventId,
     ) ?? null;
-  const currentNewEntry =
-    manifest.entities.find(
-      (entry) =>
-        entry.entity_type === "event" && entry.entity_id === input.newEventId,
-    ) ?? null;
-  if (
-    (previousOldEntry && previousOldEntry.fence_token !== input.fenceToken) ||
-    (currentNewEntry && currentNewEntry.fence_token !== input.fenceToken)
-  ) {
+  if (hasForeignRenameToken(manifest)) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
 
@@ -228,14 +248,7 @@ export async function preCommitEventVisibilityFenceRename(
         (entry) =>
           entry.entity_type === "event" && entry.entity_id === input.oldEventId,
       ) ?? null;
-      const current = latest.entities.find(
-        (entry) =>
-          entry.entity_type === "event" && entry.entity_id === input.newEventId,
-      );
-      if (
-        (previous && previous.fence_token !== input.fenceToken) ||
-        (current && current.fence_token !== input.fenceToken)
-      ) {
+      if (hasForeignRenameToken(latest)) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       const withoutNew = {
@@ -271,6 +284,7 @@ export async function preCommitEventVisibilityFenceRename(
   if (
     !confirmedEntry ||
     confirmedEntry.fence_token !== input.fenceToken ||
+    hasForeignRenameToken(confirmed) ||
     previousOldEntry !== null &&
     !confirmed.entities.some(
       (entry) =>
@@ -292,11 +306,31 @@ export async function preCommitEventVisibilityRenameTombstone(
     eventId: string;
     fenceToken: string;
     reason?: string | null;
+    /** Optional for legacy direct callers; CURRENT rename provides the exact
+     * previous R2 token (or null if none) to reject foreign CAS ownership. */
+    expectedPreviousFenceToken?: string | null;
   },
   host: VisibilityFenceHost,
 ): Promise<EventVisibilityRenameTombstonePrecommit> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
+  // A rename may rotate exactly the old-ID token it observed, never a
+  // concurrent writer's token. Legacy direct users omit the expectation and
+  // retain the existing single-token rotation contract. Duplicate mixed
+  // ownership is forbidden even for those legacy calls.
+  const hasUnexpectedOldIdToken = (snapshot: PublicVisibilityBlockedEntitiesManifest) => {
+    const tokens = snapshot.entities
+      .filter((entry) => entry.entity_type === "event" && entry.entity_id === input.eventId)
+      .map((entry) => entry.fence_token);
+    if (tokens.some((token) => token !== tokens[0])) return true;
+    if (input.expectedPreviousFenceToken === undefined) return false;
+    if (input.expectedPreviousFenceToken === null) return tokens.length > 0;
+    return tokens.length === 0 ||
+      tokens.some((token) => token !== input.expectedPreviousFenceToken);
+  };
+  if (hasUnexpectedOldIdToken(manifest)) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
   const previousEntry =
     manifest.entities.find(
       (entry) =>
@@ -316,6 +350,9 @@ export async function preCommitEventVisibilityRenameTombstone(
   await host.manifest.write(next, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
+      if (hasUnexpectedOldIdToken(latest)) {
+        throw new Error("public_visibility_fence_token_mismatch");
+      }
       const previous = latest.entities.find(
         (entry) =>
           entry.entity_type === "event" && entry.entity_id === input.eventId,
@@ -341,7 +378,12 @@ export async function preCommitEventVisibilityRenameTombstone(
     (entry) =>
       entry.entity_type === "event" && entry.entity_id === input.eventId,
   );
-  if (!confirmedEntry || confirmedEntry.fence_token !== input.fenceToken) {
+  if (
+    !confirmedEntry || confirmedEntry.fence_token !== input.fenceToken ||
+    confirmed.entities.some((entry) =>
+      entry.entity_type === "event" && entry.entity_id === input.eventId &&
+      entry.fence_token !== input.fenceToken)
+  ) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
   return {
@@ -364,7 +406,22 @@ export async function compensateEventVisibilityFenceRenameOnD1Failure(
         entry.entity_type === "event" &&
         entry.entity_id === input.newEventId,
     );
-    if (!currentNewEntry || currentNewEntry.fence_token !== input.fenceToken) {
+    const previousOldEntry = input.previousOldEntry;
+    if (
+      !currentNewEntry || currentNewEntry.fence_token !== input.fenceToken ||
+      manifest.entities.some((entry) =>
+        entry.entity_type === "event" &&
+        entry.entity_id === input.newEventId &&
+        entry.fence_token !== input.fenceToken) ||
+      // Restoring the old ID via upsert removes *all* entries for that key.
+      // A concurrent writer may now own the old ID: never erase its block
+      // during a failed D1 rename compensation.
+      (previousOldEntry !== null &&
+        manifest.entities.some((entry) =>
+          entry.entity_type === "event" &&
+          entry.entity_id === input.oldEventId &&
+          entry.fence_token !== previousOldEntry.fence_token))
+    ) {
       return;
     }
     const withoutNew = {
@@ -419,7 +476,13 @@ export async function compensateEventVisibilityRenameTombstoneOnD1Failure(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.eventId,
     );
-    if (!currentEntry || currentEntry.fence_token !== input.fenceToken) {
+    if (
+      !currentEntry || currentEntry.fence_token !== input.fenceToken ||
+      manifest.entities.some((entry) =>
+        entry.entity_type === "event" &&
+        entry.entity_id === input.eventId &&
+        entry.fence_token !== input.fenceToken)
+    ) {
       return;
     }
     const withoutCurrent = {

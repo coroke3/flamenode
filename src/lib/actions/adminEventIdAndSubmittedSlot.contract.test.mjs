@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 function readRepoFile(path) {
   return readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
@@ -99,4 +100,61 @@ test("event ID rename control is rendered inside the admin danger section", () =
     adminListSource,
     /href=\{`\/manage\/events\/\$\{encodeURIComponent\(ev\.id\)\}\/edit`\}/,
   );
+});
+
+
+test("event rename D1 fence move is ownership-CAS and never overwrites a raced tombstone", () => {
+  const source = readRepoFile("src/lib/actions/event-admin-danger.ts");
+  assert.match(source, /UPDATE public_visibility_fences[\s\S]*?AND fence_token = \$\{oldFence\?\.fence_token \?\? null\}[\s\S]*?AND state = \$\{oldFence\?\.state \?\? null\}/);
+  assert.match(source, /renameTombstoneStatement[\s\S]*?\.onConflictDoNothing\(\)/);
+  assert.match(source, /index === referenceUpdates\.length - 1 \? \(oldFence \? 1 : 0\) : null/);
+
+  // Exercise SQLite's real UPDATE/INSERT conflict and rollback semantics with
+  // the same predicates that the CURRENT action uses in its atomic D1 batch.
+  const cases = [
+    { name: "matching owner", observed: ["old-owner", "blocked"], actual: ["old-owner", "blocked"], succeeds: true },
+    { name: "token replaced between R2 and D1", observed: ["old-owner", "blocked"], actual: ["new-owner", "blocked"], succeeds: false },
+    { name: "state changed after precommit", observed: ["old-owner", "blocked"], actual: ["old-owner", "release_pending"], succeeds: false },
+    { name: "unexpected old-ID claim", observed: null, actual: ["new-owner", "blocked"], succeeds: false },
+    { name: "no prior fence", observed: null, actual: null, succeeds: true },
+  ];
+
+  for (const sample of cases) {
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec("CREATE TABLE public_visibility_fences (entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL, state TEXT NOT NULL, PRIMARY KEY (entity_type, entity_id))");
+      if (sample.actual) {
+        db.prepare("INSERT INTO public_visibility_fences VALUES ('event', 'old-event', ?, ?)")
+          .run(...sample.actual);
+      }
+      const before = db.prepare("SELECT * FROM public_visibility_fences ORDER BY entity_id").all();
+      const rename = () => {
+        db.exec("BEGIN");
+        try {
+          const moved = db.prepare("UPDATE public_visibility_fences SET entity_id = ? WHERE entity_type = 'event' AND entity_id = ? AND fence_token = ? AND state = ?")
+            .run("new-event", "old-event", sample.observed?.[0] ?? null, sample.observed?.[1] ?? null);
+          assert.equal(Number(moved.changes), sample.observed ? 1 : 0, "fence ownership/state changed");
+          const inserted = db.prepare("INSERT INTO public_visibility_fences (entity_type, entity_id, fence_token, state) VALUES ('event', 'old-event', 'rename-tombstone', 'blocked') ON CONFLICT DO NOTHING")
+            .run();
+          assert.equal(Number(inserted.changes), 1, "another writer owns old-ID tombstone");
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      };
+      if (sample.succeeds) {
+        rename();
+        assert.equal(db.prepare("SELECT fence_token FROM public_visibility_fences WHERE entity_id = 'old-event'").get().fence_token, "rename-tombstone", sample.name);
+        if (sample.observed) {
+          assert.equal(db.prepare("SELECT fence_token FROM public_visibility_fences WHERE entity_id = 'new-event'").get().fence_token, "old-owner", sample.name);
+        }
+      } else {
+        assert.throws(rename, /fence ownership|another writer owns/, sample.name);
+        assert.deepEqual(db.prepare("SELECT * FROM public_visibility_fences ORDER BY entity_id").all(), before, sample.name + " must roll back");
+      }
+    } finally {
+      db.close();
+    }
+  }
 });

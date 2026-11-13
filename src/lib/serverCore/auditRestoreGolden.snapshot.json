@@ -4871,6 +4871,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -5449,6 +5458,15 @@
         "sql": "select \"id\", \"title\", \"event_type\", \"explanation\", \"youtube_description_template\", \"required_video_fields_json\", \"icon_url\", \"img_url\", \"accent_color\", \"visibility_status\", \"allow_user_video_event_links\", \"allow_unslotted_posts\", \"allow_user_video_edits\", \"user_video_edit_permission_keys_json\", \"slot_type\", \"slot_visibility_mode\", \"start_time\", \"end_time\", \"entry_start_time\", \"entry_end_time\", \"created_at\", \"updated_at\", \"max_slots_per_video\", \"max_slot_reservation_groups_per_xid\", \"slot_interval_minutes\", \"review_settings\", \"editable_fields\", \"repeat_rules\", \"slot_part_gap_minutes\", \"parts_json\", \"public_api_enabled\" from \"events\" where \"events\".\"id\" = ?",
         "params": [
           "evt-private"
+        ]
+      },
+      {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-private",
+          1
         ]
       },
       {
@@ -10054,6 +10072,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -10935,6 +10962,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -11648,6 +11684,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -12328,6 +12373,15 @@
         "sql": "select \"id\", \"title\", \"event_type\", \"explanation\", \"youtube_description_template\", \"required_video_fields_json\", \"icon_url\", \"img_url\", \"accent_color\", \"visibility_status\", \"allow_user_video_event_links\", \"allow_unslotted_posts\", \"allow_user_video_edits\", \"user_video_edit_permission_keys_json\", \"slot_type\", \"slot_visibility_mode\", \"start_time\", \"end_time\", \"entry_start_time\", \"entry_end_time\", \"created_at\", \"updated_at\", \"max_slots_per_video\", \"max_slot_reservation_groups_per_xid\", \"slot_interval_minutes\", \"review_settings\", \"editable_fields\", \"repeat_rules\", \"slot_part_gap_minutes\", \"parts_json\", \"public_api_enabled\" from \"events\" where \"events\".\"id\" = ?",
         "params": [
           "evt-1"
+        ]
+      },
+      {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
         ]
       },
       {

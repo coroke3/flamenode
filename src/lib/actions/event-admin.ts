@@ -602,7 +602,7 @@ export async function updateEvent(
     now,
   });
   const after = { ...before, ...built.payload } as typeof events.$inferSelect;
-  const visibilityTransition = planEventVisibilityTransition({
+  const visibilityTransition = await planEventVisibilityTransition({
     db,
     eventId: data.id,
     previousStatus: before.visibility_status,
@@ -1124,7 +1124,7 @@ export async function deleteEvent(
     visibility_status: "private" as const,
     updated_at: now,
   };
-  const visibilityTransition = planEventVisibilityTransition({
+  const visibilityTransition = await planEventVisibilityTransition({
     db,
     eventId,
     previousStatus: before.visibility_status,

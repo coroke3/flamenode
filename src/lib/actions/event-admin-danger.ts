@@ -337,6 +337,9 @@ export async function renameEventId(
     renameTombstone = await preCommitEventVisibilityRenameTombstone({
       eventId: oldId,
       fenceToken: renameTombstoneToken,
+      // The copied R2 fence is still the old-ID owner. If a concurrent writer
+      // replaces it before tombstone CAS, fail closed instead of rotating theirs.
+      expectedPreviousFenceToken: manifestRename?.previousOldEntry?.fence_token ?? null,
       reason: "event_id_rename_old_cleanup",
     });
   } catch (error) {
@@ -415,6 +418,8 @@ export async function renameEventId(
       UPDATE public_visibility_fences
       SET entity_id = ${newId}
       WHERE entity_type = 'event' AND entity_id = ${oldId}
+        AND fence_token = ${oldFence?.fence_token ?? null}
+        AND state = ${oldFence?.state ?? null}
     `),
   ];
   const renameTombstoneStatement = db
@@ -431,19 +436,10 @@ export async function renameEventId(
       requested_by_auth_user_id: actorUserId,
       updated_at: now,
     })
-    .onConflictDoUpdate({
-      target: [publicVisibilityFences.entity_type, publicVisibilityFences.entity_id],
-      set: {
-        fence_token: renameTombstoneToken,
-        state: "blocked",
-        reason: "event_id_rename_old_cleanup",
-        requirements_json: null,
-        blocked_at: now,
-        release_requested_at: null,
-        requested_by_auth_user_id: actorUserId,
-        updated_at: now,
-      },
-    });
+    // A concurrent writer may have claimed oldId since the precommit. Do
+    // not overwrite their D1 fence; the expected 1-row assertion below
+    // rolls back this whole batch on a conflict.
+    .onConflictDoNothing();
   const targetFenceDelete = targetReusePrecommit
     ? db
         .delete(publicVisibilityFences)
@@ -490,7 +486,12 @@ export async function renameEventId(
       null,
       ...(targetFenceDelete ? [1] : []),
       1,
-      ...referenceUpdates.map(() => null),
+      // The last reference update moves the exact D1 fence observed before
+      // the R2 precommit (or intentionally moves zero when none was present).
+      // Any changed owner/state aborts the atomic rename before the tombstone.
+      ...referenceUpdates.map((_, index) =>
+        index === referenceUpdates.length - 1 ? (oldFence ? 1 : 0) : null,
+      ),
       1,
       ...oldQueue.expectedChanges,
       ...newQueue.expectedChanges,
