@@ -345,14 +345,30 @@ async function repairTrendingAfterGa4Failure(
 
   if (!shouldRewrite) return false;
   const generatedAt = retainedGeneratedAt ?? Math.floor(Date.now() / 1000);
-  await putTrendingPayload(env, {
+  const rewritten: TrendingOutputPayload = {
     schema_version: TRENDING_SCHEMA_VERSION,
     generated_at: generatedAt,
     source: "ga4",
     ranking_rule: [...TRENDING_RANKING_RULE],
     windows: buildTrendingWindows(new Date(generatedAt * 1000)),
     items: retained ?? [],
-  }, signal);
+  };
+  try {
+    await putTrendingPayload(env, rewritten, signal);
+  } catch (error) {
+    if (!(error instanceof Error) ||
+      error.message !== "ga4_trending_output_exceeds_size_limit") throw error;
+    // A valid public title may grow beyond the R2 public-reader 1 MiB cap.
+    // Leaving the old object would also leave any revoked private rows.
+    // Publish a bounded empty artifact instead of silently failing repair.
+    const clearedAt = Math.floor(Date.now() / 1000);
+    await putTrendingPayload(env, {
+      ...rewritten,
+      generated_at: clearedAt,
+      windows: buildTrendingWindows(new Date(clearedAt * 1000)),
+      items: [],
+    }, signal);
+  }
   return true;
 }
 
