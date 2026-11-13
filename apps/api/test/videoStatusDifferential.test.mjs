@@ -175,7 +175,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // The R2 bucket below implements real CAS precommit on the shared Hono
   // manifest adapter. This is still not a live Cloudflare binding, and does
   // not replace complete CURRENT Action/HTTP/authorization parity.
-  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false) {
+  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false, replaceR2FenceOwner = false) {
     const sqlite = createSqlite();
     seed(sqlite);
     const d1 = createVideoStatusD1(sqlite);
@@ -213,6 +213,17 @@ if (runUnderRootTsx(import.meta.url)) {
           if (condition && !(condition instanceof Headers) &&
               condition.etagMatches !== current?.etag) return null;
           objects.set(key, { text: value, etag: `etag-${++etagVersion}` });
+          if (replaceR2FenceOwner && etagVersion === 1) {
+            // Another writer takes ownership between a successful R2 put
+            // and the mandatory read-back confirmation.
+            const overwritten = JSON.parse(value);
+            const entry = overwritten.entities.find((row) =>
+              row.entity_type === "video" && row.entity_id === "vid-1");
+            assert.ok(entry, "the precommit actually blocked the intended video");
+            entry.fence_token = "vf-foreign-owner";
+            objects.set(key, { text: JSON.stringify(overwritten), etag: "etag-foreign" });
+            events.push(["r2.concurrent-owner", key]);
+          }
           return { key };
         },
       };
@@ -249,7 +260,11 @@ if (runUnderRootTsx(import.meta.url)) {
         db, videoId: "vid-1", requestedStatus: nextStatus, transition,
         reason: "audited differential", logTag: "status-differential",
       }, auditedHost);
-      if (forceStaleCas) {
+      if (replaceR2FenceOwner) {
+        assert.equal(result.ok, false, "R2 owner changes must stop before D1");
+        assert.equal(result.errorCode, "visibility_precommit_failed");
+        assert.equal(result.retryable, false, "lost R2 ownership is fail-closed");
+      } else if (forceStaleCas) {
         assert.equal(result.ok, false, "the stale CAS must fail");
         assert.equal(result.retryable, true, "a D1 CAS failure is recoverable");
       } else {
@@ -327,6 +342,23 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(puts.length, 2, "one conditional precommit and one compensated release");
     assert.equal(puts[0][2], "create-if-absent", "first R2 write is never unconditional");
     assert.equal(puts[1][2], "etag-1", "compensation releases by exact R2 CAS etag");
+  });
+
+  test("concurrent R2 fence ownership supersedes the stale caller without clearing the winner", async () => {
+    const current = await executeAuditedStatus("private", true, false, true);
+    const hono = await executeAuditedStatus("private", false, false, true);
+    assert.deepEqual(hono, current, "both planners must reject a lost R2 fence owner");
+    assert.equal(current.batches, 0, "no audited D1 mutation may run after lost R2 CAS ownership");
+    assert.equal(current.video.visibility_status, "public");
+    assert.deepEqual(current.fences, []);
+    assert.deepEqual(current.audits, []);
+    assert.deepEqual(current.notifications, []);
+    assert.deepEqual(current.queue, []);
+    assert.equal(current.manifest.entities[0].fence_token, "vf-foreign-owner",
+      "compensation may never remove a different writer's R2 fence");
+    assert.equal(current.events.filter((event) => event[0] === "r2.put").length, 1,
+      "the original precommit is the only R2 put, never an unauthorized compensation");
+    assert.equal(current.events.filter((event) => event[0] === "r2.concurrent-owner").length, 1);
   });
 
   for (const nextStatus of ["private", "voided"]) {
