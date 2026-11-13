@@ -207,7 +207,7 @@ test("Issue #674: context and table-name guard prevent V1-prefix and cross-table
   assert.equal(classifySpreadsheetAuditHistoryCandidate(
     lookup, asRow(lookup.v1.context, lookup.v1.target_id, "video_members")), "other");
   assert.equal(classifySpreadsheetAuditHistoryCandidate(
-    lookup, asRow(lookup.v1.context, "spk:v1:[[\\\"id\\\",\\\"other\\\"]]")), "other");
+    lookup, asRow(lookup.v1.context, buildSpreadsheetAuditIdentityV1({ id: "other" }).target_id)), "other");
   const spoof = buildSpreadsheetAuditHistoryLookup("video_events", { id: lookup.v1.target_id });
   assert.equal(classifySpreadsheetAuditHistoryCandidate(
     spoof, asRow("admin_spreadsheet", lookup.v1.target_id)), "legacy_ambiguous");
