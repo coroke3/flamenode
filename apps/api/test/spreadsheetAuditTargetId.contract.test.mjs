@@ -66,6 +66,27 @@ test("Issue #674: the same target_id string is NOT enough to classify historical
   assert.deepEqual(parseSpreadsheetAuditIdentityV1(v1), [["id", "record-a"]]);
 });
 
+test("Issue #674: malformed runtime identity values never throw or masquerade as V1", () => {
+  const valid = buildSpreadsheetAuditIdentityV1({ id: "record-a" });
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(valid), [["id", "record-a"]]);
+  for (const malformed of [
+    null, undefined, 0, false, "", [], Object.create(null),
+    { context: valid.context }, { target_id: valid.target_id },
+    { context: valid.context, target_id: null },
+    { context: valid.context, target_id: 7 },
+    { context: valid.context, target_id: [] },
+    { context: "admin_spreadsheet", target_id: valid.target_id },
+  ]) {
+    assert.doesNotThrow(() => parseSpreadsheetAuditIdentityV1(malformed));
+    assert.equal(parseSpreadsheetAuditIdentityV1(malformed), null);
+  }
+  const lookup = buildSpreadsheetAuditHistoryLookup("video_events", { id: "record-a" });
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, {
+    table_name: lookup.table_name, context: valid.context, target_id: null,
+    before_json: null, after_json: null,
+  }), "other", "malformed V1 row must not be classified as a confirmed match");
+});
+
 test("Issue #674: invalid or noncanonical V1 representations fail closed", () => {
   for (const bad of [
     {}, { id: "" }, { id: "  " }, { id: "ab\0cd" }, { "bad\0key": "x" },
