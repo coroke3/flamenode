@@ -127,9 +127,27 @@ function createExecutableWritePlan(db, queue = { statements: [], expectedChanges
   return plan;
 }
 
+function seedCreateActor(sqlite, { status = "approved", selectedX = "x_approved", linkActor = "u_admin", linked = true } = {}) {
+  insert(sqlite, "user", {
+    id: "u_admin", name: "Admin", discord_id: "discord", role: "admin",
+    active_x_user_id: selectedX,
+  });
+  if (linkActor !== "u_admin") {
+    insert(sqlite, "user", { id: linkActor, role: "user" });
+  }
+  insert(sqlite, "x_users", {
+    id: "x_approved", x_name: "Approved", approval_status: status,
+  });
+  if (linked) {
+    insert(sqlite, "x_user_account_links", {
+      x_user_id: "x_approved", auth_user_id: linkActor, link_role: "owner",
+    });
+  }
+}
+
 test("MIG-0652 U02 SQLite T01: strict CREATE audit, event, owner and questions commit atomically", async () => {
   const { sqlite, d1, db } = createAtomicCreateHarness();
-  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  seedCreateActor(sqlite);
   const plan = createExecutableWritePlan(db);
   const ids = await mutateWithAudit(db, plan);
   assert.equal(ids.length, 4, "one strict audit per inserted source row");
@@ -155,7 +173,7 @@ test("MIG-0652 U02 SQLite T01: strict CREATE audit, event, owner and questions c
 
 test("MIG-0652 U02 SQLite T02: owner insert collision rolls back earlier event INSERT and all strict audits", async () => {
   const { sqlite, d1, db } = createAtomicCreateHarness();
-  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  seedCreateActor(sqlite);
   // Force the second DML (owner INSERT) to fail after the event INSERT would
   // otherwise have succeeded. This must roll back the whole D1 batch.
   insert(sqlite, "event_staff", owner);
@@ -170,7 +188,7 @@ test("MIG-0652 U02 SQLite T02: owner insert collision rolls back earlier event I
 
 test("MIG-0652 U02 SQLite T03: actual event-create rebuild queue commits in the audited D1 batch", async () => {
   const { sqlite, d1, db } = createAtomicCreateHarness();
-  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  seedCreateActor(sqlite);
   const queue = await buildEventChangeQueueBatch(db, {
     eventId: "ev_create", reason: "event_create", requestedByUserId: "u_admin", priority: "high",
   });
@@ -200,7 +218,7 @@ test("MIG-0652 U02 SQLite T03: actual event-create rebuild queue commits in the 
 
 test("MIG-0652 U02 SQLite T04: failed strict audit rolls back event, questions AND queue writes", async () => {
   const { sqlite, d1, db } = createAtomicCreateHarness();
-  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  seedCreateActor(sqlite);
   const queue = await buildEventChangeQueueBatch(db, {
     eventId: "ev_create", reason: "event_create", requestedByUserId: "u_admin", priority: "high",
   });
@@ -221,7 +239,7 @@ test("MIG-0652 U02 SQLite T04: failed strict audit rolls back event, questions A
 
 test("MIG-0652 U02 SQLite T05: existing pending event rebuild target is coalesced with CREATE", async () => {
   const { sqlite, d1, db } = createAtomicCreateHarness();
-  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  seedCreateActor(sqlite);
   insert(sqlite, "static_rebuild_queue", {
     id: "old_pending", target_type: "event_base", target_id: "ev_create",
     reason: "older_event_update", priority: "low", status: "pending",
@@ -251,7 +269,7 @@ test("MIG-0652 U02 SQLite T05: existing pending event rebuild target is coalesce
 
 test("MIG-0652 U02 SQLite T06: audit failure rolls back updates to a pre-existing queue target", async () => {
   const { sqlite, d1, db } = createAtomicCreateHarness();
-  insert(sqlite, "user", { id: "u_admin", name: "Admin", discord_id: "discord", role: "admin" });
+  seedCreateActor(sqlite);
   insert(sqlite, "static_rebuild_queue", {
     id: "old_pending", target_type: "event_base", target_id: "ev_create",
     reason: "older_event_update", priority: "low", status: "pending",
@@ -281,6 +299,48 @@ test("MIG-0652 U02 SQLite T06: audit failure rolls back updates to a pre-existin
   }
 });
 
+test("MIG-0652 U02 SQLite T07: unapproved, unlinked or inactive X identity fails before event INSERT", async () => {
+  const invalid = [
+    { status: "pending" },
+    { status: "rejected" },
+    { selectedX: "x_other" },
+    { linkActor: "u_other" },
+    { linked: false },
+  ];
+  for (const options of invalid) {
+    const { sqlite, d1, db } = createAtomicCreateHarness();
+    seedCreateActor(sqlite, options);
+    const plan = createExecutableWritePlan(db);
+    assert.equal(plan.preMutationAssertions.length, 1);
+    assert.equal(plan.budget.preMutationAssertionCount, 1);
+    await assert.rejects(mutateWithAudit(db, plan),
+      "unverified owner must abort the D1 batch: " + JSON.stringify(options));
+    assert.equal(d1.stats.batches, 1);
+    for (const table of ["events", "event_staff", "event_custom_questions", "audit_logs"]) {
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0,
+        table + " must not be created for " + JSON.stringify(options));
+    }
+  }
+});
+
+test("MIG-0652 U02 SQLite T08: revoking a linked owner after planning but before D1 commit aborts atomically", async () => {
+  const { sqlite, d1, db } = createAtomicCreateHarness();
+  seedCreateActor(sqlite);
+  const queue = await buildEventChangeQueueBatch(db, {
+    eventId: "ev_create", reason: "event_create", requestedByUserId: "u_admin", priority: "high",
+  });
+  const plan = createExecutableWritePlan(db, queue);
+  // The future Hono preflight could pass while the approved X account is
+  // revoked before the final atomic batch begins.
+  sqlite.prepare("UPDATE x_users SET approval_status = 'rejected' WHERE id = 'x_approved'").run();
+  await assert.rejects(mutateWithAudit(db, plan));
+  assert.equal(d1.stats.batches, 1);
+  for (const table of ["events", "event_staff", "event_custom_questions", "static_rebuild_queue", "audit_logs"]) {
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0,
+      table + " must not survive revoked owner identity");
+  }
+});
+
 test("MIG-0652 U02 atomic create: event, owner, ordered question chunks and strict audits are bundled", () => {
   const result = makePlan();
   assert.equal(result.ok, true);
@@ -297,6 +357,8 @@ test("MIG-0652 U02 atomic create: event, owner, ordered question chunks and stri
   assert.equal(result.audits[1].after.x_user_id, "x_approved");
   assert.equal(result.budget.withinLimit, true);
   assert.equal(result.budget.reservedCallerQueryCount, 18);
+  assert.equal(result.preMutationAssertions.length, 1);
+  assert.equal(result.budget.preMutationAssertionCount, 1);
 });
 
 test("MIG-0652 U02 atomic create: empty questions do not emit an empty Drizzle INSERT", () => {
@@ -391,6 +453,8 @@ test("MIG-0652 U02 atomic create: source keeps unmounted route and no premature 
   assert.doesNotMatch(app, /createMutationPlan|createRoute/);
   assert.match(core, /planD1AuditMutationBudget\(/);
   assert.match(core, /mutationAssertionCount: mutationStatements.length/);
+  assert.match(core, /preMutationAssertionCount: preMutationAssertions.length/);
+  assert.match(core, /approval_status/);
   assert.doesNotMatch(core, /staticRebuildWakeSource:/);
   assert.match(source, /const mutationStatements = \[/);
   assert.match(source, /context: "event-create:owner"/);
