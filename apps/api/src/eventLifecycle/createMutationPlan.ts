@@ -15,7 +15,7 @@ import type { ServerCoreDb } from "@flamenode/server-core/db";
 import type { WriteAuditLogInput } from "@flamenode/server-core/audit/types";
 import { assertCondition, planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutate";
 import type { buildEventChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
-import { MAX_EVENT_CREATE_QUESTIONS, MAX_EVENT_CREATE_QUESTIONS_PER_INSERT } from "@flamenode/domain/event";
+import { EVENT_ID_PATTERN, MAX_EVENT_CREATE_QUESTIONS, MAX_EVENT_CREATE_QUESTIONS_PER_INSERT } from "@flamenode/domain/event";
 
 export const EVENT_CREATE_PLAN_FAILURE = "イベント作成の原子的処理がD1の上限を超えます。";
 export const EVENT_CREATE_INVALID_PLAN = "イベント作成の書き込み計画が不正です。";
@@ -57,7 +57,11 @@ export function planEventCreateAtomicWrite(input: {
   // and creates one publicly listed, fixed-role owner without extra grants.
   // Reject a malformed future Hono adapter instead of silently increasing
   // publication or owner permissions in its first atomic D1 batch.
-  if (input.hasRenameTombstone || !eventRow.id || !ownerRow.id ||
+  // Mirror CURRENT createEvent route-safe new-ID contract even if a future
+  // Hono adapter passes a malformed purportedly validated event row.
+  if (input.hasRenameTombstone ||
+      typeof eventRow.id !== "string" || !EVENT_ID_PATTERN.test(eventRow.id) ||
+      !ownerRow.id ||
       eventRow.public_api_enabled !== 0 ||
       ownerRow.event_id !== eventRow.id || !actorUserId ||
       ownerRow.approved_by_auth_user_id !== actorUserId ||
