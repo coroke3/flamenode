@@ -5,6 +5,7 @@ import {
   resolveStaticTrendingStaleMeta,
   TRENDING_STALE_MAX_AGE_SEC,
   TRENDING_TOO_OLD_FOR_HOME_SEC,
+  TRENDING_MAX_FUTURE_SKEW_SEC,
 } from "./staticTrendingCore.ts";
 
 const sampleItem = {
@@ -157,6 +158,31 @@ test("normalizeStaticTrending: public 以外の status は除外", () => {
 
   assert.ok(data);
   assert.deepEqual(data.items, []);
+});
+
+test("Issue #653: future-dated trending artifact beyond clock skew is rejected at read", () => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const payload = {
+    schema_version: 1,
+    generated_at: nowSec + TRENDING_MAX_FUTURE_SKEW_SEC,
+    items: [sampleItem],
+  };
+  assert.ok(normalizeStaticTrending(payload),
+    "small bounded clock skew must remain usable");
+  assert.equal(normalizeStaticTrending({
+    ...payload,
+    generated_at: nowSec + TRENDING_MAX_FUTURE_SKEW_SEC + 1,
+  }), null, "far-future artifact must never be treated as fresh");
+});
+
+test("Issue #653: future trending metadata fails closed even without the normalizer", () => {
+  const nowSec = 1_700_000_000;
+  assert.deepEqual(resolveStaticTrendingStaleMeta(
+    nowSec + TRENDING_MAX_FUTURE_SKEW_SEC + 1, nowSec,
+  ), { stale: true, ageSeconds: null, tooOldForHome: true });
+  assert.deepEqual(resolveStaticTrendingStaleMeta(
+    nowSec + TRENDING_MAX_FUTURE_SKEW_SEC, nowSec,
+  ), { stale: false, ageSeconds: 0, tooOldForHome: false });
 });
 
 test("resolveStaticTrendingStaleMeta: 3時間超で stale、24時間超で tooOldForHome", () => {
