@@ -213,8 +213,8 @@ function isCanonicalRetainedTrendingWire(raw: string, payload: TrendingOutputPay
     if (!hasOnlyRetainedKeys(payload.windows, RETAINED_TRENDING_WINDOW_KEYS)) return false;
     for (const value of Object.values(payload.windows)) {
       if (!hasOnlyRetainedKeys(value, RETAINED_TRENDING_DATE_KEYS) ||
-        typeof value.start_date !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value.start_date) ||
-        typeof value.end_date !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value.end_date)) {
+        typeof value.start_date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.start_date) ||
+        typeof value.end_date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.end_date)) {
         return false;
       }
     }
