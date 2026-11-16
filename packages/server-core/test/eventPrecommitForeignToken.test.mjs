@@ -580,6 +580,49 @@ test("Visibility rename copy: a foreign duplicate on old or new event ID stops t
   }
 });
 
+test("Visibility rename: full R2 copy+tombstone precommit and D1 failure rollback restore exactly prior state", async () => {
+  const source = { ...entry("event", "event-old", "original-owner"),
+    blocked_at: 44, reason: "existing-private" };
+  const unrelated = entry("video", "unrelated", "other-owner");
+  const original = manifestOf(source, unrelated);
+  const state = hostOf(original);
+  const copied = await preCommitEventVisibilityFenceRename({
+    oldEventId: "event-old", newEventId: "event-new",
+    fenceToken: "original-owner", reason: "rename",
+  }, state.host);
+  assert.deepEqual(copied.previousOldEntry, source);
+  assert.equal(copied.writtenNewEntry.fence_token, source.fence_token);
+  assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "event-old"), source,
+    "copying the fence must not make stale old-ID public before tombstone");
+  assert.equal(state.manifest.entities.find(x => x.entity_id === "event-new").fence_token,
+    source.fence_token, "new-ID public projection must stay blocked");
+
+  const tombstone = await preCommitEventVisibilityRenameTombstone({
+    eventId: "event-old", fenceToken: "vf-old-cleanup",
+    expectedPreviousFenceToken: copied.previousOldEntry.fence_token,
+    reason: "event_id_rename_old_cleanup",
+  }, state.host);
+  assert.equal(tombstone.previousEntry.fence_token, source.fence_token);
+  assert.equal(state.manifest.entities.find(x => x.entity_id === "event-old").fence_token,
+    "vf-old-cleanup", "old URL must be held by a fresh tombstone until D1 finishes");
+  assert.equal(state.manifest.entities.find(x => x.entity_id === "event-new").fence_token,
+    "original-owner", "new URL must remain blocked during D1 CAS");
+  assert.equal(state.manifest.entities.find(x => x.entity_id === "unrelated").fence_token,
+    "other-owner", "unrelated blockers survive both precommit steps");
+
+  // Mimic the caller's D1-failure catch sequence: tombstone compensation first,
+  // then new-ID copied-fence compensation, both conditional on their own R2 CAS.
+  await compensateEventVisibilityRenameTombstoneOnD1Failure(tombstone, state.host);
+  assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "event-old"), source);
+  await compensateEventVisibilityFenceRenameOnD1Failure(copied, state.host);
+  assert.equal(state.manifest.entities.length, 2);
+  assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "event-old"), source);
+  assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "unrelated"), unrelated);
+  assert.equal(state.manifest.entities.some(x => x.entity_id === "event-new"), false,
+    "only our temporary new-ID copy should be removed");
+  assert.equal(state.appliedWrites, 4, "two CAS precommits plus two conditional R2 rollbacks");
+});
+
 test("Visibility rename copy: a pre-existing same-token destination must not be overwritten", async () => {
   const old = entry("event", "event-old", "incoming");
   const priorNew = { ...entry("event", "event-new", "incoming"),
