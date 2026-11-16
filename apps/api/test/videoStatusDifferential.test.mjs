@@ -184,7 +184,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // The R2 bucket below implements real CAS precommit on the shared Hono
   // manifest adapter. This is still not a live Cloudflare binding, and does
   // not replace complete CURRENT Action/HTTP/authorization parity.
-  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false, replaceR2FenceOwner = false, enableWake = false, initialStatus = "public") {
+  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false, replaceR2FenceOwner = false, enableWake = false, initialStatus = "public", r2Fault = null) {
     const sqlite = createSqlite();
     seed(sqlite);
     if (initialStatus !== "public") {
@@ -214,6 +214,7 @@ if (runUnderRootTsx(import.meta.url)) {
         },
         async get(key) {
           events.push(["r2.get", key]);
+          if (r2Fault === "read") throw new Error("public_visibility_manifest_transport_unavailable");
           const row = objects.get(key);
           return row ? {
             etag: row.etag,
@@ -224,6 +225,7 @@ if (runUnderRootTsx(import.meta.url)) {
         async put(key, value, options) {
           events.push(["r2.put", key, options?.onlyIf instanceof Headers
             ? "create-if-absent" : options?.onlyIf?.etagMatches ?? null]);
+          if (r2Fault === "write") throw new Error("public_visibility_manifest_transport_unavailable");
           const current = objects.get(key);
           const condition = options?.onlyIf;
           if (condition instanceof Headers &&
@@ -291,7 +293,11 @@ if (runUnderRootTsx(import.meta.url)) {
         ? await executeCurrentStatusMutation(mutationInput)
         : await executeHonoVideoVisibilityStatusMutation(mutationInput, auditedHost);
       await Promise.all(pendingWakePromises);
-      if (replaceR2FenceOwner) {
+      if (r2Fault) {
+        assert.equal(result.ok, false, "R2 transport errors must stop before D1");
+        assert.equal(result.errorCode, "visibility_precommit_failed");
+        assert.equal(result.retryable, false, "no unsafe retry after an unconfirmed R2 fence");
+      } else if (replaceR2FenceOwner) {
         assert.equal(result.ok, false, "R2 owner changes must stop before D1");
         assert.equal(result.errorCode, "visibility_precommit_failed");
         assert.equal(result.retryable, false, "lost R2 ownership is fail-closed");
@@ -439,6 +445,34 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), [],
       "a failed private-to-public transition cannot wake either queue");
   });
+
+  for (const [initialStatus, nextStatus] of [["public", "private"], ["private", "public"]]) {
+    for (const r2Fault of ["read", "write"]) {
+      test(`R2 manifest ${r2Fault} outage prevents ${initialStatus}→${nextStatus} D1 commits on CURRENT/Hono`, async () => {
+        const current = await executeAuditedStatus(
+          nextStatus, true, false, false, false, initialStatus, r2Fault,
+        );
+        const hono = await executeAuditedStatus(
+          nextStatus, false, false, false, false, initialStatus, r2Fault,
+        );
+        assert.deepEqual(hono, current, "both runtimes must fail closed on the same R2 outage");
+        assert.equal(current.result.ok, false);
+        assert.equal(current.result.errorCode, "visibility_precommit_failed");
+        assert.equal(current.batches, 0, "R2 errors prevent any audited D1 transaction");
+        assert.equal(current.video.visibility_status, initialStatus);
+        assert.equal(current.video.updated_at, 1000);
+        assert.deepEqual(current.fences, [], "no D1 visibility fence is recorded");
+        assert.deepEqual(current.audits, [], "no partial audit is committed");
+        assert.deepEqual(current.notifications, []);
+        assert.deepEqual(current.queue, [], "no public rebuild is scheduled");
+        assert.equal(current.manifest, null, "the failed write must not create a public block");
+        assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), []);
+        const writes = current.events.filter((event) => event[0] === "r2.put");
+        assert.equal(writes.length, r2Fault === "write" ? 1 : 0,
+          "at most one rejected conditional R2 write can be attempted");
+      });
+    }
+  }
 
   test("private-to-public foreign R2 owner fails closed before D1 on CURRENT and Hono", async () => {
     const current = await executeAuditedStatus("public", true, false, true, false, "private");
