@@ -1350,7 +1350,7 @@ test("Issue #653: failed R2 privacy repair preserves GA4 retry cause and redacts
   globalThis.fetch = async () => new Response("GA4 unavailable", { status: 500 });
   console.log = (value) => logs.push(JSON.parse(String(value)));
   try {
-    for (const failure of ["read", "write"]) {
+    for (const failure of ["read", "body", "write"]) {
       logs.length = 0;
       let reads = 0;
       let writes = 0;
@@ -1368,7 +1368,12 @@ test("Issue #653: failed R2 privacy repair preserves GA4 retry cause and redacts
             if (failure === "read") {
               throw Error("R2 SELECT token='private-credential' Authorization:Bearer repair-secret");
             }
-            return { size: Buffer.byteLength(previous), async text() { return previous; } };
+            return { size: Buffer.byteLength(previous), async text() {
+              if (failure === "body") {
+                throw Error("R2 body read token=private-credential Authorization:Bearer repair-secret");
+              }
+              return previous;
+            } };
           },
           async put(key) {
             assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
