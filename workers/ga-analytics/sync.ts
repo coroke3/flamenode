@@ -15,7 +15,10 @@ import {
 } from "./dataApi.ts";
 import type { Ga4DataApiEnv, VideoViewPeriods } from "./dataApi.ts";
 import { rankTrendingItems } from "./ranking.ts";
-import { normalizeStaticTrending } from "../../src/lib/publicData/staticTrendingCore.ts";
+import {
+  normalizeStaticTrending,
+  TRENDING_MAX_FUTURE_SKEW_SEC,
+} from "../../src/lib/publicData/staticTrendingCore.ts";
 import { loadRecentListFromD1 } from "./recentFromD1.ts";
 import type { RecentListPayload, TrendingItem } from "./ranking.ts";
 
@@ -29,7 +32,7 @@ export const TRENDING_SCHEMA_VERSION = 1;
 // An old artifact generated in the far future never becomes stale on the
 // public reader (it clamps negative age to zero). Do not let GA4 failure or
 // an orphan-only report preserve its freshness forever.
-export const TRENDING_MAX_FUTURE_SKEW_SEC = 300;
+export { TRENDING_MAX_FUTURE_SKEW_SEC };
 
 function hasTrustworthyTrendingTimestamp(generatedAt: number): boolean {
   return Number.isSafeInteger(generatedAt) &&
