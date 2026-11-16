@@ -2623,7 +2623,7 @@
             ]
           },
           {
-            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n  \nELSE json_extract('not-valid-json', '$')\n    END\n  ",
             "params": [
               19
             ]
@@ -4468,26 +4468,18 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ? where (\"public_visibility_fences\".\"fence_token\" = ? and \"public_visibility_fences\".\"state\" = ?)",
+            "sql": "update \"public_visibility_fences\" set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ? where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ? and \"public_visibility_fences\".\"fence_token\" = ? and \"public_visibility_fences\".\"state\" = ?)",
             "params": [
+              "vf_00000000-0000-4000-8000-000000000001",
+              "release_pending",
+              "x_id_merge_revert_source_restored",
+              null,
+              null,
+              1760000000,
+              "admin-1",
+              1760000000,
               "x_user",
               "x_src",
-              "vf_00000000-0000-4000-8000-000000000001",
-              "release_pending",
-              "x_id_merge_revert_source_restored",
-              null,
-              null,
-              1760000000,
-              "admin-1",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000001",
-              "release_pending",
-              "x_id_merge_revert_source_restored",
-              null,
-              null,
-              1760000000,
-              "admin-1",
-              1760000000,
               "vf_00000000-0000-4000-8000-000000000001",
               "blocked"
             ]
