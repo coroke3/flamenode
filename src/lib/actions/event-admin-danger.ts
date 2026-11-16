@@ -334,10 +334,9 @@ export async function renameEventId(
     // Keep the existing fence move, then retain an
     // old-id tombstone so stale `events/{oldId}.json` cannot be served after
     // the D1 primary key is renamed.
-    if (
-      oldFence &&
-      (oldFence.state === "blocked" || oldFence.state === "release_pending")
-    ) {
+    // release_pending was rejected before any R2 reuse side effect above.
+    // Only an existing blocked owner may be copied to the renamed ID.
+    if (oldFence?.state === "blocked") {
       manifestRename = await preCommitEventVisibilityFenceRename({
         oldEventId: oldId,
         newEventId: newId,
