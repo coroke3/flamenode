@@ -871,25 +871,26 @@ if (runTestWithTsx(import.meta.url)) {
     ],
     [
       "event_rename_tombstone_precommit_keeps_previous_entry_details",
-      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok" }),
+      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok", expectedPreviousFenceToken: "ef_prev" }),
       { bucket: seededManifest([entity("event", "evt-old", "ef_prev", { blocked_at: 55, reason: "old reason" })]) },
     ],
     [
       "event_rename_tombstone_precommit_defaults_reason",
-      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok" }),
+      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok", expectedPreviousFenceToken: null }),
     ],
     [
       "event_rename_tombstone_precommit_cas_conflict_uses_latest_entry",
-      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok" }),
+      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok", expectedPreviousFenceToken: "ef_x" }),
       {
         bucket: {
+          ...seededManifest([entity("event", "evt-old", "ef_x", { blocked_at: 55, reason: "stale" })]),
           options: { onFirstPutConflict: raceTo([entity("event", "evt-old", "ef_x", { blocked_at: 66, reason: "latest" })]) },
         },
       },
     ],
     [
       "event_rename_tombstone_precommit_fails_when_confirmation_token_differs",
-      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok" }),
+      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok", expectedPreviousFenceToken: null }),
       { bucket: { options: { afterPut: tamperTo([entity("event", "evt-old", "ef_tampered")]) } } },
     ],
     [
