@@ -780,6 +780,30 @@ test("Visibility tombstone compensation: same-token R2 metadata refresh survives
   }
 });
 
+test("Visibility tombstone compensation: post-PUT same-owner refresh is not our rollback lease", async () => {
+  const previous = { ...entry("event", "event-old", "prior-token"), blocked_at: 11, reason: "before" };
+  const updated = { ...entry("event", "event-old", "rotated"), blocked_at: 222, reason: "after-own-put" };
+  const state = hostOf(manifestOf(previous), null, (manifest) => ({
+    ...manifest,
+    entities: manifest.entities.map((row) =>
+      row.entity_type === "event" && row.entity_id === "event-old" ? updated : row),
+  }));
+  const precommit = await preCommitEventVisibilityRenameTombstone({
+    eventId: "event-old", fenceToken: "rotated",
+    expectedPreviousFenceToken: "prior-token",
+  }, state.host);
+  assert.deepEqual(precommit.previousEntry, previous);
+  assert.equal(precommit.writtenEntry.blocked_at, 11,
+    "the rollback lease must come from the actual CAS PUT, not a later readback");
+  assert.deepEqual(state.manifest.entities, [updated],
+    "a same-token writer updated metadata after PUT but before confirmation");
+  const applied = state.appliedWrites;
+  await compensateEventVisibilityRenameTombstoneOnD1Failure(precommit, state.host);
+  assert.equal(state.appliedWrites, applied,
+    "a stale compensation must not overwrite metadata refreshed after our PUT");
+  assert.deepEqual(state.manifest.entities, [updated]);
+});
+
 test("Visibility tombstone compensation: original snapshot still rolls back safely", async () => {
   for (const previousEntry of [entry("event", "event-old", "previous"), null]) {
     const state = hostOf(previousEntry ? manifestOf(previousEntry) : manifestOf());
