@@ -712,6 +712,41 @@ test("Visibility tombstone: vanished expected token is not treated as permission
   assert.equal(state.appliedWrites, 0);
 });
 
+test("Visibility tombstone: absent old-ID expected owner rejects a new CAS contender", async () => {
+  const foreign = entry("event", "event-old", "racing-foreign-owner");
+  const unrelated = entry("video", "video-safe", "other-video-owner");
+  const state = hostOf(manifestOf(unrelated), (latest) => ({
+    ...latest, entities: [...latest.entities, foreign],
+  }));
+  await assert.rejects(
+    preCommitEventVisibilityRenameTombstone({
+      eventId: "event-old", fenceToken: "rotated", expectedPreviousFenceToken: null,
+    }, state.host),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.callbacks, 1, "the ETag conflict must inspect the newly inserted owner");
+  assert.equal(state.appliedWrites, 0, "the rotation cannot overwrite a raced block");
+  assert.deepEqual(state.manifest.entities, [unrelated, foreign]);
+});
+
+test("Visibility tombstone: post-PUT single foreign owner invalidates explicit rotation", async () => {
+  const trusted = entry("event", "event-old", "trusted-owner");
+  const foreign = entry("event", "event-old", "post-put-owner");
+  const state = hostOf(manifestOf(trusted), null, (latest) => ({
+    ...latest, entities: [foreign],
+  }));
+  await assert.rejects(
+    preCommitEventVisibilityRenameTombstone({
+      eventId: "event-old", fenceToken: "rotated",
+      expectedPreviousFenceToken: "trusted-owner",
+    }, state.host),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.appliedWrites, 1);
+  assert.equal(state.reads, 2, "post-write readback must reject a replaced owner");
+  assert.deepEqual(state.manifest.entities, [foreign], "never remove a concurrent block");
+});
+
 // The WHERE condition runs atomically inside the canonical D1 batch. Ensure
 // a conflicting writer contributes zero changes and triggers the expected
 // row-count guard, rather than letting the earlier R2 owner overwrite it.
