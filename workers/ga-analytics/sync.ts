@@ -292,6 +292,10 @@ async function loadExistingTrendingItemCount(
       const current = currentById.get(item.id);
       if (
         !current ||
+        // A valid public artifact can still carry a stale/misordered rank.
+        // Refuse a last-good short-circuit when the D1-public projection and
+        // retained GA4 counters would assign a different canonical rank.
+        (item.rank != null && item.rank !== current.rank) ||
         item.title !== current.title ||
         item.icon_url !== current.icon_url ||
         item.primary_event_id !== current.primary_event_id ||
