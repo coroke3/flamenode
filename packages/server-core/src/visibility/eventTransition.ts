@@ -221,6 +221,14 @@ export async function preCommitEventVisibilityFenceRename(
           entry.fence_token !== input.fenceToken) ||
           entry.entity_id === input.newEventId),
     );
+  // After our CAS has written the destination, its presence is expected.
+  // Confirmation must still reject foreign token duplicates at either ID.
+  const hasForeignRenameToken = (snapshot: PublicVisibilityBlockedEntitiesManifest) =>
+    snapshot.entities.some(
+      (entry) => entry.entity_type === "event" &&
+        (entry.entity_id === input.oldEventId || entry.entity_id === input.newEventId) &&
+        entry.fence_token !== input.fenceToken,
+    );
   // The successful CAS retry may have observed a newer same-owner snapshot.
   // Compensation must restore that snapshot, not the stale initial GET.
   let previousOldEntry =
@@ -309,7 +317,7 @@ export async function preCommitEventVisibilityFenceRename(
   if (
     !confirmedEntry ||
     confirmedEntry.fence_token !== input.fenceToken ||
-    hasUnsafeRenameOwnership(confirmed) ||
+    hasForeignRenameToken(confirmed) ||
     previousOldEntry !== null &&
     !confirmed.entities.some(
       (entry) =>
