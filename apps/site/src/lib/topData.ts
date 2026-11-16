@@ -209,7 +209,7 @@ export async function loadTopForBuild(
   const read = (key: string) => loadListingPayload(access.source, key, access.options);
   const top = normalizeStaticTop((await read(TOP_KEY)) as Parameters<typeof normalizeStaticTop>[0]);
   if (!top) throw new TopBuildError(TOP_KEY);
-  const trending = normalizeStaticTrending((await read(TRENDING_KEY)) as Parameters<typeof normalizeStaticTrending>[0]);
+  const trending = normalizeStaticTrending((await read(TRENDING_KEY)) as Parameters<typeof normalizeStaticTrending>[0], now);
   if (!trending) throw new TopBuildError(TRENDING_KEY);
   // CURRENT: trending joins the top page only while it is fresh enough for it.
   const tooOld = now - trending.generatedAt > TRENDING_TOO_OLD_FOR_HOME_SEC;
