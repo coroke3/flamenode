@@ -184,9 +184,13 @@ if (runUnderRootTsx(import.meta.url)) {
   // The R2 bucket below implements real CAS precommit on the shared Hono
   // manifest adapter. This is still not a live Cloudflare binding, and does
   // not replace complete CURRENT Action/HTTP/authorization parity.
-  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false, replaceR2FenceOwner = false, enableWake = false) {
+  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false, replaceR2FenceOwner = false, enableWake = false, initialStatus = "public") {
     const sqlite = createSqlite();
     seed(sqlite);
+    if (initialStatus !== "public") {
+      sqlite.prepare("UPDATE videos SET visibility_status = ? WHERE id = ?")
+        .run(initialStatus, "vid-1");
+    }
     const d1 = createVideoStatusD1(sqlite);
     const db = drizzle(d1, { schema });
     const realNow = Date.now;
@@ -351,6 +355,28 @@ if (runUnderRootTsx(import.meta.url)) {
       ), "the R2 manifest must retain the exact D1 fence token after commit");
     });
   }
+
+  test("CURRENT and Hono persist identical release-pending fences when publishing a private video", async () => {
+    // A legacy private video can have no existing visibility fence. Publishing
+    // must still produce an atomic audit + release-pending fence and R2 block
+    // rather than expose stale public projections before their rebuild.
+    const current = await executeAuditedStatus("public", true, false, false, false, "private");
+    const hono = await executeAuditedStatus("public", false, false, false, false, "private");
+    assert.deepEqual(hono, current, "CURRENT Next/Hono public-release persistence and CAS must match");
+    assert.equal(current.result.ok, true);
+    assert.equal(current.video.visibility_status, "public");
+    assert.equal(current.batches, 1, "one audited D1 transaction");
+    assert.equal(current.audits.length, 1, "the public transition is strictly audited");
+    assert.equal(current.fences.length, 1);
+    assert.equal(current.fences[0].state, "release_pending",
+      "D1 must retain the rebuild fence until fresh public projections exist");
+    assert.equal(current.manifest?.entities?.length, 1);
+    assert.equal(current.manifest.entities[0].fence_token, current.fences[0].fence_token,
+      "R2 and D1 must refer to the same release-pending fence owner");
+    assert.equal(current.events.filter((event) => event[0] === "r2.put").length, 1,
+      "a conditional R2 block is created before publishing");
+    assert.ok(current.queue.length > 0, "publication requests a static rebuild");
+  });
 
   test("stale D1 CAS rolls back audit/outbox/rebuild and compensates only its R2 fence token", async () => {
     const current = await executeAuditedStatus("private", true, true);
