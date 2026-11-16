@@ -8,7 +8,7 @@ import {
   compensateEventVisibilityRenameTombstoneOnD1Failure,
 } from "@flamenode/server-core/visibility/eventTransition";
 import { preCommitPublicVisibilityFence, compensatePublicVisibilityFenceOnD1Failure } from "@flamenode/server-core/visibility/fenceTransition";
-import { preCommitVideoVisibilityDepublicization } from "@flamenode/server-core/visibility/videoTransition";
+import { preCommitVideoVisibilityDepublicization, planVideoVisibilityFenceTransition } from "@flamenode/server-core/visibility/videoTransition";
 import { releaseBlockedEntityInManifest } from "@flamenode/server-core/visibility/manifestCore";
 
 import {
@@ -111,6 +111,63 @@ function planningDb(existingFence, { failRead = false } = {}) {
   };
   return { db, calls };
 }
+
+test("Issue #659: audit-restore and legacy-import video fence planner respects observed D1 owner", async () => {
+  for (const state of ["blocked", "release_pending", "released", null]) {
+    const { db, calls } = planningDb(
+      state ? { state, fence_token: "vf_video_existing", entity_type: "video", entity_id: "vid-one" } : null,
+    );
+    const plan = await planVideoVisibilityFenceTransition(db, {
+      videoId: "vid-one",
+      previousStatus: "private",
+      nextStatus: "public",
+      actorUserId: "actor",
+      reason: "audit_restore_visibility",
+      now: 1760000100,
+    });
+    assert.equal(calls.selects, 1, "only one authoritative D1 fence read for a public boundary");
+    assert.deepEqual(plan.expectedMutationChanges, [1]);
+    assert.equal(plan.mutationStatements.length, 1);
+    assert.equal(plan.depublicizedFromPublic, false);
+    assert.equal(calls.upserts.length, 1);
+    assert.equal(calls.upserts[0].kind, state === null ? "insert-only" : "guarded-update");
+    assert.equal(calls.upserts[0].set?.state ?? calls.upserts[0].values.state, "release_pending");
+    assert.equal(plan.fenceToken === "vf_video_existing",
+      state === "blocked" || state === "release_pending",
+      "active token is reused; released/absent token must not be reused");
+    assert.equal(calls.upserts[0].set?.fence_token ?? calls.upserts[0].values.fence_token,
+      plan.fenceToken);
+    assert.match(plan.fenceToken, /^vf_/);
+  }
+});
+
+test("Issue #659: no video public boundary does not query D1; read errors fail closed", async () => {
+  const { db, calls } = planningDb({ state: "blocked", fence_token: "vf_video_existing" });
+  for (const [previousStatus, nextStatus] of [
+    ["private", "pending"],
+    ["pending", "voided"],
+    ["public", "public"],
+  ]) {
+    const plan = await planVideoVisibilityFenceTransition(db, {
+      videoId: "vid-one", previousStatus, nextStatus, actorUserId: "actor", now: 1760000100,
+    });
+    assert.deepEqual(plan.expectedMutationChanges, []);
+    assert.equal(plan.fenceToken, null);
+    assert.deepEqual(plan.mutationStatements, []);
+  }
+  assert.equal(calls.selects, 0);
+  assert.equal(calls.upserts.length, 0);
+  const failing = planningDb(null, { failRead: true });
+  await assert.rejects(
+    planVideoVisibilityFenceTransition(failing.db, {
+      videoId: "vid-one", previousStatus: "public", nextStatus: "private",
+      actorUserId: "actor", now: 1760000100,
+    }),
+    /authoritative D1 fence unavailable/,
+  );
+  assert.equal(failing.calls.selects, 1);
+  assert.equal(failing.calls.upserts.length, 0, "unknown owner must not produce an unconditional UPSERT");
+});
 
 test("Issue #659: event D1 fence planner preserves active tokens and rotates released tokens", async () => {
   for (const [state, expectedReuse] of [
