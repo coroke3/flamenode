@@ -60,7 +60,7 @@ NEXT_PUBLIC_GA_MEASUREMENT_ID="G-XXXXXXXXXX"
 5. 次回 `sync-jobs` deploy 後、毎時 `:07` UTC で `ga4-trending-sync` が走る
 6. Workers ログの構造化イベント（`job: ga4-trending-sync`）と R2 `analytics/trending.json` を確認
 
-`GA4_SYNC_ENABLED=0` のままでは同期は skipped。表示は前回 JSON または空状態。
+`GA4_SYNC_ENABLED=0` はGA4 API取得を停止し、ジョブの集計結果は skipped。ただしPR #680適用後はD1とR2が利用できる場合に限り、旧ランキングを現行D1公開集合で再検証し、公開撤回された行を除去する。D1失敗時はR2を更新しない。
 
 ### Build env への `GA4_SYNC_ENABLED` inject
 
@@ -135,7 +135,7 @@ R2 miss や JSON 不正時は `data=null`。トップ全体や他セクション
 - ローダー（D1 非参照）: `src/lib/publicData/trendingLoader.test.mjs`
 - UI 契約: `npm run check:ui-acceptance`
 
-同期失敗時は Cloudflare Workers ログの `ga4-trending-sync` 構造化イベントを確認（`service` / `job` / `enabled` / `result` / `generated_at` / `ga_rows` / `matched_videos` / `ranked_videos` / `r2_written` / `duration_ms` / `external_api_calls` など。secret は含まれない）。`GA4_SYNC_ENABLED` が `0` の場合は `result: "skipped"` となり、表示は前回 JSON または空状態になる。`ENABLED=1` だが secrets / R2 / KV（MIG-0517 デプロイ後は D1 も）が欠落している場合は `result: "failed"`, `error_name: "config_missing"` で R2 は更新しない。
+Cloudflare Workers の ga4-trending-sync 構造化ログで result / r2_written / privacy_rewrite_on_ga4_failure / privacy_rewrite_on_config_failure / privacy_rewrite_on_disabled / privacy_repair_error を確認する。PR #680適用後はGA4 API失敗・設定不備・明示無効化でも、D1が現在の公開行を正しく取得できればR2にプライバシー修正が書き込まれることがある。D1/R2が使えない場合や再書込みに失敗した場合、公開失効の成功は保証されない。ログには任意のprovider例外本文を含めず、固定コード privacy_repair_failed を用いる。
 
 複数 named dateRange の `runReport` では、GA4 が返す `rowCount` が「主ディメンション件数」になり、`rows` が `video_id × dateRange` に展開されることがある。同期実装は `rowCount` と `rows.length` の一致を要求せず、ページが満杯のあいだだけ offset で継続する。
 
@@ -155,6 +155,6 @@ GA4 Data API（Core）には時間・日次のトークンクォータがある�
 | HTTP | 想定原因 | 対応 |
 | --- | --- | --- |
 | **403** | 権限不足・API 未有効化・プロパティ ID 誤り | サービスアカウントの GA4 閲覧権限と Data API 有効化を確認。修正まで `GA4_SYNC_ENABLED=0` で同期停止可 |
-| **429** | Core クォータ超過 | 同期頻度を下げるかクォータ増枠を検討。`GA4_SYNC_ENABLED=0` で一時停止し、既存 `analytics/trending.json` を維持（fail-closed） |
+| **429** | Core クォータ超過 | 同期頻度を下げるかクォータ増枠を検討。GA4_SYNC_ENABLED=0 で一時停止できるが、PR #680 適用後は旧R2ランキングを無条件には維持せず、D1公開集合により公開撤回済み行を除去する場合がある |
 
-いずれも同期失敗時は R2 を上書きしない。ログの `result: "failed"` と `error` サマリを確認する。
+PR #680 適用後は、GA4 API障害・設定不足・明示無効化でも、D1公開状態を検証した上でR2を上書きする場合がある。未来時刻が300秒を超える旧generated_atを持つランキングは保持しない。Cache APIの300秒キャッシュ、Next ISR（トップ120秒・/trending 300秒）、CDN、TARGET build-time snapshotは別経路なので、writer側の再書込みだけでは即時の公開撤回は保証できない。
