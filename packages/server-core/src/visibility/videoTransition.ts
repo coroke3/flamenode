@@ -495,9 +495,11 @@ export async function compensateDepublicizationFenceOnD1Failure(
   )[0];
   const fence = await getPublicVisibilityFence(db, "video", input.videoId);
   if (
+    // A different writer may already have committed an active D1 fence after
+    // our R2 precommit. Compensating our token must not expose that writer's
+    // now-private/release-pending video before its R2 manifest is installed.
     fence &&
-    (fence.state === "blocked" || fence.state === "release_pending") &&
-    fence.fence_token === input.fenceToken
+    (fence.state === "blocked" || fence.state === "release_pending")
   ) {
     logFlowTrace({
       flow: "video_visibility_depublicize",
