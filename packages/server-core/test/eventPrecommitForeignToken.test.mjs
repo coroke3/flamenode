@@ -94,16 +94,18 @@ function planningDb(existingFence, { failRead = false } = {}) {
     },
     insert() {
       return { values(values) {
-        return {
-          onConflictDoUpdate({ set, setWhere }) {
-            calls.upserts.push({ kind: "guarded-update", values, set, setWhere });
-            return { kind: "fence_upsert" };
-          },
-          onConflictDoNothing() {
-            calls.upserts.push({ kind: "insert-only", values });
-            return { kind: "fence_insert_only" };
-          },
-        };
+        return { onConflictDoNothing() {
+          calls.upserts.push({ kind: "insert-only", values });
+          return { kind: "fence_insert_only" };
+        } };
+      } };
+    },
+    update() {
+      return { set(set) {
+        return { where(setWhere) {
+          calls.upserts.push({ kind: "guarded-update", set, setWhere });
+          return { kind: "fence_conditional_update" };
+        } };
       } };
     },
   };
@@ -135,7 +137,7 @@ test("Issue #659: event D1 fence planner preserves active tokens and rotates rel
       assert.ok(calls.upserts[0].setWhere,
         "existing D1 fence must be guarded by observed token and state");
     }
-    assert.equal(calls.upserts[0].set.fence_token, plan.fenceToken);
+    assert.equal(calls.upserts[0].set?.fence_token ?? calls.upserts[0].values.fence_token, plan.fenceToken);
     assert.equal(plan.fenceToken === "vf_existing", expectedReuse, state ?? "missing");
     assert.match(plan.fenceToken, /^vf_/);
   }
@@ -158,7 +160,7 @@ test("Issue #659: generic event-group D1 planner preserves active token, not rel
     assert.equal(calls.upserts[0].kind, "guarded-update");
     assert.ok(calls.upserts[0].setWhere,
       "generic event_group/X fences must also preserve the observed D1 owner");
-    assert.equal(calls.upserts[0].set.fence_token, plan.fenceToken);
+    assert.equal(calls.upserts[0].set?.fence_token ?? calls.upserts[0].values.fence_token, plan.fenceToken);
     assert.equal(plan.fenceToken === "vf_existing", state !== "released");
   }
 });
@@ -713,13 +715,14 @@ test("Visibility tombstone: vanished expected token is not treated as permission
 // The WHERE condition runs atomically inside the canonical D1 batch. Ensure
 // a conflicting writer contributes zero changes and triggers the expected
 // row-count guard, rather than letting the earlier R2 owner overwrite it.
-test("Issue #659: D1 fence UPSERT CAS rejects token/state changes and concurrent inserts", async () => {
+test("Issue #659: D1 fence CAS rejects raced row deletion, token/state changes and insertion", async () => {
   const { DatabaseSync } = await import("node:sqlite");
   for (const scenario of [
     { name: "same observed token/state", old: ["vf_old", "blocked"], current: ["vf_old", "blocked"], expected: 1 },
     { name: "another owner changed token", old: ["vf_old", "blocked"], current: ["vf_new", "blocked"], expected: 0 },
     { name: "same token advanced state", old: ["vf_old", "blocked"], current: ["vf_old", "release_pending"], expected: 0 },
     { name: "released token still current", old: ["vf_old", "released"], current: ["vf_old", "released"], expected: 1 },
+    { name: "row deleted after planning read", old: ["vf_old", "blocked"], current: null, expected: 0 },
     { name: "new row with no concurrent claimant", old: null, current: null, expected: 1 },
     { name: "concurrent row after empty read", old: null, current: ["vf_new", "blocked"], expected: 0 },
   ]) {
@@ -731,13 +734,14 @@ test("Issue #659: D1 fence UPSERT CAS rejects token/state changes and concurrent
       }
       const sql = scenario.old === null
         ? "INSERT INTO public_visibility_fences VALUES ('event','event-one','vf_incoming','blocked') ON CONFLICT DO NOTHING"
-        : "INSERT INTO public_visibility_fences VALUES ('event','event-one','vf_incoming','blocked') ON CONFLICT(entity_type,entity_id) DO UPDATE SET fence_token=excluded.fence_token,state=excluded.state WHERE public_visibility_fences.fence_token = ? AND public_visibility_fences.state = ?";
+        : "UPDATE public_visibility_fences SET fence_token='vf_incoming',state='blocked' WHERE entity_type='event' AND entity_id='event-one' AND fence_token = ? AND state = ?";
       const result = scenario.old === null
         ? sqlite.prepare(sql).run()
         : sqlite.prepare(sql).run(...scenario.old);
       assert.equal(Number(result.changes), scenario.expected, scenario.name);
       const row = sqlite.prepare("SELECT fence_token,state FROM public_visibility_fences WHERE entity_type='event' AND entity_id='event-one'").get();
-      assert.equal(row.fence_token, scenario.expected ? "vf_incoming" : scenario.current[0], scenario.name);
+      assert.equal(row?.fence_token ?? null,
+        scenario.expected ? "vf_incoming" : scenario.current?.[0] ?? null, scenario.name);
     } finally {
       sqlite.close();
     }

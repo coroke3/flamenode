@@ -78,30 +78,23 @@ export function buildPublicVisibilityFenceUpsertStatement(
     requested_by_auth_user_id: input.actorUserId,
     updated_at: input.now,
   };
-  const insert = db
-    .insert(publicVisibilityFences)
-    .values({
-      entity_type: input.entityType,
-      entity_id: normalizeEntityId(input.entityType, input.entityId),
-      ...fields,
-    });
-  // The old unconditional UPSERT could replace a different D1 owner after
-  // the planning SELECT. That new owner might have a distinct R2 block.
-  // Use the same D1 batch/expected-change gate to reject stale ownership.
+  const entityId = normalizeEntityId(input.entityType, input.entityId);
+  // Once an owner was observed, an UPSERT can resurrect its row after a
+  // concurrent DELETE. Use a conditional UPDATE: changed/deleted ownership
+  // yields zero rows and the canonical [1] batch assertion fails closed.
   if (input.observedFence === null) {
-    return insert.onConflictDoNothing();
+    return db.insert(publicVisibilityFences).values({
+      entity_type: input.entityType,
+      entity_id: entityId,
+      ...fields,
+    }).onConflictDoNothing();
   }
-  return insert.onConflictDoUpdate({
-    target: [
-      publicVisibilityFences.entity_type,
-      publicVisibilityFences.entity_id,
-    ],
-    set: fields,
-    setWhere: and(
-      eq(publicVisibilityFences.fence_token, input.observedFence.fenceToken),
-      eq(publicVisibilityFences.state, input.observedFence.state),
-    ),
-  });
+  return db.update(publicVisibilityFences).set(fields).where(and(
+    eq(publicVisibilityFences.entity_type, input.entityType),
+    eq(publicVisibilityFences.entity_id, entityId),
+    eq(publicVisibilityFences.fence_token, input.observedFence.fenceToken),
+    eq(publicVisibilityFences.state, input.observedFence.state),
+  ));
 }
 
 export type PublicVisibilityFencePlan<Status> = {
