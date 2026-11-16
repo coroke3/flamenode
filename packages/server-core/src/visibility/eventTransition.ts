@@ -42,6 +42,9 @@ export type EventVisibilityRenameTombstonePrecommit = {
   eventId: string;
   fenceToken: string;
   previousEntry: PublicVisibilityBlockedEntity | null;
+  /** R2 tombstone confirmed after CAS. Compensation must not erase a newer
+   * same-token update to the old ID's block metadata. */
+  writtenEntry: PublicVisibilityBlockedEntity;
 };
 
 function logEventVisibilityCompensationFailure(
@@ -399,6 +402,7 @@ export async function preCommitEventVisibilityRenameTombstone(
     eventId: input.eventId,
     fenceToken: input.fenceToken,
     previousEntry,
+    writtenEntry: confirmedEntry,
   };
 }
 
@@ -492,12 +496,17 @@ export async function compensateEventVisibilityRenameTombstoneOnD1Failure(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.eventId,
     );
+    // A concurrent same-owner R2 writer can refresh blocked_at/reason after
+    // our precommit. Token equality alone is not a safe rollback lease:
+    // only undo the exact tombstone snapshot we confirmed writing.
     if (
       !currentEntry || currentEntry.fence_token !== input.fenceToken ||
       manifest.entities.some((entry) =>
         entry.entity_type === "event" &&
         entry.entity_id === input.eventId &&
-        entry.fence_token !== input.fenceToken)
+        (entry.fence_token !== input.writtenEntry.fence_token ||
+          entry.blocked_at !== input.writtenEntry.blocked_at ||
+          (entry.reason ?? null) !== (input.writtenEntry.reason ?? null)))
     ) {
       return;
     }
