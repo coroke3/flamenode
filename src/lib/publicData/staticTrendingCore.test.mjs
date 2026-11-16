@@ -189,6 +189,32 @@ test("Issue #653: future trending metadata fails closed even without the normali
   ), { stale: false, ageSeconds: 0, tooOldForHome: false });
 });
 
+test("Issue #653: malformed injected clock and raw stale timestamp always fail closed", () => {
+  const nowSec = 1_700_000_000;
+  const payload = {
+    schema_version: 1,
+    generated_at: nowSec,
+    items: [sampleItem],
+  };
+  const blocked = { stale: true, ageSeconds: null, tooOldForHome: true };
+  const invalidSeconds = [NaN, Infinity, -Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER + 1];
+
+  for (const invalid of invalidSeconds) {
+    assert.equal(normalizeStaticTrending(payload, invalid), null,
+      `invalid injected nowSec ${String(invalid)} must not bypass future validation`);
+    assert.deepEqual(resolveStaticTrendingStaleMeta(nowSec, invalid), blocked,
+      `invalid nowSec ${String(invalid)} must not be treated as fresh`);
+    assert.deepEqual(resolveStaticTrendingStaleMeta(invalid, nowSec), blocked,
+      `invalid generatedAt ${String(invalid)} must not be treated as fresh`);
+  }
+
+  const zero = normalizeStaticTrending({ ...payload, generated_at: 0 }, 0);
+  assert.ok(zero, "Unix epoch zero remains a valid reader timestamp");
+  assert.deepEqual(resolveStaticTrendingStaleMeta(0, 0), {
+    stale: false, ageSeconds: 0, tooOldForHome: false,
+  });
+});
+
 test("resolveStaticTrendingStaleMeta: 3時間超で stale、24時間超で tooOldForHome", () => {
   const generatedAt = 1_000_000;
   const fresh = resolveStaticTrendingStaleMeta(
