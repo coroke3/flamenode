@@ -248,7 +248,16 @@ export async function compensatePublicVisibilityFenceOnD1Failure(
       input.entityType,
       entityId,
     );
-    if (fence?.fence_token === input.fenceToken) return;
+    // A different canonical D1 writer may have claimed a new active fence
+    // while our earlier R2 precommit still owns the manifest entry. Removing
+    // that entry would expose the entity despite D1 requiring a block. Do not
+    // compensate while ANY authoritative active D1 block/release is present.
+    // Preserve the existing same-token check for released/legacy rows too.
+    if (
+      fence?.fence_token === input.fenceToken ||
+      fence?.state === "blocked" ||
+      fence?.state === "release_pending"
+    ) return;
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const { manifest, etag } =
