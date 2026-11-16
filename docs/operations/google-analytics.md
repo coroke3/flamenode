@@ -105,6 +105,23 @@ R2 JSON 例:
 
 D1は読み取り専用。正常な修復試行は公開一覧D1 SELECTを1回、既存R2 GETを最大1回、差分があればR2 PUTを1回行う。実運用のCPU/D1/R2予算は非本番の計測と承認が必要。**R2 PUT成功は公開ページからの失効成功を意味しない**。Cache API（最大300秒）、Next ISR、CDN、TARGET Astroビルド済みHTMLの失効は別途検証・設計する。
 
+### 公開撤回の配信側受入ゲート（Issue #653、提案・未承認）
+
+この節は**移行リリースの未達条件を明文化するためのレビュー用設計案**であり、現在のruntimeや本番配信に適用済みではない。上記のwriterのD1 SELECTとR2 PUTだけで「private化完了」と判定しない。
+
+| 検証対象 | 再現手順・失敗条件 | 合格条件（Lead・独立security reviewerが失効許容時間を確定してから測定） |
+| --- | --- | --- |
+| D1公開状態の競合 | 動画Aがpublicの時にwriterがD1を読み、その直後にAをprivate化してから旧R2 GET/PUTを再開する（`sync.test.mjs`のIssue #653 race baseline） | 古い公開許可リストでR2が残っても、**private確定後の実配信**からAのID・タイトル・イベント名が出ない。フェンスと公開状態変更の順序および再試行・補償を検証する |
+| Cache API fresh hit | Aを含む`analytics/trending.json`をキャッシュした直後にD1をprivate化しwriterでR2を修復する | `cache_first`の300秒fresh hit中にも旧Aを配信しない。R2 PUTだけでCache APIが消えるとは仮定しない |
+| R2障害時のstale再利用 | fresh TTL経過後、R2 GETを失敗させ、古いキャッシュを残す（`staticSharedInputsLoader.test.mjs`のIssue #653 exposure baseline） | 現行ローダーの最大3時間stale再利用を含め、公開撤回に失敗した内容をレスポンスへ含めない。フェンス取得不能時のfail-closedを定義する |
+| CURRENT表示 | トップと`/trending`のISR更新前後、Cache API・CDNの別PoPを含めて公開→非公開を観測する | API JSONだけでなく、**実際にユーザーへ配信されるHTML**のすべての経路でAを露出しない |
+| TARGET Astro表示 | Aを含むHTMLを事前ビルド・公開した後にprivate化し、R2だけ修復する | 公開済みHTMLを更新・削除・遮断する経路（build要求、公開、edge無効化、失敗時停止）をエンドツーエンドで検証する。新ビルドのみ成功では不十分 |
+| 再試行と故障・負荷 | D1 SELECT失敗、R2 GET/PUT失敗、可視性フェンス競合、連続した公開→非公開→公開と並行再生成を再現する | 不完全な公開許可リストを公開の証拠にせず、秘密データをログせず、D1クエリ数・R2操作数・CPU時間・失効完了までの時間を非本番実測で記録する |
+
+**要設計判断（いずれも未採用）**: (A) 公開状態変更に先行する可視性フェンスを導入し、配信時に必ず照合する方式、(B) 変更時にページ再生成・CDN/ISR無効化を完了させる方式、(C) 応答時にD1公開状態を再確認してprivate行を除去する方式。A/Cは動的読み取り・障害時fail-closed・CPU/D1/R2予算が必要で、Bのみでは無効化遅延・並行更新の競合が残り得る。静的HTMLをそのままCDNから返す経路は、読取側フェンスやD1再確認だけでは保護できない。具体的な失効許容時間、配信コスト、フェンス整合性、ロールバック手順をLeadが選定し、独立レビュアーが実配信試験を確認するまで**privacy/cutover STOP**を維持する。
+
+
+
 **windows メタデータ**: JSON の `windows` 日付は同期時刻の UTC 日付を参考値として出力する。GA4 `runReport` の集計境界はプロパティのタイムゾーン設定に従う。
 
 ### R2 JSON の `schema_version`
