@@ -318,8 +318,8 @@ test("Issue #653: D1 private transition -> GA4-disabled R2 repair -> fresh Astro
           return { async all() {
             return { results: [{
               id: "still-public", title: "Current public title",
-              youtube_video_id: "yt-public", creator_display_name: "creator",
-              creator_x_user_id: null, creator_icon_url: null,
+              youtube_video_id: "yt-public", display_name: "Current public creator",
+              creator_x_user_id: null, icon_url: "https://example.invalid/current-icon.png",
               primary_event_id: null, primary_event_title: null,
               scheduled_time: nowSec - 3600,
             }] };
@@ -358,6 +358,10 @@ test("Issue #653: D1 private transition -> GA4-disabled R2 repair -> fresh Astro
     assert.deepEqual(repaired.items.map(({ id }) => id), ["still-public"]);
     assert.equal(repaired.items[0].title, "Current public title",
       "writer must use current D1 display data, not stale R2 title");
+    assert.equal(repaired.items[0].display_name, "Current public creator",
+      "D1 SELECT aliases display_name directly; stale creator metadata must be replaced");
+    assert.equal(repaired.items[0].icon_url, "https://example.invalid/current-icon.png",
+      "D1 SELECT aliases icon_url directly; stale icon metadata must be replaced");
     assert.doesNotMatch(stored, /Sensitive former public title|now-private/);
     assert.deepEqual(normalizeStaticTrending(repaired, nowSec)?.items.map(({ id }) => id),
       ["still-public"], "CURRENT reader normalizes the sanitized R2 payload");
