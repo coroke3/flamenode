@@ -4,21 +4,28 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { parseVideoMemberText, serializeVideoMemberTsv } from "../.test-dist/apps/app/src/lib/memberInput.js";
-import { detectDelimiter, parseDelimited, scoreSimpleMemberSuggestion } from "@flamenode/ui";
+import { detectDelimiter, parseDelimited, scoreSimpleMemberSuggestion, parseVideoMemberText as sharedParseVideoMemberText, VideoMembersField as sharedVideoMembersField } from "@flamenode/ui";
+import { VideoMembersField as personalVideoMembersField } from "../.test-dist/apps/app/src/components/forms/VideoMembersField.js";
 
 const read = path => readFile(new URL(path, import.meta.url), "utf8");
 
-test("MIG-0730 U01a: real Personal member importer and field use shared helpers, not local runtime copies", async () => {
-  const [parser, field, barrel] = await Promise.all([
+test("MIG-0730 U01b: Personal parser and form are identity-preserving facades of the shared UI", async () => {
+  const [parser, field, barrel, coreForm, coreParser] = await Promise.all([
     read("../src/lib/memberInput.ts"),
     read("../src/components/forms/VideoMembersField.tsx"),
     read("../../../packages/ui/src/index.ts"),
+    read("../../../packages/ui/src/forms/videoMembers/VideoMembersField.tsx"),
+    read("../../../packages/ui/src/forms/videoMembers/memberInput.ts"),
   ]);
-  assert.match(parser, /\} from "@flamenode\/ui";/);
-  assert.doesNotMatch(parser, /from "\.\/delimited\.js"/);
-  assert.match(field, /import \{ scoreSimpleMemberSuggestion, writeTextToClipboard \} from "@flamenode\/ui";/);
-  assert.doesNotMatch(field, /from "\.\.\/\.\.\/lib\/(?:memberSuggestionRank|clipboard)\.js"/);
-  for (const file of ["delimited", "memberSuggestionRank", "clipboard"]) {
+  assert.match(parser, /export \* from "@flamenode\/ui";/);
+  assert.match(field, /export \{ VideoMembersField \} from "@flamenode\/ui";/);
+  assert.equal(parseVideoMemberText, sharedParseVideoMemberText);
+  assert.equal(personalVideoMembersField, sharedVideoMembersField);
+  assert.doesNotMatch(coreForm, /from "\.\.\/\.\.\/|from "@flamenode\/ui"|\bfetch\s*\(/);
+  assert.match(coreForm, /await searchXUsers\(/);
+  assert.match(coreForm, /await applyPermissionBatch\(/);
+  assert.match(coreParser, /from "\.\/delimited\.js"/);
+  for (const file of ["delimited", "memberSuggestionRank", "clipboard", "memberInput", "VideoMembersField"]) {
     assert.ok(barrel.includes(`./forms/videoMembers/${file}.js`));
   }
 });
