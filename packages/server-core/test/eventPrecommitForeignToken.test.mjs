@@ -555,6 +555,41 @@ test("Visibility rename copy: matching token still carries old and new blocks sa
   assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "video-safe"), unrelated);
 });
 
+test("Visibility rename copy: CAS retry carries latest same-token old-ID metadata into rollback", async () => {
+  const stale = { ...entry("event", "event-old", "incoming"), blocked_at: 20, reason: "stale" };
+  const latest = { ...stale, blocked_at: 55, reason: "latest-owner-state" };
+  const state = hostOf(manifestOf(stale), (manifest) => ({
+    ...manifest, entities: [latest],
+  }));
+  const prior = await preCommitEventVisibilityFenceRename(
+    { oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming" },
+    state.host,
+  );
+  assert.equal(state.callbacks, 1, "read/PUT race must run the CAS conflict callback");
+  assert.deepEqual(prior.previousOldEntry, latest, "rollback must remember the state actually replaced");
+  await compensateEventVisibilityFenceRenameOnD1Failure(prior, state.host);
+  assert.deepEqual(state.manifest.entities, [latest], "rollback must not resurrect stale old-ID metadata");
+});
+
+test("Visibility rename copy: same-token old-ID inserted during CAS becomes expected tombstone owner", async () => {
+  const latest = { ...entry("event", "event-old", "incoming"), blocked_at: 66 };
+  const state = hostOf(manifestOf(), (manifest) => ({
+    ...manifest, entities: [latest],
+  }));
+  const prior = await preCommitEventVisibilityFenceRename(
+    { oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming" },
+    state.host,
+  );
+  assert.equal(state.callbacks, 1);
+  assert.deepEqual(prior.previousOldEntry, latest, "same-owner race must not be recorded as absent");
+  const tombstone = await preCommitEventVisibilityRenameTombstone({
+    eventId: "event-old", fenceToken: "rotated",
+    expectedPreviousFenceToken: prior.previousOldEntry?.fence_token ?? null,
+  }, state.host);
+  assert.deepEqual(tombstone.previousEntry, latest);
+  assert.equal(state.manifest.entities.find(x => x.entity_id === "event-old").fence_token, "rotated");
+});
+
 test("Visibility compensation: D1 rename rollback does not overwrite a concurrent old-ID owner", async () => {
   const originalOld = entry("event", "old-event", "incoming");
   const foreignOld = entry("event", "old-event", "other-writer");
@@ -575,6 +610,22 @@ test("Visibility compensation: D1 rename rollback does not overwrite a concurren
     assert.equal(state.attemptedWrites, 0, "must fail closed without attempting R2 PUT");
     assert.deepEqual(state.manifest, before, "both old and new visibility blocks stay intact");
   }
+});
+
+test("Visibility tombstone: CAS retry restores latest same-token metadata after D1 rollback", async () => {
+  const stale = { ...entry("event", "event-old", "trusted"), blocked_at: 30, reason: "stale" };
+  const latest = { ...stale, blocked_at: 80, reason: "updated-during-race" };
+  const state = hostOf(manifestOf(stale), (manifest) => ({
+    ...manifest, entities: [latest],
+  }));
+  const precommit = await preCommitEventVisibilityRenameTombstone({
+    eventId: "event-old", fenceToken: "rotated",
+    expectedPreviousFenceToken: "trusted",
+  }, state.host);
+  assert.equal(state.callbacks, 1);
+  assert.deepEqual(precommit.previousEntry, latest, "compensation must restore the CAS snapshot");
+  await compensateEventVisibilityRenameTombstoneOnD1Failure(precommit, state.host);
+  assert.deepEqual(state.manifest.entities, [latest], "D1 failure restores latest old-ID ownership metadata");
 });
 
 test("Visibility tombstone: mixed old-ID tokens on initial GET must not be rotated or erased", async () => {
