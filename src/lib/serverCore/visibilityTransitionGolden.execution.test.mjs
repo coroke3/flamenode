@@ -435,7 +435,7 @@ if (runTestWithTsx(import.meta.url)) {
           ["public_to_public", "public", "public"],
           ["pending_to_private", "pending", "private"],
         ]) {
-          const plan = videoTransition.planVideoVisibilityFenceTransition(db, { ...base, previousStatus, nextStatus });
+          const plan = await videoTransition.planVideoVisibilityFenceTransition(db, { ...base, previousStatus, nextStatus });
           out[key] = summarizePlan(plan);
           if (plan.mutationStatements.length > 0) await exec(db, plan.mutationStatements);
         }
