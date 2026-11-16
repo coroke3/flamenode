@@ -5,6 +5,7 @@ import {
   parseVideoMemberInputs as targetParse,
   normalizeMemberChapters as targetChapters,
   validateVideoMemberSubmission as targetSubmission,
+  classifyAdminVideoMemberSave,
 } from "../src/video/adminMemberSubmission.ts";
 import {
   parseVideoMemberInputs as legacyParse,
@@ -208,4 +209,31 @@ test("MIG-0650 SA-085 U03b: active Next submission entry delegates only members 
     JSON.parse(domainExport).exports["./video/adminMemberSubmission"],
     "./src/video/adminMemberSubmission.ts",
   );
+});
+
+test("MIG-0650 SA-085 U03c: public-content dirtiness and no-op classification match CURRENT", () => {
+  for (const previousCollaborationType of ["collab", "individual", "legacy", null]) {
+    for (const memberCount of [0, 1, 100]) {
+      for (const isCollab of [false, true]) {
+        for (const hasMemberAudit of [false, true]) {
+          for (const hasChapterAudit of [false, true]) {
+            const expectedType = memberCount > 0 || isCollab ? "collab" : "individual";
+            const changed = previousCollaborationType !== expectedType;
+            assert.deepEqual(classifyAdminVideoMemberSave({
+              previousCollaborationType, memberCount, isCollab,
+              hasMemberAudit, hasChapterAudit,
+            }), {
+              nextCollaborationType: expectedType,
+              collaborationTypeChanged: changed,
+              videoPublicContentChanged: changed || hasMemberAudit || hasChapterAudit,
+            });
+          }
+        }
+      }
+    }
+  }
+  assert.equal(classifyAdminVideoMemberSave({
+    previousCollaborationType: "collab", memberCount: 0, isCollab: true,
+    hasMemberAudit: false, hasChapterAudit: false,
+  }).videoPublicContentChanged, false);
 });
