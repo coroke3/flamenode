@@ -1192,6 +1192,102 @@ test("Issue #653: GA4 failure preserves fully public last-good R2 without extra 
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("Issue #653: parsed public rows with raw private keys must be sanitized on GA4 failure", async () => {
+  const item = {
+    id: "video-a", title: "A", youtube_video_id: "yt-a",
+    display_name: "creator", icon_url: null, primary_event_id: null,
+    primary_event_title: null, scheduled_time: 1_700_000_000,
+    status: "public", rank: 1, video_id: "video-a",
+    views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+  };
+  const old = { schema_version: 1, generated_at: 1_700_000_000, items: [item] };
+  const contaminated = [
+    JSON.stringify({ ...old, private_debug: "sensitive-top-level" }),
+    JSON.stringify({ ...old, items: [{ ...item, private_debug: "sensitive-row" }] }),
+    JSON.stringify({ ...old, windows: {
+      views_2d: { start_date: "2023-11-13", end_date: "2023-11-14", private_debug: "sensitive-window" },
+    } }),
+    JSON.stringify(old).replace('"title":"A"', '"title":"sensitive-duplicate","title":"A"'),
+  ];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("GA4 unavailable", { status: 500 });
+  try {
+    for (const prior of contaminated) {
+      const db = recentDb();
+      const written = [];
+      const env = enabledGa4Env({
+        DB: db,
+        KV: { async get() { return JSON.stringify({
+          access_token: "cached", expires_at: Math.floor(Date.now() / 1000) + 3600,
+        }); } },
+        R2: {
+          async get(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            return { size: Buffer.byteLength(prior), async text() { return prior; } };
+          },
+          async put(key, body) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            written.push(JSON.parse(String(body)));
+          },
+        },
+      });
+      await assert.rejects(() => syncGa4Trending(env), /ga4_report_http_500/);
+      assert.equal(db.reads, 1, "privacy repair reuses the existing D1 read");
+      assert.equal(written.length, 1, "untrusted raw R2 must not be preserved");
+      assert.deepEqual(written[0].items.map((row) => row.id), ["video-a"]);
+      assert.equal(written[0].items[0].title, "A");
+      assert.equal(written[0].generated_at, 1_700_000_000, "reused GA4 metrics stay old");
+      assert.doesNotMatch(JSON.stringify(written[0]), /sensitive-|private_debug/,
+        "neither unknown keys nor discarded duplicate values may survive");
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("Issue #653: orphan-only GA4 result cannot retain unknown private fields in raw R2", async () => {
+  const prior = JSON.stringify({
+    schema_version: 1, generated_at: 1_700_000_000,
+    items: [{
+      id: "video-a", title: "A", youtube_video_id: "yt-a",
+      display_name: "creator", icon_url: null, primary_event_id: null,
+      primary_event_title: null, scheduled_time: 1_700_000_000,
+      status: "public", rank: 1, video_id: "video-a",
+      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+      private_debug: "sensitive-event-name",
+    }],
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    assert.match(String(input), /analyticsdata.googleapis.com/);
+    return new Response(JSON.stringify({
+      dimensionHeaders: [{ name: "dateRange" }, { name: "customEvent:video_id" }],
+      metricHeaders: [{ name: "eventCount" }], rowCount: 0, rows: [],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const db = recentDb();
+  const written = [];
+  const env = enabledGa4Env({
+    DB: db,
+    KV: { async get() { return JSON.stringify({
+      access_token: "cached", expires_at: Math.floor(Date.now() / 1000) + 3600,
+    }); } },
+    R2: {
+      async get() { return { size: Buffer.byteLength(prior), async text() { return prior; } }; },
+      async put(key, body) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        written.push(JSON.parse(String(body)));
+      },
+    },
+  });
+  try {
+    const result = await syncGa4Trending(env);
+    assert.equal(result.failed, 0);
+    assert.equal(db.reads, 1);
+    assert.equal(written.length, 1);
+    assert.deepEqual(written[0].items, [], "no matching views and untrusted R2 must clear");
+    assert.doesNotMatch(JSON.stringify(written[0]), /private_debug|sensitive-event-name/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("Issue #653: revoked-only or malformed old R2 is cleared on GA4 failure", async () => {
   const previousCases = [
     { schema_version: 1, generated_at: 1_700_000_000,
