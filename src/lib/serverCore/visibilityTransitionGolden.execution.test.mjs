@@ -1310,6 +1310,49 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("Issue #659: audit-restore video fence SQL denies D1 token rotation, DELETE and late INSERT", async () => {
+    for (const race of ["foreign-token", "vanished-row", "late-insert"]) {
+      const [, result] = await runScenario(
+        `video_lightweight_fence_d1_${race}`,
+        async ({ db, sqlite }) => {
+          const plan = await videoTransition.planVideoVisibilityFenceTransition(db, {
+            videoId: "vid-1", previousStatus: "private", nextStatus: "public",
+            actorUserId: "u-actor", reason: "audit_restore_visibility", now: 1760000100,
+          });
+          assert.deepEqual(plan.expectedMutationChanges, [1]);
+          assert.equal(plan.mutationStatements.length, 1);
+          if (race === "foreign-token") {
+            sqlite.prepare("UPDATE public_visibility_fences SET fence_token = ? WHERE entity_type = 'video' AND entity_id = 'vid-1'")
+              .run("vf_foreign_owner");
+          } else if (race === "vanished-row") {
+            sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = 'video' AND entity_id = 'vid-1'").run();
+          } else {
+            seedFence(sqlite, { fence_token: "vf_foreign_owner", state: "blocked" });
+          }
+          const statement = plan.mutationStatements[0].toSQL();
+          const changed = sqlite.prepare(statement.sql).run(...statement.params).changes;
+          return { changed, token: plan.fenceToken };
+        },
+        {
+          setup: (sqlite) => {
+            seedVideo(sqlite, { visibility_status: "private" });
+            if (race !== "late-insert") {
+              seedFence(sqlite, { fence_token: "vf_existing", state: "blocked" });
+            }
+          },
+        },
+      );
+      assert.equal(result.outcome.threw, undefined, race);
+      assert.equal(result.outcome.returned.changed, 0,
+        "strict [1] expectation rejects foreign token, disappeared row, or late inserted owner");
+      assert.equal(result.public_visibility_fences.length, race === "vanished-row" ? 0 : 1);
+      if (race !== "vanished-row") {
+        assert.equal(result.public_visibility_fences[0].fence_token, "vf_foreign_owner",
+          "the concurrent D1 owner must not be overwritten");
+      }
+    }
+  });
+
   test("golden: video / event / event_group / x_user visibility transition planners and open cases", async () => {
     const actual = {};
     for (const [name, body, options] of scenarios) {
