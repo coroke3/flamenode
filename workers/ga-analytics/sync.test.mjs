@@ -1589,13 +1589,14 @@ test("Issue #653: orphan-only GA4 success rejects stale public metadata or rank 
     expires_at: Math.floor(Date.now() / 1000) + 3600,
   });
   try {
-    for (const { scheduledTime, rank, shouldPreserve } of [
-      { scheduledTime: 1_700_000_000, rank: 1, shouldPreserve: true },
-      { scheduledTime: 1_700_000_600, rank: 1, shouldPreserve: false },
-      { scheduledTime: 1_700_000_000, rank: 2, shouldPreserve: false },
+    for (const { scheduledTime, rank, generatedAt, shouldPreserve } of [
+      { scheduledTime: 1_700_000_000, rank: 1, generatedAt: 1_700_000_000, shouldPreserve: true },
+      { scheduledTime: 1_700_000_600, rank: 1, generatedAt: 1_700_000_000, shouldPreserve: false },
+      { scheduledTime: 1_700_000_000, rank: 2, generatedAt: 1_700_000_000, shouldPreserve: false },
+      { scheduledTime: 1_700_000_000, rank: 1, generatedAt: Math.floor(Date.now() / 1000) + 86400, shouldPreserve: false },
     ]) {
       const previous = JSON.stringify({
-        schema_version: 1, generated_at: 1_700_000_000,
+        schema_version: 1, generated_at: generatedAt,
         items: [{
           id: "video-a", title: "A", youtube_video_id: "yt-a",
           display_name: "creator", icon_url: null,
@@ -1642,4 +1643,43 @@ test("Issue #653: orphan-only GA4 success rejects stale public metadata or rank 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("Issue #653: future-dated last-good R2 cannot stay fresh after GA4 config failure", async () => {
+  const futureGeneratedAt = Math.floor(Date.now() / 1000) + 86400;
+  const previous = JSON.stringify({
+    schema_version: 1, generated_at: futureGeneratedAt,
+    items: [{
+      id: "video-a", title: "A", youtube_video_id: "yt-a",
+      display_name: "creator", icon_url: null,
+      primary_event_id: null, primary_event_title: null,
+      scheduled_time: 1_700_000_000, status: "public", rank: 1,
+      video_id: "video-a",
+      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+    }],
+  });
+  const db = recentDb();
+  const writes = [];
+  let reads = 0;
+  const result = await syncGa4Trending({
+    DB: db, GA4_SYNC_ENABLED: "1", // intentionally missing GA4 credentials
+    R2: {
+      async get(key) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        reads++;
+        return { size: Buffer.byteLength(previous), async text() { return previous; } };
+      },
+      async put(key, body) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        writes.push(JSON.parse(String(body)));
+      },
+    },
+  });
+  assert.equal(result.failed, 1, "config failure remains observable");
+  assert.equal(db.reads, 1, "one authoritative D1 public projection read");
+  assert.equal(reads, 1, "one R2 read; no extra external calls");
+  assert.equal(writes.length, 1, "untrusted future timestamp is not preserved");
+  assert.deepEqual(writes[0].items, [], "future-dated ranked rows must be cleared");
+  assert.ok(writes[0].generated_at < futureGeneratedAt - 300,
+    "freshly written empty artifact is timestamped now, not in the future");
 });
