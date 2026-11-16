@@ -115,11 +115,12 @@ function normalizeTrendingItem(value: unknown): TrendingItem | null {
 
 export function normalizeStaticTrending(
   payload: StaticTrendingPayload,
+  nowSec = Math.floor(Date.now() / 1000),
 ): StaticTrendingData | null {
   if (payload.schema_version !== STATIC_TRENDING_SCHEMA_VERSION) return null;
   const generatedAt = normalizeUnix(payload.generated_at);
   if (generatedAt == null ||
-    generatedAt > Math.floor(Date.now() / 1000) + TRENDING_MAX_FUTURE_SKEW_SEC
+    generatedAt > nowSec + TRENDING_MAX_FUTURE_SKEW_SEC
   ) return null;
   if (!Array.isArray(payload.items)) return null;
 
