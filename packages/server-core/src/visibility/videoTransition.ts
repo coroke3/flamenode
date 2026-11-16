@@ -143,6 +143,7 @@ export async function planVideoVisibilityFenceTransition(
     previousStatus: input.previousStatus,
     nextStatus: input.nextStatus,
     isPublic: (status) => status === "public",
+    preserveRequirementsJsonOnUpdate: true,
     actorUserId: input.actorUserId,
     reason: input.reason,
     now: input.now,
@@ -258,6 +259,7 @@ export async function planVideoVisibilityTransition(
           observedFence: observed
             ? { fenceToken: observed.fence_token, state: observed.state }
             : null,
+          preserveRequirementsJsonOnUpdate: true,
           state: fence.state,
           reason: input.reason ?? null,
           actorUserId: input.actorUserId,
