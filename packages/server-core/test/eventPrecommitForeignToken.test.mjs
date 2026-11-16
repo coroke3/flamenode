@@ -571,6 +571,26 @@ test("Visibility rename copy: CAS retry carries latest same-token old-ID metadat
   assert.deepEqual(state.manifest.entities, [latest], "rollback must not resurrect stale old-ID metadata");
 });
 
+test("Visibility rename compensation: a live same-token old-ID update survives rollback", async () => {
+  const stale = { ...entry("event", "event-old", "incoming"), blocked_at: 20, reason: "stale" };
+  const current = { ...stale, blocked_at: 75, reason: "updated-after-copy" };
+  const state = hostOf(manifestOf(stale), null, (latest) => ({
+    ...latest,
+    entities: latest.entities.map((item) =>
+      item.entity_type === "event" && item.entity_id === "event-old" ? current : item),
+  }));
+  const precommit = await preCommitEventVisibilityFenceRename({
+    oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming",
+  }, state.host);
+  assert.deepEqual(precommit.previousOldEntry, stale,
+    "the first CAS did not race, so the precommit remembers the initial metadata");
+  assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "event-old"), current,
+    "another same-owner update may arrive before confirmation");
+  await compensateEventVisibilityFenceRenameOnD1Failure(precommit, state.host);
+  assert.deepEqual(state.manifest.entities, [current],
+    "compensation must remove only the new-ID copy, not clobber current old-ID metadata");
+});
+
 test("Visibility rename copy: same-token old-ID inserted during CAS becomes expected tombstone owner", async () => {
   const latest = { ...entry("event", "event-old", "incoming"), blocked_at: 66 };
   const state = hostOf(manifestOf(), (manifest) => ({
