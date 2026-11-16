@@ -33,9 +33,18 @@ const unavailablePermission: FieldProps["applyPermissionBatch"] = async () => {
 export function AdminVideoMembersEditorPreview({
   videoId, data, searchXUsers, applyPermissionBatch, save, onSaved,
 }: AdminVideoMembersEditorPreviewProps): React.ReactElement {
+  // Limit the array BEFORE schema traversal. A forged snapshot with 101+ rows
+  // must not cause even one member getter / nested chapter to be inspected.
+  const rawMembers: unknown =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? (data as { initialMembers?: unknown }).initialMembers
+      : undefined;
+  if (!videoId || !Array.isArray(rawMembers) || rawMembers.length > MAX_VIDEO_MEMBERS) {
+    return <p role="alert">参加者データを表示できません。</p>;
+  }
+
   const parsed = AdminVideoMembersResponseSchema.safeParse(data);
-  if (!videoId || !parsed.success || parsed.data.video.id !== videoId ||
-      parsed.data.initialMembers.length > MAX_VIDEO_MEMBERS ||
+  if (!parsed.success || parsed.data.video.id !== videoId ||
       parsed.data.initialMembers.some(member => member.is_public_member !== 1)) {
     return <p role="alert">参加者データを表示できません。</p>;
   }
