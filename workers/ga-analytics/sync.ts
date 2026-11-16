@@ -177,10 +177,10 @@ function isOversizedUtf8Text(text: string, maxBytes: number): boolean {
 }
 
 // Keep the original R2 bytes only when they contain known public fields.
- // The public reader normalizes/strips unknown keys: comparing its DTO with
- // D1 cannot prove that the underlying R2 JSON is free of private metadata.
- // A duplicate JSON key is also dangerous: JSON.parse discards an earlier
- // value which remains readable in the raw public R2 object.
+// The public reader normalizes/strips unknown keys: comparing its DTO with
+// D1 cannot prove that the underlying R2 JSON is free of private metadata.
+// A duplicate JSON key is also dangerous: JSON.parse discards an earlier
+// value which remains readable in the raw public R2 object.
 const RETAINED_TRENDING_TOP_KEYS = new Set([
   "schema_version", "generated_at", "source", "ranking_rule", "windows", "items",
 ]);
@@ -207,7 +207,7 @@ function isCanonicalRetainedTrendingWire(raw: string, payload: TrendingOutputPay
   if (payload.source !== undefined && payload.source !== "ga4") return false;
   if (payload.ranking_rule !== undefined && (
     !Array.isArray(payload.ranking_rule) ||
-    payload.ranking_rule.some((rule) => !TRENDING_RANKING_RULE.includes(rule))
+    payload.ranking_rule.some((rule) => !TRENDING_RANKING_RULE.some((allowed) => allowed === rule))
   )) return false;
   if (payload.windows !== undefined) {
     if (!hasOnlyRetainedKeys(payload.windows, RETAINED_TRENDING_WINDOW_KEYS)) return false;
