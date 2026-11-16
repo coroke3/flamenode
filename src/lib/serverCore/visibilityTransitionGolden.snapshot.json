@@ -3664,7 +3664,7 @@
           "entity_type": "event",
           "entity_id": "evt-old",
           "fence_token": "ef_tok",
-          "blocked_at": 77,
+          "blocked_at": 88,
           "reason": null
         }
       }
