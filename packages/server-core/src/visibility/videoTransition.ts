@@ -15,6 +15,7 @@ import type { QueueWakeSource } from "../queues/wakeBudget.ts";
 import type { StaticRebuildQueueBatch } from "../staticRebuild/enqueue.ts";
 import { buildAfterVideoStatusChangeQueueBatch } from "../staticRebuild/hooks.ts";
 import { getPublicVisibilityFence } from "./fenceStore.ts";
+import { buildPublicVisibilityFenceUpsertStatement } from "./fenceTransition.ts";
 import type { VisibilityFenceHost } from "./manifestHost.ts";
 import {
   isEntityBlockedInManifest,
@@ -276,16 +277,29 @@ export async function planVideoVisibilityTransition(
     const fence = planVideoVisibilityFence(prevStatus, input.nextStatus);
     if (fence) {
       depublicizedFromPublic = fence.depublicizedFromPublic;
-      fenceToken = generateId("vf");
+      // Keep the authoritative blocked/release_pending owner across
+      // private -> public -> private. Creating a fresh token would make the
+      // initial R2 CAS reject our own existing block as foreign.
+      const observed = await getPublicVisibilityFence(db, "video", input.video.id);
+      fenceToken = observed &&
+        (observed.state === "blocked" || observed.state === "release_pending")
+          ? observed.fence_token
+          : generateId("vf");
+      // A concurrent D1 INSERT/DELETE/token-or-state change after planning
+      // must fail the atomic [1] assertion instead of silently replacing the
+      // other writer's owner or resurrecting a deleted fence.
       mutationStatements.push(
-        buildFenceUpsertStatement(db, {
-          videoId: input.video.id,
+        buildPublicVisibilityFenceUpsertStatement(db, {
+          entityType: "video",
+          entityId: input.video.id,
           fenceToken,
+          observedFence: observed
+            ? { fenceToken: observed.fence_token, state: observed.state }
+            : null,
           state: fence.state,
           reason: input.reason ?? null,
           actorUserId: input.actorUserId,
           now,
-          blockedAt: fence.depublicizedFromPublic ? now : null,
         }),
       );
       expectedMutationChanges.push(1);
