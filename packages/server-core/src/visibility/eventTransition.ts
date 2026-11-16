@@ -443,7 +443,14 @@ export async function compensateEventVisibilityFenceRenameOnD1Failure(
           ),
       ),
     };
-    const restored = input.previousOldEntry
+    // Copy precommit never removes the old-ID block. If another same-token
+    // writer has refreshed it since our precommit, removing the temporary
+    // new-ID copy must not replace that live metadata with our old snapshot.
+    // Only restore the prior block if old-ID is now entirely absent.
+    const oldIdStillBlocked = manifest.entities.some((entry) =>
+      entry.entity_type === "event" && entry.entity_id === input.oldEventId
+    );
+    const restored = input.previousOldEntry && !oldIdStillBlocked
       ? upsertBlockedEntityInManifest(
           withoutNew,
           input.previousOldEntry,
