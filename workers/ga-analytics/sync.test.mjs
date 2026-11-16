@@ -1277,6 +1277,63 @@ test("Issue #653: GA4 failure preserves fully public last-good R2 without extra 
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("Issue #653: GA4-disabled repair canonicalizes all four non-integer R2 view counters", async () => {
+  const canonicalItem = {
+    id: "video-a", title: "A", youtube_video_id: "yt-a",
+    display_name: "creator", icon_url: null,
+    primary_event_id: null, primary_event_title: null,
+    scheduled_time: 1_700_000_000, status: "public", rank: 1,
+    video_id: "video-a", views_2d: 1, views_5d: 2,
+    views_7d: 3, views_30d: 4,
+  };
+  const cases = [
+    ["views_2d", null, 0],
+    ["views_5d", "2", 2],
+    ["views_7d", false, 0],
+    ["views_30d", 4.5, 4],
+  ];
+  const originalLog = console.log;
+  try {
+    console.log = () => {};
+    for (const [field, malformed, expected] of cases) {
+      const db = recentDb();
+      const prior = JSON.stringify({
+        schema_version: 1, generated_at: 1_700_000_000,
+        items: [{ ...canonicalItem, [field]: malformed }],
+      });
+      const writes = [];
+      let gets = 0;
+      const result = await syncGa4Trending({
+        GA4_SYNC_ENABLED: "0", DB: db,
+        R2: {
+          async get(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            gets++;
+            return { size: Buffer.byteLength(prior), async text() { return prior; } };
+          },
+          async put(key, body) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            writes.push(JSON.parse(String(body)));
+          },
+        },
+      });
+      assert.equal(result.skipped, 1);
+      assert.equal(result.external_api_calls, 0);
+      assert.equal(db.reads, 1, "one D1 public visibility projection");
+      assert.equal(gets, 1, "one existing R2 read");
+      assert.equal(writes.length, 1,
+        `${field}=${String(malformed)} must not preserve noncanonical raw R2`);
+      assert.deepEqual(writes[0].items.map((item) => item.id), ["video-a"]);
+      assert.equal(writes[0].items[0][field], expected);
+      assert.equal(typeof writes[0].items[0][field], "number");
+      assert.equal(writes[0].generated_at, 1_700_000_000,
+        "reused GA4 view counts must not be advertised as freshly sampled");
+    }
+  } finally {
+    console.log = originalLog;
+  }
+});
+
 test("Issue #653: parsed public rows with raw private keys must be sanitized on GA4 failure", async () => {
   const item = {
     id: "video-a", title: "A", youtube_video_id: "yt-a",
