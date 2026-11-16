@@ -62,6 +62,8 @@ export function buildPublicVisibilityFenceUpsertStatement(
     fenceToken: string;
     /** Authoritative D1 row observed before R2 precommit. Null means absent. */
     observedFence: { fenceToken: string; state: PublicVisibilityFenceState } | null;
+    /** Video legacy UPDATE preserved an existing release requirements payload. */
+    preserveRequirementsJsonOnUpdate?: boolean;
     state: "blocked" | "release_pending";
     actorUserId: string;
     reason?: string | null;
@@ -89,7 +91,14 @@ export function buildPublicVisibilityFenceUpsertStatement(
       ...fields,
     }).onConflictDoNothing();
   }
-  return db.update(publicVisibilityFences).set(fields).where(and(
+  // Existing video fences can have release requirements. Preserve the legacy
+  // update contract: INSERT explicitly writes NULL, but a guarded UPDATE must
+  // not erase an earlier requirements payload.
+  const updateFields: Partial<typeof fields> = { ...fields };
+  if (input.preserveRequirementsJsonOnUpdate) {
+    delete updateFields.requirements_json;
+  }
+  return db.update(publicVisibilityFences).set(updateFields).where(and(
     eq(publicVisibilityFences.entity_type, input.entityType),
     eq(publicVisibilityFences.entity_id, entityId),
     eq(publicVisibilityFences.fence_token, input.observedFence.fenceToken),
@@ -116,6 +125,8 @@ export async function planPublicVisibilityFenceTransition<Status>(input: {
   previousStatus: Status;
   nextStatus: Status;
   isPublic: (status: Status) => boolean;
+  /** Keep existing video-only requirements when updating an active D1 fence. */
+  preserveRequirementsJsonOnUpdate?: boolean;
   actorUserId: string;
   reason?: string | null;
   now: number;
@@ -156,6 +167,7 @@ export async function planPublicVisibilityFenceTransition<Status>(input: {
         observedFence: existing
           ? { fenceToken: existing.fence_token, state: existing.state }
           : null,
+        preserveRequirementsJsonOnUpdate: input.preserveRequirementsJsonOnUpdate,
         state: input.isPublic(input.nextStatus) ? "release_pending" : "blocked",
         actorUserId: input.actorUserId,
         reason: input.reason,
