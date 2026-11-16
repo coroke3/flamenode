@@ -417,6 +417,50 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(puts[1][2], "etag-1", "compensation releases by exact R2 CAS etag");
   });
 
+  test("private-to-public stale D1 CAS rolls back release fence, audit and rebuild on both hosts", async () => {
+    const current = await executeAuditedStatus("public", true, true, false, false, "private");
+    const hono = await executeAuditedStatus("public", false, true, false, false, "private");
+    assert.deepEqual(hono, current, "CURRENT/Hono public release must have identical rollback semantics");
+    assert.equal(current.result.ok, false);
+    assert.equal(current.result.retryable, true, "stale D1 status is retryable, not a success");
+    assert.equal(current.batches, 1, "the atomic mutation was attempted once");
+    assert.equal(current.video.visibility_status, "private", "D1 CAS rollback preserves the private state");
+    assert.equal(current.video.updated_at, 2000, "the concurrent D1 writer is preserved");
+    assert.deepEqual(current.fences, [], "release-pending D1 fence must not survive a failed CAS");
+    assert.deepEqual(current.audits, [], "strict audit may not commit without the video transition");
+    assert.deepEqual(current.notifications, []);
+    assert.deepEqual(current.queue, [], "static rebuild must roll back atomically");
+    assert.deepEqual(current.manifest?.entities, [],
+      "a temporary release-blocker is compensated using its own R2 token");
+    const puts = current.events.filter((event) => event[0] === "r2.put");
+    assert.equal(puts.length, 2, "R2 precommit and exact-owner compensation");
+    assert.equal(puts[0][2], "create-if-absent", "first R2 write is conditional");
+    assert.equal(puts[1][2], "etag-1", "rollback is conditional on the R2 object version");
+    assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), [],
+      "a failed private-to-public transition cannot wake either queue");
+  });
+
+  test("private-to-public foreign R2 owner fails closed before D1 on CURRENT and Hono", async () => {
+    const current = await executeAuditedStatus("public", true, false, true, false, "private");
+    const hono = await executeAuditedStatus("public", false, false, true, false, "private");
+    assert.deepEqual(hono, current, "both adapters reject a lost release-block owner");
+    assert.equal(current.result.ok, false);
+    assert.equal(current.result.errorCode, "visibility_precommit_failed");
+    assert.equal(current.result.retryable, false);
+    assert.equal(current.batches, 0, "no mutation may start after losing the R2 CAS");
+    assert.equal(current.video.visibility_status, "private");
+    assert.equal(current.video.updated_at, 1000, "the initial private row stays unchanged");
+    assert.deepEqual(current.fences, []);
+    assert.deepEqual(current.audits, []);
+    assert.deepEqual(current.notifications, []);
+    assert.deepEqual(current.queue, []);
+    assert.equal(current.manifest?.entities?.[0]?.fence_token, "vf-foreign-owner",
+      "foreign R2 blocker remains authoritative");
+    assert.equal(current.events.filter((event) => event[0] === "r2.put").length, 1,
+      "compensation must never overwrite the new R2 owner");
+    assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), []);
+  });
+
   test("concurrent R2 fence ownership supersedes the stale caller without clearing the winner", async () => {
     const current = await executeAuditedStatus("private", true, false, true);
     const hono = await executeAuditedStatus("private", false, false, true);
