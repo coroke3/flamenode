@@ -117,6 +117,9 @@ export function normalizeStaticTrending(
   payload: StaticTrendingPayload,
   nowSec = Math.floor(Date.now() / 1000),
 ): StaticTrendingData | null {
+  // A corrupted or non-integer injected build/request clock must not
+  // accidentally authorize an implausibly future-dated public artifact.
+  if (!Number.isSafeInteger(nowSec) || nowSec < 0) return null;
   if (payload.schema_version !== STATIC_TRENDING_SCHEMA_VERSION) return null;
   const generatedAt = normalizeUnix(payload.generated_at);
   if (generatedAt == null ||
@@ -135,10 +138,15 @@ export function resolveStaticTrendingStaleMeta(
   generatedAt: number | null,
   nowSec: number,
 ): StaticTrendingStaleMeta {
-  if (generatedAt == null) {
-    return { stale: true, ageSeconds: null, tooOldForHome: true };
-  }
-  if (generatedAt > nowSec + TRENDING_MAX_FUTURE_SKEW_SEC) {
+  // Stale metadata is also used independently of the payload normalizer.
+  // NaN, Infinity or unsafe/negative clock values must never produce
+  // ageSeconds=NaN and an incorrectly "fresh" public response.
+  if (
+    generatedAt == null ||
+    !Number.isSafeInteger(generatedAt) || generatedAt < 0 ||
+    !Number.isSafeInteger(nowSec) || nowSec < 0 ||
+    generatedAt > nowSec + TRENDING_MAX_FUTURE_SKEW_SEC
+  ) {
     return { stale: true, ageSeconds: null, tooOldForHome: true };
   }
   const ageSeconds = Math.max(0, nowSec - generatedAt);
