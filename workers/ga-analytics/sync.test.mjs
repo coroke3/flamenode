@@ -1337,6 +1337,66 @@ test("Issue #653: oversized current public metadata cannot keep revoked old R2 o
   } finally { globalThis.fetch = originalFetch; }
 });
 
+
+test("Issue #653: failed R2 privacy repair preserves GA4 retry cause and redacts adapter errors", async () => {
+  const previous = JSON.stringify({
+    schema_version: 1, generated_at: 1_700_000_000,
+    items: [{ id: "revoked-video", title: "Revoked title", status: "public", rank: 1,
+      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4 }],
+  });
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const logs = [];
+  globalThis.fetch = async () => new Response("GA4 unavailable", { status: 500 });
+  console.log = (value) => logs.push(JSON.parse(String(value)));
+  try {
+    for (const failure of ["read", "write"]) {
+      logs.length = 0;
+      let reads = 0;
+      let writes = 0;
+      const db = recentDb();
+      const env = enabledGa4Env({
+        DB: db,
+        KV: { async get() {
+          return JSON.stringify({ access_token: "cached",
+            expires_at: Math.floor(Date.now() / 1000) + 3600 });
+        } },
+        R2: {
+          async get(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            reads += 1;
+            if (failure === "read") {
+              throw Error("R2 SELECT token='private-credential' Authorization:Bearer repair-secret");
+            }
+            return { size: Buffer.byteLength(previous), async text() { return previous; } };
+          },
+          async put(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            writes += 1;
+            throw Error("R2 write Authorization:Bearer repair-secret");
+          },
+        },
+      });
+      await assert.rejects(() => syncGa4Trending(env), /ga4_report_http_500/,
+        "failed R2 repair must not replace the original GA4 retry cause");
+      assert.equal(db.reads, 1, "reuse the authoritative D1 public allow-list");
+      assert.equal(reads, 1);
+      assert.equal(writes, failure === "write" ? 1 : 0);
+      const event = logs.at(-1);
+      assert.equal(event.result, "failed");
+      assert.equal(event.r2_written, false, "failed R2 PUT is never committed");
+      assert.equal(event.privacy_rewrite_on_ga4_failure, false);
+      assert.equal(event.privacy_repair_error, "privacy_repair_failed");
+      assert.match(event.error, /ga4_report_http_500/);
+      assert.doesNotMatch(JSON.stringify(logs), /private-credential|repair-secret|R2 SELECT/,
+        "R2 exception details must not reach structured worker logs");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+  }
+});
+
 test("Issue #653: orphan-only GA4 success cannot retain now-private event or retired creator metadata", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {

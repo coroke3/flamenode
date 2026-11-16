@@ -454,6 +454,7 @@ export async function syncGa4Trending(
   const budget = new ExternalRequestBudget(16);
   const startedAt = Date.now();
   let privacyRewriteOnGa4Failure = false;
+  let privacyRepairFailedOnGa4Failure = false;
 
   try {
     const recent = await loadRecentListPayload(env, signal);
@@ -491,9 +492,16 @@ export async function syncGa4Trending(
     } catch (ga4Error) {
       // A failure to reach GA4 cannot leave now-private R2 rows intact.
       // Still rethrow for normal job retry/error reporting.
-      privacyRewriteOnGa4Failure = await repairTrendingAfterGa4Failure(
-        env, recent, signal,
-      );
+      try {
+        privacyRewriteOnGa4Failure = await repairTrendingAfterGa4Failure(
+          env, recent, signal,
+        );
+      } catch {
+        signal?.throwIfAborted();
+        // R2 repair errors may include SQL, object keys or credentials.
+        // Preserve the original GA4 retry cause; log only a fixed repair marker.
+        privacyRepairFailedOnGa4Failure = true;
+      }
       throw ga4Error;
     }
     const { periods, quota } = report;
@@ -554,6 +562,7 @@ export async function syncGa4Trending(
       result: "failed",
       r2_written: privacyRewriteOnGa4Failure,
       privacy_rewrite_on_ga4_failure: privacyRewriteOnGa4Failure,
+      ...(privacyRepairFailedOnGa4Failure ? { privacy_repair_error: "privacy_repair_failed" } : {}),
       error: safeErrorSummary(error),
       external_api_calls: budget.used,
       duration_ms: Date.now() - startedAt,
