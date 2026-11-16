@@ -31,6 +31,15 @@ test("trendingLoader: R2 analytics/trending.json を Cache API 経由で読む",
   assert.match(loaderSource, /resolveStaticTrendingStaleMeta/);
 });
 
+test("Issue #653: R2 trending reader uses the same request time for future-skew rejection and staleness", () => {
+  assert.match(loaderSource, /normalizeTrendingPayload\(value, nowSec\)/,
+    "normalizer must use the loader's injected request/build time");
+  assert.match(loaderSource, /normalizeStaticTrending\(value as StaticTrendingPayload, nowSec\)/,
+    "do not silently fall back to an independent Date.now()");
+  assert.match(loaderSource, /resolveStaticTrendingStaleMeta\([\s\S]*?nowSec/,
+    "stale metadata must evaluate against the same time");
+});
+
 test("trendingLoader: miss 時は data null を返す契約", () => {
   assert.match(loaderSource, /data,\s*\.\.\.staleMeta/);
   assert.match(loaderSource, /return null/);
