@@ -471,12 +471,33 @@ export async function syncGa4Trending(
   signal?.throwIfAborted();
   const enabled = isGa4SyncEnabled(env);
   if (!enabled) {
+    // Disabling GA4 stops external analytics calls, not public-visibility
+    // revocations. Operators commonly switch the job off during a 429/outage;
+    // a previous ranking must not keep now-private rows indefinitely.
+    // This path uses one bounded D1 projection and R2 read when available,
+    // but never attempts an OAuth or GA4 request.
+    let privacyRewriteOnDisabled = false;
+    let privacyRepairError: "privacy_repair_failed" | undefined;
+    if (env.DB && env.R2) {
+      try {
+        const recent = await loadRecentListPayload(env, signal);
+        if (!Array.isArray(recent.items)) throw new Error("ga4_recent_d1_invalid_result");
+        privacyRewriteOnDisabled = await repairTrendingAfterGa4Failure(env, recent, signal);
+      } catch {
+        signal?.throwIfAborted();
+        // D1 and R2 provider exception text may expose credentials or SQL.
+        privacyRepairError = "privacy_repair_failed";
+      }
+    }
     logGa4TrendingEvent({
       service: "flamenode-sync-jobs",
       worker: "sync-jobs",
       job: "ga4-trending-sync",
       enabled: false,
       result: "skipped",
+      r2_written: privacyRewriteOnDisabled,
+      privacy_rewrite_on_disabled: privacyRewriteOnDisabled,
+      ...(privacyRepairError ? { privacy_repair_error: privacyRepairError } : {}),
     });
     return emptyResult({ processed: 0, failed: 0, skipped: 1 });
   }
