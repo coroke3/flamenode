@@ -99,6 +99,9 @@ export async function planEventVisibilityTransition(input: {
         entityType: "event",
         entityId: input.eventId,
         fenceToken,
+        observedFence: existing
+          ? { fenceToken: existing.fence_token, state: existing.state }
+          : null,
         state,
         reason: input.reason,
         actorUserId: input.actorUserId,

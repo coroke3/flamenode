@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { publicVisibilityFences } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "../db.ts";
@@ -10,6 +11,7 @@ import {
   upsertBlockedEntityInManifest,
   type PublicVisibilityBlockedEntitiesManifest,
   type PublicVisibilityFenceEntityType,
+  type PublicVisibilityFenceState,
 } from "./manifestCore.ts";
 
 /**
@@ -58,6 +60,8 @@ export function buildPublicVisibilityFenceUpsertStatement(
     entityType: PublicVisibilityFenceEntityType;
     entityId: string;
     fenceToken: string;
+    /** Authoritative D1 row observed before R2 precommit. Null means absent. */
+    observedFence: { fenceToken: string; state: PublicVisibilityFenceState } | null;
     state: "blocked" | "release_pending";
     actorUserId: string;
     reason?: string | null;
@@ -74,20 +78,30 @@ export function buildPublicVisibilityFenceUpsertStatement(
     requested_by_auth_user_id: input.actorUserId,
     updated_at: input.now,
   };
-  return db
+  const insert = db
     .insert(publicVisibilityFences)
     .values({
       entity_type: input.entityType,
       entity_id: normalizeEntityId(input.entityType, input.entityId),
       ...fields,
-    })
-    .onConflictDoUpdate({
-      target: [
-        publicVisibilityFences.entity_type,
-        publicVisibilityFences.entity_id,
-      ],
-      set: fields,
     });
+  // The old unconditional UPSERT could replace a different D1 owner after
+  // the planning SELECT. That new owner might have a distinct R2 block.
+  // Use the same D1 batch/expected-change gate to reject stale ownership.
+  if (input.observedFence === null) {
+    return insert.onConflictDoNothing();
+  }
+  return insert.onConflictDoUpdate({
+    target: [
+      publicVisibilityFences.entity_type,
+      publicVisibilityFences.entity_id,
+    ],
+    set: fields,
+    setWhere: and(
+      eq(publicVisibilityFences.fence_token, input.observedFence.fenceToken),
+      eq(publicVisibilityFences.state, input.observedFence.state),
+    ),
+  });
 }
 
 export type PublicVisibilityFencePlan<Status> = {
@@ -146,6 +160,9 @@ export async function planPublicVisibilityFenceTransition<Status>(input: {
         entityType: input.entityType,
         entityId: input.entityId,
         fenceToken,
+        observedFence: existing
+          ? { fenceToken: existing.fence_token, state: existing.state }
+          : null,
         state: input.isPublic(input.nextStatus) ? "release_pending" : "blocked",
         actorUserId: input.actorUserId,
         reason: input.reason,
