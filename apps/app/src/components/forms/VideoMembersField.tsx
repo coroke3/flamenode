@@ -14,8 +14,7 @@ import {
   type VideoMemberSuggestion,
 } from "../../lib/memberInput.js";
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
-import { scoreSimpleMemberSuggestion } from "../../lib/memberSuggestionRank.js";
-import { writeTextToClipboard } from "../../lib/clipboard.js";
+import { scoreSimpleMemberSuggestion, writeTextToClipboard } from "@flamenode/ui";
 import { MAX_COLLABORATOR_PERMISSION_BATCH } from "@flamenode/domain/video/atomicLimits";
 
 export type {
