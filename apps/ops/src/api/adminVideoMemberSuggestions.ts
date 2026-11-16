@@ -1,0 +1,90 @@
+// MIG-0730 U02e: authenticated RH-019 X-user search adapter (READ ONLY).
+// The existing Hono endpoint enforces the session. This client never confers
+// permission to edit members, apply collaborator grants, or execute SA-085.
+import type { OpsFetch } from "./read.js";
+
+export type AdminMemberSuggestionSearchResponse = {
+  items: { id: string; x_name: string | null; score?: number; matchedBy?: string }[];
+  hasMore: boolean;
+  nextOffset: number | null;
+  hint: string | null;
+};
+
+const SEARCH_LIMIT = 20;
+const QUERY_MAX_CHARS = 64;
+const OFFSET_MAX = 5000;
+
+function parseSuggestions(body: unknown): AdminMemberSuggestionSearchResponse {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("member_suggestions_unavailable");
+  }
+  const value = body as Record<string, unknown>;
+  if (!Array.isArray(value.items) || value.items.length > SEARCH_LIMIT ||
+      typeof value.hasMore !== "boolean" ||
+      (value.nextOffset !== null &&
+        (!Number.isSafeInteger(value.nextOffset) ||
+         (value.nextOffset as number) < 0 || (value.nextOffset as number) > OFFSET_MAX + SEARCH_LIMIT)) ||
+      (value.hint !== null && (typeof value.hint !== "string" || value.hint.length > 256))) {
+    throw new Error("member_suggestions_unavailable");
+  }
+  const items = value.items.map((raw: unknown) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error("member_suggestions_unavailable");
+    }
+    const row = raw as Record<string, unknown>;
+    if (typeof row.id !== "string" || row.id.length < 1 || row.id.length > 128 ||
+        (row.x_name !== null && typeof row.x_name !== "string") ||
+        (typeof row.x_name === "string" && row.x_name.length > 256) ||
+        (row.score !== undefined && (typeof row.score !== "number" || !Number.isFinite(row.score))) ||
+        (row.matchedBy !== undefined && (typeof row.matchedBy !== "string" || row.matchedBy.length > 64))) {
+      throw new Error("member_suggestions_unavailable");
+    }
+    return {
+      id: row.id,
+      x_name: row.x_name,
+      ...(typeof row.score === "number" ? { score: row.score } : {}),
+      ...(typeof row.matchedBy === "string" ? { matchedBy: row.matchedBy } : {}),
+    };
+  });
+  return {
+    items,
+    hasMore: value.hasMore as boolean,
+    nextOffset: value.nextOffset as number | null,
+    hint: value.hint as string | null,
+  };
+}
+
+/** Fail closed; the shared form displays a search error on rejected calls. */
+export async function searchAdminVideoMemberXUsers(
+  q: string,
+  offset: number,
+  signal: AbortSignal,
+  fetchFn: OpsFetch = (path, init) => fetch(path, init),
+): Promise<AdminMemberSuggestionSearchResponse> {
+  if (typeof q !== "string" || q.length > QUERY_MAX_CHARS || !q.trim() ||
+      !Number.isSafeInteger(offset) || offset < 0 || offset > OFFSET_MAX ||
+      signal.aborted) {
+    throw new Error("member_suggestions_unavailable");
+  }
+  let encoded: string;
+  try { encoded = encodeURIComponent(q.trim()); }
+  catch { throw new Error("member_suggestions_unavailable"); }
+  const response = await fetchFn(
+    `/api/internal/x-users/search?q=${encoded}&limit=${SEARCH_LIMIT}&offset=${offset}`,
+    {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { accept: "application/json" },
+      signal,
+    },
+  );
+  if (signal.aborted || response.status !== 200) {
+    throw new Error("member_suggestions_unavailable");
+  }
+  let body: unknown;
+  try { body = await response.json(); }
+  catch { throw new Error("member_suggestions_unavailable"); }
+  if (signal.aborted) throw new Error("member_suggestions_unavailable");
+  return parseSuggestions(body);
+}
