@@ -4,7 +4,7 @@ import {
   parseDelimited,
   serializeDelimited,
   type DelimiterChar,
-} from "./delimited.js";
+} from "@flamenode/ui";
 import { normalizeXId } from "@flamenode/domain/xid";
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 
