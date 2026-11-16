@@ -1321,8 +1321,8 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
-  test("Issue #659: video planner D1 fence CAS denies foreign owner or vanished observed row", async () => {
-    for (const race of ["foreign-token", "vanished-row"]) {
+  test("Issue #659: video planner D1 fence CAS denies token, state or deleted-row races", async () => {
+    for (const race of ["foreign-token", "state-only", "vanished-row"]) {
       const [, result] = await runScenario(
         `video_fence_d1_${race}`,
         async ({ db, sqlite }) => {
@@ -1331,6 +1331,8 @@ if (runTestWithTsx(import.meta.url)) {
           if (race === "foreign-token") {
             sqlite.prepare("UPDATE public_visibility_fences SET fence_token = ? WHERE entity_type = 'video' AND entity_id = 'vid-1'")
               .run("vf_foreign_owner");
+          } else if (race === "state-only") {
+            sqlite.prepare("UPDATE public_visibility_fences SET state = 'release_pending' WHERE entity_type = 'video' AND entity_id = 'vid-1'").run();
           } else {
             sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = 'video' AND entity_id = 'vid-1'").run();
           }
@@ -1353,12 +1355,16 @@ if (runTestWithTsx(import.meta.url)) {
       if (race === "foreign-token") {
         assert.equal(result.public_visibility_fences[0].fence_token, "vf_foreign_owner",
           "foreign owner is not overwritten");
+      } else if (race === "state-only") {
+        assert.equal(result.public_visibility_fences[0].fence_token, "vf_existing");
+        assert.equal(result.public_visibility_fences[0].state, "release_pending",
+          "a same-token concurrent state change is never reverted by stale planning");
       }
     }
   });
 
-  test("Issue #659: audit-restore video fence SQL denies D1 token rotation, DELETE and late INSERT", async () => {
-    for (const race of ["foreign-token", "vanished-row", "late-insert"]) {
+  test("Issue #659: audit-restore video fence SQL denies token/state races, DELETE and late INSERT", async () => {
+    for (const race of ["foreign-token", "state-only", "vanished-row", "late-insert"]) {
       const [, result] = await runScenario(
         `video_lightweight_fence_d1_${race}`,
         async ({ db, sqlite }) => {
@@ -1371,6 +1377,8 @@ if (runTestWithTsx(import.meta.url)) {
           if (race === "foreign-token") {
             sqlite.prepare("UPDATE public_visibility_fences SET fence_token = ? WHERE entity_type = 'video' AND entity_id = 'vid-1'")
               .run("vf_foreign_owner");
+          } else if (race === "state-only") {
+            sqlite.prepare("UPDATE public_visibility_fences SET state = 'release_pending' WHERE entity_type = 'video' AND entity_id = 'vid-1'").run();
           } else if (race === "vanished-row") {
             sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = 'video' AND entity_id = 'vid-1'").run();
           } else {
@@ -1393,7 +1401,11 @@ if (runTestWithTsx(import.meta.url)) {
       assert.equal(result.outcome.returned.changed, 0,
         "strict [1] expectation rejects foreign token, disappeared row, or late inserted owner");
       assert.equal(result.public_visibility_fences.length, race === "vanished-row" ? 0 : 1);
-      if (race !== "vanished-row") {
+      if (race === "state-only") {
+        assert.equal(result.public_visibility_fences[0].fence_token, "vf_existing");
+        assert.equal(result.public_visibility_fences[0].state, "release_pending",
+          "a same-token concurrent state owner must be preserved");
+      } else if (race !== "vanished-row") {
         assert.equal(result.public_visibility_fences[0].fence_token, "vf_foreign_owner",
           "the concurrent D1 owner must not be overwritten");
       }
