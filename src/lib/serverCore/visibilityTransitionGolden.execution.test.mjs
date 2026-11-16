@@ -1307,7 +1307,9 @@ if (runTestWithTsx(import.meta.url)) {
         {
           setup: (sqlite) => {
             seedVideo(sqlite, { visibility_status: "private" });
-            seedFence(sqlite, { fence_token: "vf_existing", state });
+            seedFence(sqlite, { fence_token: "vf_existing", state,
+              requirements_json: '{"release_guard":"legacy"}',
+            });
           },
           bucket: seededManifest([entity("video", "vid-1", "vf_existing")]),
         },
@@ -1317,8 +1319,42 @@ if (runTestWithTsx(import.meta.url)) {
       assert.equal(result.videos[0].visibility_status, "public");
       assert.equal(result.public_visibility_fences[0].fence_token, "vf_existing");
       assert.equal(result.public_visibility_fences[0].state, "release_pending");
+      assert.equal(result.public_visibility_fences[0].requirements_json,
+        '{"release_guard":"legacy"}',
+        "a valid reuse must not erase existing D1 release requirements");
       assert.equal(result.manifest_after.entities[0].fence_token, "vf_existing");
     }
+  });
+
+  test("Issue #659: lightweight video planner also preserves D1 release requirements", async () => {
+    const [, result] = await runScenario(
+      "video_lightweight_preserve_requirements",
+      async ({ db }) => {
+        const plan = await videoTransition.planVideoVisibilityFenceTransition(db, {
+          videoId: "vid-1", previousStatus: "private", nextStatus: "public",
+          actorUserId: "u-actor", reason: "audit_restore_visibility", now: 1760000100,
+        });
+        assert.equal(plan.fenceToken, "vf_existing");
+        await exec(db, plan.mutationStatements);
+        return plan.fenceToken;
+      },
+      {
+        setup: (sqlite) => {
+          seedVideo(sqlite, { visibility_status: "private" });
+          seedFence(sqlite, {
+            fence_token: "vf_existing",
+            state: "blocked",
+            requirements_json: '{"release_guard":"legacy"}',
+          });
+        },
+      },
+    );
+    assert.equal(result.outcome.threw, undefined);
+    assert.equal(result.outcome.returned, "vf_existing");
+    assert.equal(result.public_visibility_fences[0].state, "release_pending");
+    assert.equal(result.public_visibility_fences[0].requirements_json,
+      '{"release_guard":"legacy"}',
+      "audit restore/import must preserve the previous release conditions");
   });
 
   test("Issue #659: video planner D1 fence CAS denies token, state or deleted-row races", async () => {
