@@ -148,6 +148,31 @@ export function normalizeMemberChapters(
   return { ok: true, chapters };
 }
 
+/** SA-085 U03c: pure CURRENT-compatible save/no-op decision, reusable by Hono. */
+export function classifyAdminVideoMemberSave(input: {
+  previousCollaborationType: string | null;
+  memberCount: number;
+  isCollab: boolean;
+  hasMemberAudit: boolean;
+  hasChapterAudit: boolean;
+}): {
+  nextCollaborationType: "collab" | "individual";
+  collaborationTypeChanged: boolean;
+  videoPublicContentChanged: boolean;
+} {
+  const nextCollaborationType = input.memberCount > 0 || input.isCollab
+    ? "collab"
+    : "individual";
+  const collaborationTypeChanged =
+    input.previousCollaborationType !== nextCollaborationType;
+  return {
+    nextCollaborationType,
+    collaborationTypeChanged,
+    videoPublicContentChanged:
+      collaborationTypeChanged || input.hasMemberAudit || input.hasChapterAudit,
+  };
+}
+
 /** SA-085 U03b: CURRENT submission validation with no Next, D1 or Queue dependency. */
 export interface ValidatedMemberSubmission {
   members: MemberInput[];
