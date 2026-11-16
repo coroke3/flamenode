@@ -757,7 +757,7 @@ test("Visibility tombstone: mixed old-ID tokens on initial GET must not be rotat
   const state = hostOf(manifestOf(...beforeEntries));
   await assert.rejects(
     preCommitEventVisibilityRenameTombstone(
-      { eventId: "event-old", fenceToken: "rotated" }, state.host,
+      { eventId: "event-old", fenceToken: "rotated", expectedPreviousFenceToken: "existing-owner" }, state.host,
     ),
     /public_visibility_fence_token_mismatch/,
   );
@@ -773,7 +773,7 @@ test("Visibility tombstone: ETag CAS conflict with a duplicate foreign old-ID to
   }));
   await assert.rejects(
     preCommitEventVisibilityRenameTombstone(
-      { eventId: "event-old", fenceToken: "rotated" }, state.host,
+      { eventId: "event-old", fenceToken: "rotated", expectedPreviousFenceToken: "original" }, state.host,
     ),
     /public_visibility_fence_token_mismatch/,
   );
@@ -789,7 +789,7 @@ test("Visibility tombstone: post-PUT foreign duplicate is rejected at confirmati
   }));
   await assert.rejects(
     preCommitEventVisibilityRenameTombstone(
-      { eventId: "event-old", fenceToken: "rotated" }, state.host,
+      { eventId: "event-old", fenceToken: "rotated", expectedPreviousFenceToken: "original" }, state.host,
     ),
     /public_visibility_fence_token_mismatch/,
   );
@@ -803,7 +803,7 @@ test("Visibility tombstone: valid single-token rotation preserves previous entry
   const video = entry("video", "video-safe", "unrelated");
   const state = hostOf(manifestOf(prior, video));
   const precommit = await preCommitEventVisibilityRenameTombstone(
-    { eventId: "event-old", fenceToken: "rotated" }, state.host,
+    { eventId: "event-old", fenceToken: "rotated", expectedPreviousFenceToken: "previous" }, state.host,
   );
   assert.equal(state.appliedWrites, 1);
   assert.deepEqual(precommit.previousEntry, prior);
@@ -812,6 +812,22 @@ test("Visibility tombstone: valid single-token rotation preserves previous entry
   assert.equal(rotated.blocked_at, 55);
   assert.equal(rotated.reason, "preserve");
   assert.deepEqual(state.manifest.entities.find((x) => x.entity_id === "video-safe"), video);
+});
+
+test("Visibility tombstone: omitted owner expectation rejects direct JS calls before R2 PUT", async () => {
+  for (const before of [manifestOf(), manifestOf(entry("event", "event-old", "unobserved"))]) {
+    const state = hostOf(before);
+    await assert.rejects(
+      preCommitEventVisibilityRenameTombstone(
+        { eventId: "event-old", fenceToken: "rotated" }, state.host,
+      ),
+      /public_visibility_fence_token_mismatch/,
+      "even JS callers must explicitly declare the observed old-ID owner",
+    );
+    assert.equal(state.reads, 1);
+    assert.equal(state.attemptedWrites, 0);
+    assert.deepEqual(state.manifest, before);
+  }
 });
 
 test("Visibility tombstone: expected prior token rejects a different single old-ID owner before R2 PUT", async () => {
