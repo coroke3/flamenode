@@ -176,6 +176,53 @@ function isOversizedUtf8Text(text: string, maxBytes: number): boolean {
   );
 }
 
+// Keep the original R2 bytes only when they contain known public fields.
+ // The public reader normalizes/strips unknown keys: comparing its DTO with
+ // D1 cannot prove that the underlying R2 JSON is free of private metadata.
+ // A duplicate JSON key is also dangerous: JSON.parse discards an earlier
+ // value which remains readable in the raw public R2 object.
+const RETAINED_TRENDING_TOP_KEYS = new Set([
+  "schema_version", "generated_at", "source", "ranking_rule", "windows", "items",
+]);
+const RETAINED_TRENDING_ITEM_KEYS = new Set([
+  "id", "title", "youtube_video_id", "display_name", "icon_url",
+  "primary_event_id", "primary_event_title", "scheduled_time", "status",
+  "views_2d", "views_5d", "views_7d", "views_30d", "rank", "video_id",
+]);
+const RETAINED_TRENDING_WINDOW_KEYS = new Set([
+  "views_2d", "views_5d", "views_7d", "views_30d",
+]);
+const RETAINED_TRENDING_DATE_KEYS = new Set(["start_date", "end_date"]);
+
+function hasOnlyRetainedKeys(value: unknown, allowed: ReadonlySet<string>): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).every((key) => allowed.has(key));
+}
+
+function isCanonicalRetainedTrendingWire(raw: string, payload: TrendingOutputPayload): boolean {
+  if (!hasOnlyRetainedKeys(payload, RETAINED_TRENDING_TOP_KEYS)) return false;
+  // JSON.parse silently accepts duplicate keys. Never keep the original wire
+  // bytes if they contain data that a parsed/normalized comparison cannot see.
+  if (JSON.stringify(payload) !== raw) return false;
+  if (payload.source !== undefined && payload.source !== "ga4") return false;
+  if (payload.ranking_rule !== undefined && (
+    !Array.isArray(payload.ranking_rule) ||
+    payload.ranking_rule.some((rule) => !TRENDING_RANKING_RULE.includes(rule))
+  )) return false;
+  if (payload.windows !== undefined) {
+    if (!hasOnlyRetainedKeys(payload.windows, RETAINED_TRENDING_WINDOW_KEYS)) return false;
+    for (const value of Object.values(payload.windows)) {
+      if (!hasOnlyRetainedKeys(value, RETAINED_TRENDING_DATE_KEYS) ||
+        typeof value.start_date !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value.start_date) ||
+        typeof value.end_date !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value.end_date)) {
+        return false;
+      }
+    }
+  }
+  return Array.isArray(payload.items) &&
+    payload.items.every((item) => hasOnlyRetainedKeys(item, RETAINED_TRENDING_ITEM_KEYS));
+}
+
 async function loadRecentListPayload(
   env: Ga4TrendingSyncEnv,
   signal?: AbortSignal,
@@ -210,6 +257,7 @@ async function loadExistingTrendingItemCount(
     // ID/status alone are insufficient: title, view windows, rank and video_id
     // also affect the public reader's acceptance of each row.
     const normalized = normalizeStaticTrending(payload);
+    if (!isCanonicalRetainedTrendingWire(text, payload)) return 0;
     if (
       !normalized ||
       !Array.isArray(payload.items) ||
@@ -337,6 +385,7 @@ async function repairTrendingAfterGa4Failure(
               "scheduled_time", "status", "rank", "video_id",
             ] as const;
             const entirelyCurrent =
+              isCanonicalRetainedTrendingWire(body, payload) &&
               visible.length === normalized.items.length &&
               current.length === normalized.items.length &&
               current.every((row, index) => {
