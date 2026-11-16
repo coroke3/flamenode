@@ -24,7 +24,7 @@ test("MIG-0730 U01b: both SPA entrypoints import only the shared member CSS once
     read("apps/app/src/main.tsx"),
     read("apps/ops/src/main.tsx"),
     read("packages/ui/package.json"),
-    read("apps/app/src/components/forms/VideoMembersField.tsx"),
+    read("packages/ui/src/forms/videoMembers/VideoMembersField.tsx"),
   ]);
   const cssImport = 'import "@flamenode/ui/styles/video-members.css";';
   assert.equal(app.split(cssImport).length - 1, 1);
@@ -37,7 +37,7 @@ test("MIG-0730 U01b: both SPA entrypoints import only the shared member CSS once
 
 test("MIG-0730 U01b: every form-specific vmembers class in Personal field has a shared CSS definition", async () => {
   const [field, css] = await Promise.all([
-    read("apps/app/src/components/forms/VideoMembersField.tsx"),
+    read("packages/ui/src/forms/videoMembers/VideoMembersField.tsx"),
     read("packages/ui/src/styles/video-members.css"),
   ]);
   const used = new Set([...field.matchAll(/\bvmembers-[A-Za-z][\w-]*/g)].map(m => m[0]));
