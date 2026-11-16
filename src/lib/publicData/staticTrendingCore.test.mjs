@@ -160,6 +160,28 @@ test("normalizeStaticTrending: public 以外の status は除外", () => {
   assert.deepEqual(data.items, []);
 });
 
+test("Issue #653: noncanonical generated_at wire types cannot render public ranking", () => {
+  const nowSec = 1_700_000_000;
+  const payload = { schema_version: 1, generated_at: nowSec, items: [sampleItem] };
+  const invalid = [
+    null, false, true, "", "1700000000", -1, -0.5, 0.5, NaN,
+    Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1, {}, [],
+  ];
+
+  for (const generated_at of invalid) {
+    assert.equal(
+      normalizeStaticTrending({ ...payload, generated_at }, nowSec),
+      null,
+      `reject malformed R2 generated_at: ${String(generated_at)}`,
+    );
+  }
+
+  assert.equal(normalizeStaticTrending({ ...payload, generated_at: 0 }, nowSec)?.generatedAt, 0,
+    "the numeric Unix epoch remains valid for legacy artifacts");
+  assert.equal(normalizeStaticTrending(payload, nowSec)?.generatedAt, nowSec,
+    "canonical numeric timestamps remain accepted");
+});
+
 test("Issue #653: future-dated trending artifact beyond clock skew is rejected at read", () => {
   const nowSec = 1_700_000_000;
   const payload = {
