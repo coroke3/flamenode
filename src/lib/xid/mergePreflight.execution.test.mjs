@@ -105,7 +105,7 @@ if (runTestWithTsx(import.meta.url)) {
         insert() {
           return {
             values() {
-              return { onConflictDoUpdate: () => ({}) };
+              return { onConflictDoUpdate: () => ({}), onConflictDoNothing: () => ({}) };
             },
           };
         },
