@@ -3854,7 +3854,13 @@
       "returned": {
         "eventId": "evt-old",
         "fenceToken": "ef_tok",
-        "previousEntry": null
+        "previousEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-old",
+          "fence_token": "ef_x",
+          "blocked_at": 66,
+          "reason": "latest"
+        }
       }
     },
     "log": [
