@@ -358,6 +358,12 @@ export async function preCommitEventVisibilityRenameTombstone(
     },
     now,
   );
+  // Keep the exact candidate produced by our successful CAS attempt.
+  // A same-token writer may refresh metadata before confirmation, and that
+  // newer snapshot must not become our rollback lease.
+  let writtenEntry = next.entities.find((entry) =>
+    entry.entity_type === "event" && entry.entity_id === input.eventId
+  )!;
   await host.manifest.write(next, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
@@ -369,7 +375,7 @@ export async function preCommitEventVisibilityRenameTombstone(
           entry.entity_type === "event" && entry.entity_id === input.eventId,
       ) ?? null;
       previousEntry = previous;
-      return upsertBlockedEntityInManifest(
+      const merged = upsertBlockedEntityInManifest(
         latest,
         {
           entity_type: "event",
@@ -381,6 +387,10 @@ export async function preCommitEventVisibilityRenameTombstone(
         },
         Math.floor(Date.now() / 1000),
       );
+      writtenEntry = merged.entities.find((entry) =>
+        entry.entity_type === "event" && entry.entity_id === input.eventId
+      )!;
+      return merged;
     },
   });
 
@@ -402,7 +412,7 @@ export async function preCommitEventVisibilityRenameTombstone(
     eventId: input.eventId,
     fenceToken: input.fenceToken,
     previousEntry,
-    writtenEntry: confirmedEntry,
+    writtenEntry,
   };
 }
 
