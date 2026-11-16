@@ -530,7 +530,7 @@ export async function restoreAuditLog(
       if (!publicEligibility.ok) {
         throw new Error(publicEligibility.message);
       }
-      const transition = planVideoVisibilityFenceTransition(db, {
+      const transition = await planVideoVisibilityFenceTransition(db, {
         videoId: log.target_id,
         previousStatus: previousStatus as "pending" | "public" | "private" | "voided",
         nextStatus: nextStatus as "pending" | "public" | "private" | "voided",
