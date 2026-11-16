@@ -64,10 +64,15 @@ test("member置換は共通fail-closed resolverでcanonicalizeし変換後重複
 });
 
 test("managed chapter同値判定はDB取得順ではなくID順へ正規化する", async () => {
+  // MIG-0650 U03d-2b: preserve the original contract but inspect the
+  // extracted shared provider rather than requiring a dead Next-local copy.
   const source = await read("src/lib/video/replaceVideoMembers.ts");
-  assert.match(source, /function canonicalChapterRows/);
-  assert.match(source, /compareSqliteBinaryText\(left\.id, right\.id\)/);
-  assert.match(source, /function managedChapterRowsEqual/);
+  const provider = await read("packages/server-core/src/video/memberChapterAudit.ts");
+  assert.match(source, /from "@flamenode\/server-core\/video\/memberChapterAudit"/);
+  assert.match(source, /managedChapterRowsEqual/);
+  assert.match(provider, /function canonicalChapterRows/);
+  assert.match(provider, /compareSqliteBinaryText\(left\.id, right\.id\)/);
+  assert.match(provider, /export function managedChapterRowsEqual/);
   assert.match(
     source,
     /const chaptersChanged = !managedChapterRowsEqual\([\s\S]*existingManagedChapters,[\s\S]*nextManagedChapters/,
