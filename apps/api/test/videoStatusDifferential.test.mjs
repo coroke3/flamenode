@@ -300,7 +300,11 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(result.retryable, true, "a D1 CAS failure is recoverable");
       } else {
         assert.deepEqual(result, {
-          ok: true, message: "ステータスを更新しました。", pendingPublicReflection: true,
+          ok: true,
+          message: "ステータスを更新しました。",
+          ...(transition.queueBatch.statements.length > 0
+            ? { pendingPublicReflection: true }
+            : {}),
         });
       }
       return {
@@ -355,6 +359,22 @@ if (runUnderRootTsx(import.meta.url)) {
       ), "the R2 manifest must retain the exact D1 fence token after commit");
     });
   }
+
+  test("CURRENT and Hono do not create R2 fences for a pending-to-private transition", async () => {
+    // This changes the audited video state without crossing the public boundary.
+    // Neither adapter may manufacture a new R2 blocker or D1 fence.
+    const current = await executeAuditedStatus("private", true, false, false, false, "pending");
+    const hono = await executeAuditedStatus("private", false, false, false, false, "pending");
+    assert.deepEqual(hono, current, "CURRENT/Hono non-public transition must have identical side effects");
+    assert.equal(current.result.ok, true);
+    assert.equal(current.video.visibility_status, "private");
+    assert.equal(current.batches, 1, "the audit and mutation run in one D1 batch");
+    assert.equal(current.audits.length, 1, "status transition keeps a strict audit row");
+    assert.deepEqual(current.fences, [], "no visibility fence for a non-public transition");
+    assert.equal(current.manifest, null, "R2 manifest is not created");
+    assert.deepEqual(current.events.filter((event) => event[0] === "r2.put"), [],
+      "no R2 CAS attempt for an unchanged public boundary");
+  });
 
   test("CURRENT and Hono persist identical release-pending fences when publishing a private video", async () => {
     // A legacy private video can have no existing visibility fence. Publishing
