@@ -26,6 +26,16 @@ export const GA4_TRENDING_CACHE_CONTROL = staticR2CacheControl(
 );
 export const GA4_TRENDING_MAX_OBJECT_BYTES = 1024 * 1024;
 export const TRENDING_SCHEMA_VERSION = 1;
+// An old artifact generated in the far future never becomes stale on the
+// public reader (it clamps negative age to zero). Do not let GA4 failure or
+// an orphan-only report preserve its freshness forever.
+export const TRENDING_MAX_FUTURE_SKEW_SEC = 300;
+
+function hasTrustworthyTrendingTimestamp(generatedAt: number): boolean {
+  return Number.isSafeInteger(generatedAt) &&
+    generatedAt >= 0 &&
+    generatedAt <= Math.floor(Date.now() / 1000) + TRENDING_MAX_FUTURE_SKEW_SEC;
+}
 export const TRENDING_RANKING_RULE = [
   "views_2d_desc",
   "views_5d_desc",
@@ -257,6 +267,7 @@ async function loadExistingTrendingItemCount(
     // ID/status alone are insufficient: title, view windows, rank and video_id
     // also affect the public reader's acceptance of each row.
     const normalized = normalizeStaticTrending(payload);
+    if (normalized && !hasTrustworthyTrendingTimestamp(normalized.generatedAt)) return 0;
     if (!isCanonicalRetainedTrendingWire(text, payload)) return 0;
     if (
       !normalized ||
@@ -364,7 +375,9 @@ async function repairTrendingAfterGa4Failure(
         const payload = JSON.parse(body) as TrendingOutputPayload;
         const normalized = normalizeStaticTrending(payload);
         if (
-          normalized && Array.isArray(payload.items) &&
+          normalized &&
+          hasTrustworthyTrendingTimestamp(normalized.generatedAt) &&
+          Array.isArray(payload.items) &&
           normalized.items.length === payload.items.length &&
           normalized.items.length <= 200
         ) {
