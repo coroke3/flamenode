@@ -41,9 +41,10 @@ export function parseAdminVideoMembersHttpInput(
     return { ok: false, message: INVALID_INPUT };
   }
   const body = raw as Record<string, unknown>;
+  const membersJson = body.members_json;
   if (
     Object.keys(body).some((key) => key !== "members_json" && key !== "is_collab") ||
-    (body.members_json !== undefined && typeof body.members_json !== "string")
+    (membersJson !== undefined && typeof membersJson !== "string")
   ) {
     // D-16-1: path ID is authoritative, even a matching body.video_id is forbidden.
     return { ok: false, message: INVALID_INPUT };
@@ -57,6 +58,6 @@ export function parseAdminVideoMembersHttpInput(
   const formData = new FormData();
   formData.set("video_id", pathVideoId);
   for (const value of values as string[]) formData.append("is_collab", value);
-  if (body.members_json !== undefined) formData.set("members_json", body.members_json);
+  if (typeof membersJson === "string") formData.set("members_json", membersJson);
   return { ok: true, formData };
 }
