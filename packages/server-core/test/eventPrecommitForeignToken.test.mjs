@@ -634,7 +634,8 @@ test("Visibility tombstone compensation: a duplicate foreign old-ID token cannot
   const state = hostOf(manifestOf(own, foreign));
   const before = structuredClone(state.manifest);
   await compensateEventVisibilityRenameTombstoneOnD1Failure(
-    { eventId: "event-old", fenceToken: "incoming", previousEntry: null }, state.host,
+    { eventId: "event-old", fenceToken: "incoming", previousEntry: null,
+      writtenEntry: own }, state.host,
   );
   assert.equal(state.appliedWrites, 0);
   assert.deepEqual(state.manifest, before);
@@ -746,6 +747,51 @@ test("Visibility tombstone: CAS retry restores latest same-token metadata after 
   assert.deepEqual(precommit.previousEntry, latest, "compensation must restore the CAS snapshot");
   await compensateEventVisibilityRenameTombstoneOnD1Failure(precommit, state.host);
   assert.deepEqual(state.manifest.entities, [latest], "D1 failure restores latest old-ID ownership metadata");
+});
+
+test("Visibility tombstone compensation: same-token R2 metadata refresh survives D1 rollback", async () => {
+  for (const previousEntry of [
+    { ...entry("event", "event-old", "previous"), blocked_at: 30, reason: "prior" },
+    null,
+  ]) {
+    const state = hostOf(previousEntry ? manifestOf(previousEntry) : manifestOf());
+    const precommit = await preCommitEventVisibilityRenameTombstone({
+      eventId: "event-old", fenceToken: "rotated",
+      expectedPreviousFenceToken: previousEntry?.fence_token ?? null,
+    }, state.host);
+    assert.deepEqual(precommit.previousEntry, previousEntry);
+    const { manifest, etag } = await state.host.manifest.read();
+    const updated = {
+      ...precommit.writtenEntry, blocked_at: precommit.writtenEntry.blocked_at + 15,
+      reason: "newer-same-token-block",
+    };
+    await state.host.manifest.write({
+      ...manifest,
+      entities: manifest.entities.map((row) =>
+        row.entity_type === "event" && row.entity_id === "event-old" ? updated : row),
+    }, { ifMatchEtag: etag });
+    const beforeRollback = structuredClone(state.manifest);
+    const appliedBefore = state.appliedWrites;
+    await compensateEventVisibilityRenameTombstoneOnD1Failure(precommit, state.host);
+    assert.equal(state.appliedWrites, appliedBefore,
+      "rollback must not restore a stale previous entry or erase a refreshed same-token block");
+    assert.deepEqual(state.manifest, beforeRollback);
+    assert.deepEqual(state.manifest.entities, [updated]);
+  }
+});
+
+test("Visibility tombstone compensation: original snapshot still rolls back safely", async () => {
+  for (const previousEntry of [entry("event", "event-old", "previous"), null]) {
+    const state = hostOf(previousEntry ? manifestOf(previousEntry) : manifestOf());
+    const precommit = await preCommitEventVisibilityRenameTombstone({
+      eventId: "event-old", fenceToken: "rotated",
+      expectedPreviousFenceToken: previousEntry?.fence_token ?? null,
+    }, state.host);
+    assert.equal(state.appliedWrites, 1);
+    await compensateEventVisibilityRenameTombstoneOnD1Failure(precommit, state.host);
+    assert.equal(state.appliedWrites, 2, "the unchanged own tombstone must still be reversible");
+    assert.deepEqual(state.manifest.entities, previousEntry ? [previousEntry] : []);
+  }
 });
 
 test("Visibility tombstone: mixed old-ID tokens on initial GET must not be rotated or erased", async () => {
