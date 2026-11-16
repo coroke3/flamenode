@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   parseVideoMemberInputs as targetParse,
   normalizeMemberChapters as targetChapters,
+  validateVideoMemberSubmission as targetSubmission,
 } from "../src/video/adminMemberSubmission.ts";
 import {
   parseVideoMemberInputs as legacyParse,
@@ -135,5 +136,62 @@ test("MIG-0650 SA-085 U03: every scenario preserves canonical member results and
         assert.deepEqual(converted.chapters.map(ch => ch.order_index), row.chapters.map((_, j) => j));
       }
     }
+  }
+});
+
+function legacySubmission(formData, isCollab) {
+  const parsed = legacyParse(formData.get("members_json"), isCollab);
+  if (!parsed.ok) return parsed;
+  const chaptersByIndex = new Map();
+  for (let i = 0; i < parsed.members.length; i++) {
+    const normalized = legacyChapters(parsed.members[i], i);
+    if (!normalized.ok) return normalized;
+    chaptersByIndex.set(i, normalized.chapters);
+  }
+  return { ok: true, value: { members: parsed.members, chaptersByIndex } };
+}
+function submission(input, isCollab) {
+  const formData = new FormData();
+  if (input !== null) formData.set("members_json", input);
+  const actual = targetSubmission(formData, isCollab);
+  assert.deepEqual(actual, legacySubmission(formData, isCollab));
+  return actual;
+}
+
+test("MIG-0650 SA-085 U03b: full FormData member + chapter validation matches CURRENT", () => {
+  const valid = submission(encode([
+    member("@ALICE", {
+      chapters: [
+        { time: "1:23", label: "", note: "" },
+        { time: "5:04", label: " Outro ", note: " text " },
+      ],
+    }),
+    member("bob", { name: "Bob", role: "", chapters: [] }),
+  ]), true);
+  assert.equal(valid.ok, true);
+  assert.deepEqual(valid.value.chaptersByIndex.get(0).map(x => x.order_index), [0, 1]);
+  assert.equal(valid.value.chaptersByIndex.get(0)[0].time_seconds, 83);
+  assert.equal(valid.value.chaptersByIndex.get(0)[0].label, "映像");
+  assert.deepEqual(valid.value.chaptersByIndex.get(1), []);
+});
+
+test("MIG-0650 SA-085 U03b: collaboration OFF discards even hostile member payload", () => {
+  for (const raw of [null, "{", "null", encode([member("alice")])]) {
+    const outcome = submission(raw, false);
+    assert.deepEqual(outcome, { ok: true, value: {
+      members: [], chaptersByIndex: new Map(),
+    } });
+  }
+});
+
+test("MIG-0650 SA-085 U03b: full submit rejects invalid time, duplicate X ID, and >100 rows", () => {
+  const cases = [
+    encode([member("alice", { chapters: [{ time: "5:60", label: "", note: "" }] })]),
+    encode([member("ALICE"), member("@alice")]),
+    encode(Array.from({ length: 101 }, (_, i) => member("user_" + i))),
+  ];
+  for (const raw of cases) {
+    const outcome = submission(raw, true);
+    assert.equal(outcome.ok, false);
   }
 });
