@@ -30,6 +30,9 @@ export type EventVisibilityFenceRenamePrecommit = {
   newEventId: string;
   fenceToken: string;
   previousOldEntry: PublicVisibilityBlockedEntity | null;
+  /** Exact new-ID R2 entry produced by the successful CAS write. Never
+   * compensate a later same-token update as if it were this copy. */
+  writtenNewEntry: PublicVisibilityBlockedEntity;
 };
 
 /**
@@ -249,6 +252,11 @@ export async function preCommitEventVisibilityFenceRename(
     },
     now,
   );
+  // The confirmation GET may already contain a different same-token
+  // writer's metadata. Only the actual successful CAS write is our lease.
+  let writtenNewEntry = next.entities.find((entry) =>
+    entry.entity_type === "event" && entry.entity_id === input.newEventId
+  )!;
   await host.manifest.write(next, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
@@ -270,7 +278,7 @@ export async function preCommitEventVisibilityFenceRename(
             ),
         ),
       };
-      return upsertBlockedEntityInManifest(
+      const merged = upsertBlockedEntityInManifest(
         withoutNew,
         {
           entity_type: "event",
@@ -281,6 +289,10 @@ export async function preCommitEventVisibilityFenceRename(
         },
         Math.floor(Date.now() / 1000),
       );
+      writtenNewEntry = merged.entities.find((entry) =>
+        entry.entity_type === "event" && entry.entity_id === input.newEventId
+      )!;
+      return merged;
     },
   });
 
@@ -307,6 +319,7 @@ export async function preCommitEventVisibilityFenceRename(
     newEventId: input.newEventId,
     fenceToken: input.fenceToken,
     previousOldEntry,
+    writtenNewEntry,
   };
 }
 
@@ -432,10 +445,14 @@ export async function compensateEventVisibilityFenceRenameOnD1Failure(
     const previousOldEntry = input.previousOldEntry;
     if (
       !currentNewEntry || currentNewEntry.fence_token !== input.fenceToken ||
+      // CAS ownership also includes the copied block's metadata. If another
+      // same-token writer refreshed it, leave its block intact on rollback.
       manifest.entities.some((entry) =>
         entry.entity_type === "event" &&
         entry.entity_id === input.newEventId &&
-        entry.fence_token !== input.fenceToken) ||
+        (entry.fence_token !== input.writtenNewEntry.fence_token ||
+          entry.blocked_at !== input.writtenNewEntry.blocked_at ||
+          (entry.reason ?? null) !== (input.writtenNewEntry.reason ?? null))) ||
       // Restoring the old ID via upsert removes *all* entries for that key.
       // A concurrent writer may now own the old ID: never erase its block
       // during a failed D1 rename compensation.

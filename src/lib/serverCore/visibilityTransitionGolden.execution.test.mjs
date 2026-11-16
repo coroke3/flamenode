@@ -900,6 +900,7 @@ if (runTestWithTsx(import.meta.url)) {
           eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({
             ...renameInput(),
             previousOldEntry: entity("event", "evt-old", "ef_tok", { blocked_at: 77 }),
+            writtenNewEntry: entity("event", "evt-new", "ef_tok"),
           }),
         ),
       { bucket: seededManifest([entity("event", "evt-new", "ef_tok")]) },
@@ -908,7 +909,7 @@ if (runTestWithTsx(import.meta.url)) {
       "event_compensate_fence_rename_without_previous_entry_bumps_revision",
       () =>
         done(
-          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null }),
+          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null, writtenNewEntry: entity("event", "evt-new", "ef_tok") }),
         ),
       { bucket: seededManifest([entity("event", "evt-new", "ef_tok")]) },
     ],
@@ -916,7 +917,7 @@ if (runTestWithTsx(import.meta.url)) {
       "event_compensate_fence_rename_leaves_newer_token_alone",
       () =>
         done(
-          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null }),
+          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null, writtenNewEntry: entity("event", "evt-new", "ef_tok") }),
         ),
       { bucket: seededManifest([entity("event", "evt-new", "ef_newer")]) },
     ],
@@ -924,7 +925,7 @@ if (runTestWithTsx(import.meta.url)) {
       "event_compensate_fence_rename_logs_stuck_after_three_failures",
       () =>
         done(
-          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null }),
+          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null, writtenNewEntry: entity("event", "evt-new", "ef_tok") }),
         ),
       { bucket: { ...seededManifest([entity("event", "evt-new", "ef_tok")]), options: { failPuts: true } } },
     ],

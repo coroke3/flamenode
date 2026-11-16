@@ -622,10 +622,58 @@ test("Visibility rename compensation: a foreign duplicate on new ID prevents who
   const before = structuredClone(state.manifest);
   await compensateEventVisibilityFenceRenameOnD1Failure(
     { oldEventId: "event-old", newEventId: "event-new",
-      fenceToken: "incoming", previousOldEntry: null }, state.host,
+      fenceToken: "incoming", previousOldEntry: null, writtenNewEntry: ownNew }, state.host,
   );
   assert.equal(state.appliedWrites, 0);
   assert.deepEqual(state.manifest, before);
+});
+
+test("Visibility rename copy compensation: same-token new-ID metadata updates survive D1 rollback", async () => {
+  for (const oldEntry of [entry("event", "event-old", "incoming"), null]) {
+    const state = hostOf(oldEntry ? manifestOf(oldEntry) : manifestOf());
+    const precommit = await preCommitEventVisibilityFenceRename({
+      oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming",
+    }, state.host);
+    const { manifest, etag } = await state.host.manifest.read();
+    const refreshed = { ...precommit.writtenNewEntry,
+      blocked_at: precommit.writtenNewEntry.blocked_at + 37,
+      reason: "new-owner-refresh",
+    };
+    await state.host.manifest.write({
+      ...manifest,
+      entities: manifest.entities.map((row) =>
+        row.entity_type === "event" && row.entity_id === "event-new" ? refreshed : row),
+    }, { ifMatchEtag: etag });
+    const beforeRollback = structuredClone(state.manifest);
+    const writesBefore = state.appliedWrites;
+    await compensateEventVisibilityFenceRenameOnD1Failure(precommit, state.host);
+    assert.equal(state.appliedWrites, writesBefore,
+      "do not remove another same-token writer's updated new-ID fence");
+    assert.deepEqual(state.manifest, beforeRollback);
+  }
+});
+
+test("Visibility rename copy compensation: post-PUT same-token refresh is not the CAS rollback lease", async () => {
+  const oldEntry = entry("event", "event-old", "incoming");
+  const state = hostOf(manifestOf(oldEntry), null, (manifest) => ({
+    ...manifest,
+    entities: manifest.entities.map((row) =>
+      row.entity_type === "event" && row.entity_id === "event-new"
+        ? { ...row, blocked_at: row.blocked_at + 42, reason: "after-write-refresh" }
+        : row),
+  }));
+  const precommit = await preCommitEventVisibilityFenceRename({
+    oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming",
+  }, state.host);
+  const newRow = state.manifest.entities.find((row) => row.entity_id === "event-new");
+  assert.equal(precommit.writtenNewEntry.reason, null,
+    "precommit records the actual CAS candidate, not the later confirmation value");
+  assert.equal(newRow.reason, "after-write-refresh");
+  const beforeRollback = structuredClone(state.manifest);
+  const writesBefore = state.appliedWrites;
+  await compensateEventVisibilityFenceRenameOnD1Failure(precommit, state.host);
+  assert.equal(state.appliedWrites, writesBefore);
+  assert.deepEqual(state.manifest, beforeRollback);
 });
 
 test("Visibility tombstone compensation: a duplicate foreign old-ID token cannot be removed", async () => {
@@ -724,6 +772,7 @@ test("Visibility compensation: D1 rename rollback does not overwrite a concurren
         newEventId: "new-event",
         fenceToken: "incoming",
         previousOldEntry: originalOld,
+        writtenNewEntry: ownNew,
       },
       state.host,
     );

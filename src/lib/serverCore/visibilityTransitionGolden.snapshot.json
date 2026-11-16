@@ -3528,6 +3528,13 @@
           "fence_token": "ef_tok",
           "blocked_at": 77,
           "reason": "kept"
+        },
+        "writtenNewEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-new",
+          "fence_token": "ef_tok",
+          "blocked_at": 77,
+          "reason": "kept"
         }
       }
     },
@@ -3587,7 +3594,14 @@
         "oldEventId": "evt-old",
         "newEventId": "evt-new",
         "fenceToken": "ef_tok",
-        "previousOldEntry": null
+        "previousOldEntry": null,
+        "writtenNewEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-new",
+          "fence_token": "ef_tok",
+          "blocked_at": 1760000000,
+          "reason": "rename"
+        }
       }
     },
     "log": [
@@ -3676,6 +3690,13 @@
         "previousOldEntry": {
           "entity_type": "event",
           "entity_id": "evt-old",
+          "fence_token": "ef_tok",
+          "blocked_at": 88,
+          "reason": null
+        },
+        "writtenNewEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-new",
           "fence_token": "ef_tok",
           "blocked_at": 88,
           "reason": null
