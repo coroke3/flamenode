@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { publicVisibilityFences, videos } from "@flamenode/db/schema";
+import { videos } from "@flamenode/db/schema";
 import { planVideoVisibilityFence, validateVideoPublicEligibility } from "@flamenode/domain/video";
 import { expectedRowCondition } from "../audit/expectedRowCondition.ts";
 import { AuditMutationError } from "../audit/mutate.ts";
@@ -15,7 +15,10 @@ import type { QueueWakeSource } from "../queues/wakeBudget.ts";
 import type { StaticRebuildQueueBatch } from "../staticRebuild/enqueue.ts";
 import { buildAfterVideoStatusChangeQueueBatch } from "../staticRebuild/hooks.ts";
 import { getPublicVisibilityFence } from "./fenceStore.ts";
-import { buildPublicVisibilityFenceUpsertStatement } from "./fenceTransition.ts";
+import {
+  buildPublicVisibilityFenceUpsertStatement,
+  planPublicVisibilityFenceTransition,
+} from "./fenceTransition.ts";
 import type { VisibilityFenceHost } from "./manifestHost.ts";
 import {
   isEntityBlockedInManifest,
@@ -98,50 +101,6 @@ function userPublicCacheKeys(xUserId: string | null, userMaxPages: number): stri
   return keys;
 }
 
-function buildFenceUpsertStatement(
-  db: ServerCoreDb,
-  input: {
-    videoId: string;
-    fenceToken: string;
-    state: "blocked" | "release_pending";
-    reason?: string | null;
-    actorUserId: string;
-    now: number;
-    blockedAt?: number | null;
-  },
-): BatchItem<"sqlite"> {
-  return db
-    .insert(publicVisibilityFences)
-    .values({
-      entity_type: "video",
-      entity_id: input.videoId,
-      fence_token: input.fenceToken,
-      state: input.state,
-      reason: input.reason ?? null,
-      requirements_json: null,
-      blocked_at: input.blockedAt ?? null,
-      release_requested_at: input.state === "release_pending" ? input.now : null,
-      requested_by_auth_user_id: input.actorUserId,
-      updated_at: input.now,
-    })
-    .onConflictDoUpdate({
-      target: [
-        publicVisibilityFences.entity_type,
-        publicVisibilityFences.entity_id,
-      ],
-      set: {
-        fence_token: input.fenceToken,
-        state: input.state,
-        reason: input.reason ?? null,
-        blocked_at: input.blockedAt ?? null,
-        release_requested_at:
-          input.state === "release_pending" ? input.now : null,
-        requested_by_auth_user_id: input.actorUserId,
-        updated_at: input.now,
-      },
-    });
-}
-
 export type VideoVisibilityFenceTransitionPlan = {
   mutationStatements: BatchItem<"sqlite">[];
   expectedMutationChanges: number[];
@@ -153,7 +112,7 @@ export type VideoVisibilityFenceTransitionPlan = {
  * 既存の videos 更新を別の atomic mutation（監査復元など）が担当する場合に、
  * 公開状態フェンスだけを同じ D1 batch へ追加するための軽量 planner。
  */
-export function planVideoVisibilityFenceTransition(
+export async function planVideoVisibilityFenceTransition(
   db: ServerCoreDb,
   input: {
     videoId: string;
@@ -163,7 +122,7 @@ export function planVideoVisibilityFenceTransition(
     reason?: string | null;
     now: number;
   },
-): VideoVisibilityFenceTransitionPlan {
+): Promise<VideoVisibilityFenceTransitionPlan> {
   const fence = planVideoVisibilityFence(input.previousStatus, input.nextStatus);
   if (!fence) {
     return {
@@ -174,21 +133,24 @@ export function planVideoVisibilityFenceTransition(
     };
   }
 
-  const fenceToken = generateId("vf");
+  // Audit restore and legacy import must use the same authoritative D1
+  // token/state CAS as normal status changes. Never resurrect a deleted
+  // owner or replace another writer's token via an unconditional UPSERT.
+  const planned = await planPublicVisibilityFenceTransition({
+    db,
+    entityType: "video",
+    entityId: input.videoId,
+    previousStatus: input.previousStatus,
+    nextStatus: input.nextStatus,
+    isPublic: (status) => status === "public",
+    actorUserId: input.actorUserId,
+    reason: input.reason,
+    now: input.now,
+  });
   return {
-    mutationStatements: [
-      buildFenceUpsertStatement(db, {
-        videoId: input.videoId,
-        fenceToken,
-        state: fence.state,
-        reason: input.reason ?? null,
-        actorUserId: input.actorUserId,
-        now: input.now,
-        blockedAt: fence.depublicizedFromPublic ? input.now : null,
-      }),
-    ],
-    expectedMutationChanges: [1],
-    fenceToken,
+    mutationStatements: planned.mutationStatements,
+    expectedMutationChanges: planned.expectedMutationChanges,
+    fenceToken: planned.fenceToken,
     depublicizedFromPublic: fence.depublicizedFromPublic,
   };
 }
