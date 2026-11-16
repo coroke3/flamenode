@@ -141,6 +141,56 @@ test("Issue #653: disabled GA4 still revokes stale private R2 rows without conta
   }
 });
 
+test("Issue #653 race baseline: visibility revocation after D1 snapshot can retain a now-private R2 row", async () => {
+  // This intentionally characterizes an OPEN SECURITY STOP, not a
+  // revocation-acceptance assertion. A valid public snapshot has no
+  // atomic ordering with a subsequent visibility mutation and R2 GET.
+  const db = recentDb(); // D1 SELECT observes video-a as public.
+  const old = JSON.stringify({
+    schema_version: 1, generated_at: 1_700_000_000,
+    items: [{
+      id: "video-a", title: "A", youtube_video_id: "yt-a",
+      display_name: "creator", icon_url: null,
+      primary_event_id: null, primary_event_title: null,
+      scheduled_time: 1_700_000_000, status: "public", rank: 1,
+      video_id: "video-a",
+      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+    }],
+  });
+  let visibility = "public";
+  let r2Gets = 0;
+  let r2Puts = 0;
+  const oldLog = console.log;
+  const logs = [];
+  console.log = (line) => logs.push(JSON.parse(String(line)));
+  try {
+    const result = await syncGa4Trending({
+      GA4_SYNC_ENABLED: "0",
+      DB: db,
+      R2: {
+        async get(key) {
+          assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+          assert.equal(db.reads, 1, "D1 public snapshot was already read");
+          visibility = "private"; // Simulated concurrent D1 commit.
+          r2Gets++;
+          return { size: Buffer.byteLength(old), async text() { return old; } };
+        },
+        async put() { r2Puts++; },
+      },
+    });
+    assert.equal(result.skipped, 1);
+    assert.equal(result.external_api_calls, 0);
+    assert.equal(visibility, "private", "source visibility is now revoked");
+    assert.deepEqual([db.reads, r2Gets, r2Puts], [1, 1, 0],
+      "writer does not revalidate the D1 snapshot or invalidate unchanged R2");
+    assert.match(old, /"id":"video-a"/,
+      "last-success R2 still exposes now-private video after the race");
+    assert.equal(logs.at(-1).privacy_rewrite_on_disabled, false);
+  } finally {
+    console.log = oldLog;
+  }
+});
+
 test("Issue #653: disabled GA4 with failed D1 cannot overwrite existing R2", async () => {
   let r2Reads = 0;
   let r2Writes = 0;
