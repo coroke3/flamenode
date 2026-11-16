@@ -1730,6 +1730,61 @@ test("Issue #653: orphan-only GA4 success rejects stale public metadata or rank 
   }
 });
 
+test("Issue #653: malformed R2 generated_at is never reused on GA4 config failure", async () => {
+  // All visible fields match the CURRENT D1 public projection. Without
+  // strict generated_at validation the last-good shortcut would keep these
+  // noncanonical raw bytes instead of rewriting them.
+  const invalidTimestamps = [null, false, "1700000000", 1_700_000_000.5];
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (line) => logs.push(JSON.parse(String(line)));
+  try {
+    for (const generated_at of invalidTimestamps) {
+      const db = recentDb();
+      const old = JSON.stringify({
+        schema_version: 1,
+        generated_at,
+        items: [{
+          id: "video-a", title: "A", youtube_video_id: "yt-a",
+          display_name: "creator", icon_url: null,
+          primary_event_id: null, primary_event_title: null,
+          scheduled_time: 1_700_000_000, status: "public",
+          rank: 1, video_id: "video-a",
+          views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+        }],
+      });
+      let reads = 0;
+      const writes = [];
+      const result = await syncGa4Trending({
+        DB: db,
+        GA4_SYNC_ENABLED: "1", // missing credentials, so GA4 is never called
+        R2: {
+          async get(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            reads += 1;
+            return { size: Buffer.byteLength(old), async text() { return old; } };
+          },
+          async put(key, body) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            writes.push(JSON.parse(String(body)));
+          },
+        },
+      });
+      assert.equal(result.failed, 1, "config_missing must remain observable");
+      assert.equal(db.reads, 1, "one bounded D1 public projection");
+      assert.equal(reads, 1, "one R2 read, with no GA4 external request");
+      assert.equal(writes.length, 1, "noncanonical timestamp must be cleared");
+      assert.deepEqual(writes[0].items, [], "never keep raw malformed ranking rows");
+      assert.ok(Number.isSafeInteger(writes[0].generated_at),
+        "replacement must carry a safe numeric timestamp");
+      assert.equal(logs.at(-1).error_name, "config_missing");
+      assert.equal(logs.at(-1).privacy_rewrite_on_config_failure, true);
+    }
+  } finally {
+    console.log = originalLog;
+  }
+});
+
 test("Issue #653: future-dated last-good R2 cannot stay fresh after GA4 config failure", async () => {
   const futureGeneratedAt = Math.floor(Date.now() / 1000) + 86400;
   const previous = JSON.stringify({
