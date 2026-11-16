@@ -103,6 +103,20 @@ test("event ID rename control is rendered inside the admin danger section", () =
 });
 
 
+test("event rename re-checks released fence state before target reuse can mutate R2", () => {
+  const source = readRepoFile("src/lib/actions/event-admin-danger.ts");
+  const fenceRead = source.indexOf('const oldFence = await getPublicVisibilityFence(db, "event", oldId);');
+  const reusePreparation = source.indexOf("let targetReusePrecommit: EventIdReusePrecommit | null = null;");
+  const reuseWrite = source.indexOf("await preCommitEventIdReuse(");
+  assert.ok(fenceRead >= 0 && fenceRead < reusePreparation && reusePreparation < reuseWrite,
+    "old-ID fence reread must precede target tombstone R2 release");
+  const beforeReuse = source.slice(fenceRead, reusePreparation);
+  assert.match(beforeReuse, /oldFence\?\.state === "release_pending"/,
+    "a newly release-pending old ID must fail closed before target reuse");
+  assert.match(beforeReuse, /return \{[\s\S]*?ok: false/,
+    "release-pending transition must stop before any reuse side effect");
+});
+
 test("event rename D1 fence move is ownership-CAS and never overwrites a raced tombstone", () => {
   const source = readRepoFile("src/lib/actions/event-admin-danger.ts");
   assert.match(source, /UPDATE public_visibility_fences[\s\S]*?AND fence_token = \$\{oldFence\?\.fence_token \?\? null\}[\s\S]*?AND state = \$\{oldFence\?\.state \?\? null\}/);
