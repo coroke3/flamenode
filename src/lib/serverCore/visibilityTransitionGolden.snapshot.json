@@ -3884,18 +3884,13 @@
       {
         "op": "r2.put",
         "key": "visibility/blocked-entities.v1.json",
-        "value": "{\"schema_version\":1,\"revision\":1,\"generated_at\":1760000000,\"entities\":[{\"entity_type\":\"event\",\"entity_id\":\"evt-old\",\"fence_token\":\"ef_tok\",\"blocked_at\":1760000000,\"reason\":\"event_id_rename\"}]}",
+        "value": "{\"schema_version\":1,\"revision\":2,\"generated_at\":1760000000,\"entities\":[{\"entity_type\":\"event\",\"entity_id\":\"evt-old\",\"fence_token\":\"ef_tok\",\"blocked_at\":55,\"reason\":\"stale\"}]}",
         "options": {
           "httpMetadata": {
             "cacheControl": "no-store"
           },
           "onlyIf": {
-            "headers": [
-              [
-                "if-none-match",
-                "*"
-              ]
-            ]
+            "etagMatches": "etag-seed"
           }
         }
       },
