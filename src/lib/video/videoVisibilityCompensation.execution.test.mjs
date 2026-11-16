@@ -212,6 +212,31 @@ if (!runningWithTsx) {
     assert.equal(state.writeCalls, 0);
   });
 
+  test("Issue #659: foreign active D1 video fence prevents old R2 block compensation", async () => {
+    for (const d1State of ["blocked", "release_pending"]) {
+      for (const visibility of ["public", "private"]) {
+        reset();
+        state.videoVisibility = visibility;
+        state.fence = {
+          state: d1State,
+          fence_token: "other-writer-token",
+        };
+        const before = structuredClone(state.manifest);
+        await compensateDepublicizationFenceOnD1Failure(createDb(), {
+          videoId: "video-1",
+          fenceToken: "fence-token-1",
+          traceId: "trace-foreign-video-fence",
+          // Test the promotion-rollback branch as well as public->private.
+          allowNonPublicRollback: visibility === "private",
+        });
+        assert.equal(state.writeCalls, 0,
+          `${d1State}/${visibility}: do not release another active D1 owner's block`);
+        assert.deepEqual(state.manifest, before,
+          "original R2 block must not be removed by failed-writer compensation");
+      }
+    }
+  });
+
   test("missing R2 entry does not write", async () => {
     reset();
     state.manifest.entities = [];
