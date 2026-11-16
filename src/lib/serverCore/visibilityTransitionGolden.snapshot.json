@@ -4962,30 +4962,21 @@
           "grp-1",
           1
         ]
-      },
-      {
-        "op": "r2.get",
-        "key": "visibility/blocked-entities.v1.json"
-      },
-      {
-        "op": "r2.put",
-        "key": "visibility/blocked-entities.v1.json",
-        "value": "{\"schema_version\":1,\"revision\":2,\"generated_at\":1760000000,\"entities\":[]}",
-        "options": {
-          "httpMetadata": {
-            "cacheControl": "no-store"
-          },
-          "onlyIf": {
-            "etagMatches": "etag-1"
-          }
-        }
       }
     ],
     "manifest_after": {
       "schema_version": 1,
-      "revision": 2,
+      "revision": 1,
       "generated_at": 1760000000,
-      "entities": []
+      "entities": [
+        {
+          "entity_type": "event_group",
+          "entity_id": "grp-1",
+          "fence_token": "gf_tok",
+          "blocked_at": 1760000000,
+          "reason": "r"
+        }
+      ]
     },
     "public_visibility_fences": [
       {
