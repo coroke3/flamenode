@@ -115,6 +115,8 @@ test("event rename re-checks released fence state before target reuse can mutate
     "a newly release-pending old ID must fail closed before target reuse");
   assert.match(beforeReuse, /return \{[\s\S]*?ok: false/,
     "release-pending transition must stop before any reuse side effect");
+  assert.match(source, /if \(oldFence\?\.state === "blocked"\)/,
+    "after the pending-state gate only a blocked fence is copied during rename");
 });
 
 test("event rename D1 fence move is ownership-CAS and never overwrites a raced tombstone", () => {
