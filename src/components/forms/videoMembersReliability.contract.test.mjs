@@ -123,8 +123,10 @@ test("参加者保存はvideos全行CASを使わずmember-set CASを競合正本
 
 test("完全no-opの参加者保存はvideos.updated_at・score dirty・static rebuildを発生させない", async () => {
   const source = await read("src/lib/actions/video/adminMembers.ts");
-  assert.match(source, /const videoPublicContentChanged =/);
-  assert.match(source, /collaborationTypeChanged \|\| hasMemberAudit \|\| hasChapterAudit/);
+  assert.match(source, /classifyAdminVideoMemberSave\(\{/);
+  assert.match(source, /previousCollaborationType: target\.collaboration_type/);
+  assert.match(source, /hasMemberAudit,/);
+  assert.match(source, /hasChapterAudit,/);
   assert.match(source, /if \(videoPublicContentChanged\) \{[\s\S]*?\.update\(videos\)/);
   assert.match(source, /if \(plan\.statements\.length === 0\)/);
   assert.match(source, /参加者設定に変更はありません/);
