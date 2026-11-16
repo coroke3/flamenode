@@ -209,13 +209,17 @@ export async function preCommitEventVisibilityFenceRename(
 ): Promise<EventVisibilityFenceRenamePrecommit> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
-  // Moving a fence copies the SAME token to a new ID. A duplicate R2 key
-  // carrying another token must never be silently overwritten by the copy.
-  const hasForeignRenameToken = (snapshot: PublicVisibilityBlockedEntitiesManifest) =>
+  // The destination must be unclaimed before we copy a blocked source.
+  // Even an existing destination with the SAME token is not our copy: erasing
+  // it on D1 rollback could expose a pre-existing block. The caller's target
+  // tombstone reuse precommit must release its R2 owner before this stage.
+  // Check the first GET and every ETag-CAS retry, not only foreign tokens.
+  const hasUnsafeRenameOwnership = (snapshot: PublicVisibilityBlockedEntitiesManifest) =>
     snapshot.entities.some(
       (entry) => entry.entity_type === "event" &&
-        (entry.entity_id === input.oldEventId || entry.entity_id === input.newEventId) &&
-        entry.fence_token !== input.fenceToken,
+        ((entry.entity_id === input.oldEventId &&
+          entry.fence_token !== input.fenceToken) ||
+          entry.entity_id === input.newEventId),
     );
   // The successful CAS retry may have observed a newer same-owner snapshot.
   // Compensation must restore that snapshot, not the stale initial GET.
@@ -224,7 +228,7 @@ export async function preCommitEventVisibilityFenceRename(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.oldEventId,
     ) ?? null;
-  if (hasForeignRenameToken(manifest)) {
+  if (hasUnsafeRenameOwnership(manifest)) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
 
@@ -264,7 +268,7 @@ export async function preCommitEventVisibilityFenceRename(
         (entry) =>
           entry.entity_type === "event" && entry.entity_id === input.oldEventId,
       ) ?? null;
-      if (hasForeignRenameToken(latest)) {
+      if (hasUnsafeRenameOwnership(latest)) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       previousOldEntry = previous;
@@ -305,7 +309,7 @@ export async function preCommitEventVisibilityFenceRename(
   if (
     !confirmedEntry ||
     confirmedEntry.fence_token !== input.fenceToken ||
-    hasForeignRenameToken(confirmed) ||
+    hasUnsafeRenameOwnership(confirmed) ||
     previousOldEntry !== null &&
     !confirmed.entities.some(
       (entry) =>

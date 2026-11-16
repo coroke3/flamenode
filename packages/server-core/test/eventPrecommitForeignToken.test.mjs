@@ -580,6 +580,43 @@ test("Visibility rename copy: a foreign duplicate on old or new event ID stops t
   }
 });
 
+test("Visibility rename copy: a pre-existing same-token destination must not be overwritten", async () => {
+  const old = entry("event", "event-old", "incoming");
+  const priorNew = { ...entry("event", "event-new", "incoming"),
+    blocked_at: 10, reason: "another-pending-copy" };
+  const unrelated = entry("video", "video-safe", "video-owner");
+  const state = hostOf(manifestOf(old, priorNew, unrelated));
+  const before = structuredClone(state.manifest);
+  await assert.rejects(
+    preCommitEventVisibilityFenceRename(
+      { oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming" },
+      state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.attemptedWrites, 0, "already blocked destination cannot be copied over");
+  assert.deepEqual(state.manifest, before);
+});
+
+test("Visibility rename copy: CAS race adding same-token new-ID owner fails closed", async () => {
+  const old = entry("event", "event-old", "incoming");
+  const racedNew = { ...entry("event", "event-new", "incoming"),
+    blocked_at: 15, reason: "racing-same-token-owner" };
+  const state = hostOf(manifestOf(old), (manifest) => ({
+    ...manifest, entities: [...manifest.entities, racedNew],
+  }));
+  await assert.rejects(
+    preCommitEventVisibilityFenceRename(
+      { oldEventId: "event-old", newEventId: "event-new", fenceToken: "incoming" },
+      state.host,
+    ),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(state.callbacks, 1, "the ETag retry must inspect target ownership");
+  assert.equal(state.appliedWrites, 0, "the previously claimed target remains untouched");
+  assert.deepEqual(state.manifest.entities, [old, racedNew]);
+});
+
 test("Visibility rename copy: a racing foreign new-ID token during CAS prevents overwrite", async () => {
   const owned = entry("event", "event-old", "incoming");
   const foreignNew = entry("event", "event-new", "other-writer");

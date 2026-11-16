@@ -863,7 +863,6 @@ if (runTestWithTsx(import.meta.url)) {
           options: {
             onFirstPutConflict: raceTo([
               entity("event", "evt-old", "ef_tok", { blocked_at: 88 }),
-              entity("event", "evt-new", "ef_tok"),
             ]),
           },
         },
