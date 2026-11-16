@@ -211,7 +211,9 @@ export async function preCommitEventVisibilityFenceRename(
         (entry.entity_id === input.oldEventId || entry.entity_id === input.newEventId) &&
         entry.fence_token !== input.fenceToken,
     );
-  const previousOldEntry =
+  // The successful CAS retry may have observed a newer same-owner snapshot.
+  // Compensation must restore that snapshot, not the stale initial GET.
+  let previousOldEntry =
     manifest.entities.find(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.oldEventId,
@@ -254,6 +256,7 @@ export async function preCommitEventVisibilityFenceRename(
       if (hasForeignRenameToken(latest)) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
+      previousOldEntry = previous;
       const withoutNew = {
         ...latest,
         entities: latest.entities.filter(
@@ -334,7 +337,9 @@ export async function preCommitEventVisibilityRenameTombstone(
   if (hasUnexpectedOldIdToken(manifest)) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
-  const previousEntry =
+  // A successful CAS conflict retry may observe a newer same-owner entry.
+  // Preserve the entry actually replaced so D1 rollback restores its metadata.
+  let previousEntry =
     manifest.entities.find(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.eventId,
@@ -360,6 +365,7 @@ export async function preCommitEventVisibilityRenameTombstone(
         (entry) =>
           entry.entity_type === "event" && entry.entity_id === input.eventId,
       ) ?? null;
+      previousEntry = previous;
       return upsertBlockedEntityInManifest(
         latest,
         {
