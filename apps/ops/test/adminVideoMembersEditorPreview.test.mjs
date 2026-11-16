@@ -76,3 +76,23 @@ test("MIG-0730 U02d: not route-mounted, no HTTP code or direct Personal imports"
   assert.doesNotMatch(file, /from "\.\.\/\.\.\/\.\.\/\.\.\/app\//);
   assert.match(file, /from "@flamenode\/ui"/);
 });
+
+test("MIG-0730 U02d: oversized payload is rejected before accessing any member getter", () => {
+  let accessed = 0;
+  const oversized = Array.from({ length: 101 }, (_, i) => member(i));
+  Object.defineProperty(oversized, 0, {
+    enumerable: true,
+    configurable: true,
+    get() {
+      accessed++;
+      throw new Error("oversized member content must never be traversed");
+    },
+  });
+  const markup = html({
+    videoId: "v1", data: snapshot("v1", oversized),
+    searchXUsers, applyPermissionBatch, save,
+  });
+  assert.equal(accessed, 0, "bounds check must precede schema traversal");
+  assert.match(markup, /参加者データを表示できません/);
+  assert.doesNotMatch(markup, /name="members_json"|参加者設定を保存/);
+});
