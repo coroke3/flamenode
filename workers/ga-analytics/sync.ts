@@ -233,7 +233,18 @@ function isCanonicalRetainedTrendingWire(raw: string, payload: TrendingOutputPay
     }
   }
   return Array.isArray(payload.items) &&
-    payload.items.every((item) => hasOnlyRetainedKeys(item, RETAINED_TRENDING_ITEM_KEYS));
+    payload.items.every((item) => {
+      if (!hasOnlyRetainedKeys(item, RETAINED_TRENDING_ITEM_KEYS)) return false;
+      // The GA4 writer emits safe nonnegative integer counters. The public
+      // normalizer is deliberately lenient (e.g. false, null, strings and
+      // fractions can coerce/floor to integers), but its normalized DTO
+      // cannot authorize retaining those noncanonical raw R2 bytes after
+      // a privacy-repair audit. Re-emit canonical counters from D1+views.
+      const views = [item.views_2d, item.views_5d, item.views_7d, item.views_30d];
+      return views.every((value) =>
+        typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
+      ) && typeof item.views_30d === "number" && item.views_30d >= 1;
+    });
 }
 
 async function loadRecentListPayload(
