@@ -42,6 +42,7 @@ test("MIG-0707 U05c: global CSS loads in CURRENT order before Ops React", async 
     "./styles/shared.css",
     "./styles/admin-shell.css",
     "./styles/manage-shell.css",
+    "@flamenode/ui/styles/video-members.css",
   ]);
 });
 
