@@ -19,6 +19,7 @@
     "./video": "./src/video/index.ts",
     "./video/atomicLimits": "./src/video/atomicLimits.ts",
     "./video/adminMemberSubmission": "./src/video/adminMemberSubmission.ts",
+    "./video/adminMemberHttpInput": "./src/video/adminMemberHttpInput.ts",
     "./event": "./src/event/index.ts",
     "./event/limits": "./src/event/limits.ts",
     "./xid": "./src/xid/index.ts",
