@@ -2623,7 +2623,7 @@
             ]
           },
           {
-            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n  \nELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
             "params": [
               19
             ]
