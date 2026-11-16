@@ -7,7 +7,7 @@ import {
   compensateEventVisibilityFenceRenameOnD1Failure,
   compensateEventVisibilityRenameTombstoneOnD1Failure,
 } from "@flamenode/server-core/visibility/eventTransition";
-import { preCommitPublicVisibilityFence } from "@flamenode/server-core/visibility/fenceTransition";
+import { preCommitPublicVisibilityFence, compensatePublicVisibilityFenceOnD1Failure } from "@flamenode/server-core/visibility/fenceTransition";
 import { preCommitVideoVisibilityDepublicization } from "@flamenode/server-core/visibility/videoTransition";
 import { releaseBlockedEntityInManifest } from "@flamenode/server-core/visibility/manifestCore";
 
@@ -388,6 +388,49 @@ test("Visibility CAS: same-token video retry preserves unrelated manifest entrie
   assert.equal(state.reads, 2);
   assert.equal(state.manifest.entities.find(x => x.entity_id === "video-one").fence_token, "incoming");
   assert.deepEqual(state.manifest.entities.find(x => x.entity_id === "group-two"), extra);
+});
+
+test("Issue #659: generic compensation must preserve R2 while a foreign D1 fence is active", async () => {
+  // Our failed D1 mutation did not land, but a newer writer has already
+  // installed its own canonical D1 block. Removing our still-active R2
+  // entry would briefly expose the entity until the new writer publishes.
+  for (const state of ["blocked", "release_pending"]) {
+    const { db, calls } = planningDb({
+      entity_type: "event_group", entity_id: "group-one",
+      fence_token: "foreign-writer", state,
+    });
+    const initial = manifestOf(
+      entry("event_group", "group-one", "incoming"),
+      entry("video", "unrelated", "untouched"),
+    );
+    const host = hostOf(initial);
+    await compensatePublicVisibilityFenceOnD1Failure({
+      db, entityType: "event_group", entityId: "group-one",
+      fenceToken: "incoming", flow: "foreign_d1_claim",
+    }, host.host);
+    assert.equal(calls.selects, 1, "one authoritative D1 fence read");
+    assert.equal(host.reads, 0, "R2 must not be read for a foreign active D1 fence");
+    assert.equal(host.attemptedWrites, 0, "no R2 DELETE/PUT may release its block");
+    assert.deepEqual(host.manifest, initial, state);
+  }
+});
+
+test("Issue #659: generic compensation still releases orphan R2 after failed D1 commit", async () => {
+  // Preserve cleanup of our exact R2 precommit when there is no canonical
+  // active D1 fence; unrelated entities must remain blocked.
+  const { db, calls } = planningDb(null);
+  const other = entry("video", "other-video", "keep");
+  const state = hostOf(manifestOf(
+    entry("event_group", "group-one", "incoming"), other,
+  ));
+  await compensatePublicVisibilityFenceOnD1Failure({
+    db, entityType: "event_group", entityId: "group-one",
+    fenceToken: "incoming", flow: "orphan_cleanup",
+  }, state.host);
+  assert.equal(calls.selects, 1);
+  assert.equal(state.reads, 1);
+  assert.equal(state.appliedWrites, 1);
+  assert.deepEqual(state.manifest.entities, [other]);
 });
 
 test("Visibility compensation: release refuses to remove a duplicate foreign event token", () => {
