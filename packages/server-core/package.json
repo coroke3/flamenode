@@ -13,6 +13,7 @@
     "./video/memberSetSnapshot": "./src/video/memberSetSnapshot.ts",
     "./video/chapterJsonChunking": "./src/video/chapterJsonChunking.ts",
     "./video/memberChapterAudit": "./src/video/memberChapterAudit.ts",
+    "./video/memberChapterSql": "./src/video/memberChapterSql.ts",
     "./video/permissionSql": "./src/video/permissionSql.ts",
     "./video/permissionRecipients": "./src/video/permissionRecipients.ts",
     "./memberSuggestion/core": "./src/memberSuggestion/core.ts",
