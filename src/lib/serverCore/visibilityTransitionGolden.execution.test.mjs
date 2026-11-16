@@ -1242,6 +1242,53 @@ if (runTestWithTsx(import.meta.url)) {
 
   const scenarios = [...videoScenarios, ...eventScenarios, ...fenceScenarios, ...moderationScenarios];
 
+  test("Issue #659: real video public-private-public-private sequence keeps the same D1/R2 fence owner", async () => {
+    const [, result] = await runScenario(
+      "video_repeated_visibility_cycle_same_owner",
+      async ({ db }) => {
+        const tokens = [];
+        const statuses = ["private", "public", "private"];
+        for (const nextStatus of statuses) {
+          const current = await loadVideo(db);
+          const plan = await planVideo(db, current, { nextStatus, reason: "cycle" });
+          assert.equal(plan.validationError, undefined);
+          assert.equal(plan.expectedMutationChanges[0], 1, "video CAS must be planned");
+          assert.equal(plan.expectedMutationChanges[1], 1, "D1 fence CAS must be planned");
+          assert.ok(plan.fenceToken, "a boundary crossing must produce a fence owner");
+          tokens.push(plan.fenceToken);
+          // The same CURRENT bridge and synthetic ETag CAS R2 host are used
+          // by the production status transition. R2 must be blocked before
+          // committing the canonical D1 transition on every crossing.
+          await videoTransition.preCommitVideoVisibilityDepublicization({
+            videoId: "vid-1", fenceToken: plan.fenceToken, reason: "cycle",
+          });
+          await exec(db, plan.mutationStatements);
+          const confirmed = await loadVideo(db);
+          assert.equal(confirmed.visibility_status, nextStatus,
+            "the canonical video must commit the requested status");
+        }
+        return { tokens, statuses };
+      },
+      { setup: withVideo({}) },
+    );
+    assert.equal(result.outcome.threw, undefined,
+      "valid repeated transitions must not mistake their own R2 block for a foreign writer");
+    const { tokens } = result.outcome.returned;
+    assert.equal(tokens.length, 3);
+    assert.match(tokens[0], /^vf_/);
+    assert.deepEqual(tokens, [tokens[0], tokens[0], tokens[0]],
+      "public-private-public-private must preserve the same active D1/R2 token");
+    assert.equal(result.videos[0].visibility_status, "private");
+    assert.equal(result.public_visibility_fences.length, 1);
+    assert.equal(result.public_visibility_fences[0].state, "blocked");
+    assert.equal(result.public_visibility_fences[0].fence_token, tokens[0]);
+    assert.equal(result.manifest_after.entities.length, 1);
+    assert.equal(result.manifest_after.entities[0].fence_token, tokens[0]);
+    const puts = result.log.filter((entry) => entry.op === "r2.put");
+    assert.equal(puts.length, 3, "one conditional R2 precommit per public-boundary crossing");
+    assert.equal(result.log.filter((entry) => entry.op === "batch.commit").length, 3);
+  });
+
   test("Issue #659: video planner reuses active D1 fence tokens for legitimate republish", async () => {
     for (const state of ["blocked", "release_pending"]) {
       const [, result] = await runScenario(
