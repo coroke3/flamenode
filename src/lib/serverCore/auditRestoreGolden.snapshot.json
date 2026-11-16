@@ -6541,6 +6541,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -6639,7 +6648,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -6647,13 +6656,6 @@
               "blocked",
               "audit_restore_visibility",
               null,
-              1760000000,
-              null,
-              "u-actor",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "blocked",
-              "audit_restore_visibility",
               1760000000,
               null,
               "u-actor",
@@ -7325,6 +7327,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -7423,7 +7434,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -7431,13 +7442,6 @@
               "release_pending",
               "audit_restore_visibility",
               null,
-              null,
-              1760000000,
-              "u-actor",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "audit_restore_visibility",
               null,
               1760000000,
               "u-actor",
@@ -8073,6 +8077,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -8167,7 +8180,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -8175,13 +8188,6 @@
               "release_pending",
               "audit_restore_visibility",
               null,
-              null,
-              1760000000,
-              "u-actor",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "audit_restore_visibility",
               null,
               1760000000,
               "u-actor",
@@ -8813,6 +8819,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -8911,7 +8926,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -8919,13 +8934,6 @@
               "release_pending",
               "audit_restore_visibility",
               null,
-              null,
-              1760000000,
-              "u-actor",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "audit_restore_visibility",
               null,
               1760000000,
               "u-actor",
@@ -10483,6 +10491,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -10581,7 +10598,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -10589,13 +10606,6 @@
               "blocked",
               "audit_restore_visibility",
               null,
-              1760000000,
-              null,
-              "u-actor",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "blocked",
-              "audit_restore_visibility",
               1760000000,
               null,
               "u-actor",
