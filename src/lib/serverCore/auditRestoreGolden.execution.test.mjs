@@ -717,6 +717,33 @@ if (runTestWithTsx(import.meta.url)) {
       const [key, value] = await runScenario(name, spec);
       assert.ok(!(key in actual), `duplicate scenario name ${key}`);
       actual[key] = value;
+
+      // Local D1 budget regression for the tested audit-restore video paths.
+      // Count all direct D1 operations and statements inside each D1 batch;
+      // unlike a production workerd probe this does NOT include HTTP auth,
+      // CostGuard, or unrelated pre/post-commit caller work.
+      const guardedVideoRestores = new Set([
+        "video_public_to_private",
+        "video_private_to_public",
+        "video_snapshot_without_source_keys_uses_current",
+        "video_snapshot_null_youtube_id_is_not_rejected",
+        "video_cas_conflict_rolls_back_and_compensates",
+      ]);
+      if (guardedVideoRestores.has(key)) {
+        const directD1 = value.log.filter((entry) => entry.op === "d1");
+        const batchD1 = value.log
+          .filter((entry) => entry.op === "batch")
+          .reduce((count, entry) => count + entry.statements.length, 0);
+        const fenceReads = directD1.filter((entry) =>
+          entry.sql.includes('from "public_visibility_fences"')
+        ).length;
+        const expectedFenceReads =
+          key === "video_cas_conflict_rolls_back_and_compensates" ? 2 : 1;
+        assert.equal(fenceReads, expectedFenceReads,
+          `${key}: one authoritative fence pre-read per transition; compensation adds one`);
+        assert.ok(directD1.length + batchD1 <= 30,
+          `${key}: synthetic D1 budget exceeded: ${directD1.length} direct + ${batchD1} batched`);
+      }
     }
     const serialized = JSON.stringify(actual, null, 2) + "\n";
     if (process.env.FLAMENODE_UPDATE_GOLDEN === "1" || !existsSync(SNAPSHOT_URL)) {
