@@ -15,7 +15,6 @@ import {
   buildVideoMemberBulkInsertSql,
   buildVideoMemberSetGuardSql,
   buildVideoMemberSetSnapshot,
-  compareSqliteBinaryText,
   toVideoMemberSnapshotRow,
 } from "@/lib/video/memberSetSnapshot";
 
@@ -177,6 +176,10 @@ async function canonicalizeMemberInputs(
   };
 }
 
+// Compatibility bridge (MIG-0650, D-10): canonical identity lookup stays in
+// CURRENT, while the exact permission/hidden-row selection is shared with Hono.
+import { selectVideoMemberPermissionCarry } from "@flamenode/server-core/video/memberPermissionCarry";
+
 // Compatibility bridge (MIG-0650, D-10): hidden carry CAS/delete SQL lives in core.
 import {
   buildHiddenCarryRowsGuardSql,
@@ -276,28 +279,8 @@ export async function buildReplaceVideoMembersPlan(
     throw new Error("video_member_carry_limit_exceeded");
   }
 
-  const hiddenCarryRows = carryRows.filter(
-    (row) =>
-      row.is_public_member === 0 &&
-      Boolean(canonicalIdentity(row.x_user_id)) &&
-      xIdSet.has(canonicalIdentity(row.x_user_id)),
-  );
-
-  const permissionCarryByXId = new Map<
-    string,
-    typeof videoMembers.$inferSelect
-  >();
-  for (const row of [...carryRows].sort(
-    (left, right) =>
-      right.can_edit - left.can_edit ||
-      right.is_public_member - left.is_public_member ||
-      compareSqliteBinaryText(left.id, right.id),
-  )) {
-    const xId = canonicalIdentity(row.x_user_id);
-    if (xId && !permissionCarryByXId.has(xId)) {
-      permissionCarryByXId.set(xId, row);
-    }
-  }
+  const { hiddenCarryRows, permissionCarryByXId } =
+    selectVideoMemberPermissionCarry(carryRows, xIdSet, canonicalIdentity);
 
   const existingPublicByXId = new Map<
     string,
