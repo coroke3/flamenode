@@ -18,3 +18,5 @@ export * from "./screens/index.js";
 export * from "./forms/videoMembers/delimited.js";
 export * from "./forms/videoMembers/memberSuggestionRank.js";
 export * from "./forms/videoMembers/clipboard.js";
+export * from "./forms/videoMembers/memberInput.js";
+export * from "./forms/videoMembers/VideoMembersField.js";
