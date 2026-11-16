@@ -1570,7 +1570,7 @@ test("Issue #653: orphan-only GA4 success cannot retain now-private event or ret
 });
 
 
-test("Issue #653: orphan-only GA4 success invalidates a stale scheduled time, but keeps current R2", async () => {
+test("Issue #653: orphan-only GA4 success rejects stale public metadata or rank but keeps current R2", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {
     assert.match(String(input), /analyticsdata.googleapis.com/);
@@ -1589,14 +1589,18 @@ test("Issue #653: orphan-only GA4 success invalidates a stale scheduled time, bu
     expires_at: Math.floor(Date.now() / 1000) + 3600,
   });
   try {
-    for (const scheduledTime of [1_700_000_000, 1_700_000_600]) {
+    for (const { scheduledTime, rank, shouldPreserve } of [
+      { scheduledTime: 1_700_000_000, rank: 1, shouldPreserve: true },
+      { scheduledTime: 1_700_000_600, rank: 1, shouldPreserve: false },
+      { scheduledTime: 1_700_000_000, rank: 2, shouldPreserve: false },
+    ]) {
       const previous = JSON.stringify({
         schema_version: 1, generated_at: 1_700_000_000,
         items: [{
           id: "video-a", title: "A", youtube_video_id: "yt-a",
           display_name: "creator", icon_url: null,
           primary_event_id: null, primary_event_title: null,
-          scheduled_time: scheduledTime, status: "public", rank: 1,
+          scheduled_time: scheduledTime, status: "public", rank,
           video_id: "video-a",
           views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 7,
         }],
@@ -1621,14 +1625,14 @@ test("Issue #653: orphan-only GA4 success invalidates a stale scheduled time, bu
           },
         },
       });
-      if (scheduledTime === 1_700_000_000) {
+      if (shouldPreserve) {
         await assert.rejects(() => syncGa4Trending(env),
           /ga4_empty_report_preserving_existing/);
         assert.equal(writes, 0, "current public ranking is preserved");
       } else {
         const outcome = await syncGa4Trending(env);
         assert.equal(outcome.failed, 0);
-        assert.equal(writes, 1, "stale schedule must not outlive D1");
+        assert.equal(writes, 1, "stale schedule or rank must not outlive the current public projection");
         assert.deepEqual(written.items, []);
         assert.equal(JSON.stringify(written).includes(String(scheduledTime)), false);
       }
