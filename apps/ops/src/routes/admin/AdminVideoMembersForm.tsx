@@ -26,9 +26,19 @@ export interface AdminVideoMembersFormProps {
  * checkbox is_collab=true, members_json from the injected shared field).
  * Never fabricate members_json or publish edits when that field is missing.
  */
-export function AdminVideoMembersForm({
+export function AdminVideoMembersForm(props: AdminVideoMembersFormProps): React.ReactElement {
+  // A different video must receive independent form state, including an isolated submit latch.
+  return <AdminVideoMembersFormForVideo key={props.video.id} {...props} />;
+}
+
+function AdminVideoMembersFormForVideo({
   video, initialMembersCount, membersField, save, onSaved,
 }: AdminVideoMembersFormProps): React.ReactElement {
+  const mounted = React.useRef(false);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [isCollab, setIsCollab] = React.useState(
     video.collaboration_type === "collab" || initialMembersCount > 0,
   );
@@ -65,13 +75,18 @@ export function AdminVideoMembersForm({
     setResult(null);
     try {
       const response = await save(formData);
-      setResult(response);
-      if (response.ok) onSaved?.();
+      // A may finish after navigation to B; never deliver A's result or refresh to B.
+      if (mounted.current) {
+        setResult(response);
+        if (response.ok) onSaved?.();
+      }
     } catch {
-      setResult({ ok: false, message: "保存中にエラーが発生しました。再度確認してください。" });
+      if (mounted.current) {
+        setResult({ ok: false, message: "保存中にエラーが発生しました。再度確認してください。" });
+      }
     } finally {
       inFlight.current = false;
-      setPending(false);
+      if (mounted.current) setPending(false);
     }
   }
 
