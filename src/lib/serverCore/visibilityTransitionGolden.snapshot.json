@@ -81,12 +81,11 @@
         "op": "batch",
         "statements": [
           {
-            "sql": "update \"public_visibility_fences\" set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ? where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ? and \"public_visibility_fences\".\"fence_token\" = ? and \"public_visibility_fences\".\"state\" = ?)",
+            "sql": "update \"public_visibility_fences\" set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ? where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ? and \"public_visibility_fences\".\"fence_token\" = ? and \"public_visibility_fences\".\"state\" = ?)",
             "params": [
               "vf_00000000-0000-4000-8000-000000000001",
               "release_pending",
               "why",
-              null,
               null,
               1760000100,
               "u-actor",
