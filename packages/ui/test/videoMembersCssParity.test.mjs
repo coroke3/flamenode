@@ -13,7 +13,7 @@ test("MIG-0730 U01b: shared member CSS remains byte-identical to the original Pe
   ]);
   assert.ok(shared.length > 1500);
   assert.equal(shared, personal);
-  const names = new Set([...shared.matchAll(/\\.vmembers-[A-Za-z][\\w-]*/g)].map(m => m[0].slice(1)));
+  const names = new Set([...shared.matchAll(/\.vmembers-[A-Za-z][\w-]*/g)].map(m => m[0].slice(1)));
   assert.ok(names.has("vmembers-root"));
   assert.ok(names.has("vmembers-sampleTableScroll"));
   assert.ok(names.has("vmembers-bulkPreviewTable"));
@@ -29,7 +29,7 @@ test("MIG-0730 U01b: both SPA entrypoints import only the shared member CSS once
   const cssImport = 'import "@flamenode/ui/styles/video-members.css";';
   assert.equal(app.split(cssImport).length - 1, 1);
   assert.equal(ops.split(cssImport).length - 1, 1);
-  assert.doesNotMatch(app, /import "\\.\\/styles\\/video-members\\.css"/);
+  assert.doesNotMatch(app, /import "\.\/styles\/video-members\.css"/);
   assert.match(field, /vmembers-root/);
   const exported = JSON.parse(pkg).exports;
   assert.equal(exported["./styles/video-members.css"], "./src/styles/video-members.css");
@@ -40,8 +40,8 @@ test("MIG-0730 U01b: every form-specific vmembers class in Personal field has a 
     read("apps/app/src/components/forms/VideoMembersField.tsx"),
     read("packages/ui/src/styles/video-members.css"),
   ]);
-  const used = new Set([...field.matchAll(/\\bvmembers-[A-Za-z][\\w-]*/g)].map(m => m[0]));
-  const defined = new Set([...css.matchAll(/\\.vmembers-[A-Za-z][\\w-]*/g)].map(m => m[0].slice(1)));
+  const used = new Set([...field.matchAll(/\bvmembers-[A-Za-z][\w-]*/g)].map(m => m[0]));
+  const defined = new Set([...css.matchAll(/\.vmembers-[A-Za-z][\w-]*/g)].map(m => m[0].slice(1)));
   assert.ok(used.size > 10);
   for (const name of used) assert.ok(defined.has(name), `no CSS definition: ${name}`);
 });
