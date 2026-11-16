@@ -241,9 +241,34 @@ function isCanonicalRetainedTrendingWire(raw: string, payload: TrendingOutputPay
       // cannot authorize retaining those noncanonical raw R2 bytes after
       // a privacy-repair audit. Re-emit canonical counters from D1+views.
       const views = [item.views_2d, item.views_5d, item.views_7d, item.views_30d];
-      return views.every((value) =>
+      if (!views.every((value) =>
         typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
-      ) && typeof item.views_30d === "number" && item.views_30d >= 1;
+      ) || typeof item.views_30d !== "number" || item.views_30d < 1) return false;
+
+      // Normalization intentionally converts malformed optional display
+      // fields to null/unknown. An object hidden under an allowed key such as
+      // icon_url or primary_event_title could therefore compare equal to the
+      // current public D1 DTO while raw R2 still leaks nested private fields.
+      // Only retain primitive writer-compatible wire values; otherwise
+      // regenerate the DTO rather than preserving uninspected original bytes.
+      const requiredStrings = ["id", "title", "display_name", "status", "video_id"];
+      if (requiredStrings.some((key) =>
+        key in item && (typeof item[key] !== "string" || !item[key].trim()),
+      )) return false;
+      const optionalStrings = [
+        "youtube_video_id", "icon_url", "primary_event_id", "primary_event_title",
+      ];
+      if (optionalStrings.some((key) =>
+        key in item && item[key] !== null &&
+        (typeof item[key] !== "string" || !item[key].trim()),
+      )) return false;
+      if ("scheduled_time" in item && item.scheduled_time !== null &&
+        (typeof item.scheduled_time !== "number" ||
+          !Number.isSafeInteger(item.scheduled_time) || item.scheduled_time < 0)
+      ) return false;
+      if ("rank" in item && (typeof item.rank !== "number" ||
+        !Number.isSafeInteger(item.rank) || item.rank < 1)) return false;
+      return true;
     });
 }
 
