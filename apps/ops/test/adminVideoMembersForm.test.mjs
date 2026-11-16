@@ -26,7 +26,8 @@ function setup(overrides = {}) {
     membersField: h("input", { name: "members_json", type: "hidden", value: '[{"name":"Alice"}]' }),
     ...overrides,
   };
-  const render = async () => React.act(async () => {
+  const render = async (nextProps = {}) => React.act(async () => {
+    Object.assign(props, nextProps);
     root.render(h(AdminVideoMembersForm, props));
   });
   const submit = async () => React.act(async () => {
@@ -141,4 +142,54 @@ test("MIG-0730 U02c: failed or rejected save never triggers refresh callback", a
       assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false);
     } finally { await ui.cleanup(); }
   }
+});
+
+test("MIG-0730 U02c: A save resolving after navigation to B never refreshes B or displays A success", async () => {
+  const wait = deferred();
+  let aSaved = 0, bSaved = 0, bWrites = 0;
+  const ui = setup({
+    save: async () => wait.promise,
+    onSaved: () => { aSaved++; },
+  });
+  try {
+    await ui.render();
+    await ui.submit();
+    assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true);
+    await ui.render({
+      video: { id: "v2", title: "Video B", collaboration_type: null },
+      initialMembersCount: 0,
+      onSaved: () => { bSaved++; },
+      save: async () => { bWrites++; return { ok: true }; },
+    });
+    assert.equal(ui.target.querySelector('input[name="video_id"]').value, "v2");
+    assert.equal(ui.target.querySelector('input[type="checkbox"]').checked, false,
+      "B collab state must not inherit A");
+    assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false,
+      "B submit must not inherit A in-flight latch");
+    await React.act(async () => wait.finish({ ok: true, message: "A saved" }));
+    assert.equal(aSaved, 0, "A's retired form cannot trigger refresh");
+    assert.equal(bSaved, 0);
+    assert.doesNotMatch(ui.target.textContent, /A saved/);
+    await ui.submit();
+    assert.equal(bWrites, 1);
+    assert.equal(bSaved, 1);
+    assert.match(ui.target.textContent, /保存しました/);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0730 U02c: A rejected save after B navigation cannot produce an error in B", async () => {
+  const wait = deferred();
+  const ui = setup({ save: async () => wait.promise });
+  try {
+    await ui.render();
+    await ui.submit();
+    await ui.render({
+      video: { id: "v2", title: "Video B", collaboration_type: null },
+      initialMembersCount: 0,
+      save: undefined,
+    });
+    await React.act(async () => wait.finish(Promise.reject(new Error("old video error"))));
+    assert.doesNotMatch(ui.target.textContent, /保存中にエラー|保存に失敗しました/);
+    assert.match(ui.target.textContent, /保存機能は移行中/);
+  } finally { await ui.cleanup(); }
 });
