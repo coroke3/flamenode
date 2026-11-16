@@ -294,6 +294,18 @@ export async function renameEventId(
     (batch) => batch.expectedChanges,
   );
 
+  // Re-read authoritative D1 ownership immediately before any R2 reuse release.
+  // A concurrent release_pending transition after the earlier pendingFence
+  // query must be rejected before preCommitEventIdReuse can mutate R2.
+  const oldFence = await getPublicVisibilityFence(db, "event", oldId);
+  if (oldFence?.state === "release_pending") {
+    return {
+      ok: false,
+      message:
+        "イベントの公開反映中はIDを変更できません。公開反映が完了してから再試行してください。",
+    };
+  }
+
   let targetReusePrecommit: EventIdReusePrecommit | null = null;
   if (targetTombstone) {
     const reuse = await preCommitEventIdReuse({
@@ -315,7 +327,6 @@ export async function renameEventId(
   // Keep every statement-builder await before the R2 pre-commit. If queue
   // planning fails, no manifest mutation has happened and the D1 row remains
   // untouched, so there is nothing to compensate.
-  const oldFence = await getPublicVisibilityFence(db, "event", oldId);
   const renameTombstoneToken = generateId("vf");
   let manifestRename: EventVisibilityFenceRenamePrecommit | null = null;
   let renameTombstone: EventVisibilityRenameTombstonePrecommit | null = null;
