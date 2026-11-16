@@ -312,24 +312,24 @@ export async function preCommitEventVisibilityRenameTombstone(
     eventId: string;
     fenceToken: string;
     reason?: string | null;
-    /** Optional for legacy direct callers; CURRENT rename provides the exact
-     * previous R2 token (or null if none) to reject foreign CAS ownership. */
-    expectedPreviousFenceToken?: string | null;
+    /** Required previous R2 owner (or null when absent). Callers may not
+     * rotate a tombstone with an unobserved owner, even on the first CAS. */
+    expectedPreviousFenceToken: string | null;
   },
   host: VisibilityFenceHost,
 ): Promise<EventVisibilityRenameTombstonePrecommit> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
-  // A rename may rotate exactly the old-ID token it observed, never a
-  // concurrent writer's token. Legacy direct users omit the expectation and
-  // retain the existing single-token rotation contract. Duplicate mixed
-  // ownership is forbidden even for those legacy calls.
+  // A rename may rotate exactly the old-ID token observed by its caller.
+  // Reject a missing ownership expectation at runtime as well as via TypeScript:
+  // an unguarded direct JS call must never overwrite a foreign R2 block.
+  // A null expectation means the caller observed no old-ID owner.
   const hasUnexpectedOldIdToken = (snapshot: PublicVisibilityBlockedEntitiesManifest) => {
     const tokens = snapshot.entities
       .filter((entry) => entry.entity_type === "event" && entry.entity_id === input.eventId)
       .map((entry) => entry.fence_token);
     if (tokens.some((token) => token !== tokens[0])) return true;
-    if (input.expectedPreviousFenceToken === undefined) return false;
+    if (input.expectedPreviousFenceToken === undefined) return true;
     if (input.expectedPreviousFenceToken === null) return tokens.length > 0;
     return tokens.length === 0 ||
       tokens.some((token) => token !== input.expectedPreviousFenceToken);
