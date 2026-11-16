@@ -8,6 +8,9 @@ import { normalizeStaticVideoCardBase } from "./staticVideoCardCore.ts";
 
 export const TRENDING_OBJECT_KEY = "analytics/trending.json";
 export const TRENDING_STALE_MAX_AGE_SEC = 3 * 60 * 60;
+// UTC clock drift beyond five minutes is not a valid last-success timestamp.
+// Do not allow an implausibly future-dated R2 artifact to masquerade as fresh.
+export const TRENDING_MAX_FUTURE_SKEW_SEC = 5 * 60;
 export const TRENDING_TOO_OLD_FOR_HOME_SEC = 24 * 60 * 60;
 
 /** workers/ga-analytics/ranking.ts の TrendingItem と整合 */
@@ -115,7 +118,9 @@ export function normalizeStaticTrending(
 ): StaticTrendingData | null {
   if (payload.schema_version !== STATIC_TRENDING_SCHEMA_VERSION) return null;
   const generatedAt = normalizeUnix(payload.generated_at);
-  if (generatedAt == null) return null;
+  if (generatedAt == null ||
+    generatedAt > Math.floor(Date.now() / 1000) + TRENDING_MAX_FUTURE_SKEW_SEC
+  ) return null;
   if (!Array.isArray(payload.items)) return null;
 
   const items = payload.items
@@ -130,6 +135,9 @@ export function resolveStaticTrendingStaleMeta(
   nowSec: number,
 ): StaticTrendingStaleMeta {
   if (generatedAt == null) {
+    return { stale: true, ageSeconds: null, tooOldForHome: true };
+  }
+  if (generatedAt > nowSec + TRENDING_MAX_FUTURE_SKEW_SEC) {
     return { stale: true, ageSeconds: null, tooOldForHome: true };
   }
   const ageSeconds = Math.max(0, nowSec - generatedAt);
