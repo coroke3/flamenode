@@ -262,6 +262,16 @@ test("fail closed: a configured but broken snapshot fails the build instead of p
     await assert.rejects(loadListingForBuild(writeSnapshot(dir, good, { trending: { visibility: "private" } })), { code: "NOT_PUBLIC" });
     await assert.rejects(loadListingForBuild(writeSnapshot(dir, { ...good, list: { videos: good.list.videos, total: 1 } })), { code: "LISTING_INVALID" });
     await assert.rejects(loadListingForBuild(writeSnapshot(dir, { ...good, recommend: { generated_at: 1, recommended: [], latest: [], underrated: [], creators: [] } })), { code: "LISTING_INVALID" });
+    const buildNowSec = 1_790_000_000;
+    const atLimit = await loadListingForBuild(writeSnapshot(dir, {
+      ...good, trending: { ...good.trending, generated_at: buildNowSec + 300 },
+    }), buildNowSec);
+    assert.equal(atLimit.trending.items.length, 2,
+      "TARGET Astro listing accepts exact 300-second clock skew");
+    await assert.rejects(loadListingForBuild(writeSnapshot(dir, {
+      ...good, trending: { ...good.trending, generated_at: buildNowSec + 301 },
+    }), buildNowSec), { code: "LISTING_INVALID" },
+    "TARGET Astro listing rejects future-dated snapshot beyond 300 seconds");
     await assert.rejects(loadListingForBuild(writeSnapshot(dir, { ...good, trending: { schema_version: 9, generated_at: 1, items: [] } })), { code: "LISTING_INVALID" });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
