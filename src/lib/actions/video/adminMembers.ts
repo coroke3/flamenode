@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { readAdminVideoCollabFlag } from "@flamenode/domain/video";
+import { classifyAdminVideoMemberSave } from "@flamenode/domain/video/adminMemberSubmission";
 import { adminVideoMembersRebuildTargets } from "@flamenode/server-core/video/adminMemberRebuildTargets";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
@@ -97,7 +98,6 @@ export async function updateVideoMembersAdmin(
   if (!memberValidation.ok) return memberValidation;
 
   const members = memberValidation.value.members;
-  const nextCollaborationType = members.length > 0 || isCollab ? "collab" : "individual";
   const now = Math.floor(Date.now() / 1000);
   const traceId = createTraceId();
 
@@ -118,10 +118,16 @@ export async function updateVideoMembersAdmin(
     const hasChapterAudit = membersPlan.audits.some(
       (audit) => audit.table_name === "video_chapters_member_set",
     );
-    const collaborationTypeChanged =
-      target.collaboration_type !== nextCollaborationType;
-    const videoPublicContentChanged =
-      collaborationTypeChanged || hasMemberAudit || hasChapterAudit;
+    const {
+      nextCollaborationType,
+      videoPublicContentChanged,
+    } = classifyAdminVideoMemberSave({
+      previousCollaborationType: target.collaboration_type,
+      memberCount: members.length,
+      isCollab,
+      hasMemberAudit,
+      hasChapterAudit,
+    });
 
     // 旧実装は保存内容が同じでもvideos.updated_atを毎回更新し、score dirty化と
     // 不要なstatic rebuildを誘発していた。公開内容か合作区分が実際に変わる時だけ
