@@ -83,6 +83,91 @@ test("syncGa4Trending skips when GA4_SYNC_ENABLED is not 1", async () => {
   }
 });
 
+test("Issue #653: disabled GA4 still revokes stale private R2 rows without contacting GA4", async () => {
+  const db = recentDb();
+  const old = JSON.stringify({
+    schema_version: 1, generated_at: 1_700_000_000,
+    items: [
+      {
+        id: "video-a", title: "A", youtube_video_id: "yt-a",
+        display_name: "creator", icon_url: null,
+        primary_event_id: null, primary_event_title: null,
+        scheduled_time: 1_700_000_000, status: "public", rank: 1,
+        video_id: "video-a",
+        views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+      },
+      {
+        id: "revoked", title: "Private title must be removed",
+        status: "public", rank: 2, video_id: "revoked",
+        views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+      },
+    ],
+  });
+  const writes = [];
+  let reads = 0;
+  const log = [];
+  const oldLog = console.log;
+  const oldFetch = globalThis.fetch;
+  console.log = (line) => log.push(JSON.parse(String(line)));
+  globalThis.fetch = () => { throw new Error("GA4 must remain disabled"); };
+  try {
+    const result = await syncGa4Trending({
+      DB: db, GA4_SYNC_ENABLED: "0", // explicit operator disable
+      R2: {
+        async get(key) {
+          assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+          reads++;
+          return { size: Buffer.byteLength(old), async text() { return old; } };
+        },
+        async put(key, body) {
+          assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+          writes.push(JSON.parse(String(body)));
+        },
+      },
+    });
+    assert.deepEqual([result.processed, result.failed, result.skipped], [0, 0, 1]);
+    assert.equal(result.external_api_calls, 0);
+    assert.equal(db.reads, 1, "one bounded public allow-list read");
+    assert.equal(reads, 1);
+    assert.equal(writes.length, 1, "revoke private content even while GA4 disabled");
+    assert.deepEqual(writes[0].items.map((item) => item.id), ["video-a"]);
+    assert.doesNotMatch(JSON.stringify(writes), /Private title must be removed/);
+    assert.equal(log.at(-1).result, "skipped");
+    assert.equal(log.at(-1).privacy_rewrite_on_disabled, true);
+    assert.equal(log.at(-1).r2_written, true);
+  } finally {
+    console.log = oldLog;
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("Issue #653: disabled GA4 with failed D1 cannot overwrite existing R2", async () => {
+  let r2Reads = 0;
+  let r2Writes = 0;
+  const logs = [];
+  const oldLog = console.log;
+  console.log = (line) => logs.push(JSON.parse(String(line)));
+  try {
+    const result = await syncGa4Trending({
+      GA4_SYNC_ENABLED: "0",
+      DB: { prepare() { throw new Error("sensitive SQL provider failure bearer-private-token"); } },
+      R2: {
+        async get() { r2Reads++; throw new Error("never inspect old R2 without D1 allow-list"); },
+        async put() { r2Writes++; },
+      },
+    });
+    assert.equal(result.skipped, 1);
+    assert.equal(result.failed, 0, "disabled semantics are preserved");
+    assert.equal(r2Reads, 0);
+    assert.equal(r2Writes, 0, "a failed D1 read cannot authorize R2 purging");
+    assert.equal(logs.at(-1).privacy_repair_error, "privacy_repair_failed");
+    assert.equal(logs.at(-1).r2_written, false);
+    assert.doesNotMatch(JSON.stringify(logs), /sensitive SQL|bearer-private-token/);
+  } finally {
+    console.log = oldLog;
+  }
+});
+
 test("syncGa4Trending fails closed with config_missing when secrets are absent", async () => {
   let putCalls = 0;
   let logLine = "";
