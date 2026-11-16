@@ -14,6 +14,7 @@
     "./video/chapterJsonChunking": "./src/video/chapterJsonChunking.ts",
     "./video/memberChapterAudit": "./src/video/memberChapterAudit.ts",
     "./video/memberChapterSql": "./src/video/memberChapterSql.ts",
+    "./video/hiddenMemberCarrySql": "./src/video/hiddenMemberCarrySql.ts",
     "./video/permissionSql": "./src/video/permissionSql.ts",
     "./video/permissionRecipients": "./src/video/permissionRecipients.ts",
     "./memberSuggestion/core": "./src/memberSuggestion/core.ts",
