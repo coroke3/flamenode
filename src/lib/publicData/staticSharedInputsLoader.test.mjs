@@ -126,6 +126,11 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
   const { resetPublicJsonIsolateCacheForTests } = await import(
     "./publicCacheIsolate.ts"
   );
+  const {
+    TRENDING_OBJECT_KEY,
+    TRENDING_STALE_MAX_AGE_SEC,
+    normalizeStaticTrending,
+  } = await import("./staticTrendingCore.ts");
 
   function slotStatsPayload(generatedAt) {
     return {
@@ -141,6 +146,65 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
     cacheWrites.length = 0;
     resetPublicJsonIsolateCacheForTests();
   }
+
+  test("Issue #653 exposure baseline: cached revoked trending survives a repaired R2 PUT and R2 outage", async () => {
+    // Characterizes the CURRENT privacy STOP, not a passing revocation
+    // acceptance test. A repaired writer object does not invalidate old
+    // Cache API bytes, and an R2 outage permits 3-hour stale replay.
+    resetHarness();
+    const nowSec = 1_700_000_000;
+    const revoked = {
+      id: "now-private", title: "Formerly public secret title",
+      youtube_video_id: "yt-revoked", display_name: "creator",
+      icon_url: null, primary_event_id: null, primary_event_title: null,
+      scheduled_time: nowSec - 3600, status: "public", rank: 1,
+      video_id: "now-private", views_2d: 1, views_5d: 2,
+      views_7d: 3, views_30d: 4,
+    };
+    const old = { schema_version: 1, generated_at: nowSec - 120, items: [revoked] };
+    const repaired = { schema_version: 1, generated_at: nowSec - 120, items: [] };
+    const readAt = (clock) => loadStaticJsonFreshStaleUnavailable({
+      key: TRENDING_OBJECT_KEY,
+      normalize: (value) => normalizeStaticTrending(value, clock),
+      cacheMode: "cache_first",
+      maxStaleAgeSec: TRENDING_STALE_MAX_AGE_SEC,
+      cacheTtlSeconds: 300,
+      nowSec: clock,
+    });
+
+    // R2 was repaired after the cache was populated, but cache_first does
+    // not read R2 on a valid fresh hit (even at the same generated_at).
+    cacheStore.set(TRENDING_OBJECT_KEY, { payload: old, stored_at: nowSec - 60 });
+    r2Objects.set(TRENDING_OBJECT_KEY, repaired);
+    const freshLeak = await readAt(nowSec);
+    assert.equal(freshLeak.status, "fresh");
+    assert.deepEqual(freshLeak.value?.items.map((row) => row.id), ["now-private"]);
+    assert.equal(cacheWrites.length, 0, "fresh cache hit never checked repaired R2");
+
+    // After the 300-second fresh interval, an R2 GET failure still returns
+    // the old item as stale until the separately configured 3-hour window.
+    cacheStore.set(TRENDING_OBJECT_KEY, { payload: old, stored_at: nowSec - 301 });
+    r2Objects.clear();
+    const staleLeak = await readAt(nowSec);
+    assert.equal(staleLeak.status, "stale");
+    assert.deepEqual(staleLeak.value?.items.map((row) => row.id), ["now-private"]);
+
+    cacheStore.set(TRENDING_OBJECT_KEY, {
+      payload: old, stored_at: nowSec - TRENDING_STALE_MAX_AGE_SEC - 1,
+    });
+    const expired = await readAt(nowSec);
+    assert.equal(expired.status, "unavailable");
+    assert.equal(expired.value, null);
+
+    // Only a successful new read after expiry can consume the repaired
+    // artifact; existing Next ISR/CDN or Astro HTML are outside this test.
+    cacheStore.set(TRENDING_OBJECT_KEY, { payload: old, stored_at: nowSec - 301 });
+    r2Objects.set(TRENDING_OBJECT_KEY, repaired);
+    const updated = await readAt(nowSec);
+    assert.equal(updated.status, "fresh");
+    assert.deepEqual(updated.value?.items, []);
+    assert.equal(cacheWrites.length, 1);
+  });
 
   test("loadStaticJsonFreshStaleUnavailable prefers newer R2 over fresh cache", async () => {
     resetHarness();
