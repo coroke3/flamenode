@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFile } from "node:fs/promises";
 import {
   parseVideoMemberInputs as targetParse,
   normalizeMemberChapters as targetChapters,
@@ -194,4 +195,17 @@ test("MIG-0650 SA-085 U03b: full submit rejects invalid time, duplicate X ID, an
     const outcome = submission(raw, true);
     assert.equal(outcome.ok, false);
   }
+});
+
+test("MIG-0650 SA-085 U03b: active Next submission entry delegates only members validation to domain", async () => {
+  const nextSource = await readFile(new URL("../../../src/lib/video/submissionValidation.ts", import.meta.url), "utf8");
+  const domainExport = await readFile(new URL("../package.json", import.meta.url), "utf8");
+  assert.match(nextSource, /export \{ validateVideoMemberSubmission \} from "@flamenode\/domain\/video\/adminMemberSubmission"/);
+  assert.match(nextSource, /export type \{ ValidatedMemberSubmission \}/);
+  assert.match(nextSource, /export async function validateCustomAnswersForEvents/);
+  assert.doesNotMatch(nextSource, /function validateVideoMemberSubmission\s*\(/);
+  assert.equal(
+    JSON.parse(domainExport).exports["./video/adminMemberSubmission"],
+    "./src/video/adminMemberSubmission.ts",
+  );
 });
