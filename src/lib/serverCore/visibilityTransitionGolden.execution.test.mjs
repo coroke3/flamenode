@@ -1242,6 +1242,74 @@ if (runTestWithTsx(import.meta.url)) {
 
   const scenarios = [...videoScenarios, ...eventScenarios, ...fenceScenarios, ...moderationScenarios];
 
+  test("Issue #659: video planner reuses active D1 fence tokens for legitimate republish", async () => {
+    for (const state of ["blocked", "release_pending"]) {
+      const [, result] = await runScenario(
+        `video_existing_${state}_republish`,
+        async ({ db }) => {
+          const video = await loadVideo(db);
+          const plan = await planVideo(db, video, { nextStatus: "public", reason: "republish" });
+          assert.equal(plan.fenceToken, "vf_existing", "the observed active D1 token is reused");
+          assert.equal(plan.expectedMutationChanges[1], 1);
+          await videoTransition.preCommitVideoVisibilityDepublicization({
+            videoId: "vid-1", fenceToken: plan.fenceToken, reason: "republish",
+          });
+          await exec(db, plan.mutationStatements);
+          return { token: plan.fenceToken, state: "release_pending" };
+        },
+        {
+          setup: (sqlite) => {
+            seedVideo(sqlite, { visibility_status: "private" });
+            seedFence(sqlite, { fence_token: "vf_existing", state });
+          },
+          bucket: seededManifest([entity("video", "vid-1", "vf_existing")]),
+        },
+      );
+      assert.equal(result.outcome.threw, undefined, state);
+      assert.deepEqual(result.outcome.returned, { token: "vf_existing", state: "release_pending" });
+      assert.equal(result.videos[0].visibility_status, "public");
+      assert.equal(result.public_visibility_fences[0].fence_token, "vf_existing");
+      assert.equal(result.public_visibility_fences[0].state, "release_pending");
+      assert.equal(result.manifest_after.entities[0].fence_token, "vf_existing");
+    }
+  });
+
+  test("Issue #659: video planner D1 fence CAS denies foreign owner or vanished observed row", async () => {
+    for (const race of ["foreign-token", "vanished-row"]) {
+      const [, result] = await runScenario(
+        `video_fence_d1_${race}`,
+        async ({ db, sqlite }) => {
+          const plan = await planVideo(db, await loadVideo(db), { nextStatus: "public" });
+          assert.equal(plan.fenceToken, "vf_existing");
+          if (race === "foreign-token") {
+            sqlite.prepare("UPDATE public_visibility_fences SET fence_token = ? WHERE entity_type = 'video' AND entity_id = 'vid-1'")
+              .run("vf_foreign_owner");
+          } else {
+            sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = 'video' AND entity_id = 'vid-1'").run();
+          }
+          // Execute the exact planned fence SQL by itself. A zero-row result
+          // makes strict mutateWithAudit [1] fail and roll back the real batch.
+          const stmt = plan.mutationStatements[1].toSQL();
+          const changed = sqlite.prepare(stmt.sql).run(...stmt.params).changes;
+          return { changed, plannedToken: plan.fenceToken };
+        },
+        {
+          setup: (sqlite) => {
+            seedVideo(sqlite, { visibility_status: "private" });
+            seedFence(sqlite, { fence_token: "vf_existing", state: "blocked" });
+          },
+        },
+      );
+      assert.equal(result.outcome.threw, undefined, race);
+      assert.equal(result.outcome.returned.changed, 0, "conditional update must fail closed");
+      assert.equal(result.public_visibility_fences.length, race === "vanished-row" ? 0 : 1);
+      if (race === "foreign-token") {
+        assert.equal(result.public_visibility_fences[0].fence_token, "vf_foreign_owner",
+          "foreign owner is not overwritten");
+      }
+    }
+  });
+
   test("golden: video / event / event_group / x_user visibility transition planners and open cases", async () => {
     const actual = {};
     for (const [name, body, options] of scenarios) {
