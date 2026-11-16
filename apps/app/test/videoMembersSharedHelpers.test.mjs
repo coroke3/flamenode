@@ -17,7 +17,8 @@ test("MIG-0730 U01b: Personal parser and form are identity-preserving facades of
     read("../../../packages/ui/src/forms/videoMembers/VideoMembersField.tsx"),
     read("../../../packages/ui/src/forms/videoMembers/memberInput.ts"),
   ]);
-  assert.match(parser, /export \* from "@flamenode\/ui";/);
+  assert.match(parser, /parseVideoMemberText, parseVideoMemberCsv, serializeVideoMemberTsv/);
+  assert.match(parser, /from "@flamenode\/ui";/);
   assert.match(field, /export \{ VideoMembersField \} from "@flamenode\/ui";/);
   assert.equal(parseVideoMemberText, sharedParseVideoMemberText);
   assert.equal(personalVideoMembersField, sharedVideoMembersField);
