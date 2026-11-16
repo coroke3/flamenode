@@ -161,18 +161,22 @@ test("normalizeStaticTrending: public 以外の status は除外", () => {
 });
 
 test("Issue #653: future-dated trending artifact beyond clock skew is rejected at read", () => {
-  const nowSec = Math.floor(Date.now() / 1000);
+  const nowSec = 1_700_000_000;
   const payload = {
     schema_version: 1,
     generated_at: nowSec + TRENDING_MAX_FUTURE_SKEW_SEC,
     items: [sampleItem],
   };
-  assert.ok(normalizeStaticTrending(payload),
-    "small bounded clock skew must remain usable");
+  assert.ok(normalizeStaticTrending(payload, nowSec),
+    "small bounded clock skew must remain usable at the supplied build time");
   assert.equal(normalizeStaticTrending({
     ...payload,
     generated_at: nowSec + TRENDING_MAX_FUTURE_SKEW_SEC + 1,
-  }), null, "far-future artifact must never be treated as fresh");
+  }, nowSec), null, "far-future artifact must never be treated as fresh");
+  assert.equal(normalizeStaticTrending({
+    ...payload,
+    generated_at: Math.floor(Date.now() / 1000) + 86400,
+  }), null, "default call sites use the real clock when no build time is supplied");
 });
 
 test("Issue #653: future trending metadata fails closed even without the normalizer", () => {
