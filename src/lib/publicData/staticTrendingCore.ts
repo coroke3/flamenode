@@ -1,6 +1,5 @@
 import {
   normalizeCount,
-  normalizeNumericUnix as normalizeUnix,
   normalizePresentString as normalizeNullableString,
   normalizePresentString as normalizeString,
 } from "./normalize.ts";
@@ -121,8 +120,13 @@ export function normalizeStaticTrending(
   // accidentally authorize an implausibly future-dated public artifact.
   if (!Number.isSafeInteger(nowSec) || nowSec < 0) return null;
   if (payload.schema_version !== STATIC_TRENDING_SCHEMA_VERSION) return null;
-  const generatedAt = normalizeUnix(payload.generated_at);
-  if (generatedAt == null ||
+  // The GA4 writer serializes generated_at as an integer number. Generic
+  // numeric coercion would turn null, false and "" into Unix epoch zero,
+  // allowing malformed R2 wire data through the public reader.
+  const generatedAt = payload.generated_at;
+  if (
+    typeof generatedAt !== "number" ||
+    !Number.isSafeInteger(generatedAt) || generatedAt < 0 ||
     generatedAt > nowSec + TRENDING_MAX_FUTURE_SKEW_SEC
   ) return null;
   if (!Array.isArray(payload.items)) return null;
