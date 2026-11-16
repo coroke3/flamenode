@@ -173,7 +173,7 @@ test("MIG-0713 U03: matching an X ID on blur fills name and canonicalizes the ha
 });
 
 test("MIG-0713 U02: component has injected search/permission adapters, never directly fetches or invokes a Server Action", async () => {
-  const source = await readFile(new URL("../src/components/forms/VideoMembersField.tsx", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../../packages/ui/src/forms/videoMembers/VideoMembersField.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\bfetch\s*\(/);
   assert.doesNotMatch(source, /\bapplyVideoCollaboratorPermissionsBatch\s*\(/);
   assert.match(source, /await searchXUsers\(/);
@@ -197,8 +197,8 @@ function typeInto(input, value) {
 
 test("MIG-0713 U03: each vmembers class used by the form is defined in ported CSS", async () => {
   const [component, css] = await Promise.all([
-    readFile(new URL("../src/components/forms/VideoMembersField.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/styles/video-members.css", import.meta.url), "utf8"),
+    readFile(new URL("../../../packages/ui/src/forms/videoMembers/VideoMembersField.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../../packages/ui/src/styles/video-members.css", import.meta.url), "utf8"),
   ]);
   const used = new Set([...component.matchAll(/\bvmembers-[A-Za-z][\w-]*/g)].map((m) => m[0]));
   const defined = new Set([...css.matchAll(/\.vmembers-[A-Za-z][\w-]*/g)].map((m) => m[0].slice(1)));
