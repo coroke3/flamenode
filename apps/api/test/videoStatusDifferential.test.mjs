@@ -218,7 +218,9 @@ if (runUnderRootTsx(import.meta.url)) {
         },
         async get(key) {
           events.push(["r2.get", key]);
-          if (r2Fault === "read") throw new Error("public_visibility_manifest_transport_unavailable");
+          if (r2Fault === "read" || (r2Fault === "read-after-write" && etagVersion > 0)) {
+            throw new Error("public_visibility_manifest_transport_unavailable");
+          }
           const row = objects.get(key);
           return row ? {
             etag: row.etag,
@@ -320,6 +322,7 @@ if (runUnderRootTsx(import.meta.url)) {
         : await executeHonoVideoVisibilityStatusMutation(mutationInput, auditedHost);
       await Promise.all(pendingWakePromises);
       if (r2Fault === "read" || r2Fault === "write" ||
+          r2Fault === "read-after-write" ||
           r2Fault === "write-committed-foreign-owner-once") {
         assert.equal(result.ok, false, "persistent R2 errors or lost R2 ownership must stop before D1");
         assert.equal(result.errorCode, "visibility_precommit_failed");
@@ -587,6 +590,40 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(current.events.filter((event) =>
         event[0] === "r2.concurrent-owner-after-lost-ack").length, 1);
       assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), []);
+    });
+  }
+
+  for (const [initialStatus, nextStatus] of [["public", "private"], ["private", "public"]]) {
+    test(`R2 read-back outage after a committed block holds ${initialStatus}→${nextStatus} fail-closed`, async () => {
+      const current = await executeAuditedStatus(
+        nextStatus, true, false, false, false, initialStatus, "read-after-write",
+      );
+      const hono = await executeAuditedStatus(
+        nextStatus, false, false, false, false, initialStatus, "read-after-write",
+      );
+      assert.deepEqual(hono, current,
+        "CURRENT bridge and Hono adapter must fail closed identically without a confirmed R2 read-back");
+      assert.equal(current.result.ok, false);
+      assert.equal(current.result.errorCode, "visibility_precommit_failed");
+      assert.equal(current.result.retryable, false,
+        "unconfirmed R2 fence state is never safe to retry automatically");
+      assert.equal(current.batches, 0, "an unverified R2 fence cannot authorize any D1 mutation");
+      assert.equal(current.video.visibility_status, initialStatus);
+      assert.equal(current.video.updated_at, 1000);
+      assert.deepEqual(current.fences, []);
+      assert.deepEqual(current.audits, []);
+      assert.deepEqual(current.notifications, []);
+      assert.deepEqual(current.queue, []);
+      assert.equal(current.manifest?.entities?.length, 1,
+        "the committed R2 public blocker must stay in place when read-back fails");
+      assert.equal(current.manifest.entities[0].entity_type, "video");
+      assert.equal(current.manifest.entities[0].entity_id, "vid-1");
+      assert.equal(current.events.filter((event) => event[0] === "r2.put").length, 1,
+        "R2 blocker is not overwritten or compensated away without confirmed ownership");
+      assert.ok(current.events.filter((event) => event[0] === "r2.get").length >= 2,
+        "initial read succeeded; confirmation and best-effort compensation tried to re-read");
+      assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), [],
+        "no post-commit side effect can run without the D1 commit");
     });
   }
 
