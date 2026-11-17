@@ -185,6 +185,57 @@ test("MIG-0650 U03bf rejects spliced or unaccounted-for Queue mutations", () => 
   }
 });
 
+test("MIG-0650 U03cf rejects sparse execution vectors before any D1 batch", async () => {
+  const baseline = fixture();
+  const holes = n => new Array(n);
+  const sparseQueueStatements = holes(1);
+  const sparseQueueExpected = holes(1);
+  const invalid = [
+    { ...baseline.assembly, plan: {
+      ...baseline.assembly.plan, statements: [undefined, queueRow],
+    } },
+    { ...baseline.assembly, plan: {
+      ...baseline.assembly.plan, expectedChanges: [undefined, 1],
+    } },
+    { ...baseline.assembly, plan: {
+      ...baseline.assembly.plan, audits: holes(1),
+    } },
+    { ...baseline.assembly, plan: {
+      ...baseline.assembly.plan, statements: [null, queueRow],
+    } },
+    { ...baseline.assembly, plan: {
+      ...baseline.assembly.plan, audits: [null],
+    } },
+    { ...baseline.assembly,
+      plan: { ...baseline.assembly.plan, statements: [mutation, undefined] },
+      queue: { ...baseline.assembly.queue, statements: sparseQueueStatements },
+    },
+    { ...baseline.assembly,
+      plan: { ...baseline.assembly.plan, expectedChanges: [null, undefined] },
+      queue: { ...baseline.assembly.queue, expectedChanges: sparseQueueExpected },
+    },
+    { ...baseline.assembly, targets: holes(1) },
+    { ...baseline.assembly, targets: [null] },
+  ];
+  let dbTouches = 0;
+  const noDb = new Proxy({}, {
+    get() { dbTouches++; throw new Error("invalid atomic input reached D1"); },
+  });
+  for (const assembly of invalid) {
+    const input = fixture({ assembly });
+    assert.throws(() => prepareAdminMemberAtomicExecution(input), {
+      name: "RangeError", message: "video_admin_member_atomic_execution_invalid",
+    });
+    await assert.rejects(
+      executeAdminMemberAtomicCandidate(noDb, input),
+      { name: "RangeError", message: "video_admin_member_atomic_execution_invalid" },
+    );
+  }
+  assert.equal(dbTouches, 0, "malformed execution vectors never touch D1");
+  assert.ok(prepareAdminMemberAtomicExecution(baseline),
+    "dense canonical plan remains valid");
+});
+
 test("MIG-0650 U03bf requires complete no-op and rejects fake no-op with Queue", () => {
   const baseline = noOp();
   const invalid = [

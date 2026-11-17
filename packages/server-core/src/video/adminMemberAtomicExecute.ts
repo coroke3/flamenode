@@ -65,6 +65,25 @@ export function prepareAdminMemberAtomicExecution(
     !Array.isArray(assembly.queue.statements) ||
     !Array.isArray(assembly.queue.expectedChanges) ||
     !Array.isArray(assembly.targets) ||
+    // Array#some skips holes. Inspect dense projections of every execution
+    // vector so a forged caller cannot smuggle missing D1 statements, audits
+    // or Queue assertions past the pure pre-execution boundary.
+    Array.from(assembly.plan.statements).some(statement => statement == null) ||
+    Array.from(assembly.plan.expectedChanges).some(expected =>
+      expected !== null &&
+      (!Number.isSafeInteger(expected) || expected < 0)
+    ) ||
+    Array.from(assembly.plan.audits).some(audit =>
+      !audit || typeof audit !== "object" || Array.isArray(audit)
+    ) ||
+    Array.from(assembly.queue.statements).some(statement => statement == null) ||
+    Array.from(assembly.queue.expectedChanges).some(expected =>
+      !Number.isSafeInteger(expected) || expected < 0
+    ) ||
+    Array.from(assembly.targets).some(target =>
+      !target || typeof target.targetType !== "string" || !target.targetType ||
+      typeof target.targetId !== "string" || !target.targetId
+    ) ||
     // Even a no-op must not be acknowledged with a forged/missing guard actor.
     !preloaded?.settings ||
     !isValidPreloadedActorSnapshotJson(preloaded.actorSnapshotJsonById?.[actorUserId])
