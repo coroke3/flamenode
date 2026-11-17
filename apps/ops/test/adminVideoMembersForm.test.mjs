@@ -374,3 +374,43 @@ test("MIG-0730 U02u: refresh callback failure never disguises a successful save 
     } finally { await ui.cleanup(); }
   }
 });
+
+test("MIG-0730 U02y: swapping same-video save adapter retires its old async success or failure", async () => {
+  for (const outcome of ["success", "failure"]) {
+    const pending = deferred();
+    let oldWrites = 0, nextWrites = 0, oldRefreshes = 0, nextRefreshes = 0;
+    const oldSave = async () => { oldWrites++; return pending.promise; };
+    const nextSave = async () => { nextWrites++; return { ok: true, message: "NEW SAVE" }; };
+    const ui = setup({
+      save: oldSave,
+      onSaved: () => { oldRefreshes++; },
+    });
+    try {
+      await ui.render();
+      await ui.submit();
+      assert.equal(oldWrites, 1);
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true);
+
+      // The capability remains truthy while a caller swaps its scoped
+      // authorization adapter. The old request may already have committed.
+      await ui.render({ save: nextSave, onSaved: () => { nextRefreshes++; } });
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true,
+        "do not overlap an unknown write with a new adapter request");
+
+      const late = outcome === "success"
+        ? { ok: true, message: "OBSOLETE ADAPTER SUCCESS" }
+        : Promise.reject(new Error("obsolete adapter request failed"));
+      await React.act(async () => pending.finish(late));
+      assert.equal(oldRefreshes, 0);
+      assert.equal(nextRefreshes, 0);
+      assert.doesNotMatch(ui.target.textContent, /OBSOLETE ADAPTER|保存中にエラー/);
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false);
+      assert.equal(nextWrites, 0, "no automatic replay after the old settlement");
+
+      await ui.submit();
+      assert.equal(nextWrites, 1);
+      assert.equal(nextRefreshes, 1);
+      assert.match(ui.target.textContent, /NEW SAVE/);
+    } finally { await ui.cleanup(); }
+  }
+});

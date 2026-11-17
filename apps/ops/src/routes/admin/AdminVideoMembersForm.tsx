@@ -50,15 +50,18 @@ function AdminVideoMembersFormForVideo({
   const enabled = Boolean(save) && (!isCollab || membersField != null);
   // Losing the required member field is also a write-capability revocation,
   // even when the save function itself remains present.
-  const saveCapabilityRef = React.useRef(enabled);
+  // A true-to-true save adapter change may represent a new authorization
+  // boundary. Reject the old asynchronous receipt even if the button remains.
+  const saveCapabilityRef = React.useRef({ enabled, save });
   const saveCapabilityEpoch = React.useRef(0);
   React.useLayoutEffect(() => {
-    if (saveCapabilityRef.current !== enabled) {
-      saveCapabilityRef.current = enabled;
+    if (saveCapabilityRef.current.enabled !== enabled ||
+        saveCapabilityRef.current.save !== save) {
+      saveCapabilityRef.current = { enabled, save };
       saveCapabilityEpoch.current += 1;
       setResult(null);
     }
-  }, [enabled]);
+  }, [enabled, save]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
