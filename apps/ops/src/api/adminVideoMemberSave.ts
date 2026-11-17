@@ -12,10 +12,14 @@ export type AdminVideoMemberSaveResult = {
 
 const INVALID = "参加者設定の入力を確認してください。";
 const UNVERIFIED = "保存結果を確認できませんでした。最新状態を再取得してください。";
+// Match MIG-0650's unmounted SA-085 adminMembersBody.ts interim JSON limit.
+// This is NOT a validated maximum for every legal CURRENT member payload;
+// re-evaluate with that server policy before enabling the route.
+const MAX_SA085_JSON_BODY_BYTES = 256 * 1024;
 
 function validatedBody(videoId: string, formData: FormData): {
   encodedId: string;
-  body: { is_collab: string[]; members_json: string };
+  body: string;
 } | null {
   if (typeof videoId !== "string" || !videoId || videoId.length > 64 ||
       videoId.trim() !== videoId || videoId === "." || videoId === ".." ||
@@ -40,6 +44,9 @@ function validatedBody(videoId: string, formData: FormData): {
       members.length !== 1 || typeof members[0] !== "string") return null;
 
   const memberJson = members[0];
+  // UTF-8 JSON transport cannot be smaller than this UTF-16 code-unit count.
+  // Reject oversized input before parsing a potentially expensive nested array.
+  if (memberJson.length > MAX_SA085_JSON_BODY_BYTES) return null;
   try {
     const parsed: unknown = JSON.parse(memberJson);
     if (!Array.isArray(parsed) || parsed.length > MAX_VIDEO_MEMBERS ||
@@ -55,10 +62,16 @@ function validatedBody(videoId: string, formData: FormData): {
     }
   } catch { return null; }
 
-  return {
-    encodedId,
-    body: { is_collab: checkbox as string[], members_json: memberJson },
-  };
+  // Account for JSON escapes, the envelope and multi-byte UTF-8 on the exact
+  // wire payload. A short UTF-16 member string can still exceed the HTTP limit.
+  const body = JSON.stringify({
+    is_collab: checkbox as string[],
+    members_json: memberJson,
+  });
+  if (new TextEncoder().encode(body).byteLength > MAX_SA085_JSON_BODY_BYTES) {
+    return null;
+  }
+  return { encodedId, body };
 }
 
 /**
@@ -80,7 +93,7 @@ export async function saveAdminVideoMembers(
         credentials: "same-origin",
         cache: "no-store",
         headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify(parsed.body),
+        body: parsed.body,
       },
     );
     if (response.status !== 200) return { ok: false, message: UNVERIFIED };
