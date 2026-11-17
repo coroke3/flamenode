@@ -15,6 +15,7 @@
     "./video/memberChapterAudit": "./src/video/memberChapterAudit.ts",
     "./video/memberChapterRows": "./src/video/memberChapterRows.ts",
     "./video/memberCanonicalization": "./src/video/memberCanonicalization.ts",
+    "./video/memberWriteMutationBatch": "./src/video/memberWriteMutationBatch.ts",
     "./video/memberChapterSql": "./src/video/memberChapterSql.ts",
     "./video/hiddenMemberCarrySql": "./src/video/hiddenMemberCarrySql.ts",
     "./video/memberPermissionCarry": "./src/video/memberPermissionCarry.ts",
