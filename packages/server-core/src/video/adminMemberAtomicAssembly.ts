@@ -32,11 +32,21 @@ type MemberAtomicPlan = {
   expectedChanges: (number | null)[];
   audits: WriteAuditLogInput[];
 };
-type Target = Pick<
+/**
+ * CURRENT accepts seven persisted video states for admin member maintenance.
+ * The older Drizzle schema infers only four visibility values; the Hono
+ * authorized D1 SELECT and runtime guard deliberately accept all seven.
+ * Widen only this candidate's already-validated snapshot, not the schema.
+ */
+export type AdminMemberAuthorizedTarget = Pick<
   typeof videos.$inferSelect,
-  "id" | "collaboration_type" | "visibility_status" |
-  "creator_x_user_id" | "updated_at"
->;
+  "id" | "collaboration_type" | "creator_x_user_id" | "updated_at"
+> & {
+  visibility_status:
+    | "draft" | "pending" | "public" | "limited"
+    | "private" | "archived" | "voided";
+};
+type Target = AdminMemberAuthorizedTarget;
 
 export type AdminMemberAtomicAssembly = {
   plan: MemberAtomicPlan;

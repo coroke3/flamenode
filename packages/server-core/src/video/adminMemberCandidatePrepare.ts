@@ -7,7 +7,7 @@
  * It must instrument EVERY invocation-local D1 read and supply the measured
  * count *after* this function's canonicalization/planning reads.
  */
-import type { videos } from "@flamenode/db/schema";
+
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import { isCanonicalXId } from "@flamenode/domain/xid";
 import {
@@ -22,6 +22,7 @@ import { buildReplaceVideoMembersPlan } from "./replaceVideoMembers.ts";
 import {
   assembleAdminVideoMemberAtomicPlan,
   type AdminMemberAtomicAssembly,
+  type AdminMemberAuthorizedTarget,
 } from "./adminMemberAtomicAssembly.ts";
 import {
   prepareAdminMemberAtomicExecution,
@@ -29,11 +30,7 @@ import {
 } from "./adminMemberAtomicExecute.ts";
 import type { AtomicAuditMutationInput } from "../audit/mutate.ts";
 
-type AuthorizedTarget = Pick<
-  typeof videos.$inferSelect,
-  "id" | "collaboration_type" | "visibility_status" |
-  "creator_x_user_id" | "updated_at"
->;
+type AuthorizedTarget = AdminMemberAuthorizedTarget;
 
 export type AdminMemberCandidatePrepareInput = {
   /** Supplied ONLY by the authenticated target-video D1 SELECT, not JSON. */

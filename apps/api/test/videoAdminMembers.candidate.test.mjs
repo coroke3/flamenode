@@ -254,6 +254,30 @@ test("MIG-0650 U03bt opt-in Hono dry-run composes no-op and changing member plan
   } finally { s.sqlite.close(); }
 });
 
+test("MIG-0650 U03bu Hono dry-run accepts all seven CURRENT video states without writes", async () => {
+  const s = realGuardFixture({ enableCanonicalDryRun: true });
+  try {
+    for (const state of ["draft", "pending", "public", "limited", "private", "archived", "voided"]) {
+      s.sqlite.prepare("UPDATE videos SET visibility_status = ? WHERE id = 'v_two'").run(state);
+      const beforeReads = s.d1.stats.reads;
+      const response = await s.send(
+        { is_collab: ["false"], members_json: "[]" },
+        SITE, "/api/videos/v_two/members");
+      assert.equal(response.status, 501,
+        state + " must pass the canonical planner but never commit a write");
+      assert.deepEqual(await response.json(), {
+        ok: false, message: "参加者設定の保存APIは移行準備中です。",
+      });
+      assert.ok(s.d1.stats.reads - beforeReads > 3,
+        state + " must reach canonical read-metered planning");
+      assert.equal(s.d1.stats.batches, 0);
+      assert.equal(s.count("audit_logs"), 0);
+      assert.equal(s.count("static_rebuild_queue"), 0);
+      assert.equal(s.count("video_members"), 0);
+    }
+  } finally { s.sqlite.close(); }
+});
+
 test("MIG-0650 U03bt dry-run never bypasses guard or turns a rejection into a write", async () => {
   for (const config of [
     { as: null, expected: 401 },
