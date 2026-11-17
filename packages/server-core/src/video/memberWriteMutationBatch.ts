@@ -82,6 +82,14 @@ export function buildVideoMemberWriteMutationBatch(
   if (membersChanged && existingPublicCount !== beforeSnapshotRows.length) {
     throw new RangeError("video_member_write_public_count_mismatch");
   }
+  // CURRENT derives membersChanged from these canonical snapshot rows.
+  // A future Hono adapter must not suppress the public replacement, strict
+  // member audit or rebuild queue by passing "unchanged" with different rows.
+  // The authorized snapshot is limited to 100 public members by the caller.
+  if (!membersChanged &&
+      JSON.stringify(beforeSnapshotRows) !== JSON.stringify(afterSnapshotRows)) {
+    throw new RangeError("video_member_write_undeclared_member_changes");
+  }
   // Exact DELETE/INSERT changes() counts rely on unique IDs in each
   // independently supplied snapshot. D1 primary keys cannot substitute for
   // an authenticated plan preflight: duplicate JSON1 delete IDs are silently
