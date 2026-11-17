@@ -138,7 +138,24 @@ export async function executeVideoVisibilityStatusMutation<DB>(
       }
     }
     if (host.isAuditMutationError(error)) {
-      const currentStatus = await host.rereadStatus(db, videoId);
+      let currentStatus: string | null | undefined;
+      try {
+        currentStatus = await host.rereadStatus(db, videoId);
+      } catch {
+        // A failed CAS followed by an unavailable D1 reread has an UNKNOWN
+        // final status. Do not leak SQL/provider errors or mark it idempotent
+        // or automatically retry a potentially fenced visibility transition.
+        host.log("warn", `[${logTag}] visibility status reread failed`, {
+          traceId, error_code: "visibility_status_reread_failed",
+        });
+        return {
+          ok: false,
+          message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+          errorCode: "status_unverified",
+          traceId,
+          retryable: false,
+        };
+      }
       if (currentStatus === requestedStatus) {
         return host.markPendingPublicReflection(
           { ok: true, message: "すでに同じ状態へ更新されています。" },
