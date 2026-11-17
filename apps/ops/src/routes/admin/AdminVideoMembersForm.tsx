@@ -68,10 +68,22 @@ function AdminVideoMembersFormForVideo({
   // be read-only, belong to another video, serialize to a different field, or
   // lack one of its required privileged adapters. OFF would otherwise submit a
   // locally synthesized members_json=[] even though that field is unwriteable.
-  const hasHiddenMemberInput = React.isValidElement(membersField) &&
-    membersField.type === "input" &&
-    (membersField.props as { type?: unknown }).type === "hidden" &&
-    (membersField.props as { name?: unknown }).name === "members_json";
+  const nativeMemberProps = React.isValidElement(membersField) &&
+    membersField.type === "input"
+    ? membersField.props as {
+        type?: unknown; name?: unknown; value?: unknown; disabled?: unknown;
+      }
+    : null;
+  // A disabled or empty native placeholder is not a usable editor, even if
+  // the form generates members_json=[] on collaboration OFF. Without this
+  // guard the placeholder alone could authorize a destructive OFF submit.
+  const hasHiddenMemberInput = nativeMemberProps !== null &&
+    nativeMemberProps.type === "hidden" &&
+    nativeMemberProps.name === "members_json" &&
+    typeof nativeMemberProps.value === "string" &&
+    (nativeMemberProps.disabled === undefined ||
+      nativeMemberProps.disabled === false ||
+      nativeMemberProps.disabled === null);
   // A known shared editor may keep *local* collaboration drafts even while
   // its save adapter is unavailable. This must not imply write authorization.
   const hasMemberEditor = sharedEditor !== null || hasHiddenMemberInput;
