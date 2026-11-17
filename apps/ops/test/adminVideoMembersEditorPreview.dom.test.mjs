@@ -630,13 +630,17 @@ test("MIG-0730 U02ab: query change never offers stale remote suggestions before 
     assert.equal(requests[0].query, "Alpha");
     await React.act(async () => requests[0].resolve({
       items: [{ id: "alpha_creator", x_name: "ALPHA CANDIDATE" }],
-      hasMore: true, nextOffset: 20, hint: null,
+      hasMore: true, nextOffset: 20, hint: "ALPHA PRIVATE QUERY HINT",
     }));
     assert.ok(options().includes("ALPHA CANDIDATE"));
+    assert.match(target.textContent, /ALPHA PRIVATE QUERY HINT/,
+      "an authorized result may show the matching query's hint");
     assert.ok([...target.querySelectorAll("button")].some(button =>
       button.textContent.includes("候補をさらに読み込む")));
 
     await edit("Bravo");
+    assert.doesNotMatch(target.textContent, /ALPHA PRIVATE QUERY HINT/,
+      "previous query hint must disappear immediately, not after the 250ms debounce");
     assert.ok(![...target.querySelectorAll("button")].some(button =>
       button.textContent.includes("候補をさらに読み込む")),
       "old query pagination cursor must not survive an input change");
@@ -646,9 +650,11 @@ test("MIG-0730 U02ab: query change never offers stale remote suggestions before 
     assert.equal(requests[1].query, "Bravo");
     await React.act(async () => requests[1].resolve({
       items: [{ id: "bravo_creator", x_name: "BRAVO CANDIDATE" }],
-      hasMore: false, nextOffset: null, hint: null,
+      hasMore: false, nextOffset: null, hint: "BRAVO AUTHORIZED QUERY HINT",
     }));
     assert.ok(options().includes("BRAVO CANDIDATE"));
+    assert.match(target.textContent, /BRAVO AUTHORIZED QUERY HINT/);
+    assert.doesNotMatch(target.textContent, /ALPHA PRIVATE QUERY HINT/);
     assert.ok(!options().includes("ALPHA CANDIDATE"));
     assert.deepEqual(formPayload(target).map(x => x.name), ["Bravo"],
       "search snapshot partition must not reset the member draft");

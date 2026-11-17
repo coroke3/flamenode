@@ -175,6 +175,9 @@ function VideoMembersFieldForTarget({
     "idle" | "loading" | "done" | "error"
   >("idle");
   const [searchHint, setSearchHint] = React.useState<string | null>(null);
+  // A search hint can contain query-specific private metadata. The previous
+  // query's hint must never paint while a new query is in its debounce window.
+  const [searchHintQuery, setSearchHintQuery] = React.useState("");
   const [searchHasMore, setSearchHasMore] = React.useState(false);
   const [nextOffset, setNextOffset] = React.useState<number | null>(null);
   const suggestionRequestIdRef = React.useRef(0);
@@ -193,6 +196,7 @@ function VideoMembersFieldForTarget({
     setFetched({ query: "", items: [] });
     setSearchStatus("idle");
     setSearchHint(null);
+    setSearchHintQuery("");
     setSearchHasMore(false);
     setNextOffset(null);
     // Restart the existing debounced search under the newly committed port.
@@ -206,6 +210,7 @@ function VideoMembersFieldForTarget({
       const requestId = ++suggestionRequestIdRef.current;
       setSearchStatus("loading");
       setSearchHint(null);
+      setSearchHintQuery("");
       try {
         const searchXUsers = searchXUsersRef.current;
         const json = await searchXUsers(q, offset, signal);
@@ -235,6 +240,7 @@ function VideoMembersFieldForTarget({
             ? "候補が見つかりません。X ID の表記や文字数を確認してください。"
             : (json.hint ?? null),
         );
+        setSearchHintQuery(q);
         setSearchStatus("done");
       } catch (e) {
         if (
@@ -251,6 +257,7 @@ function VideoMembersFieldForTarget({
         setSearchHasMore(false);
         setNextOffset(null);
         setSearchStatus("error");
+        setSearchHintQuery(q);
         setSearchHint("候補の取得に失敗しました。少し待って再入力してください。");
       }
     },
@@ -271,6 +278,7 @@ function VideoMembersFieldForTarget({
       setFetched({ query: "", items: [] });
       setSearchStatus("idle");
       setSearchHint(null);
+      setSearchHintQuery("");
       setSearchHasMore(false);
       setNextOffset(null);
       return;
@@ -921,7 +929,8 @@ function VideoMembersFieldForTarget({
         <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
           {searchStatus === "loading"
             ? "候補を検索中..."
-            : (searchHint ?? `${mergedSuggestions.length}件の候補を表示しています。`)}
+            : ((searchHintQuery === searchQuery.trim() ? searchHint : null) ??
+              `${mergedSuggestions.length}件の候補を表示しています。`)}
         </p>
       ) : null}
       <div
