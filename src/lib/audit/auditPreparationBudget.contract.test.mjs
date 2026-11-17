@@ -9,6 +9,10 @@ const atomicSource = await readFile(
   new URL("../video/atomicWritePlan.ts", import.meta.url),
   "utf8",
 );
+const atomicBudgetCore = await readFile(
+  new URL("../../../packages/server-core/src/video/videoAtomicBudget.ts", import.meta.url),
+  "utf8",
+);
 
 test("actor_x_user_id検証はaudit件数分SELECTせずJSON1 1 queryへまとめる", () => {
   assert.match(loggerSource, /async function loadApprovedActorXPairs/);
@@ -28,12 +32,12 @@ test("actor X検証queryはmutateWithAuditのD1予算にも含める", () => {
 });
 
 test("VideoAtomicWritePlanのpreflightもactor X検証1queryを同じ式で数える", () => {
-  assert.match(
-    atomicSource,
-    /const actorXValidationQueryCount = plan\.audits\.some/,
-  );
-  assert.match(atomicSource, /Boolean\(audit\.actor_x_user_id\?\.trim\(\)\)/);
-  assert.match(atomicSource, /actorXValidationQueryCount,/);
+  // MIG-0650 U03w: Next delegates this exact count to the canonical core.
+  assert.match(atomicSource, /from "@flamenode\/server-core\/video\/videoAtomicBudget"/);
+  assert.match(atomicSource, /inspectVideoAtomicWritePlanBudget\(plan\)/);
+  assert.match(atomicBudgetCore, /const actorXValidationQueryCount = plan\.audits\.some/);
+  assert.match(atomicBudgetCore, /Boolean\(audit\.actor_x_user_id\?\.trim\(\)\)/);
+  assert.match(atomicBudgetCore, /actorXValidationQueryCount,/);
 });
 
 test("監査INSERTは21列bindを4entry以下へchunkする", () => {
