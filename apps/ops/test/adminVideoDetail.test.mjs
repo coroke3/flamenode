@@ -18,7 +18,7 @@ import {
   safeAdminNextHref,
 } from "../.test-dist/apps/ops/src/api/adminVideoStatus.js";
 import { CreateModerationCaseForm } from "../.test-dist/apps/ops/src/routes/admin/CreateModerationCaseForm.js";
-import { StatusControls, AdminVideoTabs, AdminVideoDetail } from "../.test-dist/apps/ops/src/routes/admin/AdminVideoDetail.js";
+import { StatusControls, AdminVideoTabs, AdminVideoDetail, adminVideoPublicHref } from "../.test-dist/apps/ops/src/routes/admin/AdminVideoDetail.js";
 import { AdminVideoManagementTabs, AdminVideos } from "../.test-dist/apps/ops/src/routes/admin/AdminVideos.js";
 import { SaveSuccessNotice } from "../.test-dist/apps/ops/src/components/shared/SaveSuccessNotice.js";
 
@@ -67,6 +67,85 @@ test("MIG-0729 U01/U02: CURRENT tab labels, icons, active state, filter and cros
   assert.ok(detailNav.querySelector('a[href="/dashboard/edit/video%2F1/permissions?privileged=admin"]'));
   assert.ok(detailNav.querySelector('a[href="/AbcD1234567"]'));
   assert.ok(detailNav.querySelector('a[href="/admin/audit?table=videos&record=video%2F1"]'));
+});
+
+test("MIG-0729 U03a: public tab follows CURRENT videoPageHref for YouTube URLs and safe fallback", () => {
+  const youtube = "dQw4w9WgXcQ";
+  const checks = [
+    { id: "safe_slug", youtube_video_id: youtube, expected: "/" + youtube },
+    { id: "safe_slug", youtube_video_id: "https://youtu.be/" + youtube + "?t=30", expected: "/" + youtube },
+    { id: "safe_slug", youtube_video_id: "https://www.youtube.com/watch?v=" + youtube, expected: "/" + youtube },
+    { id: "safe_slug", youtube_video_id: "https://youtube.com/shorts/" + youtube, expected: "/" + youtube },
+    { id: "safe_slug", youtube_video_id: "https://youtube.com/embed/" + youtube, expected: "/" + youtube },
+    { id: "safe_slug", youtube_video_id: "https://youtube.com/live/" + youtube, expected: "/" + youtube },
+    { id: "safe_slug", youtube_video_id: "https://youtube.com/v/" + youtube, expected: "/" + youtube },
+    { id: "safe_slug", youtube_video_id: "https://youtube.com.evil.test/watch?v=" + youtube, expected: "/safe_slug" },
+    { id: "safe_slug", youtube_video_id: "javascript:alert(1)", expected: "/safe_slug" },
+    { id: "safe_slug", youtube_video_id: "//untrusted.example/abc", expected: "/safe_slug" },
+    { id: "safe_slug", youtube_video_id: null, expected: "/safe_slug" },
+    { id: "id with space", youtube_video_id: "invalid-id", expected: "/list" },
+    { id: "bad/path", youtube_video_id: null, expected: "/list" },
+    { id: "bad/path", youtube_video_id: "https://youtu.be/" + youtube, expected: "/" + youtube },
+    { id: "safe_slug", youtube_video_id: "https://youtu.be/" + youtube + ".evil", expected: "/safe_slug" },
+  ];
+  for (const { id, youtube_video_id, expected } of checks) {
+    assert.equal(adminVideoPublicHref({ id, youtube_video_id }), expected);
+    const html = renderToStaticMarkup(React.createElement(MemoryRouter, null,
+      React.createElement(AdminVideoTabs, {
+        videoId: id, youtubeVideoId: youtube_video_id, active: "detail",
+      })));
+    const nav = new JSDOM(html).window.document.querySelector('nav[aria-label="作品管理メニュー"]');
+    const link = [...nav.querySelectorAll("a")].find(a => a.textContent.trim() === "公開ページ");
+    assert.equal(link?.getAttribute("href"), expected,
+      "public tab must use the CURRENT-normalized same-origin public path");
+  }
+});
+
+test("MIG-0729 U03a: detail footer and public tab share the CURRENT canonical URL", async () => {
+  const saved = {
+    window: globalThis.window, document: globalThis.document,
+    act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+  };
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+    url: "https://flamenode.invalid/admin/videos/video-1",
+  });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  let calls = 0;
+  const payload = { ...detail, video: { ...detail.video,
+    youtube_video_id: "https://youtu.be/dQw4w9WgXcQ?t=30" } };
+  try {
+    await React.act(async () => root.render(React.createElement(MemoryRouter, {
+      initialEntries: ["/admin/videos/video-1"],
+    }, React.createElement(Routes, null, React.createElement(Route, {
+      path: "/admin/videos/:id",
+      element: React.createElement(AdminVideoDetail, {
+        fetchFn: async () => { calls++; return json(200, payload); },
+      }),
+    })))));
+    assert.equal(calls, 1);
+    const publicLinks = [...dom.window.document.querySelectorAll("a")]
+      .filter(a => a.textContent.trim() === "公開ページ");
+    assert.equal(publicLinks.length, 2, "both six-tab nav and detail footer link are visible");
+    for (const link of publicLinks) {
+      assert.equal(link.getAttribute("href"), "/dQw4w9WgXcQ");
+    }
+    const footerLink = dom.window.document.querySelector(
+      'nav[aria-label="作品の関連画面"] a[href="/dQw4w9WgXcQ"]');
+    assert.equal(footerLink?.getAttribute("target"), "_blank");
+    assert.equal(footerLink?.getAttribute("rel"), "noopener noreferrer");
+  } finally {
+    await React.act(async () => root.unmount());
+    dom.window.close();
+    if (saved.window === undefined) delete globalThis.window;
+    else globalThis.window = saved.window;
+    if (saved.document === undefined) delete globalThis.document;
+    else globalThis.document = saved.document;
+    if (saved.act === undefined) delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+    else globalThis.IS_REACT_ACT_ENVIRONMENT = saved.act;
+  }
 });
 
 test("MIG-0729 U01/U02: internal list/detail/reset/pagination links remain in Ops SPA", async () => {

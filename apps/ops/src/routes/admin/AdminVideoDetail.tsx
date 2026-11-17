@@ -25,6 +25,47 @@ const STATUS_OPTIONS = ["pending", "public", "private", "voided"] as const;
 const VOID_CATEGORIES = ["x_id_invalid", "duplicate", "withdrawn_by_creator", "operator_decision", "expired"] as const;
 
 
+/** CURRENT src/lib/youtube/id.ts extractYoutubeId() + videoPageHref() parity.
+ * This Ops-only helper must be reconciled with MIG-0730's member footer at
+ * integration; never treat raw YouTube URLs as a URL path component.
+ */
+export function adminVideoPublicHref(video: {
+  id: string;
+  youtube_video_id?: string | null;
+}): string {
+  const youtubeIdPattern = /^[A-Za-z0-9_-]{11}$/;
+  const supplied = video.youtube_video_id;
+  if (typeof supplied === "string" && supplied) {
+    const trimmed = supplied.trim();
+    if (youtubeIdPattern.test(trimmed)) return `/${trimmed}`;
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        const host = url.hostname.toLowerCase().replace(/^www\./, "");
+        if (host === "youtu.be") {
+          const id = url.pathname.split("/").filter(Boolean)[0];
+          if (id && youtubeIdPattern.test(id)) return `/${id}`;
+        }
+        if (host === "youtube.com" || host.endsWith(".youtube.com")) {
+          const queryId = url.searchParams.get("v");
+          if (queryId && youtubeIdPattern.test(queryId)) return `/${queryId}`;
+          const parts = url.pathname.split("/").filter(Boolean);
+          const index = parts.findIndex(part =>
+            ["shorts", "embed", "live", "v"].includes(part));
+          if (index >= 0 && parts[index + 1] &&
+              youtubeIdPattern.test(parts[index + 1]!)) {
+            return `/${parts[index + 1]}`;
+          }
+        }
+      }
+    } catch {
+      // Invalid or hostile video URL: use only a safe same-origin fallback.
+    }
+  }
+  return typeof video.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(video.id)
+    ? `/${video.id}` : "/list";
+}
+
 /** CURRENT AdminVideoTabs: preserve cross-SPA links, icons and active detail state. */
 export function AdminVideoTabs({ videoId, youtubeVideoId, active = "detail" }: {
   videoId: string;
@@ -32,7 +73,7 @@ export function AdminVideoTabs({ videoId, youtubeVideoId, active = "detail" }: {
   active?: "detail" | "members" | "edit" | "permissions" | "public" | "audit";
 }): React.ReactElement {
   const id = encodeURIComponent(videoId);
-  const publicId = encodeURIComponent(youtubeVideoId?.trim() || videoId);
+  const publicHref = adminVideoPublicHref({ id: videoId, youtube_video_id: youtubeVideoId });
   return <AdminResourceTabs
     active={active}
     ariaLabel="作品管理メニュー"
@@ -41,7 +82,7 @@ export function AdminVideoTabs({ videoId, youtubeVideoId, active = "detail" }: {
       { key: "members", href: `/admin/videos/${id}/members`, label: "メンバー", icon: "users" },
       { key: "edit", href: `/dashboard/edit/${id}?privileged=admin`, label: "内容編集", icon: "edit" },
       { key: "permissions", href: `/dashboard/edit/${id}/permissions?privileged=admin`, label: "編集権限", icon: "settings" },
-      { key: "public", href: `/${publicId}`, label: "公開ページ", icon: "external" },
+      { key: "public", href: publicHref, label: "公開ページ", icon: "external" },
       { key: "audit", href: `/admin/audit?table=videos&record=${id}`, label: "監査ログ", icon: "clock" },
     ]}
   />;
@@ -283,7 +324,7 @@ export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetc
   const data = result.data;
   const video = data.video;
   const slug = encodeURIComponent(video.id);
-  const publicSlug = encodeURIComponent(video.youtube_video_id?.trim() || video.id);
+  const publicHref = adminVideoPublicHref(video);
   return (
     <section className="fn-public-container fn-page">
       <header className="fn-page-head">
@@ -299,7 +340,7 @@ export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetc
           <StatusControls data={data} eventId={eventId} onRefresh={refresh}
             onNext={href => { void navigate(href); }} actions={actions} />
           <nav aria-label="作品の関連画面" className="fn-panel-actions">
-            <a href={`/${publicSlug}`} target="_blank" rel="noopener noreferrer">公開ページ</a>
+            <a href={publicHref} target="_blank" rel="noopener noreferrer">公開ページ</a>
             <a href={`/dashboard/edit/${slug}?privileged=admin`}>編集画面</a>
             <OpsLink href={`/admin/videos/${slug}/members`}>参加者設定</OpsLink>
           </nav>
