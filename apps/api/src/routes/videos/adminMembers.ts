@@ -18,6 +18,7 @@ import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { BODY_TOO_LARGE_MESSAGE } from "../admin/body.ts";
 import { readAdminVideoMembersJsonBody } from "./adminMembersBody.ts";
+import { createAdminMemberD1ReadMeter, type AdminMemberD1ReadMeter } from "./adminMemberD1ReadMeter.ts";
 
 type Ctx = Context<AppEnv>;
 
@@ -57,6 +58,12 @@ export function createDefaultVideoAdminMembersPreflightHost(
     loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
     allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
   });
+  // Hono's Context.env exposes provider bindings. Do NOT overwrite them on
+  // the original request or mutate the shared Worker environment. Instead,
+  // scope a metered, read-only overlay to this UNMOUNTED guard invocation.
+  // Direct loadAuthorizedVideo() probes outside an HTTP request retain their
+  // existing test-only semantics; requests always use the guarded overlay.
+  const guardedContexts = new WeakMap<Ctx, Ctx>();
   const stack: MiddlewareHandler<AppEnv>[] = [
     (c, next) => originGuardMiddleware(originOptions(c))(c, next),
     options.session ?? (sessionMiddleware() as unknown as MiddlewareHandler<AppEnv>),
@@ -69,7 +76,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
   ];
   return {
     loadAuthorizedVideo: (c, videoId) =>
-      c.env.DB.prepare(
+      (guardedContexts.get(c) ?? c).env.DB.prepare(
         'SELECT "id", "collaboration_type", "visibility_status", ' +
         '"creator_x_user_id", "youtube_video_id", "primary_event_id", "updated_at", ' +
         '(SELECT COALESCE(json_group_array("event_id"), \'[]\') FROM (' +
@@ -84,15 +91,44 @@ export function createDefaultVideoAdminMembersPreflightHost(
       ).bind(videoId, videoId, videoId).first<AdminVideoMemberTarget>(),
     writeGuard: async (c, next) => {
       c.header("Cache-Control", "private, no-store");
+      const meterState: { meter?: AdminMemberD1ReadMeter } = {};
+      const originalEnv = c.env;
+      // Lazy DB resolution preserves the existing origin-first denial order:
+      // an invalid Origin must never dereference even a failing DB binding.
+      const meteredEnv = new Proxy(Object.create(null), {
+        get(_facade, key) {
+          if (key === "DB") {
+            meterState.meter ??= createAdminMemberD1ReadMeter(originalEnv.DB);
+            return meterState.meter.binding;
+          }
+          return Reflect.get(originalEnv, key, originalEnv);
+        },
+      }) as AppEnv["Bindings"];
+      const guardedContext = new Proxy(c, {
+        get(target, key) {
+          if (key === "env") return meteredEnv;
+          // Hono Context methods may use private fields; bind them to the
+          // original Context, not to this request-scoped read-only overlay.
+          const value: unknown = Reflect.get(target, key, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as Ctx;
+      guardedContexts.set(c, guardedContext);
       const execute = async (index: number): Promise<Response | void> => {
         if (index === stack.length) return next();
         let child: Response | void = undefined;
-        const result = await stack[index]!(c, async () => {
+        const result = await stack[index]!(guardedContext, async () => {
           child = await execute(index + 1);
         });
         return result ?? child;
       };
-      return execute(0);
+      try {
+        return await execute(0);
+      } finally {
+        // Never permit a retained guard/Drizzle statement to issue late reads.
+        meterState.meter?.close();
+        guardedContexts.delete(c);
+      }
     },
   };
 }

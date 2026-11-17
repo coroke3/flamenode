@@ -160,13 +160,14 @@ import { atomicD1, seedChapterWorld, SESSION_USER, SITE } from "./support/chapte
 import { validateVideoMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
 import { MAX_ADMIN_JSON_BODY_BYTES } from "../src/routes/admin/body.ts";
 
-function realGuardFixture({ as = "u_admin", mode = "normal" } = {}) {
+function realGuardFixture({ as = "u_admin", mode = "normal", observeBinding } = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
   sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'").run(mode);
   const d1 = atomicD1(sqlite);
   const actor = as ? SESSION_USER(as, as === "u_admin" ? "admin" : "user", "x_admin") : null;
   const session = async (c, next) => {
+    observeBinding?.(c.env.DB);
     c.set("user", actor);
     c.set("sessionState", actor ? "user" : "none");
     await next();
@@ -183,6 +184,36 @@ function realGuardFixture({ as = "u_admin", mode = "normal" } = {}) {
   const count = table => sqlite.prepare('SELECT COUNT(*) AS n FROM "' + table + '"').get().n;
   return { sqlite, d1, send, count };
 }
+
+test("MIG-0650 U03bq authentic guard stack uses one per-request metered D1 facade and closes after 501", async () => {
+  const observed = [];
+  const s = realGuardFixture({ observeBinding: binding => observed.push(binding) });
+  try {
+    for (let i = 0; i < 2; i++) {
+      const before = s.d1.stats.reads;
+      const response = await s.send(valid());
+      assert.equal(response.status, 501, "the unmounted SA-085 writer remains disabled");
+      assert.equal(s.d1.stats.reads - before, 3,
+        "actor/TOS, CostGuard and authoritative video SELECT each use one D1 read");
+      assert.equal(observed.length, i + 1);
+      assert.notStrictEqual(observed[i], s.d1, "session receives the read-only facade, not raw DB");
+      assert.deepEqual(Reflect.ownKeys(observed[i]), [], "raw DB properties remain hidden");
+      assert.equal(Object.getPrototypeOf(observed[i]), null);
+      assert.throws(() => observed[i].prepare("SELECT 1"), {
+        name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
+      }, "request return seals even an otherwise legal SELECT");
+    }
+    assert.notStrictEqual(observed[0], observed[1], "separate requests never share a meter");
+    const beforeDenied = s.d1.stats.reads;
+    const denied = await s.send(valid(), "https://untrusted.invalid");
+    assert.equal(denied.status, 403);
+    assert.equal(observed.length, 2, "Origin denial occurs before session or D1 meter access");
+    assert.equal(s.d1.stats.reads, beforeDenied);
+    assert.equal(s.d1.stats.batches, 0, "neither the guard nor the read-only handler can write D1");
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+  } finally { s.sqlite.close(); }
+});
 
 test("MIG-0650 U03f real origin guard denies cross-origin before any D1 read", async () => {
   const s = realGuardFixture();
