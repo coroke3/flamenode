@@ -115,8 +115,12 @@ test("MIG-0730 T03: 101 members fail closed without writing any member batch", a
   } finally { await ui.cleanup(); }
 });
 
-test("MIG-0730 U02c: invalid member JSON and hidden edit-only member fail closed", async () => {
-  for (const payload of ["{", '[{"name":"hidden","is_public_member":0}]']) {
+test("MIG-0730 U02c/U02bb: malformed native member data cannot become a destructive OFF save", async () => {
+  for (const payload of [
+    "{", "null", '{"members":[]}',
+    '[{"name":"hidden","is_public_member":0}]',
+    '[{"name":"hidden","can_edit":true}]',
+  ]) {
     let called = false;
     const ui = setup({
       membersField: h("input", { type: "hidden", name: "members_json", value: payload }),
@@ -127,6 +131,14 @@ test("MIG-0730 U02c: invalid member JSON and hidden edit-only member fail closed
       await ui.submit();
       assert.equal(called, false);
       assert.ok(ui.target.querySelector('[role="alert"]'));
+      const toggle = ui.target.querySelector('input[name="is_collab"][type="checkbox"]');
+      await React.act(async () => toggle.click());
+      assert.equal(toggle.checked, false);
+      assert.deepEqual(new FormData(ui.target.querySelector("form")).getAll("members_json"), ["[]"],
+        "the synthetic OFF field alone must not validate a broken original editor");
+      await ui.submit();
+      assert.equal(called, false, "malformed or privileged native member rows cannot trigger a destructive OFF write");
+      assert.match(ui.target.querySelector('[role="alert"]').textContent, /形式が正しくありません/);
     } finally { await ui.cleanup(); }
   }
 });
