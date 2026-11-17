@@ -312,11 +312,14 @@ test("CAS reread and R2 compensation both unavailable still return sanitized sta
   assert.equal(result.ok, false);
   assert.equal(result.errorCode, "status_unverified");
   assert.equal(result.retryable, false);
-  assert.deepEqual(calls.map((entry) => entry[2].error_code), [
+  // host() records the successful precommit as a string event too;
+  // only structured logger calls have a diagnostic error_code field.
+  const diagnosticLogs = calls.filter((entry) => Array.isArray(entry));
+  assert.deepEqual(diagnosticLogs.map((entry) => entry[2].error_code), [
     "visibility_compensation_failed",
     "visibility_status_reread_failed",
   ]);
-  assert.deepEqual(calls.map((entry) => entry[0]), ["warn", "warn"]);
+  assert.deepEqual(diagnosticLogs.map((entry) => entry[0]), ["warn", "warn"]);
   assert.doesNotMatch(JSON.stringify({ calls, result }), /account_token|authorization=private/);
 });
 
