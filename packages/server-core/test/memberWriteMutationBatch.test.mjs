@@ -212,3 +212,49 @@ test("MIG-0650 U03d-2k: Next delegates exact CAS and D1 order to shared core, st
   assert.doesNotMatch(legacy, /db\.run\(buildVideoMemberSetGuardSql/);
   assert.doesNotMatch(source, /mutateWithAudit|wakeNotificationQueue|writeGuard/);
 });
+
+
+test("MIG-0650 U03aj fail-closes cross-video member/chapter rows before D1 planning", () => {
+  const foreignMember = member("cross", "alice", { video_id: "video-other" });
+  const foreignChapter = chapter("cross:member:0", { video_id: "video-other" });
+  const ordinaryMember = member("correct");
+  const ordinaryChapter = chapter("correct:member:0");
+  const cases = [
+    { beforeSnapshotRows: [foreignMember] },
+    { afterSnapshotRows: [foreignMember], membersChanged: true },
+    { hiddenCarryRows: [member("cross-hidden", "alice", {
+      video_id: "video-other", is_public_member: 0,
+    })] },
+    { existingManagedChapters: [foreignChapter], chaptersChanged: true },
+    { nextManagedChapters: [foreignChapter], chaptersChanged: true },
+    { afterSnapshotRows: [ordinaryMember, foreignMember], membersChanged: true },
+    { existingManagedChapters: [ordinaryChapter, foreignChapter], chaptersChanged: true },
+  ];
+  for (const options of cases) {
+    const c = collector();
+    const input = {
+      videoId: "video-1", beforeSnapshotRows: [], afterSnapshotRows: [],
+      existingPublicCount: 0, hiddenCarryRows: [], newXUsers: [],
+      existingManagedChapters: [], nextManagedChapters: [],
+      membersChanged: false, chaptersChanged: false, ...options,
+    };
+    assert.throws(() => buildVideoMemberWriteMutationBatch(c.db, input),
+      { name: "RangeError", message: "video_member_write_cross_video_rows" },
+      "wrong video_id in " + Object.keys(options).join(","));
+    assert.equal(c.queries.length, 0,
+      "a corrupt row must not construct even the member-set CAS statement");
+  }
+
+  const good = build({
+    beforeSnapshotRows: [ordinaryMember],
+    afterSnapshotRows: [ordinaryMember],
+    hiddenCarryRows: [member("hidden", "alice", { is_public_member: 0 })],
+    existingPublicCount: 1,
+    existingManagedChapters: [ordinaryChapter],
+    nextManagedChapters: [ordinaryChapter],
+    membersChanged: true,
+    chaptersChanged: true,
+  });
+  assert.deepEqual(good.expectedChanges, [null, null, 1, 1, 1, 1, 1],
+    "same-video CURRENT atomic mutation ordering is preserved");
+});
