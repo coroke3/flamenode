@@ -99,7 +99,9 @@ function hasValidNormalizedMemberShape(
       if (seenXIds.has(member.x_user_id)) return false;
       seenXIds.add(member.x_user_id);
     }
-    if (member.chapters.some(ch =>
+    // Array#some skips holes, but normalizeMemberChapters iterates them and
+    // would throw TypeError on an absent chapter instead of failing closed.
+    if (Array.from(member.chapters).some(ch =>
       !ch || typeof ch.time !== "string" || ch.time !== ch.time.trim() ||
       typeof ch.label !== "string" || ch.label.length > 120 ||
       ch.label !== ch.label.trim() ||

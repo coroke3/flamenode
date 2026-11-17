@@ -1443,6 +1443,28 @@ test("MIG-0650 U03cd forged normalized fields and duplicate X handles reject bef
       { name: "RangeError", message: "video_admin_member_candidate_prepare_invalid" },
     );
   }
+  // Sparse input survives Array#some but normalizeMemberChapters uses
+  // entries(), which dereferences the missing chapter and throws TypeError.
+  // Reject at the candidate boundary with a stable RangeError before D1.
+  const sparseFirst = new Array(2);
+  sparseFirst[1] = chapter;
+  const sparseLast = [chapter];
+  sparseLast.length = 2;
+  for (const chapters of [sparseFirst, sparseLast]) {
+    await assert.rejects(
+      prepareAdminVideoMemberCandidateWrite(neverDb, {
+        ...input,
+        validated: {
+          members: [{ ...member, chapters }],
+          chaptersByIndex: new Map([[0, Array.from(
+            { length: chapters.length },
+            (_, index) => ({ ...normalized, order_index: index }),
+          )]]),
+        },
+      }),
+      { name: "RangeError", message: "video_admin_member_candidate_prepare_invalid" },
+    );
+  }
   assert.equal(dbAccess, 0,
     "all malformed supposedly validated submissions rejected before canonical SELECT");
 });
