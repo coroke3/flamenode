@@ -337,3 +337,54 @@ test("MIG-0730 U02ax: malformed and forged input retains a separate generic erro
   assert.match(overflow.message, /現行の管理画面で保存してください/);
   assert.equal(sends, 0);
 });
+
+test("MIG-0730 U02bl: same-video SA-085 direct client is single-flight even without a Preview", async () => {
+  for (const outcome of ["success", "lost_response"]) {
+    const videoId = "video-u02bl-" + outcome;
+    const calls = [];
+    let resolveFirst, rejectFirst;
+    const waiting = new Promise((resolve, reject) => {
+      resolveFirst = resolve; rejectFirst = reject;
+    });
+    const send = (path, init) => {
+      calls.push({ path, init });
+      return path.includes(videoId)
+        ? waiting
+        : Promise.resolve(reply({ ok: true, videoId: "different-video" }));
+    };
+    const first = saveAdminVideoMembers(videoId, form({ videoId }), send);
+    assert.equal(calls.length, 1);
+    const duplicate = await saveAdminVideoMembers(
+      videoId, form({ videoId, members: [{ name: "Bob" }] }), send,
+    );
+    assert.deepEqual(duplicate, {
+      ok: false,
+      message: "この作品の参加者保存は処理中です。完了後に最新状態を確認してください。",
+    });
+    assert.equal(calls.length, 1, "same-video duplicate must not reach the PUT port");
+
+    const other = await saveAdminVideoMembers(
+      "different-video", form({ videoId: "different-video" }), send,
+    );
+    assert.deepEqual(other, { ok: true }, "a separate video is not blocked");
+    assert.equal(calls.length, 2);
+
+    if (outcome === "success") {
+      resolveFirst(reply({ ok: true, videoId }));
+    } else {
+      rejectFirst(new Error("network response lost after server may have committed"));
+    }
+    const firstResult = await first;
+    assert.equal(firstResult.ok, outcome === "success");
+    assert.equal(calls.length, 2, "ambiguous PUT never retries itself");
+    const explicitRetry = await saveAdminVideoMembers(
+      videoId, form({ videoId }), async path => {
+        calls.push({ path });
+        return reply({ ok: true, videoId });
+      },
+    );
+    assert.deepEqual(explicitRetry, { ok: true },
+      "a new explicit action is allowed only after the original attempt settles");
+    assert.equal(calls.length, 3);
+  }
+});

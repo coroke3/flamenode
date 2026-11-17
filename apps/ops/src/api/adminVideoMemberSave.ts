@@ -13,6 +13,12 @@ export type AdminVideoMemberSaveResult = {
 const INVALID = "参加者設定の入力を確認してください。";
 const TOO_LARGE = "参加者データが移行先の暫定256KiB制限を超えています。現行の管理画面で保存してください。";
 const UNVERIFIED = "保存結果を確認できませんでした。最新状態を再取得してください。";
+// The Hono request may commit even if the response is lost. Do not issue a
+// second same-video PUT while the first request is in flight, including when
+// callers bypass the optional Preview wrapper or remount it. Browser-module
+// scope only: server-side CAS is required across tabs/devices.
+const inFlightPublicMemberSaves = new Set<string>();
+const BUSY = "この作品の参加者保存は処理中です。完了後に最新状態を確認してください。";
 // Match MIG-0650's unmounted SA-085 adminMembersBody.ts interim JSON limit.
 // This is NOT a validated maximum for every legal CURRENT member payload;
 // re-evaluate with that server policy before enabling the route.
@@ -89,6 +95,12 @@ export async function saveAdminVideoMembers(
   const parsed = validatedBody(videoId, formData);
   if (parsed.kind === "invalid") return { ok: false, message: INVALID };
   if (parsed.kind === "too_large") return { ok: false, message: TOO_LARGE };
+  // Use the validated call-time string, not a mutable FormData field or
+  // response videoId, as the lock identity. Acquire before the first await.
+  if (inFlightPublicMemberSaves.has(videoId)) {
+    return { ok: false, message: BUSY };
+  }
+  inFlightPublicMemberSaves.add(videoId);
   try {
     const response = await fetchFn(
       `/api/videos/${parsed.encodedId}/members`,
@@ -124,5 +136,9 @@ export async function saveAdminVideoMembers(
     };
   } catch {
     return { ok: false, message: UNVERIFIED };
+  } finally {
+    // A settled unknown result is not proof of rollback; never auto-retry.
+    // Only a later explicit user action may attempt another PUT.
+    inFlightPublicMemberSaves.delete(videoId);
   }
 }
