@@ -24,15 +24,22 @@ export function AdminVideoMembersReadView({ videoId, data }: {
   let encodedVideoId: string;
   try { encodedVideoId = encodeURIComponent(videoId); }
   catch { return <p role="alert">参加者データを表示できません。</p>; }
-  // Defense in depth: callers must not be able to bypass the read adapter's
-  // public-only verification by handing this view a forged or oversized DTO.
-  const rawMembers: unknown = data && typeof data === "object" && !Array.isArray(data)
-    ? (data as { initialMembers?: unknown }).initialMembers
-    : undefined;
-  if (!Array.isArray(rawMembers) || rawMembers.length > MAX_VIDEO_MEMBERS) {
+  // Defense in depth: direct callers may inject objects with throwing
+  // getters or revoked proxies instead of a JSON-decoded DTO. Keep those
+  // malformed snapshots out of React's render-error path and out of the DOM.
+  // Preserve the early 101-row cap before any nested member traversal.
+  let parsed: ReturnType<typeof AdminVideoMembersResponseSchema.safeParse>;
+  try {
+    const rawMembers: unknown = data && typeof data === "object" && !Array.isArray(data)
+      ? (data as { initialMembers?: unknown }).initialMembers
+      : undefined;
+    if (!Array.isArray(rawMembers) || rawMembers.length > MAX_VIDEO_MEMBERS) {
+      return <p role="alert">参加者データを表示できません。</p>;
+    }
+    parsed = AdminVideoMembersResponseSchema.safeParse(data);
+  } catch {
     return <p role="alert">参加者データを表示できません。</p>;
   }
-  const parsed = AdminVideoMembersResponseSchema.safeParse(data);
   if (!parsed.success || parsed.data.video.id !== videoId ||
       parsed.data.initialMembers.some(member => member.is_public_member !== 1)) {
     return <p role="alert">参加者データを表示できません。</p>;
