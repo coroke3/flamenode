@@ -887,6 +887,44 @@ test("MIG-0730 U02bf: collaboration OFF retires shared permission confirmation a
   }
 });
 
+test("MIG-0730 U02bf: missing save port disables child permission and TSV UI", async () => {
+  let permissionWrites = 0;
+  let searches = 0;
+  const ui = setup({
+    membersField: h(VideoMembersField, {
+      initialMembers: [{ name: "Alice", x_user_id: "alice", role: "", comment: "", chapters: [] }],
+      searchXUsers: async () => { searches++; return { items: [], hasMore: false }; },
+      applyPermissionBatch: async () => { permissionWrites++; return { ok: true }; },
+      permissionTargetVideoId: "v1",
+    }),
+    save: undefined,
+  });
+  try {
+    await ui.render();
+    const form = ui.target.querySelector("form");
+    assert.equal(form.querySelector('button[type="submit"]'), null);
+    assert.equal(form.querySelector("fieldset").disabled, true);
+    const textarea = form.querySelector("#members-tsv-input");
+    assert.ok(textarea);
+    assert.equal(textarea.disabled, true,
+      "a read-only parent must not merely disable its fieldset: child adapters must be revoked");
+    const confirm = [...form.querySelectorAll("button")].find(b => b.textContent.trim() === "内容を確認");
+    assert.ok(confirm);
+    assert.equal(confirm.disabled, true);
+    const toggle = form.querySelector('input[name="is_collab"][type="checkbox"]');
+    await React.act(async () => toggle.click());
+    assert.deepEqual(new FormData(form).getAll("members_json"), ["[]"]);
+    await React.act(async () => toggle.click());
+    assert.equal(form.querySelector("#members-tsv-input").disabled, true);
+    assert.equal(permissionWrites, 0);
+    assert.equal(searches, 0);
+    assert.deepEqual(JSON.parse(form.querySelector('fieldset input[name="members_json"]').value)
+      .map(row => row.name), ["Alice"]);
+  } finally {
+    await ui.cleanup();
+  }
+});
+
 test("MIG-0730 U02bc: replacing same-video native member data retires stale save responses", async () => {
   for (const outcome of ["success", "failure"]) {
     const pending = deferred();
