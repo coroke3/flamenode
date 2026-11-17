@@ -244,6 +244,12 @@ function VideoMembersFieldForTarget({
         ) {
           return;
         }
+        // Search failures may mean the session or read authority was revoked.
+        // Previously successful private suggestions must not survive a later
+        // failed page from the same injected adapter.
+        setFetched({ query: "", items: [] });
+        setSearchHasMore(false);
+        setNextOffset(null);
         setSearchStatus("error");
         setSearchHint("候補の取得に失敗しました。少し待って再入力してください。");
       }
