@@ -201,7 +201,9 @@ function AdminVideoMembersFormForVideo({
       }
     } catch {
       if (mounted.current && requestEpoch === saveCapabilityEpoch.current) {
-        setResult({ ok: false, message: "保存中にエラーが発生しました。再度確認してください。" });
+        // A thrown save port may have committed before its response was lost.
+        // Do not imply a retry is safe: the caller must refresh server state.
+        setResult({ ok: false, message: "保存結果を確認できませんでした。最新状態を再取得してください。" });
       }
     } finally {
       inFlight.current = false;

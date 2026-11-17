@@ -984,3 +984,33 @@ test("MIG-0730 U02bc: replacing same-video native member data retires stale save
     }
   }
 });
+
+test("MIG-0730 U02bn: a rejected injected save does not imply rollback or invite a blind retry", async () => {
+  const pending = deferred();
+  let calls = 0, refreshes = 0;
+  const ui = setup({
+    save: async () => {
+      calls++;
+      return pending.promise;
+    },
+    onSaved: () => { refreshes++; },
+  });
+  try {
+    await ui.render();
+    await ui.submit();
+    await ui.submit();
+    assert.equal(calls, 1, "a pending mutation must not issue a second write");
+    assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true);
+
+    // The write may have committed before an injected adapter lost its reply.
+    await React.act(async () => pending.finish(Promise.reject(new Error("PRIVATE NETWORK TOKEN after DB commit"))));
+    assert.equal(calls, 1, "rejected save must not be automatically replayed");
+    assert.equal(refreshes, 0, "an unverified write must never trigger saved refresh");
+
+    const alert = ui.target.querySelector('[role="alert"]');
+    assert.ok(alert);
+    assert.equal(alert.textContent, "保存結果を確認できませんでした。最新状態を再取得してください。");
+    assert.doesNotMatch(alert.textContent, /再試行|再度保存|もう一度|PRIVATE|TOKEN/,
+      "unknown outcome must instruct server re-fetch and hide internal exception data");
+  } finally { await ui.cleanup(); }
+});
