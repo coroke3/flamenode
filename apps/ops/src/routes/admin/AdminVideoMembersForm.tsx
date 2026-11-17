@@ -186,6 +186,25 @@ function AdminVideoMembersFormForVideo({
       setResult({ ok: false, message: "メンバー情報が不足しているため保存できません。" });
       return;
     }
+    // All source fields must have one canonical interpretation. The caller
+    // may inject another save adapter, so do not rely solely on its checks.
+    const ids = formData.getAll("video_id");
+    const flags = formData.getAll("is_collab");
+    const members = formData.getAll("members_json");
+    let unknownKey = false;
+    formData.forEach((_, key) => {
+      if (key !== "video_id" && key !== "is_collab" && key !== "members_json") unknownKey = true;
+    });
+    const canonicalOn = flags.length === 2 &&
+      flags[0] === "false" && flags[1] === "true";
+    const canonicalOff = flags.length === 1 && flags[0] === "false";
+    if (unknownKey || ids.length !== 1 || ids[0] !== video.id ||
+        members.length !== 1 || members[0] !== raw ||
+        !(isCollab ? canonicalOn : canonicalOff) ||
+        (!isCollab && raw !== "[]")) {
+      setResult({ ok: false, message: "参加者設定の入力を確認してください。" });
+      return;
+    }
     try {
       const parsed: unknown = JSON.parse(raw);
       if (!Array.isArray(parsed) || parsed.length > MAX_VIDEO_MEMBERS ||

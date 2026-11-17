@@ -100,6 +100,44 @@ test("MIG-0730 T02: turning collaboration off submits false and an empty members
   } finally { await ui.cleanup(); }
 });
 
+test("MIG-0730 U02by: direct form rejects forged transport fields before injected save", async () => {
+  const cases = [
+    { label: "duplicate video target", name: "video_id", value: "other" },
+    { label: "duplicate member JSON", name: "members_json", value: "[]" },
+    { label: "duplicate collab flag", name: "is_collab", value: "true" },
+    { label: "privilege ON", name: "can_edit", value: "true" },
+    { label: "privilege OFF", name: "can_edit", value: "true", off: true },
+    { label: "unknown OFF", name: "unexpected_field", value: "1", off: true },
+  ];
+  for (const scenario of cases) {
+    let saves = 0, refreshes = 0;
+    const ui = setup({
+      save: async () => { saves++; return { ok: true }; },
+      onSaved: () => { refreshes++; },
+    });
+    try {
+      await ui.render();
+      if (scenario.off) {
+        await React.act(async () => ui.target.querySelector('input[type="checkbox"]').click());
+      }
+      const extra = document.createElement("input");
+      extra.type = "hidden";
+      extra.name = scenario.name;
+      extra.value = scenario.value;
+      ui.target.querySelector("form").append(extra);
+      await ui.submit();
+      assert.equal(saves, 0, scenario.label + " did not call injected save");
+      assert.equal(refreshes, 0, scenario.label + " cannot confirm a forged write");
+      assert.equal(ui.target.querySelector('[role="alert"]')?.textContent,
+        "参加者設定の入力を確認してください。", scenario.label);
+      extra.remove();
+      await ui.submit();
+      assert.equal(saves, 1, scenario.label + " canonical ON/OFF still saves");
+      assert.equal(refreshes, 1, scenario.label + " only real success refreshes");
+    } finally { await ui.cleanup(); }
+  }
+});
+
 test("MIG-0730 T03: 101 members fail closed without writing any member batch", async () => {
   let count = 0;
   const members = Array.from({ length: 101 }, (_, i) => ({ name: "Member " + i }));
