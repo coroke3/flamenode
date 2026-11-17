@@ -13,6 +13,7 @@
 import type { BatchItem } from "drizzle-orm/batch";
 import type { videos } from "@flamenode/db/schema";
 import type { WriteAuditLogInput } from "../audit/types.ts";
+import type { D1AuditMutationBudget } from "../audit/mutateBudget.ts";
 import type { ServerCoreDb } from "../db.ts";
 import {
   buildStaticRebuildQueueBatch,
@@ -22,6 +23,7 @@ import type { EnqueueStaticRebuildInput } from "../staticRebuild/types.ts";
 import { deriveAdminVideoMemberSaveEffects } from "./memberAggregationFanOut.ts";
 import { buildAdminVideoMemberMetadataPlan } from "./adminMemberMetadataPlan.ts";
 import { adminVideoMembersRebuildTargets } from "./adminMemberRebuildTargets.ts";
+import { inspectVideoAtomicWritePlanBudget } from "./videoAtomicBudget.ts";
 
 type MemberAtomicPlan = {
   statements: BatchItem<"sqlite">[];
@@ -39,6 +41,12 @@ export type AdminMemberAtomicAssembly = {
   queue: StaticRebuildQueueBatch;
   targets: EnqueueStaticRebuildInput[];
   noOp: boolean;
+  /**
+   * Conservative 18 pre-read projection for a future D1 mutation.
+   * A real Hono writer must separately measure its caller reads at the
+   * authenticated boundary; this is not production budget acceptance.
+   */
+  budget: D1AuditMutationBudget | null;
 };
 
 /**
@@ -195,6 +203,7 @@ export async function assembleAdminVideoMemberAtomicPlan(
       queue: { statements: [], expectedChanges: [], acceptedTargetCount: 0 },
       targets,
       noOp: true,
+      budget: null,
     };
   }
   // JSON1 Queue statements are part of the SAME batch and strict audit
@@ -206,5 +215,13 @@ export async function assembleAdminVideoMemberAtomicPlan(
       plan.audits.length === 0) {
     throw new Error("video_admin_member_atomic_assembly_incomplete");
   }
-  return { plan, queue, targets, noOp: false };
+  // U03bc: CURRENT's conservative pre-read reserve (18) is used until
+  // an authenticated Hono executor can supply *measured* request-local
+  // reads. Never hand an over-budget composed member+metadata+Queue plan
+  // to a future atomic D1 executor. This performs no D1 operation.
+  const budget = inspectVideoAtomicWritePlanBudget(plan);
+  if (!budget.withinLimit) {
+    throw new RangeError("video_admin_member_atomic_budget_exceeded");
+  }
+  return { plan, queue, targets, noOp: false, budget };
 }

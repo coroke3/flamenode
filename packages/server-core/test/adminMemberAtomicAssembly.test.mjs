@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+import { D1_MAX_BATCH_QUERIES, D1_RESERVED_CALLER_QUERIES } from "../src/audit/mutateBudget.ts";
 import {
   assembleAdminVideoMemberAtomicPlan,
 } from "../src/video/adminMemberAtomicAssembly.ts";
@@ -64,6 +65,7 @@ test("MIG-0650 U03ax: no-op composes no D1 mutation, audit, Queue, or wake work"
   assert.deepEqual(result.targets, []);
   assert.equal(result.queue.acceptedTargetCount, 0);
   assert.deepEqual(result.queue.statements, []);
+  assert.equal(result.budget, null, "true no-op never enters the D1 mutation budget");
   assert.equal(planned.length, 0);
 });
 
@@ -80,6 +82,10 @@ test("MIG-0650 U03ax: collaboration-only save places video UPDATE, strict audit 
   assert.equal(result.plan.statements[1], planned[1]);
   assert.deepEqual(result.targets.map(x => x.targetType), ["video", "event_release"]);
   assert.equal(result.queue.acceptedTargetCount, 2);
+  assert.equal(result.budget?.withinLimit, true);
+  assert.equal(result.budget?.callerQueryCount, D1_RESERVED_CALLER_QUERIES);
+  assert.equal(result.budget?.mutationStatementCount, 2);
+  assert.equal(result.budget?.mutationAssertionCount, 2);
   assert.equal(result.plan.audits.length, 1);
   assert.equal(result.plan.audits[0].table_name, "videos");
   assert.equal(result.plan.audits[0].strict, true);
@@ -326,4 +332,50 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
   }));
   assert.deepEqual(paired.plan.audits.slice(0, 2), [validX, canonical],
     "distinct CURRENT audit categories keep their canonical order and identity");
+});
+
+test("MIG-0650 U03bc: composed member and Queue plan fails closed above conservative D1 limit", async () => {
+  // A future Hono adapter must never present a large strict-audit member
+  // mutation plan as executable simply because each SQL chunk is bounded.
+  const fakeMutations = Array.from({ length: D1_MAX_BATCH_QUERIES }, (_, i) => ({ kind: "member-cas-" + i }));
+  const audit = {
+    table_name: "video_members_set",
+    target_id: "video-1", operation: "MERGE",
+    actor_user_id: "admin", strict: true,
+    before: { id: "video-1", rows: [] },
+    after: { id: "video-1", rows: [] },
+  };
+  const { db, planned } = capturedDb();
+  await assert.rejects(
+    () => assembleAdminVideoMemberAtomicPlan(db, input({
+      membersPlan: memberPlan(fakeMutations, fakeMutations.map(() => null), [audit]),
+    })),
+    { name: "RangeError", message: "video_admin_member_atomic_budget_exceeded" },
+  );
+  // The pure composition may construct SQL, but no statement can execute.
+  assert.ok(planned.every(statement => statement.kind === "video-metadata" || statement.kind === "queue"));
+});
+
+test("MIG-0650 U03bc: accepted strict member plan reports complete D1 projection", async () => {
+  const audit = {
+    table_name: "video_members_set",
+    target_id: "video-1", operation: "MERGE",
+    actor_user_id: "admin", strict: true,
+    before: { id: "video-1", rows: [] },
+    after: { id: "video-1", rows: [] },
+  };
+  const { db } = capturedDb();
+  const result = await assembleAdminVideoMemberAtomicPlan(db, input({
+    membersPlan: memberPlan([{ kind: "member-cas" }], [null], [audit]),
+  }));
+  assert.equal(result.noOp, false);
+  assert.ok(result.budget);
+  assert.equal(result.budget.callerQueryCount, D1_RESERVED_CALLER_QUERIES);
+  assert.equal(result.budget.mutationStatementCount, result.plan.statements.length);
+  assert.equal(
+    result.budget.mutationAssertionCount,
+    result.plan.expectedChanges.filter(value => value !== null).length,
+  );
+  assert.equal(result.budget.withinLimit, true);
+  assert.ok(result.budget.totalQueryCount <= D1_MAX_BATCH_QUERIES);
 });
