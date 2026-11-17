@@ -1,6 +1,7 @@
 // MIG-0730 U02c: unmounted form shell. Only an injected SA-085 adapter can save.
 // DO NOT route-mount before MIG-0650, U01 shared VideoMembersField and review gates.
 import * as React from "react";
+import { VideoMembersField } from "@flamenode/ui";
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 
 export type AdminVideoMembersSaveResult = {
@@ -54,10 +55,13 @@ function AdminVideoMembersFormForVideo({
   // A bare native element other than the canonical hidden member input is
   // not a member editor. Without this guard even <div /> plus save would let
   // an individual video submit a fabricated empty members_json payload.
-  // Trust composite member-editor components only at the injection boundary;
-  // the submit handler still validates the actual FormData independently.
+  // A fragment, arbitrary function, memo wrapper or placeholder composite can
+  // render nothing while looking like a valid React element. Accept only the
+  // canonical shared VideoMembersField (used by the Ops preview), or the exact
+  // hidden members_json input used by the direct FormData regression harness.
+  // The submit handler still validates the serialized FormData independently.
   const hasMemberEditor = React.isValidElement(membersField) && (
-    typeof membersField.type !== "string" ||
+    membersField.type === VideoMembersField ||
     (membersField.type === "input" &&
       (membersField.props as { type?: unknown }).type === "hidden" &&
       (membersField.props as { name?: unknown }).name === "members_json")

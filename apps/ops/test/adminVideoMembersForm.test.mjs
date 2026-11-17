@@ -511,12 +511,25 @@ test("MIG-0730 U02ak: form must never pass collaborator can_edit in members_json
   }
 });
 
-test("MIG-0730 U02ap: arbitrary native field cannot authorize collaboration-OFF destructive PUT", async () => {
+test("MIG-0730 U02ap/U02aq: only canonical shared field or exact hidden input authorizes writes", async () => {
+  // Native placeholders and opaque React composites must not grant write
+  // capability. Fragment/func components are truthy React elements but can
+  // render zero real membership inputs.
+  const MissingMemberField = () => null;
+  const ForgedMemberField = () => h("input", {
+    type: "hidden", name: "members_json", value: "[]",
+  });
   const invalidEditors = [
     h("div", null, "not a member editor"),
     h("span", null, "placeholder"),
     h("input", { type: "hidden", name: "different_json", value: "[]" }),
     h("input", { type: "text", name: "members_json", value: "[]" }),
+    h(React.Fragment, null),
+    h(React.Fragment, null, h("input", {
+      type: "hidden", name: "members_json", value: "[]",
+    })),
+    h(MissingMemberField),
+    h(ForgedMemberField),
   ];
   for (const editor of invalidEditors) {
     let writes = 0;
