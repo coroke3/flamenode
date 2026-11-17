@@ -187,3 +187,47 @@ test("MIG-0603 unmounted admin candidate: admin-only guards precede input, mutat
   }
 });
 
+test("MIG-0603 S3 D1 pre-read budget characterization: unmounted status candidates exceed the limit", async (t) => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted = 1');
+    sqlite.exec("UPDATE system_settings SET operation_mode='normal', disabled_features_json=NULL WHERE id='default'");
+    const d1 = createVideoStatusD1(sqlite);
+    const S3_PRE_READ_LIMIT = 3;
+    const cases = [
+      ["admin", createUnboundAdminVideoStatusCandidate(), JSON.stringify({
+        video_id: "v1", status: "private",
+      }), 4],
+      ["manage-event-staff", createUnboundManageVideoStatusCandidate(), BODY, 6],
+    ];
+    for (const [name, candidate, body, expectedReads] of cases) {
+      const user = name === "admin" ? "admin" : "mgr";
+      const start = d1.stats.statements;
+      const response = await candidate.request(ORIGIN + "/", {
+        method: "POST",
+        headers: { origin: ORIGIN, ...cookie(`tok-${user}`), "content-type": "application/json" },
+        body,
+      }, { DB: d1, NEXT_PUBLIC_SITE_URL: ORIGIN, FLAMENODE_LOCAL_PREVIEW: "1" });
+      const reads = d1.stats.statements - start;
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), {
+        ok: false, reason: "status_candidate_unmounted",
+      }, "this test cannot activate an over-budget write endpoint");
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal(reads, expectedReads,
+        "this is a characterization of the CURRENT unmounted implementation, NOT S3 acceptance");
+      assert.ok(reads > S3_PRE_READ_LIMIT,
+        "the budget violation must remain explicit until guard+access reads are redesigned");
+      assert.equal(d1.stats.batches, 0);
+      assert.equal(d1.stats.writes, 0);
+      t.diagnostic(`${name}: ${reads} D1 pre-reads > S3 budget ${S3_PRE_READ_LIMIT}; STOP route activation`);
+    }
+  } finally {
+    sqlite.close();
+  }
+});
+
+// Acceptance remains intentionally TODO. Passing the characterization above
+// demonstrates a known budget VIOLATION, not readiness for status writes.
+test.todo("MIG-0603 S3 acceptance: admin/manage authenticated status writes each use <=3 D1 pre-reads plus one audited batch");
