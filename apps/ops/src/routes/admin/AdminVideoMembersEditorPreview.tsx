@@ -50,6 +50,12 @@ export function AdminVideoMembersEditorPreview({
   }
 
   const valid = parsed.data;
+  // The shared field keeps its member rows in useState(initialMembers). A same-ID
+  // authorization refresh may revoke/delete participants without changing the
+  // route ID. Key the whole form by the *validated* snapshot so both its hidden
+  // payload and collaboration checkbox are replaced on a changed server read.
+  // Do not use data object identity: equal-value refreshes must preserve edits.
+  const snapshotKey = JSON.stringify(valid);
   const canEdit = Boolean(save && searchXUsers && applyPermissionBatch);
   const field = (
     <VideoMembersField
@@ -64,6 +70,7 @@ export function AdminVideoMembersEditorPreview({
 
   return (
     <AdminVideoMembersForm
+      key={snapshotKey}
       video={valid.video}
       initialMembersCount={valid.initialMembers.length}
       membersField={field}
