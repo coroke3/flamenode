@@ -35,11 +35,19 @@ export async function readAdminVideoMembers(
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { status: "unavailable" };
   }
-  const members = (body as { initialMembers?: unknown }).initialMembers;
-  if (!Array.isArray(members) || members.length > MAX_VIDEO_MEMBERS) {
+  // Even an injected GET adapter can return a non-JSON object at runtime.
+  // Throwing accessors or revoked proxies must not reject the read Promise
+  // and leave the Ops page loading forever. Preserve the 100-row early gate.
+  let parsed: ReturnType<typeof AdminVideoMembersResponseSchema.safeParse>;
+  try {
+    const members = (body as { initialMembers?: unknown }).initialMembers;
+    if (!Array.isArray(members) || members.length > MAX_VIDEO_MEMBERS) {
+      return { status: "unavailable" };
+    }
+    parsed = AdminVideoMembersResponseSchema.safeParse(body);
+  } catch {
     return { status: "unavailable" };
   }
-  const parsed = AdminVideoMembersResponseSchema.safeParse(body);
   if (!parsed.success || parsed.data.video.id !== videoId ||
       parsed.data.initialMembers.some((member) => member.is_public_member !== 1)) {
     // A hidden edit-only member must never become a public participant input.
