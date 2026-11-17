@@ -72,3 +72,23 @@ test("MIG-0650 U03x rejects invalid explicit caller reads instead of undercounti
     "the omitted CURRENT caller count keeps its existing conservative fallback",
   );
 });
+
+test("MIG-0650 U03z refuses mismatched mutation assertions before D1 budget approval", () => {
+  // Missing assertions must not reduce the projected D1 query total.
+  // Excess assertions are likewise invalid: one assertion slot per statement.
+  for (const expectedChanges of [[1], [1, 1, 1]]) {
+    assert.throws(
+      () => inspectVideoAtomicWritePlanBudget(
+        plan([{}, {}], expectedChanges, [{ actor_user_id: "admin" }]),
+        { callerQueryCount: 3 },
+      ),
+      { name: "RangeError", message: "video_atomic_expected_changes_mismatch" },
+    );
+  }
+  const valid = inspectVideoAtomicWritePlanBudget(
+    plan([{}, {}], [null, 1], [{ actor_user_id: "admin" }]),
+    { callerQueryCount: 3 },
+  );
+  assert.equal(valid.mutationStatementCount, 2);
+  assert.equal(valid.mutationAssertionCount, 1);
+});
