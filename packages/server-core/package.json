@@ -128,6 +128,7 @@
     "./video/permissionRebuildTargets": "./src/video/permissionRebuildTargets.ts",
     "./video/adminMemberRebuildTargets": "./src/video/adminMemberRebuildTargets.ts",
     "./video/adminMemberMetadataPlan": "./src/video/adminMemberMetadataPlan.ts",
+    "./video/adminMemberAtomicAssembly": "./src/video/adminMemberAtomicAssembly.ts",
     "./video/permissionNotificationInputs": "./src/video/permissionNotificationInputs.ts",
     "./video/permissionCanonicalize": "./src/video/permissionCanonicalize.ts",
     "./video/permissionMutationBatch": "./src/video/permissionMutationBatch.ts",
