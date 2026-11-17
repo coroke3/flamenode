@@ -12,6 +12,7 @@
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
+import { isCanonicalXId } from "@flamenode/domain/xid";
 import { videoMembers } from "@flamenode/db/schema";
 import type { videoChapters, xUsers } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "../db.ts";
@@ -180,6 +181,26 @@ export function buildVideoMemberWriteMutationBatch(
   // inserting an approved or rejected profile.
   if (newXUsers.some(row => row.approval_status !== "pending")) {
     throw new RangeError("video_member_write_x_profile_not_pending");
+  }
+  // CURRENT creates a placeholder profile only: its public identity is a
+  // canonical lower-case X ID, its display name is trimmed and at most 80
+  // characters, and all editable profile metadata starts as SQL NULL.
+  // Without this boundary, a future Hono host could use the member save
+  // endpoint to bypass the separate X-profile edit/review workflows.
+  if (newXUsers.some(row =>
+    !isCanonicalXId(row.id) ||
+    typeof row.x_name !== "string" ||
+    row.x_name.length === 0 ||
+    row.x_name.length > 80 ||
+    row.x_name.trim() !== row.x_name ||
+    row.icon_url !== null ||
+    row.profile_text !== null ||
+    row.portfolio_contact !== null ||
+    row.youtube_channel_url !== null ||
+    row.other_social_links !== null ||
+    row.creative_start_date !== null
+  )) {
+    throw new RangeError("video_member_write_x_profile_unsafe_fields");
   }
   // CURRENT creates pending X profiles only for submitted public members.
   // The shared JSON1 INSERT binds newXUsers independently of member DML; a
