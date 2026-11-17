@@ -854,3 +854,43 @@ test("MIG-0650 U03af snapshots streamed bytes before an upstream producer reuses
     kind: "ok", value: { members_json: "original" },
   }, "later producer mutations cannot rewrite already-consumed body bytes");
 });
+
+
+test("MIG-0650 U03ah all seven schema-valid video statuses are valid SA-085 targets", async () => {
+  const schema = await readFile(
+    new URL("../../../../packages/db/src/schema/base.ts", import.meta.url), "utf8",
+  );
+  const videosDeclaration = schema.slice(schema.indexOf('export const videos = sqliteTable("videos"'));
+  const statusDeclaration = videosDeclaration.match(
+    /visibility_status: text\("visibility_status", \{\s*enum: \[([^\]]+)\]/,
+  );
+  assert.ok(statusDeclaration, "schema must still expose videos.visibility_status");
+  const schemaStates = Array.from(statusDeclaration[1].matchAll(/"([^"]+)"/g), m => m[1]);
+  const validStates = ["draft", "pending", "public", "limited", "private", "archived", "voided"];
+  assert.deepEqual(schemaStates.slice().sort(), validStates.slice().sort(),
+    "update this preflight test when the authoritative DB enum changes");
+
+  for (const visibility_status of validStates) {
+    const f = fixture({ targetOverride: {
+      id: "v1", collaboration_type: "individual", visibility_status,
+      creator_x_user_id: null, youtube_video_id: null,
+      primary_event_id: null, updated_at: 100, linked_event_ids_json: "[]",
+    } });
+    const result = await f.request(endpoint, valid());
+    assert.equal(result.status, 501, visibility_status + " must reach only the unwired save port");
+    assert.deepEqual(await result.json(), {
+      ok: false, message: "参加者設定の保存APIは移行準備中です。",
+    }, visibility_status);
+    assert.equal(result.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(f.stats(), { invoked: 1, prematureDb: 0 });
+  }
+
+  const invalid = fixture({ targetOverride: {
+    id: "v1", collaboration_type: "individual", visibility_status: "forged",
+    creator_x_user_id: null, youtube_video_id: null,
+    primary_event_id: null, updated_at: 100, linked_event_ids_json: "[]",
+  } });
+  const rejected = await invalid.request(endpoint, valid());
+  assert.equal(rejected.status, 503, "unrecognized state must fail closed");
+  assert.deepEqual(invalid.stats(), { invoked: 1, prematureDb: 0 });
+});
