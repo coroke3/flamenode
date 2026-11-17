@@ -192,7 +192,7 @@ test("MIG-0650 U03d-2j: a stale CAS inside one SQLite transaction rolls back a p
   } finally { sqlite.close(); }
 });
 
-test("MIG-0650 U03d-2j: source and package export are unmounted; CURRENT remains authenticated owner", async () => {
+test("MIG-0650 U03d-2k: Next delegates exact CAS and D1 order to shared core, still owns audit", async () => {
   const legacy = await readFile(new URL("../../../src/lib/video/replaceVideoMembers.ts", import.meta.url), "utf8");
   const source = await readFile(new URL("../src/video/memberWriteMutationBatch.ts", import.meta.url), "utf8");
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
@@ -204,6 +204,8 @@ test("MIG-0650 U03d-2j: source and package export are unmounted; CURRENT remains
   assert.match(source, /if \(chaptersChanged && existingManagedChapters\.length > 0\)/);
   assert.match(legacy, /export async function buildReplaceVideoMembersPlan/);
   assert.match(legacy, /plan\.audits\.push/);
-  assert.match(legacy, /buildVideoMemberSetGuardSql/);
+  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberWriteMutationBatch"/);
+  assert.match(legacy, /buildVideoMemberWriteMutationBatch\(db, \{/);
+  assert.doesNotMatch(legacy, /db\.run\(buildVideoMemberSetGuardSql/);
   assert.doesNotMatch(source, /mutateWithAudit|wakeNotificationQueue|writeGuard/);
 });
