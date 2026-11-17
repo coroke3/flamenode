@@ -24,7 +24,9 @@ type Ctx = Context<AppEnv>;
 export type AdminVideoMemberTarget = {
   id: string;
   collaboration_type: "individual" | "collab";
-  visibility_status: "pending" | "public" | "private" | "voided";
+  // All schema-valid states must pass preflight; this path also handles
+  // existing draft, limited and archived videos in CURRENT Next.
+  visibility_status: "draft" | "pending" | "public" | "limited" | "private" | "archived" | "voided";
   creator_x_user_id: string | null;
   youtube_video_id: string | null;
   primary_event_id: string | null;
@@ -147,7 +149,10 @@ export function createVideoAdminMembersPreflightRoutes(
     if (
       target.id !== videoId ||
       (target.collaboration_type !== "individual" && target.collaboration_type !== "collab") ||
-      !["pending", "public", "private", "voided"].includes(target.visibility_status) ||
+      // MIG-0650 U03ah: do not reject schema-valid draft/limited/archived
+      // states before the Hono save host is implemented. Only public triggers
+      // the public rebuild fanout in the eventual atomic writer.
+      !["draft", "pending", "public", "limited", "private", "archived", "voided"].includes(target.visibility_status) ||
       !Number.isSafeInteger(target.updated_at) ||
       [target.creator_x_user_id, target.youtube_video_id, target.primary_event_id].some(
         value => value !== null && typeof value !== "string",
