@@ -230,7 +230,16 @@ function AdminVideoMembersFormForVideo({
           OFF; only the explicit [] input below can be submitted. */}
       <fieldset disabled={pending || !enabled || !isCollab}
         style={{ border: 0, padding: 0, display: isCollab ? undefined : "none" }}>
-        {membersField ?? <p role="status">参加者フォームを準備しています。</p>}
+        {sharedEditor
+          ? React.cloneElement(
+              membersField as React.ReactElement<React.ComponentProps<typeof VideoMembersField>>,
+              // DOM fieldset.disabled does not update the shared editor's
+              // internal permission epoch, search, or async mutation guards.
+              // Preserve row drafts while retiring privileged confirmation
+              // and search state whenever the parent cannot edit.
+              { disabled: sharedEditor.disabled === true || pending || !enabled || !isCollab },
+            )
+          : membersField ?? <p role="status">参加者フォームを準備しています。</p>}
       </fieldset>
       {!isCollab ? (
         <section>
