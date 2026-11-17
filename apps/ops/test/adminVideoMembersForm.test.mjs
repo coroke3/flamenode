@@ -60,6 +60,39 @@ test("MIG-0730 U02c: no save adapter or member form means no active mutation but
   } finally { await ui.cleanup(); }
 });
 
+test("MIG-0730 U02bz: unsafe video IDs in standalone Form cannot enable an injected write", async () => {
+  for (const id of ["", ".", "..", " v1", "v1 ", "v/1", "v\\\\1", "v\\n1", "\\uD800", "x".repeat(65)]) {
+    let writes = 0, refreshes = 0;
+    const ui = setup({
+      video: { ...video, id },
+      save: async () => { writes++; return { ok: true }; },
+      onSaved: () => { refreshes++; },
+    });
+    try {
+      await ui.render();
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null,
+        "invalid video identity never enables save: " + JSON.stringify(id));
+      await ui.submit();
+      assert.equal(writes, 0, "no write on invalid ID");
+      assert.equal(refreshes, 0, "no onSaved on invalid ID");
+    } finally { await ui.cleanup(); }
+  }
+  for (const id of ["valid-123", "x".repeat(64)]) {
+    let writes = 0;
+    const ui = setup({video: { ...video, id }, save: async data => {
+      writes++;
+      assert.equal(data.get("video_id"), id);
+      return { ok: true };
+    }});
+    try {
+      await ui.render();
+      assert.ok(ui.target.querySelector('button[type="submit"]'));
+      await ui.submit();
+      assert.equal(writes, 1, "valid video ID still permits canonical save");
+    } finally { await ui.cleanup(); }
+  }
+});
+
 test("MIG-0730 T01: repeated submit events while save is pending start exactly one write", async () => {
   const wait = deferred();
   const calls = [];

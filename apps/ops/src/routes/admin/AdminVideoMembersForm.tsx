@@ -13,6 +13,17 @@ export type AdminVideoMembersSaveResult = {
 export type AdminVideoMembersSave = (payload: FormData) => Promise<AdminVideoMembersSaveResult>;
 const UNVERIFIED_SAVE = "保存結果を確認できませんでした。最新状態を再取得してください。";
 
+// A standalone form can receive an untrusted video object, without the
+// Preview and its validated route target. Match the unmounted HTTP adapter's
+// accepted video ID boundary before offering any injected write capability.
+function isSafeVideoId(value: unknown): value is string {
+  if (typeof value !== "string" || !value || value.length > 64 ||
+      value.trim() !== value || value === "." || value === ".." ||
+      /[\\/\\\\\\x00-\\x1f]/.test(value)) return false;
+  try { encodeURIComponent(value); return true; }
+  catch { return false; }
+}
+
 /**
  * The injected write port is a runtime trust boundary even though the
  * TypeScript callback is typed. A malformed success must not call onSaved.
@@ -122,7 +133,7 @@ function AdminVideoMembersFormForVideo({
     typeof sharedEditor.searchXUsers === "function" &&
     typeof sharedEditor.applyPermissionBatch === "function"
   );
-  const enabled = Boolean(save) && writableMemberEditor;
+  const enabled = Boolean(save) && writableMemberEditor && isSafeVideoId(video.id);
   // Losing the required member field is also a write-capability revocation,
   // even when the save function itself remains present.
   // A true-to-true save adapter change may represent a new authorization
