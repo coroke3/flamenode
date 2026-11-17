@@ -49,6 +49,12 @@ export type AdminMemberAtomicAssembly = {
  * count its actual D1 preparation reads, and run exactly one audited atomic
  * batch before sending any Queue wake.
  */
+/** CURRENT emits profile-create and hidden-cleanup audits only with real row work. */
+function auditRows(snapshot: unknown): readonly unknown[] | null {
+  if (!snapshot || typeof snapshot !== "object" || !("rows" in snapshot)) return null;
+  return Array.isArray(snapshot.rows) ? snapshot.rows : null;
+}
+
 /** A top-level audit target is insufficient if its nested rows name another video. */
 function auditMemberRowsBelongToVideo(snapshot: unknown, videoId: string): boolean {
   if (!snapshot || typeof snapshot !== "object" || !("rows" in snapshot)) return false;
@@ -109,6 +115,18 @@ export async function assembleAdminVideoMemberAtomicPlan(
     if (
       !expectedOperation || audit.operation !== expectedOperation ||
       seenAuditTables.has(audit.table_name) ||
+      // CURRENT creates new X profiles only for nonempty pending rows.
+      (audit.table_name === "x_users_member_batch" &&
+        (!auditRows(audit.after)?.length ||
+         !auditRows(audit.after)?.every(row =>
+           row !== null && typeof row === "object" &&
+           !Array.isArray(row) && "id" in row &&
+           typeof row.id === "string" && row.id.length > 0))) ||
+      // Hidden-row cleanup must account for rows actually removed, not
+      // falsely record a cleanup with an unchanged/remaining after-snapshot.
+      (audit.table_name === "video_member_hidden_carry_cleanup" &&
+        (!auditRows(audit.before)?.length ||
+         auditRows(audit.after)?.length !== 0)) ||
       // Audit snapshots must not contain rows from any other video even when
       // their outer snapshot ID matches this target.
       ((audit.table_name === "video_members_set" ||

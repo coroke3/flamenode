@@ -251,6 +251,12 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
     target_id: "video-1", operation: "MERGE",
     actor_user_id: "admin", strict: true,
     before: null,
+    after: { id: "video-1", rows: [{ id: "new-x-user" }] },
+  };
+  const validHidden = {
+    ...canonical, table_name: "video_member_hidden_carry_cleanup",
+    operation: "DELETE",
+    before: { id: "video-1", rows: [{ video_id: "video-1" }] },
     after: { id: "video-1", rows: [] },
   };
   const invalid = [
@@ -273,6 +279,12 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
     [canonical, canonical],
     [{ ...validX, before: { id: "video-1", rows: [] } }],
     [{ ...validX, after: { id: "another-video", rows: [] } }],
+    [{ ...validX, after: { id: "video-1", rows: [] } }],
+    [{ ...validX, after: { id: "video-1", rows: "not-a-list" } }],
+    [{ ...validX, after: { id: "video-1", rows: [{}] } }],
+    [{ ...validHidden, before: { id: "video-1", rows: [] } }],
+    [{ ...validHidden, after: { id: "video-1", rows: [{ video_id: "video-1" }] } }],
+    [{ ...validHidden, after: { id: "video-1", rows: "bad" } }],
   ];
   for (const audits of invalid) {
     const { db, planned } = capturedDb();
@@ -297,11 +309,7 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
       ...canonical,
       table_name: "video_chapters_member_set",
     },
-    {
-      ...canonical,
-      table_name: "video_member_hidden_carry_cleanup",
-      operation: "DELETE",
-    },
+    validHidden,
   ]) {
     const { db } = capturedDb();
     const result = await assembleAdminVideoMemberAtomicPlan(db, input({
