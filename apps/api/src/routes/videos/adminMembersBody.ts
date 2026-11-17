@@ -35,6 +35,16 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      // Request bodies are byte streams. A malformed injected stream may yield
+      // a string, typed-array element view or arbitrary object; its byteLength
+      // would undercount or corrupt the buffered payload. Reject before copy.
+      if (!(value instanceof Uint8Array)) {
+        void reader.cancel().catch(() => undefined);
+        return { kind: "invalid" };
+      }
+      // Empty chunks are permitted but must not accumulate an unbounded
+      // number of array entries outside the 256KiB actual-byte limit.
+      if (value.byteLength === 0) continue;
       total += value.byteLength;
       if (total > MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES) {
         // Do not wait for a malicious/broken transport to finish cancelling:
