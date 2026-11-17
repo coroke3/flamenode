@@ -357,7 +357,7 @@ test("MIG-0730 U02t: shared Personal field ignores privilege success after disab
   });
   try {
     await render(false);
-    await previewPermissionTsv(target, "Bob\\tbob\\t\\t\\t\\tON");
+    await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
     await React.act(async () => buttonNamed(target, "変更を反映").click());
     assert.equal(calls.length, 1);
     assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
@@ -394,7 +394,7 @@ test("MIG-0730 U02t: same mounted field rejects previous video's permission comp
   });
   try {
     await render("A");
-    await previewPermissionTsv(target, "Bob\\tbob\\t\\t\\t\\tON");
+    await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
     await React.act(async () => buttonNamed(target, "変更を反映").click());
     await render("B");
     assert.equal(target.querySelector('[role="alertdialog"]'), null);
