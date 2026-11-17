@@ -12,6 +12,10 @@ import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/res
 import type { SessionUserLike } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 
+// Defend against unbounded joined fan-out in D1. Exceeding this limit is
+// an explicit fail-closed condition, never a partial-grant decision.
+export const MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT = 256;
+
 export type ManageVideoStatusAccess =
   | { ok: true }
   | { ok: false; message: string };
@@ -52,7 +56,14 @@ export async function checkManageVideoStatusAccess(
           eq(xUserAccountLinks.auth_user_id, user.id),
           eq(xUsers.approval_status, "approved"),
         )!,
-      );
+      )
+      .limit(MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT + 1);
+    if (approvedStaff.length > MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT) {
+      // Do not authorize using an incomplete/oversized permission snapshot.
+      // The isolated Hono candidate catches D1/access errors and responds
+      // with a private fixed 503, without leaking a target-video association.
+      throw new Error("manage_video_status_staff_read_limit_exceeded");
+    }
     if (!approvedStaff.some((row) => staffRowHasPermissionKey(row, "video.status"))) {
       return { ok: false, message: "このイベントの作品審査権限がありません。" };
     }
