@@ -15,6 +15,7 @@ import type { videos } from "@flamenode/db/schema";
 import type { WriteAuditLogInput } from "../audit/types.ts";
 import type { D1AuditMutationBudget } from "../audit/mutateBudget.ts";
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
+import { isCanonicalXId } from "@flamenode/domain/xid";
 import type { ServerCoreDb } from "../db.ts";
 import {
   buildStaticRebuildQueueBatch,
@@ -167,8 +168,29 @@ export async function assembleAdminVideoMemberAtomicPlan(
   },
 ): Promise<AdminMemberAtomicAssembly> {
   if (
-    !input.target.id ||
-    !input.actorUserId ||
+    // This function is a separate trust boundary from candidate preparation:
+    // TypeScript types do not validate a future host's runtime snapshot.
+    !input.target || typeof input.target.id !== "string" || !input.target.id ||
+    (input.target.collaboration_type !== "collab" &&
+      input.target.collaboration_type !== "individual") ||
+    !["draft", "pending", "public", "limited", "private", "archived", "voided"]
+      .includes(input.target.visibility_status) ||
+    !Number.isSafeInteger(input.target.updated_at) ||
+    input.target.updated_at < 0 ||
+    (input.target.creator_x_user_id !== null &&
+      typeof input.target.creator_x_user_id !== "string") ||
+    typeof input.actorUserId !== "string" || !input.actorUserId ||
+    typeof input.isCollab !== "boolean" ||
+    !Array.isArray(input.members) ||
+    input.members.length > MAX_VIDEO_MEMBERS ||
+    input.members.some(member =>
+      !member || typeof member.x_user_id !== "string" ||
+      (member.x_user_id !== "" && !isCanonicalXId(member.x_user_id))
+    ) ||
+    !input.membersPlan ||
+    !Array.isArray(input.membersPlan.statements) ||
+    !Array.isArray(input.membersPlan.expectedChanges) ||
+    !Array.isArray(input.membersPlan.audits) ||
     !Number.isSafeInteger(input.now) || input.now < 0 ||
     // The direct assembly boundary must not rely solely on the outer Hono
     // candidate input guard. Duplicate, empty or noncanonical linked-event

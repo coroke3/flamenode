@@ -182,6 +182,44 @@ test("MIG-0650 U03ax: malformed planner inputs reject before metadata or Queue c
   }
 });
 
+test("MIG-0650 U03cc: direct atomic assembly validates target, members and flag before any SQL", async () => {
+  const badCases = [
+    { target: null },
+    { target: { ...target, collaboration_type: "forged" } },
+    { target: { ...target, visibility_status: "forged" } },
+    { target: { ...target, updated_at: null } },
+    { target: { ...target, updated_at: 1.5 } },
+    { target: { ...target, creator_x_user_id: 123 } },
+    { actorUserId: 123 },
+    { isCollab: "false" },
+    { isCollab: 1 },
+    { members: null },
+    { members: "alice" },
+    { members: Array.from({ length: 101 }, () => ({ x_user_id: "" })) },
+    { members: [{}] },
+    { members: [null] },
+    { members: [{ x_user_id: "Alice" }] },
+    { members: [{ x_user_id: "@alice" }] },
+    { membersPlan: null },
+    { membersPlan: { statements: [], expectedChanges: [], audits: null } },
+  ];
+  for (const invalid of badCases) {
+    const { db, planned } = capturedDb();
+    await assert.rejects(
+      () => assembleAdminVideoMemberAtomicPlan(db, input({
+        ...invalid, isCollab: invalid.isCollab ?? true,
+      })),
+      { name: "RangeError", message: "video_admin_member_atomic_assembly_invalid_input" },
+    );
+    assert.equal(planned.length, 0, "invalid direct assembly input cannot build metadata/Queue SQL");
+  }
+  const { db } = capturedDb();
+  const valid = await assembleAdminVideoMemberAtomicPlan(db, input({
+    isCollab: true, members: [{ x_user_id: "alice" }],
+  }));
+  assert.equal(valid.noOp, false, "canonical member handle still composes an atomic metadata plan");
+});
+
 test("MIG-0650 U03ay: malformed oversized event fanout rejects before even metadata SQL planning", async () => {
   const { db, planned } = capturedDb();
   await assert.rejects(
