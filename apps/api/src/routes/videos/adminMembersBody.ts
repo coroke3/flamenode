@@ -21,7 +21,7 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
       return { kind: "too_large" };
     }
   }
-  if (!request.body) return { kind: "invalid" };
+  if (request.signal.aborted || !request.body) return { kind: "invalid" };
 
   // If a middleware already owns or disturbed the request body, getReader()
   // may throw synchronously. Fail closed as invalid input rather than leaking
@@ -32,12 +32,27 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
   } catch {
     return { kind: "invalid" };
   }
+  // A cancelled upload can leave read() pending forever when the transport
+  // never supplies another chunk. Race the read against the Fetch abort
+  // signal without waiting for reader.cancel() (which itself may never settle).
+  const aborted = Symbol("video_members_request_aborted");
+  let notifyAbort: (() => void) | undefined;
+  const abortPromise = new Promise<typeof aborted>((resolve) => {
+    notifyAbort = () => resolve(aborted);
+    request.signal.addEventListener("abort", notifyAbort, { once: true });
+    if (request.signal.aborted) notifyAbort();
+  });
   const chunks: Uint8Array[] = [];
   let total = 0;
   let emptyChunks = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const next = await Promise.race([reader.read(), abortPromise]);
+      if (next === aborted) {
+        void reader.cancel().catch(() => undefined);
+        return { kind: "invalid" };
+      }
+      const { done, value } = next;
       if (done) break;
       // Request bodies are byte streams. A malformed injected stream may yield
       // a string, typed-array element view or arbitrary object; its byteLength
@@ -71,7 +86,10 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
     // A failed upload must also be rejected without waiting on cancel().
     void reader.cancel().catch(() => undefined);
     return { kind: "invalid" };
+  } finally {
+    if (notifyAbort) request.signal.removeEventListener("abort", notifyAbort);
   }
+  if (request.signal.aborted) return { kind: "invalid" };
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
