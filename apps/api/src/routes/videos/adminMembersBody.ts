@@ -9,6 +9,9 @@
 import type { AdminJsonBody } from "../admin/body.ts";
 
 export const MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES = 256 * 1024;
+// A hostile stream can emit empty reads indefinitely without consuming any
+// of the byte budget. Limit these separately while allowing normal framing.
+export const MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS = 1024;
 
 export async function readAdminVideoMembersJsonBody(request: Request): Promise<AdminJsonBody> {
   const declared = request.headers.get("content-length");
@@ -31,6 +34,7 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
   }
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let emptyChunks = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -42,9 +46,16 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
         void reader.cancel().catch(() => undefined);
         return { kind: "invalid" };
       }
-      // Empty chunks are permitted but must not accumulate an unbounded
-      // number of array entries outside the 256KiB actual-byte limit.
-      if (value.byteLength === 0) continue;
+      // Empty chunks consume no bytes but still cost Worker CPU. Admit a
+      // bounded amount of harmless framing and reject an infinite stream
+      // without allocating or waiting for transport cancellation.
+      if (value.byteLength === 0) {
+        if (++emptyChunks > MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS) {
+          void reader.cancel().catch(() => undefined);
+          return { kind: "invalid" };
+        }
+        continue;
+      }
       total += value.byteLength;
       if (total > MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES) {
         // Do not wait for a malicious/broken transport to finish cancelling:
