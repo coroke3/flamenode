@@ -246,6 +246,53 @@ test("MIG-0713 U03 T01: search debounce invokes only the last query, preserves 2
 });
 
 
+test("MIG-0713 U03 T01: stable search adapter identity preserves the pending request", async () => {
+  const calls = [];
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const searchXUsers = (query, offset, signal) => {
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    calls.push({ query, offset, signal, resolve });
+    return promise;
+  };
+  const props = { ...noopAdapters, searchXUsers };
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, props)));
+    const input = container.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await act(async () => typeInto(input, "alice"));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 320)); });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].signal.aborted, false);
+
+    // New parent props do not imply a new search authority if the actual
+    // injected adapter identity is unchanged.
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...props,
+      suggestions: [],
+    })));
+    assert.equal(calls[0].signal.aborted, false,
+      "rerender with the identical adapter must not revoke a valid request");
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 320)); });
+    assert.equal(calls.length, 1, "same adapter and query must not repeat a request");
+
+    await act(async () => calls[0].resolve({
+      items: [{ id: "alice", x_name: "Alice" }],
+      hasMore: false, nextOffset: null,
+    }));
+    assert.ok(container.querySelector('#member-name-suggestions option[value="Alice"]'));
+    await act(async () => root.render(React.createElement(VideoMembersField, props)));
+    assert.ok(container.querySelector('#member-name-suggestions option[value="Alice"]'),
+      "the same authority retains its successful suggestions");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+
 test("MIG-0713 U03 T01: changing search adapter retires the old in-flight authority", async () => {
   // An injected function may carry a new auth/session scope. Treat replacement
   // as a trust boundary even if the two adapters use the same implementation.
