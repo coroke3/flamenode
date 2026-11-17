@@ -18,8 +18,9 @@ import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { BODY_TOO_LARGE_MESSAGE } from "../admin/body.ts";
 import { readAdminVideoMembersJsonBody } from "./adminMembersBody.ts";
-import { createAdminMemberD1ReadMeter, type AdminMemberD1ReadMeter } from "./adminMemberD1ReadMeter.ts";
+import { createAdminMemberD1ReadMeter, sealAdminMemberD1ReadMeter, type AdminMemberD1ReadMeter } from "./adminMemberD1ReadMeter.ts";
 import { prepareAdminVideoMemberCandidateWrite } from "@flamenode/server-core/video/adminMemberCandidatePrepare";
+import { prepareAdminMemberAtomicExecution } from "@flamenode/server-core/video/adminMemberAtomicExecute";
 import type { ValidatedMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
 
 type Ctx = Context<AppEnv>;
@@ -123,7 +124,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
         }
         // The db passed by dbMiddleware belongs to the request's READ-ONLY
         // metered D1 facade. There is no write-capable handle in this port.
-        await prepareAdminVideoMemberCandidateWrite(db, {
+        const prepared = await prepareAdminVideoMemberCandidateWrite(db, {
           target: input.target, videoId: input.videoId,
           actorUserId: actor.id,
           validated: input.validated,
@@ -133,7 +134,20 @@ export function createDefaultVideoAdminMembersPreflightHost(
           preloaded: { settings, actorSnapshotJsonById: snapshots },
           readMeasuredCallerQueries: () => meter.readCount(),
         });
-        // Deliberately discard the plan: preview mode never writes or wakes.
+        // Close ALL read access before a future Hono write-only handoff.
+        // A forged or stale count must fail even for a valid-looking plan.
+        const sealedCount = sealAdminMemberD1ReadMeter(
+          meter, prepared.executionInput.callerQueryCount);
+        const checkedAtomic = prepareAdminMemberAtomicExecution({
+          ...prepared.executionInput, callerQueryCount: sealedCount,
+        });
+        // Both no-op and write-intent plans must remain internally coherent.
+        // This is ONLY a pure replay of validation, never a D1 batch call.
+        if ((checkedAtomic === null) !== prepared.assembly.noOp ||
+            (checkedAtomic === null) !== (prepared.atomic === null)) {
+          throw new RangeError("video_admin_member_dry_run_plan_mismatch");
+        }
+        // Deliberately discard the sealed plan: no Hono writer/Queue wake.
       },
     } : {}),
     writeGuard: async (c, next) => {

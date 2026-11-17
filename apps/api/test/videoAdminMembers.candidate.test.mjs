@@ -160,7 +160,7 @@ import { atomicD1, seedChapterWorld, SESSION_USER, SITE } from "./support/chapte
 import { validateVideoMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
 import { MAX_ADMIN_JSON_BODY_BYTES } from "../src/routes/admin/body.ts";
 
-function realGuardFixture({ as = "u_admin", mode = "normal", observeBinding, enableCanonicalDryRun = false } = {}) {
+function realGuardFixture({ as = "u_admin", mode = "normal", observeBinding, enableCanonicalDryRun = false, afterCanonicalDryRun } = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
   sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'").run(mode);
@@ -173,9 +173,21 @@ function realGuardFixture({ as = "u_admin", mode = "normal", observeBinding, ena
     await next();
   };
   const app = new Hono();
-  app.route("/api/videos", createVideoAdminMembersPreflightRoutes(
-    createDefaultVideoAdminMembersPreflightHost({ session, enableCanonicalDryRun }),
-  ));
+  const host = createDefaultVideoAdminMembersPreflightHost({
+    session, enableCanonicalDryRun,
+  });
+  // Test-only hook observes the read facade BEFORE writeGuard.finally executes.
+  // This proves canonical dry-run seals access in the handler itself, not just
+  // when the outer middleware returns.
+  if (afterCanonicalDryRun) {
+    const originalPreview = host.previewCanonicalPlan;
+    assert.ok(originalPreview, "hook requires explicit dry-run opt-in");
+    host.previewCanonicalPlan = async (c, input) => {
+      await originalPreview(c, input);
+      await afterCanonicalDryRun();
+    };
+  }
+  app.route("/api/videos", createVideoAdminMembersPreflightRoutes(host));
   const send = (body, origin = SITE, path = "/api/videos/v_pub/members") => app.request(path, {
     method: "PUT",
     headers: { origin, "content-type": "application/json" },
@@ -248,6 +260,45 @@ test("MIG-0650 U03bt opt-in Hono dry-run composes no-op and changing member plan
         name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
       }, "even the dry-run planning read handle must seal on return");
     }
+    assert.equal(s.sqlite.prepare(
+      "SELECT collaboration_type FROM videos WHERE id = 'v_two'"
+    ).get().collaboration_type, "individual");
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03bv Hono no-op and write-intent dry-runs seal reads before returning HTTP 501", async () => {
+  const observed = [];
+  let verified = 0;
+  const s = realGuardFixture({
+    enableCanonicalDryRun: true,
+    observeBinding: facade => observed.push(facade),
+    afterCanonicalDryRun: () => {
+      verified++;
+      const facade = observed[observed.length - 1];
+      assert.ok(facade, "the authenticated request must use a metered facade");
+      assert.throws(() => facade.prepare("SELECT 1"), {
+        name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
+      }, "the planning read meter must seal BEFORE the route returns");
+    },
+  });
+  try {
+    for (const body of [
+      { is_collab: ["false"], members_json: "[]" },
+      { is_collab: ["false", "true"], members_json: "[]" },
+    ]) {
+      const before = s.d1.stats.reads;
+      const result = await s.send(body, SITE, "/api/videos/v_two/members");
+      assert.equal(result.status, 501, await result.clone().text());
+      assert.deepEqual(await result.json(), {
+        ok: false, message: "参加者設定の保存APIは移行準備中です。",
+      });
+      assert.ok(s.d1.stats.reads - before > 3, "canonical reads were metered");
+      assert.equal(s.d1.stats.batches, 0, "no-op or write-intent cannot commit");
+      assert.equal(s.count("audit_logs"), 0);
+      assert.equal(s.count("static_rebuild_queue"), 0);
+      assert.equal(s.count("video_members"), 0);
+    }
+    assert.equal(verified, 2, "both planning classifications sealed before response");
     assert.equal(s.sqlite.prepare(
       "SELECT collaboration_type FROM videos WHERE id = 'v_two'"
     ).get().collaboration_type, "individual");
