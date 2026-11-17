@@ -164,7 +164,12 @@ function VideoMembersFieldForTarget({
   }, []);
 
   // /api/internal/x-users/search からの追加候補 (debounce 検索)
-  const [fetched, setFetched] = React.useState<VideoMemberSuggestion[]>([]);
+  // Keep remote suggestions bound to the query that produced them.
+  // An unrelated query cannot render or autofill from the previous one.
+  const [fetched, setFetched] = React.useState<{
+    query: string;
+    items: VideoMemberSuggestion[];
+  }>({ query: "", items: [] });
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchStatus, setSearchStatus] = React.useState<
     "idle" | "loading" | "done" | "error"
@@ -185,7 +190,7 @@ function VideoMembersFieldForTarget({
     suggestionRequestIdRef.current += 1;
     loadMoreControllerRef.current?.abort();
     loadMoreControllerRef.current = null;
-    setFetched([]);
+    setFetched({ query: "", items: [] });
     setSearchStatus("idle");
     setSearchHint(null);
     setSearchHasMore(false);
@@ -215,11 +220,11 @@ function VideoMembersFieldForTarget({
         if (signal.aborted || requestId !== suggestionRequestIdRef.current) return;
         setFetched((prev) => {
           const map = new Map<string, VideoMemberSuggestion>();
-          if (offset > 0) {
-            for (const s of prev) map.set(normalizeXId(s.x_user_id), s);
+          if (offset > 0 && prev.query === q) {
+            for (const s of prev.items) map.set(normalizeXId(s.x_user_id), s);
           }
           for (const s of items) map.set(normalizeXId(s.x_user_id), s);
-          return Array.from(map.values());
+          return { query: q, items: Array.from(map.values()) };
         });
         setSearchHasMore(Boolean(json.hasMore));
         setNextOffset(
@@ -257,7 +262,7 @@ function VideoMembersFieldForTarget({
       suggestionRequestIdRef.current += 1;
       loadMoreControllerRef.current?.abort();
       loadMoreControllerRef.current = null;
-      setFetched([]);
+      setFetched({ query: "", items: [] });
       setSearchStatus("idle");
       setSearchHint(null);
       setSearchHasMore(false);
@@ -304,12 +309,12 @@ function VideoMembersFieldForTarget({
         if (key) map.set(key, suggestion);
       }
 
-      // API検索結果を優先し、サーバー側scoreを保持
-      for (const suggestion of fetched) {
-        const key = normalizeXId(
-          suggestion.x_user_id,
-        );
-        if (key) map.set(key, suggestion);
+      // API検索結果は、取得した検索語と現在の入力が一致する場合のみ使用する。
+      if (fetched.query === searchQuery.trim()) {
+        for (const suggestion of fetched.items) {
+          const key = normalizeXId(suggestion.x_user_id);
+          if (key) map.set(key, suggestion);
+        }
       }
 
       const query = searchQuery.trim();
