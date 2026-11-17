@@ -49,6 +49,39 @@ test("MIG-0730 U02b preview preserves CURRENT public participant/chapter display
   assert.match(empty, /公開参加者は登録されていません/);
 });
 
+test("MIG-0730 U02ce: CURRENT member footer links stay same-origin and retain safe public fallbacks", () => {
+  const youtube = "dQw4w9WgXcQ";
+  const scenarios = [
+    { id: "safe_slug", youtubeId: youtube, expected: "/" + youtube },
+    { id: "safe_slug", youtubeId: "https://youtu.be/" + youtube + "?t=30", expected: "/" + youtube },
+    { id: "safe_slug", youtubeId: "https://www.youtube.com/watch?v=" + youtube, expected: "/" + youtube },
+    { id: "safe_slug", youtubeId: "https://youtube.com/shorts/" + youtube, expected: "/" + youtube },
+    { id: "safe_slug", youtubeId: "https://youtube.com.evil.test/watch?v=" + youtube, expected: "/safe_slug" },
+    { id: "safe_slug", youtubeId: "//evil.test/path", expected: "/safe_slug" },
+    { id: "safe_slug", youtubeId: null, expected: "/safe_slug" },
+    { id: "id with space", youtubeId: "invalid-id", expected: "/list" },
+  ];
+  for (const { id, youtubeId, expected } of scenarios) {
+    const data = snapshot(id);
+    data.video.youtube_video_id = youtubeId;
+    const html = renderToStaticMarkup(wrap(React.createElement(AdminVideoMembersReadView, {
+      videoId: id, data,
+    })));
+    const doc = new JSDOM(html).window.document;
+    const links = [...doc.querySelectorAll("a")];
+    const detail = links.find(link => link.textContent.trim() === "詳細へ戻る");
+    const publicLink = links.find(link => link.textContent.trim() === "公開ページ");
+    assert.ok(detail, "CURRENT detail footer exists");
+    assert.equal(detail.getAttribute("href"), "/admin/videos/" + encodeURIComponent(id));
+    assert.ok(publicLink, "CURRENT public footer exists");
+    assert.equal(publicLink.getAttribute("href"), expected,
+      "YouTube and invalid legacy identifiers use CURRENT safe same-origin URLs");
+    assert.equal(publicLink.getAttribute("target"), "_blank");
+    assert.equal(publicLink.getAttribute("rel"), "noopener noreferrer");
+    assert.doesNotMatch(html, /type="submit"|参加者設定を保存/);
+  }
+});
+
 test("MIG-0730 U02b render-time identity epoch prevents A-B-A private data reuse", () => {
   const fetchFn = async () => json(snapshot("a"));
   const previous = {
