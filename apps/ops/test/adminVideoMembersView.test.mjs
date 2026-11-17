@@ -169,6 +169,31 @@ test("MIG-0730 U02ca: an obsolete A authorization error cannot redirect video B"
   } finally { await ui.cleanup(); }
 });
 
+test("MIG-0730 U02cc: obsolete 404 cannot replace video B or reappear on A revisit", async () => {
+  const ui = setup();
+  try {
+    await ui.render("a");
+    await ui.render("b");
+    assert.equal(ui.calls[0].signal.aborted, true, "A request is cancelled on navigation");
+    await React.act(async () => ui.calls[1].resolve(json(snapshot("b", [member("CURRENT_B")]))));
+    assert.match(ui.target.textContent, /CURRENT_B/);
+
+    await React.act(async () => ui.calls[0].resolve(json({}, 404)));
+    assert.match(ui.target.textContent, /CURRENT_B/, "stale A 404 must not displace B");
+    assert.doesNotMatch(ui.target.textContent, /ページが見つかりません/,
+      "stale A 404 must not mount the shared NotFoundView");
+    assert.deepEqual(ui.navigations, [], "404 is never an auth redirect");
+
+    await ui.render("a");
+    assert.equal(ui.calls[1].signal.aborted, true);
+    assert.match(ui.target.textContent, /読み込み中/);
+    assert.doesNotMatch(ui.target.textContent, /CURRENT_B|ページが見つかりません/);
+    await React.act(async () => ui.calls[2].resolve(json(snapshot("a", [member("FRESH_A")]))));
+    assert.match(ui.target.textContent, /FRESH_A/);
+    assert.doesNotMatch(ui.target.textContent, /CURRENT_B|ページが見つかりません/);
+  } finally { await ui.cleanup(); }
+});
+
 test("MIG-0730 U02b invalid UTF-16 route ID fails without any network and no endless loading", async () => {
   const ui = setup();
   try {
