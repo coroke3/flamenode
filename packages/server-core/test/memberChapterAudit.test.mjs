@@ -89,10 +89,10 @@ test("MIG-0650 U03d-2b: strict audit summary retains CURRENT fields and counts",
 });
 
 test("MIG-0650 U03d-2b: migration retains one shared chapter logic provider", async () => {
-  const source = await readFile(new URL("../../../src/lib/video/replaceVideoMembers.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../src/video/replaceVideoMembers.ts", import.meta.url), "utf8");
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.exports["./video/memberChapterAudit"], "./src/video/memberChapterAudit.ts");
-  assert.match(source, /from "@flamenode\/server-core\/video\/memberChapterAudit"/);
+  assert.match(source, /from "\.\/memberChapterAudit\.ts"/);
   assert.doesNotMatch(source, /function managedChapterRowsEqual\s*\(/);
   assert.doesNotMatch(source, /function buildChapterAuditSummary\s*\(/);
 });

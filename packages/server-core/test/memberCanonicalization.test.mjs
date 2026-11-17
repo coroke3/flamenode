@@ -154,13 +154,13 @@ test("MIG-0650 U03d-2i: live canonical/alias collision cannot pick another princ
 });
 
 test("MIG-0650 U03d-2i: shared resolver drives CURRENT Next, retaining CAS", async () => {
-  const legacy = await readFile(new URL("../../../src/lib/video/replaceVideoMembers.ts", import.meta.url), "utf8");
+  const legacy = await readFile(new URL("../src/video/replaceVideoMembers.ts", import.meta.url), "utf8");
   const mutations = await readFile(new URL("../src/video/memberWriteMutationBatch.ts", import.meta.url), "utf8");
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.exports["./video/memberCanonicalization"], "./src/video/memberCanonicalization.ts");
-  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberCanonicalization"/);
+  assert.match(legacy, /from "\.\/memberCanonicalization\.ts"/);
   assert.match(legacy, /canonicalizeVideoMemberInputs\(db, args\.members\)/);
-  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberWriteMutationBatch"/);
+  assert.match(legacy, /from "\.\/memberWriteMutationBatch\.ts"/);
   assert.match(mutations, /buildVideoMemberSetGuardSql/);
   assert.match(mutations, /buildHiddenCarryRowsGuardSql/);
   assert.doesNotMatch(legacy, /function isUnsafeXUserResolution/);
