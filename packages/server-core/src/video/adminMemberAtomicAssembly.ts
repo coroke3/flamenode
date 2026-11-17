@@ -170,6 +170,14 @@ export async function assembleAdminVideoMemberAtomicPlan(
     !input.target.id ||
     !input.actorUserId ||
     !Number.isSafeInteger(input.now) || input.now < 0 ||
+    // The direct assembly boundary must not rely solely on the outer Hono
+    // candidate input guard. Duplicate, empty or noncanonical linked-event
+    // identifiers must not enter the eventual durable Queue fanout.
+    !Array.isArray(input.eventIds) ||
+    input.eventIds.some(id =>
+      typeof id !== "string" || !id || id.trim() !== id
+    ) ||
+    new Set(input.eventIds).size !== input.eventIds.length ||
     input.membersPlan.statements.length !== input.membersPlan.expectedChanges.length ||
     input.membersPlan.expectedChanges.some(
       n => n !== null && (!Number.isSafeInteger(n) || n < 0),

@@ -194,6 +194,39 @@ test("MIG-0650 U03ay: malformed oversized event fanout rejects before even metad
   assert.equal(planned.length, 0);
 });
 
+test("MIG-0650 U03cb: direct assembly rejects malformed or duplicate linked event IDs", async () => {
+  const invalidEventIds = [
+    null,
+    "event-1",
+    [""],
+    ["  "],
+    [" event-1"],
+    ["event-1 "],
+    ["event-1", "event-1"],
+    ["event-1", null],
+    [42],
+  ];
+  for (const eventIds of invalidEventIds) {
+    const { db, planned } = capturedDb();
+    await assert.rejects(
+      () => assembleAdminVideoMemberAtomicPlan(db, input({
+        isCollab: true, eventIds,
+      })),
+      { name: "RangeError", message: "video_admin_member_atomic_assembly_invalid_input" },
+    );
+    assert.equal(planned.length, 0,
+      "malformed linked event IDs must be rejected before metadata or Queue SQL");
+  }
+  const { db } = capturedDb();
+  const result = await assembleAdminVideoMemberAtomicPlan(db, input({
+    isCollab: true, eventIds: ["event-b", "event-a"],
+  }));
+  assert.deepEqual(
+    result.targets.filter(x => x.targetType === "event_release").map(x => x.targetId),
+    ["event-b", "event-a"], "distinct event IDs preserve CURRENT fanout order",
+  );
+});
+
 test("MIG-0650 U03ay: audit, target, actor and row-count integrity reject before SQL or Queue", async () => {
   const validAudit = {
     table_name: "video_members_set",
