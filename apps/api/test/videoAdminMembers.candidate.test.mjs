@@ -578,6 +578,41 @@ test("MIG-0650 U03t locked or consumed request body fails closed before JSON par
     "previously consumed input is never treated as an empty valid member set");
 });
 
+
+test("MIG-0650 U03u oversized streaming input rejects promptly even when cancel never settles", async () => {
+  // A hostile transport may report a body chunk over budget but never
+  // resolve cancel(); rejecting HTTP 413 must not await that promise.
+  let cancelCalled = 0;
+  const upload = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES + 1));
+    },
+    cancel() {
+      cancelCalled++;
+      return new Promise(() => {});
+    },
+  });
+  const request = new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: upload,
+    duplex: "half",
+  });
+  let timeout;
+  try {
+    const result = await Promise.race([
+      readAdminVideoMembersJsonBody(request),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("oversize input waited for transport cancel")), 1500);
+      }),
+    ]);
+    assert.deepEqual(result, { kind: "too_large" });
+    assert.equal(cancelCalled, 1, "the transport is still cancelled best-effort");
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
 test("MIG-0650 U03l SA-085 reader rejects malformed UTF-8 instead of altering participant identity", async () => {
   // JSON.parse succeeds with the replacement character under the default
   // non-fatal TextDecoder. This must be an invalid request, not a renamed row.

@@ -37,7 +37,9 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
       if (done) break;
       total += value.byteLength;
       if (total > MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES) {
-        await reader.cancel().catch(() => undefined);
+        // Do not wait for a malicious/broken transport to finish cancelling:
+        // a never-settling cancel() must not hang this privileged request.
+        void reader.cancel().catch(() => undefined);
         return { kind: "too_large" };
       }
       chunks.push(value);
@@ -45,7 +47,8 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
   } catch {
     // An interrupted streaming upload has not supplied a complete JSON body.
     // Do not allow it to reach a privileged write, even on a retryable network error.
-    await reader.cancel().catch(() => undefined);
+    // A failed upload must also be rejected without waiting on cancel().
+    void reader.cancel().catch(() => undefined);
     return { kind: "invalid" };
   }
   const bytes = new Uint8Array(total);
