@@ -74,7 +74,7 @@ test("MIG-0730 U02ci: editable member footer preserves CURRENT navigation and sa
     { id: "v1", youtubeId: null, expected: "/v1" },
     { id: "id with space", youtubeId: "not-a-video", expected: "/list" },
     { id: "bad/path", youtubeId: null, expected: "/list", detail: "/admin/videos" },
-    { id: "\\uD800", youtubeId: null, expected: "/list", detail: "/admin/videos" },
+    { id: String.fromCharCode(0xD800), youtubeId: null, expected: "/list", detail: "/admin/videos" },
   ];
   for (const entry of cases) {
     const ui = setup({ video: { ...video, id: entry.id, youtube_video_id: entry.youtubeId } });
