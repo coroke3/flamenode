@@ -14,6 +14,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { videos } from "@flamenode/db/schema";
 import type { WriteAuditLogInput } from "../audit/types.ts";
 import type { D1AuditMutationBudget } from "../audit/mutateBudget.ts";
+import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import type { ServerCoreDb } from "../db.ts";
 import {
   buildStaticRebuildQueueBatch,
@@ -61,6 +62,33 @@ export type AdminMemberAtomicAssembly = {
 function auditRows(snapshot: unknown): readonly unknown[] | null {
   if (!snapshot || typeof snapshot !== "object" || !("rows" in snapshot)) return null;
   return Array.isArray(snapshot.rows) ? snapshot.rows : null;
+}
+
+/** The CURRENT chapter audit is an aggregate, not a member-row snapshot. */
+function auditChapterSummaryIsConsistent(
+  snapshot: unknown,
+  maxRows?: number,
+): boolean {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return false;
+  const data = snapshot as Record<string, unknown>;
+  const { row_count: rows, member_count: members, note_count: notes } = data;
+  if (
+    typeof rows !== "number" || !Number.isSafeInteger(rows) || rows < 0 ||
+    typeof members !== "number" || !Number.isSafeInteger(members) ||
+    members < 0 || members > rows ||
+    typeof notes !== "number" || !Number.isSafeInteger(notes) ||
+    notes < 0 || notes > rows ||
+    (maxRows !== undefined && rows > maxRows)
+  ) return false;
+  if (rows === 0) {
+    return members === 0 && notes === 0 &&
+      data.min_time === null && data.max_time === null;
+  }
+  return typeof data.min_time === "number" &&
+    Number.isFinite(data.min_time) &&
+    typeof data.max_time === "number" &&
+    Number.isFinite(data.max_time) &&
+    data.min_time <= data.max_time;
 }
 
 /** A top-level audit target is insufficient if its nested rows name another video. */
@@ -135,6 +163,12 @@ export async function assembleAdminVideoMemberAtomicPlan(
       (audit.table_name === "video_member_hidden_carry_cleanup" &&
         (!auditRows(audit.before)?.length ||
          auditRows(audit.after)?.length !== 0)) ||
+      // Chapter audits contain bounded aggregate summaries rather than
+      // member rows. A malformed or contradictory summary cannot serve as
+      // the strict evidence for a future authenticated chapter write.
+      (audit.table_name === "video_chapters_member_set" &&
+        (!auditChapterSummaryIsConsistent(audit.before) ||
+         !auditChapterSummaryIsConsistent(audit.after, MAX_VIDEO_MEMBERS * 30))) ||
       // Audit snapshots must not contain rows from any other video even when
       // their outer snapshot ID matches this target.
       ((audit.table_name === "video_members_set" ||

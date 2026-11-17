@@ -259,6 +259,13 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
     before: null,
     after: { id: "video-1", rows: [{ id: "new-x-user" }] },
   };
+  const validChapter = {
+    ...canonical, table_name: "video_chapters_member_set",
+    before: { id: "video-1", row_count: 0, member_count: 0,
+      min_time: null, max_time: null, note_count: 0 },
+    after: { id: "video-1", row_count: 1, member_count: 1,
+      min_time: 62, max_time: 62, note_count: 1 },
+  };
   const validHidden = {
     ...canonical, table_name: "video_member_hidden_carry_cleanup",
     operation: "DELETE",
@@ -291,6 +298,16 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
     [{ ...validHidden, before: { id: "video-1", rows: [] } }],
     [{ ...validHidden, after: { id: "video-1", rows: [{ video_id: "video-1" }] } }],
     [{ ...validHidden, after: { id: "video-1", rows: "bad" } }],
+    [{ ...validChapter, before: { id: "video-1", rows: [] } }],
+    [{ ...validChapter, after: { ...validChapter.after, row_count: -1 } }],
+    [{ ...validChapter, after: { ...validChapter.after, row_count: 0.5 } }],
+    [{ ...validChapter, after: { ...validChapter.after, member_count: 2 } }],
+    [{ ...validChapter, after: { ...validChapter.after, note_count: 2 } }],
+    [{ ...validChapter, before: { ...validChapter.before, min_time: 0 } }],
+    [{ ...validChapter, after: { ...validChapter.after, min_time: null } }],
+    [{ ...validChapter, after: { ...validChapter.after, min_time: 100 } }],
+    [{ ...validChapter, after: { ...validChapter.after, row_count: 3001 } }],
+    [{ ...validChapter, after: { ...validChapter.after, row_count: Number.NaN } }],
   ];
   for (const audits of invalid) {
     const { db, planned } = capturedDb();
@@ -311,10 +328,7 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
       before: { id: "video-1", rows: [{ video_id: "video-1" }] },
       after: { id: "video-1", rows: [{ video_id: "video-1" }] },
     },
-    {
-      ...canonical,
-      table_name: "video_chapters_member_set",
-    },
+    validChapter,
     validHidden,
   ]) {
     const { db } = capturedDb();
