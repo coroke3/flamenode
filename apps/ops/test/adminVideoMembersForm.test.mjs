@@ -723,3 +723,71 @@ test("MIG-0730 U02at: rotating either member privilege adapter retires pending s
     }
   }
 });
+
+test("MIG-0730 U02az: local OFF/ON preserves canonical editor draft without submitting private rows while OFF", async () => {
+  const searchXUsers = async () => ({ items: [], hasMore: false, nextOffset: null, hint: null });
+  const applyPermissionBatch = async () => ({ ok: true });
+  const requests = [];
+  const ui = setup({
+    membersField: h(VideoMembersField, {
+      initialMembers: [{
+        name: "Alice", x_user_id: "alice", role: "", comment: "", chapters: [],
+      }],
+      searchXUsers, applyPermissionBatch, permissionTargetVideoId: "v1",
+    }),
+    save: async form => {
+      requests.push([...form.entries()]);
+      return { ok: true, message: "保存しました" };
+    },
+  });
+  try {
+    await ui.render();
+    const form = ui.target.querySelector("form");
+    const fieldset = form.querySelector("fieldset");
+    const toggle = form.querySelector('input[name="is_collab"][type="checkbox"]');
+    const tableButton = [...form.querySelectorAll("button")].find(b => b.textContent.trim() === "表");
+    assert.ok(tableButton, "real shared VideoMembersField is mounted");
+    await React.act(async () => tableButton.click());
+    assert.equal(tableButton.getAttribute("aria-pressed"), "true");
+    assert.equal(form.querySelectorAll('input[placeholder="表示名"]').length, 1);
+
+    const addRow = [...form.querySelectorAll("button")].find(b => /行を追加/.test(b.textContent));
+    assert.ok(addRow);
+    await React.act(async () => addRow.click());
+    assert.equal(form.querySelectorAll('input[placeholder="表示名"]').length, 2,
+      "unsaved additional member row exists in local editor draft");
+    const hidden = fieldset.querySelector('input[name="members_json"]');
+    assert.ok(hidden);
+    await React.act(async () => toggle.click());
+    assert.equal(toggle.checked, false);
+    assert.equal(fieldset.disabled, true);
+    assert.equal(fieldset.style.display, "none");
+    assert.equal(fieldset.querySelector('input[name="members_json"]'), hidden,
+      "temporary OFF must not unmount the editor or discard its local state");
+    assert.deepEqual(new FormData(form).getAll("members_json"), ["[]"],
+      "OFF must exclude the disabled editor and submit only literal empty members");
+
+    await React.act(async () => toggle.click());
+    assert.equal(toggle.checked, true);
+    assert.equal(fieldset.disabled, false);
+    assert.equal(fieldset.querySelector('input[name="members_json"]'), hidden);
+    assert.equal(tableButton.getAttribute("aria-pressed"), "true");
+    assert.equal(form.querySelectorAll('input[placeholder="表示名"]').length, 2,
+      "existing local table mode and newly added unsaved row must survive OFF/ON");
+    assert.deepEqual(JSON.parse(new FormData(form).get("members_json")).map(r => r.name), ["Alice"]);
+
+    await ui.submit();
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0].filter(([key]) => key === "members_json").length, 1);
+    assert.deepEqual(JSON.parse(requests[0].find(([key]) => key === "members_json")[1])
+      .map(r => r.name), ["Alice"]);
+
+    await React.act(async () => toggle.click());
+    await ui.submit();
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests[1].filter(([key]) => key === "members_json"), [["members_json", "[]"]],
+      "explicit OFF save remains destructive only when submitted");
+  } finally {
+    await ui.cleanup();
+  }
+});
