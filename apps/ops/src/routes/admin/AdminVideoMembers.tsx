@@ -20,8 +20,8 @@ export function AdminVideoMembersReadView({ videoId, data }: {
     return <p role="alert">参加者データを表示できません。</p>;
   }
   const parsed = AdminVideoMembersResponseSchema.safeParse(data);
-  if (!parsed.success || parsed.verified.video.id !== videoId ||
-      parsed.verified.initialMembers.some(member => member.is_public_member !== 1)) {
+  if (!parsed.success || parsed.data.video.id !== videoId ||
+      parsed.data.initialMembers.some(member => member.is_public_member !== 1)) {
     return <p role="alert">参加者データを表示できません。</p>;
   }
   const verified = parsed.data;
