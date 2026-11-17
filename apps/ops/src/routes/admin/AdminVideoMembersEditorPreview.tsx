@@ -141,15 +141,22 @@ export function AdminVideoMembersEditorPreview({
   catch { return <p role="alert">参加者データを表示できません。</p>; }
   // Limit the array BEFORE schema traversal. A forged snapshot with 101+ rows
   // must not cause even one member getter / nested chapter to be inspected.
-  const rawMembers: unknown =
-    data && typeof data === "object" && !Array.isArray(data)
-      ? (data as { initialMembers?: unknown }).initialMembers
-      : undefined;
-  if (!Array.isArray(rawMembers) || rawMembers.length > MAX_VIDEO_MEMBERS) {
+  // This preview is callable directly: malicious legacy getters/proxies can
+  // throw during the initialMembers access or Zod traversal. Reject them
+  // without crashing the entire editor or exposing a hidden member row.
+  let parsed: ReturnType<typeof AdminVideoMembersResponseSchema.safeParse>;
+  try {
+    const rawMembers: unknown =
+      data && typeof data === "object" && !Array.isArray(data)
+        ? (data as { initialMembers?: unknown }).initialMembers
+        : undefined;
+    if (!Array.isArray(rawMembers) || rawMembers.length > MAX_VIDEO_MEMBERS) {
+      return <p role="alert">参加者データを表示できません。</p>;
+    }
+    parsed = AdminVideoMembersResponseSchema.safeParse(data);
+  } catch {
     return <p role="alert">参加者データを表示できません。</p>;
   }
-
-  const parsed = AdminVideoMembersResponseSchema.safeParse(data);
   if (!parsed.success || parsed.data.video.id !== videoId ||
       parsed.data.initialMembers.some(member => member.is_public_member !== 1)) {
     return <p role="alert">参加者データを表示できません。</p>;
