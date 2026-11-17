@@ -25,10 +25,10 @@ const unavailablePermission: FieldProps["applyPermissionBatch"] = async () => {
   throw new Error("MIG-0730: permission mutation adapter is not wired");
 };
 
-// Best-effort in-tab deduplication: a Preview can be unmounted/remounted while
-// its old PUT is still in flight. Keep the per-video latch beyond React roots.
+// Best-effort in-tab deduplication across independent Preview React roots:
+// member PUT and permission POST must not mutate the same video concurrently.
 // Different tabs/devices still require the server-side D1 CAS (MIG-0650).
-const writesInFlightByVideo = new Set<string>();
+const writesInFlightByVideo = new Map<string, "save" | "permission">();
 
 /**
  * Never show hidden edit-only rows from a forged/oversized snapshot; never turn
@@ -43,17 +43,22 @@ export function AdminVideoMembersEditorPreview({
   const guardedSave = React.useMemo<AdminVideoMembersSave | undefined>(() => {
     if (!save) return undefined;
     return async formData => {
-      if (writesInFlightByVideo.has(videoId)) {
+      const ongoing = writesInFlightByVideo.get(videoId);
+      if (ongoing) {
         return {
           ok: false,
-          message: "前の保存処理が完了していません。結果を確認してから再度保存してください。",
+          message: ongoing === "save"
+            ? "前の保存処理が完了していません。結果を確認してから再度保存してください。"
+            : "前の権限変更処理が完了していません。最新状態を確認してください。",
         };
       }
-      writesInFlightByVideo.add(videoId);
+      writesInFlightByVideo.set(videoId, "save");
       try {
         return await save(formData);
       } finally {
-        writesInFlightByVideo.delete(videoId);
+        if (writesInFlightByVideo.get(videoId) === "save") {
+          writesInFlightByVideo.delete(videoId);
+        }
       }
     };
   }, [save, videoId]);
@@ -65,6 +70,22 @@ export function AdminVideoMembersEditorPreview({
   const guardedPermission = React.useMemo<FieldProps["applyPermissionBatch"] | undefined>(() => {
     if (!applyPermissionBatch) return undefined;
     return async input => {
+      // One preview must not redirect another video's privilege write.
+      if (!input || input.videoId !== videoId) {
+        return {
+          ok: false,
+          message: "編集権限の反映結果を確認できませんでした。状態を再取得してください。",
+        };
+      }
+      if (writesInFlightByVideo.has(videoId)) {
+        return {
+          ok: false,
+          message: "前の変更処理が完了していません。最新状態を確認してください。",
+        };
+      }
+      // Acquire synchronously, before the first await. A second Preview root
+      // must respect an in-flight PUT/POST even after a React remount.
+      writesInFlightByVideo.set(videoId, "permission");
       try {
         return await applyPermissionBatch(input);
       } catch {
@@ -72,9 +93,13 @@ export function AdminVideoMembersEditorPreview({
           ok: false,
           message: "編集権限の反映結果を確認できませんでした。状態を再取得してください。",
         };
+      } finally {
+        if (writesInFlightByVideo.get(videoId) === "permission") {
+          writesInFlightByVideo.delete(videoId);
+        }
       }
     };
-  }, [applyPermissionBatch]);
+  }, [applyPermissionBatch, videoId]);
 
   // This unmounted preview is also callable directly. Reject malformed IDs
   // before touching a potentially private server response.

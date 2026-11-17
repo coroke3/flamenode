@@ -1208,3 +1208,73 @@ test("MIG-0730 U02bs: rejected Ops permission port is unverified, never a proved
     target.remove();
   }
 });
+
+test("MIG-0730 U02bt: two Ops Preview roots share the video write gate across permission POST and member PUT", async () => {
+  const firstTarget = document.createElement("div");
+  const secondTarget = document.createElement("div");
+  document.body.append(firstTarget, secondTarget);
+  const firstRoot = createRoot(firstTarget);
+  const secondRoot = createRoot(secondTarget);
+  const posts = [], saves = [];
+  let settleFirst;
+  const pending = new Promise(resolve => { settleFirst = resolve; });
+  const applyPermissionBatch = async input => {
+    posts.push(input);
+    return posts.length === 1 ? pending : { ok: true };
+  };
+  const save = async formData => {
+    saves.push(formData.get("video_id"));
+    return { ok: true, message: "AFTER SETTLE" };
+  };
+  const searchXUsers = async () => ({ items: [], hasMore: false, nextOffset: null });
+  const render = (root, name) => React.act(async () => root.render(
+    React.createElement(AdminVideoMembersEditorPreview, {
+      videoId: "U02BT", data: data("U02BT", name),
+      save, searchXUsers, applyPermissionBatch,
+    }),
+  ));
+  const submit = target => React.act(async () => {
+    const event = new dom.window.Event("submit", { bubbles: true, cancelable: true });
+    target.querySelector("form").dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+  });
+  try {
+    await render(firstRoot, "OLD");
+    await previewPermissionTsv(firstTarget, ["Bob", "bob", "", "", "", "ON"].join("\t"));
+    await React.act(async () => buttonNamed(firstTarget, "変更を反映").click());
+    assert.equal(posts.length, 1);
+    assert.deepEqual(formPayload(firstTarget).map(row => row.name), ["OLD"]);
+
+    // An unrelated React root for the SAME video must not PUT while that POST
+    // could have committed without a response.
+    await render(secondRoot, "FRESH");
+    await submit(secondTarget);
+    assert.deepEqual(saves, [], "pending permission POST must block a same-video member PUT");
+    assert.match(secondTarget.textContent, /前の権限変更処理が完了していません/);
+
+    await previewPermissionTsv(secondTarget, ["Alice", "alice", "", "", "", "ON"].join("\t"));
+    await React.act(async () => buttonNamed(secondTarget, "変更を反映").click());
+    assert.equal(posts.length, 1, "another Preview cannot overlap the pending permission POST");
+    assert.match(secondTarget.textContent, /前の変更処理が完了していません/);
+    assert.deepEqual(formPayload(secondTarget).map(row => row.name), ["FRESH"],
+      "neither blocked write may apply unverified member rows");
+
+    // A failed or lost first response is not retried. A fresh explicit action
+    // is allowed only after the first operation settles and releases the lock.
+    await React.act(async () => settleFirst({
+      ok: false, message: "編集権限の反映結果を確認できませんでした。状態を再取得してください。",
+    }));
+    assert.equal(posts.length, 1);
+    assert.deepEqual(saves, []);
+    await React.act(async () => buttonNamed(secondTarget, "変更を反映").click());
+    assert.equal(posts.length, 2);
+    assert.deepEqual(formPayload(secondTarget).map(row => row.name).sort(),
+      ["Alice", "FRESH"]);
+    await submit(secondTarget);
+    assert.deepEqual(saves, ["U02BT"], "PUT may proceed only after permission POST settled");
+  } finally {
+    settleFirst({ ok: false });
+    await React.act(async () => { firstRoot.unmount(); secondRoot.unmount(); });
+    firstTarget.remove(); secondTarget.remove();
+  }
+});
