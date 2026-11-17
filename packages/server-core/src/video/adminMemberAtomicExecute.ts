@@ -63,7 +63,10 @@ export function prepareAdminMemberAtomicExecution(
     !Array.isArray(assembly.plan.audits) ||
     !Array.isArray(assembly.queue.statements) ||
     !Array.isArray(assembly.queue.expectedChanges) ||
-    !Array.isArray(assembly.targets)
+    !Array.isArray(assembly.targets) ||
+    // Even a no-op must not be acknowledged with a forged/missing guard actor.
+    !preloaded?.settings ||
+    !isValidPreloadedActorSnapshotJson(preloaded.actorSnapshotJsonById?.[actorUserId])
   ) invalid();
 
   const { plan, queue } = assembly;
@@ -103,9 +106,7 @@ export function prepareAdminMemberAtomicExecution(
         queue.expectedChanges[i]
     ) ||
     (queue.acceptedTargetCount > 0) !== (queue.statements.length > 0) ||
-    (assembly.targets.length > 0) !== (queue.acceptedTargetCount > 0) ||
-    !preloaded?.settings ||
-    !isValidPreloadedActorSnapshotJson(preloaded.actorSnapshotJsonById?.[actorUserId])
+    (assembly.targets.length > 0) !== (queue.acceptedTargetCount > 0)
   ) invalid();
 
   const atomic: AtomicAuditMutationInput = {

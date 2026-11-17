@@ -71,6 +71,30 @@ test("MIG-0650 U03bf true no-op skips audit/Queue and all D1 execution", async (
   });
 });
 
+test("MIG-0650 U03by no-op rejects missing or forged authenticated actor context without D1 access", async () => {
+  const invalid = [
+    {},
+    { settings: preloaded.settings, actorSnapshotJsonById: {} },
+    { settings: preloaded.settings, actorSnapshotJsonById: { admin: "{}" } },
+  ];
+  let dbAccess = 0;
+  const neverDb = new Proxy({}, {
+    get() { dbAccess++; throw Error("invalid no-op must not touch D1"); },
+  });
+  for (const forged of invalid) {
+    const input = noOp();
+    input.preloaded = forged;
+    assert.throws(() => prepareAdminMemberAtomicExecution(input), {
+      name: "RangeError", message: "video_admin_member_atomic_execution_invalid",
+    });
+    await assert.rejects(
+      executeAdminMemberAtomicCandidate(neverDb, input),
+      { name: "RangeError", message: "video_admin_member_atomic_execution_invalid" },
+    );
+  }
+  assert.equal(dbAccess, 0, "reject before any D1 or Queue operation");
+});
+
 test("MIG-0650 U03bf no-queue member write never requests a Queue wake", () => {
   const plan = fixture();
   const result = {
