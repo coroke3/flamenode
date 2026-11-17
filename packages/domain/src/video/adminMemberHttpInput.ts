@@ -12,6 +12,29 @@ const INVALID_INPUT = "参加者設定の入力が不正です。";
 const INVALID_VIDEO_ID = "対象作品が指定されていません。";
 
 /**
+ * Use exactly the same URL ID guard before reading the privileged JSON body.
+ * Does not grant authorization or access the database.
+ */
+export function isValidAdminVideoMemberPathId(pathVideoId: unknown): pathVideoId is string {
+  if (
+    typeof pathVideoId !== "string" ||
+    !pathVideoId ||
+    pathVideoId.length > 64 ||
+    pathVideoId.trim() !== pathVideoId ||
+    pathVideoId === "." ||
+    pathVideoId === ".." ||
+    /[\/\\\x00-\x1f]/.test(pathVideoId)
+  ) return false;
+  try {
+    encodeURIComponent(pathVideoId); // reject malformed UTF-16
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
+/**
  * Keep the legacy literal checkbox semantics: only "on" and "true" turn
  * collaboration on. Multiple checkbox values may be represented as an array.
  * "members_json" remains a string because CURRENT validates its raw JSON
@@ -21,20 +44,7 @@ export function parseAdminVideoMembersHttpInput(
   pathVideoId: string,
   raw: unknown,
 ): AdminMemberHttpInput {
-  if (
-    typeof pathVideoId !== "string" ||
-    !pathVideoId ||
-    pathVideoId.length > 64 ||
-    pathVideoId.trim() !== pathVideoId ||
-    pathVideoId === "." ||
-    pathVideoId === ".." ||
-    /[\/\\\x00-\x1f]/.test(pathVideoId)
-  ) {
-    return { ok: false, message: INVALID_VIDEO_ID };
-  }
-  try {
-    encodeURIComponent(pathVideoId); // malformed UTF-16 is not a valid path identifier
-  } catch {
+  if (!isValidAdminVideoMemberPathId(pathVideoId)) {
     return { ok: false, message: INVALID_VIDEO_ID };
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
