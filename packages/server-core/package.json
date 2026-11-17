@@ -17,6 +17,7 @@
     "./video/hiddenMemberCarrySql": "./src/video/hiddenMemberCarrySql.ts",
     "./video/memberPermissionCarry": "./src/video/memberPermissionCarry.ts",
     "./video/memberXUserSql": "./src/video/memberXUserSql.ts",
+    "./video/memberReplacementRows": "./src/video/memberReplacementRows.ts",
     "./video/permissionSql": "./src/video/permissionSql.ts",
     "./video/permissionRecipients": "./src/video/permissionRecipients.ts",
     "./memberSuggestion/core": "./src/memberSuggestion/core.ts",
