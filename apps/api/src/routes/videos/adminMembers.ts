@@ -200,7 +200,9 @@ export function createVideoAdminMembersPreflightRoutes(
       // A blank or non-canonical primary ID would become a bogus rebuild
       // target. Apply the same trim/nonempty rule as linked D1 event IDs.
       (target.primary_event_id !== null &&
-        (!target.primary_event_id || target.primary_event_id.trim() !== target.primary_event_id)) ||
+        (typeof target.primary_event_id !== "string" ||
+          !target.primary_event_id ||
+          target.primary_event_id.trim() !== target.primary_event_id)) ||
       !Number.isSafeInteger(target.public_member_count) ||
       target.public_member_count < 0 ||
       target.public_member_count > MAX_VIDEO_MEMBERS ||

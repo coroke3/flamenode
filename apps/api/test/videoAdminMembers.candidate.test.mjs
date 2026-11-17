@@ -504,6 +504,8 @@ test("MIG-0650 U03i forged or corrupted video facts fail closed before any write
     { ...baseline, public_member_count: "0" },
     { ...baseline, creator_x_user_id: { forged: true } },
     { ...baseline, primary_event_id: ["cross_video"] },
+    { ...baseline, primary_event_id: 5 },
+    { ...baseline, primary_event_id: { malformed: true } },
     { ...baseline, linked_event_ids_json: undefined },
     { ...baseline, linked_event_ids_json: "not-json" },
     { ...baseline, linked_event_ids_json: "{}" },
