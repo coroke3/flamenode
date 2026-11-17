@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { buildAdminVideoMemberMetadataPlan } from "../src/video/adminMemberMetadataPlan.ts";
@@ -40,14 +41,16 @@ test("MIG-0650 U03p: complete no-op returns empty D1/strict audit/expected-count
   assert.equal(calls.length, 0);
 });
 
-test("MIG-0650 U03p: video metadata update scopes bound WHERE by server-read ID", () => {
+test("MIG-0650 U03av: video metadata UPDATE requires server-read ID, type and timestamp", () => {
   const { db, calls } = capture();
   const plan = buildAdminVideoMemberMetadataPlan(db, args());
   assert.equal(calls.length, 1);
   assert.equal(plan.statements[0], calls[0]);
   assert.deepEqual(calls[0].values, {collaboration_type:"collab", updated_at:12345});
   assert.match(calls[0].query.sql, /"id" = \?/);
-  assert.deepEqual(calls[0].query.params, ["video-1"]);
+  assert.deepEqual(calls[0].query.params, ["video-1", "individual", 42]);
+  assert.match(calls[0].query.sql, /"collaboration_type" = \\?/);
+  assert.match(calls[0].query.sql, /"updated_at" = \\?/);
   assert.deepEqual(plan.expectedChanges, [1], "one row must change inside atomic D1 batch");
 });
 
@@ -85,4 +88,47 @@ test("MIG-0650 U03p: Next imports the shared metadata planner, no duplicate loca
   assert.match(next, /buildAdminVideoMemberMetadataPlan\(db, \{/);
   assert.match(next, /appendVideoAtomicWritePlan\(plan, metadataPlan\)/);
   assert.doesNotMatch(next, /reason: "参加者設定から合作区分を同期"/);
+});
+
+test("MIG-0650 U03av: real SQLite stale metadata rejects writes instead of clobbering a newer collaboration edit", () => {
+  const { db } = capture();
+  const plan = buildAdminVideoMemberMetadataPlan(db, args());
+  const { query, values } = plan.statements[0];
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(
+      "CREATE TABLE videos (id TEXT PRIMARY KEY, collaboration_type TEXT NOT NULL, updated_at INTEGER NOT NULL)"
+    );
+    const insert = sqlite.prepare(
+      "INSERT INTO videos (id, collaboration_type, updated_at) VALUES ('video-1', ?, ?)"
+    );
+    const update = sqlite.prepare(
+      'UPDATE videos SET collaboration_type = ?, updated_at = ? WHERE ' + query.sql
+    );
+    const current = () =>
+      sqlite.prepare("SELECT collaboration_type, updated_at FROM videos WHERE id = 'video-1'").get();
+    const run = () => update.run(
+      values.collaboration_type, values.updated_at, ...query.params
+    ).changes;
+
+    insert.run("individual", 42);
+    assert.equal(run(), 1, "fresh snapshot updates exactly one video in atomic batch");
+    assert.deepEqual(current(), { collaboration_type: "collab", updated_at: 12345 });
+
+    sqlite.exec("DELETE FROM videos");
+    insert.run("individual", 43);
+    assert.equal(run(), 0, "stale timestamp cannot overwrite the concurrently edited video");
+    assert.deepEqual(current(), { collaboration_type: "individual", updated_at: 43 });
+
+    sqlite.exec("DELETE FROM videos");
+    insert.run("collab", 42);
+    assert.equal(run(), 0, "stale collaboration type cannot overwrite even if timestamps collide");
+    assert.deepEqual(current(), { collaboration_type: "collab", updated_at: 42 });
+
+    sqlite.exec("DELETE FROM videos");
+    assert.equal(run(), 0, "deleted video must not be recreated by a stale mutation");
+    assert.deepEqual(plan.expectedChanges, [1], "host's exact changes() assertion rejects all stale cases");
+  } finally {
+    sqlite.close();
+  }
 });
