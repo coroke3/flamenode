@@ -657,3 +657,65 @@ test("MIG-0730 U02ab: query change never offers stale remote suggestions before 
     target.remove();
   }
 });
+
+
+test("MIG-0730 U02ae: rejected X-user pagination retires cached private candidates", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const calls = [];
+  const searchXUsers = async (query, offset) => {
+    calls.push({ query, offset });
+    if (offset > 0) throw new Error("HTTP 403: X-user search access revoked");
+    return {
+      items: [{ id: "private_creator", x_name: "PRIVATE CANDIDATE" }],
+      hasMore: true, nextOffset: 20, hint: null,
+    };
+  };
+  const permission = async () => ({ ok: false });
+  const options = () => [...target.querySelectorAll("#member-name-suggestions option")]
+    .map(node => node.value);
+  try {
+    await React.act(async () => root.render(React.createElement(VideoMembersField, {
+      initialMembers: [member("CURRENT")],
+      permissionTargetVideoId: "A",
+      searchXUsers,
+      applyPermissionBatch: permission,
+    })));
+    const input = target.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await React.act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+      assert.ok(setter);
+      setter.call(input, "Alice");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await React.act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 320));
+    });
+    assert.deepEqual(calls, [{ query: "Alice", offset: 0 }]);
+    assert.ok(options().includes("PRIVATE CANDIDATE"));
+    const loadMore = [...target.querySelectorAll("button")]
+      .find(button => button.textContent.includes("候補をさらに読み込む"));
+    assert.ok(loadMore);
+
+    // A later page can return HTTP 401/403 after the first page succeeded.
+    // All remote candidates must disappear; a failure is not an empty page.
+    await React.act(async () => loadMore.click());
+    assert.deepEqual(calls, [
+      { query: "Alice", offset: 0 },
+      { query: "Alice", offset: 20 },
+    ]);
+    assert.ok(!options().includes("PRIVATE CANDIDATE"),
+      "cached private candidates cannot survive a rejected pagination request");
+    assert.ok(![...target.querySelectorAll("button")]
+      .some(button => button.textContent.includes("候補をさらに読み込む")),
+      "rejected request invalidates the old paging cursor");
+    assert.match(target.textContent, /候補の取得に失敗しました/);
+    assert.deepEqual(formPayload(target).map(row => row.name), ["Alice"],
+      "revoking suggestions must not discard unsaved member edits");
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
