@@ -122,7 +122,16 @@ function currentExplicitPermissionPrivilegeMode(): "admin" | "event" | undefined
   return raw === "admin" || raw === "event" ? raw : undefined;
 }
 
-export function VideoMembersField({
+// Reusing one mounted field for video B must not carry unsaved video A rows
+// (or an in-flight permission dialog) into B's hidden members_json payload.
+// For the SAME target, preserve the current draft during harmless rerenders.
+export function VideoMembersField(props: VideoMembersFieldProps): React.ReactElement {
+  const targetKey = props.permissionTargetVideoId == null
+    ? "new-video" : `video:${props.permissionTargetVideoId}`;
+  return <VideoMembersFieldForTarget key={targetKey} {...props} />;
+}
+
+function VideoMembersFieldForTarget({
   initialMembers = [],
   suggestions = [],
   hiddenName = "members_json",

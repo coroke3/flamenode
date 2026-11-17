@@ -406,3 +406,39 @@ test("MIG-0730 U02t: same mounted field rejects previous video's permission comp
     target.remove();
   }
 });
+
+test("MIG-0730 U02x: reused shared field must not carry video A draft into video B", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const render = async (videoId, name) => React.act(async () => {
+    root.render(React.createElement(VideoMembersField, {
+      initialMembers: [member(name)],
+      permissionTargetVideoId: videoId,
+      searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null, hint: null }),
+      applyPermissionBatch: async () => ({ ok: false }),
+    }));
+  });
+  try {
+    await render("A", "A ONLY");
+    assert.deepEqual(formPayload(target).map(x => x.name), ["A ONLY"]);
+
+    // A same-video metadata refresh must preserve the in-progress local draft.
+    await render("A", "A SERVER REFRESH");
+    assert.deepEqual(formPayload(target).map(x => x.name), ["A ONLY"]);
+
+    // The parent intentionally reuses the same root and component type.
+    // The target change must replace its state BEFORE B can submit.
+    await render("B", "B ONLY");
+    assert.deepEqual(formPayload(target).map(x => x.name), ["B ONLY"]);
+    assert.doesNotMatch(target.querySelector('input[name="members_json"]').value, /A ONLY/);
+
+    await render("B", "B SERVER REFRESH");
+    assert.deepEqual(formPayload(target).map(x => x.name), ["B ONLY"]);
+    await render("A", "A NEW SESSION");
+    assert.deepEqual(formPayload(target).map(x => x.name), ["A NEW SESSION"]);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
