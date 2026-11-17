@@ -116,10 +116,10 @@ test("MIG-0650 U03d-2e: deterministic parity with original priority for every se
 });
 
 test("MIG-0650 U03d-2e: shared core is the single source and Next caller controls canonicalization", async () => {
-  const source = await readFile(new URL("../../../src/lib/video/replaceVideoMembers.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../src/video/replaceVideoMembers.ts", import.meta.url), "utf8");
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.exports["./video/memberPermissionCarry"], "./src/video/memberPermissionCarry.ts");
-  assert.match(source, /from "@flamenode\/server-core\/video\/memberPermissionCarry"/);
+  assert.match(source, /from "\.\/memberPermissionCarry\.ts"/);
   assert.match(source, /selectVideoMemberPermissionCarry\(carryRows, xIdSet, canonicalIdentity\)/);
   assert.match(source, /const canonicalIdentity = \(raw: string \| null \| undefined\): string =>/);
   assert.doesNotMatch(source, /const permissionCarryByXId = new Map/);

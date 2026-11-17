@@ -193,7 +193,7 @@ test("MIG-0650 U03d-2j: a stale CAS inside one SQLite transaction rolls back a p
 });
 
 test("MIG-0650 U03d-2k: Next delegates exact CAS and D1 order to shared core, still owns audit", async () => {
-  const legacy = await readFile(new URL("../../../src/lib/video/replaceVideoMembers.ts", import.meta.url), "utf8");
+  const legacy = await readFile(new URL("../src/video/replaceVideoMembers.ts", import.meta.url), "utf8");
   const source = await readFile(new URL("../src/video/memberWriteMutationBatch.ts", import.meta.url), "utf8");
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.exports["./video/memberWriteMutationBatch"], "./src/video/memberWriteMutationBatch.ts");
@@ -202,10 +202,12 @@ test("MIG-0650 U03d-2k: Next delegates exact CAS and D1 order to shared core, st
   assert.match(source, /expectedChanges\.push\(newXUsers\.length\)/);
   assert.match(source, /if \(membersChanged && existingPublicCount > 0\)/);
   assert.match(source, /if \(chaptersChanged && existingManagedChapters\.length > 0\)/);
+  const bridge = await readFile(new URL("../../../src/lib/video/replaceVideoMembers.ts", import.meta.url), "utf8");
+  assert.match(bridge, /export \{ buildReplaceVideoMembersPlan \} from "@flamenode\/server-core\/video\/replaceVideoMembers"/);
   assert.match(legacy, /export async function buildReplaceVideoMembersPlan/);
   assert.match(legacy, /plan\.audits\.push\(\.\.\.buildVideoMemberWriteAudits\(\{/);
-  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberWriteAudits"/);
-  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberWriteMutationBatch"/);
+  assert.match(legacy, /from "\.\/memberWriteAudits\.ts"/);
+  assert.match(legacy, /from "\.\/memberWriteMutationBatch\.ts"/);
   assert.match(legacy, /buildVideoMemberWriteMutationBatch\(db, \{/);
   assert.doesNotMatch(legacy, /db\.run\(buildVideoMemberSetGuardSql/);
   assert.doesNotMatch(source, /mutateWithAudit|wakeNotificationQueue|writeGuard/);

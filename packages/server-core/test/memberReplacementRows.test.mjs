@@ -161,17 +161,17 @@ test("MIG-0650 U03d-2g: source arrays, map and set are not mutated or reused acr
 });
 
 test("MIG-0650 U03d-2g: Next writer invokes shared projection, retaining canonical resolution and CAS", async () => {
-  const legacy = await readFile(new URL("../../../src/lib/video/replaceVideoMembers.ts", import.meta.url), "utf8");
+  const legacy = await readFile(new URL("../src/video/replaceVideoMembers.ts", import.meta.url), "utf8");
   const mutations = await readFile(new URL("../src/video/memberWriteMutationBatch.ts", import.meta.url), "utf8");
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.exports["./video/memberReplacementRows"], "./src/video/memberReplacementRows.ts");
-  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberReplacementRows"/);
+  assert.match(legacy, /from "\.\/memberReplacementRows\.ts"/);
   assert.match(legacy, /buildVideoMemberReplacementRows\(\{/);
   assert.match(legacy, /canonicalizeVideoMemberInputs\(db, args\.members\)/);
-  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberCanonicalization"/);
+  assert.match(legacy, /from "\.\/memberCanonicalization\.ts"/);
   assert.match(legacy, /normalizeXId/);
   assert.match(legacy, /generateMemberId: \(\) => generateId\("vm"\)/);
-  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberWriteMutationBatch"/);
+  assert.match(legacy, /from "\.\/memberWriteMutationBatch\.ts"/);
   assert.match(mutations, /buildVideoMemberSetGuardSql/);
   assert.doesNotMatch(legacy, /const existingPublicByXId = new Map/);
   assert.doesNotMatch(legacy, /const nextMembers: Array</);

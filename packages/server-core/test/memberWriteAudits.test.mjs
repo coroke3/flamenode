@@ -76,7 +76,7 @@ test("MIG-0650 U03m chapter-only, hidden-only, member-only audits are independen
   assert.deepEqual(m[0].after,a);
 });
 test("MIG-0650 U03m Next delegates to shared audits without separate D1 writes", async () => {
-  const source=await readFile(new URL("../../../src/lib/video/replaceVideoMembers.ts", import.meta.url),"utf8");
+  const source=await readFile(new URL("../src/video/replaceVideoMembers.ts", import.meta.url),"utf8");
   const pkg=JSON.parse(await readFile(new URL("../package.json", import.meta.url),"utf8"));
   assert.equal(pkg.exports["./video/memberWriteAudits"],"./src/video/memberWriteAudits.ts");
   assert.ok(source.includes("plan.audits.push(...buildVideoMemberWriteAudits({"));
