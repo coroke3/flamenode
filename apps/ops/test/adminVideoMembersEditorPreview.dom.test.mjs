@@ -934,3 +934,77 @@ test("MIG-0730 U02aj: no-target replacement confirmation retires on read-only tr
     target.remove();
   }
 });
+
+test("MIG-0730 U02bg: fresh same-video snapshot cannot bypass pending public-member PUT latch", async () => {
+  for (const path of ["same-video-refresh", "A-B-A"]) {
+    for (const outcome of ["success", "failure"]) {
+      const target = document.createElement("div");
+      document.body.append(target);
+      const root = createRoot(target);
+      const writes = [];
+      let finish, reject;
+      let refreshes = 0;
+      const first = new Promise((resolve, rejectFirst) => {
+        finish = resolve; reject = rejectFirst;
+      });
+      const save = async formData => {
+        writes.push({
+          videoId: formData.get("video_id"),
+          names: JSON.parse(formData.get("members_json")).map(row => row.name),
+        });
+        return writes.length === 1 ? first : { ok: true, message: "LATEST SAVE" };
+      };
+      const searchXUsers = async () => ({ items: [], hasMore: false, nextOffset: null });
+      const applyPermissionBatch = async () => ({ ok: true });
+      const render = async (id, name) => React.act(async () => root.render(
+        React.createElement(AdminVideoMembersEditorPreview, {
+          videoId: id, data: data(id, name), save, searchXUsers, applyPermissionBatch,
+          onSaved: () => { refreshes++; },
+        }),
+      ));
+      const submit = async () => React.act(async () => {
+        const event = new dom.window.Event("submit", { bubbles: true, cancelable: true });
+        target.querySelector("form").dispatchEvent(event);
+        assert.equal(event.defaultPrevented, true);
+      });
+      try {
+        await render("A", "Alice");
+        await submit();
+        assert.deepEqual(writes, [{ videoId: "A", names: ["Alice"] }]);
+        assert.equal(target.querySelector('button[type="submit"]').disabled, true);
+
+        // Changes to the authorized membership snapshot remount the form and
+        // discard its local pending ref. Do not allow that new form to PUT
+        // while the old A request has an uncertain commit state.
+        if (path === "A-B-A") await render("B", "Other");
+        await render("A", "Bob");
+        assert.deepEqual(formPayload(target).map(row => row.name), ["Bob"]);
+        assert.equal(target.querySelector('button[type="submit"]').disabled, false);
+        await submit();
+        assert.equal(writes.length, 1, "remounted form cannot issue an overlapping PUT");
+        assert.match(target.textContent, /前の保存処理が完了していません/);
+        assert.equal(refreshes, 0);
+
+        if (outcome === "success") {
+          await React.act(async () => finish({ ok: true, message: "OBSOLETE ALICE SAVE" }));
+        } else {
+          await React.act(async () => reject(new Error("old A write result unknown")));
+        }
+        assert.equal(writes.length, 1, "ambiguous old write is never replayed");
+        assert.equal(refreshes, 0, "unmounted old form may not refresh the new snapshot");
+        assert.doesNotMatch(target.textContent, /OBSOLETE ALICE SAVE|保存中にエラー/);
+
+        // Only a new explicit user submit after the old request settles may
+        // save the fresh authorized snapshot.
+        await submit();
+        assert.deepEqual(writes[1], { videoId: "A", names: ["Bob"] });
+        assert.equal(writes.length, 2);
+        assert.equal(refreshes, 1);
+        assert.match(target.textContent, /LATEST SAVE/);
+      } finally {
+        await React.act(async () => root.unmount());
+        target.remove();
+      }
+    }
+  }
+});
