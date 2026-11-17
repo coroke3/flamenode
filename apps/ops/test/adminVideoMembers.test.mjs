@@ -153,3 +153,31 @@ test("MIG-0730 U02i: valid 64-character route ID remains supported", async () =>
   assert.equal(requested, "/api/admin-read/videos/" + id + "/members");
   assert.equal(result.status, "ok");
 });
+
+test("MIG-0730 U02cr: abort triggered during private GET validation never publishes members", async () => {
+  const controller = new AbortController();
+  const payload = snapshot("v1", [member(0, { name: "PRIVATE_MEMBER" })]);
+  // getJson's post-json AbortSignal check runs before this lazy getter is
+  // accessed by readAdminVideoMembers' schema validation.
+  Object.defineProperty(payload, "initialMembers", {
+    enumerable: true,
+    get() {
+      controller.abort();
+      return [member(0, { name: "PRIVATE_MEMBER" })];
+    },
+  });
+  let requests = 0;
+  const got = await readAdminVideoMembers("v1", async () => {
+    requests++;
+    return { status: 200, json: async () => payload };
+  }, controller.signal);
+  assert.deepEqual(got, { status: "unavailable" },
+    "a revoked request must not expose newly parsed private participant rows");
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(requests, 1);
+
+  const normalController = new AbortController();
+  const valid = await readAdminVideoMembers("v1", async () =>
+    json(200, snapshot("v1", [member(1)])), normalController.signal);
+  assert.equal(valid.status, "ok", "unaborted valid snapshots still render");
+});

@@ -55,5 +55,9 @@ export async function readAdminVideoMembers(
     // A hidden edit-only member must never become a public participant input.
     return { status: "unavailable" };
   }
+  // Zod can synchronously visit getters supplied by an injected legacy/mock
+  // json() port. If validation revokes the request, the prior private snapshot
+  // must not be published even though getJson checked before parsing began.
+  if (signal?.aborted) return { status: "unavailable" };
   return { status: "ok", data: parsed.data };
 }
