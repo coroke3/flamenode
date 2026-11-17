@@ -200,7 +200,7 @@ test("MIG-0603 S3 D1 pre-read budget characterization: unmounted status candidat
         video_id: "v1", status: "private",
       }), 3, "admin"],
       ["manage-site-admin", createUnboundManageVideoStatusCandidate(), BODY, 4, "admin"],
-      ["manage-event-staff", createUnboundManageVideoStatusCandidate(), BODY, 6, "mgr"],
+      ["manage-event-staff", createUnboundManageVideoStatusCandidate(), BODY, 5, "mgr"],
     ];
     for (const [name, candidate, body, expectedReads, user] of cases) {
       const start = d1.stats.statements;
