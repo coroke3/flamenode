@@ -5,7 +5,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { readFile } from "node:fs/promises";
-import { AdminVideoMembersEditorPreview, bindPreviewPermissionInput } from "../.test-dist/apps/ops/src/routes/admin/AdminVideoMembersEditorPreview.js";
+import { AdminVideoMembersEditorPreview, bindPreviewPermissionInput, bindPreviewSaveFormData } from "../.test-dist/apps/ops/src/routes/admin/AdminVideoMembersEditorPreview.js";
 
 const member = (i, extra = {}) => ({
   name: `Member ${i}`, x_user_id: `member_${i}`, role: "映像",
@@ -191,4 +191,55 @@ test("MIG-0730 U02cu: preview refuses cross-video, malformed and iterable-forged
     videoId: "v1", notify: true,
     intents: [{ x_user_id: "alice_2", display_name: "Name", intent: "off" }],
   }, "only indexed rows can enter the forwarded privilege payload");
+});
+ 
+test("MIG-0730 U02cv: SA-085 validation must forward a fresh immutable-by-caller FormData snapshot", () => {
+  const original = new FormData();
+  original.append("video_id", "v1");
+  original.append("is_collab", "false");
+  original.append("is_collab", "true");
+  original.append("members_json", '[{"name":"ALICE"}]');
+  const nativeForEach = original.forEach.bind(original);
+  original.forEach = (cb, thisArg) => {
+    nativeForEach(cb, thisArg);
+    // Mutate original after the getAll() reads but before the save() call.
+    original.set("video_id", "OTHER_VIDEO");
+    original.set("members_json", '[{"name":"PRIVATE_CHANGED"}]');
+    original.append("can_edit", "true");
+  };
+  const bound = bindPreviewSaveFormData(original, "v1");
+  assert.ok(bound instanceof FormData);
+  assert.notStrictEqual(bound, original);
+  assert.deepEqual([...bound.entries()], [
+    ["video_id", "v1"], ["is_collab", "false"], ["is_collab", "true"],
+    ["members_json", '[{"name":"ALICE"}]'],
+  ], "the downstream port receives only the validated canonical values");
+  original.set("video_id", "EVEN_LATER");
+  assert.equal(bound.get("video_id"), "v1");
+  assert.equal(bound.has("can_edit"), false);
+});
+
+test("MIG-0730 U02cv: canonical OFF stays valid and forged fields fail closed", () => {
+  const build = (id, flags, members, extra = null) => {
+    const form = new FormData();
+    form.append("video_id", id);
+    for (const flag of flags) form.append("is_collab", flag);
+    form.append("members_json", members);
+    if (extra) form.append(extra, "true");
+    return form;
+  };
+  const off = bindPreviewSaveFormData(build("v1", ["false"], "[]"), "v1");
+  assert.ok(off instanceof FormData);
+  assert.deepEqual([...off.entries()], [
+    ["video_id", "v1"], ["is_collab", "false"], ["members_json", "[]"],
+  ]);
+  for (const bad of [
+    build("other", ["false"], "[]"),
+    build("v1", ["false"], "[]", "can_edit"),
+    build("v1", ["false"], '[{"name":"FORGED_OFF"}]'),
+    build("v1", ["true"], "[]"),
+    build("v1", ["false","true","true"], "[]"),
+  ]) {
+    assert.equal(bindPreviewSaveFormData(bad, "v1"), null);
+  }
 });

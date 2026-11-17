@@ -31,6 +31,42 @@ const unavailablePermission: FieldProps["applyPermissionBatch"] = async () => {
 // Different tabs/devices still require the server-side D1 CAS (MIG-0650).
 const writesInFlightByVideo = new Map<string, "save" | "permission">();
 
+/**
+ * Snapshot the exact SA-085 transport fields. Validating a mutable FormData
+ * and forwarding that same object to an injected save port leaves a TOCTOU
+ * gap for legacy/injected accessors or callers that mutate it.
+ */
+export function bindPreviewSaveFormData(
+  formData: FormData,
+  expectedVideoId: string,
+): FormData | null {
+  try {
+    const ids = formData.getAll("video_id");
+    const flags = formData.getAll("is_collab");
+    const members = formData.getAll("members_json");
+    let unexpectedField = false;
+    formData.forEach((_, key) => {
+      if (key !== "video_id" && key !== "is_collab" && key !== "members_json") {
+        unexpectedField = true;
+      }
+    });
+    const off = flags.length === 1 && flags[0] === "false";
+    const on = flags.length === 2 && flags[0] === "false" && flags[1] === "true";
+    if (unexpectedField || ids.length !== 1 || ids[0] !== expectedVideoId ||
+        members.length !== 1 || typeof members[0] !== "string" ||
+        !(on || (off && members[0] === "[]"))) return null;
+    const bound = new FormData();
+    bound.append("video_id", expectedVideoId);
+    bound.append("is_collab", "false");
+    if (on) bound.append("is_collab", "true");
+    bound.append("members_json", members[0]);
+    return bound;
+  } catch {
+    return null;
+  }
+}
+
+
 type PermissionInput = Parameters<FieldProps["applyPermissionBatch"]>[0];
 
 /**
@@ -110,28 +146,8 @@ export function AdminVideoMembersEditorPreview({
       // hidden false + optional checked true, and one canonical member value.
       // A duplicate or reordered field could be interpreted differently by
       // another port (e.g. get() versus getAll()/getLast()).
-      let canonicalForm = false;
-      try {
-        const ids = formData.getAll("video_id");
-        const flags = formData.getAll("is_collab");
-        const members = formData.getAll("members_json");
-        // The form emits only these three keys. Do not pass unexpected
-        // privileged or future fields through an alternate injected port.
-        let unexpectedField = false;
-        formData.forEach((_, key) => {
-          if (key !== "video_id" && key !== "is_collab" && key !== "members_json") {
-            unexpectedField = true;
-          }
-        });
-        const off = flags.length === 1 && flags[0] === "false";
-        const on = flags.length === 2 &&
-          flags[0] === "false" && flags[1] === "true";
-        canonicalForm = !unexpectedField &&
-          ids.length === 1 && ids[0] === videoId &&
-          members.length === 1 && typeof members[0] === "string" &&
-          (on || (off && members[0] === "[]"));
-      } catch { /* Malformed FormData is not a write capability. */ }
-      if (!canonicalForm) {
+      const boundForm = bindPreviewSaveFormData(formData, videoId);
+      if (!boundForm) {
         return { ok: false, message: "参加者設定の入力を確認してください。" };
       }
       const ongoing = writesInFlightByVideo.get(videoId);
@@ -145,7 +161,7 @@ export function AdminVideoMembersEditorPreview({
       }
       writesInFlightByVideo.set(videoId, "save");
       try {
-        return await save(formData);
+        return await save(boundForm);
       } finally {
         if (writesInFlightByVideo.get(videoId) === "save") {
           writesInFlightByVideo.delete(videoId);
