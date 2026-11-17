@@ -624,3 +624,50 @@ test("MIG-0650 U03ar pending X profiles must belong to authorized next public me
   assert.match(allowed.queries[1].sql, /INSERT INTO x_users/);
   assert.match(allowed.queries[2].sql, /INSERT INTO video_members/);
 });
+
+test("MIG-0650 U03as pending X placeholders cannot seed unapproved profile metadata", () => {
+  const base = pending("alice");
+  const illegal = [
+    { id: "Alice" },
+    { id: "@alice" },
+    { id: "alice.name" },
+    { id: "a".repeat(21) },
+    { x_name: "" },
+    { x_name: " leading" },
+    { x_name: "trailing " },
+    { x_name: "x".repeat(81) },
+    { icon_url: "https://example.test/profile.png" },
+    { profile_text: "forged profile" },
+    { portfolio_contact: "https://example.test" },
+    { youtube_channel_url: "https://example.test/channel" },
+    { other_social_links: "{}" },
+    { creative_start_date: "2026-01-01" },
+    { icon_url: undefined },
+    { other_social_links: undefined },
+  ];
+  for (const override of illegal) {
+    const c = collector();
+    assert.throws(() => buildVideoMemberWriteMutationBatch(c.db, {
+      videoId: "video-1",
+      beforeSnapshotRows: [member("linked", "alice")],
+      afterSnapshotRows: [member("linked", "alice")],
+      existingPublicCount: 1,
+      hiddenCarryRows: [],
+      newXUsers: [{ ...base, ...override }],
+      existingManagedChapters: [], nextManagedChapters: [],
+      membersChanged: false, chaptersChanged: false,
+    }), { name: "RangeError", message: "video_member_write_x_profile_unsafe_fields" },
+    JSON.stringify(override));
+    assert.equal(c.queries.length, 0,
+      "noncanonical or prefilled X profile must not plan even the public-member CAS");
+  }
+
+  const linked = member("linked", "alice");
+  const valid = build({
+    beforeSnapshotRows: [linked],
+    afterSnapshotRows: [linked],
+    newXUsers: [pending("alice")],
+  });
+  assert.deepEqual(valid.expectedChanges, [null, 1]);
+  assert.match(valid.queries[1].sql, /INSERT INTO x_users/);
+});
