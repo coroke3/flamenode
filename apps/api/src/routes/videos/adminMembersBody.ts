@@ -12,6 +12,10 @@ export const MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES = 256 * 1024;
 // A hostile stream can emit empty reads indefinitely without consuming any
 // of the byte budget. Limit these separately while allowing normal framing.
 export const MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS = 1024;
+// The byte budget alone permits 262144 distinct 1-byte chunks, each requiring
+ // a Promise.race/read, copy and retained array entry. Keep total read work
+ // bounded independently of the existing zero-byte-only guard.
+export const MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_CHUNKS = 4096;
 
 export async function readAdminVideoMembersJsonBody(request: Request): Promise<AdminJsonBody> {
   const declared = request.headers.get("content-length");
@@ -45,6 +49,7 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
   const chunks: Uint8Array[] = [];
   let total = 0;
   let emptyChunks = 0;
+  let readChunks = 0;
   try {
     for (;;) {
       const next = await Promise.race([reader.read(), abortPromise]);
@@ -54,6 +59,13 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
       }
       const { done, value } = next;
       if (done) break;
+      // A nonempty byte stream can still deliver one byte per read and evade
+      // the 256KiB byte ceiling and the empty-chunk-only CPU guard.
+      // Count every delivered chunk; EOF is not a payload read.
+      if (++readChunks > MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_CHUNKS) {
+        void reader.cancel().catch(() => undefined);
+        return { kind: "invalid" };
+      }
       // Request bodies are byte streams. A malformed injected stream may yield
       // a string, typed-array element view or arbitrary object; its byteLength
       // would undercount or corrupt the buffered payload. Reject before copy.
