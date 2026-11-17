@@ -183,7 +183,7 @@ test("MIG-0650 U03d-2j: a stale CAS inside one SQLite transaction rolls back a p
       original.is_public_member, original.edit_granted_by_auth_user_id,
       original.edit_granted_at, original.edit_updated_at
     );
-    const b = build({ beforeSnapshotRows: [original] });
+    const b = build({ beforeSnapshotRows: [original], afterSnapshotRows: [original] });
     sqlite.exec("UPDATE video_members SET can_edit = 1 WHERE id = 'old'");
     sqlite.exec("BEGIN");
     try {
@@ -322,7 +322,8 @@ test("MIG-0650 U03ak public replacement count must match the authorized read sna
 
 test("MIG-0650 U03al fail-closes duplicate and empty row IDs before any atomic SQL plan", () => {
   const cases = [
-    { beforeSnapshotRows: [member("dup"), member("dup")] },
+    { beforeSnapshotRows: [member("dup"), member("dup")],
+      existingPublicCount: 2, membersChanged: true },
     { afterSnapshotRows: [member("dup"), member("dup")], membersChanged: true },
     { hiddenCarryRows: [
       member("dup", "alice", { is_public_member: 0 }),
@@ -597,9 +598,10 @@ test("MIG-0650 U03ar pending X profiles must belong to authorized next public me
       afterSnapshotRows: [member("case-mismatch", "alice")],
       beforeSnapshotRows: [member("case-mismatch", "alice")],
       newXUsers: [pending("Alice")],
+      expectedError: "video_member_write_x_profile_unsafe_fields",
     },
   ];
-  for (const fields of cases) {
+  for (const { expectedError = "video_member_write_unlinked_x_profile", ...fields } of cases) {
     const c = collector();
     assert.throws(() => buildVideoMemberWriteMutationBatch(c.db, {
       videoId: "video-1",
@@ -608,7 +610,7 @@ test("MIG-0650 U03ar pending X profiles must belong to authorized next public me
       existingManagedChapters: [], nextManagedChapters: [],
       membersChanged: false, chaptersChanged: false,
       ...fields,
-    }), { name: "RangeError", message: "video_member_write_unlinked_x_profile" });
+    }), { name: "RangeError", message: expectedError });
     assert.equal(c.queries.length, 0,
       "unrelated pending X profile cannot reach member CAS or x_users JSON1 INSERT");
   }
