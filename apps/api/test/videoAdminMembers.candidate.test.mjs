@@ -125,7 +125,7 @@ test("MIG-0650 U03e default stack explicitly enforces admin and edit_video guard
     "sessionMiddleware()",
     'requiredRole: "admin"',
     'costGuardMiddleware("edit_video")',
-    "dbMiddleware",
+    "    dbMiddleware,",
   ].map(x => source.indexOf(x));
   assert.ok(order.every(i => i >= 0));
   assert.ok(order.every((value, i) => i === 0 || value > order[i - 1]));
