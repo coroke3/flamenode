@@ -380,3 +380,38 @@ test("MIG-0650 U03am new X identities cannot bypass pending-only approval workfl
     typeof p === "string" && p.includes('"approval_status":"pending"')),
     "valid pending-only profile is included in JSON1 bind");
 });
+
+test("MIG-0650 U03an suppressed public member deltas cannot silently skip atomic D1 replacement", () => {
+  // CURRENT compares canonical snapshots before setting membersChanged. An
+  // incorrectly wired Hono adapter must not suppress changes, strict audits,
+  // and the rebuild queue by supplying false while member rows differ.
+  const cases = [
+    { beforeSnapshotRows: [member("old")], afterSnapshotRows: [member("new")], existingPublicCount: 1 },
+    { beforeSnapshotRows: [], afterSnapshotRows: [member("new")], existingPublicCount: 0 },
+    {
+      beforeSnapshotRows: [member("same")],
+      afterSnapshotRows: [member("same", "alice", { comment: "updated" })],
+      existingPublicCount: 1,
+    },
+  ];
+  for (const change of cases) {
+    const c = collector();
+    assert.throws(() => buildVideoMemberWriteMutationBatch(c.db, {
+      videoId: "video-1",
+      beforeSnapshotRows: [], afterSnapshotRows: [],
+      existingPublicCount: 0, hiddenCarryRows: [], newXUsers: [],
+      existingManagedChapters: [], nextManagedChapters: [],
+      membersChanged: false, chaptersChanged: false, ...change,
+    }), { name: "RangeError", message: "video_member_write_undeclared_member_changes" });
+    assert.equal(c.queries.length, 0, "inconsistent dirty flag must fail before any CAS/DML SQL");
+  }
+
+  // A genuine no-public-member-change pending X profile path is still valid.
+  const stable = build({
+    beforeSnapshotRows: [member("stable")],
+    afterSnapshotRows: [member("stable")],
+    newXUsers: [pending("new_x")],
+    membersChanged: false,
+  });
+  assert.deepEqual(stable.expectedChanges, [null, 1]);
+});
