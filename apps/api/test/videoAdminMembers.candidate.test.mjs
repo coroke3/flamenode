@@ -755,7 +755,15 @@ test("MIG-0650 U03ad caps zero-byte streamed reads without waiting on cancellati
       }),
     ]);
     assert.deepEqual(result, { kind: "invalid" });
-    assert.equal(reads, MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS + 1);
+    // ReadableStream.pull() may prefetch one extra element ahead of
+    // reader.read() even though the parser rejects at exactly max + 1
+    // delivered empty chunks. Measure bounded producer work, not an
+    // implementation-dependent equality between pull() and read() calls.
+    assert.ok(
+      reads >= MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS + 1 &&
+      reads <= MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS + 2,
+      `unexpected producer pulls: ${reads}`,
+    );
     assert.equal(cancels, 1, "rejects without waiting for a stalled transport cancel");
   } finally {
     clearTimeout(timeout);
