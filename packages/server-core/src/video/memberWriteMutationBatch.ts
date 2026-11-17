@@ -105,6 +105,14 @@ export function buildVideoMemberWriteMutationBatch(
   ].some(hasDuplicateOrEmptyIds)) {
     throw new RangeError("video_member_write_duplicate_or_empty_row_id");
   }
+  // This admin-members flow may only reserve a previously unknown X identity
+  // as pending. Profile approval is a separate privileged workflow. The JSON1
+  // batch INSERT binds approval_status from each supplied row, so relying on
+  // the table default would not prevent a future Hono host from accidentally
+  // inserting an approved or rejected profile.
+  if (newXUsers.some(row => row.approval_status !== "pending")) {
+    throw new RangeError("video_member_write_x_profile_not_pending");
+  }
   const statements: BatchItem<"sqlite">[] = [];
   const expectedChanges: Array<number | null> = [];
 
