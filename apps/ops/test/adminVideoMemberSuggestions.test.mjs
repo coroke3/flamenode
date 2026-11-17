@@ -256,3 +256,52 @@ test("MIG-0730 U02bp: cursorless hasMore=true must be a documented V2 refinement
   );
   assert.deepEqual(ordinaryEnd, { items: [], hasMore: false, nextOffset: null, hint: null });
 });
+
+test("MIG-0730 U02cp: private search failures and abort during decode never publish results", async () => {
+  const generic = error => error instanceof Error &&
+    error.message === "member_suggestions_unavailable";
+  const signal = new AbortController().signal;
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, signal, async () => {
+      throw Error("PRIVATE_PROVIDER_TOKEN");
+    }),
+    generic, "transport errors must not expose provider details",
+  );
+
+  const throwingTop = result();
+  Object.defineProperty(throwingTop, "query", {
+    get() { throw Error("PRIVATE_QUERY"); },
+  });
+  const throwingRow = result();
+  Object.defineProperty(throwingRow.items[0], "x_name", {
+    get() { throw Error("PRIVATE_ROW_NAME"); },
+  });
+  const revoked = Proxy.revocable(result(), {});
+  revoked.revoke();
+  for (const body of [throwingTop, throwingRow, revoked.proxy]) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, signal,
+        async () => ({ status: 200, json: async () => body })),
+      generic, "hostile decoded search DTOs fail closed with a stable error",
+    );
+  }
+
+  const controller = new AbortController();
+  const abortingPayload = result();
+  Object.defineProperty(abortingPayload, "items", {
+    get() {
+      controller.abort();
+      return [{ id: "secret_x", x_name: "PRIVATE_RESULT" }];
+    },
+  });
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, controller.signal,
+      async () => ({ status: 200, json: async () => abortingPayload })),
+    generic, "a revoked search scope during JSON validation cannot return candidates",
+  );
+  const normal = await searchAdminVideoMemberXUsers(
+    "al", 0, signal, async () => json(result()));
+  assert.deepEqual(normal.items, [
+    { id: "alice", x_name: "Alice", score: 10, matchedBy: "xid_exact" },
+  ], "valid RH-019 responses retain their existing shape");
+});

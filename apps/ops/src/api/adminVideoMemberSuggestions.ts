@@ -92,16 +92,23 @@ export async function searchAdminVideoMemberXUsers(
   let encoded: string;
   try { encoded = encodeURIComponent(q.trim()); }
   catch { throw new Error("member_suggestions_unavailable"); }
-  const response = await fetchFn(
-    `/api/internal/x-users/search?q=${encoded}&limit=${SEARCH_LIMIT}&offset=${offset}`,
-    {
-      method: "GET",
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: { accept: "application/json" },
-      signal,
-    },
-  );
+  // An injected search port can reject with provider/private details.
+  // Callers only receive the stable, non-sensitive unavailable error.
+  let response: Response;
+  try {
+    response = await fetchFn(
+      `/api/internal/x-users/search?q=${encoded}&limit=${SEARCH_LIMIT}&offset=${offset}`,
+      {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { accept: "application/json" },
+        signal,
+      },
+    );
+  } catch {
+    throw new Error("member_suggestions_unavailable");
+  }
   if (signal.aborted || response.status !== 200) {
     throw new Error("member_suggestions_unavailable");
   }
@@ -109,5 +116,15 @@ export async function searchAdminVideoMemberXUsers(
   try { body = await response.json(); }
   catch { throw new Error("member_suggestions_unavailable"); }
   if (signal.aborted) throw new Error("member_suggestions_unavailable");
-  return parseSuggestions(body, q.trim(), offset);
+  // Do not propagate private/malformed accessor errors from an injected JSON
+  // port. A getter may also revoke the AbortSignal during synchronous parsing;
+  // check cancellation once more before publishing private candidates.
+  let parsed: AdminMemberSuggestionSearchResponse;
+  try {
+    parsed = parseSuggestions(body, q.trim(), offset);
+  } catch {
+    throw new Error("member_suggestions_unavailable");
+  }
+  if (signal.aborted) throw new Error("member_suggestions_unavailable");
+  return parsed;
 }
