@@ -84,7 +84,7 @@ test("MIG-0730 U02a: malformed or cross-video 200 must not render private member
 test("MIG-0730 U02a: malformed route IDs and cancelled requests never reveal members", async () => {
   let called = 0;
   const fetchFn = async () => { called++; return json(200, snapshot()); };
-  for (const id of ["", ".", "..", "v\0tail", "\uD800", "\uDC00", "v\uD800tail"]) {
+  for (const id of ["", ".", "..", "v\0tail", "\uD800", "\uDC00", "v\uD800tail", "v/child", "v\\child", " leading", "trailing ", "v\nchild", "v\tchild", "v".repeat(65), null, undefined]) {
     assert.deepEqual(await readAdminVideoMembers(id, fetchFn), { status: "unavailable" });
   }
   assert.equal(called, 0, "reject invalid IDs before network request");
@@ -97,4 +97,28 @@ test("MIG-0730 U02a: malformed route IDs and cancelled requests never reveal mem
     { status: "unavailable" },
     "an aborted fetch must not deliver a previously authorized snapshot",
   );
+});
+
+
+test("MIG-0730 U02i: pre-aborted read returns unavailable before invoking fetch", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let calls = 0;
+  const result = await readAdminVideoMembers("v1", async () => {
+    calls++;
+    return json(200, snapshot());
+  }, controller.signal);
+  assert.deepEqual(result, { status: "unavailable" });
+  assert.equal(calls, 0, "cancelled prior read must never send HTTP");
+});
+
+test("MIG-0730 U02i: valid 64-character route ID remains supported", async () => {
+  const id = "x".repeat(64);
+  let requested = "";
+  const result = await readAdminVideoMembers(id, async path => {
+    requested = path;
+    return json(200, snapshot(id));
+  });
+  assert.equal(requested, "/api/admin-read/videos/" + id + "/members");
+  assert.equal(result.status, "ok");
 });
