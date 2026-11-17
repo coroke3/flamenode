@@ -24,6 +24,12 @@ export function inspectVideoAtomicWritePlanBudget(
   ) {
     throw new RangeError("video_atomic_invalid_caller_query_count");
   }
+  // A mismatched assertion vector would produce a falsely low D1 budget.
+  // The existing Next executor checks this already; enforce the same invariant
+  // for a future Hono caller before any optimistic query-count projection.
+  if (plan.statements.length !== plan.expectedChanges.length) {
+    throw new RangeError("video_atomic_expected_changes_mismatch");
+  }
   const actorXValidationQueryCount = plan.audits.some(
     audit => Boolean(audit.actor_x_user_id?.trim()),
   ) ? 1 : 0;
