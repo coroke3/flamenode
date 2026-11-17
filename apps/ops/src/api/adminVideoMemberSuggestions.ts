@@ -13,6 +13,9 @@ export type AdminMemberSuggestionSearchResponse = {
 const SEARCH_LIMIT = 20;
 const QUERY_MAX_CHARS = 64;
 const OFFSET_MAX = 5000;
+// RH-019's V1 and V2 R2 index readers both guarantee this canonical shape.
+// Do not allow a forged HTTP 200 to hand malformed X IDs to the editor.
+const X_USER_ID_RE = /^[a-z0-9_]{1,64}$/;
 
 function parseSuggestions(
   body: unknown, requestedQuery: string, requestedOffset: number,
@@ -55,7 +58,7 @@ function parseSuggestions(
       throw new Error("member_suggestions_unavailable");
     }
     const row = raw as Record<string, unknown>;
-    if (typeof row.id !== "string" || row.id.length < 1 || row.id.length > 128 ||
+    if (typeof row.id !== "string" || !X_USER_ID_RE.test(row.id) ||
         (row.x_name !== null && typeof row.x_name !== "string") ||
         (typeof row.x_name === "string" && row.x_name.length > 256) ||
         (row.score !== undefined && (typeof row.score !== "number" || !Number.isFinite(row.score))) ||

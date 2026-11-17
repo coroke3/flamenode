@@ -305,3 +305,29 @@ test("MIG-0730 U02cp: private search failures and abort during decode never publ
     { id: "alice", x_name: "Alice", score: 10, matchedBy: "xid_exact" },
   ], "valid RH-019 responses retain their existing shape");
 });
+
+test("MIG-0730 U02cq: RH-019 suggestion IDs must match the canonical V1/V2 R2 index", async () => {
+  // Both server-core memberSuggestion parsers accept only /^[a-z0-9_]{1,64}$/.
+  // A forged 200 should never reach the member field as a public X handle.
+  for (const id of [
+    "ALICE", "@alice", "alice/admin", "two words", "a.b", "éclair",
+    "a".repeat(65), "x\nprivate", "", 
+  ]) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers(
+        "al", 0, new AbortController().signal,
+        async () => json(result({ items: [{ id, x_name: "SECRET" }] })),
+      ),
+      /member_suggestions_unavailable/,
+      "noncanonical candidate must be rejected: " + JSON.stringify(id),
+    );
+  }
+  for (const id of ["a", "alice_123", "x".repeat(64)]) {
+    const valid = await searchAdminVideoMemberXUsers(
+      "al", 0, new AbortController().signal,
+      async () => json(result({ items: [{ id, x_name: null }] })),
+    );
+    assert.deepEqual(valid.items, [{ id, x_name: null }],
+      "a canonical server index ID must remain available");
+  }
+});
