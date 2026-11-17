@@ -258,3 +258,54 @@ test("MIG-0650 U03aj fail-closes cross-video member/chapter rows before D1 plann
   assert.deepEqual(good.expectedChanges, [null, null, 1, 1, 1, 1, 1],
     "same-video CURRENT atomic mutation ordering is preserved");
 });
+
+
+test("MIG-0650 U03ak rejects public/hidden row misclassification before atomic D1 SQL planning", () => {
+  const cases = [
+    { beforeSnapshotRows: [member("hidden-before", "alice", { is_public_member: 0 })] },
+    { afterSnapshotRows: [member("hidden-after", "alice", { is_public_member: 0 })],
+      membersChanged: true },
+    { hiddenCarryRows: [member("public-carry", "alice", { is_public_member: 1 })] },
+    { beforeSnapshotRows: [member("bad-flag", "alice", { is_public_member: 2 })] },
+  ];
+  for (const fields of cases) {
+    const c = collector();
+    const data = {
+      videoId: "video-1", beforeSnapshotRows: [], afterSnapshotRows: [],
+      existingPublicCount: 0, hiddenCarryRows: [], newXUsers: [],
+      existingManagedChapters: [], nextManagedChapters: [],
+      membersChanged: false, chaptersChanged: false, ...fields,
+    };
+    assert.throws(() => buildVideoMemberWriteMutationBatch(c.db, data),
+      { name: "RangeError", message: "video_member_write_public_class_mismatch" },
+      Object.keys(fields).join(", "));
+    assert.equal(c.queries.length, 0, "misclassified input must not plan even CAS SQL");
+  }
+});
+
+test("MIG-0650 U03ak public replacement count must match the authorized read snapshot", () => {
+  for (const fields of [
+    { beforeSnapshotRows: [member("old")], existingPublicCount: 0 },
+    { beforeSnapshotRows: [], existingPublicCount: 1 },
+    { beforeSnapshotRows: [member("old")], existingPublicCount: 2 },
+  ]) {
+    const c = collector();
+    assert.throws(() => buildVideoMemberWriteMutationBatch(c.db, {
+      videoId: "video-1", beforeSnapshotRows: [], afterSnapshotRows: [],
+      existingPublicCount: 0, hiddenCarryRows: [], newXUsers: [],
+      existingManagedChapters: [], nextManagedChapters: [],
+      membersChanged: true, chaptersChanged: false, ...fields,
+    }), { name: "RangeError", message: "video_member_write_public_count_mismatch" });
+    assert.equal(c.queries.length, 0, "invalid count must not plan a partial public DELETE");
+  }
+
+  // A chapter-only CAS never issues public DELETE, so it must not require the
+  // separately supplied public-delete count to be used or inferred.
+  const chapterOnly = build({
+    beforeSnapshotRows: [member("stable")], existingPublicCount: 0,
+    existingManagedChapters: [chapter("stable:member:0")],
+    nextManagedChapters: [chapter("stable:member:0", { chapter_label: "New" })],
+    membersChanged: false, chaptersChanged: true,
+  });
+  assert.deepEqual(chapterOnly.expectedChanges, [null, 1, 1]);
+});
