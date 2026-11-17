@@ -1,5 +1,6 @@
 import { parseVideoMemberSetSnapshot } from "./memberSetSnapshot.ts";
 import { normalizeXId } from "@flamenode/domain/xid";
+import { classifyAdminVideoMemberSave } from "@flamenode/domain/video/adminMemberSubmission";
 
 type VideoMemberAuditPlan = {
   audits: ReadonlyArray<{ table_name: string; before?: unknown }>;
@@ -59,4 +60,52 @@ export function collectMemberAggregationAffectedXUserIds(args: {
     add(args.nextCreatorXUserId);
   }
   return ids;
+}
+
+/**
+ * MIG-0650 U03s: compose the exact CURRENT SA-085 member/chapter audit flags,
+ * collaboration metadata transition and public-user aggregate fanout.
+ * This is pure: the authenticated host still owns CAS, audit, Queue, D1 and wake.
+ */
+export function deriveAdminVideoMemberSaveEffects(input: {
+  membersPlan: VideoMemberAuditPlan & { statements: ReadonlyArray<unknown> };
+  previousCollaborationType: string | null;
+  members: ReadonlyArray<{ x_user_id: string }>;
+  isCollab: boolean;
+  isPublicVideo: boolean;
+  creatorXUserId: string | null;
+}): {
+  nextCollaborationType: "collab" | "individual";
+  videoPublicContentChanged: boolean;
+  membersPlanChanged: boolean;
+  affectedCreatorIds: Set<string>;
+} {
+  const hasMemberAudit = input.membersPlan.audits.some(
+    audit => audit.table_name === "video_members_set",
+  );
+  const hasChapterAudit = input.membersPlan.audits.some(
+    audit => audit.table_name === "video_chapters_member_set",
+  );
+  const { nextCollaborationType, videoPublicContentChanged } = classifyAdminVideoMemberSave({
+    previousCollaborationType: input.previousCollaborationType,
+    memberCount: input.members.length,
+    isCollab: input.isCollab,
+    hasMemberAudit,
+    hasChapterAudit,
+  });
+  const affectedCreatorIds = input.isPublicVideo && hasMemberAudit
+    ? collectMemberAggregationAffectedXUserIds({
+        previousCreatorXUserId: input.creatorXUserId,
+        nextCreatorXUserId: input.creatorXUserId,
+        previousMemberXUserIds:
+          extractPreviousPublicMemberXUserIdsFromMembersPlan(input.membersPlan),
+        nextMembers: input.members,
+      })
+    : new Set<string>();
+  return {
+    nextCollaborationType,
+    videoPublicContentChanged,
+    membersPlanChanged: input.membersPlan.statements.length > 0,
+    affectedCreatorIds,
+  };
 }

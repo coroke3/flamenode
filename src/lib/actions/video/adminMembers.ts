@@ -4,15 +4,13 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { readAdminVideoCollabFlag } from "@flamenode/domain/video";
-import { classifyAdminVideoMemberSave } from "@flamenode/domain/video/adminMemberSubmission";
 import { adminVideoMembersRebuildTargets } from "@flamenode/server-core/video/adminMemberRebuildTargets";
 import { buildAdminVideoMemberMetadataPlan } from "@flamenode/server-core/video/adminMemberMetadataPlan";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import {
-  collectMemberAggregationAffectedXUserIds,
-  extractPreviousPublicMemberXUserIdsFromMembersPlan,
+  deriveAdminVideoMemberSaveEffects,
 } from "@/lib/video/memberAggregationFanOut";
 import { validateVideoMemberSubmission } from "@/lib/video/submissionValidation";
 import type { VideoActionResult } from "@/lib/video/types";
@@ -113,21 +111,18 @@ export async function updateVideoMembersAdmin(
     });
     appendVideoAtomicWritePlan(plan, membersPlan);
 
-    const hasMemberAudit = membersPlan.audits.some(
-      (audit) => audit.table_name === "video_members_set",
-    );
-    const hasChapterAudit = membersPlan.audits.some(
-      (audit) => audit.table_name === "video_chapters_member_set",
-    );
     const {
       nextCollaborationType,
       videoPublicContentChanged,
-    } = classifyAdminVideoMemberSave({
+      affectedCreatorIds,
+      membersPlanChanged,
+    } = deriveAdminVideoMemberSaveEffects({
+      membersPlan,
       previousCollaborationType: target.collaboration_type,
-      memberCount: members.length,
+      members,
       isCollab,
-      hasMemberAudit,
-      hasChapterAudit,
+      isPublicVideo: target.visibility_status === "public",
+      creatorXUserId: target.creator_x_user_id,
     });
 
     // 旧実装は保存内容が同じでもvideos.updated_atを毎回更新し、score dirty化と
@@ -139,25 +134,14 @@ export async function updateVideoMembersAdmin(
     });
     appendVideoAtomicWritePlan(plan, metadataPlan);
 
-    const isPublicVideo = target.visibility_status === "public";
-    const affectedCreatorIds = isPublicVideo && hasMemberAudit
-      ? collectMemberAggregationAffectedXUserIds({
-          previousCreatorXUserId: target.creator_x_user_id,
-          nextCreatorXUserId: target.creator_x_user_id,
-          previousMemberXUserIds:
-            extractPreviousPublicMemberXUserIdsFromMembersPlan(membersPlan),
-          nextMembers: members,
-        })
-      : new Set<string>();
-    const hasMembersPlanChanges = membersPlan.statements.length > 0;
 
     const queueItems = adminVideoMembersRebuildTargets({
       videoId,
       actorUserId: user.id,
       publicContentChanged: videoPublicContentChanged,
-      membersPlanChanged: hasMembersPlanChanges,
+      membersPlanChanged,
       eventIds: rebuildEvents.eventIds,
-      isPublicVideo,
+      isPublicVideo: target.visibility_status === "public",
       affectedCreatorIds,
     });
 
