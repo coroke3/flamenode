@@ -666,3 +666,60 @@ test("MIG-0730 U02ar: canonical shared member field must match video and have li
     await ui.cleanup();
   }
 });
+
+test("MIG-0730 U02at: rotating either member privilege adapter retires pending save receipts", async () => {
+  for (const rotated of ["searchXUsers", "applyPermissionBatch"]) {
+    for (const outcome of ["success", "failure"]) {
+      const pending = deferred();
+      let writes = 0, refreshes = 0;
+      const searchXUsers = async () => ({ items: [], hasMore: false, nextOffset: null, hint: null });
+      const applyPermissionBatch = async () => ({ ok: true });
+      const base = {
+        initialMembers: [{ name: "Alice", x_user_id: "alice", role: "", comment: "", chapters: [] }],
+        permissionTargetVideoId: "v1",
+        searchXUsers,
+        applyPermissionBatch,
+      };
+      const save = async () => {
+        writes++;
+        return writes === 1 ? pending.promise : { ok: true, message: "FRESH SAVE" };
+      };
+      const ui = setup({
+        membersField: h(VideoMembersField, base),
+        save,
+        onSaved: () => { refreshes++; },
+      });
+      try {
+        await ui.render();
+        await ui.submit();
+        assert.equal(writes, 1);
+        assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true);
+
+        // Both ports remain callable, the video ID stays the same and the
+        // save callback is unchanged. A new adapter is still a new authority.
+        const replacement = rotated === "searchXUsers"
+          ? async () => ({ items: [], hasMore: false, nextOffset: null, hint: null })
+          : async () => ({ ok: true });
+        await ui.render({
+          membersField: h(VideoMembersField, { ...base, [rotated]: replacement }),
+        });
+        assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true,
+          "the unsettled write latch cannot be bypassed after a port swap");
+
+        const response = outcome === "success"
+          ? { ok: true, message: "STALE PRIVILEGE CONTEXT" }
+          : Promise.reject(new Error("stale privilege context rejected"));
+        await React.act(async () => pending.finish(response));
+        assert.equal(refreshes, 0, "stale completion must not refresh a new authority");
+        assert.doesNotMatch(ui.target.textContent, /STALE PRIVILEGE CONTEXT|保存中にエラー/);
+        assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false);
+        assert.equal(writes, 1, "a possibly committed write must not be replayed automatically");
+
+        await ui.submit();
+        assert.equal(writes, 2);
+        assert.equal(refreshes, 1, "only an explicit save under the new ports can refresh");
+        assert.match(ui.target.textContent, /FRESH SAVE/);
+      } finally { await ui.cleanup(); }
+    }
+  }
+});
