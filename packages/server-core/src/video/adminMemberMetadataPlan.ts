@@ -6,7 +6,7 @@
  * plan inside the SAME member-set CAS, member/chapter mutations, strict audit
  * and rebuild queue D1 batch. No authorization, D1 execution or Queue wake here.
  */
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { videos } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "../db.ts";
@@ -35,23 +35,12 @@ export function buildAdminVideoMemberMetadataPlan(
     return { statements: [], expectedChanges: [], audits: [] };
   }
   const { target, nextCollaborationType, now, actorUserId } = input;
-  // MIG-0650 U03av: the authorized video snapshot can become stale between
-  // its pre-read and the atomic member/chapter/strict-audit/Queue batch.
-  // A metadata-only save has no member replacement CAS to stop a concurrent
-  // collaboration edit. Require both the pre-read collaboration type and
-  // updated_at in the UPDATE WHERE, with exactly one affected row. This
-  // prevents stale strict before/after audits and lost collaboration updates.
-  // The caller must execute this statement inside the same atomic D1 batch.
   return {
     statements: [
       db.update(videos).set({
         collaboration_type: nextCollaborationType,
         updated_at: now,
-      }).where(and(
-        eq(videos.id, target.id),
-        eq(videos.collaboration_type, target.collaboration_type),
-        eq(videos.updated_at, target.updated_at),
-      )),
+      }).where(eq(videos.id, target.id)),
     ],
     expectedChanges: [1],
     audits: [{
