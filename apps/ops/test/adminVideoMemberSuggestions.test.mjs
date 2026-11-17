@@ -19,7 +19,7 @@ test("MIG-0730 U02e: exact RH-019 query uses same-origin no-store authenticated 
   let seen;
   const search = async (path, init) => {
     seen = { path, init };
-    return json(result());
+    return json(result({ query: "@あ l", offset: 4 }));
   };
   const found = await searchAdminVideoMemberXUsers("  @あ l  ", 4, controller.signal, search);
   assert.equal(seen.path, "/api/internal/x-users/search?q=%40%E3%81%82%20l&limit=20&offset=4");
@@ -86,6 +86,41 @@ test("MIG-0730 U02e: pre-flight rejects invalid query, unsafe offsets and UTF-16
   assert.equal(calls, 0);
 });
 
+test("MIG-0730 U02am: query, page offset and limit must match RH-019 request identity", async () => {
+  const badBodies = [
+    result({ query: "other-private-query" }),
+    result({ query: undefined }),
+    result({ query: 42 }),
+    result({ limit: 21 }),
+    result({ limit: "20" }),
+    result({ limit: undefined }),
+    result({ offset: 1 }),
+    result({ offset: "0" }),
+    result({ offset: undefined }),
+  ];
+  for (const payload of badBodies) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+        async () => json(payload)),
+      /member_suggestions_unavailable/,
+      "mismatched RH-019 response metadata must not leak private candidates",
+    );
+  }
+
+  const resultPage = result({ offset: 20, nextOffset: 40, hasMore: true,
+    items: [{ id: "page_private", x_name: "Page private" }] });
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+      async () => json(resultPage)),
+    /member_suggestions_unavailable/,
+    "an old pagination cursor cannot be accepted for offset zero",
+  );
+  const accepted = await searchAdminVideoMemberXUsers("al", 20,
+    new AbortController().signal, async () => json(resultPage));
+  assert.deepEqual(accepted.items, [{ id: "page_private", x_name: "Page private" }],
+    "matching request identity still accepts the valid page");
+});
+
 test("MIG-0730 U02e: abort before or after network response never returns stale private suggestions", async () => {
   const aborted = new AbortController();
   aborted.abort();
@@ -111,7 +146,7 @@ test("MIG-0730 U02e: abort before or after network response never returns stale 
 test("MIG-0730 U02e: 20 rows, valid empty V2 refine and pagination preserve Hono contract", async () => {
   const twenty = Array.from({ length: 20 }, (_, i) => ({ id: "user_" + i, x_name: null }));
   const a = await searchAdminVideoMemberXUsers("al", 2, new AbortController().signal,
-    async () => json(result({ items: twenty, nextOffset: 22, hasMore: true, hint: "refine" })));
+    async () => json(result({ items: twenty, offset: 2, nextOffset: 22, hasMore: true, hint: "refine" })));
   assert.equal(a.items.length, 20);
   assert.deepEqual(a.items[0], { id: "user_0", x_name: null });
   assert.equal(a.hasMore, true);

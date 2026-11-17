@@ -14,12 +14,19 @@ const SEARCH_LIMIT = 20;
 const QUERY_MAX_CHARS = 64;
 const OFFSET_MAX = 5000;
 
-function parseSuggestions(body: unknown): AdminMemberSuggestionSearchResponse {
+function parseSuggestions(
+  body: unknown, requestedQuery: string, requestedOffset: number,
+): AdminMemberSuggestionSearchResponse {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new Error("member_suggestions_unavailable");
   }
   const value = body as Record<string, unknown>;
-  if (!Array.isArray(value.items) || value.items.length > SEARCH_LIMIT ||
+  // RH-019 echoes the authoritative request identity in every 200 response.
+  // Reject a mismatched page/query rather than render another search's private
+  // X-user suggestions or reuse an unrelated pagination cursor.
+  if (value.query !== requestedQuery || value.limit !== SEARCH_LIMIT ||
+      value.offset !== requestedOffset ||
+      !Array.isArray(value.items) || value.items.length > SEARCH_LIMIT ||
       typeof value.hasMore !== "boolean" ||
       (value.nextOffset !== null &&
         (!Number.isSafeInteger(value.nextOffset) ||
@@ -86,5 +93,5 @@ export async function searchAdminVideoMemberXUsers(
   try { body = await response.json(); }
   catch { throw new Error("member_suggestions_unavailable"); }
   if (signal.aborted) throw new Error("member_suggestions_unavailable");
-  return parseSuggestions(body);
+  return parseSuggestions(body, q.trim(), offset);
 }
