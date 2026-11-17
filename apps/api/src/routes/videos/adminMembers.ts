@@ -10,6 +10,7 @@ import { readAdminVideoCollabFlag, mergeVideoRebuildEventIds } from "@flamenode/
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
 import { isValidAdminVideoMemberPathId, parseAdminVideoMembersHttpInput } from "@flamenode/domain/video/adminMemberHttpInput";
 import { validateVideoMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
+import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import type { AppEnv } from "../../env.ts";
 import { sessionMiddleware } from "../../auth/session.ts";
 import { dbMiddleware } from "../../middleware/db.ts";
@@ -31,6 +32,8 @@ export type AdminVideoMemberTarget = {
   youtube_video_id: string | null;
   primary_event_id: string | null;
   updated_at: number;
+  /** Bounded count of existing public participants; 101 is overflow. */
+  public_member_count: number;
   /** JSON1 bounded linked event IDs fetched with the same video snapshot D1 SELECT. */
   linked_event_ids_json: string;
 };
@@ -72,9 +75,13 @@ export function createDefaultVideoAdminMembersPreflightHost(
         '(SELECT COALESCE(json_group_array("event_id"), \'[]\') FROM (' +
         'SELECT "event_id" FROM "video_events" WHERE "video_id" = ? ' +
         'ORDER BY "event_id" LIMIT ' + (MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS + 1) +
-        ')) AS "linked_event_ids_json" ' +
+        ')) AS "linked_event_ids_json", ' +
+        '(SELECT COUNT(*) FROM (' +
+        'SELECT 1 FROM "video_members" WHERE "video_id" = ? AND "is_public_member" = 1 ' +
+        'LIMIT ' + (MAX_VIDEO_MEMBERS + 1) +
+        ')) AS "public_member_count" ' +
         'FROM "videos" WHERE "id" = ? LIMIT 1',
-      ).bind(videoId, videoId).first<AdminVideoMemberTarget>(),
+      ).bind(videoId, videoId, videoId).first<AdminVideoMemberTarget>(),
     writeGuard: async (c, next) => {
       c.header("Cache-Control", "private, no-store");
       const execute = async (index: number): Promise<Response | void> => {
@@ -154,6 +161,9 @@ export function createVideoAdminMembersPreflightRoutes(
       // the public rebuild fanout in the eventual atomic writer.
       !["draft", "pending", "public", "limited", "private", "archived", "voided"].includes(target.visibility_status) ||
       !Number.isSafeInteger(target.updated_at) ||
+      !Number.isSafeInteger(target.public_member_count) ||
+      target.public_member_count < 0 ||
+      target.public_member_count > MAX_VIDEO_MEMBERS ||
       [target.creator_x_user_id, target.youtube_video_id, target.primary_event_id].some(
         value => value !== null && typeof value !== "string",
       )
