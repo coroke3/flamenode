@@ -266,6 +266,26 @@ test("MIG-0730 U02b invalid UTF-16 route ID fails without any network and no end
   } finally { await ui.cleanup(); }
 });
 
+test("MIG-0730 U02cl: direct read view rejects throwing injected DTO getters without crashing", () => {
+  const topLevel = { video: snapshot("v1").video,
+    get initialMembers() { throw new Error("PRIVATE_TOP_LEVEL"); } };
+  const nested = snapshot("v1", [member("PRIVATE_NESTED")]);
+  Object.defineProperty(nested.initialMembers[0], "name", {
+    enumerable: true,
+    get() { throw new Error("PRIVATE_NESTED_GETTER"); },
+  });
+  const revoked = Proxy.revocable(snapshot("v1", [member("PRIVATE_PROXY")]), {});
+  revoked.revoke();
+  for (const input of [topLevel, nested, revoked.proxy]) {
+    const markup = renderToStaticMarkup(wrap(React.createElement(AdminVideoMembersReadView, {
+      videoId: "v1", data: input,
+    })));
+    assert.match(markup, /参加者データを表示できません/, "fail closed without a render exception");
+    assert.doesNotMatch(markup, /PRIVATE_|公開参加者（|公開ページ|type="submit"/,
+      "private member rows and authorized links must not render");
+  }
+});
+
 test("MIG-0730 U02m: read view fails closed on injected private or wrong-video DTO, never renders secret", () => {
   for (const injected of [
     snapshot("other", [member("PRIVATE_OTHER")]),
