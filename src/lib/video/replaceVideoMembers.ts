@@ -32,6 +32,10 @@ import {
   buildVideoChapterBulkInsertSql,
 } from "@flamenode/server-core/video/memberChapterSql";
 
+// Compatibility bridge (MIG-0650, D-10): old Next caller delegates the
+// canonical member-managed chapter projection to server-core.
+import { buildVideoMemberManagedChapterRows } from "@flamenode/server-core/video/memberChapterRows";
+
 // Compatibility bridge (MIG-0650, D-10): chapter diff/audit semantics shared with Hono.
 import {
   managedChapterRowsEqual,
@@ -318,28 +322,12 @@ export async function buildReplaceVideoMembersPlan(
   const membersChanged =
     JSON.stringify(beforeSnapshot.rows) !== JSON.stringify(afterSnapshot.rows);
 
-  const existingChapterById = new Map(
-    existingManagedChapters.map((chapter) => [chapter.id, chapter]),
-  );
-  const now = Math.floor(Date.now() / 1000);
-  const nextManagedChapters: Array<typeof videoChapters.$inferSelect> = [];
-  for (const [memberIndex, member] of nextMembers.entries()) {
-    const chapters = args.chaptersByIndex?.get(memberIndex) ?? [];
-    for (const [chapterIndex, chapter] of chapters.entries()) {
-      const id = `${member.id}:member:${chapterIndex}`;
-      nextManagedChapters.push({
-        id,
-        video_id: args.videoId,
-        x_user_id: member.x_user_id,
-        chapter_time: chapter.time_seconds,
-        chapter_label: chapter.label,
-        note: chapter.note || null,
-        visibility: "public",
-        created_at: existingChapterById.get(id)?.created_at ?? now,
-        updated_at: now,
-      });
-    }
-  }
+  const nextManagedChapters = buildVideoMemberManagedChapterRows({
+    videoId: args.videoId,
+    existingManagedChapters,
+    nextMembers,
+    chaptersByIndex: args.chaptersByIndex,
+  });
   const chaptersChanged = !managedChapterRowsEqual(
     existingManagedChapters,
     nextManagedChapters,
