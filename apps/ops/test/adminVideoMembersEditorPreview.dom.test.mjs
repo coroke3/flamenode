@@ -179,3 +179,111 @@ test("MIG-0730 U02o: title-only same-video GET refresh preserves draft while mem
     target.remove();
   }
 });
+
+
+// MIG-0730 U02p: the shared field is still unmounted in Ops. A future privileged
+// editor must not issue duplicate collaborator writes or write after adapters
+// are revoked while an existing confirmation dialog is still visible.
+function buttonNamed(target, label) {
+  const node = [...target.querySelectorAll("button")].find(
+    button => button.textContent.trim() === label,
+  );
+  assert.ok(node, "button " + label + " is present");
+  return node;
+}
+async function previewPermissionTsv(target, tsv) {
+  const textarea = target.querySelector("#members-tsv-input");
+  assert.ok(textarea, "shared TSV textarea exists");
+  await React.act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(textarea), "value")?.set;
+    assert.ok(setter);
+    setter.call(textarea, tsv);
+    textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+  await React.act(async () => buttonNamed(target, "内容を確認").click());
+  assert.match(target.textContent, /確認（1行）/);
+  await React.act(async () => buttonNamed(target, "追加").click());
+  assert.match(target.querySelector('[role="alertdialog"]').textContent, /以下の編集権限を変更します/);
+}
+
+test("MIG-0730 U02p: two permission confirmations in one React batch write exactly once", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const calls = [];
+  let settle;
+  const adapters = {
+    save: async () => ({ ok: true }),
+    searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null, hint: null }),
+    applyPermissionBatch: input => {
+      calls.push(input);
+      return new Promise(resolve => { settle = resolve; });
+    },
+  };
+  try {
+    await React.act(async () => root.render(React.createElement(
+      AdminVideoMembersEditorPreview,
+      { videoId: "A", data: data("A", "CURRENT"), ...adapters },
+    )));
+    await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
+    assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+
+    // Do NOT flush React updates between two clicks: this is exactly where a
+    // permPending state-only guard can issue two POSTs.
+    await React.act(async () => {
+      const submit = buttonNamed(target, "変更を反映");
+      submit.click();
+      submit.click();
+    });
+    assert.equal(calls.length, 1, "synchronous duplicate clicks must send one permission batch");
+    assert.equal(calls[0].videoId, "A");
+    assert.equal(calls[0].intents.length, 1);
+    assert.equal(buttonNamed(target, "反映中...").disabled, true);
+    assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"],
+      "unconfirmed permission writes must not commit member rows");
+
+    await React.act(async () => settle({ ok: true }));
+    assert.equal(target.querySelector('[role="alertdialog"]'), null);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(formPayload(target).map(x => x.name).sort(), ["Bob", "CURRENT"]);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
+
+test("MIG-0730 U02p: removing edit adapters disables a still-open privileged confirmation", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const calls = [];
+  const adapters = {
+    save: async () => ({ ok: true }),
+    searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null, hint: null }),
+    applyPermissionBatch: async input => { calls.push(input); return { ok: true }; },
+  };
+  const render = async save => React.act(async () => {
+    root.render(React.createElement(AdminVideoMembersEditorPreview, {
+      videoId: "A", data: data("A", "CURRENT"),
+      ...adapters, save,
+    }));
+  });
+  try {
+    await render(adapters.save);
+    await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
+    assert.equal(buttonNamed(target, "変更を反映").disabled, false);
+
+    // Same video/snapshot; only adapter privilege was withdrawn. The old
+    // confirmation remains in React state but it must no longer write.
+    await render(undefined);
+    const confirm = buttonNamed(target, "変更を反映");
+    assert.equal(confirm.disabled, true);
+    await React.act(async () => confirm.click());
+    assert.equal(calls.length, 0);
+    assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+    assert.equal(target.querySelector('button[type="submit"]'), null);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});

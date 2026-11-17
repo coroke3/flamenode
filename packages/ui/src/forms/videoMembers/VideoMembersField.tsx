@@ -573,6 +573,9 @@ export function VideoMembersField({
   const [replaceConfirmOpen, setReplaceConfirmOpen] = React.useState(false);
   const [permConfirmOpen, setPermConfirmOpen] = React.useState(false);
   const [permPending, setPermPending] = React.useState(false);
+  // React state updates are batched: a synchronous double-click may enter the
+  // handler twice before permPending commits. A ref closes that mutation race.
+  const permWriteInFlightRef = React.useRef(false);
   const [permResult, setPermResult] = React.useState<{ ok: boolean; message: string } | null>(
     null,
   );
@@ -745,7 +748,9 @@ export function VideoMembersField({
 
   /** 編集権限だけを専用batch Server Actionで一括反映する。 */
   const applyPermissionsBatch = async () => {
-    if (!bulkPreview || !permissionTargetVideoId || permPending) return;
+    if (disabled || !bulkPreview || !permissionTargetVideoId ||
+        permPending || permWriteInFlightRef.current) return;
+    permWriteInFlightRef.current = true;
     setPermPending(true);
     setPermResult(null);
     try {
@@ -778,6 +783,7 @@ export function VideoMembersField({
     } catch {
       setPermResult({ ok: false, message: "編集権限の反映中にエラーが発生しました。" });
     } finally {
+      permWriteInFlightRef.current = false;
       setPermPending(false);
     }
   };
@@ -1499,7 +1505,7 @@ export function VideoMembersField({
                 type="button"
                 className="fn-btn fn-btn-primary fn-btn-sm"
                 onClick={() => void applyPermissionsBatch()}
-                disabled={permPending || bulkPreview.permissionIntents.length === 0}
+                disabled={disabled || permPending || bulkPreview.permissionIntents.length === 0}
               >
                 {permPending ? "反映中..." : "変更を反映"}
               </button>
