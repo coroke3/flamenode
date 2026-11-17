@@ -11,6 +11,33 @@ export type AdminVideoMembersSaveResult = {
 };
 
 export type AdminVideoMembersSave = (payload: FormData) => Promise<AdminVideoMembersSaveResult>;
+const UNVERIFIED_SAVE = "保存結果を確認できませんでした。最新状態を再取得してください。";
+
+/**
+ * The injected write port is a runtime trust boundary even though the
+ * TypeScript callback is typed. A malformed success must not call onSaved.
+ * Concrete SA-085 must separately verify the authoritative videoId receipt.
+ */
+function normalizeInjectedSaveResult(value: unknown): AdminVideoMembersSaveResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, message: UNVERIFIED_SAVE };
+  }
+  const body = value as Record<string, unknown>;
+  if (typeof body.ok !== "boolean" ||
+      (body.message !== undefined &&
+        (typeof body.message !== "string" || body.message.length > 300)) ||
+      (body.pendingPublicReflection !== undefined &&
+        typeof body.pendingPublicReflection !== "boolean")) {
+    return { ok: false, message: UNVERIFIED_SAVE };
+  }
+  return {
+    ok: body.ok,
+    ...(typeof body.message === "string" ? { message: body.message } : {}),
+    ...(typeof body.pendingPublicReflection === "boolean"
+      ? { pendingPublicReflection: body.pendingPublicReflection } : {}),
+  };
+}
+
 
 export interface AdminVideoMembersFormProps {
   video: { id: string; title: string; collaboration_type: string | null };
@@ -180,7 +207,7 @@ function AdminVideoMembersFormForVideo({
     setPending(true);
     setResult(null);
     try {
-      const response = await save(formData);
+      const response = normalizeInjectedSaveResult(await save(formData));
       // A may finish after navigation to B; never deliver A's result or refresh to B.
       if (mounted.current && requestEpoch === saveCapabilityEpoch.current) {
         setResult(response);
@@ -203,7 +230,7 @@ function AdminVideoMembersFormForVideo({
       if (mounted.current && requestEpoch === saveCapabilityEpoch.current) {
         // A thrown save port may have committed before its response was lost.
         // Do not imply a retry is safe: the caller must refresh server state.
-        setResult({ ok: false, message: "保存結果を確認できませんでした。最新状態を再取得してください。" });
+        setResult({ ok: false, message: UNVERIFIED_SAVE });
       }
     } finally {
       inFlight.current = false;

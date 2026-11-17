@@ -1014,3 +1014,51 @@ test("MIG-0730 U02bn: a rejected injected save does not imply rollback or invite
       "unknown outcome must instruct server re-fetch and hide internal exception data");
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0730 U02bo: malformed injected save receipts cannot fake success or refresh a private view", async () => {
+  const broken = [
+    null,
+    undefined,
+    {},
+    [],
+    { ok: "true", message: "PRIVATE-RECEIPT" },
+    { ok: 1, message: "PRIVATE-RECEIPT" },
+    { ok: true, message: 42 },
+    { ok: true, message: "x".repeat(301) },
+    { ok: true, pendingPublicReflection: "true" },
+    { ok: false, message: { secret: "PRIVATE-RECEIPT" } },
+  ];
+  for (const invalid of broken) {
+    let writes = 0, refreshes = 0;
+    const ui = setup({
+      save: async () => { writes++; return invalid; },
+      onSaved: () => { refreshes++; },
+    });
+    try {
+      await ui.render();
+      await ui.submit();
+      assert.equal(writes, 1, "one malformed receipt must not cause another write");
+      assert.equal(refreshes, 0, "unverified write must not trigger onSaved");
+      const alert = ui.target.querySelector('[role="alert"]');
+      assert.ok(alert);
+      assert.equal(alert.textContent,
+        "保存結果を確認できませんでした。最新状態を再取得してください。");
+      assert.doesNotMatch(ui.target.textContent, /PRIVATE-RECEIPT|\bPRIVATE\b|\bsecret\b/);
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false);
+    } finally { await ui.cleanup(); }
+  }
+
+  // A syntactically valid boolean failure should still preserve its safe
+  // user-facing message, while a verified success may run the refresh callback.
+  let refreshes = 0;
+  const ui = setup({
+    save: async () => ({ ok: true, message: "保存しました", pendingPublicReflection: true }),
+    onSaved: () => { refreshes++; },
+  });
+  try {
+    await ui.render();
+    await ui.submit();
+    assert.equal(refreshes, 1);
+    assert.match(ui.target.textContent, /保存しました/);
+  } finally { await ui.cleanup(); }
+});
