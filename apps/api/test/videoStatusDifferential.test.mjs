@@ -210,6 +210,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const pendingWakePromises = [];
       const objects = new Map();
       let etagVersion = 0;
+      let transientPutFailures = 0;
       const bucket = {
         async delete(key) {
           events.push(["r2.delete", key]);
@@ -228,7 +229,9 @@ if (runUnderRootTsx(import.meta.url)) {
         async put(key, value, options) {
           events.push(["r2.put", key, options?.onlyIf instanceof Headers
             ? "create-if-absent" : options?.onlyIf?.etagMatches ?? null]);
-          if (r2Fault === "write") throw new Error("public_visibility_manifest_transport_unavailable");
+          if (r2Fault === "write" || (r2Fault === "write-once" && transientPutFailures++ === 0)) {
+            throw new Error("public_visibility_manifest_transport_unavailable");
+          }
           const current = objects.get(key);
           const condition = options?.onlyIf;
           if (condition instanceof Headers &&
@@ -477,6 +480,33 @@ if (runUnderRootTsx(import.meta.url)) {
           "R2 transport retries must preserve the create-if-absent CAS condition");
       });
     }
+  }
+
+  for (const [initialStatus, nextStatus] of [["public", "private"], ["private", "public"]]) {
+    test(`transient R2 manifest PUT outage recovers safely for ${initialStatus}→${nextStatus} on CURRENT/Hono`, async () => {
+      const current = await executeAuditedStatus(
+        nextStatus, true, false, false, false, initialStatus, "write-once",
+      );
+      const hono = await executeAuditedStatus(
+        nextStatus, false, false, false, false, initialStatus, "write-once",
+      );
+      assert.deepEqual(hono, current, "CURRENT and unmounted Hono host must recover with identical committed state");
+      assert.equal(current.result.ok, true, "a transient R2 outage must not reject a safely recovered CAS");
+      assert.equal(current.video.visibility_status, nextStatus);
+      assert.equal(current.batches, 1, "D1 audit and state transition commit only after the R2 CAS succeeds");
+      assert.equal(current.audits.length, 1, "status transition retains its strict audit");
+      assert.equal(current.fences.length, 1, "a public visibility boundary requires a durable D1 fence");
+      assert.equal(current.fences[0].state, nextStatus === "private" ? "blocked" : "release_pending");
+      assert.equal(current.manifest?.entities?.length, 1, "the successfully retried R2 object remains present");
+      assert.equal(current.manifest.entities[0].fence_token, current.fences[0].fence_token,
+        "D1 and R2 must store the same owner after recovery");
+      const puts = current.events.filter((event) => event[0] === "r2.put");
+      assert.equal(puts.length, 2, "one simulated transport failure followed by one successful conditional PUT");
+      assert.ok(puts.every((event) => event[2] === "create-if-absent"),
+        "retry must preserve create-only CAS and cannot overwrite a competing blocker");
+      assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), [],
+        "the Hono/CURRENT fixture has dispatch disabled, so retry does not produce an uncommitted wake");
+    });
   }
 
   test("private-to-public foreign R2 owner fails closed before D1 on CURRENT and Hono", async () => {
