@@ -196,13 +196,13 @@ test("MIG-0603 S3 D1 pre-read budget characterization: unmounted status candidat
     const d1 = createVideoStatusD1(sqlite);
     const S3_PRE_READ_LIMIT = 3;
     const cases = [
-      ["admin", createUnboundAdminVideoStatusCandidate(), JSON.stringify({
+      ["site-admin", createUnboundAdminVideoStatusCandidate(), JSON.stringify({
         video_id: "v1", status: "private",
-      }), 4],
-      ["manage-event-staff", createUnboundManageVideoStatusCandidate(), BODY, 6],
+      }), 3, "admin"],
+      ["manage-site-admin", createUnboundManageVideoStatusCandidate(), BODY, 4, "admin"],
+      ["manage-event-staff", createUnboundManageVideoStatusCandidate(), BODY, 6, "mgr"],
     ];
-    for (const [name, candidate, body, expectedReads] of cases) {
-      const user = name === "admin" ? "admin" : "mgr";
+    for (const [name, candidate, body, expectedReads, user] of cases) {
       const start = d1.stats.statements;
       const response = await candidate.request(ORIGIN + "/", {
         method: "POST",
@@ -217,11 +217,16 @@ test("MIG-0603 S3 D1 pre-read budget characterization: unmounted status candidat
       assert.equal(response.headers.get("cache-control"), "private, no-store");
       assert.equal(reads, expectedReads,
         "this is a characterization of the CURRENT unmounted implementation, NOT S3 acceptance");
-      assert.ok(reads > S3_PRE_READ_LIMIT,
-        "the budget violation must remain explicit until guard+access reads are redesigned");
+      if (name === "site-admin") {
+        assert.equal(reads, S3_PRE_READ_LIMIT,
+          "admin-only preflight uses the full S3 read budget before any mutation");
+      } else {
+        assert.ok(reads > S3_PRE_READ_LIMIT,
+          "the manage authorization preflight exceeds S3 and MUST NOT be mounted");
+      }
       assert.equal(d1.stats.batches, 0);
       assert.equal(d1.stats.writes, 0);
-      t.diagnostic(`${name}: ${reads} D1 pre-reads > S3 budget ${S3_PRE_READ_LIMIT}; STOP route activation`);
+      t.diagnostic(`${name}: ${reads} D1 pre-reads (S3 max ${S3_PRE_READ_LIMIT}); full mutation budget NOT accepted`);
     }
   } finally {
     sqlite.close();
