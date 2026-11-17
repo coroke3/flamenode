@@ -5,7 +5,7 @@ import {
   createVideoAdminMembersPreflightRoutes,
   createDefaultVideoAdminMembersPreflightHost,
 } from "../src/routes/videos/adminMembers.ts";
-import { MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES, readAdminVideoMembersJsonBody } from "../src/routes/videos/adminMembersBody.ts";
+import { MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS, MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES, readAdminVideoMembersJsonBody } from "../src/routes/videos/adminMembersBody.ts";
 
 const endpoint = "/v1/members";
 const member = i => ({ name: "Name " + i, x_user_id: "user_" + i, chapters: [] });
@@ -723,4 +723,56 @@ test("MIG-0650 U03ab rejects invalid URL ID before costly JSON body, after admin
   const normal = await admin.request(endpoint, oversized);
   assert.equal(normal.status, 413);
   assert.deepEqual(admin.stats(), { invoked: 2, prematureDb: 0 });
+});
+
+
+test("MIG-0650 U03ad caps zero-byte streamed reads without waiting on cancellation", async () => {
+  let reads = 0;
+  let cancels = 0;
+  const endlessEmpty = new ReadableStream({
+    pull(controller) {
+      reads += 1;
+      controller.enqueue(new Uint8Array(0));
+    },
+    cancel() {
+      cancels += 1;
+      // A malicious transport may never settle its cancellation promise.
+      return new Promise(() => {});
+    },
+  });
+  const request = stream => new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: stream,
+    duplex: "half",
+  });
+  let timeout;
+  try {
+    const result = await Promise.race([
+      readAdminVideoMembersJsonBody(request(endlessEmpty)),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("empty stream blocked Worker request")), 1500);
+      }),
+    ]);
+    assert.deepEqual(result, { kind: "invalid" });
+    assert.equal(reads, MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS + 1);
+    assert.equal(cancels, 1, "rejects without waiting for a stalled transport cancel");
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  // The allowed ceiling is inclusive and does not alter valid JSON.
+  const payload = new TextEncoder().encode(JSON.stringify(valid()));
+  const allowed = new ReadableStream({
+    start(controller) {
+      for (let i = 0; i < MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS; i++) {
+        controller.enqueue(new Uint8Array());
+      }
+      controller.enqueue(payload);
+      controller.close();
+    },
+  });
+  assert.deepEqual(await readAdminVideoMembersJsonBody(request(allowed)), {
+    kind: "ok", value: valid(),
+  });
 });
