@@ -144,3 +144,38 @@ test("MIG-0730 U02h: equal-value same-ID refresh does not reset local collaborat
     target.remove();
   }
 });
+
+
+test("MIG-0730 U02o: title-only same-video GET refresh preserves draft while membership change resets it", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const render = async snapshot => React.act(async () => {
+    root.render(React.createElement(AdminVideoMembersEditorPreview, { videoId: "A", data: snapshot }));
+  });
+  try {
+    await render(data("A", "CURRENT"));
+    await React.act(async () =>
+      target.querySelector('input[name="is_collab"][type="checkbox"]').click());
+    assert.equal(target.querySelector('input[name="is_collab"][type="checkbox"]').checked, false);
+    assert.deepEqual(formPayload(target), []);
+
+    const fresh = data("A", "CURRENT");
+    fresh.video.title = "A renamed";
+    fresh.video.youtube_video_id = "new_video_id";
+    await render(fresh);
+    assert.equal(target.querySelector('input[name="is_collab"][type="checkbox"]').checked, false,
+      "metadata-only authorized refresh must not discard an unsaved local draft");
+    assert.deepEqual(formPayload(target), []);
+    assert.equal(target.querySelector('button[type="submit"]'), null);
+
+    await render(data("A", "AUTHORIZED NEW"));
+    assert.equal(target.querySelector('input[name="is_collab"][type="checkbox"]').checked, true,
+      "changed authorized members must invalidate the old local draft");
+    assert.deepEqual(formPayload(target).map(x => x.name), ["AUTHORIZED NEW"]);
+    assert.doesNotMatch(target.textContent, /CURRENT/);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});

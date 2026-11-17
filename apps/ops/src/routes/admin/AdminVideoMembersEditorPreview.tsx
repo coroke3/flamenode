@@ -33,13 +33,22 @@ const unavailablePermission: FieldProps["applyPermissionBatch"] = async () => {
 export function AdminVideoMembersEditorPreview({
   videoId, data, searchXUsers, applyPermissionBatch, save, onSaved,
 }: AdminVideoMembersEditorPreviewProps): React.ReactElement {
+  // This unmounted preview is also callable directly. Reject malformed IDs
+  // before touching a potentially private server response.
+  if (typeof videoId !== "string" || !videoId || videoId.length > 64 ||
+      videoId.trim() !== videoId || videoId === "." || videoId === ".." ||
+      /[\/\\\x00-\x1f]/.test(videoId)) {
+    return <p role="alert">参加者データを表示できません。</p>;
+  }
+  try { encodeURIComponent(videoId); }
+  catch { return <p role="alert">参加者データを表示できません。</p>; }
   // Limit the array BEFORE schema traversal. A forged snapshot with 101+ rows
   // must not cause even one member getter / nested chapter to be inspected.
   const rawMembers: unknown =
     data && typeof data === "object" && !Array.isArray(data)
       ? (data as { initialMembers?: unknown }).initialMembers
       : undefined;
-  if (!videoId || !Array.isArray(rawMembers) || rawMembers.length > MAX_VIDEO_MEMBERS) {
+  if (!Array.isArray(rawMembers) || rawMembers.length > MAX_VIDEO_MEMBERS) {
     return <p role="alert">参加者データを表示できません。</p>;
   }
 
@@ -50,12 +59,13 @@ export function AdminVideoMembersEditorPreview({
   }
 
   const valid = parsed.data;
-  // The shared field keeps its member rows in useState(initialMembers). A same-ID
-  // authorization refresh may revoke/delete participants without changing the
-  // route ID. Key the whole form by the *validated* snapshot so both its hidden
-  // payload and collaboration checkbox are replaced on a changed server read.
-  // Do not use data object identity: equal-value refreshes must preserve edits.
-  const snapshotKey = JSON.stringify(valid);
+  // Reset the member field and collaboration checkbox for a fresh authorized
+  // membership snapshot. Changes to title/YouTube metadata alone should not
+  // throw away local in-progress edits. Use only validated edit-relevant data,
+  // not the entire DTO or its object identity, for the form's remount key.
+  const snapshotKey = JSON.stringify([
+    valid.video.id, valid.video.collaboration_type, valid.initialMembers,
+  ]);
   const canEdit = Boolean(save && searchXUsers && applyPermissionBatch);
   const field = (
     <VideoMembersField

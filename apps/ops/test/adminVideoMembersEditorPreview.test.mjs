@@ -96,3 +96,21 @@ test("MIG-0730 U02d: oversized payload is rejected before accessing any member g
   assert.match(markup, /参加者データを表示できません/);
   assert.doesNotMatch(markup, /name="members_json"|参加者設定を保存/);
 });
+
+
+test("MIG-0730 U02o: malformed route fails closed before accessing private preview rows", () => {
+  const ids = ["", ".", "..", "v/child", "v\\child", " leading", "trailing ", "v\0bad", "\uD800", "v".repeat(65)];
+  for (const videoId of ids) {
+    let touched = 0;
+    const injected = {
+      get initialMembers() {
+        touched++;
+        throw Error("invalid video route must never read a private DTO");
+      },
+    };
+    const markup = html({ videoId, data: injected, searchXUsers, applyPermissionBatch, save });
+    assert.equal(touched, 0, "malformed path must be denied before accessing members");
+    assert.match(markup, /参加者データを表示できません/);
+    assert.doesNotMatch(markup, /members_json|参加者設定を保存/);
+  }
+});
