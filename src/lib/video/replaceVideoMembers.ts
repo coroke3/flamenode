@@ -180,6 +180,10 @@ async function canonicalizeMemberInputs(
 // CURRENT, while the exact permission/hidden-row selection is shared with Hono.
 import { selectVideoMemberPermissionCarry } from "@flamenode/server-core/video/memberPermissionCarry";
 
+// Compatibility bridge (MIG-0650, D-10): projection remains deterministic
+// after caller completes fail-closed canonical X identity lookup.
+import { buildVideoMemberReplacementRows } from "@flamenode/server-core/video/memberReplacementRows";
+
 // Compatibility bridge (MIG-0650, D-10): CURRENT X-user pending
 // UPSERT SQL is shared without changing the atomic batch/audit callers.
 import { buildVideoMemberXUserBatchSql } from "@flamenode/server-core/video/memberXUserSql";
@@ -286,25 +290,6 @@ export async function buildReplaceVideoMembersPlan(
   const { hiddenCarryRows, permissionCarryByXId } =
     selectVideoMemberPermissionCarry(carryRows, xIdSet, canonicalIdentity);
 
-  const existingPublicByXId = new Map<
-    string,
-    typeof videoMembers.$inferSelect
-  >();
-  const existingPublicByName = new Map<
-    string,
-    typeof videoMembers.$inferSelect
-  >();
-  for (const row of existing) {
-    const xId = canonicalIdentity(row.x_user_id);
-    if (xId && !existingPublicByXId.has(xId)) {
-      existingPublicByXId.set(xId, row);
-    }
-    const nameKey = row.name.trim().normalize("NFKC").toLowerCase();
-    if (nameKey && !existingPublicByName.has(nameKey)) {
-      existingPublicByName.set(nameKey, row);
-    }
-  }
-
   const existingXUsers =
     xIds.length > 0
       ? await db
@@ -317,50 +302,16 @@ export async function buildReplaceVideoMembersPlan(
       : [];
   const existingXIds = new Set(existingXUsers.map((row) => normalizeXId(row.id)));
 
-  const newXUsers: Array<typeof xUsers.$inferInsert> = [];
-  const nextMembers: Array<typeof videoMembers.$inferSelect> = [];
-  for (const [index, member] of members.entries()) {
-    const xId = normalizeXId(member.x_user_id) || null;
-    if (xId && !existingXIds.has(xId)) {
-      newXUsers.push({
-        id: xId,
-        x_name: member.name || `@${xId}`,
-        icon_url: null,
-        profile_text: null,
-        portfolio_contact: null,
-        youtube_channel_url: null,
-        other_social_links: null,
-        creative_start_date: null,
-        approval_status: "pending",
-      });
-      existingXIds.add(xId);
-    }
-
-    const previousPublic = xId
-      ? existingPublicByXId.get(xId)
-      : existingPublicByName.get(
-          member.name.trim().normalize("NFKC").toLowerCase(),
-        );
-    const permissionCarry = xId
-      ? permissionCarryByXId.get(xId)
-      : previousPublic;
-
-    nextMembers.push({
-      id: previousPublic?.id ?? generateId("vm"),
-      video_id: args.videoId,
-      x_user_id: xId,
-      name: member.name.trim() || (xId ? `@${xId}` : ""),
-      role: member.role || null,
-      comment: member.comment || null,
-      order_index: index,
-      can_edit: permissionCarry?.can_edit ?? 0,
-      is_public_member: 1,
-      edit_granted_by_auth_user_id:
-        permissionCarry?.edit_granted_by_auth_user_id ?? null,
-      edit_granted_at: permissionCarry?.edit_granted_at ?? null,
-      edit_updated_at: permissionCarry?.edit_updated_at ?? null,
-    });
-  }
+  const { newXUsers, nextMembers } = buildVideoMemberReplacementRows({
+    videoId: args.videoId,
+    members,
+    existingPublic: existing,
+    permissionCarryByXId,
+    existingXIds,
+    canonicalIdentity,
+    normalizeXId,
+    generateMemberId: () => generateId("vm"),
+  });
 
   const beforeSnapshot = buildVideoMemberSetSnapshot(args.videoId, existing);
   const afterSnapshot = buildVideoMemberSetSnapshot(args.videoId, nextMembers);
