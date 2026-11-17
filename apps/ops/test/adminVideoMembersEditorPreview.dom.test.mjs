@@ -442,3 +442,53 @@ test("MIG-0730 U02x: reused shared field must not carry video A draft into video
     target.remove();
   }
 });
+
+test("MIG-0730 U02z: same-video permission adapter replacement retires stale success or rejection", async () => {
+  for (const outcome of ["success", "failure"]) {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const root = createRoot(target);
+    let finishOld;
+    let oldCalls = 0, newCalls = 0;
+    const oldAdapter = () => {
+      oldCalls++;
+      return new Promise((resolve, reject) => { finishOld = { resolve, reject }; });
+    };
+    const newAdapter = async () => { newCalls++; return { ok: true, message: "NEW PERMISSION" }; };
+    const search = async () => ({ items: [], hasMore: false, nextOffset: null, hint: null });
+    const render = async adapter => React.act(async () => {
+      root.render(React.createElement(VideoMembersField, {
+        initialMembers: [member("CURRENT")],
+        permissionTargetVideoId: "A",
+        searchXUsers: search,
+        applyPermissionBatch: adapter,
+      }));
+    });
+    try {
+      await render(oldAdapter);
+      await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
+      await React.act(async () => buttonNamed(target, "変更を反映").click());
+      assert.equal(oldCalls, 1);
+      assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+      await render(newAdapter);
+      assert.equal(target.querySelector('[role="alertdialog"]'), null,
+        "adapter change revokes old permission confirmation on the SAME mounted video");
+      if (outcome === "success") {
+        await React.act(async () => finishOld.resolve({ ok: true, message: "OBSOLETE PERMISSION" }));
+      } else {
+        await React.act(async () => finishOld.reject(new Error("old permission request failed")));
+      }
+      assert.equal(newCalls, 0, "no automatic retry through replacement adapter");
+      assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+      assert.doesNotMatch(target.textContent, /OBSOLETE PERMISSION|編集権限の反映中にエラー/);
+
+      await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
+      await React.act(async () => buttonNamed(target, "変更を反映").click());
+      assert.equal(newCalls, 1);
+      assert.deepEqual(formPayload(target).map(x => x.name).sort(), ["Bob", "CURRENT"]);
+    } finally {
+      await React.act(async () => root.unmount());
+      target.remove();
+    }
+  }
+});

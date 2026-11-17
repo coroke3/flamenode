@@ -594,17 +594,23 @@ function VideoMembersFieldForTarget({
   // Retire stale callbacks synchronously on the committed capability change.
   const permissionCapability = disabled ? null : (permissionTargetVideoId ?? null);
   const permissionCapabilityRef = React.useRef(permissionCapability);
+  const permissionAdapterRef = React.useRef(applyPermissionBatch);
   const permissionEpochRef = React.useRef(0);
   React.useLayoutEffect(() => {
-    if (permissionCapabilityRef.current === permissionCapability) return;
+    // A same-video write port may be replaced when its authorization scope
+    // changes. Retire a pending response even if the video ID and disabled
+    // flag stay the same. Do not apply stale permission intents to local rows.
+    if (permissionCapabilityRef.current === permissionCapability &&
+        permissionAdapterRef.current === applyPermissionBatch) return;
     permissionCapabilityRef.current = permissionCapability;
+    permissionAdapterRef.current = applyPermissionBatch;
     permissionEpochRef.current += 1;
     pendingApplyRef.current = null;
     setPermConfirmOpen(false);
     setReplaceConfirmOpen(false);
     setPermResult(null);
     setBulkPreview(null);
-  }, [permissionCapability]);
+  }, [permissionCapability, applyPermissionBatch]);
 
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     if (disabled) return;
