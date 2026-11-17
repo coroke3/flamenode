@@ -51,6 +51,9 @@ if (runUnderRootTsx(import.meta.url)) {
   const { PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY: MANIFEST_KEY } = await import(
     "@flamenode/server-core/visibility/manifestCore"
   );
+  const { MANIFEST_PUT_MAX_RETRIES } = await import(
+    "@flamenode/server-core/visibility/manifestR2"
+  );
 
   function seed(sqlite) {
     sqlite.exec(`
@@ -468,8 +471,10 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(current.manifest, null, "the failed write must not create a public block");
         assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), []);
         const writes = current.events.filter((event) => event[0] === "r2.put");
-        assert.equal(writes.length, r2Fault === "write" ? 1 : 0,
-          "at most one rejected conditional R2 write can be attempted");
+        assert.equal(writes.length, r2Fault === "write" ? MANIFEST_PUT_MAX_RETRIES : 0,
+          "transport failures retry bounded conditional PUTs, but never reach D1");
+        assert.ok(writes.every((event) => event[2] === "create-if-absent"),
+          "R2 transport retries must preserve the create-if-absent CAS condition");
       });
     }
   }
