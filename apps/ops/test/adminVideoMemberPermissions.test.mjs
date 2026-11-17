@@ -274,3 +274,35 @@ test("MIG-0730 U02bk: mutable input cannot retarget SA-084 receipt or leak in-fl
     assert.equal(requests.length, 3);
   }
 });
+
+test("MIG-0730 U02co: hostile permission DTO getters and proxies reject before SA-084 HTTP", async () => {
+  const top = input();
+  Object.defineProperty(top, "videoId", {
+    get() { throw Error("PRIVATE_VIDEO_ID"); },
+  });
+  const array = input();
+  Object.defineProperty(array, "intents", {
+    get() { throw Error("PRIVATE_INTENTS"); },
+  });
+  const row = input();
+  Object.defineProperty(row.intents[0], "x_user_id", {
+    get() { throw Error("PRIVATE_X_USER"); },
+  });
+  const revoked = Proxy.revocable(input(), {});
+  revoked.revoke();
+
+  let posts = 0;
+  const fetchFn = async () => {
+    posts++;
+    return json({ ok: true, videoId: "video-1" });
+  };
+  for (const invalid of [top, array, row, revoked.proxy]) {
+    assert.deepEqual(
+      await applyAdminVideoMemberPermissionBatch(invalid, fetchFn),
+      { ok: false, message: "権限変更の入力に誤りがあります。" },
+    );
+  }
+  assert.equal(posts, 0, "forged permission accessors never result in a write");
+  assert.deepEqual(await applyAdminVideoMemberPermissionBatch(input(), fetchFn), { ok: true });
+  assert.equal(posts, 1, "canonical permissions still submit exactly once");
+});

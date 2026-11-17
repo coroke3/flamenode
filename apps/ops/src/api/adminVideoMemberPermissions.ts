@@ -84,7 +84,14 @@ export async function applyAdminVideoMemberPermissionBatch(
   input: AdminPermissionBatchInput,
   fetchFn: OpsFetch = (path, init) => fetch(path, init),
 ): Promise<AdminPermissionBatchResult> {
-  const parsed = validatedBatch(input);
+  // A legacy/injected input can carry throwing getters or revoked Proxies.
+  // An invalid permission batch must always settle without issuing HTTP.
+  let parsed: ReturnType<typeof validatedBatch>;
+  try {
+    parsed = validatedBatch(input);
+  } catch {
+    return { ok: false, message: INVALID };
+  }
   if (!parsed) return { ok: false, message: INVALID };
   // Freeze the request identity before any await; callers can mutate their
   // input object while the request is pending.
