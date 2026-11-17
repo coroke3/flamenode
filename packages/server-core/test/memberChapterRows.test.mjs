@@ -108,13 +108,15 @@ test("MIG-0650 U03d-2h: chapter IDs come from projected member id, never client 
 
 test("MIG-0650 U03d-2h: Next uses core projection and preserves SQL CAS/audit wiring", async () => {
   const legacy = await readFile(new URL("../../../src/lib/video/replaceVideoMembers.ts", import.meta.url), "utf8");
+  const mutations = await readFile(new URL("../src/video/memberWriteMutationBatch.ts", import.meta.url), "utf8");
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.exports["./video/memberChapterRows"], "./src/video/memberChapterRows.ts");
   assert.match(legacy, /from "@flamenode\/server-core\/video\/memberChapterRows"/);
   assert.match(legacy, /buildVideoMemberManagedChapterRows\(\{/);
   assert.match(legacy, /managedChapterRowsEqual/);
-  assert.match(legacy, /buildVideoChapterBulkInsertSql/);
-  assert.match(legacy, /buildVideoMemberSetGuardSql/);
+  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberWriteMutationBatch"/);
+  assert.match(mutations, /buildVideoChapterBulkInsertSql/);
+  assert.match(mutations, /buildVideoMemberSetGuardSql/);
   assert.match(legacy, /buildChapterAuditSummary/);
   assert.doesNotMatch(legacy, /const existingChapterById = new Map/);
   assert.doesNotMatch(legacy, /nextManagedChapters\.push/);
