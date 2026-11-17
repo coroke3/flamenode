@@ -901,7 +901,7 @@ function VideoMembersFieldForTarget({
           <Icon name="settings" size={11} aria-hidden /> 編集できる人を設定
         </a>
       ) : null}
-      {searchQuery.trim().length > 0 ? (
+      {!disabled && searchQuery.trim().length > 0 ? (
         <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
           {searchStatus === "loading"
             ? "候補を検索中..."

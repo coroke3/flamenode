@@ -733,14 +733,24 @@ test("MIG-0730 U02af: disable hides cached private suggestions before render eff
     return response;
   };
   const permission = async () => ({ ok: false });
+  const beforePassiveEffects = [];
+  const LayoutProbe = ({ disabled }) => {
+    React.useLayoutEffect(() => {
+      if (disabled) beforePassiveEffects.push(target.textContent);
+    }, [disabled]);
+    return null;
+  };
   const render = disabled => React.act(async () => root.render(
-    React.createElement(VideoMembersField, {
-      initialMembers: [member("CURRENT")],
-      permissionTargetVideoId: "A",
-      searchXUsers,
-      applyPermissionBatch: permission,
-      disabled,
-    })
+    React.createElement(React.Fragment, null,
+      React.createElement(VideoMembersField, {
+        initialMembers: [member("CURRENT")],
+        permissionTargetVideoId: "A",
+        searchXUsers,
+        applyPermissionBatch: permission,
+        disabled,
+      }),
+      React.createElement(LayoutProbe, { disabled }),
+    )
   ));
   const names = () => [...target.querySelectorAll("#member-name-suggestions option")]
     .map(node => node.value);
@@ -762,12 +772,18 @@ test("MIG-0730 U02af: disable hides cached private suggestions before render eff
     assert.equal(requests.length, 1);
     await React.act(async () => requests[0].resolve({
       items: [{ id: "revoked", x_name: "OLD PRIVATE" }],
-      hasMore: true, nextOffset: 20, hint: null,
+      hasMore: true, nextOffset: 20, hint: "PRIVATE AUDIT HINT",
     }));
+    assert.match(target.textContent, /PRIVATE AUDIT HINT/);
     assert.ok(names().includes("OLD PRIVATE"));
     assert.equal(hasMore(), true);
 
     await render(true);
+    assert.equal(beforePassiveEffects.length, 1,
+      "layout probe must inspect the committed disabled render before effects");
+    assert.doesNotMatch(beforePassiveEffects[0], /PRIVATE AUDIT HINT/,
+      "no private search metadata may paint in the disabled commit");
+    assert.doesNotMatch(target.textContent, /PRIVATE AUDIT HINT/);
     assert.deepEqual(names(), [], "disabled render must hide private datalist suggestions");
     assert.equal(hasMore(), false, "disabled render must hide old pagination action");
     assert.deepEqual(formPayload(target).map(row => row.name), ["Alice"],
