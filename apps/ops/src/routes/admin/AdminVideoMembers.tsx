@@ -7,36 +7,7 @@ import type { OpsFetch, OpsResult } from "../../api/read.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { OpsLink } from "../../components/shared/OpsLink.js";
 import { NotFoundView } from "../NotFoundView.js";
-
-/** CURRENT src/lib/youtube/id.ts videoPageHref: only same-origin public routes.
- * No user-provided YouTube string may become an absolute or protocol-relative URL.
- */
-function currentVideoPublicHref(video: { id: string; youtube_video_id?: string | null }): string {
-  const raw = video.youtube_video_id?.trim();
-  const youtubeIdPattern = /^[A-Za-z0-9_-]{11}$/;
-  if (raw) {
-    if (youtubeIdPattern.test(raw)) return "/" + raw;
-    try {
-      const url = new URL(raw);
-      if (url.protocol === "https:" || url.protocol === "http:") {
-        const host = url.hostname.toLowerCase().replace(/^www\./, "");
-        if (host === "youtu.be") {
-          const id = url.pathname.split("/").filter(Boolean)[0];
-          if (id && youtubeIdPattern.test(id)) return "/" + id;
-        } else if (host === "youtube.com" || host.endsWith(".youtube.com")) {
-          const queryId = url.searchParams.get("v");
-          if (queryId && youtubeIdPattern.test(queryId)) return "/" + queryId;
-          const segments = url.pathname.split("/").filter(Boolean);
-          const index = segments.findIndex(segment => ["shorts", "embed", "live", "v"].includes(segment));
-          if (index >= 0 && segments[index + 1] && youtubeIdPattern.test(segments[index + 1]!)) {
-            return "/" + segments[index + 1];
-          }
-        }
-      }
-    } catch { /* Invalid URLs fall back to a safe internal slug. */ }
-  }
-  return /^[A-Za-z0-9_-]{1,128}$/.test(video.id) ? "/" + video.id : "/list";
-}
+import { memberVideoPublicHref } from "./memberVideoPublicHref.js";
 
 /** Display only public participants in the Hono-admin-authorized DTO. Never mount an editor before SA-085 is ready. */
 export function AdminVideoMembersReadView({ videoId, data }: {
@@ -109,7 +80,7 @@ export function AdminVideoMembersReadView({ videoId, data }: {
       {/* CURRENT AdminVideoMembersForm footer: tabs are separately owned by MIG-0729. */}
       <footer style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <OpsLink href={detailHref} className="fn-btn fn-btn-ghost">詳細へ戻る</OpsLink>
-        <a href={currentVideoPublicHref(verified.video)} className="fn-btn fn-btn-ghost"
+        <a href={memberVideoPublicHref(verified.video)} className="fn-btn fn-btn-ghost"
           target="_blank" rel="noopener noreferrer">公開ページ</a>
       </footer>
     </div>
