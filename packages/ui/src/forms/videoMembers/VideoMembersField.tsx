@@ -355,7 +355,9 @@ function VideoMembersFieldForTarget({
     ]);
 
   // 空入力時は候補0件。preloadされたsuggestionsも空queryでは出さない。
-  const visibleSuggestions = searchQuery.trim()
+  // Permission revocation must hide any previously fetched/preloaded choices
+  // in the very render that disables the field, before passive effects run.
+  const visibleSuggestions = !disabled && searchQuery.trim()
     ? mergedSuggestions.slice(0, 20)
     : [];
 
@@ -1238,7 +1240,7 @@ function VideoMembersFieldForTarget({
           <Icon name="copy" size={11} aria-hidden />
           {copied && copiedLabel === "TSVコピー" ? "コピーしました" : "TSVをコピー"}
         </button>
-        {fetched.query === searchQuery.trim() && searchHasMore && nextOffset !== null ? (
+        {!disabled && fetched.query === searchQuery.trim() && searchHasMore && nextOffset !== null ? (
           <button
             type="button"
             className="fn-btn fn-btn-ghost fn-btn-sm"
