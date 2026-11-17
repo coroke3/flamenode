@@ -68,6 +68,9 @@ test("MIG-0730 U02f: reject duplicate canonical X handles and invalid inputs bef
     input({ edit_privilege_mode: "superuser" }),
     input({ videoId: "" }),
     input({ videoId: "../other" }),
+    input({ videoId: "v\\child" }),
+    input({ videoId: " leading" }),
+    input({ videoId: "trailing " }),
     input({ videoId: "other\0id" }),
     input({ videoId: "\uD800" }),
     input({ videoId: "a".repeat(65) }),
@@ -123,4 +126,17 @@ test("MIG-0730 U02f: candidate is neither route-registered nor injected to the e
   assert.doesNotMatch(editor, /adminVideoMemberPermissions|applyAdminVideoMemberPermissionBatch/);
   assert.match(adapter, /MIG-0650/);
   assert.match(adapter, /never|Never/i);
+});
+
+test("MIG-0730 U02l: permission batch preserves encoded safe video path and authoritative body ID", async () => {
+  const requests = [];
+  const data = input({ videoId: "video with space" });
+  const result = await applyAdminVideoMemberPermissionBatch(data, async (path, init) => {
+    requests.push({ path, init });
+    return json({ ok: true });
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].path, "/api/videos/video%20with%20space/collaborators/batch");
+  assert.equal(JSON.parse(requests[0].init.body).video_id, "video with space");
 });
