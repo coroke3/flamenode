@@ -174,12 +174,25 @@ function VideoMembersFieldForTarget({
   const [nextOffset, setNextOffset] = React.useState<number | null>(null);
   const suggestionRequestIdRef = React.useRef(0);
   const loadMoreControllerRef = React.useRef<AbortController | null>(null);
-  // A parent may replace the adapter without changing the query.
-  // Synchronize after commit: an abandoned concurrent render must not replace
-  // the adapter used by a request that is already pending.
+  // A parent may replace the search adapter without changing the query.
+  // Treat this as a new authorization scope: old in-flight requests and their
+  // cached suggestions must not survive a same-video adapter replacement.
   const searchXUsersRef = React.useRef(searchXUsers);
-  React.useEffect(() => {
+  const [searchAdapterRevision, setSearchAdapterRevision] = React.useState(0);
+  React.useLayoutEffect(() => {
+    if (searchXUsersRef.current === searchXUsers) return;
     searchXUsersRef.current = searchXUsers;
+    suggestionRequestIdRef.current += 1;
+    loadMoreControllerRef.current?.abort();
+    loadMoreControllerRef.current = null;
+    setFetched([]);
+    setSearchStatus("idle");
+    setSearchHint(null);
+    setSearchHasMore(false);
+    setNextOffset(null);
+    // Restart the existing debounced search under the newly committed port.
+    // Layout timing prevents a frame of old cached suggestions from painting.
+    setSearchAdapterRevision((revision) => revision + 1);
   }, [searchXUsers]);
 
   const fetchSuggestions = React.useCallback(
@@ -262,7 +275,7 @@ function VideoMembersFieldForTarget({
       loadMoreControllerRef.current = null;
       window.clearTimeout(t);
     };
-  }, [disabled, fetchSuggestions, searchQuery]);
+  }, [disabled, fetchSuggestions, searchQuery, searchAdapterRevision]);
 
   const loadMoreSuggestions = React.useCallback(() => {
     if (disabled || nextOffset === null) return;
