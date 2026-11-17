@@ -151,6 +151,29 @@ test("MIG-0730 U02j: forged checkbox order, duplicates and stale collaboration-O
   assert.equal(calls, 0, "forged checkbox, conflicting members and duplicate fields must fail before HTTP");
 });
 
+test("MIG-0730 U02bx: standalone SA-085 candidate rejects unexpected FormData keys before HTTP", async () => {
+  let sends = 0;
+  const fetchFn = async () => {
+    sends++;
+    return reply({ ok: true, videoId: "video-1" });
+  };
+  for (const collab of [true, false]) {
+    const forged = form({ collab, members: collab ? [{ name: "Alice" }] : [] });
+    forged.append("can_edit", "true");
+    const response = await saveAdminVideoMembers("video-1", forged, fetchFn);
+    assert.deepEqual(response, { ok: false, message: "参加者設定の入力を確認してください。" });
+    assert.equal(sends, 0, "unexpected privilege field cannot trigger a PUT");
+  }
+  const unknown = form();
+  unknown.append("legacy_extra", "untrusted");
+  assert.equal((await saveAdminVideoMembers("video-1", unknown, fetchFn)).ok, false);
+  assert.equal(sends, 0, "even an unrecognized non-privilege field must be rejected");
+
+  assert.equal((await saveAdminVideoMembers("video-1", form(), fetchFn)).ok, true);
+  assert.equal((await saveAdminVideoMembers("video-1", form({ collab: false, members: [] }), fetchFn)).ok, true);
+  assert.equal(sends, 2, "canonical ON/OFF forms still reach the HTTP port");
+});
+
 test("MIG-0730 U02j: valid ON with zero participants keeps exact two-value transport contract", async () => {
   const data = form({ collab: true, members: [] });
   let calls = 0;

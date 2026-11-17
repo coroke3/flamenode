@@ -31,7 +31,8 @@ function validatedBody(videoId: string, formData: FormData): ValidatedBody {
   if (typeof videoId !== "string" || !videoId || videoId.length > 64 ||
       videoId.trim() !== videoId || videoId === "." || videoId === ".." ||
       /[\/\\\x00-\x1f]/.test(videoId) ||
-      !formData || typeof formData.getAll !== "function") return { kind: "invalid" };
+      !formData || typeof formData.getAll !== "function" ||
+      typeof formData.forEach !== "function") return { kind: "invalid" };
   let encodedId: string;
   try { encodedId = encodeURIComponent(videoId); }
   catch { return { kind: "invalid" }; }
@@ -41,6 +42,16 @@ function validatedBody(videoId: string, formData: FormData): ValidatedBody {
   const ids = formData.getAll("video_id");
   const checkbox = formData.getAll("is_collab");
   const members = formData.getAll("members_json");
+  // Reject unknown source keys even though the JSON transport below only
+  // serializes allowlisted fields. Direct callers must not silently accept
+  // forged privilege/legacy inputs bypassing the Preview's UI boundary.
+  let unexpectedField = false;
+  formData.forEach((_, key) => {
+    if (key !== "video_id" && key !== "is_collab" && key !== "members_json") {
+      unexpectedField = true;
+    }
+  });
+  if (unexpectedField) return { kind: "invalid" };
   // Unlike the general-purpose CURRENT/Hono parser, this adapter only accepts
   // FormData produced by our exact Ops form (hidden "false", optional checked
   // "true"). Any altered order, duplicate, or alternate flag fails before PUT.
