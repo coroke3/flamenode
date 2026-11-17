@@ -840,7 +840,7 @@ test("MIG-0730 U02bf: collaboration OFF retires shared permission confirmation a
       await React.act(async () => {
         const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(textarea), "value")?.set;
         assert.ok(setter);
-        setter.call(textarea, "Bob\\tbob\\t\\t\\t\\tON");
+        setter.call(textarea, ["Bob", "bob", "", "", "", "ON"].join(String.fromCharCode(9)));
         textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
       });
       await React.act(async () => byText("内容を確認").click());
