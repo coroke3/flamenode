@@ -88,7 +88,10 @@ test("managed chapter同値判定はDB取得順ではなくID順へ正規化す�
 
 test("chapter監査は巨大rows snapshotを持たず存在しないrestore adapterを指定しない", async () => {
   const source = await read("src/lib/video/replaceVideoMembers.ts");
-  const audit = source.match(
+  const provider = await read("packages/server-core/src/video/memberWriteAudits.ts");
+  assert.match(source, /from "@flamenode\/server-core\/video\/memberWriteAudits"/);
+  assert.match(source, /plan\.audits\.push\(\.\.\.buildVideoMemberWriteAudits\(\{/);
+  const audit = provider.match(
     /table_name: "video_chapters_member_set"[\s\S]*?strict: true,/,
   )?.[0];
   assert.ok(audit);
@@ -102,14 +105,13 @@ test("chapter監査は巨大rows snapshotを持たず存在しないrestore adap
 test("チャプターだけの変更では公開メンバー100行をDELETE/INSERTし直さない", async () => {
   const source = await read("src/lib/video/replaceVideoMembers.ts");
   const mutations = await read("packages/server-core/src/video/memberWriteMutationBatch.ts");
+  const audits = await read("packages/server-core/src/video/memberWriteAudits.ts");
   assert.match(source, /buildVideoMemberWriteMutationBatch\(db, \{/);
+  assert.match(source, /plan\.audits\.push\(\.\.\.buildVideoMemberWriteAudits\(\{/);
   assert.match(mutations, /if \(membersChanged && existingPublicCount > 0\)/);
   assert.match(mutations, /if \(membersChanged && afterSnapshotRows\.length > 0\)/);
-  assert.match(
-    source,
-    /if \(membersChanged\) \{[\s\S]*table_name: "video_members_set"/,
-  );
-  assert.match(source, /if \(chaptersChanged\) \{[\s\S]*table_name: "video_chapters_member_set"/);
+  assert.match(audits, /if \(membersChanged\) \{[\s\S]*table_name: "video_members_set"/);
+  assert.match(audits, /if \(chaptersChanged\) \{[\s\S]*table_name: "video_chapters_member_set"/);
 });
 
 test("参加者保存はD1等の失敗を一律に競合と断定せずbudget errorを分離する", async () => {
