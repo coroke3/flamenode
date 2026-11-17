@@ -43,6 +43,17 @@ export function AdminVideoMembersEditorPreview({
   const guardedSave = React.useMemo<AdminVideoMembersSave | undefined>(() => {
     if (!save) return undefined;
     return async formData => {
+      // The form contains a mutable DOM hidden input, not an authenticated
+      // route identity. A forged/duplicate video_id must never reach an
+      // injected SA-085 port, even if that port trusts its FormData.
+      let matchesVideo = false;
+      try {
+        const ids = formData.getAll("video_id");
+        matchesVideo = ids.length === 1 && ids[0] === videoId;
+      } catch { /* Malformed FormData is not a write capability. */ }
+      if (!matchesVideo) {
+        return { ok: false, message: "参加者設定の入力を確認してください。" };
+      }
       const ongoing = writesInFlightByVideo.get(videoId);
       if (ongoing) {
         return {

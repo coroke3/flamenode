@@ -1278,3 +1278,58 @@ test("MIG-0730 U02bt: two Ops Preview roots share the video write gate across pe
     firstTarget.remove(); secondTarget.remove();
   }
 });
+
+test("MIG-0730 U02bu: forged or duplicate hidden video_id cannot reach injected SA-085 save", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const saves = [];
+  let refreshed = 0;
+  const adapters = {
+    save: async payload => {
+      saves.push(payload.getAll("video_id"));
+      return { ok: true, message: "SAVED_VALID_VIDEO" };
+    },
+    searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null, hint: null }),
+    applyPermissionBatch: async () => ({ ok: true }),
+    onSaved: () => { refreshed++; },
+  };
+  const submit = async () => React.act(async () => {
+    const event = new dom.window.Event("submit", { bubbles: true, cancelable: true });
+    target.querySelector("form").dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+  });
+  try {
+    await React.act(async () => root.render(React.createElement(AdminVideoMembersEditorPreview, {
+      videoId: "U02BU", data: data("U02BU", "CURRENT"), ...adapters,
+    })));
+    const form = target.querySelector("form");
+    const identity = form.querySelector('input[name="video_id"]');
+    assert.ok(identity);
+    identity.value = "DIFFERENT_VIDEO";
+    await submit();
+    assert.deepEqual(saves, [], "a tampered hidden ID must fail before injected HTTP write");
+    assert.equal(refreshed, 0);
+    assert.match(target.textContent, /参加者設定の入力を確認してください/);
+    assert.doesNotMatch(target.textContent, /SAVED_VALID_VIDEO/);
+
+    identity.value = "U02BU";
+    const duplicate = document.createElement("input");
+    duplicate.type = "hidden";
+    duplicate.name = "video_id";
+    duplicate.value = "U02BU";
+    form.append(duplicate);
+    await submit();
+    assert.deepEqual(saves, [], "duplicate even matching video IDs must be rejected");
+    assert.equal(refreshed, 0);
+    duplicate.remove();
+
+    await submit();
+    assert.deepEqual(saves, [["U02BU"]], "canonical single ID may reach the port");
+    assert.equal(refreshed, 1, "only the verified canonical submit may refresh");
+    assert.match(target.textContent, /SAVED_VALID_VIDEO/);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
