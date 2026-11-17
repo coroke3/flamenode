@@ -101,7 +101,14 @@ export async function saveAdminVideoMembers(
   formData: FormData,
   fetchFn: OpsFetch = (path, init) => fetch(path, init),
 ): Promise<AdminVideoMemberSaveResult> {
-  const parsed = validatedBody(videoId, formData);
+  // An injected/legacy FormData getter or iterator may throw before HTTP.
+  // Treat it as invalid input, not a rejected save Promise or a write receipt.
+  let parsed: ValidatedBody;
+  try {
+    parsed = validatedBody(videoId, formData);
+  } catch {
+    return { ok: false, message: INVALID };
+  }
   if (parsed.kind === "invalid") return { ok: false, message: INVALID };
   if (parsed.kind === "too_large") return { ok: false, message: TOO_LARGE };
   // Use the validated call-time string, not a mutable FormData field or

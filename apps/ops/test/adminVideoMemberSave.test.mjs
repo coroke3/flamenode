@@ -411,3 +411,34 @@ test("MIG-0730 U02bl: same-video SA-085 direct client is single-flight even with
     assert.equal(calls.length, 3);
   }
 });
+
+test("MIG-0730 U02cn: hostile FormData accessors and iterators reject before SA-085 HTTP", async () => {
+  // The standalone, UNMOUNTED port is callable with injected FormData.
+  // Its validation may throw before the fetch try/catch was reached.
+  const throwingGetter = form();
+  Object.defineProperty(throwingGetter, "getAll", {
+    get() { throw new Error("PRIVATE_GETALL_ACCESSOR"); },
+  });
+  const throwingGetAll = form();
+  throwingGetAll.getAll = () => { throw new Error("PRIVATE_GETALL_CALL"); };
+  const throwingForEach = form();
+  throwingForEach.forEach = () => { throw new Error("PRIVATE_FOREACH"); };
+  const revoked = Proxy.revocable(form(), {});
+  revoked.revoke();
+
+  let requests = 0;
+  const fetchFn = async () => {
+    requests++;
+    return reply({ ok: true, videoId: "video-1" });
+  };
+  for (const data of [throwingGetter, throwingGetAll, throwingForEach, revoked.proxy]) {
+    const result = await saveAdminVideoMembers("video-1", data, fetchFn);
+    assert.deepEqual(result, {
+      ok: false, message: "参加者設定の入力を確認してください。",
+    });
+  }
+  assert.equal(requests, 0, "hostile inputs may not reach PUT or disclose exception detail");
+  assert.equal((await saveAdminVideoMembers("video-1", form(), fetchFn)).ok, true,
+    "ordinary canonical FormData is unaffected");
+  assert.equal(requests, 1);
+});
