@@ -5,6 +5,7 @@ import {
   createVideoAdminMembersPreflightRoutes,
   createDefaultVideoAdminMembersPreflightHost,
 } from "../src/routes/videos/adminMembers.ts";
+import { MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES, readAdminVideoMembersJsonBody } from "../src/routes/videos/adminMembersBody.ts";
 
 const endpoint = "/v1/members";
 const member = i => ({ name: "Name " + i, x_user_id: "user_" + i, chapters: [] });
@@ -100,14 +101,21 @@ test("MIG-0650 U03e Hono rejects invalid, duplicate or 101 member submissions", 
   assert.deepEqual(f.stats(), { invoked: 4, prematureDb: 0 });
 });
 
-test("MIG-0650 U03e Hono no-body, malformed body and >64KB reject without mutation", async () => {
+test("MIG-0650 U03e/U03k malformed, excessive and forged JSON fail without mutation", async () => {
   const f = fixture();
   const invalidJson = await f.request(endpoint, "{");
   assert.equal(invalidJson.status, 400);
-  const tooLarge = await f.request(endpoint, { ...valid(), extra: "X".repeat(66000) });
+  const nowWithinRouteBudget = await f.request(endpoint, {
+    ...valid(), extra: "X".repeat(66000),
+  });
+  assert.equal(nowWithinRouteBudget.status, 400,
+    "below SA-085 body budget but invalid unknown-key payload is still rejected");
+  const tooLarge = await f.request(endpoint, {
+    ...valid(), extra: "X".repeat(MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES),
+  });
   assert.equal(tooLarge.status, 413);
   assert.match((await tooLarge.json()).message, /大きすぎ/);
-  assert.deepEqual(f.stats(), { invoked: 2, prematureDb: 0 });
+  assert.deepEqual(f.stats(), { invoked: 3, prematureDb: 0 });
 });
 
 test("MIG-0650 U03e valid canonical ON/OFF can never produce a false save success", async () => {
@@ -228,7 +236,7 @@ test("MIG-0650 U03f real admin session + CostGuard may preflight but cannot writ
   } finally { s.sqlite.close(); }
 });
 
-test("MIG-0650 U03f legal 100x30 CURRENT chapter input exceeds 64KiB transport cap", async () => {
+test("MIG-0650 U03k legal CURRENT 100x30 chapter fixture passes bounded transport but remains unwired", async () => {
   const members = Array.from({ length: 100 }, (_, i) => ({
     name: "member_" + i,
     x_user_id: "handle_" + i,
@@ -249,12 +257,14 @@ test("MIG-0650 U03f legal 100x30 CURRENT chapter input exceeds 64KiB transport c
   const request = { is_collab: ["false", "true"], members_json: membersJson };
   const bytes = new TextEncoder().encode(JSON.stringify(request)).byteLength;
   assert.ok(bytes > MAX_ADMIN_JSON_BODY_BYTES, "documented compatibility gap must be measured, not guessed");
-  assert.ok(bytes < MAX_ADMIN_JSON_BODY_BYTES * 4, "fixture is a realistic bounded form, not an arbitrary megabyte payload");
+  assert.ok(bytes < MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES, "documented intermediate SA-085 body budget must fit actual fixture");
 
   const s = realGuardFixture();
   try {
     const response = await s.send(request);
-    assert.equal(response.status, 413, "current Hono preflight rejects legal CURRENT member+chapter input");
+    assert.equal(response.status, 501, "legal 100x30 now passes input preflight but a writer is still deliberately unavailable");
+    assert.deepEqual(await response.json(), { ok: false, message: "参加者設定の保存APIは移行準備中です。" });
+    assert.ok(s.d1.stats.reads <= 3, "larger body cannot add D1 pre-read queries");
     assert.equal((await response.json()).ok, false);
     assert.equal(s.d1.stats.batches, 0);
     assert.equal(s.count("audit_logs"), 0);
@@ -425,4 +435,30 @@ test("MIG-0650 U03j linked event overflow and primary+linked overflow fail close
     });
     assert.deepEqual(f.stats(), { invoked: 1, prematureDb: 0 });
   }
+});
+
+test("MIG-0650 U03k bounded body reader ignores lying or absent Content-Length", async () => {
+  const large = JSON.stringify({ ...valid(),
+    extra: "X".repeat(MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES) });
+  const admitted = JSON.stringify(valid());
+  const req = (body, length) => new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    ...(length === undefined ? {} : { headers: { "content-length": String(length) } }),
+    body,
+  });
+  const noHeader = await readAdminVideoMembersJsonBody(req(large));
+  assert.equal(noHeader.kind, "too_large",
+    "bytes actually read enforce ceiling without Content-Length");
+  const forgedShort = await readAdminVideoMembersJsonBody(req(large, 1));
+  assert.equal(forgedShort.kind, "too_large", "short claimed Content-Length cannot bypass byte ceiling");
+  const forgedLong = await readAdminVideoMembersJsonBody(req(admitted, MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES + 1));
+  assert.equal(forgedLong.kind, "too_large", "claimed oversize is rejected without parsing");
+  const accepted = await readAdminVideoMembersJsonBody(req(admitted));
+  assert.equal(accepted.kind, "ok");
+  assert.deepEqual(accepted.value, valid());
+
+  const standardReader = (await import("../src/routes/admin/body.ts")).readAdminJsonBody;
+  const legacy = await standardReader(req(JSON.stringify({ ...valid(), extra: "X".repeat(66000) })));
+  assert.equal(legacy.kind, "too_large",
+    "all other privileged admin routes retain ZERO_1102 64KiB default cap");
 });

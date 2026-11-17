@@ -15,7 +15,8 @@ import { sessionMiddleware } from "../../auth/session.ts";
 import { dbMiddleware } from "../../middleware/db.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
-import { BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
+import { BODY_TOO_LARGE_MESSAGE } from "../admin/body.ts";
+import { readAdminVideoMembersJsonBody } from "./adminMembersBody.ts";
 
 type Ctx = Context<AppEnv>;
 
@@ -113,7 +114,7 @@ export function createVideoAdminMembersPreflightRoutes(
     if (mediaType !== "application/json") {
       return reject(c, 400, "JSON形式の入力が必要です。");
     }
-    const body = await readAdminJsonBody(c.req.raw);
+    const body = await readAdminVideoMembersJsonBody(c.req.raw);
     if (body.kind === "too_large") return reject(c, 413, BODY_TOO_LARGE_MESSAGE);
     if (body.kind !== "ok") return reject(c, 400, "入力エラー");
 
