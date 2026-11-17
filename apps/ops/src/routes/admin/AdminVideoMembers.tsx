@@ -1,6 +1,7 @@
 // MIG-0730 U02b candidate: unmounted read-only view; SA-085 write remains with MIG-0650.
 import * as React from "react";
-import type { AdminVideoMembersResponse } from "@flamenode/contracts";
+import { AdminVideoMembersResponseSchema, type AdminVideoMembersResponse } from "@flamenode/contracts";
+import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import { readAdminVideoMembers } from "../../api/adminVideoMembers.js";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
@@ -10,12 +11,26 @@ export function AdminVideoMembersReadView({ videoId, data }: {
   videoId: string;
   data: AdminVideoMembersResponse;
 }): React.ReactElement {
+  // Defense in depth: callers must not be able to bypass the read adapter's
+  // public-only verification by handing this view a forged or oversized DTO.
+  const rawMembers: unknown = data && typeof data === "object" && !Array.isArray(data)
+    ? (data as { initialMembers?: unknown }).initialMembers
+    : undefined;
+  if (!Array.isArray(rawMembers) || rawMembers.length > MAX_VIDEO_MEMBERS) {
+    return <p role="alert">参加者データを表示できません。</p>;
+  }
+  const parsed = AdminVideoMembersResponseSchema.safeParse(data);
+  if (!parsed.success || parsed.verified.video.id !== videoId ||
+      parsed.verified.initialMembers.some(member => member.is_public_member !== 1)) {
+    return <p role="alert">参加者データを表示できません。</p>;
+  }
+  const verified = parsed.data;
   const detailHref = "/admin/videos/" + encodeURIComponent(videoId);
-  const isCollab = data.video.collaboration_type === "collab" || data.initialMembers.length > 0;
+  const isCollab = verified.video.collaboration_type === "collab" || verified.initialMembers.length > 0;
   return (
     <div className="fn-public-container fn-page">
       <ConsolePageHeader
-        title={data.video.title + " の参加者設定"}
+        title={verified.video.title + " の参加者設定"}
         description="公開参加者と合作設定を確認します。既存のメンバーチャプターは読み取り専用で表示しています。"
         backHref={detailHref}
         backLabel="作品詳細へ"
@@ -24,12 +39,12 @@ export function AdminVideoMembersReadView({ videoId, data }: {
         <h2>参加者設定</h2>
         <p role="status">閲覧のみ：参加者の追加・編集・保存機能は移行中です。</p>
         <p>合作作品：{isCollab ? "ON" : "OFF"}</p>
-        <h3>公開参加者（{data.initialMembers.length}人）</h3>
-        {data.initialMembers.length === 0 ? (
+        <h3>公開参加者（{verified.initialMembers.length}人）</h3>
+        {verified.initialMembers.length === 0 ? (
           <p>公開参加者は登録されていません。</p>
         ) : (
           <ol>
-            {data.initialMembers.map((member, index) => (
+            {verified.initialMembers.map((member, index) => (
               <li key={index}>
                 <strong>{member.name || member.x_user_id || "名前未設定"}</strong>
                 {member.x_user_id ? <span>（@{member.x_user_id}）</span> : null}
