@@ -6,6 +6,7 @@ import { createSqlite } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import { checkManageVideoStatusAccess } from "../src/routes/videos/videoStatusAccess.ts";
+import { canEditEvent } from "@flamenode/server-core/auth/ownership";
 
 test("MIG-0603: unmounted manage status gate matches CURRENT event privilege and exact video link", async () => {
   const sqlite = createSqlite();
@@ -95,3 +96,70 @@ test("MIG-0603: video-event association lookup failure rejects for admin and rev
     }
   }
 });
+
+test("MIG-0603: approved-X and staff joined authorization preserves CURRENT deny-before-link ordering", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    for (const name of ["admin", "owner", "mgr", "rev", "slot", "pending", "plain", "outsider", "two"]) {
+      const user = { id: `u_${name}`, role: name === "admin" ? "admin" : "user" };
+      for (const eventId of ["evA", "evB", "evC"]) {
+        for (const videoId of ["v1", "v4", "not-a-video"]) {
+          // Independent CURRENT reference: keep the canonical permission
+          // resolver and exact link query separate for the test oracle.
+          const hasPermission = user.role === "admin" ||
+            await canEditEvent(db, user, eventId, "video.status");
+          const exists = hasPermission && Boolean(sqlite.prepare(
+            "SELECT 1 FROM video_events WHERE event_id = ? AND video_id = ? LIMIT 1",
+          ).get(eventId, videoId));
+          const expected = !hasPermission
+            ? { ok: false, message: "このイベントの作品審査権限がありません。" }
+            : exists
+              ? { ok: true }
+              : { ok: false, message: "このイベントに紐づく作品ではありません。" };
+          const start = d1.stats.statements;
+          const actual = await checkManageVideoStatusAccess(db, user, eventId, videoId);
+          assert.deepEqual(actual, expected, `${name}/${eventId}/${videoId}`);
+          const reads = d1.stats.statements - start;
+          assert.equal(reads, hasPermission ? (name === "admin" ? 1 : 2) : 1,
+            "one joined privilege read; exact link read only AFTER successful privilege");
+        }
+      }
+    }
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0603: joined approved-X lookup preserves CURRENT whitespace trimming and cannot leak link failures", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    // CURRENT approvedXIdsWhere trims IDs returned from the approved X link
+    // read. The joined version must match staff's unpadded X ID, too.
+    sqlite.exec("UPDATE x_user_account_links SET x_user_id=' mgr_x ' WHERE x_user_id='mgr_x'");
+    sqlite.exec("UPDATE x_users SET id=' mgr_x ' WHERE id='mgr_x'");
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    assert.equal(await canEditEvent(db, manager, "evA", "video.status"), true,
+      "canonical CURRENT resolver still grants linked, approved padded X");
+    const start = d1.stats.statements;
+    assert.deepEqual(await checkManageVideoStatusAccess(db, manager, "evA", "v1"), { ok: true });
+    assert.equal(d1.stats.statements - start, 2, "joined permission + exact link only");
+    sqlite.exec("DROP TABLE video_events");
+    const unauth = { id: "u_plain", role: "user" };
+    assert.deepEqual(await checkManageVideoStatusAccess(db, unauth, "evA", "v1"), {
+      ok: false, message: "このイベントの作品審査権限がありません。",
+    }, "an unauthorized caller must be denied before querying the missing link table");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
