@@ -583,3 +583,72 @@ test("MIG-0730 U02aa: same-video X-user search port rotation retires old results
     target.remove();
   }
 });
+
+
+test("MIG-0730 U02ab: query change never offers stale remote suggestions before next search resolves", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const requests = [];
+  const searchXUsers = (query, offset, signal) => {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    requests.push({ query, offset, signal, resolve });
+    return promise;
+  };
+  const waitFor = async (predicate) => {
+    for (let i = 0; i < 80; i++) {
+      if (predicate()) return;
+      await React.act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 40));
+      });
+    }
+    assert.fail("timed out waiting for new X-user request");
+  };
+  const edit = async value => {
+    const input = target.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await React.act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+      assert.ok(setter);
+      setter.call(input, value);
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+  };
+  const options = () =>
+    [...target.querySelectorAll("#member-name-suggestions option")].map(x => x.value);
+  try {
+    await React.act(async () => root.render(React.createElement(VideoMembersField, {
+      initialMembers: [member("CURRENT")],
+      permissionTargetVideoId: "A",
+      searchXUsers,
+      applyPermissionBatch: async () => ({ ok: false }),
+    })));
+
+    await edit("Alpha");
+    await waitFor(() => requests.length === 1);
+    assert.equal(requests[0].query, "Alpha");
+    await React.act(async () => requests[0].resolve({
+      items: [{ id: "alpha_creator", x_name: "ALPHA CANDIDATE" }],
+      hasMore: false, nextOffset: null, hint: null,
+    }));
+    assert.ok(options().includes("ALPHA CANDIDATE"));
+
+    await edit("Bravo");
+    assert.ok(!options().includes("ALPHA CANDIDATE"),
+      "old query candidates must disappear on the input commit, before debounce");
+    await waitFor(() => requests.length === 2);
+    assert.equal(requests[1].query, "Bravo");
+    await React.act(async () => requests[1].resolve({
+      items: [{ id: "bravo_creator", x_name: "BRAVO CANDIDATE" }],
+      hasMore: false, nextOffset: null, hint: null,
+    }));
+    assert.ok(options().includes("BRAVO CANDIDATE"));
+    assert.ok(!options().includes("ALPHA CANDIDATE"));
+    assert.deepEqual(formPayload(target).map(x => x.name), ["Bravo"],
+      "search snapshot partition must not reset the member draft");
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
