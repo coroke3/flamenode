@@ -127,6 +127,25 @@ function AdminVideoMembersFormForVideo({
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!enabled || !save || pending || inFlight.current) return;
+    // The direct native hidden-input adapter is only a test/legacy bridge.
+    // While collaboration is OFF the actual fieldset is disabled and the form
+    // submits a synthesized []. Do not allow a malformed/privileged original
+    // member field to authorize a destructive OFF write by hiding it.
+    if (!isCollab && nativeMemberProps !== null) {
+      try {
+        const original: unknown = JSON.parse(nativeMemberProps.value as string);
+        if (!Array.isArray(original) || original.length > MAX_VIDEO_MEMBERS ||
+            original.some(member => !member || typeof member !== "object" ||
+              Array.isArray(member) || "can_edit" in member ||
+              ("is_public_member" in member && member.is_public_member !== 1))) {
+          setResult({ ok: false, message: "メンバー情報の形式が正しくありません。" });
+          return;
+        }
+      } catch {
+        setResult({ ok: false, message: "メンバー情報の形式が正しくありません。" });
+        return;
+      }
+    }
     const formData = new FormData(event.currentTarget);
     const raw = formData.get("members_json");
     if (typeof raw !== "string") {
