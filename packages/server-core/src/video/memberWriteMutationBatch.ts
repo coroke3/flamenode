@@ -11,6 +11,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
+import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import { videoMembers } from "@flamenode/db/schema";
 import type { videoChapters, xUsers } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "../db.ts";
@@ -54,6 +55,22 @@ export function buildVideoMemberWriteMutationBatch(
     hiddenCarryRows, newXUsers, existingManagedChapters, nextManagedChapters,
     membersChanged, chaptersChanged,
   } = input;
+  // CURRENT admits at most 100 public members and 30 chapters/member.
+  // Existing legacy-managed chapter rows may exceed the new-input bound, so
+  // restrict only the *next* projected chapter set. All bounds must be checked
+  // before constructing CAS/JSON1 SQL from a future untrusted Hono adapter.
+  if (
+    beforeSnapshotRows.length > MAX_VIDEO_MEMBERS ||
+    afterSnapshotRows.length > MAX_VIDEO_MEMBERS ||
+    newXUsers.length > MAX_VIDEO_MEMBERS ||
+    hiddenCarryRows.length > MAX_VIDEO_MEMBERS * 2 ||
+    nextManagedChapters.length > MAX_VIDEO_MEMBERS * 30 ||
+    !Number.isSafeInteger(existingPublicCount) ||
+    existingPublicCount < 0 ||
+    existingPublicCount > MAX_VIDEO_MEMBERS
+  ) {
+    throw new RangeError("video_member_write_input_limit_exceeded");
+  }
   // All row sets must belong to the video authorized by the caller. In
   // particular, JSON1 bulk inserts bind each row's own video_id, whereas
   // the CAS/deletes are scoped to the outer videoId. A mismatched candidate
