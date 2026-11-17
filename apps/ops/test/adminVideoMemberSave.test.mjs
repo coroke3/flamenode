@@ -248,8 +248,11 @@ test("MIG-0730 U02aw: legal 100-member / three-chapter payload obeys exact 256 K
   assert.equal((await saveAdminVideoMembers("video-1", exact, fetchFn)).ok, true,
     "legal CURRENT fields at the exact wire limit remain eligible to send");
   lastNote.note += "x";
-  assert.equal((await saveAdminVideoMembers("video-1", form({ members }), fetchFn)).ok, false,
+  const over = await saveAdminVideoMembers("video-1", form({ members }), fetchFn);
+  assert.equal(over.ok, false,
     "one extra wire byte is rejected despite otherwise legal field lengths");
+  assert.match(over.message, /暫定256KiB制限/,
+    "a legitimate oversized draft needs an actionable reason, not generic invalid JSON");
   assert.equal(sends, 1);
 });
 
@@ -306,5 +309,31 @@ test("MIG-0730 U02av: schema-permitted 100 × 30 chapter upper-bound exceeds pro
     return reply({ ok: true, videoId: "video-1" });
   });
   assert.equal(result.ok, false, "a policy mismatch must fail closed rather than risk a 413");
+  assert.match(result.message, /現行の管理画面で保存してください/);
   assert.equal(requests, 0);
+});
+
+test("MIG-0730 U02ax: malformed and forged input retains a separate generic error", async () => {
+  let sends = 0;
+  const fetchFn = async () => { sends++; return reply({ ok: true, videoId: "video-1" }); };
+  const malformed = form();
+  malformed.set("members_json", "not json");
+  const invalid = await saveAdminVideoMembers("video-1", malformed, fetchFn);
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.message, /入力を確認してください/);
+  assert.doesNotMatch(invalid.message, /256KiB|現行の管理画面/);
+  const forged = form({ members: [{ name: "Alice", can_edit: true }] });
+  const privilege = await saveAdminVideoMembers("video-1", forged, fetchFn);
+  assert.equal(privilege.ok, false);
+  assert.match(privilege.message, /入力を確認してください/);
+  assert.doesNotMatch(privilege.message, /256KiB|現行の管理画面/);
+
+  // Beyond the raw bound, do not parse/replay/truncate sensitive member rows.
+  const tooLarge = form();
+  tooLarge.set("members_json", "[" + " ".repeat(300_000) + "]");
+  const overflow = await saveAdminVideoMembers("video-1", tooLarge, fetchFn);
+  assert.equal(overflow.ok, false);
+  assert.match(overflow.message, /暫定256KiB制限/);
+  assert.match(overflow.message, /現行の管理画面で保存してください/);
+  assert.equal(sends, 0);
 });
