@@ -79,6 +79,13 @@ export function createVideoAdminMembersPreflightRoutes(
     }
     if (actor.role !== "admin") return reject(c, 403, "管理者権限が必要です。");
 
+    // This is a JSON-only privileged API. Reject form/text/suffix media types
+    // before consuming the bounded body, even if the bytes happen to be JSON.
+    // A charset parameter is allowed (the Ops client uses application/json).
+    const mediaType = c.req.header("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+    if (mediaType !== "application/json") {
+      return reject(c, 400, "JSON形式の入力が必要です。");
+    }
     const body = await readAdminJsonBody(c.req.raw);
     if (body.kind === "too_large") return reject(c, 413, BODY_TOO_LARGE_MESSAGE);
     if (body.kind !== "ok") return reject(c, 400, "入力エラー");

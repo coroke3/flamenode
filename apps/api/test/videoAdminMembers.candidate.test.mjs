@@ -250,3 +250,31 @@ test("MIG-0650 U03f legal 100x30 CURRENT chapter input exceeds 64KiB transport c
     assert.equal(s.count("audit_logs"), 0);
   } finally { s.sqlite.close(); }
 });
+
+
+test("MIG-0650 U03g privileged PUT only accepts application/json media type before body", async () => {
+  const f = fixture();
+  const invalid = [
+    ["text/plain", JSON.stringify(valid())],
+    ["application/x-www-form-urlencoded", "is_collab=true"],
+    ["application/vnd.api+json", JSON.stringify(valid())],
+    ["multipart/form-data; boundary=abc", JSON.stringify(valid())],
+  ];
+  for (const [contentType, body] of invalid) {
+    const res = await f.request(endpoint, body, {
+      headers: { "content-type": contentType },
+    });
+    assert.equal(res.status, 400, contentType);
+    assert.deepEqual(await res.json(), {
+      ok: false,
+      message: "JSON形式の入力が必要です。",
+    });
+    assert.equal(res.headers.get("cache-control"), "private, no-store");
+  }
+
+  const accepted = await f.request(endpoint, valid(), {
+    headers: { "content-type": "application/json; charset=UTF-8" },
+  });
+  assert.equal(accepted.status, 501, "valid JSON media type still cannot write until authorized writer exists");
+  assert.deepEqual(f.stats(), { invoked: 5, prematureDb: 0 });
+});
