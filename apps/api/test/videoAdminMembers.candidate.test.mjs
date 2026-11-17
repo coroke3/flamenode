@@ -24,7 +24,7 @@ function fixture({ role = "admin", includeContext = true, targetError = false, t
       return videoId === "v1" ? targetOverride ?? {
         id: "v1", collaboration_type: "individual", visibility_status: "pending",
         creator_x_user_id: null, youtube_video_id: null,
-        primary_event_id: null, updated_at: 100,
+        primary_event_id: null, updated_at: 100, linked_event_ids_json: "[]",
       } : null;
     },
     writeGuard: async (c, next) => {
@@ -354,7 +354,7 @@ test("MIG-0650 U03i forged or corrupted video facts fail closed before any write
   const baseline = {
     id: "v1", collaboration_type: "individual", visibility_status: "pending",
     creator_x_user_id: null, youtube_video_id: null,
-    primary_event_id: null, updated_at: 12345,
+    primary_event_id: null, updated_at: 12345, linked_event_ids_json: "[]",
   };
   for (const forged of [
     { ...baseline, id: "other_video" },
@@ -364,12 +364,65 @@ test("MIG-0650 U03i forged or corrupted video facts fail closed before any write
     { ...baseline, updated_at: Number.NaN },
     { ...baseline, creator_x_user_id: { forged: true } },
     { ...baseline, primary_event_id: ["cross_video"] },
+    { ...baseline, linked_event_ids_json: undefined },
+    { ...baseline, linked_event_ids_json: "not-json" },
+    { ...baseline, linked_event_ids_json: "{}" },
+    { ...baseline, linked_event_ids_json: '["ev1",2]' },
+    { ...baseline, linked_event_ids_json: '["  ev1"]' },
+    { ...baseline, linked_event_ids_json: JSON.stringify(Array.from({length: 10}, (_, i) => "ev" + i)) },
   ]) {
     const f = fixture({ targetOverride: forged });
     const response = await f.request(endpoint, valid());
     assert.equal(response.status, 503, "untrusted target facts must not enter a future SA-085 writer");
     assert.deepEqual(await response.json(), { ok: false, message: "作品の確認に失敗しました。" });
     assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(f.stats(), { invoked: 1, prematureDb: 0 });
+  }
+});
+
+test("MIG-0650 U03j existing video and linked events share one bounded authoritative D1 SELECT", async () => {
+  const s = realGuardFixture();
+  try {
+    const host = createDefaultVideoAdminMembersPreflightHost();
+    const before = s.d1.stats.reads;
+    const linked = await host.loadAuthorizedVideo({ env: { DB: s.d1 } }, "v_two");
+    assert.equal(linked?.id, "v_two");
+    assert.equal(linked?.primary_event_id, null);
+    assert.deepEqual(JSON.parse(linked.linked_event_ids_json), ["ev2"]);
+    assert.equal(s.d1.stats.reads - before, 1, "linked event lookup adds zero pre-read queries");
+    const sql = s.d1.stats.readSql.at(-1);
+    assert.match(sql, /FROM "video_events" WHERE "video_id" = \?/);
+    assert.match(sql, /ORDER BY "event_id" LIMIT 9/);
+    assert.match(sql, /FROM "videos" WHERE "id" = \? LIMIT 1/);
+
+    const response = await s.send(valid(), SITE, "/api/videos/v_two/members");
+    assert.equal(response.status, 501, "the preflight still never writes");
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03j linked event overflow and primary+linked overflow fail closed", async () => {
+  const baseline = {
+    id: "v1", collaboration_type: "collab", visibility_status: "public",
+    creator_x_user_id: null, youtube_video_id: null, primary_event_id: null,
+    updated_at: 100,
+  };
+  for (const events of [
+    Array.from({ length: 9 }, (_, i) => "event_" + i),
+    Array.from({ length: 8 }, (_, i) => "event_" + i),
+  ]) {
+    const f = fixture({ targetOverride: {
+      ...baseline,
+      primary_event_id: events.length === 8 ? "another_primary" : null,
+      linked_event_ids_json: JSON.stringify(events),
+    } });
+    const response = await f.request(endpoint, valid());
+    assert.equal(response.status, 400, "9 unique rebuild targets must never be partially enqueued");
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "関連イベント数が処理上限を超えています。",
+    });
     assert.deepEqual(f.stats(), { invoked: 1, prematureDb: 0 });
   }
 });

@@ -6,7 +6,8 @@
  * even for a valid request. Never mount it or represent it as a working writer.
  */
 import { Hono, type Context, type MiddlewareHandler } from "hono";
-import { readAdminVideoCollabFlag } from "@flamenode/domain/video";
+import { readAdminVideoCollabFlag, mergeVideoRebuildEventIds } from "@flamenode/domain/video";
+import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
 import { parseAdminVideoMembersHttpInput } from "@flamenode/domain/video/adminMemberHttpInput";
 import { validateVideoMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
 import type { AppEnv } from "../../env.ts";
@@ -27,6 +28,8 @@ export type AdminVideoMemberTarget = {
   youtube_video_id: string | null;
   primary_event_id: string | null;
   updated_at: number;
+  /** JSON1 bounded linked event IDs fetched with the same video snapshot D1 SELECT. */
+  linked_event_ids_json: string;
 };
 
 export type VideoAdminMembersPreflightHost = {
@@ -62,9 +65,13 @@ export function createDefaultVideoAdminMembersPreflightHost(
     loadAuthorizedVideo: (c, videoId) =>
       c.env.DB.prepare(
         'SELECT "id", "collaboration_type", "visibility_status", ' +
-        '"creator_x_user_id", "youtube_video_id", "primary_event_id", "updated_at" ' +
+        '"creator_x_user_id", "youtube_video_id", "primary_event_id", "updated_at", ' +
+        '(SELECT COALESCE(json_group_array("event_id"), \'[]\') FROM (' +
+        'SELECT "event_id" FROM "video_events" WHERE "video_id" = ? ' +
+        'ORDER BY "event_id" LIMIT ' + (MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS + 1) +
+        ')) AS "linked_event_ids_json" ' +
         'FROM "videos" WHERE "id" = ? LIMIT 1',
-      ).bind(videoId).first<AdminVideoMemberTarget>(),
+      ).bind(videoId, videoId).first<AdminVideoMemberTarget>(),
     writeGuard: async (c, next) => {
       c.header("Cache-Control", "private, no-store");
       const execute = async (index: number): Promise<Response | void> => {
@@ -143,8 +150,30 @@ export function createVideoAdminMembersPreflightRoutes(
       return reject(c, 503, "作品の確認に失敗しました。");
     }
 
+    // Fetch linked events in the same bounded SELECT as the video snapshot:
+    // pre-write guard + CostGuard + this SELECT stay within 3 D1 pre-reads.
+    // The ninth linked event is a deliberate overflow sentinel. Never silently
+    // truncate the canonical rebuild targets or enqueue an incomplete fanout.
+    let linkedEventIds: unknown;
+    try {
+      linkedEventIds = JSON.parse(target.linked_event_ids_json);
+    } catch {
+      return reject(c, 503, "作品の確認に失敗しました。");
+    }
+    if (!Array.isArray(linkedEventIds) ||
+        linkedEventIds.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS + 1 ||
+        linkedEventIds.some(id => typeof id !== "string" || !id || id.trim() !== id)) {
+      return reject(c, 503, "作品の確認に失敗しました。");
+    }
+    const rebuildEventIds = mergeVideoRebuildEventIds(
+      target.primary_event_id, linkedEventIds as string[],
+    );
+    if (rebuildEventIds.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
+      return reject(c, 400, "関連イベント数が処理上限を超えています。");
+    }
+
     // Validity is not authorization to mutate the video. We have no Hono
-    // per-video admin D1 lookup, atomic member CAS/audit plan, or Queue port yet.
+    // atomic member CAS/audit plan or Queue port yet.
     // Deliberately never return a successful save response.
     return reject(c, 501, "参加者設定の保存APIは移行準備中です。");
   });
