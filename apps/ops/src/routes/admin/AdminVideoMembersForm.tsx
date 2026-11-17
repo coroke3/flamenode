@@ -35,7 +35,7 @@ function AdminVideoMembersFormForVideo({
   video, initialMembersCount, membersField, save, onSaved,
 }: AdminVideoMembersFormProps): React.ReactElement {
   const mounted = React.useRef(false);
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
@@ -45,6 +45,18 @@ function AdminVideoMembersFormForVideo({
   const [pending, setPending] = React.useState(false);
   const [result, setResult] = React.useState<AdminVideoMembersSaveResult | null>(null);
   const inFlight = React.useRef(false);
+  // A pending request can outlive the loss and later restoration of this form's
+  // write capability. Retire its completion before any stale success callback.
+  const saveCapabilityRef = React.useRef(Boolean(save));
+  const saveCapabilityEpoch = React.useRef(0);
+  React.useLayoutEffect(() => {
+    const available = Boolean(save);
+    if (saveCapabilityRef.current !== available) {
+      saveCapabilityRef.current = available;
+      saveCapabilityEpoch.current += 1;
+      setResult(null);
+    }
+  }, [save]);
   const enabled = Boolean(save) && (!isCollab || membersField != null);
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -70,18 +82,19 @@ function AdminVideoMembersFormForVideo({
       return;
     }
 
+    const requestEpoch = saveCapabilityEpoch.current;
     inFlight.current = true;
     setPending(true);
     setResult(null);
     try {
       const response = await save(formData);
       // A may finish after navigation to B; never deliver A's result or refresh to B.
-      if (mounted.current) {
+      if (mounted.current && requestEpoch === saveCapabilityEpoch.current) {
         setResult(response);
         if (response.ok) onSaved?.();
       }
     } catch {
-      if (mounted.current) {
+      if (mounted.current && requestEpoch === saveCapabilityEpoch.current) {
         setResult({ ok: false, message: "保存中にエラーが発生しました。再度確認してください。" });
       }
     } finally {

@@ -273,3 +273,44 @@ test("MIG-0730 U02k: unmounted form -> candidate lost write response never retri
     assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0730 U02r: same-video write capability revocation/regrant ignores obsolete async results", async () => {
+  for (const outcome of ["success", "failure"]) {
+    const wait = deferred();
+    let staleRefreshes = 0;
+    let newRefreshes = 0;
+    let oldWrites = 0;
+    const ui = setup({
+      save: async () => { oldWrites++; return wait.promise; },
+      onSaved: () => { staleRefreshes++; },
+    });
+    try {
+      await ui.render();
+      await ui.submit();
+      assert.equal(oldWrites, 1);
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true);
+
+      // Keep the SAME video and form instance: only the injected save capability
+      // changes. A previous request may already have committed on the server.
+      await ui.render({ save: undefined, onSaved: undefined });
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+      await ui.render({
+        save: async () => ({ ok: true }),
+        onSaved: () => { newRefreshes++; },
+      });
+      // Keep the latch until the old request settles: do not allow two writes.
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true);
+
+      const reply = outcome === "success"
+        ? { ok: true, message: "OBSOLETE SAVE SUCCEEDED" }
+        : Promise.reject(new Error("OBSOLETE SAVE FAILED"));
+      await React.act(async () => wait.finish(reply));
+      assert.equal(staleRefreshes, 0, "revoked adapter must not refresh");
+      assert.equal(newRefreshes, 0, "regranted adapter must not receive stale success");
+      assert.doesNotMatch(ui.target.textContent, /OBSOLETE SAVE|保存中にエラー/);
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false);
+      await ui.submit();
+      assert.equal(newRefreshes, 1, "only a fresh authorized save refreshes");
+    } finally { await ui.cleanup(); }
+  }
+});
