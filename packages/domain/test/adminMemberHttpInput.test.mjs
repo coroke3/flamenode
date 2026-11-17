@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
-import { parseAdminVideoMembersHttpInput } from "../src/video/adminMemberHttpInput.ts";
+import { isValidAdminVideoMemberPathId, parseAdminVideoMembersHttpInput } from "../src/video/adminMemberHttpInput.ts";
 import { readAdminVideoCollabFlag } from "../src/video/adminMemberInput.ts";
 import { validateVideoMemberSubmission } from "../src/video/adminMemberSubmission.ts";
 
@@ -115,4 +115,16 @@ test("MIG-0650 U03d-1: new input adapter stays unmounted and never accesses D1",
   const adapter = await readFile(new URL("../src/video/adminMemberHttpInput.ts", import.meta.url), "utf8");
   assert.doesNotMatch(router, /adminMemberHttpInput|createAdminVideoMembersRoutes/);
   assert.doesNotMatch(adapter, /@\/|from "next|from "hono|from "drizzle|\.batch\(|\.prepare\(/);
+});
+
+test("MIG-0650 U03ab standalone path guard exactly agrees with FormData adapter", () => {
+  for (const path of ["v1", "video_1", "v".repeat(64), "v-1"]) {
+    assert.equal(isValidAdminVideoMemberPathId(path), true, path);
+    assert.equal(parseAdminVideoMembersHttpInput(path, {}).ok, true, path);
+  }
+  for (const path of ["", ".", "..", " bad", "bad ", "v/child",
+    "v\\child", "a\u0000b", "v".repeat(65), "\uD800", undefined, null, 123]) {
+    assert.equal(isValidAdminVideoMemberPathId(path), false, String(path));
+    assert.equal(parseAdminVideoMembersHttpInput(path, {}).ok, false, String(path));
+  }
 });
