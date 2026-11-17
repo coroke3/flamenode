@@ -132,8 +132,25 @@ function auditMemberRowsBelongToVideo(
     return true;
   }) && originalRows.every(row =>
     row !== null && typeof row === "object" && !Array.isArray(row) &&
+    // The snapshot parser coerces malformed optional types to null.
+    // Fail closed before that coercion changes strict audit evidence.
     "x_user_id" in row &&
-    (row.x_user_id === null || typeof row.x_user_id === "string")
+    (row.x_user_id === null || typeof row.x_user_id === "string") &&
+    "role" in row &&
+    (row.role === null || typeof row.role === "string") &&
+    "comment" in row &&
+    (row.comment === null || typeof row.comment === "string") &&
+    "edit_granted_by_auth_user_id" in row &&
+    (row.edit_granted_by_auth_user_id === null ||
+      typeof row.edit_granted_by_auth_user_id === "string") &&
+    "edit_granted_at" in row &&
+    (row.edit_granted_at === null ||
+      (typeof row.edit_granted_at === "number" &&
+        Number.isSafeInteger(row.edit_granted_at))) &&
+    "edit_updated_at" in row &&
+    (row.edit_updated_at === null ||
+      (typeof row.edit_updated_at === "number" &&
+        Number.isSafeInteger(row.edit_updated_at)))
   );
 }
 

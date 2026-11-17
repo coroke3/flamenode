@@ -362,6 +362,60 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
     "distinct CURRENT audit categories keep their canonical order and identity");
 });
 
+test("MIG-0650 U03ca: strict member audit snapshots reject malformed optional fields", async () => {
+  const canonical = {
+    table_name: "video_members_set", target_id: "video-1",
+    operation: "MERGE", actor_user_id: "admin", strict: true,
+    before: { id: "video-1", rows: [memberAuditRow("old")] },
+    after: { id: "video-1", rows: [memberAuditRow("new")] },
+  };
+  const invalidFields = [
+    { role: ["forged"] },
+    { comment: { nested: true } },
+    { edit_granted_by_auth_user_id: 7 },
+    { edit_granted_at: "123" },
+    { edit_updated_at: Number.NaN },
+    { edit_updated_at: 1.5 },
+    { role: undefined },
+  ];
+  for (const field of invalidFields) {
+    for (const side of ["before", "after"]) {
+      const { db, planned } = capturedDb();
+      const audit = {
+        ...canonical,
+        [side]: { id: "video-1", rows: [
+          memberAuditRow(side === "before" ? "old" : "new", 1, field),
+        ] },
+      };
+      await assert.rejects(
+        () => assembleAdminVideoMemberAtomicPlan(db, input({
+          isCollab: true,
+          membersPlan: memberPlan([{ kind: "member-CAS" }], [null], [audit]),
+        })),
+        { name: "RangeError",
+          message: "video_admin_member_atomic_assembly_invalid_audit" },
+      );
+      assert.equal(planned.length, 0,
+        "invalid snapshot must fail before metadata or Queue SQL");
+    }
+  }
+  const { db } = capturedDb();
+  const valid = memberAuditRow("valid", 1, {
+    role: "reviewer", comment: "note",
+    edit_granted_by_auth_user_id: "admin",
+    edit_granted_at: 123, edit_updated_at: 124,
+  });
+  const result = await assembleAdminVideoMemberAtomicPlan(db, input({
+    isCollab: true,
+    membersPlan: memberPlan([{ kind: "member-CAS" }], [null], [{
+      ...canonical,
+      before: { id: "video-1", rows: [valid] },
+      after: { id: "video-1", rows: [valid] },
+    }]),
+  }));
+  assert.equal(result.noOp, false);
+});
+
 test("MIG-0650 U03bc: composed member and Queue plan fails closed above conservative D1 limit", async () => {
   // A future Hono adapter must never present a large strict-audit member
   // mutation plan as executable simply because each SQL chunk is bounded.
