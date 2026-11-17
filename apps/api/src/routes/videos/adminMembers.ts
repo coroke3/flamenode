@@ -49,7 +49,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
       c.header("Cache-Control", "private, no-store");
       const execute = async (index: number): Promise<Response | void> => {
         if (index === stack.length) return next();
-        let child: Response | void;
+        let child: Response | void = undefined;
         const result = await stack[index]!(c, async () => {
           child = await execute(index + 1);
         });
