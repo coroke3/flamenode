@@ -1001,3 +1001,123 @@ test("MIG-0650 U03at real D1 preflight detects >100 existing public members in o
     assert.equal(s.count("static_rebuild_queue"), 0);
   } finally { s.sqlite.close(); }
 });
+
+test("MIG-0650 U03bi authorized Hono host can compose canonical shared no-op without any D1 batch", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const schema = await import("@flamenode/db/schema");
+  const { mapAuditSettings } = await import("@flamenode/server-core/audit/settings");
+  const { prepareAdminVideoMemberCandidateWrite } =
+    await import("@flamenode/server-core/video/adminMemberCandidatePrepare");
+  const s = realGuardFixture();
+  try {
+    const host = createDefaultVideoAdminMembersPreflightHost();
+    const target = await host.loadAuthorizedVideo({ env: { DB: s.d1 } }, "v_two");
+    assert.ok(target);
+    const form = new FormData();
+    form.set("members_json", "[]");
+    const validated = validateVideoMemberSubmission(form, false);
+    assert.equal(validated.ok, true);
+    const prepared = await prepareAdminVideoMemberCandidateWrite(
+      drizzle(s.d1, { schema }),
+      {
+        target, videoId: "v_two", actorUserId: "u_admin",
+        validated: validated.value, isCollab: false, eventIds: ["ev2"],
+        now: 12345,
+        preloaded: {
+          settings: mapAuditSettings(s.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get()),
+          actorSnapshotJsonById: {
+            u_admin: JSON.stringify({
+              discord_id: null, discord_name: null, x_user_id: null,
+              x_name: null, icon_url: null,
+            }),
+          },
+        },
+        readMeasuredCallerQueries: () => s.d1.stats.reads,
+      },
+    );
+    assert.equal(prepared.assembly.noOp, true);
+    assert.equal(prepared.atomic, null);
+    assert.equal(prepared.executionInput.callerQueryCount, s.d1.stats.reads);
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03bi canonical collaboration-only plan includes strict video audit + Queue but executes no D1", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const schema = await import("@flamenode/db/schema");
+  const { mapAuditSettings } = await import("@flamenode/server-core/audit/settings");
+  const { prepareAdminVideoMemberCandidateWrite } =
+    await import("@flamenode/server-core/video/adminMemberCandidatePrepare");
+  const s = realGuardFixture();
+  try {
+    const target = await createDefaultVideoAdminMembersPreflightHost()
+      .loadAuthorizedVideo({ env: { DB: s.d1 } }, "v_two");
+    assert.ok(target);
+    const form = new FormData();
+    form.set("members_json", "[]");
+    const validated = validateVideoMemberSubmission(form, true);
+    assert.equal(validated.ok, true);
+    const preloaded = {
+      settings: mapAuditSettings(s.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get()),
+      actorSnapshotJsonById: {
+        u_admin: JSON.stringify({
+          discord_id: null, discord_name: null, x_user_id: null,
+          x_name: null, icon_url: null,
+        }),
+      },
+    };
+    let measuredCalls = 0;
+    const candidate = await prepareAdminVideoMemberCandidateWrite(drizzle(s.d1, { schema }), {
+      target, videoId: "v_two", actorUserId: "u_admin",
+      validated: validated.value, isCollab: true, eventIds: ["ev2"],
+      now: 12345, preloaded,
+      readMeasuredCallerQueries: () => {
+        measuredCalls++;
+        return s.d1.stats.reads;
+      },
+    });
+    assert.equal(measuredCalls, 1, "measure AFTER shared planner's canonical D1 reads");
+    assert.equal(candidate.assembly.noOp, false);
+    assert.ok(candidate.atomic);
+    assert.ok(candidate.atomic.audits.some(a => a.table_name === "videos" && a.strict));
+    assert.equal(candidate.atomic.callerQueryCount, s.d1.stats.reads);
+    assert.equal(candidate.atomic.staticRebuildWakeSource, "admin");
+    assert.ok(candidate.assembly.targets.some(t => t.targetType === "video"));
+    assert.ok(candidate.assembly.targets.some(t => t.targetType === "event_release"));
+    assert.equal(s.d1.stats.batches, 0, "planning can never commit D1");
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+    assert.equal(s.sqlite.prepare("SELECT collaboration_type FROM videos WHERE id='v_two'").get().collaboration_type, "individual");
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03bi rejects forged actor/target and absent measured read counter before D1 reads", async () => {
+  const { prepareAdminVideoMemberCandidateWrite } =
+    await import("@flamenode/server-core/video/adminMemberCandidatePrepare");
+  const forbiddenDb = new Proxy({}, { get() { throw Error("must reject before accessing D1"); } });
+  const target = { id: "v_two", collaboration_type: "individual",
+    visibility_status: "public", creator_x_user_id: null, updated_at: 10 };
+  const preloaded = { settings: {}, actorSnapshotJsonById: {
+    u_admin: JSON.stringify({ discord_id: null, discord_name: null, x_user_id: null, x_name: null, icon_url: null }),
+  } };
+  const valid = { target, videoId: "v_two", actorUserId: "u_admin",
+    validated: { members: [], chaptersByIndex: new Map() }, isCollab: false,
+    eventIds: [], now: 12345, preloaded,
+    readMeasuredCallerQueries: () => 0 };
+  for (const variant of [
+    { videoId: "foreign_video" },
+    { actorUserId: "other_user" },
+    { readMeasuredCallerQueries: null },
+    { eventIds: ["e1", "e1"] },
+    { eventIds: Array.from({ length: 9 }, (_, i) => "e" + i) },
+    { validated: { members: Array.from({ length: 101 }, () => ({})), chaptersByIndex: new Map() } },
+  ]) {
+    await assert.rejects(
+      prepareAdminVideoMemberCandidateWrite(forbiddenDb, { ...valid, ...variant,
+        ...(variant.actorUserId === "other_user" ? { preloaded: { ...preloaded, actorSnapshotJsonById: {} } } : {}) }),
+      { name: "RangeError", message: "video_admin_member_candidate_prepare_invalid" },
+    );
+  }
+});

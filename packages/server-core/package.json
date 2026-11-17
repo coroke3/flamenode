@@ -130,6 +130,7 @@
     "./video/adminMemberMetadataPlan": "./src/video/adminMemberMetadataPlan.ts",
     "./video/adminMemberAtomicAssembly": "./src/video/adminMemberAtomicAssembly.ts",
     "./video/adminMemberAtomicExecute": "./src/video/adminMemberAtomicExecute.ts",
+    "./video/adminMemberCandidatePrepare": "./src/video/adminMemberCandidatePrepare.ts",
     "./video/permissionNotificationInputs": "./src/video/permissionNotificationInputs.ts",
     "./video/permissionCanonicalize": "./src/video/permissionCanonicalize.ts",
     "./video/permissionMutationBatch": "./src/video/permissionMutationBatch.ts",
