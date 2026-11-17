@@ -84,3 +84,63 @@ test("MIG-0730 U02d: forbidden snapshot after a valid preview removes the old hi
     target.remove();
   }
 });
+
+
+test("MIG-0730 U02h: same-ID member revocation replaces stale hidden rows on fresh server snapshot", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const render = async payload => React.act(async () => {
+    root.render(React.createElement(AdminVideoMembersEditorPreview, { videoId: "A", data: payload }));
+  });
+  try {
+    await render(data("A", "REVOKED OLD"));
+    assert.equal(formPayload(target)[0].name, "REVOKED OLD");
+    assert.equal(target.querySelector('input[name="is_collab"][type="checkbox"]').checked, true);
+
+    // The route ID remains A; only the authoritative GET payload has changed.
+    await render(data("A", "AUTHORIZED NEW"));
+    assert.deepEqual(formPayload(target).map(row => row.name), ["AUTHORIZED NEW"]);
+    assert.doesNotMatch(target.textContent, /REVOKED OLD/);
+    assert.equal(target.querySelector('button[type="submit"]'), null);
+
+    // Removing the last participant must also clear the old collab checkbox
+    // and canonical members_json, not just the visible member cards.
+    await render(data("A", null, "individual"));
+    assert.equal(target.querySelector('input[name="is_collab"][type="checkbox"]').checked, false);
+    assert.deepEqual(formPayload(target), []);
+    assert.doesNotMatch(target.textContent, /AUTHORIZED NEW|REVOKED OLD/);
+    assert.equal(target.querySelector('button[type="submit"]'), null);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
+
+test("MIG-0730 U02h: equal-value same-ID refresh does not reset local collaboration draft", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const render = async payload => React.act(async () => {
+    root.render(React.createElement(AdminVideoMembersEditorPreview, { videoId: "A", data: payload }));
+  });
+  try {
+    await render(data("A", "CURRENT"));
+    let checkbox = target.querySelector('input[name="is_collab"][type="checkbox"]');
+    assert.equal(checkbox.checked, true);
+    await React.act(async () => checkbox.click());
+    checkbox = target.querySelector('input[name="is_collab"][type="checkbox"]');
+    assert.equal(checkbox.checked, false);
+    assert.deepEqual(formPayload(target), []);
+
+    // Object identity changed, but the sanitized snapshot is equivalent.
+    await render(data("A", "CURRENT"));
+    checkbox = target.querySelector('input[name="is_collab"][type="checkbox"]');
+    assert.equal(checkbox.checked, false);
+    assert.deepEqual(formPayload(target), []);
+    assert.equal(target.querySelector('button[type="submit"]'), null);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
