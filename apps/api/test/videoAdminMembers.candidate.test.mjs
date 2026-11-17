@@ -825,3 +825,32 @@ test("MIG-0650 U03ae aborted stalled upload rejects without waiting for stream c
     kind: "invalid",
   }, "no full body must be parsed after an existing abort");
 });
+
+
+test("MIG-0650 U03af snapshots streamed bytes before an upstream producer reuses its buffer", async () => {
+  // A custom Request can reuse a Uint8Array between stream reads. Retaining
+  // the first view and concatenating only after EOF would parse mutated
+  // bytes rather than the bytes actually delivered by the first read.
+  const original = '{"members_json":"original"}';
+  const first = new TextEncoder().encode(original.slice(0, 12));
+  const second = new TextEncoder().encode(original.slice(12));
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(first);
+      setImmediate(() => {
+        first.fill(88); // upstream reuses the first underlying buffer
+        controller.enqueue(second);
+        controller.close();
+      });
+    },
+  });
+  const request = new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: stream,
+    duplex: "half",
+  });
+  assert.deepEqual(await readAdminVideoMembersJsonBody(request), {
+    kind: "ok", value: { members_json: "original" },
+  }, "later producer mutations cannot rewrite already-consumed body bytes");
+});
