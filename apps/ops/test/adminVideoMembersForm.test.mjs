@@ -809,3 +809,59 @@ test("MIG-0730 U02az: local OFF/ON preserves canonical editor draft without subm
     await ui.cleanup();
   }
 });
+
+test("MIG-0730 U02bc: replacing same-video native member data retires stale save responses", async () => {
+  for (const outcome of ["success", "failure"]) {
+    const pending = deferred();
+    const entries = [];
+    let priorRefreshes = 0, currentRefreshes = 0;
+    const save = async form => {
+      entries.push(form.get("members_json"));
+      return entries.length === 1 ? pending.promise : { ok: true, message: "CURRENT MEMBER SAVE" };
+    };
+    const native = name => h("input", {
+      type: "hidden", name: "members_json", value: JSON.stringify([{ name }]),
+    });
+    const ui = setup({
+      membersField: native("Alice"),
+      save,
+      onSaved: () => { priorRefreshes++; },
+    });
+    try {
+      await ui.render();
+      await ui.submit();
+      assert.equal(entries.length, 1);
+      assert.deepEqual(JSON.parse(entries[0]).map(row => row.name), ["Alice"]);
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true);
+
+      // A same-video server snapshot can replace the native source even when
+      // the save callback and authorized editor presence are unchanged.
+      await ui.render({
+        membersField: native("Bob"),
+        onSaved: () => { currentRefreshes++; },
+      });
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true,
+        "do not overlap a potentially committed mutation");
+      assert.deepEqual(JSON.parse(new FormData(ui.target.querySelector("form"))
+        .get("members_json")).map(row => row.name), ["Bob"]);
+
+      const late = outcome === "success"
+        ? { ok: true, message: "OBSOLETE ALICE SAVE" }
+        : Promise.reject(new Error("obsolete Alice response"));
+      await React.act(async () => pending.finish(late));
+      assert.equal(priorRefreshes, 0);
+      assert.equal(currentRefreshes, 0);
+      assert.equal(entries.length, 1, "never auto-replay an ambiguous write");
+      assert.doesNotMatch(ui.target.textContent, /OBSOLETE ALICE SAVE|保存中にエラー/);
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false);
+
+      await ui.submit();
+      assert.equal(entries.length, 2);
+      assert.deepEqual(JSON.parse(entries[1]).map(row => row.name), ["Bob"]);
+      assert.equal(currentRefreshes, 1, "only the current explicit save refreshes the new snapshot");
+      assert.match(ui.target.textContent, /CURRENT MEMBER SAVE/);
+    } finally {
+      await ui.cleanup();
+    }
+  }
+});
