@@ -163,3 +163,53 @@ test("MIG-0603: joined approved-X lookup preserves CURRENT whitespace trimming a
   }
 });
 
+test("MIG-0603: revoked X approval and custom grants never bypass joined event status permission", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    const custom = { id: "u_custom", role: "user" };
+    async function assertCurrentParity(user, expected, context) {
+      const current = await canEditEvent(db, user, "evA", "video.status");
+      assert.equal(current, expected, "CURRENT event authorization reference: " + context);
+      const before = d1.stats.statements;
+      const actual = await checkManageVideoStatusAccess(db, user, "evA", "v1");
+      assert.deepEqual(actual, expected
+        ? { ok: true }
+        : { ok: false, message: "このイベントの作品審査権限がありません。" },
+      "joined access must match CURRENT: " + context);
+      assert.equal(d1.stats.statements - before, expected ? 2 : 1,
+        "one approved-link/staff select plus exact video link only when permitted: " + context);
+    }
+    await assertCurrentParity(manager, true, "approved manager");
+    sqlite.exec("UPDATE x_user_account_links SET link_role='manager' WHERE auth_user_id='u_mgr'");
+    await assertCurrentParity(manager, true, "manager link role still qualifies without owner-only filter");
+    sqlite.exec("UPDATE x_users SET approval_status='rejected' WHERE id='mgr_x'");
+    await assertCurrentParity(manager, false, "rejected X approval revokes reviewer grant");
+    sqlite.exec("UPDATE x_users SET approval_status='pending' WHERE id='mgr_x'");
+    await assertCurrentParity(manager, false, "pending X approval revokes reviewer grant");
+    sqlite.exec("UPDATE x_users SET approval_status='approved' WHERE id='mgr_x'");
+    await assertCurrentParity(manager, true, "re-approved X restores reviewer grant");
+
+    await assertCurrentParity(custom, false, "unrelated custom permission cannot change status");
+    sqlite.exec(`UPDATE event_staff SET custom_permission_keys_json='["video.status"]'
+      WHERE event_id='evA' AND x_user_id='custom_x'`);
+    await assertCurrentParity(custom, true, "explicit custom video.status permission is accepted");
+    sqlite.exec(`UPDATE event_staff SET custom_permission_keys_json='["videos.title"]'
+      WHERE event_id='evA' AND x_user_id='custom_x'`);
+    await assertCurrentParity(custom, false, "custom status permission removal denies");
+    sqlite.exec("DROP TABLE video_events");
+    // No permission => do not query an inaccessible target/link table.
+    assert.deepEqual(
+      await checkManageVideoStatusAccess(db, custom, "evA", "v1"),
+      { ok: false, message: "このイベントの作品審査権限がありません。" },
+      "revoked custom permissions deny before reading a missing video_events table",
+    );
+    assert.equal(d1.stats.writes, 0);
+    assert.equal(d1.stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
