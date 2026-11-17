@@ -96,7 +96,7 @@ test("MIG-0650 U03d-2j: hidden carry CAS occurs before profile insert and scoped
   assert.match(b.queries[0].sql, /SELECT CASE/);
   assert.match(b.queries[1].sql, /SELECT CASE/);
   assert.match(b.queries[2].sql, /INSERT INTO x_users/);
-  assert.match(b.queries[3].sql, /DELETE FROM video_members/);
+  assert.match(b.queries[3].sql, /DELETE FROM "?video_members"?/i);
   assert.match(b.queries[3].sql, /is_public_member = 0/);
   assert.ok(b.queries[3].params.includes("video-1"));
   assert.ok(b.queries[3].params.some(x => typeof x === "string" && x.includes("hidden_x")));
@@ -110,7 +110,7 @@ test("MIG-0650 U03d-2j: public member replacement counts exactly deleted and ins
     existingPublicCount: 1, membersChanged: true,
   });
   assert.deepEqual(b.expectedChanges, [null, 1, 1]);
-  assert.match(b.queries[1].sql, /DELETE FROM video_members/);
+  assert.match(b.queries[1].sql, /DELETE FROM "?video_members"?/i);
   assert.match(b.queries[1].sql, /is_public_member/);
   assert.ok(b.queries[1].params.includes("video-1"));
   assert.match(b.queries[2].sql, /INSERT INTO video_members/);
@@ -148,8 +148,8 @@ test("MIG-0650 U03d-2j: combined operation maintains CURRENT ordering and exact 
   assert.match(sqlTexts[0], /SELECT CASE/);
   assert.match(sqlTexts[1], /SELECT CASE/);
   assert.match(sqlTexts[2], /INSERT INTO x_users/);
-  assert.match(sqlTexts[3], /DELETE FROM video_members/);
-  assert.match(sqlTexts[4], /DELETE FROM video_members/);
+  assert.match(sqlTexts[3], /DELETE FROM "?video_members"?/i);
+  assert.match(sqlTexts[4], /DELETE FROM "?video_members"?/i);
   assert.match(sqlTexts[5], /INSERT INTO video_members/);
   assert.match(sqlTexts[6], /DELETE FROM video_chapters/);
   assert.match(sqlTexts[7], /INSERT INTO video_chapters/);
