@@ -842,8 +842,12 @@ test("MIG-0730 U02bc: replacing same-video native member data retires stale save
       });
       assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true,
         "do not overlap a potentially committed mutation");
-      assert.deepEqual(JSON.parse(new FormData(ui.target.querySelector("form"))
-        .get("members_json")).map(row => row.name), ["Bob"]);
+      // A pending mutation disables the entire fieldset, so FormData omits
+      // its hidden members_json. Inspect the new DOM source value directly
+      // while the previous request remains unsettled.
+      const currentInput = ui.target.querySelector('fieldset input[name="members_json"]');
+      assert.ok(currentInput);
+      assert.deepEqual(JSON.parse(currentInput.value).map(row => row.name), ["Bob"]);
 
       const late = outcome === "success"
         ? { ok: true, message: "OBSOLETE ALICE SAVE" }
