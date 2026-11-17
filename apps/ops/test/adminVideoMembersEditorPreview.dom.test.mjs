@@ -31,8 +31,14 @@ function data(id, name, collab = "collab") {
   };
 }
 function formPayload(target) {
-  const input = target.querySelector('input[name="members_json"]');
-  assert.ok(input, "the canonical shared VideoMembersField must provide a hidden payload");
+  // U02az deliberately keeps the editor DOM mounted during a local OFF draft.
+  // The retained disabled fieldset is not the active payload: only the
+  // synthesized direct form section's [] may be submitted while OFF. In
+  // read-only previews, inspect the canonical shared hidden input while ON
+  // even though the whole editor fieldset is disabled for authorization.
+  const input = target.querySelector('form > section > input[name="members_json"]') ??
+    target.querySelector('fieldset input[name="members_json"]');
+  assert.ok(input, "the form must provide a canonical or synthetic member payload");
   return JSON.parse(input.value);
 }
 test("MIG-0730 U02d: A→B→A resets field values, collaboration state and save gate", async () => {
