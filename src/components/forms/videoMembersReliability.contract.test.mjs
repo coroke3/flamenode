@@ -50,15 +50,18 @@ test("member X IDはServer write境界でもcanonical形式と重複を検証す
 });
 
 test("member置換は共通fail-closed resolverでcanonicalizeし変換後重複を拒否する", async () => {
+  // MIG-0650 U03d-2i: check both the shared policy and its live Next bridge.
   const source = await read("src/lib/video/replaceVideoMembers.ts");
-  assert.match(source, /canonicalizeMemberInputs/);
-  assert.match(source, /resolveCanonicalXUserResolutions\(db, candidates\)/);
-  assert.match(source, /invalid_alias_target/);
-  assert.match(source, /ambiguous_alias/);
-  assert.match(source, /canonical_alias_collision/);
-  assert.match(source, /xUserAliases/);
-  assert.match(source, /FROM json_each\(\$\{JSON\.stringify\(candidates\)\}\)/);
-  assert.match(source, /video_member_duplicate_x_user_id/);
+  const provider = await read("packages/server-core/src/video/memberCanonicalization.ts");
+  assert.match(source, /from "@flamenode\/server-core\/video\/memberCanonicalization"/);
+  assert.match(source, /canonicalizeVideoMemberInputs\(db, args\.members\)/);
+  assert.match(provider, /resolveCanonicalXUserResolutions\(db, candidates\)/);
+  assert.match(provider, /invalid_alias_target/);
+  assert.match(provider, /ambiguous_alias/);
+  assert.match(provider, /canonical_alias_collision/);
+  assert.match(provider, /xUserAliases/);
+  assert.match(provider, /FROM json_each\(\$\{JSON\.stringify\(candidates\)\}\)/);
+  assert.match(provider, /video_member_duplicate_x_user_id/);
   assert.match(source, /lower\(\$\{videoMembers\.x_user_id\}\)/);
   assert.match(source, /lower\(\$\{xUsers\.id\}\)/);
 });
