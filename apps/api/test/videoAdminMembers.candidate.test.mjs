@@ -25,7 +25,7 @@ function fixture({ role = "admin", includeContext = true, targetError = false, t
       return videoId === "v1" ? targetOverride ?? {
         id: "v1", collaboration_type: "individual", visibility_status: "pending",
         creator_x_user_id: null, youtube_video_id: null,
-        primary_event_id: null, updated_at: 100, linked_event_ids_json: "[]",
+        primary_event_id: null, updated_at: 100, linked_event_ids_json: "[]", public_member_count: 0,
       } : null;
     },
     writeGuard: async (c, next) => {
@@ -451,7 +451,7 @@ test("MIG-0650 U03i forged or corrupted video facts fail closed before any write
   const baseline = {
     id: "v1", collaboration_type: "individual", visibility_status: "pending",
     creator_x_user_id: null, youtube_video_id: null,
-    primary_event_id: null, updated_at: 12345, linked_event_ids_json: "[]",
+    primary_event_id: null, updated_at: 12345, linked_event_ids_json: "[]", public_member_count: 0,
   };
   for (const forged of [
     { ...baseline, id: "other_video" },
@@ -459,6 +459,13 @@ test("MIG-0650 U03i forged or corrupted video facts fail closed before any write
     { ...baseline, visibility_status: "forged" },
     { ...baseline, updated_at: "12345" },
     { ...baseline, updated_at: Number.NaN },
+    { ...baseline, public_member_count: undefined },
+    { ...baseline, public_member_count: null },
+    { ...baseline, public_member_count: -1 },
+    { ...baseline, public_member_count: 101 },
+    { ...baseline, public_member_count: 0.5 },
+    { ...baseline, public_member_count: Number.NaN },
+    { ...baseline, public_member_count: "0" },
     { ...baseline, creator_x_user_id: { forged: true } },
     { ...baseline, primary_event_id: ["cross_video"] },
     { ...baseline, linked_event_ids_json: undefined },
@@ -485,11 +492,14 @@ test("MIG-0650 U03j existing video and linked events share one bounded authorita
     const linked = await host.loadAuthorizedVideo({ env: { DB: s.d1 } }, "v_two");
     assert.equal(linked?.id, "v_two");
     assert.equal(linked?.primary_event_id, null);
+    assert.equal(linked?.public_member_count, 0);
     assert.deepEqual(JSON.parse(linked.linked_event_ids_json), ["ev2"]);
     assert.equal(s.d1.stats.reads - before, 1, "linked event lookup adds zero pre-read queries");
     const sql = s.d1.stats.readSql.at(-1);
     assert.match(sql, /FROM "video_events" WHERE "video_id" = \?/);
     assert.match(sql, /ORDER BY "event_id" LIMIT 9/);
+    assert.match(sql, /FROM "video_members" WHERE "video_id" = \?/);
+    assert.match(sql, /"is_public_member" = 1 LIMIT 101/);
     assert.match(sql, /FROM "videos" WHERE "id" = \? LIMIT 1/);
 
     const response = await s.send(valid(), SITE, "/api/videos/v_two/members");
@@ -513,7 +523,7 @@ test("MIG-0650 U03j linked event overflow and primary+linked overflow fail close
     const f = fixture({ targetOverride: {
       ...baseline,
       primary_event_id: events.length === 8 ? "another_primary" : null,
-      linked_event_ids_json: JSON.stringify(events),
+      linked_event_ids_json: JSON.stringify(events), public_member_count: 0,
     } });
     const response = await f.request(endpoint, valid());
     assert.equal(response.status, 400, "9 unique rebuild targets must never be partially enqueued");
@@ -882,7 +892,7 @@ test("MIG-0650 U03ah all seven schema-valid video statuses are valid SA-085 targ
     const f = fixture({ targetOverride: {
       id: "v1", collaboration_type: "individual", visibility_status,
       creator_x_user_id: null, youtube_video_id: null,
-      primary_event_id: null, updated_at: 100, linked_event_ids_json: "[]",
+      primary_event_id: null, updated_at: 100, linked_event_ids_json: "[]", public_member_count: 0,
     } });
     const result = await f.request(endpoint, valid());
     assert.equal(result.status, 501, visibility_status + " must reach only the unwired save port");
@@ -896,7 +906,7 @@ test("MIG-0650 U03ah all seven schema-valid video statuses are valid SA-085 targ
   const invalid = fixture({ targetOverride: {
     id: "v1", collaboration_type: "individual", visibility_status: "forged",
     creator_x_user_id: null, youtube_video_id: null,
-    primary_event_id: null, updated_at: 100, linked_event_ids_json: "[]",
+    primary_event_id: null, updated_at: 100, linked_event_ids_json: "[]", public_member_count: 0,
   } });
   const rejected = await invalid.request(endpoint, valid());
   assert.equal(rejected.status, 503, "unrecognized state must fail closed");
@@ -954,4 +964,40 @@ test("MIG-0650 U03ai bounds 1-byte streamed JSON chunks separately from byte cou
   } finally {
     clearTimeout(timeout);
   }
+});
+
+test("MIG-0650 U03at real D1 preflight detects >100 existing public members in one bounded SELECT", async () => {
+  const s = realGuardFixture();
+  try {
+    const host = createDefaultVideoAdminMembersPreflightHost();
+    const insertMember = s.sqlite.prepare(
+      "INSERT INTO video_members " +
+      "(id, video_id, x_user_id, name, role, comment, order_index, can_edit, " +
+      "is_public_member, edit_granted_by_auth_user_id, edit_granted_at, edit_updated_at) " +
+      "VALUES (?, ?, ?, ?, NULL, NULL, ?, 0, 1, NULL, NULL, NULL)"
+    );
+    for (let i = 0; i < 100; i++) {
+      insertMember.run("preflight_member_" + i, "v_pub", null, "Member " + i, i);
+    }
+    const before = s.d1.stats.reads;
+    const authorized = await host.loadAuthorizedVideo({ env: { DB: s.d1 } }, "v_pub");
+    assert.equal(authorized?.public_member_count, 100);
+    assert.equal(s.d1.stats.reads - before, 1, "100-public count uses existing target read");
+
+    const allowed = await s.send(valid());
+    assert.equal(allowed.status, 501, "valid maximum does not activate writer");
+    assert.equal(s.d1.stats.batches, 0);
+
+    insertMember.run("preflight_member_overflow", "v_pub", null, "Overflow", 100);
+    const preOverflowReads = s.d1.stats.reads;
+    const overflow = await host.loadAuthorizedVideo({ env: { DB: s.d1 } }, "v_pub");
+    assert.equal(overflow?.public_member_count, 101, "count is capped at max + 1");
+    assert.equal(s.d1.stats.reads - preOverflowReads, 1, "no fourth pre-read to detect overflow");
+    const denied = await s.send(valid());
+    assert.equal(denied.status, 503, "existing corruption cannot reach future Hono writer");
+    assert.deepEqual(await denied.json(), { ok: false, message: "作品の確認に失敗しました。" });
+    assert.equal(s.d1.stats.batches, 0, "overflow must never execute a D1 mutation");
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+  } finally { s.sqlite.close(); }
 });
