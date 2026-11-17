@@ -9,6 +9,7 @@
  */
 import type { videos } from "@flamenode/db/schema";
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
+import { isCanonicalXId } from "@flamenode/domain/xid";
 import type { ValidatedMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
 import type { ServerCoreDb } from "../db.ts";
 import type { PreloadedAuditContext } from "../audit/logger.ts";
@@ -63,6 +64,50 @@ function invalid(): never {
 }
 
 /**
+ * This boundary consumes the exact normalized output of
+ * validateVideoMemberSubmission, not arbitrary body/host-provided chapter maps.
+ * A missing index can silently omit one member's chapters; an extra index
+ * can be ignored by the projection and conceal an invalid request.
+ * Reject both before any canonicalization/alias D1 reads.
+ */
+function hasValidNormalizedMemberShape(
+  validated: ValidatedMemberSubmission,
+  isCollab: boolean,
+): boolean {
+  if (!validated || !Array.isArray(validated.members) ||
+      validated.members.length > MAX_VIDEO_MEMBERS ||
+      !(validated.chaptersByIndex instanceof Map) ||
+      validated.chaptersByIndex.size !== validated.members.length ||
+      (!isCollab && validated.members.length > 0)) return false;
+
+  for (const [index, member] of validated.members.entries()) {
+    if (!member || typeof member.name !== "string" || member.name.length > 80 ||
+        typeof member.x_user_id !== "string" ||
+        (member.x_user_id !== "" && !isCanonicalXId(member.x_user_id)) ||
+        typeof member.role !== "string" || member.role.length > 80 ||
+        typeof member.comment !== "string" || member.comment.length > 500 ||
+        !Array.isArray(member.chapters) || member.chapters.length > 30) return false;
+    if (member.chapters.some(ch =>
+      !ch || typeof ch.time !== "string" ||
+      typeof ch.label !== "string" || ch.label.length > 120 ||
+      typeof ch.note !== "string" || ch.note.length > 1000
+    )) return false;
+    const normalized = validated.chaptersByIndex.get(index);
+    if (!Array.isArray(normalized) ||
+        normalized.length !== member.chapters.length ||
+        normalized.length > 30 ||
+        normalized.some((ch, chapterIndex) =>
+          !ch || !Number.isSafeInteger(ch.time_seconds) ||
+          ch.time_seconds < 0 || ch.time_seconds > 9999 * 60 + 59 ||
+          ch.order_index !== chapterIndex ||
+          typeof ch.label !== "string" || ch.label.length > 120 ||
+          typeof ch.note !== "string" || ch.note.length > 1000
+        )) return false;
+  }
+  return true;
+}
+
+/**
  * Compose CURRENT member replacement, metadata, strict audit and JSON1 Queue
  * from an authorized guard snapshot. Builds SQL but never executes it.
  */
@@ -75,12 +120,14 @@ export async function prepareAdminVideoMemberCandidateWrite(
     !target || typeof videoId !== "string" || !videoId ||
     target.id !== videoId ||
     (target.collaboration_type !== "individual" && target.collaboration_type !== "collab") ||
+    !["draft", "pending", "public", "limited", "private", "archived", "voided"]
+      .includes(target.visibility_status) ||
+    !Number.isSafeInteger(target.updated_at) ||
+    (target.creator_x_user_id !== null && typeof target.creator_x_user_id !== "string") ||
     typeof actorUserId !== "string" || !actorUserId ||
     typeof isCollab !== "boolean" ||
     !Number.isSafeInteger(now) || now < 0 ||
-    !validated || !Array.isArray(validated.members) ||
-    validated.members.length > MAX_VIDEO_MEMBERS ||
-    !(validated.chaptersByIndex instanceof Map) ||
+    !hasValidNormalizedMemberShape(validated, isCollab) ||
     !Array.isArray(eventIds) ||
     eventIds.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS ||
     eventIds.some(id => typeof id !== "string" || !id || id.trim() !== id) ||

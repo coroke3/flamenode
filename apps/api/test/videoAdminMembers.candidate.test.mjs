@@ -1121,3 +1121,58 @@ test("MIG-0650 U03bi rejects forged actor/target and absent measured read counte
     );
   }
 });
+
+test("MIG-0650 U03bj strict host boundary rejects incomplete chapters and invalid video snapshot before D1", async () => {
+  const { prepareAdminVideoMemberCandidateWrite } =
+    await import("@flamenode/server-core/video/adminMemberCandidatePrepare");
+  let dbAccess = 0;
+  const forbiddenDb = new Proxy({}, { get() { dbAccess++; throw Error("unexpected D1 read"); } });
+  const target = { id: "v_two", collaboration_type: "individual",
+    visibility_status: "public", creator_x_user_id: null, updated_at: 10 };
+  const member = { name: "Alice", x_user_id: "alice", role: "",
+    comment: "", chapters: [] };
+  const goodMap = new Map([[0, []]]);
+  const preloaded = { settings: {}, actorSnapshotJsonById: {
+    u_admin: JSON.stringify({
+      discord_id: null, discord_name: null, x_user_id: null,
+      x_name: null, icon_url: null,
+    }),
+  } };
+  const args = {
+    target, videoId: "v_two", actorUserId: "u_admin",
+    validated: { members: [member], chaptersByIndex: goodMap },
+    isCollab: true, eventIds: [], now: 12345, preloaded,
+    readMeasuredCallerQueries: () => 1,
+  };
+  const normalizedChapter = { time_seconds: 12, label: "Hi", note: "", order_index: 0 };
+  const rawChapter = { time: "0:12", label: "Hi", note: "" };
+  const invalid = [
+    { target: { ...target, visibility_status: "forged" } },
+    { target: { ...target, updated_at: "10" } },
+    { target: { ...target, updated_at: Number.NaN } },
+    { target: { ...target, creator_x_user_id: { malformed: true } } },
+    { isCollab: false },
+    { validated: { members: [member], chaptersByIndex: new Map() } },
+    { validated: { members: [], chaptersByIndex: goodMap } },
+    { validated: { members: [member], chaptersByIndex: new Map([[1, []]]) } },
+    { validated: { members: [{ ...member, x_user_id: "invalid-id!" }], chaptersByIndex: goodMap } },
+    { validated: { members: [{ ...member, chapters: [rawChapter] }], chaptersByIndex: goodMap } },
+    { validated: { members: [{ ...member, chapters: [rawChapter] }],
+      chaptersByIndex: new Map([[0, [{ ...normalizedChapter, time_seconds: NaN }]]]) } },
+    { validated: { members: [{ ...member, chapters: [rawChapter] }],
+      chaptersByIndex: new Map([[0, [{ ...normalizedChapter, order_index: 7 }]]]) } },
+    { validated: { members: [{ ...member, chapters: [rawChapter] }],
+      chaptersByIndex: new Map([[0, [{ ...normalizedChapter, note: "N".repeat(1001) }]]]) } },
+    { validated: { members: [{ ...member, chapters: Array.from({ length: 31 }, () => rawChapter) }],
+      chaptersByIndex: new Map([[0, Array.from({ length: 31 }, (_, i) =>
+        ({ ...normalizedChapter, order_index: i }))]]) } },
+  ];
+  for (const variant of invalid) {
+    await assert.rejects(
+      prepareAdminVideoMemberCandidateWrite(forbiddenDb, { ...args, ...variant }),
+      { name: "RangeError", message: "video_admin_member_candidate_prepare_invalid" },
+    );
+  }
+  assert.equal(dbAccess, 0, "all malformed inputs must fail before identity/chapters SELECT");
+});
+
