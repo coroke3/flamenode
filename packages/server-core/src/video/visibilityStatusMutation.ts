@@ -156,6 +156,21 @@ export async function executeVideoVisibilityStatusMutation<DB>(
           retryable: false,
         };
       }
+      if (currentStatus == null) {
+        // No row is not proof of a concurrent update. The video may be
+        // missing or the D1 read may have returned no result; a blind retry
+        // is unsafe while an R2 visibility fence may still exist.
+        host.log("warn", `[${logTag}] visibility status missing after CAS conflict`, {
+          traceId, error_code: "visibility_status_missing",
+        });
+        return {
+          ok: false,
+          message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+          errorCode: "status_unverified",
+          traceId,
+          retryable: false,
+        };
+      }
       if (currentStatus === requestedStatus) {
         return host.markPendingPublicReflection(
           { ok: true, message: "すでに同じ状態へ更新されています。" },
