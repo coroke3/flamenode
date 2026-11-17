@@ -128,3 +128,37 @@ test("MIG-0730 U02g: client remains unmounted and has no direct D1 or auth bypas
   const candidate = await readFile(new URL("../src/api/adminVideoMemberSave.ts", import.meta.url), "utf8");
   assert.doesNotMatch(candidate, /from "next|from "hono|from "drizzle|\.prepare\(|\.batch\(/);
 });
+
+test("MIG-0730 U02j: forged checkbox order, duplicates and stale collaboration-OFF rows never send a PUT", async () => {
+  const cases = [];
+  const missing = form(); missing.delete("is_collab"); cases.push(missing);
+  const onlyTrue = form(); onlyTrue.delete("is_collab"); onlyTrue.append("is_collab", "true"); cases.push(onlyTrue);
+  const inverted = form(); inverted.delete("is_collab"); inverted.append("is_collab", "true"); inverted.append("is_collab", "false"); cases.push(inverted);
+  const extraTrue = form(); extraTrue.append("is_collab", "true"); cases.push(extraTrue);
+  const duplicateFalse = form({ collab: false, members: [] }); duplicateFalse.append("is_collab", "false"); cases.push(duplicateFalse);
+  const legacyOn = form(); legacyOn.set("is_collab", "on"); cases.push(legacyOn);
+  const staleOff = form({ collab: false, members: [{ name: "STALE" }] }); cases.push(staleOff);
+  const repeatedJson = form(); repeatedJson.append("members_json", "[]"); cases.push(repeatedJson);
+
+  let calls = 0;
+  const fetchFn = async () => { calls++; return reply({ ok: true }); };
+  for (const [i, data] of cases.entries()) {
+    const result = await saveAdminVideoMembers("video-1", data, fetchFn);
+    assert.equal(result.ok, false, "invalid FormData case " + i);
+  }
+  assert.equal(calls, 0, "forged checkbox, conflicting members and duplicate fields must fail before HTTP");
+});
+
+test("MIG-0730 U02j: valid ON with zero participants keeps exact two-value transport contract", async () => {
+  const data = form({ collab: true, members: [] });
+  let calls = 0;
+  const result = await saveAdminVideoMembers("video-1", data, async (_path, init) => {
+    calls++;
+    assert.deepEqual(JSON.parse(init.body), {
+      is_collab: ["false", "true"], members_json: "[]",
+    });
+    return reply({ ok: true });
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls, 1);
+});
