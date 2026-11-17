@@ -73,7 +73,13 @@ export type AdminMemberAtomicAssembly = {
 /** CURRENT emits profile-create and hidden-cleanup audits only with real row work. */
 function auditRows(snapshot: unknown): readonly unknown[] | null {
   if (!snapshot || typeof snapshot !== "object" || !("rows" in snapshot)) return null;
-  return Array.isArray(snapshot.rows) ? snapshot.rows : null;
+  const rows = snapshot.rows;
+  // Array#every skips holes; a sparse x_users_member_batch after-snapshot
+  // otherwise appears to contain a nonempty set of valid created profiles.
+  if (!Array.isArray(rows) || Array.from(rows).some(row => row === undefined)) {
+    return null;
+  }
+  return rows;
 }
 
 /** The CURRENT chapter audit is an aggregate, not a member-row snapshot. */
@@ -203,7 +209,9 @@ export async function assembleAdminVideoMemberAtomicPlan(
     // candidate input guard. Duplicate, empty or noncanonical linked-event
     // identifiers must not enter the eventual durable Queue fanout.
     !Array.isArray(input.eventIds) ||
-    input.eventIds.some(id =>
+    // Validate every slot: Array#some silently skips holes, whereas a
+    // sparse linked-event ID can become an undefined Queue target.
+    Array.from(input.eventIds).some(id =>
       typeof id !== "string" || !id || id.trim() !== id
     ) ||
     new Set(input.eventIds).size !== input.eventIds.length ||

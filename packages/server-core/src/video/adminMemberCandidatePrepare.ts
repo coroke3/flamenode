@@ -155,7 +155,10 @@ export async function prepareAdminVideoMemberCandidateWrite(
     !hasValidNormalizedMemberShape(validated, isCollab) ||
     !Array.isArray(eventIds) ||
     eventIds.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS ||
-    eventIds.some(id => typeof id !== "string" || !id || id.trim() !== id) ||
+    // Guard sparse arrays independently of the final atomic assembly.
+    Array.from(eventIds).some(id =>
+      typeof id !== "string" || !id || id.trim() !== id
+    ) ||
     new Set(eventIds).size !== eventIds.length ||
     !preloaded?.settings ||
     !isValidPreloadedActorSnapshotJson(preloaded.actorSnapshotJsonById?.[actorUserId]) ||

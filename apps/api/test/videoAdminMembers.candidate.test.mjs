@@ -1296,6 +1296,7 @@ test("MIG-0650 U03bi rejects forged actor/target and absent measured read counte
     { actorUserId: "other_user" },
     { readMeasuredCallerQueries: null },
     { eventIds: ["e1", "e1"] },
+    { eventIds: new Array(1) },
     { eventIds: Array.from({ length: 9 }, (_, i) => "e" + i) },
     { validated: { members: Array.from({ length: 101 }, () => ({})), chaptersByIndex: new Map() } },
   ]) {

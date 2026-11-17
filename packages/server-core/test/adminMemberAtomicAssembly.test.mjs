@@ -303,6 +303,48 @@ test("MIG-0650 U03cb: direct assembly rejects malformed or duplicate linked even
   );
 });
 
+test("MIG-0650 U03cg: sparse linked events and X-profile audit rows reject without SQL", async () => {
+  const malformedEventIds = [new Array(1), ["event-a", , "event-c"]];
+  for (const eventIds of malformedEventIds) {
+    const { db, planned } = capturedDb();
+    await assert.rejects(
+      () => assembleAdminVideoMemberAtomicPlan(db, input({
+        isCollab: true, eventIds,
+      })),
+      { name: "RangeError", message: "video_admin_member_atomic_assembly_invalid_input" },
+    );
+    assert.equal(planned.length, 0,
+      "sparse linked-event IDs must fail before metadata/Queue SQL");
+  }
+  for (const rows of [new Array(1), [undefined]]) {
+    const { db, planned } = capturedDb();
+    await assert.rejects(
+      () => assembleAdminVideoMemberAtomicPlan(db, input({
+        isCollab: true,
+        membersPlan: memberPlan([{ kind: "create-X-profiles" }], [null], [{
+          table_name: "x_users_member_batch", target_id: "video-1",
+          operation: "MERGE", actor_user_id: "admin", strict: true,
+          before: null, after: { id: "video-1", rows },
+        }]),
+      })),
+      { name: "RangeError", message: "video_admin_member_atomic_assembly_invalid_audit" },
+    );
+    assert.equal(planned.length, 0,
+      "missing X-profile audit rows must fail before metadata/Queue SQL");
+  }
+  const { db } = capturedDb();
+  const valid = await assembleAdminVideoMemberAtomicPlan(db, input({
+    isCollab: true, eventIds: ["event-a"],
+    membersPlan: memberPlan([{ kind: "create-X-profiles" }], [null], [{
+      table_name: "x_users_member_batch", target_id: "video-1",
+      operation: "MERGE", actor_user_id: "admin", strict: true,
+      before: null, after: { id: "video-1", rows: [{ id: "valid_x" }] },
+    }]),
+  }));
+  assert.equal(valid.noOp, false, "dense X-profile audit remains accepted");
+  assert.ok(valid.targets.some(t => t.targetId === "event-a"));
+});
+
 test("MIG-0650 U03ay: audit, target, actor and row-count integrity reject before SQL or Queue", async () => {
   const validAudit = {
     table_name: "video_members_set",
