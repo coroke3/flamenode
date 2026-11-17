@@ -128,7 +128,9 @@ test("参加者保存はvideos全行CASを使わずmember-set CASを競合正本
   const memberPlanSource = await read("src/lib/video/replaceVideoMembers.ts");
   const mutations = await read("packages/server-core/src/video/memberWriteMutationBatch.ts");
   assert.doesNotMatch(adminSource, /expectedRowCondition/);
-  assert.match(adminSource, /\.where\(eq\(videos\.id, videoId\)\)/);
+  const metadata = await read("packages/server-core/src/video/adminMemberMetadataPlan.ts");
+  assert.match(metadata, /\.where\(eq\(videos\.id, target\.id\)\)/);
+  assert.match(adminSource, /buildAdminVideoMemberMetadataPlan\(db, \{/);
   assert.match(adminSource, /member-set CAS/);
   assert.match(memberPlanSource, /buildVideoMemberWriteMutationBatch\(db, \{/);
   assert.match(mutations, /buildVideoMemberSetGuardSql/);
@@ -141,7 +143,11 @@ test("完全no-opの参加者保存はvideos.updated_at・score dirty・static r
   assert.match(source, /previousCollaborationType: target\.collaboration_type/);
   assert.match(source, /hasMemberAudit,/);
   assert.match(source, /hasChapterAudit,/);
-  assert.match(source, /if \(videoPublicContentChanged\) \{[\s\S]*?\.update\(videos\)/);
+  const metadata = await read("packages/server-core/src/video/adminMemberMetadataPlan.ts");
+  assert.match(source, /buildAdminVideoMemberMetadataPlan\(db, \{/);
+  assert.match(source, /appendVideoAtomicWritePlan\(plan, metadataPlan\)/);
+  assert.match(metadata, /if \(!input\.publicContentChanged\) \{/);
+  assert.match(metadata, /\.update\(videos\)/);
   assert.match(source, /if \(plan\.statements\.length === 0\)/);
   assert.match(source, /参加者設定に変更はありません/);
   const targets = await read("packages/server-core/src/video/adminMemberRebuildTargets.ts");

@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { readAdminVideoCollabFlag } from "@flamenode/domain/video";
 import { classifyAdminVideoMemberSave } from "@flamenode/domain/video/adminMemberSubmission";
 import { adminVideoMembersRebuildTargets } from "@flamenode/server-core/video/adminMemberRebuildTargets";
+import { buildAdminVideoMemberMetadataPlan } from "@flamenode/server-core/video/adminMemberMetadataPlan";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
@@ -132,39 +133,11 @@ export async function updateVideoMembersAdmin(
     // 旧実装は保存内容が同じでもvideos.updated_atを毎回更新し、score dirty化と
     // 不要なstatic rebuildを誘発していた。公開内容か合作区分が実際に変わる時だけ
     // video本体をdirtyにする。member-set CASはmembersPlan側で引き続きfail-closed。
-    if (videoPublicContentChanged) {
-      plan.statements.push(
-        db
-          .update(videos)
-          .set({
-            collaboration_type: nextCollaborationType,
-            updated_at: now,
-          })
-          .where(eq(videos.id, videoId)),
-      );
-      plan.expectedChanges.push(1);
-      plan.audits.push({
-        table_name: "videos",
-        target_id: videoId,
-        operation: "UPDATE",
-        before: {
-          id: target.id,
-          collaboration_type: target.collaboration_type,
-          updated_at: target.updated_at,
-        },
-        after: {
-          id: target.id,
-          collaboration_type: nextCollaborationType,
-          updated_at: now,
-        },
-        actor_user_id: user.id,
-        context: "admin-video-members",
-        reason: "参加者設定から合作区分を同期",
-        retention_class: "normal",
-        restore_strategy: "none",
-        strict: true,
-      });
-    }
+    const metadataPlan = buildAdminVideoMemberMetadataPlan(db, {
+      target, nextCollaborationType, now, actorUserId: user.id,
+      publicContentChanged: videoPublicContentChanged,
+    });
+    appendVideoAtomicWritePlan(plan, metadataPlan);
 
     const isPublicVideo = target.visibility_status === "public";
     const affectedCreatorIds = isPublicVideo && hasMemberAudit
