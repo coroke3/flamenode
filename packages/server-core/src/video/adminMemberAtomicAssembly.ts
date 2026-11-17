@@ -25,6 +25,7 @@ import { deriveAdminVideoMemberSaveEffects } from "./memberAggregationFanOut.ts"
 import { buildAdminVideoMemberMetadataPlan } from "./adminMemberMetadataPlan.ts";
 import { adminVideoMembersRebuildTargets } from "./adminMemberRebuildTargets.ts";
 import { inspectVideoAtomicWritePlanBudget } from "./videoAtomicBudget.ts";
+import { parseVideoMemberSetSnapshot } from "./memberSetSnapshot.ts";
 
 type MemberAtomicPlan = {
   statements: BatchItem<"sqlite">[];
@@ -91,13 +92,38 @@ function auditChapterSummaryIsConsistent(
     data.min_time <= data.max_time;
 }
 
-/** A top-level audit target is insufficient if its nested rows name another video. */
-function auditMemberRowsBelongToVideo(snapshot: unknown, videoId: string): boolean {
-  if (!snapshot || typeof snapshot !== "object" || !("rows" in snapshot)) return false;
-  const rows = snapshot.rows;
-  return Array.isArray(rows) && rows.every(
-    (row: unknown) => row !== null && typeof row === "object" &&
-      !Array.isArray(row) && "video_id" in row && row.video_id === videoId,
+/**
+ * A same-video row ID alone does not make a valid member audit snapshot.
+ * Invalid before snapshots previously became an empty previous-X set in
+ * memberAggregationFanOut, silently omitting pages of removed members.
+ * Parse the same CURRENT snapshot format used by that fanout before Queue
+ * invalidations are derived. This does not execute a database statement.
+ */
+function auditMemberRowsBelongToVideo(
+  snapshot: unknown,
+  videoId: string,
+  memberClass: "public" | "hidden",
+): boolean {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return false;
+  const originalRows = auditRows(snapshot);
+  const parsed = parseVideoMemberSetSnapshot(snapshot as Record<string, unknown>);
+  if (!originalRows || !parsed || parsed.id !== videoId) return false;
+  const limit = memberClass === "public" ? MAX_VIDEO_MEMBERS : MAX_VIDEO_MEMBERS * 2;
+  if (parsed.rows.length > limit) return false;
+  const expectedPublicFlag = memberClass === "public" ? 1 : 0;
+  const seen = new Set<string>();
+  return parsed.rows.every(row => {
+    if (!row.id || seen.has(row.id) ||
+      row.video_id !== videoId ||
+      row.is_public_member !== expectedPublicFlag ||
+      !Number.isSafeInteger(row.order_index) || row.order_index < 0 ||
+      (row.can_edit !== 0 && row.can_edit !== 1)) return false;
+    seen.add(row.id);
+    return true;
+  }) && originalRows.every(row =>
+    row !== null && typeof row === "object" && !Array.isArray(row) &&
+    "x_user_id" in row &&
+    (row.x_user_id === null || typeof row.x_user_id === "string")
   );
 }
 
@@ -173,8 +199,14 @@ export async function assembleAdminVideoMemberAtomicPlan(
       // their outer snapshot ID matches this target.
       ((audit.table_name === "video_members_set" ||
         audit.table_name === "video_member_hidden_carry_cleanup") &&
-        (!auditMemberRowsBelongToVideo(audit.before, input.target.id) ||
-         !auditMemberRowsBelongToVideo(audit.after, input.target.id))) ||
+        (!auditMemberRowsBelongToVideo(
+            audit.before, input.target.id,
+            audit.table_name === "video_members_set" ? "public" : "hidden",
+          ) ||
+         !auditMemberRowsBelongToVideo(
+            audit.after, input.target.id,
+            audit.table_name === "video_members_set" ? "public" : "hidden",
+          ))) ||
       audit.after?.id !== input.target.id ||
       (audit.table_name === "x_users_member_batch"
         ? audit.before != null

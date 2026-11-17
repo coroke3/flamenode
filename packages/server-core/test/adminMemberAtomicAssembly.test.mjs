@@ -54,6 +54,12 @@ const input = extra => ({
   membersPlan: memberPlan(),
   ...extra,
 });
+const memberAuditRow = (id, isPublicMember = 1, extra = {}) => ({
+  id, video_id: "video-1", x_user_id: "alice", name: "Alice",
+  order_index: 0, can_edit: 0, is_public_member: isPublicMember,
+  role: null, comment: null, edit_granted_by_auth_user_id: null,
+  edit_granted_at: null, edit_updated_at: null, ...extra,
+});
 
 test("MIG-0650 U03ax: no-op composes no D1 mutation, audit, Queue, or wake work", async () => {
   const { db, planned } = capturedDb();
@@ -105,11 +111,7 @@ test("MIG-0650 U03ax: members CAS, metadata, strict audits and full Queue preser
     actor_user_id: "admin", strict: true,
     before: {
       id: "video-1",
-      rows: [{
-        id: "old", video_id: "video-1", x_user_id: "alice",
-        name: "Alice", order_index: 0, can_edit: 0,
-        is_public_member: 1,
-      }],
+      rows: [memberAuditRow("old")],
     },
     after: { id: "video-1", rows: [] },
   };
@@ -269,7 +271,7 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
   const validHidden = {
     ...canonical, table_name: "video_member_hidden_carry_cleanup",
     operation: "DELETE",
-    before: { id: "video-1", rows: [{ video_id: "video-1" }] },
+    before: { id: "video-1", rows: [memberAuditRow("hidden", 0)] },
     after: { id: "video-1", rows: [] },
   };
   const invalid = [
@@ -308,6 +310,17 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
     [{ ...validChapter, after: { ...validChapter.after, min_time: 100 } }],
     [{ ...validChapter, after: { ...validChapter.after, row_count: 3001 } }],
     [{ ...validChapter, after: { ...validChapter.after, row_count: Number.NaN } }],
+    [{ ...canonical, before: { id: "video-1", rows: [{ video_id: "video-1" }] } }],
+    [{ ...canonical, before: { id: "video-1", rows: [memberAuditRow("", 1)] } }],
+    [{ ...canonical, before: { id: "video-1", rows: [memberAuditRow("dup"), memberAuditRow("dup")] } }],
+    [{ ...canonical, before: { id: "video-1", rows: [memberAuditRow("old", 0)] } }],
+    [{ ...canonical, after: { id: "video-1", rows: [memberAuditRow("new", 1, { x_user_id: undefined })] } }],
+    [{ ...canonical, after: { id: "video-1", rows: [memberAuditRow("new", 1, { x_user_id: ["forged"] })] } }],
+    [{ ...canonical, before: { id: "video-1", rows: [memberAuditRow("old", 1, { can_edit: 4 })] } }],
+    [{ ...canonical, after: { id: "video-1", rows: [memberAuditRow("new", 1, { order_index: Number.NaN })] } }],
+    [{ ...canonical, after: { id: "video-1", rows: Array.from({ length: 101 }, (_, i) => memberAuditRow("m" + i)) } }],
+    [{ ...validHidden, before: { id: "video-1", rows: [memberAuditRow("hidden", 1)] } }],
+    [{ ...validHidden, before: { id: "video-1", rows: Array.from({ length: 201 }, (_, i) => memberAuditRow("h" + i, 0)) } }],
   ];
   for (const audits of invalid) {
     const { db, planned } = capturedDb();
@@ -325,11 +338,12 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
     validX,
     {
       ...canonical,
-      before: { id: "video-1", rows: [{ video_id: "video-1" }] },
-      after: { id: "video-1", rows: [{ video_id: "video-1" }] },
+      before: { id: "video-1", rows: [memberAuditRow("before")] },
+      after: { id: "video-1", rows: [memberAuditRow("after")] },
     },
     validChapter,
     validHidden,
+    { ...canonical, before: { id: "video-1", rows: [memberAuditRow("nullable", 1, { x_user_id: null })] } },
   ]) {
     const { db } = capturedDb();
     const result = await assembleAdminVideoMemberAtomicPlan(db, input({
