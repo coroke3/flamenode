@@ -16,6 +16,12 @@ export type AdminPermissionBatchResult = { ok: boolean; message?: string };
 const FAILURE = "権限変更を確認できませんでした。状態を再取得してください。";
 const INVALID = "権限変更の入力に誤りがあります。";
 
+// A privilege batch can commit even if the browser loses its response.
+// Keep an in-flight guard across shared-field / Preview remounts in this JS
+// module, but never call this an authorization or cross-tab/DB lock.
+const inFlightPermissionBatches = new Set<string>();
+const BUSY = "この作品の権限変更は処理中です。結果を確認してから操作してください。";
+
 function validatedBatch(input: AdminPermissionBatchInput): {
   encodedId: string;
   body: {
@@ -81,6 +87,12 @@ export async function applyAdminVideoMemberPermissionBatch(
 ): Promise<AdminPermissionBatchResult> {
   const parsed = validatedBatch(input);
   if (!parsed) return { ok: false, message: INVALID };
+  // Check and acquire synchronously, before the first await, to prevent two
+  // confirmation submissions in the same JS runtime from issuing two POSTs.
+  if (inFlightPermissionBatches.has(input.videoId)) {
+    return { ok: false, message: BUSY };
+  }
+  inFlightPermissionBatches.add(input.videoId);
   try {
     const response = await fetchFn(
       `/api/videos/${parsed.encodedId}/collaborators/batch`,
@@ -111,5 +123,9 @@ export async function applyAdminVideoMemberPermissionBatch(
     return { ok: true, ...(typeof body.message === "string" ? { message: body.message } : {}) };
   } catch {
     return { ok: false, message: FAILURE };
+  } finally {
+    // Never replay an ambiguous committed write. Only an explicit new user
+    // action after the first HTTP attempt settles may issue another request.
+    inFlightPermissionBatches.delete(input.videoId);
   }
 }

@@ -172,3 +172,50 @@ test("MIG-0730 U02bi: SA-084 must bind success to the requested video before loc
   assert.deepEqual(valid, { ok: true, message: "verified" });
   assert.equal(requests, invalidReceipts.length + 1);
 });
+
+test("MIG-0730 U02bj: same-video permission POST remains single-flight across client callers", async () => {
+  for (const outcome of ["success", "ambiguous_failure"]) {
+    const videoId = "video-" + outcome;
+    const requests = [];
+    let settle, fail;
+    const pending = new Promise((resolve, reject) => {
+      settle = resolve; fail = reject;
+    });
+    const fetchFn = (path, init) => {
+      requests.push({ path, init });
+      if (path.includes(videoId)) return pending;
+      return Promise.resolve(json({ ok: true, videoId: "independent-video" }));
+    };
+    const original = input({ videoId });
+    const first = applyAdminVideoMemberPermissionBatch(original, fetchFn);
+    assert.equal(requests.length, 1, "the first call must acquire the in-tab latch before awaiting");
+    const duplicate = await applyAdminVideoMemberPermissionBatch(original, fetchFn);
+    assert.deepEqual(duplicate, {
+      ok: false,
+      message: "この作品の権限変更は処理中です。結果を確認してから操作してください。",
+    });
+    assert.equal(requests.length, 1, "the second same-video call must not issue a POST");
+
+    const unrelated = await applyAdminVideoMemberPermissionBatch(
+      input({ videoId: "independent-video" }), fetchFn,
+    );
+    assert.deepEqual(unrelated, { ok: true }, "a different video is not blocked");
+    assert.equal(requests.length, 2);
+    if (outcome === "success") {
+      settle(json({ ok: true, videoId }));
+    } else {
+      fail(new Error("write may have committed before transport failed"));
+    }
+    const firstResult = await first;
+    assert.equal(firstResult.ok, outcome === "success");
+    assert.equal(requests.length, 2, "an ambiguous result must not automatically retry");
+
+    // Only a new explicit submission, after the previous request settled, may POST.
+    const next = await applyAdminVideoMemberPermissionBatch(original, async (path) => {
+      requests.push({ path });
+      return json({ ok: true, videoId });
+    });
+    assert.deepEqual(next, { ok: true });
+    assert.equal(requests.length, 3);
+  }
+});
