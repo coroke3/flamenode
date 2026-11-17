@@ -660,3 +660,41 @@ test("MIG-0650 U03l byte-counted limit rejects multi-byte uploads at the actual 
   assert.equal((await readAdminVideoMembersJsonBody(request(below))).kind, "ok");
   assert.equal((await readAdminVideoMembersJsonBody(request(below + "あ".repeat(10)))).kind, "too_large");
 });
+
+test("MIG-0650 U03aa non-byte stream chunks fail closed; empty byte chunks preserve JSON", async () => {
+  const makeRequest = chunks => {
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+    return new Request("https://flamenode.test/sa085", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: stream,
+      duplex: "half",
+    });
+  };
+  const bytes = text => new TextEncoder().encode(text);
+  const payload = JSON.stringify(valid());
+
+  // An injected Request stream can emit non-Uint8Array values despite
+  // the TypeScript type. Never trust byteLength or attempt to copy them.
+  for (const malformed of [
+    "{}", new Uint16Array([123]), { byteLength: 0 },
+    new DataView(new ArrayBuffer(2)),
+  ]) {
+    const result = await readAdminVideoMembersJsonBody(
+      makeRequest([bytes("{"), malformed, bytes("}")]),
+    );
+    assert.deepEqual(result, { kind: "invalid" }, String(malformed));
+  }
+
+  const accepted = await readAdminVideoMembersJsonBody(makeRequest([
+    new Uint8Array(), bytes(payload.slice(0, 4)),
+    new Uint8Array(), bytes(payload.slice(4)),
+  ]));
+  assert.deepEqual(accepted, { kind: "ok", value: valid() },
+    "zero-length byte chunks must not change valid JSON semantics");
+});
