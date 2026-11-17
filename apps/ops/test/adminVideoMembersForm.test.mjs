@@ -414,3 +414,68 @@ test("MIG-0730 U02y: swapping same-video save adapter retires its old async succ
     } finally { await ui.cleanup(); }
   }
 });
+
+
+test("MIG-0730 U02ah: absent member editor cannot activate a destructive OFF save", async () => {
+  for (const missing of [null, false, undefined]) {
+    let writes = 0;
+    const ui = setup({
+      membersField: missing,
+      save: async () => { writes++; return { ok: true }; },
+    });
+    try {
+      await ui.render();
+      let checkbox = ui.target.querySelector('input[name="is_collab"][type="checkbox"]');
+      assert.equal(checkbox.checked, true);
+      assert.equal(checkbox.disabled, true,
+        "when a member editor is missing, the collaboration toggle must be read-only");
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+      await React.act(async () => checkbox.click());
+      assert.equal(checkbox.checked, true, "a disabled checkbox cannot switch the form into OFF mode");
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+      await ui.submit();
+      assert.equal(writes, 0, "a forged submit must not write without the canonical member editor");
+
+      // An individual video without the editor must also remain read-only:
+      // otherwise a synthetic [] payload could delete existing data.
+      await ui.render({
+        video: { id: "v2", title: "Individual", collaboration_type: null },
+        initialMembersCount: 0,
+      });
+      checkbox = ui.target.querySelector('input[name="is_collab"][type="checkbox"]');
+      assert.equal(checkbox.checked, false);
+      assert.equal(checkbox.disabled, true);
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+      await ui.submit();
+      assert.equal(writes, 0);
+
+      // Restoring a real field explicitly enables a fresh authorized submit.
+      await ui.render({
+        membersField: h("input", {
+          type: "hidden", name: "members_json",
+          value: '[{"name":"Bob","x_user_id":"bob"}]',
+        }),
+      });
+      assert.equal(ui.target.querySelector('input[name="is_collab"][type="checkbox"]').disabled, false);
+      assert.ok(ui.target.querySelector('button[type="submit"]'));
+      await ui.submit();
+      assert.equal(writes, 1, "a complete authorized form can submit exactly once");
+    } finally {
+      await ui.cleanup();
+    }
+  }
+});
+
+test("MIG-0730 U02ah: a member field without save authorization stays read-only", async () => {
+  const ui = setup();
+  try {
+    await ui.render();
+    assert.equal(ui.target.querySelector('input[name="is_collab"][type="checkbox"]').disabled, true);
+    assert.equal(ui.target.querySelector("fieldset").disabled, true,
+      "read-only mode locks the entire member editor, not only the submit button");
+    assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+    await ui.submit();
+  } finally {
+    await ui.cleanup();
+  }
+});

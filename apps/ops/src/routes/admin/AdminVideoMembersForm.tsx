@@ -47,7 +47,9 @@ function AdminVideoMembersFormForVideo({
   const inFlight = React.useRef(false);
   // A pending request can outlive the loss and later restoration of this form's
   // write capability. Retire its completion before any stale success callback.
-  const enabled = Boolean(save) && (!isCollab || membersField != null);
+  // Do not allow a collaboration-OFF destructive write merely because the
+  // member editor was never supplied. A save port alone is not a complete form.
+  const enabled = Boolean(save) && React.isValidElement(membersField);
   // Losing the required member field is also a write-capability revocation,
   // even when the save function itself remains present.
   // A true-to-true save adapter change may represent a new authorization
@@ -132,11 +134,11 @@ function AdminVideoMembersFormForVideo({
       </header>
       <label>
         <input type="checkbox" name="is_collab" value="true" checked={isCollab}
-          disabled={pending} onChange={event => setIsCollab(event.target.checked)} />
+          disabled={pending || !enabled} onChange={event => { if (enabled) setIsCollab(event.target.checked); }} />
         この作品を合作作品として登録する
       </label>
       {isCollab ? (
-        <fieldset disabled={pending} style={{ border: 0, padding: 0 }}>
+        <fieldset disabled={pending || !enabled} style={{ border: 0, padding: 0 }}>
           {membersField ?? <p role="status">参加者フォームを準備しています。</p>}
         </fieldset>
       ) : (
