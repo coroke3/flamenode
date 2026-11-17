@@ -65,6 +65,23 @@ export function buildVideoMemberWriteMutationBatch(
   ].some(rows => rows.some(row => row.video_id !== videoId))) {
     throw new RangeError("video_member_write_cross_video_rows");
   }
+  // The member-set CAS and the hidden carry cleanup have distinct scopes.
+  // A wrongly classified row could otherwise be inserted as a hidden member
+  // by the public replacement query or be omitted from the hidden DELETE.
+  // Validate the host's row classifications before any D1 statement is made.
+  if (
+    beforeSnapshotRows.some(row => row.is_public_member !== 1) ||
+    afterSnapshotRows.some(row => row.is_public_member !== 1) ||
+    hiddenCarryRows.some(row => row.is_public_member !== 0)
+  ) {
+    throw new RangeError("video_member_write_public_class_mismatch");
+  }
+  // The authoritative pre-read count is used as the exact expected DELETE
+  // changes() assertion. Only verify it when a public replacement is planned;
+  // a chapter-only edit intentionally never rewrites public member rows.
+  if (membersChanged && existingPublicCount !== beforeSnapshotRows.length) {
+    throw new RangeError("video_member_write_public_count_mismatch");
+  }
   const statements: BatchItem<"sqlite">[] = [];
   const expectedChanges: Array<number | null> = [];
 
