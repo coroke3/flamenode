@@ -5,6 +5,7 @@ import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import { readAdminVideoMembers } from "../../api/adminVideoMembers.js";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
+import { NotFoundView } from "../NotFoundView.js";
 
 /** Display only public participants in the Hono-admin-authorized DTO. Never mount an editor before SA-085 is ready. */
 export function AdminVideoMembersReadView({ videoId, data }: {
@@ -130,7 +131,8 @@ export function AdminVideoMembersReadPage({ videoId, fetchFn, onNavigate }: {
   }, [redirectTo, onNavigate]);
 
   if (!result) return <p role="status" aria-busy="true">読み込み中...</p>;
-  if (result.status === "notFound") return <p role="alert">作品または公開参加者設定が見つかりません。</p>;
+  // D-17-2: CURRENT notFound() uses the shared 404 EmptyState, not a local alert.
+  if (result.status === "notFound") return <NotFoundView />;
   if (result.status === "anonymous") return <p role="alert">再ログインが必要です。</p>;
   if (result.status === "forbidden") return <p role="alert">参加者設定を表示する権限がありません。</p>;
   if (result.status !== "ok") return <p role="alert">参加者設定を取得できませんでした。</p>;

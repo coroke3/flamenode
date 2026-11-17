@@ -147,7 +147,11 @@ test("MIG-0730 U02ca: 401 and admin-read 403 redirect, while 404 does not naviga
     await React.act(async () => ui.calls[3].resolve(json({}, 404)));
     assert.deepEqual(ui.navigations, ["/entry", "/dashboard", "/dashboard"],
       "404 is not an auth redirect");
-    assert.match(ui.target.textContent, /見つかりません/);
+    assert.match(ui.target.textContent, /ページが見つかりません/,
+      "D-17-2 uses the shared CURRENT 404 view instead of a local alert");
+    assert.match(ui.target.textContent, /トップへ戻る/,
+      "shared 404 view includes the standard recovery action");
+    assert.equal(ui.target.querySelector('a[href="/"]')?.textContent, "トップへ戻る");
   } finally { await ui.cleanup(); }
 });
 
