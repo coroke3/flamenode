@@ -183,7 +183,9 @@ export async function assembleAdminVideoMemberAtomicPlan(
     typeof input.isCollab !== "boolean" ||
     !Array.isArray(input.members) ||
     input.members.length > MAX_VIDEO_MEMBERS ||
-    input.members.some(member =>
+    // Array#some skips sparse holes. A forged direct-call array with one
+    // missing member is NOT an authorized nonempty members set.
+    Array.from(input.members).some(member =>
       !member || typeof member.x_user_id !== "string" ||
       (member.x_user_id !== "" && !isCanonicalXId(member.x_user_id))
     ) ||
@@ -191,6 +193,11 @@ export async function assembleAdminVideoMemberAtomicPlan(
     !Array.isArray(input.membersPlan.statements) ||
     !Array.isArray(input.membersPlan.expectedChanges) ||
     !Array.isArray(input.membersPlan.audits) ||
+    // Reject holes/null in candidate statements and audit entries before
+    // metadata SQL generation. The atomic executor cannot execute a sparse
+    // D1 batch or create a strict audit from an absent entry.
+    Array.from(input.membersPlan.statements).some(statement => statement == null) ||
+    Array.from(input.membersPlan.audits).some(audit => !audit || typeof audit !== "object") ||
     !Number.isSafeInteger(input.now) || input.now < 0 ||
     // The direct assembly boundary must not rely solely on the outer Hono
     // candidate input guard. Duplicate, empty or noncanonical linked-event
@@ -201,7 +208,7 @@ export async function assembleAdminVideoMemberAtomicPlan(
     ) ||
     new Set(input.eventIds).size !== input.eventIds.length ||
     input.membersPlan.statements.length !== input.membersPlan.expectedChanges.length ||
-    input.membersPlan.expectedChanges.some(
+    Array.from(input.membersPlan.expectedChanges).some(
       n => n !== null && (!Number.isSafeInteger(n) || n < 0),
     ) ||
     // The Hono host must not accept a member CAS without its strict,

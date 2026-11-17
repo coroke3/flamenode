@@ -220,6 +220,44 @@ test("MIG-0650 U03cc: direct atomic assembly validates target, members and flag 
   assert.equal(valid.noOp, false, "canonical member handle still composes an atomic metadata plan");
 });
 
+test("MIG-0650 U03ce: sparse members, D1 statements and strict audits fail before planning", async () => {
+  const audit = {
+    table_name: "video_members_set", target_id: "video-1",
+    operation: "MERGE", actor_user_id: "admin", strict: true,
+    before: { id: "video-1", rows: [] },
+    after: { id: "video-1", rows: [] },
+  };
+  const sparseMembers = new Array(1);
+  const sparseStatements = new Array(1);
+  const sparseAudits = new Array(1);
+  const sparseExpectations = new Array(1);
+  const invalid = [
+    { members: sparseMembers },
+    { membersPlan: memberPlan(sparseStatements, [null], [audit]) },
+    { membersPlan: memberPlan([{}], sparseExpectations, [audit]) },
+    { membersPlan: memberPlan([{}], [null], sparseAudits) },
+    { membersPlan: memberPlan([null], [null], [audit]) },
+    { membersPlan: memberPlan([{}], [null], [null]) },
+  ];
+  for (const override of invalid) {
+    const { db, planned } = capturedDb();
+    await assert.rejects(
+      () => assembleAdminVideoMemberAtomicPlan(db, input({
+        isCollab: true, ...override,
+      })),
+      { name: "RangeError", message: "video_admin_member_atomic_assembly_invalid_input" },
+    );
+    assert.equal(planned.length, 0,
+      "sparse/null candidate input must not produce metadata or Queue SQL");
+  }
+  const { db } = capturedDb();
+  const result = await assembleAdminVideoMemberAtomicPlan(db, input({
+    isCollab: true,
+    members: [{ x_user_id: "alice" }],
+  }));
+  assert.equal(result.noOp, false, "dense legal candidate remains accepted");
+});
+
 test("MIG-0650 U03ay: malformed oversized event fanout rejects before even metadata SQL planning", async () => {
   const { db, planned } = capturedDb();
   await assert.rejects(
