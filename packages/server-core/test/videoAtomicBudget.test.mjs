@@ -92,3 +92,32 @@ test("MIG-0650 U03z refuses mismatched mutation assertions before D1 budget appr
   assert.equal(valid.mutationStatementCount, 2);
   assert.equal(valid.mutationAssertionCount, 1);
 });
+
+test("MIG-0650 U03ac refuses invalid or sparse expected-changes values before budget approval", () => {
+  const malformed = [
+    undefined, -1, -0.5, 0.5, Number.NaN, Infinity, -Infinity,
+    Number.MAX_SAFE_INTEGER + 1, "1", false, {}, [], 1n,
+  ];
+  for (const value of malformed) {
+    assert.throws(
+      () => inspectVideoAtomicWritePlanBudget(plan([{}], [value], []),
+        { callerQueryCount: 3 }),
+      { name: "RangeError", message: "video_atomic_invalid_expected_changes" },
+      String(value),
+    );
+  }
+  const hole = new Array(1);
+  assert.throws(
+    () => inspectVideoAtomicWritePlanBudget(plan([{}], hole, []),
+      { callerQueryCount: 3 }),
+    { name: "RangeError", message: "video_atomic_invalid_expected_changes" },
+    "a sparse slot must not omit a changes() assertion from the D1 projection",
+  );
+
+  const valid = inspectVideoAtomicWritePlanBudget(
+    plan([{}, {}, {}], [null, 0, 3], [{ actor_user_id: "admin" }]),
+    { callerQueryCount: 3 },
+  );
+  assert.equal(valid.mutationStatementCount, 3);
+  assert.equal(valid.mutationAssertionCount, 2);
+});
