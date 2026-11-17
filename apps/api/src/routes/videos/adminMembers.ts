@@ -18,11 +18,22 @@ import { BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
 
 type Ctx = Context<AppEnv>;
 
+/** Authoritative, bounded D1 snapshot required for future SA-085 CAS/audit/Queue. */
+export type AdminVideoMemberTarget = {
+  id: string;
+  collaboration_type: "individual" | "collab";
+  visibility_status: "pending" | "public" | "private" | "voided";
+  creator_x_user_id: string | null;
+  youtube_video_id: string | null;
+  primary_event_id: string | null;
+  updated_at: number;
+};
+
 export type VideoAdminMembersPreflightHost = {
   writeGuard: MiddlewareHandler<AppEnv>;
   // A missing or stale video must not reach a future SA-085 mutation port.
   // This is one authoritative D1 read, after identity and CostGuard preflight.
-  loadAuthorizedVideo: (c: Ctx, videoId: string) => Promise<{ id: string } | null>;
+  loadAuthorizedVideo: (c: Ctx, videoId: string) => Promise<AdminVideoMemberTarget | null>;
 };
 
 /**
@@ -49,8 +60,11 @@ export function createDefaultVideoAdminMembersPreflightHost(
   ];
   return {
     loadAuthorizedVideo: (c, videoId) =>
-      c.env.DB.prepare('SELECT "id" FROM "videos" WHERE "id" = ? LIMIT 1')
-        .bind(videoId).first<{ id: string }>(),
+      c.env.DB.prepare(
+        'SELECT "id", "collaboration_type", "visibility_status", ' +
+        '"creator_x_user_id", "youtube_video_id", "primary_event_id", "updated_at" ' +
+        'FROM "videos" WHERE "id" = ? LIMIT 1',
+      ).bind(videoId).first<AdminVideoMemberTarget>(),
     writeGuard: async (c, next) => {
       c.header("Cache-Control", "private, no-store");
       const execute = async (index: number): Promise<Response | void> => {
@@ -107,14 +121,27 @@ export function createVideoAdminMembersPreflightRoutes(
     // before planning mutations. One bounded D1 query remains inside the
     // ZERO_1102 pre-write budget (guard actor + CostGuard + target video).
     // Never trust target metadata supplied through the request body.
-    let target: { id: string } | null;
+    let target: AdminVideoMemberTarget | null;
     try {
       target = await host.loadAuthorizedVideo(c, videoId);
     } catch {
       return reject(c, 503, "作品の確認に失敗しました。");
     }
     if (!target) return reject(c, 404, "作品が見つかりません。");
-    if (target.id !== videoId) return reject(c, 503, "作品の確認に失敗しました。");
+    // A correct ID alone is insufficient for future CAS and rebuild planning:
+    // reject missing or malformed target facts before a privileged write port
+    // could ever consume them. No body-supplied metadata is trusted.
+    if (
+      target.id !== videoId ||
+      (target.collaboration_type !== "individual" && target.collaboration_type !== "collab") ||
+      !["pending", "public", "private", "voided"].includes(target.visibility_status) ||
+      !Number.isSafeInteger(target.updated_at) ||
+      [target.creator_x_user_id, target.youtube_video_id, target.primary_event_id].some(
+        value => value !== null && typeof value !== "string",
+      )
+    ) {
+      return reject(c, 503, "作品の確認に失敗しました。");
+    }
 
     // Validity is not authorization to mutate the video. We have no Hono
     // per-video admin D1 lookup, atomic member CAS/audit plan, or Queue port yet.

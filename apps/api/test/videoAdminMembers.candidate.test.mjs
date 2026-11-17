@@ -13,7 +13,7 @@ const valid = () => ({
   members_json: JSON.stringify([member(0)]),
 });
 
-function fixture({ role = "admin", includeContext = true, targetError = false } = {}) {
+function fixture({ role = "admin", includeContext = true, targetError = false, targetOverride } = {}) {
   let invoked = 0;
   let prematureDb = 0;
   const host = {
@@ -21,7 +21,11 @@ function fixture({ role = "admin", includeContext = true, targetError = false } 
     // Real-stack tests below use the authoritative SQLite/D1 implementation.
     loadAuthorizedVideo: async (_c, videoId) => {
       if (targetError) throw Error("injected target D1 failure");
-      return videoId === "v1" ? { id: "v1" } : null;
+      return videoId === "v1" ? targetOverride ?? {
+        id: "v1", collaboration_type: "individual", visibility_status: "pending",
+        creator_x_user_id: null, youtube_video_id: null,
+        primary_event_id: null, updated_at: 100,
+      } : null;
     },
     writeGuard: async (c, next) => {
       invoked++;
@@ -320,4 +324,52 @@ test("MIG-0650 U03h real Hono target lookup uses only one extra D1 read, never a
     assert.equal(s.count("audit_logs"), 0);
     assert.equal(s.count("static_rebuild_queue"), 0);
   } finally { s.sqlite.close(); }
+});
+
+
+test("MIG-0650 U03i authorized video facts are selected in the same one D1 query", async () => {
+  const s = realGuardFixture();
+  try {
+    s.sqlite.prepare(
+      "UPDATE videos SET collaboration_type = 'collab', visibility_status = 'private', updated_at = 12345 WHERE id = 'v_pub'"
+    ).run();
+    const res = await s.send(valid());
+    assert.equal(res.status, 501);
+    assert.equal((await res.json()).ok, false);
+    const videoReads = s.d1.stats.readSql.filter(sql => /FROM "videos" WHERE "id" = \? LIMIT 1/.test(sql));
+    assert.equal(videoReads.length, 1, "the snapshot must cost exactly one bounded SELECT");
+    for (const column of [
+      "id", "collaboration_type", "visibility_status", "creator_x_user_id",
+      "youtube_video_id", "primary_event_id", "updated_at",
+    ]) assert.match(videoReads[0], new RegExp('"' + column + '"'));
+    assert.ok(s.d1.stats.reads <= 3, "actor, CostGuard and video snapshot fit pre-read budget");
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(s.count("video_members"), 0);
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03i forged or corrupted video facts fail closed before any write", async () => {
+  const baseline = {
+    id: "v1", collaboration_type: "individual", visibility_status: "pending",
+    creator_x_user_id: null, youtube_video_id: null,
+    primary_event_id: null, updated_at: 12345,
+  };
+  for (const forged of [
+    { ...baseline, id: "other_video" },
+    { ...baseline, collaboration_type: "unauthorized" },
+    { ...baseline, visibility_status: "forged" },
+    { ...baseline, updated_at: "12345" },
+    { ...baseline, updated_at: Number.NaN },
+    { ...baseline, creator_x_user_id: { forged: true } },
+    { ...baseline, primary_event_id: ["cross_video"] },
+  ]) {
+    const f = fixture({ targetOverride: forged });
+    const response = await f.request(endpoint, valid());
+    assert.equal(response.status, 503, "untrusted target facts must not enter a future SA-085 writer");
+    assert.deepEqual(await response.json(), { ok: false, message: "作品の確認に失敗しました。" });
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(f.stats(), { invoked: 1, prematureDb: 0 });
+  }
 });
