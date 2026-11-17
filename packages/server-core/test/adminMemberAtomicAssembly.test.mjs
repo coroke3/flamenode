@@ -261,6 +261,15 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
     [{ ...canonical, after: { id: "another-video", rows: [] } }],
     [{ ...canonical, before: null }],
     [{ ...canonical, after: null }],
+    [{ ...canonical, before: { id: "video-1", rows: [{ video_id: "foreign-video" }] } }],
+    [{ ...canonical, after: { id: "video-1", rows: [{ video_id: "foreign-video" }] } }],
+    [{ ...canonical, before: { id: "video-1", rows: "not-an-array" } }],
+    [{ ...canonical, after: { id: "video-1", rows: [null] } }],
+    [{
+      ...canonical, table_name: "video_member_hidden_carry_cleanup",
+      operation: "DELETE",
+      before: { id: "video-1", rows: [{ video_id: "foreign-video" }] },
+    }],
     [canonical, canonical],
     [{ ...validX, before: { id: "video-1", rows: [] } }],
     [{ ...validX, after: { id: "another-video", rows: [] } }],
@@ -279,6 +288,11 @@ test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail b
   for (const audit of [
     canonical,
     validX,
+    {
+      ...canonical,
+      before: { id: "video-1", rows: [{ video_id: "video-1" }] },
+      after: { id: "video-1", rows: [{ video_id: "video-1" }] },
+    },
     {
       ...canonical,
       table_name: "video_chapters_member_set",

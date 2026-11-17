@@ -49,6 +49,16 @@ export type AdminMemberAtomicAssembly = {
  * count its actual D1 preparation reads, and run exactly one audited atomic
  * batch before sending any Queue wake.
  */
+/** A top-level audit target is insufficient if its nested rows name another video. */
+function auditMemberRowsBelongToVideo(snapshot: unknown, videoId: string): boolean {
+  if (!snapshot || typeof snapshot !== "object" || !("rows" in snapshot)) return false;
+  const rows = snapshot.rows;
+  return Array.isArray(rows) && rows.every(
+    (row: unknown) => row !== null && typeof row === "object" &&
+      !Array.isArray(row) && "video_id" in row && row.video_id === videoId,
+  );
+}
+
 export async function assembleAdminVideoMemberAtomicPlan(
   db: ServerCoreDb,
   input: {
@@ -99,6 +109,12 @@ export async function assembleAdminVideoMemberAtomicPlan(
     if (
       !expectedOperation || audit.operation !== expectedOperation ||
       seenAuditTables.has(audit.table_name) ||
+      // Audit snapshots must not contain rows from any other video even when
+      // their outer snapshot ID matches this target.
+      ((audit.table_name === "video_members_set" ||
+        audit.table_name === "video_member_hidden_carry_cleanup") &&
+        (!auditMemberRowsBelongToVideo(audit.before, input.target.id) ||
+         !auditMemberRowsBelongToVideo(audit.after, input.target.id))) ||
       audit.after?.id !== input.target.id ||
       (audit.table_name === "x_users_member_batch"
         ? audit.before != null
