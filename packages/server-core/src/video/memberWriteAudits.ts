@@ -31,11 +31,11 @@ export function buildVideoMemberWriteAudits(input: {
   if (newXUsers.length > 0) {
     audits.push({
       table_name: "x_users_member_batch",
-      target_id: args.videoId,
+      target_id: videoId,
       operation: "MERGE",
       before: null,
-      after: { id: args.videoId, rows: newXUsers },
-      actor_user_id: args.actorUserId,
+      after: { id: videoId, rows: newXUsers },
+      actor_user_id: actorUserId,
       context: "video-save:member-profile",
       reason: "参加者X IDプロフィール行をpendingで一括確保",
       retention_class: "long_audit",
@@ -47,14 +47,14 @@ export function buildVideoMemberWriteAudits(input: {
   if (hiddenCarryRows.length > 0) {
     audits.push({
       table_name: "video_member_hidden_carry_cleanup",
-      target_id: args.videoId,
+      target_id: videoId,
       operation: "DELETE",
       before: {
-        id: args.videoId,
+        id: videoId,
         rows: hiddenCarryRows.map(toVideoMemberSnapshotRow),
       },
-      after: { id: args.videoId, rows: [] },
-      actor_user_id: args.actorUserId,
+      after: { id: videoId, rows: [] },
+      actor_user_id: actorUserId,
       context: "video-save:members",
       reason: "公開メンバー化したX IDのhidden editorを公開行へ統合",
       retention_class: "long_audit",
@@ -66,11 +66,11 @@ export function buildVideoMemberWriteAudits(input: {
   if (chaptersChanged) {
     audits.push({
       table_name: "video_chapters_member_set",
-      target_id: args.videoId,
+      target_id: videoId,
       operation: "MERGE",
-      before: buildChapterAuditSummary(args.videoId, existingManagedChapters),
-      after: buildChapterAuditSummary(args.videoId, nextManagedChapters),
-      actor_user_id: args.actorUserId,
+      before: buildChapterAuditSummary(videoId, existingManagedChapters),
+      after: buildChapterAuditSummary(videoId, nextManagedChapters),
+      actor_user_id: actorUserId,
       context: "video-save:member-chapters",
       reason: "管理チャプター集合を更新（CPU/D1負荷抑制のため監査は集約情報のみ保持）",
       retention_class: "long_audit",
@@ -83,11 +83,11 @@ export function buildVideoMemberWriteAudits(input: {
   if (membersChanged) {
     audits.push({
       table_name: "video_members_set",
-      target_id: args.videoId,
+      target_id: videoId,
       operation: "MERGE",
       before: beforeSnapshot,
       after: afterSnapshot,
-      actor_user_id: args.actorUserId,
+      actor_user_id: actorUserId,
       context: "video-save:members",
       retention_class: "restorable",
       restore_strategy: "custom_adapter",
