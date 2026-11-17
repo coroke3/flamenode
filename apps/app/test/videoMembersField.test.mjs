@@ -179,8 +179,8 @@ test("MIG-0713 U02: component has injected search/permission adapters, never dir
   assert.match(source, /await searchXUsers\(/);
   assert.match(source, /await applyPermissionBatch\(/);
   assert.match(source, /MAX_COLLABORATOR_PERMISSION_BATCH/);
-  assert.match(source, /React\.useEffect\(\(\) => \{\s*searchXUsersRef\.current = searchXUsers;\s*\}, \[searchXUsers\]\);/,
-    "the latest injected adapter must be installed after commit");
+  assert.match(source, /React\.useLayoutEffect\(\(\) => \{\s*if \(searchXUsersRef\.current === searchXUsers\) return;\s*searchXUsersRef\.current = searchXUsers;/,
+    "a replaced search adapter must be installed after commit and invalidate old authority");
   assert.doesNotMatch(source, /const searchXUsersRef = React\.useRef\(searchXUsers\);\s*searchXUsersRef\.current = searchXUsers;/,
     "render-phase mutation could leak an abandoned render's adapter");
   assert.doesNotMatch(source, /from\s+["'](?:@\/|next\/)/);
@@ -246,16 +246,18 @@ test("MIG-0713 U03 T01: search debounce invokes only the last query, preserves 2
 });
 
 
-test("MIG-0713 U03 T01: equivalent parent adapter re-render preserves in-flight search", async () => {
+test("MIG-0713 U03 T01: changing search adapter retires the old in-flight authority", async () => {
+  // An injected function may carry a new auth/session scope. Treat replacement
+  // as a trust boundary even if the two adapters use the same implementation.
   const calls = [];
   const container = dom.window.document.createElement("div");
   dom.window.document.body.append(container);
   const root = createRoot(container);
-  let settleSearch;
   const newAdapter = () => (query, offset, signal) => {
-    calls.push({ query, offset, signal });
-    // Keep the first request pending across the parent render.
-    return new Promise((resolve) => { settleSearch = resolve; });
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    calls.push({ query, offset, signal, resolve });
+    return promise;
   };
   const props = { ...noopAdapters, searchXUsers: newAdapter() };
   try {
@@ -266,22 +268,35 @@ test("MIG-0713 U03 T01: equivalent parent adapter re-render preserves in-flight 
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].signal.aborted, false);
+
     await act(async () => root.render(React.createElement(VideoMembersField, {
       ...props,
       searchXUsers: newAdapter(),
     })));
-    assert.equal(calls[0].signal.aborted, false, "parent rerender must not abort an in-flight search");
+    assert.equal(calls[0].signal.aborted, true,
+      "a replaced injected adapter must retire the old authorization scope");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
-    assert.equal(calls.length, 1, "the unchanged query must not trigger another request");
-    await act(async () => settleSearch({
-      items: [{ id: "alice", x_name: "Alice" }], hasMore: false, nextOffset: null,
+    assert.equal(calls.length, 2, "same query is retried once through the new adapter");
+    assert.equal(calls[1].signal.aborted, false);
+
+    await act(async () => calls[0].resolve({
+      items: [{ id: "old", x_name: "OLD SEARCH" }],
+      hasMore: false, nextOffset: null,
     }));
-    assert.ok(container.querySelector('#member-name-suggestions option[value="Alice"]'), "the original request can still render a suggestion");
+    assert.equal(container.querySelector('#member-name-suggestions option[value="OLD SEARCH"]'), null,
+      "late response from the replaced adapter cannot populate Personal autocomplete");
+
+    await act(async () => calls[1].resolve({
+      items: [{ id: "alice", x_name: "Alice" }],
+      hasMore: false, nextOffset: null,
+    }));
+    assert.ok(container.querySelector('#member-name-suggestions option[value="Alice"]'));
   } finally {
     await act(async () => root.unmount());
     container.remove();
   }
 });
+
 
 test("MIG-0713 U03 T01: pending debounce uses the latest injected search adapter", async () => {
   const oldCalls = [];
