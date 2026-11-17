@@ -81,6 +81,37 @@ test("MIG-0730 U02a: malformed or cross-video 200 must not render private member
     "notFound", "CURRENT returns 404 when the D1 member count exceeds 100");
 });
 
+test("MIG-0730 U02cm: malformed decoded GET getters/proxies do not reject a private read", async () => {
+  // A mocked/legacy JSON port can return a non-JSON value after its json()
+  // promise resolves. Reject it without a rejected Promise or stuck loader.
+  const top = { video: snapshot().video,
+    get initialMembers() { throw Error("PRIVATE_TOP_LEVEL"); } };
+  const nested = snapshot();
+  Object.defineProperty(nested.initialMembers[0], "name", {
+    enumerable: true,
+    get() { throw Error("PRIVATE_MEMBER_NAME"); },
+  });
+  const revoked = Proxy.revocable(snapshot(), {});
+  revoked.revoke();
+  const unsafeArray = Array.from({ length: 101 }, (_, i) => member(i));
+  let accessed = 0;
+  Object.defineProperty(unsafeArray, 0, {
+    enumerable: true, configurable: true,
+    get() { accessed++; throw Error("PRIVATE_OVERSIZE"); },
+  });
+  for (const bad of [top, nested, revoked.proxy, snapshot("v1", unsafeArray)]) {
+    let calls = 0;
+    const result = await readAdminVideoMembers("v1", async () => {
+      calls++;
+      return { status: 200, json: async () => bad };
+    });
+    assert.equal(calls, 1);
+    assert.deepEqual(result, { status: "unavailable" },
+      "hostile decoded data is unavailable, never a successful private read");
+  }
+  assert.equal(accessed, 0, "101 members are rejected before nested getter evaluation");
+});
+
 test("MIG-0730 U02a: malformed route IDs and cancelled requests never reveal members", async () => {
   let called = 0;
   const fetchFn = async () => { called++; return json(200, snapshot()); };
