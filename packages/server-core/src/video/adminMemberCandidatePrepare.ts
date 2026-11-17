@@ -10,7 +10,10 @@
 import type { videos } from "@flamenode/db/schema";
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import { isCanonicalXId } from "@flamenode/domain/xid";
-import type { ValidatedMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
+import {
+  normalizeMemberChapters,
+  type ValidatedMemberSubmission,
+} from "@flamenode/domain/video/adminMemberSubmission";
 import type { ServerCoreDb } from "../db.ts";
 import type { PreloadedAuditContext } from "../audit/logger.ts";
 import { isValidPreloadedActorSnapshotJson } from "../audit/logger.ts";
@@ -103,6 +106,17 @@ function hasValidNormalizedMemberShape(
           typeof ch.label !== "string" || ch.label.length > 120 ||
           typeof ch.note !== "string" || ch.note.length > 1000
         )) return false;
+    // A same-sized, structurally valid Map can still contain forged normalized
+    // times, labels or notes. Bind every projected chapter value to exactly
+    // what CURRENT's validator derives from the same raw member input.
+    const canonical = normalizeMemberChapters(member, index);
+    if (!canonical.ok || canonical.chapters.some((expected, chapterIndex) => {
+      const provided = normalized[chapterIndex];
+      return !provided || provided.time_seconds !== expected.time_seconds ||
+        provided.order_index !== expected.order_index ||
+        provided.label !== expected.label ||
+        provided.note !== expected.note;
+    })) return false;
   }
   return true;
 }

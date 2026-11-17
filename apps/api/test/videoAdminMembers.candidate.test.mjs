@@ -1163,6 +1163,14 @@ test("MIG-0650 U03bj strict host boundary rejects incomplete chapters and invali
       chaptersByIndex: new Map([[0, [{ ...normalizedChapter, order_index: 7 }]]]) } },
     { validated: { members: [{ ...member, chapters: [rawChapter] }],
       chaptersByIndex: new Map([[0, [{ ...normalizedChapter, note: "N".repeat(1001) }]]]) } },
+    { validated: { members: [{ ...member, chapters: [rawChapter] }],
+      chaptersByIndex: new Map([[0, [{ ...normalizedChapter, time_seconds: 13 }]]]) } },
+    { validated: { members: [{ ...member, chapters: [rawChapter] }],
+      chaptersByIndex: new Map([[0, [{ ...normalizedChapter, label: "FORGED" }]]]) } },
+    { validated: { members: [{ ...member, chapters: [rawChapter] }],
+      chaptersByIndex: new Map([[0, [{ ...normalizedChapter, note: "FORGED" }]]]) } },
+    { validated: { members: [{ ...member, chapters: [{ ...rawChapter, time: "1:60" }] }],
+      chaptersByIndex: new Map([[0, [normalizedChapter]]]) } },
     { validated: { members: [{ ...member, chapters: Array.from({ length: 31 }, () => rawChapter) }],
       chaptersByIndex: new Map([[0, Array.from({ length: 31 }, (_, i) =>
         ({ ...normalizedChapter, order_index: i }))]]) } },
@@ -1176,3 +1184,55 @@ test("MIG-0650 U03bj strict host boundary rejects incomplete chapters and invali
   assert.equal(dbAccess, 0, "all malformed inputs must fail before identity/chapters SELECT");
 });
 
+
+
+test("MIG-0650 U03bk real validated member and chapter values produce strict atomic plan without D1 write", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const schema = await import("@flamenode/db/schema");
+  const { mapAuditSettings } = await import("@flamenode/server-core/audit/settings");
+  const { prepareAdminVideoMemberCandidateWrite } =
+    await import("@flamenode/server-core/video/adminMemberCandidatePrepare");
+  const s = realGuardFixture();
+  try {
+    const target = await createDefaultVideoAdminMembersPreflightHost()
+      .loadAuthorizedVideo({ env: { DB: s.d1 } }, "v_two");
+    assert.ok(target);
+    const form = new FormData();
+    form.set("members_json", JSON.stringify([{
+      name: "Owner", x_user_id: "x_owner", role: "", comment: "",
+      chapters: [{ time: "0:12", label: "Owner", note: "Checked" }],
+    }]));
+    const validated = validateVideoMemberSubmission(form, true);
+    assert.equal(validated.ok, true);
+    const initialChapterCount = s.count("video_chapters");
+    const prepared = await prepareAdminVideoMemberCandidateWrite(drizzle(s.d1, { schema }), {
+      target, videoId: "v_two", actorUserId: "u_admin",
+      validated: validated.value, isCollab: true, eventIds: ["ev2"],
+      now: 12345,
+      preloaded: {
+        settings: mapAuditSettings(s.sqlite.prepare(
+          "SELECT * FROM system_settings WHERE id = 'default'"
+        ).get()),
+        actorSnapshotJsonById: {
+          u_admin: JSON.stringify({
+            discord_id: null, discord_name: null, x_user_id: null,
+            x_name: null, icon_url: null,
+          }),
+        },
+      },
+      readMeasuredCallerQueries: () => s.d1.stats.reads,
+    });
+    assert.ok(prepared.atomic);
+    assert.equal(prepared.assembly.noOp, false);
+    for (const table of ["video_members_set", "video_chapters_member_set", "videos"]) {
+      assert.ok(prepared.atomic.audits.some(a => a.table_name === table && a.strict), table);
+    }
+    assert.ok(prepared.assembly.targets.some(t => t.targetType === "event_release"));
+    assert.equal(prepared.atomic.callerQueryCount, s.d1.stats.reads);
+    assert.equal(s.d1.stats.batches, 0, "candidate preparation can never commit");
+    assert.equal(s.count("video_members"), 0);
+    assert.equal(s.count("video_chapters"), initialChapterCount);
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+  } finally { s.sqlite.close(); }
+});
