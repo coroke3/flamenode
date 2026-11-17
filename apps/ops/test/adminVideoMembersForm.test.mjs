@@ -72,6 +72,11 @@ test("MIG-0730 U02ci: editable member footer preserves CURRENT navigation and sa
     { id: "v1", youtubeId: "https://youtube.com.evil.test/watch?v=" + youtube, expected: "/v1" },
     { id: "v1", youtubeId: "//malicious.test/video", expected: "/v1" },
     { id: "v1", youtubeId: null, expected: "/v1" },
+    // Standalone previews may receive malformed, unvalidated legacy metadata.
+    // Neither an unexpected type nor a hostile .trim method may crash render.
+    { id: "v1", youtubeId: 123, expected: "/v1" },
+    { id: "v1", youtubeId: { trim() { throw new Error("do not call malformed .trim"); } }, expected: "/v1" },
+    { id: 42, youtubeId: null, expected: "/list", detail: "/admin/videos" },
     { id: "id with space", youtubeId: "invalid-id", expected: "/list" },
     { id: "bad/path", youtubeId: null, expected: "/list", detail: "/admin/videos" },
     { id: String.fromCharCode(0xD800), youtubeId: null, expected: "/list", detail: "/admin/videos" },
