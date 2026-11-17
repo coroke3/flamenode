@@ -19,7 +19,7 @@ const UNVERIFIED_SAVE = "保存結果を確認できませんでした。最新�
 function isSafeVideoId(value: unknown): value is string {
   if (typeof value !== "string" || !value || value.length > 64 ||
       value.trim() !== value || value === "." || value === ".." ||
-      /[\\/\\\\\\x00-\\x1f]/.test(value)) return false;
+      /[\/\\\x00-\x1f]/.test(value)) return false;
   try { encodeURIComponent(value); return true; }
   catch { return false; }
 }

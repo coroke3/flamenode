@@ -61,7 +61,7 @@ test("MIG-0730 U02c: no save adapter or member form means no active mutation but
 });
 
 test("MIG-0730 U02bz: unsafe video IDs in standalone Form cannot enable an injected write", async () => {
-  for (const id of ["", ".", "..", " v1", "v1 ", "v/1", "v\\\\1", "v\\n1", "\\uD800", "x".repeat(65)]) {
+  for (const id of ["", ".", "..", " v1", "v1 ", "v/1", "v\\1", "v\n1", "\uD800", "x".repeat(65)]) {
     let writes = 0, refreshes = 0;
     const ui = setup({
       video: { ...video, id },
