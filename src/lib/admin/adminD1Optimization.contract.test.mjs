@@ -86,7 +86,12 @@ test("通知一覧は全履歴 GROUP BY を行わず最新100件と運用件数�
 test("監査 actor は canonical と legacy operator を受け付け、新規リンクは actor を使う", async () => {
   const usersPageSource = await readFile(new URL("../../../app/(admin)/admin/users/page.tsx", import.meta.url), "utf8");
   const tabsSource = await readFile(new URL("../../components/admin/AdminUserTabs.tsx", import.meta.url), "utf8");
-  assert.match(auditPage, /sp\.actor \?\? sp\.operator/);
+  const auditQuery = await readFile(new URL("./auditQuery.ts", import.meta.url), "utf8");
+  assert.match(auditPage, /readAuditActorFilter\(sp\.actor, sp\.operator\)/);
+  assert.match(auditQuery, /export function readAuditActorFilter\(/);
+  assert.match(auditQuery, /Array\.isArray\(actor\)/);
+  assert.match(auditQuery, /readAuditQueryValue\(operator\)/);
+  assert.match(auditQuery, /readAuditQueryValue\(actor \?\? operator\)/);
   assert.match(usersPageSource, /admin\/audit\?actor=/);
   assert.match(tabsSource, /admin\/audit\?actor=/);
 });

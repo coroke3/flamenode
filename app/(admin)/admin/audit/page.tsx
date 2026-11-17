@@ -18,6 +18,17 @@ import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/Consol
 import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { AuditTargetLink } from "@/components/admin/AuditTargetLink";
 import { parseAuditDiff } from "@/lib/audit/diff";
+import {
+  buildAuditViewHref,
+  MAX_AUDIT_LIMIT,
+  readAuditActorFilter,
+  readAuditDateBoundary,
+  readAuditLimit,
+  readAuditQueryValue,
+  readAuditViewMode,
+  type AdminAuditSearchParams,
+  type AuditViewMode,
+} from "@/lib/admin/auditQuery";
 
 export const metadata: Metadata = { title: "監査ログ" };
 export const dynamic = "force-dynamic";
@@ -25,29 +36,8 @@ export const dynamic = "force-dynamic";
 type AuditRow = typeof auditLogs.$inferSelect;
 
 interface Props {
-  searchParams?: Promise<{
-    table?: string;
-    operation?: string;
-    actor?: string;
-    /** 旧ブックマーク互換。新規リンクは actor を使う。 */
-    operator?: string;
-    record?: string;
-    restore_status?: string;
-    limit?: string;
-    since?: string;
-    until?: string;
-    view?: string;
-  }>;
+  searchParams?: Promise<AdminAuditSearchParams>;
 }
-
-type ViewMode = "table" | "timeline" | "cards";
-
-function normalizeViewMode(raw: string | undefined): ViewMode {
-  return raw === "timeline" || raw === "cards" ? raw : "table";
-}
-
-const MAX_LIMIT = 100;
-const DEFAULT_LIMIT = 50;
 
 const OPERATIONS = [
   "CREATE",
@@ -94,28 +84,18 @@ export default async function AdminAuditPage({
   if (!user || user.role !== "admin") notFound();
 
   const sp = (await searchParams) ?? {};
-  const viewMode = normalizeViewMode(sp.view);
-  const tableFilter = (sp.table ?? "").trim();
-  const operationFilter = (sp.operation ?? "").trim().toUpperCase();
-  const actorFilter = (sp.actor ?? sp.operator ?? "").trim();
-  const recordFilter = (sp.record ?? "").trim();
-  const restoreStatusFilter = (sp.restore_status ?? "").trim();
-  const sinceFilter = (sp.since ?? "").trim();
-  const untilFilter = (sp.until ?? "").trim();
+  const viewMode = readAuditViewMode(sp.view);
+  const tableFilter = readAuditQueryValue(sp.table);
+  const operationFilter = readAuditQueryValue(sp.operation).toUpperCase();
+  const actorFilter = readAuditActorFilter(sp.actor, sp.operator);
+  const recordFilter = readAuditQueryValue(sp.record);
+  const restoreStatusFilter = readAuditQueryValue(sp.restore_status);
+  const sinceFilter = readAuditQueryValue(sp.since);
+  const untilFilter = readAuditQueryValue(sp.until);
 
-  const parseDateBoundary = (s: string, end: boolean): number | null => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-    const suffix = end ? "T23:59:59+09:00" : "T00:00:00+09:00";
-    const t = Date.parse(`${s}${suffix}`);
-    return Number.isNaN(t) ? null : Math.floor(t / 1000);
-  };
-  const sinceUnix = sinceFilter ? parseDateBoundary(sinceFilter, false) : null;
-  const untilUnix = untilFilter ? parseDateBoundary(untilFilter, true) : null;
-  const limitRaw = Number(sp.limit ?? "");
-  const limit =
-    Number.isFinite(limitRaw) && limitRaw > 0
-      ? Math.min(Math.floor(limitRaw), MAX_LIMIT)
-      : DEFAULT_LIMIT;
+  const sinceUnix = sinceFilter ? readAuditDateBoundary(sinceFilter, false) : null;
+  const untilUnix = untilFilter ? readAuditDateBoundary(untilFilter, true) : null;
+  const limit = readAuditLimit(sp.limit);
 
   const db = getDatabase();
   let rows: AuditRow[] = [];
@@ -261,13 +241,13 @@ export default async function AdminAuditPage({
           />
         </label>
         <label style={{ display: "flex", flexDirection: "column", fontSize: 11 }}>
-          <span style={{ color: "var(--text-muted)" }}>件数 (最大 {MAX_LIMIT})</span>
+          <span style={{ color: "var(--text-muted)" }}>件数 (最大 {MAX_AUDIT_LIMIT})</span>
           <input
             type="number"
             name="limit"
             defaultValue={limit}
             min={1}
-            max={MAX_LIMIT}
+            max={MAX_AUDIT_LIMIT}
             className="fn-input"
             style={{ width: 100 }}
           />
@@ -329,26 +309,14 @@ export default async function AdminAuditPage({
   );
 }
 
-function buildViewHref(
-  sp: NonNullable<Awaited<Props["searchParams"]>>,
-  view: ViewMode,
-): string {
-  const usp = new URLSearchParams();
-  for (const [k, v] of Object.entries(sp)) {
-    if (v && k !== "view") usp.set(k, String(v));
-  }
-  usp.set("view", view);
-  return `/admin/audit?${usp.toString()}`;
-}
-
 function ViewModeSwitch({
   current,
   sp,
 }: {
-  current: ViewMode;
-  sp: NonNullable<Awaited<Props["searchParams"]>>;
+  current: AuditViewMode;
+  sp: AdminAuditSearchParams;
 }): React.ReactElement {
-  const modes: { id: ViewMode; label: string }[] = [
+  const modes: { id: AuditViewMode; label: string }[] = [
     { id: "table", label: "テーブル" },
     { id: "timeline", label: "タイムライン" },
     { id: "cards", label: "カード" },
@@ -371,7 +339,7 @@ function ViewModeSwitch({
           key={m.id}
           role="tab"
           aria-selected={current === m.id}
-          href={buildViewHref(sp, m.id)}
+          href={buildAuditViewHref(sp, m.id)}
           className={`fn-btn fn-btn-sm ${
             current === m.id ? "fn-btn-primary" : "fn-btn-ghost"
           }`}

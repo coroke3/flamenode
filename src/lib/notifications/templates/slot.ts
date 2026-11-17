@@ -67,6 +67,31 @@ export function buildSlotVideoSubmittedNotification(args: {
   });
 }
 
+/** Legacy IDs are displayed as one bounded logical line, never as forged DM sections. */
+function groupIdForDiscordDisplay(groupId: string): string {
+  // Include invisible joiners/format markers that can disguise @mentions or ID boundaries.
+  // Do not strip variation selectors or emoji sequences: normal group IDs remain readable.
+  const cleaned = groupId
+    // Preserve legitimate pictograph ZWJ sequences (👩‍💻), but mark lone joiners as controls.
+    .replace(/(?<!\p{Extended_Pictographic})(?<!\p{Extended_Pictographic}\uFE0F)(?<!\p{Extended_Pictographic}\p{Emoji_Modifier})\u200d|\u200d(?!\p{Extended_Pictographic})/gu, "\u200b")
+    // Collapse adjacent invisible controls into one visible separator.
+    .replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u180e\u200b-\u200c\u200e-\u200f\u2028-\u202e\u2060-\u206f\ufeff]+/g, " ");
+  // A malformed persisted legacy ID must not consume an entire Discord message.
+  // Preserve a surrogate pair at the UTF-16 boundary before adding an ellipsis.
+  // Preserve complete emoji pairs while removing a dangling high surrogate at the boundary.
+  const clipped = cleaned.slice(0, 256).replace(/[\uD800-\uDBFF]$/, "");
+  // A dangling high surrogate can already be present in an exactly 256-unit
+  // malformed persisted ID; clipping removed it, so show the truncation marker.
+  const truncated = clipped.length < cleaned.length;
+  // Corrupt legacy UTF-16 can contain isolated low/high surrogates even before truncation.
+  // Replace those code units without altering complete emoji pairs.
+  const safe = clipped.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    "�",
+  );
+  return escapeDiscordMention(safe + (truncated ? "…" : ""));
+}
+
 /** 運営による枠強制解放 DM。 */
 export function buildSlotForceReleasedNotification(args: {
   eventId: string;
@@ -92,7 +117,7 @@ export function buildSlotForceReleasedNotification(args: {
       lines: [
         `対象枠数: ${args.slotIds.length}`,
         args.reservationGroupId
-          ? `予約グループ: ${args.reservationGroupId}`
+          ? `予約グループ: ${groupIdForDiscordDisplay(args.reservationGroupId)}`
           : null,
       ],
     },
@@ -134,7 +159,7 @@ export function buildSlotSubmissionReleasedNotification(args: {
       lines: [
         `対象枠数: ${args.slotIds.length}`,
         args.reservationGroupId
-          ? `提出グループ: ${args.reservationGroupId}`
+          ? `提出グループ: ${groupIdForDiscordDisplay(args.reservationGroupId)}`
           : null,
       ],
     },

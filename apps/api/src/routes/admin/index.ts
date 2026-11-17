@@ -28,6 +28,7 @@ import { adminNotificationRoutes } from "./notifications.ts";
 import { adminPermissionsRoutes } from "./permissions.ts";
 import { adminTermsRoutes } from "./terms.ts";
 import { adminUsersRoutes, adminXUsersRoutes } from "./users.ts";
+import { mountMig0643AdminRoutes } from "./mig0643.ts";
 
 export function createAdminRoutes(
   options: { session?: MiddlewareHandler<AppEnv> } = {},
@@ -64,5 +65,7 @@ export function createAdminRoutes(
   admin.route("/terms", adminTermsRoutes);
   admin.route("/users", adminUsersRoutes);
   admin.route("/x-users", adminXUsersRoutes);
+  // MIG-0643 routes inherit the shared admin origin, auth and read/write guards.
+  mountMig0643AdminRoutes(admin);
   return admin;
 }

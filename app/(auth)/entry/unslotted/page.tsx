@@ -19,6 +19,7 @@ import { StatusPanel } from "@/components/ui/StatusPanel";
 import styles from "./page.module.css";
 import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { unslottedEventEligibilityWhere } from "@/lib/video/resolveUnslottedEventSyncTarget";
+import { normalizeUnslottedEventQuery } from "@/lib/video/unslottedEventQuery";
 import { absoluteUrl } from "@/lib/seo";
 
 export const metadata: Metadata = { title: "枠なし投稿" };
@@ -27,7 +28,7 @@ export const dynamic = "force-dynamic";
 const MAX_UNSLOTTED_EVENT_OPTIONS = 120;
 
 interface Props {
-  searchParams?: Promise<{ event_q?: string }>;
+  searchParams?: Promise<{ event_q?: string | string[] }>;
 }
 
 export default async function UnslottedPostPage({
@@ -39,7 +40,7 @@ export default async function UnslottedPostPage({
   const user = guard.user;
   const db = getDatabase();
   const activeX = user.active_x_user_id;
-  const eventQuery = ((await searchParams)?.event_q ?? "").trim().slice(0, 100);
+  const eventQuery = normalizeUnslottedEventQuery((await searchParams)?.event_q);
   const now = Math.floor(Date.now() / 1000);
 
   const xRow =

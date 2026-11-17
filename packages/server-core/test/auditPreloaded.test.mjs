@@ -7,10 +7,12 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
-import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { mutateWithAudit, planAtomicAuditMutationBudget } from "@flamenode/server-core/audit/mutate";
+import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
 import { actorSnapshotFromRow, prepareAuditLogEntries } from "@flamenode/server-core/audit/logger";
 import { mapAuditSettings } from "@flamenode/server-core/audit/settings";
 import { sql } from "@flamenode/server-core/sql";
+import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 
 const MIGRATIONS = new URL("../../../migrations/", import.meta.url);
 
@@ -173,4 +175,278 @@ test("mutateWithAudit forwards preloaded: one batch, no settings or actor read, 
   // the preloaded actor here is the empty snapshot, so only actor_snapshot_json may differ
   assert.deepEqual({ ...pre.row, actor_snapshot_json: null }, { ...self.row, actor_snapshot_json: null });
   assert.deepEqual(JSON.parse(pre.row.actor_snapshot_json), actorSnapshotFromRow(null));
+});
+
+
+test("Issue #669: exact 50-query budget uses only matching guard-preloaded audit reads", () => {
+  const audit = { ...AUDIT, actor_user_id: "admin-1" };
+  const base = {
+    mutationStatements: [sql`INSERT INTO test_table (id) VALUES (${"a1"})`],
+    expectedMutationChanges: 1,
+    audits: [audit],
+    callerQueryCount: 46,
+  };
+  const settings = { max_payload_bytes: 90000 };
+  const validPreload = {
+    settings,
+    actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
+  };
+  const noPreload = planAtomicAuditMutationBudget(base);
+  assert.equal(noPreload.preparationQueryCount, 2);
+  assert.equal(noPreload.totalQueryCount, 52);
+  assert.equal(noPreload.withinLimit, false);
+
+  for (const [label, preload] of [
+    ["only settings", { settings }],
+    ["wrong actor key", { settings, actorSnapshotJsonById: { other: "{}" } }],
+    ["only actor", { actorSnapshotJsonById: validPreload.actorSnapshotJsonById }],
+    ["null actor placeholder", { settings, actorSnapshotJsonById: { "admin-1": null } }],
+  ]) {
+    const budget = planAtomicAuditMutationBudget({ ...base, preloaded: preload });
+    assert.equal(budget.preparationQueryCount, 1, label);
+    assert.equal(budget.totalQueryCount, 51, label);
+    assert.equal(budget.withinLimit, false, label);
+  }
+  const full = planAtomicAuditMutationBudget({ ...base, preloaded: validPreload });
+  assert.equal(full.preparationQueryCount, 0);
+  assert.equal(full.totalQueryCount, 50);
+  assert.equal(full.withinLimit, true);
+  const withActorX = planAtomicAuditMutationBudget({
+    ...base, audits: [{ ...audit, actor_x_user_id: "x1" }], preloaded: validPreload,
+  });
+  assert.equal(withActorX.preparationQueryCount, 1, "actor-X approval SELECT is not preloaded");
+  assert.equal(withActorX.totalQueryCount, 51);
+  assert.equal(withActorX.withinLimit, false);
+
+  const distinct = planD1AuditMutationBudget({
+    mutationStatementCount: 1, mutationAssertionCount: 1,
+    auditEntryCount: 1, distinctActorCount: 1, callerQueryCount: 46,
+    preloadedSettings: true, preloadedActorCount: 10000,
+  });
+  assert.equal(distinct.preparationQueryCount, 0, "credits are capped by real distinct actors");
+  const invalidCredit = planD1AuditMutationBudget({
+    mutationStatementCount: 1, mutationAssertionCount: 1,
+    auditEntryCount: 1, distinctActorCount: 1, callerQueryCount: 46,
+    preloadedSettings: true, preloadedActorCount: Number.NaN,
+  });
+  assert.equal(invalidCredit.preparationQueryCount, 1, "invalid actor counts cannot reduce the budget");
+});
+
+test("Issue #669: real SQLite audited mutation accepts fully preloaded 50/50; partial/missing fail before reads", async () => {
+  for (const mode of ["none", "settings", "actor", "wrongActor", "both"]) {
+    const w = world();
+    const restore = freeze();
+    try {
+      w.sqlite.exec("CREATE TABLE t (id TEXT PRIMARY KEY)");
+      const settings = mapAuditSettings(w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get());
+      const actor = JSON.stringify(actorSnapshotFromRow(null));
+      const preloaded = mode === "none" ? undefined : {
+        ...(mode === "settings" || mode === "wrongActor" || mode === "both" ? { settings } : {}),
+        ...(mode === "actor" || mode === "both"
+          ? { actorSnapshotJsonById: { "admin-1": actor } }
+          : mode === "wrongActor" ? { actorSnapshotJsonById: { "other": actor } } : {}),
+      };
+      const input = {
+        mutationStatements: [sql`INSERT INTO t (id) VALUES (${"a1"})`],
+        expectedMutationChanges: 1,
+        audits: [{ ...AUDIT }],
+        callerQueryCount: 46,
+        preloaded,
+      };
+      assert.equal(planAtomicAuditMutationBudget(input).withinLimit, mode === "both");
+      if (mode === "both") {
+        await mutateWithAudit(w.db, input);
+        assert.equal(w.stats.reads.length, 0, "both authoritative preflight reads were reused");
+        assert.equal(w.stats.batches, 1);
+        assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM t").get().n, 1);
+        assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1);
+      } else {
+        await assert.rejects(() => mutateWithAudit(w.db, input), /query 数が上限/);
+        assert.equal(w.stats.reads.length, 0, "budget rejects before any audit SELECT");
+        assert.equal(w.stats.batches, 0, "budget rejects before the D1 transaction");
+        assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM t").get().n, 0);
+        assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+      }
+    } finally {
+      restore();
+      w.sqlite.close();
+    }
+  }
+});
+
+
+test("Issue #669: 80-event SA-029 with the prospective MIG-0516 marker fits 50 without dropping audits", async () => {
+  const queue = await buildEventGroupChangeQueueBatch(
+    { run: (query) => query },
+    { reason: "event_group_member_add", requestedByUserId: "admin-1" },
+  );
+  assert.equal(queue.acceptedTargetCount, 1);
+  assert.equal(queue.statements.length, 1, "actual current events_index upsert is one DML");
+  assert.deepEqual(queue.expectedChanges, [1]);
+  const now = 1800000000000;
+  const marker = sql`UPDATE public_build_state
+    SET requested_at = MAX(requested_at, ${now}) WHERE id = 1`;
+  const audits = Array.from({ length: 80 }, (_, i) => ({
+    table_name: "event_group_events",
+    target_id: `grp:${i}`,
+    operation: "CREATE",
+    after: { event_group_id: "grp", event_id: `event-${i}` },
+    actor_user_id: "admin-1",
+    retention_class: "restorable",
+  }));
+  const proposal = {
+    mutationStatements: [sql`SELECT 1`, ...queue.statements, marker],
+    expectedMutationChanges: [80, ...queue.expectedChanges, 1],
+    audits,
+    callerQueryCount: 3,
+  };
+  const legacy = planAtomicAuditMutationBudget(proposal);
+  assert.equal(legacy.auditChunkCount, 20);
+  assert.equal(legacy.auditQueryCount, 40, "no per-row audit or count assertion is dropped");
+  assert.equal(legacy.preparationQueryCount, 2);
+  assert.equal(legacy.totalQueryCount, 51);
+  assert.equal(legacy.withinLimit, false);
+  const reused = planAtomicAuditMutationBudget({
+    ...proposal,
+    preloaded: {
+      settings: { max_payload_bytes: 90000 },
+      actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
+    },
+  });
+  assert.equal(reused.mutationStatementCount, 3);
+  assert.equal(reused.mutationAssertionCount, 3, "marker still has strict changes()=1");
+  assert.equal(reused.auditChunkCount, 20);
+  assert.equal(reused.preparationQueryCount, 0);
+  assert.equal(reused.totalQueryCount, 49);
+  assert.equal(reused.withinLimit, true);
+});
+
+
+test("Issue #669: actual SQLite 80-member insert + queue + MIG-0516 marker audits all 80 under D1 50", async () => {
+  const w = world();
+  const restore = freeze();
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const payload = Array.from({ length: 80 }, (_, i) => ({
+      event_group_id: "test-66", event_id: `event-${String(i).padStart(3, "0")}`,
+      relation_type: "member", created_at: now, updated_at: now,
+    }));
+    const queue = await buildEventGroupChangeQueueBatch(w.db, {
+      reason: "event_group_member_add", requestedByUserId: "admin-1",
+    });
+    assert.equal(queue.statements.length, 1);
+    assert.deepEqual(queue.expectedChanges, [1]);
+    const mutation = w.db.run(sql`
+      INSERT INTO event_group_events
+        (event_group_id, event_id, relation_type, created_at, updated_at)
+      SELECT
+        json_extract(value, '$.event_group_id'),
+        json_extract(value, '$.event_id'),
+        json_extract(value, '$.relation_type'),
+        json_extract(value, '$.created_at'),
+        json_extract(value, '$.updated_at')
+      FROM json_each(${JSON.stringify(payload)})
+    `);
+    // SQL and strict expected-changes assertion mirror MIG-0516's builder.
+    // This is a projected cross-PR integration test, NOT a mounted route.
+    const marker = w.db.run(sql`
+      UPDATE public_build_state
+      SET requested_at = MAX(requested_at, ${Date.now()})
+      WHERE id = 1
+    `);
+    const audits = payload.map((row) => ({
+      table_name: "event_group_events",
+      target_id: `${row.event_group_id}:${row.event_id}`,
+      operation: "CREATE", after: { ...row },
+      actor_user_id: "admin-1", retention_class: "restorable",
+    }));
+    const fullPreload = {
+      settings: mapAuditSettings(w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get()),
+      actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) },
+    };
+    const input = {
+      mutationStatements: [mutation, ...queue.statements, marker],
+      expectedMutationChanges: [80, ...queue.expectedChanges, 1],
+      audits,
+      callerQueryCount: 3,
+      preloaded: fullPreload,
+    };
+    const budget = planAtomicAuditMutationBudget(input);
+    assert.equal(budget.totalQueryCount, 49);
+    assert.equal(budget.auditChunkCount, 20);
+    assert.equal(budget.mutationStatementCount, 3);
+    assert.equal(budget.mutationAssertionCount, 3);
+    assert.equal(budget.preparationQueryCount, 0);
+    assert.equal(budget.withinLimit, true);
+
+    // Same exact queued marker and audits, but without the guard's read
+    // snapshots, must refuse 51/50 *before* any D1 read or write.
+    const noPreload = { ...input, preloaded: undefined };
+    assert.equal(planAtomicAuditMutationBudget(noPreload).totalQueryCount, 51);
+    await assert.rejects(() => mutateWithAudit(w.db, noPreload), /query 数が上限/);
+    assert.equal(w.stats.reads.length, 0);
+    assert.equal(w.stats.batches, 0);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM event_group_events WHERE event_group_id = 'test-66'").get().n, 0);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+    assert.equal(w.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get().requested_at, 0);
+
+    await mutateWithAudit(w.db, input);
+    assert.equal(w.stats.reads.length, 0, "guard preloads eliminate *actual* audit preparation queries");
+    assert.equal(w.stats.batches, 1);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM event_group_events WHERE event_group_id = 'test-66'").get().n, 80);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'event_group_events' AND operation = 'CREATE'").get().n, 80);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue WHERE target_type = 'events_index'").get().n, 1);
+    assert.equal(w.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get().requested_at, Date.now());
+    const rows = w.sqlite.prepare("SELECT target_id, after_json, retention_class FROM audit_logs ORDER BY target_id").all();
+    assert.equal(new Set(rows.map((row) => row.target_id)).size, 80);
+    assert.ok(rows.every((row) =>
+      row.retention_class === "restorable" && JSON.parse(row.after_json).event_group_id === "test-66"
+    ), "all audits are independently restorable with complete snapshots");
+  } finally {
+    restore();
+    w.sqlite.close();
+  }
+});
+
+
+test("Issue #669: corrupted preload JSON and non-string placeholders never bypass D1", async () => {
+  const canonical = actorSnapshotFromRow(null);
+  for (const placeholder of [
+    null, false, 42, {}, "", "null", "[]", "{}", "{broken-json",
+    JSON.stringify({ ...canonical, extra: "injected" }),
+    JSON.stringify({ ...canonical, icon_url: 17 }),
+  ]) {
+    const w = world();
+    const restore = freeze();
+    try {
+      const settings = mapAuditSettings(
+        w.sqlite.prepare("SELECT * FROM system_settings WHERE id = 'default'").get(),
+      );
+      const preload = {
+        settings,
+        actorSnapshotJsonById: { "admin-1": placeholder },
+      };
+      const planned = planAtomicAuditMutationBudget({
+        mutationStatements: [sql`SELECT 1`],
+        expectedMutationChanges: 0,
+        audits: [AUDIT],
+        callerQueryCount: 0,
+        preloaded: preload,
+      });
+      assert.equal(planned.preparationQueryCount, 1, "the invalid actor cannot earn a D1 credit");
+      const [entry] = await prepareAuditLogEntries(w.db, [AUDIT], preload);
+      assert.equal(w.stats.reads.length, 1, "the logger must perform the read charged by the planner");
+      assert.deepEqual(JSON.parse(entry.actor_snapshot_json), {
+        discord_id: "d-1",
+        discord_name: "Admin",
+        x_user_id: "x1",
+        x_name: "XN",
+        icon_url: "https://i/x.png",
+      });
+    } finally {
+      restore();
+      w.sqlite.close();
+    }
+  }
 });

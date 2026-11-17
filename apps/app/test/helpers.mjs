@@ -1,7 +1,7 @@
 // Shared jsdom + contract-fixture helpers for apps/app tests (not a test file).
 import React, { act } from "react";
-import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+
+
 import { JSDOM } from "jsdom";
 
 export const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test/" });
@@ -9,6 +9,9 @@ for (const key of ["window", "document", "navigator", "HTMLElement", "Node"]) {
   Object.defineProperty(globalThis, key, { configurable: true, value: key === "window" ? dom.window : dom.window[key] });
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+// React DOM must initialize after the jsdom globals, otherwise input/change event support is detected incorrectly.
+const { createRoot } = await import("react-dom/client");
+const { MemoryRouter } = await import("react-router-dom");
 
 const DIST = "../.test-dist";
 const contracts = await import(`${DIST}/packages/contracts/src/personal/index.js`);
@@ -69,6 +72,13 @@ export const settings = (over = {}) =>
   });
 export const onboarding = (over = {}) =>
   must(contracts.OnboardingResponseSchema, { user: user(), state: onboardingState(), rules: null, ...over });
+/** Entry screen fixtures are also schema-checked (MIG-0711 U03), not only PersonalUser/OnboardingState. */
+export const entryIndex = (over = {}) =>
+  must(contracts.EntryIndexResponseSchema, {
+    user: user(), state: onboardingState(), events: [], reservedSlots: [],
+    truncated: false, nextOffset: null, ...over,
+  });
+
 
 export const ok = (data) => ({ status: "ok", data });
 const un = { status: "unavailable" };
@@ -88,12 +98,13 @@ export function fakeApi(results = {}) {
     getLibrary: (q, s) => pick("getLibrary", q, s),
     getSettings: (q, s) => pick("getSettings", q, s),
     getOnboarding: (s) => pick("getOnboarding", s),
+    getEntryIndex: (s, offset) => pick("getEntryIndex", offset, s),
   };
 }
 
 /** Every endpoint answers with the same non-ok status (anonymous / banned / unavailable). */
 export const uniformApi = (status) =>
-  fakeApi(Object.fromEntries(["getSession", "getDashboard", "getLibrary", "getSettings", "getOnboarding"].map((n) => [n, { status }])));
+  fakeApi(Object.fromEntries(["getSession", "getDashboard", "getLibrary", "getSettings", "getOnboarding", "getEntryIndex"].map((n) => [n, { status }])));
 
 export async function flush() {
   for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });

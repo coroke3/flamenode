@@ -5,6 +5,7 @@ export const MODULES = [
   ["dash", "app/(auth)/dashboard/page.module.css", "apps/app/src/styles/dashboard.css"],
   ["cgb", "src/components/layout/CostGuardBanner.module.css", "apps/app/src/styles/cost-guard-banner.css"],
   ["onb", "app/(auth)/onboarding/page.module.css", "apps/app/src/styles/onboarding.css"],
+  ["entry", "app/(auth)/entry/page.module.css", "apps/app/src/styles/entry.css"],
   ["settings", "src/components/settings/settings-page.module.css", "apps/app/src/styles/settings.css"],
   ["vcard", "src/components/video/VideoCard.module.css", "apps/app/src/styles/video-card.css"],
   ["vmembers", "src/components/forms/VideoMembersField.module.css", "apps/app/src/styles/video-members.css"],
