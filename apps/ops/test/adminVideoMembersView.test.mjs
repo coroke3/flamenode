@@ -79,16 +79,18 @@ function setup() {
   document.body.append(target);
   const root = createRoot(target);
   const calls = [];
+  const navigations = [];
+  const onNavigate = path => navigations.push(path);
   const fetchFn = (url, init) => {
     const wait = deferred();
     calls.push({ ...wait, url, signal: init?.signal });
     return wait.promise;
   };
   const render = async (videoId) => React.act(async () => {
-    root.render(wrap(React.createElement(AdminVideoMembersReadPage, { videoId, fetchFn })));
+    root.render(wrap(React.createElement(AdminVideoMembersReadPage, { videoId, fetchFn, onNavigate })));
   });
   const cleanup = async () => React.act(async () => { root.unmount(); target.remove(); });
-  return { target, calls, render, cleanup };
+  return { target, calls, render, cleanup, navigations };
 }
 
 test("MIG-0730 U02b already displayed private video A data disappears immediately on B navigation", async () => {
@@ -120,6 +122,46 @@ test("MIG-0730 U02b 403 and obsolete aborted response cannot re-display private 
     await React.act(async () => { ui.calls[1].resolve(json({ reason: "forbidden" }, 403)); });
     assert.match(ui.target.textContent, /権限がありません/);
     assert.doesNotMatch(ui.target.textContent, /PRIVATE_A/);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0730 U02ca: 401 and admin-read 403 redirect, while 404 does not navigate", async () => {
+  const ui = setup();
+  try {
+    await ui.render("a");
+    await React.act(async () => ui.calls[0].resolve(json({ error: "unauthorized" }, 401)));
+    assert.deepEqual(ui.navigations, ["/entry"], "401 sends the operator to login");
+    assert.doesNotMatch(ui.target.textContent, /Alice|PRIVATE/);
+
+    await ui.render("b");
+    await React.act(async () => ui.calls[1].resolve(json({ redirect: "/dashboard" }, 403)));
+    assert.deepEqual(ui.navigations, ["/entry", "/dashboard"],
+      "admin-read 403 returns to the authorized dashboard");
+
+    await ui.render("c");
+    await React.act(async () => ui.calls[2].resolve(json({ redirect: "/entry" }, 403)));
+    assert.deepEqual(ui.navigations, ["/entry", "/dashboard", "/dashboard"],
+      "generic allowed redirects cannot change the admin-read 403 target");
+
+    await ui.render("d");
+    await React.act(async () => ui.calls[3].resolve(json({}, 404)));
+    assert.deepEqual(ui.navigations, ["/entry", "/dashboard", "/dashboard"],
+      "404 is not an auth redirect");
+    assert.match(ui.target.textContent, /見つかりません/);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0730 U02ca: an obsolete A authorization error cannot redirect video B", async () => {
+  const ui = setup();
+  try {
+    await ui.render("a");
+    await ui.render("b");
+    assert.equal(ui.calls[0].signal.aborted, true);
+    await React.act(async () => ui.calls[0].resolve(json({ redirect: "/dashboard" }, 403)));
+    assert.deepEqual(ui.navigations, [], "stale A must not redirect B");
+    await React.act(async () => ui.calls[1].resolve(json(snapshot("b"))));
+    assert.deepEqual(ui.navigations, [], "authorized B never redirects");
+    assert.match(ui.target.textContent, /作品 b/);
   } finally { await ui.cleanup(); }
 });
 

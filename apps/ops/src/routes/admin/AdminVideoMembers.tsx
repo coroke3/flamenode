@@ -95,9 +95,11 @@ export function currentAdminVideoMembersResult(
     snapshot.epoch === epoch ? snapshot.result : null;
 }
 
-export function AdminVideoMembersReadPage({ videoId, fetchFn }: {
+export function AdminVideoMembersReadPage({ videoId, fetchFn, onNavigate }: {
   videoId: string;
   fetchFn?: OpsFetch;
+  /** Testing port; the actual Ops navigation uses window.location.assign. */
+  onNavigate?: (path: string) => void;
 }): React.ReactElement {
   const [snapshot, setSnapshot] = React.useState<AdminVideoMembersReadSnapshot | null>(null);
   const identity = React.useRef({ videoId, fetchFn, epoch: 0 });
@@ -115,6 +117,18 @@ export function AdminVideoMembersReadPage({ videoId, fetchFn }: {
   }, [videoId, fetchFn, epoch]);
 
   const result = currentAdminVideoMembersResult(videoId, fetchFn, epoch, snapshot);
+  // D-17-2: a private read's 401/403 is a navigation decision, not a
+  // terminal in-page error. Never redirect from an obsolete A→B→A snapshot.
+  // Only /dashboard is a valid admin-read 403 target, even if a generic
+  // shared Ops GET client accepts additional redirect destinations.
+  const redirectTo = result?.status === "anonymous" ? "/entry"
+    : result?.status === "forbidden" ? "/dashboard" : null;
+  React.useEffect(() => {
+    if (!redirectTo) return;
+    if (onNavigate) onNavigate(redirectTo);
+    else window.location.assign(redirectTo);
+  }, [redirectTo, onNavigate]);
+
   if (!result) return <p role="status" aria-busy="true">読み込み中...</p>;
   if (result.status === "notFound") return <p role="alert">作品または公開参加者設定が見つかりません。</p>;
   if (result.status === "anonymous") return <p role="alert">再ログインが必要です。</p>;
