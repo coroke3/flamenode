@@ -43,15 +43,24 @@ export function AdminVideoMembersEditorPreview({
   const guardedSave = React.useMemo<AdminVideoMembersSave | undefined>(() => {
     if (!save) return undefined;
     return async formData => {
-      // The form contains a mutable DOM hidden input, not an authenticated
-      // route identity. A forged/duplicate video_id must never reach an
-      // injected SA-085 port, even if that port trusts its FormData.
-      let matchesVideo = false;
+      // FormData is mutable, not an authenticated submission. Independently
+      // bind all transport keys before giving them to an injected SA-085 port:
+      // hidden false + optional checked true, and one canonical member value.
+      // A duplicate or reordered field could be interpreted differently by
+      // another port (e.g. get() versus getAll()/getLast()).
+      let canonicalForm = false;
       try {
         const ids = formData.getAll("video_id");
-        matchesVideo = ids.length === 1 && ids[0] === videoId;
+        const flags = formData.getAll("is_collab");
+        const members = formData.getAll("members_json");
+        const off = flags.length === 1 && flags[0] === "false";
+        const on = flags.length === 2 &&
+          flags[0] === "false" && flags[1] === "true";
+        canonicalForm = ids.length === 1 && ids[0] === videoId &&
+          members.length === 1 && typeof members[0] === "string" &&
+          (on || (off && members[0] === "[]"));
       } catch { /* Malformed FormData is not a write capability. */ }
-      if (!matchesVideo) {
+      if (!canonicalForm) {
         return { ok: false, message: "参加者設定の入力を確認してください。" };
       }
       const ongoing = writesInFlightByVideo.get(videoId);

@@ -1333,3 +1333,85 @@ test("MIG-0730 U02bu: forged or duplicate hidden video_id cannot reach injected 
     target.remove();
   }
 });
+
+test("MIG-0730 U02bv: duplicate members_json or altered collaboration flags cannot reach an injected save port", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const sent = [];
+  let refreshes = 0;
+  const adapters = {
+    save: async payload => {
+      sent.push({
+        ids: payload.getAll("video_id"),
+        flags: payload.getAll("is_collab"),
+        members: payload.getAll("members_json"),
+      });
+      return { ok: true, message: "VALIDATED_SAVE" };
+    },
+    searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null }),
+    applyPermissionBatch: async () => ({ ok: true }),
+    onSaved: () => { refreshes++; },
+  };
+  const submit = async () => React.act(async () => {
+    const e = new dom.window.Event("submit", { bubbles: true, cancelable: true });
+    target.querySelector("form").dispatchEvent(e);
+    assert.equal(e.defaultPrevented, true);
+  });
+  const hidden = (name, value) => {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    target.querySelector("form").append(input);
+    return input;
+  };
+  try {
+    await React.act(async () => root.render(React.createElement(AdminVideoMembersEditorPreview, {
+      videoId: "U02BV", data: data("U02BV", "CURRENT"), ...adapters,
+    })));
+    const extraMember = hidden("members_json", "[]");
+    await submit();
+    assert.equal(sent.length, 0, "duplicate member payload must not pass to save");
+    assert.equal(refreshes, 0);
+    assert.match(target.textContent, /参加者設定の入力を確認してください/);
+    extraMember.remove();
+
+    const extraFlag = hidden("is_collab", "true");
+    await submit();
+    assert.equal(sent.length, 0, "trailing duplicate ON flag must not pass");
+    extraFlag.remove();
+
+    const baseFlag = target.querySelector('input[name="is_collab"][type="hidden"]');
+    assert.ok(baseFlag);
+    baseFlag.value = "true";
+    await submit();
+    assert.equal(sent.length, 0, "forged hidden true cannot authorize an ON write");
+    baseFlag.value = "false";
+
+    await submit();
+    assert.equal(sent.length, 1, "valid ON form still saves");
+    assert.deepEqual(sent[0].ids, ["U02BV"]);
+    assert.deepEqual(sent[0].flags, ["false", "true"]);
+    assert.deepEqual(sent[0].members.map(v => JSON.parse(v).map(x => x.name)), [["CURRENT"]]);
+    assert.equal(refreshes, 1);
+
+    const checkbox = target.querySelector('input[name="is_collab"][type="checkbox"]');
+    await React.act(async () => checkbox.click());
+    assert.equal(checkbox.checked, false);
+    const synthetic = target.querySelector('form > section > input[name="members_json"]');
+    assert.ok(synthetic);
+    synthetic.value = '[{"name":"FORGED_OFF"}]';
+    await submit();
+    assert.equal(sent.length, 1, "OFF may not smuggle nonempty members");
+    synthetic.value = "[]";
+    await submit();
+    assert.equal(sent.length, 2, "canonical OFF request must still save");
+    assert.deepEqual(sent[1].flags, ["false"]);
+    assert.deepEqual(sent[1].members, ["[]"]);
+    assert.equal(refreshes, 2);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
