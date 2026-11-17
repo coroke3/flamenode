@@ -698,3 +698,29 @@ test("MIG-0650 U03aa non-byte stream chunks fail closed; empty byte chunks prese
   assert.deepEqual(accepted, { kind: "ok", value: valid() },
     "zero-length byte chunks must not change valid JSON semantics");
 });
+
+test("MIG-0650 U03ab rejects invalid URL ID before costly JSON body, after admin guard", async () => {
+  const invalidPath = "/" + "v".repeat(65) + "/members";
+  const oversized = { ...valid(), extra: "X".repeat(MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES) };
+
+  const admin = fixture();
+  const rejected = await admin.request(invalidPath, oversized);
+  assert.equal(rejected.status, 400, "invalid URL must reject before body-size 413");
+  assert.deepEqual(await rejected.json(), {
+    ok: false,
+    message: "対象作品が指定されていません。",
+  });
+  assert.equal(rejected.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(admin.stats(), { invoked: 1, prematureDb: 0 });
+
+  // The early URL check must never bypass the admin identity guard.
+  const forbidden = fixture({ role: "user" });
+  const denied = await forbidden.request(invalidPath, oversized);
+  assert.equal(denied.status, 403);
+  assert.deepEqual(forbidden.stats(), { invoked: 1, prematureDb: 0 });
+
+  // Valid paths still enforce the existing 256KiB body ceiling.
+  const normal = await admin.request(endpoint, oversized);
+  assert.equal(normal.status, 413);
+  assert.deepEqual(admin.stats(), { invoked: 2, prematureDb: 0 });
+});
