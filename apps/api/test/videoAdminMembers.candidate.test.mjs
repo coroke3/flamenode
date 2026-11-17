@@ -1456,6 +1456,61 @@ test("MIG-0650 U03bm 51st D1 read fails BEFORE provider call and cannot bypass c
 });
 
 
+test("MIG-0650 U03bo blank D1 facade does not leak raw providers via extra properties or reflection", async () => {
+  const { createAdminMemberD1ReadMeter } =
+    await import("../src/routes/videos/adminMemberD1ReadMeter.ts");
+  let reads = 0;
+  let rawGetterCalls = 0;
+  let statementGetterCalls = 0;
+  const rawStmt = {
+    bind() { return this; },
+    async first() { reads++; return { id: "v_safe" }; },
+    async all() { reads++; return { results: [{ id: "v_safe" }] }; },
+    async raw() { reads++; return [["v_safe"]]; },
+    run() { throw Error("raw writer must not be reachable"); },
+    get rawHandle() {
+      statementGetterCalls++;
+      return { run: () => { throw Error("unmetered statement"); } };
+    },
+  };
+  const rawDb = {
+    prepare(sql) {
+      assert.equal(sql, "SELECT id FROM videos");
+      return rawStmt;
+    },
+    get rawHandle() {
+      rawGetterCalls++;
+      return { prepare: () => rawStmt };
+    },
+  };
+  const meter = createAdminMemberD1ReadMeter(rawDb);
+  assert.deepEqual(Reflect.ownKeys(meter.binding), [],
+    "no raw binding properties are visible by reflection");
+  assert.equal(Object.getPrototypeOf(meter.binding), null);
+  assert.equal(meter.binding.rawHandle, undefined,
+    "host-owned object-valued handles must be unreachable");
+  assert.equal(rawGetterCalls, 0, "untrusted binding getter must never run");
+
+  const stmt = meter.binding.prepare("SELECT id FROM videos");
+  assert.deepEqual(Reflect.ownKeys(stmt), [],
+    "no raw statement properties are visible by reflection");
+  assert.equal(Object.getPrototypeOf(stmt), null);
+  assert.equal(stmt.rawHandle, undefined);
+  assert.equal(statementGetterCalls, 0, "untrusted statement getter must never run");
+  assert.deepEqual(await stmt.first(), { id: "v_safe" });
+  assert.deepEqual((await stmt.bind("v_safe").all()).results, [{ id: "v_safe" }]);
+  assert.deepEqual(await stmt.raw(), [["v_safe"]]);
+  assert.equal(meter.readCount(), 3);
+  assert.equal(reads, 3);
+  assert.throws(() => stmt.run(), {
+    name: "RangeError", message: "video_admin_member_d1_read_meter_mutation_forbidden",
+  });
+  assert.equal(meter.close(), 3);
+  assert.throws(() => stmt.first(), {
+    name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
+  });
+});
+
 test("MIG-0650 U03bn SELECT-only meter refuses DML even when invoked through first/all/raw", async () => {
   const { createAdminMemberD1ReadMeter } =
     await import("../src/routes/videos/adminMemberD1ReadMeter.ts");

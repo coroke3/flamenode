@@ -62,43 +62,46 @@ export function createAdminMemberD1ReadMeter(db: D1Database): AdminMemberD1ReadM
     if (reads >= D1_MAX_BATCH_QUERIES) throw new RangeError(OVER_BUDGET);
     reads++;
   };
+  // Expose a blank facade, NOT a Proxy whose target is the real statement.
+  // Reflective operations and host-specific object-valued properties must
+  // never expose an unmetered D1 handle to a future Hono caller.
   const meteredStatement = (stmt: D1PreparedStatement): D1PreparedStatement =>
-    new Proxy(stmt, {
-      get(target, property) {
+    new Proxy(Object.create(null), {
+      get(_facade, property) {
         if (property === "bind") return (...args: unknown[]) => {
           assertOpen();
-          return meteredStatement(Reflect.apply(target.bind, target, args));
+          return meteredStatement(Reflect.apply(stmt.bind, stmt, args));
         };
         if (property === "first" || property === "all" || property === "raw") {
-          const method = Reflect.get(target, property, target);
+          const method = Reflect.get(stmt, property, stmt);
           return (...args: unknown[]) => {
             nextRead();
-            return Reflect.apply(method, target, args);
+            return Reflect.apply(method, stmt, args);
           };
         }
         if (property === "run") return forbidden;
-        const value = Reflect.get(target, property, target);
-        // Any newly introduced D1 statement method fails closed rather
-        // than silently executing an unmetered query or write.
-        return typeof value === "function" ? forbidden : value;
+        // No other properties, including any provider-owned object, getters,
+        // extension methods or reflective backing target, are exposed.
+        return undefined;
       },
     });
-  const binding = new Proxy(db, {
-    get(target, property) {
+  const binding = new Proxy(Object.create(null), {
+    get(_facade, property) {
       if (property === "prepare") {
         return (sql: string) => {
           assertOpen();
           assertReadOnlySql(sql);
-          return meteredStatement(target.prepare(sql));
+          return meteredStatement(db.prepare(sql));
         };
       }
       if (property === "batch" || property === "exec" ||
           property === "dump" || property === "withSession") return forbidden;
-      const value = Reflect.get(target, property, target);
-      // Protect against new D1 write/query methods not in this allowlist.
-      return typeof value === "function" ? forbidden : value;
+      // An unknown non-function object (such as a raw provider connection)
+      // can be just as unsafe as an unknown method. Expose neither; no getter
+      // on the raw D1 binding is evaluated through this facade.
+      return undefined;
     },
-  });
+  }) as D1Database;
   return {
     binding,
     readCount: () => reads,
