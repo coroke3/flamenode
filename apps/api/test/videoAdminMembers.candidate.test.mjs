@@ -776,3 +776,52 @@ test("MIG-0650 U03ad caps zero-byte streamed reads without waiting on cancellati
     kind: "ok", value: valid(),
   });
 });
+
+
+test("MIG-0650 U03ae aborted stalled upload rejects without waiting for stream cancel", async () => {
+  let cancelCount = 0;
+  const transport = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"members_json":"'));
+      // Never close or enqueue another chunk: the second read cannot finish.
+    },
+    cancel() {
+      cancelCount += 1;
+      return new Promise(() => {});
+    },
+  });
+  const controller = new AbortController();
+  const request = new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: transport,
+    duplex: "half",
+    signal: controller.signal,
+  });
+  let timeout;
+  try {
+    const read = readAdminVideoMembersJsonBody(request);
+    controller.abort();
+    const result = await Promise.race([
+      read,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("aborted upload hung on read or cancel")), 1500);
+      }),
+    ]);
+    assert.deepEqual(result, { kind: "invalid" });
+    assert.ok(cancelCount <= 1, "cancellation remains best effort");
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const preAborted = new AbortController();
+  preAborted.abort();
+  const preAbortedRequest = new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    body: JSON.stringify(valid()),
+    signal: preAborted.signal,
+  });
+  assert.deepEqual(await readAdminVideoMembersJsonBody(preAbortedRequest), {
+    kind: "invalid",
+  }, "no full body must be parsed after an existing abort");
+});
