@@ -58,6 +58,24 @@ export function AdminVideoMembersEditorPreview({
     };
   }, [save, videoId]);
 
+  // The shared Personal field deliberately preserves its CURRENT fallback
+  // wording, but Ops' injected permission port can lose the response AFTER
+  // the server commits. Report uncertainty without leaking provider details
+  // or telling an admin that the permission change definitely failed.
+  const guardedPermission = React.useMemo<FieldProps["applyPermissionBatch"] | undefined>(() => {
+    if (!applyPermissionBatch) return undefined;
+    return async input => {
+      try {
+        return await applyPermissionBatch(input);
+      } catch {
+        return {
+          ok: false,
+          message: "編集権限の反映結果を確認できませんでした。状態を再取得してください。",
+        };
+      }
+    };
+  }, [applyPermissionBatch]);
+
   // This unmounted preview is also callable directly. Reject malformed IDs
   // before touching a potentially private server response.
   if (typeof videoId !== "string" || !videoId || videoId.length > 64 ||
@@ -101,7 +119,7 @@ export function AdminVideoMembersEditorPreview({
       initialMembers={valid.initialMembers}
       disabled={!canEdit}
       searchXUsers={searchXUsers ?? unavailableSearch}
-      applyPermissionBatch={applyPermissionBatch ?? unavailablePermission}
+      applyPermissionBatch={guardedPermission ?? unavailablePermission}
       permissionTargetVideoId={canEdit ? videoId : null}
     />
   );

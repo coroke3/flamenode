@@ -1170,3 +1170,41 @@ test("MIG-0730 U02br: malformed permission port results cannot apply collaborato
     }
   }
 });
+
+test("MIG-0730 U02bs: rejected Ops permission port is unverified, never a proved rollback", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  let calls = 0;
+  const adapters = {
+    save: async () => ({ ok: true }),
+    searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null, hint: null }),
+    applyPermissionBatch: async () => {
+      calls++;
+      throw new Error("PRIVATE_NETWORK_SECRET after server possibly committed");
+    },
+  };
+  try {
+    await React.act(async () => root.render(React.createElement(
+      AdminVideoMembersEditorPreview,
+      { videoId: "A", data: data("A", "CURRENT"), ...adapters },
+    )));
+    const tsv = ["Bob", "bob", "", "", "", "ON"].join("\t");
+    await previewPermissionTsv(target, tsv);
+    await React.act(async () => buttonNamed(target, "変更を反映").click());
+    assert.equal(calls, 1, "ambiguous permission writes must not auto-retry");
+    const dialog = target.querySelector('[role="alertdialog"]');
+    assert.ok(dialog, "unverified permissions must keep the confirmation visible");
+    assert.deepEqual(formPayload(target).map(row => row.name), ["CURRENT"],
+      "a possibly committed permission response must not update local member rows");
+    assert.match(dialog.textContent,
+      /編集権限の反映結果を確認できませんでした。状態を再取得してください。/,
+      "an unknown result must instruct re-fetch rather than declare rollback");
+    assert.doesNotMatch(target.textContent,
+      /PRIVATE_NETWORK_SECRET|編集権限の反映中にエラーが発生しました/,
+      "the private exception and generic CURRENT fallback must not reach Ops");
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
