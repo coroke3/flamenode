@@ -138,6 +138,41 @@ export function buildVideoMemberWriteMutationBatch(
   ].some(hasDuplicateOrEmptyIds)) {
     throw new RangeError("video_member_write_duplicate_or_empty_row_id");
   }
+  // CURRENT only loads managed chapter rows that belong to existing
+  // public members. A future Hono caller must not pass arbitrary same-video
+  // chapter IDs into the JSON1 DELETE/INSERT (which would otherwise erase
+  // unrelated editorial chapters). When chapters change, bind every old ID
+  // to the authorized public before-snapshot and every new ID to the
+  // after-snapshot member whose canonical :member:<index> key it represents.
+  if (chaptersChanged) {
+    const beforeMemberIds = beforeSnapshotRows.map(row => row.id);
+    const nextChapterCountByMemberId = new Map<string, number>();
+    const oldChapterIsManaged = (id: string): boolean =>
+      beforeMemberIds.some(memberId =>
+        id.startsWith(memberId + ":legacy:") ||
+        id.startsWith(memberId + ":member:"));
+    if (existingManagedChapters.some(row => !oldChapterIsManaged(row.id))) {
+      throw new RangeError("video_member_write_unowned_existing_chapter");
+    }
+    for (const row of nextManagedChapters) {
+      const owner = afterSnapshotRows.find(member => {
+        const prefix = member.id + ":member:";
+        if (!row.id.startsWith(prefix)) return false;
+        const suffix = row.id.slice(prefix.length);
+        return /^(0|[1-9][0-9]*)$/.test(suffix) &&
+          Number(suffix) < 30;
+      });
+      if (!owner || row.x_user_id !== owner.x_user_id ||
+          row.visibility !== "public") {
+        throw new RangeError("video_member_write_unowned_next_chapter");
+      }
+      const count = (nextChapterCountByMemberId.get(owner.id) ?? 0) + 1;
+      if (count > 30) {
+        throw new RangeError("video_member_write_member_chapter_limit");
+      }
+      nextChapterCountByMemberId.set(owner.id, count);
+    }
+  }
   // This admin-members flow may only reserve a previously unknown X identity
   // as pending. Profile approval is a separate privileged workflow. The JSON1
   // batch INSERT binds approval_status from each supplied row, so relying on
