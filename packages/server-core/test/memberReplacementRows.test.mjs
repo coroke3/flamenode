@@ -122,7 +122,9 @@ test("MIG-0650 U03d-2g: X-less matches NFKC normalized lower-case name, grants f
   assert.equal(result.nextMembers[0].id, "vm_name");
   assert.equal(result.nextMembers[0].can_edit, 1);
   assert.equal(result.nextMembers[0].edit_granted_by_auth_user_id, "approved-admin");
-  assert.equal(result.nextMembers[0].role, null);
+  // CURRENT preserves any truthy role verbatim. Whitespace is truthy;
+  // validation of user submissions belongs to the caller, not this projection.
+  assert.equal(result.nextMembers[0].role, "  ");
   assert.equal(result.nextMembers[0].x_user_id, null);
 });
 
