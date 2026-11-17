@@ -630,11 +630,16 @@ test("MIG-0730 U02ab: query change never offers stale remote suggestions before 
     assert.equal(requests[0].query, "Alpha");
     await React.act(async () => requests[0].resolve({
       items: [{ id: "alpha_creator", x_name: "ALPHA CANDIDATE" }],
-      hasMore: false, nextOffset: null, hint: null,
+      hasMore: true, nextOffset: 20, hint: null,
     }));
     assert.ok(options().includes("ALPHA CANDIDATE"));
+    assert.ok([...target.querySelectorAll("button")].some(button =>
+      button.textContent.includes("候補をさらに読み込む")));
 
     await edit("Bravo");
+    assert.ok(![...target.querySelectorAll("button")].some(button =>
+      button.textContent.includes("候補をさらに読み込む")),
+      "old query pagination cursor must not survive an input change");
     assert.ok(!options().includes("ALPHA CANDIDATE"),
       "old query candidates must disappear on the input commit, before debounce");
     await waitFor(() => requests.length === 2);
