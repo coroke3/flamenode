@@ -100,7 +100,11 @@ export async function applyAdminVideoMemberPermissionBatch(
       return { ok: false, message: FAILURE };
     }
     const body = json as Record<string, unknown>;
-    if (body.ok !== true || (body.message !== undefined &&
+    // An unmounted SA-084 candidate must not optimistically apply edits on
+    // an unbound {ok:true} receipt. The current upstream Draft still omits
+    // videoId; keep this fail-closed until MIG-0650 agrees on the contract.
+    if (body.ok !== true || body.videoId !== input.videoId ||
+        (body.message !== undefined &&
         (typeof body.message !== "string" || body.message.length > 300))) {
       return { ok: false, message: FAILURE };
     }

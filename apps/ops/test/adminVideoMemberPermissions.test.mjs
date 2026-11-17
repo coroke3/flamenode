@@ -16,7 +16,7 @@ test("MIG-0730 U02f: POST exact candidate SA-084 endpoint with canonical X ID an
   const calls = [];
   const fetchFn = async (path, init) => {
     calls.push({ path, init });
-    return json({ ok: true, message: "saved" });
+    return json({ ok: true, videoId: "video-1", message: "saved" });
   };
   const saved = await applyAdminVideoMemberPermissionBatch(input({ edit_privilege_mode: "admin" }), fetchFn);
   assert.deepEqual(saved, { ok: true, message: "saved" });
@@ -36,7 +36,7 @@ test("MIG-0730 U02f: POST exact candidate SA-084 endpoint with canonical X ID an
 
 test("MIG-0730 U02f: exactly 100 intents are permitted, 101 are blocked pre-network", async () => {
   let calls = 0;
-  const fetchFn = async () => { calls++; return json({ ok: true }); };
+  const fetchFn = async () => { calls++; return json({ ok: true, videoId: "video-1" }); };
   const hundred = Array.from({ length: 100 }, (_, n) => ({
     x_user_id: "member_" + n, display_name: "Member", intent: n % 2 ? "off" : "on",
   }));
@@ -133,10 +133,42 @@ test("MIG-0730 U02l: permission batch preserves encoded safe video path and auth
   const data = input({ videoId: "video with space" });
   const result = await applyAdminVideoMemberPermissionBatch(data, async (path, init) => {
     requests.push({ path, init });
-    return json({ ok: true });
+    return json({ ok: true, videoId: "video with space" });
   });
   assert.deepEqual(result, { ok: true });
   assert.equal(requests.length, 1);
   assert.equal(requests[0].path, "/api/videos/video%20with%20space/collaborators/batch");
   assert.equal(JSON.parse(requests[0].init.body).video_id, "video with space");
+});
+
+test("MIG-0730 U02bi: SA-084 must bind success to the requested video before local permission UI changes", async () => {
+  let requests = 0;
+  const invalidReceipts = [
+    { ok: true },
+    { ok: true, videoId: null },
+    { ok: true, videoId: "" },
+    { ok: true, videoId: "other-video", message: "wrong target" },
+    { ok: true, videoId: 123 },
+    { ok: "true", videoId: "video-1" },
+  ];
+  for (const receipt of invalidReceipts) {
+    const result = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+      requests++;
+      return json(receipt);
+    });
+    assert.deepEqual(result, {
+      ok: false,
+      message: "権限変更を確認できませんでした。状態を再取得してください。",
+    });
+    assert.doesNotMatch(result.message, /wrong target/);
+  }
+  assert.equal(requests, invalidReceipts.length, "ambiguous replies do not trigger retries");
+
+  const valid = await applyAdminVideoMemberPermissionBatch(input(), async (path) => {
+    requests++;
+    assert.equal(path, "/api/videos/video-1/collaborators/batch");
+    return json({ ok: true, videoId: "video-1", message: "verified" });
+  });
+  assert.deepEqual(valid, { ok: true, message: "verified" });
+  assert.equal(requests, invalidReceipts.length + 1);
 });
