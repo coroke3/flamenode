@@ -229,6 +229,7 @@ test("SA-084 authenticated middleware + real SQLite D1: permission, strict audit
     assert.equal(res.status, 200, await res.clone().text());
     const result = await res.json();
     assert.equal(result.ok, true);
+    assert.equal(result.videoId, "v_pub", "receipt uses the authorized D1 video, not request JSON");
     assert.equal(result.granted.length, 1);
     const rows = s.sqlite.prepare("SELECT can_edit,is_public_member FROM video_members WHERE video_id='v_pub' AND x_user_id='x_other'").all();
     assert.deepEqual(rows.map(x => [x.can_edit, x.is_public_member]), [[1, 0]]);
@@ -237,6 +238,46 @@ test("SA-084 authenticated middleware + real SQLite D1: permission, strict audit
     assert.ok(s.count("static_rebuild_queue") >= 1);
     assert.equal(s.d1.stats.batches, 1, "DML + audit + rebuild are a single atomic D1 batch");
     assert.equal(s.wakeLoads(), 1, "load wake host only AFTER the atomic commit");
+  } finally {
+    s.sqlite.close();
+  }
+});
+
+test("MIG-0650 U03br: SA-084 bound success receipt includes authorized video for write and idempotent no-op", async () => {
+  const s = integration();
+  try {
+    const path = "/api/videos/v_pub/collaborators/batch";
+    const body = {
+      video_id: "v_pub", edit_privilege_mode: "admin", notify: false,
+      intents: [{ x_user_id: "x_other", display_name: "Other", intent: "on" }],
+    };
+    const first = await s.send("POST", path, body);
+    assert.equal(first.status, 200, await first.clone().text());
+    const committed = await first.json();
+    assert.equal(committed.ok, true);
+    assert.equal(committed.videoId, "v_pub",
+      "a committed mutation must return the authoritative target video ID");
+    assert.equal(s.d1.stats.batches, 1);
+    assert.equal(s.count("audit_logs"), 1);
+    const second = await s.send("POST", path, body);
+    assert.equal(second.status, 200, await second.clone().text());
+    const noOp = await second.json();
+    assert.equal(noOp.ok, true);
+    assert.equal(noOp.videoId, "v_pub",
+      "a verified no-op must not become unbound success");
+    assert.equal(s.d1.stats.batches, 1,
+      "repeated intent does not commit another D1 batch");
+    assert.equal(s.count("audit_logs"), 1,
+      "repeated intent must not generate a spurious audit");
+    const mismatch = await s.send("POST", path, {
+      ...body, video_id: "other-video",
+    });
+    assert.equal(mismatch.status, 400);
+    const rejected = await mismatch.json();
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.videoId, undefined,
+      "failed / unauthorized requests must not echo a target receipt");
+    assert.equal(s.d1.stats.batches, 1);
   } finally {
     s.sqlite.close();
   }

@@ -41,7 +41,7 @@ import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../ad
 
 type Ctx = Context<AppEnv>;
 type AuthorizedVideo = NonNullable<Awaited<ReturnType<typeof loadAuthorizedPermissionVideo>>>;
-type Result = { ok: boolean; message?: string; granted?: string[]; revoked?: string[]; unchanged?: number };
+type Result = { ok: boolean; videoId?: string; message?: string; granted?: string[]; revoked?: string[]; unchanged?: number };
 type Status = 200 | 400 | 403 | 404 | 413 | 500 | 503;
 type WriteInput = {
   videoId: string;
@@ -212,7 +212,12 @@ async function executePermissionWrite(
     });
     if (preparation.kind === "error") return failure(c, 400, preparation.message);
     if (preparation.kind === "terminal") {
-      return response(c, preparation.result.ok ? 200 : 400, preparation.result);
+      // Even a successful no-op must bind its receipt to the already
+      // authorized video. Do not attach identity to failure responses.
+      return response(c, preparation.result.ok ? 200 : 400,
+        preparation.result.ok
+          ? { ...preparation.result, videoId: video.id }
+          : preparation.result);
     }
 
     const { xids, existingRows, currentHiddenEditorCount, plan } = preparation;
@@ -279,6 +284,9 @@ async function executePermissionWrite(
 
     return response(c, 200, {
       ok: true,
+      // Authoritative target identity, not the untrusted request JSON.
+      // The UNMOUNTED Ops SA-084 client requires this to confirm a write.
+      videoId: video.id,
       message: input.successMessage ??
         ("編集権限を反映しました（付与 " + plan.grantedNames.length +
          " / 解除 " + plan.revokedNames.length +
