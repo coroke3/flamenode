@@ -4,6 +4,7 @@
 import { MAX_COLLABORATOR_PERMISSION_BATCH } from "@flamenode/domain/video/atomicLimits";
 import { isCanonicalXId, normalizeXId } from "@flamenode/domain/xid";
 import type { OpsFetch } from "./read.js";
+import { tryAcquireAdminVideoWrite } from "./adminVideoWriteLatch.js";
 
 export type AdminPermissionBatchInput = {
   videoId: string;
@@ -16,10 +17,8 @@ export type AdminPermissionBatchResult = { ok: boolean; message?: string };
 const FAILURE = "権限変更を確認できませんでした。状態を再取得してください。";
 const INVALID = "権限変更の入力に誤りがあります。";
 
-// A privilege batch can commit even if the browser loses its response.
-// Keep an in-flight guard across shared-field / Preview remounts in this JS
-// module, but never call this an authorization or cross-tab/DB lock.
-const inFlightPermissionBatches = new Set<string>();
+// SA-084 and SA-085 must not concurrently mutate one video's participant
+// and permission rows in the same browser module graph (U02bm).
 const BUSY = "この作品の権限変更は処理中です。結果を確認してから操作してください。";
 
 function validatedBatch(input: AdminPermissionBatchInput): {
@@ -92,10 +91,8 @@ export async function applyAdminVideoMemberPermissionBatch(
   const videoId = parsed.body.video_id;
   // Check and acquire synchronously, before the first await, to prevent two
   // confirmation submissions in the same JS runtime from issuing two POSTs.
-  if (inFlightPermissionBatches.has(videoId)) {
-    return { ok: false, message: BUSY };
-  }
-  inFlightPermissionBatches.add(videoId);
+  const releaseWrite = tryAcquireAdminVideoWrite(videoId);
+  if (!releaseWrite) return { ok: false, message: BUSY };
   try {
     const response = await fetchFn(
       `/api/videos/${parsed.encodedId}/collaborators/batch`,
@@ -129,6 +126,6 @@ export async function applyAdminVideoMemberPermissionBatch(
   } finally {
     // Never replay an ambiguous committed write. Only an explicit new user
     // action after the first HTTP attempt settles may issue another request.
-    inFlightPermissionBatches.delete(videoId);
+    releaseWrite();
   }
 }
