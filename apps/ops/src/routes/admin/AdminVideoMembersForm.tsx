@@ -139,6 +139,8 @@ function AdminVideoMembersFormForVideo({
   // even when the save function itself remains present.
   // A true-to-true save adapter change may represent a new authorization
   // boundary. Reject the old asynchronous receipt even if the button remains.
+  // The post-save refresh callback is also scoped to the authority that
+  // initiated the PUT. A new callback must not execute an old receipt.
   // Even with the same save function and an enabled button, rotating either
   // privileged member adapter changes the authorization context. A response
   // started under the old ports must not refresh or confirm the new context.
@@ -152,23 +154,24 @@ function AdminVideoMembersFormForVideo({
   const nativeSourceValue = hasHiddenMemberInput
     ? nativeMemberProps!.value as string : null;
   const saveCapabilityRef = React.useRef({
-    enabled, save, searchPort, permissionPort, permissionTarget, nativeSourceValue,
+    enabled, save, onSaved, searchPort, permissionPort, permissionTarget, nativeSourceValue,
   });
   const saveCapabilityEpoch = React.useRef(0);
   React.useLayoutEffect(() => {
     const previous = saveCapabilityRef.current;
     if (previous.enabled !== enabled || previous.save !== save ||
+        previous.onSaved !== onSaved ||
         previous.searchPort !== searchPort ||
         previous.permissionPort !== permissionPort ||
         previous.permissionTarget !== permissionTarget ||
         previous.nativeSourceValue !== nativeSourceValue) {
       saveCapabilityRef.current = {
-        enabled, save, searchPort, permissionPort, permissionTarget, nativeSourceValue,
+        enabled, save, onSaved, searchPort, permissionPort, permissionTarget, nativeSourceValue,
       };
       saveCapabilityEpoch.current += 1;
       setResult(null);
     }
-  }, [enabled, save, searchPort, permissionPort, permissionTarget, nativeSourceValue]);
+  }, [enabled, save, onSaved, searchPort, permissionPort, permissionTarget, nativeSourceValue]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
