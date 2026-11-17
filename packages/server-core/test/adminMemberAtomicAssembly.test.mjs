@@ -95,7 +95,7 @@ test("MIG-0650 U03ax: members CAS, metadata, strict audits and full Queue preser
   const cas = { kind: "public-member-cas" };
   const audit = {
     table_name: "video_members_set",
-    target_id: "video-1", operation: "UPDATE",
+    target_id: "video-1", operation: "MERGE",
     actor_user_id: "admin", strict: true,
     before: {
       id: "video-1",
@@ -105,6 +105,7 @@ test("MIG-0650 U03ax: members CAS, metadata, strict audits and full Queue preser
         is_public_member: 1,
       }],
     },
+    after: { id: "video-1", rows: [] },
   };
   const result = await assembleAdminVideoMemberAtomicPlan(db, input({
     target: { ...target, collaboration_type: "collab" },
@@ -140,9 +141,10 @@ test("MIG-0650 U03ax: private member changes do not enqueue public user projecti
   const { db } = capturedDb();
   const audit = {
     table_name: "video_members_set",
-    target_id: "video-1",
+    target_id: "video-1", operation: "MERGE",
     actor_user_id: "admin", strict: true,
     before: { id: "video-1", rows: [] },
+    after: { id: "video-1", rows: [] },
   };
   const result = await assembleAdminVideoMemberAtomicPlan(db, input({
     target: { ...target, visibility_status: "private" },
@@ -234,4 +236,72 @@ test("MIG-0650 U03ay: audit, target, actor and row-count integrity reject before
   assert.equal(result.plan.audits[0], validAudit);
   assert.deepEqual(memberPlanInput.expectedChanges, [null],
     "assembly does not mutate original member CAS change assertions");
+});
+
+test("MIG-0650 U03az: unknown/duplicate audit types and foreign snapshots fail before SQL", async () => {
+  const canonical = {
+    table_name: "video_members_set",
+    target_id: "video-1", operation: "MERGE",
+    actor_user_id: "admin", strict: true,
+    before: { id: "video-1", rows: [] },
+    after: { id: "video-1", rows: [] },
+  };
+  const validX = {
+    table_name: "x_users_member_batch",
+    target_id: "video-1", operation: "MERGE",
+    actor_user_id: "admin", strict: true,
+    before: null,
+    after: { id: "video-1", rows: [] },
+  };
+  const invalid = [
+    [{ ...canonical, table_name: "videos" }],
+    [{ ...canonical, table_name: "video_members" }],
+    [{ ...canonical, operation: "DELETE" }],
+    [{ ...canonical, before: { id: "another-video", rows: [] } }],
+    [{ ...canonical, after: { id: "another-video", rows: [] } }],
+    [{ ...canonical, before: null }],
+    [{ ...canonical, after: null }],
+    [canonical, canonical],
+    [{ ...validX, before: { id: "video-1", rows: [] } }],
+    [{ ...validX, after: { id: "another-video", rows: [] } }],
+  ];
+  for (const audits of invalid) {
+    const { db, planned } = capturedDb();
+    await assert.rejects(
+      () => assembleAdminVideoMemberAtomicPlan(db, input({
+        isCollab: true,
+        membersPlan: memberPlan([{ kind: "member-CAS" }], [null], audits),
+      })),
+      { name: "RangeError", message: "video_admin_member_atomic_assembly_invalid_audit" },
+    );
+    assert.equal(planned.length, 0, "malformed audit cannot allocate metadata or Queue SQL");
+  }
+  for (const audit of [
+    canonical,
+    validX,
+    {
+      ...canonical,
+      table_name: "video_chapters_member_set",
+    },
+    {
+      ...canonical,
+      table_name: "video_member_hidden_carry_cleanup",
+      operation: "DELETE",
+    },
+  ]) {
+    const { db } = capturedDb();
+    const result = await assembleAdminVideoMemberAtomicPlan(db, input({
+      membersPlan: memberPlan([{ kind: "member-CAS" }], [null], [audit]),
+      isCollab: true,
+    }));
+    assert.equal(result.plan.audits[0], audit);
+    assert.equal(result.noOp, false);
+  }
+  const { db } = capturedDb();
+  const paired = await assembleAdminVideoMemberAtomicPlan(db, input({
+    isCollab: true,
+    membersPlan: memberPlan([{ kind: "member-CAS" }], [null], [validX, canonical]),
+  }));
+  assert.deepEqual(paired.plan.audits.slice(0, 2), [validX, canonical],
+    "distinct CURRENT audit categories keep their canonical order and identity");
 });
