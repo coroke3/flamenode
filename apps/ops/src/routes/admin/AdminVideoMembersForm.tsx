@@ -68,19 +68,22 @@ function AdminVideoMembersFormForVideo({
   // be read-only, belong to another video, serialize to a different field, or
   // lack one of its required privileged adapters. OFF would otherwise submit a
   // locally synthesized members_json=[] even though that field is unwriteable.
-  const hasMemberEditor = Boolean(
-    (sharedEditor &&
-      (sharedEditor.disabled === undefined || sharedEditor.disabled === false) &&
-      (sharedEditor.hiddenName === undefined || sharedEditor.hiddenName === "members_json") &&
-      sharedEditor.permissionTargetVideoId === video.id &&
-      typeof sharedEditor.searchXUsers === "function" &&
-      typeof sharedEditor.applyPermissionBatch === "function") ||
-    (React.isValidElement(membersField) &&
-      membersField.type === "input" &&
-      (membersField.props as { type?: unknown }).type === "hidden" &&
-      (membersField.props as { name?: unknown }).name === "members_json")
+  const hasHiddenMemberInput = React.isValidElement(membersField) &&
+    membersField.type === "input" &&
+    (membersField.props as { type?: unknown }).type === "hidden" &&
+    (membersField.props as { name?: unknown }).name === "members_json";
+  // A known shared editor may keep *local* collaboration drafts even while
+  // its save adapter is unavailable. This must not imply write authorization.
+  const hasMemberEditor = sharedEditor !== null || hasHiddenMemberInput;
+  const writableMemberEditor = hasHiddenMemberInput || Boolean(
+    sharedEditor &&
+    (sharedEditor.disabled === undefined || sharedEditor.disabled === false) &&
+    (sharedEditor.hiddenName === undefined || sharedEditor.hiddenName === "members_json") &&
+    sharedEditor.permissionTargetVideoId === video.id &&
+    typeof sharedEditor.searchXUsers === "function" &&
+    typeof sharedEditor.applyPermissionBatch === "function"
   );
-  const enabled = Boolean(save) && hasMemberEditor;
+  const enabled = Boolean(save) && writableMemberEditor;
   // Losing the required member field is also a write-capability revocation,
   // even when the save function itself remains present.
   // A true-to-true save adapter change may represent a new authorization

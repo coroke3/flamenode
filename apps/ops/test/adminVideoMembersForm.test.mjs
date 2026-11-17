@@ -612,10 +612,17 @@ test("MIG-0730 U02ar: canonical shared member field must match video and have li
     try {
       await ui.render();
       let toggle = ui.target.querySelector('input[name="is_collab"][type="checkbox"]');
-      assert.equal(toggle.disabled, true, "read-only or wrong-target canonical editor cannot grant writes");
-      assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+      assert.equal(toggle.disabled, false,
+        "recognized canonical editor may retain a local collaboration draft without write privilege");
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null,
+        "read-only or wrong-target canonical editor cannot grant writes");
       await ui.submit();
       assert.equal(writes, 0, "no write from unprivileged ON editor");
+      await React.act(async () => toggle.click());
+      assert.equal(toggle.checked, false, "unauthorized local OFF draft is still possible");
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+      await ui.submit();
+      assert.equal(writes, 0, "local OFF draft must never authorize a destructive save");
 
       await ui.render({
         video: { id: "v2", title: "Individual", collaboration_type: null },
@@ -626,7 +633,8 @@ test("MIG-0730 U02ar: canonical shared member field must match video and have li
       // For wrong-target fixture v2, the video now matches; it must be tested
       // separately, so only assert this second state for the other variants.
       if (props.permissionTargetVideoId !== "v2") {
-        assert.equal(toggle.disabled, true);
+        assert.equal(toggle.disabled, false,
+          "a recognized editor remains locally draftable while write capability is absent");
         assert.equal(ui.target.querySelector('button[type="submit"]'), null);
         await ui.submit();
         assert.equal(writes, 0, "read-only/mismatched OFF editor cannot delete members");
