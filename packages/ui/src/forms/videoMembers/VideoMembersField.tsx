@@ -639,6 +639,17 @@ function VideoMembersFieldForTarget({
     setBulkPreview(null);
   }, [permissionCapability, applyPermissionBatch]);
 
+  // With a new-video/absent permission target the permissionCapability above
+  // remains null across read-only transitions. Retire any pending bulk replace
+  // confirmation on a global edit capability loss as well.
+  React.useLayoutEffect(() => {
+    if (!disabled) return;
+    pendingApplyRef.current = null;
+    setReplaceConfirmOpen(false);
+    setPermConfirmOpen(false);
+    setBulkPreview(null);
+  }, [disabled]);
+
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     if (disabled) return;
     const text = e.clipboardData.getData("text");
@@ -740,6 +751,11 @@ function VideoMembersFieldForTarget({
 
   /** 置き換え確認後、権限intentがあれば編集権限の確認dialogへ進む。 */
   const onReplaceConfirmed = () => {
+    if (disabled) {
+      pendingApplyRef.current = null;
+      setReplaceConfirmOpen(false);
+      return;
+    }
     setReplaceConfirmOpen(false);
     if (
       bulkPreview &&

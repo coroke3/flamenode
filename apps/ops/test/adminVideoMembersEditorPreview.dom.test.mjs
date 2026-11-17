@@ -872,3 +872,50 @@ test("MIG-0730 U02ag: global disabled blocks chapter inputs in both card and tab
     target.remove();
   }
 });
+
+
+test("MIG-0730 U02aj: no-target replacement confirmation retires on read-only transition", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const props = {
+    initialMembers: [member("CURRENT")],
+    searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null }),
+    applyPermissionBatch: async () => ({ ok: false }),
+    // An unsaved Personal video has no permissionTargetVideoId. Its
+    // permissionCapability stays null even when disabled toggles.
+  };
+  const render = disabled => React.act(async () => root.render(
+    React.createElement(VideoMembersField, { ...props, disabled })
+  ));
+  try {
+    await render(false);
+    const original = formPayload(target);
+    const textarea = target.querySelector("#members-tsv-input");
+    assert.ok(textarea);
+    await React.act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(textarea), "value")?.set;
+      assert.ok(setter);
+      setter.call(textarea, "NEXT\tnext\t\t\t\t");
+      textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await React.act(async () => buttonNamed(target, "内容を確認").click());
+    assert.match(target.textContent, /確認（1行）/);
+    await React.act(async () => buttonNamed(target, "現在のメンバーを置き換え").click());
+    assert.ok(target.querySelector('[role="alertdialog"]'));
+    assert.deepEqual(formPayload(target), original);
+
+    await render(true);
+    assert.equal(target.querySelector('[role="alertdialog"]'), null,
+      "permission loss must retire the replace confirmation even without a permission video target");
+    assert.deepEqual(formPayload(target), original,
+      "a stale confirmation must not replace members after editing is disabled");
+    await render(false);
+    assert.equal(target.querySelector('[role="alertdialog"]'), null,
+      "restoring edit capability cannot resurrect the old confirmation");
+    assert.deepEqual(formPayload(target), original);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
