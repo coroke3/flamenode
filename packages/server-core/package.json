@@ -13,6 +13,7 @@
     "./video/memberSetSnapshot": "./src/video/memberSetSnapshot.ts",
     "./video/chapterJsonChunking": "./src/video/chapterJsonChunking.ts",
     "./video/memberChapterAudit": "./src/video/memberChapterAudit.ts",
+    "./video/memberChapterRows": "./src/video/memberChapterRows.ts",
     "./video/memberChapterSql": "./src/video/memberChapterSql.ts",
     "./video/hiddenMemberCarrySql": "./src/video/hiddenMemberCarrySql.ts",
     "./video/memberPermissionCarry": "./src/video/memberPermissionCarry.ts",
