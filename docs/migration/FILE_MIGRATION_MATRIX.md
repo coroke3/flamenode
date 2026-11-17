@@ -1589,100 +1589,6 @@
 | `apps/ops/src/routes/manage/SaveEventTemplateForm.tsx` | TARGET_SKELETON | MIG-0720 U03 SA-035 template save form with synchronous double-submit lock and refresh callback | MIG-0720 | SAME (mounted in EventOverview for admin viewers) | IN_PROGRESS | PR#462 SHA=6d9719293f7a08c42c037441c76acb5584e9fc00 TEST=node --test apps/ops/test/manageOverview.test.mjs  ; PR#462 SHA=1691121db05da632832460bfc3515fa19bfa874b TEST=node --test apps/ops/test/manageOverview.test.mjs (event-scope generation guard, release new-event lock and discard late response; final-head CI pending)  ; PR#462 SHA=c7d548cea44fca902aec895249da2742b07b1535 TEST=apps/ops/test/manageOverview.test.mjs (synchronous unmount layout cleanup for stale-save generation; latest CI pending) ; PR#462 squash fff2905ff3b8661adfdf8f991016a5bc8c4296a5 CI=https://github.com/coroke3/flamenode/actions/runs/43116095631 PASS |
 | `apps/ops/test/manageEventShell.test.mjs` | TEST | MIG-0720 U01: navigation, privilege display, notice regressions | MIG-0720 | apps/ops/src/components/manage/*.tsx | IN_PROGRESS | PR#462 SHA=a38fedb12e4b3cb9b1a16b3c32f0688a75ec6b54 TEST=node --test apps/ops/test/manageEventShell.test.mjs ; PR#462 squash fff2905ff3b8661adfdf8f991016a5bc8c4296a5 CI=https://github.com/coroke3/flamenode/actions/runs/43116095631 PASS |
 | `apps/ops/test/manageOverview.test.mjs` | TEST | MIG-0720 U02..U05 DTO, event/notification scope, 401/403/404, SaveEventTemplateForm (T03/T04), EventAudience (T05), and route SSR regressions | MIG-0720 | SAME | IN_PROGRESS | PR#462 SHA=6d9719293f7a08c42c037441c76acb5584e9fc00 TEST=node --test apps/ops/test/manageOverview.test.mjs  ; PR#462 SHA=2d68bff00ab163ebddcc97235baa79f4f403c273 TEST=node --test apps/ops/test/manageOverview.test.mjs (DOM regressions: A-to-B switch, stale 200/401/409, tampered hidden ID and unmount; final-head CI pending) ; PR#462 squash fff2905ff3b8661adfdf8f991016a5bc8c4296a5 CI=https://github.com/coroke3/flamenode/actions/runs/43116095631 PASS |
-## Future files requiring source/target registration
-
-| Planned path or family | Owning MIG | Status | Required connection |
-| --- | --- | --- | --- |
-| `scripts/d03-fanout-dry-run.mjs` | MIG-0658 | PARITY_VERIFIED | new read-only D-03 fan-out local SQLite report; PR#414 SHA=0f9cdf66979697100a38ecac2bcd8ce2b442bf6f TEST=npm run check:d03-fanout-dry-run (T01–T22) CI=https://github.com/coroke3/flamenode/actions/runs/40311626295 (local synthetic D-03 only; not production cutover) |
-| `scripts/d03-fanout-dry-run.test.mjs` | MIG-0658 | PARITY_VERIFIED | fixture tests T01–T22, including snapshot, approved-X, collisions, immutable SQLite, Windows/space paths, non-file input rejection, WAL/header rejection, symlink/import entrypoint, non-approved owner skip, real migrations schema, read-only handle; PR#414 TEST=npm run check:d03-fanout-dry-run (SHA and CI recorded in work-items/MIG-0658.md) |
-| `apps/ops/{package.json,tsconfig.json,tsconfig.test.json,index.html,vite.config.ts,src/**,test/**}` | MIG-0707 | IN_PROGRESS | U01 package/build scaffold plus U02 RH-001 no-store client and D-17-14 guarded `/manage`/`/admin` placeholders; U03 immutable-only headers and U04 CI steps added; U05a API read/write clients and T05 tests added; remaining U05 shared components/CSS/hooks pending. Final-head CI and independent review pending. |
-| `apps/site/src/gateway/**` | MIG-0405 | IN_PROGRESS | index.ts / visibility.ts / routeShards.ts registered above; build emission of shards and lower-case user dirs is MIG-0409, Route PoC needs approval |
-| `scripts/check-public-site-build-budget.mjs` | MIG-0406 | IN_PROGRESS | created in PR#314; counts `apps/site/dist` by type, warns at 18,000 and fails above 20,000 (Free); CI runs it after the site build |
-| `scripts/benchmark-api-cpu.mjs`, `scripts/benchmark-api-cpu.test.mjs` | MIG-0606 | IN_PROGRESS | U01 harness (new, no CURRENT counterpart; Runtime N): LOCAL-only `wrangler dev --local` / in-process runs of `apps/api` that record CPU p50/p95/p99/max for 4 input kinds; judged by max against ZERO_1102 section 3; never writes production values. U02 full run waits for MIG-0603..0605 ; MIG-0632: PR#457 SHA=78f4d60d0c4e5521e1fc3a17817c148ca4340805 TEST=node --test scripts/benchmark-api-cpu.test.mjs (adds RH-013 upper-bound scenario and D1 raw() stub; additive) CI=https://github.com/coroke3/flamenode/pull/457/checks |
-| `scripts/benchmark-background-cpu.mjs` | MIG-0609 | DONE | LOCAL-only profiler for the 3 background Workers (new, no CURRENT counterpart; Runtime N): 12 named job fixtures + 3 queue consumers + idle cron, normal/limit/invalid/cold x 50 on a freshly seeded local D1/R2/KV, fetch fail-closed trap, G18 golden hash; PR#455 builder-complete 2026-11-01 (MIG-0609 DONE; exact-head CI and independent review recorded on the PR)|
-| `scripts/benchmark-background-cpu.test.mjs` | MIG-0609 | DONE | dry-run, offline fetch trap, canonical-wake validity, fixture/cap drift guard against the worker sources, seed route, synthetic responder allow-list, verdict and markdown renderer tests (33 pass); PR#455 builder-complete 2026-11-01 (MIG-0609 DONE; exact-head CI and independent review recorded on the PR)|
-| `docs/migration/cloudflare/BACKGROUND_CPU.md` | MIG-0609 | DONE | LOCAL measurement table (host, sample counts, noise, per-kind p50/p95/max, verdict, cap), fixture definitions, calibration and the G18 hash; every number labelled LOCAL and simulator-inclusive; PR#455 builder-complete 2026-11-01 (MIG-0609 DONE; exact-head CI and independent review recorded on the PR)|
-| `docs/migration/cloudflare/API_CPU_BENCHMARK.md` | MIG-0606 | IN_PROGRESS | method, conditions, noise floor and per-method table (31 methods plus SA-004..008); unmeasured methods say "not yet measured" |
-
-## Source families (MIG-0622 completeness)
-
-`scripts/check-migration-ledger-completeness.mjs` fails when a tracked non-test file under `app/`, `src/lib/`, `src/components/`, `src/styles/`, `public/`, `workers/`, `cloudflare/` or a listed root config has neither an exact ledger row above nor a family row here. A family row names a directory (`dir/**`) and its **first owner MIG** (the task that decides the disposition, not necessarily the one that extracts it). Exact rows win. When an owner MIG touches a file in a family it adds an exact row in the same PR (the file-progress checker already requires that for changed files). Owners marked `closest` were not decided by a Work Order; the MIG-0901 residual inventory may reassign them.
-
-Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fixtures (`*.fixture.*`), generated or vendored output (`node_modules`, `dist`, `.next`, `.wrangler`, `.astro`, `coverage`). `apps/**` and `packages/**` are owned by `check-migration-file-progress.mjs`; `migrations/**` is owned by the DB task line (MIG-0308); `scripts/**`, `docs/**` and CI files are tooling, not CURRENT product source.
-
-| Family | Kind | First owner MIG | Disposition (closest owner unless stated) | State |
-| --- | --- | --- | --- | --- |
-| `public/brand/**` | HELPER | MIG-0501 | brand images referenced by root layout/manifest (G05); copied to apps/site public | NOT_STARTED |
-| `src/styles/**` | HELPER | MIG-0201 | global CSS replaced by @flamenode/ui tokens/layout CSS | NOT_STARTED |
-| `app/(public)/[id]/**` | HELPER | MIG-0507 | video page CSS module (page.tsx has its own row) | NOT_STARTED |
-| `app/(public)/about/**` | HELPER | MIG-0501 | about page view and CSS | NOT_STARTED |
-| `app/(public)/event/**` | HELPER | MIG-0502 | event pages views/CSS (EventIndexView, ReleaseView, EventSlotsViewerPanel) | NOT_STARTED |
-| `app/(public)/list/**` | HELPER | MIG-0505 | list page view/CSS | NOT_STARTED |
-| `app/(public)/recommend/**` | HELPER | MIG-0505 | recommend page CSS | NOT_STARTED |
-| `app/(public)/rules/**` | HELPER | MIG-0501 | rules page assets | NOT_STARTED |
-| `app/(public)/trending/**` | HELPER | MIG-0505 | trending page CSS | NOT_STARTED |
-| `app/(public)/user/**` | HELPER | MIG-0504 | user pages views/CSS (UserIndexView, UserProfilePage) | NOT_STARTED |
-| `app/(auth)/dashboard/**` | HELPER | MIG-0701 | dashboard CSS | NOT_STARTED |
-| `app/(auth)/entry/**` | HELPER | MIG-0703 | entry CSS | NOT_STARTED |
-| `app/(auth)/onboarding/**` | HELPER | MIG-0701 | onboarding forms/CSS (reads: MIG-0611) | NOT_STARTED |
-| `src/components/admin/**` | HELPER | MIG-0705 | admin components move to apps/ops | NOT_STARTED |
-| `src/components/auth/**` | HELPER | MIG-0802 | sign-out button (Auth.js) | NOT_STARTED |
-| `src/components/event/**` | HELPER | MIG-0502 | event components to @flamenode/ui / apps/site | NOT_STARTED |
-| `src/components/forms/**` | HELPER | MIG-0702 | form components to @flamenode/ui + apps/app | NOT_STARTED |
-| `src/components/layout/**` | HELPER | MIG-0203 | navigation/layout (shared UI; existing exact rows win) | NOT_STARTED |
-| `src/components/manage/**` | HELPER | MIG-0704 | manage components to apps/ops | NOT_STARTED |
-| `src/components/media/**` | HELPER | MIG-0603 | media components (video APIs) | NOT_STARTED |
-| `src/components/notifications/**` | HELPER | MIG-0701 | notification summary UI | NOT_STARTED |
-| `src/components/seo/**` | HELPER | MIG-0501 | JsonLd (G06) | NOT_STARTED |
-| `src/components/settings/**` | HELPER | MIG-0701 | settings screens | NOT_STARTED |
-| `src/components/terms/**` | HELPER | MIG-0703 | terms accept button | NOT_STARTED |
-| `src/components/ui/**` | HELPER | MIG-0202 | primitives in @flamenode/ui | NOT_STARTED |
-| `src/components/user/**` | HELPER | MIG-0504 | user components | NOT_STARTED |
-| `src/components/video/**` | HELPER | MIG-0507 | video components | NOT_STARTED |
-| `src/lib/account/**` | HELPER | MIG-0701 | account menu/summary (dashboard) | NOT_STARTED |
-| `src/lib/admin/**` | HELPER | MIG-0705 | admin loaders/helpers | NOT_STARTED |
-| `src/lib/analytics/**` | HELPER | MIG-0507 | videoViewTrackerCore, island (G07) | NOT_STARTED |
-| `src/lib/api/**` | HELPER | MIG-0601 | CURRENT API route helpers | NOT_STARTED |
-| `src/lib/audit/**` | HELPER | MIG-0613 | audit mutation core | NOT_STARTED |
-| `src/lib/auth/**` | HELPER | MIG-0802 | Auth.js integration (existing exact rows win) | NOT_STARTED |
-| `src/lib/client/**` | HELPER | MIG-0701 | browser-side helpers for SPA | NOT_STARTED |
-| `src/lib/constants/**` | HELPER | MIG-0306 | domain constants | NOT_STARTED |
-| `src/lib/db/**` | HELPER | MIG-0308 | db access helpers (existing exact rows win) | NOT_STARTED |
-| `src/lib/entry/**` | HELPER | MIG-0703 | entry step states | NOT_STARTED |
-| `src/lib/event/**` | HELPER | MIG-0305 | event domain (existing exact rows win) | NOT_STARTED |
-| `src/lib/forms/**` | HELPER | MIG-0702 | form helpers | NOT_STARTED |
-| `src/lib/health/**` | HELPER | MIG-0601 | health checks (RH-017/018 done; deep health follow-up) | NOT_STARTED |
-| `src/lib/import/**` | HELPER | MIG-0705 | import tools (admin) | NOT_STARTED |
-| `src/lib/interactions/**` | HELPER | MIG-0602 | video interactions mutations | NOT_STARTED |
-| `src/lib/manage/**` | HELPER | MIG-0704 | manage loaders | NOT_STARTED |
-| `src/lib/media/**` | HELPER | MIG-0603 | media helpers | NOT_STARTED |
-| `src/lib/moderation/**` | HELPER | MIG-0605 | moderation cases | NOT_STARTED |
-| `src/lib/notifications/**` | HELPER | MIG-0614 | notification batch core (existing exact rows win) | NOT_STARTED |
-| `src/lib/observability/**` | HELPER | MIG-0501 | publicRequestMetrics/flowTrace (G08) | NOT_STARTED |
-| `src/lib/operationMode/**` | HELPER | MIG-0619 | maintenance mode (existing exact rows win) | NOT_STARTED |
-| `src/lib/publicData/**` | HELPER | MIG-0509 | public data loaders become build-time snapshots (existing exact rows win) | NOT_STARTED |
-| `src/lib/queues/**` | HELPER | MIG-0614 | static rebuild enqueue core | NOT_STARTED |
-| `src/lib/slots/**` | HELPER | MIG-0305 | slot domain (existing exact rows win) | NOT_STARTED |
-| `src/lib/staticRebuild/**` | HELPER | MIG-0907 | removed with the static rebuild queue | NOT_STARTED |
-| `src/lib/terms/**` | HELPER | MIG-0306 | terms domain | NOT_STARTED |
-| `src/lib/testing/**` | HELPER | MIG-0901 | test runner helper (residual inventory) | NOT_STARTED |
-| `src/lib/theme/**` | HELPER | MIG-0501 | theme bootstrap (G08) | NOT_STARTED |
-| `src/lib/ui/**` | HELPER | MIG-0202 | floating menu helper to @flamenode/ui | NOT_STARTED |
-| `src/lib/utils/**` | HELPER | MIG-0901 | shared utils (residual inventory; existing exact rows win) | NOT_STARTED |
-| `src/lib/video/**` | HELPER | MIG-0304 | video domain (existing exact rows win) | NOT_STARTED |
-| `src/lib/xid/**` | HELPER | MIG-0618 | xid merge core (existing exact rows win) | NOT_STARTED |
-| `src/lib/youtube/**` | HELPER | MIG-0610 | youtube sync helpers (background jobs split) | NOT_STARTED |
-| `workers/cleanup/**` | WORKER_ENTRY | MIG-0901 | retention/incremental cache (G24: MIG-0904 removes the cache) | NOT_STARTED |
-| `workers/content-jobs/**` | WORKER_ENTRY | MIG-0901 | cron + /rebuild (G17/G18: MIG-0609/0610/0907) | NOT_STARTED |
-| `workers/fast-jobs/**` | WORKER_ENTRY | MIG-0901 | notification queue consumer | NOT_STARTED |
-| `workers/ga-analytics/**` | WORKER_ENTRY | MIG-0627 | GA4 sync and ranking; R2 recent.json consumers (G14) | NOT_STARTED |
-| `workers/json-generator/**` | WORKER_ENTRY | MIG-0907 | removed after build-time snapshots (MIG-0627 first) | NOT_STARTED |
-| `workers/notification-dispatcher/**` | WORKER_ENTRY | MIG-0610 | dispatch and reminders split under 8ms | NOT_STARTED |
-| `workers/score-recalc/**` | WORKER_ENTRY | MIG-0901 | score recalculation worker | NOT_STARTED |
-| `workers/shared/**` | WORKER_ENTRY | MIG-0610 | shared worker runtime (lease, queue, d1 budget) | NOT_STARTED |
-| `workers/sync-jobs/**` | WORKER_ENTRY | MIG-0901 | sync jobs | NOT_STARTED |
-| `workers/youtube-playlist-sync/**` | WORKER_ENTRY | MIG-0901 | playlist sync | NOT_STARTED |
-| `workers/youtube-sync/**` | WORKER_ENTRY | MIG-0610 | youtube sync quota/scheduling | NOT_STARTED |
 | `src/lib/actions/admin-remaining-write.contract.test.mjs` | TEST | Remaining admin writes, including collaborator permission CAS source, obey atomic audited mutations | MIG-0650 | SAME | IN_PROGRESS | PR#473 SHA=ff485e22c557b4f084327ca628e3e8403a9d9a38 TEST=src/lib/actions/admin-remaining-write.contract.test.mjs (shared D1 CAS source contract) |
 | `packages/domain/src/video/adminMemberInput.ts` | HELPER | SA-085 CURRENT/Hono admin video member FormData checkbox boolean contract | MIG-0650 | SAME (CURRENT adminMembers consumer; Hono U03 not mounted) | IN_PROGRESS | PR#473 SHA=acb093aab26f85fa065274637a34477996ee890a TEST=packages/domain/test/adminMemberInput.test.mjs (checkbox repeated/hostile-input regressions; final CI pending) |
 | `packages/domain/src/video/adminMemberSubmission.ts` | HELPER | MIG-0650 U03a SA-085 CURRENT-compatible JSON member/chapter validator with local time parsing | MIG-0650 | SAME (Next submission validator now bridged; Hono remains unmounted) | IN_PROGRESS | PR#473 SHA=fc8eed2792ea7daaae0de3570132659525717e6f TEST=packages/domain/test/adminMemberSubmission.parity.test.mjs CI=exact-head pending ; MIG-0650 PR#473 SHA=4eac92da15bbe156e8ecb46547167eb97d60087e U03b full FormData submission validation composition TEST=packages/domain/test/adminMemberSubmission.parity.test.mjs CI=pending ; MIG-0650 PR#473 SHA=7c4f86941df5d3ac59edf879b727924adbd71049 SA-085 U03c pure dirty/save classification TEST=packages/domain/test/adminMemberSubmission.parity.test.mjs CI=exact-new-head-pending |
@@ -1777,6 +1683,101 @@ Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fix
 | `apps/api/src/routes/videos/adminMembers.ts` | HELPER | MIG-0650 U03e UNMOUNTED Hono SA-085 admin PUT preflight, admin/COST/id/JSON/domain checks; deliberately HTTP 501 without D1 writer | MIG-0650 | NEW (no router mount) | IN_PROGRESS | PR#473 SHA=31dc3cfb479e027bdaa993d64e0c7e5aa1baf882 U03e BLOB=1a5a1c30afad66c31eb2c2efbb2bbf98cc55937c TEST=apps/api/test/videoAdminMembers.candidate.test.mjs CI=exact-head pending; hard STOP until authorized CAS/audit/Queue and large payload parity ; MIG-0650 U03e CI typecheck TS2454 guard middleware child initialized BLOB=b93539da87cd259755ce889c9a42c8fcf8639052  CI=exact-head pending ; MIG-0650 U03g route BLOB=5ace2b7da7d22cd192ce2dbaa804a2eb37f67ca6 rejects non-application/json media before bounded body without altering unmounted HTTP501 save gate CI=exact-head pending ; MIG-0650 U03h AUTHORIZED_VIDEO_BLOB=6b1680a3bac733b95c23ea1ae3eb021aea3123a9 Hono unmounted target existence one bounded D1 pre-read, HTTP404 missing/503 D1 errors, never writes; TEST=apps/api/test/videoAdminMembers.candidate.test.mjs CI=exact-head pending ; MIG-0650 U03i BLOB=cc13d5469b575279b091d05e5a7106d3c183436e one bounded D1 snapshot for CURRENT SA-085 CAS/rebuild: collaboration/visibility/creator/YT/primary-event/updated_at; malformed facts fail-closed HTTP503; UNMOUNTED, HTTP501 valid, CI=exact-head pending ; MIG-0650 U03j PR#473 SHA=bb5aec523aced3ad0177d474872ad6c34d5f0980 TEST=apps/api/test/videoAdminMembers.candidate.test.mjs CI=exact-head pending ; MIG-0650 U03k PR#473 SHA=86b10d7cdfbe3679e4210ad3067ee2a3d275caa8 TEST=apps/api/test/videoAdminMembers.candidate.test.mjs CI=exact-head pending |
 | `apps/api/test/videoAdminMembers.candidate.test.mjs` | TEST | MIG-0650 U03e SA-085 Hono admin guard, path/body mismatch, 101, 64KB, no false commit | MIG-0650 | NEW unmounted candidate tests | IN_PROGRESS | PR#473 SHA=c67c25cfc50bd082ee0c4b5b851dae6edd431e5f U03e BLOB=de07f140163c36c286c8a3bee25349eaa67111f5 CI=exact-head pending ; MIG-0650 U03e test import-vs-stack guard order correction BLOB=39b03259d91d107454b0ef9b00af5f778d1bac31 ensures actual dbMiddleware stack element not import; CI=exact-head pending ; MIG-0650 U03f SHA=56e9837c1555f4cf873ceb8b8bed4b16d9bf094d BLOB=9e1ab3bd7204ca8c0e1740f6caf65c5830b468ce real Hono origin/admin/maintenance D1 guard test + legal CURRENT 100x30 payload 413 incompatibility proof, unmounted, no D1 mutations; CI=exact-head pending ; MIG-0650 U03g regression BLOB=02880c72cfb9db5fe5f2e13d3c6ba0e62a850ad6 text/form/vendor/multipart Content-Type denied; JSON charset accepted HTTP501, zero D1 writes CI=exact-head pending ; MIG-0650 U03h BLOB=0f2b4f01aadbdb9314af27a652d52f2b7cacb55f fake target fail-closed and real SQLite/D1 <=3 guarded reads, missing HTTP404, zero writes CI=exact-head pending ; MIG-0650 U03i BLOB=89e2ba9d49ebfd30f2772e1295b14fed33156cd7 real SQLite/D1 exact one-target-SELECT seven columns, <=3 reads, no writes; seven forged-facts HTTP503 cases CI=exact-head pending ; MIG-0650 U03j PR#473 SHA=1a58b6a848e9b2caff044eef38660ae7f5beaab1 TEST=apps/api/test/videoAdminMembers.candidate.test.mjs CI=exact-head pending ; MIG-0650 U03k PR#473 SHA=4362b9af6d35d2c6a999dec07b19c3efe5867899 TEST=apps/api/test/videoAdminMembers.candidate.test.mjs CI=exact-head pending ; MIG-0650 U03l PR#473 SHA=b377b73c1ea510e5146d61b8957903c00e4c3060 TEST=apps/api/test/videoAdminMembers.candidate.test.mjs CI=exact-head pending ; MIG-0650 U03m PR#473 BLOB=9759fad6824b01c644553caddb74539dae82a7ef TEST=packages/server-core/test/memberWriteAudits.test.mjs CI=exact-head pending ; MIG-0650 U03q PR#473 TEST=full-length legal 100x30 CURRENT validator, 256KiB safe 413 and zero D1 mutation; exact-head CI pending ; MIG-0650 U03r PR#473 TEST=CURRENT-valid escaped control-note 100x30 >20MiB nested JSON and early streaming reject; exact-head CI pending ; MIG-0650 U03t PR#473 TEST=locked and consumed Request body fail closed; new-head CI pending ; MIG-0650 U03u PR#473 TEST=stalled transport cancel cannot hang oversize denial; new-head CI pending |
 | `apps/api/test/videoCollaborators.candidate.test.mjs` | TEST | MIG-0650 SA-082..084 candidate Hono HTTP input, mismatch, 64KB body, no middleware state, no premature DB/Queue | MIG-0650 | NEW Hono workspace candidate tests | IN_PROGRESS | PR#473 SHA=6b44cbbb3cf22e8e316a053f0785e1e4429f8cd6 TEST=npm run test --workspace=@flamenode/api (candidate tests; latest-head CI pending) ; PR#473 SHA=57734361dbc57a72811c5ed56576824a5178de5d TEST=apps/api/test/videoCollaborators.candidate.test.mjs (real full-schema SQLite D1 + origin/session/CostGuard + atomic audit/rebuild/Queue wake host, CI pending) ; PR#473 SHA=04b2511090a1e9bdb9c59ac32447dfb7b15b9e8c TEST=apps/api/test/videoCollaborators.candidate.test.mjs (missing CostGuard/audit preloads 503 without D1; status source contract, CI pending) ; PR#473 SHA=ae37190742fad696d6f51771f25c803621e34d65 TEST=apps/api/test/videoCollaborators.candidate.test.mjs (atomic D1/audit success despite wake host rejection, CI pending) ; PR#473 SHA=293d58adcaddc5414f2d1f053222820b251cb37e TEST=apps/api/test/videoCollaborators.candidate.test.mjs (SA-082 grant, SA-083 revoke, repeat no-op, SA-082/083/084 forbidden actor in real D1; exact CI pending) ; PR#473 SHA=2972137efdd52f565ae156ba6b97ea92958801fe TEST=apps/api/test/videoCollaborators.candidate.test.mjs (default guard stack; enabled/disabled edit_video CostGuard, admin grant/revoke/noop, no D1 or wake on forbidden; pending CI) ; PR#473 SHA=8947f4dc31fe75694d8b338148d89cf3ded3f8cb TEST=apps/api/test/videoCollaborators.candidate.test.mjs (notify=true real D1 audit/outbox/static queue atomic, two aftercommit Queue wake-only messages with feature flag; exact CI pending) ; PR#473 SHA=b841a63b95ca1ad38932ac96e483802c51664a0a TEST=apps/api/test/videoCollaborators.candidate.test.mjs (real D1 stale member set injected after SELECT; atomic CAS rollback asserts no audit/outbox/static queue wake; pending CI) ; PR#473 SHA=fc92a770976209892a3a175b6b406f2d4d499471 TEST=apps/api/test/videoCollaborators.candidate.test.mjs (CI #43229636022 failure on .raw() blind beforeRead race injection; deterministic beforeBatch transaction-edge injection now covers concurrent CAS rollback; exact CI pending) |
+
+## Future files requiring source/target registration
+
+| Planned path or family | Owning MIG | Status | Required connection |
+| --- | --- | --- | --- |
+| `scripts/d03-fanout-dry-run.mjs` | MIG-0658 | PARITY_VERIFIED | new read-only D-03 fan-out local SQLite report; PR#414 SHA=0f9cdf66979697100a38ecac2bcd8ce2b442bf6f TEST=npm run check:d03-fanout-dry-run (T01–T22) CI=https://github.com/coroke3/flamenode/actions/runs/40311626295 (local synthetic D-03 only; not production cutover) |
+| `scripts/d03-fanout-dry-run.test.mjs` | MIG-0658 | PARITY_VERIFIED | fixture tests T01–T22, including snapshot, approved-X, collisions, immutable SQLite, Windows/space paths, non-file input rejection, WAL/header rejection, symlink/import entrypoint, non-approved owner skip, real migrations schema, read-only handle; PR#414 TEST=npm run check:d03-fanout-dry-run (SHA and CI recorded in work-items/MIG-0658.md) |
+| `apps/ops/{package.json,tsconfig.json,tsconfig.test.json,index.html,vite.config.ts,src/**,test/**}` | MIG-0707 | IN_PROGRESS | U01 package/build scaffold plus U02 RH-001 no-store client and D-17-14 guarded `/manage`/`/admin` placeholders; U03 immutable-only headers and U04 CI steps added; U05a API read/write clients and T05 tests added; remaining U05 shared components/CSS/hooks pending. Final-head CI and independent review pending. |
+| `apps/site/src/gateway/**` | MIG-0405 | IN_PROGRESS | index.ts / visibility.ts / routeShards.ts registered above; build emission of shards and lower-case user dirs is MIG-0409, Route PoC needs approval |
+| `scripts/check-public-site-build-budget.mjs` | MIG-0406 | IN_PROGRESS | created in PR#314; counts `apps/site/dist` by type, warns at 18,000 and fails above 20,000 (Free); CI runs it after the site build |
+| `scripts/benchmark-api-cpu.mjs`, `scripts/benchmark-api-cpu.test.mjs` | MIG-0606 | IN_PROGRESS | U01 harness (new, no CURRENT counterpart; Runtime N): LOCAL-only `wrangler dev --local` / in-process runs of `apps/api` that record CPU p50/p95/p99/max for 4 input kinds; judged by max against ZERO_1102 section 3; never writes production values. U02 full run waits for MIG-0603..0605 ; MIG-0632: PR#457 SHA=78f4d60d0c4e5521e1fc3a17817c148ca4340805 TEST=node --test scripts/benchmark-api-cpu.test.mjs (adds RH-013 upper-bound scenario and D1 raw() stub; additive) CI=https://github.com/coroke3/flamenode/pull/457/checks |
+| `scripts/benchmark-background-cpu.mjs` | MIG-0609 | DONE | LOCAL-only profiler for the 3 background Workers (new, no CURRENT counterpart; Runtime N): 12 named job fixtures + 3 queue consumers + idle cron, normal/limit/invalid/cold x 50 on a freshly seeded local D1/R2/KV, fetch fail-closed trap, G18 golden hash; PR#455 builder-complete 2026-11-01 (MIG-0609 DONE; exact-head CI and independent review recorded on the PR)|
+| `scripts/benchmark-background-cpu.test.mjs` | MIG-0609 | DONE | dry-run, offline fetch trap, canonical-wake validity, fixture/cap drift guard against the worker sources, seed route, synthetic responder allow-list, verdict and markdown renderer tests (33 pass); PR#455 builder-complete 2026-11-01 (MIG-0609 DONE; exact-head CI and independent review recorded on the PR)|
+| `docs/migration/cloudflare/BACKGROUND_CPU.md` | MIG-0609 | DONE | LOCAL measurement table (host, sample counts, noise, per-kind p50/p95/max, verdict, cap), fixture definitions, calibration and the G18 hash; every number labelled LOCAL and simulator-inclusive; PR#455 builder-complete 2026-11-01 (MIG-0609 DONE; exact-head CI and independent review recorded on the PR)|
+| `docs/migration/cloudflare/API_CPU_BENCHMARK.md` | MIG-0606 | IN_PROGRESS | method, conditions, noise floor and per-method table (31 methods plus SA-004..008); unmeasured methods say "not yet measured" |
+
+## Source families (MIG-0622 completeness)
+
+`scripts/check-migration-ledger-completeness.mjs` fails when a tracked non-test file under `app/`, `src/lib/`, `src/components/`, `src/styles/`, `public/`, `workers/`, `cloudflare/` or a listed root config has neither an exact ledger row above nor a family row here. A family row names a directory (`dir/**`) and its **first owner MIG** (the task that decides the disposition, not necessarily the one that extracts it). Exact rows win. When an owner MIG touches a file in a family it adds an exact row in the same PR (the file-progress checker already requires that for changed files). Owners marked `closest` were not decided by a Work Order; the MIG-0901 residual inventory may reassign them.
+
+Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fixtures (`*.fixture.*`), generated or vendored output (`node_modules`, `dist`, `.next`, `.wrangler`, `.astro`, `coverage`). `apps/**` and `packages/**` are owned by `check-migration-file-progress.mjs`; `migrations/**` is owned by the DB task line (MIG-0308); `scripts/**`, `docs/**` and CI files are tooling, not CURRENT product source.
+
+| Family | Kind | First owner MIG | Disposition (closest owner unless stated) | State |
+| --- | --- | --- | --- | --- |
+| `public/brand/**` | HELPER | MIG-0501 | brand images referenced by root layout/manifest (G05); copied to apps/site public | NOT_STARTED |
+| `src/styles/**` | HELPER | MIG-0201 | global CSS replaced by @flamenode/ui tokens/layout CSS | NOT_STARTED |
+| `app/(public)/[id]/**` | HELPER | MIG-0507 | video page CSS module (page.tsx has its own row) | NOT_STARTED |
+| `app/(public)/about/**` | HELPER | MIG-0501 | about page view and CSS | NOT_STARTED |
+| `app/(public)/event/**` | HELPER | MIG-0502 | event pages views/CSS (EventIndexView, ReleaseView, EventSlotsViewerPanel) | NOT_STARTED |
+| `app/(public)/list/**` | HELPER | MIG-0505 | list page view/CSS | NOT_STARTED |
+| `app/(public)/recommend/**` | HELPER | MIG-0505 | recommend page CSS | NOT_STARTED |
+| `app/(public)/rules/**` | HELPER | MIG-0501 | rules page assets | NOT_STARTED |
+| `app/(public)/trending/**` | HELPER | MIG-0505 | trending page CSS | NOT_STARTED |
+| `app/(public)/user/**` | HELPER | MIG-0504 | user pages views/CSS (UserIndexView, UserProfilePage) | NOT_STARTED |
+| `app/(auth)/dashboard/**` | HELPER | MIG-0701 | dashboard CSS | NOT_STARTED |
+| `app/(auth)/entry/**` | HELPER | MIG-0703 | entry CSS | NOT_STARTED |
+| `app/(auth)/onboarding/**` | HELPER | MIG-0701 | onboarding forms/CSS (reads: MIG-0611) | NOT_STARTED |
+| `src/components/admin/**` | HELPER | MIG-0705 | admin components move to apps/ops | NOT_STARTED |
+| `src/components/auth/**` | HELPER | MIG-0802 | sign-out button (Auth.js) | NOT_STARTED |
+| `src/components/event/**` | HELPER | MIG-0502 | event components to @flamenode/ui / apps/site | NOT_STARTED |
+| `src/components/forms/**` | HELPER | MIG-0702 | form components to @flamenode/ui + apps/app | NOT_STARTED |
+| `src/components/layout/**` | HELPER | MIG-0203 | navigation/layout (shared UI; existing exact rows win) | NOT_STARTED |
+| `src/components/manage/**` | HELPER | MIG-0704 | manage components to apps/ops | NOT_STARTED |
+| `src/components/media/**` | HELPER | MIG-0603 | media components (video APIs) | NOT_STARTED |
+| `src/components/notifications/**` | HELPER | MIG-0701 | notification summary UI | NOT_STARTED |
+| `src/components/seo/**` | HELPER | MIG-0501 | JsonLd (G06) | NOT_STARTED |
+| `src/components/settings/**` | HELPER | MIG-0701 | settings screens | NOT_STARTED |
+| `src/components/terms/**` | HELPER | MIG-0703 | terms accept button | NOT_STARTED |
+| `src/components/ui/**` | HELPER | MIG-0202 | primitives in @flamenode/ui | NOT_STARTED |
+| `src/components/user/**` | HELPER | MIG-0504 | user components | NOT_STARTED |
+| `src/components/video/**` | HELPER | MIG-0507 | video components | NOT_STARTED |
+| `src/lib/account/**` | HELPER | MIG-0701 | account menu/summary (dashboard) | NOT_STARTED |
+| `src/lib/admin/**` | HELPER | MIG-0705 | admin loaders/helpers | NOT_STARTED |
+| `src/lib/analytics/**` | HELPER | MIG-0507 | videoViewTrackerCore, island (G07) | NOT_STARTED |
+| `src/lib/api/**` | HELPER | MIG-0601 | CURRENT API route helpers | NOT_STARTED |
+| `src/lib/audit/**` | HELPER | MIG-0613 | audit mutation core | NOT_STARTED |
+| `src/lib/auth/**` | HELPER | MIG-0802 | Auth.js integration (existing exact rows win) | NOT_STARTED |
+| `src/lib/client/**` | HELPER | MIG-0701 | browser-side helpers for SPA | NOT_STARTED |
+| `src/lib/constants/**` | HELPER | MIG-0306 | domain constants | NOT_STARTED |
+| `src/lib/db/**` | HELPER | MIG-0308 | db access helpers (existing exact rows win) | NOT_STARTED |
+| `src/lib/entry/**` | HELPER | MIG-0703 | entry step states | NOT_STARTED |
+| `src/lib/event/**` | HELPER | MIG-0305 | event domain (existing exact rows win) | NOT_STARTED |
+| `src/lib/forms/**` | HELPER | MIG-0702 | form helpers | NOT_STARTED |
+| `src/lib/health/**` | HELPER | MIG-0601 | health checks (RH-017/018 done; deep health follow-up) | NOT_STARTED |
+| `src/lib/import/**` | HELPER | MIG-0705 | import tools (admin) | NOT_STARTED |
+| `src/lib/interactions/**` | HELPER | MIG-0602 | video interactions mutations | NOT_STARTED |
+| `src/lib/manage/**` | HELPER | MIG-0704 | manage loaders | NOT_STARTED |
+| `src/lib/media/**` | HELPER | MIG-0603 | media helpers | NOT_STARTED |
+| `src/lib/moderation/**` | HELPER | MIG-0605 | moderation cases | NOT_STARTED |
+| `src/lib/notifications/**` | HELPER | MIG-0614 | notification batch core (existing exact rows win) | NOT_STARTED |
+| `src/lib/observability/**` | HELPER | MIG-0501 | publicRequestMetrics/flowTrace (G08) | NOT_STARTED |
+| `src/lib/operationMode/**` | HELPER | MIG-0619 | maintenance mode (existing exact rows win) | NOT_STARTED |
+| `src/lib/publicData/**` | HELPER | MIG-0509 | public data loaders become build-time snapshots (existing exact rows win) | NOT_STARTED |
+| `src/lib/queues/**` | HELPER | MIG-0614 | static rebuild enqueue core | NOT_STARTED |
+| `src/lib/slots/**` | HELPER | MIG-0305 | slot domain (existing exact rows win) | NOT_STARTED |
+| `src/lib/staticRebuild/**` | HELPER | MIG-0907 | removed with the static rebuild queue | NOT_STARTED |
+| `src/lib/terms/**` | HELPER | MIG-0306 | terms domain | NOT_STARTED |
+| `src/lib/testing/**` | HELPER | MIG-0901 | test runner helper (residual inventory) | NOT_STARTED |
+| `src/lib/theme/**` | HELPER | MIG-0501 | theme bootstrap (G08) | NOT_STARTED |
+| `src/lib/ui/**` | HELPER | MIG-0202 | floating menu helper to @flamenode/ui | NOT_STARTED |
+| `src/lib/utils/**` | HELPER | MIG-0901 | shared utils (residual inventory; existing exact rows win) | NOT_STARTED |
+| `src/lib/video/**` | HELPER | MIG-0304 | video domain (existing exact rows win) | NOT_STARTED |
+| `src/lib/xid/**` | HELPER | MIG-0618 | xid merge core (existing exact rows win) | NOT_STARTED |
+| `src/lib/youtube/**` | HELPER | MIG-0610 | youtube sync helpers (background jobs split) | NOT_STARTED |
+| `workers/cleanup/**` | WORKER_ENTRY | MIG-0901 | retention/incremental cache (G24: MIG-0904 removes the cache) | NOT_STARTED |
+| `workers/content-jobs/**` | WORKER_ENTRY | MIG-0901 | cron + /rebuild (G17/G18: MIG-0609/0610/0907) | NOT_STARTED |
+| `workers/fast-jobs/**` | WORKER_ENTRY | MIG-0901 | notification queue consumer | NOT_STARTED |
+| `workers/ga-analytics/**` | WORKER_ENTRY | MIG-0627 | GA4 sync and ranking; R2 recent.json consumers (G14) | NOT_STARTED |
+| `workers/json-generator/**` | WORKER_ENTRY | MIG-0907 | removed after build-time snapshots (MIG-0627 first) | NOT_STARTED |
+| `workers/notification-dispatcher/**` | WORKER_ENTRY | MIG-0610 | dispatch and reminders split under 8ms | NOT_STARTED |
+| `workers/score-recalc/**` | WORKER_ENTRY | MIG-0901 | score recalculation worker | NOT_STARTED |
+| `workers/shared/**` | WORKER_ENTRY | MIG-0610 | shared worker runtime (lease, queue, d1 budget) | NOT_STARTED |
+| `workers/sync-jobs/**` | WORKER_ENTRY | MIG-0901 | sync jobs | NOT_STARTED |
+| `workers/youtube-playlist-sync/**` | WORKER_ENTRY | MIG-0901 | playlist sync | NOT_STARTED |
+| `workers/youtube-sync/**` | WORKER_ENTRY | MIG-0610 | youtube sync quota/scheduling | NOT_STARTED |
 
 
 **Update rule:** Every file created, moved, removed, or modified as part of a migration MIG must either have an updated row above or an added one in this matrix, with exact new path, owner, state, and evidence. The one-MIG PR must show a per-file before/after list. Never mark `PARITY_VERIFIED` on the basis of only TypeScript compile or an AI assertion.
