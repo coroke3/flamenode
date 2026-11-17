@@ -117,6 +117,10 @@ test("MIG-0650 U03bf rejects spliced or unaccounted-for Queue mutations", () => 
     { ...baseline.assembly, queue: { ...baseline.assembly.queue, expectedChanges: [0] } },
     { ...baseline.assembly, queue: { ...baseline.assembly.queue, acceptedTargetCount: 0 } },
     { ...baseline.assembly, targets: [] },
+    { ...baseline.assembly, targets: [
+      { targetType: "video", targetId: "video-1" },
+      { targetType: "user", targetId: "missing-queue-entry" },
+    ] },
     { ...baseline.assembly, plan: {
       ...baseline.assembly.plan, expectedChanges: [null],
     } },

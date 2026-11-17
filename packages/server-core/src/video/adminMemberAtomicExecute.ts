@@ -72,7 +72,7 @@ export function prepareAdminMemberAtomicExecution(
     queue.statements.length !== queue.expectedChanges.length ||
     !Number.isSafeInteger(queue.acceptedTargetCount) ||
     queue.acceptedTargetCount < 0 ||
-    queue.acceptedTargetCount > assembly.targets.length
+    queue.acceptedTargetCount !== assembly.targets.length
   ) invalid();
 
   if (assembly.noOp) {
