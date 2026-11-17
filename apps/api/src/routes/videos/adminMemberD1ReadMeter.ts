@@ -17,6 +17,22 @@ const FORBIDDEN = "video_admin_member_d1_read_meter_mutation_forbidden";
 const CLOSED = "video_admin_member_d1_read_meter_closed";
 const OVER_BUDGET = "video_admin_member_d1_read_limit_exceeded";
 
+/**
+ * The meter must NEVER be allowed to execute DML disguised as a "read":
+ * D1 supports INSERT...RETURNING through all/first/raw as well as run().
+ *
+ * All CURRENT SA-085 guard + canonical planner reads are SELECT statements.
+ * Reject semicolons (even a final one), leading SQL comments and CTEs rather
+ * than attempting to parse arbitrary multi-statement or write-capable SQL.
+ * This is deliberately narrower than generic SQLite syntax.
+ */
+function assertReadOnlySql(sql: string): void {
+  if (typeof sql !== "string" || !/^\s*select\b/i.test(sql) ||
+      sql.includes(";")) {
+    throw new RangeError(FORBIDDEN);
+  }
+}
+
 export type AdminMemberD1ReadMeter = {
   /** No write, batch, exec, dump or session entrypoints are accessible. */
   binding: D1Database;
@@ -72,6 +88,7 @@ export function createAdminMemberD1ReadMeter(db: D1Database): AdminMemberD1ReadM
       if (property === "prepare") {
         return (sql: string) => {
           assertOpen();
+          assertReadOnlySql(sql);
           return meteredStatement(target.prepare(sql));
         };
       }

@@ -1454,3 +1454,41 @@ test("MIG-0650 U03bm 51st D1 read fails BEFORE provider call and cannot bypass c
     assert.equal(s.d1.stats.batches, 0);
   } finally { s.sqlite.close(); }
 });
+
+
+test("MIG-0650 U03bn SELECT-only meter refuses DML even when invoked through first/all/raw", async () => {
+  const { createAdminMemberD1ReadMeter } =
+    await import("../src/routes/videos/adminMemberD1ReadMeter.ts");
+  const s = realGuardFixture();
+  try {
+    const meter = createAdminMemberD1ReadMeter(s.d1);
+    const before = s.sqlite.prepare(
+      "SELECT collaboration_type FROM videos WHERE id = 'v_two'"
+    ).get().collaboration_type;
+    const forbidden = [
+      "UPDATE videos SET collaboration_type = 'collab' WHERE id = 'v_two' RETURNING id",
+      "INSERT INTO videos (id) VALUES ('forged') RETURNING id",
+      "DELETE FROM videos WHERE id = 'v_two' RETURNING id",
+      "WITH dangerous AS (DELETE FROM videos RETURNING id) SELECT * FROM dangerous",
+      "PRAGMA foreign_keys = OFF",
+      "SELECT 1; DELETE FROM videos",
+      "/* comment */ SELECT 1",
+      "SELECT 1;",
+      "",
+    ];
+    for (const statement of forbidden) {
+      assert.throws(() => meter.binding.prepare(statement), {
+        name: "RangeError",
+        message: "video_admin_member_d1_read_meter_mutation_forbidden",
+      }, statement);
+    }
+    assert.deepEqual(await meter.binding.prepare("  SELECT id FROM videos WHERE id = ?")
+      .bind("v_two").all().then(result => result.results.map(row => row.id)), ["v_two"]);
+    assert.equal(meter.readCount(), 1);
+    assert.equal(s.d1.stats.reads, 1, "forbidden queries never reach the D1 provider");
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(s.sqlite.prepare(
+      "SELECT collaboration_type FROM videos WHERE id = 'v_two'"
+    ).get().collaboration_type, before);
+  } finally { s.sqlite.close(); }
+});
