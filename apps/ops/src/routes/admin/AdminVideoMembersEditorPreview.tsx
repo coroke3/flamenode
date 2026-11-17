@@ -4,7 +4,8 @@ import * as React from "react";
 import { VideoMembersField } from "@flamenode/ui";
 import type { AdminVideoMembersResponse } from "@flamenode/contracts";
 import { AdminVideoMembersResponseSchema } from "@flamenode/contracts";
-import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
+import { MAX_VIDEO_MEMBERS, MAX_COLLABORATOR_PERMISSION_BATCH } from "@flamenode/domain/video/atomicLimits";
+import { normalizeXId, isCanonicalXId } from "@flamenode/domain/xid";
 import { AdminVideoMembersForm, type AdminVideoMembersSave } from "./AdminVideoMembersForm.js";
 
 type FieldProps = React.ComponentProps<typeof VideoMembersField>;
@@ -29,6 +30,67 @@ const unavailablePermission: FieldProps["applyPermissionBatch"] = async () => {
 // member PUT and permission POST must not mutate the same video concurrently.
 // Different tabs/devices still require the server-side D1 CAS (MIG-0650).
 const writesInFlightByVideo = new Map<string, "save" | "permission">();
+
+type PermissionInput = Parameters<FieldProps["applyPermissionBatch"]>[0];
+
+/**
+ * Bind the preview's video identity and privileged intents to a fresh,
+ * single-read DTO before forwarding them to any injected permission port.
+ * The generic injected port might not perform the exact SA-084 validation.
+ */
+export function bindPreviewPermissionInput(
+  input: PermissionInput,
+  expectedVideoId: string,
+): PermissionInput | null {
+  try {
+    if (!input || typeof input !== "object") return null;
+    const suppliedId = input.videoId;
+    const mode = input.edit_privilege_mode;
+    const notify = input.notify;
+    const sourceIntents = input.intents;
+    if (suppliedId !== expectedVideoId || typeof expectedVideoId !== "string" ||
+        !expectedVideoId || expectedVideoId.length > 64 ||
+        expectedVideoId.trim() !== expectedVideoId ||
+        /[\/\\\x00-\x1f]/.test(expectedVideoId) ||
+        expectedVideoId === "." || expectedVideoId === ".." ||
+        notify !== true ||
+        (mode !== undefined && mode !== "admin" && mode !== "event") ||
+        !Array.isArray(sourceIntents)) return null;
+    // Never trust an injected array's iterator; inspect only its bounded
+    // indexed rows and never forward row objects or accessors to the port.
+    const count = sourceIntents.length;
+    if (count < 1 || count > MAX_COLLABORATOR_PERMISSION_BATCH) return null;
+    const intents: PermissionInput["intents"] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < count; i += 1) {
+      const row = sourceIntents[i];
+      if (!row || typeof row !== "object") return null;
+      const rawId = row.x_user_id;
+      const rawName = row.display_name;
+      const intent = row.intent;
+      if (typeof rawId !== "string" || rawId.length > 32 ||
+          typeof rawName !== "string" ||
+          (intent !== "on" && intent !== "off")) return null;
+      const xid = normalizeXId(rawId);
+      const name = rawName.trim();
+      if (!isCanonicalXId(xid) || !name || name.length > 80 || seen.has(xid)) return null;
+      seen.add(xid);
+      intents.push({ x_user_id: xid, display_name: name, intent });
+    }
+    try { encodeURIComponent(expectedVideoId); }
+    catch { return null; }
+    return {
+      videoId: expectedVideoId,
+      ...(mode ? { edit_privilege_mode: mode } : {}),
+      notify: true,
+      intents,
+    };
+  } catch {
+    // Untrusted input accessors must not throw into the private member form.
+    return null;
+  }
+}
+
 
 /**
  * Never show hidden edit-only rows from a forged/oversized snapshot; never turn
@@ -99,8 +161,10 @@ export function AdminVideoMembersEditorPreview({
   const guardedPermission = React.useMemo<FieldProps["applyPermissionBatch"] | undefined>(() => {
     if (!applyPermissionBatch) return undefined;
     return async input => {
-      // One preview must not redirect another video's privilege write.
-      if (!input || input.videoId !== videoId) {
+      // Bind the target once. A getter can otherwise report this preview's
+      // ID here and a different video ID to the injected POST adapter.
+      const boundInput = bindPreviewPermissionInput(input, videoId);
+      if (!boundInput) {
         return {
           ok: false,
           message: "編集権限の反映結果を確認できませんでした。状態を再取得してください。",
@@ -116,7 +180,7 @@ export function AdminVideoMembersEditorPreview({
       // must respect an in-flight PUT/POST even after a React remount.
       writesInFlightByVideo.set(videoId, "permission");
       try {
-        return await applyPermissionBatch(input);
+        return await applyPermissionBatch(boundInput);
       } catch {
         return {
           ok: false,
