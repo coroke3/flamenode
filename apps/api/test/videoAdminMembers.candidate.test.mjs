@@ -490,6 +490,11 @@ test("MIG-0650 U03i forged or corrupted video facts fail closed before any write
     { ...baseline, visibility_status: "forged" },
     { ...baseline, updated_at: "12345" },
     { ...baseline, updated_at: Number.NaN },
+    { ...baseline, updated_at: -1 },
+    { ...baseline, primary_event_id: "" },
+    { ...baseline, primary_event_id: " ev1" },
+    { ...baseline, primary_event_id: "ev1 " },
+    { ...baseline, primary_event_id: "  " },
     { ...baseline, public_member_count: undefined },
     { ...baseline, public_member_count: null },
     { ...baseline, public_member_count: -1 },
@@ -513,6 +518,22 @@ test("MIG-0650 U03i forged or corrupted video facts fail closed before any write
     assert.equal(response.headers.get("cache-control"), "private, no-store");
     assert.deepEqual(f.stats(), { invoked: 1, prematureDb: 0 });
   }
+});
+
+test("MIG-0650 U03bs valid canonical primary event remains accepted at the preflight boundary", async () => {
+  const f = fixture({ targetOverride: {
+    id: "v1", collaboration_type: "collab", visibility_status: "public",
+    creator_x_user_id: null, youtube_video_id: null,
+    primary_event_id: "ev1", updated_at: 0,
+    linked_event_ids_json: JSON.stringify(["ev1", "ev2"]),
+    public_member_count: 0,
+  } });
+  const response = await f.request(endpoint, valid());
+  assert.equal(response.status, 501, "a canonical source must still reach only the unwired save port");
+  assert.deepEqual(await response.json(), {
+    ok: false, message: "参加者設定の保存APIは移行準備中です。",
+  });
+  assert.deepEqual(f.stats(), { invoked: 1, prematureDb: 0 });
 });
 
 test("MIG-0650 U03j existing video and linked events share one bounded authoritative D1 SELECT", async () => {
@@ -1181,6 +1202,7 @@ test("MIG-0650 U03bj strict host boundary rejects incomplete chapters and invali
     { target: { ...target, visibility_status: "forged" } },
     { target: { ...target, updated_at: "10" } },
     { target: { ...target, updated_at: Number.NaN } },
+    { target: { ...target, updated_at: -1 } },
     { target: { ...target, creator_x_user_id: { malformed: true } } },
     { isCollab: false },
     { validated: { members: [member], chaptersByIndex: new Map() } },

@@ -196,7 +196,11 @@ export function createVideoAdminMembersPreflightRoutes(
       // states before the Hono save host is implemented. Only public triggers
       // the public rebuild fanout in the eventual atomic writer.
       !["draft", "pending", "public", "limited", "private", "archived", "voided"].includes(target.visibility_status) ||
-      !Number.isSafeInteger(target.updated_at) ||
+      !Number.isSafeInteger(target.updated_at) || target.updated_at < 0 ||
+      // A blank or non-canonical primary ID would become a bogus rebuild
+      // target. Apply the same trim/nonempty rule as linked D1 event IDs.
+      (target.primary_event_id !== null &&
+        (!target.primary_event_id || target.primary_event_id.trim() !== target.primary_event_id)) ||
       !Number.isSafeInteger(target.public_member_count) ||
       target.public_member_count < 0 ||
       target.public_member_count > MAX_VIDEO_MEMBERS ||

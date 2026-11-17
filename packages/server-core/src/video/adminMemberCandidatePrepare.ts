@@ -136,7 +136,7 @@ export async function prepareAdminVideoMemberCandidateWrite(
     (target.collaboration_type !== "individual" && target.collaboration_type !== "collab") ||
     !["draft", "pending", "public", "limited", "private", "archived", "voided"]
       .includes(target.visibility_status) ||
-    !Number.isSafeInteger(target.updated_at) ||
+    !Number.isSafeInteger(target.updated_at) || target.updated_at < 0 ||
     (target.creator_x_user_id !== null && typeof target.creator_x_user_id !== "string") ||
     typeof actorUserId !== "string" || !actorUserId ||
     typeof isCollab !== "boolean" ||
