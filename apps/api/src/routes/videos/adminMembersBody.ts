@@ -23,15 +23,22 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES) {
-      await reader.cancel().catch(() => undefined);
-      return { kind: "too_large" };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return { kind: "too_large" };
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } catch {
+    // An interrupted streaming upload has not supplied a complete JSON body.
+    // Do not allow it to reach a privileged write, even on a retryable network error.
+    await reader.cancel().catch(() => undefined);
+    return { kind: "invalid" };
   }
   const bytes = new Uint8Array(total);
   let offset = 0;
@@ -40,7 +47,9 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
     offset += chunk.byteLength;
   }
   try {
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    // JSON over HTTP is UTF-8. Default TextDecoder silently replaces invalid
+    // bytes, which can change X IDs/names before validating or saving them.
+    const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? { kind: "ok", value: parsed as Record<string, unknown> }
       : { kind: "invalid" };

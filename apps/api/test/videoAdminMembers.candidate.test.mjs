@@ -462,3 +462,51 @@ test("MIG-0650 U03k bounded body reader ignores lying or absent Content-Length",
   assert.equal(legacy.kind, "too_large",
     "all other privileged admin routes retain ZERO_1102 64KiB default cap");
 });
+
+test("MIG-0650 U03l SA-085 reader rejects malformed UTF-8 instead of altering participant identity", async () => {
+  // JSON.parse succeeds with the replacement character under the default
+  // non-fatal TextDecoder. This must be an invalid request, not a renamed row.
+  const malformed = new Uint8Array([
+    ...new TextEncoder().encode('{"members_json":"'),
+    0xc3, 0x28,
+    ...new TextEncoder().encode('","is_collab":["false","true"]}'),
+  ]);
+  const request = new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: malformed,
+  });
+  const result = await readAdminVideoMembersJsonBody(request);
+  assert.deepEqual(result, { kind: "invalid" });
+});
+
+test("MIG-0650 U03l SA-085 reader treats an interrupted chunked body as invalid", async () => {
+  const brokenStream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"members_json":"'));
+      controller.error(new Error("client upload interrupted"));
+    },
+  });
+  const request = new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: brokenStream,
+    duplex: "half",
+  });
+  const result = await readAdminVideoMembersJsonBody(request);
+  assert.deepEqual(result, { kind: "invalid" });
+});
+
+test("MIG-0650 U03l byte-counted limit rejects multi-byte uploads at the actual 256KiB boundary", async () => {
+  const below = "あ".repeat(Math.floor((MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES - 20) / 3));
+  const body = JSON.stringify({ v: below });
+  const bytes = new TextEncoder().encode(body).byteLength;
+  assert.ok(bytes < MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES);
+  const request = payload => new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ v: payload }),
+  });
+  assert.equal((await readAdminVideoMembersJsonBody(request(below))).kind, "ok");
+  assert.equal((await readAdminVideoMembersJsonBody(request(below + "あ".repeat(10)))).kind, "too_large");
+});
