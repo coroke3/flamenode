@@ -68,3 +68,30 @@ test("MIG-0603: permission lookup failure rejects instead of granting manage sta
     sqlite.close();
   }
 });
+
+test("MIG-0603: video-event association lookup failure rejects for admin and reviewer", async () => {
+  for (const name of ["admin", "mgr"]) {
+    const sqlite = createSqlite();
+    try {
+      seed(sqlite);
+      // An authorized reviewer and a site admin must both re-check the exact
+      // event-video link. No role can turn an unavailable link read into allow.
+      sqlite.exec("DROP TABLE video_events");
+      const d1 = createVideoStatusD1(sqlite);
+      const db = drizzle(d1, { schema });
+      await assert.rejects(
+        checkManageVideoStatusAccess(
+          db,
+          { id: `u_${name}`, role: name === "admin" ? "admin" : "user" },
+          "evA", "v1",
+        ),
+        /video_events|no such table/i,
+        `${name}: cannot grant a status change when the event association is unavailable`,
+      );
+      assert.equal(d1.stats.batches, 0, "no D1 batch after link-read failure");
+      assert.equal(d1.stats.writes, 0, "no D1 writes after link-read failure");
+    } finally {
+      sqlite.close();
+    }
+  }
+});
