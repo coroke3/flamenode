@@ -20,6 +20,7 @@ import {
   isValidPreloadedActorSnapshotJson,
   type PreloadedAuditContext,
 } from "../audit/logger.ts";
+import { D1_MAX_BATCH_QUERIES } from "../audit/mutateBudget.ts";
 import type { AdminMemberAtomicAssembly } from "./adminMemberAtomicAssembly.ts";
 
 export type AdminMemberAtomicExecutionInput = {
@@ -84,6 +85,12 @@ export function prepareAdminMemberAtomicExecution(
       queue.statements.length || queue.acceptedTargetCount ||
       assembly.targets.length || assembly.budget !== null
     ) invalid();
+    // No-op bypasses mutateWithAudit, so enforce the invocation-level
+    // D1 read ceiling here as well. Real requests meter each SELECT; a
+    // forged or miscounted no-op cannot silently evade this final guard.
+    if (callerQueryCount > D1_MAX_BATCH_QUERIES) {
+      throw new RangeError("video_admin_member_atomic_execution_budget_exceeded");
+    }
     return null;
   }
 

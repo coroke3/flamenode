@@ -95,6 +95,35 @@ test("MIG-0650 U03by no-op rejects missing or forged authenticated actor context
   assert.equal(dbAccess, 0, "reject before any D1 or Queue operation");
 });
 
+test("MIG-0650 U03bz no-op enforces measured D1 50-read cap before reporting success", async () => {
+  // Exactly 50 executed SELECTs are within the per-invocation budget for a
+  // no-op (no mutation/audit/Queue queries follow).
+  assert.equal(prepareAdminMemberAtomicExecution(
+    noOpWithCount(D1_MAX_BATCH_QUERIES),
+  ), null);
+  let dbTouches = 0;
+  const neverDb = new Proxy({}, {
+    get() { dbTouches++; throw Error("no-op must not touch a D1 handle"); },
+  });
+  for (const count of [D1_MAX_BATCH_QUERIES + 1, 1000]) {
+    const input = noOpWithCount(count);
+    assert.throws(() => prepareAdminMemberAtomicExecution(input), {
+      name: "RangeError",
+      message: "video_admin_member_atomic_execution_budget_exceeded",
+    });
+    await assert.rejects(
+      executeAdminMemberAtomicCandidate(neverDb, input),
+      { name: "RangeError",
+        message: "video_admin_member_atomic_execution_budget_exceeded" },
+    );
+  }
+  assert.equal(dbTouches, 0, "rejected no-op never reads or writes D1");
+});
+
+function noOpWithCount(callerQueryCount) {
+  return { ...noOp(), callerQueryCount };
+}
+
 test("MIG-0650 U03bf no-queue member write never requests a Queue wake", () => {
   const plan = fixture();
   const result = {
