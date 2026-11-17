@@ -64,3 +64,46 @@ test("SA-085: each invocation owns its result and does not mutate caller inputs"
   assert.deepEqual([...input.affectedCreatorIds], ["alice", "bob"]);
   assert.deepEqual(input.eventIds, ["event-b", "event-a"]);
 });
+
+test("MIG-0650 U03aw: legal 8-event / 200-public-X fanout remains below 256 Queue targets", () => {
+  const eventIds = Array.from({ length: 8 }, (_, i) => "event_" + i);
+  const affectedCreatorIds = new Set(
+    Array.from({ length: 200 }, (_, i) => "creator_" + i),
+  );
+  const targets = adminVideoMembersRebuildTargets({
+    ...base(),
+    publicContentChanged: true,
+    membersPlanChanged: true,
+    eventIds, affectedCreatorIds,
+  });
+  assert.equal(targets.length, 211, "1 video + 1 suggestions + 8 events + 1 index + 200 users");
+  assert.ok(targets.length <= 256, "queue accepts the complete CURRENT fanout");
+  assert.deepEqual(
+    targets.filter(t => t.targetType === "event_release").map(t => t.targetId),
+    eventIds, "all eight event releases are retained in CURRENT order",
+  );
+  assert.equal(targets.filter(t => t.targetType === "user").length, 200);
+  assert.equal(eventIds.length, 8, "planner does not modify caller events");
+  assert.equal(affectedCreatorIds.size, 200, "planner does not modify caller member set");
+});
+
+test("MIG-0650 U03aw: malformed Hono fanout cannot overrun event or public-member bounds", () => {
+  const atMaxEvents = Array.from({ length: 8 }, (_, i) => "event_" + i);
+  const atMaxUsers = new Set(Array.from({ length: 200 }, (_, i) => "creator_" + i));
+  const overEvents = [...atMaxEvents, "event_8"];
+  const overUsers = new Set([...atMaxUsers, "creator_200"]);
+  for (const inputs of [
+    { eventIds: overEvents, affectedCreatorIds: new Set() },
+    { eventIds: atMaxEvents, affectedCreatorIds: overUsers },
+    { eventIds: overEvents, affectedCreatorIds: overUsers, isPublicVideo: false },
+  ]) {
+    assert.throws(
+      () => adminVideoMembersRebuildTargets({
+        ...base(), publicContentChanged: true, membersPlanChanged: true, ...inputs,
+      }),
+      { name: "RangeError", message: "video_admin_member_rebuild_target_limit_exceeded" },
+    );
+  }
+  assert.equal(overEvents.length, 9);
+  assert.equal(overUsers.size, 201);
+});
