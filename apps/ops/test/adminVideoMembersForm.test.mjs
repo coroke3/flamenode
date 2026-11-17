@@ -510,3 +510,62 @@ test("MIG-0730 U02ak: form must never pass collaborator can_edit in members_json
     }
   }
 });
+
+test("MIG-0730 U02ap: arbitrary native field cannot authorize collaboration-OFF destructive PUT", async () => {
+  const invalidEditors = [
+    h("div", null, "not a member editor"),
+    h("span", null, "placeholder"),
+    h("input", { type: "hidden", name: "different_json", value: "[]" }),
+    h("input", { type: "text", name: "members_json", value: "[]" }),
+  ];
+  for (const editor of invalidEditors) {
+    let writes = 0;
+    const ui = setup({
+      membersField: editor,
+      save: async () => { writes++; return { ok: true }; },
+    });
+    try {
+      await ui.render();
+      let toggle = ui.target.querySelector('input[name="is_collab"][type="checkbox"]');
+      assert.equal(toggle.disabled, true, "invalid editor must not grant a collaboration toggle");
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+      await React.act(async () => toggle.click());
+      assert.equal(toggle.checked, true);
+      await ui.submit();
+      assert.equal(writes, 0, "invalid native member field cannot submit");
+
+      // An initially individual video already has members_json=[] in its OFF
+      // branch. A native placeholder must still never authorize deleting data.
+      await ui.render({
+        video: { id: "v2", title: "Individual", collaboration_type: null },
+        initialMembersCount: 0,
+      });
+      toggle = ui.target.querySelector('input[name="is_collab"][type="checkbox"]');
+      assert.equal(toggle.checked, false);
+      assert.equal(toggle.disabled, true);
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+      await ui.submit();
+      assert.equal(writes, 0);
+    } finally {
+      await ui.cleanup();
+    }
+  }
+
+  // A valid directly injected hidden member input remains supported; the
+  // production VideoMembersField composite also stays eligible.
+  let writes = 0;
+  const ui = setup({
+    membersField: h("input", {
+      type: "hidden", name: "members_json", value: '[{"name":"Alice"}]',
+    }),
+    save: async () => { writes++; return { ok: true }; },
+  });
+  try {
+    await ui.render();
+    assert.equal(ui.target.querySelector('input[name="is_collab"][type="checkbox"]').disabled, false);
+    await ui.submit();
+    assert.equal(writes, 1);
+  } finally {
+    await ui.cleanup();
+  }
+});

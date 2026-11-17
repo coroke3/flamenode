@@ -51,7 +51,17 @@ function AdminVideoMembersFormForVideo({
   // member editor was never supplied. A save port alone is not a complete form.
   // A supplied editor permits non-destructive local collaboration drafts even
   // before the write port is wired; only the *combination* grants save access.
-  const hasMemberEditor = React.isValidElement(membersField);
+  // A bare native element other than the canonical hidden member input is
+  // not a member editor. Without this guard even <div /> plus save would let
+  // an individual video submit a fabricated empty members_json payload.
+  // Trust composite member-editor components only at the injection boundary;
+  // the submit handler still validates the actual FormData independently.
+  const hasMemberEditor = React.isValidElement(membersField) && (
+    typeof membersField.type !== "string" ||
+    (membersField.type === "input" &&
+      (membersField.props as { type?: unknown }).type === "hidden" &&
+      (membersField.props as { name?: unknown }).name === "members_json")
+  );
   const enabled = Boolean(save) && hasMemberEditor;
   // Losing the required member field is also a write-capability revocation,
   // even when the save function itself remains present.
