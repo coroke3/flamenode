@@ -3,6 +3,7 @@
 import * as React from "react";
 import { VideoMembersField } from "@flamenode/ui";
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
+import { SaveSuccessNotice } from "../../components/shared/SaveSuccessNotice.js";
 
 export type AdminVideoMembersSaveResult = {
   ok: boolean;
@@ -306,8 +307,14 @@ function AdminVideoMembersFormForVideo({
           <p>合作をOFFにすると、保存時に公開参加者とメンバーチャプターを空にします。</p>
         </section>
       ) : null}
-      {result && <p role={result.ok ? "status" : "alert"}>{result.message ??
-        (result.ok ? "保存しました。" : "保存に失敗しました。")}</p>}
+      {result ? result.ok ? (
+        <SaveSuccessNotice
+          message={result.message ?? "保存しました。"}
+          pendingPublicReflection={result.pendingPublicReflection}
+        />
+      ) : (
+        <p role="alert">{result.message ?? "保存に失敗しました。"}</p>
+      ) : null}
       {enabled ? (
         <button type="submit" className="fn-btn fn-btn-primary" disabled={pending}>
           {pending ? "保存中..." : "参加者設定を保存"}
