@@ -25,11 +25,12 @@ function validatedBatch(input: AdminPermissionBatchInput): {
     intents: AdminPermissionBatchInput["intents"];
   };
 } | null {
+  // Align privileged permission paths with SA-085 and admin GET path guards.
   if (!input || typeof input !== "object" ||
       typeof input.videoId !== "string" ||
       input.videoId.length < 1 || input.videoId.length > 64 ||
       input.videoId.trim() !== input.videoId ||
-      /[\/\x00-\x1f]/.test(input.videoId) ||
+      /[\/\\\x00-\x1f]/.test(input.videoId) ||
       input.videoId === "." || input.videoId === ".." ||
       input.notify !== true ||
       (input.edit_privilege_mode !== undefined &&
