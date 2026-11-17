@@ -229,7 +229,7 @@ test("MIG-0730 U02au: SA-085 candidate honors exact 256 KiB UTF-8 JSON envelope"
     return reply({ ok: true, videoId: "video-1" });
   };
   assert.equal((await saveAdminVideoMembers("video-1", exact, fetchFn)).ok, true,
-    "an exact-limit valid JSON envelope is eligible to send");
+    "an exact-limit transport envelope can be sent (not a CURRENT field-length acceptance certificate)");
   assert.equal((await saveAdminVideoMembers("video-1", oversized, fetchFn)).ok, false,
     "one extra wire byte must fail before HTTP");
   assert.equal(sends, 1);
@@ -253,4 +253,40 @@ test("MIG-0730 U02au: multi-byte and oversized raw members fail before HTTP", as
   huge.set("members_json", "[" + " ".repeat(300_000) + "]");
   assert.equal((await saveAdminVideoMembers("video-1", huge, fetchFn)).ok, false);
   assert.equal(sends, 0, "oversized local input cannot reach the write endpoint");
+});
+
+test("MIG-0730 U02av: schema-permitted 100 × 30 chapter upper-bound exceeds provisional Hono cap", async () => {
+  // Corresponds to MIG-0650 adminMemberSubmission.ts CURRENT limits:
+  // 100 public members, 30 chapters each, 80-character names/roles,
+  // 500-character comments, 120-character chapter labels, 1000-character notes.
+  // Even ASCII-only *legal-length* data exceeds the unmounted 256 KiB server
+  // body policy. This is a release parity STOP, not a reason to mount/bypass it.
+  const members = Array.from({ length: 100 }, (_, i) => ({
+    name: "M".repeat(80),
+    x_user_id: "user_" + i,
+    role: "R".repeat(80),
+    comment: "C".repeat(500),
+    chapters: Array.from({ length: 30 }, () => ({
+      time: "00:00",
+      label: "L".repeat(120),
+      note: "N".repeat(1000),
+    })),
+  }));
+  const payload = form({ members });
+  const membersJson = payload.get("members_json");
+  const wire = JSON.stringify({
+    is_collab: ["false", "true"], members_json: membersJson,
+  });
+  const bytes = new TextEncoder().encode(wire).byteLength;
+  assert.equal(members.length, 100);
+  assert.equal(members[0].chapters.length, 30);
+  assert.ok(bytes > 3_000_000, "legal-length payload substantially exceeds 256 KiB");
+  assert.ok(bytes < 8 * 1024 * 1024, "not an arbitrary unbounded input");
+  let requests = 0;
+  const result = await saveAdminVideoMembers("video-1", payload, async () => {
+    requests++;
+    return reply({ ok: true, videoId: "video-1" });
+  });
+  assert.equal(result.ok, false, "a policy mismatch must fail closed rather than risk a 413");
+  assert.equal(requests, 0);
 });
