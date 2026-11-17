@@ -415,3 +415,47 @@ test("MIG-0650 U03an suppressed public member deltas cannot silently skip atomic
   });
   assert.deepEqual(stable.expectedChanges, [null, 1]);
 });
+
+test("MIG-0650 U03ao suppressed chapter content cannot silently skip strict atomic chapter writes", () => {
+  // The Next planner derives chaptersChanged via managedChapterRowsEqual,
+  // ignoring row order and timestamps but preserving all public chapter data.
+  const oldRow = chapter("alice:member:0");
+  const changed = [
+    { existingManagedChapters: [oldRow], nextManagedChapters: [], membersChanged: false },
+    { existingManagedChapters: [], nextManagedChapters: [oldRow], membersChanged: false },
+    {
+      existingManagedChapters: [oldRow],
+      nextManagedChapters: [chapter("alice:member:0", { chapter_label: "Changed" })],
+      membersChanged: true,
+    },
+    {
+      existingManagedChapters: [oldRow],
+      nextManagedChapters: [chapter("alice:member:0", { note: "Changed" })],
+      membersChanged: false,
+    },
+  ];
+  for (const fields of changed) {
+    const c = collector();
+    const publicRows = fields.membersChanged ? [member("public-1")] : [];
+    assert.throws(() => buildVideoMemberWriteMutationBatch(c.db, {
+      videoId: "video-1", beforeSnapshotRows: publicRows, afterSnapshotRows: publicRows,
+      existingPublicCount: publicRows.length,
+      hiddenCarryRows: [], newXUsers: [], chaptersChanged: false, ...fields,
+    }), { name: "RangeError", message: "video_member_write_undeclared_chapter_changes" });
+    assert.equal(c.queries.length, 0, "unreported chapter delta must fail before CAS or DML");
+  }
+
+  // Ordering and timestamps must not create a false chapter-content delta.
+  const a = chapter("alice:member:0", { chapter_time: 10 });
+  const b = chapter("alice:member:1", { chapter_time: 20 });
+  const stable = build({
+    existingManagedChapters: [a, b],
+    nextManagedChapters: [
+      { ...b, created_at: b.created_at + 1, updated_at: b.updated_at + 1 },
+      { ...a, created_at: a.created_at + 1, updated_at: a.updated_at + 1 },
+    ],
+    chaptersChanged: false,
+    newXUsers: [pending("new_x")],
+  });
+  assert.deepEqual(stable.expectedChanges, [null, 1]);
+});
