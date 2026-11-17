@@ -128,16 +128,21 @@ export async function applyAdminVideoMemberPermissionBatch(
     if (!json || typeof json !== "object" || Array.isArray(json)) {
       return { ok: false, message: FAILURE };
     }
-    const body = json as Record<string, unknown>;
-    // An unmounted SA-084 candidate must not optimistically apply edits on
-    // an unbound {ok:true} receipt. The current upstream Draft still omits
-    // videoId; keep this fail-closed until MIG-0650 agrees on the contract.
-    if (body.ok !== true || body.videoId !== videoId ||
-        (body.message !== undefined &&
-        (typeof body.message !== "string" || body.message.length > 300))) {
+    const receipt = json as Record<string, unknown>;
+    // Keep this unmounted SA-084 success bound to the requested target.
+    // An injected/mock json() object may expose changing getters. Capture
+    // each receipt field only once before deciding whether to publish success.
+    const ok = receipt.ok;
+    const receiptVideoId = receipt.videoId;
+    const message = receipt.message;
+    // Upstream MIG-0650 Draft currently omits videoId, so this intentionally
+    // fails closed until the backend's authoritative receipt is finalized.
+    if (ok !== true || receiptVideoId !== videoId ||
+        (message !== undefined &&
+          (typeof message !== "string" || message.length > 300))) {
       return { ok: false, message: FAILURE };
     }
-    return { ok: true, ...(typeof body.message === "string" ? { message: body.message } : {}) };
+    return { ok: true, ...(typeof message === "string" ? { message } : {}) };
   } catch {
     return { ok: false, message: FAILURE };
   } finally {

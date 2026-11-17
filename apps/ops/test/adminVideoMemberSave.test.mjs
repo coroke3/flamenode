@@ -442,3 +442,42 @@ test("MIG-0730 U02cn: hostile FormData accessors and iterators reject before SA-
     "ordinary canonical FormData is unaffected");
   assert.equal(requests, 1);
 });
+ 
+test("MIG-0730 U02cx: SA-085 injected HTTP receipt cannot change failed validation into success", async () => {
+  const reads = { ok: 0, videoId: 0, message: 0, pending: 0 };
+  const receipt = {};
+  Object.defineProperties(receipt, {
+    ok: { get() { reads.ok++; return reads.ok === 1 ? false : true; } },
+    videoId: { get() { reads.videoId++; return reads.videoId === 1 ? "video-1" : "other"; } },
+    message: { get() { reads.message++; return reads.message === 1 ? "verified" : "PRIVATE_TOKEN"; } },
+    pendingPublicReflection: { get() { reads.pending++; return reads.pending === 1 ? false : true; } },
+  });
+  let calls = 0;
+  const got = await saveAdminVideoMembers("video-1", form(), async () => {
+    calls++;
+    return { status: 200, json: async () => receipt };
+  });
+  assert.deepEqual(got, { ok: false, message: "保存結果を確認できませんでした。最新状態を再取得してください。" });
+  assert.deepEqual(reads, { ok: 1, videoId: 1, message: 1, pending: 1 });
+  assert.equal(calls, 1, "an ambiguous server write must never be retried");
+  assert.doesNotMatch(got.message, /PRIVATE_TOKEN/);
+});
+
+test("MIG-0730 U02cx: SA-085 receipt display cannot change after validation", async () => {
+  const reads = { message: 0, pending: 0 };
+  const receipt = { ok: true, videoId: "video-1" };
+  Object.defineProperties(receipt, {
+    message: { get() { reads.message++; return reads.message === 1 ? "saved" : "PRIVATE_LATER"; } },
+    pendingPublicReflection: { get() { reads.pending++; return reads.pending === 1 ? false : true; } },
+  });
+  const got = await saveAdminVideoMembers("video-1", form(), async () => ({
+    status: 200, json: async () => receipt,
+  }));
+  assert.deepEqual(got, { ok: true, message: "saved", pendingPublicReflection: false });
+  assert.deepEqual(reads, { message: 1, pending: 1 });
+  const revoked = Proxy.revocable({ ok: true, videoId: "video-1" }, {});
+  revoked.revoke();
+  assert.equal((await saveAdminVideoMembers("video-1", form(), async () => ({
+    status: 200, json: async () => revoked.proxy,
+  }))).ok, false, "revoked provider reply is ambiguous, never confirmed");
+});

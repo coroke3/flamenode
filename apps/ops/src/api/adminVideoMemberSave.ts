@@ -131,22 +131,26 @@ export async function saveAdminVideoMembers(
     if (!json || typeof json !== "object" || Array.isArray(json)) {
       return { ok: false, message: UNVERIFIED };
     }
-    const body = json as Record<string, unknown>;
-    // HTTP 200 plus {ok:true} is not sufficient evidence that the server
-    // committed *this* video. Require an explicit path-matching receipt.
-    // A missing/mismatched ID is ambiguous and must never trigger onSaved.
-    if (body.ok !== true || body.videoId !== videoId ||
-        (body.message !== undefined &&
-          (typeof body.message !== "string" || body.message.length > 300)) ||
-        (body.pendingPublicReflection !== undefined &&
-          typeof body.pendingPublicReflection !== "boolean")) {
+    const receipt = json as Record<string, unknown>;
+    // Inspect each untrusted receipt property exactly once. A legacy/mock
+    // json() port may return stateful getters even though normal JSON cannot.
+    // The checked success + target must be the same values we return to Ops.
+    const ok = receipt.ok;
+    const receiptVideoId = receipt.videoId;
+    const message = receipt.message;
+    const pendingPublicReflection = receipt.pendingPublicReflection;
+    if (ok !== true || receiptVideoId !== videoId ||
+        (message !== undefined &&
+          (typeof message !== "string" || message.length > 300)) ||
+        (pendingPublicReflection !== undefined &&
+          typeof pendingPublicReflection !== "boolean")) {
       return { ok: false, message: UNVERIFIED };
     }
     return {
       ok: true,
-      ...(typeof body.message === "string" ? { message: body.message } : {}),
-      ...(typeof body.pendingPublicReflection === "boolean"
-        ? { pendingPublicReflection: body.pendingPublicReflection } : {}),
+      ...(typeof message === "string" ? { message } : {}),
+      ...(typeof pendingPublicReflection === "boolean"
+        ? { pendingPublicReflection } : {}),
     };
   } catch {
     return { ok: false, message: UNVERIFIED };

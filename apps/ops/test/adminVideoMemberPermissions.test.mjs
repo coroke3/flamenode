@@ -362,3 +362,43 @@ test("MIG-0730 U02ct: permission batch does not trust custom array iteration", a
   assert.deepEqual(got, { ok: true });
   assert.equal(requests, 1);
 });
+ 
+test("MIG-0730 U02cx: SA-084 injected HTTP receipt fields are validated once", async () => {
+  const reads = { ok: 0, videoId: 0, message: 0 };
+  const receipt = {};
+  Object.defineProperties(receipt, {
+    ok: { get() { reads.ok++; return reads.ok === 1 ? true : false; } },
+    videoId: { get() { reads.videoId++; return reads.videoId === 1 ? "video-1" : "WRONG_VIDEO"; } },
+    message: { get() { reads.message++; return reads.message === 1 ? "saved" : "PRIVATE_MESSAGE"; } },
+  });
+  let calls = 0;
+  const got = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+    calls++;
+    return { status: 200, json: async () => receipt };
+  });
+  assert.deepEqual(got, { ok: true, message: "saved" });
+  assert.deepEqual(reads, { ok: 1, videoId: 1, message: 1 });
+  assert.equal(calls, 1);
+  assert.doesNotMatch(got.message, /PRIVATE_MESSAGE/);
+
+  const broken = { ok: true, videoId: "video-1" };
+  Object.defineProperty(broken, "message", { get() { throw Error("PRIVATE_PROVIDER"); } });
+  const invalid = await applyAdminVideoMemberPermissionBatch(input(), async () => ({
+    status: 200, json: async () => broken,
+  }));
+  assert.equal(invalid.ok, false);
+  assert.doesNotMatch(invalid.message, /PRIVATE_PROVIDER/);
+});
+
+test("MIG-0730 U02cx: SA-084 cannot turn a rejected receipt into verified success", async () => {
+  let reads = 0;
+  const receipt = { videoId: "video-1" };
+  Object.defineProperty(receipt, "ok", {
+    get() { reads++; return reads === 1 ? false : true; },
+  });
+  const got = await applyAdminVideoMemberPermissionBatch(input(), async () => ({
+    status: 200, json: async () => receipt,
+  }));
+  assert.deepEqual(got, { ok: false, message: "権限変更を確認できませんでした。状態を再取得してください。" });
+  assert.equal(reads, 1);
+});
