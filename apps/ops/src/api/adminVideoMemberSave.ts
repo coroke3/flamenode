@@ -11,23 +11,26 @@ export type AdminVideoMemberSaveResult = {
 };
 
 const INVALID = "参加者設定の入力を確認してください。";
+const TOO_LARGE = "参加者データが移行先の暫定256KiB制限を超えています。現行の管理画面で保存してください。";
 const UNVERIFIED = "保存結果を確認できませんでした。最新状態を再取得してください。";
 // Match MIG-0650's unmounted SA-085 adminMembersBody.ts interim JSON limit.
 // This is NOT a validated maximum for every legal CURRENT member payload;
 // re-evaluate with that server policy before enabling the route.
 const MAX_SA085_JSON_BODY_BYTES = 256 * 1024;
 
-function validatedBody(videoId: string, formData: FormData): {
-  encodedId: string;
-  body: string;
-} | null {
+type ValidatedBody =
+  | { kind: "ok"; encodedId: string; body: string }
+  | { kind: "invalid" }
+  | { kind: "too_large" };
+
+function validatedBody(videoId: string, formData: FormData): ValidatedBody {
   if (typeof videoId !== "string" || !videoId || videoId.length > 64 ||
       videoId.trim() !== videoId || videoId === "." || videoId === ".." ||
       /[\/\\\x00-\x1f]/.test(videoId) ||
-      !formData || typeof formData.getAll !== "function") return null;
+      !formData || typeof formData.getAll !== "function") return { kind: "invalid" };
   let encodedId: string;
   try { encodedId = encodeURIComponent(videoId); }
-  catch { return null; }
+  catch { return { kind: "invalid" }; }
 
   // Preserve CURRENT hidden false + checked true FormData ordering, but the
   // HTTP body may contain only members_json and is_collab (never video_id).
@@ -41,12 +44,12 @@ function validatedBody(videoId: string, formData: FormData): {
     checkbox.length === 1 && checkbox[0] === "false" ||
     checkbox.length === 2 && checkbox[0] === "false" && checkbox[1] === "true";
   if (ids.length !== 1 || ids[0] !== videoId || !validCheckbox ||
-      members.length !== 1 || typeof members[0] !== "string") return null;
+      members.length !== 1 || typeof members[0] !== "string") return { kind: "invalid" };
 
   const memberJson = members[0];
   // UTF-8 JSON transport cannot be smaller than this UTF-16 code-unit count.
   // Reject oversized input before parsing a potentially expensive nested array.
-  if (memberJson.length > MAX_SA085_JSON_BODY_BYTES) return null;
+  if (memberJson.length > MAX_SA085_JSON_BODY_BYTES) return { kind: "too_large" };
   try {
     const parsed: unknown = JSON.parse(memberJson);
     if (!Array.isArray(parsed) || parsed.length > MAX_VIDEO_MEMBERS ||
@@ -58,9 +61,9 @@ function validatedBody(videoId: string, formData: FormData): {
           // It belongs solely to the separate collaborator permission API.
           "can_edit" in item ||
           ("is_public_member" in item && item.is_public_member !== 1))) {
-      return null;
+      return { kind: "invalid" };
     }
-  } catch { return null; }
+  } catch { return { kind: "invalid" }; }
 
   // Account for JSON escapes, the envelope and multi-byte UTF-8 on the exact
   // wire payload. A short UTF-16 member string can still exceed the HTTP limit.
@@ -69,9 +72,9 @@ function validatedBody(videoId: string, formData: FormData): {
     members_json: memberJson,
   });
   if (new TextEncoder().encode(body).byteLength > MAX_SA085_JSON_BODY_BYTES) {
-    return null;
+    return { kind: "too_large" };
   }
-  return { encodedId, body };
+  return { kind: "ok", encodedId, body };
 }
 
 /**
@@ -84,7 +87,8 @@ export async function saveAdminVideoMembers(
   fetchFn: OpsFetch = (path, init) => fetch(path, init),
 ): Promise<AdminVideoMemberSaveResult> {
   const parsed = validatedBody(videoId, formData);
-  if (!parsed) return { ok: false, message: INVALID };
+  if (parsed.kind === "invalid") return { ok: false, message: INVALID };
+  if (parsed.kind === "too_large") return { ok: false, message: TOO_LARGE };
   try {
     const response = await fetchFn(
       `/api/videos/${parsed.encodedId}/members`,
