@@ -118,13 +118,13 @@ test("MIG-0650 U03ag monotonic metadata CAS rejects stale video writes in SQLite
     const first = apply({ now: 42 });
     assert.equal(first.changes, 1);
     assert.equal(first.audit.after.updated_at, 43);
-    assert.deepEqual(sqlite.prepare("SELECT collaboration_type, updated_at FROM videos").get(),
+    assert.deepEqual({ ...sqlite.prepare("SELECT collaboration_type, updated_at FROM videos").get() },
       { collaboration_type: "collab", updated_at: 43 });
 
     // A second writer based on the old video snapshot must fail its CAS.
     const stale = apply({ now: 42 });
     assert.equal(stale.changes, 0);
-    assert.deepEqual(sqlite.prepare("SELECT collaboration_type, updated_at FROM videos").get(),
+    assert.deepEqual({ ...sqlite.prepare("SELECT collaboration_type, updated_at FROM videos").get() },
       { collaboration_type: "collab", updated_at: 43 });
 
     // Even a concurrent legacy update that did not bump the version must be
@@ -141,7 +141,7 @@ test("MIG-0650 U03ag monotonic metadata CAS rejects stale video writes in SQLite
     });
     assert.equal(fresh.changes, 1);
     assert.equal(fresh.audit.after.updated_at, 43);
-    assert.deepEqual(sqlite.prepare("SELECT collaboration_type, updated_at FROM videos").get(),
+    assert.deepEqual({ ...sqlite.prepare("SELECT collaboration_type, updated_at FROM videos").get() },
       { collaboration_type: "individual", updated_at: 43 });
   } finally {
     sqlite.close();
