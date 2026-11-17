@@ -6,7 +6,7 @@
  * plan inside the SAME member-set CAS, member/chapter mutations, strict audit
  * and rebuild queue D1 batch. No authorization, D1 execution or Queue wake here.
  */
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { videos } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "../db.ts";
@@ -15,7 +15,11 @@ import type { WriteAuditLogInput } from "../audit/types.ts";
 type VideoMetadata = Pick<
   typeof videos.$inferSelect,
   "id" | "collaboration_type" | "updated_at"
->;
+> & {
+  // The CURRENT Next action / authorized Hono target includes all seven
+  // persisted states, while the older inferred schema only models four.
+  visibility_status: string;
+};
 
 export function buildAdminVideoMemberMetadataPlan(
   db: ServerCoreDb,
@@ -40,7 +44,15 @@ export function buildAdminVideoMemberMetadataPlan(
       db.update(videos).set({
         collaboration_type: nextCollaborationType,
         updated_at: now,
-      }).where(eq(videos.id, target.id)),
+      }).where(and(
+        eq(videos.id, target.id),
+        // Reject a stale authorized snapshot. A concurrent admin can change
+        // collaboration/visibility in the SAME timestamp second, so checking
+        // updated_at alone is not a sufficient optimistic CAS predicate.
+        eq(videos.collaboration_type, target.collaboration_type),
+        eq(videos.updated_at, target.updated_at),
+        sql`${videos.visibility_status} = ${target.visibility_status}`,
+      )),
     ],
     expectedChanges: [1],
     audits: [{
