@@ -580,6 +580,22 @@ export function VideoMembersField({
     null,
   );
   const pendingApplyRef = React.useRef<(() => void) | null>(null);
+  // A permission response can arrive after a Personal form becomes read-only
+  // without remounting, or after a different video's target replaces this one.
+  // Retire stale callbacks synchronously on the committed capability change.
+  const permissionCapability = disabled ? null : (permissionTargetVideoId ?? null);
+  const permissionCapabilityRef = React.useRef(permissionCapability);
+  const permissionEpochRef = React.useRef(0);
+  React.useLayoutEffect(() => {
+    if (permissionCapabilityRef.current === permissionCapability) return;
+    permissionCapabilityRef.current = permissionCapability;
+    permissionEpochRef.current += 1;
+    pendingApplyRef.current = null;
+    setPermConfirmOpen(false);
+    setReplaceConfirmOpen(false);
+    setPermResult(null);
+    setBulkPreview(null);
+  }, [permissionCapability]);
 
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     if (disabled) return;
@@ -751,6 +767,7 @@ export function VideoMembersField({
     if (disabled || !bulkPreview || !permissionTargetVideoId ||
         permPending || permWriteInFlightRef.current) return;
     permWriteInFlightRef.current = true;
+    const requestEpoch = permissionEpochRef.current;
     setPermPending(true);
     setPermResult(null);
     try {
@@ -768,6 +785,7 @@ export function VideoMembersField({
           intent: intent.intent ? "on" : "off",
         })),
       });
+      if (requestEpoch !== permissionEpochRef.current) return;
       setPermResult({
         ok: result.ok,
         message: result.message ?? (result.ok ? "反映しました。" : "反映に失敗しました。"),
@@ -781,7 +799,9 @@ export function VideoMembersField({
         setAiText("");
       }
     } catch {
-      setPermResult({ ok: false, message: "編集権限の反映中にエラーが発生しました。" });
+      if (requestEpoch === permissionEpochRef.current) {
+        setPermResult({ ok: false, message: "編集権限の反映中にエラーが発生しました。" });
+      }
     } finally {
       permWriteInFlightRef.current = false;
       setPermPending(false);

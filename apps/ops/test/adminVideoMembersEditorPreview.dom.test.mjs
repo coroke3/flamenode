@@ -16,6 +16,7 @@ const { createRoot } = await import("react-dom/client");
 const { AdminVideoMembersEditorPreview } = await import(
   "../.test-dist/apps/ops/src/routes/admin/AdminVideoMembersEditorPreview.js"
 );
+const { VideoMembersField } = await import("@flamenode/ui");
 
 function member(name, i = 0) {
   return {
@@ -329,6 +330,77 @@ test("MIG-0730 U02q: pending permission success after revocation cannot revive o
     assert.equal(target.querySelector('[role="alertdialog"]'), null);
     assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
     assert.ok(target.querySelector('button[type="submit"]'));
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
+
+test("MIG-0730 U02t: shared Personal field ignores privilege success after disabled toggle without remount", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const calls = [];
+  let settle;
+  const adapter = input => {
+    calls.push(input);
+    return new Promise(resolve => { settle = resolve; });
+  };
+  const render = async (disabled, permissionTargetVideoId = "A") => React.act(async () => {
+    root.render(React.createElement(VideoMembersField, {
+      initialMembers: [member("CURRENT")],
+      disabled,
+      permissionTargetVideoId,
+      applyPermissionBatch: adapter,
+      searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null, hint: null }),
+    }));
+  });
+  try {
+    await render(false);
+    await previewPermissionTsv(target, "Bob\\tbob\\t\\t\\t\\tON");
+    await React.act(async () => buttonNamed(target, "変更を反映").click());
+    assert.equal(calls.length, 1);
+    assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+
+    // The shared field stays mounted: unlike the Ops preview it is not keyed
+    // by a parent authorization snapshot in every Personal consumer.
+    await render(true);
+    assert.equal(target.querySelector('[role="alertdialog"]'), null);
+    await render(false);
+    await React.act(async () => settle({ ok: true, message: "STALE PRIVILEGE OK" }));
+    assert.equal(target.querySelector('[role="alertdialog"]'), null);
+    assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+    assert.doesNotMatch(target.textContent, /STALE PRIVILEGE OK/);
+    assert.equal(calls.length, 1);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
+
+test("MIG-0730 U02t: same mounted field rejects previous video's permission completion", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  let settle;
+  const adapter = () => new Promise(resolve => { settle = resolve; });
+  const render = async videoId => React.act(async () => {
+    root.render(React.createElement(VideoMembersField, {
+      initialMembers: [member("CURRENT")],
+      permissionTargetVideoId: videoId,
+      applyPermissionBatch: adapter,
+      searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null, hint: null }),
+    }));
+  });
+  try {
+    await render("A");
+    await previewPermissionTsv(target, "Bob\\tbob\\t\\t\\t\\tON");
+    await React.act(async () => buttonNamed(target, "変更を反映").click());
+    await render("B");
+    assert.equal(target.querySelector('[role="alertdialog"]'), null);
+    await React.act(async () => settle({ ok: true, message: "A OLD PRIVILEGE" }));
+    assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+    assert.doesNotMatch(target.textContent, /A OLD PRIVILEGE/);
   } finally {
     await React.act(async () => root.unmount());
     target.remove();
