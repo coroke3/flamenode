@@ -8,7 +8,7 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { readAdminVideoCollabFlag, mergeVideoRebuildEventIds } from "@flamenode/domain/video";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
-import { parseAdminVideoMembersHttpInput } from "@flamenode/domain/video/adminMemberHttpInput";
+import { isValidAdminVideoMemberPathId, parseAdminVideoMembersHttpInput } from "@flamenode/domain/video/adminMemberHttpInput";
 import { validateVideoMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
 import type { AppEnv } from "../../env.ts";
 import { sessionMiddleware } from "../../auth/session.ts";
@@ -114,11 +114,16 @@ export function createVideoAdminMembersPreflightRoutes(
     if (mediaType !== "application/json") {
       return reject(c, 400, "JSON形式の入力が必要です。");
     }
+    // Admin/TOS/CostGuard and media-type checks precede validation. Reject an
+    // invalid path without spending Worker CPU on up to 256KiB of JSON bytes.
+    const videoId = c.req.param("videoId");
+    if (!isValidAdminVideoMemberPathId(videoId)) {
+      return reject(c, 400, "対象作品が指定されていません。");
+    }
     const body = await readAdminVideoMembersJsonBody(c.req.raw);
     if (body.kind === "too_large") return reject(c, 413, BODY_TOO_LARGE_MESSAGE);
     if (body.kind !== "ok") return reject(c, 400, "入力エラー");
 
-    const videoId = c.req.param("videoId");
     const parsed = parseAdminVideoMembersHttpInput(videoId, body.value);
     if (!parsed.ok) return reject(c, 400, parsed.message);
     const isCollab = readAdminVideoCollabFlag(parsed.formData);
