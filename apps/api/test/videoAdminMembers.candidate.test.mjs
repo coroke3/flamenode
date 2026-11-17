@@ -13,10 +13,16 @@ const valid = () => ({
   members_json: JSON.stringify([member(0)]),
 });
 
-function fixture({ role = "admin", includeContext = true } = {}) {
+function fixture({ role = "admin", includeContext = true, targetError = false } = {}) {
   let invoked = 0;
   let prematureDb = 0;
   const host = {
+    // The unmounted fake host never touches D1 and cannot grant permissions.
+    // Real-stack tests below use the authoritative SQLite/D1 implementation.
+    loadAuthorizedVideo: async (_c, videoId) => {
+      if (targetError) throw Error("injected target D1 failure");
+      return videoId === "v1" ? { id: "v1" } : null;
+    },
     writeGuard: async (c, next) => {
       invoked++;
       c.header("Cache-Control", "private, no-store");
@@ -157,7 +163,7 @@ function realGuardFixture({ as = "u_admin", mode = "normal" } = {}) {
   app.route("/api/videos", createVideoAdminMembersPreflightRoutes(
     createDefaultVideoAdminMembersPreflightHost({ session }),
   ));
-  const send = (body, origin = SITE) => app.request("/api/videos/v_pub/members", {
+  const send = (body, origin = SITE, path = "/api/videos/v_pub/members") => app.request(path, {
     method: "PUT",
     headers: { origin, "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -277,4 +283,41 @@ test("MIG-0650 U03g privileged PUT only accepts application/json media type befo
   });
   assert.equal(accepted.status, 501, "valid JSON media type still cannot write until authorized writer exists");
   assert.deepEqual(f.stats(), { invoked: 5, prematureDb: 0 });
+});
+
+
+test("MIG-0650 U03h unmounted SA-085 denies missing target video and target D1 error", async () => {
+  const f = fixture();
+  const missing = await f.request("/unknown/members", valid());
+  assert.equal(missing.status, 404, await missing.clone().text());
+  assert.deepEqual(await missing.json(), { ok: false, message: "作品が見つかりません。" });
+  assert.equal(missing.headers.get("cache-control"), "private, no-store");
+
+  const bad = fixture({ targetError: true });
+  const failed = await bad.request(endpoint, valid());
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await failed.json(), { ok: false, message: "作品の確認に失敗しました。" });
+  assert.equal(failed.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(f.stats(), { invoked: 1, prematureDb: 0 });
+  assert.deepEqual(bad.stats(), { invoked: 1, prematureDb: 0 });
+});
+
+test("MIG-0650 U03h real Hono target lookup uses only one extra D1 read, never a write", async () => {
+  const s = realGuardFixture();
+  try {
+    const existing = await s.send(valid());
+    assert.equal(existing.status, 501, "existing authorized video still cannot commit without writer");
+    const firstReads = s.d1.stats.reads;
+    assert.ok(firstReads > 0 && firstReads <= 3, "actor, CostGuard and video facts fit 3 pre-reads");
+    assert.equal(s.d1.stats.batches, 0);
+
+    const missing = await s.send(valid(), SITE, "/api/videos/no_such_video/members");
+    assert.equal(missing.status, 404);
+    assert.equal((await missing.json()).ok, false);
+    assert.ok(s.d1.stats.reads - firstReads <= 3, "missing video still fits pre-read budget");
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(s.count("video_members"), 0);
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+  } finally { s.sqlite.close(); }
 });

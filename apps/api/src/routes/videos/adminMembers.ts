@@ -20,6 +20,9 @@ type Ctx = Context<AppEnv>;
 
 export type VideoAdminMembersPreflightHost = {
   writeGuard: MiddlewareHandler<AppEnv>;
+  // A missing or stale video must not reach a future SA-085 mutation port.
+  // This is one authoritative D1 read, after identity and CostGuard preflight.
+  loadAuthorizedVideo: (c: Ctx, videoId: string) => Promise<{ id: string } | null>;
 };
 
 /**
@@ -45,6 +48,9 @@ export function createDefaultVideoAdminMembersPreflightHost(
     dbMiddleware,
   ];
   return {
+    loadAuthorizedVideo: (c, videoId) =>
+      c.env.DB.prepare('SELECT "id" FROM "videos" WHERE "id" = ? LIMIT 1')
+        .bind(videoId).first<{ id: string }>(),
     writeGuard: async (c, next) => {
       c.header("Cache-Control", "private, no-store");
       const execute = async (index: number): Promise<Response | void> => {
@@ -60,7 +66,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
   };
 }
 
-function reject(c: Ctx, status: 400 | 403 | 413 | 501 | 503, message: string): Response {
+function reject(c: Ctx, status: 400 | 403 | 404 | 413 | 501 | 503, message: string): Response {
   c.header("Cache-Control", "private, no-store");
   return c.json({ ok: false, message }, status);
 }
@@ -96,6 +102,19 @@ export function createVideoAdminMembersPreflightRoutes(
     const isCollab = readAdminVideoCollabFlag(parsed.formData);
     const members = validateVideoMemberSubmission(parsed.formData, isCollab);
     if (!members.ok) return reject(c, 400, members.message);
+
+    // The current Next SA-085 action checks the authoritative video row
+    // before planning mutations. One bounded D1 query remains inside the
+    // ZERO_1102 pre-write budget (guard actor + CostGuard + target video).
+    // Never trust target metadata supplied through the request body.
+    let target: { id: string } | null;
+    try {
+      target = await host.loadAuthorizedVideo(c, videoId);
+    } catch {
+      return reject(c, 503, "作品の確認に失敗しました。");
+    }
+    if (!target) return reject(c, 404, "作品が見つかりません。");
+    if (target.id !== videoId) return reject(c, 503, "作品の確認に失敗しました。");
 
     // Validity is not authorization to mutate the video. We have no Hono
     // per-video admin D1 lookup, atomic member CAS/audit plan, or Queue port yet.
