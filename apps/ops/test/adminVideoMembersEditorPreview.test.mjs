@@ -62,6 +62,24 @@ test("MIG-0730 U02d: wrong video, hidden member and 101 participants reveal no p
   }
 });
 
+test("MIG-0730 U02cl: forged getters and revoked DTOs cannot crash unmounted editor or grant writes", () => {
+  const top = { video: snapshot().video,
+    get initialMembers() { throw Error("PRIVATE_INITIAL_MEMBERS"); } };
+  const nested = snapshot("v1", [member(0)]);
+  Object.defineProperty(nested.initialMembers[0], "name", {
+    enumerable: true,
+    get() { throw Error("PRIVATE_NESTED_MEMBER"); },
+  });
+  const revoked = Proxy.revocable(snapshot(), {});
+  revoked.revoke();
+  for (const data of [top, nested, revoked.proxy]) {
+    const markup = html({ videoId: "v1", data, searchXUsers, applyPermissionBatch, save });
+    assert.match(markup, /参加者データを表示できません/, "must render safe fallback");
+    assert.doesNotMatch(markup, /PRIVATE_|members_json|参加者設定を保存|公開ページ/,
+      "no private data, write capability, or authorized links on malformed snapshots");
+  }
+});
+
 test("MIG-0730 U02d: exactly 100 public participants remain renderable and never bypass save gate", () => {
   const many = snapshot("v1", Array.from({ length: 100 }, (_, i) => member(i)));
   const markup = html({ videoId: "v1", data: many });
