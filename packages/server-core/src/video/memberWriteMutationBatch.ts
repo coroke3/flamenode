@@ -82,6 +82,29 @@ export function buildVideoMemberWriteMutationBatch(
   if (membersChanged && existingPublicCount !== beforeSnapshotRows.length) {
     throw new RangeError("video_member_write_public_count_mismatch");
   }
+  // Exact DELETE/INSERT changes() counts rely on unique IDs in each
+  // independently supplied snapshot. D1 primary keys cannot substitute for
+  // an authenticated plan preflight: duplicate JSON1 delete IDs are silently
+  // deduplicated by IN (...), while duplicate insert IDs can abort an atomic
+  // batch only after costly SQL/audit/Queue planning.
+  // IDs may legitimately repeat across before/after snapshots (same member),
+  // so only check uniqueness *within* each row set.
+  const hasDuplicateOrEmptyIds = (rows: readonly { id: string }[]): boolean => {
+    const ids = new Set<string>();
+    for (const row of rows) {
+      if (typeof row.id !== "string" || row.id.length === 0 || ids.has(row.id)) {
+        return true;
+      }
+      ids.add(row.id);
+    }
+    return false;
+  };
+  if ([
+    beforeSnapshotRows, afterSnapshotRows, hiddenCarryRows, newXUsers,
+    existingManagedChapters, nextManagedChapters,
+  ].some(hasDuplicateOrEmptyIds)) {
+    throw new RangeError("video_member_write_duplicate_or_empty_row_id");
+  }
   const statements: BatchItem<"sqlite">[] = [];
   const expectedChanges: Array<number | null> = [];
 
