@@ -791,3 +791,68 @@ test("MIG-0730 U02af: disable hides cached private suggestions before render eff
     target.remove();
   }
 });
+
+
+test("MIG-0730 U02ag: global disabled blocks chapter inputs in both card and table modes", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const searchXUsers = async () => ({ items: [], hasMore: false, nextOffset: null, hint: null });
+  const applyPermissionBatch = async () => ({ ok: false });
+  const render = (disabled, chaptersDisabled = false) => React.act(async () => root.render(
+    React.createElement(VideoMembersField, {
+      initialMembers: [member("CURRENT")],
+      permissionTargetVideoId: "A",
+      searchXUsers,
+      applyPermissionBatch,
+      disabled,
+      chaptersDisabled,
+    })
+  ));
+  const changeChapter = async value => {
+    const input = target.querySelector('input[placeholder="0:12;1:05"]');
+    assert.ok(input, "a chapter editor is present");
+    await React.act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+      assert.ok(setter);
+      setter.call(input, value);
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    return input;
+  };
+  try {
+    await render(true);
+    const original = formPayload(target);
+    const card = target.querySelector('input[placeholder="0:12;1:05"]');
+    assert.equal(card.disabled, true, "read-only card mode must not offer chapter editing");
+    await changeChapter("1:23");
+    assert.deepEqual(formPayload(target), original, "read-only card must ignore synthetic changes");
+
+    await React.act(async () => buttonNamed(target, "表").click());
+    const table = target.querySelector('input[placeholder="0:12;1:05"]');
+    assert.equal(table.disabled, true, "read-only table mode must not offer chapter editing");
+    await changeChapter("2:34");
+    assert.deepEqual(formPayload(target), original, "read-only table must not update hidden JSON");
+
+    await render(false, true);
+    assert.equal(target.querySelector('input[placeholder="0:12;1:05"]').disabled, true,
+      "chaptersDisabled independently locks chapters even when other member fields are writable");
+    await changeChapter("3:45");
+    assert.deepEqual(formPayload(target), original);
+
+    await render(false, false);
+    assert.equal(target.querySelector('input[placeholder="0:12;1:05"]').disabled, false,
+      "authorized editing must remain available");
+    await changeChapter("1:23");
+    assert.equal(formPayload(target)[0].chapters.length, 1,
+      "authorized chapter editing must still serialize into members_json");
+
+    await render(true, false);
+    assert.equal(target.querySelector('input[placeholder="0:12;1:05"]').disabled, true);
+    assert.equal(formPayload(target)[0].chapters.length, 1,
+      "revoking edit capability must not erase a local unsaved chapter draft");
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
