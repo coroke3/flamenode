@@ -309,3 +309,43 @@ test("MIG-0650 U03ak public replacement count must match the authorized read sna
   });
   assert.deepEqual(chapterOnly.expectedChanges, [null, 1, 1]);
 });
+
+
+test("MIG-0650 U03al fail-closes duplicate and empty row IDs before any atomic SQL plan", () => {
+  const cases = [
+    { beforeSnapshotRows: [member("dup"), member("dup")] },
+    { afterSnapshotRows: [member("dup"), member("dup")], membersChanged: true },
+    { hiddenCarryRows: [
+      member("dup", "alice", { is_public_member: 0 }),
+      member("dup", "bob", { is_public_member: 0 }),
+    ] },
+    { newXUsers: [pending("dup"), pending("dup")] },
+    { existingManagedChapters: [chapter("dup"), chapter("dup")], chaptersChanged: true },
+    { nextManagedChapters: [chapter("dup"), chapter("dup")], chaptersChanged: true },
+    { afterSnapshotRows: [member("")], membersChanged: true },
+    { newXUsers: [pending("")] },
+  ];
+  for (const fields of cases) {
+    const c = collector();
+    const input = {
+      videoId: "video-1", beforeSnapshotRows: [], afterSnapshotRows: [],
+      existingPublicCount: 0, hiddenCarryRows: [], newXUsers: [],
+      existingManagedChapters: [], nextManagedChapters: [],
+      membersChanged: false, chaptersChanged: false, ...fields,
+    };
+    assert.throws(() => buildVideoMemberWriteMutationBatch(c.db, input),
+      { name: "RangeError", message: "video_member_write_duplicate_or_empty_row_id" },
+      Object.keys(fields).join(", "));
+    assert.equal(c.queries.length, 0,
+      "invalid identifiers must be rejected before even member-set CAS SQL");
+  }
+
+  // A stable primary key can and must appear in *both* snapshots when a
+  // legitimate member is edited. Only duplicates within a set are forbidden.
+  const sameId = build({
+    beforeSnapshotRows: [member("stable")],
+    afterSnapshotRows: [member("stable", "alice", { comment: "Changed" })],
+    existingPublicCount: 1, membersChanged: true,
+  });
+  assert.deepEqual(sameId.expectedChanges, [null, 1, 1]);
+});
