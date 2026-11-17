@@ -116,6 +116,7 @@ test("大規模合作はJSON1一括INSERTでbind上限を回避する", () => {
     read("./replaceVideoMembers.ts");
   const memberSet =
     read("../../../packages/server-core/src/video/memberSetSnapshot.ts");
+  const mutation = read("../../../packages/server-core/src/video/memberWriteMutationBatch.ts");
 
   assert.match(
     limits,
@@ -123,6 +124,10 @@ test("大規模合作はJSON1一括INSERTでbind上限を回避する", () => {
   );
   assert.match(
     members,
+    /buildVideoMemberWriteMutationBatch/,
+  );
+  assert.match(
+    mutation,
     /buildVideoMemberBulkInsertSql/,
   );
   assert.match(
