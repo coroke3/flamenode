@@ -219,3 +219,58 @@ test("MIG-0730 U02bj: same-video permission POST remains single-flight across cl
     assert.equal(requests.length, 3);
   }
 });
+
+test("MIG-0730 U02bk: mutable input cannot retarget SA-084 receipt or leak in-flight video lock", async () => {
+  for (const receiptVideoId of ["original", "mutated"]) {
+    const originalId = "video-u02bk-" + receiptVideoId;
+    const mutatedId = "video-u02bk-other-" + receiptVideoId;
+    const payload = input({ videoId: originalId });
+    const requests = [];
+    let respond;
+    const waiting = new Promise(resolve => { respond = resolve; });
+    const first = applyAdminVideoMemberPermissionBatch(payload, (path, init) => {
+      requests.push({ path, init });
+      return waiting;
+    });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].path, "/api/videos/" + originalId + "/collaborators/batch");
+    assert.equal(JSON.parse(requests[0].init.body).video_id, originalId);
+
+    // Simulate a navigation/state update that reuses the caller's object.
+    payload.videoId = mutatedId;
+    const sameTarget = await applyAdminVideoMemberPermissionBatch(
+      input({ videoId: originalId }), async () => {
+        requests.push("unexpected same-target write");
+        return json({ ok: true, videoId: originalId });
+      },
+    );
+    assert.equal(sameTarget.ok, false, "the original video remains locked");
+    assert.match(sameTarget.message, /処理中/);
+    assert.equal(requests.length, 1);
+
+    const otherTarget = await applyAdminVideoMemberPermissionBatch(
+      input({ videoId: mutatedId }), async (path) => {
+        requests.push({ path });
+        return json({ ok: true, videoId: mutatedId });
+      },
+    );
+    assert.deepEqual(otherTarget, { ok: true }, "changing the caller object does not lock another video");
+    assert.equal(requests.length, 2);
+
+    respond(json({ ok: true, videoId: receiptVideoId === "original" ? originalId : mutatedId }));
+    const firstResult = await first;
+    assert.equal(firstResult.ok, receiptVideoId === "original",
+      "the final response must be compared against the original request, not the mutated object");
+    assert.equal(requests.length, 2, "no ambiguous write is automatically replayed");
+
+    const afterSettle = await applyAdminVideoMemberPermissionBatch(
+      input({ videoId: originalId }), async path => {
+        requests.push({ path });
+        return json({ ok: true, videoId: originalId });
+      },
+    );
+    assert.deepEqual(afterSettle, { ok: true },
+      "finally must release the original lock, not the mutated input ID");
+    assert.equal(requests.length, 3);
+  }
+});

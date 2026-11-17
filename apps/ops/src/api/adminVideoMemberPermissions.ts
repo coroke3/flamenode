@@ -87,12 +87,15 @@ export async function applyAdminVideoMemberPermissionBatch(
 ): Promise<AdminPermissionBatchResult> {
   const parsed = validatedBatch(input);
   if (!parsed) return { ok: false, message: INVALID };
+  // Freeze the request identity before any await; callers can mutate their
+  // input object while the request is pending.
+  const videoId = parsed.body.video_id;
   // Check and acquire synchronously, before the first await, to prevent two
   // confirmation submissions in the same JS runtime from issuing two POSTs.
-  if (inFlightPermissionBatches.has(input.videoId)) {
+  if (inFlightPermissionBatches.has(videoId)) {
     return { ok: false, message: BUSY };
   }
-  inFlightPermissionBatches.add(input.videoId);
+  inFlightPermissionBatches.add(videoId);
   try {
     const response = await fetchFn(
       `/api/videos/${parsed.encodedId}/collaborators/batch`,
@@ -115,7 +118,7 @@ export async function applyAdminVideoMemberPermissionBatch(
     // An unmounted SA-084 candidate must not optimistically apply edits on
     // an unbound {ok:true} receipt. The current upstream Draft still omits
     // videoId; keep this fail-closed until MIG-0650 agrees on the contract.
-    if (body.ok !== true || body.videoId !== input.videoId ||
+    if (body.ok !== true || body.videoId !== videoId ||
         (body.message !== undefined &&
         (typeof body.message !== "string" || body.message.length > 300))) {
       return { ok: false, message: FAILURE };
@@ -126,6 +129,6 @@ export async function applyAdminVideoMemberPermissionBatch(
   } finally {
     // Never replay an ambiguous committed write. Only an explicit new user
     // action after the first HTTP attempt settles may issue another request.
-    inFlightPermissionBatches.delete(input.videoId);
+    inFlightPermissionBatches.delete(videoId);
   }
 }
