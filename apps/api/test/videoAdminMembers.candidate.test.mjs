@@ -273,6 +273,54 @@ test("MIG-0650 U03k legal CURRENT 100x30 chapter fixture passes bounded transpor
 });
 
 
+
+test("MIG-0650 U03q maximum legal 100x30 chapter text exposes 256KiB compatibility STOP", async () => {
+  // The small/empty 100x30 fixture tests count parity, not legal text limits.
+  const members = Array.from({ length: 100 }, (_, i) => ({
+    name: "N".repeat(80),
+    x_user_id: "handle_" + i,
+    role: "R".repeat(80),
+    comment: "C".repeat(500),
+    chapters: Array.from({ length: 30 }, (_, j) => ({
+      time: j + ":00", label: "L".repeat(120), note: "M".repeat(1000),
+    })),
+  }));
+  const membersJson = JSON.stringify(members);
+  const form = new FormData();
+  form.set("members_json", membersJson);
+  const validated = validateVideoMemberSubmission(form, true);
+  assert.equal(validated.ok, true, validated.ok ? "" : validated.message);
+  assert.equal(validated.value.members.length, 100);
+  assert.equal([...validated.value.chaptersByIndex.values()].reduce((n, rows) => n + rows.length, 0), 3000);
+
+  const input = { is_collab: ["false", "true"], members_json: membersJson };
+  const encoded = JSON.stringify(input);
+  const wireBytes = new TextEncoder().encode(encoded).byteLength;
+  assert.ok(wireBytes > MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES,
+    "CURRENT-valid full-length input is NOT supported by the intermediate 256KiB limit");
+  assert.ok(wireBytes > 3 * 1024 * 1024,
+    "measure actual worst-case bytes rather than extrapolating from empty chapters");
+
+  const body = await readAdminVideoMembersJsonBody(new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: encoded,
+  }));
+  assert.equal(body.kind, "too_large", "reader rejects instead of truncating legal data");
+
+  const s = realGuardFixture();
+  try {
+    const response = await s.send(input);
+    assert.equal(response.status, 413,
+      "CURRENT parity gap: do not mount SA-085 until reviewed body/CPU policy");
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal((await response.json()).ok, false);
+    assert.equal(s.d1.stats.batches, 0, "oversize request cannot partially write D1");
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+  } finally { s.sqlite.close(); }
+});
+
 test("MIG-0650 U03g privileged PUT only accepts application/json media type before body", async () => {
   const f = fixture();
   const invalid = [
