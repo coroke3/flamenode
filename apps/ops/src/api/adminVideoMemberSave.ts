@@ -86,8 +86,10 @@ export async function saveAdminVideoMembers(
       return { ok: false, message: UNVERIFIED };
     }
     const body = json as Record<string, unknown>;
-    if (body.ok !== true ||
-        (body.videoId !== undefined && body.videoId !== videoId) ||
+    // HTTP 200 plus {ok:true} is not sufficient evidence that the server
+    // committed *this* video. Require an explicit path-matching receipt.
+    // A missing/mismatched ID is ambiguous and must never trigger onSaved.
+    if (body.ok !== true || body.videoId !== videoId ||
         (body.message !== undefined &&
           (typeof body.message !== "string" || body.message.length > 300)) ||
         (body.pendingPublicReflection !== undefined &&

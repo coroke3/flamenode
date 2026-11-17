@@ -43,7 +43,7 @@ test("MIG-0730 U02g: collab OFF sends exactly false and an empty member array", 
     calls++;
     assert.equal(path, "/api/videos/v%201/members");
     assert.deepEqual(JSON.parse(init.body), { is_collab: ["false"], members_json: "[]" });
-    return reply({ ok: true });
+    return reply({ ok: true, videoId: "v 1" });
   });
   assert.deepEqual(result, { ok: true });
   assert.equal(calls, 1);
@@ -51,7 +51,7 @@ test("MIG-0730 U02g: collab OFF sends exactly false and an empty member array", 
 
 test("MIG-0730 U02g: 100 member limit and 101-member fail-closed before HTTP", async () => {
   let calls = 0;
-  const fetchFn = async () => { calls++; return reply({ ok: true }); };
+  const fetchFn = async () => { calls++; return reply({ ok: true, videoId: "video-1" }); };
   const members = Array.from({ length: 100 }, (_, i) => ({ name: "member " + i }));
   assert.equal((await saveAdminVideoMembers("video-1", form({ members }), fetchFn)).ok, true);
   assert.equal((await saveAdminVideoMembers("video-1", form({ members: [...members, {}] }), fetchFn)).ok, false);
@@ -100,8 +100,10 @@ test("MIG-0730 U02g: 401/403/409/503, lost response and forged 200 are unverifie
   }
   for (const body of [
     null, [], { ok: "true" }, { ok: false },
-    { ok: true, videoId: "another" }, { ok: true, pendingPublicReflection: "yes" },
-    { ok: true, message: 123 },
+    { ok: true }, { ok: true, videoId: null }, { ok: true, videoId: "" },
+    { ok: true, videoId: "another" },
+    { ok: true, videoId: "video-1", pendingPublicReflection: "yes" },
+    { ok: true, videoId: "video-1", message: 123 },
   ]) {
     const result = await saveAdminVideoMembers("video-1", form(), async () => reply(body));
     assert.equal(result.ok, false);
@@ -157,8 +159,34 @@ test("MIG-0730 U02j: valid ON with zero participants keeps exact two-value trans
     assert.deepEqual(JSON.parse(init.body), {
       is_collab: ["false", "true"], members_json: "[]",
     });
-    return reply({ ok: true });
+    return reply({ ok: true, videoId: "video-1" });
   });
   assert.equal(result.ok, true);
   assert.equal(calls, 1);
+});
+
+test("MIG-0730 U02v: success must include path-matching videoId; ambiguous 200 cannot refresh", async () => {
+  let requests = 0;
+  for (const body of [
+    { ok: true },
+    { ok: true, videoId: null },
+    { ok: true, videoId: "other-video" },
+    { ok: true, videoId: 123 },
+  ]) {
+    const result = await saveAdminVideoMembers("video-1", form(), async () => {
+      requests++;
+      return reply(body);
+    });
+    assert.deepEqual(result, {
+      ok: false,
+      message: "保存結果を確認できませんでした。最新状態を再取得してください。",
+    });
+  }
+  assert.equal(requests, 4, "never automatically replay an ambiguous write");
+  const verified = await saveAdminVideoMembers("video-1", form(), async () => {
+    requests++;
+    return reply({ ok: true, videoId: "video-1", pendingPublicReflection: false });
+  });
+  assert.deepEqual(verified, { ok: true, pendingPublicReflection: false });
+  assert.equal(requests, 5);
 });
