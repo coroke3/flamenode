@@ -53,6 +53,10 @@ function parseSuggestions(
       (value.hint !== null && (typeof value.hint !== "string" || value.hint.length > 256))) {
     throw new Error("member_suggestions_unavailable");
   }
+  // The CURRENT V1 artifact builder and the migrated V2 loader both keep
+  // one row per canonical X ID. A forged duplicated ID with conflicting
+  // names/scores must not let the UI silently overwrite a prior candidate.
+  const seenIds = new Set<string>();
   const items = value.items.map((raw: unknown) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
       throw new Error("member_suggestions_unavailable");
@@ -65,6 +69,10 @@ function parseSuggestions(
         (row.matchedBy !== undefined && (typeof row.matchedBy !== "string" || row.matchedBy.length > 64))) {
       throw new Error("member_suggestions_unavailable");
     }
+    if (seenIds.has(row.id)) {
+      throw new Error("member_suggestions_unavailable");
+    }
+    seenIds.add(row.id);
     return {
       id: row.id,
       x_name: row.x_name,

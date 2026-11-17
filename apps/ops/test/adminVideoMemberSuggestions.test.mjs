@@ -331,3 +331,27 @@ test("MIG-0730 U02cq: RH-019 suggestion IDs must match the canonical V1/V2 R2 in
       "a canonical server index ID must remain available");
   }
 });
+
+test("MIG-0730 U02cs: RH-019 duplicate X IDs never overwrite private suggestion identity", async () => {
+  // CURRENT buildMemberSuggestionItems() and migrated V2 candidates Map both
+  // emit at most one row for each normalized X ID.
+  const first = { id: "alice", x_name: "Alice", score: 100 };
+  for (const duplicate of [
+    { ...first },
+    { id: "alice", x_name: "PRIVATE_CONFLICT", score: 500 },
+    { id: "alice", x_name: null },
+  ]) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+        async () => json(result({ items: [first, duplicate] }))),
+      /member_suggestions_unavailable/,
+      "one forged page cannot advertise the same X ID twice",
+    );
+  }
+  const items = [first, { id: "alice_2", x_name: "Alice 2", score: 80 }];
+  const valid = await searchAdminVideoMemberXUsers(
+    "al", 0, new AbortController().signal,
+    async () => json(result({ items })),
+  );
+  assert.deepEqual(valid.items, items, "distinct canonical IDs remain accepted");
+});
