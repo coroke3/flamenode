@@ -86,8 +86,8 @@ function setup() {
     calls.push({ ...wait, url, signal: init?.signal });
     return wait.promise;
   };
-  const render = async (videoId) => React.act(async () => {
-    root.render(wrap(React.createElement(AdminVideoMembersReadPage, { videoId, fetchFn, onNavigate })));
+  const render = async (videoId, activeFetch = fetchFn) => React.act(async () => {
+    root.render(wrap(React.createElement(AdminVideoMembersReadPage, { videoId, fetchFn: activeFetch, onNavigate })));
   });
   const cleanup = async () => React.act(async () => { root.unmount(); target.remove(); });
   return { target, calls, render, cleanup, navigations };
@@ -108,6 +108,35 @@ test("MIG-0730 U02b already displayed private video A data disappears immediatel
     await React.act(async () => { ui.calls[1].resolve(json(snapshot("b", [member("PRIVATE_B")]))); });
     assert.match(ui.target.textContent, /PRIVATE_B/);
     assert.doesNotMatch(ui.target.textContent, /PRIVATE_A/);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0730 U02cd: same-video fetch adapter rotation hides an old authorized snapshot", async () => {
+  const ui = setup();
+  const rotatedCalls = [];
+  const rotatedFetch = (url, init) => {
+    const wait = deferred();
+    rotatedCalls.push({ ...wait, url, signal: init?.signal });
+    return wait.promise;
+  };
+  try {
+    await ui.render("a");
+    await React.act(async () => ui.calls[0].resolve(json(snapshot("a", [member("OLD_SCOPE_PRIVATE")]))));
+    assert.match(ui.target.textContent, /OLD_SCOPE_PRIVATE/);
+
+    // Even when the URL is unchanged, a new fetch port may represent a new
+    // session/authorization scope. The previous private snapshot must vanish.
+    await ui.render("a", rotatedFetch);
+    assert.equal(ui.calls[0].signal.aborted, true);
+    assert.equal(rotatedCalls.length, 1, "new fetch port requires its own GET");
+    assert.match(ui.target.textContent, /読み込み中/);
+    assert.doesNotMatch(ui.target.textContent, /OLD_SCOPE_PRIVATE/,
+      "render-time identity invalidation must not wait for the new GET");
+
+    await React.act(async () => rotatedCalls[0].resolve(json(snapshot("a", [member("NEW_SCOPE_MEMBER")]))));
+    assert.match(ui.target.textContent, /NEW_SCOPE_MEMBER/);
+    assert.doesNotMatch(ui.target.textContent, /OLD_SCOPE_PRIVATE/);
+    assert.deepEqual(ui.navigations, [], "a same-video adapter swap never redirects");
   } finally { await ui.cleanup(); }
 });
 
