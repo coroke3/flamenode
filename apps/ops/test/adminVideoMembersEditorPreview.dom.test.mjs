@@ -492,3 +492,94 @@ test("MIG-0730 U02z: same-video permission adapter replacement retires stale suc
     }
   }
 });
+
+
+test("MIG-0730 U02aa: same-video X-user search port rotation retires old results and re-fetches", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const oldCalls = [], newCalls = [], thirdCalls = [];
+  const oldAdapter = (_query, _offset, signal) => {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    oldCalls.push({ signal, resolve });
+    return promise;
+  };
+  const newAdapter = (_query, _offset, signal) => {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    newCalls.push({ signal, resolve });
+    return promise;
+  };
+  const thirdAdapter = (_query, _offset, signal) => {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    thirdCalls.push({ signal, resolve });
+    return promise;
+  };
+  const permission = async () => ({ ok: false });
+  const render = adapter => React.act(async () => {
+    root.render(React.createElement(VideoMembersField, {
+      initialMembers: [member("CURRENT")],
+      permissionTargetVideoId: "A",
+      searchXUsers: adapter,
+      applyPermissionBatch: permission,
+    }));
+  });
+  const waitFor = async (predicate) => {
+    for (let i = 0; i < 80; i++) {
+      if (predicate()) return;
+      await React.act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 40));
+      });
+    }
+    assert.fail("timed out waiting for debounced X-user search");
+  };
+  const options = () =>
+    [...target.querySelectorAll("#member-name-suggestions option")].map(x => x.value);
+  try {
+    await render(oldAdapter);
+    const input = target.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await React.act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+      assert.ok(setter);
+      setter.call(input, "AB");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await waitFor(() => oldCalls.length === 1);
+    assert.equal(oldCalls.length, 1);
+
+    // The old request is still pending when the parent switches same-video
+    // search authority. A late response cannot populate the new adapter's UI.
+    await render(newAdapter);
+    assert.equal(oldCalls[0].signal.aborted, true);
+    await React.act(async () => oldCalls[0].resolve({
+      items: [{ id: "old_creator", x_name: "OLD SEARCH RESULT" }],
+      hasMore: false, nextOffset: null, hint: null,
+    }));
+    assert.doesNotMatch(options().join("|"), /OLD SEARCH RESULT/);
+    await waitFor(() => newCalls.length === 1);
+    await React.act(async () => newCalls[0].resolve({
+      items: [{ id: "new_creator", x_name: "NEW SEARCH RESULT" }],
+      hasMore: false, nextOffset: null, hint: null,
+    }));
+    assert.ok(options().includes("NEW SEARCH RESULT"));
+    assert.equal(newCalls.length, 1);
+
+    // Cached successful candidates must also disappear without changing query.
+    await render(thirdAdapter);
+    assert.doesNotMatch(options().join("|"), /OLD SEARCH RESULT|NEW SEARCH RESULT/);
+    await waitFor(() => thirdCalls.length === 1);
+    await React.act(async () => thirdCalls[0].resolve({
+      items: [{ id: "third_creator", x_name: "THIRD RESULT" }],
+      hasMore: false, nextOffset: null, hint: null,
+    }));
+    assert.ok(options().includes("THIRD RESULT"));
+    assert.deepEqual(formPayload(target).map(x => x.name), ["AB"],
+      "search port rotation must not discard same-video unsaved member edits");
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
