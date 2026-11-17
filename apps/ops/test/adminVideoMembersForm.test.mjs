@@ -810,6 +810,83 @@ test("MIG-0730 U02az: local OFF/ON preserves canonical editor draft without subm
   }
 });
 
+test("MIG-0730 U02bf: collaboration OFF retires shared permission confirmation and pending results without losing rows", async () => {
+  for (const phase of ["confirmation", "in-flight"]) {
+    const late = deferred();
+    let permissionWrites = 0;
+    const ui = setup({
+      membersField: h(VideoMembersField, {
+        initialMembers: [{ name: "Alice", x_user_id: "alice", role: "", comment: "", chapters: [] }],
+        searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null }),
+        applyPermissionBatch: async () => { permissionWrites++; return late.promise; },
+        permissionTargetVideoId: "v1",
+      }),
+      save: async () => ({ ok: true, message: "saved" }),
+    });
+    const byText = text => {
+      const button = [...ui.target.querySelectorAll("button")].find(
+        item => item.textContent.trim() === text,
+      );
+      assert.ok(button, "expected button " + text);
+      return button;
+    };
+    try {
+      await ui.render();
+      const toggle = ui.target.querySelector('input[name="is_collab"][type="checkbox"]');
+      const form = ui.target.querySelector("form");
+      const fieldset = form.querySelector("fieldset");
+      const textarea = fieldset.querySelector("#members-tsv-input");
+      assert.ok(textarea);
+      await React.act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(textarea), "value")?.set;
+        assert.ok(setter);
+        setter.call(textarea, "Bob\\tbob\\t\\t\\t\\tON");
+        textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      });
+      await React.act(async () => byText("内容を確認").click());
+      assert.match(ui.target.textContent, /確認（1行）/);
+      await React.act(async () => byText("追加").click());
+      assert.ok(fieldset.querySelector('[role="alertdialog"]'),
+        "a privileged confirmation exists before the parent is switched OFF");
+      if (phase === "in-flight") {
+        await React.act(async () => byText("変更を反映").click());
+        assert.equal(permissionWrites, 1);
+        assert.equal(byText("反映中...").disabled, true);
+      }
+      const editorPayload = fieldset.querySelector('input[name="members_json"]');
+      assert.ok(editorPayload);
+      await React.act(async () => toggle.click());
+      assert.equal(toggle.checked, false);
+      assert.equal(fieldset.disabled, true);
+      assert.equal(fieldset.querySelector('[role="alertdialog"]'), null,
+        "parent OFF must close the child permission dialog, not just CSS-hide it");
+      assert.deepEqual(new FormData(form).getAll("members_json"), ["[]"]);
+
+      await React.act(async () => toggle.click());
+      assert.equal(toggle.checked, true);
+      assert.equal(fieldset.disabled, false);
+      assert.equal(fieldset.querySelector('[role="alertdialog"]'), null,
+        "previous permission confirmation cannot resume after OFF/ON");
+      assert.equal(fieldset.querySelector('input[name="members_json"]'), editorPayload);
+      assert.deepEqual(JSON.parse(editorPayload.value).map(row => row.name), ["Alice"],
+        "unsaved member data remains mounted but no unconfirmed bulk intent applies");
+      if (phase === "in-flight") {
+        await React.act(async () => late.finish({ ok: true, message: "STALE PERMISSION RECEIPT" }));
+        assert.doesNotMatch(ui.target.textContent, /STALE PERMISSION RECEIPT/);
+        assert.deepEqual(JSON.parse(editorPayload.value).map(row => row.name), ["Alice"],
+          "an already dispatched permission reply may not rewrite the resumed editor");
+      } else {
+        assert.equal(permissionWrites, 0,
+          "an abandoned confirmation cannot dispatch any privilege mutation");
+      }
+      assert.equal(permissionWrites, phase === "in-flight" ? 1 : 0,
+        "OFF/ON must never retry or replay a permission write");
+    } finally {
+      await ui.cleanup();
+    }
+  }
+});
+
 test("MIG-0730 U02bc: replacing same-video native member data retires stale save responses", async () => {
   for (const outcome of ["success", "failure"]) {
     const pending = deferred();
