@@ -107,7 +107,7 @@ test("MIG-0730 U02am: query, page offset and limit must match RH-019 request ide
     );
   }
 
-  const resultPage = result({ offset: 20, nextOffset: 40, hasMore: true,
+  const resultPage = result({ offset: 20, nextOffset: 21, hasMore: true,
     items: [{ id: "page_private", x_name: "Page private" }] });
   await assert.rejects(
     searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
@@ -158,6 +158,37 @@ test("MIG-0730 U02an: reject impossible or non-advancing RH-019 pagination curso
       items: [{ id: "another", x_name: "Another" }],
     })));
   assert.equal(page.nextOffset, 21);
+});
+
+test("MIG-0730 U02ao: continuation equals offset plus returned rows; V2 refine remains valid", async () => {
+  const wrong = [
+    result({ items: [{ id: "one", x_name: "One" }], hasMore: true, nextOffset: 20 }),
+    result({ offset: 20, items: [{ id: "one", x_name: "One" }],
+      hasMore: true, nextOffset: 40 }),
+    result({ items: [{ id: "one", x_name: "One" }], hasMore: true, nextOffset: null }),
+    result({ items: [], hasMore: true, nextOffset: 1 }),
+  ];
+  for (const payload of wrong) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", payload.offset, new AbortController().signal,
+        async () => json(payload)),
+      /member_suggestions_unavailable/,
+      "a forged successful page must not skip candidates or pretend it is a V2 refine hint",
+    );
+  }
+
+  const valid = await searchAdminVideoMemberXUsers("al", 20,
+    new AbortController().signal, async () => json(result({
+      offset: 20, items: [{ id: "one", x_name: "One" }],
+      hasMore: true, nextOffset: 21,
+    })));
+  assert.equal(valid.nextOffset, 21);
+
+  const refine = await searchAdminVideoMemberXUsers("al", 0,
+    new AbortController().signal, async () => json(result({
+      items: [], hasMore: true, nextOffset: null, hint: "refine",
+    })));
+  assert.deepEqual(refine, { items: [], hasMore: true, nextOffset: null, hint: "refine" });
 });
 
 test("MIG-0730 U02e: abort before or after network response never returns stale private suggestions", async () => {

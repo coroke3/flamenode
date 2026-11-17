@@ -33,9 +33,15 @@ function parseSuggestions(
          // The RH-019 ranked search always advances a non-null cursor.
          // No-progress cursors can re-request the same private result page.
          (value.nextOffset as number) <= requestedOffset ||
-         (value.nextOffset as number) > OFFSET_MAX + SEARCH_LIMIT)) ||
+         (value.nextOffset as number) > OFFSET_MAX + SEARCH_LIMIT ||
+         // The ranker continues from exactly the end of this received page.
+         // A larger value silently skips private candidates.
+         (value.nextOffset as number) !== requestedOffset + value.items.length)) ||
       // A completed page cannot simultaneously advertise a next page.
       (value.hasMore === false && value.nextOffset !== null) ||
+      // Only the RH-019 V2 'refine your query' response has a null cursor
+      // with hasMore=true, and that response always has zero candidate rows.
+      (value.hasMore === true && value.nextOffset === null && value.items.length !== 0) ||
       (value.hint !== null && (typeof value.hint !== "string" || value.hint.length > 256))) {
     throw new Error("member_suggestions_unavailable");
   }
