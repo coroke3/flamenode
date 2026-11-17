@@ -117,9 +117,11 @@ test("MIG-0650 U03d-2c: large JSON1 payload stays below bind/SQL budgets", () =>
 
 test("MIG-0650 U03d-2c: original Next SQL builders are removed, while its planner imports shared core", async () => {
   const source = await readFile(new URL("../../../src/lib/video/replaceVideoMembers.ts", import.meta.url), "utf8");
+  const mutations = await readFile(new URL("../src/video/memberWriteMutationBatch.ts", import.meta.url), "utf8");
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.exports["./video/memberChapterSql"], "./src/video/memberChapterSql.ts");
-  assert.match(source, /from "@flamenode\/server-core\/video\/memberChapterSql"/);
+  assert.match(source, /from "@flamenode\/server-core\/video\/memberWriteMutationBatch"/);
+  assert.match(mutations, /from "\.\/memberChapterSql\.ts"/);
   assert.doesNotMatch(source, /function buildChunkValueUnion\s*\(/);
   assert.doesNotMatch(source, /function buildVideoChapterBulkInsertSql\s*\(/);
   assert.doesNotMatch(source, /function buildVideoChapterBulkDeleteSql\s*\(/);
