@@ -13,9 +13,17 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const React = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { AdminVideoMembersEditorPreview } = await import(
+const { MemoryRouter } = await import("react-router-dom");
+const { AdminVideoMembersEditorPreview: UnmountedAdminVideoMembersEditorPreview } = await import(
   "../.test-dist/apps/ops/src/routes/admin/AdminVideoMembersEditorPreview.js"
 );
+// Each DOM fixture mounts through the same React Router context as the Ops
+// application. Preserve the Preview component identity across rerenders so
+// capability-epoch and pending-write isolation tests remain meaningful.
+function AdminVideoMembersEditorPreview(props) {
+  return React.createElement(MemoryRouter, null,
+    React.createElement(UnmountedAdminVideoMembersEditorPreview, props));
+}
 const { VideoMembersField } = await import("@flamenode/ui");
 
 function member(name, i = 0) {
