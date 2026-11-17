@@ -201,3 +201,66 @@ test("MIG-0650 U03bg no-Queue strict audit mutation executes without a wake port
     assert.equal(count(w.sqlite, "static_rebuild_queue"), 0);
   } finally { w.sqlite.close(); }
 });
+
+test("MIG-0650 U03bh failed postcommit wake-host loader preserves durable committed save", async () => {
+  const w = world();
+  try {
+    const planned = await input(w);
+    let loaderCalls = 0;
+    const result = await executeAdminMemberAtomicCandidate(w.db, planned, async () => {
+      loaderCalls++;
+      assert.equal(count(w.sqlite, "sa085_atomic_probe"), 1);
+      assert.equal(count(w.sqlite, "static_rebuild_queue"), 1);
+      throw Error("missing optional Queue wake binding");
+    });
+    assert.equal(result.committed, true, "already committed mutation cannot become a false 500");
+    assert.equal(result.auditIds.length, 1);
+    assert.equal(w.stats.batches, 1);
+    assert.equal(loaderCalls, 1);
+    assert.equal(count(w.sqlite, "sa085_atomic_probe"), 1);
+    assert.equal(count(w.sqlite, "audit_logs"), 1);
+    assert.equal(count(w.sqlite, "static_rebuild_queue"), 1);
+  } finally { w.sqlite.close(); }
+});
+
+test("MIG-0650 U03bh duplicate member insert rolls back the retry without a second audit or wake", async () => {
+  const w = world();
+  try {
+    const first = await input(w);
+    const saved = await executeAdminMemberAtomicCandidate(w.db, first, async () => disabledWake());
+    assert.equal(saved.committed, true);
+    const again = await input(w);
+    let retryWake = 0;
+    await assert.rejects(
+      executeAdminMemberAtomicCandidate(w.db, again, async () => {
+        retryWake++; return disabledWake();
+      }),
+    );
+    assert.equal(w.stats.batches, 2);
+    assert.equal(retryWake, 0);
+    assert.equal(count(w.sqlite, "sa085_atomic_probe"), 1);
+    assert.equal(count(w.sqlite, "audit_logs"), 1,
+      "a retried duplicate cannot append an audit for a save that rolled back");
+    assert.equal(count(w.sqlite, "static_rebuild_queue"), 1);
+  } finally { w.sqlite.close(); }
+});
+
+test("MIG-0650 U03bh failed durable Queue statement rolls back member mutation with no strict audit", async () => {
+  const w = world();
+  try {
+    const planned = await input(w);
+    // The Queue JSON1 statement is built, but its table disappears before
+    // execution. D1's one transaction must roll the preceding member INSERT back.
+    w.sqlite.exec("DROP TABLE static_rebuild_queue");
+    let wakeCalls = 0;
+    await assert.rejects(
+      executeAdminMemberAtomicCandidate(w.db, planned, async () => {
+        wakeCalls++; return disabledWake();
+      }),
+    );
+    assert.equal(w.stats.batches, 1);
+    assert.equal(count(w.sqlite, "sa085_atomic_probe"), 0);
+    assert.equal(count(w.sqlite, "audit_logs"), 0);
+    assert.equal(wakeCalls, 0);
+  } finally { w.sqlite.close(); }
+});
