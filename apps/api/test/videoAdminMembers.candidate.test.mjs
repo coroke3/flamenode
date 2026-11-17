@@ -1372,6 +1372,80 @@ test("MIG-0650 U03bj strict host boundary rejects incomplete chapters and invali
 
 
 
+test("MIG-0650 U03cd forged normalized fields and duplicate X handles reject before D1", async () => {
+  const { prepareAdminVideoMemberCandidateWrite } =
+    await import("@flamenode/server-core/video/adminMemberCandidatePrepare");
+  let dbAccess = 0;
+  const neverDb = new Proxy({}, {
+    get() { dbAccess++; throw Error("invalid normalized input reached D1"); },
+  });
+  const member = {
+    name: "Alice", x_user_id: "alice", role: "", comment: "", chapters: [],
+  };
+  const target = {
+    id: "v_two", collaboration_type: "individual", visibility_status: "public",
+    creator_x_user_id: null, updated_at: 10,
+  };
+  const preloaded = {
+    settings: {},
+    actorSnapshotJsonById: {
+      u_admin: JSON.stringify({
+        discord_id: null, discord_name: null, x_user_id: null,
+        x_name: null, icon_url: null,
+      }),
+    },
+  };
+  const input = {
+    target, videoId: "v_two", actorUserId: "u_admin", isCollab: true,
+    eventIds: [], now: 12345, preloaded,
+    readMeasuredCallerQueries: () => 0,
+  };
+  const badMembers = [
+    [{ ...member, name: "" }],
+    [{ ...member, name: " Alice" }],
+    [{ ...member, name: "Alice " }],
+    [{ ...member, role: " Lead" }],
+    [{ ...member, comment: "Note " }],
+    [{ ...member, x_user_id: "alice" }, { ...member, name: "Other" }],
+  ];
+  for (const members of badMembers) {
+    await assert.rejects(
+      prepareAdminVideoMemberCandidateWrite(neverDb, {
+        ...input, validated: {
+          members,
+          chaptersByIndex: new Map(members.map((_, i) => [i, []])),
+        },
+      }),
+      { name: "RangeError", message: "video_admin_member_candidate_prepare_invalid" },
+    );
+  }
+  const chapter = { time: "0:12", label: "Hi", note: "" };
+  const normalized = { time_seconds: 12, order_index: 0, label: "Hi", note: "" };
+  const badChapters = [
+    { ...chapter, time: " 0:12" },
+    { ...chapter, label: " Hi" },
+    { ...chapter, note: "Note " },
+  ];
+  for (const badChapter of badChapters) {
+    await assert.rejects(
+      prepareAdminVideoMemberCandidateWrite(neverDb, {
+        ...input,
+        validated: {
+          members: [{ ...member, chapters: [badChapter] }],
+          // The normalized map is structurally correct; the raw payload is
+          // forged rather than returned by CURRENT's trimmed Zod validator.
+          chaptersByIndex: new Map([[0, [
+            { ...normalized, note: badChapter.note.trim() },
+          ]]]),
+        },
+      }),
+      { name: "RangeError", message: "video_admin_member_candidate_prepare_invalid" },
+    );
+  }
+  assert.equal(dbAccess, 0,
+    "all malformed supposedly validated submissions rejected before canonical SELECT");
+});
+
 test("MIG-0650 U03bk real validated member and chapter values produce strict atomic plan without D1 write", async () => {
   const { drizzle } = await import("drizzle-orm/d1");
   const schema = await import("@flamenode/db/schema");

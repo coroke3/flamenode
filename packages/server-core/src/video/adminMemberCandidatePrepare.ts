@@ -80,17 +80,31 @@ function hasValidNormalizedMemberShape(
       validated.chaptersByIndex.size !== validated.members.length ||
       (!isCollab && validated.members.length > 0)) return false;
 
+  // CURRENT's validator trims input, synthesizes a nonempty name, and
+  // disallows duplicate nonempty X handles. Do not trust a forged "validated"
+  // payload with the same structural shape but different persisted values.
+  const seenXIds = new Set<string>();
   for (const [index, member] of validated.members.entries()) {
-    if (!member || typeof member.name !== "string" || member.name.length > 80 ||
+    if (!member ||
+        typeof member.name !== "string" || !member.name ||
+        member.name.length > 80 || member.name !== member.name.trim() ||
         typeof member.x_user_id !== "string" ||
         (member.x_user_id !== "" && !isCanonicalXId(member.x_user_id)) ||
         typeof member.role !== "string" || member.role.length > 80 ||
+        member.role !== member.role.trim() ||
         typeof member.comment !== "string" || member.comment.length > 500 ||
+        member.comment !== member.comment.trim() ||
         !Array.isArray(member.chapters) || member.chapters.length > 30) return false;
+    if (member.x_user_id) {
+      if (seenXIds.has(member.x_user_id)) return false;
+      seenXIds.add(member.x_user_id);
+    }
     if (member.chapters.some(ch =>
-      !ch || typeof ch.time !== "string" ||
+      !ch || typeof ch.time !== "string" || ch.time !== ch.time.trim() ||
       typeof ch.label !== "string" || ch.label.length > 120 ||
-      typeof ch.note !== "string" || ch.note.length > 1000
+      ch.label !== ch.label.trim() ||
+      typeof ch.note !== "string" || ch.note.length > 1000 ||
+      ch.note !== ch.note.trim()
     )) return false;
     const normalized = validated.chaptersByIndex.get(index);
     if (!Array.isArray(normalized) ||
