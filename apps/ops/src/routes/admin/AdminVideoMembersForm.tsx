@@ -4,6 +4,8 @@ import * as React from "react";
 import { VideoMembersField } from "@flamenode/ui";
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import { SaveSuccessNotice } from "../../components/shared/SaveSuccessNotice.js";
+import { OpsLink } from "../../components/shared/OpsLink.js";
+import { memberVideoPublicHref } from "./memberVideoPublicHref.js";
 
 export type AdminVideoMembersSaveResult = {
   ok: boolean;
@@ -52,7 +54,7 @@ function normalizeInjectedSaveResult(value: unknown): AdminVideoMembersSaveResul
 
 
 export interface AdminVideoMembersFormProps {
-  video: { id: string; title: string; collaboration_type: string | null };
+  video: { id: string; title: string; youtube_video_id?: string | null; collaboration_type: string | null };
   initialMembersCount: number;
   /** Eventually: shared @flamenode/ui VideoMembersField with a members_json hidden input. */
   membersField?: React.ReactNode;
@@ -272,6 +274,12 @@ function AdminVideoMembersFormForVideo({
     }
   }
 
+  // Invalid standalone preview IDs must never create document-relative or
+  // protocol-relative navigation; only validated IDs enter the Ops detail URL.
+  const detailHref = isSafeVideoId(video.id)
+    ? "/admin/videos/" + encodeURIComponent(video.id)
+    : "/admin/videos";
+
   return (
     <form onSubmit={event => { void submit(event); }} className="fn-card"
       aria-label="参加者設定の編集フォーム" style={{ display: "grid", gap: 18 }}>
@@ -318,13 +326,20 @@ function AdminVideoMembersFormForVideo({
       ) : (
         <p role="alert">{result.message ?? "保存に失敗しました。"}</p>
       ) : null}
-      {enabled ? (
-        <button type="submit" className="fn-btn fn-btn-primary" disabled={pending}>
-          {pending ? "保存中..." : "参加者設定を保存"}
-        </button>
-      ) : (
-        <p role="status">保存機能は移行中です。現行の管理画面で操作してください。</p>
-      )}
+      {/* CURRENT member form footer: keep navigation even while writes remain
+          deliberately disabled; only the authorized adapter enables saving. */}
+      <footer style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {enabled ? (
+          <button type="submit" className="fn-btn fn-btn-primary" disabled={pending}>
+            {pending ? "保存中..." : "参加者設定を保存"}
+          </button>
+        ) : (
+          <p role="status">保存機能は移行中です。現行の管理画面で操作してください。</p>
+        )}
+        <OpsLink href={detailHref} className="fn-btn fn-btn-ghost">詳細へ戻る</OpsLink>
+        <a href={memberVideoPublicHref(video)} className="fn-btn fn-btn-ghost"
+          target="_blank" rel="noopener noreferrer">公開ページ</a>
+      </footer>
     </form>
   );
 }
