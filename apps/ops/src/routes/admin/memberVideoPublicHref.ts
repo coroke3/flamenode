@@ -7,7 +7,10 @@ export function memberVideoPublicHref(video: {
   id: string;
   youtube_video_id?: string | null;
 }): string {
-  const raw = video.youtube_video_id?.trim();
+  // The standalone editor also accepts injected legacy data at runtime.
+  // Never invoke .trim() on a malformed value or expose an unsafe public path.
+  const raw = typeof video.youtube_video_id === "string"
+    ? video.youtube_video_id.trim() : null;
   if (raw) {
     if (YOUTUBE_ID_RE.test(raw)) return `/${raw}`;
     try {
@@ -31,5 +34,6 @@ export function memberVideoPublicHref(video: {
       }
     } catch { /* Invalid URLs fall through to the safe internal ID. */ }
   }
-  return SAFE_INTERNAL_ID_RE.test(video.id) ? `/${video.id}` : "/list";
+  return typeof video.id === "string" && SAFE_INTERNAL_ID_RE.test(video.id)
+    ? `/${video.id}` : "/list";
 }
