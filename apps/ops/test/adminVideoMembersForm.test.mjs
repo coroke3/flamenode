@@ -525,6 +525,12 @@ test("MIG-0730 U02ap/U02aq: only canonical shared field or exact hidden input au
     h("span", null, "placeholder"),
     h("input", { type: "hidden", name: "different_json", value: "[]" }),
     h("input", { type: "text", name: "members_json", value: "[]" }),
+    // A disabled or value-less hidden input cannot grant destructive OFF writes.
+    h("input", { type: "hidden", name: "members_json", value: "[]", disabled: true }),
+    h("input", { type: "hidden", name: "members_json", value: "[]", disabled: "true" }),
+    h("input", { type: "hidden", name: "members_json", disabled: false }),
+    h("input", { type: "hidden", name: "members_json", defaultValue: "[]" }),
+    h("input", { type: "hidden", name: "members_json", value: 5 }),
     h(React.Fragment, null),
     h(React.Fragment, null, h("input", {
       type: "hidden", name: "members_json", value: "[]",
