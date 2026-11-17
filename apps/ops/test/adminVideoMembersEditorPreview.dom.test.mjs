@@ -719,3 +719,75 @@ test("MIG-0730 U02ae: rejected X-user pagination retires cached private candidat
     target.remove();
   }
 });
+
+
+test("MIG-0730 U02af: disable hides cached private suggestions before render effects", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const requests = [];
+  const searchXUsers = (q, offset, signal) => {
+    let resolve;
+    const response = new Promise(done => { resolve = done; });
+    requests.push({ q, offset, signal, resolve });
+    return response;
+  };
+  const permission = async () => ({ ok: false });
+  const render = disabled => React.act(async () => root.render(
+    React.createElement(VideoMembersField, {
+      initialMembers: [member("CURRENT")],
+      permissionTargetVideoId: "A",
+      searchXUsers,
+      applyPermissionBatch: permission,
+      disabled,
+    })
+  ));
+  const names = () => [...target.querySelectorAll("#member-name-suggestions option")]
+    .map(node => node.value);
+  const hasMore = () => [...target.querySelectorAll("button")]
+    .some(button => button.textContent.includes("候補をさらに読み込む"));
+  try {
+    await render(false);
+    const input = target.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await React.act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+      assert.ok(setter);
+      setter.call(input, "Alice");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await React.act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 320));
+    });
+    assert.equal(requests.length, 1);
+    await React.act(async () => requests[0].resolve({
+      items: [{ id: "revoked", x_name: "OLD PRIVATE" }],
+      hasMore: true, nextOffset: 20, hint: null,
+    }));
+    assert.ok(names().includes("OLD PRIVATE"));
+    assert.equal(hasMore(), true);
+
+    await render(true);
+    assert.deepEqual(names(), [], "disabled render must hide private datalist suggestions");
+    assert.equal(hasMore(), false, "disabled render must hide old pagination action");
+    assert.deepEqual(formPayload(target).map(row => row.name), ["Alice"],
+      "read permission revocation must not silently discard draft edits");
+
+    await render(false);
+    assert.ok(!names().includes("OLD PRIVATE"),
+      "reenabling before fresh authorization must not resurrect cached results");
+    await React.act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 320));
+    });
+    assert.equal(requests.length, 2, "reenabling requires a fresh search");
+    await React.act(async () => requests[1].resolve({
+      items: [{ id: "fresh", x_name: "NEW AUTHORIZED" }],
+      hasMore: false, nextOffset: null, hint: null,
+    }));
+    assert.ok(names().includes("NEW AUTHORIZED"));
+    assert.ok(!names().includes("OLD PRIVATE"));
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
