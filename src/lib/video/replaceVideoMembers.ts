@@ -10,8 +10,6 @@ import {
 } from "@/lib/video/atomicWritePlan";
 import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
 import {
-  buildVideoMemberBulkInsertSql,
-  buildVideoMemberSetGuardSql,
   buildVideoMemberSetSnapshot,
   toVideoMemberSnapshotRow,
 } from "@/lib/video/memberSetSnapshot";
@@ -23,12 +21,6 @@ export {
   VIDEO_CHAPTER_JSON_MAX_BYTES,
   VIDEO_CHAPTER_JSON_MAX_BINDS,
 } from "@flamenode/server-core/video/chapterJsonChunking";
-
-// Compatibility bridge (MIG-0650, D-10): original SQL compound statements live in server-core.
-import {
-  buildVideoChapterBulkDeleteSql,
-  buildVideoChapterBulkInsertSql,
-} from "@flamenode/server-core/video/memberChapterSql";
 
 // Compatibility bridge (MIG-0650, D-10): old Next caller delegates the
 // canonical member-managed chapter projection to server-core.
@@ -52,15 +44,9 @@ import { selectVideoMemberPermissionCarry } from "@flamenode/server-core/video/m
 // after caller completes fail-closed canonical X identity lookup.
 import { buildVideoMemberReplacementRows } from "@flamenode/server-core/video/memberReplacementRows";
 
-// Compatibility bridge (MIG-0650, D-10): CURRENT X-user pending
-// UPSERT SQL is shared without changing the atomic batch/audit callers.
-import { buildVideoMemberXUserBatchSql } from "@flamenode/server-core/video/memberXUserSql";
-
-// Compatibility bridge (MIG-0650, D-10): hidden carry CAS/delete SQL lives in core.
-import {
-  buildHiddenCarryRowsGuardSql,
-  buildHiddenCarryRowsDeleteSql,
-} from "@flamenode/server-core/video/hiddenMemberCarrySql";
+// Compatibility bridge (MIG-0650, D-10): shared mutation sequencing
+// retains CURRENT member-set CAS and all D1 changes() assertions.
+import { buildVideoMemberWriteMutationBatch } from "@flamenode/server-core/video/memberWriteMutationBatch";
 
 export async function buildReplaceVideoMembersPlan(
   db: DB,
@@ -205,23 +191,25 @@ export async function buildReplaceVideoMembersPlan(
     hiddenCarryRows.length === 0
   ) return plan;
 
-  plan.statements.push(
-    db.run(buildVideoMemberSetGuardSql(args.videoId, beforeSnapshot.rows)),
-  );
-  plan.expectedChanges.push(null);
-
-  if (hiddenCarryRows.length > 0) {
-    plan.statements.push(
-      db.run(buildHiddenCarryRowsGuardSql(args.videoId, hiddenCarryRows)),
-    );
-    plan.expectedChanges.push(null);
-  }
+  // MIG-0650 U03d-2k: same ordered member/chapter D1 statements and
+  // exact change counts are shared with the future Hono writer. CURRENT owns
+  // validation, strict audits, one-batch execution and post-commit Queue.
+  const mutationBatch = buildVideoMemberWriteMutationBatch(db, {
+    videoId: args.videoId,
+    beforeSnapshotRows: beforeSnapshot.rows,
+    afterSnapshotRows: afterSnapshot.rows,
+    existingPublicCount: existing.length,
+    hiddenCarryRows,
+    newXUsers,
+    existingManagedChapters,
+    nextManagedChapters,
+    membersChanged,
+    chaptersChanged,
+  });
+  plan.statements.push(...mutationBatch.statements);
+  plan.expectedChanges.push(...mutationBatch.expectedChanges);
 
   if (newXUsers.length > 0) {
-    plan.statements.push(db.run(buildVideoMemberXUserBatchSql(newXUsers)));
-    // SELECT後に別requestが同じX IDを作っていても、同一IDのno-op UPDATEを
-    // 1 changeとして扱い、参加者保存全体を不要なUNIQUE競合で落とさない。
-    plan.expectedChanges.push(newXUsers.length);
     plan.audits.push({
       table_name: "x_users_member_batch",
       target_id: args.videoId,
@@ -238,10 +226,6 @@ export async function buildReplaceVideoMembersPlan(
   }
 
   if (hiddenCarryRows.length > 0) {
-    plan.statements.push(
-      db.run(buildHiddenCarryRowsDeleteSql(args.videoId, hiddenCarryRows)),
-    );
-    plan.expectedChanges.push(hiddenCarryRows.length);
     plan.audits.push({
       table_name: "video_member_hidden_carry_cleanup",
       target_id: args.videoId,
@@ -260,44 +244,6 @@ export async function buildReplaceVideoMembersPlan(
     });
   }
 
-  // チャプターだけ変更した保存では公開メンバー集合をDELETE/INSERTし直さない。
-  // 不要なD1 writeと権限metadataの再書込みを避け、member-set CASだけを競合ガードに使う。
-  if (membersChanged && existing.length > 0) {
-    plan.statements.push(
-      db
-        .delete(videoMembers)
-        .where(
-          and(
-            eq(videoMembers.video_id, args.videoId),
-            eq(videoMembers.is_public_member, 1),
-          )!,
-        ),
-    );
-    plan.expectedChanges.push(existing.length);
-  }
-
-  if (membersChanged && afterSnapshot.rows.length > 0) {
-    plan.statements.push(
-      db.run(buildVideoMemberBulkInsertSql(afterSnapshot.rows)),
-    );
-    plan.expectedChanges.push(afterSnapshot.rows.length);
-  }
-
-  if (chaptersChanged && existingManagedChapters.length > 0) {
-    for (const chunk of buildVideoChapterBulkDeleteSql(
-      args.videoId,
-      existingManagedChapters,
-    )) {
-      plan.statements.push(db.run(chunk.statement));
-      plan.expectedChanges.push(chunk.rowCount);
-    }
-  }
-  if (chaptersChanged && nextManagedChapters.length > 0) {
-    for (const chunk of buildVideoChapterBulkInsertSql(nextManagedChapters)) {
-      plan.statements.push(db.run(chunk.statement));
-      plan.expectedChanges.push(chunk.rowCount);
-    }
-  }
   if (chaptersChanged) {
     plan.audits.push({
       table_name: "video_chapters_member_set",
