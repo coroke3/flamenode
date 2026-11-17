@@ -30,14 +30,22 @@ function validatedBody(videoId: string, formData: FormData): {
   const ids = formData.getAll("video_id");
   const checkbox = formData.getAll("is_collab");
   const members = formData.getAll("members_json");
-  if (ids.length !== 1 || ids[0] !== videoId ||
-      checkbox.length > 16 || checkbox.some(v => typeof v !== "string") ||
+  // Unlike the general-purpose CURRENT/Hono parser, this adapter only accepts
+  // FormData produced by our exact Ops form (hidden "false", optional checked
+  // "true"). Any altered order, duplicate, or alternate flag fails before PUT.
+  const validCheckbox =
+    checkbox.length === 1 && checkbox[0] === "false" ||
+    checkbox.length === 2 && checkbox[0] === "false" && checkbox[1] === "true";
+  if (ids.length !== 1 || ids[0] !== videoId || !validCheckbox ||
       members.length !== 1 || typeof members[0] !== "string") return null;
 
   const memberJson = members[0];
   try {
     const parsed: unknown = JSON.parse(memberJson);
     if (!Array.isArray(parsed) || parsed.length > MAX_VIDEO_MEMBERS ||
+        // A collaboration-OFF submission must not carry stale member rows.
+        // The Ops form serializes a literal [] when the checkbox is off.
+        (checkbox.length === 1 && parsed.length !== 0) ||
         parsed.some(item => !item || typeof item !== "object" || Array.isArray(item) ||
           ("is_public_member" in item && item.is_public_member !== 1))) {
       return null;
