@@ -306,3 +306,59 @@ test("MIG-0730 U02co: hostile permission DTO getters and proxies reject before S
   assert.deepEqual(await applyAdminVideoMemberPermissionBatch(input(), fetchFn), { ok: true });
   assert.equal(posts, 1, "canonical permissions still submit exactly once");
 });
+
+test("MIG-0730 U02ct: stateful permission getters are read once and bound to the validated POST", async () => {
+  const seen = { videoId: 0, mode: 0, notify: 0, intents: 0, xid: 0, name: 0, intent: 0 };
+  const row = {};
+  Object.defineProperties(row, {
+    x_user_id: { get() { seen.xid++; return seen.xid === 1 ? "@ALICE" : "@BOB"; } },
+    display_name: { get() { seen.name++; return seen.name === 1 ? " Alice " : "PRIVATE_REPLACEMENT"; } },
+    intent: { get() { seen.intent++; return seen.intent === 1 ? "on" : "superuser"; } },
+  });
+  const permission = {};
+  Object.defineProperties(permission, {
+    videoId: { get() { seen.videoId++; return seen.videoId === 1 ? "video-1" : "other-video"; } },
+    edit_privilege_mode: { get() { seen.mode++; return seen.mode === 1 ? "admin" : "event"; } },
+    notify: { get() { seen.notify++; return seen.notify === 1 ? true : false; } },
+    intents: { get() {
+      seen.intents++;
+      return seen.intents === 1 ? [row] : Array.from({ length: 101 }, (_, i) =>
+        ({ x_user_id: "other_" + i, display_name: "OTHER", intent: "off" }));
+    } },
+  });
+
+  const requests = [];
+  const actual = await applyAdminVideoMemberPermissionBatch(permission, async (path, init) => {
+    requests.push({ path, body: JSON.parse(init.body) });
+    return json({ ok: true, videoId: "video-1" });
+  });
+  assert.deepEqual(actual, { ok: true });
+  assert.equal(requests.length, 1, "one canonical POST only");
+  assert.equal(requests[0].path, "/api/videos/video-1/collaborators/batch");
+  assert.deepEqual(requests[0].body, {
+    video_id: "video-1", edit_privilege_mode: "admin", notify: true,
+    intents: [{ x_user_id: "alice", display_name: "Alice", intent: "on" }],
+  });
+  assert.deepEqual(seen, {
+    videoId: 1, mode: 1, notify: 1, intents: 1,
+    xid: 1, name: 1, intent: 1,
+  }, "no source getter may change value between validation and serialization");
+});
+
+test("MIG-0730 U02ct: permission batch does not trust custom array iteration", async () => {
+  const intents = [{ x_user_id: "alice", display_name: "Alice", intent: "on" }];
+  intents[Symbol.iterator] = function* () {
+    yield { x_user_id: "other", display_name: "OTHER", intent: "off" };
+    throw new Error("PRIVATE_ITERATOR");
+  };
+  let requests = 0;
+  const got = await applyAdminVideoMemberPermissionBatch(input({ intents }), async (_, init) => {
+    requests++;
+    assert.deepEqual(JSON.parse(init.body).intents, [
+      { x_user_id: "alice", display_name: "Alice", intent: "on" },
+    ], "only bounded indexed values, not custom iterator output, are accepted");
+    return json({ ok: true, videoId: "video-1" });
+  });
+  assert.deepEqual(got, { ok: true });
+  assert.equal(requests, 1);
+});

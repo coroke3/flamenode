@@ -30,46 +30,56 @@ function validatedBatch(input: AdminPermissionBatchInput): {
     intents: AdminPermissionBatchInput["intents"];
   };
 } | null {
-  // Align privileged permission paths with SA-085 and admin GET path guards.
-  if (!input || typeof input !== "object" ||
-      typeof input.videoId !== "string" ||
-      input.videoId.length < 1 || input.videoId.length > 64 ||
-      input.videoId.trim() !== input.videoId ||
-      /[\/\\\x00-\x1f]/.test(input.videoId) ||
-      input.videoId === "." || input.videoId === ".." ||
-      input.notify !== true ||
-      (input.edit_privilege_mode !== undefined &&
-        input.edit_privilege_mode !== "admin" &&
-        input.edit_privilege_mode !== "event") ||
-      !Array.isArray(input.intents) ||
-      input.intents.length < 1 ||
-      input.intents.length > MAX_COLLABORATOR_PERMISSION_BATCH) {
-    return null;
-  }
+  if (!input || typeof input !== "object") return null;
+  // A legacy/injected object can expose stateful accessors. Read each source
+  // property exactly once: the checked video ID must also be the path, lock
+  // and body identity, and checked privilege intents must be the sent intents.
+  const videoId = input.videoId;
+  const mode = input.edit_privilege_mode;
+  const notify = input.notify;
+  const sourceIntents = input.intents;
+  if (typeof videoId !== "string" ||
+      videoId.length < 1 || videoId.length > 64 ||
+      videoId.trim() !== videoId ||
+      /[\/\\\x00-\x1f]/.test(videoId) ||
+      videoId === "." || videoId === ".." ||
+      notify !== true ||
+      (mode !== undefined && mode !== "admin" && mode !== "event") ||
+      !Array.isArray(sourceIntents)) return null;
+
+  // Snapshot no more than the server's maximum by numeric index. Iterating a
+  // hostile array's custom Symbol.iterator could yield arbitrary extra rows,
+  // bypass the length gate or never terminate.
+  const count = sourceIntents.length;
+  if (count < 1 || count > MAX_COLLABORATOR_PERMISSION_BATCH) return null;
+  const rows: AdminPermissionBatchInput["intents"] = [];
+  for (let i = 0; i < count; i += 1) rows.push(sourceIntents[i]!);
 
   const seen = new Set<string>();
   const intents: AdminPermissionBatchInput["intents"] = [];
-  for (const item of input.intents) {
-    if (!item || typeof item !== "object" ||
-        typeof item.x_user_id !== "string" || item.x_user_id.length > 32 ||
-        typeof item.display_name !== "string" ||
-        typeof item.intent !== "string" ||
-        (item.intent !== "on" && item.intent !== "off")) return null;
-    const xid = normalizeXId(item.x_user_id);
-    const display = item.display_name.trim();
+  for (const item of rows) {
+    if (!item || typeof item !== "object") return null;
+    const rawXId = item.x_user_id;
+    const rawName = item.display_name;
+    const intent = item.intent;
+    if (typeof rawXId !== "string" || rawXId.length > 32 ||
+        typeof rawName !== "string" ||
+        (intent !== "on" && intent !== "off")) return null;
+    const xid = normalizeXId(rawXId);
+    const display = rawName.trim();
     if (!isCanonicalXId(xid) || !display || display.length > 80 || seen.has(xid)) return null;
     seen.add(xid);
-    intents.push({ x_user_id: xid, display_name: display, intent: item.intent });
+    intents.push({ x_user_id: xid, display_name: display, intent });
   }
 
   let encodedId: string;
-  try { encodedId = encodeURIComponent(input.videoId); }
+  try { encodedId = encodeURIComponent(videoId); }
   catch { return null; }
   return {
     encodedId,
     body: {
-      video_id: input.videoId,
-      ...(input.edit_privilege_mode ? { edit_privilege_mode: input.edit_privilege_mode } : {}),
+      video_id: videoId,
+      ...(mode ? { edit_privilege_mode: mode } : {}),
       notify: true,
       intents,
     },
