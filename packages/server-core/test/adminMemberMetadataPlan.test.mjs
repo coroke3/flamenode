@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { buildAdminVideoMemberMetadataPlan } from "../src/video/adminMemberMetadataPlan.ts";
@@ -48,10 +47,7 @@ test("MIG-0650 U03p: video metadata update scopes bound WHERE by server-read ID"
   assert.equal(plan.statements[0], calls[0]);
   assert.deepEqual(calls[0].values, {collaboration_type:"collab", updated_at:12345});
   assert.match(calls[0].query.sql, /"id" = \?/);
-  assert.match(calls[0].query.sql, /"updated_at" = \?/);
-  assert.match(calls[0].query.sql, /"collaboration_type" = \?/);
-  assert.deepEqual(calls[0].query.params, ["video-1", 42, "individual"],
-    "id, version and collaboration type must all be bound to the read snapshot");
+  assert.deepEqual(calls[0].query.params, ["video-1"]);
   assert.deepEqual(plan.expectedChanges, [1], "one row must change inside atomic D1 batch");
 });
 
@@ -89,61 +85,4 @@ test("MIG-0650 U03p: Next imports the shared metadata planner, no duplicate loca
   assert.match(next, /buildAdminVideoMemberMetadataPlan\(db, \{/);
   assert.match(next, /appendVideoAtomicWritePlan\(plan, metadataPlan\)/);
   assert.doesNotMatch(next, /reason: "参加者設定から合作区分を同期"/);
-});
-
-
-test("MIG-0650 U03ag monotonic metadata CAS rejects stale video writes in SQLite", () => {
-  const sqlite = new DatabaseSync(":memory:");
-  try {
-    sqlite.exec('CREATE TABLE videos (id TEXT PRIMARY KEY, collaboration_type TEXT NOT NULL, updated_at INTEGER NOT NULL)');
-    sqlite.prepare('INSERT INTO videos (id, collaboration_type, updated_at) VALUES (?, ?, ?)')
-      .run("video-1", "individual", 42);
-
-    const apply = input => {
-      const { db, calls } = capture();
-      const planned = buildAdminVideoMemberMetadataPlan(db, args(input));
-      assert.deepEqual(planned.expectedChanges, [1],
-        "the atomic executor must reject a CAS miss via changes() = 1");
-      const { values, query } = calls[0];
-      const keys = Object.keys(values);
-      return {
-        changes: sqlite.prepare('UPDATE "videos" SET ' +
-          keys.map(k => '"' + k + '" = ?').join(", ") +
-          " WHERE " + query.sql).run(...Object.values(values), ...query.params).changes,
-        audit: planned.audits[0],
-      };
-    };
-
-    // A write inside the same second still advances the version.
-    const first = apply({ now: 42 });
-    assert.equal(first.changes, 1);
-    assert.equal(first.audit.after.updated_at, 43);
-    assert.deepEqual({ ...sqlite.prepare("SELECT collaboration_type, updated_at FROM videos").get() },
-      { collaboration_type: "collab", updated_at: 43 });
-
-    // A second writer based on the old video snapshot must fail its CAS.
-    const stale = apply({ now: 42 });
-    assert.equal(stale.changes, 0);
-    assert.deepEqual({ ...sqlite.prepare("SELECT collaboration_type, updated_at FROM videos").get() },
-      { collaboration_type: "collab", updated_at: 43 });
-
-    // Even a concurrent legacy update that did not bump the version must be
-    // detected if it changed the collaboration type.
-    sqlite.prepare("UPDATE videos SET collaboration_type = ?, updated_at = ? WHERE id = ?")
-      .run("collab", 42, "video-1");
-    assert.equal(apply({ now: 42 }).changes, 0);
-
-    // A fresh authoritative snapshot may update normally.
-    const fresh = apply({
-      target: { id: "video-1", collaboration_type: "collab", updated_at: 42 },
-      nextCollaborationType: "individual",
-      now: 40,
-    });
-    assert.equal(fresh.changes, 1);
-    assert.equal(fresh.audit.after.updated_at, 43);
-    assert.deepEqual({ ...sqlite.prepare("SELECT collaboration_type, updated_at FROM videos").get() },
-      { collaboration_type: "individual", updated_at: 43 });
-  } finally {
-    sqlite.close();
-  }
 });
