@@ -11,6 +11,7 @@ for (const key of ["window", "document", "navigator", "HTMLElement", "Node", "Fo
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const React = await import("react");
 const { createRoot } = await import("react-dom/client");
+const { MemoryRouter } = await import("react-router-dom");
 const { AdminVideoMembersForm } = await import(
   "../.test-dist/apps/ops/src/routes/admin/AdminVideoMembersForm.js"
 );
@@ -32,7 +33,7 @@ function setup(overrides = {}) {
   };
   const render = async (nextProps = {}) => React.act(async () => {
     Object.assign(props, nextProps);
-    root.render(h(AdminVideoMembersForm, props));
+    root.render(h(MemoryRouter, null, h(AdminVideoMembersForm, props)));
   });
   const submit = async () => React.act(async () => {
     const event = new dom.window.Event("submit", { bubbles: true, cancelable: true });
@@ -58,6 +59,41 @@ test("MIG-0730 U02c: no save adapter or member form means no active mutation but
     assert.match(ui.target.textContent, /保存機能は移行中/);
     await ui.submit();
   } finally { await ui.cleanup(); }
+});
+
+test("MIG-0730 U02ci: editable member footer preserves CURRENT navigation and safe public fallbacks", async () => {
+  const youtube = "dQw4w9WgXcQ";
+  const cases = [
+    { id: "v1", youtubeId: youtube, expected: "/" + youtube },
+    { id: "v1", youtubeId: "https://youtu.be/" + youtube + "?t=30", expected: "/" + youtube },
+    { id: "v1", youtubeId: "https://www.youtube.com/watch?v=" + youtube, expected: "/" + youtube },
+    { id: "v1", youtubeId: "https://youtube.com/shorts/" + youtube, expected: "/" + youtube },
+    { id: "v1", youtubeId: "https://youtube.com/embed/" + youtube, expected: "/" + youtube },
+    { id: "v1", youtubeId: "https://youtube.com.evil.test/watch?v=" + youtube, expected: "/v1" },
+    { id: "v1", youtubeId: "//malicious.test/video", expected: "/v1" },
+    { id: "v1", youtubeId: null, expected: "/v1" },
+    { id: "id with space", youtubeId: "not-a-video", expected: "/list" },
+    { id: "bad/path", youtubeId: null, expected: "/list", detail: "/admin/videos" },
+    { id: "\\uD800", youtubeId: null, expected: "/list", detail: "/admin/videos" },
+  ];
+  for (const entry of cases) {
+    const ui = setup({ video: { ...video, id: entry.id, youtube_video_id: entry.youtubeId } });
+    try {
+      await ui.render();
+      const links = Array.from(ui.target.querySelectorAll("a"));
+      const detail = links.find(link => link.textContent.trim() === "詳細へ戻る");
+      const publicLink = links.find(link => link.textContent.trim() === "公開ページ");
+      assert.ok(detail, "CURRENT detail footer is present without a save adapter");
+      assert.equal(detail.getAttribute("href"), entry.detail ??
+        "/admin/videos/" + encodeURIComponent(entry.id));
+      assert.ok(publicLink, "CURRENT public footer is present");
+      assert.equal(publicLink.getAttribute("href"), entry.expected);
+      assert.equal(publicLink.getAttribute("target"), "_blank");
+      assert.equal(publicLink.getAttribute("rel"), "noopener noreferrer");
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null,
+        "navigation never activates an unapproved SA-085 adapter");
+    } finally { await ui.cleanup(); }
+  }
 });
 
 test("MIG-0730 U02bz: unsafe video IDs in standalone Form cannot enable an injected write", async () => {
