@@ -320,3 +320,46 @@ test("CAS reread and R2 compensation both unavailable still return sanitized sta
   assert.doesNotMatch(JSON.stringify({ calls, result }), /account_token|authorization=private/);
 });
 
+
+test("CAS status reread returns no row: reject unknown outcome without unsafe retry", async () => {
+  for (const observed of [null, undefined]) {
+    for (const fenceToken of ["fence-1", null]) {
+      const calls = [];
+      const result = await executeVideoVisibilityStatusMutation({
+        db: {},
+        videoId: "v-1",
+        requestedStatus: "private",
+        transition: transition({ fenceToken }),
+        reason: null,
+        logTag: "manage-video-status",
+      }, host({
+        mutate: async () => {
+          calls.push("mutate");
+          throw Object.assign(new Error("CAS conflict"), { auditMutation: true });
+        },
+        isAuditMutationError: (error) => Boolean(error?.auditMutation),
+        compensate: async () => { calls.push("compensate"); },
+        rereadStatus: async () => {
+          calls.push("reread");
+          return observed;
+        },
+        log: (level, tag, details) => calls.push(["log", level, tag, details]),
+      }, calls));
+
+      assert.deepEqual(result, {
+        ok: false,
+        message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+        errorCode: "status_unverified",
+        traceId: "trace-1",
+        retryable: false,
+      }, "a missing row is not positive confirmation of a stale CAS conflict");
+      assert.deepEqual(calls.map((entry) => Array.isArray(entry) ? entry[0] : entry),
+        fenceToken ? ["precommit", "mutate", "compensate", "reread", "log"]
+          : ["mutate", "reread", "log"]);
+      assert.deepEqual(calls.filter((entry) => Array.isArray(entry) && entry[0] === "log"),
+        [["log", "warn", "[manage-video-status] visibility status missing after CAS conflict",
+          { traceId: "trace-1", error_code: "visibility_status_missing" }]],
+        "only a fixed diagnostic is logged, never the missing-row provider response");
+    }
+  }
+});
