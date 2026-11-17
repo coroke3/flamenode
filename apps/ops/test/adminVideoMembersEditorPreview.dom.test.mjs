@@ -1334,7 +1334,7 @@ test("MIG-0730 U02bu: forged or duplicate hidden video_id cannot reach injected 
   }
 });
 
-test("MIG-0730 U02bv: duplicate members_json or altered collaboration flags cannot reach an injected save port", async () => {
+test("MIG-0730 U02bv/U02bw: forged, duplicate and unexpected FormData fields cannot reach injected save", async () => {
   const target = document.createElement("div");
   document.body.append(target);
   const root = createRoot(target);
@@ -1389,6 +1389,12 @@ test("MIG-0730 U02bv: duplicate members_json or altered collaboration flags cann
     assert.equal(sent.length, 0, "forged hidden true cannot authorize an ON write");
     baseFlag.value = "false";
 
+    const injectedPrivilege = hidden("can_edit", "true");
+    await submit();
+    assert.equal(sent.length, 0, "unexpected privilege field must not reach an injected save port");
+    assert.equal(refreshes, 0, "unexpected field must not cause an authorized refresh");
+    injectedPrivilege.remove();
+
     await submit();
     assert.equal(sent.length, 1, "valid ON form still saves");
     assert.deepEqual(sent[0].ids, ["U02BV"]);
@@ -1405,6 +1411,11 @@ test("MIG-0730 U02bv: duplicate members_json or altered collaboration flags cann
     await submit();
     assert.equal(sent.length, 1, "OFF may not smuggle nonempty members");
     synthetic.value = "[]";
+    const injectedUnknown = hidden("unrecognized_field", "untrusted");
+    await submit();
+    assert.equal(sent.length, 1, "unexpected OFF form field must not reach save port");
+    assert.equal(refreshes, 1, "unexpected OFF form field must not refresh");
+    injectedUnknown.remove();
     await submit();
     assert.equal(sent.length, 2, "canonical OFF request must still save");
     assert.deepEqual(sent[1].flags, ["false"]);

@@ -53,10 +53,19 @@ export function AdminVideoMembersEditorPreview({
         const ids = formData.getAll("video_id");
         const flags = formData.getAll("is_collab");
         const members = formData.getAll("members_json");
+        // The form emits only these three keys. Do not pass unexpected
+        // privileged or future fields through an alternate injected port.
+        let unexpectedField = false;
+        formData.forEach((_, key) => {
+          if (key !== "video_id" && key !== "is_collab" && key !== "members_json") {
+            unexpectedField = true;
+          }
+        });
         const off = flags.length === 1 && flags[0] === "false";
         const on = flags.length === 2 &&
           flags[0] === "false" && flags[1] === "true";
-        canonicalForm = ids.length === 1 && ids[0] === videoId &&
+        canonicalForm = !unexpectedField &&
+          ids.length === 1 && ids[0] === videoId &&
           members.length === 1 && typeof members[0] === "string" &&
           (on || (off && members[0] === "[]"));
       } catch { /* Malformed FormData is not a write capability. */ }
