@@ -28,11 +28,23 @@ test("参加者管理ページはhidden editorを除外しmanaged chapterを初�
   assert.match(source, /chapters:\s*\(chaptersByMemberId\.get\(member\.id\)/);
 });
 
+test("MIG-0650 U03v Next member-replacement bridge resolves canonical server-core implementation", async () => {
+  const bridge = await read("src/lib/video/replaceVideoMembers.ts");
+  const provider = await read("packages/server-core/src/video/replaceVideoMembers.ts");
+  const exports = await read("packages/server-core/package.json");
+  assert.match(bridge, /export \{ buildReplaceVideoMembersPlan \} from "@flamenode\/server-core\/video\/replaceVideoMembers"/);
+  assert.match(exports, /"\.\/video\/replaceVideoMembers": "\.\/src\/video\/replaceVideoMembers\.ts"/);
+  assert.match(provider, /export async function buildReplaceVideoMembersPlan\(/);
+  assert.match(provider, /canonicalizeVideoMemberInputs\(db, args\.members\)/);
+  assert.match(provider, /buildVideoMemberWriteMutationBatch\(db, \{/);
+  assert.match(provider, /buildVideoMemberWriteAudits\(\{/);
+});
+
 test("managed chapterのmember ID prefixはLIKE wildcardでなく完全prefix判定する", async () => {
   for (const path of [
     "app/(admin)/admin/videos/[id]/members/page.tsx",
     "src/lib/video/memberSubmissionBaseline.ts",
-    "src/lib/video/replaceVideoMembers.ts",
+    "packages/server-core/src/video/replaceVideoMembers.ts",
   ]) {
     const source = await read(path);
     assert.match(source, /instr\([\s\S]*':legacy:'[\s\S]*\) = 1/);
@@ -51,9 +63,9 @@ test("member X IDはServer write境界でもcanonical形式と重複を検証す
 
 test("member置換は共通fail-closed resolverでcanonicalizeし変換後重複を拒否する", async () => {
   // MIG-0650 U03d-2i: check both the shared policy and its live Next bridge.
-  const source = await read("src/lib/video/replaceVideoMembers.ts");
+  const source = await read("packages/server-core/src/video/replaceVideoMembers.ts");
   const provider = await read("packages/server-core/src/video/memberCanonicalization.ts");
-  assert.match(source, /from "@flamenode\/server-core\/video\/memberCanonicalization"/);
+  assert.match(source, /from "\.\/memberCanonicalization\.ts"/);
   assert.match(source, /canonicalizeVideoMemberInputs\(db, args\.members\)/);
   assert.match(provider, /resolveCanonicalXUserResolutions\(db, candidates\)/);
   assert.match(provider, /invalid_alias_target/);
@@ -69,9 +81,9 @@ test("member置換は共通fail-closed resolverでcanonicalizeし変換後重複
 test("managed chapter同値判定はDB取得順ではなくID順へ正規化する", async () => {
   // MIG-0650 U03d-2b: preserve the original contract but inspect the
   // extracted shared provider rather than requiring a dead Next-local copy.
-  const source = await read("src/lib/video/replaceVideoMembers.ts");
+  const source = await read("packages/server-core/src/video/replaceVideoMembers.ts");
   const provider = await read("packages/server-core/src/video/memberChapterAudit.ts");
-  assert.match(source, /from "@flamenode\/server-core\/video\/memberChapterAudit"/);
+  assert.match(source, /from "\.\/memberChapterAudit\.ts"/);
   assert.match(source, /managedChapterRowsEqual/);
   assert.match(provider, /function canonicalChapterRows/);
   assert.match(provider, /compareSqliteBinaryText\(left\.id, right\.id\)/);
@@ -87,9 +99,9 @@ test("managed chapter同値判定はDB取得順ではなくID順へ正規化す�
 });
 
 test("chapter監査は巨大rows snapshotを持たず存在しないrestore adapterを指定しない", async () => {
-  const source = await read("src/lib/video/replaceVideoMembers.ts");
+  const source = await read("packages/server-core/src/video/replaceVideoMembers.ts");
   const provider = await read("packages/server-core/src/video/memberWriteAudits.ts");
-  assert.match(source, /from "@flamenode\/server-core\/video\/memberWriteAudits"/);
+  assert.match(source, /from "\.\/memberWriteAudits\.ts"/);
   assert.match(source, /plan\.audits\.push\(\.\.\.buildVideoMemberWriteAudits\(\{/);
   const audit = provider.match(
     /table_name: "video_chapters_member_set"[\s\S]*?strict: true,/,
@@ -103,7 +115,7 @@ test("chapter監査は巨大rows snapshotを持たず存在しないrestore adap
 });
 
 test("チャプターだけの変更では公開メンバー100行をDELETE/INSERTし直さない", async () => {
-  const source = await read("src/lib/video/replaceVideoMembers.ts");
+  const source = await read("packages/server-core/src/video/replaceVideoMembers.ts");
   const mutations = await read("packages/server-core/src/video/memberWriteMutationBatch.ts");
   const audits = await read("packages/server-core/src/video/memberWriteAudits.ts");
   assert.match(source, /buildVideoMemberWriteMutationBatch\(db, \{/);
@@ -125,7 +137,7 @@ test("参加者保存はD1等の失敗を一律に競合と断定せずbudget er
 
 test("参加者保存はvideos全行CASを使わずmember-set CASを競合正本にする", async () => {
   const adminSource = await read("src/lib/actions/video/adminMembers.ts");
-  const memberPlanSource = await read("src/lib/video/replaceVideoMembers.ts");
+  const memberPlanSource = await read("packages/server-core/src/video/replaceVideoMembers.ts");
   const mutations = await read("packages/server-core/src/video/memberWriteMutationBatch.ts");
   assert.doesNotMatch(adminSource, /expectedRowCondition/);
   const metadata = await read("packages/server-core/src/video/adminMemberMetadataPlan.ts");
@@ -167,13 +179,13 @@ test("member-set CASのID順はlocaleCompareに依存しない", async () => {
   // an unused comparator import in the legacy writer.
   const snapshot = await read("packages/server-core/src/video/memberSetSnapshot.ts");
   const carry = await read("packages/server-core/src/video/memberPermissionCarry.ts");
-  const replace = await read("src/lib/video/replaceVideoMembers.ts");
+  const replace = await read("packages/server-core/src/video/replaceVideoMembers.ts");
   assert.match(snapshot, /export function compareSqliteBinaryText/);
   assert.doesNotMatch(snapshot, /id\.localeCompare/);
   assert.match(carry, /import \{ compareSqliteBinaryText \} from "\.\/memberSetSnapshot\.ts"/);
   assert.match(carry, /compareSqliteBinaryText\(left\.id, right\.id\)/);
   assert.doesNotMatch(carry, /id\.localeCompare/);
-  assert.match(replace, /from "@flamenode\/server-core\/video\/memberPermissionCarry"/);
+  assert.match(replace, /from "\.\/memberPermissionCarry\.ts"/);
   assert.match(replace, /selectVideoMemberPermissionCarry\(carryRows, xIdSet, canonicalIdentity\)/);
   const mutations = await read("packages/server-core/src/video/memberWriteMutationBatch.ts");
   assert.match(replace, /buildVideoMemberWriteMutationBatch\(db, \{/);
