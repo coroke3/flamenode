@@ -82,6 +82,8 @@ function AdminVideoMembersFormForVideo({
       if (!Array.isArray(parsed) || parsed.length > MAX_VIDEO_MEMBERS ||
           parsed.some(member =>
             !member || typeof member !== "object" || Array.isArray(member) ||
+            // Never transport collaborator privilege intents in members_json.
+            "can_edit" in member ||
             ("is_public_member" in member && member.is_public_member !== 1))) {
         setResult({ ok: false, message: `公開参加者は最大${MAX_VIDEO_MEMBERS}人までです。入力を確認してください。` });
         return;

@@ -486,3 +486,27 @@ test("MIG-0730 U02ah: a supplied editor without save port retains only local che
     await ui.cleanup();
   }
 });
+
+test("MIG-0730 U02ak: form must never pass collaborator can_edit in members_json", async () => {
+  for (const flag of [1, 0, true, false, null]) {
+    let writes = 0;
+    const ui = setup({
+      membersField: h("input", {
+        type: "hidden",
+        name: "members_json",
+        value: JSON.stringify([{ name: "Alice", can_edit: flag }]),
+      }),
+      save: async () => { writes++; return { ok: true }; },
+    });
+    try {
+      await ui.render();
+      await ui.submit();
+      assert.equal(writes, 0, "can_edit " + String(flag) + " must not reach the save adapter");
+      assert.match(ui.target.querySelector('[role="alert"]')?.textContent ?? "", /入力を確認|100人/);
+      assert.ok(ui.target.querySelector('button[type="submit"]'),
+        "a rejected payload must not permanently disable the form");
+    } finally {
+      await ui.cleanup();
+    }
+  }
+});

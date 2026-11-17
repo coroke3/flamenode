@@ -190,3 +190,26 @@ test("MIG-0730 U02v: success must include path-matching videoId; ambiguous 200 c
   assert.deepEqual(verified, { ok: true, pendingPublicReflection: false });
   assert.equal(requests, 5);
 });
+
+test("MIG-0730 U02ak: public member PUT rejects can_edit intent before HTTP", async () => {
+  let requests = 0;
+  const fetchFn = async () => {
+    requests++;
+    return reply({ ok: true, videoId: "video-1" });
+  };
+  for (const flag of [1, 0, true, false, null, "on"]) {
+    const forged = form({ members: [{ name: "Alice", can_edit: flag }] });
+    const result = await saveAdminVideoMembers("video-1", forged, fetchFn);
+    assert.equal(result.ok, false, "can_edit=" + String(flag) + " must never enter SA-085 transport");
+    assert.match(result.message, /入力を確認/);
+  }
+  assert.equal(requests, 0, "forged privilege flags must fail before sending HTTP");
+
+  const allowed = form({ members: [{
+    name: "Alice", x_user_id: "alice", role: "", comment: "",
+    chapters: [], is_public_member: 1,
+  }] });
+  assert.equal((await saveAdminVideoMembers("video-1", allowed, fetchFn)).ok, true,
+    "ordinary public member fields remain supported");
+  assert.equal(requests, 1);
+});

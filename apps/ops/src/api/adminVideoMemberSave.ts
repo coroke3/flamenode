@@ -47,6 +47,9 @@ function validatedBody(videoId: string, formData: FormData): {
         // The Ops form serializes a literal [] when the checkbox is off.
         (checkbox.length === 1 && parsed.length !== 0) ||
         parsed.some(item => !item || typeof item !== "object" || Array.isArray(item) ||
+          // Editing privilege is never part of a public-membership PUT.
+          // It belongs solely to the separate collaborator permission API.
+          "can_edit" in item ||
           ("is_public_member" in item && item.is_public_member !== 1))) {
       return null;
     }
