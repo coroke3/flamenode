@@ -140,6 +140,7 @@ test("MIG-0650 U03ax: private member changes do not enqueue public user projecti
   const { db } = capturedDb();
   const audit = {
     table_name: "video_members_set",
+    target_id: "video-1",
     actor_user_id: "admin", strict: true,
     before: { id: "video-1", rows: [] },
   };
@@ -171,13 +172,66 @@ test("MIG-0650 U03ax: malformed planner inputs reject before metadata or Queue c
   }
 });
 
-test("MIG-0650 U03ax: malformed oversized event fanout rejects before Queue planning", async () => {
+test("MIG-0650 U03ay: malformed oversized event fanout rejects before even metadata SQL planning", async () => {
   const { db, planned } = capturedDb();
   await assert.rejects(
     () => assembleAdminVideoMemberAtomicPlan(db, input({
+      isCollab: true,
       eventIds: Array.from({ length: 9 }, (_, i) => "event-" + i),
     })),
     { name: "RangeError", message: "video_admin_member_rebuild_target_limit_exceeded" },
   );
   assert.equal(planned.length, 0);
+});
+
+test("MIG-0650 U03ay: audit, target, actor and row-count integrity reject before SQL or Queue", async () => {
+  const validAudit = {
+    table_name: "video_members_set",
+    target_id: "video-1",
+    operation: "MERGE",
+    actor_user_id: "admin",
+    strict: true,
+    before: { id: "video-1", rows: [] },
+    after: { id: "video-1", rows: [] },
+  };
+  const memberMutation = { kind: "member-CAS" };
+  const invalid = [
+    { membersPlan: memberPlan([memberMutation], [null], []) },
+    { membersPlan: memberPlan([], [], [validAudit]) },
+    { membersPlan: memberPlan([memberMutation], [null], [
+      { ...validAudit, strict: false },
+    ]) },
+    { membersPlan: memberPlan([memberMutation], [null], [
+      { ...validAudit, strict: undefined },
+    ]) },
+    { membersPlan: memberPlan([memberMutation], [null], [
+      { ...validAudit, actor_user_id: "other-admin" },
+    ]) },
+    { membersPlan: memberPlan([memberMutation], [null], [
+      { ...validAudit, target_id: "unrelated-video" },
+    ]) },
+    { membersPlan: memberPlan([memberMutation], [-1], [validAudit]) },
+    { membersPlan: memberPlan([memberMutation], [1.5], [validAudit]) },
+    { membersPlan: memberPlan([memberMutation], [Number.NaN], [validAudit]) },
+    { membersPlan: memberPlan([memberMutation], [undefined], [validAudit]) },
+  ];
+  for (const extra of invalid) {
+    const { db, planned } = capturedDb();
+    await assert.rejects(
+      () => assembleAdminVideoMemberAtomicPlan(db, input({ ...extra, isCollab: true })),
+      { name: "RangeError", message: "video_admin_member_atomic_assembly_invalid_input" },
+    );
+    assert.equal(planned.length, 0, "a malformed member plan cannot allocate metadata/Queue SQL");
+  }
+
+  const { db } = capturedDb();
+  const memberPlanInput = memberPlan([memberMutation], [null], [validAudit]);
+  const result = await assembleAdminVideoMemberAtomicPlan(db, input({
+    membersPlan: memberPlanInput, isCollab: true,
+  }));
+  assert.equal(result.noOp, false);
+  assert.equal(result.plan.statements[0], memberMutation);
+  assert.equal(result.plan.audits[0], validAudit);
+  assert.deepEqual(memberPlanInput.expectedChanges, [null],
+    "assembly does not mutate original member CAS change assertions");
 });
