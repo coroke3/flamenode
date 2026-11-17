@@ -1073,3 +1073,59 @@ test("MIG-0730 U02bh: full Preview unmount/remount cannot overlap same-video PUT
     newTarget.remove();
   }
 });
+
+test("MIG-0730 U02bq: zero-row V2 refinement displays its hint rather than a false no-results message", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const calls = [];
+  const hint = "候補が多いため、名前またはX IDを追加で入力してください。";
+  const searchXUsers = async (query, offset) => {
+    calls.push({ query, offset });
+    return query === "WIDE"
+      ? { items: [], hasMore: true, nextOffset: null, hint }
+      : { items: [], hasMore: false, nextOffset: null, hint: null };
+  };
+  const edit = async value => {
+    const input = target.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await React.act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+      assert.ok(setter);
+      setter.call(input, value);
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await React.act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 320));
+    });
+  };
+  try {
+    await React.act(async () => root.render(React.createElement(VideoMembersField, {
+      initialMembers: [member("CURRENT")],
+      permissionTargetVideoId: "A",
+      searchXUsers,
+      applyPermissionBatch: async () => ({ ok: false }),
+    })));
+    await edit("WIDE");
+    assert.deepEqual(calls, [{ query: "WIDE", offset: 0 }]);
+    assert.match(target.textContent, /候補が多いため、名前またはX IDを追加で入力してください/);
+    assert.doesNotMatch(target.textContent, /候補が見つかりません/,
+      "V2 refinement is not an empty successful search");
+    assert.ok(![...target.querySelectorAll("button")].some(button =>
+      button.textContent.includes("候補をさらに読み込む")),
+      "cursorless refinement must not show a pagination action");
+
+    await edit("NONE");
+    assert.deepEqual(calls, [
+      { query: "WIDE", offset: 0 },
+      { query: "NONE", offset: 0 },
+    ]);
+    assert.match(target.textContent, /候補が見つかりません/,
+      "a genuinely completed empty page still shows the no-candidates message");
+    assert.doesNotMatch(target.textContent, /候補が多いため/,
+      "a prior query's private refinement hint must not survive a query change");
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});

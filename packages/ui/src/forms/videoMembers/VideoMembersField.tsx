@@ -235,8 +235,11 @@ function VideoMembersFieldForTarget({
         setNextOffset(
           typeof json.nextOffset === "number" ? json.nextOffset : null,
         );
+        // RH-019 V2 may return zero rows and hasMore=true with no cursor:
+        // this means "refine query", not "no candidates". Preserve its
+        // authoritative hint instead of overwriting it with the empty message.
         setSearchHint(
-          items.length === 0 && offset === 0
+          items.length === 0 && offset === 0 && !json.hasMore
             ? "候補が見つかりません。X ID の表記や文字数を確認してください。"
             : (json.hint ?? null),
         );
