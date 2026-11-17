@@ -20,7 +20,15 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
   }
   if (!request.body) return { kind: "invalid" };
 
-  const reader = request.body.getReader();
+  // If a middleware already owns or disturbed the request body, getReader()
+  // may throw synchronously. Fail closed as invalid input rather than leaking
+  // an unhandled TypeError/HTTP 500 from this privileged preflight.
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = request.body.getReader();
+  } catch {
+    return { kind: "invalid" };
+  }
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {

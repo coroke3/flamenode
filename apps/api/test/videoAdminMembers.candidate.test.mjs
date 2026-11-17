@@ -550,6 +550,34 @@ test("MIG-0650 U03k bounded body reader ignores lying or absent Content-Length",
     "all other privileged admin routes retain ZERO_1102 64KiB default cap");
 });
 
+
+test("MIG-0650 U03t locked or consumed request body fails closed before JSON parse", async () => {
+  const lockedRequest = new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(valid()),
+  });
+  const ownedReader = lockedRequest.body.getReader();
+  try {
+    const locked = await readAdminVideoMembersJsonBody(lockedRequest);
+    assert.deepEqual(locked, { kind: "invalid" },
+      "locked body must not leak a TypeError/500 to privileged callers");
+  } finally {
+    await ownedReader.cancel();
+    ownedReader.releaseLock();
+  }
+
+  const consumedRequest = new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(valid()),
+  });
+  await consumedRequest.text();
+  const consumed = await readAdminVideoMembersJsonBody(consumedRequest);
+  assert.deepEqual(consumed, { kind: "invalid" },
+    "previously consumed input is never treated as an empty valid member set");
+});
+
 test("MIG-0650 U03l SA-085 reader rejects malformed UTF-8 instead of altering participant identity", async () => {
   // JSON.parse succeeds with the replacement character under the default
   // non-fatal TextDecoder. This must be an invalid request, not a renamed row.
