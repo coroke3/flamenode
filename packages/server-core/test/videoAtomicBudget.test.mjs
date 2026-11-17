@@ -48,3 +48,27 @@ test("MIG-0650 U03w counts distinct actors and X validation pre-reads", () => {
   assert.equal(r.preparationQueryCount, 4);
   assert.equal(r.actorXValidationQueryCount, 1);
 });
+
+test("MIG-0650 U03x rejects invalid explicit caller reads instead of undercounting D1", () => {
+  // A malformed or guessed caller count must never be silently clamped
+  // from -1 to zero or rounded down before authorizing an atomic write.
+  const p = plan([{}], [null], []);
+  for (const invalid of [-1, -0.5, 0.5, Number.NaN, Infinity, -Infinity,
+    Number.MAX_SAFE_INTEGER + 1, null, "3", true]) {
+    assert.throws(
+      () => inspectVideoAtomicWritePlanBudget(p, { callerQueryCount: invalid }),
+      { name: "RangeError", message: "video_atomic_invalid_caller_query_count" },
+      String(invalid),
+    );
+  }
+  assert.equal(
+    inspectVideoAtomicWritePlanBudget(p, { callerQueryCount: 0 }).callerQueryCount,
+    0,
+    "an explicitly measured zero is allowed, but not fabricated from invalid input",
+  );
+  assert.equal(
+    inspectVideoAtomicWritePlanBudget(p).callerQueryCount,
+    D1_RESERVED_CALLER_QUERIES,
+    "the omitted CURRENT caller count keeps its existing conservative fallback",
+  );
+});
