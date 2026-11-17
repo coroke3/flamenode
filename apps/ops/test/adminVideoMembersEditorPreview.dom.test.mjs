@@ -37,7 +37,10 @@ function formPayload(target) {
   // read-only previews, inspect the canonical shared hidden input while ON
   // even though the whole editor fieldset is disabled for authorization.
   const input = target.querySelector('form > section > input[name="members_json"]') ??
-    target.querySelector('fieldset input[name="members_json"]');
+    target.querySelector('fieldset input[name="members_json"]') ??
+    // Some regressions mount VideoMembersField directly, without the Ops form.
+    // In those tests there is no fieldset or synthetic OFF input.
+    target.querySelector('input[name="members_json"]');
   assert.ok(input, "the form must provide a canonical or synthetic member payload");
   return JSON.parse(input.value);
 }
