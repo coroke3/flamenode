@@ -162,3 +162,33 @@ test("MIG-0730 U02m: read view rejects 101 rows before any nested member getter 
   assert.match(html, /参加者データを表示できません/);
   assert.doesNotMatch(html, /User 100/);
 });
+
+
+test("MIG-0730 U02n: direct read view rejects malformed route IDs without rendering participants or throwing", () => {
+  const badIds = [
+    "", ".", "..", "v/child", "v\\child", " leading", "trailing ",
+    "v\0tail", "v\nchild", "\uD800", "v".repeat(65),
+  ];
+  for (const id of badIds) {
+    const html = renderToStaticMarkup(wrap(React.createElement(AdminVideoMembersReadView, {
+      videoId: id, data: snapshot(id, [member("NONPUBLIC_ROWHOLDER")]),
+    })));
+    assert.match(html, /参加者データを表示できません/, "invalid route must fail closed");
+    assert.doesNotMatch(html, /NONPUBLIC_ROWHOLDER|公開参加者（/);
+  }
+});
+
+test("MIG-0730 U02n: invalid route short-circuits before reading untrusted member getters", () => {
+  let accessed = 0;
+  const forged = {
+    get initialMembers() {
+      accessed++;
+      throw Error("untrusted participant getter must not be evaluated");
+    },
+  };
+  const html = renderToStaticMarkup(wrap(React.createElement(AdminVideoMembersReadView, {
+    videoId: "../other", data: forged,
+  })));
+  assert.equal(accessed, 0);
+  assert.match(html, /参加者データを表示できません/);
+});

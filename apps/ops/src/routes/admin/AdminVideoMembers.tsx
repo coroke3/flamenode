@@ -11,6 +11,16 @@ export function AdminVideoMembersReadView({ videoId, data }: {
   videoId: string;
   data: AdminVideoMembersResponse;
 }): React.ReactElement {
+  // This view can be called directly, bypassing the GET adapter. Validate the
+  // path before reading injected data or constructing a back link.
+  if (typeof videoId !== "string" || !videoId || videoId.length > 64 ||
+      videoId.trim() !== videoId || videoId === "." || videoId === ".." ||
+      /[\/\\\x00-\x1f]/.test(videoId)) {
+    return <p role="alert">参加者データを表示できません。</p>;
+  }
+  let encodedVideoId: string;
+  try { encodedVideoId = encodeURIComponent(videoId); }
+  catch { return <p role="alert">参加者データを表示できません。</p>; }
   // Defense in depth: callers must not be able to bypass the read adapter's
   // public-only verification by handing this view a forged or oversized DTO.
   const rawMembers: unknown = data && typeof data === "object" && !Array.isArray(data)
@@ -25,7 +35,7 @@ export function AdminVideoMembersReadView({ videoId, data }: {
     return <p role="alert">参加者データを表示できません。</p>;
   }
   const verified = parsed.data;
-  const detailHref = "/admin/videos/" + encodeURIComponent(videoId);
+  const detailHref = "/admin/videos/" + encodedVideoId;
   const isCollab = verified.video.collaboration_type === "collab" || verified.initialMembers.length > 0;
   return (
     <div className="fn-public-container fn-page">
