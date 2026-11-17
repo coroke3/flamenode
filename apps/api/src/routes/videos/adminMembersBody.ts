@@ -13,7 +13,7 @@ export const MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES = 256 * 1024;
 // of the byte budget. Limit these separately while allowing normal framing.
 export const MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS = 1024;
 // The byte budget alone permits 262144 distinct 1-byte chunks, each requiring
- // a Promise.race/read, copy and retained array entry. Keep total read work
+// a Promise.race/read, copy and retained array entry. Keep total read work
  // bounded independently of the existing zero-byte-only guard.
 export const MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_CHUNKS = 4096;
 
