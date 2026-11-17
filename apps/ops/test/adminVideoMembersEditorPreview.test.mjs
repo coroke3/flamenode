@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 import { readFile } from "node:fs/promises";
 import { AdminVideoMembersEditorPreview } from "../.test-dist/apps/ops/src/routes/admin/AdminVideoMembersEditorPreview.js";
 
@@ -15,7 +16,10 @@ const snapshot = (id = "v1", members = [member(0)]) => ({
   video: { id, title: "Video", youtube_video_id: null, collaboration_type: "collab" },
   initialMembers: members,
 });
-const html = props => renderToStaticMarkup(React.createElement(AdminVideoMembersEditorPreview, props));
+// The unmounted preview will run inside the Ops React Router when activated.
+// Keep SSR parity checks in the same routing context as its OpsLink footer.
+const html = props => renderToStaticMarkup(React.createElement(MemoryRouter, null,
+  React.createElement(AdminVideoMembersEditorPreview, props)));
 const dataProps = { videoId: "v1", data: snapshot() };
 const searchXUsers = async () => ({ items: [], hasMore: false });
 const applyPermissionBatch = async () => ({ ok: true });
