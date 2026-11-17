@@ -69,7 +69,7 @@ test("MIG-0650 U03d-2f: pending profile rows preserve all nine JSON1 fields", ()
     assert.equal(result.changes, 2);
     for (const row of rows) {
       const actual = db.prepare("SELECT * FROM x_users WHERE id = ?").get(row.id);
-      assert.deepEqual(actual, row);
+      assert.deepEqual({ ...actual }, row);
     }
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, 2);
   } finally { db.close(); }
