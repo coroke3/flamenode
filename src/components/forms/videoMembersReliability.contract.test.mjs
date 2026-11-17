@@ -142,11 +142,20 @@ test("完全no-opの参加者保存はvideos.updated_at・score dirty・static r
 });
 
 test("member-set CASのID順はlocaleCompareに依存しない", async () => {
+  // MIG-0650 U03d-2e: the permission-carry sorting moved to server-core.
+  // Verify the actual provider and the Next call site instead of requiring
+  // an unused comparator import in the legacy writer.
   const snapshot = await read("packages/server-core/src/video/memberSetSnapshot.ts");
+  const carry = await read("packages/server-core/src/video/memberPermissionCarry.ts");
   const replace = await read("src/lib/video/replaceVideoMembers.ts");
-  assert.match(snapshot, /compareSqliteBinaryText/);
+  assert.match(snapshot, /export function compareSqliteBinaryText/);
   assert.doesNotMatch(snapshot, /id\.localeCompare/);
-  assert.match(replace, /compareSqliteBinaryText/);
+  assert.match(carry, /import \{ compareSqliteBinaryText \} from "\.\/memberSetSnapshot\.ts"/);
+  assert.match(carry, /compareSqliteBinaryText\(left\.id, right\.id\)/);
+  assert.doesNotMatch(carry, /id\.localeCompare/);
+  assert.match(replace, /from "@flamenode\/server-core\/video\/memberPermissionCarry"/);
+  assert.match(replace, /selectVideoMemberPermissionCarry\(carryRows, xIdSet, canonicalIdentity\)/);
+  assert.match(replace, /buildVideoMemberSetGuardSql/);
 });
 
 test("100人stress testは実canonicalのstatic_rebuild_queue shapeを持つ", async () => {
