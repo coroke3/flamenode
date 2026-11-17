@@ -6,10 +6,9 @@
  * plan inside the SAME member-set CAS, member/chapter mutations, strict audit
  * and rebuild queue D1 batch. No authorization, D1 execution or Queue wake here.
  */
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { videos } from "@flamenode/db/schema";
-import { monotonicVideoUpdatedAt } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 import type { WriteAuditLogInput } from "../audit/types.ts";
 
@@ -36,20 +35,12 @@ export function buildAdminVideoMemberMetadataPlan(
     return { statements: [], expectedChanges: [], audits: [] };
   }
   const { target, nextCollaborationType, now, actorUserId } = input;
-  // The same-second CURRENT action used to write updated_at = now, which
-  // could fail to advance the optimistic version. Match the visibility
-  // writer's monotonic timestamp contract, also under clock skew.
-  const updatedAt = monotonicVideoUpdatedAt(target.updated_at, now);
   return {
     statements: [
       db.update(videos).set({
         collaboration_type: nextCollaborationType,
-        updated_at: updatedAt,
-      }).where(and(
-        eq(videos.id, target.id),
-        eq(videos.updated_at, target.updated_at),
-        eq(videos.collaboration_type, target.collaboration_type),
-      )!),
+        updated_at: now,
+      }).where(eq(videos.id, target.id)),
     ],
     expectedChanges: [1],
     audits: [{
@@ -64,7 +55,7 @@ export function buildAdminVideoMemberMetadataPlan(
       after: {
         id: target.id,
         collaboration_type: nextCollaborationType,
-        updated_at: updatedAt,
+        updated_at: now,
       },
       actor_user_id: actorUserId,
       context: "admin-video-members",
