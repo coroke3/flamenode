@@ -1236,3 +1236,116 @@ test("MIG-0650 U03bk real validated member and chapter values produce strict ato
     assert.equal(s.count("static_rebuild_queue"), 0);
   } finally { s.sqlite.close(); }
 });
+
+/** U03bl: exercise the fully canonicalized but UNMOUNTED Hono write pipeline against SQLite. */
+async function preparedSqliteMemberSave(s) {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const schema = await import("@flamenode/db/schema");
+  const { mapAuditSettings } = await import("@flamenode/server-core/audit/settings");
+  const { prepareAdminVideoMemberCandidateWrite } =
+    await import("@flamenode/server-core/video/adminMemberCandidatePrepare");
+  const target = await createDefaultVideoAdminMembersPreflightHost()
+    .loadAuthorizedVideo({ env: { DB: s.d1 } }, "v_two");
+  assert.ok(target, "authoritative video snapshot");
+  const form = new FormData();
+  form.set("members_json", JSON.stringify([{
+    name: "Owner", x_user_id: "x_owner", role: "", comment: "",
+    chapters: [{ time: "0:12", label: "Owner", note: "Checked" }],
+  }]));
+  const validated = validateVideoMemberSubmission(form, true);
+  assert.equal(validated.ok, true);
+  const db = drizzle(s.d1, { schema });
+  const prepared = await prepareAdminVideoMemberCandidateWrite(db, {
+    target, videoId: "v_two", actorUserId: "u_admin",
+    validated: validated.value, isCollab: true, eventIds: ["ev2"], now: 12345,
+    preloaded: {
+      settings: mapAuditSettings(s.sqlite.prepare(
+        "SELECT * FROM system_settings WHERE id = 'default'"
+      ).get()),
+      actorSnapshotJsonById: {
+        u_admin: JSON.stringify({
+          discord_id: null, discord_name: null, x_user_id: null,
+          x_name: null, icon_url: null,
+        }),
+      },
+    },
+    readMeasuredCallerQueries: () => s.d1.stats.reads,
+  });
+  assert.ok(prepared.atomic);
+  assert.equal(prepared.atomic.callerQueryCount, s.d1.stats.reads);
+  assert.equal(s.d1.stats.batches, 0, "preparation cannot start a transaction");
+  return { db, prepared };
+}
+
+test("MIG-0650 U03bl canonical member/chapter metadata + strict audit + Queue commit in one SQLite D1 batch", async () => {
+  const { executeAdminMemberAtomicCandidate } =
+    await import("@flamenode/server-core/video/adminMemberAtomicExecute");
+  const s = realGuardFixture();
+  try {
+    const { db, prepared } = await preparedSqliteMemberSave(s);
+    const priorChapters = s.count("video_chapters");
+    let wakeLookups = 0;
+    const saved = await executeAdminMemberAtomicCandidate(
+      db, prepared.executionInput, async () => {
+        wakeLookups++;
+        assert.equal(s.count("video_members"), 1, "member row is committed before wake");
+        assert.equal(s.count("video_chapters"), priorChapters + 1,
+          "member-managed chapter is committed before wake");
+        assert.ok(s.count("audit_logs") >= 3, "strict member/chapter/video audits committed");
+        assert.ok(s.count("static_rebuild_queue") > 0, "durable fanout committed");
+        return {
+          readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+        };
+      },
+    );
+    assert.equal(saved.committed, true);
+    assert.ok(saved.auditIds.length >= 3);
+    assert.equal(s.d1.stats.batches, 1, "atomic member/chapter/audit/Queue transaction");
+    assert.equal(wakeLookups, 1, "no Queue notification before commit");
+    assert.equal(s.sqlite.prepare(
+      "SELECT collaboration_type FROM videos WHERE id = 'v_two'"
+    ).get().collaboration_type, "collab");
+    assert.equal(s.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM video_chapters WHERE video_id = 'v_two' AND id LIKE '%:member:0'"
+    ).get().n, 1);
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03bl stale member snapshot rolls back chapter, metadata, audit and Queue", async () => {
+  const { executeAdminMemberAtomicCandidate } =
+    await import("@flamenode/server-core/video/adminMemberAtomicExecute");
+  const s = realGuardFixture();
+  try {
+    const { db, prepared } = await preparedSqliteMemberSave(s);
+    const priorChapters = s.count("video_chapters");
+    // Simulate a second admin changing the member set AFTER authorized reads,
+    // but BEFORE the same-batch optimistic member-set CAS.
+    s.sqlite.prepare(
+      "INSERT INTO video_members " +
+      "(id, video_id, x_user_id, name, role, comment, order_index, can_edit, " +
+      "is_public_member, edit_granted_by_auth_user_id, edit_granted_at, edit_updated_at) " +
+      "VALUES (?, ?, ?, ?, NULL, NULL, ?, 0, 1, NULL, NULL, NULL)"
+    ).run("raced_member", "v_two", null, "Concurrent editor", 0);
+    let wakeLookups = 0;
+    await assert.rejects(
+      executeAdminMemberAtomicCandidate(db, prepared.executionInput, async () => {
+        wakeLookups++;
+        return {
+          readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+        };
+      }),
+    );
+    assert.equal(s.d1.stats.batches, 1);
+    assert.equal(wakeLookups, 0, "no wake after a rejected optimistic CAS");
+    assert.equal(s.count("video_members"), 1, "concurrent writer row survives");
+    assert.equal(s.sqlite.prepare(
+      "SELECT id FROM video_members WHERE video_id='v_two'"
+    ).get().id, "raced_member");
+    assert.equal(s.count("video_chapters"), priorChapters, "no chapter write survives");
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+    assert.equal(s.sqlite.prepare(
+      "SELECT collaboration_type FROM videos WHERE id = 'v_two'"
+    ).get().collaboration_type, "individual");
+  } finally { s.sqlite.close(); }
+});
