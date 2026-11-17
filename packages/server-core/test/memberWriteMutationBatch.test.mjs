@@ -302,7 +302,8 @@ test("MIG-0650 U03ak public replacement count must match the authorized read sna
   // A chapter-only CAS never issues public DELETE, so it must not require the
   // separately supplied public-delete count to be used or inferred.
   const chapterOnly = build({
-    beforeSnapshotRows: [member("stable")], existingPublicCount: 0,
+    beforeSnapshotRows: [member("stable")],
+    afterSnapshotRows: [member("stable")], existingPublicCount: 0,
     existingManagedChapters: [chapter("stable:member:0")],
     nextManagedChapters: [chapter("stable:member:0", { chapter_label: "New" })],
     membersChanged: false, chaptersChanged: true,
@@ -509,4 +510,57 @@ test("MIG-0650 U03ap in-range maximum rows preserve CURRENT projection semantics
   });
   assert.deepEqual(plan.expectedChanges, [null, 100]);
   assert.match(plan.queries[1].sql, /INSERT INTO x_users/);
+});
+
+test("MIG-0650 U03aq rejects same-video but unowned managed chapter DML before any CAS", () => {
+  const base = {
+    videoId: "video-1",
+    beforeSnapshotRows: [member("pub_old")],
+    afterSnapshotRows: [member("pub_new")],
+    existingPublicCount: 1,
+    hiddenCarryRows: [], newXUsers: [],
+    existingManagedChapters: [], nextManagedChapters: [],
+    membersChanged: true, chaptersChanged: true,
+  };
+  const cases = [
+    { fields: { existingManagedChapters: [chapter("editorial:member:0")] },
+      error: "video_member_write_unowned_existing_chapter" },
+    { fields: { existingManagedChapters: [chapter("pub_new:member:0")] },
+      error: "video_member_write_unowned_existing_chapter" },
+    { fields: { nextManagedChapters: [chapter("pub_old:member:0")] },
+      error: "video_member_write_unowned_next_chapter" },
+    { fields: { nextManagedChapters: [chapter("pub_new:legacy:0")] },
+      error: "video_member_write_unowned_next_chapter" },
+    { fields: { nextManagedChapters: [chapter("pub_new:member:30")] },
+      error: "video_member_write_unowned_next_chapter" },
+    { fields: { nextManagedChapters: [chapter("pub_new:member:01")] },
+      error: "video_member_write_unowned_next_chapter" },
+    { fields: { nextManagedChapters: [chapter("pub_new:member:0", { x_user_id: "other" })] },
+      error: "video_member_write_unowned_next_chapter" },
+    { fields: { nextManagedChapters: [chapter("pub_new:member:0", { visibility: "private" })] },
+      error: "video_member_write_unowned_next_chapter" },
+  ];
+  for (const { fields, error } of cases) {
+    const c = collector();
+    assert.throws(
+      () => buildVideoMemberWriteMutationBatch(c.db, { ...base, ...fields }),
+      { name: "RangeError", message: error },
+      JSON.stringify(fields),
+    );
+    assert.equal(c.queries.length, 0,
+      "unowned chapter rows must not produce even member-set CAS SQL");
+  }
+
+  const allowed = build({
+    ...base,
+    existingManagedChapters: [
+      chapter("pub_old:legacy:0"), chapter("pub_old:member:1"),
+    ],
+    nextManagedChapters: [
+      chapter("pub_new:member:0"), chapter("pub_new:member:1"),
+    ],
+  });
+  assert.deepEqual(allowed.expectedChanges, [null, 1, 1, 2, 2]);
+  assert.match(allowed.queries[3].sql, /DELETE FROM video_chapters/);
+  assert.match(allowed.queries[4].sql, /INSERT INTO video_chapters/);
 });
