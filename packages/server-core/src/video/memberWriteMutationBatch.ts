@@ -53,6 +53,18 @@ export function buildVideoMemberWriteMutationBatch(
     hiddenCarryRows, newXUsers, existingManagedChapters, nextManagedChapters,
     membersChanged, chaptersChanged,
   } = input;
+  // All row sets must belong to the video authorized by the caller. In
+  // particular, JSON1 bulk inserts bind each row's own video_id, whereas
+  // the CAS/deletes are scoped to the outer videoId. A mismatched candidate
+  // must never be allowed to plan a cross-video insert or chapter rewrite.
+  // Check before constructing even the CAS statement; the caller must not
+  // execute a partial or malformed write plan.
+  if ([
+    beforeSnapshotRows, afterSnapshotRows, hiddenCarryRows,
+    existingManagedChapters, nextManagedChapters,
+  ].some(rows => rows.some(row => row.video_id !== videoId))) {
+    throw new RangeError("video_member_write_cross_video_rows");
+  }
   const statements: BatchItem<"sqlite">[] = [];
   const expectedChanges: Array<number | null> = [];
 
