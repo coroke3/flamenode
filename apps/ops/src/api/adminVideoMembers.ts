@@ -14,7 +14,7 @@ export async function readAdminVideoMembers(
   // Never make a GET for a malformed/overlong path or an already-aborted load.
   if (typeof videoId !== "string" || !videoId || videoId.length > 64 ||
       videoId.trim() !== videoId || videoId === "." || videoId === ".." ||
-      /[\\/\\\\\\x00-\\x1f]/.test(videoId) || signal?.aborted) {
+      /[\/\\\x00-\x1f]/.test(videoId) || signal?.aborted) {
     return { status: "unavailable" };
   }
   // Invalid UTF-16 must fail closed without rejecting the load promise.
