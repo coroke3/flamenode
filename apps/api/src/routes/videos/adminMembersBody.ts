@@ -78,7 +78,11 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
         void reader.cancel().catch(() => undefined);
         return { kind: "too_large" };
       }
-      chunks.push(value);
+      // Own the buffered bytes before awaiting the next network read.
+      // A custom Request stream can enqueue a mutable/reused Uint8Array;
+      // retaining its view would let a later chunk alter already-validated
+      // participant JSON after it passed the byte limit.
+      chunks.push(value.slice());
     }
   } catch {
     // An interrupted streaming upload has not supplied a complete JSON body.
