@@ -186,16 +186,20 @@ function AdminVideoMembersFormForVideo({
           disabled={pending || !hasMemberEditor} onChange={event => { if (hasMemberEditor) setIsCollab(event.target.checked); }} />
         この作品を合作作品として登録する
       </label>
-      {isCollab ? (
-        <fieldset disabled={pending || !enabled} style={{ border: 0, padding: 0 }}>
-          {membersField ?? <p role="status">参加者フォームを準備しています。</p>}
-        </fieldset>
-      ) : (
+      {/* Keep the editor mounted while OFF: a temporary checkbox draft must
+          not erase unsaved member rows, chapters, or a pending permission UI.
+          The disabled fieldset excludes its members_json from FormData when
+          OFF; only the explicit [] input below can be submitted. */}
+      <fieldset disabled={pending || !enabled || !isCollab}
+        style={{ border: 0, padding: 0, display: isCollab ? undefined : "none" }}>
+        {membersField ?? <p role="status">参加者フォームを準備しています。</p>}
+      </fieldset>
+      {!isCollab ? (
         <section>
           <input type="hidden" name="members_json" value="[]" />
           <p>合作をOFFにすると、保存時に公開参加者とメンバーチャプターを空にします。</p>
         </section>
-      )}
+      ) : null}
       {result && <p role={result.ok ? "status" : "alert"}>{result.message ??
         (result.ok ? "保存しました。" : "保存に失敗しました。")}</p>}
       {enabled ? (
