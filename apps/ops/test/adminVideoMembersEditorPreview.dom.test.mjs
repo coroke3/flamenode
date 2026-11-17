@@ -1008,3 +1008,68 @@ test("MIG-0730 U02bg: fresh same-video snapshot cannot bypass pending public-mem
     }
   }
 });
+
+test("MIG-0730 U02bh: full Preview unmount/remount cannot overlap same-video PUT", async () => {
+  const oldTarget = document.createElement("div");
+  const newTarget = document.createElement("div");
+  document.body.append(oldTarget, newTarget);
+  const oldRoot = createRoot(oldTarget);
+  const newRoot = createRoot(newTarget);
+  const writes = [];
+  let settleOld;
+  const first = new Promise(resolve => { settleOld = resolve; });
+  const save = async formData => {
+    writes.push({
+      id: formData.get("video_id"),
+      names: JSON.parse(formData.get("members_json")).map(row => row.name),
+    });
+    return writes.length === 1 ? first : { ok: true, message: "NEW SAVE" };
+  };
+  const searchXUsers = async () => ({ items: [], hasMore: false, nextOffset: null });
+  const applyPermissionBatch = async () => ({ ok: true });
+  const render = async (root, name, onSaved) => React.act(async () =>
+    root.render(React.createElement(AdminVideoMembersEditorPreview, {
+      videoId: "A", data: data("A", name), save,
+      searchXUsers, applyPermissionBatch, onSaved,
+    }))
+  );
+  const submit = async target => React.act(async () => {
+    const event = new dom.window.Event("submit", { bubbles: true, cancelable: true });
+    target.querySelector("form").dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+  });
+  let oldMounted = true;
+  let oldRefreshes = 0;
+  let newRefreshes = 0;
+  try {
+    await render(oldRoot, "OLD", () => { oldRefreshes++; });
+    await submit(oldTarget);
+    assert.deepEqual(writes, [{ id: "A", names: ["OLD"] }]);
+    await React.act(async () => oldRoot.unmount());
+    oldMounted = false;
+
+    // The React ref belonging to the first Preview no longer exists.
+    // The second root must still reject another possibly-conflicting PUT.
+    await render(newRoot, "FRESH", () => { newRefreshes++; });
+    await submit(newTarget);
+    assert.equal(writes.length, 1);
+    assert.match(newTarget.textContent, /前の保存処理が完了していません/);
+    assert.equal(newRefreshes, 0);
+
+    await React.act(async () => settleOld({ ok: true, message: "OBSOLETE SAVE" }));
+    assert.equal(oldRefreshes, 0, "unmounted Preview cannot refresh the new page");
+    assert.doesNotMatch(newTarget.textContent, /OBSOLETE SAVE/);
+    assert.equal(writes.length, 1, "old PUT is not retried automatically");
+
+    await submit(newTarget);
+    assert.deepEqual(writes[1], { id: "A", names: ["FRESH"] });
+    assert.equal(newRefreshes, 1);
+    assert.match(newTarget.textContent, /NEW SAVE/);
+  } finally {
+    settleOld({ ok: false });
+    if (oldMounted) await React.act(async () => oldRoot.unmount());
+    await React.act(async () => newRoot.unmount());
+    oldTarget.remove();
+    newTarget.remove();
+  }
+});

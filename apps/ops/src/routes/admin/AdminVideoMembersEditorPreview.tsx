@@ -25,6 +25,11 @@ const unavailablePermission: FieldProps["applyPermissionBatch"] = async () => {
   throw new Error("MIG-0730: permission mutation adapter is not wired");
 };
 
+// Best-effort in-tab deduplication: a Preview can be unmounted/remounted while
+// its old PUT is still in flight. Keep the per-video latch beyond React roots.
+// Different tabs/devices still require the server-side D1 CAS (MIG-0650).
+const writesInFlightByVideo = new Set<string>();
+
 /**
  * Never show hidden edit-only rows from a forged/oversized snapshot; never turn
  * an incomplete set of injected adapters into a usable write interface.
@@ -33,25 +38,22 @@ const unavailablePermission: FieldProps["applyPermissionBatch"] = async () => {
 export function AdminVideoMembersEditorPreview({
   videoId, data, searchXUsers, applyPermissionBatch, save, onSaved,
 }: AdminVideoMembersEditorPreviewProps): React.ReactElement {
-  // A fresh authorized same-video GET changes the form's snapshot key and
-  // remounts its local submit latch. Keep a second, parent-scoped write latch
-  // so that a prior possibly-committed PUT cannot overlap a new snapshot's
-  // PUT. Retain A's latch across A -> B -> A navigation in this preview.
-  const writesInFlight = React.useRef(new Set<string>());
+  // Both keyed form remounts and full Preview remounts must keep an old PUT
+  // latched until it settles; never retry an ambiguous possibly-committed PUT.
   const guardedSave = React.useMemo<AdminVideoMembersSave | undefined>(() => {
     if (!save) return undefined;
     return async formData => {
-      if (writesInFlight.current.has(videoId)) {
+      if (writesInFlightByVideo.has(videoId)) {
         return {
           ok: false,
           message: "前の保存処理が完了していません。結果を確認してから再度保存してください。",
         };
       }
-      writesInFlight.current.add(videoId);
+      writesInFlightByVideo.add(videoId);
       try {
         return await save(formData);
       } finally {
-        writesInFlight.current.delete(videoId);
+        writesInFlightByVideo.delete(videoId);
       }
     };
   }, [save, videoId]);
