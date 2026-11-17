@@ -214,14 +214,31 @@ test("MIG-0730 U02ak: public member PUT rejects can_edit intent before HTTP", as
   assert.equal(requests, 1);
 });
 
-test("MIG-0730 U02au: SA-085 candidate honors exact 256 KiB UTF-8 JSON envelope", async () => {
+test("MIG-0730 U02aw: legal 100-member / three-chapter payload obeys exact 256 KiB wire boundary", async () => {
   const limit = 256 * 1024;
-  const wrapperBytes = new TextEncoder().encode(JSON.stringify({
-    is_collab: ["false", "true"],
-    members_json: JSON.stringify([{ name: "" }]),
-  })).byteLength;
-  const exact = form({ members: [{ name: "x".repeat(limit - wrapperBytes) }] });
-  const oversized = form({ members: [{ name: "x".repeat(limit - wrapperBytes + 1) }] });
+  // Use valid CURRENT field-length limits instead of an impossible 262 KiB
+  // member name: 100 members, three chapters each, 80/500/120/1000 caps.
+  const members = Array.from({ length: 100 }, (_, i) => ({
+    name: "Alice" + i,
+    x_user_id: "user_" + i,
+    role: "",
+    comment: "",
+    chapters: Array.from({ length: 3 }, () => ({
+      time: "00:00", label: "", note: "x".repeat(792),
+    })),
+  }));
+  const encode = rows => JSON.stringify({
+    is_collab: ["false", "true"], members_json: JSON.stringify(rows),
+  });
+  const baseBytes = new TextEncoder().encode(encode(members)).byteLength;
+  assert.ok(baseBytes <= limit && limit - baseBytes < 208,
+    "the legal baseline must be within one short chapter note of the limit");
+  const lastNote = members[99].chapters[2];
+  lastNote.note += "x".repeat(limit - baseBytes);
+  assert.ok(lastNote.note.length <= 1000, "the exact-limit note remains legal");
+
+  const exact = form({ members });
+  assert.equal(new TextEncoder().encode(encode(members)).byteLength, limit);
   let sends = 0;
   const fetchFn = async (_path, init) => {
     sends++;
@@ -229,9 +246,10 @@ test("MIG-0730 U02au: SA-085 candidate honors exact 256 KiB UTF-8 JSON envelope"
     return reply({ ok: true, videoId: "video-1" });
   };
   assert.equal((await saveAdminVideoMembers("video-1", exact, fetchFn)).ok, true,
-    "an exact-limit transport envelope can be sent (not a CURRENT field-length acceptance certificate)");
-  assert.equal((await saveAdminVideoMembers("video-1", oversized, fetchFn)).ok, false,
-    "one extra wire byte must fail before HTTP");
+    "legal CURRENT fields at the exact wire limit remain eligible to send");
+  lastNote.note += "x";
+  assert.equal((await saveAdminVideoMembers("video-1", form({ members }), fetchFn)).ok, false,
+    "one extra wire byte is rejected despite otherwise legal field lengths");
   assert.equal(sends, 1);
 });
 
