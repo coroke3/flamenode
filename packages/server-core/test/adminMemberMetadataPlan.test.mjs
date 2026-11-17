@@ -49,8 +49,8 @@ test("MIG-0650 U03av: video metadata UPDATE requires server-read ID, type and ti
   assert.deepEqual(calls[0].values, {collaboration_type:"collab", updated_at:12345});
   assert.match(calls[0].query.sql, /"id" = \?/);
   assert.deepEqual(calls[0].query.params, ["video-1", "individual", 42]);
-  assert.match(calls[0].query.sql, /"collaboration_type" = \\?/);
-  assert.match(calls[0].query.sql, /"updated_at" = \\?/);
+  assert.match(calls[0].query.sql, /"collaboration_type" = \?/);
+  assert.match(calls[0].query.sql, /"updated_at" = \?/);
   assert.deepEqual(plan.expectedChanges, [1], "one row must change inside atomic D1 batch");
 });
 
@@ -113,17 +113,17 @@ test("MIG-0650 U03av: real SQLite stale metadata rejects writes instead of clobb
 
     insert.run("individual", 42);
     assert.equal(run(), 1, "fresh snapshot updates exactly one video in atomic batch");
-    assert.deepEqual(current(), { collaboration_type: "collab", updated_at: 12345 });
+    assert.deepEqual({ ...current() }, { collaboration_type: "collab", updated_at: 12345 });
 
     sqlite.exec("DELETE FROM videos");
     insert.run("individual", 43);
     assert.equal(run(), 0, "stale timestamp cannot overwrite the concurrently edited video");
-    assert.deepEqual(current(), { collaboration_type: "individual", updated_at: 43 });
+    assert.deepEqual({ ...current() }, { collaboration_type: "individual", updated_at: 43 });
 
     sqlite.exec("DELETE FROM videos");
     insert.run("collab", 42);
     assert.equal(run(), 0, "stale collaboration type cannot overwrite even if timestamps collide");
-    assert.deepEqual(current(), { collaboration_type: "collab", updated_at: 42 });
+    assert.deepEqual({ ...current() }, { collaboration_type: "collab", updated_at: 42 });
 
     sqlite.exec("DELETE FROM videos");
     assert.equal(run(), 0, "deleted video must not be recreated by a stale mutation");
