@@ -181,6 +181,18 @@ export function buildVideoMemberWriteMutationBatch(
   if (newXUsers.some(row => row.approval_status !== "pending")) {
     throw new RangeError("video_member_write_x_profile_not_pending");
   }
+  // CURRENT creates pending X profiles only for submitted public members.
+  // The shared JSON1 INSERT binds newXUsers independently of member DML; a
+  // future Hono host must not create unrelated X identities by supplying a
+  // pending profile that is absent from the authorized after-member snapshot.
+  const submittedXIds = new Set(
+    afterSnapshotRows.map(row => row.x_user_id).filter(
+      (value): value is string => typeof value === "string" && value.length > 0,
+    ),
+  );
+  if (newXUsers.some(row => !submittedXIds.has(row.id))) {
+    throw new RangeError("video_member_write_unlinked_x_profile");
+  }
   const statements: BatchItem<"sqlite">[] = [];
   const expectedChanges: Array<number | null> = [];
 
