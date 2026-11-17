@@ -160,7 +160,7 @@ import { atomicD1, seedChapterWorld, SESSION_USER, SITE } from "./support/chapte
 import { validateVideoMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
 import { MAX_ADMIN_JSON_BODY_BYTES } from "../src/routes/admin/body.ts";
 
-function realGuardFixture({ as = "u_admin", mode = "normal", observeBinding } = {}) {
+function realGuardFixture({ as = "u_admin", mode = "normal", observeBinding, enableCanonicalDryRun = false } = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
   sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'").run(mode);
@@ -174,7 +174,7 @@ function realGuardFixture({ as = "u_admin", mode = "normal", observeBinding } = 
   };
   const app = new Hono();
   app.route("/api/videos", createVideoAdminMembersPreflightRoutes(
-    createDefaultVideoAdminMembersPreflightHost({ session }),
+    createDefaultVideoAdminMembersPreflightHost({ session, enableCanonicalDryRun }),
   ));
   const send = (body, origin = SITE, path = "/api/videos/v_pub/members") => app.request(path, {
     method: "PUT",
@@ -213,6 +213,62 @@ test("MIG-0650 U03bq authentic guard stack uses one per-request metered D1 facad
     assert.equal(s.count("audit_logs"), 0);
     assert.equal(s.count("static_rebuild_queue"), 0);
   } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03bt opt-in Hono dry-run composes no-op and changing member plans with zero writes", async () => {
+  const observed = [];
+  const s = realGuardFixture({
+    enableCanonicalDryRun: true,
+    observeBinding: binding => observed.push(binding),
+  });
+  try {
+    const variants = [
+      { is_collab: ["false"], members_json: "[]" },
+      { is_collab: ["false", "true"], members_json: "[]" },
+    ];
+    for (const body of variants) {
+      const beforeReads = s.d1.stats.reads;
+      const result = await s.send(body, SITE, "/api/videos/v_two/members");
+      assert.equal(result.status, 501,
+        "even a fully prepared canonical write must not be committed by this Hono route");
+      assert.deepEqual(await result.json(), {
+        ok: false, message: "参加者設定の保存APIは移行準備中です。",
+      });
+      assert.ok(s.d1.stats.reads - beforeReads > 3,
+        "canonical shared planner must actually perform metered post-guard SELECTs");
+      assert.equal(s.d1.stats.batches, 0);
+      assert.equal(s.count("video_members"), 0);
+      assert.equal(s.count("audit_logs"), 0);
+      assert.equal(s.count("static_rebuild_queue"), 0);
+    }
+    assert.equal(observed.length, 2);
+    for (const facade of observed) {
+      assert.notStrictEqual(facade, s.d1);
+      assert.throws(() => facade.prepare("SELECT 1"), {
+        name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
+      }, "even the dry-run planning read handle must seal on return");
+    }
+    assert.equal(s.sqlite.prepare(
+      "SELECT collaboration_type FROM videos WHERE id = 'v_two'"
+    ).get().collaboration_type, "individual");
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03bt dry-run never bypasses guard or turns a rejection into a write", async () => {
+  for (const config of [
+    { as: null, expected: 401 },
+    { as: "u_other", expected: 403 },
+    { mode: "maintenance", expected: 503 },
+  ]) {
+    const s = realGuardFixture({ ...config, enableCanonicalDryRun: true });
+    try {
+      const result = await s.send(valid());
+      assert.equal(result.status, config.expected);
+      assert.equal(s.d1.stats.batches, 0);
+      assert.equal(s.count("audit_logs"), 0);
+      assert.equal(s.count("static_rebuild_queue"), 0);
+    } finally { s.sqlite.close(); }
+  }
 });
 
 test("MIG-0650 U03f real origin guard denies cross-origin before any D1 read", async () => {

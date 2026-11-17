@@ -19,6 +19,8 @@ import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/wr
 import { BODY_TOO_LARGE_MESSAGE } from "../admin/body.ts";
 import { readAdminVideoMembersJsonBody } from "./adminMembersBody.ts";
 import { createAdminMemberD1ReadMeter, type AdminMemberD1ReadMeter } from "./adminMemberD1ReadMeter.ts";
+import { prepareAdminVideoMemberCandidateWrite } from "@flamenode/server-core/video/adminMemberCandidatePrepare";
+import type { ValidatedMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
 
 type Ctx = Context<AppEnv>;
 
@@ -44,6 +46,18 @@ export type VideoAdminMembersPreflightHost = {
   // A missing or stale video must not reach a future SA-085 mutation port.
   // This is one authoritative D1 read, after identity and CostGuard preflight.
   loadAuthorizedVideo: (c: Ctx, videoId: string) => Promise<AdminVideoMemberTarget | null>;
+  /**
+   * Optional TEST/REVIEW-ONLY dry-run. Reads an authenticated D1 snapshot,
+   * composes the canonical member/chapters/CAS/audit/Queue plan, and NEVER
+   * executes D1 mutation or responds with success. Not installed by default.
+   */
+  previewCanonicalPlan?: (c: Ctx, input: {
+    videoId: string;
+    target: AdminVideoMemberTarget;
+    validated: ValidatedMemberSubmission;
+    isCollab: boolean;
+    eventIds: readonly string[];
+  }) => Promise<void>;
 };
 
 /**
@@ -52,7 +66,7 @@ export type VideoAdminMembersPreflightHost = {
  * This merely prepares the UNMOUNTED preflight; no host mutation port exists.
  */
 export function createDefaultVideoAdminMembersPreflightHost(
-  options: { session?: MiddlewareHandler<AppEnv> } = {},
+  options: { session?: MiddlewareHandler<AppEnv>; enableCanonicalDryRun?: boolean } = {},
 ): VideoAdminMembersPreflightHost {
   const originOptions = (c: Ctx) => ({
     loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
@@ -64,6 +78,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
   // Direct loadAuthorizedVideo() probes outside an HTTP request retain their
   // existing test-only semantics; requests always use the guarded overlay.
   const guardedContexts = new WeakMap<Ctx, Ctx>();
+  const activeMeters = new WeakMap<Ctx, AdminMemberD1ReadMeter>();
   const stack: MiddlewareHandler<AppEnv>[] = [
     (c, next) => originGuardMiddleware(originOptions(c))(c, next),
     options.session ?? (sessionMiddleware() as unknown as MiddlewareHandler<AppEnv>),
@@ -89,6 +104,38 @@ export function createDefaultVideoAdminMembersPreflightHost(
         ')) AS "public_member_count" ' +
         'FROM "videos" WHERE "id" = ? LIMIT 1',
       ).bind(videoId, videoId, videoId).first<AdminVideoMemberTarget>(),
+    ...(options.enableCanonicalDryRun ? {
+      previewCanonicalPlan: async (c: Ctx, input: {
+        videoId: string;
+        target: AdminVideoMemberTarget;
+        validated: ValidatedMemberSubmission;
+        isCollab: boolean;
+        eventIds: readonly string[];
+      }) => {
+        const meter = activeMeters.get(c);
+        const actor = c.get("user");
+        const db = c.get("db");
+        const settings = c.get("auditSettings");
+        const snapshots = c.get("actorSnapshotJsonById");
+        if (!meter || !actor || actor.role !== "admin" || !db || !settings ||
+            !snapshots || !snapshots[actor.id]) {
+          throw new RangeError("video_admin_member_preview_not_authorized");
+        }
+        // The db passed by dbMiddleware belongs to the request's READ-ONLY
+        // metered D1 facade. There is no write-capable handle in this port.
+        await prepareAdminVideoMemberCandidateWrite(db, {
+          target: input.target, videoId: input.videoId,
+          actorUserId: actor.id,
+          validated: input.validated,
+          isCollab: input.isCollab,
+          eventIds: input.eventIds,
+          now: Math.floor(Date.now() / 1000),
+          preloaded: { settings, actorSnapshotJsonById: snapshots },
+          readMeasuredCallerQueries: () => meter.readCount(),
+        });
+        // Deliberately discard the plan: preview mode never writes or wakes.
+      },
+    } : {}),
     writeGuard: async (c, next) => {
       c.header("Cache-Control", "private, no-store");
       const meterState: { meter?: AdminMemberD1ReadMeter } = {};
@@ -99,6 +146,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
         get(_facade, key) {
           if (key === "DB") {
             meterState.meter ??= createAdminMemberD1ReadMeter(originalEnv.DB);
+            activeMeters.set(c, meterState.meter);
             return meterState.meter.binding;
           }
           return Reflect.get(originalEnv, key, originalEnv);
@@ -127,6 +175,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
       } finally {
         // Never permit a retained guard/Drizzle statement to issue late reads.
         meterState.meter?.close();
+        activeMeters.delete(c);
         guardedContexts.delete(c);
       }
     },
@@ -235,9 +284,21 @@ export function createVideoAdminMembersPreflightRoutes(
       return reject(c, 400, "関連イベント数が処理上限を超えています。");
     }
 
-    // Validity is not authorization to mutate the video. We have no Hono
-    // atomic member CAS/audit plan or Queue port yet.
-    // Deliberately never return a successful save response.
+    // Explicit opt-in dry-run verifies the authenticated Hono -> shared
+    // canonical-planner integration with a READ-ONLY metered D1 handle.
+    // Regardless of whether a plan is a no-op or would write, NO execution
+    // port is wired here. Even a successful preview still returns HTTP 501.
+    if (host.previewCanonicalPlan) {
+      try {
+        await host.previewCanonicalPlan(c, {
+          videoId, target, validated: members.value,
+          isCollab, eventIds: rebuildEventIds,
+        });
+      } catch {
+        return reject(c, 503, "参加者設定の検証に失敗しました。");
+      }
+    }
+    // A complete write-capable Hono host does not exist yet.
     return reject(c, 501, "参加者設定の保存APIは移行準備中です。");
   });
   return routes;
