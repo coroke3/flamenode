@@ -166,7 +166,8 @@ test("MIG-0650 U03d-2g: Next writer invokes shared projection, retaining canonic
   assert.equal(pkg.exports["./video/memberReplacementRows"], "./src/video/memberReplacementRows.ts");
   assert.match(legacy, /from "@flamenode\/server-core\/video\/memberReplacementRows"/);
   assert.match(legacy, /buildVideoMemberReplacementRows\(\{/);
-  assert.match(legacy, /canonicalizeMemberInputs\(db, args\.members\)/);
+  assert.match(legacy, /canonicalizeVideoMemberInputs\(db, args\.members\)/);
+  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberCanonicalization"/);
   assert.match(legacy, /normalizeXId/);
   assert.match(legacy, /generateMemberId: \(\) => generateId\("vm"\)/);
   assert.match(legacy, /buildVideoMemberSetGuardSql/);
