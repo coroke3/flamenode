@@ -500,6 +500,52 @@ test("MIG-0730 U02y: swapping same-video save adapter retires its old async succ
 });
 
 
+test("MIG-0730 U02cg: rotating same-video onSaved authority retires old save completion", async () => {
+  for (const outcome of ["success", "failure"]) {
+    const pending = deferred();
+    let writes = 0, previousRefreshes = 0, currentRefreshes = 0;
+    const save = async () => {
+      writes++;
+      return writes === 1
+        ? pending.promise
+        : { ok: true, message: "CURRENT AUTHORIZED SAVE" };
+    };
+    const ui = setup({
+      save,
+      onSaved: () => { previousRefreshes++; },
+    });
+    try {
+      await ui.render();
+      await ui.submit();
+      assert.equal(writes, 1);
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true);
+
+      // The video ID and save adapter stay stable. The caller's post-save
+      // refresh authority alone is replaced while the PUT remains unresolved.
+      await ui.render({ onSaved: () => { currentRefreshes++; } });
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true,
+        "new callback must not start a second write before old PUT settles");
+
+      const settled = outcome === "success"
+        ? { ok: true, message: "STALE CALLBACK SAVE", pendingPublicReflection: true }
+        : Promise.reject(new Error("old save completion may have already mutated D1"));
+      await React.act(async () => pending.finish(settled));
+      assert.equal(previousRefreshes, 0, "retired callback must not refetch old authority");
+      assert.equal(currentRefreshes, 0, "old write must not refresh the new authority");
+      assert.doesNotMatch(ui.target.textContent, /STALE CALLBACK SAVE|公開ページへの反映は/,
+        "obsolete success and public reflection notice must not appear");
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false);
+      assert.equal(writes, 1, "never replay an unknown server mutation automatically");
+
+      await ui.submit();
+      assert.equal(writes, 2);
+      assert.equal(currentRefreshes, 1);
+      assert.equal(previousRefreshes, 0);
+      assert.match(ui.target.textContent, /CURRENT AUTHORIZED SAVE/);
+    } finally { await ui.cleanup(); }
+  }
+});
+
 test("MIG-0730 U02ah: absent member editor cannot activate a destructive OFF save", async () => {
   for (const missing of [null, false, undefined]) {
     let writes = 0;
