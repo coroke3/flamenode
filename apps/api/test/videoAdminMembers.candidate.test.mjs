@@ -321,6 +321,44 @@ test("MIG-0650 U03q maximum legal 100x30 chapter text exposes 256KiB compatibili
   } finally { s.sqlite.close(); }
 });
 
+
+test("MIG-0650 U03r CURRENT-valid escaped chapter notes exceed 20MiB in nested JSON transport", async () => {
+  // This is an evidence fixture, not permission to raise the Hono body limit.
+  // The CURRENT validator caps note characters but does not reject U+0001;
+  // JSON.stringify escapes each control character again in members_json.
+  const controlNote = String.fromCharCode(1).repeat(1000);
+  const members = Array.from({ length: 100 }, (_, i) => ({
+    name: "N".repeat(80),
+    x_user_id: "handle_" + i,
+    role: "R".repeat(80),
+    comment: "C".repeat(500),
+    chapters: Array.from({ length: 30 }, (_, j) => ({
+      time: j + ":00", label: "L".repeat(120), note: controlNote,
+    })),
+  }));
+  const membersJson = JSON.stringify(members);
+  const form = new FormData();
+  form.set("members_json", membersJson);
+  const validated = validateVideoMemberSubmission(form, true);
+  assert.equal(validated.ok, true, validated.ok ? "" : validated.message);
+  assert.equal([...validated.value.chaptersByIndex.values()].reduce((n, rows) => n + rows.length, 0), 3000);
+
+  const encoded = JSON.stringify({ is_collab: ["false", "true"], members_json: membersJson });
+  const wireBytes = new TextEncoder().encode(encoded).byteLength;
+  assert.ok(wireBytes > 20 * 1024 * 1024,
+    "a legal nested-JSON submission can exceed 20MiB after escaping control characters");
+  assert.ok(wireBytes > MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES,
+    "the 256KiB interim limit is not full CURRENT payload parity");
+
+  // No Content-Length shortcut: actual streamed body bytes must reject early.
+  const result = await readAdminVideoMembersJsonBody(new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: encoded,
+  }));
+  assert.equal(result.kind, "too_large", "oversize must never be parsed or truncated into member writes");
+});
+
 test("MIG-0650 U03g privileged PUT only accepts application/json media type before body", async () => {
   const f = fixture();
   const invalid = [
