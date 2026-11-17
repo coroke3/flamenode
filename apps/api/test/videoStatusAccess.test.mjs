@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
-import { createSqlite } from "./support/personalHarness.mjs";
+import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import { checkManageVideoStatusAccess } from "../src/routes/videos/videoStatusAccess.ts";
@@ -213,3 +213,49 @@ test("MIG-0603: revoked X approval and custom grants never bypass joined event s
     sqlite.close();
   }
 });
+
+test("MIG-0603: joined event status privilege is bounded at 256 rows and fails closed on overflow", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    // The existing manager already has one approved X + evA staff grant.
+    // Build 255 more approved links and staff grants, then cross the cap.
+    const addStaff = (i) => {
+      const xId = `cap_x_${i}`;
+      insert(sqlite, "x_users", {
+        id: xId, x_name: xId, approval_status: "approved",
+      });
+      insert(sqlite, "x_user_account_links", {
+        x_user_id: xId, auth_user_id: "u_mgr", link_role: "manager",
+      });
+      insert(sqlite, "event_staff", {
+        id: `cap_staff_${i}`, event_id: "evA", x_user_id: xId,
+        display_name: xId, permission_preset: "public_staff",
+      });
+    };
+    for (let i = 0; i < 255; i += 1) addStaff(i);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    const before = d1.stats.statements;
+    assert.deepEqual(await checkManageVideoStatusAccess(db, manager, "evA", "v1"), {
+      ok: true,
+    }, "the joined result is still authorized at the inclusive 256-row cap");
+    assert.equal(d1.stats.statements - before, 2);
+
+    addStaff(255);
+    const overflowStart = d1.stats.statements;
+    await assert.rejects(
+      checkManageVideoStatusAccess(db, manager, "evA", "v1"),
+      /manage_video_status_staff_read_limit_exceeded/,
+      "never decide a status change from a truncated joined privilege snapshot",
+    );
+    assert.equal(d1.stats.statements - overflowStart, 1,
+      "the overflow must abort before probing the target video-events association");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
