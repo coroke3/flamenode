@@ -132,3 +132,33 @@ test("MIG-0730 U02b invalid UTF-16 route ID fails without any network and no end
     assert.doesNotMatch(ui.target.textContent, /読み込み中/);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0730 U02m: read view fails closed on injected private or wrong-video DTO, never renders secret", () => {
+  for (const injected of [
+    snapshot("other", [member("PRIVATE_OTHER")]),
+    snapshot("v1", [member("HIDDEN_MEMBER", { is_public_member: 0 })]),
+    snapshot("v1", [member("INVALID_MEMBER", { chapters: [{ time: 12, label: "Bad", note: "" }] })]),
+    { ...snapshot("v1"), initialMembers: null },
+  ]) {
+    const html = renderToStaticMarkup(wrap(React.createElement(AdminVideoMembersReadView, {
+      videoId: "v1", data: injected,
+    })));
+    assert.match(html, /参加者データを表示できません/);
+    assert.doesNotMatch(html, /PRIVATE_OTHER|HIDDEN_MEMBER|INVALID_MEMBER|type="submit"/);
+  }
+});
+
+test("MIG-0730 U02m: read view rejects 101 rows before any nested member getter runs", () => {
+  let touched = 0;
+  const many = Array.from({ length: 101 }, (_, i) => member("User " + i));
+  Object.defineProperty(many, 0, {
+    configurable: true, enumerable: true,
+    get() { touched++; throw new Error("oversized private rows must not be traversed"); },
+  });
+  const html = renderToStaticMarkup(wrap(React.createElement(AdminVideoMembersReadView, {
+    videoId: "v1", data: snapshot("v1", many),
+  })));
+  assert.equal(touched, 0);
+  assert.match(html, /参加者データを表示できません/);
+  assert.doesNotMatch(html, /User 100/);
+});
