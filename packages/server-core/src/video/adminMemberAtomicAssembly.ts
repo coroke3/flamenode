@@ -81,6 +81,37 @@ export async function assembleAdminVideoMemberAtomicPlan(
   ) {
     throw new RangeError("video_admin_member_atomic_assembly_invalid_input");
   }
+  // MIG-0650 U03az: the separate CURRENT member planner emits exactly four
+  // supported strict audit types. Reject a mislabeled audit, a duplicate
+  // category, or a pre/post snapshot tied to another video BEFORE metadata
+  // or Queue SQL is built. Otherwise a future Hono adapter could accidentally
+  // turn a member-set CAS into an unrelated audit or hide the member-changed
+  // signal used by public rebuild fanout.
+  const allowedMemberAuditOperations: Record<string, "MERGE" | "DELETE"> = {
+    x_users_member_batch: "MERGE",
+    video_member_hidden_carry_cleanup: "DELETE",
+    video_chapters_member_set: "MERGE",
+    video_members_set: "MERGE",
+  };
+  const seenAuditTables = new Set<string>();
+  if (input.membersPlan.audits.some(audit => {
+    const expectedOperation = allowedMemberAuditOperations[audit.table_name];
+    if (
+      !expectedOperation || audit.operation !== expectedOperation ||
+      seenAuditTables.has(audit.table_name) ||
+      audit.after?.id !== input.target.id ||
+      (audit.table_name === "x_users_member_batch"
+        ? audit.before != null
+        : audit.before?.id !== input.target.id)
+    ) {
+      return true;
+    }
+    seenAuditTables.add(audit.table_name);
+    return false;
+  })) {
+    throw new RangeError("video_admin_member_atomic_assembly_invalid_audit");
+  }
+
   // The live Next flow classifies these effects from the same audited
   // membersPlan; never infer membersChanged from a request JSON flag.
   const effects = deriveAdminVideoMemberSaveEffects({
