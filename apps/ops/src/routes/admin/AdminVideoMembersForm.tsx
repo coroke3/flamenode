@@ -49,7 +49,10 @@ function AdminVideoMembersFormForVideo({
   // write capability. Retire its completion before any stale success callback.
   // Do not allow a collaboration-OFF destructive write merely because the
   // member editor was never supplied. A save port alone is not a complete form.
-  const enabled = Boolean(save) && React.isValidElement(membersField);
+  // A supplied editor permits non-destructive local collaboration drafts even
+  // before the write port is wired; only the *combination* grants save access.
+  const hasMemberEditor = React.isValidElement(membersField);
+  const enabled = Boolean(save) && hasMemberEditor;
   // Losing the required member field is also a write-capability revocation,
   // even when the save function itself remains present.
   // A true-to-true save adapter change may represent a new authorization
@@ -134,7 +137,7 @@ function AdminVideoMembersFormForVideo({
       </header>
       <label>
         <input type="checkbox" name="is_collab" value="true" checked={isCollab}
-          disabled={pending || !enabled} onChange={event => { if (enabled) setIsCollab(event.target.checked); }} />
+          disabled={pending || !hasMemberEditor} onChange={event => { if (hasMemberEditor) setIsCollab(event.target.checked); }} />
         この作品を合作作品として登録する
       </label>
       {isCollab ? (

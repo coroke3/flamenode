@@ -466,13 +466,20 @@ test("MIG-0730 U02ah: absent member editor cannot activate a destructive OFF sav
   }
 });
 
-test("MIG-0730 U02ah: a member field without save authorization stays read-only", async () => {
+test("MIG-0730 U02ah: a supplied editor without save port retains only local checkbox draft", async () => {
   const ui = setup();
   try {
     await ui.render();
-    assert.equal(ui.target.querySelector('input[name="is_collab"][type="checkbox"]').disabled, true);
+    const checkbox = ui.target.querySelector('input[name="is_collab"][type="checkbox"]');
+    assert.equal(checkbox.disabled, false,
+      "a complete editor may prepare a local collaboration draft without a save adapter");
     assert.equal(ui.target.querySelector("fieldset").disabled, true,
-      "read-only mode locks the entire member editor, not only the submit button");
+      "member fields remain read-only while the save authorization is absent");
+    assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+    await React.act(async () => checkbox.click());
+    assert.equal(ui.target.querySelector('input[name="is_collab"][type="checkbox"]').checked, false);
+    assert.equal(new FormData(ui.target.querySelector("form")).get("members_json"), "[]",
+      "draft OFF is local only and must not activate a save control");
     assert.equal(ui.target.querySelector('button[type="submit"]'), null);
     await ui.submit();
   } finally {
