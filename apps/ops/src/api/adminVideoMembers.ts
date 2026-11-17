@@ -32,14 +32,16 @@ export async function readAdminVideoMembers(
   // Do not parse an unbounded array on a malformed 200. CURRENT returns 404
   // when the authoritative D1 public-member query contains >100 rows.
   const body = response.data;
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return { status: "unavailable" };
-  }
   // Even an injected GET adapter can return a non-JSON object at runtime.
   // Throwing accessors or revoked proxies must not reject the read Promise
   // and leave the Ops page loading forever. Preserve the 100-row early gate.
   let parsed: ReturnType<typeof AdminVideoMembersResponseSchema.safeParse>;
   try {
+    // Array.isArray itself throws on revoked Proxies; keep the top-level
+    // object/array rejection inside this same fail-closed exception boundary.
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return { status: "unavailable" };
+    }
     const members = (body as { initialMembers?: unknown }).initialMembers;
     if (!Array.isArray(members) || members.length > MAX_VIDEO_MEMBERS) {
       return { status: "unavailable" };
