@@ -180,6 +180,10 @@ async function canonicalizeMemberInputs(
 // CURRENT, while the exact permission/hidden-row selection is shared with Hono.
 import { selectVideoMemberPermissionCarry } from "@flamenode/server-core/video/memberPermissionCarry";
 
+// Compatibility bridge (MIG-0650, D-10): CURRENT X-user pending
+// UPSERT SQL is shared without changing the atomic batch/audit callers.
+import { buildVideoMemberXUserBatchSql } from "@flamenode/server-core/video/memberXUserSql";
+
 // Compatibility bridge (MIG-0650, D-10): hidden carry CAS/delete SQL lives in core.
 import {
   buildHiddenCarryRowsGuardSql,
@@ -411,36 +415,7 @@ export async function buildReplaceVideoMembersPlan(
   }
 
   if (newXUsers.length > 0) {
-    const payload = JSON.stringify(newXUsers);
-    plan.statements.push(
-      db.run(sql`
-        INSERT INTO x_users (
-          id,
-          x_name,
-          icon_url,
-          profile_text,
-          portfolio_contact,
-          youtube_channel_url,
-          other_social_links,
-          creative_start_date,
-          approval_status
-        )
-        SELECT
-          json_extract(value, '$.id'),
-          json_extract(value, '$.x_name'),
-          json_extract(value, '$.icon_url'),
-          json_extract(value, '$.profile_text'),
-          json_extract(value, '$.portfolio_contact'),
-          json_extract(value, '$.youtube_channel_url'),
-          json_extract(value, '$.other_social_links'),
-          json_extract(value, '$.creative_start_date'),
-          json_extract(value, '$.approval_status')
-        FROM json_each(${payload})
-        WHERE 1 = 1
-        ON CONFLICT(id) DO UPDATE SET
-          id = excluded.id
-      `),
-    );
+    plan.statements.push(db.run(buildVideoMemberXUserBatchSql(newXUsers)));
     // SELECT後に別requestが同じX IDを作っていても、同一IDのno-op UPDATEを
     // 1 changeとして扱い、参加者保存全体を不要なUNIQUE競合で落とさない。
     plan.expectedChanges.push(newXUsers.length);
