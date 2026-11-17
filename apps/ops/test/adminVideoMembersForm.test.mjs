@@ -17,6 +17,7 @@ const { AdminVideoMembersForm } = await import(
 const { saveAdminVideoMembers } = await import(
   "../.test-dist/apps/ops/src/api/adminVideoMemberSave.js"
 );
+const { VideoMembersField } = await import("@flamenode/ui");
 const h = React.createElement;
 
 const video = { id: "v1", title: "Test", collaboration_type: "collab" };
@@ -578,6 +579,81 @@ test("MIG-0730 U02ap/U02aq: only canonical shared field or exact hidden input au
     assert.equal(ui.target.querySelector('input[name="is_collab"][type="checkbox"]').disabled, false);
     await ui.submit();
     assert.equal(writes, 1);
+  } finally {
+    await ui.cleanup();
+  }
+});
+
+test("MIG-0730 U02ar: canonical shared member field must match video and have live write adapters", async () => {
+  const searchXUsers = async () => ({ items: [], hasMore: false, nextOffset: null, hint: null });
+  const applyPermissionBatch = async () => ({ ok: true });
+  const baseline = {
+    initialMembers: [{ name: "Alice", x_user_id: "alice", role: "",
+      comment: "", chapters: [] }],
+    searchXUsers,
+    applyPermissionBatch,
+    permissionTargetVideoId: "v1",
+  };
+  const invalid = [
+    { disabled: true },
+    { disabled: "true" },
+    { hiddenName: "other_json" },
+    { permissionTargetVideoId: "v2" },
+    { permissionTargetVideoId: null },
+    { searchXUsers: undefined },
+    { applyPermissionBatch: undefined },
+  ];
+  for (const props of invalid) {
+    let writes = 0;
+    const ui = setup({
+      membersField: h(VideoMembersField, { ...baseline, ...props }),
+      save: async () => { writes++; return { ok: true }; },
+    });
+    try {
+      await ui.render();
+      let toggle = ui.target.querySelector('input[name="is_collab"][type="checkbox"]');
+      assert.equal(toggle.disabled, true, "read-only or wrong-target canonical editor cannot grant writes");
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+      await ui.submit();
+      assert.equal(writes, 0, "no write from unprivileged ON editor");
+
+      await ui.render({
+        video: { id: "v2", title: "Individual", collaboration_type: null },
+        initialMembersCount: 0,
+      });
+      toggle = ui.target.querySelector('input[name="is_collab"][type="checkbox"]');
+      assert.equal(toggle.checked, false);
+      // For wrong-target fixture v2, the video now matches; it must be tested
+      // separately, so only assert this second state for the other variants.
+      if (props.permissionTargetVideoId !== "v2") {
+        assert.equal(toggle.disabled, true);
+        assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+        await ui.submit();
+        assert.equal(writes, 0, "read-only/mismatched OFF editor cannot delete members");
+      }
+    } finally {
+      await ui.cleanup();
+    }
+  }
+
+  // The real Ops editor composition with matching video and both adapters
+  // remains writable; it still serializes the standard public-member payload.
+  let writes = 0, payload;
+  const ui = setup({
+    membersField: h(VideoMembersField, baseline),
+    save: async data => {
+      writes++;
+      payload = data.get("members_json");
+      return { ok: true };
+    },
+  });
+  try {
+    await ui.render();
+    assert.equal(ui.target.querySelector('input[name="is_collab"][type="checkbox"]').disabled, false);
+    assert.ok(ui.target.querySelector('button[type="submit"]'));
+    await ui.submit();
+    assert.equal(writes, 1);
+    assert.deepEqual(JSON.parse(payload).map(row => row.name), ["Alice"]);
   } finally {
     await ui.cleanup();
   }

@@ -60,9 +60,23 @@ function AdminVideoMembersFormForVideo({
   // canonical shared VideoMembersField (used by the Ops preview), or the exact
   // hidden members_json input used by the direct FormData regression harness.
   // The submit handler still validates the serialized FormData independently.
-  const hasMemberEditor = React.isValidElement(membersField) && (
-    membersField.type === VideoMembersField ||
-    (membersField.type === "input" &&
+  const sharedEditor = React.isValidElement(membersField) &&
+    membersField.type === VideoMembersField
+    ? membersField.props as React.ComponentProps<typeof VideoMembersField>
+    : null;
+  // Element identity alone is insufficient: a canonical field may explicitly
+  // be read-only, belong to another video, serialize to a different field, or
+  // lack one of its required privileged adapters. OFF would otherwise submit a
+  // locally synthesized members_json=[] even though that field is unwriteable.
+  const hasMemberEditor = Boolean(
+    (sharedEditor &&
+      (sharedEditor.disabled === undefined || sharedEditor.disabled === false) &&
+      (sharedEditor.hiddenName === undefined || sharedEditor.hiddenName === "members_json") &&
+      sharedEditor.permissionTargetVideoId === video.id &&
+      typeof sharedEditor.searchXUsers === "function" &&
+      typeof sharedEditor.applyPermissionBatch === "function") ||
+    (React.isValidElement(membersField) &&
+      membersField.type === "input" &&
       (membersField.props as { type?: unknown }).type === "hidden" &&
       (membersField.props as { name?: unknown }).name === "members_json")
   );
