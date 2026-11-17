@@ -139,10 +139,15 @@ test("参加者保存はvideos全行CASを使わずmember-set CASを競合正本
 
 test("完全no-opの参加者保存はvideos.updated_at・score dirty・static rebuildを発生させない", async () => {
   const source = await read("src/lib/actions/video/adminMembers.ts");
-  assert.match(source, /classifyAdminVideoMemberSave\(\{/);
+  // MIG-0650 U03s: the active Next caller now delegates this exact decision
+  // to server-core. Verify both the caller and the canonical provider.
+  const effects = await read("packages/server-core/src/video/memberAggregationFanOut.ts");
+  assert.match(source, /deriveAdminVideoMemberSaveEffects\(\{/);
   assert.match(source, /previousCollaborationType: target\.collaboration_type/);
-  assert.match(source, /hasMemberAudit,/);
-  assert.match(source, /hasChapterAudit,/);
+  assert.match(effects, /classifyAdminVideoMemberSave\(\{/);
+  assert.match(effects, /hasMemberAudit,/);
+  assert.match(effects, /hasChapterAudit,/);
+  assert.match(effects, /membersPlanChanged: input\.membersPlan\.statements\.length > 0/);
   const metadata = await read("packages/server-core/src/video/adminMemberMetadataPlan.ts");
   assert.match(source, /buildAdminVideoMemberMetadataPlan\(db, \{/);
   assert.match(source, /appendVideoAtomicWritePlan\(plan, metadataPlan\)/);
