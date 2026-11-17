@@ -1,15 +1,15 @@
 /**
- * MIG-0603 U02a: canonical read-only event-status authorization, shared with
- * the unmounted Hono transport. CURRENT's manage action performs the same
- * checks in the same order (src/lib/actions/manage-video.ts).
+ * MIG-0603 U02a: unmounted, read-only CURRENT-parity event status access.
  *
- * Caller MUST enforce Origin -> Session -> writeGuard(requiredRole:null) ->
- * CostGuard("manage_video_status") before calling this authorization helper.
+ * Call only AFTER Origin -> Session -> writeGuard(requiredRole:null) ->
+ * CostGuard("manage_video_status"). A successful preflight is NOT sufficient
+ * to activate an HTTP mutation route: full S3/D1 budget and moderation/audit/
+ * R2 fencing remain STOP gates.
  */
-import { and, eq } from "drizzle-orm";
-import { videoEvents } from "@flamenode/db/schema";
+import { and, eq, sql } from "drizzle-orm";
+import { eventStaff, videoEvents, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
+import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
 import type { SessionUserLike } from "@flamenode/domain/video";
-import { canEditEvent } from "../auth/ownership.ts";
 import type { ServerCoreDb } from "../db.ts";
 
 export type ManageVideoStatusAccess =
@@ -17,9 +17,16 @@ export type ManageVideoStatusAccess =
   | { ok: false; message: string };
 
 /**
- * Deny unauthorized users before fetching target event-video associations
- * (avoid private existence disclosure). Site admins bypass only staff
- * privilege, never the exact video-event link. D1 errors propagate fail-closed.
+ * CURRENT canEditEvent resolves approved linked X IDs, then matches event_staff
+ * permission presets/custom keys. Do the same in ONE read using inner joins
+ * and the SAME canonical staffRowHasPermissionKey resolver. Importantly:
+ * approvedXIdsWhere() trims linked IDs before comparing with event_staff, so
+ * this join must trim the linked X ID as well.
+ *
+ * After privilege succeeds, fetch the exact video-event link separately:
+ * an unauthorized request must not discover whether a foreign video exists,
+ * nor be exposed to a failure reading video_events before permission denial.
+ * The site-admin branch bypasses staff roles, never the association.
  */
 export async function checkManageVideoStatusAccess(
   db: ServerCoreDb,
@@ -27,11 +34,28 @@ export async function checkManageVideoStatusAccess(
   eventId: string,
   videoId: string,
 ): Promise<ManageVideoStatusAccess> {
-  if (
-    user.role !== "admin" &&
-    !(await canEditEvent(db, user, eventId, "video.status"))
-  ) {
-    return { ok: false, message: "このイベントの作品審査権限がありません。" };
+  if (user.role !== "admin") {
+    const approvedStaff = await db
+      .select({
+        permission_preset: eventStaff.permission_preset,
+        custom_permission_keys_json: eventStaff.custom_permission_keys_json,
+      })
+      .from(eventStaff)
+      .innerJoin(
+        xUserAccountLinks,
+        sql`${eventStaff.x_user_id} = trim(${xUserAccountLinks.x_user_id})`,
+      )
+      .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
+      .where(
+        and(
+          eq(eventStaff.event_id, eventId),
+          eq(xUserAccountLinks.auth_user_id, user.id),
+          eq(xUsers.approval_status, "approved"),
+        )!,
+      );
+    if (!approvedStaff.some((row) => staffRowHasPermissionKey(row, "video.status"))) {
+      return { ok: false, message: "このイベントの作品審査権限がありません。" };
+    }
   }
 
   const link = (
