@@ -213,3 +213,44 @@ test("MIG-0730 U02ak: public member PUT rejects can_edit intent before HTTP", as
     "ordinary public member fields remain supported");
   assert.equal(requests, 1);
 });
+
+test("MIG-0730 U02au: SA-085 candidate honors exact 256 KiB UTF-8 JSON envelope", async () => {
+  const limit = 256 * 1024;
+  const wrapperBytes = new TextEncoder().encode(JSON.stringify({
+    is_collab: ["false", "true"],
+    members_json: JSON.stringify([{ name: "" }]),
+  })).byteLength;
+  const exact = form({ members: [{ name: "x".repeat(limit - wrapperBytes) }] });
+  const oversized = form({ members: [{ name: "x".repeat(limit - wrapperBytes + 1) }] });
+  let sends = 0;
+  const fetchFn = async (_path, init) => {
+    sends++;
+    assert.equal(new TextEncoder().encode(init.body).byteLength, limit);
+    return reply({ ok: true, videoId: "video-1" });
+  };
+  assert.equal((await saveAdminVideoMembers("video-1", exact, fetchFn)).ok, true,
+    "an exact-limit valid JSON envelope is eligible to send");
+  assert.equal((await saveAdminVideoMembers("video-1", oversized, fetchFn)).ok, false,
+    "one extra wire byte must fail before HTTP");
+  assert.equal(sends, 1);
+});
+
+test("MIG-0730 U02au: multi-byte and oversized raw members fail before HTTP", async () => {
+  let sends = 0;
+  const fetchFn = async () => {
+    sends++;
+    return reply({ ok: true, videoId: "video-1" });
+  };
+  const multibyte = form({ members: [{ name: "あ".repeat(90_000) }] });
+  const raw = multibyte.get("members_json");
+  assert.ok(raw.length < 256 * 1024, "UTF-16 code units alone undercount UTF-8");
+  assert.ok(new TextEncoder().encode(JSON.stringify({
+    is_collab: ["false", "true"], members_json: raw,
+  })).byteLength > 256 * 1024);
+  assert.equal((await saveAdminVideoMembers("video-1", multibyte, fetchFn)).ok, false);
+
+  const huge = form();
+  huge.set("members_json", "[" + " ".repeat(300_000) + "]");
+  assert.equal((await saveAdminVideoMembers("video-1", huge, fetchFn)).ok, false);
+  assert.equal(sends, 0, "oversized local input cannot reach the write endpoint");
+});
