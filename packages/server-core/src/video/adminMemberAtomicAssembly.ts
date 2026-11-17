@@ -65,7 +65,19 @@ export async function assembleAdminVideoMemberAtomicPlan(
     !input.target.id ||
     !input.actorUserId ||
     !Number.isSafeInteger(input.now) || input.now < 0 ||
-    input.membersPlan.statements.length !== input.membersPlan.expectedChanges.length
+    input.membersPlan.statements.length !== input.membersPlan.expectedChanges.length ||
+    input.membersPlan.expectedChanges.some(
+      n => n !== null && (!Number.isSafeInteger(n) || n < 0),
+    ) ||
+    // The Hono host must not accept a member CAS without its strict,
+    // same-video, same-actor audit or splice a forged audit into the batch.
+    (input.membersPlan.statements.length === 0) !==
+      (input.membersPlan.audits.length === 0) ||
+    input.membersPlan.audits.some(audit =>
+      audit.strict !== true ||
+      audit.target_id !== input.target.id ||
+      audit.actor_user_id !== input.actorUserId
+    )
   ) {
     throw new RangeError("video_admin_member_atomic_assembly_invalid_input");
   }
@@ -78,6 +90,18 @@ export async function assembleAdminVideoMemberAtomicPlan(
     isCollab: input.isCollab,
     isPublicVideo: input.target.visibility_status === "public",
     creatorXUserId: input.target.creator_x_user_id,
+  });
+  // MIG-0650 U03ay: validate bounded event/creator fanout before allocating
+  // the video UPDATE or Queue SQL. This builder is pure, and reordering it
+  // does not change the CURRENT statement/audit/Queue ordering.
+  const targets = adminVideoMembersRebuildTargets({
+    videoId: input.target.id,
+    actorUserId: input.actorUserId,
+    publicContentChanged: effects.videoPublicContentChanged,
+    membersPlanChanged: effects.membersPlanChanged,
+    eventIds: input.eventIds,
+    isPublicVideo: input.target.visibility_status === "public",
+    affectedCreatorIds: effects.affectedCreatorIds,
   });
   const metadataPlan = buildAdminVideoMemberMetadataPlan(db, {
     target: input.target,
@@ -94,15 +118,6 @@ export async function assembleAdminVideoMemberAtomicPlan(
     ],
     audits: [...input.membersPlan.audits, ...metadataPlan.audits],
   };
-  const targets = adminVideoMembersRebuildTargets({
-    videoId: input.target.id,
-    actorUserId: input.actorUserId,
-    publicContentChanged: effects.videoPublicContentChanged,
-    membersPlanChanged: effects.membersPlanChanged,
-    eventIds: input.eventIds,
-    isPublicVideo: input.target.visibility_status === "public",
-    affectedCreatorIds: effects.affectedCreatorIds,
-  });
 
   // CURRENT returns before constructing a Queue batch for true no-ops.
   // The caller must not generate an audit or wake for this path.
