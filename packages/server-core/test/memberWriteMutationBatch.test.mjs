@@ -459,3 +459,54 @@ test("MIG-0650 U03ao suppressed chapter content cannot silently skip strict atom
   });
   assert.deepEqual(stable.expectedChanges, [null, 1]);
 });
+
+test("MIG-0650 U03ap rejects out-of-contract row counts before any atomic SQL", () => {
+  const cases = [
+    { beforeSnapshotRows: Array.from({ length: 101 }, (_, i) => member("old_" + i)) },
+    { afterSnapshotRows: Array.from({ length: 101 }, (_, i) => member("new_" + i)) },
+    { newXUsers: Array.from({ length: 101 }, (_, i) => pending("new_" + i)) },
+    { hiddenCarryRows: Array.from({ length: 201 }, (_, i) =>
+      member("hidden_" + i, "alice", { is_public_member: 0 })) },
+    { nextManagedChapters: Array.from({ length: 3001 }, (_, i) =>
+      chapter("alice:member:" + i)) },
+    { existingPublicCount: -1 },
+    { existingPublicCount: 1.5 },
+    { existingPublicCount: 101 },
+    { existingPublicCount: Number.NaN },
+    { existingPublicCount: Number.POSITIVE_INFINITY },
+  ];
+  for (const fields of cases) {
+    const c = collector();
+    assert.throws(() => buildVideoMemberWriteMutationBatch(c.db, {
+      videoId: "video-1",
+      beforeSnapshotRows: [], afterSnapshotRows: [], existingPublicCount: 0,
+      hiddenCarryRows: [], newXUsers: [],
+      existingManagedChapters: [], nextManagedChapters: [],
+      membersChanged: false, chaptersChanged: false,
+      ...fields,
+    }), { name: "RangeError", message: "video_member_write_input_limit_exceeded" },
+    Object.keys(fields).join(", "));
+    assert.equal(c.queries.length, 0, "out-of-contract row counts must not build CAS/JSON1 SQL");
+  }
+});
+
+test("MIG-0650 U03ap in-range maximum rows preserve CURRENT projection semantics", () => {
+  const members = Array.from({ length: 100 }, (_, i) => member("public_" + i));
+  const profiles = Array.from({ length: 100 }, (_, i) => pending("x_" + i));
+  const chapters = Array.from({ length: 3000 }, (_, i) =>
+    chapter("public_0:member:" + i));
+  // The writer may retain a legitimate oversized legacy chapter collection,
+  // but its new validated chapter projection remains bounded by 100x30.
+  const plan = build({
+    beforeSnapshotRows: members,
+    afterSnapshotRows: members,
+    existingPublicCount: 100,
+    newXUsers: profiles,
+    existingManagedChapters: chapters,
+    nextManagedChapters: chapters,
+    membersChanged: false,
+    chaptersChanged: false,
+  });
+  assert.deepEqual(plan.expectedChanges, [null, 100]);
+  assert.match(plan.queries[1].sql, /INSERT INTO x_users/);
+});
