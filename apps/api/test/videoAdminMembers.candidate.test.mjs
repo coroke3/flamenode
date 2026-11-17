@@ -263,9 +263,10 @@ test("MIG-0650 U03k legal CURRENT 100x30 chapter fixture passes bounded transpor
   try {
     const response = await s.send(request);
     assert.equal(response.status, 501, "legal 100x30 now passes input preflight but a writer is still deliberately unavailable");
-    assert.deepEqual(await response.json(), { ok: false, message: "参加者設定の保存APIは移行準備中です。" });
+    const reply = await response.json();
+    assert.deepEqual(reply, { ok: false, message: "参加者設定の保存APIは移行準備中です。" });
     assert.ok(s.d1.stats.reads <= 3, "larger body cannot add D1 pre-read queries");
-    assert.equal((await response.json()).ok, false);
+    assert.equal(reply.ok, false);
     assert.equal(s.d1.stats.batches, 0);
     assert.equal(s.count("audit_logs"), 0);
   } finally { s.sqlite.close(); }

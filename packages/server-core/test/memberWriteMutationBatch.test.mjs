@@ -203,7 +203,8 @@ test("MIG-0650 U03d-2k: Next delegates exact CAS and D1 order to shared core, st
   assert.match(source, /if \(membersChanged && existingPublicCount > 0\)/);
   assert.match(source, /if \(chaptersChanged && existingManagedChapters\.length > 0\)/);
   assert.match(legacy, /export async function buildReplaceVideoMembersPlan/);
-  assert.match(legacy, /plan\.audits\.push/);
+  assert.match(legacy, /plan\.audits\.push\(\.\.\.buildVideoMemberWriteAudits\(\{/);
+  assert.match(legacy, /from "@flamenode\/server-core\/video\/memberWriteAudits"/);
   assert.match(legacy, /from "@flamenode\/server-core\/video\/memberWriteMutationBatch"/);
   assert.match(legacy, /buildVideoMemberWriteMutationBatch\(db, \{/);
   assert.doesNotMatch(legacy, /db\.run\(buildVideoMemberSetGuardSql/);

@@ -9,10 +9,7 @@ import {
   type VideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
-import {
-  buildVideoMemberSetSnapshot,
-  toVideoMemberSnapshotRow,
-} from "@/lib/video/memberSetSnapshot";
+import { buildVideoMemberSetSnapshot } from "@/lib/video/memberSetSnapshot";
 
 // Compatibility bridge (MIG-0650, D-10): SA-085 JSON1 chunking is shared with Hono.
 export {
@@ -27,10 +24,8 @@ export {
 import { buildVideoMemberManagedChapterRows } from "@flamenode/server-core/video/memberChapterRows";
 
 // Compatibility bridge (MIG-0650, D-10): chapter diff/audit semantics shared with Hono.
-import {
-  managedChapterRowsEqual,
-  buildChapterAuditSummary,
-} from "@flamenode/server-core/video/memberChapterAudit";
+import { managedChapterRowsEqual } from "@flamenode/server-core/video/memberChapterAudit";
+import { buildVideoMemberWriteAudits } from "@flamenode/server-core/video/memberWriteAudits";
 
 // Compatibility bridge (MIG-0650, D-10): CURRENT authenticated Next
 // caller and future Hono use the same fail-closed X alias resolution.
@@ -209,72 +204,13 @@ export async function buildReplaceVideoMembersPlan(
   plan.statements.push(...mutationBatch.statements);
   plan.expectedChanges.push(...mutationBatch.expectedChanges);
 
-  if (newXUsers.length > 0) {
-    plan.audits.push({
-      table_name: "x_users_member_batch",
-      target_id: args.videoId,
-      operation: "MERGE",
-      before: null,
-      after: { id: args.videoId, rows: newXUsers },
-      actor_user_id: args.actorUserId,
-      context: "video-save:member-profile",
-      reason: "参加者X IDプロフィール行をpendingで一括確保",
-      retention_class: "long_audit",
-      restore_strategy: "none",
-      strict: true,
-    });
-  }
-
-  if (hiddenCarryRows.length > 0) {
-    plan.audits.push({
-      table_name: "video_member_hidden_carry_cleanup",
-      target_id: args.videoId,
-      operation: "DELETE",
-      before: {
-        id: args.videoId,
-        rows: hiddenCarryRows.map(toVideoMemberSnapshotRow),
-      },
-      after: { id: args.videoId, rows: [] },
-      actor_user_id: args.actorUserId,
-      context: "video-save:members",
-      reason: "公開メンバー化したX IDのhidden editorを公開行へ統合",
-      retention_class: "long_audit",
-      restore_strategy: "none",
-      strict: true,
-    });
-  }
-
-  if (chaptersChanged) {
-    plan.audits.push({
-      table_name: "video_chapters_member_set",
-      target_id: args.videoId,
-      operation: "MERGE",
-      before: buildChapterAuditSummary(args.videoId, existingManagedChapters),
-      after: buildChapterAuditSummary(args.videoId, nextManagedChapters),
-      actor_user_id: args.actorUserId,
-      context: "video-save:member-chapters",
-      reason: "管理チャプター集合を更新（CPU/D1負荷抑制のため監査は集約情報のみ保持）",
-      retention_class: "long_audit",
-      // video_chapters_member_set のrestore adapterは存在しないため、復元可能と誤表示しない。
-      restore_strategy: "none",
-      strict: true,
-    });
-  }
-
-  if (membersChanged) {
-    plan.audits.push({
-      table_name: "video_members_set",
-      target_id: args.videoId,
-      operation: "MERGE",
-      before: beforeSnapshot,
-      after: afterSnapshot,
-      actor_user_id: args.actorUserId,
-      context: "video-save:members",
-      retention_class: "restorable",
-      restore_strategy: "custom_adapter",
-      strict: true,
-    });
-  }
+  // Shared CURRENT strict audits. Next still executes one atomic CAS/audit/Queue plan.
+  plan.audits.push(...buildVideoMemberWriteAudits({
+    videoId: args.videoId, actorUserId: args.actorUserId,
+    newXUsers, hiddenCarryRows, chaptersChanged,
+    existingManagedChapters, nextManagedChapters, membersChanged,
+    beforeSnapshot, afterSnapshot,
+  }));
 
   return plan;
 }
