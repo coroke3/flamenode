@@ -349,3 +349,34 @@ test("MIG-0650 U03al fail-closes duplicate and empty row IDs before any atomic S
   });
   assert.deepEqual(sameId.expectedChanges, [null, 1, 1]);
 });
+
+
+test("MIG-0650 U03am new X identities cannot bypass pending-only approval workflow", () => {
+  // The shared SQL builder binds each supplied approval_status into x_users.
+  // A malicious or incorrectly wired future Hono host must not use the admin
+  // member-save flow to create an already-approved X profile.
+  for (const approval_status of ["approved", "rejected", null, undefined, "unknown"]) {
+    const c = collector();
+    const input = {
+      videoId: "video-1", beforeSnapshotRows: [], afterSnapshotRows: [],
+      existingPublicCount: 0, hiddenCarryRows: [],
+      newXUsers: [{ ...pending("alice"), approval_status }],
+      existingManagedChapters: [], nextManagedChapters: [],
+      membersChanged: false, chaptersChanged: false,
+    };
+    assert.throws(
+      () => buildVideoMemberWriteMutationBatch(c.db, input),
+      { name: "RangeError", message: "video_member_write_x_profile_not_pending" },
+      String(approval_status),
+    );
+    assert.equal(c.queries.length, 0,
+      "invalid approval state must be rejected before building CAS/INSERT statements");
+  }
+
+  const allowed = build({ newXUsers: [pending("alice")] });
+  assert.deepEqual(allowed.expectedChanges, [null, 1]);
+  assert.match(allowed.queries[1].sql, /INSERT INTO x_users/);
+  assert.ok(allowed.queries[1].params.some(p =>
+    typeof p === "string" && p.includes('"approval_status":"pending"')),
+    "valid pending-only profile is included in JSON1 bind");
+});
