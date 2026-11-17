@@ -1349,3 +1349,108 @@ test("MIG-0650 U03bl stale member snapshot rolls back chapter, metadata, audit a
     ).get().collaboration_type, "individual");
   } finally { s.sqlite.close(); }
 });
+
+
+test("MIG-0650 U03bm read meter counts bound D1 first/all/raw and forbids writes", async () => {
+  const { createAdminMemberD1ReadMeter } =
+    await import("../src/routes/videos/adminMemberD1ReadMeter.ts");
+  const s = realGuardFixture();
+  try {
+    const meter = createAdminMemberD1ReadMeter(s.d1);
+    const stmt = meter.binding.prepare("SELECT id FROM videos WHERE id = ?").bind("v_two");
+    assert.equal((await stmt.first()).id, "v_two");
+    assert.equal((await stmt.all()).results.length, 1);
+    assert.equal((await stmt.raw()).length, 1);
+    assert.equal(meter.readCount(), 3);
+    assert.equal(s.d1.stats.reads, 3);
+    assert.throws(() => stmt.run(), { name: "RangeError",
+      message: "video_admin_member_d1_read_meter_mutation_forbidden" });
+    assert.throws(() => meter.binding.batch([]), { name: "RangeError",
+      message: "video_admin_member_d1_read_meter_mutation_forbidden" });
+    assert.throws(() => meter.binding.exec("DELETE FROM videos"), { name: "RangeError",
+      message: "video_admin_member_d1_read_meter_mutation_forbidden" });
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(meter.close(), 3);
+    assert.throws(() => stmt.first(), {
+      name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
+    });
+    assert.throws(() => meter.binding.prepare("SELECT 1"), {
+      name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
+    });
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03bm one meter measures CostGuard, authorized video and canonical member/chapter Drizzle reads", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const schema = await import("@flamenode/db/schema");
+  const { evaluateCostGuardWithSettings } =
+    await import("../src/middleware/costGuard.ts");
+  const { createAdminMemberD1ReadMeter } =
+    await import("../src/routes/videos/adminMemberD1ReadMeter.ts");
+  const { prepareAdminVideoMemberCandidateWrite } =
+    await import("@flamenode/server-core/video/adminMemberCandidatePrepare");
+  const s = realGuardFixture();
+  try {
+    const meter = createAdminMemberD1ReadMeter(s.d1);
+    const cost = await evaluateCostGuardWithSettings(meter.binding, "edit_video");
+    assert.equal(cost.denied, null);
+    assert.ok(cost.auditSettings);
+    const target = await createDefaultVideoAdminMembersPreflightHost()
+      .loadAuthorizedVideo({ env: { DB: meter.binding } }, "v_two");
+    assert.ok(target);
+    const form = new FormData();
+    form.set("members_json", JSON.stringify([{
+      name: "Owner", x_user_id: "x_owner", role: "", comment: "",
+      chapters: [{ time: "0:12", label: "Owner", note: "Checked" }],
+    }]));
+    const validated = validateVideoMemberSubmission(form, true);
+    assert.equal(validated.ok, true);
+    const prepared = await prepareAdminVideoMemberCandidateWrite(
+      drizzle(meter.binding, { schema }), {
+        target, videoId: "v_two", actorUserId: "u_admin",
+        validated: validated.value, isCollab: true, eventIds: ["ev2"],
+        now: 12345,
+        preloaded: {
+          settings: cost.auditSettings,
+          actorSnapshotJsonById: {
+            u_admin: JSON.stringify({
+              discord_id: null, discord_name: null, x_user_id: null,
+              x_name: null, icon_url: null,
+            }),
+          },
+        },
+        readMeasuredCallerQueries: meter.readCount,
+      },
+    );
+    assert.ok(prepared.atomic);
+    assert.equal(prepared.atomic.callerQueryCount, meter.readCount());
+    assert.equal(meter.readCount(), s.d1.stats.reads,
+      "guard, CostGuard, target and canonical reads must all be metered");
+    assert.ok(meter.readCount() > 2, "canonical planner must contribute reads");
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(meter.close(), prepared.atomic.callerQueryCount);
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03bm 51st D1 read fails BEFORE provider call and cannot bypass cap", async () => {
+  const { createAdminMemberD1ReadMeter } =
+    await import("../src/routes/videos/adminMemberD1ReadMeter.ts");
+  const { D1_MAX_BATCH_QUERIES } =
+    await import("@flamenode/server-core/audit/mutateBudget");
+  const s = realGuardFixture();
+  try {
+    const meter = createAdminMemberD1ReadMeter(s.d1);
+    const stmt = meter.binding.prepare("SELECT id FROM videos WHERE id = ?")
+      .bind("v_two");
+    for (let n = 0; n < D1_MAX_BATCH_QUERIES; n++) {
+      assert.equal((await stmt.first()).id, "v_two");
+    }
+    assert.equal(meter.readCount(), D1_MAX_BATCH_QUERIES);
+    assert.equal(s.d1.stats.reads, D1_MAX_BATCH_QUERIES);
+    assert.throws(() => stmt.first(), {
+      name: "RangeError", message: "video_admin_member_d1_read_limit_exceeded",
+    });
+    assert.equal(s.d1.stats.reads, D1_MAX_BATCH_QUERIES);
+    assert.equal(s.d1.stats.batches, 0);
+  } finally { s.sqlite.close(); }
+});
