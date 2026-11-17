@@ -3,7 +3,7 @@ import test from "node:test";
 import { createSqlite, cookie } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
-import { createUnboundManageVideoStatusCandidate } from "../src/routes/videos/videoStatusCandidate.ts";
+import { createUnboundAdminVideoStatusCandidate, createUnboundManageVideoStatusCandidate } from "../src/routes/videos/videoStatusCandidate.ts";
 
 const ORIGIN = "http://127.0.0.1";
 const BODY = JSON.stringify({ event_id: "evA", video_id: "v1", status: "private" });
@@ -104,3 +104,86 @@ test("MIG-0603 unmounted manage candidate: permission D1 outage returns a fixed 
     sqlite.close();
   }
 });
+
+test("MIG-0603 unmounted admin candidate: admin-only guards precede input, mutation always disabled", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted = 1');
+    sqlite.exec("UPDATE system_settings SET operation_mode='normal', disabled_features_json=NULL WHERE id='default'");
+    const d1 = createVideoStatusD1(sqlite);
+    const candidate = createUnboundAdminVideoStatusCandidate();
+    const defaultBody = JSON.stringify({ video_id: "v1", status: "private" });
+
+    async function request(name, { body = defaultBody, origin = ORIGIN, env = {}, noCookie = false } = {}) {
+      const response = await candidate.request(ORIGIN + "/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(origin === null ? {} : { origin }),
+          ...(!noCookie ? cookie(`tok-${name}`) : {}),
+        },
+        body,
+      }, { DB: d1, NEXT_PUBLIC_SITE_URL: ORIGIN, FLAMENODE_LOCAL_PREVIEW: "1", ...env });
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal(d1.stats.batches, 0, "unmounted admin candidate never opens an audited transaction");
+      assert.equal(d1.stats.writes, 0, "unmounted admin candidate never writes to D1");
+      return { status: response.status, data: await response.json() };
+    }
+
+    const before = d1.stats.statements;
+    assert.deepEqual(await request("admin", { origin: "https://evil.example" }), {
+      status: 403, data: { ok: false, reason: "invalid_origin" },
+    });
+    assert.deepEqual(await request("admin", { origin: null }), {
+      status: 403, data: { ok: false, reason: "invalid_origin" },
+    });
+    assert.deepEqual(await request("admin", { env: { NEXT_PUBLIC_SITE_URL: null } }), {
+      status: 503, data: { ok: false, reason: "origin_verification_unavailable" },
+    });
+    assert.equal(d1.stats.statements, before, "Origin denial must precede all D1 reads");
+
+    assert.deepEqual(await request("admin", { noCookie: true }), {
+      status: 401, data: { ok: false, reason: "unauthenticated", message: "ログインが必要です。" },
+    });
+    assert.equal(d1.stats.statements, before, "missing session cannot cause a D1 query");
+    assert.deepEqual(await request("mgr", { body: '{"broken":' }), {
+      status: 403, data: { ok: false, reason: "forbidden", message: "この操作を実行する権限がありません。" },
+    }, "manager video.status privileges do not bypass site-admin role; role check precedes JSON");
+    assert.deepEqual(await request("admin", { body: '{"broken":' }), {
+      status: 400, data: { ok: false, message: "入力が不正です。" },
+    });
+    assert.deepEqual(await request("admin", { body: JSON.stringify({
+      video_id: "v1", status: "voided",
+    }) }), {
+      status: 400, data: { ok: false, message: "voidedへの変更には理由が必要です。" },
+    }, "CURRENT admin voided reason is required");
+    for (const body of [
+      JSON.stringify({ video_id: "v1", status: "public" }),
+      JSON.stringify({ video_id: "v1", status: "voided", reason: "review case" }),
+    ]) {
+      assert.deepEqual(await request("admin", { body }), {
+        status: 503, data: { ok: false, reason: "status_candidate_unmounted" },
+      }, "even valid site-admin / moderation inputs can never mutate via this unbound candidate");
+    }
+
+    // The manage and admin feature switches are independent.
+    sqlite.exec("UPDATE system_settings SET disabled_features_json='[\"manage_video_status\"]' WHERE id='default'");
+    assert.deepEqual(await request("admin"), {
+      status: 503, data: { ok: false, reason: "status_candidate_unmounted" },
+    }, "manage feature disabled must not incorrectly disable the admin feature");
+    sqlite.exec("UPDATE system_settings SET disabled_features_json='[\"admin_video_status\"]' WHERE id='default'");
+    assert.deepEqual(await request("admin"), {
+      status: 503,
+      data: { ok: false, reason: "cost_guard_blocked", message: "現在、この機能の書き込みは一時的に無効化されています。" },
+    });
+    sqlite.exec("UPDATE system_settings SET disabled_features_json=NULL WHERE id='default'");
+    sqlite.exec("UPDATE user SET is_tos_accepted=0 WHERE id='u_admin'");
+    assert.deepEqual(await request("admin"), {
+      status: 403, data: { ok: false, reason: "tos_required", message: "利用規約への同意が必要です。" },
+    }, "admin role never bypasses the CURRENT TOS guard");
+  } finally {
+    sqlite.close();
+  }
+});
+
