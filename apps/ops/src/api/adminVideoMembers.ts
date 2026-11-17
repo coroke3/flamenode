@@ -10,7 +10,11 @@ export async function readAdminVideoMembers(
   fetchFn: OpsFetch = (path, init) => fetch(path, init),
   signal?: AbortSignal,
 ): Promise<OpsResult<AdminVideoMembersResponse>> {
-  if (!videoId || videoId === "." || videoId === ".." || videoId.includes("\0")) {
+  // Keep read and SA-085 write route IDs under the same fail-closed bounds.
+  // Never make a GET for a malformed/overlong path or an already-aborted load.
+  if (typeof videoId !== "string" || !videoId || videoId.length > 64 ||
+      videoId.trim() !== videoId || videoId === "." || videoId === ".." ||
+      /[\\/\\\\\\x00-\\x1f]/.test(videoId) || signal?.aborted) {
     return { status: "unavailable" };
   }
   // Invalid UTF-16 must fail closed without rejecting the load promise.
