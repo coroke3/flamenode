@@ -1131,5 +1131,35 @@ test("MIG-0730 U02bo: malformed injected save receipts cannot fake success or re
     await ui.submit();
     assert.equal(refreshes, 1);
     assert.match(ui.target.textContent, /保存しました/);
+    assert.match(ui.target.querySelector('[role="status"]')?.textContent ?? "",
+      /公開ページへの反映は、静的データの再生成が完了するまで/,
+      "confirmed delayed public reflection must display CURRENT notice");
   } finally { await ui.cleanup(); }
+});
+
+test("MIG-0730 U02cf: only successful pending public reflection shows delay notice", async () => {
+  const scenarios = [
+    { response: { ok: true, message: "保存しました", pendingPublicReflection: false }, delayed: false },
+    { response: { ok: false, message: "保存できません", pendingPublicReflection: true }, delayed: false },
+    { response: { ok: true, message: "保存しました", pendingPublicReflection: true }, delayed: true },
+  ];
+  for (const { response, delayed } of scenarios) {
+    let refreshes = 0;
+    const ui = setup({
+      save: async () => response,
+      onSaved: () => { refreshes++; },
+    });
+    try {
+      await ui.render();
+      await ui.submit();
+      const notice = "公開ページへの反映は、静的データの再生成が完了するまで";
+      assert.equal(ui.target.textContent.includes(notice), delayed,
+        "only verified successful writes with pendingPublicReflection=true show the shared delay notice");
+      assert.equal(refreshes, response.ok ? 1 : 0);
+      if (!response.ok) {
+        assert.match(ui.target.querySelector('[role="alert"]')?.textContent ?? "", /保存できません/);
+        assert.equal(ui.target.querySelector('[role="status"]'), null);
+      }
+    } finally { await ui.cleanup(); }
+  }
 });
