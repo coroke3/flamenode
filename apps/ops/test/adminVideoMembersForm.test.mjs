@@ -1250,3 +1250,73 @@ test("MIG-0730 U02cf: only successful pending public reflection shows delay noti
     } finally { await ui.cleanup(); }
   }
 });
+
+test("MIG-0730 U02cw: injected save receipt getters are validated once before refresh", async () => {
+  const reads = { ok: 0, message: 0, pending: 0 };
+  const receipt = {};
+  Object.defineProperties(receipt, {
+    ok: {
+      get() { reads.ok++; return reads.ok === 1 ? false : true; },
+    },
+    message: {
+      get() {
+        reads.message++;
+        return reads.message === 1 ? "保存できませんでした" : "PRIVATE_PROVIDER_TOKEN";
+      },
+    },
+    pendingPublicReflection: {
+      get() { reads.pending++; return reads.pending === 1 ? false : true; },
+    },
+  });
+  let writes = 0, refreshes = 0;
+  const ui = setup({
+    save: async () => { writes++; return receipt; },
+    onSaved: () => { refreshes++; },
+  });
+  try {
+    await ui.render();
+    await ui.submit();
+    assert.equal(writes, 1, "the ambiguous mutation must never be retried");
+    assert.deepEqual(reads, { ok: 1, message: 1, pending: 1 },
+      "the validated properties must be the exact returned properties");
+    assert.equal(refreshes, 0, "a validated failure cannot become success via getter mutation");
+    assert.match(ui.target.querySelector('[role="alert"]')?.textContent ?? "",
+      /保存できませんでした/);
+    assert.doesNotMatch(ui.target.textContent,
+      /PRIVATE_PROVIDER_TOKEN|公開ページへの反映は/);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0730 U02cw: forged save accessors fail closed; ordinary success remains valid", async () => {
+  const hostile = {};
+  Object.defineProperty(hostile, "ok", { get() { throw Error("PRIVATE_RECEIPT"); } });
+  const revoked = Proxy.revocable({ ok: true }, {});
+  revoked.revoke();
+  for (const forged of [hostile, revoked.proxy]) {
+    let refreshes = 0;
+    const ui = setup({
+      save: async () => forged,
+      onSaved: () => { refreshes++; },
+    });
+    try {
+      await ui.render();
+      await ui.submit();
+      assert.equal(refreshes, 0);
+      assert.equal(ui.target.querySelector('[role="alert"]')?.textContent,
+        "保存結果を確認できませんでした。最新状態を再取得してください。");
+      assert.doesNotMatch(ui.target.textContent, /PRIVATE_RECEIPT/);
+    } finally { await ui.cleanup(); }
+  }
+  let refreshes = 0;
+  const normal = setup({
+    save: async () => ({ ok: true, message: "保存しました", pendingPublicReflection: true }),
+    onSaved: () => { refreshes++; },
+  });
+  try {
+    await normal.render();
+    await normal.submit();
+    assert.equal(refreshes, 1);
+    assert.match(normal.target.textContent, /保存しました/);
+    assert.match(normal.target.textContent, /公開ページへの反映は/);
+  } finally { await normal.cleanup(); }
+});

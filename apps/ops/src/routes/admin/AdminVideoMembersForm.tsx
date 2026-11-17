@@ -36,22 +36,32 @@ function normalizeInjectedSaveResult(value: unknown): AdminVideoMembersSaveResul
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, message: UNVERIFIED_SAVE };
   }
-  const body = value as Record<string, unknown>;
-  if (typeof body.ok !== "boolean" ||
-      (body.message !== undefined &&
-        (typeof body.message !== "string" || body.message.length > 300)) ||
-      (body.pendingPublicReflection !== undefined &&
-        typeof body.pendingPublicReflection !== "boolean")) {
+  // A legacy/injected save port may return a getter-backed or Proxy receipt.
+  // Read each property once: a changing ok getter could previously validate
+  // as false, return true, and invoke onSaved without a confirmed commit.
+  try {
+    const body = value as Record<string, unknown>;
+    const ok = body.ok;
+    const message = body.message;
+    const pendingPublicReflection = body.pendingPublicReflection;
+    if (typeof ok !== "boolean" ||
+        (message !== undefined &&
+          (typeof message !== "string" || message.length > 300)) ||
+        (pendingPublicReflection !== undefined &&
+          typeof pendingPublicReflection !== "boolean")) {
+      return { ok: false, message: UNVERIFIED_SAVE };
+    }
+    return {
+      ok,
+      ...(typeof message === "string" ? { message } : {}),
+      ...(typeof pendingPublicReflection === "boolean"
+        ? { pendingPublicReflection } : {}),
+    };
+  } catch {
+    // Never surface private provider/accessor errors or refresh on ambiguity.
     return { ok: false, message: UNVERIFIED_SAVE };
   }
-  return {
-    ok: body.ok,
-    ...(typeof body.message === "string" ? { message: body.message } : {}),
-    ...(typeof body.pendingPublicReflection === "boolean"
-      ? { pendingPublicReflection: body.pendingPublicReflection } : {}),
-  };
 }
-
 
 export interface AdminVideoMembersFormProps {
   video: { id: string; title: string; youtube_video_id?: string | null; collaboration_type: string | null };
