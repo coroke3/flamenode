@@ -252,7 +252,7 @@ test("MIG-0730 U02p: two permission confirmations in one React batch write exact
   }
 });
 
-test("MIG-0730 U02p: removing edit adapters disables a still-open privileged confirmation", async () => {
+test("MIG-0730 U02p/U02q: removing edit adapters retires a still-open privileged confirmation", async () => {
   const target = document.createElement("div");
   document.body.append(target);
   const root = createRoot(target);
@@ -273,15 +273,62 @@ test("MIG-0730 U02p: removing edit adapters disables a still-open privileged con
     await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
     assert.equal(buttonNamed(target, "変更を反映").disabled, false);
 
-    // Same video/snapshot; only adapter privilege was withdrawn. The old
-    // confirmation remains in React state but it must no longer write.
+    // Adapter withdrawal retires the entire confirmation, not merely its button.
     await render(undefined);
-    const confirm = buttonNamed(target, "変更を反映");
-    assert.equal(confirm.disabled, true);
-    await React.act(async () => confirm.click());
+    assert.equal(target.querySelector('[role="alertdialog"]'), null);
+    assert.equal(target.querySelector('button[type="submit"]'), null);
     assert.equal(calls.length, 0);
     assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
+
+
+test("MIG-0730 U02q: pending permission success after revocation cannot revive obsolete member edits", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  const calls = [];
+  let settle;
+  const adapters = {
+    save: async () => ({ ok: true }),
+    searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null, hint: null }),
+    applyPermissionBatch: input => {
+      calls.push(input);
+      return new Promise(resolve => { settle = resolve; });
+    },
+  };
+  const render = async save => React.act(async () => {
+    root.render(React.createElement(AdminVideoMembersEditorPreview, {
+      videoId: "A", data: data("A", "CURRENT"), ...adapters, save,
+    }));
+  });
+  try {
+    await render(adapters.save);
+    await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
+    await React.act(async () => buttonNamed(target, "変更を反映").click());
+    assert.equal(calls.length, 1);
+    assert.equal(buttonNamed(target, "反映中...").disabled, true);
+    assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+
+    await render(undefined);
+    assert.equal(target.querySelector('[role="alertdialog"]'), null);
     assert.equal(target.querySelector('button[type="submit"]'), null);
+    assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+
+    await React.act(async () => settle({ ok: true, message: "late permission success" }));
+    assert.equal(target.querySelector('[role="alertdialog"]'), null);
+    assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"],
+      "obsolete success must not commit imported rows");
+    assert.equal(calls.length, 1);
+    assert.doesNotMatch(target.textContent, /late permission success/);
+
+    await render(adapters.save);
+    assert.equal(target.querySelector('[role="alertdialog"]'), null);
+    assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+    assert.ok(target.querySelector('button[type="submit"]'));
   } finally {
     await React.act(async () => root.unmount());
     target.remove();

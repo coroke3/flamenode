@@ -63,10 +63,13 @@ export function AdminVideoMembersEditorPreview({
   // membership snapshot. Changes to title/YouTube metadata alone should not
   // throw away local in-progress edits. Use only validated edit-relevant data,
   // not the entire DTO or its object identity, for the form's remount key.
-  const snapshotKey = JSON.stringify([
-    valid.video.id, valid.video.collaboration_type, valid.initialMembers,
-  ]);
   const canEdit = Boolean(save && searchXUsers && applyPermissionBatch);
+  // Capability loss/regrant is an authorization boundary. Retire the old form
+  // including pending permission callbacks, private edits and confirmation UI.
+  // Changes to title/YouTube metadata alone still preserve the local draft.
+  const snapshotKey = JSON.stringify([
+    valid.video.id, valid.video.collaboration_type, valid.initialMembers, canEdit,
+  ]);
   const field = (
     <VideoMembersField
       key={videoId}
