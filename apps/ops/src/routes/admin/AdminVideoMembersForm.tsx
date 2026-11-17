@@ -47,17 +47,18 @@ function AdminVideoMembersFormForVideo({
   const inFlight = React.useRef(false);
   // A pending request can outlive the loss and later restoration of this form's
   // write capability. Retire its completion before any stale success callback.
-  const saveCapabilityRef = React.useRef(Boolean(save));
+  const enabled = Boolean(save) && (!isCollab || membersField != null);
+  // Losing the required member field is also a write-capability revocation,
+  // even when the save function itself remains present.
+  const saveCapabilityRef = React.useRef(enabled);
   const saveCapabilityEpoch = React.useRef(0);
   React.useLayoutEffect(() => {
-    const available = Boolean(save);
-    if (saveCapabilityRef.current !== available) {
-      saveCapabilityRef.current = available;
+    if (saveCapabilityRef.current !== enabled) {
+      saveCapabilityRef.current = enabled;
       saveCapabilityEpoch.current += 1;
       setResult(null);
     }
-  }, [save]);
-  const enabled = Boolean(save) && (!isCollab || membersField != null);
+  }, [enabled]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();

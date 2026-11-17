@@ -314,3 +314,38 @@ test("MIG-0730 U02r: same-video write capability revocation/regrant ignores obso
     } finally { await ui.cleanup(); }
   }
 });
+
+test("MIG-0730 U02s: losing required member field retires a pending save even if the adapter remains", async () => {
+  const pendingSave = deferred();
+  let writes = 0;
+  let refreshes = 0;
+  const field = h("input", {
+    type: "hidden", name: "members_json", value: '[{"name":"Alice"}]',
+  });
+  const ui = setup({
+    membersField: field,
+    save: async () => { writes++; return pendingSave.promise; },
+    onSaved: () => { refreshes++; },
+  });
+  try {
+    await ui.render();
+    await ui.submit();
+    assert.equal(writes, 1);
+    assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true);
+
+    // A parent can withdraw the member editor without withdrawing the save
+    // function. The old request cannot be safely treated as authorized UI state.
+    await ui.render({ membersField: null });
+    assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+    await ui.render({ membersField: field });
+    assert.equal(ui.target.querySelector('button[type="submit"]').disabled, true);
+
+    await React.act(async () => pendingSave.finish({
+      ok: true, message: "OBSOLETE MEMBER SAVE",
+    }));
+    assert.equal(refreshes, 0, "obsolete write must not refresh after field revocation");
+    assert.doesNotMatch(ui.target.textContent, /OBSOLETE MEMBER SAVE/);
+    assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false);
+    assert.equal(writes, 1, "no automatic retry of the possibly committed request");
+  } finally { await ui.cleanup(); }
+});
