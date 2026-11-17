@@ -239,6 +239,10 @@ if (runUnderRootTsx(import.meta.url)) {
           if (condition && !(condition instanceof Headers) &&
               condition.etagMatches !== current?.etag) return null;
           objects.set(key, { text: value, etag: `etag-${++etagVersion}` });
+          if (r2Fault === "write-committed-once" && transientPutFailures++ === 0) {
+            // The CAS has committed in R2, but the client did not receive its ACK.
+            throw new Error("public_visibility_manifest_transport_unavailable");
+          }
           if (replaceR2FenceOwner && etagVersion === 1) {
             // Another writer takes ownership between a successful R2 put
             // and the mandatory read-back confirmation.
@@ -299,8 +303,8 @@ if (runUnderRootTsx(import.meta.url)) {
         ? await executeCurrentStatusMutation(mutationInput)
         : await executeHonoVideoVisibilityStatusMutation(mutationInput, auditedHost);
       await Promise.all(pendingWakePromises);
-      if (r2Fault) {
-        assert.equal(result.ok, false, "R2 transport errors must stop before D1");
+      if (r2Fault === "read" || r2Fault === "write") {
+        assert.equal(result.ok, false, "persistent R2 transport errors must stop before D1");
         assert.equal(result.errorCode, "visibility_precommit_failed");
         assert.equal(result.retryable, false, "no unsafe retry after an unconfirmed R2 fence");
       } else if (replaceR2FenceOwner) {
@@ -506,6 +510,33 @@ if (runUnderRootTsx(import.meta.url)) {
         "retry must preserve create-only CAS and cannot overwrite a competing blocker");
       assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), [],
         "the Hono/CURRENT fixture has dispatch disabled, so retry does not produce an uncommitted wake");
+    });
+  }
+
+  for (const [initialStatus, nextStatus] of [["public", "private"], ["private", "public"]]) {
+    test(`lost ACK after successful R2 manifest CAS safely recovers for ${initialStatus}→${nextStatus}`, async () => {
+      const current = await executeAuditedStatus(
+        nextStatus, true, false, false, false, initialStatus, "write-committed-once",
+      );
+      const hono = await executeAuditedStatus(
+        nextStatus, false, false, false, false, initialStatus, "write-committed-once",
+      );
+      assert.deepEqual(hono, current, "CURRENT and unmounted Hono host must recover with identical effects");
+      assert.equal(current.result.ok, true, "recoverable lost ACK must not turn a confirmed CAS into denial");
+      assert.equal(current.video.visibility_status, nextStatus);
+      assert.equal(current.batches, 1, "no D1 batch occurs until the R2 fence is reconfirmed");
+      assert.equal(current.audits.length, 1, "strict audited write occurs once");
+      assert.equal(current.fences.length, 1);
+      assert.equal(current.fences[0].state, nextStatus === "private" ? "blocked" : "release_pending");
+      assert.equal(current.manifest?.entities?.length, 1, "no duplicate R2 entity after uncertain commit");
+      assert.equal(current.manifest.entities[0].fence_token, current.fences[0].fence_token,
+        "R2 owner and D1 fence token stay identical");
+      const puts = current.events.filter((event) => event[0] === "r2.put");
+      assert.deepEqual(puts.map((event) => event[2]),
+        ["create-if-absent", "create-if-absent", "etag-1"],
+        "lost ACK retries must never use unconditional PUT; the third attempt owns exact etag");
+      assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), [],
+        "no Queue wake when dispatch is disabled");
     });
   }
 
