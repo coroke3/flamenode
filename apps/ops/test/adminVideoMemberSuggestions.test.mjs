@@ -225,3 +225,34 @@ test("MIG-0730 U02e: 20 rows, valid empty V2 refine and pagination preserve Hono
     async () => json(result({ items: [], nextOffset: null, hasMore: true, hint: "refine" })));
   assert.deepEqual(b, { items: [], hasMore: true, nextOffset: null, hint: "refine" });
 });
+test("MIG-0730 U02bp: cursorless hasMore=true must be a documented V2 refinement, never a forged page", async () => {
+  const invalid = [
+    result({ items: [], hasMore: true, nextOffset: null, hint: null }),
+    result({ items: [], hasMore: true, nextOffset: null, hint: "" }),
+    result({ items: [], hasMore: true, nextOffset: null, hint: "   " }),
+    result({ items: [], hasMore: true, nextOffset: null, hint: "refine", source: "v1" }),
+    result({ items: [], hasMore: true, nextOffset: null, hint: "refine", source: undefined }),
+  ];
+  for (const payload of invalid) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+        async () => json(payload)),
+      /member_suggestions_unavailable/,
+      "only V2 may signal a cursorless continuation with a real refinement hint",
+    );
+  }
+  const validRefinement = await searchAdminVideoMemberXUsers(
+    "al", 20, new AbortController().signal, async () => json(result({
+      offset: 20, items: [], hasMore: true, nextOffset: null, hint: "候補が多いため絞り込んでください", source: "v2",
+    })),
+  );
+  assert.deepEqual(validRefinement, {
+    items: [], hasMore: true, nextOffset: null, hint: "候補が多いため絞り込んでください",
+  });
+  const ordinaryEnd = await searchAdminVideoMemberXUsers(
+    "al", 0, new AbortController().signal, async () => json(result({
+      items: [], hasMore: false, nextOffset: null, hint: null, source: undefined,
+    })),
+  );
+  assert.deepEqual(ordinaryEnd, { items: [], hasMore: false, nextOffset: null, hint: null });
+});

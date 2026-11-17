@@ -39,9 +39,14 @@ function parseSuggestions(
          (value.nextOffset as number) !== requestedOffset + value.items.length)) ||
       // A completed page cannot simultaneously advertise a next page.
       (value.hasMore === false && value.nextOffset !== null) ||
-      // Only the RH-019 V2 'refine your query' response has a null cursor
-      // with hasMore=true, and that response always has zero candidate rows.
-      (value.hasMore === true && value.nextOffset === null && value.items.length !== 0) ||
+      // A null cursor with hasMore=true is exclusively RH-019 V2's
+      // explicit "refine query" answer. Without a nonblank hint and v2
+      // source, this would be an ambiguous, non-pageable private result.
+      (value.hasMore === true && value.nextOffset === null &&
+        (value.items.length !== 0 ||
+         value.source !== "v2" ||
+         typeof value.hint !== "string" ||
+         !value.hint.trim())) ||
       (value.hint !== null && (typeof value.hint !== "string" || value.hint.length > 256))) {
     throw new Error("member_suggestions_unavailable");
   }
