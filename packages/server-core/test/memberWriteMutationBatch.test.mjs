@@ -81,7 +81,11 @@ test("MIG-0650 U03d-2j: caller's no-op is not a mutation; an invoked builder ret
 });
 
 test("MIG-0650 U03d-2j: a pending X profile is checked after CAS, and conflict counts one change", () => {
-  const b = build({ newXUsers: [pending("new_x")] });
+  const profileMember = member("profile-member", "new_x");
+  const b = build({
+    beforeSnapshotRows: [profileMember], afterSnapshotRows: [profileMember],
+    newXUsers: [pending("new_x")],
+  });
   assert.deepEqual(b.expectedChanges, [null, 1]);
   assert.match(b.queries[1].sql, /INSERT INTO x_users/);
   assert.match(b.queries[1].sql, /ON CONFLICT\(id\) DO UPDATE SET\s+id = excluded\.id/);
@@ -91,7 +95,11 @@ test("MIG-0650 U03d-2j: a pending X profile is checked after CAS, and conflict c
 
 test("MIG-0650 U03d-2j: hidden carry CAS occurs before profile insert and scoped cleanup", () => {
   const hidden = member("hidden_x", "alice", { is_public_member: 0, can_edit: 1 });
-  const b = build({ hiddenCarryRows: [hidden], newXUsers: [pending("new_x")] });
+  const profileMember = member("profile-member", "new_x");
+  const b = build({
+    beforeSnapshotRows: [profileMember], afterSnapshotRows: [profileMember],
+    hiddenCarryRows: [hidden], newXUsers: [pending("new_x")],
+  });
   assert.deepEqual(b.expectedChanges, [null, null, 1, 1]);
   assert.match(b.queries[0].sql, /SELECT CASE/);
   assert.match(b.queries[1].sql, /SELECT CASE/);
@@ -136,14 +144,14 @@ test("MIG-0650 U03d-2j: combined operation maintains CURRENT ordering and exact 
   const newer = member("pub_next", "alice");
   const hidden = member("hidden_old", "alice", { is_public_member: 0, can_edit: 1 });
   const b = build({
-    beforeSnapshotRows: [old], afterSnapshotRows: [newer],
+    beforeSnapshotRows: [old], afterSnapshotRows: [newer, member("pub_bob", "bob")],
     existingPublicCount: 1, membersChanged: true,
     hiddenCarryRows: [hidden], newXUsers: [pending("bob")],
     existingManagedChapters: [chapter("pub_old:member:0")],
     nextManagedChapters: [chapter("pub_next:member:0")],
     chaptersChanged: true,
   });
-  assert.deepEqual(b.expectedChanges, [null, null, 1, 1, 1, 1, 1, 1]);
+  assert.deepEqual(b.expectedChanges, [null, null, 1, 1, 1, 2, 1, 1]);
   const sqlTexts = b.queries.map(q => q.sql);
   assert.match(sqlTexts[0], /SELECT CASE/);
   assert.match(sqlTexts[1], /SELECT CASE/);
@@ -374,7 +382,11 @@ test("MIG-0650 U03am new X identities cannot bypass pending-only approval workfl
       "invalid approval state must be rejected before building CAS/INSERT statements");
   }
 
-  const allowed = build({ newXUsers: [pending("alice")] });
+  const profileMember = member("profile-member", "alice");
+  const allowed = build({
+    beforeSnapshotRows: [profileMember], afterSnapshotRows: [profileMember],
+    newXUsers: [pending("alice")],
+  });
   assert.deepEqual(allowed.expectedChanges, [null, 1]);
   assert.match(allowed.queries[1].sql, /INSERT INTO x_users/);
   assert.ok(allowed.queries[1].params.some(p =>
@@ -409,8 +421,8 @@ test("MIG-0650 U03an suppressed public member deltas cannot silently skip atomic
 
   // A genuine no-public-member-change pending X profile path is still valid.
   const stable = build({
-    beforeSnapshotRows: [member("stable")],
-    afterSnapshotRows: [member("stable")],
+    beforeSnapshotRows: [member("stable", "new_x")],
+    afterSnapshotRows: [member("stable", "new_x")],
     newXUsers: [pending("new_x")],
     membersChanged: false,
   });
@@ -456,6 +468,8 @@ test("MIG-0650 U03ao suppressed chapter content cannot silently skip strict atom
       { ...a, created_at: a.created_at + 1, updated_at: a.updated_at + 1 },
     ],
     chaptersChanged: false,
+    beforeSnapshotRows: [member("profile-member", "new_x")],
+    afterSnapshotRows: [member("profile-member", "new_x")],
     newXUsers: [pending("new_x")],
   });
   assert.deepEqual(stable.expectedChanges, [null, 1]);
@@ -492,7 +506,8 @@ test("MIG-0650 U03ap rejects out-of-contract row counts before any atomic SQL", 
 });
 
 test("MIG-0650 U03ap in-range maximum rows preserve CURRENT projection semantics", () => {
-  const members = Array.from({ length: 100 }, (_, i) => member("public_" + i));
+  const members = Array.from({ length: 100 }, (_, i) =>
+    member("public_" + i, "x_" + i));
   const profiles = Array.from({ length: 100 }, (_, i) => pending("x_" + i));
   const chapters = Array.from({ length: 3000 }, (_, i) =>
     chapter("public_0:member:" + i));
@@ -563,4 +578,49 @@ test("MIG-0650 U03aq rejects same-video but unowned managed chapter DML before a
   assert.deepEqual(allowed.expectedChanges, [null, 1, 1, 2, 2]);
   assert.match(allowed.queries[3].sql, /DELETE FROM video_chapters/);
   assert.match(allowed.queries[4].sql, /INSERT INTO video_chapters/);
+});
+
+test("MIG-0650 U03ar pending X profiles must belong to authorized next public members", () => {
+  const cases = [
+    { afterSnapshotRows: [], newXUsers: [pending("unrelated")] },
+    {
+      afterSnapshotRows: [member("listed", "alice")],
+      beforeSnapshotRows: [member("listed", "alice")],
+      newXUsers: [pending("bob")],
+    },
+    {
+      afterSnapshotRows: [member("anonymous", null)],
+      beforeSnapshotRows: [member("anonymous", null)],
+      newXUsers: [pending("alice")],
+    },
+    {
+      afterSnapshotRows: [member("case-mismatch", "alice")],
+      beforeSnapshotRows: [member("case-mismatch", "alice")],
+      newXUsers: [pending("Alice")],
+    },
+  ];
+  for (const fields of cases) {
+    const c = collector();
+    assert.throws(() => buildVideoMemberWriteMutationBatch(c.db, {
+      videoId: "video-1",
+      beforeSnapshotRows: [], afterSnapshotRows: [],
+      existingPublicCount: 0, hiddenCarryRows: [], newXUsers: [],
+      existingManagedChapters: [], nextManagedChapters: [],
+      membersChanged: false, chaptersChanged: false,
+      ...fields,
+    }), { name: "RangeError", message: "video_member_write_unlinked_x_profile" });
+    assert.equal(c.queries.length, 0,
+      "unrelated pending X profile cannot reach member CAS or x_users JSON1 INSERT");
+  }
+
+  const newMember = member("added", "new_x");
+  const allowed = build({
+    beforeSnapshotRows: [],
+    afterSnapshotRows: [newMember],
+    membersChanged: true,
+    newXUsers: [pending("new_x")],
+  });
+  assert.deepEqual(allowed.expectedChanges, [null, 1, 1]);
+  assert.match(allowed.queries[1].sql, /INSERT INTO x_users/);
+  assert.match(allowed.queries[2].sql, /INSERT INTO video_members/);
 });
