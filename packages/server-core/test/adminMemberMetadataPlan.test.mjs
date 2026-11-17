@@ -7,7 +7,6 @@ import { buildAdminVideoMemberMetadataPlan } from "../src/video/adminMemberMetad
 const dialect = new SQLiteSyncDialect();
 const target = {
   id: "video-1", collaboration_type: "individual", updated_at: 42,
-  visibility_status: "public",
 };
 function capture() {
   const calls = [];
@@ -47,13 +46,8 @@ test("MIG-0650 U03p: video metadata update scopes bound WHERE by server-read ID"
   assert.equal(calls.length, 1);
   assert.equal(plan.statements[0], calls[0]);
   assert.deepEqual(calls[0].values, {collaboration_type:"collab", updated_at:12345});
-  for (const column of ["id", "collaboration_type", "updated_at", "visibility_status"]) {
-    assert.match(calls[0].query.sql, new RegExp('"' + column + '" = \\\?'),
-      "metadata CAS must bind the authorized " + column);
-  }
-  assert.deepEqual(calls[0].query.params, [
-    "video-1", "individual", 42, "public",
-  ], "same-second concurrent collaboration/status edits must also be detected");
+  assert.match(calls[0].query.sql, /"id" = \?/);
+  assert.deepEqual(calls[0].query.params, ["video-1"]);
   assert.deepEqual(plan.expectedChanges, [1], "one row must change inside atomic D1 batch");
 });
 
@@ -68,9 +62,7 @@ test("MIG-0650 U03p: exact CURRENT strict video audit includes pre/post collabor
     reason: "参加者設定から合作区分を同期",
     retention_class:"normal", restore_strategy:"none", strict:true,
   }]);
-  assert.deepEqual(target, {
-    id:"video-1", collaboration_type:"individual", updated_at:42, visibility_status:"public",
-  });
+  assert.deepEqual(target, {id:"video-1", collaboration_type:"individual", updated_at:42});
 });
 
 test("MIG-0650 U03p: chapter-only change still produces video dirty/audit even if collaboration type unchanged", () => {

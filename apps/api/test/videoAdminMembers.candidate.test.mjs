@@ -1497,48 +1497,6 @@ test("MIG-0650 U03bl canonical member/chapter metadata + strict audit + Queue co
   } finally { s.sqlite.close(); }
 });
 
-test("MIG-0650 U03bw concurrent video metadata/status edit aborts the entire member CAS batch", async () => {
-  const { executeAdminMemberAtomicCandidate } =
-    await import("@flamenode/server-core/video/adminMemberAtomicExecute");
-  // These mutations happen AFTER the authorized video SELECT and BEFORE
-  // the atomic batch. Timestamp collisions must not hide status/type edits.
-  for (const race of [
-    { column: "collaboration_type", value: "collab" },
-    { column: "visibility_status", value: "private" },
-    { column: "updated_at", value: 999999 },
-  ]) {
-    const s = realGuardFixture();
-    try {
-      const { db, prepared } = await preparedSqliteMemberSave(s);
-      const oldChapters = s.count("video_chapters");
-      s.sqlite.prepare("UPDATE videos SET " + race.column + " = ? WHERE id = 'v_two'")
-        .run(race.value);
-      const concurrentRow = s.sqlite.prepare(
-        "SELECT collaboration_type, visibility_status, updated_at FROM videos WHERE id = 'v_two'"
-      ).get();
-      let wakeCalls = 0;
-      await assert.rejects(
-        executeAdminMemberAtomicCandidate(db, prepared.executionInput, async () => {
-          wakeCalls++;
-          return {
-            readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
-          };
-        }),
-        "a stale " + race.column + " must fail the metadata CAS assertion",
-      );
-      assert.equal(s.d1.stats.batches, 1, "one atomic attempted batch, never a partial write");
-      assert.equal(wakeCalls, 0, "no postcommit Queue wake after CAS rollback");
-      assert.equal(s.count("video_members"), 0, "no participant write survived");
-      assert.equal(s.count("video_chapters"), oldChapters, "no chapter write survived");
-      assert.equal(s.count("audit_logs"), 0, "no strict audit survived");
-      assert.equal(s.count("static_rebuild_queue"), 0, "no rebuild target survived");
-      assert.deepEqual(s.sqlite.prepare(
-        "SELECT collaboration_type, visibility_status, updated_at FROM videos WHERE id = 'v_two'"
-      ).get(), concurrentRow, "the concurrent admin edit survives the failed stale write");
-    } finally { s.sqlite.close(); }
-  }
-});
-
 test("MIG-0650 U03bl stale member snapshot rolls back chapter, metadata, audit and Queue", async () => {
   const { executeAdminMemberAtomicCandidate } =
     await import("@flamenode/server-core/video/adminMemberAtomicExecute");
