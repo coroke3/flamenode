@@ -858,7 +858,7 @@ test("MIG-0650 U03af snapshots streamed bytes before an upstream producer reuses
 
 test("MIG-0650 U03ah all seven schema-valid video statuses are valid SA-085 targets", async () => {
   const schema = await readFile(
-    new URL("../../../../packages/db/src/schema/base.ts", import.meta.url), "utf8",
+    new URL("../../../packages/db/src/schema/base.ts", import.meta.url), "utf8",
   );
   const videosDeclaration = schema.slice(schema.indexOf('export const videos = sqliteTable("videos"'));
   const statusDeclaration = videosDeclaration.match(
