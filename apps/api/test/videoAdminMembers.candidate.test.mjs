@@ -1385,7 +1385,7 @@ test("MIG-0650 U03bm one meter measures CostGuard, authorized video and canonica
   const schema = await import("@flamenode/db/schema");
   const { evaluateCostGuardWithSettings } =
     await import("../src/middleware/costGuard.ts");
-  const { createAdminMemberD1ReadMeter } =
+  const { createAdminMemberD1ReadMeter, sealAdminMemberD1ReadMeter } =
     await import("../src/routes/videos/adminMemberD1ReadMeter.ts");
   const { prepareAdminVideoMemberCandidateWrite } =
     await import("@flamenode/server-core/video/adminMemberCandidatePrepare");
@@ -1428,7 +1428,11 @@ test("MIG-0650 U03bm one meter measures CostGuard, authorized video and canonica
       "guard, CostGuard, target and canonical reads must all be metered");
     assert.ok(meter.readCount() > 2, "canonical planner must contribute reads");
     assert.equal(s.d1.stats.batches, 0);
-    assert.equal(meter.close(), prepared.atomic.callerQueryCount);
+    assert.equal(sealAdminMemberD1ReadMeter(meter, prepared.atomic.callerQueryCount),
+      prepared.atomic.callerQueryCount, "the canonical execution budget is sealed");
+    assert.throws(() => meter.binding.prepare("SELECT 1"), {
+      name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
+    });
   } finally { s.sqlite.close(); }
 });
 
@@ -1509,6 +1513,32 @@ test("MIG-0650 U03bo blank D1 facade does not leak raw providers via extra prope
   assert.throws(() => stmt.first(), {
     name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
   });
+});
+
+test("MIG-0650 U03bp mismatched or invalid execution read count closes D1 access before any write", async () => {
+  const { createAdminMemberD1ReadMeter, sealAdminMemberD1ReadMeter } =
+    await import("../src/routes/videos/adminMemberD1ReadMeter.ts");
+  const s = realGuardFixture();
+  try {
+    for (const expected of [0, 2, -1, 1.5, Number.NaN, undefined]) {
+      const meter = createAdminMemberD1ReadMeter(s.d1);
+      const stmt = meter.binding.prepare("SELECT id FROM videos WHERE id = ?").bind("v_two");
+      assert.deepEqual(await stmt.first(), { id: "v_two" });
+      const beforeReads = s.d1.stats.reads;
+      assert.throws(() => sealAdminMemberD1ReadMeter(meter, expected), {
+        name: "RangeError", message: "video_admin_member_d1_read_meter_count_mismatch",
+      }, String(expected));
+      assert.equal(meter.readCount(), 1, "rejected seal cannot erase counted reads");
+      assert.throws(() => stmt.first(), {
+        name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
+      });
+      assert.throws(() => stmt.bind("v_two"), {
+        name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
+      });
+      assert.equal(s.d1.stats.reads, beforeReads, "rejected seal cannot add D1 reads");
+      assert.equal(s.d1.stats.batches, 0, "no D1 mutation on failed handoff");
+    }
+  } finally { s.sqlite.close(); }
 });
 
 test("MIG-0650 U03bn SELECT-only meter refuses DML even when invoked through first/all/raw", async () => {

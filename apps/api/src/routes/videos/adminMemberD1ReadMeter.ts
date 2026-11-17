@@ -111,3 +111,25 @@ export function createAdminMemberD1ReadMeter(db: D1Database): AdminMemberD1ReadM
     },
   };
 }
+
+/**
+ * MIG-0650 U03bp: seal the authenticated SA-085 request's read counter
+ * BEFORE obtaining the separate write-only D1 handle for atomic execution.
+ * The sealed count must match what prepareAdminVideoMemberCandidateWrite
+ * recorded after its canonical reads. A mismatch rejects even a valid-looking
+ * mutation plan, and the meter stays closed on rejection (no retry/bypass).
+ * This helper does NOT authorize, execute or mount the Hono save route.
+ */
+export function sealAdminMemberD1ReadMeter(
+  meter: AdminMemberD1ReadMeter,
+  expectedCallerQueryCount: number,
+): number {
+  const actualCount = meter.close();
+  // Close first: invalid expected counts must not leave a live read facade.
+  if (!Number.isSafeInteger(expectedCallerQueryCount) ||
+      expectedCallerQueryCount < 0 ||
+      actualCount !== expectedCallerQueryCount) {
+    throw new RangeError("video_admin_member_d1_read_meter_count_mismatch");
+  }
+  return actualCount;
+}
