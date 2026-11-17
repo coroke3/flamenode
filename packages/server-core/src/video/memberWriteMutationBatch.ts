@@ -24,6 +24,7 @@ import {
   buildHiddenCarryRowsDeleteSql,
 } from "./hiddenMemberCarrySql.ts";
 import { buildVideoMemberXUserBatchSql } from "./memberXUserSql.ts";
+import { managedChapterRowsEqual } from "./memberChapterAudit.ts";
 import {
   buildVideoChapterBulkDeleteSql,
   buildVideoChapterBulkInsertSql,
@@ -89,6 +90,13 @@ export function buildVideoMemberWriteMutationBatch(
   if (!membersChanged &&
       JSON.stringify(beforeSnapshotRows) !== JSON.stringify(afterSnapshotRows)) {
     throw new RangeError("video_member_write_undeclared_member_changes");
+  }
+  // CURRENT calculates chaptersChanged from the same content-only comparator
+  // (which ignores chapter timestamp and row order). A future Hono adapter
+  // must not silently omit chapter DML and its strict audit/rebuild effects.
+  if (!chaptersChanged &&
+      !managedChapterRowsEqual(existingManagedChapters, nextManagedChapters)) {
+    throw new RangeError("video_member_write_undeclared_chapter_changes");
   }
   // Exact DELETE/INSERT changes() counts rely on unique IDs in each
   // independently supplied snapshot. D1 primary keys cannot substitute for
