@@ -101,8 +101,10 @@ test("chapter監査は巨大rows snapshotを持たず存在しないrestore adap
 
 test("チャプターだけの変更では公開メンバー100行をDELETE/INSERTし直さない", async () => {
   const source = await read("src/lib/video/replaceVideoMembers.ts");
-  assert.match(source, /if \(membersChanged && existing\.length > 0\)/);
-  assert.match(source, /if \(membersChanged && afterSnapshot\.rows\.length > 0\)/);
+  const mutations = await read("packages/server-core/src/video/memberWriteMutationBatch.ts");
+  assert.match(source, /buildVideoMemberWriteMutationBatch\(db, \{/);
+  assert.match(mutations, /if \(membersChanged && existingPublicCount > 0\)/);
+  assert.match(mutations, /if \(membersChanged && afterSnapshotRows\.length > 0\)/);
   assert.match(
     source,
     /if \(membersChanged\) \{[\s\S]*table_name: "video_members_set"/,
@@ -122,11 +124,13 @@ test("参加者保存はD1等の失敗を一律に競合と断定せずbudget er
 test("参加者保存はvideos全行CASを使わずmember-set CASを競合正本にする", async () => {
   const adminSource = await read("src/lib/actions/video/adminMembers.ts");
   const memberPlanSource = await read("src/lib/video/replaceVideoMembers.ts");
+  const mutations = await read("packages/server-core/src/video/memberWriteMutationBatch.ts");
   assert.doesNotMatch(adminSource, /expectedRowCondition/);
   assert.match(adminSource, /\.where\(eq\(videos\.id, videoId\)\)/);
   assert.match(adminSource, /member-set CAS/);
-  assert.match(memberPlanSource, /buildVideoMemberSetGuardSql/);
-  assert.match(memberPlanSource, /plan\.expectedChanges\.push\(null\)/);
+  assert.match(memberPlanSource, /buildVideoMemberWriteMutationBatch\(db, \{/);
+  assert.match(mutations, /buildVideoMemberSetGuardSql/);
+  assert.match(mutations, /expectedChanges\.push\(null\)/);
 });
 
 test("完全no-opの参加者保存はvideos.updated_at・score dirty・static rebuildを発生させない", async () => {
@@ -158,7 +162,9 @@ test("member-set CASのID順はlocaleCompareに依存しない", async () => {
   assert.doesNotMatch(carry, /id\.localeCompare/);
   assert.match(replace, /from "@flamenode\/server-core\/video\/memberPermissionCarry"/);
   assert.match(replace, /selectVideoMemberPermissionCarry\(carryRows, xIdSet, canonicalIdentity\)/);
-  assert.match(replace, /buildVideoMemberSetGuardSql/);
+  const mutations = await read("packages/server-core/src/video/memberWriteMutationBatch.ts");
+  assert.match(replace, /buildVideoMemberWriteMutationBatch\(db, \{/);
+  assert.match(mutations, /buildVideoMemberSetGuardSql/);
 });
 
 test("100人stress testは実canonicalのstatic_rebuild_queue shapeを持つ", async () => {
