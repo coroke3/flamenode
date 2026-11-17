@@ -59,6 +59,9 @@ export function prepareAdminMemberAtomicExecution(
     typeof actorUserId !== "string" || !actorUserId ||
     !Number.isSafeInteger(callerQueryCount) || callerQueryCount < 0 ||
     !assembly || !assembly.plan || !assembly.queue ||
+    // A truthy string such as "false" must never masquerade as a confirmed
+    // no-op: that would return committed:false without executing a write.
+    typeof assembly.noOp !== "boolean" ||
     !Array.isArray(assembly.plan.statements) ||
     !Array.isArray(assembly.plan.expectedChanges) ||
     !Array.isArray(assembly.plan.audits) ||

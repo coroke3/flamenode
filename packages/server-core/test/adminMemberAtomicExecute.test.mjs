@@ -124,6 +124,35 @@ function noOpWithCount(callerQueryCount) {
   return { ...noOp(), callerQueryCount };
 }
 
+test("MIG-0650 U03ch: only a boolean noOp can bypass D1 or mark a mutation", async () => {
+  const invalidValues = [null, undefined, 0, 1, "false", "true", [], {}];
+  let dbAccesses = 0;
+  const rejectDb = new Proxy({}, {
+    get() { dbAccesses++; throw new Error("forged noOp must not touch D1"); },
+  });
+  for (const invalidValue of invalidValues) {
+    for (const canonical of [noOp(), fixture()]) {
+      const input = {
+        ...canonical,
+        assembly: { ...canonical.assembly, noOp: invalidValue },
+      };
+      assert.throws(() => prepareAdminMemberAtomicExecution(input), {
+        name: "RangeError", message: "video_admin_member_atomic_execution_invalid",
+      });
+      await assert.rejects(
+        executeAdminMemberAtomicCandidate(rejectDb, input),
+        { name: "RangeError", message: "video_admin_member_atomic_execution_invalid" },
+      );
+    }
+  }
+  assert.equal(dbAccesses, 0,
+    "invalid noOp values must be rejected before any D1 access");
+  assert.equal(prepareAdminMemberAtomicExecution(noOp()), null,
+    "a true canonical no-op remains valid");
+  assert.ok(prepareAdminMemberAtomicExecution(fixture()),
+    "a false canonical nonempty write remains valid");
+});
+
 test("MIG-0650 U03bf no-queue member write never requests a Queue wake", () => {
   const plan = fixture();
   const result = {
