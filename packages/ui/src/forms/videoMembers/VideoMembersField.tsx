@@ -283,7 +283,8 @@ function VideoMembersFieldForTarget({
   }, [disabled, fetchSuggestions, searchQuery, searchAdapterRevision]);
 
   const loadMoreSuggestions = React.useCallback(() => {
-    if (disabled || nextOffset === null) return;
+    // The previous query's pagination cursor is not valid for a new query.
+    if (disabled || fetched.query !== searchQuery.trim() || nextOffset === null) return;
     loadMoreControllerRef.current?.abort();
     const controller = new AbortController();
     loadMoreControllerRef.current = controller;
@@ -292,7 +293,7 @@ function VideoMembersFieldForTarget({
         loadMoreControllerRef.current = null;
       }
     });
-  }, [disabled, fetchSuggestions, nextOffset, searchQuery]);
+  }, [disabled, fetched.query, fetchSuggestions, nextOffset, searchQuery]);
 
   // props + fetched を id ベースで重複排除して 1 つの suggestion 配列にまとめる
   const mergedSuggestions =
@@ -1231,7 +1232,7 @@ function VideoMembersFieldForTarget({
           <Icon name="copy" size={11} aria-hidden />
           {copied && copiedLabel === "TSVコピー" ? "コピーしました" : "TSVをコピー"}
         </button>
-        {searchHasMore && nextOffset !== null ? (
+        {fetched.query === searchQuery.trim() && searchHasMore && nextOffset !== null ? (
           <button
             type="button"
             className="fn-btn fn-btn-ghost fn-btn-sm"
