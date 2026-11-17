@@ -121,6 +121,45 @@ test("MIG-0730 U02am: query, page offset and limit must match RH-019 request ide
     "matching request identity still accepts the valid page");
 });
 
+test("MIG-0730 U02an: reject impossible or non-advancing RH-019 pagination cursors", async () => {
+  const invalid = [
+    result({ hasMore: false, nextOffset: 20 }),
+    result({ hasMore: false, nextOffset: 0 }),
+    result({ hasMore: true, nextOffset: 0 }),
+  ];
+  for (const payload of invalid) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+        async () => json(payload)),
+      /member_suggestions_unavailable/,
+      "a completed or non-advancing cursor must not be accepted",
+    );
+  }
+
+  // A stale second page must never point back to itself.
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 20, new AbortController().signal,
+      async () => json(result({ offset: 20, hasMore: true, nextOffset: 20 }))),
+    /member_suggestions_unavailable/,
+  );
+
+  // RH-019 V2 refinement deliberately uses hasMore=true and nextOffset=null
+  // to ask the user to refine the query, not to request another page.
+  const refine = await searchAdminVideoMemberXUsers("al", 0,
+    new AbortController().signal, async () => json(result({
+      items: [], hasMore: true, nextOffset: null, hint: "refine",
+    })));
+  assert.deepEqual(refine, { items: [], hasMore: true, nextOffset: null, hint: "refine" });
+
+  // A normal advancing cursor still works.
+  const page = await searchAdminVideoMemberXUsers("al", 20,
+    new AbortController().signal, async () => json(result({
+      offset: 20, hasMore: true, nextOffset: 21,
+      items: [{ id: "another", x_name: "Another" }],
+    })));
+  assert.equal(page.nextOffset, 21);
+});
+
 test("MIG-0730 U02e: abort before or after network response never returns stale private suggestions", async () => {
   const aborted = new AbortController();
   aborted.abort();

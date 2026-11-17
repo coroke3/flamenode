@@ -30,7 +30,12 @@ function parseSuggestions(
       typeof value.hasMore !== "boolean" ||
       (value.nextOffset !== null &&
         (!Number.isSafeInteger(value.nextOffset) ||
-         (value.nextOffset as number) < 0 || (value.nextOffset as number) > OFFSET_MAX + SEARCH_LIMIT)) ||
+         // The RH-019 ranked search always advances a non-null cursor.
+         // No-progress cursors can re-request the same private result page.
+         (value.nextOffset as number) <= requestedOffset ||
+         (value.nextOffset as number) > OFFSET_MAX + SEARCH_LIMIT)) ||
+      // A completed page cannot simultaneously advertise a next page.
+      (value.hasMore === false && value.nextOffset !== null) ||
       (value.hint !== null && (typeof value.hint !== "string" || value.hint.length > 256))) {
     throw new Error("member_suggestions_unavailable");
   }
