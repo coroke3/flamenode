@@ -30,6 +30,16 @@ export function inspectVideoAtomicWritePlanBudget(
   if (plan.statements.length !== plan.expectedChanges.length) {
     throw new RangeError("video_atomic_expected_changes_mismatch");
   }
+  // TypeScript cannot protect a runtime Hono caller or an array with sparse
+  // slots. The atomic executor emits one changes() assertion per numeric slot:
+  // undefined, NaN, fractional, negative or unsafe counts are not valid D1
+  // mutation row-count expectations. Reject them before approving the budget.
+  for (let index = 0; index < plan.expectedChanges.length; index += 1) {
+    const expected = plan.expectedChanges[index];
+    if (expected !== null && (!Number.isSafeInteger(expected) || expected < 0)) {
+      throw new RangeError("video_atomic_invalid_expected_changes");
+    }
+  }
   const actorXValidationQueryCount = plan.audits.some(
     audit => Boolean(audit.actor_x_user_id?.trim()),
   ) ? 1 : 0;
