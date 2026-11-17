@@ -1,0 +1,98 @@
+// MIG-0730 U02g: UNWIRED SA-085 JSON client candidate, matched to
+// MIG-0650's D-16-1 path-authoritative FormData bridge.
+// Never mount until Hono admin authorization/CAS/audit/queue parity is reviewed.
+import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
+import type { OpsFetch } from "./read.js";
+
+export type AdminVideoMemberSaveResult = {
+  ok: boolean;
+  message?: string;
+  pendingPublicReflection?: boolean;
+};
+
+const INVALID = "参加者設定の入力を確認してください。";
+const UNVERIFIED = "保存結果を確認できませんでした。最新状態を再取得してください。";
+
+function validatedBody(videoId: string, formData: FormData): {
+  encodedId: string;
+  body: { is_collab: string[]; members_json: string };
+} | null {
+  if (typeof videoId !== "string" || !videoId || videoId.length > 64 ||
+      videoId.trim() !== videoId || videoId === "." || videoId === ".." ||
+      /[\/\\\x00-\x1f]/.test(videoId) ||
+      !formData || typeof formData.getAll !== "function") return null;
+  let encodedId: string;
+  try { encodedId = encodeURIComponent(videoId); }
+  catch { return null; }
+
+  // Preserve CURRENT hidden false + checked true FormData ordering, but the
+  // HTTP body may contain only members_json and is_collab (never video_id).
+  const ids = formData.getAll("video_id");
+  const checkbox = formData.getAll("is_collab");
+  const members = formData.getAll("members_json");
+  if (ids.length !== 1 || ids[0] !== videoId ||
+      checkbox.length > 16 || checkbox.some(v => typeof v !== "string") ||
+      members.length !== 1 || typeof members[0] !== "string") return null;
+
+  const memberJson = members[0];
+  try {
+    const parsed: unknown = JSON.parse(memberJson);
+    if (!Array.isArray(parsed) || parsed.length > MAX_VIDEO_MEMBERS ||
+        parsed.some(item => !item || typeof item !== "object" || Array.isArray(item) ||
+          ("is_public_member" in item && item.is_public_member !== 1))) {
+      return null;
+    }
+  } catch { return null; }
+
+  return {
+    encodedId,
+    body: { is_collab: checkbox as string[], members_json: memberJson },
+  };
+}
+
+/**
+ * Standalone candidate only: no imports from a mounted route or editor.
+ * A failed/missing reply could follow a committed D1 batch. Never auto-retry.
+ */
+export async function saveAdminVideoMembers(
+  videoId: string,
+  formData: FormData,
+  fetchFn: OpsFetch = (path, init) => fetch(path, init),
+): Promise<AdminVideoMemberSaveResult> {
+  const parsed = validatedBody(videoId, formData);
+  if (!parsed) return { ok: false, message: INVALID };
+  try {
+    const response = await fetchFn(
+      `/api/videos/${parsed.encodedId}/members`,
+      {
+        method: "PUT",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify(parsed.body),
+      },
+    );
+    if (response.status !== 200) return { ok: false, message: UNVERIFIED };
+    const json: unknown = await response.json();
+    if (!json || typeof json !== "object" || Array.isArray(json)) {
+      return { ok: false, message: UNVERIFIED };
+    }
+    const body = json as Record<string, unknown>;
+    if (body.ok !== true ||
+        (body.videoId !== undefined && body.videoId !== videoId) ||
+        (body.message !== undefined &&
+          (typeof body.message !== "string" || body.message.length > 300)) ||
+        (body.pendingPublicReflection !== undefined &&
+          typeof body.pendingPublicReflection !== "boolean")) {
+      return { ok: false, message: UNVERIFIED };
+    }
+    return {
+      ok: true,
+      ...(typeof body.message === "string" ? { message: body.message } : {}),
+      ...(typeof body.pendingPublicReflection === "boolean"
+        ? { pendingPublicReflection: body.pendingPublicReflection } : {}),
+    };
+  } catch {
+    return { ok: false, message: UNVERIFIED };
+  }
+}
