@@ -239,8 +239,24 @@ if (runUnderRootTsx(import.meta.url)) {
           if (condition && !(condition instanceof Headers) &&
               condition.etagMatches !== current?.etag) return null;
           objects.set(key, { text: value, etag: `etag-${++etagVersion}` });
-          if (r2Fault === "write-committed-once" && transientPutFailures++ === 0) {
+          if ((r2Fault === "write-committed-once" ||
+               r2Fault === "write-committed-foreign-owner-once") &&
+              transientPutFailures++ === 0) {
             // The CAS has committed in R2, but the client did not receive its ACK.
+            if (r2Fault === "write-committed-foreign-owner-once") {
+              // Before the client retries, an independent writer replaces its
+              // successful fence; subsequent retries must not mutate D1 or
+              // remove the foreign R2 owner during compensation.
+              const overridden = JSON.parse(value);
+              const entry = overridden.entities.find((row) =>
+                row.entity_type === "video" && row.entity_id === "vid-1");
+              assert.ok(entry, "precommit did persist the video's original fence");
+              entry.fence_token = "vf-foreign-after-lost-ack";
+              objects.set(key, {
+                text: JSON.stringify(overridden), etag: "etag-foreign-after-lost-ack",
+              });
+              events.push(["r2.concurrent-owner-after-lost-ack", key]);
+            }
             throw new Error("public_visibility_manifest_transport_unavailable");
           }
           if (replaceR2FenceOwner && etagVersion === 1) {
@@ -303,8 +319,9 @@ if (runUnderRootTsx(import.meta.url)) {
         ? await executeCurrentStatusMutation(mutationInput)
         : await executeHonoVideoVisibilityStatusMutation(mutationInput, auditedHost);
       await Promise.all(pendingWakePromises);
-      if (r2Fault === "read" || r2Fault === "write") {
-        assert.equal(result.ok, false, "persistent R2 transport errors must stop before D1");
+      if (r2Fault === "read" || r2Fault === "write" ||
+          r2Fault === "write-committed-foreign-owner-once") {
+        assert.equal(result.ok, false, "persistent R2 errors or lost R2 ownership must stop before D1");
         assert.equal(result.errorCode, "visibility_precommit_failed");
         assert.equal(result.retryable, false, "no unsafe retry after an unconfirmed R2 fence");
       } else if (replaceR2FenceOwner) {
@@ -537,6 +554,39 @@ if (runUnderRootTsx(import.meta.url)) {
         "lost ACK retries must never use unconditional PUT; the third attempt owns exact etag");
       assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), [],
         "no Queue wake when dispatch is disabled");
+    });
+  }
+
+  for (const [initialStatus, nextStatus] of [["public", "private"], ["private", "public"]]) {
+    test(`foreign R2 owner after a lost PUT ACK blocks ${initialStatus}→${nextStatus} D1 mutation`, async () => {
+      const current = await executeAuditedStatus(
+        nextStatus, true, false, false, false, initialStatus, "write-committed-foreign-owner-once",
+      );
+      const hono = await executeAuditedStatus(
+        nextStatus, false, false, false, false, initialStatus, "write-committed-foreign-owner-once",
+      );
+      assert.deepEqual(hono, current,
+        "CURRENT Next and unmounted Hono must fail closed with identical effects after owner replacement");
+      assert.equal(current.result.ok, false);
+      assert.equal(current.result.errorCode, "visibility_precommit_failed");
+      assert.equal(current.result.retryable, false, "never automatically retry a lost foreign fence");
+      assert.equal(current.batches, 0, "no audited D1 transaction begins without confirmed R2 ownership");
+      assert.equal(current.video.visibility_status, initialStatus, "video visibility is unchanged");
+      assert.equal(current.video.updated_at, 1000);
+      assert.deepEqual(current.fences, []);
+      assert.deepEqual(current.audits, []);
+      assert.deepEqual(current.notifications, []);
+      assert.deepEqual(current.queue, []);
+      assert.equal(current.manifest?.entities?.[0]?.fence_token,
+        "vf-foreign-after-lost-ack", "the surviving foreign blocker must never be removed");
+      const puts = current.events.filter((event) => event[0] === "r2.put");
+      assert.equal(puts.length, MANIFEST_PUT_MAX_RETRIES,
+        "all attempts remain bounded despite owner-conflict errors");
+      assert.ok(puts.every((event) => event[2] === "create-if-absent"),
+        "a lost owner never escalates to an unconditional or stale-ETag overwrite");
+      assert.equal(current.events.filter((event) =>
+        event[0] === "r2.concurrent-owner-after-lost-ack").length, 1);
+      assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), []);
     });
   }
 
