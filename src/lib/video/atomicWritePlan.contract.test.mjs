@@ -205,3 +205,15 @@ test("主要行の監査は投影ではなく完全なbefore/after rowを保持�
   assert.match(update, /before: \{ \.\.\.plan\.target \}/);
   assert.match(update, /const after = \{ \.\.\.plan\.target, \.\.\.payload \}/);
 });
+
+test("MIG-0650 U03w Next video atomic budget uses the shared server-core inspector", () => {
+  const next = read("./atomicWritePlan.ts");
+  const core = read("../../../packages/server-core/src/video/videoAtomicBudget.ts");
+  const pkg = JSON.parse(read("../../../packages/server-core/package.json"));
+  assert.match(next, /from "@flamenode\/server-core\/video\/videoAtomicBudget"/);
+  assert.match(next, /export \{ inspectVideoAtomicWritePlanBudget \}/);
+  assert.match(next, /const budget = inspectVideoAtomicWritePlanBudget\(plan\)/);
+  assert.match(core, /planD1AuditMutationBudget\(\{/);
+  assert.match(core, /callerQueryCount: options\.callerQueryCount/);
+  assert.equal(pkg.exports["./video/videoAtomicBudget"], "./src/video/videoAtomicBudget.ts");
+});

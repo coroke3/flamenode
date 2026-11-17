@@ -138,7 +138,8 @@
     "./video/permissionNotificationBulkSql": "./src/video/permissionNotificationBulkSql.ts",
     "./video/permissionNotificationBatch": "./src/video/permissionNotificationBatch.ts",
     "./video/permissionGrantDm": "./src/video/permissionGrantDm.ts",
-    "./video/replaceVideoMembers": "./src/video/replaceVideoMembers.ts"
+    "./video/replaceVideoMembers": "./src/video/replaceVideoMembers.ts",
+    "./video/videoAtomicBudget": "./src/video/videoAtomicBudget.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

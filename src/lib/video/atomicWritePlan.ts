@@ -1,10 +1,8 @@
 import type { DB } from "@/lib/db/client";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import type { QueueWakeKind, QueueWakeSource } from "@/lib/queues/wakeBudget";
-import {
-  planD1AuditMutationBudget,
-  type D1AuditMutationBudget,
-} from "@/lib/audit/mutateBudget";
+import type { D1AuditMutationBudget } from "@/lib/audit/mutateBudget";
+import { inspectVideoAtomicWritePlanBudget } from "@flamenode/server-core/video/videoAtomicBudget";
 import type { VideoAtomicWritePlan } from "./atomicWritePlanCore";
 export {
   appendVideoAtomicWritePlan,
@@ -27,24 +25,7 @@ export class VideoAtomicPlanBudgetError extends Error {
   }
 }
 
-export function inspectVideoAtomicWritePlanBudget(
-  plan: VideoAtomicWritePlan,
-): D1AuditMutationBudget {
-  const actorXValidationQueryCount = plan.audits.some(
-    (audit) => Boolean(audit.actor_x_user_id?.trim()),
-  )
-    ? 1
-    : 0;
-  return planD1AuditMutationBudget({
-    mutationStatementCount: plan.statements.length,
-    mutationAssertionCount: plan.expectedChanges.filter(
-      (expected) => expected !== null,
-    ).length,
-    auditEntryCount: plan.audits.length,
-    distinctActorCount: new Set(plan.audits.map((audit) => audit.actor_user_id)).size,
-    actorXValidationQueryCount,
-  });
-}
+export { inspectVideoAtomicWritePlanBudget };
 
 export async function executeVideoAtomicWritePlan(
   db: DB,
