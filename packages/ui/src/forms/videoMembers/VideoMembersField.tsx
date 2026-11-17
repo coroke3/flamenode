@@ -855,11 +855,24 @@ function VideoMembersFieldForTarget({
         })),
       });
       if (requestEpoch !== permissionEpochRef.current) return;
+      // Injected permission adapters are a runtime boundary, not just a
+      // TypeScript type. A truthy string/number must not grant local edit
+      // privileges or apply imported rows as though the POST had committed.
+      if (!result || typeof result !== "object" || Array.isArray(result) ||
+          typeof result.ok !== "boolean" ||
+          (result.message !== undefined &&
+            (typeof result.message !== "string" || result.message.length > 300))) {
+        setPermResult({
+          ok: false,
+          message: "編集権限の反映結果を確認できませんでした。状態を再取得してください。",
+        });
+        return;
+      }
       setPermResult({
         ok: result.ok,
         message: result.message ?? (result.ok ? "反映しました。" : "反映に失敗しました。"),
       });
-      if (result.ok) {
+      if (result.ok === true) {
         setPermConfirmOpen(false);
         runPendingApply();
         syncPermissionIntentsToLocalRows(intents);

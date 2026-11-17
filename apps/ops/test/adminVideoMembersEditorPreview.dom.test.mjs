@@ -1129,3 +1129,44 @@ test("MIG-0730 U02bq: zero-row V2 refinement displays its hint rather than a fal
     target.remove();
   }
 });
+
+test("MIG-0730 U02br: malformed permission port results cannot apply collaborators or leak private messages", async () => {
+  const forgedResults = [
+    { ok: "true", message: "PRIVATE_FORGED_SUCCESS" },
+    { ok: 1, message: "PRIVATE_FORGED_SUCCESS" },
+    { ok: true, message: { private: "PRIVATE_FORGED_SUCCESS" } },
+    { ok: true, message: "x".repeat(301) },
+    null,
+  ];
+  for (const forged of forgedResults) {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const root = createRoot(target);
+    let requests = 0;
+    try {
+      const adapters = {
+        save: async () => ({ ok: true }),
+        searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null, hint: null }),
+        applyPermissionBatch: async () => { requests++; return forged; },
+      };
+      await React.act(async () => root.render(React.createElement(
+        AdminVideoMembersEditorPreview,
+        { videoId: "A", data: data("A", "CURRENT"), ...adapters },
+      )));
+      await previewPermissionTsv(target, "Bob\\tbob\\t\\t\\t\\tON".replaceAll("\\t", "\t"));
+      await React.act(async () => buttonNamed(target, "変更を反映").click());
+      assert.equal(requests, 1, "one forged receipt must not cause a second POST");
+      assert.ok(target.querySelector('[role="alertdialog"]'),
+        "a malformed success must not close the permission confirmation");
+      assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"],
+        "unverified permissions must not apply imported collaborator rows");
+      assert.match(target.querySelector('[role="alertdialog"]').textContent,
+        /編集権限の反映結果を確認できませんでした。状態を再取得してください。/);
+      assert.doesNotMatch(target.textContent, /PRIVATE_FORGED_SUCCESS/,
+        "private untrusted adapter messages must never be rendered");
+    } finally {
+      await React.act(async () => root.unmount());
+      target.remove();
+    }
+  }
+});
