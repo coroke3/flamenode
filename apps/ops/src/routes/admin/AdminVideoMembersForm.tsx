@@ -106,8 +106,14 @@ function AdminVideoMembersFormForVideo({
   const searchPort = sharedEditor?.searchXUsers;
   const permissionPort = sharedEditor?.applyPermissionBatch;
   const permissionTarget = sharedEditor?.permissionTargetVideoId;
+  // A direct native member field can be replaced with a different same-video
+  // snapshot while a save is in flight. Retire the previous receipt rather
+  // than marking the replacement as saved. The shared editor uses the parent
+  // snapshot key and its privileged adapter identity for equivalent isolation.
+  const nativeSourceValue = hasHiddenMemberInput
+    ? nativeMemberProps!.value as string : null;
   const saveCapabilityRef = React.useRef({
-    enabled, save, searchPort, permissionPort, permissionTarget,
+    enabled, save, searchPort, permissionPort, permissionTarget, nativeSourceValue,
   });
   const saveCapabilityEpoch = React.useRef(0);
   React.useLayoutEffect(() => {
@@ -115,14 +121,15 @@ function AdminVideoMembersFormForVideo({
     if (previous.enabled !== enabled || previous.save !== save ||
         previous.searchPort !== searchPort ||
         previous.permissionPort !== permissionPort ||
-        previous.permissionTarget !== permissionTarget) {
+        previous.permissionTarget !== permissionTarget ||
+        previous.nativeSourceValue !== nativeSourceValue) {
       saveCapabilityRef.current = {
-        enabled, save, searchPort, permissionPort, permissionTarget,
+        enabled, save, searchPort, permissionPort, permissionTarget, nativeSourceValue,
       };
       saveCapabilityEpoch.current += 1;
       setResult(null);
     }
-  }, [enabled, save, searchPort, permissionPort, permissionTarget]);
+  }, [enabled, save, searchPort, permissionPort, permissionTarget, nativeSourceValue]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
