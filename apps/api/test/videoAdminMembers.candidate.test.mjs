@@ -5,7 +5,7 @@ import {
   createVideoAdminMembersPreflightRoutes,
   createDefaultVideoAdminMembersPreflightHost,
 } from "../src/routes/videos/adminMembers.ts";
-import { MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS, MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES, readAdminVideoMembersJsonBody } from "../src/routes/videos/adminMembersBody.ts";
+import { MAX_ADMIN_VIDEO_MEMBERS_EMPTY_CHUNKS, MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES, MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_CHUNKS, readAdminVideoMembersJsonBody } from "../src/routes/videos/adminMembersBody.ts";
 
 const endpoint = "/v1/members";
 const member = i => ({ name: "Name " + i, x_user_id: "user_" + i, chapters: [] });
@@ -893,4 +893,57 @@ test("MIG-0650 U03ah all seven schema-valid video statuses are valid SA-085 targ
   const rejected = await invalid.request(endpoint, valid());
   assert.equal(rejected.status, 503, "unrecognized state must fail closed");
   assert.deepEqual(invalid.stats(), { invoked: 1, prematureDb: 0 });
+});
+
+test("MIG-0650 U03ai bounds 1-byte streamed JSON chunks separately from byte count", async () => {
+  const makeRequest = body => new Request("https://flamenode.test/sa085", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+    duplex: "half",
+  });
+
+  // Exactly the full 4096-read budget is still legal when the body is valid
+  // JSON. This cannot be confused with the independent 1024 empty-read cap.
+  const legalJson = new TextEncoder().encode(
+    "{" + " ".repeat(MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_CHUNKS - 2) + "}",
+  );
+  const legal = new ReadableStream({
+    start(controller) {
+      for (const byte of legalJson) controller.enqueue(Uint8Array.of(byte));
+      controller.close();
+    },
+  });
+  assert.deepEqual(await readAdminVideoMembersJsonBody(makeRequest(legal)), {
+    kind: "ok", value: {},
+  }, "exactly max delivered nonempty chunks must not be prematurely rejected");
+
+  // A malicious client can issue more than 4096 nonempty 1-byte reads without
+  // reaching the 256KiB ceiling. Its cancel() may never settle.
+  let emitted = 0;
+  let cancelled = 0;
+  const endless = new ReadableStream({
+    pull(controller) {
+      emitted++;
+      controller.enqueue(Uint8Array.of(32));
+    },
+    cancel() {
+      cancelled++;
+      return new Promise(() => {});
+    },
+  });
+  let timeout;
+  try {
+    const result = await Promise.race([
+      readAdminVideoMembersJsonBody(makeRequest(endless)),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("1-byte stream exceeded request CPU budget")), 3000);
+      }),
+    ]);
+    assert.deepEqual(result, { kind: "invalid" });
+    assert.ok(emitted >= MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_CHUNKS + 1);
+    assert.equal(cancelled, 1, "reject promptly without awaiting malicious cancel()");
+  } finally {
+    clearTimeout(timeout);
+  }
 });
