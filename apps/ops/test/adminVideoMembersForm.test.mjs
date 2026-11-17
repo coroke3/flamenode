@@ -349,3 +349,28 @@ test("MIG-0730 U02s: losing required member field retires a pending save even if
     assert.equal(writes, 1, "no automatic retry of the possibly committed request");
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0730 U02u: refresh callback failure never disguises a successful save or retries", async () => {
+  for (const kind of ["synchronous", "asynchronous"]) {
+    let writes = 0, refreshes = 0;
+    const ui = setup({
+      save: async () => { writes++; return { ok: true, message: "保存しました" }; },
+      onSaved: () => {
+        refreshes++;
+        if (kind === "synchronous") throw new Error("refresh failed");
+        return Promise.reject(new Error("refresh rejected"));
+      },
+    });
+    try {
+      await ui.render();
+      await ui.submit();
+      assert.equal(writes, 1, "a committed save must not be retried");
+      assert.equal(refreshes, 1);
+      assert.equal(ui.target.querySelector('[role="alert"]'), null,
+        "a failed refresh is not a failed mutation");
+      assert.match(ui.target.querySelector('[role="status"]').textContent,
+        /保存は完了しましたが、表示の更新に失敗しました/);
+      assert.equal(ui.target.querySelector('button[type="submit"]').disabled, false);
+    } finally { await ui.cleanup(); }
+  }
+});

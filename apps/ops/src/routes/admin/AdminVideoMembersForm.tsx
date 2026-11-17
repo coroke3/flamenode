@@ -18,7 +18,7 @@ export interface AdminVideoMembersFormProps {
   membersField?: React.ReactNode;
   /** Do not pass until the MIG-0650 SA-085 adapter is independently verified. */
   save?: AdminVideoMembersSave;
-  onSaved?: () => void;
+  onSaved?: () => void | Promise<void>;
 }
 
 /**
@@ -92,7 +92,20 @@ function AdminVideoMembersFormForVideo({
       // A may finish after navigation to B; never deliver A's result or refresh to B.
       if (mounted.current && requestEpoch === saveCapabilityEpoch.current) {
         setResult(response);
-        if (response.ok) onSaved?.();
+        if (response.ok && onSaved) {
+          // Save has already succeeded. A failed view refresh must not turn a
+          // committed write into a false save-error message or invite a retry.
+          try {
+            await onSaved();
+          } catch {
+            if (mounted.current && requestEpoch === saveCapabilityEpoch.current) {
+              setResult({
+                ...response,
+                message: "保存は完了しましたが、表示の更新に失敗しました。再読み込みして確認してください。",
+              });
+            }
+          }
+        }
       }
     } catch {
       if (mounted.current && requestEpoch === saveCapabilityEpoch.current) {
