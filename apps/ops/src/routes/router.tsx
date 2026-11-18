@@ -5,11 +5,15 @@ import { CostGuardBanner } from "../components/layout/CostGuardBanner.js";
 import { AdminLayout } from "./admin/AdminLayout.js";
 import { AdminApiEndpointsPage } from "./admin/AdminApiEndpoints.js";
 import { AdminCostGuard } from "./admin/AdminCostGuard.js";
+import { AdminEvents } from "./admin/AdminEvents.js";
 import { AdminNotifications } from "./admin/AdminNotifications.js";
 import { AdminCompatRedirect } from "./admin/AdminRedirects.js";
 import { AdminTop } from "./admin/AdminTop.js";
 import { AnnouncementCreatePage, AnnouncementEditPage } from "./admin/AnnouncementEditor.js";
 import { AnnouncementsPage } from "./admin/Announcements.js";
+import { EventGroupCreatePage, EventGroupEditPage } from "./admin/EventGroupEdit.js";
+import { EventGroupsPage } from "./admin/EventGroups.js";
+import { EventTemplates } from "./admin/EventTemplates.js";
 import { PermissionSimulator } from "./admin/PermissionSimulator.js";
 import { AdminRulesPage } from "./admin/Rules.js";
 import { StaticBuilds } from "./admin/StaticBuilds.js";
@@ -107,8 +111,12 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
               <Route path="youtube-sync/playlists" element={<YoutubePlaylists />} />
               <Route path="youtube-quota" element={<YoutubeQuota />} />
               <Route path="history" element={<AdminCompatRedirect />} />
+              <Route path="event-groups" element={<EventGroupsPage />} />
+              <Route path="event-groups/new" element={<EventGroupCreatePage />} />
+              <Route path="event-groups/:id/edit" element={<EventGroupEditPage />} />
+              <Route path="events" element={<AdminEvents />} />
               <Route path="events/new" element={<UnmigratedView />} />
-              <Route path="events/templates" element={<UnmigratedView />} />
+              <Route path="events/templates" element={<EventTemplates />} />
               <Route path="events/:id" element={<AdminCompatRedirect />} />
               <Route path="events/:id/edit" element={<AdminCompatRedirect />} />
               <Route path="events/:id/slots" element={<AdminCompatRedirect />} />
