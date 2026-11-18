@@ -3,12 +3,17 @@ import { Outlet, Route, Routes, useParams } from "react-router-dom";
 import type { OpsApi } from "../api/account.js";
 import { CostGuardBanner } from "../components/layout/CostGuardBanner.js";
 import { AdminLayout } from "./admin/AdminLayout.js";
+import { AdminApiEndpointsPage } from "./admin/AdminApiEndpoints.js";
 import { AdminCostGuard } from "./admin/AdminCostGuard.js";
 import { AdminNotifications } from "./admin/AdminNotifications.js";
 import { AdminCompatRedirect } from "./admin/AdminRedirects.js";
 import { AdminTop } from "./admin/AdminTop.js";
+import { AnnouncementCreatePage, AnnouncementEditPage } from "./admin/AnnouncementEditor.js";
+import { AnnouncementsPage } from "./admin/Announcements.js";
 import { PermissionSimulator } from "./admin/PermissionSimulator.js";
+import { AdminRulesPage } from "./admin/Rules.js";
 import { StaticBuilds } from "./admin/StaticBuilds.js";
+import { AdminRuleCreatePage, AdminRuleEditPage } from "./admin/TermsEditor.js";
 import { YoutubeSync } from "./admin/YoutubeSync.js";
 import { YoutubePlaylists } from "./admin/YoutubePlaylists.js";
 import { YoutubeQuota } from "./admin/YoutubeQuota.js";
@@ -88,6 +93,13 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
             <Route path="/admin" element={adminFrame}>
               <Route index element={<AdminTop />} />
               <Route path="permissions/simulator" element={<PermissionSimulator />} />
+              <Route path="announcements" element={<AnnouncementsPage />} />
+              <Route path="announcements/new" element={<AnnouncementCreatePage />} />
+              <Route path="announcements/:id/edit" element={<AnnouncementEditPage />} />
+              <Route path="api-endpoints" element={<AdminApiEndpointsPage />} />
+              <Route path="rules" element={<AdminRulesPage />} />
+              <Route path="rules/new" element={<AdminRuleCreatePage />} />
+              <Route path="rules/:id/edit" element={<AdminRuleEditPage />} />
               <Route path="cost-guard" element={<AdminCostGuard />} />
               <Route path="notifications" element={<AdminNotifications />} />
               <Route path="static-builds" element={<StaticBuilds />} />
