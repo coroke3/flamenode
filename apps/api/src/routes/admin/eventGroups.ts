@@ -1,12 +1,12 @@
 /**
- * MIG-0653 U02: SA-025 event-group membership candidate search.
+ * MIG-0653: SA-025..030 admin event-group candidate search and mutations.
  *
- * Mounted on the Draft branch under createAdminRoutes after #476/#480 merged.
- * The parent supplies the session/admin read guard; the handler additionally
- * enforces CURRENT's write-side ToS/CostGuard within S2's D1 query budget.
+ * Mounted under createAdminRoutes at /api/admin/event-groups:
+ *   - GET /event-options (SA-025): adminReadGuard + write-side ToS/CostGuard in S2 budget
+ *   - POST /, PATCH /:id, DELETE /:id (SA-026..028): origin -> session -> writeGuard -> db -> CostGuard + R2/D1 fence
+ *   - POST /:id/events, DELETE /:id/events/:eventId (SA-029..030): origin -> session -> writeGuard -> db -> CostGuard
  *
- * CURRENT: src/lib/admin/eventGroupEventOptions.ts. Keep its 80-row cursor,
- * NOT EXISTS membership filter, escaped LIKE and updated_at/id ordering.
+ * CURRENT: src/lib/actions/event-group-admin.ts, src/lib/admin/eventGroupEventOptions.ts.
  */
 import { Hono } from "hono";
 import { assertCondition, mutateWithAudit, planAtomicAuditMutationBudget } from "@flamenode/server-core/audit/mutate";
@@ -16,7 +16,7 @@ import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "./bod
 import { mapAuditSettings, type AuditSettingsRow } from "@flamenode/server-core/audit/settings";
 import { writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
 import type { AppEnv } from "../../env.ts";
-import { adminReadGuardMiddleware } from "../../middleware/adminReadGuard.ts";
+import { adminReadGuardMiddleware, onlyReads } from "../../middleware/adminReadGuard.ts";
 import { evaluateAdminWriteGuard } from "../../middleware/writeOrigin.ts";
 import { evaluateCostGuardCore } from "@flamenode/domain/admin";
 import { MAX_SINGLE_ROW_LIMIT } from "../../lib/limits.ts";
@@ -132,7 +132,7 @@ export const adminEventGroupOptionsRoutes = new Hono<AppEnv>();
 
 adminEventGroupOptionsRoutes.use("*", async (c, next) => {
   c.header("Cache-Control", "private, no-store");
-  return adminReadGuardMiddleware()(c, next);
+  return onlyReads(adminReadGuardMiddleware())(c, next);
 });
 
 adminEventGroupOptionsRoutes.get("/event-options", async (c) => {
@@ -249,7 +249,9 @@ export type EventGroupCreateValues = {
   updated_at: number;
 };
 export type EventGroupUpdateValues = Omit<EventGroupCreateValues,
-  "id" | "img_url" | "created_at">;
+  "id" | "img_url" | "created_at" | "sort_order"> & {
+  sort_order: number | null;
+};
 
 function optionalGroupText(raw: string | null | undefined): string | null {
   return raw?.trim() || null;
@@ -281,7 +283,7 @@ export function planEventGroupCreateValues(
  */
 export function planEventGroupUpdateValues(
   data: ValidEventGroupMutation,
-  previous: { sort_order: number; updated_at: number },
+  previous: { sort_order: number | null; updated_at: number },
   now: number,
 ): EventGroupUpdateValues {
   return {
@@ -644,8 +646,9 @@ stagedEventGroupWriteRoutes.post("/", async (c) => {
     return writeGuardDenyResponse(c, cost.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked", 503);
   }
   c.set("auditSettings", mapAuditSettings(snapshot));
-  if (snapshot.slug_exists === 1) {
-    return c.json({ ok: false, message: "このスラッグは既に使われています。" }, 400);
+  const slugCheck = checkEventGroupSlugAvailable(snapshot.slug_exists !== 1);
+  if (!slugCheck.ok) {
+    return c.json({ ok: false, message: slugCheck.message }, 400);
   }
 
   let fenceToken: string | null = null;
@@ -779,7 +782,8 @@ stagedEventGroupWriteRoutes.patch("/:id", async (c) => {
   const data = parsed.data;
   const id = c.req.param("id").trim();
   const bodyId = data.id?.trim();
-  if (!id || id.length > MAX_EVENT_GROUP_ID_LENGTH || (bodyId && bodyId !== id)) {
+  const idCheck = requireEventGroupMutationId({ ...data, id });
+  if (!idCheck.ok || id.length > MAX_EVENT_GROUP_ID_LENGTH || (bodyId && bodyId !== id)) {
     return c.json({ ok: false, message: "ID が必要です。" }, 400);
   }
   const db = c.get("db");
@@ -848,11 +852,12 @@ stagedEventGroupWriteRoutes.patch("/:id", async (c) => {
   }
   c.set("auditSettings", mapAuditSettings(snapshot));
   if (!snapshot.group_id || snapshot.updated_at == null || snapshot.visibility_status == null ||
-      snapshot.sort_order == null || snapshot.created_at == null) {
+      snapshot.created_at == null) {
     return c.json({ ok: false, message: "グループが見つかりません。" }, 404);
   }
-  if (snapshot.slug_exists === 1) {
-    return c.json({ ok: false, message: "このスラッグは既に使われています。" }, 400);
+  const slugCheck = checkEventGroupSlugAvailable(snapshot.slug_exists !== 1);
+  if (!slugCheck.ok) {
+    return c.json({ ok: false, message: slugCheck.message }, 400);
   }
   const cas = checkEventGroupUpdateCas(data.base_updated_at, snapshot.updated_at);
   if (!cas.ok) return c.json({ ok: false, message: cas.message }, 409);
@@ -965,7 +970,7 @@ stagedEventGroupWriteRoutes.patch("/:id", async (c) => {
           entityType: "event_group",
           entityId: id,
           fenceToken,
-          reason: "event_group_visibility_update",
+          reason: "event_group_update",
         }, fenceHost);
         fencePreCommitted = true;
       }
@@ -1083,7 +1088,7 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
   }
   c.set("auditSettings", mapAuditSettings(snapshot));
   if (!snapshot.group_id || snapshot.updated_at == null ||
-      snapshot.created_at == null || snapshot.sort_order == null ||
+      snapshot.created_at == null ||
       snapshot.visibility_status == null) {
     return c.json({ ok: false, message: "グループが見つかりません。" }, 404);
   }
@@ -1487,8 +1492,7 @@ stagedEventGroupWriteRoutes.post("/:id/events", async (c) => {
   const existingMemberIds = rows.flatMap((row) => row.existing_member_id ? [row.existing_member_id] : []);
   const plan = planEventGroupMembershipAdd(eventIds, validEventIds, existingMemberIds);
   if (!plan.ok) {
-    const status = plan.message === "追加できるイベントがありません。" ? 400 : 400;
-    return c.json({ ok: false, message: plan.message }, status);
+    return c.json({ ok: false, message: plan.message }, 400);
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -1559,3 +1563,8 @@ stagedEventGroupWriteRoutes.post("/:id/events", async (c) => {
     return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 500);
   }
 });
+
+/** Combined SA-025..030 admin event-group router mounted under /api/admin/event-groups. */
+export const adminEventGroupRoutes = new Hono<AppEnv>();
+adminEventGroupRoutes.route("/", adminEventGroupOptionsRoutes);
+adminEventGroupRoutes.route("/", stagedEventGroupWriteRoutes);

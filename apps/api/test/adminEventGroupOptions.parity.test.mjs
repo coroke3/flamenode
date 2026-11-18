@@ -1150,10 +1150,20 @@ test("SA-030 U04 staged: missing group/member and origin/role denials never muta
   }
 });
 
-test("SA-030 U04 staged: production admin index does not expose incomplete DELETE", async () => {
+test("SA-026..030: mounted admin index enforces origin/session/writeGuard/CostGuard on event-group writes", async () => {
   const { db, sqlite, stats } = createAdminD1();
   try {
     seedBase(sqlite);
+    sqlite.exec(`
+      CREATE TABLE event_groups (id TEXT PRIMARY KEY);
+      CREATE TABLE event_group_events (
+        event_group_id TEXT NOT NULL, event_id TEXT NOT NULL,
+        relation_type TEXT NOT NULL, created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL, PRIMARY KEY (event_group_id, event_id)
+      );
+      INSERT INTO event_groups (id) VALUES ('grp-1');
+      INSERT INTO event_group_events VALUES ('grp-1', 'ev-1', 'member', 10, 20);
+    `);
     const app = new Hono();
     app.route("/api/admin", createAdminRoutes({
       session: async (c, next) => {
@@ -1162,15 +1172,28 @@ test("SA-030 U04 staged: production admin index does not expose incomplete DELET
         await next();
       },
     }));
-    const response = await app.request(
+    const badOrigin = await app.request(
+      new Request(STAGED_WRITE_SITE + "/api/admin/event-groups/grp-1/events/ev-1", {
+        method: "DELETE",
+        headers: { Origin: "https://evil.example" },
+      }),
+      undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE },
+    );
+    assert.equal(badOrigin.status, 403);
+    assert.equal((await badOrigin.json()).reason, "invalid_origin");
+    assert.equal(stats.batches, 0);
+
+    const ok = await app.request(
       new Request(STAGED_WRITE_SITE + "/api/admin/event-groups/grp-1/events/ev-1", {
         method: "DELETE",
         headers: { Origin: STAGED_WRITE_SITE },
       }),
       undefined, { DB: db, NEXT_PUBLIC_SITE_URL: STAGED_WRITE_SITE },
     );
-    assert.equal(response.status, 404);
-    assert.equal(stats.batches, 0);
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { ok: true, id: "grp-1" });
+    assert.equal(stats.batches, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_group_events").get().n, 0);
   } finally {
     sqlite.close();
   }
