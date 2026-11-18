@@ -310,3 +310,24 @@ test("MIG-0730 U02db: preview save boundary excludes collaborator privileges and
   assert.ok(bindPreviewSaveFormData(build("[]", false), "v1") instanceof FormData,
     "canonical collaboration-OFF remains accepted");
 });
+
+test("MIG-0730 U02dc: invalid preview video ID rejects before reading private FormData", () => {
+  const unsafe = ["", ".", "..", " leading", "trailing ", "v/child",
+    "v\\child", "v\nchild", "v\0child", "\uD800", "x".repeat(65), null, 3];
+  for (const videoId of unsafe) {
+    let reads = 0;
+    const injected = {
+      getAll() { reads++; throw Error("PRIVATE_MEMBER_FORM"); },
+      forEach() { reads++; throw Error("PRIVATE_FIELD_NAMES"); },
+    };
+    assert.equal(bindPreviewSaveFormData(injected, videoId), null,
+      "invalid video IDs must never reach an injected member binding");
+    assert.equal(reads, 0, "must not access private form data for " + String(videoId));
+  }
+  const validId = "v".repeat(64);
+  const form = new FormData();
+  form.append("video_id", validId);
+  form.append("is_collab", "false");
+  form.append("members_json", "[]");
+  assert.equal(bindPreviewSaveFormData(form, validId)?.get("video_id"), validId);
+});

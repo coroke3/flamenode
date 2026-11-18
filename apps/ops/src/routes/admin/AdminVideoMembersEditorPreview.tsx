@@ -40,6 +40,15 @@ export function bindPreviewSaveFormData(
   formData: FormData,
   expectedVideoId: string,
 ): FormData | null {
+  // This is an exported boundary, not just a private callback of Preview.
+  // A malformed target must be denied BEFORE invoking a custom FormData
+  // getter that could reveal private member fields or run side effects.
+  if (typeof expectedVideoId !== "string" || !expectedVideoId ||
+      expectedVideoId.length > 64 || expectedVideoId.trim() !== expectedVideoId ||
+      expectedVideoId === "." || expectedVideoId === ".." ||
+      /[\/\\\x00-\x1f]/.test(expectedVideoId)) return null;
+  try { encodeURIComponent(expectedVideoId); }
+  catch { return null; }
   try {
     const ids = formData.getAll("video_id");
     const flags = formData.getAll("is_collab");
