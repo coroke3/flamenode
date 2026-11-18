@@ -481,3 +481,76 @@ test("MIG-0730 U02cx: SA-085 receipt display cannot change after validation", as
     status: 200, json: async () => revoked.proxy,
   }))).ok, false, "revoked provider reply is ambiguous, never confirmed");
 });
+
+test("MIG-0730 U02dl: SA-085 binds every source FormData index exactly once", async () => {
+  const expectedMember = '[{"name":"Alice"}]';
+  const forgedMember = '[{"name":"SECRET","can_edit":true}]';
+  const reads = { id: 0, falseFlag: 0, trueFlag: 0, member: 0 };
+  const dynamic = form();
+  dynamic.getAll = key => {
+    if (key === "video_id") return Object.defineProperty(["video-1"], 0, {
+      get() { reads.id++; return reads.id === 1 ? "video-1" : "different-video"; },
+    });
+    if (key === "is_collab") {
+      const flags = ["false", "true"];
+      Object.defineProperties(flags, {
+        0: { get() { reads.falseFlag++; return reads.falseFlag === 1 ? "false" : "true"; } },
+        1: { get() { reads.trueFlag++; return reads.trueFlag === 1 ? "true" : "false"; } },
+      });
+      return flags;
+    }
+    if (key === "members_json") return Object.defineProperty([expectedMember], 0, {
+      get() { reads.member++; return reads.member === 1 ? expectedMember : forgedMember; },
+    });
+    return [];
+  };
+  let requests = 0;
+  const result = await saveAdminVideoMembers("video-1", dynamic, async (_, init) => {
+    requests++;
+    assert.deepEqual(JSON.parse(init.body), {
+      is_collab: ["false", "true"], members_json: expectedMember,
+    }, "only the validated video/checkbox/member primitives can reach SA-085");
+    return reply({ ok: true, videoId: "video-1" });
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(requests, 1);
+  assert.deepEqual(reads, { id: 1, falseFlag: 1, trueFlag: 1, member: 1 });
+});
+
+test("MIG-0730 U02dl: non-array getAll collections are rejected before HTTP", async () => {
+  const forged = form();
+  forged.getAll = key => ({
+    length: key === "is_collab" ? 2 : 1,
+    0: key === "is_collab" ? "false" : key === "video_id" ? "video-1" : "[]",
+    1: "true",
+  });
+  let requests = 0;
+  const result = await saveAdminVideoMembers("video-1", forged, async () => {
+    requests++;
+    return reply({ ok: true, videoId: "video-1" });
+  });
+  assert.deepEqual(result, { ok: false, message: "参加者設定の入力を確認してください。" });
+  assert.equal(requests, 0);
+});
+
+test("MIG-0730 U02dl: UTF-8 wire overflow is rejected before invoking JSON.parse", async () => {
+  // The raw text is within the temporary 256Ki UTF-16 bound, but the
+  // multibyte wire envelope is oversized. Make the JSON intentionally
+  // syntactically invalid to distinguish transport rejection from parsing.
+  const raw = '["' + "あ".repeat(90_000);
+  assert.ok(raw.length < 256 * 1024);
+  assert.ok(new TextEncoder().encode(JSON.stringify({
+    is_collab: ["false", "true"], members_json: raw,
+  })).byteLength > 256 * 1024);
+  const data = form();
+  data.set("members_json", raw);
+  let requests = 0;
+  const result = await saveAdminVideoMembers("video-1", data, async () => {
+    requests++;
+    return reply({ ok: true, videoId: "video-1" });
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /暫定256KiB制限/,
+    "oversized wire payload is classified before the JSON parser");
+  assert.equal(requests, 0);
+});

@@ -42,6 +42,23 @@ function validatedBody(videoId: string, formData: FormData): ValidatedBody {
   const ids = formData.getAll("video_id");
   const checkbox = formData.getAll("is_collab");
   const members = formData.getAll("members_json");
+  // getAll() returns arrays in a browser, but an injected legacy adapter can
+  // supply getter-backed collections. Capture bounded lengths and indexes
+  // exactly once: the video/flag/member values verified here must be the
+  // exact values serialized in the eventual HTTP body.
+  if (!Array.isArray(ids) || !Array.isArray(checkbox) || !Array.isArray(members)) {
+    return { kind: "invalid" };
+  }
+  const idCount = ids.length;
+  const flagCount = checkbox.length;
+  const memberCount = members.length;
+  if (idCount !== 1 || (flagCount !== 1 && flagCount !== 2) || memberCount !== 1) {
+    return { kind: "invalid" };
+  }
+  const suppliedId: unknown = ids[0];
+  const firstFlag: unknown = checkbox[0];
+  const secondFlag: unknown = flagCount === 2 ? checkbox[1] : undefined;
+  const memberJson: unknown = members[0];
   // Reject unknown source keys even though the JSON transport below only
   // serializes allowlisted fields. Direct callers must not silently accept
   // forged privilege/legacy inputs bypassing the Preview's UI boundary.
@@ -55,22 +72,30 @@ function validatedBody(videoId: string, formData: FormData): ValidatedBody {
   // Unlike the general-purpose CURRENT/Hono parser, this adapter only accepts
   // FormData produced by our exact Ops form (hidden "false", optional checked
   // "true"). Any altered order, duplicate, or alternate flag fails before PUT.
-  const validCheckbox =
-    checkbox.length === 1 && checkbox[0] === "false" ||
-    checkbox.length === 2 && checkbox[0] === "false" && checkbox[1] === "true";
-  if (ids.length !== 1 || ids[0] !== videoId || !validCheckbox ||
-      members.length !== 1 || typeof members[0] !== "string") return { kind: "invalid" };
+  const validCheckbox = firstFlag === "false" &&
+    (flagCount === 1 || (flagCount === 2 && secondFlag === "true"));
+  if (suppliedId !== videoId || !validCheckbox || typeof memberJson !== "string") {
+    return { kind: "invalid" };
+  }
 
-  const memberJson = members[0];
-  // UTF-8 JSON transport cannot be smaller than this UTF-16 code-unit count.
-  // Reject oversized input before parsing a potentially expensive nested array.
+  // Build the exact canonical wire body from the bound primitives, not from
+  // mutable FormData arrays. Count UTF-8 envelope bytes BEFORE JSON.parse:
+  // multibyte content below the raw UTF-16 limit may still exceed Hono's
+  // provisional 256KiB transport limit.
   if (memberJson.length > MAX_SA085_JSON_BODY_BYTES) return { kind: "too_large" };
+  const body = JSON.stringify({
+    is_collab: flagCount === 2 ? ["false", "true"] : ["false"],
+    members_json: memberJson,
+  });
+  if (new TextEncoder().encode(body).byteLength > MAX_SA085_JSON_BODY_BYTES) {
+    return { kind: "too_large" };
+  }
   try {
     const parsed: unknown = JSON.parse(memberJson);
     if (!Array.isArray(parsed) || parsed.length > MAX_VIDEO_MEMBERS ||
         // A collaboration-OFF submission must not carry stale member rows.
         // The Ops form serializes a literal [] when the checkbox is off.
-        (checkbox.length === 1 && parsed.length !== 0) ||
+        (flagCount === 1 && parsed.length !== 0) ||
         parsed.some(item => !item || typeof item !== "object" || Array.isArray(item) ||
           // Editing privilege is never part of a public-membership PUT.
           // It belongs solely to the separate collaborator permission API.
@@ -79,16 +104,6 @@ function validatedBody(videoId: string, formData: FormData): ValidatedBody {
       return { kind: "invalid" };
     }
   } catch { return { kind: "invalid" }; }
-
-  // Account for JSON escapes, the envelope and multi-byte UTF-8 on the exact
-  // wire payload. A short UTF-16 member string can still exceed the HTTP limit.
-  const body = JSON.stringify({
-    is_collab: checkbox as string[],
-    members_json: memberJson,
-  });
-  if (new TextEncoder().encode(body).byteLength > MAX_SA085_JSON_BODY_BYTES) {
-    return { kind: "too_large" };
-  }
   return { kind: "ok", encodedId, body };
 }
 
