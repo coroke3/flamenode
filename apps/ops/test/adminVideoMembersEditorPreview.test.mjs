@@ -276,3 +276,37 @@ test("MIG-0730 U02da: truthy non-function write/search ports cannot enable the u
     }
   }
 });
+
+test("MIG-0730 U02db: preview save boundary excludes collaborator privileges and oversized member rows", () => {
+  const build = (memberJson, on = true) => {
+    const form = new FormData();
+    form.append("video_id", "v1");
+    form.append("is_collab", "false");
+    if (on) form.append("is_collab", "true");
+    form.append("members_json", memberJson);
+    return form;
+  };
+  const invalid = [
+    '[{"name":"Secret","can_edit":1}]',
+    '[{"name":"Secret","can_edit":false}]',
+    '[{"name":"Hidden","is_public_member":0}]',
+    '[{"name":"Hidden","is_public_member":null}]',
+    '[null]',
+    '["not a member"]',
+    '[[]]',
+    '{"members":[]}',
+    'not JSON',
+    JSON.stringify(Array.from({ length: 101 }, (_, i) => ({ name: "Member " + i }))),
+  ];
+  for (const memberJson of invalid) {
+    assert.equal(bindPreviewSaveFormData(build(memberJson), "v1"), null,
+      "no privileged or malformed members_json may reach an injected SA-085 port");
+  }
+  const accepted = JSON.stringify(Array.from({ length: 100 }, (_, i) => ({
+    name: "Member " + i, is_public_member: 1,
+  })));
+  assert.equal(bindPreviewSaveFormData(build(accepted), "v1")?.get("members_json"), accepted,
+    "the CURRENT legal 100-public-member limit remains accepted");
+  assert.ok(bindPreviewSaveFormData(build("[]", false), "v1") instanceof FormData,
+    "canonical collaboration-OFF remains accepted");
+});

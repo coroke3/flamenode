@@ -55,6 +55,16 @@ export function bindPreviewSaveFormData(
     if (unexpectedField || ids.length !== 1 || ids[0] !== expectedVideoId ||
         members.length !== 1 || typeof members[0] !== "string" ||
         !(on || (off && members[0] === "[]"))) return null;
+    // This exported binding can also be invoked independently of the Ops
+    // form. Never send collaborator privilege fields via the public member
+    // PUT, even to a legacy/injected save port that omits its own checks.
+    const decoded: unknown = JSON.parse(members[0]);
+    if (!Array.isArray(decoded) || decoded.length > MAX_VIDEO_MEMBERS ||
+        decoded.some(item => !item || typeof item !== "object" ||
+          Array.isArray(item) || "can_edit" in item ||
+          ("is_public_member" in item && item.is_public_member !== 1))) {
+      return null;
+    }
     const bound = new FormData();
     bound.append("video_id", expectedVideoId);
     bound.append("is_collab", "false");
