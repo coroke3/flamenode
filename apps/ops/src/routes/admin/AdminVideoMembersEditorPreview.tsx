@@ -97,18 +97,22 @@ export function bindPreviewPermissionInput(
   input: PermissionInput,
   expectedVideoId: string,
 ): PermissionInput | null {
+  // Reject an invalid target before touching any injected privilege input.
+  // Direct callers must not trigger private getters for an unusable video ID.
+  if (typeof expectedVideoId !== "string" || !expectedVideoId ||
+      expectedVideoId.length > 64 ||
+      expectedVideoId.trim() !== expectedVideoId ||
+      expectedVideoId === "." || expectedVideoId === ".." ||
+      /[\/\\\x00-\x1f]/.test(expectedVideoId)) return null;
+  try { encodeURIComponent(expectedVideoId); }
+  catch { return null; }
   try {
     if (!input || typeof input !== "object") return null;
     const suppliedId = input.videoId;
     const mode = input.edit_privilege_mode;
     const notify = input.notify;
     const sourceIntents = input.intents;
-    if (suppliedId !== expectedVideoId || typeof expectedVideoId !== "string" ||
-        !expectedVideoId || expectedVideoId.length > 64 ||
-        expectedVideoId.trim() !== expectedVideoId ||
-        /[\/\\\x00-\x1f]/.test(expectedVideoId) ||
-        expectedVideoId === "." || expectedVideoId === ".." ||
-        notify !== true ||
+    if (suppliedId !== expectedVideoId || notify !== true ||
         (mode !== undefined && mode !== "admin" && mode !== "event") ||
         !Array.isArray(sourceIntents)) return null;
     // Never trust an injected array's iterator; inspect only its bounded
@@ -132,8 +136,6 @@ export function bindPreviewPermissionInput(
       seen.add(xid);
       intents.push({ x_user_id: xid, display_name: name, intent });
     }
-    try { encodeURIComponent(expectedVideoId); }
-    catch { return null; }
     return {
       videoId: expectedVideoId,
       ...(mode ? { edit_privilege_mode: mode } : {}),

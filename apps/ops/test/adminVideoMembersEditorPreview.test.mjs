@@ -331,3 +331,28 @@ test("MIG-0730 U02dc: invalid preview video ID rejects before reading private Fo
   form.append("members_json", "[]");
   assert.equal(bindPreviewSaveFormData(form, validId)?.get("video_id"), validId);
 });
+
+test("MIG-0730 U02dd: malformed preview permission target never reads injected privilege fields", () => {
+  const invalidTargets = [
+    "", ".", "..", " leading", "trailing ", "v/child", "v\\child",
+    "v\nchild", "v\0child", "\uD800", "x".repeat(65), null, 1,
+  ];
+  for (const target of invalidTargets) {
+    let reads = 0;
+    const injected = {
+      get videoId() { reads++; throw Error("PRIVATE_VIDEO_TARGET"); },
+      get intents() { reads++; throw Error("PRIVATE_INTENTS"); },
+    };
+    assert.equal(bindPreviewPermissionInput(injected, target), null);
+    assert.equal(reads, 0, "private privilege getters must not run for " + String(target));
+  }
+  const videoId = "v".repeat(64);
+  const valid = bindPreviewPermissionInput({
+    videoId, notify: true,
+    intents: [{ x_user_id: "member_1", display_name: "Member", intent: "on" }],
+  }, videoId);
+  assert.deepEqual(valid, {
+    videoId, notify: true,
+    intents: [{ x_user_id: "member_1", display_name: "Member", intent: "on" }],
+  });
+});
