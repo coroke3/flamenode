@@ -477,21 +477,31 @@ const notificationParams = (kind, i, tag) => ({ id: benchNotificationId(i, tag) 
 const notificationSetup = (status) => (kind, i, tag) => [notificationRow(benchNotificationId(i, tag), status)];
 
 // MIG-0639 / SA-049,051..055: local drafts/published terms, isolated across samples.
+let termsPublishSeq = 900;
 const benchTermsId = (i, tag) => `bench-terms-${tag}-${i}`;
 const termsParams = (kind, i, tag) => ({ id: benchTermsId(i, tag) });
-const termsRow = (id, status) => ({
-  sql: "INSERT OR REPLACE INTO terms_versions (id,version_label,body_markdown,status,severity,published_at,created_by_user_id,created_at,updated_at) VALUES (?, 'bench-v1', 'bench body', ?, 'major', ?, 'bench-admin', 100, 100)",
-  params: [id, status, status === "published" ? 900 : null],
+const termsRow = (id, status, severity = "major") => ({
+  sql: "INSERT OR REPLACE INTO terms_versions (id,version_label,body_markdown,status,severity,published_at,created_by_user_id,created_at,updated_at) VALUES (?, 'bench-v1', 'bench body', ?, ?, ?, 'bench-admin', 100, 100)",
+  params: [id, status, severity, status === "published" ? ++termsPublishSeq : null],
 });
-const termsSetup = (status) => (kind, i, tag) => [
-  termsRow(benchTermsId(i, tag), status),
+const termsSetup = (status, severity = "major", { keepSinglePublished = false } = {}) => (kind, i, tag) => [
+  ...(keepSinglePublished ? [{
+    sql: "UPDATE terms_versions SET status = 'archived' WHERE id LIKE 'bench-terms-%' AND status = 'published' AND id != COALESCE((SELECT id FROM terms_versions WHERE id LIKE 'bench-terms-%' AND status = 'published' ORDER BY published_at DESC, rowid DESC LIMIT 1), '')",
+    params: [],
+  }] : []),
+  termsRow(benchTermsId(i, tag), status, severity),
   ...(status === "published" ? [{ sql: `UPDATE "user" SET accepted_terms_version_id = ? WHERE id = 'bench-admin'`, params: [benchTermsId(i, tag)] }] : []),
 ];
 
 // MIG-0639 / SA-099..100: owned X-ID request rows on local D1 only.
 const benchXRequestId = (i, tag) => `bench-xreq-${tag}-${i}`;
+const clearPendingXRequests = {
+  sql: "DELETE FROM x_identity_requests WHERE requested_by_auth_user_id = 'bench-admin' AND status = 'pending'",
+  params: [],
+};
 const xMergeParentRow = (i, tag) => [
-  { sql: "INSERT OR REPLACE INTO x_users (id,x_name,approval_status) VALUES ('bench-x-source','Bench Source','approved')", params: [] },
+  clearPendingXRequests,
+  { sql: "INSERT OR IGNORE INTO x_users (id,x_name,approval_status) VALUES ('bench-x-source','Bench Source','approved')", params: [] },
   {
   sql: "INSERT OR REPLACE INTO x_identity_requests (id,request_type,requested_by_auth_user_id,requested_x_id,source_x_user_id,target_x_user_id,restore_snapshot_json,revert_deadline_at,status,requested_at,updated_at) VALUES (?, 'merge', 'bench-admin', NULL, 'bench-x-source', 'bench-x', '{\"v\":1}', 4102444800, 'done', 50, 60)",
   params: [benchXRequestId(i, tag)],
@@ -640,13 +650,13 @@ export const ROUTE_INVENTORY = [
   ["RH-009", "GET", "/api/admin/spreadsheet/tables", "a"],
   // SA-045..048: verified handler contracts from apps/api/src/routes/admin/notifications.ts
   // SA-049 / SA-051..055: exact handler names and contracts per MIG-0642 parity suite
-  ["SA-099", "POST", "/api/xid/requests", "w"],
-  ["SA-100", "POST", "/api/xid/requests/:id/cancel", "w", { params: (kind, i, tag) => ({ id: benchXRequestId(i, tag) }), setup: (kind, i, tag) => [xRequestRow(i, tag)] }],
+  ["SA-099", "POST", "/api/xid/requests", "w", { setup: () => [clearPendingXRequests] }],
+  ["SA-100", "POST", "/api/xid/requests/:id/cancel", "w", { params: (kind, i, tag) => ({ id: benchXRequestId(i, tag) }), setup: (kind, i, tag) => [clearPendingXRequests, xRequestRow(i, tag)] }],
   ["SA-101", "POST", "/api/xid/merge-revert-requests", "w", { setup: (kind, i, tag) => xMergeParentRow(i, tag) }],
   ["SA-049", "PUT", "/api/admin/permissions/editable-fields", "w"],
   ["SA-051", "POST", "/api/admin/terms", "w"],
   ["SA-052", "PATCH", "/api/admin/terms/:id", "w", { params: termsParams, setup: termsSetup("draft") }],
-  ["SA-053", "POST", "/api/admin/terms/:id/publish", "w", { params: termsParams, setup: termsSetup("draft") }],
+  ["SA-053", "POST", "/api/admin/terms/:id/publish", "w", { params: termsParams, setup: termsSetup("draft", "minor", { keepSinglePublished: true }) }],
   ["SA-054", "POST", "/api/admin/terms/:id/reaccept-broadcast", "w", { params: termsParams, setup: termsSetup("published") }],
   ["SA-055", "POST", "/api/admin/terms/:id/archive", "w", { params: termsParams, setup: termsSetup("draft") }],
   ["SA-048", "POST", "/api/admin/notifications/retry-failed", "w", { setup: (kind, i, tag) => kind === "limit"

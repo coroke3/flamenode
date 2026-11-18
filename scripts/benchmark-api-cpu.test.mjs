@@ -647,3 +647,36 @@ test("MIG-0639 / PR #457: mounted RH-013 has one bounded named scenario, never a
   assert.equal(app.routes.some((r) => r.method === "GET" && r.path === "/api/event-endpoints/:id"), true,
     "RH-013 must remain mounted before its CPU scenario is eligible");
 });
+
+test("MIG-0639: repeated X-ID and terms write scenarios stay isolated on one shared migrated DB", async () => {
+  const scenarios = new Map(buildScenarios({ adminToken: "t" }).map((s) => [s.id, s]));
+  const target = await createInprocTarget({ adminToken: "t" });
+  const failures = [];
+  try {
+    // Run >5 samples per kind (past X_ID_PENDING_REQUEST_LIMIT=5) in one shared target
+    // and ensure SA-053/SA-054 never poison subsequent writes with 403 tos_reaccept_required.
+    for (const id of ["SA-099", "SA-100", "SA-101", "SA-052", "SA-053", "SA-054", "SA-055", "SA-048"]) {
+      const sc = scenarios.get(id);
+      for (const kind of ["normal", "limit", "invalid"]) {
+        for (let i = 0; i < 6; i += 1) {
+          const spec = sc.kinds[kind](i, `multi-${id}-${kind}`);
+          if (spec.setup) await target.exec(spec.setup);
+          const r = await target.run(spec);
+          if (!spec.expect.includes(r.status)) {
+            failures.push(`${id}/${kind}#${i}: expected ${spec.expect.join("/")} got ${r.status}`);
+          }
+        }
+      }
+    }
+    // Re-running SA-053 after SA-054 simulates the rotated cold-round order.
+    const coldTerms = scenarios.get("SA-053").kinds.normal(0, "cold-after-054");
+    await target.exec(coldTerms.setup);
+    const coldRes = await target.run(coldTerms);
+    if (!coldTerms.expect.includes(coldRes.status)) {
+      failures.push(`SA-053/cold-after-054: expected ${coldTerms.expect.join("/")} got ${coldRes.status}`);
+    }
+  } finally {
+    await target.close();
+  }
+  assert.deepEqual(failures, []);
+});
