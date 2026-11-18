@@ -151,14 +151,8 @@ function legacyRebuildQueueMutation(
   };
 }
 
-export type LegacyApplyResult = {
-  created: { events: number; videos: number; xUsers: number; authUsers: number; softwares: number };
-  replaced: { events: number; videos: number };
-  skipped: { events: number; videos: number };
-  customQuestions: { created: number; reused: number };
-  warnings: string[];
-};
-
+/** MIG-0645: shared result DTO for Next and Hono. */
+export type { LegacyApplyResult } from "@flamenode/server-core/legacyImport/applyResult";
 type LegacyImportStepOutcome =
   | { kind: "none" }
   | { kind: "system_user"; skipExistingEventIds: string[]; skipExistingVideoIds: string[] }
@@ -2543,34 +2537,8 @@ function questionsNeededForSkipStrategy(
   };
 }
 
-export function legacyApplyResultFromProgress(
-  plan: CanonicalLegacyPlan,
-  progress: LegacyImportApplyProgress,
-): LegacyApplyResult {
-  return {
-    created: {
-      events: progress.counts.createdEvents,
-      videos: progress.counts.createdVideos,
-      xUsers: progress.counts.createdXUsers,
-      authUsers: progress.counts.createdAuthUsers,
-      softwares: progress.counts.createdSoftwares,
-    },
-    replaced: {
-      events: progress.counts.replacedEvents,
-      videos: progress.counts.replacedVideos,
-    },
-    skipped: {
-      events: progress.counts.skippedEvents,
-      videos: progress.counts.skippedVideos,
-    },
-    customQuestions: {
-      created: progress.counts.createdCustomQuestions,
-      reused: progress.counts.reusedCustomQuestions,
-    },
-    warnings: [...plan.warnings],
-  };
-}
-
+/** MIG-0645: canonical result mapper remains publicly available in CURRENT. */
+export { legacyApplyResultFromProgress } from "@flamenode/server-core/legacyImport/applyResult";
 export async function applyLegacyImportPlanStep(
   db: DB,
   plan: CanonicalLegacyPlan,

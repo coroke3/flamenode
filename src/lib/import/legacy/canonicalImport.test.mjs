@@ -1238,13 +1238,15 @@ test("legacy importは1 HTTPのplan・step・連続送信をhard capする", () 
   const route = fs.readFileSync(path.join(root, "app/api/admin/import/legacy/route.ts"), "utf8");
   const client = fs.readFileSync(path.join(root, "src/components/admin/LegacyCanonicalImportClient.tsx"), "utf8");
   const previewStore = fs.readFileSync(path.join(root, "src/lib/import/legacy/previewStore.ts"), "utf8");
-  const budget = fs.readFileSync(path.join(root, "src/lib/import/legacy/cpuBudget.ts"), "utf8");
+  const budget = fs.readFileSync(path.join(root, "packages/server-core/src/legacyImport/cpuBudget.ts"), "utf8");
+  const budgetBridge = fs.readFileSync(path.join(root, "src/lib/import/legacy/cpuBudget.ts"), "utf8");
   assert.match(route, /MAX_FILE_BYTES = 2 \* 1024 \* 1024/);
   assert.match(route, /MAX_TOTAL_BYTES = 4 \* 1024 \* 1024/);
   assert.match(route, /MAX_ROWS = MAX_LEGACY_IMPORT_SELECTED_ROWS/);
   assert.match(previewStore, /MAX_STORED_PLAN_BYTES = 512 \* 1024/);
   assert.match(previewStore, /PREVIEW_VERSION = 4 as const/);
   assert.match(budget, /MAX_LEGACY_IMPORT_STEP_BYTES = 128 \* 1024/);
+  assert.match(budgetBridge, /export \* from "@flamenode\/server-core\/legacyImport\/cpuBudget"/);
   assert.ok(route.indexOf("storedPlanBytes > MAX_STORED_PLAN_BYTES") < route.indexOf("preflightLegacyImportPlan(db"));
 
   const submit = client.slice(client.indexOf("async function submit"), client.indexOf("const expiresLabel"));
@@ -1262,6 +1264,7 @@ test("legacy import中はYouTube APIを呼ばずpendingを後続cronへ渡す", 
   const importSources = [
     "app/api/admin/import/legacy/route.ts",
     "src/lib/import/legacy/normalize.ts",
+    "packages/server-core/src/legacyImport/normalize.ts",
     "src/lib/import/legacy/preflight.ts",
     "src/lib/import/legacy/apply.ts",
   ].map((file) => fs.readFileSync(path.join(root, file), "utf8")).join("\n");
