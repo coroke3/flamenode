@@ -355,3 +355,45 @@ test("MIG-0730 U02cs: RH-019 duplicate X IDs never overwrite private suggestion 
   );
   assert.deepEqual(valid.items, items, "distinct canonical IDs remain accepted");
 });
+test("MIG-0730 U02cy: RH-019 accessor-backed receipt is captured once, not leaked or swapped", async () => {
+  const reads = { query: 0, items: 0, hasMore: 0, nextOffset: 0, hint: 0, id: 0, x_name: 0, score: 0, matchedBy: 0 };
+  const row = {};
+  Object.defineProperties(row, {
+    id: { get() { reads.id++; return reads.id === 1 ? "alice" : "private_wrong_id"; } },
+    x_name: { get() { reads.x_name++; return reads.x_name === 1 ? "Alice" : "PRIVATE_ROW"; } },
+    score: { get() { reads.score++; return reads.score === 1 ? 10 : 9999; } },
+    matchedBy: { get() { reads.matchedBy++; return reads.matchedBy === 1 ? "xid_exact" : "PRIVATE_MATCH"; } },
+  });
+  const receipt = result();
+  Object.defineProperties(receipt, {
+    query: { get() { reads.query++; return reads.query === 1 ? "al" : "secret_query"; } },
+    items: { get() { reads.items++; return reads.items === 1 ? [row] : [{ id: "private_user", x_name: "PRIVATE_RESULT" }]; } },
+    hasMore: { get() { reads.hasMore++; return reads.hasMore === 1 ? false : true; } },
+    nextOffset: { get() { reads.nextOffset++; return reads.nextOffset === 1 ? null : 5000; } },
+    hint: { get() { reads.hint++; return reads.hint === 1 ? null : "PRIVATE_HINT"; } },
+  });
+  const got = await searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+    async () => ({ status: 200, json: async () => receipt }));
+  assert.deepEqual(got, {
+    items: [{ id: "alice", x_name: "Alice", score: 10, matchedBy: "xid_exact" }],
+    hasMore: false, nextOffset: null, hint: null,
+  });
+  for (const [field, count] of Object.entries(reads)) {
+    assert.equal(count, 1, field + " must be read once");
+  }
+  assert.doesNotMatch(JSON.stringify(got), /PRIVATE/);
+});
+
+test("MIG-0730 U02cy: invalid first accessor values cannot become valid after a second read", async () => {
+  const receipt = result();
+  let reads = 0;
+  Object.defineProperty(receipt.items[0], "id", {
+    get() { reads++; return reads === 1 ? "invalid/evil" : "alice"; },
+  });
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+      async () => ({ status: 200, json: async () => receipt })),
+    /member_suggestions_unavailable/,
+  );
+  assert.equal(reads, 1);
+});

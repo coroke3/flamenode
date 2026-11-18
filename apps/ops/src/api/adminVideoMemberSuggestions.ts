@@ -23,68 +23,73 @@ function parseSuggestions(
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new Error("member_suggestions_unavailable");
   }
+  // Even though a normal Response.json() returns plain data, a legacy/mock
+  // fetch port can inject accessor objects. Bind every checked field once:
+  // do not validate one private page and then render a second getter value.
   const value = body as Record<string, unknown>;
-  // RH-019 echoes the authoritative request identity in every 200 response.
-  // Reject a mismatched page/query rather than render another search's private
-  // X-user suggestions or reuse an unrelated pagination cursor.
-  if (value.query !== requestedQuery || value.limit !== SEARCH_LIMIT ||
-      value.offset !== requestedOffset ||
-      !Array.isArray(value.items) || value.items.length > SEARCH_LIMIT ||
-      typeof value.hasMore !== "boolean" ||
-      (value.nextOffset !== null &&
-        (!Number.isSafeInteger(value.nextOffset) ||
-         // The RH-019 ranked search always advances a non-null cursor.
-         // No-progress cursors can re-request the same private result page.
-         (value.nextOffset as number) <= requestedOffset ||
-         (value.nextOffset as number) > OFFSET_MAX + SEARCH_LIMIT ||
-         // The ranker continues from exactly the end of this received page.
-         // A larger value silently skips private candidates.
-         (value.nextOffset as number) !== requestedOffset + value.items.length)) ||
-      // A completed page cannot simultaneously advertise a next page.
-      (value.hasMore === false && value.nextOffset !== null) ||
-      // A null cursor with hasMore=true is exclusively RH-019 V2's
-      // explicit "refine query" answer. Without a nonblank hint and v2
-      // source, this would be an ambiguous, non-pageable private result.
-      (value.hasMore === true && value.nextOffset === null &&
-        (value.items.length !== 0 ||
-         value.source !== "v2" ||
-         typeof value.hint !== "string" ||
-         !value.hint.trim())) ||
-      (value.hint !== null && (typeof value.hint !== "string" || value.hint.length > 256))) {
+  const query = value.query;
+  const limit = value.limit;
+  const offset = value.offset;
+  const rawItems = value.items;
+  const hasMore = value.hasMore;
+  const nextOffset = value.nextOffset;
+  const hint = value.hint;
+  const source = value.source;
+  if (!Array.isArray(rawItems)) throw new Error("member_suggestions_unavailable");
+  const count = rawItems.length;
+  if (query !== requestedQuery || limit !== SEARCH_LIMIT ||
+      offset !== requestedOffset || count > SEARCH_LIMIT ||
+      typeof hasMore !== "boolean" ||
+      (nextOffset !== null &&
+        (typeof nextOffset !== "number" || !Number.isSafeInteger(nextOffset) ||
+         nextOffset <= requestedOffset ||
+         nextOffset > OFFSET_MAX + SEARCH_LIMIT ||
+         nextOffset !== requestedOffset + count)) ||
+      (hasMore === false && nextOffset !== null) ||
+      // Cursorless continuation is only RH-019 V2's empty refine answer.
+      (hasMore === true && nextOffset === null &&
+        (count !== 0 || source !== "v2" ||
+         typeof hint !== "string" || !hint.trim())) ||
+      (hint !== null && (typeof hint !== "string" || hint.length > 256))) {
     throw new Error("member_suggestions_unavailable");
   }
-  // The CURRENT V1 artifact builder and the migrated V2 loader both keep
-  // one row per canonical X ID. A forged duplicated ID with conflicting
-  // names/scores must not let the UI silently overwrite a prior candidate.
+
   const seenIds = new Set<string>();
-  const items = value.items.map((raw: unknown) => {
+  const items: AdminMemberSuggestionSearchResponse["items"] = [];
+  // Numeric indexing avoids a custom array iterator/map altering the page
+  // after the bounded count was checked. Each row property is read once.
+  for (let i = 0; i < count; i += 1) {
+    const raw: unknown = rawItems[i];
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
       throw new Error("member_suggestions_unavailable");
     }
     const row = raw as Record<string, unknown>;
-    if (typeof row.id !== "string" || !X_USER_ID_RE.test(row.id) ||
-        (row.x_name !== null && typeof row.x_name !== "string") ||
-        (typeof row.x_name === "string" && row.x_name.length > 256) ||
-        (row.score !== undefined && (typeof row.score !== "number" || !Number.isFinite(row.score))) ||
-        (row.matchedBy !== undefined && (typeof row.matchedBy !== "string" || row.matchedBy.length > 64))) {
+    const id = row.id;
+    const xName = row.x_name;
+    const score = row.score;
+    const matchedBy = row.matchedBy;
+    if (typeof id !== "string" || !X_USER_ID_RE.test(id) ||
+        (xName !== null && typeof xName !== "string") ||
+        (typeof xName === "string" && xName.length > 256) ||
+        (score !== undefined && (typeof score !== "number" || !Number.isFinite(score))) ||
+        (matchedBy !== undefined &&
+          (typeof matchedBy !== "string" || matchedBy.length > 64)) ||
+        seenIds.has(id)) {
       throw new Error("member_suggestions_unavailable");
     }
-    if (seenIds.has(row.id)) {
-      throw new Error("member_suggestions_unavailable");
-    }
-    seenIds.add(row.id);
-    return {
-      id: row.id,
-      x_name: row.x_name,
-      ...(typeof row.score === "number" ? { score: row.score } : {}),
-      ...(typeof row.matchedBy === "string" ? { matchedBy: row.matchedBy } : {}),
-    };
-  });
+    seenIds.add(id);
+    items.push({
+      id,
+      x_name: xName as string | null,
+      ...(typeof score === "number" ? { score } : {}),
+      ...(typeof matchedBy === "string" ? { matchedBy } : {}),
+    });
+  }
   return {
     items,
-    hasMore: value.hasMore as boolean,
-    nextOffset: value.nextOffset as number | null,
-    hint: value.hint as string | null,
+    hasMore,
+    nextOffset: nextOffset as number | null,
+    hint: hint as string | null,
   };
 }
 
