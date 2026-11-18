@@ -46,7 +46,12 @@ export async function readAdminVideoMembers(
     if (!Array.isArray(members) || members.length > MAX_VIDEO_MEMBERS) {
       return { status: "unavailable" };
     }
-    parsed = AdminVideoMembersResponseSchema.safeParse(body);
+    // Parse the same bounded member array. A mocked JSON getter can otherwise
+    // change the initialMembers payload after the 100-row early gate.
+    parsed = AdminVideoMembersResponseSchema.safeParse({
+      video: (body as { video?: unknown }).video,
+      initialMembers: members,
+    });
   } catch {
     return { status: "unavailable" };
   }

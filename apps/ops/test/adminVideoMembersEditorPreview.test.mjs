@@ -243,3 +243,22 @@ test("MIG-0730 U02cv: canonical OFF stays valid and forged fields fail closed", 
     assert.equal(bindPreviewSaveFormData(bad, "v1"), null);
   }
 });
+
+test("MIG-0730 U02cz: unmounted editor uses only the bounded participant snapshot", () => {
+  const first = [member(0)];
+  const oversized = Array.from({ length: 101 }, (_, i) => member(i, { name: "PRIVATE_ROW" }));
+  let traversed = 0;
+  Object.defineProperty(oversized, 0, {
+    get() { traversed++; throw Error("PRIVATE_ROW_ACCESS"); },
+  });
+  const data = snapshot("v1", first);
+  let reads = 0;
+  Object.defineProperty(data, "initialMembers", {
+    get() { reads++; return reads === 1 ? first : oversized; },
+  });
+  const markup = html({ videoId: "v1", data });
+  assert.match(markup, /Member 0/);
+  assert.doesNotMatch(markup, /PRIVATE_ROW/);
+  assert.equal(reads, 1);
+  assert.equal(traversed, 0);
+});

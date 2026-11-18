@@ -36,7 +36,11 @@ export function AdminVideoMembersReadView({ videoId, data }: {
     if (!Array.isArray(rawMembers) || rawMembers.length > MAX_VIDEO_MEMBERS) {
       return <p role="alert">参加者データを表示できません。</p>;
     }
-    parsed = AdminVideoMembersResponseSchema.safeParse(data);
+    // Schema traversal must use the same bounded array checked above.
+    parsed = AdminVideoMembersResponseSchema.safeParse({
+      video: (data as { video?: unknown }).video,
+      initialMembers: rawMembers,
+    });
   } catch {
     return <p role="alert">参加者データを表示できません。</p>;
   }

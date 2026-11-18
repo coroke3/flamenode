@@ -181,3 +181,24 @@ test("MIG-0730 U02cr: abort triggered during private GET validation never publis
     json(200, snapshot("v1", [member(1)])), normalController.signal);
   assert.equal(valid.status, "ok", "unaborted valid snapshots still render");
 });
+
+test("MIG-0730 U02cz: GET validates exactly the array used at its 100-row gate", async () => {
+  const first = [member(0)];
+  const oversized = Array.from({ length: 101 }, (_, i) => member(i, { name: "PRIVATE" }));
+  let traversed = 0;
+  Object.defineProperty(oversized, 0, {
+    get() { traversed++; throw Error("PRIVATE_ROW_ACCESS"); },
+  });
+  const body = snapshot("v1", first);
+  let reads = 0;
+  Object.defineProperty(body, "initialMembers", {
+    get() { reads++; return reads === 1 ? first : oversized; },
+  });
+  const result = await readAdminVideoMembers("v1",
+    async () => ({ status: 200, json: async () => body }));
+  assert.equal(result.status, "ok");
+  assert.equal(result.data.initialMembers.length, 1);
+  assert.equal(result.data.initialMembers[0].name, "Member 0");
+  assert.equal(reads, 1, "the top-level member getter is read only once");
+  assert.equal(traversed, 0, "the substituted oversized member data is never visited");
+});

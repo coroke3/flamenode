@@ -345,3 +345,24 @@ test("MIG-0730 U02n: invalid route short-circuits before reading untrusted membe
   assert.equal(accessed, 0);
   assert.match(html, /参加者データを表示できません/);
 });
+
+test("MIG-0730 U02cz: read-only SSR uses only the bounded member snapshot", () => {
+  const first = [member("Visible first")];
+  const oversized = Array.from({ length: 101 }, () => member("PRIVATE_ROW"));
+  let traversed = 0;
+  Object.defineProperty(oversized, 0, {
+    get() { traversed++; throw Error("PRIVATE_ROW_ACCESS"); },
+  });
+  const data = snapshot("v1", first);
+  let reads = 0;
+  Object.defineProperty(data, "initialMembers", {
+    get() { reads++; return reads === 1 ? first : oversized; },
+  });
+  const markup = renderToStaticMarkup(wrap(
+    React.createElement(AdminVideoMembersReadView, { videoId: "v1", data }),
+  ));
+  assert.match(markup, /Visible first/);
+  assert.doesNotMatch(markup, /PRIVATE_ROW/);
+  assert.equal(reads, 1);
+  assert.equal(traversed, 0);
+});

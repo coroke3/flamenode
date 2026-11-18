@@ -233,7 +233,12 @@ export function AdminVideoMembersEditorPreview({
     if (!Array.isArray(rawMembers) || rawMembers.length > MAX_VIDEO_MEMBERS) {
       return <p role="alert">参加者データを表示できません。</p>;
     }
-    parsed = AdminVideoMembersResponseSchema.safeParse(data);
+    // Do not let an injected getter replace the bounded public list while
+    // Zod traverses it. Both checks must operate on one member snapshot.
+    parsed = AdminVideoMembersResponseSchema.safeParse({
+      video: (data as { video?: unknown }).video,
+      initialMembers: rawMembers,
+    });
   } catch {
     return <p role="alert">参加者データを表示できません。</p>;
   }
