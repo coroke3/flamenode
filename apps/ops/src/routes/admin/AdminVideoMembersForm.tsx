@@ -15,6 +15,12 @@ export type AdminVideoMembersSaveResult = {
 
 export type AdminVideoMembersSave = (payload: FormData) => Promise<AdminVideoMembersSaveResult>;
 const UNVERIFIED_SAVE = "保存結果を確認できませんでした。最新状態を再取得してください。";
+// This provisional migration HTTP envelope is NOT sufficient for every
+ // currently legal 100 x 30 chapter draft. Until backend #473 resolves
+ // this parity gap, show the actionable CURRENT fallback before save.
+const SA085_PROVISIONAL_BODY_BYTES = 256 * 1024;
+const SA085_OVERSIZED_MESSAGE =
+  "参加者データが移行先の暫定256KiB制限を超えています。現行の管理画面で保存してください。";
 
 // A standalone form can receive an untrusted video object, without the
 // Preview and its validated route target. Match the unmounted HTTP adapter's
@@ -215,8 +221,13 @@ function AdminVideoMembersFormForVideo({
     // submits a synthesized []. Do not allow a malformed/privileged original
     // member field to authorize a destructive OFF write by hiding it.
     if (!isCollab && nativeMemberProps !== null) {
+      const nativeRaw = nativeMemberProps.value as string;
+      if (nativeRaw.length > SA085_PROVISIONAL_BODY_BYTES) {
+        setResult({ ok: false, message: SA085_OVERSIZED_MESSAGE });
+        return;
+      }
       try {
-        const original: unknown = JSON.parse(nativeMemberProps.value as string);
+        const original: unknown = JSON.parse(nativeRaw);
         if (!Array.isArray(original) || original.length > MAX_VIDEO_MEMBERS ||
             original.some(member => !member || typeof member !== "object" ||
               Array.isArray(member) || "can_edit" in member ||
@@ -252,6 +263,17 @@ function AdminVideoMembersFormForVideo({
         !(isCollab ? canonicalOn : canonicalOff) ||
         (!isCollab && raw !== "[]")) {
       setResult({ ok: false, message: "参加者設定の入力を確認してください。" });
+      return;
+    }
+    // The raw JSON can contain a legal but huge member/chapter draft. Do not
+    // parse it or invoke an injected save port when it cannot fit the
+    // provisional Hono SA-085 envelope. The exact UTF-8 JSON body includes
+    // escaped member JSON, checkbox values and wrapper bytes.
+    if (raw.length > SA085_PROVISIONAL_BODY_BYTES ||
+        new TextEncoder().encode(JSON.stringify({
+          is_collab: flags as string[], members_json: raw,
+        })).byteLength > SA085_PROVISIONAL_BODY_BYTES) {
+      setResult({ ok: false, message: SA085_OVERSIZED_MESSAGE });
       return;
     }
     try {

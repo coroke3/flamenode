@@ -1472,3 +1472,59 @@ test("MIG-0730 U02dg: revoked or throwing video metadata cannot enable a standal
   }
 });
 
+test("MIG-0730 U02di: legal oversized member draft receives CURRENT fallback before any injected write", async () => {
+  // CURRENT permits 100 public members with four chapters and 800-char notes
+  // (up to 30 chapters, 1000-char notes). This exceeds the migration
+  // endpoint's provisional JSON limit without any forged privilege data.
+  const members = Array.from({ length: 100 }, (_, i) => ({
+    name: "Member " + i, x_user_id: "user_" + i,
+    chapters: Array.from({ length: 4 }, () => ({
+      time: "00:00", label: "Scene", note: "n".repeat(800),
+    })),
+  }));
+  const large = JSON.stringify(members);
+  assert.ok(large.length > 256 * 1024);
+  let writes = 0;
+  const save = async () => { writes++; return { ok: true }; };
+  const ui = setup({ save, membersField: h("input", {
+    type: "hidden", name: "members_json", value: large,
+  }) });
+  try {
+    await ui.render();
+    await ui.submit();
+    assert.equal(writes, 0, "legal-size CURRENT draft must not hit a 413 or injected adapter");
+    assert.match(ui.target.querySelector('[role="alert"]')?.textContent ?? "",
+      /暫定256KiB制限.*現行の管理画面で保存してください/);
+
+    // A smaller canonical replacement is still writable; oversized failure
+    // does not disable the form permanently or claim an ambiguous commit.
+    await ui.render({ membersField: h("input", {
+      type: "hidden", name: "members_json", value: '[{"name":"Alice"}]',
+    }) });
+    await ui.submit();
+    assert.equal(writes, 1);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0730 U02di: multi-byte wire overhead is checked before injected member save", async () => {
+  // UTF-16 code-unit length can be below the limit while UTF-8 HTTP bytes
+  // exceed it. An injected port must not bypass the candidate's body policy.
+  const raw = JSON.stringify([{ name: "あ".repeat(90_000) }]);
+  assert.ok(raw.length < 256 * 1024);
+  const bytes = new TextEncoder().encode(JSON.stringify({
+    is_collab: ["false", "true"], members_json: raw,
+  })).byteLength;
+  assert.ok(bytes > 256 * 1024);
+  let writes = 0;
+  const ui = setup({
+    membersField: h("input", { type: "hidden", name: "members_json", value: raw }),
+    save: async () => { writes++; return { ok: true }; },
+  });
+  try {
+    await ui.render();
+    await ui.submit();
+    assert.equal(writes, 0);
+    assert.match(ui.target.querySelector('[role="alert"]')?.textContent ?? "",
+      /暫定256KiB制限/);
+  } finally { await ui.cleanup(); }
+});
