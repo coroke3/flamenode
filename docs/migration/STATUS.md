@@ -113,7 +113,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 5 | Public migration | PARTIALLY_READY (2026-10-30: MIG-0501 / 0502 / 0503 / 0504 / 0505 / 0506 / 0509 / 0510 / 0511 / 0512 / 0513 / 0517 / 0518 / 0519 DONE (MIG-0518 PR#468 merged 2026-11-09; MIG-0509 PR#469 integrated 2026-11-02, merge pending human approval; MIG-0501 PR#429, MIG-0506 PR#431, MIG-0519 PR#447, MIG-0510 PR#450 merged 2026-11-01; MIG-0513 PR#452 builder-complete 2026-11-01, merge pending human approval); MIG-0507, 0514..0516 READY (0514..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
 | 6 | Hono API | PARTIALLY_READY (2026-11-18: 45 DONE — MIG-0601 / MIG-0608 / MIG-0611 / MIG-0602 / MIG-0612 / MIG-0613 / MIG-0614 / MIG-0615 / MIG-0616 / MIG-0617 / MIG-0618 / MIG-0619 / MIG-0620 / MIG-0621 / MIG-0622 / MIG-0623 / MIG-0624 / MIG-0625 / MIG-0628 / MIG-0629 / MIG-0630 / MIG-0631 / MIG-0632 / MIG-0633 / MIG-0634 / MIG-0635 / MIG-0636 / MIG-0637 / MIG-0640 / MIG-0641 / MIG-0643 / MIG-0646 / MIG-0647 / MIG-0648 / MIG-0649 / MIG-0653 / MIG-0655 / MIG-0658 / MIG-0659 / MIG-0660 / MIG-0661 / MIG-0663 / MIG-0664 / MIG-0609 / MIG-0642; 15 READY (incl. MIG-0627, dependency MIG-0509 DONE); MIG-0604 / MIG-0606 / MIG-0662 / MIG-0607 BLOCKED. MIG-0643 merged #480; MIG-0660 deep health core in PR#438; MIG-0659 X ID request APIs in PR#460; MIG-0642 terms / editable fields / notification admin writes in PR#461; MIG-0655 template/playlist writes in PR#476; MIG-0653 event group APIs in PR#491; MIG-0636 Personal X/Active X APIs in PR#475; production cutover not authorized) | CLOSED |
 | 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-11-06: MIG-0701, MIG-0707, MIG-0712, MIG-0713, MIG-0719, MIG-0726, MIG-0734 DONE (#470); 2026-11-08: MIG-0718 DONE (#420); 2026-11-09: MIG-0710 DONE (#439); 2026-11-10: MIG-0711 DONE (#433); 2026-11-18: MIG-0727 DONE (PR #502), MIG-0738 DONE (PR #687), MIG-0728 DONE (PR #493); MIG-0708, 0709, 0714, 0715, 0720..0725, 0729, 0730, 0731..0733, 0735..0737 READY; MIG-0702..0706, 0716, 0717 BLOCKED; Ops /manage production cutover NOT STARTED) | CLOSED |
-| 8 | Auth | IN_PROGRESS (MIG-0801 / MIG-0802 (non-production PoC, D-14-5, PR#471) / MIG-0807 DONE (MIG-0807 Hono session/write guard review, PR#444; SEC-0807-01 fixed in #445); MIG-0803 READY; MIG-0804..0806 BLOCKED; production cutover NOT STARTED) | CLOSED |
+| 8 | Auth | IN_PROGRESS (MIG-0801 / MIG-0802 (non-production PoC, D-14-5, PR#471) / MIG-0803 (Discord/account-linking parity, PR#688) / MIG-0807 DONE (MIG-0807 Hono session/write guard review, PR#444; SEC-0807-01 fixed in #445); MIG-0804 READY; MIG-0805..0806 BLOCKED; production cutover NOT STARTED) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
 
 ---
@@ -467,8 +467,8 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | --- | --- | --- | --- |
 | MIG-0801 | Auth baseline fixtures/tests | DONE | MIG-0008 |
 | MIG-0802 | Web Standard/Auth integration PoC | DONE | MIG-0801, MIG-0608 |
-| MIG-0803 | Discord/account-linking parity | READY | MIG-0802 |
-| MIG-0804 | CPU/security review (Auth.js part; Hono session part is MIG-0807) | BLOCKED | MIG-0803, MIG-0807 |
+| MIG-0803 | Discord/account-linking parity | DONE | MIG-0802 |
+| MIG-0804 | CPU/security review (Auth.js part; Hono session part is MIG-0807) | READY | MIG-0803, MIG-0807 |
 | MIG-0805 | production cutover proposal | BLOCKED | MIG-0804, MIG-0628 |
 | MIG-0806 | Phase 8 Gate | BLOCKED | MIG-0805 |
 | MIG-0807 | security review of the existing Hono session + write guard (MIG-0804 U02 part, no Auth.js) | DONE | MIG-0602, MIG-0608 |
@@ -476,6 +476,8 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 MIG-0805 requires explicit user approval before production action.
 
 2026-11-18 MIG-0802 merge-time integration (PR #471): `MIG-0802` non-production Web Standard/Auth PoC (`U01`–`U04`, `@auth/core@0.41.3` + `@auth/drizzle-adapter@1.11.3`, shared `server-core` auth config/redirect, unmounted Hono session/CSRF/signout + `/auth/complete` + `SA-107` `returnTo` parity) integrated on `main`; `MIG-0803` is now `READY` (`MIG-0804..0806` remain `BLOCKED`). Verified source HEAD `a12b28f60885abaca0a1246f0c4be449f7f529fe` passed both CI jobs in [Actions 44231205825](https://github.com/coroke3/flamenode/actions/runs/44231205825) and received [independent Carbon APPROVE](https://github.com/coroke3/flamenode/pull/471#issuecomment-6968377127). Discord/account-linking parity remains separated for `MIG-0803` (`linkAccount` fail-closed `AUTH_ATOMIC_LINK_PORT_PENDING`) and production route/secret cutover remains separated for `MIG-0805`; `apps/api/src/app.ts` and production auth routing remain untouched.
+
+2026-11-18 MIG-0803 merge-time integration (PR #688): `MIG-0803` Discord/account-linking parity (`accountRowWithoutTokens`, `linkDiscordAccountAtomically` CAS + audit + idempotent concurrent replay + post-commit deduped welcome/ops notifications, `logSafeAuthError`, `wrapAdapterOperation`, `T01`–`T03` parity) integrated; `MIG-0804` is now `READY` (`MIG-0805` and `MIG-0806` remain `BLOCKED`). Verified source HEAD `37b1d446361b4bc841e82b9382e4cb1f42c076f2` passed both CI jobs in [Actions #44314935535](https://github.com/coroke3/flamenode/actions/runs/44314935535) and received [independent Argon APPROVE](https://github.com/coroke3/flamenode/pull/688#issuecomment-6980186048). `apps/api/src/app.ts` and production auth routing remain untouched.
 
 ## Phase 9 — Next/OpenNext retirement
 
