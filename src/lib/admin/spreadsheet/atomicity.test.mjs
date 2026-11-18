@@ -89,3 +89,10 @@ test("spreadsheet inserts enforce the same column policy as updates and imports"
   assert.match(querySource, /for \(const column of Object\.keys\(opts\.row\)\)/);
   assert.match(querySource, /assertColumnEditable\(ctx, column\)/);
 });
+
+
+test("CURRENT spreadsheet rejects NUL in mutation values before D1 pre-reads", () => {
+  assert.ok(querySource.includes('value.includes("\\0")'));
+  assert.ok(querySource.includes('validateSpreadsheetInputValues(ctx, { [opts.column]: opts.value });'));
+  assert.ok(querySource.includes("validateSpreadsheetInputValues(ctx, opts.row);\n  await validateSpreadsheetForeignKeys(ctx, [opts.row]);"));
+});

@@ -414,6 +414,12 @@ export async function executeApprovedXIdMergeRequest(
     active_users: activeSourceUsers.length,
   };
 
+  // Snapshot-backed list of target staff whose permission must be promoted.
+  // The strict before-state D1 CAS validates this snapshot before any DML.
+  // One JSON1 bind avoids D1's per-statement 100-parameter ceiling.
+  const promotedTargetStaffIdsJson = JSON.stringify(
+    promotedTargetStaff.map((row) => row.id),
+  );
   const statements = [
     db.run(sql`
       DELETE FROM video_interactions
@@ -426,18 +432,6 @@ export async function executeApprovedXIdMergeRequest(
         )
     `),
     db.run(sql`
-      UPDATE event_staff
-      SET permission_preset = 'owner', updated_at = ${now}
-      WHERE x_user_id = ${target}
-        AND EXISTS (
-          SELECT 1 FROM event_staff source_row
-          WHERE source_row.x_user_id = ${source}
-            AND source_row.event_id = event_staff.event_id
-            AND source_row.permission_preset = 'owner'
-        )
-        AND permission_preset <> 'owner'
-    `),
-    db.run(sql`
       DELETE FROM event_staff
       WHERE x_user_id = ${source}
         AND EXISTS (
@@ -446,15 +440,20 @@ export async function executeApprovedXIdMergeRequest(
             AND target_row.event_id = event_staff.event_id
         )
     `),
-    db.run(sql`DELETE FROM x_user_aliases WHERE alias_x_id = ${source}`),
+    // Deleting a source alias-key and removing alias collisions are both
+    // destructive filters on the same table, so one DELETE safely combines
+    // their union. Its complete outcome remains protected by pre/post CAS.
     db.run(sql`
       DELETE FROM x_user_aliases
-      WHERE x_user_id = ${source}
-        AND EXISTS (
-          SELECT 1 FROM x_user_aliases target_row
-          WHERE target_row.x_user_id = ${target}
-            AND target_row.alias_x_id = x_user_aliases.alias_x_id
-        )
+      WHERE alias_x_id = ${source}
+         OR (
+           x_user_id = ${source}
+           AND EXISTS (
+             SELECT 1 FROM x_user_aliases target_row
+             WHERE target_row.x_user_id = ${target}
+               AND target_row.alias_x_id = x_user_aliases.alias_x_id
+           )
+         )
     `),
     db.run(sql`UPDATE videos SET creator_x_user_id = ${target}, updated_at = ${now} WHERE creator_x_user_id = ${source}`),
     db.run(sql`UPDATE video_chapters SET x_user_id = ${target}, updated_at = ${now} WHERE x_user_id = ${source}`),
@@ -475,7 +474,25 @@ export async function executeApprovedXIdMergeRequest(
     db.run(sql`UPDATE slot_reservation_groups SET x_user_id = ${target}, updated_at = ${now}, version = version + 1 WHERE x_user_id = ${source}`),
     db.run(sql`UPDATE video_moderation_cases SET related_x_user_id = ${target} WHERE related_x_user_id = ${source}`),
     db.run(sql`UPDATE video_interactions SET x_user_id = ${target} WHERE x_user_id = ${source}`),
-    db.run(sql`UPDATE event_staff SET x_user_id = ${target}, updated_at = ${now} WHERE x_user_id = ${source}`),
+    // After colliding source rows are removed, one UPDATE both remaps the
+    // surviving source staff and promotes target owners from the verified
+    // snapshot. The old two UPDATEs touched disjoint row sets.
+    db.run(sql`
+      WITH promote AS (
+        SELECT value AS staff_id FROM json_each(${promotedTargetStaffIdsJson})
+      )
+      UPDATE event_staff
+      SET x_user_id = CASE
+            WHEN x_user_id = ${source} THEN ${target} ELSE x_user_id
+          END,
+          permission_preset = CASE
+            WHEN id IN (SELECT staff_id FROM promote) THEN 'owner'
+            ELSE permission_preset
+          END,
+          updated_at = ${now}
+      WHERE x_user_id = ${source}
+         OR id IN (SELECT staff_id FROM promote)
+    `),
     db.run(sql`UPDATE x_user_aliases SET x_user_id = ${target} WHERE x_user_id = ${source}`),
     db.run(sql`
       INSERT OR IGNORE INTO x_user_aliases (x_user_id, alias_x_id)
@@ -604,7 +621,7 @@ export async function executeApprovedXIdMergeRequest(
       }]
     : [];
   const expectedMutationChanges = [
-    ...statements.map((_, index) => (index === 18 || index === 19 ? 1 : null)),
+    ...statements.map((_, index) => (index === 16 || index === 17 ? 1 : null)),
     ...visibilityFence.expectedMutationChanges,
     ...queue.expectedChanges,
   ];

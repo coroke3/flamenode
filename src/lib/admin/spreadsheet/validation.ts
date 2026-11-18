@@ -60,7 +60,10 @@ export function normalizePrimaryKeyRecord(
   }
   const out: Record<string, string> = {};
   for (const key of primaryKeys) {
-    out[key] = String(pk[key]);
+    const value = String(pk[key]);
+    // SQLite TEXT bindings can truncate embedded NUL; reject before D1 reads/writes.
+    if (value.includes("\0")) throw new Error("invalid_row");
+    out[key] = value;
   }
   return out;
 }
@@ -152,10 +155,10 @@ export function primaryKeyFromRowValues(
 export function primaryKeyFingerprint(
   primaryKey: Record<string, string>,
 ): string {
-  return Object.entries(primaryKey)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, v]) => v)
-    .join("\0");
+  // Preserve column identity and component boundaries. Locale-aware comparators\n  // can sort distinct Unicode column names as equal, depending on entry order.
+  return JSON.stringify(
+    Object.entries(primaryKey).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
 }
 
 type InsertColumnMeta = Pick<SpreadsheetColumnMeta, "name" | "pk" | "editable">;

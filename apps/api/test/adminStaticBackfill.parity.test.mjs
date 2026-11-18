@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
+import { actorSnapshotFromRow } from "@flamenode/server-core/audit/logger";
 import { staticBackfillAdminRoutes } from "../src/routes/admin/staticBackfill.ts";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 import { STATIC_BACKFILL_KV_KEY } from "@flamenode/domain/admin";
@@ -49,7 +50,7 @@ function setup({ r2Ready = false, r2Throws = false, r2GeneratedAt = { blocklist:
   app.use("*", async (c, next) => {
     c.set("user", { id: "admin-1", role: "admin" });
     c.set("db", drizzle(d1.db, { schema }));
-    c.set("actorSnapshotJsonById", { "admin-1": "{}" });
+    c.set("actorSnapshotJsonById", { "admin-1": JSON.stringify(actorSnapshotFromRow(null)) });
     await next();
   });
   app.route("/api/admin/static-builds/backfill", staticBackfillAdminRoutes);

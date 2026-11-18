@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
+import { actorSnapshotFromRow } from "@flamenode/server-core/audit/logger";
 import { staticRebuildAdminRoutes } from "../src/routes/admin/staticRebuild.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 import { AdminStaticRebuildResultSchema } from "@flamenode/contracts/admin/staticRebuildOps";
@@ -30,7 +31,7 @@ function setup({ beforeBatch } = {}) {
   app.use("*", async (c, next) => {
     c.set("user", ADMIN);
     c.set("db", drizzle(db, { schema }));
-    c.set("actorSnapshotJsonById", { [ADMIN.id]: "{}" });
+    c.set("actorSnapshotJsonById", { [ADMIN.id]: JSON.stringify(actorSnapshotFromRow(null)) });
     await next();
   });
   app.route("/api/admin/static-builds", staticRebuildAdminRoutes);

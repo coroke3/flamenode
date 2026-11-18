@@ -8,6 +8,7 @@ import { wakeStaticRebuildQueueAfterCommit } from "../queues/wakeStaticRebuildQu
 import type { WriteAuditLogInput } from "./types.ts";
 import {
   prepareAuditLogEntries,
+  isValidPreloadedActorSnapshotJson,
   type PreloadedAuditContext,
   type PreparedAuditLogEntry,
 } from "./logger.ts";
@@ -125,6 +126,7 @@ export function planAtomicAuditMutationBudget(
     | "audits"
     | "postAuditStatements"
     | "callerQueryCount"
+    | "preloaded"
   >,
 ): D1AuditMutationBudget {
   const mutationAssertionCount = Array.isArray(input.expectedMutationChanges)
@@ -135,6 +137,12 @@ export function planAtomicAuditMutationBudget(
   )
     ? 1
     : 0;
+  const distinctActors = new Set(input.audits.map((audit) => audit.actor_user_id));
+  // The logger and planner apply identical shape checks. Invalid JSON or
+  // incomplete actor snapshots must never earn a D1-query credit.
+  const preloadedActorCount = [...distinctActors].filter((actorId) =>
+    isValidPreloadedActorSnapshotJson(input.preloaded?.actorSnapshotJsonById?.[actorId])
+  ).length;
   return planD1AuditMutationBudget({
     mutationStatementCount: input.mutationStatements.length,
     mutationAssertionCount,
@@ -142,10 +150,10 @@ export function planAtomicAuditMutationBudget(
     postMutationAssertionCount: input.postMutationAssertions?.length ?? 0,
     auditEntryCount: input.audits.length,
     postAuditStatementCount: input.postAuditStatements?.length ?? 0,
-    distinctActorCount: new Set(
-      input.audits.map((audit) => audit.actor_user_id),
-    ).size,
+    distinctActorCount: distinctActors.size,
     actorXValidationQueryCount,
+    preloadedSettings: Boolean(input.preloaded?.settings),
+    preloadedActorCount,
     callerQueryCount: input.callerQueryCount,
   });
 }

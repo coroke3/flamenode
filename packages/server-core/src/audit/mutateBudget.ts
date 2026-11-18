@@ -33,6 +33,10 @@ export type D1AuditMutationBudgetInput = {
   distinctActorCount: number;
   /** actor_x_user_id が1件でもあればJSON1一括検証に1 query使う。 */
   actorXValidationQueryCount?: number;
+  /** Auditor's settings were already read by the authoritative request guard. */
+  preloadedSettings?: boolean;
+  /** Number of *matching* distinct audit actor snapshots already read by the guard. */
+  preloadedActorCount?: number;
   /**
    * この invocation で mutateWithAudit に到達するまでに消費した logical D1 query 数。
    * 指定しない既存 caller だけ D1_RESERVED_CALLER_QUERIES を使う。
@@ -89,8 +93,16 @@ export function planD1AuditMutationBudget(
     ? Math.ceil(auditEntryCount / AUDIT_INSERT_CHUNK_SIZE)
     : 0;
   const auditQueryCount = auditChunkCount * 2;
+  // prepareAuditLogEntries actually skips these reads if the same request's
+  // CostGuard/write guard supplied them. Count only the reads it will execute;
+  // never credit a missing/mismatched actor or change the 50-query cap.
+  const distinctActors = Math.max(0, input.distinctActorCount);
+  const creditedActors = Number.isSafeInteger(input.preloadedActorCount)
+    ? Math.min(distinctActors, Math.max(0, input.preloadedActorCount ?? 0))
+    : 0;
   const preparationQueryCount = auditEntryCount > 0
-    ? 1 + Math.max(0, input.distinctActorCount) + actorXValidationQueryCount
+    ? (input.preloadedSettings ? 0 : 1) +
+      (distinctActors - creditedActors) + actorXValidationQueryCount
     : 0;
   const batchQueryCount =
     mutationStatementCount +
