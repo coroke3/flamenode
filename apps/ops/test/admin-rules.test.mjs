@@ -91,7 +91,15 @@ test("MIG-0727 U03a: rules SSR preserves filters, upper-bound label, safe links 
   assert.match(html, /major/);
   assert.match(html, /admin\/rules\/terms%2Fa\/edit/);
   assert.match(html, /record=terms%2Fa/);
+  assert.match(html, /再同意通知 enqueue/);
+  assert.doesNotMatch(html, /通知enqueueは移行準備中/);
   assert.doesNotMatch(html, /TERMS.*確認して送信/);
+  const noAffected = renderToStaticMarkup(React.createElement(MemoryRouter, null,
+    React.createElement(AdminRulesView, { data: { ...payload, reacceptRequiredCount: 0, reacceptCountIsLowerBound: false } })));
+  assert.match(noAffected, /disabled=""[^>]*>再同意通知 enqueue|再同意通知 enqueue<\/button>/);
+  const noPublished = renderToStaticMarkup(React.createElement(MemoryRouter, null,
+    React.createElement(AdminRulesView, { data: { ...payload, currentPublished: null } })));
+  assert.doesNotMatch(noPublished, /再同意通知 enqueue/);
   const empty = renderToStaticMarkup(React.createElement(MemoryRouter, null,
     React.createElement(AdminRulesView, { data: { ...payload, items: [] } })));
   assert.match(empty, /規約バージョンがまだ登録されていません/);

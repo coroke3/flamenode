@@ -1,6 +1,6 @@
 import * as React from "react";
 import type { AdminApiEndpointsResponse } from "@flamenode/contracts";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   eventExportHref,
   readAdminApiEndpoints,
@@ -10,6 +10,7 @@ import {
 } from "../../api/adminApiEndpoints.js";
 import type { OpsFetch } from "../../api/read.js";
 import { createAdminApiEndpointWriteApi } from "../../api/adminApiEndpointWrite.js";
+import { adminReadRedirect } from "../../api/adminTop.js";
 import { AdminApiEndpointMutations } from "./ApiEndpointMutations.js";
 import { useApiResult } from "../useApiResult.js";
 
@@ -107,6 +108,25 @@ export function AdminApiEndpointsView({
         APIの新規発行・無効化は移行準備中です。現在は設定の確認と公開リンクの取得のみ利用できます。
       </p>}
 
+      <section className="fn-panel" aria-label="出力方式ガイド"
+        style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+        <article>
+          <strong className="fn-text-sm">新形式 v5</strong>
+          <p className="fn-muted fn-text-sm">イベント、作品、制作者、公開メンバー、チャプター、使用ソフト、公開回答を現在のFlameNode正本に沿って構造化して返します。</p>
+        </article>
+        <article>
+          <strong className="fn-text-sm">旧形式互換</strong>
+          <p className="fn-muted fn-text-sm">旧EventArchives系の配列・列名で返します。正規化済みの公開データから安全に復元できる値だけを再構成します。</p>
+        </article>
+        <article>
+          <strong className="fn-text-sm">リアルタイム更新</strong>
+          <p className="fn-muted fn-text-sm">リクエストごとにD1から最新情報を取得します。更新直後に反映したい用途向けです。</p>
+        </article>
+        <article>
+          <strong className="fn-text-sm">節約定期更新</strong>
+          <p className="fn-muted fn-text-sm">形式別にKV共有キャッシュし、指定間隔ごとにだけD1から再生成します。公開可否はキャッシュ利用前にD1で確認します。</p>
+        </article>
+      </section>
       <section className="fn-panel" aria-label="発行可能イベント">
         <h2>公開イベント（最大100件）</h2>
         <p className="fn-muted">
@@ -151,11 +171,11 @@ export function AdminApiEndpointsView({
   );
 }
 
-/** Read-only route candidate: do not register it in OpsRoutes until MIG-0726 owns routing. */
 export function AdminApiEndpointsPage({
   fetchFn = (path, init) => fetch(path, init),
-}: { fetchFn?: OpsFetch }): React.ReactElement {
+}: { fetchFn?: OpsFetch } = {}): React.ReactElement {
   const { search } = useLocation();
+  const navigate = useNavigate();
   const params = new URLSearchParams(search);
   const notice = (params.get("notice") ?? "").slice(0, 200);
   const error = (params.get("error") ?? "").slice(0, 200);
@@ -165,14 +185,28 @@ export function AdminApiEndpointsPage({
     "admin-api-endpoints",
     refreshKey,
   );
+  const redirect = result.status === "loading" ? null : adminReadRedirect(result);
+  React.useEffect(() => {
+    if (redirect) window.location.assign(redirect);
+  }, [redirect]);
+  const writeApi = React.useMemo(() => createAdminApiEndpointWriteApi(fetchFn), [fetchFn]);
 
-  if (result.status === "loading") return <p role="status">読み込み中…</p>;
-  if (result.status === "anonymous") return <p>ログインが必要です。<a href="/entry">ログイン</a></p>;
-  if (result.status === "forbidden") return <p>管理者権限が必要です。<a href="/dashboard">ダッシュボードへ</a></p>;
+  if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden") {
+    return <p role="status">読み込み中…</p>;
+  }
   if (result.status !== "ok") return <p role="alert">API設定を取得できませんでした。再読み込みしてください。</p>;
   return <>
     <AdminApiEndpointsView data={result.data} notice={notice} error={error} canWrite />
-    <AdminApiEndpointMutations data={result.data}
-      api={createAdminApiEndpointWriteApi(fetchFn)} onSuccess={() => refresh()} />
+    <AdminApiEndpointMutations
+      data={result.data}
+      api={writeApi}
+      onSuccess={() => refresh()}
+      onResult={(outcome) => {
+        const query = new URLSearchParams(
+          outcome.ok ? { notice: outcome.message } : { error: outcome.message },
+        );
+        navigate(`/admin/api-endpoints?${query.toString()}`, { replace: true });
+      }}
+    />
   </>;
 }

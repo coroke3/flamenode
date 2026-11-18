@@ -6,7 +6,9 @@ import * as React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { AdminAnnouncementDetailResponse } from "@flamenode/contracts";
 import { createAdminAnnouncementsApi } from "../../api/adminAnnouncementWrite.js";
+import { adminReadRedirect } from "../../api/adminTop.js";
 import type { OpsFetch } from "../../api/read.js";
+import { NotFoundView } from "../NotFoundView.js";
 import { useApiResult } from "../useApiResult.js";
 import { ConfirmDialog } from "../../components/shared/ConfirmDialog.js";
 
@@ -145,8 +147,7 @@ export function DeleteAnnouncementButton({ id, api, onDeleted }: {
   </section>;
 }
 
-/** Route candidate only; keep unmounted until MIG-0726 routing is released. */
-export function AnnouncementCreatePage({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactElement {
+export function AnnouncementCreatePage({ fetchFn }: { fetchFn?: OpsFetch } = {}): React.ReactElement {
   const api = createAdminAnnouncementsApi(fetchFn);
   const navigate = useNavigate();
   return <section className="fn-page" aria-label="新規お知らせ">
@@ -158,16 +159,22 @@ export function AnnouncementCreatePage({ fetchFn }: { fetchFn?: OpsFetch }): Rea
 }
 
 /** A 404/401/403 never mounts a previously loaded edit form or delete control. */
-export function AnnouncementEditPage({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactElement {
+export function AnnouncementEditPage({ fetchFn }: { fetchFn?: OpsFetch } = {}): React.ReactElement {
   const { id = "" } = useParams();
   const api = createAdminAnnouncementsApi(fetchFn);
   const navigate = useNavigate();
   const [refreshKey, refresh] = React.useReducer(n => n + 1, 0);
+  const [notice, setNotice] = React.useState<string | null>(null);
   const result = useApiResult(signal => api.read(id, signal), "admin-announcement-edit:" + id, refreshKey);
-  if (result.status === "loading") return <p role="status">読み込み中…</p>;
-  if (result.status === "anonymous") return <p>ログインが必要です。<Link to="/entry">ログイン</Link></p>;
-  if (result.status === "forbidden") return <p>管理者権限が必要です。<Link to="/dashboard">ダッシュボードへ</Link></p>;
-  if (result.status === "notFound") return <p role="alert">お知らせが見つかりません。</p>;
+  const redirect = result.status === "loading" ? null : adminReadRedirect(result);
+  React.useEffect(() => {
+    if (redirect) window.location.assign(redirect);
+  }, [redirect]);
+
+  if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden") {
+    return <p role="status">読み込み中…</p>;
+  }
+  if (result.status === "notFound") return <NotFoundView />;
   if (result.status !== "ok") return <p role="alert">お知らせを取得できませんでした。再読み込みしてください。</p>;
   const item = result.data.item;
   return <section className="fn-page" aria-label="お知らせ編集画面">
@@ -175,8 +182,9 @@ export function AnnouncementEditPage({ fetchFn }: { fetchFn?: OpsFetch }): React
       <Link to="/admin/announcements">お知らせ一覧へ</Link>
       <Link to={`/admin/audit?table=announcements&record=${encodeURIComponent(item.id)}`}>監査ログ</Link>
     </header>
+    {notice ? <p role="status" className="fn-alert fn-alert-success">{notice}</p> : null}
     <AnnouncementForm key={item.id + ":" + item.updated_at} mode="edit" initial={item} api={api}
-      onSaved={() => refresh()} />
+      onSaved={() => { setNotice("保存しました。"); refresh(); }} />
     <DeleteAnnouncementButton key={item.id} id={item.id} api={api}
       onDeleted={() => navigate("/admin/announcements")} />
   </section>;

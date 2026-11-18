@@ -1,15 +1,17 @@
-/** MIG-0727 U03b: unmounted terms lifecycle forms.
- * CURRENT src/components/admin/TermsForm.tsx; server enforces status and CAS.
- * No Ops router registrations, broadcast controls, or production writes here.
+/** MIG-0727 U03: terms lifecycle forms (CURRENT app/(admin)/admin/rules/new and [id]/edit, TermsForm.tsx).
+ * Server enforces authorization, status transitions and CAS.
  */
 import * as React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { AdminRuleDetailResponse } from "@flamenode/contracts";
 import { createAdminTermsApi } from "../../api/adminTerms.js";
 import { readAdminRuleDetail } from "../../api/adminRules.js";
+import { adminReadRedirect } from "../../api/adminTop.js";
 import type { OpsFetch } from "../../api/read.js";
+import { NotFoundView } from "../NotFoundView.js";
 import { useApiResult } from "../useApiResult.js";
 import { ConfirmDialog } from "../../components/shared/ConfirmDialog.js";
+import { DEFAULT_TERMS_MARKDOWN, DEFAULT_TERMS_VERSION_LABEL } from "./defaultTerms.js";
 
 type Api = ReturnType<typeof createAdminTermsApi>;
 type Detail = AdminRuleDetailResponse["item"];
@@ -21,9 +23,15 @@ export type TermsInitial = {
   status?: "draft" | "published" | "archived";
 };
 
+const DEFAULT_CREATE_INITIAL: Required<Pick<TermsInitial, "version_label" | "body_markdown" | "severity">> = {
+  version_label: DEFAULT_TERMS_VERSION_LABEL,
+  body_markdown: DEFAULT_TERMS_MARKDOWN,
+  severity: "major",
+};
+
 export function TermsForm({ mode, initial = {}, api, onSaved }: {
   mode: "create" | "edit"; initial?: TermsInitial; api: Api;
-  onSaved: (id: string, pendingReflection?: boolean) => void;
+  onSaved: (id: string, pendingReflection?: boolean, notice?: string) => void;
 }): React.ReactElement {
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
@@ -43,8 +51,9 @@ export function TermsForm({ mode, initial = {}, api, onSaved }: {
       if (!result.ok) { setError(result.message ?? "失敗しました。"); return; }
       const id = result.id ?? initial.id;
       if (!id) { setError("保存に失敗しました。再読み込みしてください。"); return; }
-      setSuccess(result.pendingPublicReflection ? message + " 公開側への反映待ちです。" : message);
-      onSaved(id, result.pendingPublicReflection);
+      const notice = result.pendingPublicReflection ? message + " 公開側への反映待ちです。" : message;
+      setSuccess(notice);
+      onSaved(id, result.pendingPublicReflection, notice);
     } catch {
       setError("保存に失敗しました。再読み込みしてください。");
     } finally {
@@ -121,11 +130,10 @@ export function TermsForm({ mode, initial = {}, api, onSaved }: {
   </>;
 }
 
-/** Requires the MIG-0726 owner to supply CURRENT's default version label and Markdown. */
-export function AdminRuleCreatePage({ initial, fetchFn }: {
-  initial: Required<Pick<TermsInitial, "version_label" | "body_markdown" | "severity">>;
+export function AdminRuleCreatePage({ initial = DEFAULT_CREATE_INITIAL, fetchFn }: {
+  initial?: Required<Pick<TermsInitial, "version_label" | "body_markdown" | "severity">>;
   fetchFn?: OpsFetch;
-}): React.ReactElement {
+} = {}): React.ReactElement {
   const navigate = useNavigate();
   const api = createAdminTermsApi(fetchFn);
   return <section className="fn-page" aria-label="新規利用規約バージョン">
@@ -137,16 +145,22 @@ export function AdminRuleCreatePage({ initial, fetchFn }: {
   </section>;
 }
 
-/** Unmounted edit route. Missing detail, lost session or permissions never mount write controls. */
-export function AdminRuleEditPage({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactElement {
+/** Edit route. Missing detail, lost session or permissions never mount write controls. */
+export function AdminRuleEditPage({ fetchFn }: { fetchFn?: OpsFetch } = {}): React.ReactElement {
   const { id = "" } = useParams();
   const [refreshKey, refresh] = React.useReducer(n => n + 1, 0);
+  const [notice, setNotice] = React.useState<string | null>(null);
   const api = createAdminTermsApi(fetchFn);
   const result = useApiResult(signal => readAdminRuleDetail(id, fetchFn, signal), "admin-rule-edit:" + id, refreshKey);
-  if (result.status === "loading") return <p role="status">読み込み中…</p>;
-  if (result.status === "anonymous") return <p>ログインが必要です。<Link to="/entry">ログイン</Link></p>;
-  if (result.status === "forbidden") return <p>管理者権限が必要です。<Link to="/dashboard">ダッシュボードへ</Link></p>;
-  if (result.status === "notFound") return <p role="alert">規約が見つかりません。</p>;
+  const redirect = result.status === "loading" ? null : adminReadRedirect(result);
+  React.useEffect(() => {
+    if (redirect) window.location.assign(redirect);
+  }, [redirect]);
+
+  if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden") {
+    return <p role="status">読み込み中…</p>;
+  }
+  if (result.status === "notFound") return <NotFoundView />;
   if (result.status !== "ok") return <p role="alert">規約を取得できませんでした。再読み込みしてください。</p>;
   const item: Detail = result.data.item;
   const initial: TermsInitial = {
@@ -158,7 +172,16 @@ export function AdminRuleEditPage({ fetchFn }: { fetchFn?: OpsFetch }): React.Re
   return <section className="fn-page" aria-label="規約バージョン編集">
     <header className="fn-page-head"><h1 className="fn-page-title">{item.version_label} を編集</h1>
       <Link to="/admin/rules">規約一覧へ</Link></header>
+    <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>
+      状態:{" "}
+      <span className={`fn-badge ${
+        item.status === "published" ? "fn-badge-accent"
+        : item.status === "archived" ? "fn-badge-neutral" : "fn-badge-soft"
+      }`}>{item.status ?? "draft"}</span>
+      {item.severity ? <span className="fn-badge fn-badge-soft" style={{ marginLeft: 6 }}>{item.severity}</span> : null}
+    </p>
+    {notice ? <p role="status" className="fn-alert fn-alert-success">{notice}</p> : null}
     <TermsForm key={item.id + ":" + item.status + ":" + item.version_label} mode="edit"
-      initial={initial} api={api} onSaved={() => refresh()} />
+      initial={initial} api={api} onSaved={(_savedId, _pending, msg) => { setNotice(msg ?? "保存しました。"); refresh(); }} />
   </section>;
 }

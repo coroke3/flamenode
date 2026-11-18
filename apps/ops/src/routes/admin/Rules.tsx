@@ -1,17 +1,25 @@
-/** MIG-0727 U03a: unmounted read-only admin rules list / detail candidates.
- * Publishing, archival and reaccept-broadcast require reviewed U03b write parity.
- */
+/** MIG-0727 U03: admin rules list and reaccept broadcast parity (CURRENT app/(admin)/admin/rules/page.tsx). */
 import * as React from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { AdminRulesResponse, AdminRuleDetailResponse } from "@flamenode/contracts";
 import { formatAnnouncementUnix } from "../../api/adminAnnouncements.js";
-import { readAdminRuleDetail, readAdminRules, ruleStatusQuery, type RuleStatus } from "../../api/adminRules.js";
+import { readAdminRules, ruleStatusQuery, type RuleStatus } from "../../api/adminRules.js";
+import { createAdminTermsApi } from "../../api/adminTerms.js";
+import { adminReadRedirect } from "../../api/adminTop.js";
 import type { OpsFetch } from "../../api/read.js";
 import { useApiResult } from "../useApiResult.js";
+import { TermsReacceptBroadcastButton, type TermsReacceptBroadcastButtonProps } from "./TermsReacceptBroadcastButton.js";
 
-export function AdminRulesView({ data, onStatusChange = () => {} }: {
+export function AdminRulesView({
+  data,
+  onStatusChange = () => {},
+  broadcastApi,
+  onRefresh,
+}: {
   data: AdminRulesResponse;
   onStatusChange?: (status: RuleStatus) => void;
+  broadcastApi?: TermsReacceptBroadcastButtonProps["api"];
+  onRefresh?: () => void;
 }): React.ReactElement {
   return <section className="fn-page" aria-label="規約管理">
     <header className="fn-page-head">
@@ -33,7 +41,15 @@ export function AdminRulesView({ data, onStatusChange = () => {} }: {
       <p>major公開時はユーザー行を一括更新せず、同意履歴から再同意要否を動的判定します。</p>
       <p>現在の再同意待ち: <strong>{data.reacceptRequiredCount.toLocaleString()}
         {data.reacceptCountIsLowerBound ? "件以上" : "件"}</strong></p>
-      {data.currentPublished ? <p>公開中: {data.currentPublished.version_label}。通知enqueueは移行準備中です。</p> : null}
+      {data.currentPublished ? <p>通知 enqueue:{" "}
+        <TermsReacceptBroadcastButton
+          key={data.currentPublished.id}
+          termsId={data.currentPublished.id}
+          versionLabel={data.currentPublished.version_label}
+          affectedCount={data.reacceptRequiredCount}
+          api={broadcastApi}
+          onSuccess={onRefresh}
+        /></p> : null}
       <p className="fn-muted">Discord通知はnotification_outboxに30件ずつ段階enqueueします。送信結果は通知管理で確認できます。</p>
     </aside>
     <div style={{ overflowX: "auto" }}><table className="fn-table">
@@ -50,7 +66,7 @@ export function AdminRulesView({ data, onStatusChange = () => {} }: {
         </span></td>
         <td>{formatAnnouncementUnix(item.published_at, true)}</td>
         <td>{formatAnnouncementUnix(item.updated_at)}</td>
-        <td><Link className="fn-btn fn-btn-ghost fn-btn-sm" to={`/admin/rules/${encodeURIComponent(item.id)}/edit`}>詳細</Link>{" "}
+        <td><Link className="fn-btn fn-btn-ghost fn-btn-sm" to={`/admin/rules/${encodeURIComponent(item.id)}/edit`}>編集</Link>{" "}
           <Link className="fn-btn fn-btn-ghost fn-btn-sm"
             to={`/admin/audit?table=terms_versions&record=${encodeURIComponent(item.id)}`}>監査</Link></td>
       </tr>)}
@@ -63,16 +79,29 @@ export function AdminRulesView({ data, onStatusChange = () => {} }: {
 
 export function AdminRulesPage({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactElement {
   const [params, setParams] = useSearchParams();
+  const [refreshKey, refresh] = React.useReducer(n => n + 1, 0);
   const status = ruleStatusQuery(params);
   const result = useApiResult(
     signal => readAdminRules(new URLSearchParams({ status }), fetchFn, signal),
     "admin-rules?status=" + status,
+    refreshKey,
   );
-  if (result.status === "loading") return <p role="status">読み込み中…</p>;
-  if (result.status === "anonymous") return <p>ログインが必要です。<Link to="/entry">ログイン</Link></p>;
-  if (result.status === "forbidden") return <p>管理者権限が必要です。<Link to="/dashboard">ダッシュボードへ</Link></p>;
+  const redirect = result.status === "loading" ? null : adminReadRedirect(result);
+  React.useEffect(() => {
+    if (redirect) window.location.assign(redirect);
+  }, [redirect]);
+  const broadcastApi = React.useMemo(() => createAdminTermsApi(fetchFn), [fetchFn]);
+
+  if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden") {
+    return <p role="status">読み込み中…</p>;
+  }
   if (result.status !== "ok") return <p role="alert">規約を取得できませんでした。再読み込みしてください。</p>;
-  return <AdminRulesView data={result.data} onStatusChange={next => setParams({ status: next })} />;
+  return <AdminRulesView
+    data={result.data}
+    onStatusChange={next => setParams({ status: next })}
+    broadcastApi={broadcastApi}
+    onRefresh={() => refresh()}
+  />;
 }
 
 export function AdminRuleDetailView({ data }: { data: AdminRuleDetailResponse }): React.ReactElement {
@@ -88,15 +117,4 @@ export function AdminRuleDetailView({ data }: { data: AdminRuleDetailResponse })
     <label className="fn-field">本文 (Markdown)<textarea className="fn-input" name="body_markdown"
       value={item.body_markdown} rows={10} readOnly /></label>
   </section>;
-}
-
-export function AdminRuleDetailPage({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactElement {
-  const { id = "" } = useParams();
-  const result = useApiResult(signal => readAdminRuleDetail(id, fetchFn, signal), "admin-rule-detail:" + id);
-  if (result.status === "loading") return <p role="status">読み込み中…</p>;
-  if (result.status === "anonymous") return <p>ログインが必要です。<Link to="/entry">ログイン</Link></p>;
-  if (result.status === "forbidden") return <p>管理者権限が必要です。<Link to="/dashboard">ダッシュボードへ</Link></p>;
-  if (result.status === "notFound") return <p role="alert">規約バージョンが見つかりません。</p>;
-  if (result.status !== "ok") return <p role="alert">規約を取得できませんでした。再読み込みしてください。</p>;
-  return <AdminRuleDetailView data={result.data} />;
 }

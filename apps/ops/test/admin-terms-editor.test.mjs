@@ -1,21 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { MemoryRouter } from "react-router-dom";
 import {
   TermsForm, AdminRuleCreatePage,
 } from "../.test-dist/apps/ops/src/routes/admin/TermsEditor.js";
+import { TermsReacceptBroadcastButton } from "../.test-dist/apps/ops/src/routes/admin/TermsReacceptBroadcastButton.js";
+import {
+  DEFAULT_TERMS_MARKDOWN, DEFAULT_TERMS_VERSION_LABEL,
+} from "../.test-dist/apps/ops/src/routes/admin/defaultTerms.js";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "https://flamenode.test/admin/rules",
 });
-for (const key of ["window", "document", "navigator", "HTMLElement", "Node", "FormData", "Event", "MouseEvent"]) {
+for (const key of ["window", "document", "navigator", "Element", "HTMLElement", "HTMLInputElement", "Node", "FormData", "Event", "MouseEvent"]) {
   Object.defineProperty(globalThis, key, { configurable: true, value: dom.window[key] });
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const { createRoot } = await import("react-dom/client");
 
 const draft = {
   id: "tv-123", version_label: "2026-11", body_markdown: "# テキスト",
@@ -142,4 +147,92 @@ test("MIG-0727 U03b: archive requires confirmation; 409 error never claims succe
     assert.equal(saved, 0);
     assert.match(ui.target.querySelector('[role="alert"]').textContent, /更新が競合しました/);
   } finally { await ui.close(); }
+});
+
+test("MIG-0727 T05/T06: TermsReacceptBroadcastButton enforces TERMS confirmation, carries cursor across batches, and blocks duplicate submits", async () => {
+  const calls = [];
+  let refreshes = 0;
+  const pending = deferred();
+  const api = {
+    broadcast: (id, confirm, cursor, content) => {
+      calls.push({ id, confirm, cursor, content });
+      if (calls.length === 1) return pending.promise;
+      return Promise.resolve({
+        ok: true,
+        enqueued: 12,
+        cursor: "user-2",
+        message: "2回目OK",
+      });
+    },
+  };
+  const ui = await mount(React.createElement(TermsReacceptBroadcastButton, {
+    termsId: "tv-pub",
+    versionLabel: "2026-11",
+    affectedCount: 30,
+    api,
+    onSuccess: () => { refreshes++; },
+  }));
+  try {
+    const trigger = ui.target.querySelector("button");
+    assert.equal(trigger.disabled, false);
+    await React.act(async () => trigger.click());
+    const dialog = ui.target.querySelector('[role="alertdialog"]');
+    assert.ok(dialog);
+    const submitBtn = [...dialog.querySelectorAll("button")].find(b => b.textContent.includes("enqueue"));
+    const inputs = dialog.querySelectorAll("input");
+    const cursorInput = inputs[0];
+    const confirmInput = inputs[1];
+    assert.equal(submitBtn.disabled, true, "T05: disabled until TERMS is entered");
+
+    // Wrong confirmation string keeps submit disabled
+    await React.act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+      setter.call(confirmInput, "TERM");
+      confirmInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    assert.equal(submitBtn.disabled, true);
+    assert.equal(calls.length, 0);
+
+    // Exact TERMS enables submit
+    await React.act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+      setter.call(confirmInput, "TERMS");
+      confirmInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    assert.equal(submitBtn.disabled, false);
+
+    // First submit + duplicate click while busy
+    await React.act(async () => submitBtn.click());
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].cursor, "");
+    await React.act(async () => submitBtn.click());
+    assert.equal(calls.length, 1, "busy blocks duplicate dispatch");
+
+    await React.act(async () => {
+      pending.resolve({ ok: true, enqueued: 30, cursor: "user-1", message: "1回目OK", warning: "要確認" });
+    });
+    assert.equal(refreshes, 1);
+    assert.equal(cursorInput.value, "user-1");
+    assert.match(dialog.textContent, /合計 enqueued: 30/);
+    assert.match(dialog.querySelector('[role="alert"]').textContent, /要確認/);
+
+    // T06: Second submit sends previous cursor "user-1"
+    await React.act(async () => submitBtn.click());
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].cursor, "user-1");
+    assert.match(dialog.textContent, /合計 enqueued: 42/);
+    assert.equal(cursorInput.value, "user-2");
+    assert.equal(refreshes, 2);
+  } finally { await ui.close(); }
+});
+
+test("MIG-0727 U03: AdminRuleCreatePage defaults match CURRENT defaultTerms.ts", async () => {
+  const currentSrc = await readFile(new URL("../../../src/lib/terms/defaultTerms.ts", import.meta.url), "utf8");
+  assert.ok(currentSrc.includes(DEFAULT_TERMS_VERSION_LABEL));
+  assert.ok(currentSrc.includes(DEFAULT_TERMS_MARKDOWN));
+  const html = renderToStaticMarkup(React.createElement(MemoryRouter, null,
+    React.createElement(AdminRuleCreatePage)));
+  assert.match(html, new RegExp(DEFAULT_TERMS_VERSION_LABEL));
+  assert.match(html, /FlameNode 利用規約/);
+  assert.match(html, /value="major" selected=""/);
 });

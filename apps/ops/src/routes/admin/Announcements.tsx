@@ -3,8 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { AdminAnnouncementListResponse } from "@flamenode/contracts";
 import {
   announcementQuery, formatAnnouncementUnix, readAdminAnnouncements,
-  type AnnouncementAudience, type AnnouncementStatus,
 } from "../../api/adminAnnouncements.js";
+import { adminReadRedirect } from "../../api/adminTop.js";
 import type { OpsFetch } from "../../api/read.js";
 import { useApiResult } from "../useApiResult.js";
 
@@ -72,16 +72,19 @@ export function AnnouncementsView({
   </section>;
 }
 
-/** Unmounted candidate: the MIG-0726 owner retains control of the Ops admin router. */
 export function AnnouncementsPage({
   fetchFn,
-}: { fetchFn?: OpsFetch }): React.ReactElement {
+}: { fetchFn?: OpsFetch } = {}): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const key = announcementQuery(params);
   const result = useApiResult(
     (signal) => readAdminAnnouncements(new URLSearchParams(key), fetchFn, signal),
     "admin-announcements?" + key,
   );
+  const redirect = result.status === "loading" ? null : adminReadRedirect(result);
+  React.useEffect(() => {
+    if (redirect) window.location.assign(redirect);
+  }, [redirect]);
 
   function changeFilter(name: FilterName, value: string): void {
     const next = new URLSearchParams(key);
@@ -89,9 +92,9 @@ export function AnnouncementsPage({
     setParams(announcementQuery(next));
   }
 
-  if (result.status === "loading") return <p role="status">読み込み中…</p>;
-  if (result.status === "anonymous") return <p>ログインが必要です。<Link to="/entry">ログイン</Link></p>;
-  if (result.status === "forbidden") return <p>管理者権限が必要です。<Link to="/dashboard">ダッシュボードへ</Link></p>;
+  if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden") {
+    return <p role="status">読み込み中…</p>;
+  }
   if (result.status !== "ok") return <p role="alert">お知らせを取得できませんでした。再読み込みしてください。</p>;
   return <AnnouncementsView data={result.data} onFilterChange={changeFilter} />;
 }

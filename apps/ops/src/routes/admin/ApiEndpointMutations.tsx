@@ -1,6 +1,5 @@
-/** MIG-0727 U04: unmounted Ops controls using SA-007/008 Hono writes.
- * The parent route remains owned by MIG-0726; server validates admin role,
- * public-event visibility, audit CAS, origin and Cost Guard.
+/** MIG-0727 U04: Ops API endpoint activation/deactivation controls (SA-007/008, SA-108/109).
+ * Server validates admin role, public-event visibility, audit CAS, origin and Cost Guard.
  */
 import * as React from "react";
 import type { AdminApiEndpointsResponse } from "@flamenode/contracts";
@@ -11,16 +10,21 @@ type Props = {
   data: AdminApiEndpointsResponse;
   api: Api;
   onSuccess: () => void;
+  onResult?: (outcome: { ok: boolean; message: string }) => void;
 };
 
-export function AdminApiEndpointMutations({ data, api, onSuccess }: Props): React.ReactElement {
+export function AdminApiEndpointMutations({ data, api, onSuccess, onResult }: Props): React.ReactElement {
   const [eventId, setEventId] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  async function run(task: () => ReturnType<Api["enable"]>): Promise<void> {
+  async function run(
+    task: () => ReturnType<Api["enable"]>,
+    defaultOk: string,
+    defaultErr: string,
+  ): Promise<void> {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
@@ -29,13 +33,27 @@ export function AdminApiEndpointMutations({ data, api, onSuccess }: Props): Reac
     try {
       const result = await task();
       if (result.ok) {
-        setMessage(result.message ?? "公開API設定を更新しました。");
+        const text = result.message ?? defaultOk;
+        if (onResult) {
+          onResult({ ok: true, message: text });
+        } else {
+          setMessage(text);
+        }
         onSuccess();
       } else {
-        setError(result.message ?? "公開API設定を更新できませんでした。");
+        const text = result.message ?? defaultErr;
+        if (onResult) {
+          onResult({ ok: false, message: text });
+        } else {
+          setError(text);
+        }
       }
     } catch {
-      setError("公開API設定を更新できませんでした。");
+      if (onResult) {
+        onResult({ ok: false, message: defaultErr });
+      } else {
+        setError(defaultErr);
+      }
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -49,7 +67,11 @@ export function AdminApiEndpointMutations({ data, api, onSuccess }: Props): Reac
     <form onSubmit={e => {
       e.preventDefault();
       if (eventId && validOptions.some(row => row.id === eventId)) {
-        void run(() => api.enable(eventId));
+        void run(
+          () => api.enable(eventId),
+          "公開APIを有効化しました。",
+          "公開APIを有効化できませんでした。",
+        );
       }
     }}>
       <label className="fn-field">公開イベント
@@ -67,7 +89,11 @@ export function AdminApiEndpointMutations({ data, api, onSuccess }: Props): Reac
       style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
       <span>{row.event_title} ({row.event_id})</span>
       <button type="button" className="fn-btn fn-btn-sm fn-btn-ghost" disabled={busy}
-        onClick={() => void run(() => api.setActive(row.event_id, 0))}>無効化</button>
+        onClick={() => void run(
+          () => api.setActive(row.event_id, 0),
+          "公開API設定を更新しました。",
+          "公開API設定を更新できませんでした。",
+        )}>無効化</button>
     </div>)}
     {data.rows.length === 0 ? <p className="fn-muted">発行済みのイベントAPIはありません。</p> : null}
     {error ? <p role="alert" className="fn-alert fn-alert-danger">{error}</p> : null}
