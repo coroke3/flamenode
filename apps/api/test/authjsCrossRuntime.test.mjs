@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { runTestWithTsx } from "../../../src/lib/testing/runTestWithTsx.mjs";
@@ -424,6 +425,117 @@ if (runTestWithTsx(import.meta.url)) {
       assert.throws(() => buildUnmountedAuthConfig({
         ...base, authOrigin,
       }), /AUTH_ORIGIN_INVALID/);
+    }
+  });
+
+  test("U02 T02: Hono adapter-created session cookie is readable by CURRENT NextAuth and Hono session reader", async (t) => {
+    const { d1 } = createHarness(t);
+    const { extractSessionToken, resolveSessionUser } = await import("../src/auth/session.ts");
+    const config = buildUnmountedAuthConfig(input(d1));
+    const sessionToken = `synthetic_hono_${randomUUID()}`;
+    const created = await config.adapter.createSession({
+      sessionToken,
+      userId: USERS.valid.id,
+      expires: new Date(Date.now() + 7 * 86_400_000),
+    });
+    assert.equal(created.sessionToken, sessionToken);
+
+    const cookieName = BASELINE_COOKIES.sessionToken.name;
+    const honoApp = createUnmountedAuthRoutes(input(d1));
+    const honoSessionRes = await honoApp.request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/session`, {
+      headers: { cookie: `${cookieName}=${sessionToken}` },
+    });
+    assert.equal(honoSessionRes.status, 200);
+    const honoClaims = sessionClaims(await honoSessionRes.json());
+    assert.equal(honoClaims?.id, USERS.valid.id);
+    const honoCookie = setCookies(honoSessionRes)[cookieName];
+    assert.equal(honoCookie?.value, sessionToken);
+    assert.deepEqual(withoutVolatile(honoCookie), BASELINE_COOKIES.sessionToken.observedOnRead);
+
+    const cookieHeader = `${cookieName}=${honoCookie.value}`;
+    const currentRes = await authRequest("session", { cookieHeader });
+    assert.equal(currentRes.status, 200);
+    assert.deepEqual(sessionClaims(await currentRes.json()), honoClaims);
+
+    const extracted = extractSessionToken(cookieHeader, { secure: true });
+    assert.equal(extracted, sessionToken);
+    const resolved = await resolveSessionUser(d1, extracted);
+    assert.equal(resolved?.id, USERS.valid.id);
+    assert.equal(resolved?.role, USERS.valid.role);
+    assert.equal(resolved?.is_banned, USERS.valid.is_banned);
+    assert.equal(resolved?.active_x_user_id, USERS.valid.active_x_user_id);
+  });
+
+  test("U02: existing D1 logins remain valid across Hono session reads and single-session signout", async (t) => {
+    const { d1, sqlite } = createHarness(t);
+    const secondToken = `synthetic_second_${randomUUID()}`;
+    sqlite
+      .prepare(`INSERT INTO "session" ("sessionToken", "userId", expires) VALUES (?, ?, ?)`)
+      .run(secondToken, USERS.valid.id, Date.now() + 7 * 86_400_000);
+
+    const cookieName = BASELINE_COOKIES.sessionToken.name;
+    const csrfName = BASELINE_COOKIES.csrfToken.name;
+    const app = createUnmountedAuthRoutes(input(d1));
+
+    // Reading SESSIONS.valid through Hono does not invalidate or rotate existing sessions.
+    const readRes = await app.request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/session`, {
+      headers: { cookie: `${cookieName}=${SESSIONS.valid.sessionToken}` },
+    });
+    assert.equal(readRes.status, 200);
+    assert.equal(setCookies(readRes)[cookieName]?.value, SESSIONS.valid.sessionToken);
+
+    // Signing out secondToken via Hono deletes only secondToken; existing SESSIONS.valid and multiX stay active.
+    const csrfRes = await app.request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/csrf`);
+    const { csrfToken } = await csrfRes.json();
+    const csrfCookie = setCookies(csrfRes)[csrfName]?.value;
+    const signoutRes = await postHonoSignout(app, {
+      sessionToken: secondToken,
+      csrfCookie,
+      csrfToken,
+    });
+    assertAuthJsSignoutAccepted(signoutRes);
+    assert.equal(
+      sqlite.prepare('SELECT "sessionToken" FROM "session" WHERE "sessionToken" = ?').get(secondToken),
+      undefined,
+    );
+
+    for (const [token, expectedUserId] of [
+      [SESSIONS.valid.sessionToken, USERS.valid.id],
+      [SESSIONS.multiX.sessionToken, USERS.multiX.id],
+    ]) {
+      const legacy = await authRequest("session", { cookieHeader: `${cookieName}=${token}` });
+      assert.equal((await legacy.json())?.user?.id, expectedUserId);
+      const target = await app.request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/session`, {
+        headers: { cookie: `${cookieName}=${token}` },
+      });
+      assert.equal((await target.json())?.user?.id, expectedUserId);
+    }
+  });
+
+  test("U01/U02: unmounted auth routes return private 503 on config or DB unavailability without secret leaks", async (t) => {
+    const { d1 } = createHarness(t);
+    const secret = "super-secret-must-not-leak-in-503";
+    const cases = [
+      { ...input(d1), authSecret: "", discordClientSecret: secret },
+      { ...input(d1), discordClientSecret: "" },
+      { ...input(d1), authOrigin: "https://attacker.example", authSecret: secret },
+      { ...input(d1), d1: null, authSecret: secret },
+    ];
+    for (const badInput of cases) {
+      const app = createUnmountedAuthRoutes(badInput);
+      for (const [method, path] of [
+        ["GET", "/api/auth/session"],
+        ["GET", "/api/auth/csrf"],
+        ["POST", "/api/auth/signout"],
+      ]) {
+        const res = await app.request(`${AUTH_BASELINE_ENV.AUTH_URL}${path}`, { method });
+        assert.equal(res.status, 503, `${method} ${path}`);
+        assert.equal(res.headers.get("cache-control"), "no-store");
+        const body = await res.text();
+        assert.equal(body, '{"error":"auth_temporarily_unavailable"}');
+        assert.doesNotMatch(body, new RegExp(secret));
+        assert.doesNotMatch(body, /AUTH_SECRET_MISSING|AUTH_DISCORD_CONFIG_MISSING|AUTH_ORIGIN_|AUTH_DATABASE_UNAVAILABLE/);
+      }
     }
   });
 }
