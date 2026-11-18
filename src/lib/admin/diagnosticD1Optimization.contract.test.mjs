@@ -10,8 +10,8 @@ const [healthPage, integrityPage, securityPage, healthChecks, integrityChecks, s
       "utf8",
     ),
     readFile(new URL("../../../app/(admin)/admin/security/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("./healthChecks.ts", import.meta.url), "utf8"),
-    readFile(new URL("./integrityChecks.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../../packages/server-core/src/admin/healthChecks.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../../packages/server-core/src/admin/integrityChecks.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../../components/admin/DiagnosticStatusResults.tsx", import.meta.url),
       "utf8",
