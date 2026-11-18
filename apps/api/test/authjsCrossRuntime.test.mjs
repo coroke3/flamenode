@@ -99,17 +99,48 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(row.sessionToken, SESSIONS.valid.sessionToken);
   });
 
-  test("U01: atomic account-link port is required; ordinary Drizzle link is refused", async (t) => {
+  test("U01 (MIG-0803): adapter.linkAccount enforces atomic Discord linking, token stripping, and conflict rejection", async (t) => {
     const { d1, sqlite } = createHarness(t);
     const config = buildUnmountedAuthConfig(input(d1));
-    const before = sqlite.prepare('SELECT COUNT(*) AS n FROM "account"').get().n;
+    const beforeAccounts = sqlite.prepare('SELECT COUNT(*) AS n FROM "account"').get().n;
+    await assert.rejects(config.adapter.linkAccount({
+      userId: USERS.noX.id,
+      type: "oauth",
+      provider: "discord",
+      providerAccountId: USERS.valid.discord_id,
+    }), /AUTH_DISCORD_ID_CONFLICT/);
     await assert.rejects(config.adapter.linkAccount({
       userId: USERS.valid.id,
       type: "oauth",
+      provider: "github",
+      providerAccountId: "gh-1",
+    }), /AUTH_UNSUPPORTED_ACCOUNT_PROVIDER/);
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM "account"').get().n, beforeAccounts);
+
+    sqlite
+      .prepare('INSERT INTO "user" (id, name, email, role, is_banned) VALUES (?, ?, ?, ?, ?)')
+      .run("user-unlinked", "Unlinked", "unlinked@example.com", "user", 0);
+    await config.adapter.linkAccount({
+      userId: "user-unlinked",
+      type: "oauth",
       provider: "discord",
-      providerAccountId: "synthetic_unlinked",
-    }), /AUTH_ATOMIC_LINK_PORT_PENDING/);
-    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM "account"').get().n, before);
+      providerAccountId: "discord-unlinked-1",
+      access_token: "secret-access-token",
+      refresh_token: "secret-refresh-token",
+      id_token: "secret-id-token",
+      scope: "identify email",
+    });
+    const inserted = sqlite
+      .prepare('SELECT * FROM "account" WHERE "userId" = ?')
+      .get("user-unlinked");
+    assert.equal(inserted.providerAccountId, "discord-unlinked-1");
+    assert.equal(inserted.access_token, null);
+    assert.equal(inserted.refresh_token, null);
+    assert.equal(inserted.id_token, null);
+    assert.equal(
+      sqlite.prepare('SELECT discord_id FROM "user" WHERE id = ?').get("user-unlinked").discord_id,
+      "discord-unlinked-1",
+    );
   });
 
 
