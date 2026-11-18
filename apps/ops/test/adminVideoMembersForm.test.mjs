@@ -1320,3 +1320,20 @@ test("MIG-0730 U02cw: forged save accessors fail closed; ordinary success remain
     assert.match(normal.target.textContent, /公開ページへの反映は/);
   } finally { await normal.cleanup(); }
 });
+
+test("MIG-0730 U02da: standalone Form rejects a truthy non-callable save port", async () => {
+  for (const malformed of [{ configured: true }, "configured", true]) {
+    let refreshes = 0;
+    const ui = setup({ save: malformed, onSaved: () => { refreshes++; } });
+    try {
+      await ui.render();
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null,
+        "only callable save ports may enable the member form");
+      assert.match(ui.target.textContent, /保存機能は移行中/);
+      await ui.submit();
+      assert.equal(refreshes, 0);
+    } finally {
+      await ui.cleanup();
+    }
+  }
+});

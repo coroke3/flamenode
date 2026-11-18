@@ -139,7 +139,7 @@ export function AdminVideoMembersEditorPreview({
   // Both keyed form remounts and full Preview remounts must keep an old PUT
   // latched until it settles; never retry an ambiguous possibly-committed PUT.
   const guardedSave = React.useMemo<AdminVideoMembersSave | undefined>(() => {
-    if (!save) return undefined;
+    if (typeof save !== "function") return undefined;
     return async formData => {
       // FormData is mutable, not an authenticated submission. Independently
       // bind all transport keys before giving them to an injected SA-085 port:
@@ -175,7 +175,7 @@ export function AdminVideoMembersEditorPreview({
   // the server commits. Report uncertainty without leaking provider details
   // or telling an admin that the permission change definitely failed.
   const guardedPermission = React.useMemo<FieldProps["applyPermissionBatch"] | undefined>(() => {
-    if (!applyPermissionBatch) return undefined;
+    if (typeof applyPermissionBatch !== "function") return undefined;
     return async input => {
       // Bind the target once. A getter can otherwise report this preview's
       // ID here and a different video ID to the injected POST adapter.
@@ -252,7 +252,10 @@ export function AdminVideoMembersEditorPreview({
   // membership snapshot. Changes to title/YouTube metadata alone should not
   // throw away local in-progress edits. Use only validated edit-relevant data,
   // not the entire DTO or its object identity, for the form's remount key.
-  const canEdit = Boolean(save && searchXUsers && applyPermissionBatch);
+  // Injected preview ports can be malformed at runtime. Never let truthy
+  // non-functions grant edit/write capability or reach the shared field.
+  const canEdit = typeof save === "function" &&
+    typeof searchXUsers === "function" && typeof applyPermissionBatch === "function";
   // Capability loss/regrant is an authorization boundary. Retire the old form
   // including pending permission callbacks, private edits and confirmation UI.
   // Changes to title/YouTube metadata alone still preserve the local draft.
@@ -264,7 +267,7 @@ export function AdminVideoMembersEditorPreview({
       key={videoId}
       initialMembers={valid.initialMembers}
       disabled={!canEdit}
-      searchXUsers={searchXUsers ?? unavailableSearch}
+      searchXUsers={typeof searchXUsers === "function" ? searchXUsers : unavailableSearch}
       applyPermissionBatch={guardedPermission ?? unavailablePermission}
       permissionTargetVideoId={canEdit ? videoId : null}
     />

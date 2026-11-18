@@ -262,3 +262,17 @@ test("MIG-0730 U02cz: unmounted editor uses only the bounded participant snapsho
   assert.equal(reads, 1);
   assert.equal(traversed, 0);
 });
+
+test("MIG-0730 U02da: truthy non-function write/search ports cannot enable the unmounted editor", () => {
+  const valid = { ...dataProps, searchXUsers, applyPermissionBatch, save };
+  const active = html(valid);
+  assert.match(active, /参加者設定を保存/, "three callable ports still enable the form");
+  for (const key of ["save", "searchXUsers", "applyPermissionBatch"]) {
+    for (const invalid of [{ configured: true }, "configured", true]) {
+      const markup = html({ ...valid, [key]: invalid });
+      assert.match(markup, /保存機能は移行中/, key + " non-callable port");
+      assert.doesNotMatch(markup, /参加者設定を保存/, key + " must not enable writes");
+      assert.match(markup, /Member 0/, "public read-only rows remain renderable");
+    }
+  }
+});

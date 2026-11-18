@@ -146,7 +146,8 @@ function AdminVideoMembersFormForVideo({
     typeof sharedEditor.searchXUsers === "function" &&
     typeof sharedEditor.applyPermissionBatch === "function"
   );
-  const enabled = Boolean(save) && writableMemberEditor && isSafeVideoId(video.id);
+  // A malformed injected save port must not render an actionable button.
+  const enabled = typeof save === "function" && writableMemberEditor && isSafeVideoId(video.id);
   // Losing the required member field is also a write-capability revocation,
   // even when the save function itself remains present.
   // A true-to-true save adapter change may represent a new authorization
