@@ -35,24 +35,59 @@ manageRoutes.use("*", async (c, next) => {
 // MIG-0655: playlist writes verify Origin BEFORE reading the Auth.js session.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
 const staffWritePaths = ["/events/:id/staff", "/events/:id/staff/:staffId", "/events/:id/owner-transfer"];
-const guardedWritePaths = [...playlistWritePaths, ...staffWritePaths];
+// SA-058..064 slot write candidates remain UNMOUNTED until parity and review.
+const slotWritePaths = [
+  "/events/:id/slots/batch-delete",
+  "/events/:id/slots/batch-release",
+  "/events/:id/slots/labels",
+  "/events/:id/slots/:slotId/release",
+  "/events/:id/slots/generate-chunk",
+  "/events/:id/slots/delete-available-chunk",
+];
+// SA-056/057 are prepared for the same Origin-first / session / writeGuard / DB
+// stack. The submitted-danger Hono candidate remains deliberately UNMOUNTED.
+const submittedDangerWritePaths = [
+  "/events/:id/slots/:slotId/force-release-submitted",
+  "/events/:id/slots/:slotId/release-submitted-video",
+];
+const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths, ...submittedDangerWritePaths];
+// Dynamic :slotId path overlaps /batch-delete etc. Apply ONLY to DELETE.
+const singleSlotDeletePath = "/events/:id/slots/:slotId";
+
+
 const originOptions = (c: import("hono").Context<AppEnv>) => ({
   loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
   allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
 });
-for (const path of guardedWritePaths) {
+for (const path of scopedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) => originGuardMiddleware(originOptions(c))(c, next)));
 }
+for (const path of staffWritePaths) {
+  manageRoutes.use(path, onlyMutating((c, next) => originGuardMiddleware(originOptions(c))(c, next)));
+}
+manageRoutes.use(singleSlotDeletePath, (c, next) =>
+  c.req.method === "DELETE" ? originGuardMiddleware(originOptions(c))(c, next) : next());
 manageRoutes.use("*", sessionMiddleware());
 manageRoutes.use("*", requireAuth());
 // The existing read-only /manage API remains unchanged. Every mutating
 // playlist AND staff path must receive writeGuard(identity/TOS) -> DB before
 // the handlers; onlyMutating keeps the GET staff endpoint read-only.
-for (const path of guardedWritePaths) {
+for (const path of scopedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) =>
     writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));
   manageRoutes.use(path, onlyMutating(dbMiddleware));
 }
+for (const path of staffWritePaths) {
+  manageRoutes.use(path, onlyMutating((c, next) =>
+    writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));
+  manageRoutes.use(path, onlyMutating(dbMiddleware));
+}
+manageRoutes.use(singleSlotDeletePath, (c, next) =>
+  c.req.method === "DELETE"
+    ? writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)
+    : next());
+manageRoutes.use(singleSlotDeletePath, (c, next) =>
+  c.req.method === "DELETE" ? dbMiddleware(c, next) : next());
 
 manageRoutes.route("/navigation", manageNavigationRoutes);
 manageRoutes.route("/events/:id/staff", manageStaffRoutes);

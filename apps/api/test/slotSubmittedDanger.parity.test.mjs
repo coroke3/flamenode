@@ -1,0 +1,622 @@
+import { canonicalSlotAuditSnapshotJson } from "./helpers/slotAuditSnapshot.mjs";
+// MIG-0656 U03f: real Hono candidate + SQLite D1 batch, still UNMOUNTED.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { Hono } from "hono";
+import { drizzle } from "drizzle-orm/d1";
+import * as schema from "@flamenode/db/schema";
+import { slotSubmittedDangerRoutes } from "../src/routes/manage/slotSubmittedDanger.ts";
+import { SUBMITTED_VIDEO_AUDIT_COLUMNS } from "../src/routes/manage/slotSubmittedVideoAudit.ts";
+import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
+
+const ORIGIN="https://app.flamenode.example";
+const SESSION_TOKEN="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const ADMIN={id:"admin-1",role:"admin",is_banned:0};
+const STAFF={id:"staff-1",role:"user",is_banned:0};
+const cols=[
+  "id","event_id","reserved_by_user_id","x_user_id",
+  "reserved_x_id_snapshot","display_name","slot_label","start_time",
+  "sort_order","reservation_group_id","video_id","status","updated_at","version",
+];
+const slot=(id,patch={})=>({
+  id,event_id:"ev-1",reserved_by_user_id:"recipient-1",
+  x_user_id:"x1",reserved_x_id_snapshot:"x1",display_name:"Owner",
+  slot_label:"Keep",start_time:null,sort_order:0,
+  reservation_group_id:"g  ",video_id:"vid",
+  status:"submitted",updated_at:100,version:1,...patch,
+});
+const video=(patch={})=>({
+  id:"vid",primary_event_id:"ev-1",creator_x_user_id:"x1",
+  submitted_by_user_id:"recipient-1",collaboration_type:"individual",
+  part:null,source_type:"manual",creator_display_name:"Creator",
+  creator_display_name_yomi:null,creator_icon_url:null,
+  creator_youtube_channel_url:null,creator_profile_text:"Review complete 30 fields",
+  creator_other_social_links:null,title:"Video title",music:null,
+  credit:null,music_reference_url:null,closing_comment:null,
+  youtube_video_id:null,intro_comment:null,highlights:null,
+  production_story:null,visibility_status:"pending",
+  scheduling_type:"slotted",scheduled_time:null,
+  app_like_count:5,score:2.5,score_updated_at:null,
+  created_at:50,updated_at:400,...patch,
+});
+function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
+  mode="normal",onFirst,mutate,seedVideo=true,parentSessionState,cookieToken=SESSION_TOKEN}={}){
+  const submittedReads=[];
+  const {db,sqlite,stats}=createAdminD1({
+    onFirst:(sql,sqlite)=>{
+      if (/AS (anchor_json|group_json|video_json|refs_json)\b/.test(sql)) {
+        submittedReads.push(sql);
+      }
+      onFirst?.(sql,sqlite);
+    },
+  });
+  seedBase(sqlite,{settings:mode});
+  seedEvent(sqlite);
+  sqlite.exec([
+    'ALTER TABLE "user" ADD COLUMN is_notification_enabled INTEGER DEFAULT 1;',
+    'INSERT INTO "user" (id,name,role,is_banned,is_tos_accepted,is_notification_enabled)',
+    "VALUES ('recipient-1','Recipient','user',0,1,1);",
+    "CREATE TABLE event_staff (event_id TEXT,x_user_id TEXT,permission_preset TEXT,",
+    "custom_permission_keys_json TEXT);",
+    'CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, "expires" INTEGER);',
+    "CREATE TABLE videos(" + SUBMITTED_VIDEO_AUDIT_COLUMNS.map(k=>
+      k==="id" ? "id TEXT PRIMARY KEY" :
+      ["scheduled_time","app_like_count","score_updated_at","created_at","updated_at"]
+        .includes(k) ? k+" INTEGER" : k==="score" ? "score REAL" : k+" TEXT"
+    ).join(",") + ");",
+    "CREATE TABLE slots(" + cols.map(k=>k==="id" ? "id TEXT PRIMARY KEY" :
+      ["start_time","sort_order","updated_at","version"].includes(k)
+        ? k+" INTEGER" : k+" TEXT").join(",") + ");",
+    "CREATE TABLE notification_outbox(id TEXT PRIMARY KEY,recipient_user_id TEXT,",
+    "type TEXT,payload_json TEXT,delivery_route TEXT,correlation_id TEXT,",
+    "status TEXT,attempt_count INTEGER,processing_started_at INTEGER,",
+    "lease_token TEXT,lease_expires_at INTEGER,next_attempt_at INTEGER,",
+    "last_error TEXT,processed_at INTEGER,event_id TEXT,dedupe_key TEXT,created_at INTEGER);",
+    "CREATE UNIQUE INDEX active_dedupe ON notification_outbox(dedupe_key)",
+    "WHERE dedupe_key IS NOT NULL AND status IN ('pending','processing','sent');",
+  ].join(" "));
+  const insertVideo=sqlite.prepare("INSERT INTO videos VALUES(" +
+    SUBMITTED_VIDEO_AUDIT_COLUMNS.map(()=>"?").join(",") + ")");
+  if(seedVideo)insertVideo.run(...SUBMITTED_VIDEO_AUDIT_COLUMNS.map(k=>video()[k]));
+  const insert=sqlite.prepare("INSERT INTO slots VALUES(" + cols.map(()=>"?").join(",") + ")");
+  const write=row=>insert.run(...cols.map(k=>row[k]));
+  for(let i=0;i<count;i++)write(slot("s"+i,{sort_order:i}));
+  if(actor && actor.id!==ADMIN.id){
+    sqlite.prepare('INSERT INTO "user"(id,name,role,is_banned,is_tos_accepted) VALUES (?,?,?,0,1)')
+      .run(actor.id,"Staff",actor.role);
+  }
+  if(actor) sqlite.prepare('INSERT INTO "session" ("sessionToken","userId","expires") VALUES (?,?,?)')
+    .run(SESSION_TOKEN,actor.id,Date.now()+600_000);
+  if(staff && actor){
+    sqlite.prepare("INSERT INTO x_users(id,approval_status) VALUES (?,?)").run("x1","approved");
+    sqlite.prepare("INSERT INTO x_user_account_links VALUES (?,?)").run(actor.id,"x1");
+    sqlite.prepare("INSERT INTO event_staff VALUES (?,?,?,?)")
+      .run("ev-1","x1","slot_manager",null);
+  }
+  mutate?.({sqlite,write,insertVideo});
+  const app=new Hono();
+  app.use("*",async(c,next)=>{
+    c.set("user",actor);
+    c.set("sessionState",parentSessionState ?? (actor?"user":"none"));
+    c.set("db",drizzle(c.env.DB,{schema}));
+    if(actor)c.set("actorSnapshotJsonById",{
+      [actor.id]:canonicalSlotAuditSnapshotJson(sqlite, actor.id),
+    });
+    await next();
+  });
+  // Intentional TEST-ONLY mount: manage/index.ts remains untouched.
+  app.route("/api/manage/events/:id/slots",slotSubmittedDangerRoutes);
+  const post=(slotId="s0",eventId="ev-1",op=kind)=>app.request(
+    ORIGIN+"/api/manage/events/"+eventId+"/slots/"+slotId+"/"+
+      (op==="force-release"?"force-release-submitted":"release-submitted-video"),
+    {method:"POST",headers:{Origin:ORIGIN,Cookie:cookieToken?"__Secure-authjs.session-token="+cookieToken:""}},
+    {DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN},
+  );
+  const row=(table,id)=>sqlite.prepare("SELECT * FROM "+table+" WHERE id=?").get(id);
+  const countRows=table=>sqlite.prepare("SELECT COUNT(*) AS n FROM "+table).get().n;
+  return {sqlite,stats,submittedReads,post,row,countRows,write,insertVideo};
+}
+const countEffects=s=>({
+  audits:s.countRows("audit_logs"),outbox:s.countRows("notification_outbox"),
+  queue:s.countRows("static_rebuild_queue"),
+});
+
+test("SA-056 U03f: 20 submitted slots -> available, complete video strict audit, one DM, three queues, one batch",async()=>{
+  const s=setup({count:20});
+  try{
+    const res=await s.post();
+    assert.equal(res.status,200,await res.clone().text());
+    assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+    for(let i=0;i<20;i++){
+      const saved=s.row("slots","s"+i);
+      assert.equal(saved.status,"available");
+      assert.equal(saved.reserved_by_user_id,null);
+      assert.equal(saved.video_id,null);
+      assert.equal(saved.reservation_group_id,null);
+      assert.equal(saved.slot_label,"Keep");
+      assert.equal(saved.version,2);
+    }
+    assert.equal(s.row("videos","vid").scheduling_type,"manual");
+    assert.deepEqual(countEffects(s),{audits:21,outbox:1,queue:3});
+    assert.equal(s.stats.batches,1);
+    assert.equal(s.submittedReads.length,3,"only 3 scoped SA-056 prereads");
+    const videoAudit=s.sqlite.prepare("SELECT * FROM audit_logs WHERE table_name='videos'").get();
+    assert.equal(videoAudit.retention_class,"long_audit");
+    const before=JSON.parse(videoAudit.before_json),after=JSON.parse(videoAudit.after_json);
+    assert.equal(Object.keys(before).length,30);
+    assert.equal(before.creator_profile_text,"Review complete 30 fields");
+    assert.equal(after.scheduling_type,"manual");
+    assert.equal(after.title,"Video title");
+    const dm=s.sqlite.prepare("SELECT * FROM notification_outbox").get();
+    assert.equal(dm.type,"slot_force_released");
+    assert.match(dm.dedupe_key,/slot_force_released:ev-1:s0:g:1:submitted/);
+  }finally{s.sqlite.close();}
+});
+test("SA-057 U03f: reservation remains while video detaches, long audits and second DM type",async()=>{
+  const s=setup({kind:"keep-reservation"});
+  try{
+    const res=await s.post("s1");
+    assert.equal(res.status,200,await res.clone().text());
+    for(const id of ["s0","s1"]){
+      const saved=s.row("slots",id);
+      assert.equal(saved.status,"reserved");
+      assert.equal(saved.reserved_by_user_id,"recipient-1");
+      assert.equal(saved.reservation_group_id,"g  ");
+      assert.equal(saved.video_id,null);
+      assert.equal(saved.version,2);
+    }
+    assert.equal(s.row("videos","vid").scheduling_type,"manual");
+    assert.deepEqual(countEffects(s),{audits:3,outbox:1,queue:3});
+    const dm=s.sqlite.prepare("SELECT type,dedupe_key,payload_json FROM notification_outbox").get();
+    assert.equal(dm.type,"slot_submission_released");
+    assert.match(dm.dedupe_key,/:s1:g:1:submitted$/);
+    assert.equal(JSON.parse(dm.payload_json).url,ORIGIN+"/event/ev-1/slots");
+    assert.equal(s.stats.batches,1);
+  }finally{s.sqlite.close();}
+});
+test("SA-056/057 U03l: completed operation replay and opposite operation create no duplicate effects",async()=>{
+  // A lost success response must not permit a duplicate admin mutation/DM.
+  // Replays return an explicit stale/conflict response, not a second success.
+  for(const kind of ["force-release","keep-reservation"]){
+    const s=setup({kind});
+    try{
+      const first=await s.post("s0","ev-1",kind);
+      assert.equal(first.status,200,kind+" initial "+await first.clone().text());
+      assert.deepEqual(countEffects(s),{audits:3,outbox:1,queue:3});
+      assert.equal(s.stats.batches,1);
+      const before=s.row("slots","s0");
+      const other=kind==="force-release"?"keep-reservation":"force-release";
+      for(const operation of [kind,other]){
+        const replay=await s.post("s0","ev-1",operation);
+        assert.equal(replay.status,409,
+          kind+" then "+operation+" "+await replay.clone().text());
+        assert.equal(replay.headers.get("Cache-Control"),"private, no-store");
+        assert.deepEqual(countEffects(s),{audits:3,outbox:1,queue:3});
+        assert.equal(s.stats.batches,1,"no second D1 mutation batch");
+        assert.deepEqual(s.row("slots","s0"),before);
+        assert.equal(s.row("videos","vid").scheduling_type,"manual");
+      }
+    }finally{s.sqlite.close();}
+  }
+});
+
+test("SA-056/057 U03j: static rebuild queue reason and requester match CURRENT per operation",async()=>{
+  for(const [kind,reason] of [
+    ["force-release","slot_admin_force_release_submitted"],
+    ["keep-reservation","slot_admin_release_submitted_video"],
+  ]){
+    const s=setup({kind});
+    try{
+      const res=await s.post();
+      assert.equal(res.status,200,kind+" "+await res.clone().text());
+      const rows=s.sqlite.prepare(
+        "SELECT target_type, reason, requested_by_user_id FROM static_rebuild_queue",
+      ).all();
+      assert.deepEqual(rows.map(row=>row.target_type).sort(),
+        ["event_slots","event_release","top_slot_stats"].sort());
+      for(const row of rows){
+        assert.equal(row.reason,reason,kind+" "+row.target_type);
+        // CURRENT buildSlotChangeQueueBatch: the two event-specific intents
+        // record the initiator, but the global top_slot_stats intent does not.
+        assert.equal(row.requested_by_user_id,
+          row.target_type==="top_slot_stats"?null:ADMIN.id);
+      }
+      assert.deepEqual(countEffects(s),{audits:3,outbox:1,queue:3});
+      assert.equal(s.stats.batches,1);
+    }finally{s.sqlite.close();}
+  }
+});
+
+test("SA-056/057 U03i: JS-trim Unicode group classification preserves exact RAW group key",async()=>{
+  // JS trim() treats U+3000 as blank; SQLite trim() does not. A blank-only
+  // legacy key is a solo reservation even if another row has the same bytes.
+  for(const kind of ["force-release","keep-reservation"]){
+    for(const rawGroup of ["\u3000","\u3000g\u3000"]){
+      const grouped=rawGroup.trim().length>0;
+      const s=setup({kind,mutate:({sqlite})=>
+        sqlite.prepare("UPDATE slots SET reservation_group_id=?").run(rawGroup),
+      });
+      try{
+        const res=await s.post("s0");
+        assert.equal(res.status,200,kind+" "+JSON.stringify(rawGroup)+" "+await res.clone().text());
+        const first=s.row("slots","s0"), second=s.row("slots","s1");
+        assert.equal(first.status,kind==="force-release"?"available":"reserved");
+        assert.equal(second.status,grouped
+          ?(kind==="force-release"?"available":"reserved"):"submitted");
+        assert.equal(second.reservation_group_id,grouped
+          ?(kind==="force-release"?null:rawGroup):rawGroup);
+        assert.equal(s.row("videos","vid").scheduling_type,grouped?"manual":"slotted");
+        assert.deepEqual(countEffects(s),{
+          audits:grouped?3:1,outbox:1,queue:3,
+        });
+        assert.equal(s.stats.batches,1);
+        assert.equal(s.submittedReads.length,grouped?3:2);
+        const dm=s.sqlite.prepare("SELECT dedupe_key FROM notification_outbox").get();
+        assert.ok(dm.dedupe_key.includes(grouped?":g:":":solo:"),dm.dedupe_key);
+      }finally{s.sqlite.close();}
+    }
+  }
+});
+
+test("SA-056/057 U03i: force release permits a submitted solo slot without video; keep-reservation denies",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    const s=setup({kind,count:1,mutate:({sqlite})=>
+      sqlite.prepare("UPDATE slots SET video_id=NULL,reservation_group_id=?")
+        .run("\u3000"),
+    });
+    try{
+      const res=await s.post("s0");
+      assert.equal(res.status,kind==="force-release"?200:409,
+        kind+" "+await res.clone().text());
+      assert.equal(s.row("slots","s0").status,
+        kind==="force-release"?"available":"submitted");
+      assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+      assert.deepEqual(countEffects(s),{
+        audits:kind==="force-release"?1:0,
+        outbox:kind==="force-release"?1:0,
+        queue:kind==="force-release"?3:0,
+      });
+      assert.equal(s.stats.batches,kind==="force-release"?1:0);
+      assert.equal(s.submittedReads.length,1);
+    }finally{s.sqlite.close();}
+  }
+});
+
+test("SA-056/057 U03f: other submitted reference blocks manual schedule but not this group",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    const s=setup({kind,mutate:({write})=>write(slot("outside",{
+      reservation_group_id:"else",sort_order:999,
+    }))});
+    try{
+      const res=await s.post();
+      assert.equal(res.status,200,await res.clone().text());
+      assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+      assert.equal(s.row("slots","outside").status,"submitted");
+      assert.equal(s.countRows("audit_logs"),2);
+      assert.equal(s.countRows("notification_outbox"),1);
+    }finally{s.sqlite.close();}
+  }
+});
+test("SA-056/057 U03f: linked approved staff allowed; denied staff cannot inspect event existence",async()=>{
+  const denied=setup({actor:STAFF});
+  try{
+    assert.equal((await denied.post()).status,404);
+    assert.equal((await denied.post("s0","missing")).status,404);
+    assert.deepEqual(countEffects(denied),{audits:0,outbox:0,queue:0});
+    assert.equal(denied.stats.batches,0);
+    assert.equal(denied.submittedReads.length,2,"one scoped event/anchor read per denied request");
+  }finally{denied.sqlite.close();}
+  const allowed=setup({actor:STAFF,staff:true});
+  try{
+    assert.equal((await allowed.post()).status,200);
+    assert.equal(allowed.countRows("audit_logs"),3);
+  }finally{allowed.sqlite.close();}
+});
+test("SA-056/057 U03f: group phantom after read aborts entire strict batch",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    let injected=false;
+    const s=setup({kind,onFirst:(sql,sqlite)=>{
+      if(!injected && sql.includes("AS group_json")){
+        injected=true;
+        const extra=slot("phantom",{status:"reserved"});
+        sqlite.prepare("INSERT INTO slots VALUES ("+cols.map(()=>"?").join(",")+")")
+          .run(...cols.map(k=>extra[k]));
+      }
+    }});
+    try{
+      const res=await s.post();
+      assert.equal(injected,true);
+      assert.equal(res.status,409,await res.clone().text());
+      assert.equal(s.row("slots","s0").status,"submitted");
+      assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+    }finally{s.sqlite.close();}
+  }
+});
+test("SA-056/057 U03f: post-read new submitted video ref aborts before slot DML",async()=>{
+  let injected=false;
+  const s=setup({onFirst:(sql,sqlite)=>{
+    if(!injected && sql.includes("AS refs_json")){
+      injected=true;
+      const extra=slot("new-ref",{reservation_group_id:"other"});
+      sqlite.prepare("INSERT INTO slots VALUES ("+cols.map(()=>"?").join(",")+")")
+        .run(...cols.map(k=>extra[k]));
+    }
+  }});
+  try{
+    const res=await s.post();
+    assert.equal(injected,true);
+    assert.equal(res.status,409,await res.clone().text());
+    assert.equal(s.row("slots","s0").status,"submitted");
+    assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+    assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+  }finally{s.sqlite.close();}
+});
+test("SA-056/057 U03f: stale video title without updated_at bump fails full 30-field CAS",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    let injected=false;
+    const s=setup({kind,onFirst:(sql,sqlite)=>{
+      if(!injected && sql.includes("AS refs_json")){
+        injected=true;
+        sqlite.prepare("UPDATE videos SET title=? WHERE id=?")
+          .run("Concurrent title without timestamp update","vid");
+      }
+    }});
+    try{
+      const res=await s.post();
+      assert.equal(injected,true);
+      assert.equal(res.status,409,await res.clone().text());
+      assert.equal(s.row("videos","vid").title,"Concurrent title without timestamp update");
+      assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+      assert.equal(s.row("slots","s0").status,"submitted");
+      assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+      assert.equal(s.stats.batches,1);
+    }finally{s.sqlite.close();}
+  }
+});
+
+test("SA-056/057 U03h: concurrent slot label change without version bump aborts strict batch",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    let injected=false;
+    const s=setup({kind,onFirst:(sql,sqlite)=>{
+      if(!injected && sql.includes("AS refs_json")){
+        injected=true;
+        // Simulate a legacy writer that fails to increment version/updated_at.
+        sqlite.prepare("UPDATE slots SET slot_label=? WHERE id=?")
+          .run("Concurrent edit without version bump","s1");
+      }
+    }});
+    try{
+      const res=await s.post();
+      assert.equal(injected,true);
+      assert.equal(res.status,409,await res.clone().text());
+      assert.equal(s.row("slots","s0").status,"submitted");
+      assert.equal(s.row("slots","s1").status,"submitted");
+      assert.equal(s.row("slots","s1").slot_label,"Concurrent edit without version bump");
+      assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+      assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+      assert.equal(s.stats.batches,1);
+    }finally{s.sqlite.close();}
+  }
+});
+
+test("SA-056/057 U03h: notification Outbox write failure rolls back slot, video, strict audit and queue",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    const s=setup({kind});
+    try{
+      // Keep D1 reads and queue planning available, but fail the final
+      // post-audit Outbox INSERT inside the SAME transactional D1 batch.
+      s.sqlite.exec("DROP TABLE notification_outbox");
+      const res=await s.post();
+      assert.equal(res.status,503,await res.clone().text());
+      for(const id of ["s0","s1"]){
+        assert.equal(s.row("slots",id).status,"submitted");
+        assert.equal(s.row("slots",id).video_id,"vid");
+        assert.equal(s.row("slots",id).version,1);
+      }
+      assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+      assert.equal(s.countRows("audit_logs"),0);
+      assert.equal(s.countRows("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1);
+    }finally{s.sqlite.close();}
+  }
+});
+
+test("SA-056/057 U03f: missing strict audit table rolls back slot, video, Outbox, Queue",async()=>{
+  const s=setup();
+  try{
+    s.sqlite.exec("DROP TABLE audit_logs");
+    const res=await s.post();
+    assert.equal(res.status,503,await res.clone().text());
+    for(const id of ["s0","s1"])assert.equal(s.row("slots",id).status,"submitted");
+    assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+    assert.equal(s.countRows("notification_outbox"),0);
+    assert.equal(s.countRows("static_rebuild_queue"),0);
+  }finally{s.sqlite.close();}
+});
+test("SA-056/057 U03f: opted-out recipient, CostGuard and anonymous have no unwanted effects",async()=>{
+  const opted=setup();
+  try{
+    opted.sqlite.prepare('UPDATE "user" SET is_notification_enabled=0 WHERE id=?')
+      .run("recipient-1");
+    assert.equal((await opted.post()).status,200);
+    assert.equal(opted.countRows("notification_outbox"),0);
+    assert.equal(opted.countRows("audit_logs"),3);
+  }finally{opted.sqlite.close();}
+  for(const options of [{mode:"maintenance"},{actor:null}]){
+    const s=setup(options);
+    try{
+      assert.ok([401,503].includes((await s.post()).status));
+      assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+    }finally{s.sqlite.close();}
+  }
+});
+test("SA-056/057 U03f: 21 members, invalid IDs and missing video fail closed",async()=>{
+  const excess=setup({count:21});
+  try{
+    assert.equal((await excess.post()).status,409);
+    assert.deepEqual(countEffects(excess),{audits:0,outbox:0,queue:0});
+  }finally{excess.sqlite.close();}
+  const missing=setup({seedVideo:false});
+  try{
+    assert.equal((await missing.post()).status,409);
+    assert.equal((await missing.post("s0","missing")).status,404);
+    assert.equal((await missing.post("bad!")).status,400);
+    assert.deepEqual(countEffects(missing),{audits:0,outbox:0,queue:0});
+  }finally{missing.sqlite.close();}
+});
+test("SA-056/057 U03f: no accidental managed route mount or immediate Queue wake",()=>{
+  const s=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
+  assert.doesNotMatch(s,/slotSubmittedDangerRoutes|slotSubmittedDanger\.ts/);
+  const handler=readFileSync(new URL("../src/routes/manage/slotSubmittedDanger.ts",import.meta.url),"utf8");
+  assert.doesNotMatch(handler,/notificationWakeSource|staticRebuildWakeSource|\.send\(/);
+  assert.match(handler,/mutateWithAudit\(db,/);
+  assert.match(handler,/preMutationAssertions:/);
+  assert.match(handler,/postAuditStatements:/);
+});
+
+test("SA-056/057 U04i: post-anchor authorization/session/policy revocation aborts both dangerous writes",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    for(const change of ["session-deleted","session-expired","session-reassigned",
+      "staff-revoked","x-approval-revoked","tos-revoked","major-terms-published",
+      "role-changed","banned","read-only","event-deleted"]){
+      let injected=false;
+      const staff=change==="staff-revoked"||change==="x-approval-revoked";
+      const s=setup({kind,count:2,actor:staff?STAFF:ADMIN,staff,onFirst:(sql,sqlite)=>{
+        if(injected||!sql.includes("AS anchor_json"))return;
+        injected=true;
+        if(change==="session-deleted")sqlite.prepare('DELETE FROM "session" WHERE "sessionToken"=?').run(SESSION_TOKEN);
+        if(change==="session-expired")sqlite.prepare('UPDATE "session" SET "expires"=? WHERE "sessionToken"=?')
+          .run(Date.now()-60000,SESSION_TOKEN);
+        if(change==="session-reassigned")sqlite.prepare('UPDATE "session" SET "userId"=? WHERE "sessionToken"=?')
+          .run("other-user",SESSION_TOKEN);
+        if(change==="staff-revoked")sqlite.prepare("UPDATE event_staff SET permission_preset='reviewer' WHERE event_id='ev-1'").run();
+        if(change==="x-approval-revoked")sqlite.prepare("UPDATE x_users SET approval_status='pending' WHERE id='x1'").run();
+        if(change==="major-terms-published")sqlite.prepare(
+          "INSERT INTO terms_versions(id,severity,published_at,updated_at) VALUES (?,?,?,?)"
+        ).run("major-new","major",Math.floor(Date.now()/1000),Math.floor(Date.now()/1000));
+        if(change==="tos-revoked")sqlite.prepare('UPDATE "user" SET is_tos_accepted=0 WHERE id=?').run(ADMIN.id);
+        if(change==="role-changed")sqlite.prepare("UPDATE \"user\" SET role='user' WHERE id=?").run(ADMIN.id);
+        if(change==="banned")sqlite.prepare('UPDATE "user" SET is_banned=1 WHERE id=?').run(ADMIN.id);
+        if(change==="read-only")sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+        if(change==="event-deleted")sqlite.prepare("DELETE FROM events WHERE id='ev-1'").run();
+      }});
+      try{
+        const r=await s.post();
+        assert.equal(injected,true,kind+" "+change+" injected after first SELECT");
+        assert.equal(r.status,409,kind+" "+change+" "+await r.clone().text());
+        assert.equal(r.headers.get("Cache-Control"),"private, no-store");
+        for(const id of ["s0","s1"]){
+          const row=s.row("slots",id);
+          assert.equal(row.status,"submitted");
+          assert.equal(row.video_id,"vid");
+          assert.equal(row.version,1);
+        }
+        assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+        assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+        assert.equal(s.stats.batches,1,"one rolled-back atomic D1 batch");
+        assert.ok(s.stats.reads<=4,"one CostGuard + three bounded scoped SELECTs");
+      }finally{s.sqlite.close();}
+    }
+  }
+});
+
+test("SA-056/057 U04j: artificial parent session absence or forged cookie cannot mutate submitted slots",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    for(const mode of ["parent-absent","cookie-absent","cookie-forged"]){
+      const s=setup({
+        kind,
+        parentSessionState: mode==="parent-absent"?"none":"user",
+        cookieToken: mode==="cookie-absent"?null:
+          mode==="cookie-forged"?"ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee":SESSION_TOKEN,
+      });
+      try{
+        const res=await s.post();
+        assert.equal(res.status,mode==="cookie-forged"?409:503,
+          kind+" "+mode+" "+await res.clone().text());
+        assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+        assert.equal(s.row("slots","s0").status,"submitted");
+        assert.equal(s.row("slots","s1").status,"submitted");
+        assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+        assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+        assert.equal(s.stats.batches,mode==="cookie-forged"?1:0);
+      }finally{s.sqlite.close();}
+    }
+  }
+});
+
+test("SA-056/057 U04l: CostGuard revocation between middleware and scoped snapshot denies before D1 batch",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    for(const policy of ["read-only","disabled-feature","deleted-settings"]){
+      let switched=false;
+      const s=setup({kind,onFirst:(sql,sqlite)=>{
+        // D1 first() has materialized the allowed middleware settings row,
+        // but the bound event/staff/anchor SELECT has not yet started.
+        if(switched||!sql.includes("FROM system_settings WHERE id"))return;
+        switched=true;
+        if(policy==="read-only")
+          sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+        if(policy==="disabled-feature")
+          sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+            .run(JSON.stringify(["manage_slot_update"]));
+        if(policy==="deleted-settings")
+          sqlite.prepare("DELETE FROM system_settings WHERE id='default'").run();
+      }});
+      try{
+        const r=await s.post();
+        assert.equal(switched,true,kind+" "+policy+" post-middleware injection");
+        assert.equal(r.status,503,kind+" "+policy+" "+await r.clone().text());
+        assert.equal(r.headers.get("Cache-Control"),"private, no-store");
+        const json=await r.json();
+        assert.equal(json.reason,policy==="read-only"?"maintenance_mode":"cost_guard_blocked");
+        for(const id of ["s0","s1"])assert.equal(s.row("slots",id).status,"submitted");
+        assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+        assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+        assert.equal(s.stats.batches,0,"scoped CostGuard prevents mutation preparation");
+        assert.equal(s.submittedReads.length,1,"only scoped anchor read");
+        assert.equal(s.stats.reads,2,"only parent CostGuard + scope SELECT");
+      }finally{s.sqlite.close();}
+    }
+  }
+});
+
+test("SA-056/057 U04l: post-anchor CostGuard revocation rolls back slot, video, strict audits and Outbox",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    for(const policy of ["read-only","disabled-feature","deleted-settings","expired-exception"]){
+      let switched=false;
+      const s=setup({kind,mode:policy==="expired-exception"?"read_only":"normal",onFirst:(sql,sqlite)=>{
+        if(switched||!sql.includes("AS anchor_json"))return;
+        switched=true;
+        if(policy==="read-only")
+          sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+        if(policy==="disabled-feature")
+          sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+            .run(JSON.stringify(["manage_slot_update"]));
+        if(policy==="deleted-settings")
+          sqlite.prepare("DELETE FROM system_settings WHERE id='default'").run();
+        if(policy==="expired-exception")
+          sqlite.prepare("UPDATE system_settings SET cost_guard_exception_until=? WHERE id='default'")
+            .run(Math.floor(Date.now()/1000)-1);
+      }});
+      try{
+        if(policy==="expired-exception")
+          s.sqlite.prepare("UPDATE system_settings SET cost_guard_exception_until=?,cost_guard_exception_features_json=? WHERE id='default'")
+            .run(Math.floor(Date.now()/1000)+600,JSON.stringify(["manage_slot_update"]));
+        const r=await s.post();
+        assert.equal(switched,true,kind+" "+policy+" post-anchor injection");
+        assert.equal(r.status,409,kind+" "+policy+" "+await r.clone().text());
+        assert.equal(r.headers.get("Cache-Control"),"private, no-store");
+        for(const id of ["s0","s1"]){
+          const row=s.row("slots",id);
+          assert.equal(row.status,"submitted");
+          assert.equal(row.video_id,"vid");
+          assert.equal(row.version,1);
+        }
+        assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+        assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+        assert.equal(s.stats.batches,1,"atomic policy assertion rejects after read");
+        assert.ok(s.stats.reads<=4,"CostGuard plus three scoped reads only");
+      }finally{s.sqlite.close();}
+    }
+  }
+});
