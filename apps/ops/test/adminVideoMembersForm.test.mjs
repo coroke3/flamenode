@@ -1386,3 +1386,30 @@ test("MIG-0730 U02de: stateful public footer IDs are read once and never route t
   assert.equal(memberVideoPublicHref(revoked.proxy), "/list");
   assert.equal(memberVideoPublicHref(null), "/list");
 });
+
+test("MIG-0730 U02df: truthy non-function refresh ports do not misreport a committed save", async () => {
+  for (const onSaved of [true, "not a function", { refresh: true }]) {
+    let writes = 0;
+    const ui = setup({
+      save: async () => {
+        writes++;
+        return { ok: true, message: "SERVER_CONFIRMED_SAVE" };
+      },
+      onSaved,
+    });
+    try {
+      await ui.render();
+      assert.ok(ui.target.querySelector('button[type="submit"]'),
+        "malformed optional refresh callback must not affect save authority");
+      await ui.submit();
+      assert.equal(writes, 1);
+      assert.match(ui.target.textContent, /SERVER_CONFIRMED_SAVE/,
+        "verified save must retain its authoritative success message");
+      assert.doesNotMatch(ui.target.textContent, /表示の更新に失敗|保存結果を確認できません/,
+        "missing optional callback is not a failed refresh or failed write");
+      assert.equal(ui.target.querySelector('[role="alert"]'), null);
+    } finally {
+      await ui.cleanup();
+    }
+  }
+});

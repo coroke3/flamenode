@@ -258,7 +258,7 @@ function AdminVideoMembersFormForVideo({
       // A may finish after navigation to B; never deliver A's result or refresh to B.
       if (mounted.current && requestEpoch === saveCapabilityEpoch.current) {
         setResult(response);
-        if (response.ok && onSaved) {
+        if (response.ok && typeof onSaved === "function") {
           // Save has already succeeded. A failed view refresh must not turn a
           // committed write into a false save-error message or invite a retry.
           try {

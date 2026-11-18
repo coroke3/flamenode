@@ -301,7 +301,7 @@ export function AdminVideoMembersEditorPreview({
       initialMembersCount={valid.initialMembers.length}
       membersField={field}
       save={canEdit ? guardedSave : undefined}
-      onSaved={canEdit ? onSaved : undefined}
+      onSaved={canEdit && typeof onSaved === "function" ? onSaved : undefined}
     />
   );
 }
