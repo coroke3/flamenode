@@ -9,10 +9,23 @@ import { OpsLink } from "../../components/shared/OpsLink.js";
 import { NotFoundView } from "../NotFoundView.js";
 import { memberVideoPublicHref } from "./memberVideoPublicHref.js";
 
+/**
+ * Cross-PR MIG-0729 (#506) integration seam. The reviewed
+ * AdminVideoTabs({ videoId, youtubeVideoId, active }) can be injected only
+ * after its owner lands; duplicating six navigation routes here would drift.
+ * Neither this optional visual component nor its absence authorizes writes.
+ */
+export type AdminVideoMembersTabsPort = React.ComponentType<{
+  videoId: string;
+  youtubeVideoId?: string | null;
+  active?: "detail" | "members" | "edit" | "permissions" | "public" | "audit";
+}>;
+
 /** Display only public participants in the Hono-admin-authorized DTO. Never mount an editor before SA-085 is ready. */
-export function AdminVideoMembersReadView({ videoId, data }: {
+export function AdminVideoMembersReadView({ videoId, data, managementTabs }: {
   videoId: string;
   data: AdminVideoMembersResponse;
+  managementTabs?: AdminVideoMembersTabsPort;
 }): React.ReactElement {
   // This view can be called directly, bypassing the GET adapter. Validate the
   // path before reading injected data or constructing a back link.
@@ -59,6 +72,14 @@ export function AdminVideoMembersReadView({ videoId, data }: {
         backHref={detailHref}
         backLabel="作品詳細へ"
       />
+      {/* MIG-0729's six-tab component is injected by the authorized Ops
+          parent only after cross-PR integration. Never render it for a
+          401/403/404 or an invalid/private participant snapshot. */}
+      {typeof managementTabs === "function" ? React.createElement(managementTabs, {
+        videoId: verified.video.id,
+        youtubeVideoId: verified.video.youtube_video_id,
+        active: "members",
+      }) : null}
       <section className="fn-card" aria-label="参加者設定" style={{ padding: 16 }}>
         <h2>参加者設定</h2>
         <p role="status">閲覧のみ：参加者の追加・編集・保存機能は移行中です。</p>
@@ -115,11 +136,13 @@ export function currentAdminVideoMembersResult(
     snapshot.epoch === epoch ? snapshot.result : null;
 }
 
-export function AdminVideoMembersReadPage({ videoId, fetchFn, onNavigate }: {
+export function AdminVideoMembersReadPage({ videoId, fetchFn, onNavigate, managementTabs }: {
   videoId: string;
   fetchFn?: OpsFetch;
   /** Testing port; the actual Ops navigation uses window.location.assign. */
   onNavigate?: (path: string) => void;
+  /** Optional MIG-0729 #506 AdminVideoTabs injection, never a write capability. */
+  managementTabs?: AdminVideoMembersTabsPort;
 }): React.ReactElement {
   const [snapshot, setSnapshot] = React.useState<AdminVideoMembersReadSnapshot | null>(null);
   const identity = React.useRef({ videoId, fetchFn, epoch: 0 });
@@ -155,5 +178,5 @@ export function AdminVideoMembersReadPage({ videoId, fetchFn, onNavigate }: {
   if (result.status === "anonymous") return <p role="alert">再ログインが必要です。</p>;
   if (result.status === "forbidden") return <p role="alert">参加者設定を表示する権限がありません。</p>;
   if (result.status !== "ok") return <p role="alert">参加者設定を取得できませんでした。</p>;
-  return <AdminVideoMembersReadView videoId={videoId} data={result.data} />;
+  return <AdminVideoMembersReadView videoId={videoId} data={result.data} managementTabs={managementTabs} />;
 }

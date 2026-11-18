@@ -107,7 +107,7 @@ function deferred() {
   let resolve;
   return { promise: new Promise(done => { resolve = done; }), resolve: (v) => resolve(v) };
 }
-function setup() {
+function setup(managementTabs) {
   const target = document.createElement("div");
   document.body.append(target);
   const root = createRoot(target);
@@ -120,7 +120,9 @@ function setup() {
     return wait.promise;
   };
   const render = async (videoId, activeFetch = fetchFn) => React.act(async () => {
-    root.render(wrap(React.createElement(AdminVideoMembersReadPage, { videoId, fetchFn: activeFetch, onNavigate })));
+    root.render(wrap(React.createElement(AdminVideoMembersReadPage, {
+      videoId, fetchFn: activeFetch, onNavigate, managementTabs,
+    })));
   });
   const cleanup = async () => React.act(async () => { root.unmount(); target.remove(); });
   return { target, calls, render, cleanup, navigations };
@@ -365,4 +367,75 @@ test("MIG-0730 U02cz: read-only SSR uses only the bounded member snapshot", () =
   assert.doesNotMatch(markup, /PRIVATE_ROW/);
   assert.equal(reads, 1);
   assert.equal(traversed, 0);
+});
+
+test("MIG-0730 U02dm: MIG-0729 tabs integration receives only authorized video metadata", () => {
+  const calls = [];
+  const FakeAdminVideoTabs = props => {
+    calls.push(props);
+    return React.createElement("nav", { "aria-label": "作品管理メニュー",
+      "data-active": props.active, "data-video": props.videoId },
+      React.createElement("span", null, "6-tab seam"));
+  };
+  const videoId = "v1";
+  const accepted = snapshot(videoId);
+  accepted.video.youtube_video_id = "dQw4w9WgXcQ";
+  const validMarkup = renderToStaticMarkup(wrap(React.createElement(AdminVideoMembersReadView, {
+    videoId, data: accepted, managementTabs: FakeAdminVideoTabs,
+  })));
+  assert.match(validMarkup, /6-tab seam/);
+  assert.match(validMarkup, /data-active="members"/);
+  assert.match(validMarkup, /data-video="v1"/);
+  assert.deepEqual(calls, [{
+    videoId: "v1", youtubeVideoId: "dQw4w9WgXcQ", active: "members",
+  }], "MIG-0729 AdminVideoTabs receives exactly its current public props shape");
+
+  for (const blocked of [
+    { videoId: "other", data: accepted },
+    { videoId: "v1", data: snapshot("v1", [member("PRIVATE_ROW", { is_public_member: 0 })]) },
+    { videoId: "v1", data: snapshot("v1", Array.from({ length: 101 }, () => member("PRIVATE_ROW"))) },
+  ]) {
+    const markup = renderToStaticMarkup(wrap(React.createElement(AdminVideoMembersReadView, {
+      ...blocked, managementTabs: FakeAdminVideoTabs,
+    })));
+    assert.match(markup, /参加者データを表示できません/);
+    assert.doesNotMatch(markup, /6-tab seam|PRIVATE_ROW|data-active/);
+  }
+  assert.equal(calls.length, 1, "no navigation component mounts for mismatched, hidden or oversized DTO");
+  const inert = renderToStaticMarkup(wrap(React.createElement(AdminVideoMembersReadView, {
+    videoId, data: accepted, managementTabs: { forged: true },
+  })));
+  assert.doesNotMatch(inert, /6-tab seam/,
+    "malformed injected component cannot enable navigation or writes");
+});
+
+test("MIG-0730 U02dm: page mounts six-tab seam only after current authorized GET", async () => {
+  const calls = [];
+  function FakeAdminVideoTabs(props) {
+    calls.push({ ...props });
+    return React.createElement("nav", { "aria-label": "作品管理メニュー",
+      "data-target": props.videoId }, "Tabs for " + props.videoId);
+  }
+  const ui = setup(FakeAdminVideoTabs);
+  try {
+    await ui.render("a");
+    assert.equal(calls.length, 0, "loading private GET never mounts tabs");
+    await React.act(async () => ui.calls[0].resolve(json(snapshot("a"))));
+    assert.equal(ui.target.querySelector("nav")?.getAttribute("data-target"), "a");
+    assert.deepEqual(calls.map(x => x.videoId), ["a"]);
+
+    await ui.render("b");
+    assert.equal(ui.target.querySelector("nav"), null,
+      "old video navigation disappears immediately on A to B");
+    await React.act(async () => ui.calls[1].resolve(json({ error: "forbidden" }, 403)));
+    assert.equal(ui.target.querySelector("nav"), null,
+      "forbidden response never mounts a tab with private metadata");
+    assert.deepEqual(calls.map(x => x.videoId), ["a"]);
+
+    await ui.render("c");
+    await React.act(async () => ui.calls[2].resolve(json(snapshot("c"))));
+    assert.equal(ui.target.querySelector("nav")?.getAttribute("data-target"), "c");
+    assert.deepEqual(calls.map(x => x.videoId), ["a", "c"]);
+    assert.deepEqual(calls.map(x => x.active), ["members", "members"]);
+  } finally { await ui.cleanup(); }
 });
