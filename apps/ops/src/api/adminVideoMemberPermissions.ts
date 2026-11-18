@@ -135,8 +135,9 @@ export async function applyAdminVideoMemberPermissionBatch(
     const ok = receipt.ok;
     const receiptVideoId = receipt.videoId;
     const message = receipt.message;
-    // Upstream MIG-0650 Draft currently omits videoId, so this intentionally
-    // fails closed until the backend's authoritative receipt is finalized.
+    // MIG-0650 Draft PR #473 now binds success (including authorized no-op)
+    // to video.id. Keep strict matching for both result paths; the Hono
+    // collaborator route remains UNMOUNTED and separately review-gated.
     if (ok !== true || receiptVideoId !== videoId ||
         (message !== undefined &&
           (typeof message !== "string" || message.length > 300))) {

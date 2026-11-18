@@ -402,3 +402,44 @@ test("MIG-0730 U02cx: SA-084 cannot turn a rejected receipt into verified succes
   assert.deepEqual(got, { ok: false, message: "権限変更を確認できませんでした。状態を再取得してください。" });
   assert.equal(reads, 1);
 });
+
+test("MIG-0730 U02dj: backend SA-084 committed and authorized no-op receipts match the Ops client contract", async () => {
+  // Mirrors two success shapes emitted by MIG-0650 PR #473's UNMOUNTED
+  // collaborators.ts: write path returns authorized videoId + grant summary,
+  // and no-op terminal path adds the same authorized videoId to its result.
+  const successPaths = [
+    { ok: true, videoId: "video-1", message: "権限を更新しました",
+      granted: ["Alice"], revoked: [], unchanged: 0 },
+    { ok: true, videoId: "video-1", message: "変更はありません",
+      granted: [], revoked: [], unchanged: 1 },
+    { ok: true, videoId: "video-1", granted: [], revoked: [], unchanged: 1 },
+  ];
+  let posts = 0;
+  for (const receipt of successPaths) {
+    const actual = await applyAdminVideoMemberPermissionBatch(input(), async (path, init) => {
+      posts++;
+      assert.equal(path, "/api/videos/video-1/collaborators/batch");
+      assert.equal(JSON.parse(init.body).video_id, "video-1");
+      return json(receipt);
+    });
+    assert.deepEqual(actual, {
+      ok: true,
+      ...(receipt.message ? { message: receipt.message } : {}),
+    }, "client only accepts the authorized success receipt and safe message");
+  }
+  assert.equal(posts, successPaths.length);
+
+  for (const receipt of [
+    { ok: true, videoId: "other", granted: ["Alice"] },
+    { ok: true, granted: ["Alice"] },
+    { ok: false, videoId: "video-1", message: "internal details" },
+  ]) {
+    const actual = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+      posts++;
+      return json(receipt);
+    });
+    assert.equal(actual.ok, false, "cross-target, unbound or failed receipt never confirms write");
+    assert.doesNotMatch(actual.message ?? "", /internal details/);
+  }
+  assert.equal(posts, successPaths.length + 3, "no implicit retry after any receipt");
+});
