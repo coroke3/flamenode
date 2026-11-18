@@ -59,22 +59,33 @@ export function bindPreviewSaveFormData(
         unexpectedField = true;
       }
     });
-    const off = flags.length === 1 && flags[0] === "false";
-    const on = flags.length === 2 && flags[0] === "false" && flags[1] === "true";
-    if (unexpectedField || ids.length !== 1 || ids[0] !== expectedVideoId ||
-        members.length !== 1 || typeof members[0] !== "string" ||
-        !(on || (off && members[0] === "[]"))) return null;
-    // Before parsing, bound the untrusted raw JSON to the same provisional
-    // 256KiB client/server envelope limit used by the UNMOUNTED SA-085 HTTP
-    // candidate. A payload with more UTF-16 units cannot fit the UTF-8 wire
-    // body. The concrete HTTP adapter still checks exact wire bytes. This is
-    // NOT approval of the server limit: legal CURRENT 100 x 30 chapters can
-    // exceed it and must remain a release blocker.
-    if (members[0].length > 256 * 1024) return null;
+    // A mock/legacy FormData.getAll can supply a getter-backed collection.
+    // The checked video, flag and members values must be exactly the values
+    // forwarded to the injected save port; never reread an array index.
+    const sourceId: unknown = ids[0];
+    const firstFlag: unknown = flags[0];
+    const secondFlag: unknown = flags[1];
+    const memberJson: unknown = members[0];
+    const off = flags.length === 1 && firstFlag === "false";
+    const on = flags.length === 2 && firstFlag === "false" && secondFlag === "true";
+    if (unexpectedField || ids.length !== 1 || sourceId !== expectedVideoId ||
+        members.length !== 1 || typeof memberJson !== "string" ||
+        !(on || (off && memberJson === "[]"))) return null;
+    // A raw UTF-16 length below 256Ki does NOT ensure the exact nested JSON
+    // wire envelope fits the provisional SA-085 Hono byte ceiling. Check
+    // both limits BEFORE JSON.parse and BEFORE invoking an injected save port,
+    // including UTF-8 multibyte characters and escaped member JSON.
+    // This provisional ceiling is a release parity STOP for some legal
+    // CURRENT drafts; it is not permission to truncate or enable the route.
+    if (memberJson.length > 256 * 1024 ||
+        new TextEncoder().encode(JSON.stringify({
+          is_collab: on ? ["false", "true"] : ["false"],
+          members_json: memberJson,
+        })).byteLength > 256 * 1024) return null;
     // This exported binding can also be invoked independently of the Ops
     // form. Never send collaborator privilege fields via the public member
     // PUT, even to a legacy/injected save port that omits its own checks.
-    const decoded: unknown = JSON.parse(members[0]);
+    const decoded: unknown = JSON.parse(memberJson);
     if (!Array.isArray(decoded) || decoded.length > MAX_VIDEO_MEMBERS ||
         decoded.some(item => !item || typeof item !== "object" ||
           Array.isArray(item) || "can_edit" in item ||
@@ -85,7 +96,7 @@ export function bindPreviewSaveFormData(
     bound.append("video_id", expectedVideoId);
     bound.append("is_collab", "false");
     if (on) bound.append("is_collab", "true");
-    bound.append("members_json", members[0]);
+    bound.append("members_json", memberJson);
     return bound;
   } catch {
     return null;

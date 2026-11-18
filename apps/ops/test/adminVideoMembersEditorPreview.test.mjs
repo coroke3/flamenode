@@ -374,3 +374,67 @@ test("MIG-0730 U02dh: standalone preview binding rejects oversized raw JSON befo
   assert.equal(bindPreviewSaveFormData(form, "v1")?.get("members_json"), ordinary,
     "normal public participant payload remains eligible");
 });
+
+test("MIG-0730 U02dk: mutable injected FormData indexes cannot swap the validated target or member JSON", () => {
+  const good = '[{"name":"Alice","is_public_member":1}]';
+  const poisoned = '[{"name":"FORGED","can_edit":true}]';
+  const reads = { id: 0, flag0: 0, flag1: 0, members: 0 };
+  const dynamic = {
+    getAll(name) {
+      if (name === "video_id") return Object.defineProperty(["v1"], 0, {
+        get() { reads.id++; return reads.id === 1 ? "v1" : "other-video"; },
+      });
+      if (name === "is_collab") {
+        const arr = ["false", "true"];
+        Object.defineProperty(arr, 0, { get() {
+          reads.flag0++; return reads.flag0 === 1 ? "false" : "true";
+        } });
+        Object.defineProperty(arr, 1, { get() {
+          reads.flag1++; return reads.flag1 === 1 ? "true" : "false";
+        } });
+        return arr;
+      }
+      if (name === "members_json") return Object.defineProperty([good], 0, {
+        get() { reads.members++; return reads.members === 1 ? good : poisoned; },
+      });
+      return [];
+    },
+    forEach(fn) {
+      for (const key of ["video_id", "is_collab", "members_json"]) fn("", key);
+    },
+  };
+  const bound = bindPreviewSaveFormData(dynamic, "v1");
+  assert.ok(bound instanceof FormData);
+  assert.deepEqual([...bound.entries()], [
+    ["video_id", "v1"], ["is_collab", "false"],
+    ["is_collab", "true"], ["members_json", good],
+  ]);
+  assert.deepEqual(reads, { id: 1, flag0: 1, flag1: 1, members: 1 },
+    "the exact validated values are snapshotted once");
+});
+
+test("MIG-0730 U02dk: legal multibyte member JSON that exceeds the wire budget is never forwarded", () => {
+  // 100 ordinary participants with 900-character Japanese chapter notes
+  // meet CURRENT per-member 1000 note / 30 chapter / 100-row limits. The
+  // raw UTF-16 JSON is below 256Ki but the HTTP UTF-8 envelope is not.
+  const rows = Array.from({ length: 100 }, (_, i) => ({
+    name: "Member " + i,
+    chapters: [{ time: "00:00", label: "Scene", note: "あ".repeat(900) }],
+  }));
+  const raw = JSON.stringify(rows);
+  const wire = JSON.stringify({ is_collab: ["false", "true"], members_json: raw });
+  assert.ok(raw.length < 256 * 1024, "raw UTF-16 length understates transport cost");
+  assert.ok(new TextEncoder().encode(wire).byteLength > 256 * 1024,
+    "schema-legal multibyte draft crosses the provisional Hono byte ceiling");
+  const form = new FormData();
+  form.append("video_id", "v1");
+  form.append("is_collab", "false");
+  form.append("is_collab", "true");
+  form.append("members_json", raw);
+  assert.equal(bindPreviewSaveFormData(form, "v1"), null,
+    "no alternate injected SA-085 port may receive this oversized wire body");
+  const small = JSON.stringify([{ name: "Alice" }]);
+  form.set("members_json", small);
+  assert.equal(bindPreviewSaveFormData(form, "v1")?.get("members_json"), small,
+    "valid canonical small input still passes unchanged");
+});
