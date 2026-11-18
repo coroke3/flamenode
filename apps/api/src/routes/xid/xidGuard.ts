@@ -79,6 +79,26 @@ export const XID_GUARD_JOINS_SQL = `
   LEFT JOIN system_settings settings ON settings.id = 'default'
 `;
 
+/**
+ * Fail-closed canonical-alias collision guard matching CURRENT
+ * getLinkedXUserForAuthUser -> resolveCanonicalXUserId: reject a direct link
+ * when x_user_aliases maps that X ID to missing, invalid, or different targets.
+ */
+export const XID_LINK_ALIAS_FAIL_CLOSED_SQL = `
+  NOT EXISTS (
+    SELECT 1 FROM x_user_aliases a
+    LEFT JOIN x_users t
+      ON lower(trim(ltrim(trim(t.id), '@'))) = lower(trim(ltrim(trim(a.x_user_id), '@')))
+    WHERE lower(trim(ltrim(trim(a.alias_x_id), '@'))) = l.x_user_id
+      AND (
+        t.id IS NULL
+        OR t.approval_status IS NULL
+        OR t.approval_status NOT IN ('pending', 'approved', 'imported')
+        OR lower(trim(ltrim(trim(t.id), '@'))) <> l.x_user_id
+      )
+  )
+`;
+
 export function stripXIdGuardFields<T extends XIdGuardRowFields>(
   row: T,
 ): {

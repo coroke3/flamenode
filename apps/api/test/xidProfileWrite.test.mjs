@@ -14,6 +14,7 @@ const USER = {
 function setup({ linked = true, approved = true, onFirst, realSession = false } = {}) {
   const { db, sqlite, stats } = createAdminD1({ onFirst });
   seedBase(sqlite, { role: "user" });
+  sqlite.exec("CREATE TABLE x_user_aliases (x_user_id TEXT, alias_x_id TEXT)");
   // Match the full CURRENT x_users fields missing from the minimal
   // shared admin fixture. The real schema already contains these columns.
   for (const column of ["profile_text", "portfolio_contact", "youtube_channel_url", "other_social_links"]) {
@@ -201,4 +202,16 @@ test("SA-102 real Auth.js session stays within S3 budget (3 pre-reads + 1 batch)
   assert.equal(h.stats.reads, 3, "session + combined guard/X + strict actor-X audit");
   assert.equal(h.stats.batches, 1);
   assert.equal(h.sqlite.prepare("SELECT x_name FROM x_users WHERE id = 'x_one'").get().x_name, "PathOnly");
+});
+
+test("SA-102 isolated handler fails closed (403) on canonical-alias collision without mutation", async () => {
+  const h = setup();
+  h.sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES ('x_two', 'Other', 'approved')").run();
+  h.sqlite.prepare("INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES ('x_two', 'x_one')").run();
+  const res = await h.send({ x_user_id: "x_one", x_name: "Hijacked" });
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).message, "この X ID を編集する権限がありません。");
+  assert.equal(h.sqlite.prepare("SELECT x_name FROM x_users WHERE id = 'x_one'").get().x_name, "Before");
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(h.stats.batches, 0);
 });

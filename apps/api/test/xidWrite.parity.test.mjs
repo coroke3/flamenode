@@ -109,6 +109,15 @@ if (runUnderRootTsx(import.meta.url)) {
         expires: 2_000_000_000_000,
       });
     }
+    // Pin schema unixepoch() default timestamps so sequential world() calls never straddle a second boundary.
+    sqlite.exec(`
+      UPDATE "user" SET created_at = 1800000000 WHERE created_at IS NOT NULL;
+      UPDATE x_user_account_links SET created_at = 1800000000, updated_at = 1800000000;
+      UPDATE videos SET created_at = 1800000000, updated_at = 1800000000 WHERE id NOT IN ('v_icon_pub', 'v_icon_priv');
+      UPDATE videos SET updated_at = 1800000000 WHERE id IN ('v_icon_pub', 'v_icon_priv');
+      UPDATE events SET created_at = 1800000000, updated_at = 1800000000;
+      UPDATE system_settings SET audit_updated_at = 1800000000;
+    `);
     return { sqlite, d1: atomicD1(sqlite), bucket: createBucket() };
   }
 
@@ -338,6 +347,8 @@ if (runUnderRootTsx(import.meta.url)) {
         x_user_id: "x_owner",
         display_name: "Owner",
         permission_preset: "owner",
+        created_at: 1_800_000_000,
+        updated_at: 1_800_000_000,
       });
       insert(b.sqlite, "event_staff", {
         id: "es_own",
@@ -345,6 +356,8 @@ if (runUnderRootTsx(import.meta.url)) {
         x_user_id: "x_owner",
         display_name: "Owner",
         permission_preset: "owner",
+        created_at: 1_800_000_000,
+        updated_at: 1_800_000_000,
       });
       const cur = await runCurrent(a, "u_owner", current.deleteLinkedXId, [
         ["x_user_id", "x_owner"],
@@ -356,6 +369,54 @@ if (runUnderRootTsx(import.meta.url)) {
       });
       assert.equal(hon.status, 409);
       assert.deepEqual(hon.result, cur.result);
+      assert.deepEqual(snapshot(b), snapshot(a));
+    }
+
+    // 7. SA-102, SA-104, SA-105 canonical-alias collision parity: both CURRENT and Hono fail closed (403)
+    {
+      insert(a.sqlite, "x_user_aliases", { x_user_id: "x_other", alias_x_id: "x_owner" });
+      insert(b.sqlite, "x_user_aliases", { x_user_id: "x_other", alias_x_id: "x_owner" });
+
+      const curProfile = await runCurrent(a, "u_owner", current.updateXIdProfile, [
+        ["x_user_id", "x_owner"],
+        ["x_name", "Hijacked"],
+      ]);
+      const honProfile = await runHono(b, "u_owner", "PATCH", "/api/xid/x_owner/profile", {
+        x_user_id: "x_owner",
+        x_name: "Hijacked",
+      });
+      assert.equal(honProfile.status, 403);
+      assert.deepEqual(honProfile.result, curProfile.result);
+
+      const curIcon = await runCurrent(a, "u_owner", current.setXIdIcon, [
+        ["x_user_id", "x_owner"],
+        ["icon_url", "https://cdn.example/pub-icon.png"],
+      ]);
+      const honIcon = await runHono(b, "u_owner", "PUT", "/api/xid/x_owner/icon", {
+        x_user_id: "x_owner",
+        icon_url: "https://cdn.example/pub-icon.png",
+      });
+      assert.equal(honIcon.status, 403);
+      assert.deepEqual(honIcon.result, curIcon.result);
+
+      const pngBytes = buildPng();
+      const curUpload = await runCurrent(a, "u_owner", current.uploadXIdIcon, [
+        ["x_user_id", "x_owner"],
+        ["icon_file", new File([pngBytes], "icon.png", { type: "image/png" })],
+      ]);
+      const honUpload = await runHono(
+        b,
+        "u_owner",
+        "POST",
+        "/api/xid/x_owner/icon/upload",
+        [
+          ["x_user_id", "x_owner"],
+          ["icon_file", new File([pngBytes], "icon.png", { type: "image/png" })],
+        ],
+        { multipart: true },
+      );
+      assert.equal(honUpload.status, 403);
+      assert.deepEqual(honUpload.result, curUpload.result);
       assert.deepEqual(snapshot(b), snapshot(a));
     }
   });

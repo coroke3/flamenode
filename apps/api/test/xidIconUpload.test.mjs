@@ -26,6 +26,7 @@ const png = (size = 64) => {
 function setup({ linked = true, approved = true, bucket = null, onFirst = null, brokenBucketBinding = false, realSession = false } = {}) {
   const {db,sqlite,stats}=createAdminD1({onFirst});
   seedBase(sqlite,{role:"user"});
+  sqlite.exec("CREATE TABLE x_user_aliases (x_user_id TEXT, alias_x_id TEXT)");
   sqlite.prepare("INSERT INTO x_users (id,x_name,icon_url,approval_status) VALUES ('x_one','Creator',?,?)")
     .run("https://example.com/old.png",approved ? "approved" : "pending");
   if(linked) sqlite.prepare("INSERT INTO x_user_account_links (auth_user_id,x_user_id) VALUES (?,?)")
@@ -228,4 +229,16 @@ test("SA-105 is mounted on createXIdRoutes and real Auth.js session stays within
   assert.equal(res.status,200,await res.text());
   assert.equal(h.stats.reads,3,"session + combined guard/X + strict actor-X audit");
   assert.equal(h.stats.batches,1);
+});
+
+test("SA-105 isolated upload fails closed (403) on canonical-alias collision without R2 write or D1 mutation",async()=>{
+  const h=setup();
+  h.sqlite.prepare("INSERT INTO x_users (id,x_name,icon_url,approval_status) VALUES ('x_two','Other',NULL,'approved')").run();
+  h.sqlite.prepare("INSERT INTO x_user_aliases (x_user_id,alias_x_id) VALUES ('x_two','x_one')").run();
+  const res=await h.send();
+  assert.equal(res.status,403);
+  assert.equal((await res.json()).message,"この X ID を編集する権限がありません。");
+  assert.equal(h.writes.length,0);
+  assert.equal(h.stats.batches,0);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,0);
 });

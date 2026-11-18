@@ -12,6 +12,7 @@ const USER = { id: "admin-1", name: "Admin", email: null, image: null,
 function setup({ linked = true, approved = true, onFirst, bucket, brokenBucketBinding = false, realSession = false } = {}) {
   const { db, sqlite, stats } = createAdminD1({ onFirst });
   seedBase(sqlite, { role: "user" });
+  sqlite.exec("CREATE TABLE x_user_aliases (x_user_id TEXT, alias_x_id TEXT)");
   sqlite.exec(`CREATE TABLE videos (
     id TEXT PRIMARY KEY, creator_x_user_id TEXT, creator_icon_url TEXT,
     visibility_status TEXT, created_at INTEGER
@@ -213,4 +214,17 @@ test("SA-104 real Auth.js session stays within S3 budget (3 pre-reads + 1 batch)
   assert.equal(h.stats.batches, 1);
   assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
     "https://example.com/new.png");
+});
+
+test("SA-104 isolated route fails closed (403) on canonical-alias collision without mutation", async () => {
+  const h = setup();
+  h.sqlite.prepare("INSERT INTO x_users (id,x_name,icon_url,approval_status) VALUES ('x_two','Other',NULL,'approved')").run();
+  h.sqlite.prepare("INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES ('x_two', 'x_one')").run();
+  const res = await h.send("https://example.com/new.png");
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).message, "この X ID を編集する権限がありません。");
+  assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
+    "https://example.com/old.png");
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(h.stats.batches, 0);
 });

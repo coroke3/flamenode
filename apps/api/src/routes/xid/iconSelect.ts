@@ -25,6 +25,7 @@ import {
   TERMS_REACCEPT_REQUIRED_CTE_SQL,
   XID_GUARD_COLUMNS_SQL,
   XID_GUARD_JOINS_SQL,
+  XID_LINK_ALIAS_FAIL_CLOSED_SQL,
   type XIdGuardRowFields,
 } from "./xidGuard.ts";
 
@@ -93,6 +94,7 @@ export function createXIdIconSelectRoutes(guard: MiddlewareHandler<AppEnv>): Hon
         FROM "user" u
         ${XID_GUARD_JOINS_SQL}
         LEFT JOIN x_user_account_links l ON l.auth_user_id = u.id AND l.x_user_id = ?
+          AND ${XID_LINK_ALIAS_FAIL_CLOSED_SQL}
         LEFT JOIN x_users x ON x.id = l.x_user_id
         WHERE u.id = ? LIMIT 1
       `).bind(rawPathXId, rawPathXId, authUserId).first<IconCandidateRow>();
@@ -134,8 +136,9 @@ export function createXIdIconSelectRoutes(guard: MiddlewareHandler<AppEnv>): Hon
               AND (${expectedRowCondition({ expectedCurrent: before })})
               AND approval_status = 'approved'
               AND EXISTS (
-                SELECT 1 FROM x_user_account_links
-                WHERE x_user_id = ${xUserId} AND auth_user_id = ${authUserId}
+                SELECT 1 FROM x_user_account_links l
+                WHERE l.x_user_id = ${xUserId} AND l.auth_user_id = ${authUserId}
+                  AND ${sql.raw(XID_LINK_ALIAS_FAIL_CLOSED_SQL)}
               )
               AND (
                 icon_url = ${input.value.iconUrl}
