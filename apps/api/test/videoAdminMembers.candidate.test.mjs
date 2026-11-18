@@ -1560,6 +1560,79 @@ async function preparedSqliteMemberSave(s) {
   return { db, prepared };
 }
 
+test("MIG-0650 U03ck real D1 X alias resolution enqueues and persists only canonical user identity", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const schema = await import("@flamenode/db/schema");
+  const { mapAuditSettings } = await import("@flamenode/server-core/audit/settings");
+  const { prepareAdminVideoMemberCandidateWrite } =
+    await import("@flamenode/server-core/video/adminMemberCandidatePrepare");
+  const { executeAdminMemberAtomicCandidate } =
+    await import("@flamenode/server-core/video/adminMemberAtomicExecute");
+  const s = realGuardFixture();
+  try {
+    // x_owner exists in the seeded real schema; former_owner is an alias.
+    s.sqlite.prepare(
+      "INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES (?, ?)"
+    ).run("x_owner", "former_owner");
+    const target = await createDefaultVideoAdminMembersPreflightHost()
+      .loadAuthorizedVideo({ env: { DB: s.d1 } }, "v_two");
+    assert.ok(target);
+    const form = new FormData();
+    form.set("members_json", JSON.stringify([{
+      name: "Alias input", x_user_id: "former_owner",
+      role: "", comment: "", chapters: [],
+    }]));
+    const validated = validateVideoMemberSubmission(form, true);
+    assert.equal(validated.ok, true);
+    const db = drizzle(s.d1, { schema });
+    const prepared = await prepareAdminVideoMemberCandidateWrite(db, {
+      target, videoId: "v_two", actorUserId: "u_admin",
+      validated: validated.value, isCollab: true,
+      eventIds: ["ev2"], now: 12345,
+      preloaded: {
+        settings: mapAuditSettings(s.sqlite.prepare(
+          "SELECT * FROM system_settings WHERE id = 'default'"
+        ).get()),
+        actorSnapshotJsonById: {
+          u_admin: JSON.stringify({
+            discord_id: null, discord_name: null, x_user_id: null,
+            x_name: null, icon_url: null,
+          }),
+        },
+      },
+      readMeasuredCallerQueries: () => s.d1.stats.reads,
+    });
+    assert.equal(s.d1.stats.batches, 0, "prepare must never mutate D1");
+    const memberAudit = prepared.assembly.plan.audits.find(a =>
+      a.table_name === "video_members_set"
+    );
+    assert.ok(memberAudit, "a canonicalized member-set must carry strict audit");
+    assert.deepEqual(memberAudit.after.rows.map(r => r.x_user_id), ["x_owner"]);
+    const userTargets = prepared.assembly.targets
+      .filter(t => t.targetType === "user").map(t => t.targetId);
+    assert.deepEqual(userTargets, ["x_owner"],
+      "canonical stored X ID, not the submitted alias, must be rebuilt");
+    assert.equal(prepared.assembly.targets.some(t => t.targetId === "former_owner"), false);
+
+    const saved = await executeAdminMemberAtomicCandidate(
+      db, prepared.executionInput, async () => ({
+        readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+      }),
+    );
+    assert.equal(saved.committed, true);
+    assert.equal(s.d1.stats.batches, 1,
+      "member writes and canonical Queue fanout belong to one D1 batch");
+    assert.equal(s.sqlite.prepare(
+      "SELECT x_user_id FROM video_members WHERE video_id = ? AND is_public_member = 1"
+    ).get("v_two").x_user_id, "x_owner");
+    const queueUsers = s.sqlite.prepare(
+      "SELECT target_id FROM static_rebuild_queue WHERE target_type = 'user' ORDER BY target_id"
+    ).all().map(row => row.target_id);
+    assert.deepEqual(queueUsers, ["x_owner"],
+      "durable Queue must use exactly the persisted canonical identity");
+  } finally { s.sqlite.close(); }
+});
+
 test("MIG-0650 U03bl canonical member/chapter metadata + strict audit + Queue commit in one SQLite D1 batch", async () => {
   const { executeAdminMemberAtomicCandidate } =
     await import("@flamenode/server-core/video/adminMemberAtomicExecute");
