@@ -7,6 +7,9 @@ import { AdminCostGuard } from "./admin/AdminCostGuard.js";
 import { AdminNotifications } from "./admin/AdminNotifications.js";
 import { AdminCompatRedirect } from "./admin/AdminRedirects.js";
 import { AdminTop } from "./admin/AdminTop.js";
+import { AdminUsers } from "./admin/AdminUsers.js";
+import { AdminUserDetail } from "./admin/AdminUserDetail.js";
+import { AdminUserEdit } from "./admin/AdminUserEdit.js";
 import { PermissionSimulator } from "./admin/PermissionSimulator.js";
 import { StaticBuilds } from "./admin/StaticBuilds.js";
 import { YoutubeSync } from "./admin/YoutubeSync.js";
@@ -87,6 +90,9 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
             <Route path="/manage/*" element={manage} />
             <Route path="/admin" element={adminFrame}>
               <Route index element={<AdminTop />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="users/:id" element={<AdminUserDetail />} />
+              <Route path="users/:id/edit" element={<AdminUserEdit />} />
               <Route path="permissions/simulator" element={<PermissionSimulator />} />
               <Route path="cost-guard" element={<AdminCostGuard />} />
               <Route path="notifications" element={<AdminNotifications />} />
