@@ -1413,3 +1413,62 @@ test("MIG-0730 U02df: truthy non-function refresh ports do not misreport a commi
     }
   }
 });
+
+test("MIG-0730 U02dg: standalone Form snapshots one target video ID before rendering or saving", async () => {
+  let idReads = 0, writes = 0, refreshes = 0;
+  const video = {
+    title: "Member Test", collaboration_type: "collab",
+    get id() {
+      idReads++;
+      return idReads === 1 ? "v1" : "other-video";
+    },
+  };
+  const ui = setup({
+    video,
+    save: async payload => {
+      writes++;
+      assert.deepEqual(payload.getAll("video_id"), ["v1"],
+        "validated identity and outgoing FormData must be the same");
+      return { ok: true, message: "Bound video saved" };
+    },
+    onSaved: () => { refreshes++; },
+  });
+  try {
+    await ui.render();
+    assert.equal(idReads, 1, "one getter read for key, hidden ID and save gate");
+    const form = ui.target.querySelector("form");
+    assert.ok(form);
+    assert.equal(form.querySelector('input[name="video_id"]').value, "v1");
+    const link = [...form.querySelectorAll("a")].find(a => a.textContent.trim() === "詳細へ戻る");
+    assert.equal(link?.getAttribute("href"), "/admin/videos/v1");
+    await ui.submit();
+    assert.equal(idReads, 1, "submit must not reread an untrusted video ID");
+    assert.equal(writes, 1);
+    assert.equal(refreshes, 1);
+  } finally {
+    await ui.cleanup();
+  }
+});
+
+test("MIG-0730 U02dg: revoked or throwing video metadata cannot enable a standalone write", async () => {
+  for (const video of [
+    { title: "Hidden", collaboration_type: "collab",
+      get id() { throw Error("PRIVATE_VIDEO_ID"); } },
+    {
+      id: "v1", collaboration_type: "collab",
+      get title() { throw Error("PRIVATE_TITLE"); },
+    },
+  ]) {
+    let writes = 0;
+    const ui = setup({ video, save: async () => { writes++; return { ok: true }; } });
+    try {
+      await ui.render();
+      assert.match(ui.target.textContent, /参加者データを表示できません/);
+      assert.equal(ui.target.querySelector('button[type="submit"]'), null);
+      assert.equal(writes, 0);
+    } finally {
+      await ui.cleanup();
+    }
+  }
+});
+

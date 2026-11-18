@@ -79,8 +79,29 @@ export interface AdminVideoMembersFormProps {
  * Never fabricate members_json or publish edits when that field is missing.
  */
 export function AdminVideoMembersForm(props: AdminVideoMembersFormProps): React.ReactElement {
-  // A different video must receive independent form state, including an isolated submit latch.
-  return <AdminVideoMembersFormForVideo key={props.video.id} {...props} />;
+  // The standalone form can receive legacy/getter-backed DTOs without the
+  // Preview schema boundary. Snapshot the video identity exactly once: the
+  // key, save eligibility, hidden video_id and back link must agree even if
+  // a malicious accessor changes its answer between reads.
+  let video: AdminVideoMembersFormProps["video"];
+  try {
+    const rawId: unknown = props.video.id;
+    const rawTitle: unknown = props.video.title;
+    const rawYoutubeId: unknown = props.video.youtube_video_id;
+    const rawCollaborationType: unknown = props.video.collaboration_type;
+    video = {
+      id: typeof rawId === "string" ? rawId : "",
+      title: typeof rawTitle === "string" ? rawTitle : "",
+      youtube_video_id: typeof rawYoutubeId === "string" ? rawYoutubeId : null,
+      collaboration_type: typeof rawCollaborationType === "string" ? rawCollaborationType : null,
+    };
+  } catch {
+    // A throwing/revoked metadata proxy cannot become an actionable save.
+    return <p role="alert">参加者データを表示できません。</p>;
+  }
+  // A different video must receive independent form state, including an
+  // isolated submit latch. All descendants use the bound primitive ID.
+  return <AdminVideoMembersFormForVideo key={video.id} {...props} video={video} />;
 }
 
 function AdminVideoMembersFormForVideo({
