@@ -25,6 +25,30 @@ export function extractPreviousPublicMemberXUserIdsFromMembersPlan(
   ];
 }
 
+/**
+ * The member audit can be called directly by either runtime. If an explicit
+ * snapshot is corrupt, treating it as "missing" would make the public fanout
+ * fall back to raw (possibly aliased) submitted IDs or an empty old-member
+ * set. Only intentionally omitted legacy pure-test snapshots may use that
+ * compatibility fallback.
+ */
+function malformedExplicitFanoutSnapshot(snapshot: unknown): boolean {
+  const parsed = parseVideoMemberSetSnapshot(
+    snapshot as Record<string, unknown> | null | undefined,
+  );
+  if (!parsed || !snapshot || typeof snapshot !== "object" ||
+      !("rows" in snapshot) || !Array.isArray(snapshot.rows)) return true;
+  // parseVideoMemberSetSnapshot normalizes invalid optional x_user_id to null.
+  // Do not lose a creator invalidation because an audited ID has the wrong type.
+  return Array.from(snapshot.rows).some(row => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return true;
+    const raw = row as Record<string, unknown>;
+    return !("x_user_id" in raw) ||
+      (raw.x_user_id !== null && typeof raw.x_user_id !== "string") ||
+      raw.video_id !== parsed.id || raw.is_public_member !== 1;
+  });
+}
+
 export function collectMemberAggregationAffectedXUserIds(args: {
   previousCreatorXUserId: string | null | undefined;
   nextCreatorXUserId: string | null | undefined;
@@ -102,6 +126,16 @@ export function deriveAdminVideoMemberSaveEffects(input: {
   const memberAudit = hasMemberAudit
     ? input.membersPlan.audits.find(a => a.table_name === "video_members_set")
     : undefined;
+  // Real CURRENT member-set writes always include complete before/after
+  // snapshots. Explicitly malformed evidence must never be interpreted as an
+  // absent snapshot, especially when aliases change canonical X IDs.
+  if (input.isPublicVideo && memberAudit &&
+      ((memberAudit.before !== undefined &&
+        malformedExplicitFanoutSnapshot(memberAudit.before)) ||
+       (memberAudit.after !== undefined &&
+        malformedExplicitFanoutSnapshot(memberAudit.after)))) {
+    throw new RangeError("video_member_fanout_invalid_audit_snapshot");
+  }
   const afterSnapshot = parseVideoMemberSetSnapshot(
     memberAudit?.after as Record<string, unknown> | null | undefined,
   );

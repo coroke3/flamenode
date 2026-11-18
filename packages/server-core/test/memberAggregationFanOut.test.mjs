@@ -136,6 +136,61 @@ test("MIG-0650 U03cj: public user fanout uses canonical persisted after-snapshot
     "an alias-only form edit does not invalidate an unchanged canonical user");
 });
 
+test("MIG-0650 U03cl: malformed explicit public X-audit snapshots cannot fall back to alias inputs", () => {
+  const base = {
+    membersPlan: {
+      statements: [{}],
+      audits: [{
+        table_name: "video_members_set",
+        before: { id: "video-1", rows: [snapshotRow("old", "bob")] },
+        after: { id: "video-1", rows: [snapshotRow("new", "alice")] },
+      }],
+    },
+    previousCollaborationType: "collab",
+    members: [{ x_user_id: "alias_alice" }],
+    isCollab: true, isPublicVideo: true, creatorXUserId: "owner",
+  };
+  const afterBad = [
+    null,
+    { id: "video-1", rows: [{ ...snapshotRow("new", "alice"), x_user_id: 42 }] },
+    { id: "video-1", rows: [{ ...snapshotRow("new", "alice"), video_id: "foreign-video" }] },
+    { id: "video-1", rows: new Array(1) },
+  ];
+  for (const after of afterBad) {
+    assert.throws(() => deriveAdminVideoMemberSaveEffects({
+      ...base,
+      membersPlan: {
+        ...base.membersPlan,
+        audits: [{ ...base.membersPlan.audits[0], after }],
+      },
+    }), {
+      name: "RangeError", message: "video_member_fanout_invalid_audit_snapshot",
+    }, "a malformed explicit after-snapshot must not enqueue an uncanonical alias");
+  }
+  const malformedBefore = {
+    id: "video-1", rows: [{ ...snapshotRow("old", "bob"), x_user_id: 42 }],
+  };
+  assert.throws(() => deriveAdminVideoMemberSaveEffects({
+    ...base,
+    membersPlan: {
+      ...base.membersPlan,
+      audits: [{ ...base.membersPlan.audits[0], before: malformedBefore }],
+    },
+  }), { name: "RangeError", message: "video_member_fanout_invalid_audit_snapshot" },
+  "an invalid previous X ID must not suppress removal invalidation");
+  const valid = deriveAdminVideoMemberSaveEffects(base);
+  assert.deepEqual([...valid.affectedCreatorIds], ["bob", "alice"]);
+  const legacyMissingAfter = deriveAdminVideoMemberSaveEffects({
+    ...base,
+    membersPlan: {
+      ...base.membersPlan,
+      audits: [{ table_name: "video_members_set", before: base.membersPlan.audits[0].before }],
+    },
+  });
+  assert.deepEqual([...legacyMissingAfter.affectedCreatorIds], ["bob", "alias_alice"],
+    "legacy pure caller with absent (not malformed) after still has its existing fallback");
+});
+
 test("SA-085 U03s: public member-set delta targets only removed/added X users", () => {
   const membersPlan = {
     statements: [{}],
