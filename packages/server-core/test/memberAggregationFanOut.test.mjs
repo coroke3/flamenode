@@ -97,6 +97,45 @@ test("SA-085 U03s: derived metadata/no-op flags match CURRENT for the same membe
   assert.deepEqual([...chapterOnly.affectedCreatorIds], [], "chapter-only must not rebuild member profiles");
 });
 
+test("MIG-0650 U03cj: public user fanout uses canonical persisted after-snapshot, not submitted aliases", () => {
+  const common = {
+    membersPlan: {
+      statements: [{}],
+      audits: [{
+        table_name: "video_members_set",
+        before: { id: "video-1", rows: [snapshotRow("prior", "bob")] },
+        after: { id: "video-1", rows: [snapshotRow("after", "alice")] },
+      }],
+    },
+    previousCollaborationType: "collab",
+    members: [{ x_user_id: "alias_alice" }],
+    isCollab: true,
+    isPublicVideo: true,
+    creatorXUserId: "owner",
+  };
+  const result = deriveAdminVideoMemberSaveEffects(common);
+  assert.deepEqual([...result.affectedCreatorIds], ["bob", "alice"],
+    "removed user and persisted canonical new user must be invalidated");
+  assert.equal(result.affectedCreatorIds.has("alias_alice"), false,
+    "input alias is not a public aggregate key");
+  assert.equal(result.videoPublicContentChanged, true);
+  assert.equal(result.nextCollaborationType, "collab");
+
+  const noIdentityChange = deriveAdminVideoMemberSaveEffects({
+    ...common,
+    membersPlan: {
+      statements: [{}],
+      audits: [{
+        table_name: "video_members_set",
+        before: { id: "video-1", rows: [snapshotRow("before", "alice")] },
+        after: { id: "video-1", rows: [snapshotRow("after", "alice")] },
+      }],
+    },
+  });
+  assert.deepEqual([...noIdentityChange.affectedCreatorIds], [],
+    "an alias-only form edit does not invalidate an unchanged canonical user");
+});
+
 test("SA-085 U03s: public member-set delta targets only removed/added X users", () => {
   const membersPlan = {
     statements: [{}],

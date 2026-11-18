@@ -3,7 +3,7 @@ import { normalizeXId } from "@flamenode/domain/xid";
 import { classifyAdminVideoMemberSave } from "@flamenode/domain/video/adminMemberSubmission";
 
 type VideoMemberAuditPlan = {
-  audits: ReadonlyArray<{ table_name: string; before?: unknown }>;
+  audits: ReadonlyArray<{ table_name: string; before?: unknown; after?: unknown }>;
 };
 
 export function extractPreviousPublicMemberXUserIdsFromMembersPlan(
@@ -93,13 +93,28 @@ export function deriveAdminVideoMemberSaveEffects(input: {
     hasMemberAudit,
     hasChapterAudit,
   });
+  // X handles in a submitted form can be aliases. The member replacement
+  // planner resolves them before writing, and its strict after-snapshot is
+  // the authoritative set that the public user pages actually index.
+  // Using the raw form here can omit the canonical creator page while
+  // enqueuing an obsolete alias page instead. Both CURRENT and Hono consume
+  // the same planner output, so preserve that canonical identity here.
+  const memberAudit = hasMemberAudit
+    ? input.membersPlan.audits.find(a => a.table_name === "video_members_set")
+    : undefined;
+  const afterSnapshot = parseVideoMemberSetSnapshot(
+    memberAudit?.after as Record<string, unknown> | null | undefined,
+  );
+  const effectiveNextMembers = afterSnapshot
+    ? afterSnapshot.rows.map(row => ({ x_user_id: row.x_user_id ?? "" }))
+    : input.members;
   const affectedCreatorIds = input.isPublicVideo && hasMemberAudit
     ? collectMemberAggregationAffectedXUserIds({
         previousCreatorXUserId: input.creatorXUserId,
         nextCreatorXUserId: input.creatorXUserId,
         previousMemberXUserIds:
           extractPreviousPublicMemberXUserIdsFromMembersPlan(input.membersPlan),
-        nextMembers: input.members,
+        nextMembers: effectiveNextMembers,
       })
     : new Set<string>();
   return {

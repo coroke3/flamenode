@@ -113,7 +113,9 @@ test("MIG-0650 U03ax: members CAS, metadata, strict audits and full Queue preser
       id: "video-1",
       rows: [memberAuditRow("old")],
     },
-    after: { id: "video-1", rows: [] },
+    after: { id: "video-1", rows: [
+      memberAuditRow("new-bob", 1, { x_user_id: "bob" }),
+    ] },
   };
   const result = await assembleAdminVideoMemberAtomicPlan(db, input({
     target: { ...target, collaboration_type: "collab" },
@@ -143,6 +145,36 @@ test("MIG-0650 U03ax: members CAS, metadata, strict audits and full Queue preser
   assert.deepEqual(result.plan.audits[1].after, {
     id: "video-1", collaboration_type: "collab", updated_at: 12345,
   });
+});
+
+test("MIG-0650 U03cj: atomic Queue fanout invalidates canonical X IDs after alias resolution", async () => {
+  const { db } = capturedDb();
+  const audit = {
+    table_name: "video_members_set",
+    target_id: "video-1", operation: "MERGE",
+    actor_user_id: "admin", strict: true,
+    before: { id: "video-1", rows: [memberAuditRow("prior", 1, {
+      x_user_id: "bob",
+    })] },
+    after: { id: "video-1", rows: [memberAuditRow("new", 1, {
+      x_user_id: "alice",
+    })] },
+  };
+  const result = await assembleAdminVideoMemberAtomicPlan(db, input({
+    target: { ...target, collaboration_type: "collab" },
+    members: [{ x_user_id: "alias_alice" }],
+    isCollab: true,
+    membersPlan: memberPlan([{ kind: "canonical-member-CAS" }], [null], [audit]),
+  }));
+  assert.deepEqual(result.targets.map(x => `${x.targetType}:${x.targetId}`), [
+    "video:video-1",
+    "member_suggestions:global",
+    "users_index:global",
+    "user:bob",
+    "user:alice",
+  ]);
+  assert.equal(result.targets.some(x => x.targetId === "alias_alice"), false);
+  assert.equal(result.queue.acceptedTargetCount, 5);
 });
 
 test("MIG-0650 U03ax: private member changes do not enqueue public user projections", async () => {
