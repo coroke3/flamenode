@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
-import { xidWriteStack } from "../src/routes/xid/index.ts";
+import { xidSessionStack } from "../src/routes/xid/index.ts";
 import { createXIdProfileRoutes } from "../src/routes/xid/profile.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
@@ -11,7 +11,7 @@ const USER = {
   role: "user", is_banned: 0, active_x_user_id: null,
 };
 
-function setup({ linked = true, approved = true, onFirst } = {}) {
+function setup({ linked = true, approved = true, onFirst, realSession = false } = {}) {
   const { db, sqlite, stats } = createAdminD1({ onFirst });
   seedBase(sqlite, { role: "user" });
   // Match the full CURRENT x_users fields missing from the minimal
@@ -33,13 +33,11 @@ function setup({ linked = true, approved = true, onFirst } = {}) {
     await next();
   };
   const app = new Hono();
-  // Exercise isolated handlers through the real parent write stack, but NEVER
-  // mount in public createXIdRoutes before S3 and independent review.
-  app.route("/api/xid", createXIdProfileRoutes(xidWriteStack(session)));
-  const send = (body = { x_user_id: "x_one", x_name: "After" }, origin = SITE) =>
+  app.route("/api/xid", createXIdProfileRoutes(xidSessionStack(realSession ? undefined : session)));
+  const send = (body = { x_user_id: "x_one", x_name: "After" }, origin = SITE, headers = {}) =>
     app.request(SITE + "/api/xid/x_one/profile", {
       method: "PATCH",
-      headers: { Origin: origin, "Content-Type": "application/json" },
+      headers: { Origin: origin, "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
     }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
   return { db, sqlite, stats, send, get sessionCalls() { return sessionCalls; } };
@@ -110,7 +108,7 @@ test("SA-102 isolated handler refuses bad JSON values before any write", async (
 test("SA-102 isolated handler rolls back queued changes and audit on stale CAS snapshot", async () => {
   let raced = false;
   const h = setup({ onFirst: (statement, sqlite) => {
-    if (!raced && statement.includes("SELECT x.* FROM x_users x")) {
+    if (!raced && statement.includes("x_users x")) {
       raced = true;
       sqlite.prepare("UPDATE x_users SET x_name = 'Concurrent' WHERE id = 'x_one'").run();
     }
@@ -126,7 +124,7 @@ test("SA-102 isolated handler rolls back queued changes and audit on stale CAS s
 test("SA-102 isolated handler denies a linked-X revocation raced after authorization read", async () => {
   let revoked = false;
   const h = setup({ onFirst: (statement, sqlite) => {
-    if (!revoked && statement.includes("SELECT x.* FROM x_users x")) {
+    if (!revoked && statement.includes("x_users x")) {
       revoked = true;
       sqlite.prepare("DELETE FROM x_user_account_links WHERE auth_user_id = ? AND x_user_id = ?")
         .run(USER.id, "x_one");
@@ -143,7 +141,7 @@ test("SA-102 isolated handler denies a linked-X revocation raced after authoriza
 test("SA-102 isolated handler denies approval revocation raced after authorization read", async () => {
   let revoked = false;
   const h = setup({ onFirst: (statement, sqlite) => {
-    if (!revoked && statement.includes("SELECT x.* FROM x_users x")) {
+    if (!revoked && statement.includes("x_users x")) {
       revoked = true;
       sqlite.prepare("UPDATE x_users SET approval_status = 'rejected' WHERE id = ?").run("x_one");
     }
@@ -160,7 +158,7 @@ test("SA-102 isolated handler denies approval revocation raced after authorizati
 
 test("SA-102 isolated handler returns error without mutation when D1 pre-read fails", async () => {
   const h = setup({ onFirst: (statement) => {
-    if (statement.includes("SELECT x.* FROM x_users x")) throw new Error("transient read failure");
+    if (statement.includes("x_users x")) throw new Error("transient read failure");
   } });
   const res = await h.send({ x_user_id: "x_one", x_name: "Never" });
   assert.equal(res.status, 503);
@@ -187,4 +185,20 @@ test("SA-102 isolated handler never emits cacheable private profile responses", 
     const res = await h.send();
     assert.equal(res.headers.get("Cache-Control"), "private, no-store");
   }
+});
+
+test("SA-102 real Auth.js session stays within S3 budget (3 pre-reads + 1 batch) and accepts path-only x_user_id", async () => {
+  const h = setup({ realSession: true });
+  h.sqlite.exec('CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, expires INTEGER)');
+  h.sqlite.prepare('INSERT INTO "session" ("sessionToken", "userId", expires) VALUES (?, ?, ?)')
+    .run("valid-session-token", USER.id, Date.now() + 3600_000);
+  const res = await h.send(
+    { x_name: "PathOnly" },
+    SITE,
+    { Cookie: "__Secure-authjs.session-token=valid-session-token" },
+  );
+  assert.equal(res.status, 200, await res.text());
+  assert.equal(h.stats.reads, 3, "session + combined guard/X + strict actor-X audit");
+  assert.equal(h.stats.batches, 1);
+  assert.equal(h.sqlite.prepare("SELECT x_name FROM x_users WHERE id = 'x_one'").get().x_name, "PathOnly");
 });

@@ -2,8 +2,8 @@ import { sql, type SQL } from "@flamenode/server-core/sql";
 /**
  * MIG-0636 U05 / SA-103 CURRENT src/lib/auth/xLinkDependencies.ts parity.
  * One read-only dependency probe before any authenticated unlink. This DOES
- * NOT authorize deletion: the future DELETE must recheck each predicate in
- * its atomic SQL CAS to close races with newly created dependencies.
+ * NOT authorize deletion: the DELETE rechecks each predicate in its atomic
+ * SQL CAS to close races with newly created dependencies.
  */
 export type XUnlinkBlocker =
   | "event_owner_inoperable"
@@ -27,7 +27,7 @@ export type UnlinkAssessment = {
   message: string | null;
 };
 
-type UnlinkFacts = {
+export type UnlinkFacts = {
   link_present: number;
   owner_blocked: number;
   video_blocked: number;
@@ -36,56 +36,53 @@ type UnlinkFacts = {
   dependency_blocked: number;
 };
 
-/** The query is fixed and all user-supplied parameters are bound. No writes. */
-export async function assessXUnlinkD1(
-  db: D1Database,
-  authUserId: string,
-  xUserId: string,
-): Promise<UnlinkAssessment> {
-  const row = await db.prepare(`
-    WITH actor AS (
-      SELECT ? AS auth_id, ? AS xid
-    ), link AS (
-      SELECT l.link_role, x.approval_status
-      FROM x_user_account_links l
+export const XID_UNLINK_CTES_SQL = `
+  actor AS (
+    SELECT ? AS auth_id, ? AS xid
+  ), link AS (
+    SELECT l.link_role, x.approval_status
+    FROM x_user_account_links l
+    INNER JOIN x_users x ON x.id = l.x_user_id
+    JOIN actor a ON a.auth_id = l.auth_user_id AND a.xid = l.x_user_id
+    LIMIT 1
+  ), alt AS (
+    SELECT EXISTS (
+      SELECT 1 FROM x_user_account_links l
       INNER JOIN x_users x ON x.id = l.x_user_id
-      JOIN actor a ON a.auth_id = l.auth_user_id AND a.xid = l.x_user_id
-      LIMIT 1
-    ), alt AS (
-      SELECT EXISTS (
-        SELECT 1 FROM x_user_account_links l
+      JOIN actor a ON a.auth_id = l.auth_user_id
+      WHERE l.x_user_id <> a.xid AND x.approval_status = 'approved'
+    ) AS has_alt
+  )
+`;
+
+export const XID_UNLINK_FACTS_COLUMNS_SQL = `
+  EXISTS (SELECT 1 FROM link) AS link_present,
+  (EXISTS (SELECT 1 FROM link WHERE link_role = 'owner' AND approval_status = 'approved')
+   AND EXISTS (SELECT 1 FROM event_staff es JOIN actor a ON es.x_user_id = a.xid
+               WHERE es.permission_preset = 'owner')
+   AND (SELECT COUNT(*) FROM x_user_account_links l
         INNER JOIN x_users x ON x.id = l.x_user_id
-        JOIN actor a ON a.auth_id = l.auth_user_id
-        WHERE l.x_user_id <> a.xid AND x.approval_status = 'approved'
-      ) AS has_alt
-    )
-    SELECT
-      EXISTS (SELECT 1 FROM link) AS link_present,
-      (EXISTS (SELECT 1 FROM link WHERE link_role = 'owner' AND approval_status = 'approved')
-       AND EXISTS (SELECT 1 FROM event_staff es JOIN actor a ON es.x_user_id = a.xid
-                   WHERE es.permission_preset = 'owner')
-       AND (SELECT COUNT(*) FROM x_user_account_links l
-            INNER JOIN x_users x ON x.id = l.x_user_id
-            JOIN actor a ON a.xid = l.x_user_id
-            WHERE l.link_role = 'owner' AND x.approval_status = 'approved') <= 1
-      ) AS owner_blocked,
-      (EXISTS (SELECT 1 FROM videos v JOIN actor a ON a.xid = v.creator_x_user_id)
-       AND NOT (SELECT has_alt FROM alt)
-      ) AS video_blocked,
-      EXISTS (SELECT 1 FROM slots s JOIN actor a ON s.x_user_id = a.xid
-              AND s.reserved_by_user_id = a.auth_id
-              WHERE s.status IN ('reserved', 'submitted')) AS slot_blocked,
-      EXISTS (SELECT 1 FROM x_identity_requests r JOIN actor a
-              WHERE r.status = 'pending' AND r.request_type IN ('merge', 'revert_merge')
-                AND (r.requested_by_auth_user_id = a.auth_id
-                     OR r.source_x_user_id = a.xid OR r.target_x_user_id = a.xid)
-             ) AS pending_blocked,
-      ((EXISTS (SELECT 1 FROM event_staff es JOIN actor a ON es.x_user_id = a.xid)
-        OR EXISTS (SELECT 1 FROM videos v JOIN actor a ON v.creator_x_user_id = a.xid))
-       AND NOT (SELECT has_alt FROM alt)
-      ) AS dependency_blocked
-  `).bind(authUserId, xUserId).first<UnlinkFacts>();
-  if (!row) throw new Error("xid.unlinkAssessment: no facts returned");
+        JOIN actor a ON a.xid = l.x_user_id
+        WHERE l.link_role = 'owner' AND x.approval_status = 'approved') <= 1
+  ) AS owner_blocked,
+  (EXISTS (SELECT 1 FROM videos v JOIN actor a ON a.xid = v.creator_x_user_id)
+   AND NOT (SELECT has_alt FROM alt)
+  ) AS video_blocked,
+  EXISTS (SELECT 1 FROM slots s JOIN actor a ON s.x_user_id = a.xid
+          AND s.reserved_by_user_id = a.auth_id
+          WHERE s.status IN ('reserved', 'submitted')) AS slot_blocked,
+  EXISTS (SELECT 1 FROM x_identity_requests r JOIN actor a
+          WHERE r.status = 'pending' AND r.request_type IN ('merge', 'revert_merge')
+            AND (r.requested_by_auth_user_id = a.auth_id
+                 OR r.source_x_user_id = a.xid OR r.target_x_user_id = a.xid)
+         ) AS pending_blocked,
+  ((EXISTS (SELECT 1 FROM event_staff es JOIN actor a ON es.x_user_id = a.xid)
+    OR EXISTS (SELECT 1 FROM videos v JOIN actor a ON v.creator_x_user_id = a.xid))
+   AND NOT (SELECT has_alt FROM alt)
+  ) AS dependency_blocked
+`;
+
+export function resolveUnlinkAssessment(row: UnlinkFacts): UnlinkAssessment {
   const blockers: XUnlinkBlocker[] = [];
   if (row.owner_blocked) blockers.push("event_owner_inoperable");
   if (row.video_blocked) blockers.push("creator_assets_without_alternative");
@@ -93,8 +90,26 @@ export async function assessXUnlinkD1(
   if (row.pending_blocked) blockers.push("pending_merge_request");
   if (row.dependency_blocked) blockers.push("only_approved_link_with_dependencies");
   const linked = row.link_present === 1;
-  return { linked, allowed: linked && blockers.length === 0,
-    blockers, message: blockers.length ? messages[blockers[0]!] : null };
+  return {
+    linked,
+    allowed: linked && blockers.length === 0,
+    blockers,
+    message: blockers.length ? messages[blockers[0]!] : null,
+  };
+}
+
+/** The query is fixed and all user-supplied parameters are bound. No writes. */
+export async function assessXUnlinkD1(
+  db: D1Database,
+  authUserId: string,
+  xUserId: string,
+): Promise<UnlinkAssessment> {
+  const row = await db.prepare(`
+    WITH ${XID_UNLINK_CTES_SQL}
+    SELECT ${XID_UNLINK_FACTS_COLUMNS_SQL}
+  `).bind(authUserId, xUserId).first<UnlinkFacts>();
+  if (!row) throw new Error("xid.unlinkAssessment: no facts returned");
+  return resolveUnlinkAssessment(row);
 }
 
 /** CURRENT xLinkDeletionAllowedSql: the real DELETE must recheck all blockers

@@ -1,9 +1,11 @@
 /**
- * MIG-0659 (D-15-8): /api/xid router. MIG-0636 (Personal X / Active X APIs) shares this file; whichever
- * merges first creates it and the other adds its own `route(...)` line.
+ * MIG-0659 (D-15-8): /api/xid router. MIG-0636 (Personal X / Active X APIs) shares this file.
  *
- * Write stack (same order as videoWriteStack / the admin routes): no-store header, origin (pure, before any
- * D1 read), session, writeGuard (any role, identity only), CostGuard `xid_links`, drizzle handle.
+ * Write stacks:
+ * - SA-098 (`POST /active`): own one-read guard (origin -> session -> combined TOS/CostGuard/X -> db).
+ * - SA-099..101 (`requests` / `cancel` / `merge-revert-requests`): xidWriteStack (origin -> session -> writeGuard -> CostGuard -> db).
+ * - SA-102..105 (`PATCH /:xUserId/profile`, `DELETE /:xUserId`, `PUT /:xUserId/icon`, `POST /:xUserId/icon/upload`):
+ *   xidSessionStack (origin -> session -> authenticated -> db) + route 1-SELECT combined TOS/CostGuard/X preflight.
  */
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
@@ -12,8 +14,15 @@ import type { AppEnv } from "../../env.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { dbMiddleware } from "../../middleware/db.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
-import { createXIdRequestRoutes } from "./requests.ts";
 import { activeXRoutes } from "./activeX.ts";
+import { createXIdIconSelectRoutes } from "./iconSelect.ts";
+import { createXIdIconUploadRoutes } from "./iconUpload.ts";
+import { createXIdProfileRoutes } from "./profile.ts";
+import { createXIdRequestRoutes } from "./requests.ts";
+import { createXIdUnlinkRoutes } from "./unlink.ts";
+import { xidSessionStack } from "./xidGuard.ts";
+
+export { xidSessionStack };
 
 export function xidWriteStack(session?: MiddlewareHandler<AppEnv>): MiddlewareHandler<AppEnv> {
   const originOptions = (c: Context<AppEnv>) => ({
@@ -63,8 +72,13 @@ export function createXIdRoutes(options: { session?: MiddlewareHandler<AppEnv> }
   xid.use("/active", (c, next) =>
     c.req.method === "POST" ? (options.session ?? sessionMiddleware())(c, next) : next(),
   );
+  const sessionGuard = xidSessionStack(options.session);
   xid.route("/active", activeXRoutes); // MIG-0636 SA-098: own one-read write guard
   xid.route("/", createXIdRequestRoutes(xidWriteStack(options.session))); // MIG-0659 SA-099..101
+  xid.route("/", createXIdProfileRoutes(sessionGuard)); // MIG-0636 SA-102
+  xid.route("/", createXIdUnlinkRoutes(sessionGuard)); // MIG-0636 SA-103
+  xid.route("/", createXIdIconSelectRoutes(sessionGuard)); // MIG-0636 SA-104
+  xid.route("/", createXIdIconUploadRoutes(sessionGuard)); // MIG-0636 SA-105
   return xid;
 }
 

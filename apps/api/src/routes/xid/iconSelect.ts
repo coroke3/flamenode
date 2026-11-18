@@ -1,7 +1,12 @@
 /**
- * MIG-0636 U05 SA-104: isolated icon-selector write handler.
- * UNMOUNTED pending CURRENT parity, orphan R2 cleanup and S3 budget acceptance.
- * Guard supplied by caller must enforce origin, identity, TOS, CostGuard and D1.
+ * MIG-0636 U05 SA-104: Hono icon-selector write handler (PUT /api/xid/:xUserId/icon).
+ * CURRENT contract: src/lib/actions/xid.ts#setXIdIcon.
+ *
+ * Caller supplies xidSessionStack (same-origin -> session -> authenticated -> db).
+ * Combined 1-SELECT preflight loads TOS, CostGuard settings, actor snapshot,
+ * linked X row, and up to 40 candidate icons so real sessions stay within
+ * ZERO_1102 S3 (3 pre-reads + 1 batch).
+ * D-0603-1: static rebuild queue rows commit atomically (wake 0).
  */
 import { Hono, type MiddlewareHandler } from "hono";
 import type { AppEnv } from "../../env.ts";
@@ -13,29 +18,39 @@ import { auditPreloaded, readAdminJsonBody, BODY_TOO_LARGE_MESSAGE } from "../ad
 import { limitXIdActionBody } from "../../middleware/bodyLimit.ts";
 import { parseSetXIdIconInput } from "./profileInput.ts";
 import { cleanupOldXIconAfterCommit } from "./orphanCleanup.ts";
+import {
+  evaluateXIdGuardRow,
+  resolveXIdDb,
+  stripXIdGuardFields,
+  TERMS_REACCEPT_REQUIRED_CTE_SQL,
+  XID_GUARD_COLUMNS_SQL,
+  XID_GUARD_JOINS_SQL,
+  type XIdGuardRowFields,
+} from "./xidGuard.ts";
 
-type IconRow = Record<string, unknown> & {
-  id: string;
+type IconCandidateRow = XIdGuardRowFields & {
+  _has_link: number;
+  _icon_candidates_json: string | null;
+  id: string | null;
   icon_url: string | null;
   approval_status: string | null;
 };
-type IconCandidateRow = IconRow & { _icon_candidates_json: string | null };
 
 /** CURRENT getXIconCandidates(...,40): current X icon then public video icons
  * newest-first, distinct in arrival order. The capped JSON source prevents
  * an unbounded response; no client-supplied URL alone grants permission.
  */
 function approvedIconCandidate(
-  row: IconCandidateRow,
+  currentIconUrl: string | null,
+  candidatesJson: string | null,
   value: string,
 ): boolean {
   const seen = new Set<string>();
-  if (row.icon_url) seen.add(row.icon_url);
+  if (currentIconUrl) seen.add(currentIconUrl);
   if (seen.has(value)) return true;
-  const raw = row._icon_candidates_json;
-  if (!raw || raw.length > 45000) return false;
+  if (!candidatesJson || candidatesJson.length > 45000) return false;
   let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return false; }
+  try { parsed = JSON.parse(candidatesJson); } catch { return false; }
   if (!Array.isArray(parsed)) return false;
   let count = seen.size;
   for (const candidate of parsed) {
@@ -51,44 +66,66 @@ function approvedIconCandidate(
 export function createXIdIconSelectRoutes(guard: MiddlewareHandler<AppEnv>): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
   routes.put("/:xUserId/icon", guard, limitXIdActionBody("SA-104"), async (c) => {
+    const rawD1 = resolveXIdDb(c);
+    if (rawD1 instanceof Response) return rawD1;
+
     const body = await readAdminJsonBody(c.req.raw);
     if (body.kind === "too_large") {
       return c.json({ ok: false, message: BODY_TOO_LARGE_MESSAGE }, 413);
     }
-    const input = parseSetXIdIconInput(c.req.param("xUserId"), body.kind === "ok" ? body.value : null);
-    if (!input.ok) return c.json({ ok: false, message: input.message }, 400);
-    const xUserId = input.value.xUserId;
-    const authUserId = c.get("user")!.id;
+
+    const rawPathXId = c.req.param("xUserId") ?? "";
+    const sessionUser = c.get("user")!;
+    const authUserId = sessionUser.id;
     let row: IconCandidateRow | null;
     try {
-      row = await c.env.DB.prepare(`
-        SELECT x.*,
+      row = await rawD1.prepare(`
+        ${TERMS_REACCEPT_REQUIRED_CTE_SQL}
+        SELECT ${XID_GUARD_COLUMNS_SQL},
+          (l.x_user_id IS NOT NULL) AS _has_link,
           (SELECT json_group_array(q.icon_url) FROM (
             SELECT creator_icon_url AS icon_url FROM videos
             WHERE creator_x_user_id = ? AND creator_icon_url IS NOT NULL
               AND visibility_status = 'public'
             ORDER BY created_at DESC LIMIT 80
-          ) q) AS _icon_candidates_json
-        FROM x_users x
-        INNER JOIN x_user_account_links l ON l.x_user_id = x.id
-        WHERE x.id = ? AND l.auth_user_id = ? LIMIT 1
-      `).bind(xUserId, xUserId, authUserId).first<IconCandidateRow>();
+          ) q) AS _icon_candidates_json,
+          x.*
+        FROM "user" u
+        ${XID_GUARD_JOINS_SQL}
+        LEFT JOIN x_user_account_links l ON l.auth_user_id = u.id AND l.x_user_id = ?
+        LEFT JOIN x_users x ON x.id = l.x_user_id
+        WHERE u.id = ? LIMIT 1
+      `).bind(rawPathXId, rawPathXId, authUserId).first<IconCandidateRow>();
     } catch {
       return c.json({ ok: false, message: "DBに接続できません。" }, 503);
     }
-    if (!row) return c.json({ ok: false, message: "この X ID を編集する権限がありません。" }, 403);
-    if (row.approval_status !== "approved") {
+
+    const guardDeny = await evaluateXIdGuardRow(c, sessionUser, row);
+    if (guardDeny) return guardDeny;
+
+    const input = parseSetXIdIconInput(rawPathXId, body.kind === "ok" ? body.value : null);
+    if (!input.ok) return c.json({ ok: false, message: input.message }, 400);
+    const xUserId = input.value.xUserId;
+
+    const { rest } = stripXIdGuardFields(row!);
+    const { _has_link, _icon_candidates_json, ...before } = rest;
+    if (_has_link !== 1 || typeof before.id !== "string") {
+      return c.json({ ok: false, message: "この X ID を編集する権限がありません。" }, 403);
+    }
+    if (before.approval_status !== "approved") {
       return c.json({ ok: false, message: "承認済みの X ID だけを編集できます。" }, 403);
     }
-    if (!approvedIconCandidate(row, input.value.iconUrl)) {
+    if (!approvedIconCandidate(before.icon_url, _icon_candidates_json, input.value.iconUrl)) {
       return c.json({ ok: false, message: "選択できないアイコンです。" }, 400);
     }
-    const { _icon_candidates_json: _candidates, ...before } = row;
+
     const after = { ...before, icon_url: input.value.iconUrl };
     const db = c.get("db");
     try {
       const queue = await buildAfterXUserPublicUpdateQueueBatch(db, {
-        xUserId, reason: "x_user_icon_update", requestedByUserId: authUserId,
+        xUserId,
+        reason: "x_user_icon_update",
+        requestedByUserId: authUserId,
       });
       await mutateWithAudit(db, {
         mutationStatements: [
@@ -114,25 +151,29 @@ export function createXIdIconSelectRoutes(guard: MiddlewareHandler<AppEnv>): Hon
         expectedMutationChanges: [1, ...queue.expectedChanges],
         preloaded: auditPreloaded(c),
         audits: [{
-          table_name: "x_users", target_id: before.id, operation: "UPDATE",
-          before: { ...before }, after: { ...after }, actor_user_id: authUserId,
-          actor_x_user_id: xUserId, reason: "icon_select", retention_class: "long_audit",
+          table_name: "x_users",
+          target_id: before.id,
+          operation: "UPDATE",
+          before: { ...before },
+          after: { ...after },
+          actor_user_id: authUserId,
+          actor_x_user_id: xUserId,
+          reason: "icon_select",
+          retention_class: "long_audit",
           strict: true,
         }],
+        // D-0603-1: background Cron consumes queue. Do NOT wake a Queue here.
       });
     } catch {
       return c.json({ ok: false, message: "アイコンを更新できませんでした。再読み込みしてお試しください。" }, 409);
     }
     // CURRENT best-effort orphan cleanup happens only after the D1 commit.
-    // Any missing table, R2 error, reused URL or uncertain reference retains
-    // the object; an unsuccessful cleanup never turns a committed write into
-    // an HTTP failure that would encourage duplicate submissions.
     // A completed atomic D1 write must not be reported as failed simply
     // because an optional R2 binding is unavailable during postcommit GC.
     try {
       const bucket = c.env?.BUCKET;
       if (bucket) {
-        await cleanupOldXIconAfterCommit(c.env.DB, bucket, before.icon_url, input.value.iconUrl);
+        await cleanupOldXIconAfterCommit(rawD1, bucket, before.icon_url, input.value.iconUrl);
       }
     } catch {
       // Best effort only. A future cleanup can recheck all live references.

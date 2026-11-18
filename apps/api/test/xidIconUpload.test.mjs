@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
-import { xidWriteStack, createXIdRoutes } from "../src/routes/xid/index.ts";
+import { xidSessionStack, createXIdRoutes } from "../src/routes/xid/index.ts";
 import { createXIdIconUploadRoutes } from "../src/routes/xid/iconUpload.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
@@ -23,7 +23,7 @@ const png = (size = 64) => {
   chunk("IEND",new Uint8Array(0));
   return new Uint8Array(parts);
 };
-function setup({ linked = true, approved = true, bucket = null, onFirst = null, brokenBucketBinding = false } = {}) {
+function setup({ linked = true, approved = true, bucket = null, onFirst = null, brokenBucketBinding = false, realSession = false } = {}) {
   const {db,sqlite,stats}=createAdminD1({onFirst});
   seedBase(sqlite,{role:"user"});
   sqlite.prepare("INSERT INTO x_users (id,x_name,icon_url,approval_status) VALUES ('x_one','Creator',?,?)")
@@ -38,10 +38,10 @@ function setup({ linked = true, approved = true, bucket = null, onFirst = null, 
   let sessions=0;
   const session=async(c,next)=>{sessions++;c.set("user",{...USER});c.set("sessionState","user");await next();};
   const app=new Hono();
-  app.route("/api/xid",createXIdIconUploadRoutes(xidWriteStack(session)));
-  const send=(bytes=png(),{type="image/png",bodyXId="x_one",pathXId="x_one",origin=SITE,extra={}}={})=>{
+  app.route("/api/xid",createXIdIconUploadRoutes(xidSessionStack(realSession ? undefined : session)));
+  const send=(bytes=png(),{type="image/png",bodyXId="x_one",pathXId="x_one",origin=SITE,extra={},headers={}}={})=>{
     const form=new FormData();
-    form.append("x_user_id",bodyXId);
+    if (bodyXId !== undefined) form.append("x_user_id",bodyXId);
     form.append("icon_file",new File([bytes],"avatar.png",{type}));
     for(const [key,value] of Object.entries(extra))form.append(key,value);
     const env={DB:db,NEXT_PUBLIC_SITE_URL:SITE};
@@ -53,7 +53,7 @@ function setup({ linked = true, approved = true, bucket = null, onFirst = null, 
       },
     });
     return app.request(SITE+"/api/xid/"+pathXId+"/icon/upload",
-      {method:"POST",headers:{Origin:origin},body:form},env);
+      {method:"POST",headers:{Origin:origin,...headers},body:form},env);
   };
   return {sqlite,stats,writes,deletes,send,app,
     get sessions(){return sessions;}};
@@ -84,11 +84,10 @@ test("SA-105 isolated upload: authorized PNG uses staged+final R2, strict audit 
   assert.deepEqual(h.sqlite.prepare("SELECT target_type FROM static_rebuild_queue").all()
     .map(x=>x.target_type).sort(),["member_suggestions","user","users_index"]);
   assert.equal(h.stats.batches,1);
-  // 2 guard reads + 1 linked-X preflight + 1 mandatory actor-X
-  // authorization validation during strict audit preparation. Guarded
-  // settings/actor snapshots must not be fetched again.
-  assert.equal(h.stats.reads, 4,
-    "SA-105 must retain strict actor-X validation without duplicate settings/actor reads");
+  // 1 combined guard/preflight read + 1 mandatory actor-X authorization
+  // validation during strict audit preparation (mocked session = 0 reads).
+  assert.equal(h.stats.reads, 2,
+    "SA-105 must retain strict actor-X validation without duplicate guard/settings reads");
 });
 
 test("SA-105 isolated upload: invalid identity, malformed image, MIME mismatch and 2 MiB cap never touch R2",async()=>{
@@ -166,7 +165,7 @@ test("SA-105 isolated upload: failed final R2 put rolls back both new object key
 test("SA-105 isolated upload: revoked X link between pre-read and CAS rolls back R2 and D1 audit",async()=>{
   let raced=false;
   const h=setup({onFirst:(sql,sqlite)=>{
-    if(!raced&&sql.includes("FROM x_users AS x")&&sql.includes("x_user_account_links")){
+    if(!raced&&sql.includes("x_users AS x")&&sql.includes("x_user_account_links")){
       raced=true;
       sqlite.prepare("DELETE FROM x_user_account_links WHERE auth_user_id=?").run(USER.id);
     }
@@ -185,7 +184,7 @@ test("SA-105 isolated upload: revoked X link between pre-read and CAS rolls back
 test("SA-105 isolated upload: approval revocation after the preflight cannot create a live R2 reference",async()=>{
   let revoked=false;
   const h=setup({onFirst:(statement,sqlite)=>{
-    if(!revoked&&statement.includes("FROM x_users AS x")&&statement.includes("x_user_account_links")){
+    if(!revoked&&statement.includes("x_users AS x")&&statement.includes("x_user_account_links")){
       revoked=true;
       sqlite.prepare("UPDATE x_users SET approval_status = 'rejected' WHERE id = 'x_one'").run();
     }
@@ -214,7 +213,19 @@ test("SA-105 isolated upload: successful commit survives staging deletion error"
   assert.equal(h.stats.batches,1);
 });
 
-test("SA-105 is not mounted on the public X ID router before accepted security/performance gates",()=>{
+test("SA-105 is mounted on createXIdRoutes and real Auth.js session stays within S3 budget (3 pre-reads + 1 batch)",async()=>{
   const routes=createXIdRoutes();
-  assert.equal(routes.routes.some(r=>r.method==="POST"&&r.path.includes("/icon/upload")),false);
+  assert.equal(routes.routes.some(r=>r.method==="POST"&&r.path.includes("/icon/upload")),true);
+
+  const h=setup({realSession:true});
+  h.sqlite.exec('CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, expires INTEGER)');
+  h.sqlite.prepare('INSERT INTO "session" ("sessionToken", "userId", expires) VALUES (?, ?, ?)')
+    .run("valid-session-token", USER.id, Date.now() + 3600_000);
+  const res=await h.send(png(),{
+    bodyXId:undefined,
+    headers:{Cookie:"__Secure-authjs.session-token=valid-session-token"},
+  });
+  assert.equal(res.status,200,await res.text());
+  assert.equal(h.stats.reads,3,"session + combined guard/X + strict actor-X audit");
+  assert.equal(h.stats.batches,1);
 });

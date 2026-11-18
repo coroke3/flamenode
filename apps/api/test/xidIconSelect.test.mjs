@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
-import { xidWriteStack } from "../src/routes/xid/index.ts";
+import { xidSessionStack } from "../src/routes/xid/index.ts";
 import { createXIdIconSelectRoutes } from "../src/routes/xid/iconSelect.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
@@ -9,7 +9,7 @@ const SITE = "https://app.flamenode.example";
 const USER = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "user", is_banned: 0, active_x_user_id: null };
 
-function setup({ linked = true, approved = true, onFirst, bucket, brokenBucketBinding = false } = {}) {
+function setup({ linked = true, approved = true, onFirst, bucket, brokenBucketBinding = false, realSession = false } = {}) {
   const { db, sqlite, stats } = createAdminD1({ onFirst });
   seedBase(sqlite, { role: "user" });
   sqlite.exec(`CREATE TABLE videos (
@@ -38,11 +38,11 @@ function setup({ linked = true, approved = true, onFirst, bucket, brokenBucketBi
     await next();
   };
   const app = new Hono();
-  app.route("/api/xid", createXIdIconSelectRoutes(xidWriteStack(session)));
-  const send = (icon_url, { x_user_id = "x_one", origin = SITE } = {}) =>
+  app.route("/api/xid", createXIdIconSelectRoutes(xidSessionStack(realSession ? undefined : session)));
+  const send = (icon_url, { x_user_id = "x_one", origin = SITE, headers = {} } = {}) =>
     app.request(SITE + "/api/xid/x_one/icon", {
-      method: "PUT", headers: { Origin: origin, "Content-Type": "application/json" },
-      body: JSON.stringify({ x_user_id, icon_url }),
+      method: "PUT", headers: { Origin: origin, "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(x_user_id === undefined ? { icon_url } : { x_user_id, icon_url }),
     }, Object.defineProperty({ DB: db, NEXT_PUBLIC_SITE_URL: SITE }, "BUCKET", {
       enumerable: true,
       get() {
@@ -94,7 +94,7 @@ test("SA-104 isolated route rejects unlinked and unapproved identities", async (
 test("SA-104 isolated route rejects revoked link and preserves atomic audit and queue state", async () => {
   let raced = false;
   const h = setup({ onFirst: (sql, sqlite) => {
-    if (!raced && sql.includes("FROM x_users x") && sql.includes("_icon_candidates_json")) {
+    if (!raced && sql.includes("x_users x") && sql.includes("_icon_candidates_json")) {
       raced = true;
       sqlite.prepare("DELETE FROM x_user_account_links WHERE auth_user_id = ?").run(USER.id);
     }
@@ -119,7 +119,7 @@ test("SA-104 isolated route rejects cross-origin requests before session and D1"
 test("SA-104 isolated route rejects icon withdrawn from public candidates after pre-read", async () => {
   let withdrawn = false;
   const h = setup({ onFirst: (statement, sqlite) => {
-    if (!withdrawn && statement.includes("_icon_candidates_json") && statement.includes("FROM x_users x")) {
+    if (!withdrawn && statement.includes("_icon_candidates_json") && statement.includes("x_users x")) {
       withdrawn = true;
       sqlite.prepare("UPDATE videos SET visibility_status = 'private' WHERE id = 'v1'").run();
       sqlite.prepare("UPDATE videos SET visibility_status = 'private' WHERE id = 'v3'").run();
@@ -197,4 +197,20 @@ test("SA-104 isolated route ignores orphan cleanup failures after a successful D
   assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
     "https://example.com/new.png");
   assert.equal(h.stats.batches, 1);
+});
+
+test("SA-104 real Auth.js session stays within S3 budget (3 pre-reads + 1 batch) and accepts path-only x_user_id", async () => {
+  const h = setup({ realSession: true });
+  h.sqlite.exec('CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, expires INTEGER)');
+  h.sqlite.prepare('INSERT INTO "session" ("sessionToken", "userId", expires) VALUES (?, ?, ?)')
+    .run("valid-session-token", USER.id, Date.now() + 3600_000);
+  const res = await h.send("https://example.com/new.png", {
+    x_user_id: undefined,
+    headers: { Cookie: "__Secure-authjs.session-token=valid-session-token" },
+  });
+  assert.equal(res.status, 200, await res.text());
+  assert.equal(h.stats.reads, 3, "session + combined guard/candidates + strict actor-X audit");
+  assert.equal(h.stats.batches, 1);
+  assert.equal(h.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='x_one'").get().icon_url,
+    "https://example.com/new.png");
 });

@@ -362,7 +362,7 @@ test("MIG-0636 U05 SA-102..104 JSON input contracts retain CURRENT field names w
   assert.equal(SetXIdIconBodySchema.safeParse({ x_user_id: "x-one", icon_url: null }).success, false);
 });
 
-test("MIG-0636 U05/U06 unmounted write routes fail closed with no DB mutation", async () => {
+test("MIG-0636 U05/U06 mounted write routes enforce fail-closed unmatched methods and real-router auth", async () => {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite, { role: "user" });
   const app = new Hono();
@@ -375,22 +375,39 @@ test("MIG-0636 U05/U06 unmounted write routes fail closed with no DB mutation", 
       await next();
     },
   }));
-  const requests = [
-    ["PATCH", "/api/xid/x-one/profile", { x_user_id: "x-one", x_name: "Forged" }],
-    ["DELETE", "/api/xid/x-one", { x_user_id: "x-one", confirm: "DELETE x-one" }],
-    ["PUT", "/api/xid/x-one/icon", { x_user_id: "x-one", icon_url: "https://evil.example/forged.png" }],
-    ["POST", "/api/xid/x-one/icon/upload", { x_user_id: "x-one" }],
-  ];
-  for (const [method, path, body] of requests) {
+  for (const [method, path] of [
+    ["GET", "/api/xid/x-one/profile"],
+    ["POST", "/api/xid/x-one/profile"],
+    ["GET", "/api/xid/x-one"],
+    ["GET", "/api/xid/x-one/icon"],
+    ["GET", "/api/xid/x-one/icon/upload"],
+  ]) {
     const response = await app.request(SITE + path, {
       method,
-      headers: { Origin: SITE, "Content-Type": "application/json" },
+      headers: { Origin: SITE },
+    }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
+    assert.ok([404, 405].includes(response.status), method + " " + path + " must reject unsupported method");
+  }
+  assert.equal(sessionCalls, 0, "unmatched routes never resolve a privileged session");
+  assert.equal(stats.batches, 0);
+  assert.equal(stats.reads, 0);
+
+  // Cross-origin request on mounted SA-102..105 routes must reject before session/D1.
+  for (const [method, path, body] of [
+    ["PATCH", "/api/xid/x-one/profile", { x_name: "Forged" }],
+    ["DELETE", "/api/xid/x-one", { confirm: "DELETE x-one" }],
+    ["PUT", "/api/xid/x-one/icon", { icon_url: "https://evil.example/forged.png" }],
+    ["POST", "/api/xid/x-one/icon/upload", { x_user_id: "x-one" }],
+  ]) {
+    const response = await app.request(SITE + path, {
+      method,
+      headers: { Origin: "https://evil.example", "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
-    assert.ok([404, 405].includes(response.status), method + " " + path + " must remain unmounted");
+    assert.equal(response.status, 403, method + " " + path + " must enforce origin guard");
   }
-  assert.equal(sessionCalls, 0, "unknown routes never resolve a privileged session");
-  assert.equal(stats.batches, 0, "unmounted routes cannot mutate user/X ID/audit state");
-  assert.equal(stats.reads, 0, "unmounted routes cannot consume D1 reads");
+  assert.equal(sessionCalls, 0, "cross-origin mounted writes never resolve session");
+  assert.equal(stats.batches, 0);
+  assert.equal(stats.reads, 0);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
 });

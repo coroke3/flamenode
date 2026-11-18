@@ -92,12 +92,12 @@ function validateProfileSocialLinks(raw: string): Parsed<string | null> {
   return { ok: true, value: links.length ? JSON.stringify(links) : null };
 }
 
-function matchTarget(pathXId: string, bodyXId: string): Parsed<string> {
+function matchTarget(pathXId: string, bodyXId: string | undefined): Parsed<string> {
   // Unlike normalization of display handles, a URL route must be canonical.
   // Reject slash, percent-decoded separators, aliases and non-X user identifiers
   // before any privileged D1 read or mutation.
   if (!isCanonicalXId(pathXId)) return { ok: false, message: INVALID_TARGET };
-  if (normalizeXId(bodyXId) !== pathXId) {
+  if (bodyXId !== undefined && normalizeXId(bodyXId) !== pathXId) {
     return { ok: false, message: MISMATCHED_TARGET };
   }
   return { ok: true, value: pathXId };
