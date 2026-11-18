@@ -103,6 +103,8 @@ Write guard order for every row: origin (pure) -> session -> origin/auth/identit
 
 SA-009 / SA-010 implemented in MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
 
+Callers (MIG-0727, PR #502): SA-004..006 from `apps/ops/src/api/adminAnnouncementWrite.ts` via `apps/ops/src/routes/admin/AnnouncementEditor.tsx` (`/admin/announcements/new`, `/admin/announcements/:id/edit`); SA-007/008 (SA-108/109) from `apps/ops/src/api/adminApiEndpointWrite.ts` via `apps/ops/src/routes/admin/ApiEndpointMutations.tsx` & `AdminApiEndpoints.tsx` (`/admin/api-endpoints`, D-17-5 `?notice=`/`?error=`).
+
 ### Hono endpoints (MIG-0603 U02b, PR #393)
 
 New URLs (CURRENT has no `/api/*` for these). Guard order: no-store header -> origin (pure) -> session -> `writeGuardMiddleware` (any role, TOS, CostGuard `chapter_comment`, approved active X) = CURRENT `writeGuard({ requireApprovedActiveXId: true, feature: "chapter_comment" })`. Every response is `Cache-Control: private, no-store`; body cap 64KB (413). Audit + video `static_rebuild_queue` row are one D1 batch (`mutateWithAudit`, `preloaded: auditPreloaded(c)`). Permission: own chapter, or `video.chapter_admin` in admin/event mode (bulk always). Source: `apps/api/src/routes/videos/chapters.ts` (+ `chapterAccess.ts`, `chapterCsv.ts`), body/result DTO `packages/contracts/src/videoChapter.ts`.
@@ -578,6 +580,8 @@ Implementation: PR #461, `apps/api/src/routes/admin/{terms,permissions,notificat
 T01–T04: `apps/api/test/adminTermsNotifications.parity.test.mjs`; U01 source contract: `scripts/migration-admin-writes-b-inventory.test.mjs`. No production KV / R2 / Queue / D1 operation.
 
 Callers (MIG-0734, PR #470): SA-045..048 from `apps/ops/src/api/adminNotifications.ts` via `apps/ops/src/routes/admin/AdminNotifications.tsx` (`/admin/notifications`); SA-046 body parsed with `AdminNotificationCancelBodySchema`, the other three (retry, force-resend, retry-failed) send no body; writes go through `api/write.ts` `send` so CURRENT write-guard messages and a 401 -> /entry are preserved.
+
+Callers (MIG-0727, PR #502): SA-051..053 & SA-055 from `apps/ops/src/api/adminTerms.ts` via `apps/ops/src/routes/admin/TermsEditor.tsx` (`/admin/rules/new`, `/admin/rules/:id/edit`); SA-054 from `apps/ops/src/routes/admin/TermsReacceptBroadcastButton.tsx` via `apps/ops/src/routes/admin/Rules.tsx` (`/admin/rules`).
 
 ## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
 
