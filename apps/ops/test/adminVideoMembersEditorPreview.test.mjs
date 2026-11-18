@@ -356,3 +356,21 @@ test("MIG-0730 U02dd: malformed preview permission target never reads injected p
     intents: [{ x_user_id: "member_1", display_name: "Member", intent: "on" }],
   });
 });
+
+test("MIG-0730 U02dh: standalone preview binding rejects oversized raw JSON before the injected save port", () => {
+  const form = new FormData();
+  form.append("video_id", "v1");
+  form.append("is_collab", "false");
+  form.append("is_collab", "true");
+  // This is valid JSON with zero members. It deliberately bypasses the row
+  // count limit; the raw size gate must reject it before parsing as [].
+  const over = "[" + " ".repeat(256 * 1024) + "]";
+  form.append("members_json", over);
+  assert.equal(JSON.parse(over).length, 0, "size-only witness is valid JSON");
+  assert.equal(bindPreviewSaveFormData(form, "v1"), null,
+    "raw member JSON outside the provisional SA-085 envelope is never forwarded");
+  const ordinary = JSON.stringify([{ name: "Alice", is_public_member: 1 }]);
+  form.set("members_json", ordinary);
+  assert.equal(bindPreviewSaveFormData(form, "v1")?.get("members_json"), ordinary,
+    "normal public participant payload remains eligible");
+});

@@ -64,6 +64,13 @@ export function bindPreviewSaveFormData(
     if (unexpectedField || ids.length !== 1 || ids[0] !== expectedVideoId ||
         members.length !== 1 || typeof members[0] !== "string" ||
         !(on || (off && members[0] === "[]"))) return null;
+    // Before parsing, bound the untrusted raw JSON to the same provisional
+    // 256KiB client/server envelope limit used by the UNMOUNTED SA-085 HTTP
+    // candidate. A payload with more UTF-16 units cannot fit the UTF-8 wire
+    // body. The concrete HTTP adapter still checks exact wire bytes. This is
+    // NOT approval of the server limit: legal CURRENT 100 x 30 chapters can
+    // exceed it and must remain a release blocker.
+    if (members[0].length > 256 * 1024) return null;
     // This exported binding can also be invoked independently of the Ops
     // form. Never send collaborator privilege fields via the public member
     // PUT, even to a legacy/injected save port that omits its own checks.
