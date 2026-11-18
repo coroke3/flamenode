@@ -517,7 +517,7 @@ PRをrevert。旧 Worker は停止前なら再 deploy で戻る。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0904 の後。消す前の呼び出し元 0件を `rg` で示してから
 - **Recipe:** R-REMOVE
 - **Runtime:** N
-- **Depends on:** MIG-0904, MIG-0610, MIG-0627 / **Decisions:** D-09 DECIDED
+- **Depends on:** MIG-0904, MIG-0610, MIG-0627, MIG-0665, MIG-0666 / **Decisions:** D-09 DECIDED, D-19-4
 - **Verified against:** `96f20dc` (2026-10-15)
 #### Source snapshot
 - 消す対象: `workers/json-generator/**`、static rebuild queue の consumer（`workers/content-jobs/staticRebuildWakeQueue.ts`）、生成を起こすだけの段（`workers/content-jobs/index.ts:201〜318`、`workers/sync-jobs/index.ts:205`）、`src/lib/staticRebuild/**` と `src/lib/queues/wakeStaticRebuildQueueAfterCommit.ts`（MIG-0903・0904 で残っていれば）。
