@@ -9,8 +9,12 @@ export function memberVideoPublicHref(video: {
 }): string {
   // The standalone editor also accepts injected legacy data at runtime.
   // Never invoke .trim() on a malformed value or expose an unsafe public path.
-  const raw = typeof video.youtube_video_id === "string"
-    ? video.youtube_video_id.trim() : null;
+  // A legacy/injected getter can return different values on successive reads,
+  // or throw. Bind once before checking its type and constructing a link.
+  let youtubeId: unknown;
+  try { youtubeId = video.youtube_video_id; }
+  catch { youtubeId = null; }
+  const raw = typeof youtubeId === "string" ? youtubeId.trim() : null;
   if (raw) {
     if (YOUTUBE_ID_RE.test(raw)) return `/${raw}`;
     try {
@@ -34,6 +38,11 @@ export function memberVideoPublicHref(video: {
       }
     } catch { /* Invalid URLs fall through to the safe internal ID. */ }
   }
-  return typeof video.id === "string" && SAFE_INTERNAL_ID_RE.test(video.id)
-    ? `/${video.id}` : "/list";
+  // Keep the checked internal fallback bound to a single getter result.
+  // Invalid/revoked direct-call metadata must not crash the Ops footer.
+  let internalId: unknown;
+  try { internalId = video.id; }
+  catch { return "/list"; }
+  return typeof internalId === "string" && SAFE_INTERNAL_ID_RE.test(internalId)
+    ? `/${internalId}` : "/list";
 }

@@ -19,6 +19,9 @@ const { saveAdminVideoMembers } = await import(
   "../.test-dist/apps/ops/src/api/adminVideoMemberSave.js"
 );
 const { VideoMembersField } = await import("@flamenode/ui");
+const { memberVideoPublicHref } = await import(
+  "../.test-dist/apps/ops/src/routes/admin/memberVideoPublicHref.js"
+);
 const h = React.createElement;
 
 const video = { id: "v1", title: "Test", collaboration_type: "collab" };
@@ -1336,4 +1339,50 @@ test("MIG-0730 U02da: standalone Form rejects a truthy non-callable save port", 
       await ui.cleanup();
     }
   }
+});
+  
+test("MIG-0730 U02de: stateful public footer IDs are read once and never route to forged values", () => {
+  const youtubeId = "dQw4w9WgXcQ";
+  let ytReads = 0;
+  const statefulYoutube = {
+    id: "safe_slug",
+    get youtube_video_id() {
+      ytReads++;
+      return ytReads === 1 ? youtubeId : { trim() { throw Error("PRIVATE_CHANGED"); } };
+    },
+  };
+  assert.equal(memberVideoPublicHref(statefulYoutube), "/" + youtubeId);
+  assert.equal(ytReads, 1, "YouTube identity may never be reread after type checking");
+
+  let internalReads = 0;
+  const statefulFallback = {
+    get id() {
+      internalReads++;
+      return internalReads === 1 ? "safe_slug" : "//evil.test";
+    },
+    youtube_video_id: "javascript:alert(1)",
+  };
+  assert.equal(memberVideoPublicHref(statefulFallback), "/safe_slug");
+  assert.equal(internalReads, 1, "validated internal ID must be the final link");
+
+  let failedYtReads = 0;
+  const throwingYoutube = {
+    id: "safe_slug",
+    get youtube_video_id() {
+      failedYtReads++;
+      throw Error("PRIVATE_YOUTUBE_ID");
+    },
+  };
+  assert.equal(memberVideoPublicHref(throwingYoutube), "/safe_slug");
+  assert.equal(failedYtReads, 1);
+
+  const throwingFallback = {
+    get id() { throw Error("PRIVATE_INTERNAL_ID"); },
+    youtube_video_id: null,
+  };
+  assert.equal(memberVideoPublicHref(throwingFallback), "/list");
+  const revoked = Proxy.revocable({ id: "safe_slug" }, {});
+  revoked.revoke();
+  assert.equal(memberVideoPublicHref(revoked.proxy), "/list");
+  assert.equal(memberVideoPublicHref(null), "/list");
 });
