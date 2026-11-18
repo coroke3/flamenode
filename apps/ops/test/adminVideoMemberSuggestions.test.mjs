@@ -1,0 +1,399 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { searchAdminVideoMemberXUsers } from "../.test-dist/apps/ops/src/api/adminVideoMemberSuggestions.js";
+
+const result = (overrides = {}) => ({
+  items: [
+    { id: "alice", x_name: "Alice", score: 10, matchedBy: "xid_exact" },
+  ],
+  query: "al", limit: 20, offset: 0, nextOffset: null,
+  hasMore: false, hint: null, source: "v2",
+  ...overrides,
+});
+const json = (body, status = 200) => new Response(JSON.stringify(body), {
+  status, headers: { "content-type": "application/json" },
+});
+
+test("MIG-0730 U02e: exact RH-019 query uses same-origin no-store authenticated GET and forwards abort", async () => {
+  const controller = new AbortController();
+  let seen;
+  const search = async (path, init) => {
+    seen = { path, init };
+    return json(result({ query: "@あ l", offset: 4 }));
+  };
+  const found = await searchAdminVideoMemberXUsers("  @あ l  ", 4, controller.signal, search);
+  assert.equal(seen.path, "/api/internal/x-users/search?q=%40%E3%81%82%20l&limit=20&offset=4");
+  assert.equal(seen.init.method, "GET");
+  assert.equal(seen.init.credentials, "same-origin");
+  assert.equal(seen.init.cache, "no-store");
+  assert.deepEqual(seen.init.headers, { accept: "application/json" });
+  assert.equal(seen.init.signal, controller.signal);
+  assert.deepEqual(found, {
+    items: [{ id: "alice", x_name: "Alice", score: 10, matchedBy: "xid_exact" }],
+    nextOffset: null, hasMore: false, hint: null,
+  });
+});
+
+test("MIG-0730 U02e: 401/403/404/503 and malformed 200 reject rather than report no matches", async () => {
+  const controller = new AbortController();
+  for (const status of [401, 403, 404, 503]) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, controller.signal, async () => json({ error: "secret" }, status)),
+      /member_suggestions_unavailable/,
+    );
+  }
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, controller.signal, async () =>
+      new Response("<html>unauthorized</html>", { status: 200 })),
+    /member_suggestions_unavailable/,
+  );
+});
+
+test("MIG-0730 U02e: reject oversized, malformed, non-finite and cross-type candidates", async () => {
+  const bad = [
+    result({ items: Array.from({ length: 21 }, (_, i) => ({ id: "a" + i, x_name: "a" })) }),
+    result({ items: [{ id: "", x_name: "A" }] }),
+    result({ items: [{ id: "x", x_name: 123 }] }),
+    result({ items: [{ id: "x", x_name: "X", score: "bad" }] }),
+    result({ items: [{ id: "x", x_name: "X", score: null }] }),
+    result({ nextOffset: -1 }),
+    result({ nextOffset: "12" }),
+    result({ hasMore: "true" }),
+    result({ hint: 10 }),
+    result({ items: "invalid" }),
+    [],
+  ];
+  for (const payload of bad) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, new AbortController().signal, async () => json(payload)),
+      /member_suggestions_unavailable/,
+    );
+  }
+});
+
+test("MIG-0730 U02e: pre-flight rejects invalid query, unsafe offsets and UTF-16 before network", async () => {
+  let calls = 0;
+  const fetchFn = async () => { calls++; return json(result()); };
+  for (const [q, offset] of [
+    ["", 0], ["   ", 0], ["a".repeat(65), 0], ["\uD800", 0],
+    ["a", -1], ["a", 5001], ["a", NaN], ["a", 0.5], ["a", Infinity],
+  ]) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers(q, offset, new AbortController().signal, fetchFn),
+      /member_suggestions_unavailable/,
+    );
+  }
+  assert.equal(calls, 0);
+});
+
+test("MIG-0730 U02am: query, page offset and limit must match RH-019 request identity", async () => {
+  const badBodies = [
+    result({ query: "other-private-query" }),
+    result({ query: undefined }),
+    result({ query: 42 }),
+    result({ limit: 21 }),
+    result({ limit: "20" }),
+    result({ limit: undefined }),
+    result({ offset: 1 }),
+    result({ offset: "0" }),
+    result({ offset: undefined }),
+  ];
+  for (const payload of badBodies) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+        async () => json(payload)),
+      /member_suggestions_unavailable/,
+      "mismatched RH-019 response metadata must not leak private candidates",
+    );
+  }
+
+  const resultPage = result({ offset: 20, nextOffset: 21, hasMore: true,
+    items: [{ id: "page_private", x_name: "Page private" }] });
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+      async () => json(resultPage)),
+    /member_suggestions_unavailable/,
+    "an old pagination cursor cannot be accepted for offset zero",
+  );
+  const accepted = await searchAdminVideoMemberXUsers("al", 20,
+    new AbortController().signal, async () => json(resultPage));
+  assert.deepEqual(accepted.items, [{ id: "page_private", x_name: "Page private" }],
+    "matching request identity still accepts the valid page");
+});
+
+test("MIG-0730 U02an: reject impossible or non-advancing RH-019 pagination cursors", async () => {
+  const invalid = [
+    result({ hasMore: false, nextOffset: 20 }),
+    result({ hasMore: false, nextOffset: 0 }),
+    result({ hasMore: true, nextOffset: 0 }),
+  ];
+  for (const payload of invalid) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+        async () => json(payload)),
+      /member_suggestions_unavailable/,
+      "a completed or non-advancing cursor must not be accepted",
+    );
+  }
+
+  // A stale second page must never point back to itself.
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 20, new AbortController().signal,
+      async () => json(result({ offset: 20, hasMore: true, nextOffset: 20 }))),
+    /member_suggestions_unavailable/,
+  );
+
+  // RH-019 V2 refinement deliberately uses hasMore=true and nextOffset=null
+  // to ask the user to refine the query, not to request another page.
+  const refine = await searchAdminVideoMemberXUsers("al", 0,
+    new AbortController().signal, async () => json(result({
+      items: [], hasMore: true, nextOffset: null, hint: "refine",
+    })));
+  assert.deepEqual(refine, { items: [], hasMore: true, nextOffset: null, hint: "refine" });
+
+  // A normal advancing cursor still works.
+  const page = await searchAdminVideoMemberXUsers("al", 20,
+    new AbortController().signal, async () => json(result({
+      offset: 20, hasMore: true, nextOffset: 21,
+      items: [{ id: "another", x_name: "Another" }],
+    })));
+  assert.equal(page.nextOffset, 21);
+});
+
+test("MIG-0730 U02ao: continuation equals offset plus returned rows; V2 refine remains valid", async () => {
+  const wrong = [
+    result({ items: [{ id: "one", x_name: "One" }], hasMore: true, nextOffset: 20 }),
+    result({ offset: 20, items: [{ id: "one", x_name: "One" }],
+      hasMore: true, nextOffset: 40 }),
+    result({ items: [{ id: "one", x_name: "One" }], hasMore: true, nextOffset: null }),
+    result({ items: [], hasMore: true, nextOffset: 1 }),
+  ];
+  for (const payload of wrong) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", payload.offset, new AbortController().signal,
+        async () => json(payload)),
+      /member_suggestions_unavailable/,
+      "a forged successful page must not skip candidates or pretend it is a V2 refine hint",
+    );
+  }
+
+  const valid = await searchAdminVideoMemberXUsers("al", 20,
+    new AbortController().signal, async () => json(result({
+      offset: 20, items: [{ id: "one", x_name: "One" }],
+      hasMore: true, nextOffset: 21,
+    })));
+  assert.equal(valid.nextOffset, 21);
+
+  const refine = await searchAdminVideoMemberXUsers("al", 0,
+    new AbortController().signal, async () => json(result({
+      items: [], hasMore: true, nextOffset: null, hint: "refine",
+    })));
+  assert.deepEqual(refine, { items: [], hasMore: true, nextOffset: null, hint: "refine" });
+});
+
+test("MIG-0730 U02e: abort before or after network response never returns stale private suggestions", async () => {
+  const aborted = new AbortController();
+  aborted.abort();
+  let calls = 0;
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, aborted.signal, async () => {
+      calls++;
+      return json(result());
+    }),
+    /member_suggestions_unavailable/,
+  );
+  assert.equal(calls, 0);
+  const controller = new AbortController();
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, controller.signal, async () => {
+      controller.abort();
+      return json(result({ items: [{ id: "secret", x_name: "SECRET" }] }));
+    }),
+    /member_suggestions_unavailable/,
+  );
+});
+
+test("MIG-0730 U02e: 20 rows, valid empty V2 refine and pagination preserve Hono contract", async () => {
+  const twenty = Array.from({ length: 20 }, (_, i) => ({ id: "user_" + i, x_name: null }));
+  const a = await searchAdminVideoMemberXUsers("al", 2, new AbortController().signal,
+    async () => json(result({ items: twenty, offset: 2, nextOffset: 22, hasMore: true, hint: "refine" })));
+  assert.equal(a.items.length, 20);
+  assert.deepEqual(a.items[0], { id: "user_0", x_name: null });
+  assert.equal(a.hasMore, true);
+  assert.equal(a.nextOffset, 22);
+  const b = await searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+    async () => json(result({ items: [], nextOffset: null, hasMore: true, hint: "refine" })));
+  assert.deepEqual(b, { items: [], hasMore: true, nextOffset: null, hint: "refine" });
+});
+test("MIG-0730 U02bp: cursorless hasMore=true must be a documented V2 refinement, never a forged page", async () => {
+  const invalid = [
+    result({ items: [], hasMore: true, nextOffset: null, hint: null }),
+    result({ items: [], hasMore: true, nextOffset: null, hint: "" }),
+    result({ items: [], hasMore: true, nextOffset: null, hint: "   " }),
+    result({ items: [], hasMore: true, nextOffset: null, hint: "refine", source: "v1" }),
+    result({ items: [], hasMore: true, nextOffset: null, hint: "refine", source: undefined }),
+  ];
+  for (const payload of invalid) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+        async () => json(payload)),
+      /member_suggestions_unavailable/,
+      "only V2 may signal a cursorless continuation with a real refinement hint",
+    );
+  }
+  const validRefinement = await searchAdminVideoMemberXUsers(
+    "al", 20, new AbortController().signal, async () => json(result({
+      offset: 20, items: [], hasMore: true, nextOffset: null, hint: "候補が多いため絞り込んでください", source: "v2",
+    })),
+  );
+  assert.deepEqual(validRefinement, {
+    items: [], hasMore: true, nextOffset: null, hint: "候補が多いため絞り込んでください",
+  });
+  const ordinaryEnd = await searchAdminVideoMemberXUsers(
+    "al", 0, new AbortController().signal, async () => json(result({
+      items: [], hasMore: false, nextOffset: null, hint: null, source: undefined,
+    })),
+  );
+  assert.deepEqual(ordinaryEnd, { items: [], hasMore: false, nextOffset: null, hint: null });
+});
+
+test("MIG-0730 U02cp: private search failures and abort during decode never publish results", async () => {
+  const generic = error => error instanceof Error &&
+    error.message === "member_suggestions_unavailable";
+  const signal = new AbortController().signal;
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, signal, async () => {
+      throw Error("PRIVATE_PROVIDER_TOKEN");
+    }),
+    generic, "transport errors must not expose provider details",
+  );
+
+  const throwingTop = result();
+  Object.defineProperty(throwingTop, "query", {
+    get() { throw Error("PRIVATE_QUERY"); },
+  });
+  const throwingRow = result();
+  Object.defineProperty(throwingRow.items[0], "x_name", {
+    get() { throw Error("PRIVATE_ROW_NAME"); },
+  });
+  const revoked = Proxy.revocable(result(), {});
+  revoked.revoke();
+  for (const body of [throwingTop, throwingRow, revoked.proxy]) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, signal,
+        async () => ({ status: 200, json: async () => body })),
+      generic, "hostile decoded search DTOs fail closed with a stable error",
+    );
+  }
+
+  const controller = new AbortController();
+  const abortingPayload = result();
+  Object.defineProperty(abortingPayload, "items", {
+    get() {
+      controller.abort();
+      return [{ id: "secret_x", x_name: "PRIVATE_RESULT" }];
+    },
+  });
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, controller.signal,
+      async () => ({ status: 200, json: async () => abortingPayload })),
+    generic, "a revoked search scope during JSON validation cannot return candidates",
+  );
+  const normal = await searchAdminVideoMemberXUsers(
+    "al", 0, signal, async () => json(result()));
+  assert.deepEqual(normal.items, [
+    { id: "alice", x_name: "Alice", score: 10, matchedBy: "xid_exact" },
+  ], "valid RH-019 responses retain their existing shape");
+});
+
+test("MIG-0730 U02cq: RH-019 suggestion IDs must match the canonical V1/V2 R2 index", async () => {
+  // Both server-core memberSuggestion parsers accept only /^[a-z0-9_]{1,64}$/.
+  // A forged 200 should never reach the member field as a public X handle.
+  for (const id of [
+    "ALICE", "@alice", "alice/admin", "two words", "a.b", "éclair",
+    "a".repeat(65), "x\nprivate", "", 
+  ]) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers(
+        "al", 0, new AbortController().signal,
+        async () => json(result({ items: [{ id, x_name: "SECRET" }] })),
+      ),
+      /member_suggestions_unavailable/,
+      "noncanonical candidate must be rejected: " + JSON.stringify(id),
+    );
+  }
+  for (const id of ["a", "alice_123", "x".repeat(64)]) {
+    const valid = await searchAdminVideoMemberXUsers(
+      "al", 0, new AbortController().signal,
+      async () => json(result({ items: [{ id, x_name: null }] })),
+    );
+    assert.deepEqual(valid.items, [{ id, x_name: null }],
+      "a canonical server index ID must remain available");
+  }
+});
+
+test("MIG-0730 U02cs: RH-019 duplicate X IDs never overwrite private suggestion identity", async () => {
+  // CURRENT buildMemberSuggestionItems() and migrated V2 candidates Map both
+  // emit at most one row for each normalized X ID.
+  const first = { id: "alice", x_name: "Alice", score: 100 };
+  for (const duplicate of [
+    { ...first },
+    { id: "alice", x_name: "PRIVATE_CONFLICT", score: 500 },
+    { id: "alice", x_name: null },
+  ]) {
+    await assert.rejects(
+      searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+        async () => json(result({ items: [first, duplicate] }))),
+      /member_suggestions_unavailable/,
+      "one forged page cannot advertise the same X ID twice",
+    );
+  }
+  const items = [first, { id: "alice_2", x_name: "Alice 2", score: 80 }];
+  const valid = await searchAdminVideoMemberXUsers(
+    "al", 0, new AbortController().signal,
+    async () => json(result({ items })),
+  );
+  assert.deepEqual(valid.items, items, "distinct canonical IDs remain accepted");
+});
+test("MIG-0730 U02cy: RH-019 accessor-backed receipt is captured once, not leaked or swapped", async () => {
+  const reads = { query: 0, items: 0, hasMore: 0, nextOffset: 0, hint: 0, id: 0, x_name: 0, score: 0, matchedBy: 0 };
+  const row = {};
+  Object.defineProperties(row, {
+    id: { get() { reads.id++; return reads.id === 1 ? "alice" : "private_wrong_id"; } },
+    x_name: { get() { reads.x_name++; return reads.x_name === 1 ? "Alice" : "PRIVATE_ROW"; } },
+    score: { get() { reads.score++; return reads.score === 1 ? 10 : 9999; } },
+    matchedBy: { get() { reads.matchedBy++; return reads.matchedBy === 1 ? "xid_exact" : "PRIVATE_MATCH"; } },
+  });
+  const receipt = result();
+  Object.defineProperties(receipt, {
+    query: { get() { reads.query++; return reads.query === 1 ? "al" : "secret_query"; } },
+    items: { get() { reads.items++; return reads.items === 1 ? [row] : [{ id: "private_user", x_name: "PRIVATE_RESULT" }]; } },
+    hasMore: { get() { reads.hasMore++; return reads.hasMore === 1 ? false : true; } },
+    nextOffset: { get() { reads.nextOffset++; return reads.nextOffset === 1 ? null : 5000; } },
+    hint: { get() { reads.hint++; return reads.hint === 1 ? null : "PRIVATE_HINT"; } },
+  });
+  const got = await searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+    async () => ({ status: 200, json: async () => receipt }));
+  assert.deepEqual(got, {
+    items: [{ id: "alice", x_name: "Alice", score: 10, matchedBy: "xid_exact" }],
+    hasMore: false, nextOffset: null, hint: null,
+  });
+  for (const [field, count] of Object.entries(reads)) {
+    assert.equal(count, 1, field + " must be read once");
+  }
+  assert.doesNotMatch(JSON.stringify(got), /PRIVATE/);
+});
+
+test("MIG-0730 U02cy: invalid first accessor values cannot become valid after a second read", async () => {
+  const receipt = result();
+  let reads = 0;
+  Object.defineProperty(receipt.items[0], "id", {
+    get() { reads++; return reads === 1 ? "invalid/evil" : "alice"; },
+  });
+  await assert.rejects(
+    searchAdminVideoMemberXUsers("al", 0, new AbortController().signal,
+      async () => ({ status: 200, json: async () => receipt })),
+    /member_suggestions_unavailable/,
+  );
+  assert.equal(reads, 1);
+});

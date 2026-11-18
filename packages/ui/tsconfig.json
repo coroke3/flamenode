@@ -3,7 +3,17 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": "./src",
+    "paths": {
+      "@flamenode/domain/xid": [
+        "./packages/domain/dist/xid/index.d.ts"
+      ],
+      "@flamenode/domain/video/atomicLimits": [
+        "./packages/domain/dist/video/atomicLimits.d.ts"
+      ]
+    }
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }
