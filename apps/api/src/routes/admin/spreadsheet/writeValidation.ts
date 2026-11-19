@@ -25,6 +25,84 @@ export interface SpreadsheetWriteValidationContext {
   }[];
 }
 
+/**
+ * U01b RH-004/005/006: guarded Hono write routes will call this AFTER
+ * the shared admin origin/session/write guard and bounded JSON reader.
+ * CURRENT accepts table, primaryKey, column/value and row as described in
+ * app/api/admin/spreadsheet/data/route.ts. We retain its missing_fields code
+ * for absent structural fields and treat ill-typed JSON cells as invalid_row,
+ * instead of allowing implicit object->string coercion in D1/audit planning.
+ * This pure parser neither resolves tables nor performs a DB mutation.
+ */
+export type SpreadsheetCrudMethod = "PATCH" | "POST" | "DELETE";
+export type SpreadsheetCrudBody =
+  | { method: "PATCH"; table: string; primaryKey: Readonly<Record<string, string>>; column: string; value: string | null }
+  | { method: "POST"; table: string; row: Readonly<Record<string, string | null>> }
+  | { method: "DELETE"; table: string; primaryKey: Readonly<Record<string, string>> };
+
+function spreadsheetJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function spreadsheetJsonStringRecord(
+  value: unknown,
+  allowNull: boolean,
+): Record<string, string | null> {
+  if (!spreadsheetJsonRecord(value)) throw new Error("missing_fields");
+  const cells: Array<[string, string | null]> = [];
+  for (const [key, cell] of Object.entries(value)) {
+    if (typeof cell !== "string" && (!allowNull || cell !== null)) {
+      throw new Error("invalid_row");
+    }
+    // Object.fromEntries stores keys such as "__proto__" as data fields.
+    // Never retain a reference to a mutable caller-owned JSON body.
+    cells.push([key, cell as string | null]);
+  }
+  return Object.freeze(Object.fromEntries(cells));
+}
+
+export function parseSpreadsheetCrudBody(
+  method: SpreadsheetCrudMethod,
+  body: unknown,
+): SpreadsheetCrudBody {
+  if (method !== "PATCH" && method !== "POST" && method !== "DELETE") {
+    throw new Error("invalid_row");
+  }
+  if (!spreadsheetJsonRecord(body)) throw new Error("missing_fields");
+  const rawTable = Object.hasOwn(body, "table") ? body.table : undefined;
+  if (typeof rawTable !== "string" || rawTable.trim() === "") {
+    throw new Error("missing_fields");
+  }
+  const table = rawTable.trim();
+  if (method === "POST") {
+    const row = spreadsheetJsonStringRecord(
+      Object.hasOwn(body, "row") ? body.row : undefined,
+      true,
+    );
+    return Object.freeze({ method, table, row });
+  }
+  const primaryKey = spreadsheetJsonStringRecord(
+    Object.hasOwn(body, "primaryKey") ? body.primaryKey : undefined,
+    false,
+  ) as Record<string, string>;
+  if (method === "DELETE") {
+    return Object.freeze({ method, table, primaryKey });
+  }
+  const rawColumn = Object.hasOwn(body, "column") ? body.column : undefined;
+  if (typeof rawColumn !== "string" || rawColumn.trim() === "") {
+    throw new Error("missing_fields");
+  }
+  const rawValue = Object.hasOwn(body, "value") ? body.value : null;
+  // CURRENT PATCH interprets an omitted or nullish cell value as SQL NULL.
+  if (rawValue !== null && rawValue !== undefined && typeof rawValue !== "string") {
+    throw new Error("invalid_row");
+  }
+  return Object.freeze({
+    method, table, primaryKey, column: rawColumn.trim(), value: rawValue ?? null,
+  });
+}
+
+
 /** CURRENT error messages are stable, machine-readable API error codes. */
 export function validateSpreadsheetInputValues(
   ctx: SpreadsheetWriteValidationContext,
