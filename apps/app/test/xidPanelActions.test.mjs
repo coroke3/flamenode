@@ -216,7 +216,17 @@ test("MIG-0708 U03 T04: shared square-crop editor blocks invalid input; uploads 
   const oldGetContext = dom.window.HTMLCanvasElement.prototype.getContext;
   const oldToBlob = dom.window.HTMLCanvasElement.prototype.toBlob;
   try {
-    await m.click(buttonWith(m.container,"アップロード"));
+    const uploadButton = m.container.querySelector('button[aria-label="画像をアップロード"]');
+    assert.ok(uploadButton);
+    assert.equal(uploadButton.title, "画像をアップロード");
+    assert.ok(uploadButton.classList.contains("xids-iconAddButton"),
+      "CURRENT compact upload uses a square icon button");
+    assert.equal(uploadButton.textContent.trim(), "",
+      "the button is a plus icon with an accessible label, not a text button");
+    assert.ok(uploadButton.querySelector("svg"));
+    assert.match(m.container.textContent, /まだ候補がありません。＋からアップロードするか/);
+    await m.click(uploadButton);
+    assert.equal(uploadButton.getAttribute("aria-expanded"), "true");
     const input=m.container.querySelector('input[type="file"]');
     assert.equal(input.getAttribute("aria-label"),"アイコン画像を選ぶ");
     const tooLarge = new File([new Uint8Array(2*1024*1024+1)],"huge.png",{type:"image/png"});

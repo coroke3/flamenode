@@ -210,10 +210,12 @@ export function XIdIconPicker({
             ) : null}
           </button>
         ))}
-        <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
+        <button type="button"
+          className={`xids-iconButton xids-iconAddButton${pending || uploadPending ? " xids-iconAddButtonDisabled" : ""}`}
+          title="画像をアップロード" aria-label="画像をアップロード"
           disabled={pending || uploadPending} aria-expanded={upload}
-          onClick={() => { setError(null); setUpload(v => !v); }}>
-          画像をアップロード
+          onClick={() => { setError(null); setMessage(null); setUpload(v => !v); }}>
+          <Icon name="plus" size={18} aria-hidden />
         </button>
       </div>
       {upload ? (
@@ -223,7 +225,7 @@ export function XIdIconPicker({
         </SquareIconEditorBoundary>
       ) : null}
       {candidates.length === 0
-        ? <p className="settings-accountNote">まだ候補がありません。画像をアップロードできます。</p> : null}
+        ? <p className="fn-muted fn-text-sm">まだ候補がありません。＋からアップロードするか、作品に設定したアイコンが候補になります。</p> : null}
       {message ? (
         <p role="status">
           {message}
