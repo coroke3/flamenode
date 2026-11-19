@@ -9,7 +9,7 @@ import { SquareIconEditorBoundary } from "../../../components/shared/SquareIconE
 
 /** MIG-0708 U03: Personal settings form controls, mounted after MIG-0636 contract integration. */
 const NETWORK_ERROR = "通信または処理中に問題が発生しました。再読み込みしてお試しください。";
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const MAX_CONVERTED_ICON_BYTES = 2 * 1024 * 1024;
 const ALLOWED_ICON_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 /** A ref closes the same-tick double-click race that React pending state alone cannot prevent. */
@@ -129,10 +129,13 @@ export function XIdIconPicker({
     if (pending || uploadLock.current) {
       return { ok: false, message: "処理中です。少しお待ちください。" };
     }
-    // The shared editor validates the source at 2 MiB; the client and server must
-    // independently reject an invalid converted payload (8 MiB upload ceiling).
-    if (!ALLOWED_ICON_MIME_TYPES.has(file.type) || file.size === 0 || file.size > MAX_UPLOAD_BYTES) {
-      return { ok: false, message: "画像はPNG・JPEG・WebP形式で8MB以下にしてください。" };
+    // Both the original and the converted file are capped at 2 MiB by CURRENT
+    // and Hono SA-105. The 8 MiB limit covers the whole multipart request only.
+    if (!ALLOWED_ICON_MIME_TYPES.has(file.type) || file.size === 0) {
+      return { ok: false, message: "PNG・JPEG・WebP形式の画像が必要です。" };
+    }
+    if (file.size > MAX_CONVERTED_ICON_BYTES) {
+      return { ok: false, message: "変換後の画像サイズが2MBを超えています。" };
     }
     const requestIdentity = identityRef.current;
     uploadLock.current = true;

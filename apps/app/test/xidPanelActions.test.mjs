@@ -161,7 +161,12 @@ test("MIG-0708 U03 T04: shared square-crop editor blocks invalid input; uploads 
     dom.window.HTMLCanvasElement.prototype.getContext=function(){return {
       clearRect(){},drawImage(...args){drawings.push({width:this.canvas?.width??null,args});}
     };};
-    dom.window.HTMLCanvasElement.prototype.toBlob=function(cb,type){cb(new Blob(["encoded-webp"],{type:type==="image/webp"?"image/webp":"image/png"}));};
+    let oversizeConvertedFile = true;
+    dom.window.HTMLCanvasElement.prototype.toBlob=function(cb,type){
+      const bytes = oversizeConvertedFile ? new Uint8Array(2*1024*1024+1) : "encoded-webp";
+      oversizeConvertedFile = false;
+      cb(new Blob([bytes],{type:type==="image/webp"?"image/webp":"image/png"}));
+    };
     const valid=new File(["original"],"icon.png",{type:"image/png"});
     Object.defineProperty(input,"files",{configurable:true,value:[valid]});
     await act(async()=>input.dispatchEvent(new dom.window.Event("change",{bubbles:true})));
@@ -170,7 +175,12 @@ test("MIG-0708 U03 T04: shared square-crop editor blocks invalid input; uploads 
     assert.ok(m.container.querySelector('canvas[width="280"]'),"crop preview is mounted");
     await m.click(buttonWith(m.container,"この画像を使用"));
     await m.flush();
-    assert.equal(files.length,1,"only the converted file should be sent");
+    assert.equal(files.length,0,"a converted icon exceeding 2 MiB must not reach the API");
+    assert.match(m.container.querySelector('[role="alert"]').textContent,/変換後の画像サイズが2MBを超えています/);
+    assert.ok(m.container.querySelector('canvas[width="280"]'),"failed conversion must preserve editor for retry");
+    await m.click(buttonWith(m.container,"この画像を使用"));
+    await m.flush();
+    assert.equal(files.length,1,"only a valid converted file should be sent");
     assert.equal(files[0][0],"foo");
     assert.equal(files[0][1].type,"image/webp");
     assert.equal(files[0][1].name,"icon.webp");

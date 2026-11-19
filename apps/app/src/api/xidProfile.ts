@@ -1,4 +1,4 @@
-/** MIG-0708 U02/U04: Personal X ID mutation transport; still unmounted pending Settings wiring. */
+/** MIG-0708 U02/U04: mounted Personal X ID mutation transport using the canonical Hono contract. */
 import { XIdWriteResultSchema, type XIdWriteResult } from "@flamenode/contracts";
 
 export type XidProfileResult = XIdWriteResult;
@@ -19,7 +19,9 @@ export interface XidProfileApi {
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 const jsonHeaders = { accept: "application/json", "content-type": "application/json" } as const;
 const INVALID = { ok: false } as const;
-const MAX_ICON_BYTES = 8 * 1024 * 1024;
+// The outer multipart request limit is 8 MiB. The Hono handler independently
+// caps the converted icon file itself at 2 MiB (SA-105).
+const MAX_ICON_BYTES = 2 * 1024 * 1024;
 const ALLOWED_ICON_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 async function request(
@@ -70,7 +72,7 @@ export function createXidProfileApi(
     uploadIcon: (id, file) => {
       // Component accept/size checks can be bypassed by direct API callers.
       // Never transmit unsupported or oversized data even before server validation.
-      if (!ALLOWED_ICON_MIME.has(file.type) || file.size > MAX_ICON_BYTES) {
+      if (!ALLOWED_ICON_MIME.has(file.type) || file.size === 0 || file.size > MAX_ICON_BYTES) {
         return Promise.resolve(INVALID);
       }
       const fd = new FormData();
