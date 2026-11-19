@@ -565,7 +565,10 @@ export function prepareSpreadsheetImportMutationRows(
   const preparedRows: PreparedSpreadsheetImportRow[] = [];
   const seenPks = new Set<string>();
   for (let index = 0; index < rows.length; index++) {
-    const row = rows[index]!;
+    // Capture every supplied cell once. Do not let caller-owned objects or
+    // getters alter the reviewed PK, audit after-image or SQL binds after
+    // validation, especially across the future async preview/D1 pre-reads.
+    const row = Object.freeze(Object.fromEntries(Object.entries(rows[index]!))) as Record<string, string | null>;
     try {
       for (const key of Object.keys(row)) {
         if (!ctx.columnNames.includes(key)) throw new Error("unknown_column");
@@ -577,7 +580,7 @@ export function prepareSpreadsheetImportMutationRows(
       seenPks.add(fingerprint);
       if (Object.keys(row).length === 0) throw new Error("empty_row");
       validateSpreadsheetInputValues(ctx, row);
-      preparedRows.push({ row, pk, fingerprint });
+      preparedRows.push(Object.freeze({ row, pk: Object.freeze(pk), fingerprint }));
     } catch (error) {
       errors.push({ index, message: error instanceof Error ? error.message : "invalid_row" });
     }
@@ -631,6 +634,7 @@ export function planSpreadsheetImportMutations(
     const editableColumns = ctx.columns.filter(column =>
       column.pk === 0 &&
       isSpreadsheetColumnEditable(ctx.def, column.name) &&
+      Object.hasOwn(preparedRow.row, column.name) &&
       preparedRow.row[column.name] !== undefined,
     );
     if (editableColumns.length === 0) {
@@ -738,12 +742,18 @@ export async function fetchSpreadsheetExistingImportRows(
   const result = await db.prepare(sql).bind(...binds).all<Record<string, unknown>>();
   const out = new Map<string, Record<string, unknown>>();
   for (const row of result.results ?? []) {
-    const rawPk: Record<string, string> = {};
+    const pkParts: Array<[string, string]> = [];
     for (const key of ctx.primaryKeys) {
+      // D1 must have returned the requested own PK column, not an inherited
+      // JS property. Object.fromEntries also retains "__proto__" as a key.
+      if (!Object.hasOwn(row, key)) throw new Error("invalid_snapshot");
       const value = row[key];
-      if (value == null || String(value).trim() === "") throw new Error("invalid_snapshot");
-      rawPk[key] = String(value);
+      if (value == null || String(value).trim() === "" || String(value).includes("\0")) {
+        throw new Error("invalid_snapshot");
+      }
+      pkParts.push([key, String(value)]);
     }
+    const rawPk = Object.fromEntries(pkParts);
     const fingerprint = spreadsheetImportPrimaryKeyFingerprint(rawPk);
     if (!seen.has(fingerprint) || out.has(fingerprint)) throw new Error("invalid_snapshot");
     for (const column of ctx.columns) {
