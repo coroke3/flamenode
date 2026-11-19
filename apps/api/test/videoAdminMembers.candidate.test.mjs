@@ -2102,3 +2102,15 @@ test("MIG-0650 U03cr default unmounted route remains 501 and auth denial prevent
   } finally { defaultHost.sqlite.close(); }
 });
 
+test("MIG-0650 U03cs isolated atomic writer rejects missing or malformed D1 bindings before constructing Drizzle", async () => {
+  const { createAdminMemberAtomicWriteDb } = await import("../src/middleware/db.ts");
+  for (const provider of [
+    null, undefined, {}, { prepare: () => ({}), batch: null },
+    { prepare: null, batch: async () => [] },
+  ]) {
+    assert.throws(() => createAdminMemberAtomicWriteDb(provider), {
+      name: "RangeError",
+      message: "video_admin_member_atomic_write_db_unavailable",
+    });
+  }
+});
