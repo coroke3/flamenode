@@ -1554,3 +1554,68 @@ test("MIG-0638 U02: anomalous D1 result counts fail before building partial PK m
   await assert.rejects(fetchSpreadsheetExistingImportRows(db({ results: extra }), ctx, prepared, 1),
     /invalid_snapshot/);
 });
+
+
+test("MIG-0638 U02: forged import PK fingerprints cannot select unrelated audit snapshots", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, planSpreadsheetImportMutations,
+    fetchSpreadsheetExistingImportRows, spreadsheetImportPrimaryKeyFingerprint,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [
+    { id: "left", title: "left new" },
+    { id: "right", title: "right new" },
+  ]);
+  assert.deepEqual(prepared.errors, []);
+  const [left, right] = prepared.preparedRows;
+  const existing = new Map([
+    [left.fingerprint, Object.freeze({ id: "left", title: "left old" })],
+    [right.fingerprint, Object.freeze({ id: "right", title: "right old" })],
+  ]);
+  let reads = 0;
+  const db = { prepare() {
+    reads++;
+    return { bind() { return { async all() { return { results: [] }; } }; } };
+  } };
+
+  // A mutable preparedRows array remains caller-owned; replacing one entry
+  // must not make the D1 SELECT and the later audit identify different rows.
+  const invalid = [
+    [{ ...left, fingerprint: right.fingerprint }, right],
+    [{ ...left, pk: { id: "right" } }, right],
+    [{ ...left, row: { id: "right", title: "left new" } }, right],
+    [left, { ...right, fingerprint: spreadsheetImportPrimaryKeyFingerprint({ id: "extra" }) }],
+    [left, left],
+  ];
+  for (const entries of invalid) {
+    const unsafe = { errors: [], preparedRows: entries };
+    assert.throws(
+      () => planSpreadsheetImportMutations(ctx, unsafe, "upsert", existing, "operator"),
+      /invalid_row|duplicate_primary_key/,
+    );
+    assert.throws(
+      () => planSpreadsheetImportMutations(ctx, unsafe, "insert", null, "operator"),
+      /invalid_row|duplicate_primary_key/,
+    );
+    await assert.rejects(fetchSpreadsheetExistingImportRows(db, ctx, unsafe, 1),
+      /invalid_row|duplicate_primary_key/);
+    assert.equal(reads, 0, "an inconsistent identity must fail before D1 prepares SQL");
+  }
+
+  const valid = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator");
+  assert.deepEqual([valid.inserted, valid.updated, valid.skipped], [0, 2, 0]);
+  assert.deepEqual(valid.mutations.map(m => m.audit.target_id), ["left", "right"]);
+  assert.deepEqual(valid.mutations.map(m => m.audit.before.title), ["left old", "right old"]);
+  assert.deepEqual(valid.mutations.map(m => m.audit.after.title), ["left new", "right new"]);
+  const checked = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+  assert.equal(reads, 1, "valid identities still permit the existing one-read preflight");
+  assert.equal(checked.size, 0);
+});
