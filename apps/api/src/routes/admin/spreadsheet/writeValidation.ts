@@ -742,12 +742,29 @@ export async function fetchSpreadsheetExistingImportRows(
   const result = await db.prepare(sql).bind(...binds).all<Record<string, unknown>>();
   const out = new Map<string, Record<string, unknown>>();
   for (const row of result.results ?? []) {
+    // Materialize each database field exactly once BEFORE matching its PK.
+    // Never let a mutable/mock D1 object or accessor change the audited
+    // before-image between identity checks, CAS planning and audit metadata.
+    // Object.fromEntries preserves SQL columns named "__proto__" as data.
+    let snapshot: Record<string, unknown>;
+    try {
+      if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("invalid_snapshot");
+      const cells: Array<[string, unknown]> = [];
+      for (const column of ctx.columns) {
+        if (!Object.hasOwn(row, column.name)) throw new Error("invalid_snapshot");
+        const value = row[column.name];
+        if (value === undefined) throw new Error("invalid_snapshot");
+        cells.push([column.name, value]);
+      }
+      snapshot = Object.freeze(Object.fromEntries(cells));
+    } catch {
+      // A malformed D1 adapter row or throwing getter is not an auditable
+      // complete-row snapshot. Do not attribute it to any requested PK.
+      throw new Error("invalid_snapshot");
+    }
     const pkParts: Array<[string, string]> = [];
     for (const key of ctx.primaryKeys) {
-      // D1 must have returned the requested own PK column, not an inherited
-      // JS property. Object.fromEntries also retains "__proto__" as a key.
-      if (!Object.hasOwn(row, key)) throw new Error("invalid_snapshot");
-      const value = row[key];
+      const value = snapshot[key];
       if (value == null || String(value).trim() === "" || String(value).includes("\0")) {
         throw new Error("invalid_snapshot");
       }
@@ -756,12 +773,7 @@ export async function fetchSpreadsheetExistingImportRows(
     const rawPk = Object.fromEntries(pkParts);
     const fingerprint = spreadsheetImportPrimaryKeyFingerprint(rawPk);
     if (!seen.has(fingerprint) || out.has(fingerprint)) throw new Error("invalid_snapshot");
-    for (const column of ctx.columns) {
-      if (!Object.prototype.hasOwnProperty.call(row, column.name) || row[column.name] === undefined) {
-        throw new Error("invalid_snapshot");
-      }
-    }
-    out.set(fingerprint, row);
+    out.set(fingerprint, snapshot);
   }
   return out;
 }
