@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { restoreAuditLog } from "@flamenode/server-core/audit/restore";
-import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
+import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
 const ADMIN = {
@@ -30,11 +30,11 @@ function setup({ user = ADMIN, role = "admin", disabled = [] } = {}) {
       await next();
     },
   }));
-  const request = (body, headers = { Origin: SITE }) => app.request(
+  const request = (body, headers = { Origin: SITE }, extraEnv = {}) => app.request(
     RESTORE, {
       method: "POST", headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
-    }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE },
+    }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE, ...extraEnv },
   );
   return { sqlite, db, stats, request };
 }
@@ -212,4 +212,100 @@ test("T05 CostGuard disabled blocks SA-011 before any mutation", async () => {
   assert.equal(res.status, 503);
   assert.equal((await res.json()).reason, "cost_guard_blocked");
   assert.equal(changes(ctx.sqlite).runs.length, 0);
+});
+
+function seedVisibilityRestore(ctx) {
+  const { sqlite } = ctx;
+  sqlite.exec(`CREATE TABLE public_visibility_fences (
+    entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+    state TEXT NOT NULL, reason TEXT, requirements_json TEXT,
+    blocked_at INTEGER, release_requested_at INTEGER,
+    requested_by_auth_user_id TEXT, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(entity_type, entity_id)
+  )`);
+  seedEvent(sqlite, { id: "ev-1", visibility_status: "public" });
+  const after = { ...sqlite.prepare("SELECT * FROM events WHERE id = 'ev-1'").get() };
+  const before = { ...after, visibility_status: "private" };
+  const now = Math.floor(Date.now() / 1000);
+  sqlite.prepare(`INSERT INTO audit_logs
+    (id,table_name,target_id,operation,restore_strategy,restore_status,before_json,after_json,created_at,actor_user_id)
+    VALUES ('event-audit','events','ev-1','UPDATE','update_before','restorable',?,?,?,'admin-1')`)
+    .run(JSON.stringify(before), JSON.stringify(after), now);
+}
+
+function visibilityManifestBucket() {
+  const state = {
+    manifest: { schema_version: 1, revision: 0, generated_at: Math.floor(Date.now() / 1000), entities: [] },
+    etag: "etag-initial",
+    puts: 0,
+  };
+  const bucket = {
+    get: async (key) => {
+      assert.equal(key, "visibility/blocked-entities.v1.json");
+      const text = JSON.stringify(state.manifest);
+      return { etag: state.etag, size: Buffer.byteLength(text), text: async () => text };
+    },
+    put: async (key, value, options) => {
+      assert.equal(key, "visibility/blocked-entities.v1.json");
+      assert.equal(options?.onlyIf?.etagMatches, state.etag);
+      assert.equal(options?.httpMetadata?.cacheControl, "no-store");
+      state.manifest = JSON.parse(value);
+      state.etag = "etag-next-" + (++state.puts);
+      return { etag: state.etag };
+    },
+  };
+  return { state, bucket };
+}
+
+test("T04 public event -> private restore commits R2 CAS fence and D1 atomically, invalidates all public caches", async () => {
+  const ctx = setup();
+  seedVisibilityRestore(ctx);
+  const { state, bucket } = visibilityManifestBucket();
+  const previous = globalThis.caches;
+  const deleted = [];
+  globalThis.caches = { default: {
+    delete: async (url) => { deleted.push(decodeURIComponent(url)); return true; },
+  } };
+  try {
+    const res = await ctx.request({
+      audit_id: "event-audit", reason: "公開状態を取り消す",
+      confirm_text: "RESTORE event-audit",
+    }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+    assert.equal(res.status, 200);
+    const result = await res.json();
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(ctx.sqlite.prepare("SELECT visibility_status FROM events WHERE id = 'ev-1'").get().visibility_status, "private");
+    const fence = ctx.sqlite.prepare(
+      "SELECT state,fence_token FROM public_visibility_fences WHERE entity_type = 'event' AND entity_id = 'ev-1'",
+    ).get();
+    assert.equal(fence.state, "blocked");
+    assert.equal(state.puts, 1);
+    assert.equal(state.manifest.entities.length, 1);
+    assert.equal(state.manifest.entities[0].entity_type, "event");
+    assert.equal(state.manifest.entities[0].entity_id, "ev-1");
+    assert.equal(state.manifest.entities[0].fence_token, fence.fence_token);
+    assert.ok(deleted.some((url) => url.endsWith("events/ev-1.json")));
+    assert.ok(deleted.some((url) => url.endsWith("events/index.json")));
+    assert.ok(deleted.some((url) => url.includes("public-event-export:9:ev-1:v5:15")));
+    assert.ok(deleted.some((url) => url.includes("public-event-export:9:ev-1:legacy:1440")));
+    assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'").get().n, 1);
+  } finally {
+    if (previous === undefined) delete globalThis.caches;
+    else globalThis.caches = previous;
+  }
+});
+
+test("T04 R2 binding failure prevents an event visibility restore and preserves public state", async () => {
+  const ctx = setup();
+  seedVisibilityRestore(ctx);
+  const res = await ctx.request({
+    audit_id: "event-audit", reason: "公開状態を取り消す",
+    confirm_text: "RESTORE event-audit",
+  }, { Origin: SITE }, { PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+  assert.equal(res.status, 200);
+  const result = await res.json();
+  assert.equal(result.ok, false);
+  assert.equal(ctx.sqlite.prepare("SELECT visibility_status FROM events WHERE id='ev-1'").get().visibility_status, "public");
+  assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM public_visibility_fences").get().n, 0);
+  assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'").get().n, 0);
 });
