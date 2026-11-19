@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSqlite, cookie } from "./support/personalHarness.mjs";
+import { createSqlite, cookie, insert } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import { createUnboundAdminVideoStatusCandidate, createUnboundManageVideoStatusCandidate } from "../src/routes/videos/videoStatusCandidate.ts";
@@ -311,6 +311,72 @@ test("MIG-0603 unmounted admin/manage candidates sanitize aborted client body st
     }
     assert.equal(d1.stats.batches, 0, "invalid body never starts an audited D1 batch");
     assert.equal(d1.stats.writes, 0, "invalid body never reaches a D1 mutation");
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0603 unmounted manage candidate rejects approved-staff overflow at the HTTP boundary", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted = 1');
+    sqlite.exec("UPDATE system_settings SET operation_mode='normal', disabled_features_json=NULL WHERE id='default'");
+
+    // The fixture starts with one approved manager / evA staff row. The
+    // authorization core accepts at most 256 joined rows and must reject
+    // 257 rather than grant from a truncated result.
+    const addStaff = (index) => {
+      const xId = `http_status_cap_${index}`;
+      insert(sqlite, "x_users", {
+        id: xId, x_name: xId, approval_status: "approved",
+      });
+      insert(sqlite, "x_user_account_links", {
+        x_user_id: xId, auth_user_id: "u_mgr", link_role: "manager",
+      });
+      insert(sqlite, "event_staff", {
+        id: `http_status_staff_${index}`, event_id: "evA",
+        x_user_id: xId, display_name: xId, permission_preset: "public_staff",
+      });
+    };
+    for (let i = 0; i < 255; i += 1) addStaff(i);
+
+    const d1 = createVideoStatusD1(sqlite);
+    const candidate = createUnboundManageVideoStatusCandidate();
+    const request = async () => {
+      const prior = d1.stats.statements;
+      const response = await candidate.request(ORIGIN + "/", {
+        method: "POST",
+        headers: {
+          origin: ORIGIN, ...cookie("tok-mgr"),
+          "content-type": "application/json",
+        },
+        body: BODY,
+      }, { DB: d1, NEXT_PUBLIC_SITE_URL: ORIGIN, FLAMENODE_LOCAL_PREVIEW: "1" });
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal(d1.stats.batches, 0, "status candidate never opens an audited batch");
+      assert.equal(d1.stats.writes, 0, "status candidate never mutates D1");
+      return {
+        status: response.status,
+        body: await response.json(),
+        reads: d1.stats.statements - prior,
+      };
+    };
+
+    assert.deepEqual(await request(), {
+      status: 503,
+      body: { ok: false, reason: "status_candidate_unmounted" },
+      reads: 5,
+    }, "256 rows may authorize preflight, but never activate the candidate write");
+
+    addStaff(255);
+    assert.deepEqual(await request(), {
+      status: 503,
+      body: { ok: false, reason: "database_unavailable" },
+      reads: 4,
+    }, "257 rows fail closed after the bounded staff read, before video association lookup");
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+      "pending", "the target video remains unchanged");
   } finally {
     sqlite.close();
   }
