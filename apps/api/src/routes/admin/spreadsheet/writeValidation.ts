@@ -878,8 +878,11 @@ export interface SpreadsheetImportMutationPlan {
 }
 /**
  * CURRENT planUpsertSpreadsheetRow + applySpreadsheetImport planning stage.
- * The caller MUST first verify preview token/nonce and preflight foreign keys,
- * then provide DB-derived, PK-keyed current rows; this function executes no D1.
+ * Caller MUST verify signed preview claims and actor before planning, provide
+ * fresh PK-keyed existing rows, then validate BOTH supplied and effective
+ * defaulted FKs with validateSpreadsheetPlannedImportForeignKeys BEFORE any
+ * nonce consumption, mutation, audit or Queue write in an atomic D1 batch.
+ * This pure planner itself executes no D1.
  */
 export function planSpreadsheetImportMutations(
   ctx: SpreadsheetSqlTableContext,
