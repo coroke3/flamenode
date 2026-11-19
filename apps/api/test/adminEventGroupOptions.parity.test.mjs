@@ -1245,6 +1245,11 @@ test("SA-029 U04 staged: failed membership INSERT rolls back relation, audits an
     assert.equal(h.count("event_group_events"), 1);
     assert.equal(h.count("audit_logs"), 0);
     assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(
+      h.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id=1").get().requested_at,
+      0,
+      "rejected atomic mutation must not commit MIG-0516 build marker",
+    );
     assert.equal(h.stats.batches, 1);
   } finally {
     h.sqlite.close();
@@ -2216,6 +2221,11 @@ test("SA-028 U03 staged: D1 failure compensates only the precommitted public DEL
     assert.equal(h.count("public_visibility_fences"), 0);
     assert.equal(h.count("audit_logs"), 0);
     assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(
+      h.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id=1").get().requested_at,
+      0,
+      "rejected atomic mutation must not commit MIG-0516 build marker",
+    );
     assert.equal(bucket.readManifest()?.entities.length, 0);
     assert.ok(bucket.puts >= 2, "precommit and compensation must both write");
   } finally {
@@ -2254,6 +2264,11 @@ test("SA-028 U03 staged: stale group CAS rolls back relations, audits and rebuil
     assert.equal(h.count("event_group_events"), 2);
     assert.equal(h.count("audit_logs"), 0);
     assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(
+      h.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id=1").get().requested_at,
+      0,
+      "rejected atomic mutation must not commit MIG-0516 build marker",
+    );
     assert.equal(h.stats.batches, 1);
   } finally {
     h.sqlite.close();
