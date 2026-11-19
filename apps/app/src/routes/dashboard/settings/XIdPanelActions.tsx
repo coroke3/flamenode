@@ -97,7 +97,7 @@ export function XIdIconPicker({
     identityRef.current = { xUserId, generation: identityRef.current.generation + 1 };
   }
   // Refreshes can replace the authoritative icon after a write or account switch.
-  React.useEffect(() => { setSelected(currentIconUrl); }, [currentIconUrl]);
+  React.useEffect(() => { setSelected(currentIconUrl); }, [currentIconUrl, xUserId]);
   // Identity changes invalidate previously displayed mutation notices.
   React.useEffect(() => { setError(null); setMessage(null); }, [xUserId]);
   const [upload, setUpload] = React.useState(false);

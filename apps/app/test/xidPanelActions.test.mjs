@@ -260,6 +260,26 @@ test("MIG-0708 U03: A-B-A account switch rejects first A mutation completion", a
   } finally { await m.dispose(); }
 });
 
+
+test("MIG-0708 U03: equal null server icon across A/B does not leak previous optimistic selection", async () => {
+  const chosen = "https://cdn.example/from-a.png";
+  const api = { setIcon: async () => ({ ok: true, iconUrl: chosen }) };
+  const props = { api, candidates: [chosen], currentIconUrl: null, onRefresh: () => {} };
+  const m = await render(XIdIconPicker, { ...props, xUserId: "A" });
+  try {
+    const choose = m.container.querySelector('button[aria-label="候補アイコンを選択"]');
+    assert.equal(choose.getAttribute("aria-pressed"), "false");
+    await m.click(choose);
+    await m.flush();
+    assert.equal(choose.getAttribute("aria-pressed"), "true", "A holds a provisional saved selection");
+    await m.rerender({ ...props, xUserId: "B" });
+    assert.equal(choose.getAttribute("aria-pressed"), "false",
+      "B must not inherit A's icon even if both authoritative icon_url fields are null");
+  } finally {
+    await m.dispose();
+  }
+});
+
 test("MIG-0708 U03: icon notices from previous account are cleared on identity switch", async () => {
   const oldUrl = "https://cdn.example/old.png";
   const newUrl = "https://cdn.example/new.png";
