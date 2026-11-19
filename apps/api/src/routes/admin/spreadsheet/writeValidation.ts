@@ -5,6 +5,18 @@
  * calls and must only run AFTER the admin write guard and table resolution.
  */
 import { sql, type SQL } from "@flamenode/server-core/sql";
+import type { ServerCoreDb } from "@flamenode/server-core/db";
+import {
+  assertAtomicAuditMutationBindLimits,
+  planAtomicAuditMutationBudget,
+  type AtomicAuditMutationInput,
+} from "@flamenode/server-core/audit/mutate";
+import type { PreloadedAuditContext } from "@flamenode/server-core/audit/logger";
+import { buildStaticRebuildQueueBatch } from "@flamenode/server-core/staticRebuild/enqueue";
+import {
+  isStaticRebuildTargetType,
+  type EnqueueStaticRebuildInput,
+} from "@flamenode/server-core/staticRebuild/types";
 import {
   getSpreadsheetColumnPolicy,
   isSpreadsheetColumnEditable,
@@ -762,6 +774,108 @@ export function buildSpreadsheetAuditedDelete(
   };
 }
 
+
+/**
+ * MIG-0638 U01b (UNMOUNTED): prepare one durable D1 transaction for a
+ * previously authorized and snapshot-checked spreadsheet CRUD request.
+ *
+ * A missing queue is never silently treated as "no public effect": caller
+ * must supply explicit, validated static rebuild targets. The batch contains
+ * the single exact-one CRUD/CAS statement, all queue UPSERTs and a strict
+ * audit; it must be executed with mutateWithAudit(db, input, loadWakeHost).
+ * This function does no D1 read or write, no Queue send and no R2 operation.
+ * Origin/session/write-identity, CostGuard, visibility fence and target
+ * mapping MUST be checked separately before this is ever mounted.
+ */
+export const SPREADSHEET_ATOMIC_MAX_REBUILD_TARGETS = 8;
+
+export async function planSpreadsheetAtomicAuditedCrud(
+  db: ServerCoreDb,
+  ctx: SpreadsheetSqlTableContext,
+  plan: SpreadsheetAuditedSqlPlan,
+  options: {
+    authorizedActorId: string;
+    callerQueryCount: number;
+    queueTargets: readonly EnqueueStaticRebuildInput[];
+    preloaded?: PreloadedAuditContext;
+  },
+): Promise<AtomicAuditMutationInput> {
+  const audit = plan?.audit;
+  if (!audit || audit.table_name !== ctx.def.table ||
+      typeof options?.authorizedActorId !== "string" ||
+      !options.authorizedActorId.trim() ||
+      audit.actor_user_id !== options.authorizedActorId ||
+      audit.context !== "admin_spreadsheet" ||
+      audit.retention_class !== "long_audit" ||
+      audit.strict !== true ||
+      !["CREATE", "UPDATE", "DELETE"].includes(audit.operation) ||
+      !Number.isSafeInteger(options.callerQueryCount) ||
+      options.callerQueryCount < 1 || options.callerQueryCount > 50) {
+    throw new Error("invalid_row");
+  }
+  if (!Array.isArray(options.queueTargets) ||
+      options.queueTargets.length < 1 ||
+      options.queueTargets.length > SPREADSHEET_ATOMIC_MAX_REBUILD_TARGETS ||
+      options.queueTargets.some(target =>
+        !target || !isStaticRebuildTargetType(target.targetType) ||
+        typeof target.targetId !== "string" || !target.targetId.trim() ||
+        typeof target.reason !== "string" || !target.reason.trim() ||
+        target.targetId.length > 256 || target.reason.length > 128)) {
+    throw new Error("invalid_row");
+  }
+  // Keep the legacy writer identity until Issue #674's versioned-history
+  // policy has been independently approved. Never accept an audit target
+  // unrelated to the mutation's PK, even if its SQL itself is canonical.
+  const primary = audit.operation === "DELETE" ? audit.before : audit.after;
+  if (!primary || typeof primary !== "object") throw new Error("invalid_row");
+  const normalizeSnapshotPk = (row: Record<string, unknown>): Record<string, string> => {
+    const entries = ctx.primaryKeys.map(key => {
+      if (!Object.hasOwn(row, key)) throw new Error("invalid_row");
+      const value = row[key];
+      if (value === null || value === undefined ||
+          (typeof value !== "string" && typeof value !== "number") ||
+          (typeof value === "number" && !Number.isSafeInteger(value))) {
+        throw new Error("invalid_row");
+      }
+      return [key, String(value)] as const;
+    });
+    return normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, Object.fromEntries(entries));
+  };
+  const pk = normalizeSnapshotPk(primary);
+  if (audit.target_id !== spreadsheetRecordIdFromPk(pk)) throw new Error("invalid_row");
+  if (audit.operation === "CREATE") {
+    if (audit.before !== null || audit.after === null ||
+        !plan.statement.startsWith("INSERT INTO ")) throw new Error("invalid_row");
+  } else if (audit.operation === "DELETE") {
+    if (audit.after !== null || audit.before === null ||
+        !plan.statement.startsWith("DELETE FROM ")) throw new Error("invalid_row");
+  } else {
+    if (!audit.before || !audit.after ||
+        JSON.stringify(normalizeSnapshotPk(audit.before)) !== JSON.stringify(pk) ||
+        !plan.statement.startsWith("UPDATE ")) throw new Error("invalid_row");
+  }
+  // Compile a non-executing D1 RunnableQuery, not a separately awaited DML.
+  const mutation = db.run(spreadsheetMutationToBoundSql(ctx, plan));
+  const queue = await buildStaticRebuildQueueBatch(db, [...options.queueTargets]);
+  if (queue.acceptedTargetCount < 1 ||
+      queue.statements.length === 0 ||
+      queue.statements.length !== queue.expectedChanges.length) {
+    throw new Error("invalid_row");
+  }
+  const input: AtomicAuditMutationInput = {
+    mutationStatements: [mutation, ...queue.statements],
+    expectedMutationChanges: [1, ...queue.expectedChanges],
+    audits: [{ ...audit }],
+    callerQueryCount: options.callerQueryCount,
+    preloaded: options.preloaded,
+    staticRebuildWakeSource: "admin",
+  };
+  if (!planAtomicAuditMutationBudget(input).withinLimit) {
+    throw new Error("batch_too_large");
+  }
+  assertAtomicAuditMutationBindLimits(db, input);
+  return input;
+}
 
 /**
  * MIG-0638 U01b: guarded RH-004/005/006 pre-write orchestration.
