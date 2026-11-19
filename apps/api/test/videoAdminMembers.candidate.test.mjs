@@ -164,7 +164,7 @@ function realGuardFixture({
   as = "u_admin", mode = "normal", observeBinding,
   enableCanonicalDryRun = false, afterCanonicalDryRun,
   enableAtomicCandidateWrite = false, beforeAtomicBatch,
-  tamperSelectedTarget = false, readDbBinding,
+  tamperSelectedTarget = false, mutateSelectedTarget = false, readDbBinding,
 } = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
@@ -195,6 +195,17 @@ function realGuardFixture({
     host.loadAuthorizedVideo = async (c, id) => {
       const selected = await originalLoad(c, id);
       return selected ? { ...selected } : null;
+    };
+  }
+  // If a future host tries to mutate the authoritative row in place, a
+  // same-object identity guard cannot distinguish forged metadata. Frozen
+  // D1 snapshots must throw before canonical plan/Queue generation.
+  if (mutateSelectedTarget) {
+    const originalLoad = host.loadAuthorizedVideo;
+    host.loadAuthorizedVideo = async (c, id) => {
+      const selected = await originalLoad(c, id);
+      if (selected) selected.visibility_status = "private";
+      return selected;
     };
   }
   // Test-only hook observes the read facade BEFORE writeGuard.finally executes.
@@ -2190,6 +2201,32 @@ test("MIG-0650 U03cu unmounted atomic Hono save pins one guarded raw D1 provider
       assert.equal(s.count("video_members"), expectBatch);
       assert.equal(s.count("audit_logs") > 0, Boolean(expectBatch));
       assert.equal(s.count("static_rebuild_queue") > 0, Boolean(expectBatch));
+    } finally { s.sqlite.close(); }
+  }
+});
+
+test("MIG-0650 U03cv same-object D1 snapshot mutation fails closed in opt-in preview and atomic writer", async () => {
+  for (const optIn of [
+    { enableAtomicCandidateWrite: true },
+    { enableCanonicalDryRun: true },
+  ]) {
+    const s = realGuardFixture({ ...optIn, mutateSelectedTarget: true });
+    try {
+      const res = await s.send({
+        is_collab: ["true"],
+        members_json: JSON.stringify([{
+          name: "Owner", x_user_id: "x_owner", chapters: [],
+        }]),
+      }, SITE, "/api/videos/v_two/members");
+      assert.equal(res.status, 503,
+        "attempting to alter a D1-authenticated video row must not reach planning");
+      assert.deepEqual((await res.json()).ok, false);
+      assert.equal(s.d1.stats.reads, 3,
+        "only guard, CostGuard and authoritative video SELECT may run");
+      assert.equal(s.d1.stats.batches, 0, "no atomic D1 batch");
+      assert.equal(s.count("video_members"), 0);
+      assert.equal(s.count("audit_logs"), 0);
+      assert.equal(s.count("static_rebuild_queue"), 0);
     } finally { s.sqlite.close(); }
   }
 });
