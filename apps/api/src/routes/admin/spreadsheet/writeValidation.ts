@@ -4,6 +4,7 @@
  * Keep error codes and validation order identical; this module performs no D1
  * calls and must only run AFTER the admin write guard and table resolution.
  */
+import { sql, type SQL } from "@flamenode/server-core/sql";
 import {
   getSpreadsheetColumnPolicy,
   isSpreadsheetColumnEditable,
@@ -291,6 +292,58 @@ function quoteSpreadsheetIdentifier(name: string): string {
 function spreadsheetTableIdentifier(ctx: SpreadsheetSqlTableContext): string {
   return quoteSpreadsheetIdentifier(ctx.def.table);
 }
+/**
+ * MIG-0638 U01b: bridge a catalog-validated, parametrized CRUD plan into the
+ * Drizzle SQL wrapper required by mutateWithAudit's D1 batch API.
+ *
+ * The caller must supply a plan from buildSpreadsheetAuditedInsert/Update/Delete,
+ * not user SQL. This helper is deliberately UNMOUNTED: it neither authorizes a
+ * write nor supplies the required audit, Queue and exact-one CAS transaction.
+ * Its additional shape checks make forged/ill-formed plans fail closed.
+ */
+export function spreadsheetMutationToBoundSql(
+  ctx: SpreadsheetSqlTableContext,
+  plan: SpreadsheetSqlPlan,
+): SQL {
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
+  const table = spreadsheetTableIdentifier(ctx);
+  if (!plan || typeof plan.statement !== "string" || !Array.isArray(plan.binds)) {
+    throw new Error("invalid_row");
+  }
+  const statement = plan.statement;
+  const allowedPrefixes = [
+    `INSERT INTO ${table} (`,
+    `UPDATE ${table} SET `,
+    `DELETE FROM ${table} WHERE `,
+  ];
+  // All source plans emit plain bound SQL with catalog-quoted identifiers.
+  // No inline literals, comments, extra statements or manually inlined binds.
+  if (!allowedPrefixes.some(prefix => statement.startsWith(prefix)) ||
+      /[;'\x00]/.test(statement) || statement.includes("--") ||
+      statement.includes("/*") || statement.includes("*/")) {
+    throw new Error("invalid_row");
+  }
+  const pieces = statement.split("?");
+  if (pieces.length !== plan.binds.length + 1 ||
+      plan.binds.length > SPREADSHEET_SQL_MAX_BINDS) {
+    throw new Error("batch_too_large");
+  }
+  const queryChunks: SQL[] = [];
+  for (let index = 0; index < plan.binds.length; index += 1) {
+    const value = plan.binds[index];
+    if (value !== null && typeof value !== "string" && typeof value !== "number") {
+      throw new Error("invalid_row");
+    }
+    if ((typeof value === "number" && !Number.isFinite(value)) ||
+        (typeof value === "string" && value.includes("\0"))) {
+      throw new Error("invalid_row");
+    }
+    queryChunks.push(sql.raw(pieces[index]), sql`${value}`);
+  }
+  queryChunks.push(sql.raw(pieces[pieces.length - 1]));
+  return sql.join(queryChunks, sql.raw(""));
+}
+
 function spreadsheetPkCondition(ctx: SpreadsheetSqlTableContext, pk: Record<string, string>): SpreadsheetSqlPlan {
   const normalized = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pk);
   return {
