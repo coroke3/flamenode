@@ -2241,3 +2241,133 @@ test("MIG-0638 U01b: malformed CRUD PK D1 result envelopes fail closed", async (
   await assert.rejects(fetchSpreadsheetRawSnapshot(
     fake({ results: [] }), ctx, { id: "slot-1" }, 1), /row_not_found/);
 });
+
+
+test("MIG-0638 U01b: CRUD INSERT preflights effective default foreign keys", async () => {
+  const {
+    parseSpreadsheetCrudBody, planSpreadsheetGuardedCrud,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 0,
+      defaultValue: "'evt-default'" },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const body = parseSpreadsheetCrudBody("POST",
+    { table: "slots", row: { id: "slot-1", title: "Created" } });
+  assert.equal(Object.hasOwn(body.row, "event_id"), false);
+  const reads = [], binds = [];
+  const db = {
+    prepare(sql) {
+      reads.push(sql);
+      return { bind(...args) {
+        binds.push(args);
+        return { async all() { return { results: args.map(value => ({ value })) }; } };
+      } };
+    },
+  };
+  const plan = await planSpreadsheetGuardedCrud(db, ctx, body, fk, "operator", 1);
+  assert.equal(plan.audit.operation, "CREATE");
+  assert.deepEqual(plan.audit.after,
+    { id: "slot-1", event_id: "evt-default", title: "Created" });
+  assert.deepEqual(plan.binds, ["slot-1", "evt-default", "Created"]);
+  assert.equal(reads.length, 1,
+    "defaulted FK must receive the same one-query preflight as a supplied FK");
+  assert.equal(reads[0],
+    'SELECT "id" AS value FROM "events" WHERE "id" IN (?) LIMIT 2');
+  assert.deepEqual(binds, [["evt-default"]]);
+
+  reads.length = 0; binds.length = 0;
+  const override = parseSpreadsheetCrudBody("POST", {
+    table: "slots", row: { id: "slot-2", event_id: "evt-override" },
+  });
+  const overridePlan = await planSpreadsheetGuardedCrud(
+    db, ctx, override, fk, "operator", 1);
+  assert.equal(overridePlan.audit.after.event_id, "evt-override");
+  assert.deepEqual(binds, [["evt-override"]],
+    "explicit inserted FK must take precedence over the default");
+
+  const blockedDb = {
+    prepare() { throw Error("no D1 should be read after exhausted budget"); },
+  };
+  await assert.rejects(
+    planSpreadsheetGuardedCrud(blockedDb, ctx, body, fk, "operator", 0),
+    /batch_too_large/,
+    "defaulted FK must not bypass S3 read budget",
+  );
+  const absentDb = {
+    prepare() { return { bind() { return {
+      async all() { return { results: [] }; },
+    }; } }; },
+  };
+  await assert.rejects(
+    planSpreadsheetGuardedCrud(absentDb, ctx, body, fk, "operator", 1),
+    /foreign_key_violation/,
+    "missing defaulted FK must reject before returning a mutation plan",
+  );
+});
+
+test("MIG-0638 U01b: numeric INSERT defaults and null FKs mirror persisted audit row", async () => {
+  const {
+    parseSpreadsheetCrudBody, planSpreadsheetGuardedCrud,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "INTEGER", notNull: false, pk: 0,
+      defaultValue: "42" },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  let prepared = 0;
+  const args = [];
+  const db = {
+    prepare(sql) {
+      prepared++;
+      assert.match(sql, /^SELECT "id" AS value FROM "events" WHERE/);
+      return { bind(...values) {
+        args.push(values);
+        return { async all() { return { results: [{ value: 42 }] }; } };
+      } };
+    },
+  };
+  const defaulted = parseSpreadsheetCrudBody("POST", {
+    table: "slots", row: { id: "slot-int" },
+  });
+  const plan = await planSpreadsheetGuardedCrud(
+    db, ctx, defaulted, fk, "operator", 1);
+  assert.equal(plan.audit.after.event_id, 42);
+  assert.deepEqual(plan.binds, ["slot-int", 42]);
+  assert.deepEqual(args, [["42"]],
+    "numeric SQLite default must be looked up by its textual FK identity");
+  assert.equal(prepared, 1);
+
+  const nullable = parseSpreadsheetCrudBody("POST", {
+    table: "slots", row: { id: "slot-null", event_id: null },
+  });
+  const nullPlan = await planSpreadsheetGuardedCrud(
+    db, ctx, nullable, fk, "operator", 0);
+  assert.equal(nullPlan.audit.after.event_id, null);
+  assert.deepEqual(nullPlan.binds, ["slot-null", null]);
+  assert.equal(prepared, 1,
+    "SQL NULL reference must not use a needless FK read");
+
+  const malformedFk = [
+    { column: "not_in_schema", referencedTable: "events", referencedColumn: "id" },
+  ];
+  await assert.rejects(
+    planSpreadsheetGuardedCrud(db, ctx, defaulted, malformedFk, "operator", 1),
+    /invalid_snapshot/,
+    "a mismatched FK catalog must fail before any D1 preflight query",
+  );
+  assert.equal(prepared, 1);
+});
