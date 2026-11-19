@@ -3442,6 +3442,11 @@ test("MIG-0638 U02: signed import rejects missing effective/default FKs before n
       .get("new").event_ref, "missing");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    const firstQueue = sqlite.prepare(
+      "SELECT updated_at, requested_by_user_id FROM static_rebuild_queue " +
+      "WHERE target_type = ? AND target_id = ?"
+    ).get("event_base", "fk-test");
+    assert.equal(firstQueue.requested_by_user_id, "admin-1");
 
     // Signed UPSERT must validate the supplied new FK, not the unchanged old
     // FK. It spends one D1 read for the existing row and one for FK checking.
@@ -3470,7 +3475,16 @@ test("MIG-0638 U02: signed import rejects missing effective/default FKs before n
     assert.equal(sqlite.prepare("SELECT event_ref FROM slots WHERE id = ?")
       .get("new").event_ref, "other");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
-    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+    // The Queue is deliberately a coalesced UPSERT: repeated invalidation of
+    // one active target updates its existing row rather than creating two.
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    const refreshedQueue = sqlite.prepare(
+      "SELECT updated_at, requested_by_user_id FROM static_rebuild_queue " +
+      "WHERE target_type = ? AND target_id = ?"
+    ).get("event_base", "fk-test");
+    assert.ok(refreshedQueue.updated_at > firstQueue.updated_at,
+      "second mutation advances active Queue dirty-generation timestamp");
+    assert.equal(refreshedQueue.requested_by_user_id, "admin-1");
     assertUnconsumed(invalidUpsert.claims.nonce);
   } finally {
     sqlite.close();
