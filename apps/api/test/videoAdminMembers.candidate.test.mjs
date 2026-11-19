@@ -164,6 +164,7 @@ function realGuardFixture({
   as = "u_admin", mode = "normal", observeBinding,
   enableCanonicalDryRun = false, afterCanonicalDryRun,
   enableAtomicCandidateWrite = false, beforeAtomicBatch,
+  tamperSelectedTarget = false,
 } = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
@@ -187,6 +188,15 @@ function realGuardFixture({
   const host = createDefaultVideoAdminMembersPreflightHost({
     session, enableCanonicalDryRun, enableAtomicCandidateWrite,
   });
+  // Simulate a future route/host accidentally replacing an authoritative
+  // snapshot with a same-shaped object after its guarded D1 SELECT.
+  if (tamperSelectedTarget) {
+    const originalLoad = host.loadAuthorizedVideo;
+    host.loadAuthorizedVideo = async (c, id) => {
+      const selected = await originalLoad(c, id);
+      return selected ? { ...selected } : null;
+    };
+  }
   // Test-only hook observes the read facade BEFORE writeGuard.finally executes.
   // This proves canonical dry-run seals access in the handler itself, not just
   // when the outer middleware returns.
@@ -2112,5 +2122,30 @@ test("MIG-0650 U03cs isolated atomic writer rejects missing or malformed D1 bind
       name: "RangeError",
       message: "video_admin_member_atomic_write_db_unavailable",
     });
+  }
+});
+
+test("MIG-0650 U03ct authenticated Hono atomic/dry-run ports reject substituted D1 snapshots before mutation", async () => {
+  for (const cfg of [
+    { enableAtomicCandidateWrite: true },
+    { enableCanonicalDryRun: true },
+  ]) {
+    const s = realGuardFixture({ ...cfg, tamperSelectedTarget: true });
+    try {
+      const res = await s.send({
+        is_collab: ["true"],
+        members_json: JSON.stringify([{
+          name: "Owner", x_user_id: "x_owner", chapters: [],
+        }]),
+      }, SITE, "/api/videos/v_two/members");
+      assert.equal(res.status, 503, "same-shaped forged snapshot must fail closed");
+      assert.equal((await res.json()).ok, false);
+      assert.equal(s.d1.stats.reads, 3,
+        "snapshot substitution must be rejected before canonical member/alias reads");
+      assert.equal(s.d1.stats.batches, 0, "no atomic D1 write");
+      assert.equal(s.count("video_members"), 0);
+      assert.equal(s.count("audit_logs"), 0);
+      assert.equal(s.count("static_rebuild_queue"), 0);
+    } finally { s.sqlite.close(); }
   }
 });
