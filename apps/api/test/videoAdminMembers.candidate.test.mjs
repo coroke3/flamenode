@@ -164,7 +164,7 @@ function realGuardFixture({
   as = "u_admin", mode = "normal", observeBinding,
   enableCanonicalDryRun = false, afterCanonicalDryRun,
   enableAtomicCandidateWrite = false, beforeAtomicBatch,
-  tamperSelectedTarget = false,
+  tamperSelectedTarget = false, readDbBinding,
 } = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
@@ -209,11 +209,17 @@ function realGuardFixture({
     };
   }
   app.route("/api/videos", createVideoAdminMembersPreflightRoutes(host));
+  const requestEnv = readDbBinding
+    ? Object.defineProperty({ NEXT_PUBLIC_SITE_URL: SITE }, "DB", {
+        enumerable: true,
+        get: () => readDbBinding(d1),
+      })
+    : { DB: d1, NEXT_PUBLIC_SITE_URL: SITE };
   const send = (body, origin = SITE, path = "/api/videos/v_pub/members") => app.request(path, {
     method: "PUT",
     headers: { origin, "content-type": "application/json" },
     body: JSON.stringify(body),
-  }, { DB: d1, NEXT_PUBLIC_SITE_URL: SITE });
+  }, requestEnv);
   const count = table => sqlite.prepare('SELECT COUNT(*) AS n FROM "' + table + '"').get().n;
   return { sqlite, d1, send, count };
 }
@@ -2146,6 +2152,44 @@ test("MIG-0650 U03ct authenticated Hono atomic/dry-run ports reject substituted 
       assert.equal(s.count("video_members"), 0);
       assert.equal(s.count("audit_logs"), 0);
       assert.equal(s.count("static_rebuild_queue"), 0);
+    } finally { s.sqlite.close(); }
+  }
+});
+
+test("MIG-0650 U03cu unmounted atomic Hono save pins one guarded raw D1 provider through commit", async () => {
+  for (const [isCollab, membersJson, expectBatch] of [
+    [false, "[]", 0],
+    [true, JSON.stringify([{
+      name: "Owner", x_user_id: "x_owner", role: "", comment: "",
+      chapters: [{ time: "0:12", label: "Owner", note: "Checked" }],
+    }]), 1],
+  ]) {
+    let rawBindingReads = 0;
+    const s = realGuardFixture({
+      enableAtomicCandidateWrite: true,
+      // The first raw provider used by the origin/session/admin/CostGuard
+      // stack must be the ONLY raw D1 dereference. A later env.DB access
+      // could point at a different tenant/provider or throw after commit.
+      readDbBinding: provider => {
+        rawBindingReads++;
+        if (rawBindingReads !== 1) {
+          throw new Error("second raw D1 provider access would break request binding");
+        }
+        return provider;
+      },
+    });
+    try {
+      const res = await s.send({
+        is_collab: [String(isCollab)], members_json: membersJson,
+      }, SITE, "/api/videos/v_two/members");
+      assert.equal(res.status, 200, await res.clone().text());
+      assert.equal((await res.json()).ok, true);
+      assert.equal(rawBindingReads, 1,
+        "canonical read and audited write must use the SAME raw D1 binding");
+      assert.equal(s.d1.stats.batches, expectBatch);
+      assert.equal(s.count("video_members"), expectBatch);
+      assert.equal(s.count("audit_logs") > 0, Boolean(expectBatch));
+      assert.equal(s.count("static_rebuild_queue") > 0, Boolean(expectBatch));
     } finally { s.sqlite.close(); }
   }
 });
