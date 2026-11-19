@@ -236,3 +236,38 @@ test("MIG-0603 S3 D1 pre-read budget characterization: unmounted status candidat
 // Acceptance remains intentionally TODO. Passing the characterization above
 // demonstrates a known budget VIOLATION, not readiness for status writes.
 test.todo("MIG-0603 S3 acceptance: admin/manage authenticated status writes each use <=3 D1 pre-reads plus one audited batch");
+
+test("MIG-0603 unmounted manage candidate denies orphan video-event links for admin and manager", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted = 1');
+    sqlite.exec("UPDATE system_settings SET operation_mode='normal', disabled_features_json=NULL WHERE id='default'");
+    sqlite.exec("PRAGMA foreign_keys = OFF");
+    sqlite.prepare("INSERT INTO video_events (event_id, video_id) VALUES (?, ?)")
+      .run("evA", "video-orphan");
+    const d1 = createVideoStatusD1(sqlite);
+    const candidate = createUnboundManageVideoStatusCandidate();
+    const body = JSON.stringify({ event_id: "evA", video_id: "video-orphan", status: "private" });
+    for (const name of ["admin", "mgr"]) {
+      const response = await candidate.request(ORIGIN + "/", {
+        method: "POST",
+        headers: {
+          origin: ORIGIN, ...cookie(`tok-${name}`),
+          "content-type": "application/json",
+        },
+        body,
+      }, { DB: d1, NEXT_PUBLIC_SITE_URL: ORIGIN, FLAMENODE_LOCAL_PREVIEW: "1" });
+      assert.equal(response.status, 404,
+        `${name}: dangling video_events link does not represent a writable video`);
+      assert.deepEqual(await response.json(), {
+        ok: false, message: "このイベントに紐づく作品ではありません。",
+      });
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+    }
+    assert.equal(d1.stats.batches, 0, "orphaned target must never enter the audited mutation");
+    assert.equal(d1.stats.writes, 0, "orphaned target must never be mutated");
+  } finally {
+    sqlite.close();
+  }
+});
