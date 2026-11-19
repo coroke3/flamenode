@@ -14,6 +14,9 @@
 
 export const SPREADSHEET_AUDIT_PK_V1_CONTEXT = "admin_spreadsheet_pk_v1";
 export const SPREADSHEET_AUDIT_PK_V1_PREFIX = "spk:v1:";
+// Bound untrusted history strings before JSON parsing. This is a future,
+// unmounted read contract, not a limit on CURRENT audit writes.
+const AUDIT_HISTORY_TEXT_MAX_BYTES = 128_000;
 
 export type SpreadsheetAuditIdentityV1 = {
   context: typeof SPREADSHEET_AUDIT_PK_V1_CONTEXT;
@@ -66,12 +69,19 @@ export function parseSpreadsheetAuditIdentityV1(
     if (!identity || typeof identity !== "object" ||
         !("context" in identity) ||
         identity.context !== SPREADSHEET_AUDIT_PK_V1_CONTEXT ||
-        !("target_id" in identity) ||
-        typeof identity.target_id !== "string" ||
-        !identity.target_id.startsWith(SPREADSHEET_AUDIT_PK_V1_PREFIX)) {
+        !("target_id" in identity)) {
       return null;
     }
-    const json = identity.target_id.slice(SPREADSHEET_AUDIT_PK_V1_PREFIX.length);
+    // Snapshot the field once: a hostile accessor must not change the bytes
+    // between prefix validation, JSON parsing and canonical equality.
+    const targetId = identity.target_id;
+    if (typeof targetId !== "string" ||
+        !targetId.startsWith(SPREADSHEET_AUDIT_PK_V1_PREFIX) ||
+        targetId.length > AUDIT_HISTORY_TEXT_MAX_BYTES ||
+        new TextEncoder().encode(targetId).byteLength > AUDIT_HISTORY_TEXT_MAX_BYTES) {
+      return null;
+    }
+    const json = targetId.slice(SPREADSHEET_AUDIT_PK_V1_PREFIX.length);
     const value: unknown = JSON.parse(json);
     if (!Array.isArray(value) || value.length === 0) return null;
     const pk: Record<string, string> = Object.create(null);
@@ -81,7 +91,7 @@ export function parseSpreadsheetAuditIdentityV1(
           Object.hasOwn(pk, item[0])) return null;
       pk[item[0]] = item[1];
     }
-    if (buildSpreadsheetAuditIdentityV1(pk).target_id !== identity.target_id) {
+    if (buildSpreadsheetAuditIdentityV1(pk).target_id !== targetId) {
       return null;
     }
     return value as [string, string][];
@@ -190,8 +200,8 @@ export function classifySpreadsheetAuditHistoryCandidate(
     // code units. Multibyte PK values must not bypass the bounded parser.
     // Check code units first to avoid allocating for obviously huge inputs.
     if (typeof snapshot !== "string" ||
-        snapshot.length > 128_000 ||
-        new TextEncoder().encode(snapshot).byteLength > 128_000) {
+        snapshot.length > AUDIT_HISTORY_TEXT_MAX_BYTES ||
+        new TextEncoder().encode(snapshot).byteLength > AUDIT_HISTORY_TEXT_MAX_BYTES) {
       return "legacy_ambiguous";
     }
     try {
