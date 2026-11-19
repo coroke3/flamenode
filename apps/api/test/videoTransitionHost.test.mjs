@@ -122,3 +122,39 @@ test("visibility manifest host uses R2 ETag preconditions for writes", async () 
   assert.equal(puts[0].key, "visibility/blocked-entities.v1.json");
   assert.deepEqual(puts[0].options.onlyIf, { etagMatches: "etag-current" });
 });
+
+test("explicit undefined CAS option retains create-if-absent; omitted option remains unconditional", async () => {
+  const puts = [];
+  const bucket = {
+    put: async (key, value, options) => {
+      assert.equal(key, "visibility/blocked-entities.v1.json");
+      puts.push(options);
+      return { etag: "new-etag" };
+    },
+  };
+  const host = createVideoVisibilityTransitionHost({
+    env: { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" },
+  });
+  const manifest = {
+    schema_version: 1, revision: 1, generated_at: 1, entities: [],
+  };
+
+  await host.manifest.write(manifest);
+  assert.equal(puts[0].onlyIf, undefined, "omitted property uses unconditional PUT");
+
+  await host.manifest.write(manifest, { ifMatchEtag: undefined });
+  assert.ok(puts[1].onlyIf instanceof Headers);
+  assert.equal(puts[1].onlyIf.get("If-None-Match"), "*",
+    "explicit undefined must reject overwriting an existing manifest");
+
+  await host.manifest.write(manifest, { ifMatchEtag: null });
+  assert.equal(puts[2].onlyIf.get("If-None-Match"), "*",
+    "explicit null is the same create-if-absent precondition");
+
+  await host.manifest.write(manifest, { ifMatchEtag: "etag-current" });
+  assert.deepEqual(puts[3].onlyIf, { etagMatches: "etag-current" });
+  for (const options of puts) {
+    assert.equal(options.httpMetadata.cacheControl, "no-store");
+  }
+  assert.equal(puts.length, 4);
+});
