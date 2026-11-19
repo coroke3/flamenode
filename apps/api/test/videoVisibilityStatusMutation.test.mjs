@@ -22,6 +22,7 @@ function host(overrides = {}, calls = []) {
     preCommit: async () => { calls.push("precommit"); },
     mutate: async (_db, input) => { calls.push(["mutate", input]); },
     compensate: async () => { calls.push("compensate"); },
+    confirmCompensation: async () => true,
     rethrowFrameworkControl: () => {},
     isAuditMutationError: () => false,
     rereadStatus: async () => "private",
@@ -345,6 +346,75 @@ test("unconfirmed R2 rollback cannot report public status already applied (CURRE
     ]);
     assert.doesNotMatch(JSON.stringify({ result, calls }), /secret-public-provider-token|Authorization:Bearer/);
   }
+});
+
+test("best-effort R2 compensation silently exhausts retries: never claim public visibility or retry", async () => {
+  const calls = [];
+  const result = await executeVideoVisibilityStatusMutation({
+    db: {},
+    videoId: "v-1",
+    requestedStatus: "public",
+    transition: transition({ depublicizedFromPublic: false }),
+    reason: null,
+    logTag: "manage-video-status",
+  }, host({
+    mutate: async () => {
+      calls.push("mutate");
+      throw Object.assign(new Error("audit CAS mismatch"), { auditMutation: true });
+    },
+    isAuditMutationError: (error) => Boolean(error?.auditMutation),
+    compensate: async () => {
+      calls.push("compensate");
+      // Mirrors the actual compensation helper: logs failed R2 CAS retries
+      // then returns void without throwing an exception.
+    },
+    confirmCompensation: async (videoId) => {
+      calls.push("confirm");
+      assert.equal(videoId, "v-1");
+      return false; // R2 manifest still contains a blocked video.
+    },
+    rereadStatus: async () => { calls.push("reread"); return "public"; },
+    log: (level, tag, details) => calls.push(["log", level, tag, details]),
+  }, calls));
+  assert.deepEqual(result, {
+    ok: false,
+    message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+    errorCode: "status_unverified",
+    traceId: "trace-1",
+    retryable: false,
+  });
+  assert.deepEqual(calls.map((row) => Array.isArray(row) ? row[0] : row), [
+    "precommit", "mutate", "compensate", "confirm", "log",
+  ], "a void return cannot prove R2 rollback or authorize a new D1 read");
+  assert.deepEqual(calls[4], [
+    "log", "warn", "[manage-video-status] visibility compensation failed",
+    { traceId: "trace-1", error_code: "visibility_compensation_failed" },
+  ]);
+});
+
+test("R2 compensation readback unavailable also fails closed without idempotent success", async () => {
+  const calls = [];
+  const result = await executeVideoVisibilityStatusMutation({
+    db: {}, videoId: "v-1", requestedStatus: "public",
+    transition: transition({ depublicizedFromPublic: false }),
+    reason: null, logTag: "admin-video-status",
+  }, host({
+    mutate: async () => { calls.push("mutate"); throw new Error("D1 transport error"); },
+    compensate: async () => { calls.push("compensate"); },
+    confirmCompensation: async () => {
+      calls.push("confirm");
+      throw new Error("R2 readback timeout Authorization:Bearer private");
+    },
+    rereadStatus: async () => { calls.push("reread"); return "public"; },
+    log: (level, tag, details) => calls.push(["log", level, tag, details]),
+  }, calls));
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "status_unverified");
+  assert.equal(result.retryable, false);
+  assert.deepEqual(calls.map((row) => Array.isArray(row) ? row[0] : row), [
+    "precommit", "mutate", "compensate", "confirm", "log",
+  ]);
+  assert.doesNotMatch(JSON.stringify({ result, calls }), /Authorization:Bearer|private/);
 });
 
 test("CAS status reread outage is non-retryable and never leaks D1 secrets (CURRENT/Hono core)", async () => {
