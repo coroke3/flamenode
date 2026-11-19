@@ -1,9 +1,11 @@
 /**
- * MIG-0650 U03e: UNMOUNTED SA-085 admin-members PUT preflight candidate.
+ * MIG-0650 U03cr: UNMOUNTED SA-085 admin-members PUT candidate.
  *
- * The authenticated Hono D1 member/chapters CAS + strict audit + static
- * rebuild host has not yet been implemented. This candidate MUST return 501
- * even for a valid request. Never mount it or represent it as a working writer.
+ * The default production-facing factory remains PREVIEW/DISABLED and returns
+ * HTTP 501 even for a valid request. An explicitly opted-in isolated test host
+ * exercises authenticated CAS + strict audit + static rebuild Queue in SQLite;
+ * it is NOT mounted in createVideosRoutes, has not passed exact-HEAD CI or
+ * workerd payload/CPU parity, and must never be used as a live writer.
  */
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { readAdminVideoCollabFlag, mergeVideoRebuildEventIds } from "@flamenode/domain/video";
