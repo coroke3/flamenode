@@ -83,12 +83,23 @@ export function parseVideoMemberInputs(
   const members: MemberInput[] = [];
   const seenXIds = new Set<string>();
   for (const item of result.data) {
+    const rawXId = item.x_user_id.trim();
     const xid = normalizeXId(item.x_user_id);
     const name = item.name.trim();
+
+    // A supplied handle such as "@" / "@@@" normalizes to empty, but is NOT
+    // an omitted optional X ID. Reject it before the blank-member skip so
+    // both the CURRENT Next bridge and unmounted Hono candidate fail closed.
+    // Only a genuinely blank input may be ignored or saved without an X ID.
+    if (rawXId && (!xid || !isCanonicalXId(xid))) {
+      return {
+        ok: false,
+        message: `${name || item.x_user_id} の X ID が不正です。英数字とアンダースコア20文字以内で入力してください。`,
+      };
+    }
     if (!name && !xid) continue;
 
-    // フロントのpatternだけに依存せず、DB write境界でもcanonical X handleを保証する。
-    // 空欄は許可するが、入力された値は英数字/underscore 20文字以内だけを保存する。
+    // Keep the legacy canonical validation for nonempty normalized handles.
     if (xid && !isCanonicalXId(xid)) {
       return {
         ok: false,
