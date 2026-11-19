@@ -106,6 +106,7 @@ export async function executeVideoVisibilityStatusMutation<DB>(
   // block even when its message contains no public_visibility_* marker.
   // Classify by execution phase, not by an untrusted provider error string.
   let preCommitInFlight = false;
+  let compensationFailed = false;
   try {
     if (transition.fenceToken) {
       preCommitInFlight = true;
@@ -135,6 +136,7 @@ export async function executeVideoVisibilityStatusMutation<DB>(
           allowNonPublicRollback: !transition.depublicizedFromPublic,
         });
       } catch {
+        compensationFailed = true;
         // Provider/D1/R2 exceptions can contain SQL, request bodies or
         // credentials. Do not send exception objects to console adapters.
         host.log("warn", `[${logTag}] visibility compensation failed`, {
@@ -151,6 +153,19 @@ export async function executeVideoVisibilityStatusMutation<DB>(
         ok: false,
         message: "公開ブロックの記録に失敗しました。",
         errorCode: "visibility_precommit_failed",
+        traceId,
+        retryable: false,
+      };
+    }
+    // Even if a D1 CAS reread reports the requested status, it cannot prove
+    // public visibility while the R2 fence rollback is unconfirmed. A
+    // retryable conflict or idempotent success would hide a potentially
+    // stranded public block; do not spend another D1 read in that state.
+    if (compensationFailed) {
+      return {
+        ok: false,
+        message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+        errorCode: "status_unverified",
         traceId,
         retryable: false,
       };
