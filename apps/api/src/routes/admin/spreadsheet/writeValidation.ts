@@ -419,8 +419,11 @@ export function buildSpreadsheetForeignKeyLookups(
       if (!row || typeof row !== "object" || Array.isArray(row)) {
         throw new Error("invalid_row");
       }
-      const value = Object.hasOwn(row, foreignKey.column)
-        ? row[foreignKey.column] : undefined;
+      const supplied = Object.hasOwn(row, foreignKey.column);
+      const value = supplied ? row[foreignKey.column] : undefined;
+      // A supplied undefined is not valid JSON; unlike an omitted optional
+      // FK, it must not silently skip the referential-integrity preflight.
+      if (supplied && value === undefined) throw new Error("invalid_row");
       // Never coerce an object, number, or boolean into a different D1 bind
       // and potentially authorize a different row than the user's JSON.
       if (value != null && typeof value !== "string") throw new Error("invalid_row");
