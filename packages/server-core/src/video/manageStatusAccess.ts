@@ -6,9 +6,11 @@
  * to activate an HTTP mutation route: full S3/D1 budget and moderation/audit/
  * R2 fencing remain STOP gates.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { eventStaff, events, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
+import { EVENT_STAFF_PRESETS, getPresetPermissions } from "@flamenode/domain/auth/permissions/presets";
+import { assertCondition } from "../audit/mutate.ts";
 import { mergeVideoRebuildEventIds, type SessionUserLike } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 
@@ -236,4 +238,68 @@ export async function loadAdminVideoStatusSnapshot(
     return { ok: false, message: "対象作品が見つかりません。" };
   }
   return finishVideoStatusSnapshot(target);
+}
+
+
+/**
+ * Design-only, UNMOUNTED preMutationAssertion candidate for Issue #692.
+ *
+ * This statement MUST be the FIRST assertion inside the SAME atomic audited
+ * D1 batch that writes the new status, audit and outbox. A successful
+ * preflight query is not a durable grant: staff/X links and the exact
+ * video_event association can all change before the mutation begins.
+ *
+ * This is a narrowly scoped DB assertion, NOT an approved HTTP auth design:
+ * the separate session/TOS/CostGuard budgets and actor snapshot remain
+ * unresolved. Do not mount a route or wire into production on this basis.
+ */
+export function planManageVideoStatusCommitAssertion(
+  db: ServerCoreDb,
+  user: SessionUserLike,
+  eventId: string,
+  videoId: string,
+) {
+  // Derive presets from the canonical permission definitions, rather than
+  // allowing a diverging hand-maintained list in the SQL commit fence.
+  const statusPresets = EVENT_STAFF_PRESETS.filter((preset) =>
+    getPresetPermissions(preset).includes("video.status"),
+  );
+
+  // Custom grants are arrays of permission-key strings. SQL must reject
+  // malformed JSON and scalar JSON exactly as the canonical JS resolver does.
+  // Nested CASE prevents json_type() from touching invalid JSON.
+  const safeKeysJson = sql`CASE WHEN json_valid(${eventStaff.custom_permission_keys_json})
+    THEN CASE WHEN json_type(${eventStaff.custom_permission_keys_json}) = 'array'
+      THEN ${eventStaff.custom_permission_keys_json} ELSE '[]' END
+    ELSE '[]' END`;
+  const hasCurrentStatusGrant = user.role === "admin"
+    ? sql`1 = 1`
+    : sql`EXISTS (
+      SELECT 1 FROM ${eventStaff}
+      INNER JOIN ${xUserAccountLinks}
+        ON ${eventStaff.x_user_id} = trim(${xUserAccountLinks.x_user_id})
+      INNER JOIN ${xUsers}
+        ON ${xUsers.id} = ${xUserAccountLinks.x_user_id}
+      WHERE ${eventStaff.event_id} = ${eventId}
+        AND ${xUserAccountLinks.auth_user_id} = ${user.id}
+        AND ${xUsers.approval_status} = 'approved'
+        AND (
+          ${inArray(eventStaff.permission_preset, statusPresets)}
+          OR (
+            ${eventStaff.permission_preset} = 'custom'
+            AND EXISTS (
+              SELECT 1 FROM json_each(${safeKeysJson}) AS key
+              WHERE key.type = 'text' AND key.value = 'video.status'
+            )
+          )
+        )
+    )`;
+  const targetStillLinked = sql`EXISTS (
+    SELECT 1 FROM ${videoEvents}
+    INNER JOIN ${videos} ON ${videos.id} = ${videoEvents.video_id}
+    INNER JOIN ${events} ON ${events.id} = ${videoEvents.event_id}
+    WHERE ${videoEvents.event_id} = ${eventId}
+      AND ${videoEvents.video_id} = ${videoId}
+  )`;
+  return db.run(assertCondition(sql`${hasCurrentStatusGrant} AND ${targetStillLinked}`));
 }

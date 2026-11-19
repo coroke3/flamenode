@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { drizzle } from "drizzle-orm/d1";
+import { sql } from "drizzle-orm";
 import * as schema from "@flamenode/db/schema";
 import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import { checkManageVideoStatusAccess, loadManageVideoStatusSnapshot, loadAdminVideoStatusSnapshot } from "../src/routes/videos/videoStatusAccess.ts";
-import { MAX_MANAGE_STATUS_REBUILD_EVENTS } from "@flamenode/server-core/video/manageStatusAccess";
+import { MAX_MANAGE_STATUS_REBUILD_EVENTS, planManageVideoStatusCommitAssertion } from "@flamenode/server-core/video/manageStatusAccess";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
 import { canEditEvent } from "@flamenode/server-core/auth/ownership";
 
@@ -609,5 +610,101 @@ test("MIG-0603: status snapshot rejects oversized primary event ID even when lin
     assert.equal(d1.stats.batches, 0);
   } finally {
     sqlite.close();
+  }
+});
+
+test("MIG-0603: commit-time status authorization assertion rolls back on revoked grant or link", async () => {
+  const cases = [
+    ["approved X revoked", (sqlite) =>
+      sqlite.exec("UPDATE x_users SET approval_status='rejected' WHERE id='mgr_x'")],
+    ["event staff preset revoked", (sqlite) =>
+      sqlite.exec("UPDATE event_staff SET permission_preset='public_staff' WHERE event_id='evA' AND x_user_id='mgr_x'")],
+    ["X account link deleted", (sqlite) =>
+      sqlite.exec("DELETE FROM x_user_account_links WHERE auth_user_id='u_mgr'")],
+    ["video-event association deleted", (sqlite) =>
+      sqlite.exec("DELETE FROM video_events WHERE video_id='v1' AND event_id='evA'")],
+    ["event deleted with orphan association", (sqlite) =>
+      sqlite.exec("DELETE FROM events WHERE id='evA'")],
+    ["custom grant revoked", (sqlite) =>
+      sqlite.exec("UPDATE event_staff SET custom_permission_keys_json='[]' WHERE event_id='evA' AND x_user_id='custom_x'")],
+    ["custom grant malformed", (sqlite) =>
+      sqlite.exec("UPDATE event_staff SET custom_permission_keys_json='{broken' WHERE event_id='evA' AND x_user_id='custom_x'")],
+  ];
+  for (const [description, revoke] of cases) {
+    const sqlite = createSqlite();
+    try {
+      seed(sqlite);
+      const d1 = createVideoStatusD1(sqlite);
+      const db = drizzle(d1, { schema });
+      const custom = description.startsWith("custom");
+      const user = custom
+        ? { id: "u_custom", role: "user" }
+        : { id: "u_mgr", role: "user" };
+      if (custom) {
+        sqlite.exec(`UPDATE event_staff
+          SET custom_permission_keys_json='["video.status"]'
+          WHERE event_id='evA' AND x_user_id='custom_x'`);
+      }
+      // Characterize the TOCTOU scenario: legitimate BEFORE preflight grants.
+      const preliminary = await loadManageVideoStatusSnapshot(db, user, "evA", "v1");
+      assert.equal(preliminary.ok, true, description + " preflight was legitimately allowed");
+
+      // Interleaved SQL mutation by another caller, AFTER our preflight.
+      revoke(sqlite);
+      const guard = planManageVideoStatusCommitAssertion(db, user, "evA", "v1");
+      const update = db.run(sql`UPDATE videos
+        SET visibility_status = 'public' WHERE id = 'v1'`);
+      const audit = db.run(sql`INSERT INTO audit_logs
+        (id, table_name, target_id, operation, actor_user_id, created_at)
+        VALUES ('commit-guard-audit', 'videos', 'v1', 'UPDATE', ${user.id}, 1000)`);
+      const outbox = db.run(sql`INSERT INTO notification_outbox
+        (id, type, payload_json, status, created_at)
+        VALUES ('commit-guard-outbox', 'video_posted', '{}', 'pending', 1000)`);
+      const start = d1.stats.statements;
+      await assert.rejects(db.batch([guard, update, audit, outbox]),
+        /malformed JSON|not-valid-json/,
+        description + " must abort the *whole* D1 batch before status/audit/outbox writes");
+      assert.equal(d1.stats.statements - start, 1,
+        description + " guard rejects in the first D1 batch statement");
+      assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+        "pending", description + " must not mutate video status");
+      assert.equal(sqlite.prepare("SELECT count(*) AS n FROM audit_logs WHERE id='commit-guard-audit'").get().n, 0);
+      assert.equal(sqlite.prepare("SELECT count(*) AS n FROM notification_outbox WHERE id='commit-guard-outbox'").get().n, 0);
+    } finally {
+      sqlite.close();
+    }
+  }
+});
+
+test("MIG-0603: commit-time status assertion accepts current canonical preset and custom grants", async () => {
+  for (const [name, user, custom] of [
+    ["manager", { id: "u_mgr", role: "user" }, false],
+    ["reviewer", { id: "u_rev", role: "user" }, false],
+    ["owner", { id: "u_owner", role: "user" }, false],
+    ["custom", { id: "u_custom", role: "user" }, true],
+    ["site admin", { id: "u_admin", role: "admin" }, false],
+  ]) {
+    const sqlite = createSqlite();
+    try {
+      seed(sqlite);
+      if (custom) sqlite.exec(`UPDATE event_staff SET custom_permission_keys_json='["video.status"]'
+        WHERE event_id='evA' AND x_user_id='custom_x'`);
+      const d1 = createVideoStatusD1(sqlite);
+      const db = drizzle(d1, { schema });
+      const prior = await loadManageVideoStatusSnapshot(db, user, "evA", "v1");
+      assert.equal(prior.ok, true, name);
+      const initial = d1.stats.statements;
+      await db.batch([
+        planManageVideoStatusCommitAssertion(db, user, "evA", "v1"),
+        db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+      ]);
+      assert.equal(d1.stats.statements - initial, 2,
+        name + ": assertion + update happen in one D1 batch with no additional preflight reads");
+      assert.equal(d1.stats.batches, 1);
+      assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+        "public");
+    } finally {
+      sqlite.close();
+    }
   }
 });
