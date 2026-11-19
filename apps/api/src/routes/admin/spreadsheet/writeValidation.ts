@@ -414,10 +414,17 @@ export function buildSpreadsheetForeignKeyLookups(
     const remainingValues = (remainingReadBudget - lookups.length) * 99;
     const seen = new Set<string>();
     for (const row of rows) {
-      const value = row[foreignKey.column];
-      // This planner can also be called without a preceding row validator.
-      // SQLite TEXT bindings may truncate NUL, so a preflight SELECT must
-      // never authorize a different foreign-key value than was requested.
+      // This planner is exported and may be called without the body parser.
+      // An inherited SQL column (e.g. "constructor") is NOT a supplied FK.
+      if (!row || typeof row !== "object" || Array.isArray(row)) {
+        throw new Error("invalid_row");
+      }
+      const value = Object.hasOwn(row, foreignKey.column)
+        ? row[foreignKey.column] : undefined;
+      // Never coerce an object, number, or boolean into a different D1 bind
+      // and potentially authorize a different row than the user's JSON.
+      if (value != null && typeof value !== "string") throw new Error("invalid_row");
+      // SQLite TEXT bindings may truncate NUL; forbid that ambiguity.
       if (typeof value === "string" && value.includes("\0")) throw new Error("invalid_row");
       if (value == null || value === "" || seen.has(value)) continue;
       if (seen.size >= remainingValues) throw new Error("batch_too_large");
@@ -451,8 +458,30 @@ export function assertSpreadsheetForeignKeyLookup(
     // authorize writes under a false assumption of FK uniqueness.
     throw new Error("invalid_snapshot");
   }
-  const found = new Set(returned.map(row => String(row.value)));
-  if (lookup.values.some(value => !found.has(String(value)))) {
+  const requested = new Set(lookup.values);
+  const found = new Set<string>();
+  for (const row of returned) {
+    // An incomplete adapter row must never stringify missing "value" as
+    // "undefined" (which might itself be a valid bound FK string).
+    if (!row || typeof row !== "object" || Array.isArray(row) ||
+        !Object.hasOwn(row, "value")) {
+      throw new Error("invalid_snapshot");
+    }
+    const cell = row.value;
+    if (cell === null ||
+        (typeof cell !== "string" && typeof cell !== "number") ||
+        (typeof cell === "number" && !Number.isFinite(cell))) {
+      throw new Error("invalid_snapshot");
+    }
+    const value = String(cell);
+    if (value.includes("\0") || !requested.has(value) || found.has(value)) {
+      // The SQL WHERE clause cannot return unrequested or duplicate values
+      // under the referenced-key uniqueness assumption.
+      throw new Error("invalid_snapshot");
+    }
+    found.add(value);
+  }
+  if (lookup.values.some(value => !found.has(value))) {
     throw new Error("foreign_key_violation");
   }
 }
