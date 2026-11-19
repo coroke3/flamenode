@@ -517,6 +517,9 @@ export async function validateSpreadsheetForeignKeys(
 }
 
 
+/** One row plus a sentinel to detect a broken/nonunique SQL PK before CAS. */
+export const MAX_SPREADSHEET_CRUD_SNAPSHOT_ROWS = 2;
+
 /**
  * CURRENT query.ts#fetchRowByPkRaw equivalent. Only a bound SELECT and no
  * caching: the caller must fetch a fresh row after the write guard.
@@ -526,7 +529,7 @@ export async function fetchSpreadsheetRawSnapshot(
   db: {
     prepare(sql: string): {
       bind(...values: (string | number | null)[]): {
-        first<T>(): Promise<T | null>;
+        all<T>(): Promise<{ results?: T[] }>;
       };
     };
   },
@@ -544,11 +547,17 @@ export async function fetchSpreadsheetRawSnapshot(
   // isSpreadsheetColumnEditable (which can reject a secret/readonly PK).
   // Actual mutation fields are validated by the downstream write planner.
   const key = spreadsheetPkCondition(ctx, normalized);
+  // A SELECT ... LIMIT 1 hides duplicate matching PK rows under a corrupt
+  // schema. Read one sentinel row in the same (single-budgeted) SELECT,
+  // rejecting ambiguity before building CAS binds and audit before_json.
   const statement = "SELECT * FROM " + spreadsheetTableIdentifier(ctx) +
-    " WHERE " + key.statement + " LIMIT 1";
+    " WHERE " + key.statement + " LIMIT " + MAX_SPREADSHEET_CRUD_SNAPSHOT_ROWS;
   if (key.binds.length > SPREADSHEET_SQL_MAX_BINDS) throw new Error("batch_too_large");
-  const row = await db.prepare(statement).bind(...key.binds).first<Record<string, unknown>>();
-  if (row === null || row === undefined) throw new Error("row_not_found");
+  const result = await db.prepare(statement).bind(...key.binds).all<Record<string, unknown>>();
+  if (!result || !Array.isArray(result.results) ||
+      result.results.length > 1) throw new Error("invalid_snapshot");
+  if (result.results.length === 0) throw new Error("row_not_found");
+  const row = result.results[0];
   // U01b: return a *single* immutable before-image. A hostile/mock D1
   // accessor cannot substitute a different PK or cell between this SELECT,
   // the optimistic CAS WHERE clause, and the strict audit before_json.
@@ -681,7 +690,6 @@ export interface SpreadsheetCrudReadDatabase {
   prepare(sql: string): {
     bind(...values: (string | number | null)[]): {
       all<T>(): Promise<{ results?: T[] }>;
-      first<T>(): Promise<T | null>;
     };
   };
 }
