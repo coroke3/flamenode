@@ -2988,7 +2988,10 @@ test("MIG-0638 U02: nonce, multi-row import, strict audit and rebuild Queue are 
     assert.equal(batch.staticRebuildWakeSource, "admin");
     assert.ok(planAtomicAuditMutationBudget(batch).withinLimit);
     await mutateWithAudit(db, batch, wakeHost);
-    assert.deepEqual(sqlite.prepare("SELECT id, title FROM slots ORDER BY id").all(),
+    // node:sqlite returns null-prototype row records, unlike plain fixtures.
+    // Convert the row containers only; keep the database values unmodified.
+    assert.deepEqual(sqlite.prepare("SELECT id, title FROM slots ORDER BY id")
+      .all().map(row => ({ ...row })),
       [{ id: "a", title: "first" }, { id: "b", title: "second" }]);
     assert.equal(sqlite.prepare(
       "SELECT consumed_at FROM spreadsheet_import_runs WHERE nonce = ?"
