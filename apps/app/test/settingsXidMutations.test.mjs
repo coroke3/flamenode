@@ -77,7 +77,7 @@ test("MIG-0708: pending X has no edit/switch; mismatched candidate ID never leak
     uploadIcon: async () => { throw Error("unexpected"); },
   };
   const m = await mount("/dashboard/settings", a);
-  assert.doesNotMatch(m.container.textContent, /公開プロフィール/);
+  assert.equal(m.container.querySelector(".settings-editPanel"), null, "pending X must have no editable profile");
   assert.ok(![...m.container.querySelectorAll("button")].some(b => b.textContent.includes("アクティブに設定")));
   assert.ok(![...m.container.querySelectorAll("img")].some(el => el.src.includes("private.png")));
   await m.unmount();

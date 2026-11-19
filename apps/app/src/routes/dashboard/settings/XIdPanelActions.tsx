@@ -229,9 +229,9 @@ export function XIdCompactProfileForm({
             disabled={pending} defaultValue={x.portfolio_contact ?? ""} />
         </label>
         <label className="xids-compactLabel">YouTube チャンネル（過去の作品から候補を表示）</label>
-        <YoutubeChannelPicker key={x.id} defaultValue={x.youtube_channel_url}
+        <YoutubeChannelPicker defaultValue={x.youtube_channel_url}
           candidates={channelCandidates} disabled={pending} />
-        <SocialLinksEditor key={x.id} initialValue={x.other_social_links} disabled={pending} />
+        <SocialLinksEditor initialValue={x.other_social_links} disabled={pending} />
         <div className="xids-rowEnd">
           {onCancel ? <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
             disabled={pending} onClick={onCancel}>キャンセル</button> : null}
