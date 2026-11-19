@@ -257,9 +257,10 @@ export async function loadAdminVideoStatusSnapshot(
  * video_event association can all change before the mutation begins.
  *
  * This is a narrowly scoped DB assertion, NOT an approved HTTP auth design:
- * it checks persisted actor existence/ban and prevents stale site-admin role
- * privileges, but does not validate the live session, TOS/major consent or
- * CostGuard atomically. Do not mount a route or wire into production.
+ * it checks persisted actor existence/ban, the base TOS acceptance flag and
+ * prevents stale site-admin role privileges. This does NOT atomically check
+ * the live session, current major-terms reacceptance or CostGuard; keep this
+ * candidate unmounted until the shared Issue #692 architecture is approved.
  */
 export function planManageVideoStatusCommitAssertion(
   db: ServerCoreDb,
@@ -302,13 +303,14 @@ export function planManageVideoStatusCommitAssertion(
           )
         )
     )`;
-  // A cached site-admin identity is not a durable authorization: a role
-  // downgrade or ban between the preflight and D1 batch must fail closed.
-  // This is still not the full session/TOS/CostGuard assertion from #692.
+  // A cached actor is not durable: role downgrade, ban, or base TOS
+  // acceptance withdrawal between preflight and D1 batch must fail closed.
+  // Major-term reacceptance/session/CostGuard still need shared Issue #692 design.
   const actorStillAllowed = sql`EXISTS (
     SELECT 1 FROM ${users}
     WHERE ${users.id} = ${user.id}
       AND COALESCE(${users.is_banned}, 0) = 0
+      AND ${users.is_tos_accepted} = 1
       ${user.role === "admin" ? sql`AND ${users.role} = 'admin'` : sql``}
   )`;
   const targetStillLinked = sql`EXISTS (

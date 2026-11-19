@@ -652,11 +652,17 @@ test("MIG-0603: commit-time status authorization assertion rolls back on revoked
       sqlite.exec("UPDATE user SET role='user' WHERE id='u_admin'")],
     ["site-admin banned after preflight", (sqlite) =>
       sqlite.exec("UPDATE user SET is_banned=1 WHERE id='u_admin'")],
+    ["actor TOS acceptance withdrawn after preflight", (sqlite) =>
+      sqlite.exec("UPDATE user SET is_tos_accepted=0 WHERE id='u_mgr'")],
+    ["site-admin TOS acceptance cleared after preflight", (sqlite) =>
+      sqlite.exec("UPDATE user SET is_tos_accepted=NULL WHERE id='u_admin'")],
   ];
   for (const [description, revoke] of cases) {
     const sqlite = createSqlite();
     try {
       seed(sqlite);
+      // The shared seed defaults to TOS=0; model a legitimate write preflight.
+      sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
       const d1 = createVideoStatusD1(sqlite);
       const db = drizzle(d1, { schema });
       const custom = description.startsWith("custom");
@@ -711,6 +717,7 @@ test("MIG-0603: commit-time status assertion accepts current canonical preset an
     const sqlite = createSqlite();
     try {
       seed(sqlite);
+      sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
       if (custom) sqlite.exec(`UPDATE event_staff SET custom_permission_keys_json='["video.status"]'
         WHERE event_id='evA' AND x_user_id='custom_x'`);
       const d1 = createVideoStatusD1(sqlite);
