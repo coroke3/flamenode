@@ -155,6 +155,7 @@ test("T03 no-conflict restore is atomic and gives no second restore", async () =
   assert.equal(state.restored, "restored");
   assert.deepEqual(state.runs, [{ status: "success", reason: "業務上の監査復元" }]);
   assert.ok(state.auditCount >= 2);
+  recordRestoreD1Budget("announcements_success", ctx.stats);
   const second = await ctx.request(body());
   assert.equal(second.status, 200);
   assert.equal((await second.json()).ok, false);
@@ -291,6 +292,7 @@ test("T04 public event -> private restore commits R2 CAS fence and D1 atomically
     assert.ok(deleted.some((url) => url.includes("public-event-export:9:ev-1:v5:15")));
     assert.ok(deleted.some((url) => url.includes("public-event-export:9:ev-1:legacy:1440")));
     assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'").get().n, 1);
+  recordRestoreD1Budget("events_private_restore_success", ctx.stats);
   } finally {
     if (previous === undefined) delete globalThis.caches;
     else globalThis.caches = previous;
@@ -310,6 +312,7 @@ test("T04 R2 binding failure prevents an event visibility restore and preserves 
   assert.equal(ctx.sqlite.prepare("SELECT visibility_status FROM events WHERE id='ev-1'").get().visibility_status, "public");
   assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM public_visibility_fences").get().n, 0);
   assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'").get().n, 0);
+  recordRestoreD1Budget("events_missing_r2_fail_closed", ctx.stats);
 });
 
 // MIG-0662 T04 video variant. Keep the test table column names in lockstep
@@ -400,6 +403,7 @@ test("T04 video public->private restore commits D1+R2 CAS and invalidates full p
       "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'",
     ).get().n, 1);
     assert.equal(ctx.stats.batches, 1, "RESTORE mutation, audit and queue must use one atomic D1 batch");
+  recordRestoreD1Budget("videos_private_restore_success", ctx.stats);
   } finally {
     if (previous === undefined) delete globalThis.caches;
     else globalThis.caches = previous;
@@ -424,4 +428,21 @@ test("T04 video restore fails closed when enforced visibility R2 bucket is unava
   assert.equal(ctx.sqlite.prepare(
     "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'",
   ).get().n, 0);
+  recordRestoreD1Budget("videos_missing_r2_fail_closed", ctx.stats);
 });
+
+// The Hono route test injects an in-memory session middleware, not Auth.js.
+// These counts therefore form a *lower bound*, not a production D1 profile.
+// Reports remain observational until the approved S3 <=3 pre-read gate is met.
+function recordRestoreD1Budget(scenario, stats) {
+  const record = {
+    scenario, mocked_session: true,
+    d1_reads: stats.reads, d1_batches: stats.batches,
+    s3_max_pre_reads: 3, s3_max_batches: 1,
+    over_s3_budget: stats.reads > 3 || stats.batches > 1,
+  };
+  assert.ok(Number.isInteger(record.d1_reads));
+  assert.ok(Number.isInteger(record.d1_batches));
+  console.info("MIG-0662_S3_BUDGET " + JSON.stringify(record));
+  return record;
+}
