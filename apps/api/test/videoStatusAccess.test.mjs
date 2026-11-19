@@ -6,6 +6,8 @@ import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import { checkManageVideoStatusAccess, loadManageVideoStatusSnapshot } from "../src/routes/videos/videoStatusAccess.ts";
+import { MAX_MANAGE_STATUS_REBUILD_EVENTS } from "@flamenode/server-core/video/manageStatusAccess";
+import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
 import { canEditEvent } from "@flamenode/server-core/auth/ownership";
 
 test("MIG-0603: unmounted manage status gate matches CURRENT event privilege and exact video link", async () => {
@@ -463,6 +465,52 @@ test("MIG-0603: opt-in video status snapshot fails closed for revoked grants and
     );
     assert.equal(d1.stats.statements - overflowStart, 1,
       "overflow aborts before any association/full-video read");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0603: same association SELECT includes bounded rebuild event targets", async () => {
+  assert.equal(MAX_MANAGE_STATUS_REBUILD_EVENTS, MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS,
+    "preload cap must match the CURRENT rebuild queue cap");
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+
+    const before = d1.stats.statements;
+    const baseline = await loadManageVideoStatusSnapshot(db, manager, "evA", "v1");
+    assert.equal(baseline.ok, true);
+    assert.deepEqual(baseline.rebuildEventIds, ["evA"]);
+    assert.equal(d1.stats.statements - before, 2,
+      "permission and exact association+rebuild projection use only two D1 statements");
+
+    // Valid references other than the selected manage event must still be
+    // included in the rebuild fan-out, like CURRENT's linkedEventIds loader.
+    const extra = ["evB", "evC", "evD", "evNull", "evPoint", "evTie1", "evTie2"];
+    for (const eventId of extra) {
+      insert(sqlite, "video_events", { video_id: "v1", event_id: eventId });
+    }
+    const capStart = d1.stats.statements;
+    const max = await loadManageVideoStatusSnapshot(db, manager, "evA", "v1");
+    assert.equal(max.ok, true);
+    assert.deepEqual(max.rebuildEventIds, ["evA", ...extra].sort(),
+      "the complete eight target event IDs are preloaded in deterministic order");
+    assert.equal(d1.stats.statements - capStart, 2);
+
+    insert(sqlite, "video_events", { video_id: "v1", event_id: "evGen19" });
+    const overflowStart = d1.stats.statements;
+    assert.deepEqual(
+      await loadManageVideoStatusSnapshot(db, manager, "evA", "v1"),
+      { ok: false, message: "関連イベント数が処理上限を超えています。" },
+      "a ninth link fails closed instead of dropping a queue rebuild target",
+    );
+    assert.equal(d1.stats.statements - overflowStart, 2,
+      "overflow needs no extra D1 round trip");
     assert.equal(d1.stats.batches, 0);
     assert.equal(d1.stats.writes, 0);
   } finally {

@@ -9,12 +9,16 @@
 import { and, eq, sql } from "drizzle-orm";
 import { eventStaff, events, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
-import type { SessionUserLike } from "@flamenode/domain/video";
+import { mergeVideoRebuildEventIds, type SessionUserLike } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 
 // Defend against unbounded joined fan-out in D1. Exceeding this limit is
 // an explicit fail-closed condition, never a partial-grant decision.
 export const MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT = 256;
+// Keep in sync with MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS in staticRebuild/hooks.
+// This module deliberately does NOT import the much larger queue/planner chain.
+export const MAX_MANAGE_STATUS_REBUILD_EVENTS = 8;
+export const MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH = 4096;
 
 export type ManageVideoStatusAccess =
   | { ok: true }
@@ -24,7 +28,7 @@ export type ManageVideoStatusAccess =
 // it checks expectedRowCondition on every original field, not only status.
 // This opt-in read is NEVER returned in the active HTTP response.
 export type ManageVideoStatusSnapshot =
-  | { ok: true; video: typeof videos.$inferSelect }
+  | { ok: true; video: typeof videos.$inferSelect; rebuildEventIds: string[] }
   | { ok: false; message: string };
 
 /**
@@ -126,9 +130,23 @@ export async function loadManageVideoStatusSnapshot(
   if (!(await hasManageVideoStatusGrant(db, user, eventId))) {
     return { ok: false, message: "このイベントの作品審査権限がありません。" };
   }
+  // CURRENT loadVideoRebuildEventIds performs one more D1 SELECT after
+  // fetching the target. This bounded correlated JSON projection folds the
+  // link fan-out into the same already-authorized exact association read.
+  // The +1 row is essential: rejecting overflow must never silently discard
+  // affected rebuild events. No Queue, R2, audit or mutation is performed.
+  const rebuildEventIdsJson = sql<string>`(
+    SELECT COALESCE(json_group_array(linked.event_id), '[]')
+    FROM (
+      SELECT "event_id" FROM "video_events"
+      WHERE "video_id" = ${videoId}
+      ORDER BY "event_id"
+      LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
+    ) linked
+  )`;
   const target = (
     await db
-      .select({ video: videos })
+      .select({ video: videos, rebuildEventIdsJson })
       .from(videoEvents)
       .innerJoin(videos, eq(videos.id, videoEvents.video_id))
       .innerJoin(events, eq(events.id, videoEvents.event_id))
@@ -143,5 +161,26 @@ export async function loadManageVideoStatusSnapshot(
   if (!target) {
     return { ok: false, message: "このイベントに紐づく作品ではありません。" };
   }
-  return { ok: true, video: target.video };
+  // The database may contain imported/corrupted event IDs; never hand an
+  // unbounded or malformed aggregate to a future audited status planner.
+  const raw = target.rebuildEventIdsJson;
+  if (typeof raw !== "string" || raw.length > MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH) {
+    throw new Error("manage_status_rebuild_event_snapshot_invalid");
+  }
+  let linked: unknown;
+  try {
+    linked = JSON.parse(raw);
+  } catch {
+    throw new Error("manage_status_rebuild_event_snapshot_invalid");
+  }
+  if (!Array.isArray(linked) ||
+      linked.length > MAX_MANAGE_STATUS_REBUILD_EVENTS + 1 ||
+      !linked.every((value) => typeof value === "string")) {
+    throw new Error("manage_status_rebuild_event_snapshot_invalid");
+  }
+  const rebuildEventIds = mergeVideoRebuildEventIds(target.video.primary_event_id, linked);
+  if (rebuildEventIds.length > MAX_MANAGE_STATUS_REBUILD_EVENTS) {
+    return { ok: false, message: "関連イベント数が処理上限を超えています。" };
+  }
+  return { ok: true, video: target.video, rebuildEventIds };
 }
