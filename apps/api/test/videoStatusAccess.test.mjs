@@ -259,3 +259,44 @@ test("MIG-0603: joined event status privilege is bounded at 256 rows and fails c
   }
 });
 
+test("MIG-0603: an orphaned video_events link is not an authorized status target", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    // Repair/import jobs can temporarily leave a link without a target video
+    // when FK enforcement is disabled. A linked row is not a real video.
+    sqlite.exec("PRAGMA foreign_keys = OFF");
+    sqlite.prepare("INSERT INTO video_events (event_id, video_id) VALUES (?, ?)")
+      .run("evA", "video-orphan");
+    assert.ok(sqlite.prepare(
+      "SELECT 1 FROM video_events WHERE event_id = ? AND video_id = ?"
+    ).get("evA", "video-orphan"), "characterize a real dangling event link");
+    assert.equal(sqlite.prepare("SELECT id FROM videos WHERE id = ?")
+      .get("video-orphan"), undefined);
+
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    for (const [name, role, expectedReads] of [
+      ["admin", "admin", 1],
+      ["mgr", "user", 2],
+    ]) {
+      const before = d1.stats.statements;
+      assert.deepEqual(
+        await checkManageVideoStatusAccess(
+          db, { id: `u_${name}`, role }, "evA", "video-orphan",
+        ),
+        { ok: false, message: "このイベントに紐づく作品ではありません。" },
+        `${name}: an orphan link must not authorize a write to a missing video`,
+      );
+      assert.equal(d1.stats.statements - before, expectedReads,
+        "target existence is verified in the existing link read, with no extra D1 statement");
+    }
+    assert.deepEqual(await checkManageVideoStatusAccess(
+      db, { id: "u_mgr", role: "user" }, "evA", "v1",
+    ), { ok: true }, "valid links and existing targets remain authorized");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
