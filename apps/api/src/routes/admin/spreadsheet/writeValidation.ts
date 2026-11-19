@@ -311,15 +311,10 @@ export function spreadsheetMutationToBoundSql(
     throw new Error("invalid_row");
   }
   const statement = plan.statement;
-  const allowedPrefixes = [
-    `INSERT INTO ${table} (`,
-    `UPDATE ${table} SET `,
-    `DELETE FROM ${table} WHERE `,
-  ];
-  // All source plans emit plain bound SQL with catalog-quoted identifiers.
-  // No inline literals, comments, extra statements or manually inlined binds.
-  if (!allowedPrefixes.some(prefix => statement.startsWith(prefix)) ||
-      /[;'\x00]/.test(statement) || statement.includes("--") ||
+  // All source planners emit one canonical SQL shape for this catalog table.
+  // Prefix-only validation is insufficient: a forged "UPDATE ... WHERE 1=1"
+  // would otherwise be accepted as a valid atomic-batch input.
+  if (/[;'\x00]/.test(statement) || statement.includes("--") ||
       statement.includes("/*") || statement.includes("*/")) {
     throw new Error("invalid_row");
   }
@@ -328,6 +323,44 @@ export function spreadsheetMutationToBoundSql(
       plan.binds.length > SPREADSHEET_SQL_MAX_BINDS) {
     throw new Error("batch_too_large");
   }
+  const cols = ctx.columns.map(col => col.name);
+  if (new Set(cols).size !== cols.length ||
+      !ctx.primaryKeys.length || new Set(ctx.primaryKeys).size !== ctx.primaryKeys.length ||
+      ctx.primaryKeys.some(key => !cols.includes(key))) {
+    throw new Error("invalid_row");
+  }
+  const snapshotWhere = ctx.columns.map(col => quoteSpreadsheetIdentifier(col.name) + " IS ?").join(" AND ");
+  const pkWhere = ctx.primaryKeys.map(key => quoteSpreadsheetIdentifier(key) + " = ?").join(" AND ");
+  const where = pkWhere + " AND " + snapshotWhere;
+  const insertColumns = ctx.columns.filter(col => !col.generated).map(col => quoteSpreadsheetIdentifier(col.name));
+  const canonicalInsert = insertColumns.length > 0
+    ? "INSERT INTO " + table + " (" + insertColumns.join(", ") + ") VALUES (" +
+      insertColumns.map(() => "?").join(", ") + ")"
+    : "";
+  const canonicalDelete = "DELETE FROM " + table + " WHERE " + where;
+  const updatePrefix = "UPDATE " + table + " SET ";
+  let canonical = statement === canonicalInsert ||
+    (statement === canonicalDelete && !isSpreadsheetPhysicalDeleteBlocked(ctx.def.table));
+  if (statement.startsWith(updatePrefix)) {
+    const whereSuffix = " WHERE " + where;
+    if (statement.endsWith(whereSuffix)) {
+      const setText = statement.slice(updatePrefix.length, -whereSuffix.length);
+      const assignments = setText.split(", ");
+      const selected = assignments.map(part =>
+        /^"([A-Za-z_][A-Za-z0-9_]*)" = \?$/.exec(part)?.[1] ?? "",
+      );
+      const allowed = ctx.columns.filter(col =>
+        col.pk === 0 && isSpreadsheetColumnEditable(ctx.def, col.name),
+      ).map(col => col.name);
+      canonical = selected.length > 0 &&
+        selected.every(name => allowed.includes(name)) &&
+        // Each selected column appears exactly once, in catalog order.
+        JSON.stringify(selected) === JSON.stringify(
+          ctx.columns.filter(col => selected.includes(col.name)).map(col => col.name),
+        );
+    }
+  }
+  if (!canonical) throw new Error("invalid_row");
   const queryChunks: SQL[] = [];
   for (let index = 0; index < plan.binds.length; index += 1) {
     const value = plan.binds[index];
