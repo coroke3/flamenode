@@ -4,6 +4,7 @@ import { AuditMutationError, mutateWithAudit } from "@/lib/audit/mutate";
 import type { DB } from "@/lib/db/client";
 import { videos } from "@/lib/db/schema";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { nextVisibilityManifestHost } from "@/lib/publicData/visibilityManifestHost";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import {
@@ -48,6 +49,14 @@ const mutationHost: VideoVisibilityStatusMutationHost<DB> = {
   preCommit: preCommitVideoVisibilityDepublicization,
   mutate: (db, mutation) => mutateWithAudit(db, mutation),
   compensate: compensateDepublicizationFenceOnD1Failure,
+  confirmCompensation: async (videoId) => {
+    // CURRENT must enforce the same readback as TARGET: an exhausted R2 CAS
+    // compensator can report only a warning and resolve without throwing.
+    const { manifest, etag } = await nextVisibilityManifestHost.read();
+    return typeof etag === "string" && etag.length > 0 &&
+      !manifest.entities.some((entry) =>
+        entry.entity_type === "video" && entry.entity_id === videoId);
+  },
   rethrowFrameworkControl: unstable_rethrow,
   isAuditMutationError: (error) => error instanceof AuditMutationError,
   rereadStatus: async (db, videoId) => {
