@@ -1274,6 +1274,68 @@ export function buildSpreadsheetPreviewNonceConsumeSql(
 
 
 /**
+ * U02 strict audit byte parity: a canonical SQL shape does not prove that its
+ * *bind values* describe the before/after images persisted in audit_logs.
+ * Keep this pure and fail closed before constructing any D1 batch.
+ */
+function assertSpreadsheetImportAuditMatchesBinds(
+  ctx: SpreadsheetSqlTableContext,
+  plan: SpreadsheetAuditedSqlPlan,
+): void {
+  const after = plan.audit.after;
+  if (!after || typeof after !== "object" || Array.isArray(after) ||
+      !Array.isArray(plan.binds)) throw new Error("invalid_row");
+  const nonGenerated = ctx.columns.filter(column => !column.generated).map(column => column.name);
+  const exactKeys = (row: Record<string, unknown>, columns: readonly string[]): boolean =>
+    Object.keys(row).length === columns.length &&
+    columns.every(name => Object.hasOwn(row, name) && (
+      row[name] === null || typeof row[name] === "string" ||
+      (typeof row[name] === "number" && Number.isFinite(row[name]))
+    ));
+  const equalsBinds = (expected: readonly (string | number | null)[]): boolean =>
+    expected.length === plan.binds.length &&
+    expected.every((value, i) => Object.is(value, plan.binds[i]));
+
+  if (plan.audit.operation === "CREATE") {
+    if (!exactKeys(after, nonGenerated) ||
+        !equalsBinds(nonGenerated.map(name => after[name] as string | number | null))) {
+      throw new Error("invalid_row");
+    }
+    return;
+  }
+  const before = plan.audit.before;
+  const columns = ctx.columns.map(column => column.name);
+  if (plan.audit.operation !== "UPDATE" ||
+      !before || typeof before !== "object" || Array.isArray(before) ||
+      !exactKeys(before, columns) || !exactKeys(after, columns)) {
+    throw new Error("invalid_row");
+  }
+  const prefix = "UPDATE " + spreadsheetTableIdentifier(ctx) + " SET ";
+  const whereIndex = plan.statement.indexOf(" WHERE ", prefix.length);
+  if (!plan.statement.startsWith(prefix) || whereIndex < 0) throw new Error("invalid_row");
+  const setText = plan.statement.slice(prefix.length, whereIndex);
+  const setColumns = setText.split(", ").map(part =>
+    /^"([A-Za-z_][A-Za-z0-9_]*)" = \?$/.exec(part)?.[1] ?? "",
+  );
+  const validSet = setColumns.length > 0 &&
+    setColumns.every(name => columns.includes(name) && !ctx.primaryKeys.includes(name)) &&
+    new Set(setColumns).size === setColumns.length;
+  if (!validSet) throw new Error("invalid_row");
+
+  // For an UPDATE, SQL SET binds = after-image changed cells; WHERE binds =
+  // requested primary key plus the complete fresh before-image. Every other
+  // after-image cell must remain byte/type identical to the before-image.
+  if (columns.some(name => !setColumns.includes(name) &&
+      !Object.is(after[name], before[name]))) throw new Error("invalid_row");
+  const expected = [
+    ...setColumns.map(name => after[name] as string | number | null),
+    ...ctx.primaryKeys.map(name => String(after[name])),
+    ...columns.map(name => before[name] as string | number | null),
+  ];
+  if (!equalsBinds(expected)) throw new Error("invalid_row");
+}
+
+/**
  * U02: UNMOUNTED importer transaction composer. No HTTP auth, token
  * verification, table-to-public-target derivation or D1 write occurs here.
  *
@@ -1389,6 +1451,9 @@ export async function planSpreadsheetAtomicAuditedImport(
         normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, beforePk),
       ) !== fingerprint) throw new Error("invalid_row");
     }
+    // Prove every SQL bind matches the audit before/after image; only then
+    // allow the canonical SQL compiler to construct a runnable D1 statement.
+    assertSpreadsheetImportAuditMatchesBinds(ctx, plan);
     // Converts only canonical table-specific INSERT/UPDATE SQL into lazy D1
     // RunnableQueries. All changes=1 assertions remain inside one batch.
     mutations.push(db.run(spreadsheetMutationToBoundSql(ctx, plan)));
