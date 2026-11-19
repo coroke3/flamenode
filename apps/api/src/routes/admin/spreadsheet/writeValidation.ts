@@ -578,6 +578,12 @@ export function assertSpreadsheetForeignKeyLookup(
         (typeof cell === "number" && !Number.isFinite(cell))) {
       throw new Error("invalid_snapshot");
     }
+    // D1 exposes SQLite numeric values as IEEE-754 JS numbers. Distinct
+    // INTEGER keys beyond 2^53-1 may collapse to the same rounded number,
+    // creating a false positive for an FK preflight and a misleading audit.
+    // Fail closed instead of comparing rounded decimal strings.
+    if (typeof cell === "number" && Number.isInteger(cell) &&
+        !Number.isSafeInteger(cell)) throw new Error("invalid_snapshot");
     const value = String(cell);
     if (value.includes("\0") || !requested.has(value) || found.has(value)) {
       // The SQL WHERE clause cannot return unrequested or duplicate values
