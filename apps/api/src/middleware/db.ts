@@ -9,6 +9,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { Context, Next } from "hono";
 import { writeGuardDenyResponse } from "./writeOrigin.ts";
 import type { AppEnv } from "../env.ts";
+import type { ServerCoreDb } from "@flamenode/server-core/db";
 
 export async function dbMiddleware(c: Context<AppEnv>, next: Next): Promise<void | Response> {
   // A prior write guard may have successfully read DB, but the binding may fail
