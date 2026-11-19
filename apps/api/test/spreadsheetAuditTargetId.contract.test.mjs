@@ -166,22 +166,44 @@ test("Issue #674: legacy snapshot budget counts UTF-8 bytes, not UTF-16 code uni
   }), "legacy_snapshot_exact");
 });
 
-test("Issue #674: untrusted V1 target IDs are bounded by UTF-8 bytes before parsing", () => {
-  const tableId = { id: "界".repeat(43_000) };
-  const oversized = buildSpreadsheetAuditIdentityV1(tableId);
-  assert.ok(oversized.target_id.length < 128_000);
-  assert.ok(Buffer.byteLength(oversized.target_id, "utf8") > 128_000);
-  assert.equal(parseSpreadsheetAuditIdentityV1(oversized), null,
-    "multibyte IDs above the history input cap must fail closed");
-  assert.equal(parseSpreadsheetAuditIdentityV1(buildSpreadsheetAuditIdentityV1({
+test("Issue #674: V1 writer and decoder agree on the 128,000-byte UTF-8 limit", () => {
+  const multibytePk = { id: "界".repeat(43_000) };
+  const oversizedMultibyteId = SPREADSHEET_AUDIT_PK_V1_PREFIX +
+    JSON.stringify([["id", multibytePk.id]]);
+  assert.ok(oversizedMultibyteId.length < 128_000,
+    "UTF-16 length alone must not establish a safe limit");
+  assert.ok(Buffer.byteLength(oversizedMultibyteId, "utf8") > 128_000);
+  assert.throws(() => buildSpreadsheetAuditIdentityV1(multibytePk), /invalid_row/,
+    "future writer must not emit IDs that its decoder cannot read");
+  assert.equal(parseSpreadsheetAuditIdentityV1({
+    context: SPREADSHEET_AUDIT_PK_V1_CONTEXT, target_id: oversizedMultibyteId,
+  }), null, "untrusted multibyte IDs must fail closed before JSON.parse");
+
+  const oversizedAsciiId = SPREADSHEET_AUDIT_PK_V1_PREFIX +
+    JSON.stringify([["id", "a".repeat(130_000)]]);
+  assert.throws(() => buildSpreadsheetAuditIdentityV1({
     id: "a".repeat(130_000),
-  })), null, "oversized ASCII IDs must fail closed");
+  }), /invalid_row/);
+  assert.equal(parseSpreadsheetAuditIdentityV1({
+    context: SPREADSHEET_AUDIT_PK_V1_CONTEXT, target_id: oversizedAsciiId,
+  }), null);
 
   const permitted = buildSpreadsheetAuditIdentityV1({ id: "界".repeat(30_000) });
   assert.ok(Buffer.byteLength(permitted.target_id, "utf8") < 128_000);
   assert.deepEqual(parseSpreadsheetAuditIdentityV1(permitted), [
     ["id", "界".repeat(30_000)],
-  ], "bounded V1 IDs retain exact Unicode identity");
+  ], "bounded Unicode IDs retain exact identity");
+
+  const overhead = Buffer.byteLength(SPREADSHEET_AUDIT_PK_V1_PREFIX +
+    JSON.stringify([["id", ""]]), "utf8");
+  const atLimit = buildSpreadsheetAuditIdentityV1({ id: "a".repeat(128_000 - overhead) });
+  assert.equal(Buffer.byteLength(atLimit.target_id, "utf8"), 128_000);
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(atLimit), [
+    ["id", "a".repeat(128_000 - overhead)],
+  ]);
+  assert.throws(() => buildSpreadsheetAuditIdentityV1({
+    id: "a".repeat(128_001 - overhead),
+  }), /invalid_row/, "a one-byte overflow must be rejected by the writer");
 });
 
 test("Issue #674: a changing target_id accessor is read only once", () => {
