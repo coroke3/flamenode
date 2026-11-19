@@ -49,6 +49,12 @@ export type VideoVisibilityStatusMutationHost<DB> = {
       allowNonPublicRollback: boolean;
     },
   ): Promise<void>;
+  /**
+   * Compensation can log and return after exhausting R2 CAS retries. Only a
+   * fresh manifest with a real ETag and NO same-video block can certify that
+   * public visibility is no longer fenced. Missing/unknown -> false or throw.
+   */
+  confirmCompensation(videoId: string): Promise<boolean>;
   rethrowFrameworkControl(error: unknown): void;
   isAuditMutationError(error: unknown): boolean;
   rereadStatus(db: DB, videoId: string): Promise<string | null | undefined>;
@@ -135,6 +141,11 @@ export async function executeVideoVisibilityStatusMutation<DB>(
           traceId,
           allowNonPublicRollback: !transition.depublicizedFromPublic,
         });
+        // A best-effort compensator may return after three unsuccessful R2
+        // retries. Never interpret its void return as rollback confirmation.
+        if (!(await host.confirmCompensation(videoId))) {
+          throw new Error("public_visibility_manifest_compensation_unverified");
+        }
       } catch {
         compensationFailed = true;
         // Provider/D1/R2 exceptions can contain SQL, request bodies or
