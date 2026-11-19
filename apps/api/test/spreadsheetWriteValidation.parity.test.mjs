@@ -2060,3 +2060,88 @@ test("MIG-0638 U01b: CRUD planner denies invalid input and exhausted FK budgets 
   assert.equal(noFk.audit.target_id, "slot-3");
   assert.equal(readCount, 0);
 });
+
+
+test("MIG-0638 U01b: FK lookup must never match missing or inherited D1 result values", async () => {
+  const {
+    buildSpreadsheetForeignKeyLookups, assertSpreadsheetForeignKeyLookup,
+    validateSpreadsheetForeignKeys,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const plan = buildSpreadsheetForeignKeyLookups(fk, [{ event_id: "undefined" }], 1)[0];
+  assert.deepEqual(plan.binds, ["undefined"]);
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(
+    plan, [{ value: "undefined" }]));
+  const inherited = Object.create({ value: "undefined" });
+  for (const results of [
+    [{}],
+    [inherited],
+    [{ value: undefined }],
+    [{ value: null }],
+    [{ value: false }],
+    [{ value: {} }],
+    [{ value: Number.NaN }],
+    [{ value: Number.POSITIVE_INFINITY }],
+    [{ value: "other" }],
+    [{ value: "undefined\0" }],
+    [null],
+    [true],
+  ]) {
+    assert.throws(
+      () => assertSpreadsheetForeignKeyLookup(plan, results),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+      "a malformed D1 adapter row must not authorize an existing FK",
+    );
+    let read = 0;
+    const db = { prepare() { read++; return { bind() {
+      return { async all() { return { results }; } };
+    } }; } };
+    await assert.rejects(
+      validateSpreadsheetForeignKeys(db, fk, [{ event_id: "undefined" }], 1),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+    );
+    assert.equal(read, 1);
+  }
+
+  const many = buildSpreadsheetForeignKeyLookups(fk,
+    [{ event_id: "a" }, { event_id: "b" }], 1)[0];
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(many,
+    [{ value: "a" }, { value: "b" }]));
+  assert.throws(() => assertSpreadsheetForeignKeyLookup(many,
+    [{ value: "a" }, { value: "a" }]), /invalid_snapshot/);
+  assert.throws(() => assertSpreadsheetForeignKeyLookup(many,
+    [{ value: "a" }]), /foreign_key_violation/);
+  const numeric = buildSpreadsheetForeignKeyLookups(fk, [{ event_id: "42" }], 1)[0];
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(numeric,
+    [{ value: 42 }]), "valid SQLite integer FK values still round-trip as strings");
+});
+
+test("MIG-0638 U01b: FK planner rejects non-string or inherited input before D1", async () => {
+  const { buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const inherited = Object.create({ event_id: "inherited" });
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, [inherited], 1), []);
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(
+    [{ column: "constructor", referencedTable: "events", referencedColumn: "id" }],
+    [{}], 1), []);
+  const explicit = Object.fromEntries([["event_id", "own"]]);
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, [explicit], 1)[0].binds,
+    ["own"]);
+  let reads = 0;
+  const db = { prepare() { reads++; throw Error("no D1 reads on malformed rows"); } };
+  for (const value of [undefined, 1, false, [], {}, Number.NaN]) {
+    const bad = { event_id: value };
+    assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, [bad], 1),
+      error => error instanceof Error && error.message === "invalid_row");
+    await assert.rejects(
+      validateSpreadsheetForeignKeys(db, fk, [bad], 1),
+      error => error instanceof Error && error.message === "invalid_row",
+    );
+    assert.equal(reads, 0);
+  }
+  for (const bad of [null, 42, [], false]) {
+    assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, [bad], 1),
+      error => error instanceof Error && error.message === "invalid_row");
+  }
+});
