@@ -1034,3 +1034,105 @@ test("MIG-0638 U02: CURRENT and Hono import preview tokens are cross-verifiable"
   assert.equal(await current.verifySpreadsheetImportPreviewToken(issuedHono.token, secret, changedRows, { now: options.now + 1 }), null);
   assert.equal(await hono.verifySpreadsheetImportPreviewToken(issuedCurrent.token, secret, b, { now: options.now + 300 }), null);
 });
+
+
+test("MIG-0638 U01b: D1 100-bind limit on spreadsheet write plans fails closed at 101", async () => {
+  const {
+    SPREADSHEET_SQL_MAX_BINDS, buildSpreadsheetInsertSql, buildSpreadsheetUpdateSql,
+    buildSpreadsheetDeleteSql,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.equal(SPREADSHEET_SQL_MAX_BINDS, 100);
+  const makeContext = (count) => {
+    const columns = [
+      { name: "id", type: "TEXT", notNull: true, pk: 1 },
+      ...Array.from({ length: count - 1 }, (_, i) => ({
+        name: "data_" + i, type: "TEXT", notNull: false, pk: 0,
+      })),
+    ];
+    return {
+      def: resolveSpreadsheetTableDef("slots", true),
+      columns, columnNames: columns.map(c => c.name), primaryKeys: ["id"],
+    };
+  };
+  const fullRow = (ctx) => Object.fromEntries(ctx.columns.map(c => [c.name, "value"]));
+  const pk = { id: "value" };
+
+  const insert100 = makeContext(100);
+  assert.equal(buildSpreadsheetInsertSql(insert100, fullRow(insert100)).binds.length, 100);
+  const insert101 = makeContext(101);
+  assert.throws(() => buildSpreadsheetInsertSql(insert101, fullRow(insert101)), /batch_too_large/);
+
+  // UPDATE: one SET bind + one PK bind + the entire row snapshot.
+  const update98 = makeContext(98);
+  assert.equal(buildSpreadsheetUpdateSql(update98, pk, fullRow(update98),
+    { data_0: "new" }).binds.length, 100);
+  const update99 = makeContext(99);
+  assert.throws(() => buildSpreadsheetUpdateSql(update99, pk, fullRow(update99),
+    { data_0: "new" }), /batch_too_large/);
+
+  // DELETE: one PK bind plus all snapshot columns.
+  const delete99 = makeContext(99);
+  assert.equal(buildSpreadsheetDeleteSql(delete99, pk, fullRow(delete99)).binds.length, 100);
+  const delete100 = makeContext(100);
+  assert.throws(() => buildSpreadsheetDeleteSql(delete100, pk, fullRow(delete100)),
+    /batch_too_large/);
+});
+
+test("MIG-0638 U01b: multi-column PK pre-reads reject >100 binds before D1 access", async () => {
+  const {
+    fetchSpreadsheetRawSnapshot, fetchSpreadsheetExistingImportRows,
+    spreadsheetImportPrimaryKeyFingerprint,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  let prepares = 0;
+  const db = {
+    prepare() {
+      prepares += 1;
+      return {
+        bind() {
+          return {
+            async first() { return null; },
+            async all() { return { results: [] }; },
+          };
+        },
+      };
+    },
+  };
+  const ctx = (width) => {
+    const columns = Array.from({ length: width }, (_, i) => ({
+      name: "key_" + i, type: "TEXT", notNull: true, pk: i + 1,
+    }));
+    return {
+      def: resolveSpreadsheetTableDef("slots", true),
+      columns, columnNames: columns.map(c => c.name),
+      primaryKeys: columns.map(c => c.name),
+    };
+  };
+  const pk = (width, row) => Object.fromEntries(
+    Array.from({ length: width }, (_, i) => ["key_" + i, "v" + row + "-" + i]),
+  );
+  const prepared = (width) => ({
+    errors: [],
+    preparedRows: Array.from({ length: 7 }, (_, i) => {
+      const key = pk(width, i);
+      return { pk: key, row: key, fingerprint: spreadsheetImportPrimaryKeyFingerprint(key) };
+    }),
+  });
+
+  const width14 = ctx(14);
+  const existing = await fetchSpreadsheetExistingImportRows(db, width14, prepared(14), 1);
+  assert.equal(existing.size, 0);
+  assert.equal(prepares, 1, "7 x 14 = 98 binds is allowed");
+
+  const width15 = ctx(15);
+  await assert.rejects(
+    fetchSpreadsheetExistingImportRows(db, width15, prepared(15), 1),
+    /batch_too_large/,
+  );
+  assert.equal(prepares, 1, "7 x 15 = 105 must not call D1");
+  await assert.rejects(fetchSpreadsheetRawSnapshot(db, ctx(101), pk(101, 0), 1),
+    /batch_too_large/);
+  assert.equal(prepares, 1, "single snapshot read at 101 binds must not call D1");
+  await assert.rejects(fetchSpreadsheetRawSnapshot(db, ctx(100), pk(100, 0), 1),
+    /row_not_found/);
+  assert.equal(prepares, 2, "single snapshot read at 100 binds must reach D1");
+});
