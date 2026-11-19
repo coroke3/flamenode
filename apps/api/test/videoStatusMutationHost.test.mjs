@@ -180,3 +180,71 @@ test("Hono R2 compensation confirmation requires a real ETag and no blocked vide
   await assert.rejects(host.confirmCompensation("video-one"), /manifest GET failed/,
     "R2 readback outage must reach shared executor's fail-closed path");
 });
+
+test("real Hono R2 compensator silently exhausts CAS yet manifest readback rejects false success", async () => {
+  const sqlite = createSqlite();
+  const savedWarn = console.warn;
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try {
+    sqlite.prepare(`
+      INSERT INTO videos (
+        id, submitted_by_user_id, creator_display_name, title,
+        visibility_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run("video-r2-stuck", "missing-user", "Creator", "Video", "public", 1000, 1000);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const initial = {
+      schema_version: 1, revision: 1, generated_at: 1000,
+      entities: [{
+        entity_type: "video", entity_id: "video-r2-stuck",
+        fence_token: "vf-r2-stuck", blocked_at: 1000, reason: "status_update",
+      }],
+    };
+    const raw = JSON.stringify(initial);
+    let putCalls = 0;
+    const bucket = {
+      get: async (key) => {
+        assert.equal(key, "visibility/blocked-entities.v1.json");
+        return {
+          size: Buffer.byteLength(raw),
+          etag: "etag-still-fenced",
+          text: async () => raw,
+        };
+      },
+      put: async (key, _body, options) => {
+        assert.equal(key, "visibility/blocked-entities.v1.json");
+        assert.deepEqual(options.onlyIf, { etagMatches: "etag-still-fenced" });
+        putCalls += 1;
+        return null; // all R2 CAS writes lose; persisted fence stays.
+      },
+    };
+    const host = createVideoVisibilityStatusMutationHost({
+      env: { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" },
+      get: () => ({}),
+    }, { mutateWithAudit: async () => [] });
+
+    // This is the actual production compensator, not a stubbed callback.
+    // It exhausts both its own 3 tries and the shared R2 writer's 3 tries
+    // per attempt, logs the failure, but still resolves without throwing.
+    await host.compensate(db, {
+      videoId: "video-r2-stuck",
+      fenceToken: "vf-r2-stuck",
+      traceId: "trace-r2-stuck",
+      allowNonPublicRollback: false,
+    });
+    assert.equal(putCalls, 9, "three compensator attempts x three R2 CAS retries");
+    assert.equal(await host.confirmCompensation("video-r2-stuck"), false,
+      "successful Promise<void> from compensator does not certify unfenced R2");
+    assert.equal(await host.rereadStatus(db, "video-r2-stuck"), "public",
+      "D1 can read public even while R2 still blocks this video");
+    assert.equal(warnings.some((line) =>
+      line.some((entry) => String(entry).includes('"stuck_fence_candidate":true'))), true);
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    console.warn = savedWarn;
+    sqlite.close();
+  }
+});
