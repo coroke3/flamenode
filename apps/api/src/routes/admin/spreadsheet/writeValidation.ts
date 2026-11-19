@@ -427,14 +427,32 @@ export async function fetchSpreadsheetRawSnapshot(
     " WHERE " + key.statement + " LIMIT 1";
   if (key.binds.length > SPREADSHEET_SQL_MAX_BINDS) throw new Error("batch_too_large");
   const row = await db.prepare(statement).bind(...key.binds).first<Record<string, unknown>>();
-  if (!row) throw new Error("row_not_found");
-  // Never allow an incomplete pre-read to be reinterpreted as a NULL in CAS.
-  for (const column of ctx.columns) {
-    if (!Object.prototype.hasOwnProperty.call(row, column.name) || row[column.name] === undefined) {
-      throw new Error("invalid_snapshot");
+  if (row === null || row === undefined) throw new Error("row_not_found");
+  // U01b: return a *single* immutable before-image. A hostile/mock D1
+  // accessor cannot substitute a different PK or cell between this SELECT,
+  // the optimistic CAS WHERE clause, and the strict audit before_json.
+  // Preserve "__proto__" as an own data column rather than invoking a setter.
+  let snapshot: Record<string, unknown>;
+  try {
+    if (typeof row !== "object" || Array.isArray(row)) throw new Error("invalid_snapshot");
+    const cells: Array<[string, string | number | null]> = [];
+    for (const column of ctx.columns) {
+      if (!Object.hasOwn(row, column.name)) throw new Error("invalid_snapshot");
+      const value = row[column.name];
+      if (value !== null && typeof value !== "string" && typeof value !== "number") {
+        throw new Error("invalid_snapshot");
+      }
+      cells.push([column.name, value]);
     }
+    snapshot = Object.freeze(Object.fromEntries(cells));
+    for (const key of ctx.primaryKeys) {
+      const value = snapshot[key];
+      if (value === null || String(value) !== normalized[key]) throw new Error("invalid_snapshot");
+    }
+  } catch {
+    throw new Error("invalid_snapshot");
   }
-  return row;
+  return snapshot;
 }
 
 
