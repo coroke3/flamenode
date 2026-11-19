@@ -13,14 +13,14 @@ import { validateVideoMemberSubmission } from "@flamenode/domain/video/adminMemb
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import type { AppEnv } from "../../env.ts";
 import { sessionMiddleware } from "../../auth/session.ts";
-import { dbMiddleware } from "../../middleware/db.ts";
+import { createAdminMemberAtomicWriteDb, dbMiddleware } from "../../middleware/db.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { BODY_TOO_LARGE_MESSAGE } from "../admin/body.ts";
 import { readAdminVideoMembersJsonBody } from "./adminMembersBody.ts";
 import { createAdminMemberD1ReadMeter, sealAdminMemberD1ReadMeter, type AdminMemberD1ReadMeter } from "./adminMemberD1ReadMeter.ts";
 import { prepareAdminVideoMemberCandidateWrite } from "@flamenode/server-core/video/adminMemberCandidatePrepare";
-import { prepareAdminMemberAtomicExecution } from "@flamenode/server-core/video/adminMemberAtomicExecute";
+import { executeAdminMemberAtomicCandidate, prepareAdminMemberAtomicExecution } from "@flamenode/server-core/video/adminMemberAtomicExecute";
 import type { ValidatedMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
 
 type Ctx = Context<AppEnv>;
@@ -59,6 +59,17 @@ export type VideoAdminMembersPreflightHost = {
     isCollab: boolean;
     eventIds: readonly string[];
   }) => Promise<void>;
+  /**
+   * UNMOUNTED test/review-only opt-in: execute the audited D1 batch after
+   * sealing the authenticated read-meter. Never installed by default.
+   */
+  commitCanonicalPlan?: (c: Ctx, input: {
+    videoId: string;
+    target: AdminVideoMemberTarget;
+    validated: ValidatedMemberSubmission;
+    isCollab: boolean;
+    eventIds: readonly string[];
+  }) => Promise<{ committed: boolean; pendingPublicReflection: boolean }>;
 };
 
 /**
@@ -67,8 +78,16 @@ export type VideoAdminMembersPreflightHost = {
  * This merely prepares the UNMOUNTED preflight; no host mutation port exists.
  */
 export function createDefaultVideoAdminMembersPreflightHost(
-  options: { session?: MiddlewareHandler<AppEnv>; enableCanonicalDryRun?: boolean } = {},
+  options: {
+    session?: MiddlewareHandler<AppEnv>;
+    enableCanonicalDryRun?: boolean;
+    /** For isolated SQLite integration only, never passed by the live router. */
+    enableAtomicCandidateWrite?: boolean;
+  } = {},
 ): VideoAdminMembersPreflightHost {
+  if (options.enableCanonicalDryRun && options.enableAtomicCandidateWrite) {
+    throw new RangeError("video_admin_member_candidate_conflicting_execution_modes");
+  }
   const originOptions = (c: Ctx) => ({
     loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
     allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
@@ -148,6 +167,78 @@ export function createDefaultVideoAdminMembersPreflightHost(
           throw new RangeError("video_admin_member_dry_run_plan_mismatch");
         }
         // Deliberately discard the sealed plan: no Hono writer/Queue wake.
+      },
+    } : {}),
+    ...(options.enableAtomicCandidateWrite ? {
+      commitCanonicalPlan: async (c: Ctx, input: {
+        videoId: string;
+        target: AdminVideoMemberTarget;
+        validated: ValidatedMemberSubmission;
+        isCollab: boolean;
+        eventIds: readonly string[];
+      }) => {
+        const meter = activeMeters.get(c);
+        const actor = c.get("user");
+        const db = c.get("db");
+        const settings = c.get("auditSettings");
+        const snapshots = c.get("actorSnapshotJsonById");
+        if (!guardedContexts.has(c) || !meter || !actor ||
+            actor.role !== "admin" || !db || !settings ||
+            !snapshots || !snapshots[actor.id]) {
+          throw new RangeError("video_admin_member_candidate_write_not_authorized");
+        }
+        // Canonical planner can only see the READ-ONLY, metered Drizzle.
+        // Every guard/target/member/chapter read is charged BEFORE the handoff.
+        const prepared = await prepareAdminVideoMemberCandidateWrite(db, {
+          target: input.target,
+          videoId: input.videoId,
+          actorUserId: actor.id,
+          validated: input.validated,
+          isCollab: input.isCollab,
+          eventIds: input.eventIds,
+          now: Math.floor(Date.now() / 1000),
+          preloaded: { settings, actorSnapshotJsonById: snapshots },
+          readMeasuredCallerQueries: () => meter.readCount(),
+        });
+        const count = sealAdminMemberD1ReadMeter(
+          meter, prepared.executionInput.callerQueryCount,
+        );
+        const executionInput = { ...prepared.executionInput, callerQueryCount: count };
+        // Pure second-pass verification, including the measured 50-query
+        // ceiling, before obtaining any provider capable of D1 batch().
+        const atomic = prepareAdminMemberAtomicExecution(executionInput);
+        if ((atomic === null) !== prepared.assembly.noOp ||
+            (atomic === null) !== (prepared.atomic === null)) {
+          throw new RangeError("video_admin_member_candidate_write_plan_mismatch");
+        }
+        if (!atomic) {
+          return { committed: false, pendingPublicReflection: false };
+        }
+        // Only this explicitly enabled unmounted adapter may obtain the raw
+        // provider, AFTER its read facade was sealed and the batch validated.
+        const writeDb = createAdminMemberAtomicWriteDb(c.env.DB);
+        const saved = await executeAdminMemberAtomicCandidate(
+          writeDb, executionInput,
+          async () => ({
+            readEnv: () => {
+              try { return c.env as unknown as Readonly<Record<string, unknown>>; }
+              catch { return null; }
+            },
+            readWaitUntil: () => {
+              try { const ctx = c.executionCtx; return ctx.waitUntil.bind(ctx); }
+              catch { return null; }
+            },
+            readKv: () => {
+              try { return c.env.KV ?? null; }
+              catch { return null; }
+            },
+          }),
+        );
+        return {
+          committed: saved.committed,
+          pendingPublicReflection: saved.committed &&
+            prepared.assembly.queue.statements.length > 0,
+        };
       },
     } : {}),
     writeGuard: async (c, next) => {
@@ -298,6 +389,11 @@ export function createVideoAdminMembersPreflightRoutes(
       return reject(c, 400, "関連イベント数が処理上限を超えています。");
     }
 
+    // Defensive: two distinct host execution modes must never share a
+    // request, even if a custom host bypasses the default factory checks.
+    if (host.previewCanonicalPlan && host.commitCanonicalPlan) {
+      return reject(c, 503, "参加者設定の保存方法を確認できませんでした。");
+    }
     // Explicit opt-in dry-run verifies the authenticated Hono -> shared
     // canonical-planner integration with a READ-ONLY metered D1 handle.
     // Regardless of whether a plan is a no-op or would write, NO execution
@@ -312,7 +408,28 @@ export function createVideoAdminMembersPreflightRoutes(
         return reject(c, 503, "参加者設定の検証に失敗しました。");
       }
     }
-    // A complete write-capable Hono host does not exist yet.
+    if (host.commitCanonicalPlan) {
+      try {
+        const saved = await host.commitCanonicalPlan(c, {
+          videoId, target, validated: members.value,
+          isCollab, eventIds: rebuildEventIds,
+        });
+        return c.json({
+          ok: true,
+          message: saved.committed
+            ? "参加者設定を保存しました。"
+            : "参加者設定に変更はありません。",
+          videoId,
+          ...(target.youtube_video_id ? { youtubeVideoId: target.youtube_video_id } : {}),
+          ...(target.primary_event_id ? { eventId: target.primary_event_id } : {}),
+          ...(saved.pendingPublicReflection ? { pendingPublicReflection: true } : {}),
+        }, 200);
+      } catch {
+        return reject(c, 503, "参加者設定の保存に失敗しました。最新状態を確認して再試行してください。");
+      }
+    }
+    // Default behavior remains HTTP 501: there is still NO live route mount
+    // or approved CURRENT >20 MiB input / workerd performance policy.
     return reject(c, 501, "参加者設定の保存APIは移行準備中です。");
   });
   return routes;
