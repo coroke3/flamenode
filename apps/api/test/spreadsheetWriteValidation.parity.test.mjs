@@ -3184,3 +3184,122 @@ test("MIG-0638 U02: nonce, multi-row import, strict audit and rebuild Queue are 
     sqlite.close();
   }
 });
+
+test("MIG-0638 U02: signed import preview is verified before D1 reads and atomic commit planning", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
+  const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+  const {
+    planSpreadsheetVerifiedImportCommit,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const {
+    buildSpreadsheetImportPreviewBinding, issueSpreadsheetImportPreviewToken,
+  } = await import("../src/routes/admin/spreadsheet/importPreviewToken.ts");
+  const fixture = createAdminD1();
+  const { sqlite, db: rawDb, stats } = fixture;
+  const secret = "s".repeat(64);
+  const cols = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1, defaultValue: null, generated: false },
+    { name: "title", type: "TEXT", notNull: false, pk: 0, defaultValue: null, generated: false },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    primaryKeys: ["id"], columns: cols, columnNames: cols.map(x => x.name),
+  };
+  const db = drizzle(rawDb);
+  const target = (id) => [{
+    targetType: "event_base", targetId: id,
+    reason: "admin_spreadsheet_change", requestedByUserId: "admin-1",
+  }];
+  const bindingFor = (mode, rows) => buildSpreadsheetImportPreviewBinding({
+    operatorUserId: "admin-1", table: "slots", mode,
+    columns: ctx.columnNames, primaryKeys: ctx.primaryKeys,
+    schemaColumns: ctx.columns, rows,
+  });
+  const issue = async (mode, rows, nonce, now) =>
+    issueSpreadsheetImportPreviewToken(await bindingFor(mode, rows), secret, {
+      nonce, now,
+    });
+  const insertPreviewRun = claims => sqlite.prepare(
+    "INSERT INTO spreadsheet_import_runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)"
+  ).run(claims.nonce, claims.operatorUserId, claims.table, claims.mode,
+    claims.payloadHash, claims.schemaFingerprint, claims.expiresAt, claims.issuedAt);
+  const opts = (mode, rows, token, nowSeconds, more = {}) => ({
+    db, rawDb, ctx, actorUserId: "admin-1", mode, rows,
+    previewToken: token, previewSecret: secret, nowSeconds,
+    callerQueryCount: 3, remainingReadQueries: 0,
+    foreignKeys: [], queueTargets: target(mode), ...more,
+  });
+  try {
+    seedBase(sqlite);
+    sqlite.exec('CREATE TABLE slots (id TEXT PRIMARY KEY NOT NULL, title TEXT)');
+    sqlite.exec('CREATE TABLE spreadsheet_import_runs (nonce TEXT PRIMARY KEY, operator_user_id TEXT NOT NULL, table_name TEXT NOT NULL, mode TEXT NOT NULL, payload_hash TEXT NOT NULL, schema_fingerprint TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, created_at INTEGER NOT NULL)');
+    const insertRows = [{ id: "a", title: "signed-first" }];
+    const insert = await issue("insert", insertRows,
+      "11111111-1111-4111-8111-111111111111", 1000);
+    insertPreviewRun(insert.claims);
+    let forbiddenReads = 0;
+    const neverRead = { prepare() {
+      forbiddenReads++;
+      throw new Error("invalid_D1_read_before_signature_verification");
+    } };
+    const invalids = [
+      { rows: [{ id: "a", title: "tampered" }] },
+      { actorUserId: "other" },
+      { previewToken: insert.token.slice(0, -3) + "aaa" },
+      { previewSecret: "x".repeat(64) },
+      { nowSeconds: 1300 },
+    ];
+    for (const override of invalids) {
+      await assert.rejects(() => planSpreadsheetVerifiedImportCommit(
+        opts("insert", insertRows, insert.token, 1100, {
+          rawDb: neverRead, ...override,
+        }),
+      ), error => error instanceof Error && error.message === "preview_required");
+    }
+    assert.equal(forbiddenReads, 0, "bad preview must fail before any D1 read");
+    assert.equal(stats.batches, 0, "bad preview must not write a D1 batch");
+    assert.equal(sqlite.prepare("SELECT consumed_at FROM spreadsheet_import_runs").get().consumed_at, null);
+
+    const first = await planSpreadsheetVerifiedImportCommit(
+      opts("insert", insertRows, insert.token, 1100, { rawDb: neverRead }),
+    );
+    assert.equal(forbiddenReads, 0, "INSERT with no FK requires no pre-read");
+    assert.deepEqual(first.result, { inserted: 1, updated: 0, skipped: 0 });
+    assert.equal(stats.batches, 0, "signed preflight is read-only");
+    assert.deepEqual(first.atomic.expectedMutationChanges, [1, 1, 1]);
+    await mutateWithAudit(db, first.atomic);
+    assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id='a'").get().title,
+      "signed-first");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    const updateRows = [{ id: "a", title: "signed-updated" }];
+    const update = await issue("upsert", updateRows,
+      "22222222-2222-4222-8222-222222222222", 1200);
+    insertPreviewRun(update.claims);
+    const insufficient = opts("upsert", updateRows, update.token, 1201, {
+      rawDb: neverRead, remainingReadQueries: 0,
+    });
+    await assert.rejects(() => planSpreadsheetVerifiedImportCommit(insufficient),
+      error => error instanceof Error && error.message === "batch_too_large");
+    assert.equal(forbiddenReads, 0, "upsert read-budget failure occurs before D1");
+    const second = await planSpreadsheetVerifiedImportCommit(
+      opts("upsert", updateRows, update.token, 1201, {
+        callerQueryCount: 4, remainingReadQueries: 1,
+      }),
+    );
+    assert.deepEqual(second.result, { inserted: 0, updated: 1, skipped: 0 });
+    assert.deepEqual(second.atomic.expectedMutationChanges, [1, 1, 1]);
+    await mutateWithAudit(db, second.atomic);
+    assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id='a'").get().title,
+      "signed-updated");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+    await assert.rejects(() => mutateWithAudit(db, second.atomic),
+      "nonce replay must not duplicate the import");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+  } finally {
+    sqlite.close();
+  }
+});
