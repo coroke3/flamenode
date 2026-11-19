@@ -100,8 +100,9 @@ Write guard order for every row: origin (pure) -> session -> origin/auth/identit
 | SA-008 | `PATCH /api/admin/api-endpoints/:id` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | same |
 | SA-009 | `POST /api/admin/audit/settings` | `admin_permissions` | 200 / 400 / 413 / 500 | `apps/api/src/routes/admin/audit.ts` |
 | SA-010 | `POST /api/admin/audit/dry-run` | `admin_permissions` | 200 / 400 / 413 | same (D-13-54 recorded exception: 6 D1 stmts, writes=0) |
+| SA-011 | `POST /api/admin/audit/restore` | `admin_permissions` | 200 (ok true/false) / 400 / 413 | `apps/api/src/routes/admin/audit.ts` (MIG-0662 PR #690, pending MIG-0603 merge/security gate) |
 
-SA-009 / SA-010 implemented in MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
+SA-009 / SA-010 implemented in MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) is implemented in MIG-0662 Draft PR #690, pending gate (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
 
 Callers (MIG-0727, PR #502): SA-004..006 from `apps/ops/src/api/adminAnnouncementWrite.ts` via `apps/ops/src/routes/admin/AnnouncementEditor.tsx` (`/admin/announcements/new`, `/admin/announcements/:id/edit`); SA-007/008 (SA-108/109) from `apps/ops/src/api/adminApiEndpointWrite.ts` via `apps/ops/src/routes/admin/ApiEndpointMutations.tsx` & `AdminApiEndpoints.tsx` (`/admin/api-endpoints`, D-17-5 `?notice=`/`?error=`).
 
