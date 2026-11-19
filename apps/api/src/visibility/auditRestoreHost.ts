@@ -54,8 +54,18 @@ export function createAuditRestoreHost(c: Context<AppEnv>): AuditRestoreHost {
       read: async () => {
         const bucket = c.env?.BUCKET;
         if (!bucket) {
-          if (resolvePublicVisibilityGuardMode(c.env?.PUBLIC_VISIBILITY_GUARD_MODE) === "enforce") {
+          const mode = resolvePublicVisibilityGuardMode(c.env?.PUBLIC_VISIBILITY_GUARD_MODE);
+          if (mode === "enforce") {
             throw new Error("public_visibility_manifest_bucket_missing");
+          }
+          // CURRENT publicVisibilityManifest.ts logs only the telemetry outcome,
+          // never an R2 key, user input or provider exception.
+          if (mode === "observe") {
+            console.warn(JSON.stringify({
+              service: "public-visibility-guard",
+              mode,
+              result: "manifest_bucket_missing",
+            }));
           }
           return {
             manifest: emptyPublicVisibilityBlockedEntitiesManifest(Math.floor(Date.now() / 1000)),

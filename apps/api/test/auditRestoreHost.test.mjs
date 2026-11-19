@@ -22,6 +22,35 @@ test("U01 missing manifest binding enforces fail-closed and never writes", async
   assert.deepEqual(observed.manifest.entities, []);
 });
 
+test("U01 observe-mode missing manifest emits CURRENT telemetry and off-mode stays quiet", async () => {
+  const originalWarn = console.warn;
+  const warnings = [];
+  try {
+    console.warn = (...args) => { warnings.push(args); };
+    const observed = await host({ PUBLIC_VISIBILITY_GUARD_MODE: "observe" }).manifest.read();
+    assert.equal(observed.etag, null);
+    assert.deepEqual(observed.manifest.entities, []);
+    assert.deepEqual(warnings, [[JSON.stringify({
+      service: "public-visibility-guard",
+      mode: "observe",
+      result: "manifest_bucket_missing",
+    })]]);
+    warnings.length = 0;
+
+    const off = await host({ PUBLIC_VISIBILITY_GUARD_MODE: "off" }).manifest.read();
+    assert.equal(off.etag, null);
+    assert.equal(warnings.length, 0, "off mode does not log missing manifest binding");
+
+    await assert.rejects(
+      host({ PUBLIC_VISIBILITY_GUARD_MODE: "enforce" }).manifest.read(),
+      /public_visibility_manifest_bucket_missing/,
+    );
+    assert.equal(warnings.length, 0, "enforce mode rejects before any telemetry");
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test("U01 conditional manifest writes preserve ETag and no-store, reads preserve snapshot", async () => {
   const manifest = { schema_version: 1, revision: 7, generated_at: 1700000000, entities: [] };
   const puts = [];
