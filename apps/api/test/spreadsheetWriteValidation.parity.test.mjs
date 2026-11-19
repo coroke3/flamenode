@@ -3072,6 +3072,45 @@ test("MIG-0638 U02: nonce, multi-row import, strict audit and rebuild Queue are 
       "schema mismatches must never write an extra audit or nonce");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
 
+    // A canonical SQL shape is insufficient if the claimed audit operation
+    // does not describe the same DML. The composite import composer must
+    // reject these forged plans before creating a runnable batch.
+    const updateSql = 'UPDATE "slots" SET "title" = ? WHERE ' +
+      '"id" = ? AND "id" IS ? AND "title" IS ?';
+    const deleteSql = 'DELETE FROM "slots" WHERE ' +
+      '"id" = ? AND "id" IS ? AND "title" IS ?';
+    const forgedCreates = [
+      { ...planned.mutations[0], statement: updateSql,
+        binds: ["forged-update", "a", "a", "first"] },
+      { ...planned.mutations[0], statement: deleteSql,
+        binds: ["a", "a", "first"] },
+    ];
+    const batchesBeforeForged = stats.batches;
+    for (const mutation of forgedCreates) {
+      await assert.rejects(() => planSpreadsheetAtomicAuditedImport(
+        db, ctx, { ...planned, mutations: [mutation, planned.mutations[1]] },
+        claims, options("forged-create"),
+      ), error => error instanceof Error && error.message === "invalid_row");
+    }
+    const changed = planSpreadsheetImportMutations(ctx,
+      prepareSpreadsheetImportMutationRows(ctx, [{ id: "a", title: "updated" }]),
+      "upsert", new Map([[spreadsheetImportPrimaryKeyFingerprint({ id: "a" }),
+        { id: "a", title: "first" }]]), "admin-1");
+    assert.equal(changed.updated, 1);
+    const forgedUpdate = {
+      ...changed.mutations[0],
+      statement: planned.mutations[0].statement,
+      binds: planned.mutations[0].binds,
+    };
+    await assert.rejects(() => planSpreadsheetAtomicAuditedImport(
+      db, ctx, { ...changed, mutations: [forgedUpdate] },
+      skippedClaims, options("forged-update"),
+    ), error => error instanceof Error && error.message === "invalid_row");
+    assert.equal(stats.batches, batchesBeforeForged,
+      "audit/DML operation mismatch must not execute a D1 batch");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
     // Invalid authorization, actor/queue attribution, budget and preview
     // time never produce a live batch or data mutation.
     const errors = [
