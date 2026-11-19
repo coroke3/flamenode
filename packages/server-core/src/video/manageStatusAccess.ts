@@ -45,35 +45,32 @@ async function hasManageVideoStatusGrant(
   eventId: string,
 ): Promise<boolean> {
   if (user.role === "admin") return true;
-  {
-
-    const approvedStaff = await db
-      .select({
-        permission_preset: eventStaff.permission_preset,
-        custom_permission_keys_json: eventStaff.custom_permission_keys_json,
-      })
-      .from(eventStaff)
-      .innerJoin(
-        xUserAccountLinks,
-        sql`${eventStaff.x_user_id} = trim(${xUserAccountLinks.x_user_id})`,
-      )
-      .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
-      .where(
-        and(
-          eq(eventStaff.event_id, eventId),
-          eq(xUserAccountLinks.auth_user_id, user.id),
-          eq(xUsers.approval_status, "approved"),
-        )!,
-      )
-      .limit(MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT + 1);
-    if (approvedStaff.length > MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT) {
-      // Do not authorize using an incomplete/oversized permission snapshot.
-      // The isolated Hono candidate catches D1/access errors and responds
-      // with a private fixed 503, without leaking a target-video association.
-      throw new Error("manage_video_status_staff_read_limit_exceeded");
-    }
-    return approvedStaff.some((row) => staffRowHasPermissionKey(row, "video.status"));
+  const approvedStaff = await db
+    .select({
+      permission_preset: eventStaff.permission_preset,
+      custom_permission_keys_json: eventStaff.custom_permission_keys_json,
+    })
+    .from(eventStaff)
+    .innerJoin(
+      xUserAccountLinks,
+      sql`${eventStaff.x_user_id} = trim(${xUserAccountLinks.x_user_id})`,
+    )
+    .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
+    .where(
+      and(
+        eq(eventStaff.event_id, eventId),
+        eq(xUserAccountLinks.auth_user_id, user.id),
+        eq(xUsers.approval_status, "approved"),
+      )!,
+    )
+    .limit(MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT + 1);
+  if (approvedStaff.length > MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT) {
+    // Do not authorize using an incomplete/oversized permission snapshot.
+    // The isolated Hono candidate catches D1/access errors and responds
+    // with a private fixed 503, without leaking a target-video association.
+    throw new Error("manage_video_status_staff_read_limit_exceeded");
   }
+  return approvedStaff.some((row) => staffRowHasPermissionKey(row, "video.status"));
 }
 
 /**
