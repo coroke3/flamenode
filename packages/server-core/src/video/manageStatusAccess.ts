@@ -7,7 +7,7 @@
  * R2 fencing remain STOP gates.
  */
 import { and, eq, sql } from "drizzle-orm";
-import { eventStaff, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
+import { eventStaff, events, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
 import type { SessionUserLike } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
@@ -76,6 +76,10 @@ export async function checkManageVideoStatusAccess(
       // An orphaned association is not an authorized video target. The join
       // checks target existence within the SAME single bounded D1 read.
       .innerJoin(videos, eq(videos.id, videoEvents.video_id))
+      // Imported/recovered association data can retain a deleted event when
+      // foreign-key enforcement was disabled. Do not authorize a status
+      // change against a non-existent event; this is the same one D1 read.
+      .innerJoin(events, eq(events.id, videoEvents.event_id))
       .where(
         and(
           eq(videoEvents.event_id, eventId),

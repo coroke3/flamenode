@@ -300,3 +300,61 @@ test("MIG-0603: an orphaned video_events link is not an authorized status target
     sqlite.close();
   }
 });
+
+test("MIG-0603: an orphan event link is not an authorized manage status target", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    // A legacy import/repair can leave both a staff grant and video_events
+    // association pointing to an event removed while FKs were disabled.
+    sqlite.exec("PRAGMA foreign_keys = OFF");
+    const missingEventId = "ev-deleted";
+    sqlite.prepare("INSERT INTO video_events (event_id, video_id) VALUES (?, ?)")
+      .run(missingEventId, "v1");
+    insert(sqlite, "event_staff", {
+      id: "st-deleted-event", event_id: missingEventId, x_user_id: "mgr_x",
+      display_name: "Orphan staff", permission_preset: "manager",
+    });
+    assert.equal(sqlite.prepare("SELECT id FROM events WHERE id=?")
+      .get(missingEventId), undefined);
+    assert.ok(sqlite.prepare(
+      "SELECT 1 FROM video_events WHERE event_id=? AND video_id=?",
+    ).get(missingEventId, "v1"), "an orphan event link really exists");
+
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    for (const [name, role, reads] of [
+      ["admin", "admin", 1],
+      ["mgr", "user", 2],
+    ]) {
+      const before = d1.stats.statements;
+      assert.deepEqual(
+        await checkManageVideoStatusAccess(
+          db, { id: `u_${name}`, role }, missingEventId, "v1",
+        ),
+        { ok: false, message: "このイベントに紐づく作品ではありません。" },
+        `${name}: missing event cannot be a valid target even with a dangling staff grant`,
+      );
+      assert.equal(d1.stats.statements - before, reads,
+        "event existence is checked by an inner join in the existing association read");
+    }
+    assert.deepEqual(
+      await checkManageVideoStatusAccess(db, { id: "u_mgr", role: "user" }, "evA", "v1"),
+      { ok: true },
+      "ordinary valid grants/association still authorize the unmounted preflight",
+    );
+    sqlite.exec("UPDATE event_staff SET permission_preset='public_staff' WHERE id='st-deleted-event'");
+    const start = d1.stats.statements;
+    assert.deepEqual(
+      await checkManageVideoStatusAccess(db, { id: "u_mgr", role: "user" }, missingEventId, "v1"),
+      { ok: false, message: "このイベントの作品審査権限がありません。" },
+      "revoked staff grant is denied BEFORE probing the target",
+    );
+    assert.equal(d1.stats.statements - start, 1,
+      "unprivileged callers must not learn the orphan link from a second read");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});

@@ -381,3 +381,50 @@ test("MIG-0603 unmounted manage candidate rejects approved-staff overflow at the
     sqlite.close();
   }
 });
+
+test("MIG-0603 unmounted manage candidate denies dangling event references over HTTP", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted = 1');
+    sqlite.exec("UPDATE system_settings SET operation_mode='normal', disabled_features_json=NULL WHERE id='default'");
+    sqlite.exec("PRAGMA foreign_keys = OFF");
+    sqlite.prepare("INSERT INTO video_events (event_id, video_id) VALUES (?, ?)")
+      .run("ev-deleted", "v1");
+    insert(sqlite, "event_staff", {
+      id: "st-deleted-event", event_id: "ev-deleted", x_user_id: "mgr_x",
+      display_name: "Orphan staff", permission_preset: "manager",
+    });
+
+    const d1 = createVideoStatusD1(sqlite);
+    const candidate = createUnboundManageVideoStatusCandidate();
+    const body = JSON.stringify({
+      event_id: "ev-deleted", video_id: "v1", status: "private",
+    });
+    for (const [name, expectedReads] of [["admin", 4], ["mgr", 5]]) {
+      const before = d1.stats.statements;
+      const response = await candidate.request(ORIGIN + "/", {
+        method: "POST",
+        headers: {
+          origin: ORIGIN, ...cookie(`tok-${name}`),
+          "content-type": "application/json",
+        },
+        body,
+      }, { DB: d1, NEXT_PUBLIC_SITE_URL: ORIGIN, FLAMENODE_LOCAL_PREVIEW: "1" });
+      assert.equal(response.status, 404,
+        `${name}: a deleted event cannot authorize a status change`);
+      assert.deepEqual(await response.json(), {
+        ok: false, message: "このイベントに紐づく作品ではありません。",
+      });
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal(d1.stats.statements - before, expectedReads,
+        "extra event existence check must not add a D1 query");
+    }
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'")
+      .get().visibility_status, "pending", "target video remains unchanged");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
