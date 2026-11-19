@@ -4,7 +4,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { dom } from "./helpers.mjs";
-const { SetActiveXButton, XIdCompactProfileForm, XIdIconPicker, DeleteXIdForm } =
+const { SetActiveXButton, XIdCompactProfileForm, XIdIconPicker, DeleteXIdForm, isSafeUploadedIconUrl } =
   await import("../.test-dist/apps/app/src/routes/dashboard/settings/XIdPanelActions.js");
 
 async function render(Component, props) {
@@ -23,6 +23,33 @@ async function render(Component, props) {
 }
 const buttonWith = (c, text) => [...c.querySelectorAll("button")].find(b => b.textContent.includes(text));
 const deferred = () => { let resolve; const promise = new Promise(r=>{resolve=r;}); return {promise,resolve}; };
+
+test("MIG-0708 SA-105: uploaded icon URL must be a same-account Hono R2 media path", () => {
+  const valid = [
+    "/api/media/xicons/foo/xicon_abc.webp",
+    "/api/media/xicons/foo/xicon-abc.jpg",
+    "/api/media/xicons/foo/abc123.png",
+  ];
+  for (const url of valid) {
+    assert.equal(isSafeUploadedIconUrl(url, "foo"), true, `valid Hono icon path ${url}`);
+  }
+  const invalid = [
+    "javascript:alert(1)",
+    "data:text/html,payload",
+    "https://external.example/xicon.webp",
+    "//external.example/xicon.webp",
+    "/api/media/xicons/another/xicon_abc.webp",
+    "/api/media/xicons/foo/../another.png",
+    "/api/media/xicons/foo/xicon.png?next=javascript:alert(1)",
+    "/api/media/xicons/foo/xicon.svg",
+    "/api/media/xicons/foo/xicon.webp#fragment",
+    "/api/media/xicons/foo/xicon%2Fother.webp",
+    "/api/media/xicons/foo/",
+  ];
+  for (const url of invalid) {
+    assert.equal(isSafeUploadedIconUrl(url, "foo"), false, `must block untrusted URL ${url}`);
+  }
+});
 
 test("MIG-0708 U03 T01: two synchronous Active X clicks issue exactly one request", async () => {
   const d=deferred(), calls=[];let refreshed=0;

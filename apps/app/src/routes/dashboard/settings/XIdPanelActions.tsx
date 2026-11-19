@@ -14,6 +14,14 @@ const NETWORK_ERROR = "通信または処理中に問題が発生しました。
 const MAX_CONVERTED_ICON_BYTES = 2 * 1024 * 1024;
 const ALLOWED_ICON_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
+/** The Hono SA-105 handler constructs /api/media/xicons/<canonical X ID>/<generated ID>.<validated extension>. 
+ * Never turn an untrusted API envelope's iconUrl into an external or script URL. */
+export function isSafeUploadedIconUrl(url: string, xUserId: string): boolean {
+  const prefix = `/api/media/xicons/${xUserId}/`;
+  if (!url.startsWith(prefix)) return false;
+  return /^[A-Za-z0-9_-]+\.(?:png|jpg|webp)$/.test(url.slice(prefix.length));
+}
+
 /** A ref closes the same-tick double-click race that React pending state alone cannot prevent. */
 function usePendingAction() {
   const lock = React.useRef(false);
@@ -163,9 +171,13 @@ export function XIdIconPicker({
         return { ok: false, message };
       }
       setMessage(result.message ?? "アイコンをアップロードしました。");
-      if (result.iconUrl) {
+      // Server controls the final R2 path; only expose its canonical scoped
+      // media URL as a navigable link. Do not trust optional envelope fields.
+      if (result.iconUrl && isSafeUploadedIconUrl(result.iconUrl, xUserId)) {
         setSelected(result.iconUrl);
         setSavedUpload({ xUserId, url: result.iconUrl });
+      } else {
+        setSavedUpload(null);
       }
       setUpload(false);
       setEditorKey((key) => key + 1);
