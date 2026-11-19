@@ -158,3 +158,56 @@ test("explicit undefined CAS option retains create-if-absent; omitted option rem
   }
   assert.equal(puts.length, 4);
 });
+
+test("explicit undefined create-if-absent retries must preserve pre-existing foreign token", async () => {
+  const foreign = {
+    entity_type: "video", entity_id: "v-existing",
+    fence_token: "vf-foreign", blocked_at: 100, reason: "already_private",
+  };
+  const newBlock = {
+    entity_type: "video", entity_id: "v-new",
+    fence_token: "vf-new", blocked_at: 101, reason: "new_private",
+  };
+  let stored = {
+    schema_version: 1, revision: 4, generated_at: 100, entities: [foreign],
+  };
+  let etag = "etag-foreign";
+  const puts = [];
+  const bucket = {
+    get: async (key) => {
+      assert.equal(key, "visibility/blocked-entities.v1.json");
+      const value = JSON.stringify(stored);
+      return { text: async () => value, size: Buffer.byteLength(value), etag };
+    },
+    put: async (key, value, options) => {
+      assert.equal(key, "visibility/blocked-entities.v1.json");
+      puts.push(options);
+      // Model real R2: precondition violation resolves to null (no mutation).
+      if (options.onlyIf instanceof Headers) {
+        assert.equal(options.onlyIf.get("If-None-Match"), "*");
+        return null; // R2 manifest already exists.
+      }
+      if (options.onlyIf?.etagMatches !== etag) return null;
+      stored = JSON.parse(value);
+      etag = "etag-merged";
+      return { etag };
+    },
+  };
+  const host = createVideoVisibilityTransitionHost({
+    env: { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" },
+  });
+  // The stale candidate has a conflicting token and an unrelated new block.
+  // CAS retry may add the latter, but cannot replace the existing owner.
+  const candidate = {
+    schema_version: 1, revision: 1, generated_at: 101,
+    entities: [{ ...foreign, fence_token: "vf-stale" }, newBlock],
+  };
+  await host.manifest.write(candidate, { ifMatchEtag: undefined });
+  assert.equal(puts.length, 2, "failed first PUT must retry conditionally");
+  assert.equal(puts[1].onlyIf.etagMatches, "etag-foreign");
+  assert.equal(stored.entities.find((e) => e.entity_id === "v-existing")?.fence_token, "vf-foreign");
+  assert.deepEqual(stored.entities.find((e) => e.entity_id === "v-new"), newBlock);
+  assert.equal(stored.entities.length, 2, "no duplicate blocks or lost foreign entity");
+  assert.ok(puts.every((option) => option.onlyIf && option.httpMetadata.cacheControl === "no-store"),
+    "there must never be an unconditional overwrite");
+});
