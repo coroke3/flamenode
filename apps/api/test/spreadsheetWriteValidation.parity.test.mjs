@@ -2929,3 +2929,138 @@ test("MIG-0638 U01b/U02: rounded SQLite INTEGER primary keys cannot prove a befo
   assert.equal((await fetchSpreadsheetExistingImportRows(textDb, textCtx, textPrepared, 1))
     .get(spreadsheetImportPrimaryKeyFingerprint({ id: "9007199254740993" }))?.title, "text");
 });
+
+test("MIG-0638 U02: nonce, multi-row import, strict audit and rebuild Queue are one D1 batch", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
+  const { mutateWithAudit, planAtomicAuditMutationBudget } =
+    await import("@flamenode/server-core/audit/mutate");
+  const {
+    prepareSpreadsheetImportMutationRows, planSpreadsheetImportMutations,
+    planSpreadsheetAtomicAuditedImport, spreadsheetImportPrimaryKeyFingerprint,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fixture = createAdminD1();
+  const { sqlite, stats } = fixture;
+  const wakeHost = async () => ({
+    readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+  });
+  try {
+    seedBase(sqlite);
+    sqlite.exec('CREATE TABLE slots (id TEXT PRIMARY KEY NOT NULL, title TEXT)');
+    sqlite.exec('CREATE TABLE spreadsheet_import_runs (nonce TEXT PRIMARY KEY, operator_user_id TEXT NOT NULL, table_name TEXT NOT NULL, mode TEXT NOT NULL, payload_hash TEXT NOT NULL, schema_fingerprint TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, created_at INTEGER NOT NULL)');
+    const columns = [
+      { name: "id", type: "TEXT", pk: 1, notNull: true },
+      { name: "title", type: "TEXT", pk: 0, notNull: false },
+    ];
+    const ctx = {
+      def: resolveSpreadsheetTableDef("slots", true), primaryKeys: ["id"],
+      columns, columnNames: columns.map(c => c.name),
+    };
+    const db = drizzle(fixture.db);
+    const claimsFor = (nonce, mode = "insert") => ({
+      version: 1, nonce, operatorUserId: "admin-1", table: "slots", mode,
+      columns: ctx.columnNames, primaryKeys: ctx.primaryKeys,
+      payloadHash: "a".repeat(64), schemaFingerprint: "b".repeat(64),
+      issuedAt: 1000, expiresAt: 1300,
+    });
+    const insertRun = claims => sqlite.prepare(
+      "INSERT INTO spreadsheet_import_runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)"
+    ).run(claims.nonce, claims.operatorUserId, claims.table, claims.mode,
+      claims.payloadHash, claims.schemaFingerprint, claims.expiresAt, claims.issuedAt);
+    const target = id => [{ targetType: "event_base", targetId: id,
+      reason: "admin_spreadsheet_change", requestedByUserId: "admin-1" }];
+    const options = (id, more = {}) => ({
+      authorizedActorId: "admin-1", consumedAt: 1100,
+      callerQueryCount: 3, queueTargets: target(id), ...more,
+    });
+    const claims = claimsFor("12345678-1234-4234-8234-123456789abc");
+    insertRun(claims);
+    const prepared = prepareSpreadsheetImportMutationRows(ctx, [
+      { id: "a", title: "first" }, { id: "b", title: "second" },
+    ]);
+    assert.deepEqual(prepared.errors, []);
+    const planned = planSpreadsheetImportMutations(ctx, prepared, "insert", null, "admin-1");
+    const batch = await planSpreadsheetAtomicAuditedImport(db, ctx, planned,
+      claims, options("batch-success"));
+    assert.equal(stats.batches, 0, "composer is unmounted and cannot execute D1");
+    assert.deepEqual(batch.expectedMutationChanges, [1, 1, 1, 1]);
+    assert.equal(batch.audits.length, 3, "nonce plus two row audits");
+    assert.equal(batch.staticRebuildWakeSource, "admin");
+    assert.ok(planAtomicAuditMutationBudget(batch).withinLimit);
+    await mutateWithAudit(db, batch, wakeHost);
+    assert.deepEqual(sqlite.prepare("SELECT id, title FROM slots ORDER BY id").all(),
+      [{ id: "a", title: "first" }, { id: "b", title: "second" }]);
+    assert.equal(sqlite.prepare(
+      "SELECT consumed_at FROM spreadsheet_import_runs WHERE nonce = ?"
+    ).get(claims.nonce).consumed_at, 1100);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.equal(stats.batches, 1);
+
+    // A replay first tries to consume the already-used nonce (changes=0).
+    // It must roll back every later DML and the audit/Queue statements.
+    await assert.rejects(() => mutateWithAudit(db, batch, wakeHost));
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    // A later INSERT conflict must also restore the unconsumed nonce and
+    // any preceding successful row mutation in this same transaction.
+    const conflicting = claimsFor("87654321-4321-4321-8234-abcdefabcdef");
+    insertRun(conflicting);
+    const attempt = planSpreadsheetImportMutations(ctx,
+      prepareSpreadsheetImportMutationRows(ctx, [
+        { id: "c", title: "would-roll-back" }, { id: "b", title: "duplicate" },
+      ]), "insert", null, "admin-1");
+    const conflictBatch = await planSpreadsheetAtomicAuditedImport(db, ctx,
+      attempt, conflicting, options("batch-conflict"));
+    await assert.rejects(() => mutateWithAudit(db, conflictBatch, wakeHost));
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots WHERE id='c'").get().n, 0);
+    assert.equal(sqlite.prepare(
+      "SELECT consumed_at FROM spreadsheet_import_runs WHERE nonce = ?"
+    ).get(conflicting.nonce).consumed_at, null);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    // A no-op UPSERT still consumes the signed nonce exactly once, but never
+    // invents a public rebuild. Both the data and its row audit stay unchanged.
+    const skippedClaims = claimsFor("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "upsert");
+    insertRun(skippedClaims);
+    const skipped = planSpreadsheetImportMutations(ctx,
+      prepareSpreadsheetImportMutationRows(ctx, [{ id: "a" }]), "upsert",
+      new Map([[spreadsheetImportPrimaryKeyFingerprint({ id: "a" }),
+        { id: "a", title: "first" }]]), "admin-1");
+    assert.equal(skipped.skipped, 1);
+    const skippedBatch = await planSpreadsheetAtomicAuditedImport(db, ctx,
+      skipped, skippedClaims, options("none", { queueTargets: [] }));
+    assert.deepEqual(skippedBatch.expectedMutationChanges, [1]);
+    assert.equal(skippedBatch.staticRebuildWakeSource, undefined);
+    await mutateWithAudit(db, skippedBatch);
+    assert.equal(sqlite.prepare(
+      "SELECT consumed_at FROM spreadsheet_import_runs WHERE nonce = ?"
+    ).get(skippedClaims.nonce).consumed_at, 1100);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+
+    // Invalid authorization, actor/queue attribution, budget and preview
+    // time never produce a live batch or data mutation.
+    const errors = [
+      [claims, options("bad", { authorizedActorId: "other" }), /preview_required/],
+      [claims, options("bad", { consumedAt: 1301 }), /preview_required/],
+      [claims, options("bad", { queueTargets: [] }), /invalid_row/],
+      [claims, options("bad", { queueTargets: [
+        { ...target("bad")[0], requestedByUserId: "other" },
+      ] }), /invalid_row/],
+      [claims, options("bad", { callerQueryCount: 50 }), /batch_too_large/],
+    ];
+    for (const [token, invalidOptions, reason] of errors) {
+      await assert.rejects(
+        () => planSpreadsheetAtomicAuditedImport(db, ctx, planned, token, invalidOptions),
+        reason,
+      );
+    }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+  } finally {
+    sqlite.close();
+  }
+});
