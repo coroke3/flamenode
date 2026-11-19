@@ -233,6 +233,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
               catch { return null; }
             },
           }),
+          { rebindReadOnlyPlan: true },
         );
         return {
           committed: saved.committed,
