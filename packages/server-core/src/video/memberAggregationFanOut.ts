@@ -123,17 +123,25 @@ export function deriveAdminVideoMemberSaveEffects(input: {
   // Using the raw form here can omit the canonical creator page while
   // enqueuing an obsolete alias page instead. Both CURRENT and Hono consume
   // the same planner output, so preserve that canonical identity here.
-  const memberAudit = hasMemberAudit
-    ? input.membersPlan.audits.find(a => a.table_name === "video_members_set")
-    : undefined;
+  const memberSetAudits = input.membersPlan.audits.filter(
+    audit => audit.table_name === "video_members_set",
+  );
+  const memberAudit = memberSetAudits[0];
   // Real CURRENT member-set writes always include complete before/after
   // snapshots. Explicitly malformed evidence must never be interpreted as an
   // absent snapshot, especially when aliases change canonical X IDs.
   if (input.isPublicVideo && memberAudit &&
-      ((memberAudit.before !== undefined &&
+      (memberSetAudits.length !== 1 ||
+       (memberAudit.before !== undefined &&
         malformedExplicitFanoutSnapshot(memberAudit.before)) ||
        (memberAudit.after !== undefined &&
-        malformedExplicitFanoutSnapshot(memberAudit.after)))) {
+        malformedExplicitFanoutSnapshot(memberAudit.after)) ||
+       // Both snapshots may be individually well formed but refer to
+       // different videos. The old member set would then invalidate the wrong
+       // creator pages, so reject before computing any Queue fanout.
+       (memberAudit.before !== undefined && memberAudit.after !== undefined &&
+        (memberAudit.before as { id: string }).id !==
+          (memberAudit.after as { id: string }).id))) {
     throw new RangeError("video_member_fanout_invalid_audit_snapshot");
   }
   const afterSnapshot = parseVideoMemberSetSnapshot(
