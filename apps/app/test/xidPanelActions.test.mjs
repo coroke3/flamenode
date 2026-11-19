@@ -258,7 +258,14 @@ test("MIG-0708 U03: icon selection tracks authoritative icon changes after refre
     await m.rerender({ ...base, currentIconUrl: null });
     assert.equal(buttons[0].getAttribute("aria-pressed"), "true",
       "CURRENT visually selects the first eligible candidate if no icon is saved");
+    assert.ok(buttons[0].classList.contains("xids-iconButtonActive"));
+    assert.ok(buttons[0].querySelector(".xids-iconSelectedMark"),
+      "CURRENT selected candidate must include the visible checkmark");
+    assert.ok(buttons[0].querySelector(".xids-iconThumb"),
+      "CURRENT thumbnail sizing class must be applied");
     assert.equal(buttons[1].getAttribute("aria-pressed"), "false");
+    assert.ok(!buttons[1].classList.contains("xids-iconButtonActive"));
+    assert.equal(buttons[1].querySelector(".xids-iconSelectedMark"), null);
   } finally { await m.dispose(); }
 });
 

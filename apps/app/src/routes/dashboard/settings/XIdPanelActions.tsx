@@ -7,6 +7,7 @@ import { YoutubeChannelPicker } from "../../../components/shared/YoutubeChannelP
 import { SquareIconEditor } from "../../../components/shared/SquareIconEditor.js";
 import { SquareIconEditorBoundary } from "../../../components/shared/SquareIconEditorBoundary.js";
 import { ConfirmDialog } from "../../../components/shared/ConfirmDialog.js";
+import { Icon } from "../../ui/Icon.js";
 
 /** MIG-0708 U03: Personal settings form controls, mounted after MIG-0636 contract integration. */
 const NETWORK_ERROR = "通信または処理中に問題が発生しました。再読み込みしてお試しください。";
@@ -176,11 +177,17 @@ export function XIdIconPicker({
       <p className="xids-compactLabel">アイコン候補（作品サムネから自動取得）</p>
       <div className="xids-iconRow" role="group" aria-label="X IDアイコン">
         {candidates.map(url => (
-          <button key={url} type="button" className="xids-iconButton"
+          <button key={url} type="button"
+            className={`xids-iconButton${url === selectedIconUrl ? " xids-iconButtonActive" : ""}`}
             disabled={pending || uploadPending} aria-busy={pending || uploadPending} aria-pressed={url === selectedIconUrl}
             aria-label="候補アイコンを選択"
             onClick={() => update(() => api.setIcon(xUserId, url), "アイコンを更新しました。")}>
-            <img src={url} alt="" width={36} height={36} />
+            <img src={url} alt="" className="xids-iconThumb" width={36} height={36} />
+            {url === selectedIconUrl ? (
+              <span className="xids-iconSelectedMark" aria-hidden="true">
+                <Icon name="check" size={12} />
+              </span>
+            ) : null}
           </button>
         ))}
         <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
