@@ -196,6 +196,58 @@ test("fence pre-commit failure runs token-scoped compensation before non-retryab
 });
 
 
+
+test("generic R2 precommit transport failure is never retryable or mislabeled as a D1 CAS", async () => {
+  const privateToken = "Authorization:Bearer upstream-secret SQL=SELECT";
+  for (const auditFlag of [false, true]) {
+    const calls = [];
+    const result = await executeVideoVisibilityStatusMutation({
+      db: {},
+      videoId: "v-1",
+      requestedStatus: "private",
+      transition: transition(),
+      reason: "moderation",
+      logTag: "admin-video-status",
+    }, host({
+      preCommit: async () => {
+        calls.push("precommit");
+        const error = new Error("R2 HTTP transport timeout " + privateToken);
+        if (auditFlag) error.auditMutation = true;
+        throw error;
+      },
+      isVisibilityPrecommitFailure: () => false,
+      // Even a mis-tagged error from the R2 adapter must never trigger D1
+      // CAS idempotency classification or rereads before a D1 write occurred.
+      isAuditMutationError: (error) => Boolean(error?.auditMutation),
+      compensate: async (_db, input) => {
+        calls.push("compensate");
+        assert.equal(input.videoId, "v-1");
+        assert.equal(input.fenceToken, "fence-1");
+        assert.equal(input.allowNonPublicRollback, false);
+      },
+      mutate: async () => { calls.push("mutate"); },
+      rereadStatus: async () => { calls.push("reread"); return "private"; },
+      log: (level, tag, details) => calls.push(["log", level, tag, details]),
+    }, calls));
+    assert.deepEqual(result, {
+      ok: false,
+      message: "公開ブロックの記録に失敗しました。",
+      errorCode: "visibility_precommit_failed",
+      traceId: "trace-1",
+      retryable: false,
+    });
+    assert.deepEqual(calls.map((value) => Array.isArray(value) ? value[0] : value), [
+      "precommit", "compensate", "log",
+    ], "no audit mutation, no D1 CAS reread, compensation before fixed error response");
+    const diagnostic = calls[2];
+    assert.equal(diagnostic[1], "error");
+    assert.deepEqual(diagnostic[3], {
+      traceId: "trace-1", error_code: "visibility_precommit_failed",
+    });
+    assert.doesNotMatch(JSON.stringify({ result, calls }), /upstream-secret|SQL=SELECT|Authorization:Bearer/);
+  }
+});
+
 test("failed fence compensation does not mask the original audit CAS conflict", async () => {
   const calls = [];
   const result = await executeVideoVisibilityStatusMutation({
