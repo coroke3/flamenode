@@ -820,7 +820,13 @@ export async function planSpreadsheetAtomicAuditedCrud(
         !target || !isStaticRebuildTargetType(target.targetType) ||
         typeof target.targetId !== "string" || !target.targetId.trim() ||
         typeof target.reason !== "string" || !target.reason.trim() ||
-        target.targetId.length > 256 || target.reason.length > 128)) {
+        target.targetId.includes("\0") || target.reason.includes("\0") ||
+        target.targetId.length > 256 || target.reason.length > 128 ||
+        // Queued work must be attributed to the *same* authorized actor
+        // whose identity is recorded by the strict audit. Never trust a
+        // different requestedByUserId supplied by a future HTTP caller.
+        (target.requestedByUserId != null &&
+          target.requestedByUserId !== options.authorizedActorId))) {
     throw new Error("invalid_row");
   }
   // Keep the legacy writer identity until Issue #674's versioned-history
@@ -856,7 +862,10 @@ export async function planSpreadsheetAtomicAuditedCrud(
   }
   // Compile a non-executing D1 RunnableQuery, not a separately awaited DML.
   const mutation = db.run(spreadsheetMutationToBoundSql(ctx, plan));
-  const queue = await buildStaticRebuildQueueBatch(db, [...options.queueTargets]);
+  const queue = await buildStaticRebuildQueueBatch(db, options.queueTargets.map(target => ({
+    ...target,
+    requestedByUserId: options.authorizedActorId,
+  })));
   if (queue.acceptedTargetCount < 1 ||
       queue.statements.length === 0 ||
       queue.statements.length !== queue.expectedChanges.length) {
