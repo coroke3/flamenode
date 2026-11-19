@@ -3111,6 +3111,44 @@ test("MIG-0638 U02: nonce, multi-row import, strict audit and rebuild Queue are 
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
 
+    // A structurally valid INSERT/UPDATE can still lie about the values
+    // written or about the full-row before-image. Those plans must be
+    // rejected *before* creating an audit/Queue batch.
+    const forgedValuePlans = [
+      { plan: { ...planned, mutations: [{
+        ...planned.mutations[0],
+        binds: ["a", "different-write"],
+      }, planned.mutations[1]] }, token: claims },
+      { plan: { ...planned, mutations: [{
+        ...planned.mutations[0],
+        audit: { ...planned.mutations[0].audit, after: {
+          id: "a", title: "falsified-audit",
+        } },
+      }, planned.mutations[1]] }, token: claims },
+      { plan: { ...changed, mutations: [{
+        ...changed.mutations[0],
+        binds: ["different-write", ...changed.mutations[0].binds.slice(1)],
+      }] }, token: skippedClaims },
+      { plan: { ...changed, mutations: [{
+        ...changed.mutations[0],
+        binds: [...changed.mutations[0].binds.slice(0, -1), "false-before"],
+      }] }, token: skippedClaims },
+      { plan: { ...changed, mutations: [{
+        ...changed.mutations[0],
+        audit: { ...changed.mutations[0].audit, after: {
+          id: "a", title: "falsified-audit",
+        } },
+      }] }, token: skippedClaims },
+    ];
+    for (const { plan, token } of forgedValuePlans) {
+      await assert.rejects(() => planSpreadsheetAtomicAuditedImport(
+        db, ctx, plan, token, options("forged-bind"),
+      ), error => error instanceof Error && error.message === "invalid_row");
+    }
+    assert.equal(stats.batches, batchesBeforeForged);
+    assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id='a'").get().title, "first");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+
     // Invalid authorization, actor/queue attribution, budget and preview
     // time never produce a live batch or data mutation.
     const errors = [
@@ -3129,6 +3167,19 @@ test("MIG-0638 U02: nonce, multi-row import, strict audit and rebuild Queue are 
       );
     }
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    // Positive control: a legitimate audited UPSERT must continue to work
+    // with the exact original before/after values and CAS snapshot binds.
+    const freshClaims = claimsFor("dddddddd-dddd-4ddd-8ddd-dddddddddddd", "upsert");
+    insertRun(freshClaims);
+    const validUpsert = await planSpreadsheetAtomicAuditedImport(
+      db, ctx, changed, freshClaims, options("actual-update"),
+    );
+    assert.deepEqual(validUpsert.expectedMutationChanges, [1, 1, 1]);
+    await mutateWithAudit(db, validUpsert, wakeHost);
+    assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id='a'").get().title, "updated");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 6);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
   } finally {
     sqlite.close();
   }
