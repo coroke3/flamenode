@@ -101,6 +101,11 @@ export function createDefaultVideoAdminMembersPreflightHost(
   // existing test-only semantics; requests always use the guarded overlay.
   const guardedContexts = new WeakMap<Ctx, Ctx>();
   const activeMeters = new WeakMap<Ctx, AdminMemberD1ReadMeter>();
+  // Bind the eventual atomic write to exactly the provider used for guard,
+  // CostGuard, target and canonical reads in this request. Never re-read
+  // c.env.DB at the write boundary: a dynamic/failing binding getter could
+  // otherwise switch databases after all authorization checks passed.
+  const requestWriteBindings = new WeakMap<Ctx, D1Database>();
   // A target may be used for a write only when the same authenticated request
   // actually obtained that exact video snapshot from its authoritative SELECT.
   const authorizedTargets = new WeakMap<Ctx, { videoId: string; target: AdminVideoMemberTarget }>();
@@ -230,7 +235,11 @@ export function createDefaultVideoAdminMembersPreflightHost(
         }
         // Only this explicitly enabled unmounted adapter may obtain the raw
         // provider, AFTER its read facade was sealed and the batch validated.
-        const writeDb = createAdminMemberAtomicWriteDb(c.env.DB);
+        const binding = requestWriteBindings.get(c);
+        if (!binding) {
+          throw new RangeError("video_admin_member_candidate_binding_not_authorized");
+        }
+        const writeDb = createAdminMemberAtomicWriteDb(binding);
         const saved = await executeAdminMemberAtomicCandidate(
           writeDb, executionInput,
           async () => ({
@@ -265,7 +274,12 @@ export function createDefaultVideoAdminMembersPreflightHost(
       const meteredEnv = new Proxy(Object.create(null), {
         get(_facade, key) {
           if (key === "DB") {
-            meterState.meter ??= createAdminMemberD1ReadMeter(originalEnv.DB);
+            if (!meterState.meter) {
+              const binding = originalEnv.DB;
+              const meter = createAdminMemberD1ReadMeter(binding);
+              meterState.meter = meter;
+              requestWriteBindings.set(c, binding);
+            }
             activeMeters.set(c, meterState.meter);
             return meterState.meter.binding;
           }
@@ -297,6 +311,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
         meterState.meter?.close();
         activeMeters.delete(c);
         authorizedTargets.delete(c);
+        requestWriteBindings.delete(c);
         guardedContexts.delete(c);
       }
     },
