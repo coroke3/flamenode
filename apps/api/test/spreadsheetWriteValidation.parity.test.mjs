@@ -2559,3 +2559,95 @@ test("MIG-0638 U02: invalid import plans and FK catalogs fail before D1 lookup",
     /invalid_snapshot/);
   assert.equal(reads, 0);
 });
+
+
+test("MIG-0638 U01b: Drizzle D1 batch SQL bridge binds INSERT UPDATE DELETE and rejects forged SQL", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { SQLiteSyncDialect } = await import("drizzle-orm/sqlite-core");
+  const {
+    buildSpreadsheetAuditedInsert,
+    buildSpreadsheetAuditedUpdate,
+    buildSpreadsheetAuditedDelete,
+    spreadsheetMutationToBoundSql,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const dialect = new SQLiteSyncDialect();
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec("CREATE TABLE slots (id TEXT PRIMARY KEY, title TEXT, count INTEGER)");
+    const columns = [
+      { name: "id", type: "TEXT", notNull: true, pk: 1 },
+      { name: "title", type: "TEXT", notNull: false, pk: 0 },
+      { name: "count", type: "INTEGER", notNull: false, pk: 0 },
+    ];
+    const ctx = {
+      def: resolveSpreadsheetTableDef("slots", true),
+      primaryKeys: ["id"],
+      columns,
+      columnNames: columns.map(column => column.name),
+    };
+    const compile = (plan) => dialect.sqlToQuery(spreadsheetMutationToBoundSql(ctx, plan));
+    const hostile = "'); DROP TABLE slots; --";
+    const insert = buildSpreadsheetAuditedInsert(ctx,
+      { id: "slot-1", title: hostile, count: "2" }, "operator-1");
+    const prepared = compile(insert);
+    assert.equal(prepared.sql, insert.statement, "placeholder bytes stay identical to approved plan");
+    assert.deepEqual(prepared.params, insert.binds, "all input values remain bound");
+    assert.ok(!prepared.sql.includes(hostile));
+    assert.equal(sqlite.prepare(prepared.sql).run(...prepared.params).changes, 1);
+    const before = sqlite.prepare('SELECT * FROM slots WHERE id = ?').get("slot-1");
+    assert.equal(before.title, hostile);
+    assert.equal(before.count, 2);
+    const update = buildSpreadsheetAuditedUpdate(ctx, { id: "slot-1" }, before,
+      { title: "changed" }, "operator-1");
+    const updateSql = compile(update);
+    assert.equal(updateSql.sql, update.statement);
+    assert.deepEqual(updateSql.params, update.binds);
+    assert.equal(sqlite.prepare(updateSql.sql).run(...updateSql.params).changes, 1);
+
+    // A stale, otherwise well-formed CAS cannot overwrite a later writer.
+    // Use a SAVEPOINT to mirror D1 all-or-nothing rollback before audit/Queue
+    // integration: SQLite changes() fails and returns the DB to the prior state.
+    sqlite.exec("SAVEPOINT stale_cas");
+    try {
+      assert.equal(sqlite.prepare(updateSql.sql).run(...updateSql.params).changes, 0);
+      assert.throws(() => sqlite.prepare(
+        "SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('not-valid-json', '$') END"
+      ).get());
+    } finally {
+      sqlite.exec("ROLLBACK TO stale_cas; RELEASE stale_cas");
+    }
+    assert.equal(sqlite.prepare('SELECT title FROM slots WHERE id = ?').get("slot-1").title, "changed");
+    const after = sqlite.prepare('SELECT * FROM slots WHERE id = ?').get("slot-1");
+    const deletion = buildSpreadsheetAuditedDelete(ctx,
+      { id: "slot-1" }, after, "operator-1");
+    const deleteSql = compile(deletion);
+    assert.equal(deleteSql.sql, deletion.statement);
+    assert.deepEqual(deleteSql.params, deletion.binds);
+    assert.equal(sqlite.prepare(deleteSql.sql).run(...deleteSql.params).changes, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 0);
+
+    for (const malicious of [
+      { statement: 'UPDATE "slots" SET "title" = ?; DELETE FROM "slots"', binds: ["a"] },
+      { statement: 'UPDATE "slots" SET "title" = ? -- comment', binds: ["a"] },
+      { statement: 'UPDATE "slots" SET "title" = ? /* comment */', binds: ["a"] },
+      { statement: 'UPDATE "videos" SET "title" = ?', binds: ["a"] },
+      { statement: 'UPDATE "slots" SET "title" = ?', binds: [] },
+      { statement: 'UPDATE "slots" SET "title" = ?', binds: ["a", "b"] },
+      { statement: 'UPDATE "slots" SET "title" = ?', binds: [Number.POSITIVE_INFINITY] },
+      { statement: 'UPDATE "slots" SET "title" = ?', binds: ["x\0y"] },
+    ]) {
+      assert.throws(() => compile(malicious), /invalid_row|batch_too_large/);
+    }
+    assert.throws(() => compile({
+      statement: 'UPDATE "slots" SET "title" = ' + Array(102).fill("?").join(", "),
+      binds: Array(102).fill("a"),
+    }), /batch_too_large/);
+    assert.throws(() => spreadsheetMutationToBoundSql({
+      ...ctx, def: { ...ctx.def, mode: "readonly" },
+    }, insert), /table_readonly/);
+    // All malformed plans are rejected before reaching any D1 mutation.
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 0);
+  } finally {
+    sqlite.close();
+  }
+});
