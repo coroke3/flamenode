@@ -250,11 +250,13 @@ export function XIdCompactProfileForm({
   };
   return (
     <div className="xids-stack">
-      <form key={x.id} onSubmit={onSubmit}>
+      <form key={x.id} className="xids-stack" onSubmit={onSubmit}>
         <label className="xids-compactLabel">表示名オーバーライド（空欄で @ハンドル表示）
           <input name="x_name" className="xids-input" maxLength={80} disabled={pending}
             placeholder={`@${x.id}`} defaultValue={x.x_name} />
         </label>
+        <XIdIconPicker api={api} xUserId={x.id} currentIconUrl={x.icon_url}
+          candidates={iconCandidates} onRefresh={onRefresh} />
         <label className="xids-compactLabel">About / 自己紹介
           <textarea name="profile_text" className="xids-textarea" rows={3} maxLength={2000}
             placeholder="制作スタイル、得意なこと、活動紹介など"
@@ -278,8 +280,6 @@ export function XIdCompactProfileForm({
         {message ? <p role="status">{message}</p> : null}
         {error ? <p role="alert" className="xids-msgErr">{error}</p> : null}
       </form>
-      <XIdIconPicker api={api} xUserId={x.id} currentIconUrl={x.icon_url}
-        candidates={iconCandidates} onRefresh={onRefresh} />
     </div>
   );
 }

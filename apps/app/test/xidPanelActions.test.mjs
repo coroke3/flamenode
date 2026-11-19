@@ -114,6 +114,14 @@ test("MIG-0708 U03: CURRENT profile placeholders and hidden YouTube/SNS picker v
   });
   try {
     const form = m.container.querySelector("form");
+    assert.ok(form.classList.contains("xids-stack"), "CURRENT profile form uses vertical spacing");
+    const nameInput = form.querySelector('[name="x_name"]');
+    const iconGroup = form.querySelector('[role="group"][aria-label="X IDアイコン"]');
+    const aboutInput = form.querySelector('[name="profile_text"]');
+    assert.ok(iconGroup, "icon picker is a part of the same CURRENT profile form");
+    assert.ok(nameInput.compareDocumentPosition(iconGroup) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
+    assert.ok(iconGroup.compareDocumentPosition(aboutInput) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+      "CURRENT field order: name, icon, About, contact, channel, socials");
     assert.equal(form.querySelector('[name="x_name"]').placeholder, "@alpha");
     assert.equal(form.querySelector('[name="profile_text"]').placeholder,
       "制作スタイル、得意なこと、活動紹介など");
