@@ -11,6 +11,23 @@ import { MAX_MANAGE_STATUS_REBUILD_EVENTS, planManageVideoStatusCommitAssertion 
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
 import { canEditEvent } from "@flamenode/server-core/auth/ownership";
 
+// Drizzle D1 `batch()` requires a prepared statement with a D1 bindable
+// `stmt`. A `db.run(sql`...`)` SQLWrapper alone is not a batch item:
+// the production audit/mutate.ts asBatchRunnable adapter compiles it first.
+// Keep this test seam equivalent so that it exercises the REAL transactional
+// SQLite D1 batch, not a TypeError before the assertion can execute.
+function preparedStatusTestBatchItem(db, sqlWrapper) {
+  const compiled = db.dialect.sqlToQuery(sqlWrapper.getSQL());
+  const stmt = db.$client.prepare(compiled.sql);
+  return {
+    _prepare: () => ({
+      getQuery: () => compiled,
+      stmt,
+      mapResult: (result) => result,
+    }),
+  };
+}
+
 test("MIG-0603: unmounted manage status gate matches CURRENT event privilege and exact video link", async () => {
   const sqlite = createSqlite();
   try {
@@ -661,7 +678,7 @@ test("MIG-0603: commit-time status authorization assertion rolls back on revoked
         (id, type, payload_json, status, created_at)
         VALUES ('commit-guard-outbox', 'video_posted', '{}', 'pending', 1000)`);
       const start = d1.stats.statements;
-      await assert.rejects(db.batch([guard, update, audit, outbox]),
+      await assert.rejects(db.batch([guard, update, audit, outbox].map((stmt) => preparedStatusTestBatchItem(db, stmt))),
         /malformed JSON|not-valid-json/,
         description + " must abort the *whole* D1 batch before status/audit/outbox writes");
       assert.equal(d1.stats.statements - start, 1,
@@ -697,7 +714,7 @@ test("MIG-0603: commit-time status assertion accepts current canonical preset an
       await db.batch([
         planManageVideoStatusCommitAssertion(db, user, "evA", "v1"),
         db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
-      ]);
+      ].map((stmt) => preparedStatusTestBatchItem(db, stmt)));
       assert.equal(d1.stats.statements - initial, 2,
         name + ": assertion + update happen in one D1 batch with no additional preflight reads");
       assert.equal(d1.stats.batches, 1);
