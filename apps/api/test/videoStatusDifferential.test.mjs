@@ -236,6 +236,13 @@ if (runUnderRootTsx(import.meta.url)) {
           }
           const current = objects.get(key);
           const condition = options?.onlyIf;
+          if (r2Fault === "compensation-rejected" && etagVersion > 0 &&
+              !JSON.parse(value).entities.some((row) =>
+                row.entity_type === "video" && row.entity_id === "vid-1")) {
+            // The initial video block was committed. Every attempted R2 CAS
+            // removal loses afterward, leaving the precommitted block live.
+            return null;
+          }
           if (condition instanceof Headers &&
               condition.get("If-None-Match") === "*" && current) return null;
           if (condition && !(condition instanceof Headers) &&
@@ -327,6 +334,14 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(result.ok, false, "persistent R2 errors or lost R2 ownership must stop before D1");
         assert.equal(result.errorCode, "visibility_precommit_failed");
         assert.equal(result.retryable, false, "no unsafe retry after an unconfirmed R2 fence");
+      } else if (r2Fault === "compensation-rejected" && forceStaleCas) {
+        assert.deepEqual(result, {
+          ok: false,
+          message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+          errorCode: "status_unverified",
+          retryable: false,
+          traceId: result.traceId,
+        }, "unconfirmed R2 compensation must never report D1 CAS retry or public success");
       } else if (replaceR2FenceOwner) {
         assert.equal(result.ok, false, "R2 owner changes must stop before D1");
         assert.equal(result.errorCode, "visibility_precommit_failed");
@@ -393,6 +408,36 @@ if (runUnderRootTsx(import.meta.url)) {
         entry.entity_id === "vid-1" &&
         entry.fence_token === current.fences[0].fence_token
       ), "the R2 manifest must retain the exact D1 fence token after commit");
+    });
+  }
+
+  for (const [initialStatus, nextStatus] of [["public", "private"], ["private", "public"]]) {
+    test(`CURRENT/Hono real audited stale CAS + nine failed R2 rollbacks fail closed for ${initialStatus}→${nextStatus}`, async () => {
+      const current = await executeAuditedStatus(
+        nextStatus, true, true, false, false, initialStatus, "compensation-rejected",
+      );
+      const hono = await executeAuditedStatus(
+        nextStatus, false, true, false, false, initialStatus, "compensation-rejected",
+      );
+      assert.deepEqual(hono, current,
+        "CURRENT and Hono must fail closed with identical persisted D1/R2 and HTTP-like result");
+      assert.equal(current.result.ok, false);
+      assert.equal(current.result.errorCode, "status_unverified");
+      assert.equal(current.result.retryable, false);
+      assert.equal(current.batches, 1, "the audited D1 transaction was attempted exactly once");
+      assert.equal(current.video.visibility_status, initialStatus, "D1 CAS was rolled back");
+      assert.equal(current.video.updated_at, 2000, "a concurrent D1 update is preserved");
+      assert.deepEqual(current.fences, [], "no D1 visibility fence survived the failed batch");
+      assert.deepEqual(current.audits, [], "no strict audit survived the failed batch");
+      assert.deepEqual(current.notifications, [], "no notifications survived the failed batch");
+      assert.deepEqual(current.queue, [], "no rebuild queue survived the failed batch");
+      assert.equal(current.manifest?.entities.length, 1,
+        "the R2 precommitted block remains after every compensation CAS loss");
+      assert.equal(current.manifest.entities[0].entity_id, "vid-1");
+      assert.equal(current.events.filter((event) => event[0] === "r2.put").length, 10,
+        "one initial R2 precommit and 3 outer x 3 inner rejected rollback CAS writes");
+      assert.deepEqual(current.events.filter((event) => event[0] === "queue.send"), [],
+        "no Queue wake may escape a failed audited video transition");
     });
   }
 
