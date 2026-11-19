@@ -102,13 +102,19 @@ export async function executeVideoVisibilityStatusMutation<DB>(
   ];
   const audits = [...transition.audits, ...(input.extraAudits ?? [])];
 
+  // A provider error during R2 precommit may have committed a visibility
+  // block even when its message contains no public_visibility_* marker.
+  // Classify by execution phase, not by an untrusted provider error string.
+  let preCommitInFlight = false;
   try {
     if (transition.fenceToken) {
+      preCommitInFlight = true;
       await host.preCommit({
         videoId,
         fenceToken: transition.fenceToken,
         reason,
       });
+      preCommitInFlight = false;
     }
 
     await host.mutate(db, {
@@ -136,6 +142,18 @@ export async function executeVideoVisibilityStatusMutation<DB>(
           error_code: "visibility_compensation_failed",
         });
       }
+    }
+    if (preCommitInFlight) {
+      host.log("error", `[${logTag}] visibility precommit failed`, {
+        traceId, error_code: "visibility_precommit_failed",
+      });
+      return {
+        ok: false,
+        message: "公開ブロックの記録に失敗しました。",
+        errorCode: "visibility_precommit_failed",
+        traceId,
+        retryable: false,
+      };
     }
     if (host.isAuditMutationError(error)) {
       let currentStatus: string | null | undefined;
