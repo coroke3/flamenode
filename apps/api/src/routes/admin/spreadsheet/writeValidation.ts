@@ -711,12 +711,36 @@ export async function planSpreadsheetGuardedCrud(
   }
 
   if (body.method === "POST") {
-    // Validate SQL shape/required PK and default expansion before any D1
-    // read; FK checks inspect precisely the supplied (pre-default) fields.
+    // Complete INSERT defaults before FK preflight. Inspecting only the
+    // caller-supplied fields could silently bypass the lookup for a non-null
+    // defaulted FK that will actually be persisted and audited.
     const plan = buildSpreadsheetAuditedInsert(ctx, body.row, operatorId);
-    const lookups = buildSpreadsheetForeignKeyLookups(foreignKeys, [body.row], remainingReadBudget);
+    const inserted = plan.audit.after;
+    if (!inserted) throw new Error("invalid_snapshot");
+    const fkCells: Array<[string, string | null]> = [];
+    for (const foreignKey of foreignKeys) {
+      if (!Object.hasOwn(inserted, foreignKey.column)) {
+        throw new Error("invalid_snapshot");
+      }
+      const value = inserted[foreignKey.column];
+      if (value == null || value === "") {
+        fkCells.push([foreignKey.column, null]);
+      } else if (typeof value === "string") {
+        fkCells.push([foreignKey.column, value]);
+      } else if (typeof value === "number" && Number.isFinite(value)) {
+        // Resolved SQLite numeric defaults are bound as numbers in INSERT;
+        // normalize to text only for FK identity comparisons and pre-read.
+        fkCells.push([foreignKey.column, String(value)]);
+      } else {
+        throw new Error("invalid_snapshot");
+      }
+    }
+    // A projection of the actual INSERT/audit after-image prevents a
+    // pre-default FK check from approving different persisted values.
+    const fkRow = Object.freeze(Object.fromEntries(fkCells));
+    const lookups = buildSpreadsheetForeignKeyLookups(foreignKeys, [fkRow], remainingReadBudget);
     if (lookups.length > 0) {
-      await validateSpreadsheetForeignKeys(db, foreignKeys, [body.row], remainingReadBudget);
+      await validateSpreadsheetForeignKeys(db, foreignKeys, [fkRow], remainingReadBudget);
     }
     return plan;
   }
