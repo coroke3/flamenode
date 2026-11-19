@@ -1787,3 +1787,128 @@ test("MIG-0638 U01b: foreign-key D1 lookups use a bounded SQL sentinel per uniqu
     sqlite.close();
   }
 });
+
+
+test("MIG-0638 U01b: Hono CRUD body parser retains CURRENT PATCH POST DELETE envelopes", async () => {
+  const {
+    parseSpreadsheetCrudBody, buildSpreadsheetAuditedInsert,
+    buildSpreadsheetAuditedUpdate, buildSpreadsheetAuditedDelete,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(x => x.name), primaryKeys: ["id"],
+  };
+  const source = { table: "  slots  ", row: { id: "slot-1", title: "original" } };
+  const post = parseSpreadsheetCrudBody("POST", source);
+  assert.deepEqual(post, { method: "POST", table: "slots",
+    row: { id: "slot-1", title: "original" } });
+  assert.equal(Object.isFrozen(post), true);
+  assert.equal(Object.isFrozen(post.row), true);
+  source.row.title = "changed after body parse";
+  const inserted = buildSpreadsheetAuditedInsert(ctx, post.row, "operator-1");
+  assert.deepEqual(inserted.binds, ["slot-1", "original"]);
+  assert.equal(inserted.audit.after.title, "original");
+  assert.equal(inserted.audit.target_id, "slot-1");
+
+  const patchBody = { table: "slots", primaryKey: { id: "slot-1" },
+    column: " title ", value: "next" };
+  const patch = parseSpreadsheetCrudBody("PATCH", patchBody);
+  assert.deepEqual(patch, {
+    method: "PATCH", table: "slots", primaryKey: { id: "slot-1" },
+    column: "title", value: "next",
+  });
+  assert.equal(Object.isFrozen(patch), true);
+  assert.equal(Object.isFrozen(patch.primaryKey), true);
+  patchBody.primaryKey.id = "swapped-key";
+  const old = { id: "slot-1", title: "original" };
+  const modified = buildSpreadsheetAuditedUpdate(ctx, patch.primaryKey, old,
+    Object.fromEntries([[patch.column, patch.value]]), "operator-1");
+  assert.deepEqual(modified.binds, ["next", "slot-1", "slot-1", "original"]);
+  assert.equal(modified.audit.before.title, "original");
+  assert.equal(modified.audit.after.title, "next");
+
+  const emptyPatch = parseSpreadsheetCrudBody("PATCH",
+    { table: "slots", primaryKey: { id: "slot-1" }, column: "title" });
+  assert.equal(emptyPatch.value, null,
+    "CURRENT PATCH maps an omitted value to SQL NULL");
+  const deleteBody = { table: "slots", primaryKey: { id: "slot-1" } };
+  const deleted = parseSpreadsheetCrudBody("DELETE", deleteBody);
+  assert.deepEqual(deleted, {
+    method: "DELETE", table: "slots", primaryKey: { id: "slot-1" },
+  });
+  deleteBody.primaryKey.id = "swapped-key";
+  const deletePlan = buildSpreadsheetAuditedDelete(ctx, deleted.primaryKey,
+    old, "operator-1");
+  assert.deepEqual(deletePlan.binds, ["slot-1", "slot-1", "original"]);
+  assert.equal(deletePlan.audit.before.title, "original");
+});
+
+test("MIG-0638 U01b: write parser rejects malformed JSON cells and absent own fields", async () => {
+  const { parseSpreadsheetCrudBody } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const invalidStructure = [
+    ["POST", null],
+    ["POST", []],
+    ["POST", { table: "slots" }],
+    ["POST", { table: "slots", row: [] }],
+    ["POST", { table: 1, row: { id: "s1" } }],
+    ["PATCH", { table: "slots", column: "title", value: "x" }],
+    ["PATCH", { table: "slots", primaryKey: {}, column: "  " }],
+    ["DELETE", { table: "", primaryKey: { id: "s1" } }],
+    ["DELETE", { table: "slots", primaryKey: "s1" }],
+  ];
+  for (const [method, input] of invalidStructure) {
+    assert.throws(
+      () => parseSpreadsheetCrudBody(method, input),
+      error => error instanceof Error && error.message === "missing_fields",
+    );
+  }
+  const inherited = Object.create({
+    table: "slots", row: { id: "inherited" },
+    primaryKey: { id: "inherited" }, column: "title",
+  });
+  assert.throws(() => parseSpreadsheetCrudBody("POST", inherited), /missing_fields/);
+  assert.throws(() => parseSpreadsheetCrudBody("DELETE", inherited), /missing_fields/);
+
+  const invalidCells = [
+    ["POST", { table: "slots", row: { id: 1 } }],
+    ["POST", { table: "slots", row: { id: "x", title: { nested: "no" } } }],
+    ["POST", { table: "slots", row: { id: "x", title: true } }],
+    ["PATCH", { table: "slots", primaryKey: { id: "x" }, column: "title", value: 5 }],
+    ["PATCH", { table: "slots", primaryKey: { id: null }, column: "title", value: "x" }],
+    ["DELETE", { table: "slots", primaryKey: { id: ["array"] } }],
+  ];
+  for (const [method, input] of invalidCells) {
+    assert.throws(
+      () => parseSpreadsheetCrudBody(method, input),
+      error => error instanceof Error && error.message === "invalid_row",
+    );
+  }
+  assert.throws(
+    () => parseSpreadsheetCrudBody("PUT", { table: "slots" }), /invalid_row/);
+});
+
+test("MIG-0638 U01b: CRUD parser stores prototype-named fields without inherited lookups", async () => {
+  const { parseSpreadsheetCrudBody } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const row = Object.fromEntries([
+    ["id", "slot-1"], ["__proto__", "safe"], ["constructor", "ordinary"],
+  ]);
+  const post = parseSpreadsheetCrudBody("POST", { table: "slots", row });
+  assert.equal(post.row["__proto__"], "safe");
+  assert.equal(post.row.constructor, "ordinary");
+  assert.ok(Object.hasOwn(post.row, "__proto__"));
+  assert.ok(Object.hasOwn(post.row, "constructor"));
+  assert.equal(Object.getPrototypeOf(post.row), Object.prototype);
+  const keys = Object.fromEntries([["__proto__", "special-key"]]);
+  const del = parseSpreadsheetCrudBody("DELETE", {
+    table: "slots", primaryKey: keys,
+  });
+  assert.deepEqual(del.primaryKey, keys);
+  assert.ok(Object.hasOwn(del.primaryKey, "__proto__"));
+  assert.equal(Object.getPrototypeOf(del.primaryKey), Object.prototype);
+});
