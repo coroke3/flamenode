@@ -139,8 +139,17 @@ test("Issue #674: legacy snapshot budget counts UTF-8 bytes, not UTF-16 code uni
   const table_name = "video_events";
   // 43k CJK code units fit below the old 128k .length guard but exceed
   // the 128k UTF-8 budget. Never parse/attribute this oversized audit row.
-  const oversizedPk = { id: "界".repeat(43_000) };
-  const oversizedSnapshot = JSON.stringify(oversizedPk);
+  // Keep the lookup PK itself within the V1 ID limit. The oversized
+  // audit snapshot contains an unrelated multibyte column, so only the
+  // snapshot-byte guard (not the identity writer) rejects attribution.
+  const oversizedPk = { id: "界".repeat(30_000) };
+  const oversizedSnapshot = JSON.stringify({
+    ...oversizedPk,
+    unrelated: "界".repeat(43_000),
+  });
+  assert.ok(Buffer.byteLength(
+    buildSpreadsheetAuditIdentityV1(oversizedPk).target_id, "utf8",
+  ) < 128_000);
   assert.ok(oversizedSnapshot.length < 128_000);
   assert.ok(Buffer.byteLength(oversizedSnapshot, "utf8") > 128_000);
   const oversizedLookup = buildSpreadsheetAuditHistoryLookup(table_name, oversizedPk);
