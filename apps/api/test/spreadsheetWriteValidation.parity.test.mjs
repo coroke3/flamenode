@@ -1250,3 +1250,114 @@ test("MIG-0638 U01b: prototype-named SQL columns require own properties and pres
     assert.equal(sql.binds[0], "new");
   }
 });
+
+
+test("MIG-0638 U02: import preflight snapshots mutable inputs before upsert planning", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, planSpreadsheetImportMutations,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["id"],
+  };
+  let getterReads = 0;
+  const row = {
+    id: "slot-1",
+    get title() {
+      getterReads++;
+      return getterReads === 1 ? "approved" : "tampered";
+    },
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [row]);
+  assert.deepEqual(prepared.errors, []);
+  assert.equal(getterReads, 1, "a getter must not supply different validation and SQL values");
+  assert.equal(prepared.preparedRows[0].row.title, "approved");
+  assert.ok(Object.isFrozen(prepared.preparedRows[0].row));
+  assert.ok(Object.isFrozen(prepared.preparedRows[0].pk));
+  assert.ok(Object.isFrozen(prepared.preparedRows[0]));
+  row.id = "slot-evil";
+  Object.defineProperty(row, "title", { value: "evil", configurable: true });
+  const planned = planSpreadsheetImportMutations(ctx, prepared, "insert", null, "operator");
+  assert.equal(planned.inserted, 1);
+  assert.deepEqual(planned.mutations[0].binds, ["slot-1", "approved"]);
+  assert.equal(planned.mutations[0].audit.target_id, "slot-1");
+  assert.equal(planned.mutations[0].audit.after.title, "approved");
+  assert.equal(planned.mutations[0].audit.after.id, "slot-1");
+
+  const malformed = prepareSpreadsheetImportMutationRows(ctx, [
+    { id: "good", title: "ok" }, null,
+  ]);
+  assert.equal(malformed.preparedRows.length, 1);
+  assert.deepEqual(malformed.errors.map(error => error.index), [1],
+    "a malformed row must preserve per-row error indexing");
+});
+
+test("MIG-0638 U02: absent prototype-named UPSERT fields are skipped, not inherited", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, planSpreadsheetImportMutations,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "constructor", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: "slot-1" }]);
+  assert.deepEqual(prepared.errors, []);
+  const existing = new Map([[prepared.preparedRows[0].fingerprint,
+    Object.fromEntries([["id", "slot-1"], ["constructor", "existing"]])]]);
+  const skipped = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator");
+  assert.deepEqual([skipped.inserted, skipped.updated, skipped.skipped], [0, 0, 1]);
+  assert.deepEqual(skipped.mutations, []);
+
+  const modified = prepareSpreadsheetImportMutationRows(ctx,
+    [Object.fromEntries([["id", "slot-1"], ["constructor", "updated"]])]);
+  const changed = planSpreadsheetImportMutations(ctx, modified, "upsert", existing, "operator");
+  assert.deepEqual([changed.inserted, changed.updated, changed.skipped], [0, 1, 0]);
+  assert.equal(changed.mutations[0].audit.after.constructor, "updated");
+});
+
+test("MIG-0638 U02: import existing-row D1 PK must be an own field", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "__proto__", type: "TEXT", notNull: true, pk: 1 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["__proto__"],
+  };
+  const input = Object.fromEntries([["__proto__", "real-pk"], ["notes", "new"]]);
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [input]);
+  assert.deepEqual(prepared.errors, []);
+  const fakeDB = rows => ({
+    prepare(sql) {
+      assert.match(sql, /^SELECT \* FROM "slots"/);
+      return {
+        bind(...values) {
+          assert.deepEqual(values, ["real-pk"]);
+          return { async all() { return { results: rows }; } };
+        },
+      };
+    },
+  });
+  const validRow = Object.fromEntries([["__proto__", "real-pk"], ["notes", "old"]]);
+  const found = await fetchSpreadsheetExistingImportRows(fakeDB([validRow]),
+    ctx, prepared, 1);
+  assert.equal(found.size, 1);
+  assert.equal(found.get(prepared.preparedRows[0].fingerprint).notes, "old");
+  await assert.rejects(fetchSpreadsheetExistingImportRows(
+    fakeDB([{ notes: "old" }]), ctx, prepared, 1), /invalid_snapshot/,
+    "an inherited Object.prototype value must not stand in for a DB PK");
+});
