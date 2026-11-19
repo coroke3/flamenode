@@ -101,6 +101,9 @@ export function createDefaultVideoAdminMembersPreflightHost(
   // existing test-only semantics; requests always use the guarded overlay.
   const guardedContexts = new WeakMap<Ctx, Ctx>();
   const activeMeters = new WeakMap<Ctx, AdminMemberD1ReadMeter>();
+  // A target may be used for a write only when the same authenticated request
+  // actually obtained that exact video snapshot from its authoritative SELECT.
+  const authorizedTargets = new WeakMap<Ctx, { videoId: string; target: AdminVideoMemberTarget }>();
   const stack: MiddlewareHandler<AppEnv>[] = [
     (c, next) => originGuardMiddleware(originOptions(c))(c, next),
     options.session ?? (sessionMiddleware() as unknown as MiddlewareHandler<AppEnv>),
@@ -112,8 +115,8 @@ export function createDefaultVideoAdminMembersPreflightHost(
     dbMiddleware,
   ];
   return {
-    loadAuthorizedVideo: (c, videoId) =>
-      (guardedContexts.get(c) ?? c).env.DB.prepare(
+    loadAuthorizedVideo: async (c, videoId) => {
+      const target = await (guardedContexts.get(c) ?? c).env.DB.prepare(
         'SELECT "id", "collaboration_type", "visibility_status", ' +
         '"creator_x_user_id", "youtube_video_id", "primary_event_id", "updated_at", ' +
         '(SELECT COALESCE(json_group_array("event_id"), \'[]\') FROM (' +
@@ -125,7 +128,12 @@ export function createDefaultVideoAdminMembersPreflightHost(
         'LIMIT ' + (MAX_VIDEO_MEMBERS + 1) +
         ')) AS "public_member_count" ' +
         'FROM "videos" WHERE "id" = ? LIMIT 1',
-      ).bind(videoId, videoId, videoId).first<AdminVideoMemberTarget>(),
+      ).bind(videoId, videoId, videoId).first<AdminVideoMemberTarget>();
+      if (target && guardedContexts.has(c)) {
+        authorizedTargets.set(c, { videoId, target });
+      }
+      return target;
+    },
     ...(options.enableCanonicalDryRun ? {
       previewCanonicalPlan: async (c: Ctx, input: {
         videoId: string;
@@ -139,8 +147,10 @@ export function createDefaultVideoAdminMembersPreflightHost(
         const db = c.get("db");
         const settings = c.get("auditSettings");
         const snapshots = c.get("actorSnapshotJsonById");
+        const selected = authorizedTargets.get(c);
         if (!meter || !actor || actor.role !== "admin" || !db || !settings ||
-            !snapshots || !snapshots[actor.id]) {
+            !snapshots || !snapshots[actor.id] ||
+            selected?.videoId !== input.videoId || selected.target !== input.target) {
           throw new RangeError("video_admin_member_preview_not_authorized");
         }
         // The db passed by dbMiddleware belongs to the request's READ-ONLY
@@ -184,9 +194,11 @@ export function createDefaultVideoAdminMembersPreflightHost(
         const db = c.get("db");
         const settings = c.get("auditSettings");
         const snapshots = c.get("actorSnapshotJsonById");
+        const selected = authorizedTargets.get(c);
         if (!guardedContexts.has(c) || !meter || !actor ||
             actor.role !== "admin" || !db || !settings ||
-            !snapshots || !snapshots[actor.id]) {
+            !snapshots || !snapshots[actor.id] ||
+            selected?.videoId !== input.videoId || selected.target !== input.target) {
           throw new RangeError("video_admin_member_candidate_write_not_authorized");
         }
         // Canonical planner can only see the READ-ONLY, metered Drizzle.
@@ -284,6 +296,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
         // Never permit a retained guard/Drizzle statement to issue late reads.
         meterState.meter?.close();
         activeMeters.delete(c);
+        authorizedTargets.delete(c);
         guardedContexts.delete(c);
       }
     },
