@@ -1912,3 +1912,151 @@ test("MIG-0638 U01b: CRUD parser stores prototype-named fields without inherited
   assert.ok(Object.hasOwn(del.primaryKey, "__proto__"));
   assert.equal(Object.getPrototypeOf(del.primaryKey), Object.prototype);
 });
+
+
+test("MIG-0638 U01b: guarded CRUD planner composes SQL, full CAS snapshots and shared S3 reads", async () => {
+  const { parseSpreadsheetCrudBody, planSpreadsheetGuardedCrud } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+    { name: "event_id", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(c => c.name), primaryKeys: ["id"],
+  };
+  const snapshot = { id: "slot-1", title: "Before", event_id: "evt1" };
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const sqls = [], args = [];
+  const db = {
+    prepare(sql) {
+      sqls.push(sql);
+      return {
+        bind(...binds) {
+          args.push(binds);
+          return {
+            async first() {
+              assert.match(sql, /^SELECT \* FROM "slots" WHERE "id" = \? LIMIT 1$/);
+              return snapshot;
+            },
+            async all() {
+              assert.match(sql, /^SELECT "id" AS value FROM "events" WHERE "id" IN \(\?\) LIMIT 2$/);
+              return { results: binds.map(value => ({ value })) };
+            },
+          };
+        },
+      };
+    },
+  };
+  const post = parseSpreadsheetCrudBody("POST", {
+    table: " slots ", row: { id: "slot-2", title: "Created", event_id: "evt1" },
+  });
+  const inserted = await planSpreadsheetGuardedCrud(db, ctx, post, fk, "operator", 1);
+  assert.equal(inserted.audit.operation, "CREATE");
+  assert.equal(inserted.audit.target_id, "slot-2");
+  assert.deepEqual(inserted.binds, ["slot-2", "Created", "evt1"]);
+  assert.deepEqual(inserted.audit.after, { id: "slot-2", title: "Created", event_id: "evt1" });
+  assert.equal(sqls.length, 1);
+  assert.deepEqual(args, [["evt1"]]);
+
+  sqls.length = 0; args.length = 0;
+  const patch = parseSpreadsheetCrudBody("PATCH", {
+    table: "slots", primaryKey: { id: "slot-1" },
+    column: "title", value: "Updated",
+  });
+  const modified = await planSpreadsheetGuardedCrud(db, ctx, patch, fk, "operator", 1);
+  assert.equal(modified.audit.operation, "UPDATE");
+  assert.equal(modified.audit.before.title, "Before");
+  assert.equal(modified.audit.after.title, "Updated");
+  assert.deepEqual(modified.binds, ["Updated", "slot-1", "slot-1", "Before", "evt1"]);
+  assert.equal(sqls.length, 1);
+  assert.deepEqual(args, [["slot-1"]]);
+
+  sqls.length = 0; args.length = 0;
+  const patchFk = parseSpreadsheetCrudBody("PATCH", {
+    table: "slots", primaryKey: { id: "slot-1" },
+    column: "event_id", value: "evt2",
+  });
+  const withFk = await planSpreadsheetGuardedCrud(db, ctx, patchFk, fk, "operator", 2);
+  assert.equal(withFk.audit.after.event_id, "evt2");
+  assert.equal(sqls.length, 2, "one fresh snapshot and one FK read");
+  assert.deepEqual(args, [["slot-1"], ["evt2"]]);
+
+  sqls.length = 0; args.length = 0;
+  const deletion = parseSpreadsheetCrudBody("DELETE", {
+    table: "slots", primaryKey: { id: "slot-1" },
+  });
+  const removed = await planSpreadsheetGuardedCrud(db, ctx, deletion, fk, "operator", 1);
+  assert.equal(removed.audit.operation, "DELETE");
+  assert.equal(removed.audit.after, null);
+  assert.deepEqual(removed.binds, ["slot-1", "slot-1", "Before", "evt1"]);
+  assert.equal(sqls.length, 1);
+});
+
+test("MIG-0638 U01b: CRUD planner denies invalid input and exhausted FK budgets without D1", async () => {
+  const { parseSpreadsheetCrudBody, planSpreadsheetGuardedCrud } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+    { name: "event_id", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(c => c.name), primaryKeys: ["id"],
+  };
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  let readCount = 0;
+  const db = { prepare() { readCount++; throw Error("no D1 read expected"); } };
+  const update = parseSpreadsheetCrudBody("PATCH", {
+    table: "slots", primaryKey: { id: "slot-1" },
+    column: "event_id", value: "evt2",
+  });
+  const deletion = parseSpreadsheetCrudBody("DELETE", {
+    table: "slots", primaryKey: { id: "slot-1" },
+  });
+  const insert = parseSpreadsheetCrudBody("POST", {
+    table: "slots", row: { id: "slot-2", event_id: "evt1" },
+  });
+  for (const [body, budget, expected] of [
+    [update, 0, "batch_too_large"],
+    [update, 1, "batch_too_large"],
+    [deletion, 0, "batch_too_large"],
+    [insert, 0, "batch_too_large"],
+    [insert, 4, "batch_too_large"],
+    [update, 1.5, "batch_too_large"],
+    [insert, -1, "batch_too_large"],
+    [{ ...deletion, table: "other" }, 1, "unknown_table"],
+    [update, 2, "missing_operator"],
+  ]) {
+    await assert.rejects(
+      planSpreadsheetGuardedCrud(db, ctx, body, fk,
+        expected === "missing_operator" ? " " : "operator", budget),
+      error => error instanceof Error && error.message === expected,
+    );
+    assert.equal(readCount, 0);
+  }
+  const invalidPk = parseSpreadsheetCrudBody("DELETE", {
+    table: "slots", primaryKey: { id: "\0bad" },
+  });
+  await assert.rejects(
+    planSpreadsheetGuardedCrud(db, ctx, invalidPk, fk, "operator", 1),
+    /invalid_row/,
+  );
+  const primaryKeyPatch = parseSpreadsheetCrudBody("PATCH", {
+    table: "slots", primaryKey: { id: "slot-1" }, column: "id", value: "other",
+  });
+  await assert.rejects(
+    planSpreadsheetGuardedCrud(db, ctx, primaryKeyPatch, fk, "operator", 1),
+    /empty_row/,
+  );
+  assert.equal(readCount, 0);
+  const noFkInsert = parseSpreadsheetCrudBody("POST", {
+    table: "slots", row: { id: "slot-3" },
+  });
+  const noFk = await planSpreadsheetGuardedCrud(db, ctx, noFkInsert, fk, "operator", 0);
+  assert.equal(noFk.audit.operation, "CREATE");
+  assert.equal(noFk.audit.target_id, "slot-3");
+  assert.equal(readCount, 0);
+});
