@@ -99,13 +99,6 @@ export function parseVideoMemberInputs(
     }
     if (!name && !xid) continue;
 
-    // Keep the legacy canonical validation for nonempty normalized handles.
-    if (xid && !isCanonicalXId(xid)) {
-      return {
-        ok: false,
-        message: `${name || item.x_user_id} の X ID が不正です。英数字とアンダースコア20文字以内で入力してください。`,
-      };
-    }
     if (xid && seenXIds.has(xid)) {
       return {
         ok: false,
