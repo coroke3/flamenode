@@ -248,7 +248,7 @@ test("generic R2 precommit transport failure is never retryable or mislabeled as
   }
 });
 
-test("failed fence compensation does not mask the original audit CAS conflict", async () => {
+test("failed R2 fence compensation prevents unsafe retryable D1 CAS response", async () => {
   const calls = [];
   const result = await executeVideoVisibilityStatusMutation({
     db: {},
@@ -275,15 +275,19 @@ test("failed fence compensation does not mask the original audit CAS conflict", 
   }, calls));
 
   assert.equal(result.ok, false);
-  assert.equal(result.errorCode, "concurrent_update");
-  assert.equal(result.retryable, true);
+  assert.deepEqual(result, {
+    ok: false,
+    message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+    errorCode: "status_unverified",
+    traceId: "trace-1",
+    retryable: false,
+  });
   assert.deepEqual(calls.map((entry) => Array.isArray(entry) ? entry[0] : entry), [
     "precommit",
     "mutate",
     "compensate",
     "log",
-    "reread",
-  ]);
+  ], "failed compensation must not allow an automatic D1 retry or idempotent status inference");
   const compensation = calls.find((entry) => Array.isArray(entry) && entry[0] === "compensate");
   assert.equal(compensation[1].videoId, "v-1");
   assert.equal(compensation[1].fenceToken, "fence-1");
@@ -294,6 +298,53 @@ test("failed fence compensation does not mask the original audit CAS conflict", 
     traceId: "trace-1", error_code: "visibility_compensation_failed",
   });
   assert.doesNotMatch(JSON.stringify(warning), /compensation-secret|Authorization:Bearer/);
+});
+
+test("unconfirmed R2 rollback cannot report public status already applied (CURRENT/Hono core)", async () => {
+  const privateError = "Authorization:Bearer secret-public-provider-token";
+  for (const auditFailure of [true, false]) {
+    const calls = [];
+    const result = await executeVideoVisibilityStatusMutation({
+      db: {},
+      videoId: "v-1",
+      requestedStatus: "public",
+      transition: transition({ depublicizedFromPublic: false }),
+      reason: null,
+      logTag: "admin-video-status",
+    }, host({
+      mutate: async () => {
+        calls.push("mutate");
+        const failure = new Error("D1 mutation rejected " + privateError);
+        if (auditFailure) failure.auditMutation = true;
+        throw failure;
+      },
+      isAuditMutationError: (error) => Boolean(error?.auditMutation),
+      compensate: async (_db, input) => {
+        calls.push("compensate");
+        assert.equal(input.allowNonPublicRollback, true);
+        throw new Error("R2 rollback timeout " + privateError);
+      },
+      // Even if a concurrent update appears public, the failed R2 rollback
+      // means this cannot be interpreted as confirmed public visibility.
+      rereadStatus: async () => { calls.push("reread"); return "public"; },
+      log: (level, tag, details) => calls.push(["log", level, tag, details]),
+    }, calls));
+    assert.deepEqual(result, {
+      ok: false,
+      message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+      errorCode: "status_unverified",
+      traceId: "trace-1",
+      retryable: false,
+    });
+    assert.deepEqual(calls.map((item) => Array.isArray(item) ? item[0] : item), [
+      "precommit", "mutate", "compensate", "log",
+    ], "do not claim idempotent success or issue a new D1 query after R2 rollback failed");
+    assert.deepEqual(calls[3], [
+      "log", "warn", "[admin-video-status] visibility compensation failed",
+      { traceId: "trace-1", error_code: "visibility_compensation_failed" },
+    ]);
+    assert.doesNotMatch(JSON.stringify({ result, calls }), /secret-public-provider-token|Authorization:Bearer/);
+  }
 });
 
 test("CAS status reread outage is non-retryable and never leaks D1 secrets (CURRENT/Hono core)", async () => {
@@ -344,7 +395,7 @@ test("CAS status reread outage is non-retryable and never leaks D1 secrets (CURR
   }
 });
 
-test("CAS reread and R2 compensation both unavailable still return sanitized status_unverified", async () => {
+test("R2 compensation unavailable returns sanitized status_unverified without unsafe D1 reread", async () => {
   const calls = [];
   const result = await executeVideoVisibilityStatusMutation({
     db: {},
@@ -369,9 +420,9 @@ test("CAS reread and R2 compensation both unavailable still return sanitized sta
   const diagnosticLogs = calls.filter((entry) => Array.isArray(entry));
   assert.deepEqual(diagnosticLogs.map((entry) => entry[2].error_code), [
     "visibility_compensation_failed",
-    "visibility_status_reread_failed",
   ]);
-  assert.deepEqual(diagnosticLogs.map((entry) => entry[0]), ["warn", "warn"]);
+  assert.deepEqual(diagnosticLogs.map((entry) => entry[0]), ["warn"]);
+  assert.equal(diagnosticLogs.length, 1, "a failed compensation aborts before an extra D1 reread");
   assert.doesNotMatch(JSON.stringify({ calls, result }), /account_token|authorization=private/);
 });
 
