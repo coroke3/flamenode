@@ -58,7 +58,9 @@ export const SCHEMA = `
 `;
 
 export function createAdminD1({ onFirst } = {}) {
-  const stats = { reads: 0, batches: 0, prepares: 0 };
+  // Count SQL actually issued to the D1 fake; constructing a prepared SQL
+  // object is not itself a D1 query. Batch members each consume one query.
+  const stats = { reads: 0, batches: 0, batchStatements: 0, prepares: 0 };
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(SCHEMA);
   const make = (sql, params) => ({
@@ -94,6 +96,7 @@ export function createAdminD1({ onFirst } = {}) {
     },
     batch: async (statements) => {
       stats.batches += 1;
+      stats.batchStatements += statements.length;
       sqlite.exec("BEGIN");
       try {
         const results = [];
