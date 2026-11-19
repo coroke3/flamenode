@@ -2746,12 +2746,12 @@ test("MIG-0638 U01b: atomic CRUD composer commits mutation, audit and Queue toge
     ), /invalid_row/, "queue requester must not impersonate a different actor");
     await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
       db, ctx, insert, options("invalid", { queueTargets: [
-        { ...target("event-nul")[0], targetId: "event\\0spoof" },
+        { ...target("event-nul")[0], targetId: "event\0spoof" },
       ] }),
     ), /invalid_row/);
     await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
       db, ctx, insert, options("invalid", { queueTargets: [
-        { ...target("event-nul")[0], reason: "bad\\0reason" },
+        { ...target("event-nul")[0], reason: "bad\0reason" },
       ] }),
     ), /invalid_row/);
     await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
