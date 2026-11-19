@@ -2,6 +2,8 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import type { ProfileFields, XidProfileApi } from "../../../api/xidProfile.js";
 import { isSafeRelativePath } from "../../next.js";
+import { SocialLinksEditor } from "../../../components/shared/SocialLinksEditor.js";
+import { YoutubeChannelPicker } from "../../../components/shared/YoutubeChannelPicker.js";
 
 /** MIG-0708 U03: isolated form components (not mounted until MIG-0636 contracts). */
 const NETWORK_ERROR = "通信または処理中に問題が発生しました。再読み込みしてお試しください。";
@@ -164,12 +166,13 @@ export function XIdIconPicker({
 }
 
 export function XIdCompactProfileForm({
-  api, x, iconCandidates, onRefresh, onCancel,
+  api, x, iconCandidates, channelCandidates, onRefresh, onCancel,
 }: {
   api: XidProfileApi;
   x: { id: string; x_name: string; icon_url: string | null; profile_text: string | null;
     portfolio_contact: string | null; youtube_channel_url: string | null; other_social_links: string | null };
   iconCandidates: readonly string[];
+  channelCandidates: string[];
   onRefresh: () => void;
   onCancel?: () => void;
 }): React.ReactElement {
@@ -225,14 +228,10 @@ export function XIdCompactProfileForm({
           <textarea name="portfolio_contact" className="xids-textarea" rows={2} maxLength={1200}
             disabled={pending} defaultValue={x.portfolio_contact ?? ""} />
         </label>
-        <label className="xids-compactLabel">YouTube チャンネル
-          <input name="youtube_channel_url" className="xids-input"
-            disabled={pending} defaultValue={x.youtube_channel_url ?? ""} />
-        </label>
-        <label className="xids-compactLabel">その他のSNSリンク（JSON）
-          <textarea name="other_social_links" className="xids-textarea"
-            disabled={pending} defaultValue={x.other_social_links ?? ""} />
-        </label>
+        <label className="xids-compactLabel">YouTube チャンネル（過去の作品から候補を表示）</label>
+        <YoutubeChannelPicker key={x.id} defaultValue={x.youtube_channel_url}
+          candidates={channelCandidates} disabled={pending} />
+        <SocialLinksEditor key={x.id} initialValue={x.other_social_links} disabled={pending} />
         <div className="xids-rowEnd">
           {onCancel ? <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
             disabled={pending} onClick={onCancel}>キャンセル</button> : null}
