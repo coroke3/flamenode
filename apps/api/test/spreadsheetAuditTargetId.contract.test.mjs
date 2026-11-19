@@ -166,6 +166,39 @@ test("Issue #674: legacy snapshot budget counts UTF-8 bytes, not UTF-16 code uni
   }), "legacy_snapshot_exact");
 });
 
+test("Issue #674: untrusted V1 target IDs are bounded by UTF-8 bytes before parsing", () => {
+  const tableId = { id: "界".repeat(43_000) };
+  const oversized = buildSpreadsheetAuditIdentityV1(tableId);
+  assert.ok(oversized.target_id.length < 128_000);
+  assert.ok(Buffer.byteLength(oversized.target_id, "utf8") > 128_000);
+  assert.equal(parseSpreadsheetAuditIdentityV1(oversized), null,
+    "multibyte IDs above the history input cap must fail closed");
+  assert.equal(parseSpreadsheetAuditIdentityV1(buildSpreadsheetAuditIdentityV1({
+    id: "a".repeat(130_000),
+  })), null, "oversized ASCII IDs must fail closed");
+
+  const permitted = buildSpreadsheetAuditIdentityV1({ id: "界".repeat(30_000) });
+  assert.ok(Buffer.byteLength(permitted.target_id, "utf8") < 128_000);
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(permitted), [
+    ["id", "界".repeat(30_000)],
+  ], "bounded V1 IDs retain exact Unicode identity");
+});
+
+test("Issue #674: a changing target_id accessor is read only once", () => {
+  const first = buildSpreadsheetAuditIdentityV1({ id: "first" });
+  const second = buildSpreadsheetAuditIdentityV1({ id: "second" });
+  let reads = 0;
+  const identity = {
+    context: first.context,
+    get target_id() {
+      reads += 1;
+      return reads === 1 ? first.target_id : second.target_id;
+    },
+  };
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(identity), [["id", "first"]]);
+  assert.equal(reads, 1, "prefix, parser and canonical comparison must share the same bytes");
+});
+
 test("Issue #674: invalid or noncanonical V1 representations fail closed", () => {
   for (const bad of [
     {}, { id: "" }, { id: "  " }, { id: "ab\0cd" }, { "bad\0key": "x" },
