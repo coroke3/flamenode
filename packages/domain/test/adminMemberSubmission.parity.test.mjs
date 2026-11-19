@@ -290,7 +290,7 @@ test("MIG-0650 U03cq large invalid member arrays reject by count before nested Z
   // At or below the limit, Zod must still validate every entry.
   const invalidWithinCap = targetParse(JSON.stringify(Array(100).fill(null)), true);
   assert.equal(invalidWithinCap.ok, false);
-  assert.notEqual(invalidWithinCap.message, "合作メンバーは最大100人です.");
+  assert.notEqual(invalidWithinCap.message, "合作メンバーは最大100人です。");
   const validWithinCap = targetParse(encode(Array.from({ length: 100 }, (_, i) =>
     member("user_" + i, { name: "User " + i, chapters: [] }))), true);
   assert.equal(validWithinCap.ok, true);
