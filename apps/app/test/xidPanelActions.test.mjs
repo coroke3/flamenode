@@ -134,28 +134,56 @@ test("MIG-0708 U03: old profile mutation completion cannot refresh or close new 
   } finally { await m.dispose(); }
 });
 
-test("MIG-0708 U03 T04: oversize upload is blocked before API, valid file uses file transport", async () => {
-  const files=[],api={uploadIcon:async(_id,file)=>{files.push(file);return {ok:true};}};
+test("MIG-0708 U03 T04: shared square-crop editor blocks invalid input; uploads only after 256x256 confirmation", async () => {
+  const files=[],api={uploadIcon:async(id,file)=>{files.push([id,file]);return {ok:true};}};
   const m=await render(XIdIconPicker,{api,xUserId:"foo",currentIconUrl:null,candidates:[],onRefresh:()=>{}});
-  await m.click(buttonWith(m.container,"アップロード"));
-  const input=m.container.querySelector('input[type="file"]');
-  const tooLarge={name:"huge.png",size:8*1024*1024+1,type:"image/png"};
-  Object.defineProperty(input,"files",{configurable:true,value:[tooLarge]});
-  await act(async()=>input.dispatchEvent(new dom.window.Event("change",{bubbles:true})));
-  assert.equal(files.length,0);
-  assert.match(m.container.querySelector('[role="alert"]').textContent,/8MB/);
-  const badType={name:"not-an-icon.txt",size:12,type:"text/plain"};
-  Object.defineProperty(input,"files",{configurable:true,value:[badType]});
-  await act(async()=>input.dispatchEvent(new dom.window.Event("change",{bubbles:true})));
-  assert.equal(files.length,0,"the accept attribute alone cannot guarantee MIME validation");
-  assert.match(m.container.querySelector('[role="alert"]').textContent,/PNG・JPEG・WebP/);
-  const valid=new Blob(["hello"],{type:"image/png"});
-  Object.defineProperty(input,"files",{configurable:true,value:[valid]});
-  await act(async()=>input.dispatchEvent(new dom.window.Event("change",{bubbles:true})));
-  await m.flush();
-  assert.equal(files.length,1);
-  assert.equal(files[0].size,5);
-  await m.dispose();
+  const priorBitmap = globalThis.createImageBitmap;
+  const oldGetContext = dom.window.HTMLCanvasElement.prototype.getContext;
+  const oldToBlob = dom.window.HTMLCanvasElement.prototype.toBlob;
+  try {
+    await m.click(buttonWith(m.container,"アップロード"));
+    const input=m.container.querySelector('input[type="file"]');
+    assert.equal(input.getAttribute("aria-label"),"アイコン画像を選ぶ");
+    const tooLarge = new File([new Uint8Array(2*1024*1024+1)],"huge.png",{type:"image/png"});
+    Object.defineProperty(input,"files",{configurable:true,value:[tooLarge]});
+    await act(async()=>input.dispatchEvent(new dom.window.Event("change",{bubbles:true})));
+    assert.equal(files.length,0);
+    assert.match(m.container.querySelector('[role="alert"]').textContent,/2MB/);
+    const invalid = new File(["bad"],"not-an-icon.txt",{type:"text/plain"});
+    Object.defineProperty(input,"files",{configurable:true,value:[invalid]});
+    await act(async()=>input.dispatchEvent(new dom.window.Event("change",{bubbles:true})));
+    assert.equal(files.length,0);
+    assert.match(m.container.querySelector('[role="alert"]').textContent,/PNG・JPEG・WEBP/);
+
+    const drawings=[];
+    const bitmap={width:640,height:480,close(){}};
+    globalThis.createImageBitmap=async()=>bitmap;
+    dom.window.HTMLCanvasElement.prototype.getContext=function(){return {
+      clearRect(){},drawImage(...args){drawings.push({width:this.canvas?.width??null,args});}
+    };};
+    dom.window.HTMLCanvasElement.prototype.toBlob=function(cb,type){cb(new Blob(["encoded-webp"],{type:type==="image/webp"?"image/webp":"image/png"}));};
+    const valid=new File(["original"],"icon.png",{type:"image/png"});
+    Object.defineProperty(input,"files",{configurable:true,value:[valid]});
+    await act(async()=>input.dispatchEvent(new dom.window.Event("change",{bubbles:true})));
+    await m.flush();
+    assert.equal(files.length,0,"source file must not upload before crop confirmation");
+    assert.ok(m.container.querySelector('canvas[width="280"]'),"crop preview is mounted");
+    await m.click(buttonWith(m.container,"この画像を使用"));
+    await m.flush();
+    assert.equal(files.length,1,"only the converted file should be sent");
+    assert.equal(files[0][0],"foo");
+    assert.equal(files[0][1].type,"image/webp");
+    assert.equal(files[0][1].name,"icon.webp");
+    assert.equal(files[0][1].size,12);
+    assert.equal(files[0][1]===valid,false,"never upload original bytes");
+    assert.ok(drawings.length>=2,"preview and 256x256 conversion both draw");
+    assert.match(m.container.textContent,/アイコンをアップロードしました/);
+  } finally {
+    globalThis.createImageBitmap=priorBitmap;
+    dom.window.HTMLCanvasElement.prototype.getContext=oldGetContext;
+    dom.window.HTMLCanvasElement.prototype.toBlob=oldToBlob;
+    await m.dispose();
+  }
 });
 
 test("MIG-0708 U03: icon selection tracks authoritative icon changes after refresh", async () => {

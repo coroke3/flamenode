@@ -4,8 +4,10 @@ import type { ProfileFields, XidProfileApi } from "../../../api/xidProfile.js";
 import { isSafeRelativePath } from "../../next.js";
 import { SocialLinksEditor } from "../../../components/shared/SocialLinksEditor.js";
 import { YoutubeChannelPicker } from "../../../components/shared/YoutubeChannelPicker.js";
+import { SquareIconEditor } from "../../../components/shared/SquareIconEditor.js";
+import { SquareIconEditorBoundary } from "../../../components/shared/SquareIconEditorBoundary.js";
 
-/** MIG-0708 U03: isolated form components (not mounted until MIG-0636 contracts). */
+/** MIG-0708 U03: Personal settings form controls, mounted after MIG-0636 contract integration. */
 const NETWORK_ERROR = "通信または処理中に問題が発生しました。再読み込みしてお試しください。";
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const ALLOWED_ICON_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -99,9 +101,14 @@ export function XIdIconPicker({
   // Identity changes invalidate previously displayed mutation notices.
   React.useEffect(() => { setError(null); setMessage(null); }, [xUserId]);
   const [upload, setUpload] = React.useState(false);
-  const ref = React.useRef<HTMLInputElement>(null);
+  const [uploadPending, setUploadPending] = React.useState(false);
+  const uploadLock = React.useRef(false);
+  const [editorKey, setEditorKey] = React.useState(0);
+  // A different X ID must never inherit a previous account's editor or uploaded image.
+  React.useEffect(() => { setUpload(false); }, [xUserId]);
   const update = (task: () => ReturnType<XidProfileApi["setIcon"]>, successText: string) => {
     const requestIdentity = identityRef.current;
+    if (uploadLock.current) return;
     void execute(async () => {
       setError(null); setMessage(null);
       try {
@@ -117,23 +124,45 @@ export function XIdIconPicker({
       }
     });
   };
-  const onFileChange = (ev: React.ChangeEvent<HTMLInputElement>) => {
-    const file = ev.target.files?.[0];
-    if (!file) return;
-    // The file-picker accept attribute is advisory: validate the selected blob too.
-    if (!ALLOWED_ICON_MIME_TYPES.has(file.type)) {
-      setError("画像はPNG・JPEG・WebP形式を選択してください。");
-      ev.target.value = "";
-      return;
+  /** Editor produces an actual cropped 256x256 File, never the unprocessed original. */
+  const onUploadProcessedFile = async (file: File): Promise<{ ok: true } | { ok: false; message: string }> => {
+    if (pending || uploadLock.current) {
+      return { ok: false, message: "処理中です。少しお待ちください。" };
     }
-    // Mirror target upload ceiling before attempting to transmit a large blob.
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setError("画像は8MB以下にしてください。");
-      ev.target.value = "";
-      return;
+    // The shared editor validates the source at 2 MiB; the client and server must
+    // independently reject an invalid converted payload (8 MiB upload ceiling).
+    if (!ALLOWED_ICON_MIME_TYPES.has(file.type) || file.size === 0 || file.size > MAX_UPLOAD_BYTES) {
+      return { ok: false, message: "画像はPNG・JPEG・WebP形式で8MB以下にしてください。" };
     }
-    update(() => api.uploadIcon(xUserId, file), "アイコンをアップロードしました。");
-    ev.target.value = "";
+    const requestIdentity = identityRef.current;
+    uploadLock.current = true;
+    setUploadPending(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.uploadIcon(xUserId, file);
+      if (identityRef.current !== requestIdentity) {
+        return { ok: false, message: "X IDの選択が変更されました。" };
+      }
+      if (!result.ok) {
+        const message = result.message ?? "アップロードに失敗しました。";
+        setError(message);
+        return { ok: false, message };
+      }
+      setMessage(result.message ?? "アイコンをアップロードしました。");
+      if (result.iconUrl) setSelected(result.iconUrl);
+      setUpload(false);
+      setEditorKey((key) => key + 1);
+      onRefresh();
+      return { ok: true };
+    } catch {
+      const message = NETWORK_ERROR;
+      if (identityRef.current === requestIdentity) setError(message);
+      return { ok: false, message };
+    } finally {
+      uploadLock.current = false;
+      setUploadPending(false);
+    }
   };
   return (
     <div className="xids-stack">
@@ -141,21 +170,23 @@ export function XIdIconPicker({
       <div className="xids-iconRow" role="group" aria-label="X IDアイコン">
         {candidates.map(url => (
           <button key={url} type="button" className="xids-iconButton"
-            disabled={pending} aria-busy={pending} aria-pressed={url === selected}
+            disabled={pending || uploadPending} aria-busy={pending || uploadPending} aria-pressed={url === selected}
             aria-label="候補アイコンを選択"
             onClick={() => update(() => api.setIcon(xUserId, url), "アイコンを更新しました。")}>
             <img src={url} alt="" width={36} height={36} />
           </button>
         ))}
         <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
-          disabled={pending} aria-expanded={upload}
+          disabled={pending || uploadPending} aria-expanded={upload}
           onClick={() => { setError(null); setUpload(v => !v); }}>
           画像をアップロード
         </button>
       </div>
       {upload ? (
-        <input ref={ref} type="file" accept="image/png,image/jpeg,image/webp"
-          aria-label="アイコン画像ファイル" disabled={pending} onChange={onFileChange} />
+        <SquareIconEditorBoundary>
+          <SquareIconEditor key={`${xUserId}:${editorKey}`} pending={pending || uploadPending}
+            onUseImage={onUploadProcessedFile} onCancel={() => setUpload(false)} />
+        </SquareIconEditorBoundary>
       ) : null}
       {candidates.length === 0
         ? <p className="settings-accountNote">まだ候補がありません。画像をアップロードできます。</p> : null}
