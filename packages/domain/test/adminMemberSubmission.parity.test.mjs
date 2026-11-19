@@ -237,3 +237,33 @@ test("MIG-0650 SA-085 U03c: public-content dirtiness and no-op classification ma
     hasMemberAudit: false, hasChapterAudit: false,
   }).videoPublicContentChanged, false);
 });
+
+test("MIG-0650 U03cp supplied at-sign-only X handles fail closed before blank-row skip", () => {
+  for (const [rawX, name] of [
+    ["@", ""], ["@@@", ""], [" @ ", " "], ["@", "Alice"],
+    ["@@@", "Alice"], [" @@@ ", "Alice"],
+  ]) {
+    const json = encode([member(rawX, { name, chapters: [] })]);
+    const parsed = targetParse(json, true);
+    assert.equal(parsed.ok, false, JSON.stringify([rawX, name]));
+    assert.match(parsed.message, /X ID が不正/, JSON.stringify([rawX, name]));
+    const fd = new FormData();
+    fd.set("members_json", json);
+    const submitted = targetSubmission(fd, true);
+    assert.equal(submitted.ok, false, "neither Hono nor the CURRENT Next bridge may silently drop an explicit bad handle");
+  }
+
+  // Truly blank optional handles and blank member rows keep their old meaning.
+  const blanks = parity(encode([
+    member(" ", { name: " ", chapters: [] }),
+    member("", { name: "Named", chapters: [] }),
+    member(" @Valid_X ", { name: "", chapters: [] }),
+  ]), true);
+  assert.equal(blanks.ok, true);
+  assert.deepEqual(blanks.members.map(row => [row.name, row.x_user_id]), [
+    ["Named", ""],
+    ["@valid_x", "valid_x"],
+  ]);
+  const off = targetParse(encode([member("@", { name: "", chapters: [] })]), false);
+  assert.deepEqual(off, { ok: true, members: [] }, "noncollaboration remains ignored by CURRENT contract");
+});
