@@ -1185,3 +1185,68 @@ test("MIG-0638 U01b: snapshot lookup does not mistake a secret primary key for a
   );
   assert.equal(calls, 1, "invalid PK must be rejected before D1 reads");
 });
+
+
+test("MIG-0638 U01b: prototype-named SQL columns require own properties and preserve row identity", async () => {
+  const {
+    normalizeSpreadsheetPrimaryKey, primaryKeyFromSpreadsheetRow,
+    prepareCompleteInsertRow, prepareSpreadsheetUpdate, buildSpreadsheetUpdateSql,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+
+  for (const name of ["constructor", "toString", "__proto__"]) {
+    // These are legal quoted SQL identifier spellings and inherited JS keys.
+    assert.throws(() => normalizeSpreadsheetPrimaryKey([name], {}),
+      /missing_primary_key/, "a prototype property cannot supply a missing PK");
+    assert.throws(() => primaryKeyFromSpreadsheetRow({}, [name]),
+      /missing_primary_key/, "a prototype property cannot supply an import-row PK");
+    const explicit = Object.fromEntries([[name, "pk-value"]]);
+    const normalized = normalizeSpreadsheetPrimaryKey([name], explicit);
+    assert.deepEqual(normalized, explicit);
+    assert.deepEqual(primaryKeyFromSpreadsheetRow(explicit, [name]), explicit);
+    assert.equal(Object.getPrototypeOf(normalized), Object.prototype);
+    assert.ok(Object.hasOwn(normalized, name));
+
+    const requiredColumns = [
+      { name, type: "TEXT", notNull: true, pk: 1 },
+      { name: "title", type: "TEXT", notNull: false, pk: 0 },
+    ];
+    const requiredCtx = {
+      def: resolveSpreadsheetTableDef("slots", true),
+      columns: requiredColumns, columnNames: requiredColumns.map(x => x.name),
+      primaryKeys: [name],
+    };
+    assert.throws(() => prepareCompleteInsertRow(requiredCtx, { title: "x" }),
+      /missing_required_column/, "missing prototype-named column cannot appear supplied");
+    const inserted = prepareCompleteInsertRow(requiredCtx, explicit);
+    assert.equal(inserted[name], "pk-value");
+    assert.equal(Object.getPrototypeOf(inserted), Object.prototype);
+    assert.ok(Object.hasOwn(inserted, name));
+
+    // A prototype-named non-PK column must be editable only when present
+    // explicitly, and "__proto__" must remain a data field in the after-image.
+    const editableColumns = [
+      { name: "id", type: "TEXT", notNull: true, pk: 1 },
+      { name, type: "TEXT", notNull: false, pk: 0 },
+    ];
+    const editCtx = {
+      def: resolveSpreadsheetTableDef("slots", true),
+      columns: editableColumns, columnNames: editableColumns.map(x => x.name),
+      primaryKeys: ["id"],
+    };
+    const before = Object.fromEntries([["id", "x"], [name, "old"]]);
+    assert.throws(() => prepareSpreadsheetUpdate(editCtx, before, {}),
+      /empty_row/, "empty input cannot implicitly edit inherited properties");
+    const updated = prepareSpreadsheetUpdate(editCtx, before,
+      Object.fromEntries([[name, "new"]]));
+    assert.deepEqual(updated.setColumns, [name]);
+    assert.equal(updated.after[name], "new");
+    assert.equal(before[name], "old", "input snapshot remains unchanged");
+    assert.equal(Object.getPrototypeOf(updated.after), Object.prototype);
+    assert.ok(Object.hasOwn(updated.after, name));
+    const sql = buildSpreadsheetUpdateSql(editCtx, { id: "x" }, before,
+      Object.fromEntries([[name, "new"]]));
+    assert.match(sql.statement, new RegExp('^UPDATE "slots" SET "' + name +
+      '" = \\? WHERE "id" = \\? AND'));
+    assert.equal(sql.binds[0], "new");
+  }
+});
