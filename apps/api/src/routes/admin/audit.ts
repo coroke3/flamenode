@@ -153,6 +153,9 @@ auditAdminRoutes.post("/dry-run", async (c) => {
 // CURRENT. The admin router supplies origin/session/write-identity/CostGuard.
 // Production routing remains CURRENT until the MIG-0603 merge and release gates.
 auditAdminRoutes.post("/restore", async (c) => {
+  // Audit restoration may return sensitive snapshots and conflict diffs.
+  // Explicitly prevent HTTP/edge caching on 200, 400 and 413 responses.
+  c.header("Cache-Control", "private, no-store");
   const read = await readAdminJsonBody(c.req.raw);
   if (read.kind === "too_large") {
     return c.json<AuditRestoreResponse>(

@@ -121,6 +121,27 @@ test("T02 invalid body and oversized JSON return 400/413 without D1 mutation", a
   assert.equal(ctx.stats.batches, 0);
 });
 
+test("T05 restore responses are private no-store across validation, rejection, and success", async () => {
+  const ctx = setup();
+  seedRestorableAnnouncement(ctx.sqlite);
+  const scenarios = [
+    { payload: body({ reason: "" }), status: 400, ok: false },
+    { payload: body({ reason: "x".repeat(70000) }), status: 413, ok: false },
+    { payload: body({ confirm_text: "incorrect" }), status: 200, ok: false },
+    { payload: body(), status: 200, ok: true },
+  ];
+  for (const item of scenarios) {
+    const response = await ctx.request(item.payload);
+    assert.equal(response.status, item.status);
+    assert.equal(
+      response.headers.get("Cache-Control"),
+      "private, no-store",
+      "audit restore snapshots/diffs must never be cached",
+    );
+    assert.equal((await response.json()).ok, item.ok);
+  }
+});
+
 test("T03 confirmation text is mandatory; no accidental restore writes", async () => {
   const ctx = setup();
   seedRestorableAnnouncement(ctx.sqlite);
