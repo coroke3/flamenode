@@ -185,6 +185,16 @@ export interface SpreadsheetSqlPlan {
   statement: string;
   binds: readonly (string | number | null)[];
 }
+
+/** D1's per-statement bind ceiling applies to write SQL AND pre-read SQL. */
+export const SPREADSHEET_SQL_MAX_BINDS = 100;
+
+function boundedSpreadsheetSqlPlan<T extends SpreadsheetSqlPlan>(plan: T): T {
+  if (plan.binds.length > SPREADSHEET_SQL_MAX_BINDS) {
+    throw new Error("batch_too_large");
+  }
+  return plan;
+}
 export interface SpreadsheetSqlTableContext extends SpreadsheetWriteValidationContext {
   primaryKeys: readonly string[];
   columns: readonly (SpreadsheetWriteValidationContext["columns"][number] & { pk: number })[];
@@ -244,12 +254,12 @@ export function buildSpreadsheetInsertSql(
   );
   const keys = Object.keys(row);
   if (keys.length === 0) throw new Error("empty_row");
-  return {
+  return boundedSpreadsheetSqlPlan({
     statement: "INSERT INTO " + spreadsheetTableIdentifier(ctx) +
       " (" + keys.map(quoteSpreadsheetIdentifier).join(", ") + ") VALUES (" + keys.map(() => "?").join(", ") + ")",
     binds: keys.map(key => row[key]),
     row,
-  };
+  });
 }
 export function buildSpreadsheetUpdateSql(
   ctx: SpreadsheetSqlTableContext,
@@ -262,13 +272,13 @@ export function buildSpreadsheetUpdateSql(
   const { setColumns, after } = prepareSpreadsheetUpdate(ctx, before, values);
   const key = spreadsheetPkCondition(ctx, pk);
   const snapshot = spreadsheetSnapshotCondition(ctx, before);
-  return {
+  return boundedSpreadsheetSqlPlan({
     statement: "UPDATE " + spreadsheetTableIdentifier(ctx) + " SET " +
       setColumns.map(column => quoteSpreadsheetIdentifier(column) + " = ?").join(", ") +
       " WHERE " + key.statement + " AND " + snapshot.statement,
     binds: [...setColumns.map(column => values[column] === "" ? null : (values[column] ?? null)), ...key.binds, ...snapshot.binds],
     after,
-  };
+  });
 }
 export function buildSpreadsheetDeleteSql(
   ctx: SpreadsheetSqlTableContext,
@@ -280,11 +290,11 @@ export function buildSpreadsheetDeleteSql(
   assertSpreadsheetSnapshotPrimaryKey(ctx, pk, before);
   const key = spreadsheetPkCondition(ctx, pk);
   const snapshot = spreadsheetSnapshotCondition(ctx, before);
-  return {
+  return boundedSpreadsheetSqlPlan({
     statement: "DELETE FROM " + spreadsheetTableIdentifier(ctx) +
       " WHERE " + key.statement + " AND " + snapshot.statement,
     binds: [...key.binds, ...snapshot.binds],
-  };
+  });
 }
 
 
@@ -406,6 +416,7 @@ export async function fetchSpreadsheetRawSnapshot(
   const key = spreadsheetPkCondition(ctx, normalized);
   const statement = "SELECT * FROM " + spreadsheetTableIdentifier(ctx) +
     " WHERE " + key.statement + " LIMIT 1";
+  if (key.binds.length > SPREADSHEET_SQL_MAX_BINDS) throw new Error("batch_too_large");
   const row = await db.prepare(statement).bind(...key.binds).first<Record<string, unknown>>();
   if (!row) throw new Error("row_not_found");
   // Never allow an incomplete pre-read to be reinterpreted as a NULL in CAS.
@@ -711,6 +722,9 @@ export async function fetchSpreadsheetExistingImportRows(
     binds.push(...cond.binds as string[]);
     return "(" + cond.statement + ")";
   });
+  // This is one D1 statement: 7 import rows times PK width can exceed the
+  // 100-bind ceiling. Reject before preparing any SQL or using a partial map.
+  if (binds.length > SPREADSHEET_SQL_MAX_BINDS) throw new Error("batch_too_large");
   const sql = "SELECT * FROM " + spreadsheetTableIdentifier(ctx) + " WHERE " + clauses.join(" OR ");
   const result = await db.prepare(sql).bind(...binds).all<Record<string, unknown>>();
   const out = new Map<string, Record<string, unknown>>();
