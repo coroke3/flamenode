@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { drizzle } from "drizzle-orm/d1";
+import { AuditMutationError } from "@flamenode/server-core/audit/mutate";
 import * as schema from "@flamenode/db/schema";
 import { createSqlite } from "./support/personalHarness.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
@@ -361,6 +362,110 @@ test("Hono full status executor fails closed after successful R2 precommit and s
     assert.doesNotMatch(JSON.stringify({ result, diagnostics }), /Bearer|private-token|D1 transport timeout/);
   } finally {
     console.warn = originalWarn;
+    sqlite.close();
+  }
+});
+
+test("Hono executor permits CAS conflict retry only after a verified successful R2 rollback", async () => {
+  const sqlite = createSqlite();
+  try {
+    sqlite.prepare(`
+      INSERT INTO videos (
+        id, submitted_by_user_id, creator_display_name, title,
+        visibility_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run("video-rollback-ok", "missing-user", "Creator", "Video", "public", 1000, 1000);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const unrelated = {
+      entity_type: "video", entity_id: "video-foreign",
+      fence_token: "vf-foreign", blocked_at: 1000, reason: "other",
+    };
+    let stored = {
+      schema_version: 1, revision: 1, generated_at: 1000, entities: [unrelated],
+    };
+    let revision = 1;
+    let writes = 0;
+    const bucket = {
+      get: async () => {
+        const body = JSON.stringify(stored);
+        return {
+          size: Buffer.byteLength(body), etag: "etag-" + revision,
+          text: async () => body,
+        };
+      },
+      put: async (_key, body, options) => {
+        assert.deepEqual(options.onlyIf, { etagMatches: "etag-" + revision });
+        const candidate = JSON.parse(body);
+        const ownsFence = candidate.entities.some((entry) =>
+          entry.entity_type === "video" && entry.entity_id === "video-rollback-ok");
+        assert.equal(ownsFence, writes === 0,
+          "first put precommits, second put removes exactly the target block");
+        writes += 1;
+        revision += 1;
+        stored = candidate;
+        return { etag: "etag-" + revision };
+      },
+    };
+    let mutationCalls = 0;
+    let rereadCalls = 0;
+    const logs = [];
+    const host = createVideoVisibilityStatusMutationHost({
+      env: { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" },
+      get: (key) => {
+        if (key === "auditSettings") return { enabled: true, retentionDays: 90 };
+        if (key === "actorSnapshotJsonById") return { admin: '{"role":"admin"}' };
+        throw new Error("unexpected context read: " + key);
+      },
+    }, {
+      createTraceId: () => "trace-rollback-success",
+      mutateWithAudit: async () => {
+        mutationCalls += 1;
+        throw new AuditMutationError("forced D1 CAS mismatch");
+      },
+    });
+    const realReread = host.rereadStatus;
+    host.rereadStatus = async (requestDb, videoId) => {
+      rereadCalls += 1;
+      return realReread(requestDb, videoId);
+    };
+    host.log = (level, tag, details) => logs.push([level, tag, details]);
+
+    const result = await executeHonoVideoVisibilityStatusMutation({
+      db,
+      videoId: "video-rollback-ok",
+      requestedStatus: "private",
+      transition: {
+        mutationStatements: ["video-update"],
+        expectedMutationChanges: [1],
+        audits: [{ table_name: "videos", target_id: "video-rollback-ok", operation: "UPDATE" }],
+        notificationBatch: { statements: [], expectedChanges: [] },
+        queueBatch: { statements: [], expectedChanges: [] },
+        visibilityChanged: true,
+        fenceToken: "vf-rollback-owned",
+        depublicizedFromPublic: true,
+        publicCacheKeys: [],
+        exportEventIds: [],
+      },
+      reason: null,
+      logTag: "admin-video-status",
+    }, host);
+    assert.deepEqual(result, {
+      ok: false,
+      message: "別の担当者が状態を変更しました。状態を再取得してもう一度お試しください。",
+      errorCode: "concurrent_update",
+      traceId: "trace-rollback-success",
+      retryable: true,
+    }, "retryable CAS conflict is safe only after R2 cleanup is positively confirmed");
+    assert.equal(writes, 2);
+    assert.equal(mutationCalls, 1);
+    assert.equal(rereadCalls, 1);
+    assert.deepEqual(stored.entities, [unrelated], "foreign manifest entries remain untouched");
+    assert.equal(await host.confirmCompensation("video-rollback-ok"), true);
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+    assert.deepEqual(logs, [], "no false compensation-outage warning on verified rollback");
+  } finally {
     sqlite.close();
   }
 });
