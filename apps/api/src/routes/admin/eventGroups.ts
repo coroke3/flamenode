@@ -1220,14 +1220,19 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
         retention_class: "restorable" as const,
       },
     ];
-    const budget = planD1AuditMutationBudget({
-      mutationStatementCount: mutationStatements.length,
-      mutationAssertionCount: expectedMutationChanges.length,
-      preMutationAssertionCount: 1,
-      auditEntryCount: audits.length,
-      distinctActorCount: 1,
+    // The joined CostGuard read and authoritative write guard preload audit
+    // settings and the actor snapshot. Count only the D1 reads the atomic
+    // executor will actually perform (including the build marker's UPDATE and
+    // changes() assertion), without lowering the hard 50-query limit.
+    const atomicMutation = {
+      mutationStatements,
+      expectedMutationChanges,
+      preMutationAssertions: [relationSnapshotCas],
+      preloaded: auditPreloaded(c),
       callerQueryCount: 3,
-    });
+      audits,
+    };
+    const budget = planAtomicAuditMutationBudget(atomicMutation);
     if (!budget.withinLimit) {
       return c.json({ ok: false, message: EVENT_GROUP_WRITE_FAILED }, 503);
     }
@@ -1263,14 +1268,7 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
         }, fenceHost);
         fencePreCommitted = true;
       }
-      await mutateWithAudit(db, {
-        mutationStatements,
-        expectedMutationChanges,
-        preMutationAssertions: [relationSnapshotCas],
-        preloaded: auditPreloaded(c),
-        callerQueryCount: 3,
-        audits,
-      });
+      await mutateWithAudit(db, atomicMutation);
     } catch {
       if (fenceToken && fenceHost && fencePreCommitted) {
         await compensatePublicVisibilityFenceOnD1Failure({
