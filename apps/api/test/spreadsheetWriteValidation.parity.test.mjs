@@ -1136,3 +1136,52 @@ test("MIG-0638 U01b: multi-column PK pre-reads reject >100 binds before D1 acces
     /row_not_found/);
   assert.equal(prepares, 2, "single snapshot read at 100 binds must reach D1");
 });
+
+
+test("MIG-0638 U01b: snapshot lookup does not mistake a secret primary key for a forbidden cell mutation", async () => {
+  const {
+    fetchSpreadsheetRawSnapshot, normalizeSpreadsheetPrimaryKey,
+    validateSpreadsheetInputValues,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "access_token", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    primaryKeys: ["access_token"],
+    columns, columnNames: columns.map(column => column.name),
+  };
+  const pk = { access_token: "secret-PK-1" };
+  // CURRENT normalizes and binds PK values without imposing cell editability.
+  assert.deepEqual(normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pk), pk);
+  assert.throws(() => validateSpreadsheetInputValues(ctx, pk), /column_not_editable/,
+    "editable-cell policy is intentionally stricter than row identity lookup");
+
+  let calls = 0;
+  const db = {
+    prepare(sql) {
+      calls += 1;
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE "access_token" = ? LIMIT 1');
+      return {
+        bind(...args) {
+          assert.deepEqual(args, ["secret-PK-1"]);
+          return {
+            async first() {
+              return { access_token: "secret-PK-1", title: "original" };
+            },
+          };
+        },
+      };
+    },
+  };
+  assert.deepEqual(await fetchSpreadsheetRawSnapshot(db, ctx, pk, 1), {
+    access_token: "secret-PK-1", title: "original",
+  });
+  assert.equal(calls, 1);
+  await assert.rejects(
+    fetchSpreadsheetRawSnapshot(db, ctx, { access_token: "bad\u0000pk" }, 1),
+    /invalid_row/,
+  );
+  assert.equal(calls, 1, "invalid PK must be rejected before D1 reads");
+});
