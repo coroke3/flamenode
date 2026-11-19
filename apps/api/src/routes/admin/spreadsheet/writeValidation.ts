@@ -412,7 +412,10 @@ export async function fetchSpreadsheetRawSnapshot(
     throw new Error("batch_too_large");
   }
   const normalized = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pk);
-  validateSpreadsheetInputValues(ctx, normalized);
+  // PK values identify a row; they are not editable cell mutations. CURRENT
+  // fetchRowByPkRaw/buildPkWhere applies the PK presence/NUL guard, but NOT
+  // isSpreadsheetColumnEditable (which can reject a secret/readonly PK).
+  // Actual mutation fields are validated by the downstream write planner.
   const key = spreadsheetPkCondition(ctx, normalized);
   const statement = "SELECT * FROM " + spreadsheetTableIdentifier(ctx) +
     " WHERE " + key.statement + " LIMIT 1";
