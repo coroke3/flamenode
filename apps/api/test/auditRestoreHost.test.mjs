@@ -197,3 +197,50 @@ test("U01 first-create race merges new blocks with the existing R2 manifest", as
     [["event", "new-event"], ["video", "new-video"]],
   );
 });
+
+test("U01 missing vs explicitly undefined conditional matches CURRENT R2 write semantics", async () => {
+  const puts = [];
+  const bucket = {
+    put: async (_key, _value, opts) => {
+      puts.push(opts);
+      return { etag: "new" };
+    },
+  };
+  const m = { schema_version: 1, revision: 0, generated_at: 1, entities: [] };
+  const current = host({ BUCKET: bucket });
+  await current.manifest.write(m);
+  await current.manifest.write(m, { ifMatchEtag: undefined });
+  assert.equal(puts.length, 2);
+  assert.equal(puts[0].onlyIf, undefined, "omitted option remains unconditional");
+  assert.equal(puts[1].onlyIf.get("If-None-Match"), "*", "explicit undefined is create-if-absent");
+});
+
+test("U01 absent Cache API and delete failure are fail-soft without leaking keys to logs", async () => {
+  const originalCache = globalThis.caches;
+  const originalWarn = console.warn;
+  const warnings = [];
+  try {
+    console.warn = (...parts) => { warnings.push(parts.join(" ")); };
+    // A local Node environment may not provide Cloudflare's Cache API.
+    if (originalCache === undefined) delete globalThis.caches;
+    else globalThis.caches = undefined;
+    await host().invalidateEventExportCache("private-sensitive-event");
+    assert.equal(warnings.length, 8);
+    assert.ok(warnings.every((message) => message === "[public-cache] cache_api_delete_failed"));
+
+    const deletes = [];
+    globalThis.caches = { default: { delete: async (url) => {
+      deletes.push(url);
+      throw new Error("provider_internal_private_key");
+    } } };
+    await host().deletePublicJsonCaches(["videos/sensitive.json", "events/sensitive.json"]);
+    assert.equal(deletes.length, 2, "all deletes are attempted after an edge-cache failure");
+    assert.equal(warnings.length, 10);
+    assert.ok(warnings.every((message) => message === "[public-cache] cache_api_delete_failed"));
+    assert.ok(warnings.every((message) => !/sensitive|provider_internal_private_key/.test(message)));
+  } finally {
+    console.warn = originalWarn;
+    if (originalCache === undefined) delete globalThis.caches;
+    else globalThis.caches = originalCache;
+  }
+});
