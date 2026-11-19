@@ -160,11 +160,22 @@ import { atomicD1, seedChapterWorld, SESSION_USER, SITE } from "./support/chapte
 import { validateVideoMemberSubmission } from "@flamenode/domain/video/adminMemberSubmission";
 import { MAX_ADMIN_JSON_BODY_BYTES } from "../src/routes/admin/body.ts";
 
-function realGuardFixture({ as = "u_admin", mode = "normal", observeBinding, enableCanonicalDryRun = false, afterCanonicalDryRun } = {}) {
+function realGuardFixture({
+  as = "u_admin", mode = "normal", observeBinding,
+  enableCanonicalDryRun = false, afterCanonicalDryRun,
+  enableAtomicCandidateWrite = false, beforeAtomicBatch,
+} = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
   sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'").run(mode);
   const d1 = atomicD1(sqlite);
+  if (beforeAtomicBatch) {
+    const providerBatch = d1.batch.bind(d1);
+    d1.batch = async statements => {
+      await beforeAtomicBatch(sqlite);
+      return providerBatch(statements);
+    };
+  }
   const actor = as ? SESSION_USER(as, as === "u_admin" ? "admin" : "user", "x_admin") : null;
   const session = async (c, next) => {
     observeBinding?.(c.env.DB);
@@ -174,7 +185,7 @@ function realGuardFixture({ as = "u_admin", mode = "normal", observeBinding, ena
   };
   const app = new Hono();
   const host = createDefaultVideoAdminMembersPreflightHost({
-    session, enableCanonicalDryRun,
+    session, enableCanonicalDryRun, enableAtomicCandidateWrite,
   });
   // Test-only hook observes the read facade BEFORE writeGuard.finally executes.
   // This proves canonical dry-run seals access in the handler itself, not just
@@ -1967,3 +1978,127 @@ test("MIG-0650 U03co SELECT-only D1 meter rejects side-effect function calls bef
     s.sqlite.close();
   }
 });
+
+
+test("MIG-0650 U03cr opt-in unmounted Hono SA-085 no-op returns CURRENT receipt without any D1 batch", async () => {
+  const s = realGuardFixture({ enableAtomicCandidateWrite: true });
+  try {
+    const res = await s.send(
+      { is_collab: ["false"], members_json: "[]" },
+      SITE, "/api/videos/v_two/members",
+    );
+    assert.equal(res.status, 200, await res.clone().text());
+    assert.deepEqual(await res.json(), {
+      ok: true, message: "参加者設定に変更はありません。", videoId: "v_two",
+    });
+    assert.ok(s.d1.stats.reads > 3, "member planner must meter canonical D1 reads");
+    assert.equal(s.d1.stats.batches, 0);
+    assert.equal(s.count("video_members"), 0);
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03cr opt-in Hono writer seals the read meter then atomically saves member, audit and Queue", async () => {
+  let facade;
+  let checkedSeal = 0;
+  const s = realGuardFixture({
+    enableAtomicCandidateWrite: true,
+    observeBinding: metered => { facade = metered; },
+    beforeAtomicBatch: () => {
+      checkedSeal++;
+      assert.ok(facade, "origin/session guard exposed only the read-only meter");
+      assert.throws(() => facade.prepare("SELECT 1"), {
+        name: "RangeError", message: "video_admin_member_d1_read_meter_closed",
+      }, "the provider must not receive a write while any read facade is open");
+    },
+  });
+  try {
+    const chaptersBefore = s.count("video_chapters");
+    const req = { is_collab: ["true"], members_json: JSON.stringify([{
+      name: "Owner", x_user_id: "x_owner", role: "", comment: "",
+      chapters: [{ time: "0:12", label: "Owner", note: "Checked" }],
+    }]) };
+    const res = await s.send(req, SITE, "/api/videos/v_two/members");
+    assert.equal(res.status, 200, await res.clone().text());
+    assert.deepEqual(await res.json(), {
+      ok: true, message: "参加者設定を保存しました。", videoId: "v_two",
+      pendingPublicReflection: true,
+    });
+    assert.equal(s.d1.stats.batches, 1, "single atomic D1 mutation/audit/Queue batch");
+    assert.equal(checkedSeal, 1);
+    assert.equal(s.count("video_members"), 1);
+    assert.equal(s.count("video_chapters"), chaptersBefore + 1);
+    assert.ok(s.count("audit_logs") >= 3);
+    assert.ok(s.count("static_rebuild_queue") > 0);
+    assert.equal(s.sqlite.prepare(
+      "SELECT collaboration_type FROM videos WHERE id = 'v_two'",
+    ).get().collaboration_type, "collab");
+    assert.equal(s.sqlite.prepare(
+      "SELECT x_user_id FROM video_members WHERE video_id = 'v_two' AND is_public_member=1",
+    ).get().x_user_id, "x_owner");
+    assert.ok(s.d1.stats.reads <= 50, "metered guard and planning stay inside D1 query ceiling");
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03cr opt-in Hono SA-085 stale member CAS rolls back all mutation, audit and Queue", async () => {
+  const s = realGuardFixture({
+    enableAtomicCandidateWrite: true,
+    beforeAtomicBatch: sqlite => {
+      sqlite.prepare(
+        "INSERT INTO video_members " +
+        "(id, video_id, x_user_id, name, role, comment, order_index, can_edit, " +
+        "is_public_member, edit_granted_by_auth_user_id, edit_granted_at, edit_updated_at) " +
+        "VALUES (?, ?, ?, ?, NULL, NULL, ?, 0, 1, NULL, NULL, NULL)",
+      ).run("raced_hono_member", "v_two", null, "Other admin", 0);
+    },
+  });
+  try {
+    const chaptersBefore = s.count("video_chapters");
+    const res = await s.send({
+      is_collab: ["true"],
+      members_json: JSON.stringify([{ name: "Owner", x_user_id: "x_owner", chapters: [] }]),
+    }, SITE, "/api/videos/v_two/members");
+    assert.equal(res.status, 503, await res.clone().text());
+    assert.equal((await res.json()).ok, false);
+    assert.equal(s.d1.stats.batches, 1, "optimistic CAS fails inside one transaction");
+    assert.equal(s.count("video_members"), 1, "concurrent row must survive a rejected save");
+    assert.equal(s.sqlite.prepare("SELECT id FROM video_members WHERE video_id='v_two'")
+      .get().id, "raced_hono_member");
+    assert.equal(s.count("video_chapters"), chaptersBefore);
+    assert.equal(s.count("audit_logs"), 0);
+    assert.equal(s.count("static_rebuild_queue"), 0);
+    assert.equal(s.sqlite.prepare(
+      "SELECT collaboration_type FROM videos WHERE id = 'v_two'",
+    ).get().collaboration_type, "individual");
+  } finally { s.sqlite.close(); }
+});
+
+test("MIG-0650 U03cr default unmounted route remains 501 and auth denial prevents opt-in writes", async () => {
+  assert.throws(
+    () => createDefaultVideoAdminMembersPreflightHost({
+      enableCanonicalDryRun: true, enableAtomicCandidateWrite: true,
+    }),
+    { name: "RangeError", message: "video_admin_member_candidate_conflicting_execution_modes" },
+  );
+  for (const cfg of [
+    { as: null, status: 401 },
+    { as: "u_other", status: 403 },
+    { mode: "maintenance", status: 503 },
+  ]) {
+    const s = realGuardFixture({ ...cfg, enableAtomicCandidateWrite: true });
+    try {
+      const res = await s.send(valid(), SITE, "/api/videos/v_two/members");
+      assert.equal(res.status, cfg.status);
+      assert.equal(s.d1.stats.batches, 0);
+      assert.equal(s.count("audit_logs"), 0);
+    } finally { s.sqlite.close(); }
+  }
+  const defaultHost = realGuardFixture();
+  try {
+    const res = await defaultHost.send(valid(), SITE, "/api/videos/v_two/members");
+    assert.equal(res.status, 501);
+    assert.equal(defaultHost.d1.stats.batches, 0);
+  } finally { defaultHost.sqlite.close(); }
+});
+
