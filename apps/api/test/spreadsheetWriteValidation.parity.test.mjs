@@ -2114,6 +2114,48 @@ test("MIG-0638 U01b: FK lookup must never match missing or inherited D1 result v
   const numeric = buildSpreadsheetForeignKeyLookups(fk, [{ event_id: "42" }], 1)[0];
   assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(numeric,
     [{ value: 42 }]), "valid SQLite integer FK values still round-trip as strings");
+  // SQLite/D1 can return an INTEGER above 2^53-1 as a rounded JS number.
+  // Without a safe-integer guard, two distinct FK targets can stringify to
+  // the same decimal text and authorize a write against the wrong key.
+  for (const unsafe of [9007199254740992, -9007199254740992]) {
+    const rounded = buildSpreadsheetForeignKeyLookups(
+      fk, [{ event_id: String(unsafe) }], 1,
+    )[0];
+    assert.throws(() => assertSpreadsheetForeignKeyLookup(rounded,
+      [{ value: unsafe }]), error =>
+      error instanceof Error && error.message === "invalid_snapshot");
+    let reads = 0;
+    const db = { prepare(statement) {
+      reads++;
+      assert.match(statement, /^SELECT /);
+      return { bind() { return { async all() {
+        return { results: [{ value: unsafe }] };
+      } }; } };
+    } };
+    await assert.rejects(
+      () => validateSpreadsheetForeignKeys(db, fk,
+        [{ event_id: String(unsafe) }], 1),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+    );
+    assert.equal(reads, 1, "unsafe result rejects after one bounded SELECT");
+  }
+  for (const safe of [Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, 42]) {
+    const valid = buildSpreadsheetForeignKeyLookups(
+      fk, [{ event_id: String(safe) }], 1,
+    )[0];
+    assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(valid,
+      [{ value: safe }]), "safe INTEGER FK references remain valid");
+  }
+  const fractional = buildSpreadsheetForeignKeyLookups(
+    fk, [{ event_id: "1.25" }], 1,
+  )[0];
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(fractional,
+    [{ value: 1.25 }]), "legitimate fractional REAL values remain valid");
+  const textKey = buildSpreadsheetForeignKeyLookups(
+    fk, [{ event_id: "9007199254740993" }], 1,
+  )[0];
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(textKey,
+    [{ value: "9007199254740993" }]), "large precise TEXT keys remain valid");
 });
 
 test("MIG-0638 U01b: FK planner rejects non-string or inherited input before D1", async () => {
