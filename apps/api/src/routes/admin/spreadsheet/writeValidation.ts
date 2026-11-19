@@ -557,6 +557,34 @@ export interface SpreadsheetImportRowValidation {
   preparedRows: PreparedSpreadsheetImportRow[];
   errors: Array<{ index: number; message: string }>;
 }
+
+/**
+ * Both U02 D1 pre-reads and mutation planning must bind the same verified PK.
+ * A caller may replace an entry in the preparedRows array after preflight;
+ * a stale, forged or swapped fingerprint must never select another before-row.
+ * This is a pure, unmounted guard and does not authorize an import.
+ */
+function verifySpreadsheetPreparedImportIdentity(
+  ctx: SpreadsheetSqlTableContext,
+  entry: PreparedSpreadsheetImportRow,
+): { pk: Record<string, string>; fingerprint: string } {
+  try {
+    if (!entry || typeof entry !== "object" || !entry.row || !entry.pk ||
+        typeof entry.row !== "object" || typeof entry.pk !== "object") {
+      throw new Error("invalid_row");
+    }
+    const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, entry.pk);
+    const rowPk = primaryKeyFromSpreadsheetRow(entry.row, ctx.primaryKeys);
+    const fingerprint = spreadsheetImportPrimaryKeyFingerprint(pk);
+    if (entry.fingerprint !== fingerprint ||
+        spreadsheetImportPrimaryKeyFingerprint(rowPk) !== fingerprint) {
+      throw new Error("invalid_row");
+    }
+    return { pk, fingerprint };
+  } catch {
+    throw new Error("invalid_row");
+  }
+}
 export function prepareSpreadsheetImportMutationRows(
   ctx: SpreadsheetSqlTableContext,
   rows: readonly Record<string, string | null>[],
@@ -619,16 +647,20 @@ export function planSpreadsheetImportMutations(
   if (mode === "upsert" && !existingRowsByPk) throw new Error("invalid_snapshot");
   if (!operatorId.trim()) throw new Error("missing_operator");
   const mutations: SpreadsheetAuditedSqlPlan[] = [];
+  const seenPks = new Set<string>();
   let inserted = 0;
   let updated = 0;
   let skipped = 0;
   for (const preparedRow of prepared.preparedRows) {
+    const verified = verifySpreadsheetPreparedImportIdentity(ctx, preparedRow);
+    if (seenPks.has(verified.fingerprint)) throw new Error("duplicate_primary_key");
+    seenPks.add(verified.fingerprint);
     if (mode === "insert") {
       mutations.push(buildSpreadsheetAuditedInsert(ctx, preparedRow.row, operatorId));
       inserted++;
       continue;
     }
-    const existing = existingRowsByPk?.get(preparedRow.fingerprint) ?? null;
+    const existing = existingRowsByPk?.get(verified.fingerprint) ?? null;
     if (!existing) {
       mutations.push(buildSpreadsheetAuditedInsert(ctx, preparedRow.row, operatorId));
       inserted++;
@@ -644,7 +676,7 @@ export function planSpreadsheetImportMutations(
       skipped++;
       continue;
     }
-    mutations.push(buildSpreadsheetAuditedUpdate(ctx, preparedRow.pk, existing, preparedRow.row, operatorId));
+    mutations.push(buildSpreadsheetAuditedUpdate(ctx, verified.pk, existing, preparedRow.row, operatorId));
     updated++;
   }
   return { mutations, inserted, updated, skipped };
@@ -725,11 +757,10 @@ export async function fetchSpreadsheetExistingImportRows(
   const seen = new Set<string>();
   const keys: Record<string, string>[] = [];
   for (const entry of prepared.preparedRows) {
-    const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, entry.pk);
-    const fingerprint = spreadsheetImportPrimaryKeyFingerprint(pk);
-    if (seen.has(fingerprint)) throw new Error("duplicate_primary_key");
-    seen.add(fingerprint);
-    keys.push(pk);
+    const verified = verifySpreadsheetPreparedImportIdentity(ctx, entry);
+    if (seen.has(verified.fingerprint)) throw new Error("duplicate_primary_key");
+    seen.add(verified.fingerprint);
+    keys.push(verified.pk);
   }
   // One statement; all requested primary-key components are positional binds.
   const binds: string[] = [];
