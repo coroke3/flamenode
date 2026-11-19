@@ -88,3 +88,20 @@ test("MIG-0708 U02: 413 validation, provider failure and malformed 200 fail clos
   const rejects = createXidProfileApi(async () => { throw Error("SECRET_DB_TOKEN"); });
   assert.deepEqual(await rejects.setActive("foo"), { ok: false });
 });
+
+
+test("MIG-0708 U04: canonical X ID response schema accepts reason and rejects invalid optional fields", async () => {
+  const responses = [
+    ok({ ok: true, reason: "already_active" }),
+    ok({ ok: true, reason: 7 }),
+    ok({ ok: true, iconUrl: null }),
+    new Response(JSON.stringify({ ok: true, message: "not-success", reason: "forbidden" }), { status: 403 }),
+    new Response(JSON.stringify({ ok: false, reason: "not_linked" }), { status: 403 }),
+  ];
+  const api = createXidProfileApi(async () => responses.shift());
+  assert.deepEqual(await api.setActive("foo"), { ok: true, reason: "already_active" });
+  assert.deepEqual(await api.setActive("foo"), { ok: false });
+  assert.deepEqual(await api.setActive("foo"), { ok: false });
+  assert.deepEqual(await api.setActive("foo"), { ok: false, message: "not-success", reason: "forbidden" });
+  assert.deepEqual(await api.setActive("foo"), { ok: false, message: undefined, reason: "not_linked" });
+});

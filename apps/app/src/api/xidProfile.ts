@@ -1,12 +1,7 @@
-/** MIG-0708 U02: provisional Personal X ID mutation transport (D-16-1).
- * No NEXT / Auth.js / D1 imports. Before MIG-0636 merges, keep this client
- * unmounted; migrate the response contract to @flamenode/contracts/xid at U04.
- */
-export interface XidProfileResult {
-  ok: boolean;
-  message?: string;
-  iconUrl?: string;
-}
+/** MIG-0708 U02/U04: Personal X ID mutation transport; still unmounted pending Settings wiring. */
+import { XIdWriteResultSchema, type XIdWriteResult } from "@flamenode/contracts";
+
+export type XidProfileResult = XIdWriteResult;
 export type ProfileFields = {
   x_name: string;
   profile_text: string;
@@ -26,14 +21,6 @@ const jsonHeaders = { accept: "application/json", "content-type": "application/j
 const INVALID = { ok: false } as const;
 const MAX_ICON_BYTES = 8 * 1024 * 1024;
 const ALLOWED_ICON_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
-
-function isXidResult(value: unknown): value is XidProfileResult {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.ok === "boolean"
-    && (record.message === undefined || typeof record.message === "string")
-    && (record.iconUrl === undefined || typeof record.iconUrl === "string");
-}
 
 async function request(
   fetchFn: FetchLike,
@@ -58,9 +45,15 @@ async function request(
   let value: unknown;
   try { value = await response.json(); }
   catch { return INVALID; }
-  if (!isXidResult(value)) return INVALID;
-  // HTTP error must not be converted to success by a stale/malformed JSON body.
-  return response.ok ? value : { ok: false, message: value.message };
+  const parsed = XIdWriteResultSchema.safeParse(value);
+  if (!parsed.success) return INVALID;
+  // Do not trust an HTTP error's ok:true envelope. Preserve the canonical reason
+  // for a valid failed response, but never leak provider exception text.
+  return response.ok ? parsed.data : {
+    ok: false,
+    message: parsed.data.message,
+    ...(parsed.data.reason === undefined ? {} : { reason: parsed.data.reason }),
+  };
 }
 const xPath = (id: string) => "/api/xid/" + encodeURIComponent(id);
 
