@@ -72,6 +72,15 @@ export function parseVideoMemberInputs(
     return { ok: false, message: "合作メンバーの JSON が不正です。" };
   }
 
+  // Zod traverses array elements even when the collection exceeds .max(100).
+  // Hostile but byte-bounded JSON may contain thousands of tiny invalid rows:
+  // reject the count before nested validation to protect the Worker CPU budget.
+  // Use the existing max-members error text; non-collaboration still returns
+  // above without inspecting its optional member payload.
+  if (Array.isArray(parsed) && parsed.length > MAX_VIDEO_MEMBERS) {
+    return { ok: false, message: `合作メンバーは最大${MAX_VIDEO_MEMBERS}人です。` };
+  }
+
   const result = membersJsonSchema.safeParse(parsed);
   if (!result.success) {
     return {
