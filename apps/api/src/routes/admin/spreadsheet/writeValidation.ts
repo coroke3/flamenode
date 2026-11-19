@@ -1274,6 +1274,161 @@ export function buildSpreadsheetPreviewNonceConsumeSql(
 
 
 /**
+ * U02: UNMOUNTED importer transaction composer. No HTTP auth, token
+ * verification, table-to-public-target derivation or D1 write occurs here.
+ *
+ * The future RH-008 route MUST first verify the signed preview and actor,
+ * obtain immutable existing-row snapshots, plan mutations, validate effective
+ * foreign keys and derive authoritative Queue targets. Only then call this
+ * composer and execute its result once via mutateWithAudit in a D1 batch.
+ */
+export async function planSpreadsheetAtomicAuditedImport(
+  db: ServerCoreDb,
+  ctx: SpreadsheetSqlTableContext,
+  planned: SpreadsheetImportMutationPlan,
+  claims: import("./importPreviewToken.ts").SpreadsheetImportPreviewClaims,
+  options: {
+    authorizedActorId: string;
+    consumedAt: number;
+    callerQueryCount: number;
+    queueTargets: readonly EnqueueStaticRebuildInput[];
+    preloaded?: PreloadedAuditContext;
+  },
+): Promise<AtomicAuditMutationInput> {
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
+  if (!planned || !Array.isArray(planned.mutations) ||
+      ![planned.inserted, planned.updated, planned.skipped].every(
+        x => Number.isSafeInteger(x) && x >= 0,
+      ) ||
+      planned.inserted + planned.updated + planned.skipped < 1 ||
+      planned.inserted + planned.updated + planned.skipped > SPREADSHEET_IMPORT_APPLY_MAX_ROWS ||
+      planned.inserted + planned.updated !== planned.mutations.length) {
+    throw new Error("invalid_row");
+  }
+  if (!claims || !options ||
+      claims.table !== ctx.def.table ||
+      claims.operatorUserId !== options.authorizedActorId ||
+      !options.authorizedActorId?.trim() ||
+      (claims.mode !== "insert" && claims.mode !== "upsert") ||
+      !Number.isSafeInteger(options.callerQueryCount) ||
+      options.callerQueryCount < 1 || options.callerQueryCount > 50 ||
+      !Number.isSafeInteger(options.consumedAt) ||
+      options.consumedAt > claims.expiresAt) {
+    throw new Error("preview_required");
+  }
+  if (claims.mode === "insert" && (planned.updated > 0 || planned.skipped > 0)) {
+    throw new Error("invalid_row");
+  }
+
+  const nonce = buildSpreadsheetPreviewNonceConsumeSql(claims, options.consumedAt);
+  const statement = db.run(sql`
+    UPDATE "spreadsheet_import_runs" SET "consumed_at" = ${options.consumedAt}
+    WHERE "nonce" = ${claims.nonce}
+      AND "operator_user_id" = ${claims.operatorUserId}
+      AND "table_name" = ${claims.table}
+      AND "mode" = ${claims.mode}
+      AND "payload_hash" = ${claims.payloadHash}
+      AND "schema_fingerprint" = ${claims.schemaFingerprint}
+      AND "expires_at" = ${claims.expiresAt}
+      AND "created_at" = ${claims.issuedAt}
+      AND "consumed_at" IS NULL
+      AND "expires_at" >= ${options.consumedAt}
+  `);
+  const seen = new Set<string>();
+  const mutations = [statement];
+  for (const plan of planned.mutations) {
+    const audit = plan?.audit;
+    if (!audit || audit.table_name !== ctx.def.table ||
+        audit.actor_user_id !== options.authorizedActorId ||
+        audit.context !== "admin_spreadsheet" ||
+        audit.strict !== true || audit.retention_class !== "long_audit" ||
+        (audit.operation !== "CREATE" && audit.operation !== "UPDATE") ||
+        (audit.operation === "CREATE" ? audit.before !== null : !audit.before) ||
+        !audit.after || typeof audit.after !== "object") {
+      throw new Error("invalid_row");
+    }
+    const rawPk = Object.fromEntries(ctx.primaryKeys.map(key => {
+      if (!Object.hasOwn(audit.after!, key)) throw new Error("invalid_row");
+      const value = audit.after![key];
+      if ((typeof value !== "string" && typeof value !== "number") ||
+          (typeof value === "number" && !Number.isSafeInteger(value))) {
+        throw new Error("invalid_row");
+      }
+      return [key, String(value)];
+    }));
+    const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, rawPk);
+    const fingerprint = spreadsheetImportPrimaryKeyFingerprint(pk);
+    if (seen.has(fingerprint) || audit.target_id !== spreadsheetRecordIdFromPk(pk)) {
+      throw new Error("invalid_row");
+    }
+    seen.add(fingerprint);
+    if (audit.operation === "UPDATE") {
+      const beforePk = Object.fromEntries(ctx.primaryKeys.map(key => {
+        if (!Object.hasOwn(audit.before!, key)) throw new Error("invalid_row");
+        const value = audit.before![key];
+        if ((typeof value !== "string" && typeof value !== "number") ||
+            (typeof value === "number" && !Number.isSafeInteger(value))) {
+          throw new Error("invalid_row");
+        }
+        return [key, String(value)];
+      }));
+      if (spreadsheetImportPrimaryKeyFingerprint(
+        normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, beforePk),
+      ) !== fingerprint) throw new Error("invalid_row");
+    }
+    // Converts only canonical table-specific INSERT/UPDATE SQL into lazy D1
+    // RunnableQueries. All changes=1 assertions remain inside one batch.
+    mutations.push(db.run(spreadsheetMutationToBoundSql(ctx, plan)));
+  }
+  if (planned.mutations.filter(m => m.audit.operation === "CREATE").length !== planned.inserted ||
+      planned.mutations.filter(m => m.audit.operation === "UPDATE").length !== planned.updated) {
+    throw new Error("invalid_row");
+  }
+
+  // A changed import with unknown public effects cannot silently omit
+  // durable invalidation. An all-skipped UPSERT only consumes its nonce.
+  if (!Array.isArray(options.queueTargets) ||
+      (mutations.length > 1
+        ? options.queueTargets.length < 1 ||
+          options.queueTargets.length > SPREADSHEET_ATOMIC_MAX_REBUILD_TARGETS
+        : options.queueTargets.length !== 0) ||
+      options.queueTargets.some(target =>
+        !target || !isStaticRebuildTargetType(target.targetType) ||
+        typeof target.targetId !== "string" || !target.targetId.trim() ||
+        typeof target.reason !== "string" || !target.reason.trim() ||
+        target.targetId.includes("\\0") || target.reason.includes("\\0") ||
+        target.targetId.length > 256 || target.reason.length > 128 ||
+        (target.requestedByUserId != null &&
+          target.requestedByUserId !== options.authorizedActorId))) {
+    throw new Error("invalid_row");
+  }
+  const queue = await buildStaticRebuildQueueBatch(db, options.queueTargets.map(
+    target => ({ ...target, requestedByUserId: options.authorizedActorId }),
+  ));
+  if ((mutations.length > 1 && (queue.acceptedTargetCount < 1 ||
+      queue.statements.length < 1)) ||
+      queue.statements.length !== queue.expectedChanges.length) {
+    throw new Error("invalid_row");
+  }
+
+  const input: AtomicAuditMutationInput = {
+    mutationStatements: [...mutations, ...queue.statements],
+    expectedMutationChanges: [
+      ...mutations.map(() => 1), ...queue.expectedChanges,
+    ],
+    audits: [nonce.audit, ...planned.mutations.map(m => ({ ...m.audit }))],
+    callerQueryCount: options.callerQueryCount,
+    preloaded: options.preloaded,
+    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+  };
+  if (!planAtomicAuditMutationBudget(input).withinLimit) {
+    throw new Error("batch_too_large");
+  }
+  assertAtomicAuditMutationBindLimits(db, input);
+  return input;
+}
+
+/**
  * CURRENT query.ts#fetchExistingRowsByImportPk, bounded to U02's 7-row
  * apply limit and a single request-budgeted D1 SELECT. UNMOUNTED.
  *
