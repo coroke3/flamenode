@@ -335,6 +335,56 @@ test("Issue #674: full legacy before/after snapshots distinguish colliding same-
   assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("mixed", target, other)), "legacy_ambiguous");
 });
 
+test("Issue #674: real SQLite INTEGER PK snapshots can prove only exact canonical legacy identity", () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec("CREATE TABLE records (id INTEGER PRIMARY KEY, title TEXT NOT NULL)");
+    sqlite.prepare("INSERT INTO records(id, title) VALUES (?, ?)").run(7, "safe");
+    // The real D1/SQLite before snapshot returns a number even though
+    // spreadsheet primaryKey JSON and legacy target_id carry string values.
+    const raw = sqlite.prepare("SELECT * FROM records WHERE id = ?").get(7);
+    assert.equal(raw.id, 7);
+    assert.equal(typeof raw.id, "number");
+    const lookup = buildSpreadsheetAuditHistoryLookup("records", { id: "7" });
+    const candidate = (snapshot) => ({
+      table_name: "records", context: "admin_spreadsheet",
+      target_id: lookup.legacy.target_id,
+      before_json: JSON.stringify(snapshot), after_json: null,
+    });
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, candidate(raw)),
+      "legacy_snapshot_exact", "SQLite INTEGER before-image proves the canonical PK");
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, candidate({ id: "7" })),
+      "legacy_snapshot_exact", "legacy TEXT snapshots remain supported");
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, {
+      ...candidate(raw), before_json: null, after_json: JSON.stringify(raw),
+    }), "legacy_snapshot_exact", "CREATE after-image supports INTEGER PK");
+
+    for (const value of [8, 7.25, Number.MAX_SAFE_INTEGER + 1, null, true, {}]) {
+      assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, candidate({ id: value })),
+        "legacy_ambiguous", `not a safe, canonical match: ${String(value)}`);
+    }
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, {
+      ...candidate(raw), after_json: JSON.stringify({ id: 8 }),
+    }), "legacy_ambiguous", "conflicting before/after cannot be attributed");
+    const paddedLookup = buildSpreadsheetAuditHistoryLookup("records", { id: "007" });
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(paddedLookup, {
+      ...candidate(raw), target_id: paddedLookup.legacy.target_id,
+    }), "legacy_ambiguous", "do not normalize a noncanonical caller PK by numeric coercion");
+
+    const composite = buildSpreadsheetAuditHistoryLookup("records", {
+      left: "x:y", right: "7",
+    });
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(composite, {
+      table_name: "records", context: "admin_spreadsheet",
+      target_id: composite.legacy.target_id,
+      before_json: JSON.stringify({ left: "x:y", right: 7 }),
+      after_json: null,
+    }), "legacy_snapshot_exact", "composite TEXT+INTEGER values retain full-PK proof");
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("Issue #674: missing, redacted, numeric and malformed legacy snapshots never prove identity", () => {
   const lookup = buildSpreadsheetAuditHistoryLookup("video_events", { left: "x:y", right: "z" });
   const candidate = (before_json, after_json) => ({
