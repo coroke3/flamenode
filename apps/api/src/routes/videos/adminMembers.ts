@@ -360,12 +360,6 @@ export function createVideoAdminMembersPreflightRoutes(
     if (body.kind === "too_large") return reject(c, 413, BODY_TOO_LARGE_MESSAGE);
     if (body.kind !== "ok") return reject(c, 400, "入力エラー");
 
-    const parsed = parseAdminVideoMembersHttpInput(videoId, body.value);
-    if (!parsed.ok) return reject(c, 400, parsed.message);
-    const isCollab = readAdminVideoCollabFlag(parsed.formData);
-    const members = validateVideoMemberSubmission(parsed.formData, isCollab);
-    if (!members.ok) return reject(c, 400, members.message);
-
     // The current Next SA-085 action checks the authoritative video row
     // before planning mutations. One bounded D1 query remains inside the
     // ZERO_1102 pre-write budget (guard actor + CostGuard + target video).
@@ -425,6 +419,17 @@ export function createVideoAdminMembersPreflightRoutes(
     if (rebuildEventIds.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
       return reject(c, 400, "関連イベント数が処理上限を超えています。");
     }
+
+    // CURRENT SA-085 resolves the authoritative video + related-event
+    // snapshot BEFORE validating member JSON. Keep the same 404/event-limit
+    // precedence for a missing video with otherwise malformed member input.
+    // Bounded HTTP framing and URL checks above still reject bad transports
+    // without any privileged D1 access.
+    const parsed = parseAdminVideoMembersHttpInput(videoId, body.value);
+    if (!parsed.ok) return reject(c, 400, parsed.message);
+    const isCollab = readAdminVideoCollabFlag(parsed.formData);
+    const members = validateVideoMemberSubmission(parsed.formData, isCollab);
+    if (!members.ok) return reject(c, 400, members.message);
 
     // Defensive: two distinct host execution modes must never share a
     // request, even if a custom host bypasses the default factory checks.
