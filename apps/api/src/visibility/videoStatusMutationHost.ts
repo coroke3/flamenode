@@ -87,6 +87,15 @@ export function createVideoVisibilityStatusMutationHost(
       }),
     compensate: (db, input) =>
       compensateDepublicizationFenceOnD1Failure(db, input, transitionHost),
+    confirmCompensation: async (videoId) => {
+      // The shared compensator may exhaust R2 CAS retries and return void.
+      // Require a real persisted manifest ETag and NO target-video block;
+      // a surviving foreign or same-token block also forbids claiming public.
+      const { manifest, etag } = await transitionHost.manifest.read();
+      return typeof etag === "string" && etag.length > 0 &&
+        !manifest.entities.some((entry) =>
+          entry.entity_type === "video" && entry.entity_id === videoId);
+    },
     rethrowFrameworkControl: () => undefined,
     isAuditMutationError: (error) => error instanceof AuditMutationError,
     rereadStatus: async (db, videoId) => {
