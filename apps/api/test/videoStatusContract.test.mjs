@@ -225,3 +225,33 @@ test("MIG-0603 U02a-2: 64KiB body limit checks both bytes and claimed length", a
   }
 });
 
+test("MIG-0603 U02a-2: aborted and locked body streams never escape as provider errors", async () => {
+  const denied = { ok: false, status: 400, message: "入力が不正です。" };
+  for (const parse of [parseAdminVideoStatusInput, parseManageVideoStatusInput]) {
+    const broken = new ReadableStream({
+      start(controller) {
+        controller.error(new Error("Authorization:Bearer private-transport-secret"));
+      },
+    });
+    const request = new Request("https://site.example/api/videos/status", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: broken,
+      duplex: "half",
+    });
+    const result = await parse(request);
+    assert.deepEqual(result, denied,
+      "an aborted transport stream must map to fixed invalid input, not throw");
+    assert.doesNotMatch(JSON.stringify(result), /private-transport-secret|Bearer/);
+
+    const locked = statusRequest({ video_id: "v", status: "private", event_id: "e" });
+    const activeReader = locked.body.getReader();
+    try {
+      assert.deepEqual(await parse(locked), denied,
+        "a previously locked body cannot escape into Hono's unhandled error path");
+    } finally {
+      await activeReader.cancel();
+      activeReader.releaseLock();
+    }
+  }
+});
