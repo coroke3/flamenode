@@ -1696,6 +1696,8 @@ test("MIG-0638 U01b: malformed/mismatched D1 CRUD pre-read snapshots fail closed
     { id: "slot-1", title: undefined },
     { id: "slot-1", title: { nested: "invalid" } },
     { id: "slot-1", title: true },
+    { id: "slot-1", title: Number.NaN },
+    { id: "slot-1", title: Number.POSITIVE_INFINITY },
     ["slot-1", "before"],
     Object.defineProperty({ id: "slot-1" }, "title", {
       get() { throw new Error("getter trap"); },
