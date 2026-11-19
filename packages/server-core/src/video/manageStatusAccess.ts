@@ -31,6 +31,46 @@ export type ManageVideoStatusSnapshot =
   | { ok: true; video: typeof videos.$inferSelect; rebuildEventIds: string[] }
   | { ok: false; message: string };
 
+/** Reuse the same bounded projection for the unmounted admin/manage planners. */
+function boundedVideoRebuildEventIdsJson(videoId: string) {
+  return sql<string>`(
+    SELECT COALESCE(json_group_array(linked.event_id), '[]')
+    FROM (
+      SELECT "event_id" FROM "video_events"
+      WHERE "video_id" = ${videoId}
+      ORDER BY "event_id"
+      LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
+    ) linked
+  )`;
+}
+
+function finishVideoStatusSnapshot(
+  target: { video: typeof videos.$inferSelect; rebuildEventIdsJson: string },
+): ManageVideoStatusSnapshot {
+  // Fail closed on malformed aggregates and unexpectedly large imported IDs;
+  // do not pass an incomplete rebuild fan-out to a future audited planner.
+  const raw = target.rebuildEventIdsJson;
+  if (typeof raw !== "string" || raw.length > MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH) {
+    throw new Error("manage_status_rebuild_event_snapshot_invalid");
+  }
+  let linked: unknown;
+  try {
+    linked = JSON.parse(raw);
+  } catch {
+    throw new Error("manage_status_rebuild_event_snapshot_invalid");
+  }
+  if (!Array.isArray(linked) ||
+      linked.length > MAX_MANAGE_STATUS_REBUILD_EVENTS + 1 ||
+      !linked.every((value) => typeof value === "string")) {
+    throw new Error("manage_status_rebuild_event_snapshot_invalid");
+  }
+  const rebuildEventIds = mergeVideoRebuildEventIds(target.video.primary_event_id, linked);
+  if (rebuildEventIds.length > MAX_MANAGE_STATUS_REBUILD_EVENTS) {
+    return { ok: false, message: "関連イベント数が処理上限を超えています。" };
+  }
+  return { ok: true, video: target.video, rebuildEventIds };
+}
+
 /**
  * CURRENT canEditEvent resolves approved linked X IDs, then matches event_staff
  * permission presets/custom keys. Do the same in ONE read using inner joins
@@ -135,15 +175,7 @@ export async function loadManageVideoStatusSnapshot(
   // link fan-out into the same already-authorized exact association read.
   // The +1 row is essential: rejecting overflow must never silently discard
   // affected rebuild events. No Queue, R2, audit or mutation is performed.
-  const rebuildEventIdsJson = sql<string>`(
-    SELECT COALESCE(json_group_array(linked.event_id), '[]')
-    FROM (
-      SELECT "event_id" FROM "video_events"
-      WHERE "video_id" = ${videoId}
-      ORDER BY "event_id"
-      LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
-    ) linked
-  )`;
+  const rebuildEventIdsJson = boundedVideoRebuildEventIdsJson(videoId);
   const target = (
     await db
       .select({ video: videos, rebuildEventIdsJson })
@@ -161,26 +193,38 @@ export async function loadManageVideoStatusSnapshot(
   if (!target) {
     return { ok: false, message: "このイベントに紐づく作品ではありません。" };
   }
-  // The database may contain imported/corrupted event IDs; never hand an
-  // unbounded or malformed aggregate to a future audited status planner.
-  const raw = target.rebuildEventIdsJson;
-  if (typeof raw !== "string" || raw.length > MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH) {
-    throw new Error("manage_status_rebuild_event_snapshot_invalid");
+  return finishVideoStatusSnapshot(target);
+}
+
+
+/**
+ * Future site-admin status planner preload (UNMOUNTED, read-only).
+ * CURRENT's admin action separately selects the video and its rebuild event
+ * IDs. This combines both into one bounded D1 statement, without relaxing the
+ * upstream Origin / Session / TOS / CostGuard or audited-write requirements.
+ * The site-admin role is checked here too: direct callers must not read a
+ * target video before the shared middleware verifies the identity.
+ */
+export async function loadAdminVideoStatusSnapshot(
+  db: ServerCoreDb,
+  user: SessionUserLike,
+  videoId: string,
+): Promise<ManageVideoStatusSnapshot> {
+  if (user.role !== "admin") {
+    return { ok: false, message: "管理者権限が必要です。" };
   }
-  let linked: unknown;
-  try {
-    linked = JSON.parse(raw);
-  } catch {
-    throw new Error("manage_status_rebuild_event_snapshot_invalid");
+  const target = (
+    await db
+      .select({
+        video: videos,
+        rebuildEventIdsJson: boundedVideoRebuildEventIdsJson(videoId),
+      })
+      .from(videos)
+      .where(eq(videos.id, videoId))
+      .limit(1)
+  )[0];
+  if (!target) {
+    return { ok: false, message: "対象作品が見つかりません。" };
   }
-  if (!Array.isArray(linked) ||
-      linked.length > MAX_MANAGE_STATUS_REBUILD_EVENTS + 1 ||
-      !linked.every((value) => typeof value === "string")) {
-    throw new Error("manage_status_rebuild_event_snapshot_invalid");
-  }
-  const rebuildEventIds = mergeVideoRebuildEventIds(target.video.primary_event_id, linked);
-  if (rebuildEventIds.length > MAX_MANAGE_STATUS_REBUILD_EVENTS) {
-    return { ok: false, message: "関連イベント数が処理上限を超えています。" };
-  }
-  return { ok: true, video: target.video, rebuildEventIds };
+  return finishVideoStatusSnapshot(target);
 }

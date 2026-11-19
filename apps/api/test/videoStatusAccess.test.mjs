@@ -5,7 +5,7 @@ import * as schema from "@flamenode/db/schema";
 import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
-import { checkManageVideoStatusAccess, loadManageVideoStatusSnapshot } from "../src/routes/videos/videoStatusAccess.ts";
+import { checkManageVideoStatusAccess, loadManageVideoStatusSnapshot, loadAdminVideoStatusSnapshot } from "../src/routes/videos/videoStatusAccess.ts";
 import { MAX_MANAGE_STATUS_REBUILD_EVENTS } from "@flamenode/server-core/video/manageStatusAccess";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
 import { canEditEvent } from "@flamenode/server-core/auth/ownership";
@@ -511,6 +511,63 @@ test("MIG-0603: same association SELECT includes bounded rebuild event targets",
     );
     assert.equal(d1.stats.statements - overflowStart, 2,
       "overflow needs no extra D1 round trip");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0603: unmounted admin status preloads video and capped rebuild events in one D1 read", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const admin = { id: "u_admin", role: "admin" };
+
+    const deniedStart = d1.stats.statements;
+    assert.deepEqual(
+      await loadAdminVideoStatusSnapshot(db, { id: "u_mgr", role: "user" }, "v1"),
+      { ok: false, message: "管理者権限が必要です。" },
+    );
+    assert.equal(d1.stats.statements - deniedStart, 0,
+      "a non-admin cannot probe video existence before the role guard");
+
+    const baselineStart = d1.stats.statements;
+    const baseline = await loadAdminVideoStatusSnapshot(db, admin, "v1");
+    assert.equal(baseline.ok, true);
+    assert.equal(baseline.video.id, "v1");
+    assert.deepEqual(baseline.rebuildEventIds, ["evA"]);
+    assert.equal(d1.stats.statements - baselineStart, 1,
+      "admin preloads video + all linked event IDs in one D1 statement");
+
+    const missingStart = d1.stats.statements;
+    assert.deepEqual(
+      await loadAdminVideoStatusSnapshot(db, admin, "deleted-video"),
+      { ok: false, message: "対象作品が見つかりません。" },
+    );
+    assert.equal(d1.stats.statements - missingStart, 1);
+
+    const extra = ["evB", "evC", "evD", "evNull", "evPoint", "evTie1", "evTie2"];
+    for (const eventId of extra) {
+      insert(sqlite, "video_events", { event_id: eventId, video_id: "v1" });
+    }
+    const cappedStart = d1.stats.statements;
+    const capped = await loadAdminVideoStatusSnapshot(db, admin, "v1");
+    assert.equal(capped.ok, true);
+    assert.deepEqual(capped.rebuildEventIds, ["evA", ...extra].sort());
+    assert.equal(d1.stats.statements - cappedStart, 1);
+
+    sqlite.prepare("UPDATE videos SET primary_event_id=? WHERE id='v1'")
+      .run("evGen19");
+    const primaryOverflowStart = d1.stats.statements;
+    assert.deepEqual(
+      await loadAdminVideoStatusSnapshot(db, admin, "v1"),
+      { ok: false, message: "関連イベント数が処理上限を超えています。" },
+      "the extra primary_event_id outside linked events is an overflow, not silently dropped",
+    );
+    assert.equal(d1.stats.statements - primaryOverflowStart, 1);
     assert.equal(d1.stats.batches, 0);
     assert.equal(d1.stats.writes, 0);
   } finally {
