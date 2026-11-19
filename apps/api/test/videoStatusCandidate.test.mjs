@@ -271,3 +271,47 @@ test("MIG-0603 unmounted manage candidate denies orphan video-event links for ad
     sqlite.close();
   }
 });
+
+test("MIG-0603 unmounted admin/manage candidates sanitize aborted client body streams", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted = 1');
+    sqlite.exec("UPDATE system_settings SET operation_mode='normal', disabled_features_json=NULL WHERE id='default'");
+    const d1 = createVideoStatusD1(sqlite);
+    for (const [kind, candidate] of [
+      ["admin", createUnboundAdminVideoStatusCandidate()],
+      ["manage", createUnboundManageVideoStatusCandidate()],
+    ]) {
+      const request = new Request(ORIGIN + "/", {
+        method: "POST",
+        headers: {
+          origin: ORIGIN,
+          ...cookie("tok-admin"),
+          "content-type": "application/json",
+        },
+        body: new ReadableStream({
+          start(controller) {
+            controller.error(new Error("Authorization:Bearer secret-body-stream"));
+          },
+        }),
+        duplex: "half",
+      });
+      const response = await candidate.request(request, undefined, {
+        DB: d1,
+        NEXT_PUBLIC_SITE_URL: ORIGIN,
+        FLAMENODE_LOCAL_PREVIEW: "1",
+      });
+      assert.equal(response.status, 400,
+        kind + ": client stream failure cannot become unhandled 500");
+      const body = await response.json();
+      assert.deepEqual(body, { ok: false, message: "入力が不正です。" });
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.doesNotMatch(JSON.stringify(body), /Authorization:Bearer|secret-body-stream/);
+    }
+    assert.equal(d1.stats.batches, 0, "invalid body never starts an audited D1 batch");
+    assert.equal(d1.stats.writes, 0, "invalid body never reaches a D1 mutation");
+  } finally {
+    sqlite.close();
+  }
+});
