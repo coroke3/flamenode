@@ -2628,6 +2628,10 @@ test("MIG-0638 U01b: Drizzle D1 batch SQL bridge binds INSERT UPDATE DELETE and 
 
     for (const malicious of [
       { statement: 'UPDATE "slots" SET "title" = ?; DELETE FROM "slots"', binds: ["a"] },
+      { statement: 'UPDATE "slots" SET "title" = ? WHERE 1=1', binds: ["a"] },
+      { statement: 'UPDATE "slots" SET "title" = ?, "title" = ? WHERE "id" = ? AND "id" IS ? AND "title" IS ? AND "count" IS ?', binds: ["a", "b", "id", "id", "x", 1] },
+      { statement: 'DELETE FROM "slots" WHERE "id" = ?', binds: ["id"] },
+      { statement: 'INSERT INTO "slots" ("id") VALUES (?)', binds: ["id"] },
       { statement: 'UPDATE "slots" SET "title" = ? -- comment', binds: ["a"] },
       { statement: 'UPDATE "slots" SET "title" = ? /* comment */', binds: ["a"] },
       { statement: 'UPDATE "videos" SET "title" = ?', binds: ["a"] },
