@@ -166,7 +166,7 @@ export function XIdIconPicker({
 }
 
 export function XIdCompactProfileForm({
-  api, x, iconCandidates, channelCandidates, onRefresh, onCancel,
+  api, x, iconCandidates, channelCandidates = [], onRefresh, onCancel,
 }: {
   api: XidProfileApi;
   x: { id: string; x_name: string; icon_url: string | null; profile_text: string | null;
