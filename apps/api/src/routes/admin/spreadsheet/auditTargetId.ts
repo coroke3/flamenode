@@ -212,18 +212,26 @@ export function classifySpreadsheetAuditHistoryCandidate(
         return "legacy_ambiguous";
       }
       const data = value as Record<string, unknown>;
-      const present = expectedPk.every(([key]) => {
+      const present = expectedPk.every(([key, expected]) => {
+        if (!Object.prototype.hasOwnProperty.call(data, key)) return false;
         const value = data[key];
-        return Object.prototype.hasOwnProperty.call(data, key) &&
-          typeof value === "string" &&
-          value !== "[REDACTED]" &&
-          // Audit sanitization may truncate long text fields; a truncated
-          // primary key cannot prove or disprove historical row identity.
-          !value.endsWith("…[truncated]");
+        if (typeof value === "string") {
+          return value !== "[REDACTED]" &&
+            // An audit sanitizer can truncate a PK; that cannot prove identity.
+            !value.endsWith("…[truncated]");
+        }
+        // D1's raw INTEGER PRIMARY KEY snapshot is a JS number, although
+        // the CRUD/legacy target_id PK is a bound string. Accept this only
+        // when the exact, safe integer's canonical decimal bytes equal the
+        // requested component. A numeric mismatch or an unsafe/rounded
+        // integer remains ambiguous; never use Number(expected) coercion.
+        return typeof value === "number" && Number.isSafeInteger(value) &&
+          String(value) === expected;
       });
       if (!present) return "legacy_ambiguous";
-      parts.push(expectedPk.every(([key, expected]) => data[key] === expected)
-        ? "match" : "other");
+      parts.push(expectedPk.every(([key, expected]) =>
+        (typeof data[key] === "number" ? String(data[key]) : data[key]) === expected,
+      ) ? "match" : "other");
     } catch {
       return "legacy_ambiguous";
     }
