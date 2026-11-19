@@ -933,6 +933,86 @@ export function planSpreadsheetImportMutations(
 }
 
 
+/**
+ * MIG-0638 U02: preflight all explicitly provided import FKs AND the
+ * *effective* FK values of planned INSERTs, including SQL column defaults.
+ *
+ * The future guarded RH-008 route must resolve the existing PK snapshots,
+ * create the complete import mutation plan, THEN invoke this function before
+ * any nonce consumption, data mutation, strict audit or static rebuild Queue
+ * write in the eventual atomic D1 batch. No changes occur here.
+ */
+export async function validateSpreadsheetPlannedImportForeignKeys(
+  db: {
+    prepare(sql: string): {
+      bind(...values: (string | number | null)[]): {
+        all<T>(): Promise<{ results?: T[] }>;
+      };
+    };
+  },
+  ctx: SpreadsheetSqlTableContext,
+  foreignKeys: readonly SpreadsheetForeignKey[],
+  prepared: SpreadsheetImportRowValidation,
+  planned: SpreadsheetImportMutationPlan,
+  remainingReadBudget: number,
+): Promise<void> {
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
+  if (prepared.errors.length > 0) throw new Error("invalid_row");
+  if (prepared.preparedRows.length < 1 ||
+      prepared.preparedRows.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS) {
+    throw new Error("batch_too_large");
+  }
+  if (!Number.isInteger(remainingReadBudget) || remainingReadBudget < 0 ||
+      remainingReadBudget > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES) {
+    throw new Error("batch_too_large");
+  }
+  if (planned.inserted < 0 || planned.updated < 0 || planned.skipped < 0 ||
+      !Number.isInteger(planned.inserted) || !Number.isInteger(planned.updated) ||
+      !Number.isInteger(planned.skipped) ||
+      planned.inserted + planned.updated + planned.skipped !== prepared.preparedRows.length ||
+      planned.mutations.length !== planned.inserted + planned.updated) {
+    throw new Error("invalid_snapshot");
+  }
+  const seen = new Set<string>();
+  const rows: Record<string, string | null>[] = [];
+  for (const entry of prepared.preparedRows) {
+    const identity = verifySpreadsheetPreparedImportIdentity(ctx, entry);
+    if (seen.has(identity.fingerprint)) throw new Error("duplicate_primary_key");
+    seen.add(identity.fingerprint);
+    rows.push(entry.row);
+  }
+  for (const mutation of planned.mutations) {
+    if (mutation.audit.table_name !== ctx.def.table ||
+        (mutation.audit.operation !== "CREATE" && mutation.audit.operation !== "UPDATE") ||
+        !mutation.audit.after) {
+      throw new Error("invalid_snapshot");
+    }
+    if (mutation.audit.operation !== "CREATE") continue;
+    const cells: Array<[string, string | null]> = [];
+    for (const foreignKey of foreignKeys) {
+      if (!Object.hasOwn(mutation.audit.after, foreignKey.column)) {
+        throw new Error("invalid_snapshot");
+      }
+      const value = mutation.audit.after[foreignKey.column];
+      if (value === null || value === "") {
+        cells.push([foreignKey.column, null]);
+      } else if (typeof value === "string") {
+        cells.push([foreignKey.column, value]);
+      } else if (typeof value === "number" && Number.isFinite(value)) {
+        cells.push([foreignKey.column, String(value)]);
+      } else {
+        throw new Error("invalid_snapshot");
+      }
+    }
+    rows.push(Object.freeze(Object.fromEntries(cells)));
+  }
+  // Existing UPDATEs retain CURRENT's supplied-field-only FK semantics.
+  // New INSERTs additionally validate defaulted FKs actually persisted and
+  // audited. Deduplication ensures both use the same S3 bounded SELECTs.
+  await validateSpreadsheetForeignKeys(db, foreignKeys, rows, remainingReadBudget);
+}
+
+
 /** CURRENT buildPreviewRunConsumptionMutation parity, UNMOUNTED.
  * The exact-one affected-row assertion and this SQL + data writes + strict audit
  * MUST run in the same atomic D1 batch; a zero-change replay must abort all.
