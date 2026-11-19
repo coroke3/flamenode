@@ -267,3 +267,32 @@ test("MIG-0650 U03cp supplied at-sign-only X handles fail closed before blank-ro
   const off = targetParse(encode([member("@", { name: "", chapters: [] })]), false);
   assert.deepEqual(off, { ok: true, members: [] }, "noncollaboration remains ignored by CURRENT contract");
 });
+
+test("MIG-0650 U03cq large invalid member arrays reject by count before nested Zod validation", () => {
+  // 10,000 tiny invalid entries fit comfortably below the unmounted SA-085
+  // 256 KiB HTTP byte cap. The first error must be the 100-member ceiling,
+  // not a nested schema error on the first null item.
+  for (const count of [101, 10_000]) {
+    const raw = JSON.stringify(Array(count).fill(null));
+    assert.ok(Buffer.byteLength(raw, "utf8") < 256 * 1024);
+    const result = targetParse(raw, true);
+    assert.deepEqual(result, {
+      ok: false, message: "合作メンバーは最大100人です。",
+    }, String(count));
+    const fd = new FormData();
+    fd.set("members_json", raw);
+    assert.deepEqual(targetSubmission(fd, true), {
+      ok: false, message: "合作メンバーは最大100人です。",
+    });
+    assert.deepEqual(targetParse(raw, false), { ok: true, members: [] },
+      "CURRENT noncollaboration ignores optional members");
+  }
+  // At or below the limit, Zod must still validate every entry.
+  const invalidWithinCap = targetParse(JSON.stringify(Array(100).fill(null)), true);
+  assert.equal(invalidWithinCap.ok, false);
+  assert.notEqual(invalidWithinCap.message, "合作メンバーは最大100人です.");
+  const validWithinCap = targetParse(encode(Array.from({ length: 100 }, (_, i) =>
+    member("user_" + i, { name: "User " + i, chapters: [] }))), true);
+  assert.equal(validWithinCap.ok, true);
+  assert.equal(validWithinCap.members.length, 100);
+});
