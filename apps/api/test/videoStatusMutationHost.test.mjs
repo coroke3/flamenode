@@ -132,3 +132,51 @@ test("Hono status mutation host rereads visibility from the migrated SQLite D1 s
     sqlite.close();
   }
 });
+
+test("Hono R2 compensation confirmation requires a real ETag and no blocked video", async () => {
+  const original = {
+    entity_type: "video", entity_id: "video-one",
+    fence_token: "vf-own", blocked_at: 100, reason: "blocked",
+  };
+  const foreign = { ...original, fence_token: "vf-other" };
+  const unrelated = { ...original, entity_id: "video-other" };
+  let entities = [original, unrelated];
+  let mode = "persisted";
+  const bucket = {
+    get: async (key) => {
+      assert.equal(key, "visibility/blocked-entities.v1.json");
+      if (mode === "missing") return null;
+      if (mode === "error") throw new Error("R2 manifest GET failed");
+      const body = JSON.stringify({
+        schema_version: 1, revision: 2, generated_at: 100, entities,
+      });
+      return {
+        etag: mode === "etag-missing" ? undefined : "etag-current",
+        size: Buffer.byteLength(body),
+        text: async () => body,
+      };
+    },
+  };
+  const host = createVideoVisibilityStatusMutationHost({
+    env: { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" },
+    get: () => ({}),
+  }, { mutateWithAudit: async () => [] });
+
+  assert.equal(await host.confirmCompensation("video-one"), false,
+    "our own video block still exists after a silently failed R2 CAS retry");
+  entities = [foreign, unrelated];
+  assert.equal(await host.confirmCompensation("video-one"), false,
+    "a different writer's block also forbids claiming the video is public");
+  entities = [unrelated];
+  assert.equal(await host.confirmCompensation("video-one"), true,
+    "a persisted R2 snapshot without the target block certifies cleanup");
+  mode = "etag-missing";
+  assert.equal(await host.confirmCompensation("video-one"), false,
+    "missing ETag cannot certify a persisted post-compensation manifest");
+  mode = "missing";
+  assert.equal(await host.confirmCompensation("video-one"), false,
+    "missing R2 manifest is not evidence of a confirmed rollback");
+  mode = "error";
+  await assert.rejects(host.confirmCompensation("video-one"), /manifest GET failed/,
+    "R2 readback outage must reach shared executor's fail-closed path");
+});
