@@ -637,6 +637,82 @@ export function buildSpreadsheetAuditedDelete(
 
 
 /**
+ * MIG-0638 U01b: guarded RH-004/005/006 pre-write orchestration.
+ *
+ * A future Hono route MUST run origin -> session -> admin write/identity and
+ * CostGuard BEFORE calling this helper. This function is deliberately NOT
+ * mounted and NEVER issues a mutation: it produces the SQL+audit plan for a
+ * later, separately verified, atomic exact-one CAS + strict audit + Queue
+ * executor. Reads are counted across FK preflight and the CRUD snapshot.
+ */
+export interface SpreadsheetCrudReadDatabase {
+  prepare(sql: string): {
+    bind(...values: (string | number | null)[]): {
+      all<T>(): Promise<{ results?: T[] }>;
+      first<T>(): Promise<T | null>;
+    };
+  };
+}
+
+export async function planSpreadsheetGuardedCrud(
+  db: SpreadsheetCrudReadDatabase,
+  ctx: SpreadsheetSqlTableContext,
+  body: SpreadsheetCrudBody,
+  foreignKeys: readonly SpreadsheetForeignKey[],
+  operatorId: string,
+  remainingReadBudget: number,
+): Promise<SpreadsheetAuditedSqlPlan> {
+  if (ctx.def.table !== body.table) throw new Error("unknown_table");
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
+  if (!operatorId.trim()) throw new Error("missing_operator");
+  if (!Number.isInteger(remainingReadBudget) || remainingReadBudget < 0 ||
+      remainingReadBudget > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES) {
+    throw new Error("batch_too_large");
+  }
+
+  if (body.method === "POST") {
+    // Validate SQL shape/required PK and default expansion before any D1
+    // read; FK checks inspect precisely the supplied (pre-default) fields.
+    const plan = buildSpreadsheetAuditedInsert(ctx, body.row, operatorId);
+    const lookups = buildSpreadsheetForeignKeyLookups(foreignKeys, [body.row], remainingReadBudget);
+    if (lookups.length > 0) {
+      await validateSpreadsheetForeignKeys(db, foreignKeys, [body.row], remainingReadBudget);
+    }
+    return plan;
+  }
+
+  // Both UPDATE and DELETE require one fresh, complete, PK-matching before
+  // snapshot; reserve that D1 statement from the shared S3 read budget.
+  if (remainingReadBudget < 1) throw new Error("batch_too_large");
+  const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, body.primaryKey);
+  if (body.method === "DELETE") {
+    // Reject blocked physical deletion before any database read.
+    if (isSpreadsheetPhysicalDeleteBlocked(ctx.def.table)) {
+      throw new Error("physical_delete_requires_visibility_status");
+    }
+    const before = await fetchSpreadsheetRawSnapshot(db, ctx, pk, 1);
+    return buildSpreadsheetAuditedDelete(ctx, pk, before, operatorId);
+  }
+
+  const values = Object.freeze(Object.fromEntries([[body.column, body.value]]));
+  validateSpreadsheetInputValues(ctx, values);
+  if (!ctx.columns.some(column => column.name === body.column && column.pk === 0 &&
+      isSpreadsheetColumnEditable(ctx.def, column.name))) {
+    throw new Error("empty_row");
+  }
+  // Fail on an excessive FK plan before incurring any D1 reads. The FK
+  // preflight may use at most the remaining S3 budget minus the PK SELECT.
+  const fkReadBudget = remainingReadBudget - 1;
+  const lookups = buildSpreadsheetForeignKeyLookups(foreignKeys, [values], fkReadBudget);
+  const before = await fetchSpreadsheetRawSnapshot(db, ctx, pk, 1);
+  if (lookups.length > 0) {
+    await validateSpreadsheetForeignKeys(db, foreignKeys, [values], fkReadBudget);
+  }
+  return buildSpreadsheetAuditedUpdate(ctx, pk, before, values, operatorId);
+}
+
+
+/**
  * MIG-0638 U02: CURRENT applySpreadsheetImport pure row preflight.
  * This does not verify preview tokens, read FK targets/existing rows,
  * consume nonces or run any D1 transaction.
