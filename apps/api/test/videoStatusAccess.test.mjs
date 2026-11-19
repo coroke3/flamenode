@@ -5,7 +5,7 @@ import * as schema from "@flamenode/db/schema";
 import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
-import { checkManageVideoStatusAccess } from "../src/routes/videos/videoStatusAccess.ts";
+import { checkManageVideoStatusAccess, loadManageVideoStatusSnapshot } from "../src/routes/videos/videoStatusAccess.ts";
 import { canEditEvent } from "@flamenode/server-core/auth/ownership";
 
 test("MIG-0603: unmounted manage status gate matches CURRENT event privilege and exact video link", async () => {
@@ -352,6 +352,56 @@ test("MIG-0603: an orphan event link is not an authorized manage status target",
     );
     assert.equal(d1.stats.statements - start, 1,
       "unprivileged callers must not learn the orphan link from a second read");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0603: opt-in snapshot preloads full video row within the existing bounded association read", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    const admin = { id: "u_admin", role: "admin" };
+    const outsider = { id: "u_plain", role: "user" };
+
+    for (const [user, eventId, videoId, expectedReads] of [
+      [manager, "evA", "v1", 2],
+      [admin, "evA", "v1", 1],
+    ]) {
+      const before = d1.stats.statements;
+      const value = await loadManageVideoStatusSnapshot(db, user, eventId, videoId);
+      assert.equal(value.ok, true);
+      assert.equal(d1.stats.statements - before, expectedReads,
+        "full planner-ready video row must reuse the existing exact link D1 query");
+      const raw = sqlite.prepare("SELECT * FROM videos WHERE id = ?").get(videoId);
+      for (const key of ["id", "title", "visibility_status", "updated_at", "primary_event_id", "youtube_video_id"]) {
+        assert.equal(value.video[key], raw[key], `canonical full video row: ${key}`);
+      }
+      assert.equal(Object.keys(value.video).length, Object.keys(raw).length,
+        "snapshot is complete for full-row audit/CAS; not just a status projection");
+    }
+    const beforeDenied = d1.stats.statements;
+    assert.deepEqual(
+      await loadManageVideoStatusSnapshot(db, outsider, "evA", "v1"),
+      { ok: false, message: "このイベントの作品審査権限がありません。" },
+    );
+    assert.equal(d1.stats.statements - beforeDenied, 1,
+      "denied reviewer must not probe any foreign video data");
+    assert.deepEqual(
+      await loadManageVideoStatusSnapshot(db, manager, "evB", "v1"),
+      { ok: false, message: "このイベントに紐づく作品ではありません。" },
+      "approved evB staff cannot retrieve a video linked only to evA",
+    );
+    assert.deepEqual(
+      await checkManageVideoStatusAccess(db, manager, "evA", "v1"),
+      { ok: true },
+      "legacy Hono boundary still returns no video body",
+    );
     assert.equal(d1.stats.batches, 0);
     assert.equal(d1.stats.writes, 0);
   } finally {

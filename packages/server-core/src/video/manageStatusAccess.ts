@@ -20,6 +20,13 @@ export type ManageVideoStatusAccess =
   | { ok: true }
   | { ok: false; message: string };
 
+// The complete row is required for the future audited transition planner:
+// it checks expectedRowCondition on every original field, not only status.
+// This opt-in read is NEVER returned in the active HTTP response.
+export type ManageVideoStatusSnapshot =
+  | { ok: true; video: typeof videos.$inferSelect }
+  | { ok: false; message: string };
+
 /**
  * CURRENT canEditEvent resolves approved linked X IDs, then matches event_staff
  * permission presets/custom keys. Do the same in ONE read using inner joins
@@ -32,13 +39,14 @@ export type ManageVideoStatusAccess =
  * nor be exposed to a failure reading video_events before permission denial.
  * The site-admin branch bypasses staff roles, never the association.
  */
-export async function checkManageVideoStatusAccess(
+async function hasManageVideoStatusGrant(
   db: ServerCoreDb,
   user: SessionUserLike,
   eventId: string,
-  videoId: string,
-): Promise<ManageVideoStatusAccess> {
-  if (user.role !== "admin") {
+): Promise<boolean> {
+  if (user.role === "admin") return true;
+  {
+
     const approvedStaff = await db
       .select({
         permission_preset: eventStaff.permission_preset,
@@ -64,9 +72,22 @@ export async function checkManageVideoStatusAccess(
       // with a private fixed 503, without leaking a target-video association.
       throw new Error("manage_video_status_staff_read_limit_exceeded");
     }
-    if (!approvedStaff.some((row) => staffRowHasPermissionKey(row, "video.status"))) {
-      return { ok: false, message: "このイベントの作品審査権限がありません。" };
-    }
+    return approvedStaff.some((row) => staffRowHasPermissionKey(row, "video.status"));
+  }
+}
+
+/**
+ * Existing status candidate: keep its small result and narrow SELECT, so no
+ * extra video bytes/CPU are consumed until an audited planner is implemented.
+ */
+export async function checkManageVideoStatusAccess(
+  db: ServerCoreDb,
+  user: SessionUserLike,
+  eventId: string,
+  videoId: string,
+): Promise<ManageVideoStatusAccess> {
+  if (!(await hasManageVideoStatusGrant(db, user, eventId))) {
+    return { ok: false, message: "このイベントの作品審査権限がありません。" };
   }
 
   const link = (
@@ -92,4 +113,38 @@ export async function checkManageVideoStatusAccess(
     return { ok: false, message: "このイベントに紐づく作品ではありません。" };
   }
   return { ok: true };
+}
+
+// Opt-in S3 planner preload experiment, intentionally NOT mounted in Hono.
+// The exact video row is loaded in the already-required event-association
+// statement, after staff permission succeeds. This can replace a separate
+// planner video SELECT, but is NOT a solution to #692's overall D1 budget or
+// to permission revocation between authorization and the audited commit.
+export async function loadManageVideoStatusSnapshot(
+  db: ServerCoreDb,
+  user: SessionUserLike,
+  eventId: string,
+  videoId: string,
+): Promise<ManageVideoStatusSnapshot> {
+  if (!(await hasManageVideoStatusGrant(db, user, eventId))) {
+    return { ok: false, message: "このイベントの作品審査権限がありません。" };
+  }
+  const target = (
+    await db
+      .select({ video: videos })
+      .from(videoEvents)
+      .innerJoin(videos, eq(videos.id, videoEvents.video_id))
+      .innerJoin(events, eq(events.id, videoEvents.event_id))
+      .where(
+        and(
+          eq(videoEvents.event_id, eventId),
+          eq(videoEvents.video_id, videoId),
+        )!,
+      )
+      .limit(1)
+  )[0];
+  if (!target) {
+    return { ok: false, message: "このイベントに紐づく作品ではありません。" };
+  }
+  return { ok: true, video: target.video };
 }

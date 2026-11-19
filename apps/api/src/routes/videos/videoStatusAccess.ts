@@ -8,4 +8,6 @@
 export {
   checkManageVideoStatusAccess,
   type ManageVideoStatusAccess,
+  loadManageVideoStatusSnapshot,
+  type ManageVideoStatusSnapshot,
 } from "@flamenode/server-core/video/manageStatusAccess";
