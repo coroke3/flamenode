@@ -178,6 +178,33 @@ test("MIG-0650 U03cl: malformed explicit public X-audit snapshots cannot fall ba
     },
   }), { name: "RangeError", message: "video_member_fanout_invalid_audit_snapshot" },
   "an invalid previous X ID must not suppress removal invalidation");
+  // Two individually valid audits must still describe the SAME video.
+  // Otherwise old-profile invalidation can be misdirected to another video.
+  const crossVideo = {
+    id: "video-2",
+    rows: [{ ...snapshotRow("new", "alice"), video_id: "video-2" }],
+  };
+  assert.throws(() => deriveAdminVideoMemberSaveEffects({
+    ...base,
+    membersPlan: {
+      ...base.membersPlan,
+      audits: [{ ...base.membersPlan.audits[0], after: crossVideo }],
+    },
+  }), { name: "RangeError", message: "video_member_fanout_invalid_audit_snapshot" },
+  "well-formed but cross-video before/after snapshots must not be mixed");
+
+  assert.throws(() => deriveAdminVideoMemberSaveEffects({
+    ...base,
+    membersPlan: {
+      ...base.membersPlan,
+      audits: [base.membersPlan.audits[0], {
+        ...base.membersPlan.audits[0],
+        after: { id: "video-1", rows: [snapshotRow("other", "carol")] },
+      }],
+    },
+  }), { name: "RangeError", message: "video_member_fanout_invalid_audit_snapshot" },
+  "duplicate member audits must not silently select an arbitrary first delta");
+
   const valid = deriveAdminVideoMemberSaveEffects(base);
   assert.deepEqual([...valid.affectedCreatorIds], ["bob", "alice"]);
   const legacyMissingAfter = deriveAdminVideoMemberSaveEffects({
