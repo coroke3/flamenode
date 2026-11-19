@@ -2230,3 +2230,45 @@ test("MIG-0650 U03cv same-object D1 snapshot mutation fails closed in opt-in pre
     } finally { s.sqlite.close(); }
   }
 });
+
+test("MIG-0650 U03cw CURRENT parity: missing target precedes invalid member JSON", async () => {
+  const missing = { is_collab: ["true"], members_json: "{" };
+  const fake = fixture();
+  const noVideo = await fake.request("/missing/members", missing);
+  assert.equal(noVideo.status, 404);
+  assert.deepEqual(await noVideo.json(), {
+    ok: false, message: "作品が見つかりません。",
+  });
+  assert.deepEqual(fake.stats(), { invoked: 1, prematureDb: 0 });
+
+  const real = realGuardFixture();
+  try {
+    const res = await real.send(missing, SITE, "/api/videos/v_missing/members");
+    assert.equal(res.status, 404, await res.clone().text());
+    assert.equal(real.d1.stats.reads, 3,
+      "origin/session/CostGuard/target SELECT still precede member parsing");
+    assert.equal(real.d1.stats.batches, 0);
+    assert.equal(real.count("video_members"), 0);
+    assert.equal(real.count("audit_logs"), 0);
+    assert.equal(real.count("static_rebuild_queue"), 0);
+  } finally { real.sqlite.close(); }
+});
+
+test("MIG-0650 U03cw CURRENT parity: related-event overflow precedes member validation", async () => {
+  const target = {
+    id: "v1", collaboration_type: "individual", visibility_status: "public",
+    creator_x_user_id: null, youtube_video_id: null, primary_event_id: null,
+    updated_at: 100, public_member_count: 0,
+    linked_event_ids_json: JSON.stringify(Array.from({ length: 9 }, (_, i) => "event_" + i)),
+  };
+  const overflow = fixture({ targetOverride: target });
+  const res = await overflow.request("/v1/members", {
+    is_collab: ["true"],
+    members_json: "invalid members JSON",
+  });
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), {
+    ok: false, message: "関連イベント数が処理上限を超えています。",
+  });
+  assert.deepEqual(overflow.stats(), { invoked: 1, prematureDb: 0 });
+});
