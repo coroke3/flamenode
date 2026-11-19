@@ -2706,6 +2706,10 @@ test("MIG-0638 U01b: atomic CRUD composer commits mutation, audit and Queue toge
     assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id = ?").get("slot-1").title, "initial");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.equal(sqlite.prepare(
+      "SELECT requested_by_user_id FROM static_rebuild_queue WHERE target_id = ?"
+    ).get("event-create").requested_by_user_id, "admin-1",
+      "durable Queue identity must match the audited authorized actor");
     assert.equal(stats.batches, 1);
 
     const before = sqlite.prepare("SELECT * FROM slots WHERE id = ?").get("slot-1");
@@ -2734,6 +2738,21 @@ test("MIG-0638 U01b: atomic CRUD composer commits mutation, audit and Queue toge
     // identity, or the hard D1 50-query budget with a forged source plan.
     await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
       db, ctx, insert, options("invalid", { queueTargets: [] }),
+    ), /invalid_row/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { queueTargets: [
+        { ...target("event-spoof")[0], requestedByUserId: "different-user" },
+      ] }),
+    ), /invalid_row/, "queue requester must not impersonate a different actor");
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { queueTargets: [
+        { ...target("event-nul")[0], targetId: "event\\0spoof" },
+      ] }),
+    ), /invalid_row/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { queueTargets: [
+        { ...target("event-nul")[0], reason: "bad\\0reason" },
+      ] }),
     ), /invalid_row/);
     await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
       db, ctx, insert, options("invalid", { authorizedActorId: "other" }),
