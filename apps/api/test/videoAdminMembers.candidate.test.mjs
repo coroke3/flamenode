@@ -1933,3 +1933,37 @@ test("MIG-0650 U03bn SELECT-only meter refuses DML even when invoked through fir
     ).get().collaboration_type, before);
   } finally { s.sqlite.close(); }
 });
+
+
+test("MIG-0650 U03co SELECT-only D1 meter rejects side-effect function calls before provider execution", async () => {
+  const { createAdminMemberD1ReadMeter } =
+    await import("../src/routes/videos/adminMemberD1ReadMeter.ts");
+  const s = realGuardFixture();
+  try {
+    const meter = createAdminMemberD1ReadMeter(s.d1);
+    const beforeReads = s.d1.stats.reads;
+    const forbidden = [
+      "SELECT load_extension('unsafe')",
+      'SELECT "load_extension" (\'unsafe\')',
+      "SELECT [writefile]('unsafe', 'payload')",
+      "SELECT \u0060writefile\u0060 ('unsafe', 'payload')",
+      "SELECT 1 WHERE EXISTS (SELECT writefile('unsafe', 'payload'))",
+      "SELECT 1 /* writefile must never run */",
+      "SELECT 'load_extension' AS diagnostic",
+    ];
+    for (const sql of forbidden) {
+      assert.throws(() => meter.binding.prepare(sql), {
+        name: "RangeError",
+        message: "video_admin_member_d1_read_meter_mutation_forbidden",
+      }, sql);
+    }
+    const rows = await meter.binding.prepare("SELECT id FROM videos WHERE id = ?")
+      .bind("v_two").all();
+    assert.deepEqual(rows.results.map((row) => row.id), ["v_two"]);
+    assert.equal(s.d1.stats.reads, beforeReads + 1);
+    assert.equal(meter.readCount(), 1);
+    assert.equal(s.d1.stats.batches, 0, "rejected functions must never trigger a D1 batch");
+  } finally {
+    s.sqlite.close();
+  }
+});
