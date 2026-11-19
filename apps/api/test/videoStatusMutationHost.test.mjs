@@ -248,3 +248,119 @@ test("real Hono R2 compensator silently exhausts CAS yet manifest readback rejec
     sqlite.close();
   }
 });
+
+test("Hono full status executor fails closed after successful R2 precommit and silently exhausted rollback", async () => {
+  const sqlite = createSqlite();
+  const originalWarn = console.warn;
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try {
+    sqlite.prepare(`
+      INSERT INTO videos (
+        id, submitted_by_user_id, creator_display_name, title,
+        visibility_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run("video-failed-rollback", "missing-user", "Creator", "Video", "public", 1000, 1000);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    let stored = {
+      schema_version: 1, revision: 1, generated_at: 1000, entities: [],
+    };
+    let etag = "etag-initial";
+    let precommitWrites = 0;
+    let rejectedRollbackWrites = 0;
+    let mutationCalls = 0;
+    let rereadCalls = 0;
+    const bucket = {
+      get: async (key) => {
+        assert.equal(key, "visibility/blocked-entities.v1.json");
+        const body = JSON.stringify(stored);
+        return { size: Buffer.byteLength(body), etag, text: async () => body };
+      },
+      put: async (key, body, options) => {
+        assert.equal(key, "visibility/blocked-entities.v1.json");
+        const next = JSON.parse(body);
+        if (next.entities.some((entity) =>
+          entity.entity_type === "video" && entity.entity_id === "video-failed-rollback")) {
+          assert.equal(precommitWrites++, 0, "the visibility fence precommit must happen exactly once");
+          assert.deepEqual(options.onlyIf, { etagMatches: "etag-initial" });
+          stored = next;
+          etag = "etag-after-precommit";
+          return { etag };
+        }
+        assert.deepEqual(options.onlyIf, { etagMatches: "etag-after-precommit" });
+        rejectedRollbackWrites += 1;
+        return null; // Conditional R2 writes lose; prior precommit remains durable.
+      },
+    };
+    const diagnostics = [];
+    const host = createVideoVisibilityStatusMutationHost({
+      env: { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" },
+      get: (key) => {
+        if (key === "auditSettings") return { enabled: true, retentionDays: 90 };
+        if (key === "actorSnapshotJsonById") return { admin: '{"role":"admin"}' };
+        throw new Error("unexpected context read: " + key);
+      },
+    }, {
+      createTraceId: () => "trace-complete",
+      mutateWithAudit: async () => {
+        mutationCalls += 1;
+        throw new Error("D1 transport timeout Authorization:Bearer private-token");
+      },
+    });
+    const realReread = host.rereadStatus;
+    host.rereadStatus = async (requestDb, videoId) => {
+      rereadCalls += 1;
+      return realReread(requestDb, videoId);
+    };
+    host.log = (level, tag, details) => diagnostics.push([level, tag, details]);
+
+    const result = await executeHonoVideoVisibilityStatusMutation({
+      db,
+      videoId: "video-failed-rollback",
+      requestedStatus: "private",
+      transition: {
+        mutationStatements: ["video-update"],
+        expectedMutationChanges: [1],
+        audits: [{ table_name: "videos", target_id: "video-failed-rollback", operation: "UPDATE" }],
+        notificationBatch: { statements: [], expectedChanges: [] },
+        queueBatch: { statements: [], expectedChanges: [] },
+        visibilityChanged: true,
+        fenceToken: "vf-executor-owned",
+        depublicizedFromPublic: true,
+        publicCacheKeys: [],
+        exportEventIds: [],
+      },
+      reason: "moderation",
+      logTag: "admin-video-status",
+    }, host);
+    assert.deepEqual(result, {
+      ok: false,
+      message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+      errorCode: "status_unverified",
+      traceId: "trace-complete",
+      retryable: false,
+    });
+    assert.equal(precommitWrites, 1, "R2 precommit persisted before the D1 failure");
+    assert.equal(mutationCalls, 1, "one audited mutation was attempted, no retry");
+    assert.equal(rejectedRollbackWrites, 9, "real nested R2 CAS retries all failed");
+    assert.equal(rereadCalls, 0, "no D1 idempotent success or extra D1 query after unknown R2 rollback");
+    assert.equal(stored.entities.length, 1);
+    assert.equal(stored.entities[0].fence_token, "vf-executor-owned",
+      "an unreleased visibility fence must never be reported as public");
+    assert.equal(await realReread(db, "video-failed-rollback"), "public",
+      "the observed D1 value alone is not sufficient proof of public visibility");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+    assert.deepEqual(diagnostics, [[
+      "warn", "[admin-video-status] visibility compensation failed",
+      { traceId: "trace-complete", error_code: "visibility_compensation_failed" },
+    ]]);
+    assert.equal(warnings.some((entries) =>
+      entries.some((entry) => String(entry).includes('"stuck_fence_candidate":true'))), true);
+    assert.doesNotMatch(JSON.stringify({ result, diagnostics }), /Bearer|private-token|D1 transport timeout/);
+  } finally {
+    console.warn = originalWarn;
+    sqlite.close();
+  }
+});
