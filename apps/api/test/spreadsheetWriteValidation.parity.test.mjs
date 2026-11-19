@@ -363,13 +363,13 @@ test("CURRENT UPDATE/DELETE snapshot pre-read binds PK, requires one S3 read and
       statements.push(sql);
       return { bind(...values) {
         binds.push(values);
-        return { async first() { return returned; } };
+        return { async all() { return { results: returned == null ? [] : [returned] }; } };
       } };
     },
   };
   const got = await fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, 1);
   assert.deepEqual(got, { id: "s-1", title: null });
-  assert.deepEqual(statements, ['SELECT * FROM "slots" WHERE "id" = ? LIMIT 1']);
+  assert.deepEqual(statements, ['SELECT * FROM "slots" WHERE "id" = ? LIMIT 2']);
   assert.deepEqual(binds, [["s-1"]]);
   for (const budget of [0, -1, 4, 0.5, undefined]) {
     await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, budget), /batch_too_large/);
@@ -1162,13 +1162,13 @@ test("MIG-0638 U01b: snapshot lookup does not mistake a secret primary key for a
   const db = {
     prepare(sql) {
       calls += 1;
-      assert.equal(sql, 'SELECT * FROM "slots" WHERE "access_token" = ? LIMIT 1');
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE "access_token" = ? LIMIT 2');
       return {
         bind(...args) {
           assert.deepEqual(args, ["secret-PK-1"]);
           return {
-            async first() {
-              return { access_token: "secret-PK-1", title: "original" };
+            async all() {
+              return { results: [{ access_token: "secret-PK-1", title: "original" }] };
             },
           };
         },
@@ -1650,10 +1650,10 @@ test("MIG-0638 U01b: CRUD pre-read freezes the verified PK and before-image", as
   const db = {
     prepare(sql) {
       selects++;
-      assert.equal(sql, 'SELECT * FROM "slots" WHERE "id" = ? LIMIT 1');
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE "id" = ? LIMIT 2');
       return { bind(...values) {
         assert.deepEqual(values, ["slot-1"]);
-        return { async first() { return mutable; } };
+        return { async all() { return { results: [mutable] }; } };
       } };
     },
   };
@@ -1705,7 +1705,7 @@ test("MIG-0638 U01b: malformed/mismatched D1 CRUD pre-read snapshots fail closed
   ];
   for (const bad of invalid) {
     const db = { prepare() { return { bind() {
-      return { async first() { return bad; } };
+      return { async all() { return { results: [bad] }; } };
     } }; } };
     await assert.rejects(
       fetchSpreadsheetRawSnapshot(db, ctx, { id: "slot-1" }, 1),
@@ -1714,7 +1714,7 @@ test("MIG-0638 U01b: malformed/mismatched D1 CRUD pre-read snapshots fail closed
     );
   }
   const missingDb = { prepare() { return { bind() {
-    return { async first() { return null; } };
+    return { async all() { return { results: [] }; } };
   } }; } };
   await assert.rejects(
     fetchSpreadsheetRawSnapshot(missingDb, ctx, { id: "slot-1" }, 1),
@@ -1936,11 +1936,11 @@ test("MIG-0638 U01b: guarded CRUD planner composes SQL, full CAS snapshots and s
         bind(...binds) {
           args.push(binds);
           return {
-            async first() {
-              assert.match(sql, /^SELECT \* FROM "slots" WHERE "id" = \? LIMIT 1$/);
-              return snapshot;
-            },
             async all() {
+              if (sql.startsWith('SELECT * FROM "slots"')) {
+                assert.match(sql, /^SELECT \* FROM "slots" WHERE "id" = \? LIMIT 2$/);
+                return { results: [snapshot] };
+              }
               assert.match(sql, /^SELECT "id" AS value FROM "events" WHERE "id" IN \(\?\) LIMIT 2$/);
               return { results: binds.map(value => ({ value })) };
             },
@@ -2144,4 +2144,100 @@ test("MIG-0638 U01b: FK planner rejects non-string or inherited input before D1"
     assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, [bad], 1),
       error => error instanceof Error && error.message === "invalid_row");
   }
+});
+
+
+test("MIG-0638 U01b: CRUD PK SELECT detects a duplicate sentinel without mutation", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const {
+    MAX_SPREADSHEET_CRUD_SNAPSHOT_ROWS,
+    fetchSpreadsheetRawSnapshot, buildSpreadsheetAuditedUpdate,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.equal(MAX_SPREADSHEET_CRUD_SNAPSHOT_ROWS, 2);
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    // A malformed legacy schema without the metadata-claimed UNIQUE PK
+    // must not trick the future Hono CAS planner into targeting many rows.
+    sqlite.exec('CREATE TABLE slots (id TEXT NOT NULL, title TEXT)');
+    const insert = sqlite.prepare('INSERT INTO slots (id, title) VALUES (?, ?)');
+    for (let i = 0; i < 20; i++) insert.run("repeated", "old-" + i);
+    let preparedCount = 0, resultCount = -1;
+    const db = {
+      prepare(sql) {
+        preparedCount++;
+        assert.equal(sql, 'SELECT * FROM "slots" WHERE "id" = ? LIMIT 2');
+        return { bind(...binds) {
+          assert.deepEqual(binds, ["repeated"]);
+          return { async all() {
+            const results = sqlite.prepare(sql).all(...binds);
+            resultCount = results.length;
+            return { results };
+          } };
+        } };
+      },
+    };
+    await assert.rejects(
+      fetchSpreadsheetRawSnapshot(db, ctx, { id: "repeated" }, 1),
+      /invalid_snapshot/,
+    );
+    assert.equal(preparedCount, 1, "one S3 pre-read, not an additional query");
+    assert.equal(resultCount, 2, "D1 reads at most the one duplicate sentinel");
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM slots').get().n, 20);
+
+    sqlite.exec('DELETE FROM slots');
+    insert.run("repeated", "single");
+    const before = await fetchSpreadsheetRawSnapshot(db, ctx, { id: "repeated" }, 1);
+    assert.deepEqual(before, { id: "repeated", title: "single" });
+    assert.ok(Object.isFrozen(before));
+    assert.equal(resultCount, 1);
+    const plan = buildSpreadsheetAuditedUpdate(ctx, { id: "repeated" },
+      before, { title: "new" }, "operator");
+    assert.deepEqual(plan.binds, ["new", "repeated", "repeated", "single"]);
+    assert.deepEqual(plan.audit.before, { id: "repeated", title: "single" });
+
+    sqlite.exec('DELETE FROM slots');
+    await assert.rejects(fetchSpreadsheetRawSnapshot(db, ctx,
+      { id: "repeated" }, 1), /row_not_found/);
+    assert.equal(resultCount, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0638 U01b: malformed CRUD PK D1 result envelopes fail closed", async () => {
+  const { fetchSpreadsheetRawSnapshot } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name), primaryKeys: ["id"],
+  };
+  const fake = payload => ({
+    prepare(sql) {
+      assert.match(sql, / LIMIT 2$/);
+      return { bind() { return { async all() { return payload; } }; } };
+    },
+  });
+  for (const result of [
+    null, {}, { results: null }, { results: {} },
+    { results: [{ id: "slot-1", title: "a" }, { id: "slot-1", title: "b" }] },
+    { results: [null] }, { results: [false] },
+  ]) {
+    await assert.rejects(fetchSpreadsheetRawSnapshot(
+      fake(result), ctx, { id: "slot-1" }, 1), /invalid_snapshot/);
+  }
+  await assert.rejects(fetchSpreadsheetRawSnapshot(
+    fake({ results: [] }), ctx, { id: "slot-1" }, 1), /row_not_found/);
 });
