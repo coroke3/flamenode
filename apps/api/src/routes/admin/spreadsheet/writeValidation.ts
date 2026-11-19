@@ -1348,6 +1348,14 @@ export async function planSpreadsheetAtomicAuditedImport(
         audit.context !== "admin_spreadsheet" ||
         audit.strict !== true || audit.retention_class !== "long_audit" ||
         (audit.operation !== "CREATE" && audit.operation !== "UPDATE") ||
+        // The SQL DML verb must describe the same mutation as the strict
+        // audit. Canonical SQL-shape validation alone also allows DELETE,
+        // and without this check a forged plan could audit an INSERT as an
+        // UPDATE (or vice versa) when wired into the future RH-008 handler.
+        typeof plan.statement !== "string" ||
+        (audit.operation === "CREATE"
+          ? !plan.statement.startsWith("INSERT INTO ")
+          : !plan.statement.startsWith("UPDATE ")) ||
         (audit.operation === "CREATE" ? audit.before !== null : !audit.before) ||
         !audit.after || typeof audit.after !== "object") {
       throw new Error("invalid_row");
