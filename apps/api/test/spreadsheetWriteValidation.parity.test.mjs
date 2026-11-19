@@ -3197,6 +3197,11 @@ test("MIG-0638 U02: signed import preview is verified before D1 reads and atomic
   } = await import("../src/routes/admin/spreadsheet/importPreviewToken.ts");
   const fixture = createAdminD1();
   const { sqlite, db: rawDb, stats } = fixture;
+  // A durable Queue wake requires a valid host loader even when no Queue
+  // transport is configured by the SQLite-only fixture.
+  const wakeHost = async () => ({
+    readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+  });
   const secret = "s".repeat(64);
   const cols = [
     { name: "id", type: "TEXT", notNull: true, pk: 1, defaultValue: null, generated: false },
@@ -3268,7 +3273,7 @@ test("MIG-0638 U02: signed import preview is verified before D1 reads and atomic
     assert.deepEqual(first.result, { inserted: 1, updated: 0, skipped: 0 });
     assert.equal(stats.batches, 0, "signed preflight is read-only");
     assert.deepEqual(first.atomic.expectedMutationChanges, [1, 1, 1]);
-    await mutateWithAudit(db, first.atomic);
+    await mutateWithAudit(db, first.atomic, wakeHost);
     assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id='a'").get().title,
       "signed-first");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
@@ -3291,12 +3296,12 @@ test("MIG-0638 U02: signed import preview is verified before D1 reads and atomic
     );
     assert.deepEqual(second.result, { inserted: 0, updated: 1, skipped: 0 });
     assert.deepEqual(second.atomic.expectedMutationChanges, [1, 1, 1]);
-    await mutateWithAudit(db, second.atomic);
+    await mutateWithAudit(db, second.atomic, wakeHost);
     assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id='a'").get().title,
       "signed-updated");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
-    await assert.rejects(() => mutateWithAudit(db, second.atomic),
+    await assert.rejects(() => mutateWithAudit(db, second.atomic, wakeHost),
       "nonce replay must not duplicate the import");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
   } finally {
