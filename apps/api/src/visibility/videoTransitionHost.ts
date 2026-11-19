@@ -62,10 +62,14 @@ function createManifestHost(env: AppEnv["Bindings"]): VisibilityManifestHost {
     async write(manifest, options) {
       const bucket = env.BUCKET;
       if (!bucket) throw new Error("public_visibility_manifest_bucket_missing");
+      // Match CURRENT: an explicitly present undefined is create-if-absent,
+      // not an unconditional overwrite of another writer's R2 fence.
+      const hasConditionalOption =
+        options != null && Object.prototype.hasOwnProperty.call(options, "ifMatchEtag");
       await putVisibilityManifestWithCas(
         bucket as unknown as VisibilityManifestBucket,
         manifest,
-        options?.ifMatchEtag,
+        hasConditionalOption ? options?.ifMatchEtag ?? null : undefined,
         options?.mutateOnConflict,
       );
     },
