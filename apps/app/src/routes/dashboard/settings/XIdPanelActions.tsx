@@ -92,6 +92,10 @@ export function XIdIconPicker({
   const [error, setError] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState(currentIconUrl);
+  // Only expose a saved upload URL for the X ID that originated the upload.
+  // The identity guard prevents a transient link to A while rendering B.
+  const [savedUpload, setSavedUpload] = React.useState<{ xUserId: string; url: string } | null>(null);
+  const savedIconUrl = savedUpload?.xUserId === xUserId ? savedUpload.url : null;
   // CURRENT: if no saved icon exists, the first server-scoped candidate is
   // visually selected; it does not perform a write until the user clicks it.
   const selectedIconUrl = selected ?? candidates[0] ?? null;
@@ -102,7 +106,7 @@ export function XIdIconPicker({
     identityRef.current = { xUserId, generation: identityRef.current.generation + 1 };
   }
   // Refreshes can replace the authoritative icon after a write or account switch.
-  React.useEffect(() => { setSelected(currentIconUrl); }, [currentIconUrl, xUserId]);
+  React.useEffect(() => { setSelected(currentIconUrl); setSavedUpload(null); }, [currentIconUrl, xUserId]);
   // Identity changes invalidate previously displayed mutation notices.
   React.useEffect(() => { setError(null); setMessage(null); }, [xUserId]);
   const [upload, setUpload] = React.useState(false);
@@ -122,6 +126,7 @@ export function XIdIconPicker({
         if (identityRef.current !== requestIdentity) return;
         if (!result.ok) { setError(result.message ?? "アイコンの更新に失敗しました。"); return; }
         setMessage(result.message ?? successText);
+        setSavedUpload(null);
         if (result.iconUrl) setSelected(result.iconUrl);
         onRefresh();
       } catch {
@@ -158,7 +163,10 @@ export function XIdIconPicker({
         return { ok: false, message };
       }
       setMessage(result.message ?? "アイコンをアップロードしました。");
-      if (result.iconUrl) setSelected(result.iconUrl);
+      if (result.iconUrl) {
+        setSelected(result.iconUrl);
+        setSavedUpload({ xUserId, url: result.iconUrl });
+      }
       setUpload(false);
       setEditorKey((key) => key + 1);
       onRefresh();
@@ -204,7 +212,14 @@ export function XIdIconPicker({
       ) : null}
       {candidates.length === 0
         ? <p className="settings-accountNote">まだ候補がありません。画像をアップロードできます。</p> : null}
-      {message ? <p role="status">{message}</p> : null}
+      {message ? (
+        <p role="status">
+          {message}
+          {savedIconUrl ? (
+            <>{" "}<a href={savedIconUrl} className="xids-iconHint">保存済み画像を表示</a></>
+          ) : null}
+        </p>
+      ) : null}
       {error ? <p className="xids-msgErr" role="alert">{error}</p> : null}
     </div>
   );

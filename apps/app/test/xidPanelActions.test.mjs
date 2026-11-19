@@ -182,7 +182,8 @@ test("MIG-0708 U03: old profile mutation completion cannot refresh or close new 
 });
 
 test("MIG-0708 U03 T04: shared square-crop editor blocks invalid input; uploads only after 256x256 confirmation", async () => {
-  const files=[],api={uploadIcon:async(id,file)=>{files.push([id,file]);return {ok:true};}};
+  const savedUrl="/api/media/xicons/foo/saved-icon.webp";
+  const files=[],api={uploadIcon:async(id,file)=>{files.push([id,file]);return {ok:true,iconUrl:savedUrl};}};
   const m=await render(XIdIconPicker,{api,xUserId:"foo",currentIconUrl:null,candidates:[],onRefresh:()=>{}});
   const priorBitmap = globalThis.createImageBitmap;
   const oldGetContext = dom.window.HTMLCanvasElement.prototype.getContext;
@@ -235,6 +236,12 @@ test("MIG-0708 U03 T04: shared square-crop editor blocks invalid input; uploads 
     assert.equal(files[0][1]===valid,false,"never upload original bytes");
     assert.ok(drawings.length>=2,"preview and 256x256 conversion both draw");
     assert.match(m.container.textContent,/アイコンをアップロードしました/);
+    const savedLink = [...m.container.querySelectorAll("a")].find(a => a.textContent.includes("保存済み画像を表示"));
+    assert.ok(savedLink, "CURRENT provides a link to inspect the confirmed uploaded icon");
+    assert.equal(savedLink.getAttribute("href"), savedUrl);
+    await m.rerender({ api, xUserId: "other", currentIconUrl: null, candidates: [], onRefresh: () => {} });
+    assert.equal(m.container.querySelector('a.xids-iconHint'), null,
+      "the saved URL of the previous X ID must not leak into another account");
   } finally {
     globalThis.createImageBitmap=priorBitmap;
     dom.window.HTMLCanvasElement.prototype.getContext=oldGetContext;
