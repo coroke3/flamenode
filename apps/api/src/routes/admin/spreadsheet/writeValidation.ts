@@ -1308,6 +1308,11 @@ export async function planSpreadsheetAtomicAuditedImport(
   if (!claims || !options ||
       claims.table !== ctx.def.table ||
       claims.operatorUserId !== options.authorizedActorId ||
+      // CURRENT applySpreadsheetImport verifies the *entire* preview schema
+      // binding, not only actor/table/mode. A signed preview from before a
+      // schema or primary-key change must never authorize a new D1 plan.
+      JSON.stringify(claims.columns) !== JSON.stringify(ctx.columnNames) ||
+      JSON.stringify(claims.primaryKeys) !== JSON.stringify(ctx.primaryKeys) ||
       !options.authorizedActorId?.trim() ||
       (claims.mode !== "insert" && claims.mode !== "upsert") ||
       !Number.isSafeInteger(options.callerQueryCount) ||
