@@ -794,7 +794,7 @@ test("U02 upsert existing-row lookup binds composite PKs in one D1 SELECT and re
     } }; } };
     const existing = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
     assert.equal(reads, 1);
-    assert.equal(statement, 'SELECT * FROM "video_events" WHERE ("video_id" = ? AND "event_id" = ?) OR ("video_id" = ? AND "event_id" = ?)');
+    assert.equal(statement, 'SELECT * FROM "video_events" WHERE ("video_id" = ? AND "event_id" = ?) OR ("video_id" = ? AND "event_id" = ?) LIMIT 8');
     assert.deepEqual(values, ["v1", "e1", "v2", "e2"]);
     assert.deepEqual([...existing.keys()], [JSON.stringify([["event_id", "e1"], ["video_id", "v1"]])]);
     const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator");
@@ -1396,7 +1396,7 @@ test("MIG-0638 U02: D1 existing import rows are captured once before PK and audi
   const db = {
     prepare(sql) {
       selects++;
-      assert.equal(sql, 'SELECT * FROM "slots" WHERE ("id" = ?)');
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE ("id" = ?) LIMIT 8');
       return { bind(...args) {
         assert.deepEqual(args, ["slot-1"]);
         return { async all() { return { results: [row] }; } };
@@ -1463,4 +1463,94 @@ test("MIG-0638 U02: throwing D1 snapshot accessors fail as invalid_snapshot", as
       error => error instanceof Error && error.message === "invalid_snapshot",
     );
   }
+});
+
+
+test("MIG-0638 U02: existing import PK read stays within 8 D1 rows and fails closed on schema drift", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const {
+    MAX_SPREADSHEET_IMPORT_EXISTING_RESULT_ROWS,
+    SPREADSHEET_IMPORT_APPLY_MAX_ROWS,
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.equal(SPREADSHEET_IMPORT_APPLY_MAX_ROWS, 7);
+  assert.equal(MAX_SPREADSHEET_IMPORT_EXISTING_RESULT_ROWS, 8);
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(x => x.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: "k", title: "new" }]);
+  assert.deepEqual(prepared.errors, []);
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    // Deliberately model broken schema metadata with no actual UNIQUE/PK index.
+    // The unmounted Hono planner must refuse duplicates before audit/DB mutation.
+    sqlite.exec('CREATE TABLE slots (id TEXT NOT NULL, title TEXT)');
+    const insert = sqlite.prepare('INSERT INTO slots (id, title) VALUES (?, ?)');
+    for (let i = 0; i < 20; i++) insert.run("k", "old-" + i);
+    let observedSql = "", reads = 0, returnedRows = 0;
+    const db = {
+      prepare(sql) {
+        reads++;
+        observedSql = sql;
+        return { bind(...binds) {
+          return { async all() {
+            const results = sqlite.prepare(sql).all(...binds);
+            returnedRows = results.length;
+            return { results };
+          } };
+        } };
+      },
+    };
+    await assert.rejects(fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1),
+      /invalid_snapshot/);
+    assert.equal(reads, 1);
+    assert.equal(observedSql, 'SELECT * FROM "slots" WHERE ("id" = ?) LIMIT 8');
+    assert.equal(returnedRows, 8, "D1 must never materialize the remaining duplicate rows");
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM slots').get().n, 20,
+      "preflight must not mutate persisted rows");
+
+    // A one-to-one PK lookup remains supported without extra bind variables.
+    sqlite.exec('DELETE FROM slots');
+    insert.run("k", "only");
+    const found = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+    assert.equal(found.get(prepared.preparedRows[0].fingerprint)?.title, "only");
+    assert.equal(returnedRows, 1);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0638 U02: anomalous D1 result counts fail before building partial PK maps", async () => {
+  const { fetchSpreadsheetExistingImportRows } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(x => x.name), primaryKeys: ["id"],
+  };
+  const prepared = {
+    errors: [], preparedRows: [
+      { pk: { id: "k" }, row: { id: "k", title: "new" }, fingerprint: '[["id","k"]]' },
+    ],
+  };
+  const extra = Array.from({ length: 8 }, () => ({ id: "k", title: "old" }));
+  const db = values => ({
+    prepare(sql) {
+      assert.match(sql, / LIMIT 8$/);
+      return { bind() { return { async all() { return { results: values }; } }; } };
+    },
+  });
+  await assert.rejects(fetchSpreadsheetExistingImportRows(db(extra), ctx, prepared, 1),
+    /invalid_snapshot/);
+  await assert.rejects(fetchSpreadsheetExistingImportRows(db({ results: extra }), ctx, prepared, 1),
+    /invalid_snapshot/);
 });
