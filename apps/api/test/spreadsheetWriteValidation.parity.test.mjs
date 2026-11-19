@@ -227,7 +227,7 @@ test("unmounted FK lookup plans preserve CURRENT dedup, 99-value chunks and boun
   assert.equal(plans[1].binds.length, 2);
   assert.equal(plans[0].binds[0], hostile);
   assert.equal(plans[0].statement.includes(hostile), false);
-  assert.equal(plans[0].statement, 'SELECT "id" AS value FROM "events" WHERE "id" IN (' + Array(99).fill("?").join(", ") + ')');
+  assert.equal(plans[0].statement, 'SELECT "id" AS value FROM "events" WHERE "id" IN (' + Array(99).fill("?").join(", ") + ') LIMIT 100');
   assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(plans[1], plans[1].values.map(value => ({ value }))));
   assert.throws(() => assertSpreadsheetForeignKeyLookup(plans[0], [{ value: hostile }]), /foreign_key_violation/);
   assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, [{ event_id: null }, {event_id:""}]), []);
@@ -1720,4 +1720,70 @@ test("MIG-0638 U01b: malformed/mismatched D1 CRUD pre-read snapshots fail closed
     fetchSpreadsheetRawSnapshot(missingDb, ctx, { id: "slot-1" }, 1),
     /row_not_found/,
   );
+});
+
+
+test("MIG-0638 U01b: foreign-key D1 lookups use a bounded SQL sentinel per unique chunk", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const {
+    buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys,
+    assertSpreadsheetForeignKeyLookup, MAX_SPREADSHEET_FK_LOOKUP_ROWS,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.equal(MAX_SPREADSHEET_FK_LOOKUP_ROWS, 100);
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const input = [{ event_id: "e1" }];
+  const plans = buildSpreadsheetForeignKeyLookups(fk, input);
+  assert.deepEqual(plans[0].binds, ["e1"]);
+  assert.equal(plans[0].statement,
+    'SELECT "id" AS value FROM "events" WHERE "id" IN (?) LIMIT 2');
+  const plan2 = buildSpreadsheetForeignKeyLookups(fk,
+    [{ event_id: "e1" }, { event_id: "e2" }]);
+  assert.match(plan2[0].statement, / LIMIT 3$/);
+  const plan99 = buildSpreadsheetForeignKeyLookups(fk,
+    Array.from({ length: 99 }, (_, i) => ({ event_id: "k" + i })));
+  assert.match(plan99[0].statement, / LIMIT 100$/);
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(plans[0], [{ value: "e1" }]));
+  assert.throws(() => assertSpreadsheetForeignKeyLookup(plans[0],
+    [{ value: "e1" }, { value: "e1" }]), /invalid_snapshot/);
+  assert.throws(() => assertSpreadsheetForeignKeyLookup(plans[0],
+    { value: "e1" }), /invalid_snapshot/);
+
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    // Simulate schema drift: the referenced identifier is not UNIQUE and
+    // hundreds of rows could otherwise be materialized in a single request.
+    sqlite.exec('CREATE TABLE events (id TEXT NOT NULL)');
+    const insert = sqlite.prepare('INSERT INTO events (id) VALUES (?)');
+    for (let i = 0; i < 200; i++) insert.run("e1");
+    let lastSql = "", returnedCount = 0, prepares = 0;
+    const db = { prepare(sql) {
+      prepares++;
+      lastSql = sql;
+      return { bind(...args) {
+        return { async all() {
+          const results = sqlite.prepare(sql).all(...args);
+          returnedCount = results.length;
+          return { results };
+        } };
+      } };
+    } };
+    await assert.rejects(
+      validateSpreadsheetForeignKeys(db, fk, input, 1),
+      /invalid_snapshot/,
+    );
+    assert.equal(prepares, 1);
+    assert.equal(lastSql, plans[0].statement);
+    assert.equal(returnedCount, 2, "D1 must fetch only one match plus one sentinel");
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM events').get().n, 200,
+      "FK preflight must not change the table");
+
+    sqlite.exec('DELETE FROM events');
+    insert.run("e1");
+    await assert.doesNotReject(validateSpreadsheetForeignKeys(db, fk, input, 1));
+    assert.equal(returnedCount, 1);
+    await assert.rejects(validateSpreadsheetForeignKeys(db, fk,
+      [{ event_id: "e2" }], 1), /foreign_key_violation/);
+  } finally {
+    sqlite.close();
+  }
 });
