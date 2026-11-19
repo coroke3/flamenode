@@ -725,3 +725,40 @@ test("MIG-0603: commit-time status assertion accepts current canonical preset an
     }
   }
 });
+
+
+test("MIG-0603: multibyte imported event IDs cannot bypass the 4096-byte rebuild snapshot bound", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const admin = { id: "u_admin", role: "admin" };
+    const manager = { id: "u_mgr", role: "user" };
+    const overlong = "雪".repeat(1500);
+    assert.ok(overlong.length < 4096 && Buffer.byteLength(overlong, "utf8") > 4096,
+      "UTF-16 character count alone misses this malformed imported ID");
+
+    // An unrelated primary ID is not included in the linked-event JSON.
+    sqlite.prepare("UPDATE videos SET primary_event_id=? WHERE id='v1'").run(overlong);
+    const first = d1.stats.statements;
+    await assert.rejects(loadAdminVideoStatusSnapshot(db, admin, "v1"),
+      /manage_status_rebuild_event_snapshot_invalid/);
+    assert.equal(d1.stats.statements - first, 1, "admin rejection uses only one read");
+    sqlite.prepare("UPDATE videos SET primary_event_id=NULL WHERE id='v1'").run();
+
+    // A long linked event ID is independently embedded in SQLite's JSON
+    // aggregate. Keep the canonical selected evA link and deny oversize.
+    sqlite.exec("PRAGMA foreign_keys=OFF");
+    sqlite.prepare("INSERT INTO video_events (event_id, video_id) VALUES (?, ?)")
+      .run(overlong, "v1");
+    const second = d1.stats.statements;
+    await assert.rejects(loadManageVideoStatusSnapshot(db, manager, "evA", "v1"),
+      /manage_status_rebuild_event_snapshot_invalid/);
+    assert.equal(d1.stats.statements - second, 2, "manager denial adds no preflight reads");
+    assert.equal(d1.stats.batches, 0, "failed preloads never start an audited transaction");
+    assert.equal(d1.stats.writes, 0, "preload itself performs no D1 writes");
+  } finally {
+    sqlite.close();
+  }
+});

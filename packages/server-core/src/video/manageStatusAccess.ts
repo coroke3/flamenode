@@ -20,7 +20,14 @@ export const MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT = 256;
 // Keep in sync with MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS in staticRebuild/hooks.
 // This module deliberately does NOT import the much larger queue/planner chain.
 export const MAX_MANAGE_STATUS_REBUILD_EVENTS = 8;
+// Both UTF-16 code units and UTF-8 bytes are bounded: a multibyte imported
+// event ID must not silently bypass the queue/rebuild input safety limit.
 export const MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH = 4096;
+
+function exceedsRebuildIdBytes(value: string): boolean {
+  return value.length > MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH ||
+    new TextEncoder().encode(value).byteLength > MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH;
+}
 
 export type ManageVideoStatusAccess =
   | { ok: true }
@@ -52,7 +59,7 @@ function finishVideoStatusSnapshot(
   // Fail closed on malformed aggregates and unexpectedly large imported IDs;
   // do not pass an incomplete rebuild fan-out to a future audited planner.
   const raw = target.rebuildEventIdsJson;
-  if (typeof raw !== "string" || raw.length > MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH) {
+  if (typeof raw !== "string" || exceedsRebuildIdBytes(raw)) {
     throw new Error("manage_status_rebuild_event_snapshot_invalid");
   }
   let linked: unknown;
@@ -72,7 +79,7 @@ function finishVideoStatusSnapshot(
   const primaryEventId = target.video.primary_event_id;
   if (primaryEventId != null &&
       (typeof primaryEventId !== "string" ||
-       primaryEventId.length > MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH)) {
+       exceedsRebuildIdBytes(primaryEventId))) {
     throw new Error("manage_status_rebuild_event_snapshot_invalid");
   }
   const rebuildEventIds = mergeVideoRebuildEventIds(primaryEventId, linked);
