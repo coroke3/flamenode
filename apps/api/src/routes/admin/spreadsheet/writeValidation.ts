@@ -1320,10 +1320,13 @@ export async function fetchSpreadsheetExistingImportRows(
   const sql = "SELECT * FROM " + spreadsheetTableIdentifier(ctx) + " WHERE " +
     clauses.join(" OR ") + " LIMIT " + MAX_SPREADSHEET_IMPORT_EXISTING_RESULT_ROWS;
   const result = await db.prepare(sql).bind(...binds).all<Record<string, unknown>>();
-  const rows = result.results ?? [];
-  if (!Array.isArray(rows) || rows.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS) {
+  // Missing/malformed D1 data is NOT an empty table: treating it as [] can
+  // turn a UPSERT into an INSERT and lose the correct audit before-image.
+  if (!result || !Array.isArray(result.results) ||
+      result.results.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS) {
     throw new Error("invalid_snapshot");
   }
+  const rows = result.results;
   const out = new Map<string, Record<string, unknown>>();
   for (const row of rows) {
     // Materialize each database field exactly once BEFORE matching its PK.
@@ -1333,11 +1336,19 @@ export async function fetchSpreadsheetExistingImportRows(
     let snapshot: Record<string, unknown>;
     try {
       if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("invalid_snapshot");
-      const cells: Array<[string, unknown]> = [];
+      const cells: Array<[string, string | number | null]> = [];
       for (const column of ctx.columns) {
         if (!Object.hasOwn(row, column.name)) throw new Error("invalid_snapshot");
         const value = row[column.name];
-        if (value === undefined) throw new Error("invalid_snapshot");
+        // A complete D1 before-image contains SQLite scalar values only.
+        // Never serialize objects, booleans or non-finite values into an
+        // import audit, or invoke a hostile PK object's toString().
+        if (value !== null && typeof value !== "string" && typeof value !== "number") {
+          throw new Error("invalid_snapshot");
+        }
+        if (typeof value === "number" && !Number.isFinite(value)) {
+          throw new Error("invalid_snapshot");
+        }
         cells.push([column.name, value]);
       }
       snapshot = Object.freeze(Object.fromEntries(cells));
