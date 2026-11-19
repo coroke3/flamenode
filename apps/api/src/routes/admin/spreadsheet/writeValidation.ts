@@ -313,6 +313,8 @@ export interface SpreadsheetForeignKey {
 /** S3 permits at most three D1 pre-read statements total. This cap only bounds FK lookups;
  * the caller must still include its other pre-reads in the request-wide budget. */
 export const SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES = 3;
+/** 99 distinct bound FK values plus one schema-drift sentinel row. */
+export const MAX_SPREADSHEET_FK_LOOKUP_ROWS = 100;
 export interface SpreadsheetForeignKeyLookup extends SpreadsheetSqlPlan {
   values: readonly string[];
 }
@@ -348,7 +350,11 @@ export function buildSpreadsheetForeignKeyLookups(
       const chunk = values.slice(start, start + 99);
       const placeholders = chunk.map(() => "?").join(", ");
       lookups.push({
-        statement: "SELECT " + reference + " AS value FROM " + table + " WHERE " + reference + " IN (" + placeholders + ")",
+        // ZERO_1102 §4 requires a literal row limit on every D1 SELECT.
+        // A valid referenced UNIQUE/PK yields <=chunk.length rows; one extra
+        // sentinel exposes an unexpectedly non-unique referenced key.
+        statement: "SELECT " + reference + " AS value FROM " + table + " WHERE " + reference + " IN (" +
+          placeholders + ") LIMIT " + Math.min(chunk.length + 1, MAX_SPREADSHEET_FK_LOOKUP_ROWS),
         binds: chunk,
         values: chunk,
       });
@@ -362,6 +368,11 @@ export function assertSpreadsheetForeignKeyLookup(
   lookup: SpreadsheetForeignKeyLookup,
   returned: readonly { value: string | number | null }[],
 ): void {
+  if (!Array.isArray(returned) || returned.length > lookup.values.length) {
+    // A non-unique referenced key or malformed D1 adapter result must never
+    // authorize writes under a false assumption of FK uniqueness.
+    throw new Error("invalid_snapshot");
+  }
   const found = new Set(returned.map(row => String(row.value)));
   if (lookup.values.some(value => !found.has(String(value)))) {
     throw new Error("foreign_key_violation");
