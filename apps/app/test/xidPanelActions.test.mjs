@@ -94,6 +94,45 @@ test("MIG-0708 U03 T03: profile reject preserves editable field and displays ser
   await m.dispose();
 });
 
+test("MIG-0708 U03: CURRENT profile placeholders and hidden YouTube/SNS picker values reach the update body", async () => {
+  const socials = JSON.stringify([{ type: "X", url: "https://x.com/creator" }]);
+  const youtube = "https://www.youtube.com/@creator";
+  const updates = [];
+  let refreshed = 0;
+  const api = { updateProfile: async (id, fields) => {
+    updates.push({ id, fields });
+    return { ok: true, message: "保存しました。" };
+  } };
+  const x = {
+    id: "alpha", x_name: "Alpha", icon_url: null,
+    profile_text: "About", portfolio_contact: "Contact",
+    youtube_channel_url: youtube, other_social_links: socials,
+  };
+  const m = await render(XIdCompactProfileForm, {
+    api, x, iconCandidates: [], channelCandidates: [youtube],
+    onRefresh: () => { refreshed++; },
+  });
+  try {
+    const form = m.container.querySelector("form");
+    assert.equal(form.querySelector('[name="x_name"]').placeholder, "@alpha");
+    assert.equal(form.querySelector('[name="profile_text"]').placeholder,
+      "制作スタイル、得意なこと、活動紹介など");
+    assert.equal(form.querySelector('[name="portfolio_contact"]').placeholder,
+      "依頼・連絡先、メール、フォームURL、DM可否など");
+    assert.equal(form.querySelector('[name="youtube_channel_url"]').value, youtube);
+    assert.equal(form.querySelector('[name="other_social_links"]').value, socials);
+    await act(async () => form.dispatchEvent(new dom.window.Event("submit", {
+      bubbles: true, cancelable: true,
+    })));
+    await m.flush();
+    assert.deepEqual(updates, [{ id: "alpha", fields: {
+      x_name: "Alpha", profile_text: "About", portfolio_contact: "Contact",
+      youtube_channel_url: youtube, other_social_links: socials,
+    } }]);
+    assert.equal(refreshed, 1, "success must refresh one time");
+  } finally { await m.dispose(); }
+});
+
 test("MIG-0708 U03: profile form resets uncontrolled values when X identity changes", async () => {
   const api = {};
   const base = { icon_url: null, portfolio_contact: null, youtube_channel_url: null, other_social_links: null };

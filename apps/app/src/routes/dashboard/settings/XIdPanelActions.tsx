@@ -253,14 +253,16 @@ export function XIdCompactProfileForm({
       <form key={x.id} onSubmit={onSubmit}>
         <label className="xids-compactLabel">表示名オーバーライド（空欄で @ハンドル表示）
           <input name="x_name" className="xids-input" maxLength={80} disabled={pending}
-            defaultValue={x.x_name} />
+            placeholder={`@${x.id}`} defaultValue={x.x_name} />
         </label>
         <label className="xids-compactLabel">About / 自己紹介
           <textarea name="profile_text" className="xids-textarea" rows={3} maxLength={2000}
+            placeholder="制作スタイル、得意なこと、活動紹介など"
             disabled={pending} defaultValue={x.profile_text ?? ""} />
         </label>
         <label className="xids-compactLabel">Contact / 連絡先
           <textarea name="portfolio_contact" className="xids-textarea" rows={2} maxLength={1200}
+            placeholder="依頼・連絡先、メール、フォームURL、DM可否など"
             disabled={pending} defaultValue={x.portfolio_contact ?? ""} />
         </label>
         <label className="xids-compactLabel">YouTube チャンネル（過去の作品から候補を表示）</label>
