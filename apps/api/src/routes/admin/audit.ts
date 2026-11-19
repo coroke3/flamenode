@@ -15,8 +15,10 @@ import { Hono } from "hono";
 import type { AppEnv } from "../../env.ts";
 import {
   AuditDryRunSchema,
+  AuditRestoreSchema,
   AuditSettingsPatchSchema,
   type AuditLogDryRunResult,
+  type AuditRestoreResponse,
   type UpdateAuditLogSettingsResult,
 } from "@flamenode/contracts";
 import { updateAuditLogSettings } from "@flamenode/server-core/audit/settings";
@@ -31,6 +33,7 @@ import {
 } from "./body.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { onlyMutating } from "../../middleware/writeOrigin.ts";
+import { createAuditRestoreHost } from "../../visibility/auditRestoreHost.ts";
 
 export const auditAdminRoutes = new Hono<AppEnv>();
 auditAdminRoutes.use("*", onlyMutating(costGuardMiddleware("admin_permissions")));
@@ -140,6 +143,51 @@ auditAdminRoutes.post("/dry-run", async (c) => {
     {
       ok: result.ok,
       message: result.message,
+      diff: result.diff,
+    },
+    200,
+  );
+});
+
+// MIG-0662 SA-011: restore audit snapshot via the same server-core entry as
+// CURRENT. The admin router supplies origin/session/write-identity/CostGuard.
+// Production routing remains CURRENT until the MIG-0603 merge and release gates.
+auditAdminRoutes.post("/restore", async (c) => {
+  const read = await readAdminJsonBody(c.req.raw);
+  if (read.kind === "too_large") {
+    return c.json<AuditRestoreResponse>(
+      { ok: false, message: BODY_TOO_LARGE_MESSAGE }, 413,
+    );
+  }
+  if (read.kind !== "ok") {
+    return c.json<AuditRestoreResponse>({ ok: false, message: "入力エラー" }, 400);
+  }
+
+  const parsed = AuditRestoreSchema.safeParse(read.value);
+  if (!parsed.success) {
+    return c.json<AuditRestoreResponse>(
+      { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" }, 400,
+    );
+  }
+
+  const result = await restoreAuditLog(
+    c.get("db"),
+    {
+      auditId: parsed.data.audit_id,
+      userId: c.get("user")!.id,
+      reason: parsed.data.reason,
+      confirmText: parsed.data.confirm_text,
+      forceOverwrite: parsed.data.force_overwrite === 1,
+      dry_run: false,
+    },
+    createAuditRestoreHost(c),
+  );
+
+  return c.json<AuditRestoreResponse>(
+    {
+      ok: result.ok,
+      message: result.message,
+      restore_run_id: result.restore_run_id,
       diff: result.diff,
     },
     200,
