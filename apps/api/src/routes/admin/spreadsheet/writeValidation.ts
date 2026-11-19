@@ -96,21 +96,26 @@ export function prepareCompleteInsertRow(
 ): Record<string, string | number | null> {
   const row = rowInput;
   validateSpreadsheetInputValues(ctx, row);
-  const complete: Record<string, string | number | null> = {};
+  const complete: Array<[string, string | number | null]> = [];
   for (const column of ctx.columns) {
     if (column.generated) continue;
-    if (row[column.name] !== undefined) {
-      if (row[column.name] == null && column.notNull) throw new Error("not_null_violation");
-      complete[column.name] = row[column.name] === "" ? null : row[column.name]!;
+    // Reading inherited properties (e.g. "constructor") would incorrectly
+    // treat a missing input as a supplied value. Store "__proto__" as a data
+    // column instead of invoking Object.prototype's legacy setter.
+    const provided = Object.hasOwn(row, column.name) && row[column.name] !== undefined;
+    if (provided) {
+      const value = row[column.name]!;
+      if (value == null && column.notNull) throw new Error("not_null_violation");
+      complete.push([column.name, value === "" ? null : value]);
     } else if (column.defaultValue != null) {
-      complete[column.name] = resolveSpreadsheetDefaultValue(column);
+      complete.push([column.name, resolveSpreadsheetDefaultValue(column)]);
     } else if (column.notNull) {
       throw new Error("missing_required_column");
     } else {
-      complete[column.name] = null;
+      complete.push([column.name, null]);
     }
   }
-  return complete;
+  return Object.fromEntries(complete);
 }
 
 
@@ -120,18 +125,20 @@ export function normalizeSpreadsheetPrimaryKey(
   pk: Record<string, string>,
 ): Record<string, string> {
   if (primaryKeys.length === 0) throw new Error("missing_primary_key");
+  const normalized: Array<[string, string]> = [];
   for (const key of primaryKeys) {
+    // Object.prototype names are valid SQL identifiers, but inherited JS
+    // properties must never stand in for absent JSON primary-key components.
+    if (!Object.hasOwn(pk, key)) throw new Error("missing_primary_key");
     const value = pk[key];
-    if (value === undefined || String(value).trim() === "") {
-      throw new Error("missing_primary_key");
-    }
+    if (value === undefined) throw new Error("missing_primary_key");
+    const text = String(value);
+    if (text.trim() === "") throw new Error("missing_primary_key");
     // Some SQLite bindings truncate embedded NUL bytes at write/read time.
-    // Refuse ambiguous primary-key identity before any SELECT or mutation.
-    if (String(value).includes("\0")) throw new Error("invalid_row");
+    if (text.includes("\0")) throw new Error("invalid_row");
+    normalized.push([key, text]);
   }
-  const normalized: Record<string, string> = {};
-  for (const key of primaryKeys) normalized[key] = String(pk[key]);
-  return normalized;
+  return Object.fromEntries(normalized);
 }
 
 /** CURRENT validation.ts#primaryKeyFromRowValues parity. */
@@ -139,11 +146,10 @@ export function primaryKeyFromSpreadsheetRow(
   row: Record<string, string | null>,
   primaryKeys: readonly string[],
 ): Record<string, string> {
-  const raw: Record<string, string> = {};
-  for (const key of primaryKeys) {
-    const value = row[key];
-    raw[key] = value == null ? "" : String(value);
-  }
+  const raw = Object.fromEntries(primaryKeys.map((key) => {
+    const value = Object.hasOwn(row, key) ? row[key] : undefined;
+    return [key, value == null ? "" : String(value)];
+  }));
   return normalizeSpreadsheetPrimaryKey(primaryKeys, raw);
 }
 
@@ -163,14 +169,14 @@ export function prepareSpreadsheetUpdate(
     .filter((column) =>
       column.pk === 0 &&
       isSpreadsheetColumnEditable(ctx.def, column.name) &&
-      values[column.name] !== undefined,
+      Object.hasOwn(values, column.name) && values[column.name] !== undefined,
     )
     .map((column) => column.name);
   if (setColumns.length === 0) throw new Error("empty_row");
-  const after = { ...before };
-  for (const column of setColumns) {
-    after[column] = values[column] === "" ? null : values[column];
-  }
+  const after = Object.fromEntries([
+    ...Object.entries(before),
+    ...setColumns.map((column) => [column, values[column] === "" ? null : values[column]]),
+  ]);
   return { setColumns, after };
 }
 
