@@ -2850,3 +2850,82 @@ test("MIG-0638 U02: incomplete D1 result and non-scalar before-images reject rat
   const numeric = await fetchSpreadsheetExistingImportRows(numericDb, ctx, numericPrepared, 1);
   assert.equal(numeric.get(spreadsheetImportPrimaryKeyFingerprint({ id: "42" })).id, 42);
 });
+
+test("MIG-0638 U01b/U02: rounded SQLite INTEGER primary keys cannot prove a before-image", async () => {
+  const {
+    fetchSpreadsheetRawSnapshot, fetchSpreadsheetExistingImportRows,
+    prepareSpreadsheetImportMutationRows, spreadsheetImportPrimaryKeyFingerprint,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "INTEGER", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name), primaryKeys: ["id"],
+  };
+  const mkDb = row => {
+    let reads = 0;
+    return {
+      get reads() { return reads; },
+      prepare(statement) {
+        assert.match(statement, /^SELECT \* FROM "slots" WHERE /);
+        assert.match(statement, / LIMIT (?:2|8)$/);
+        reads++;
+        return { bind() { return { async all() { return { results: [row] }; } }; } };
+      },
+    };
+  };
+  // Both +2^53 and -2^53 are individually representable as numbers, but
+  // integer values one apart from them may round to the same JS number.
+  for (const unsafe of [Number.MAX_SAFE_INTEGER + 1, Number.MIN_SAFE_INTEGER - 1]) {
+    const key = String(unsafe);
+    const db = mkDb({ id: unsafe, title: "old" });
+    await assert.rejects(
+      fetchSpreadsheetRawSnapshot(db, ctx, { id: key }, 1), /invalid_snapshot/,
+    );
+    assert.equal(db.reads, 1);
+    const prepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: key, title: "new" }]);
+    assert.deepEqual(prepared.errors, []);
+    await assert.rejects(
+      fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1), /invalid_snapshot/,
+    );
+    assert.equal(db.reads, 2, "one bounded read per attempt, no extra D1 query");
+  }
+
+  for (const safe of [Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, 42]) {
+    const key = String(safe);
+    const db = mkDb({ id: safe, title: "old" });
+    const snapshot = await fetchSpreadsheetRawSnapshot(db, ctx, { id: key }, 1);
+    assert.equal(snapshot.id, safe);
+    assert.ok(Object.isFrozen(snapshot));
+    const prepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: key, title: "new" }]);
+    const imported = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+    const row = imported.get(spreadsheetImportPrimaryKeyFingerprint({ id: key }));
+    assert.equal(row?.id, safe);
+    assert.ok(Object.isFrozen(row));
+  }
+
+  // A numeric REAL primary-key value is not an INTEGER precision overflow.
+  // Preserve the existing exact textual identity match for fractional keys.
+  const realCtx = {
+    ...ctx, columns: [{ ...columns[0], type: "REAL" }, columns[1]],
+  };
+  const realDb = mkDb({ id: 3.5, title: "real" });
+  assert.equal((await fetchSpreadsheetRawSnapshot(realDb, realCtx, { id: "3.5" }, 1)).id, 3.5);
+  const realPrepared = prepareSpreadsheetImportMutationRows(realCtx, [{ id: "3.5", title: "new" }]);
+  assert.deepEqual(realPrepared.errors, []);
+  assert.equal((await fetchSpreadsheetExistingImportRows(realDb, realCtx, realPrepared, 1))
+    .get(spreadsheetImportPrimaryKeyFingerprint({ id: "3.5" }))?.id, 3.5);
+
+  // TEXT PKs that merely contain long decimal-looking strings do not lose
+  // precision and must remain readable.
+  const textCtx = { ...ctx, columns: [{ ...columns[0], type: "TEXT" }, columns[1]] };
+  const textDb = mkDb({ id: "9007199254740993", title: "text" });
+  assert.equal((await fetchSpreadsheetRawSnapshot(textDb, textCtx,
+    { id: "9007199254740993" }, 1)).title, "text");
+  const textPrepared = prepareSpreadsheetImportMutationRows(textCtx,
+    [{ id: "9007199254740993", title: "new" }]);
+  assert.equal((await fetchSpreadsheetExistingImportRows(textDb, textCtx, textPrepared, 1))
+    .get(spreadsheetImportPrimaryKeyFingerprint({ id: "9007199254740993" }))?.title, "text");
+});
