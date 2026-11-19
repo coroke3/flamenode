@@ -442,6 +442,9 @@ export async function fetchSpreadsheetRawSnapshot(
       if (value !== null && typeof value !== "string" && typeof value !== "number") {
         throw new Error("invalid_snapshot");
       }
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        throw new Error("invalid_snapshot");
+      }
       cells.push([column.name, value]);
     }
     snapshot = Object.freeze(Object.fromEntries(cells));
