@@ -14,9 +14,14 @@
 
 export const SPREADSHEET_AUDIT_PK_V1_CONTEXT = "admin_spreadsheet_pk_v1";
 export const SPREADSHEET_AUDIT_PK_V1_PREFIX = "spk:v1:";
-// Bound untrusted history strings before JSON parsing. This is a future,
-// unmounted read contract, not a limit on CURRENT audit writes.
+// The future V1 writer must never emit an ID that its history reader rejects.
+// This does not change the legacy production audit writer.
 const AUDIT_HISTORY_TEXT_MAX_BYTES = 128_000;
+
+function isBoundedAuditHistoryText(value: string): boolean {
+  return value.length <= AUDIT_HISTORY_TEXT_MAX_BYTES &&
+    new TextEncoder().encode(value).byteLength <= AUDIT_HISTORY_TEXT_MAX_BYTES;
+}
 
 export type SpreadsheetAuditIdentityV1 = {
   context: typeof SPREADSHEET_AUDIT_PK_V1_CONTEXT;
@@ -47,11 +52,11 @@ function canonicalPkParts(pk: Record<string, string>): [string, string][] {
 export function buildSpreadsheetAuditIdentityV1(
   pk: Record<string, string>,
 ): SpreadsheetAuditIdentityV1 {
-  return {
-    context: SPREADSHEET_AUDIT_PK_V1_CONTEXT,
-    target_id: SPREADSHEET_AUDIT_PK_V1_PREFIX +
-      JSON.stringify(canonicalPkParts(pk)),
-  };
+  const targetId = SPREADSHEET_AUDIT_PK_V1_PREFIX + JSON.stringify(canonicalPkParts(pk));
+  // Apply the same UTF-8 limit on both sides of the future V1 contract.
+  // Otherwise a valid generated ID could never be fetched or restored.
+  if (!isBoundedAuditHistoryText(targetId)) throw new Error("invalid_row");
+  return { context: SPREADSHEET_AUDIT_PK_V1_CONTEXT, target_id: targetId };
 }
 
 /**
@@ -77,8 +82,7 @@ export function parseSpreadsheetAuditIdentityV1(
     const targetId = identity.target_id;
     if (typeof targetId !== "string" ||
         !targetId.startsWith(SPREADSHEET_AUDIT_PK_V1_PREFIX) ||
-        targetId.length > AUDIT_HISTORY_TEXT_MAX_BYTES ||
-        new TextEncoder().encode(targetId).byteLength > AUDIT_HISTORY_TEXT_MAX_BYTES) {
+        !isBoundedAuditHistoryText(targetId)) {
       return null;
     }
     const json = targetId.slice(SPREADSHEET_AUDIT_PK_V1_PREFIX.length);
@@ -199,9 +203,7 @@ export function classifySpreadsheetAuditHistoryCandidate(
     // The audit/history response budget is in UTF-8 bytes, not JS UTF-16
     // code units. Multibyte PK values must not bypass the bounded parser.
     // Check code units first to avoid allocating for obviously huge inputs.
-    if (typeof snapshot !== "string" ||
-        snapshot.length > AUDIT_HISTORY_TEXT_MAX_BYTES ||
-        new TextEncoder().encode(snapshot).byteLength > AUDIT_HISTORY_TEXT_MAX_BYTES) {
+    if (typeof snapshot !== "string" || !isBoundedAuditHistoryText(snapshot)) {
       return "legacy_ambiguous";
     }
     try {
