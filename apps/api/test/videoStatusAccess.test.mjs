@@ -408,3 +408,64 @@ test("MIG-0603: opt-in snapshot preloads full video row within the existing boun
     sqlite.close();
   }
 });
+
+test("MIG-0603: opt-in video status snapshot fails closed for revoked grants and oversized fan-out", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    const denied = { ok: false, message: "このイベントの作品審査権限がありません。" };
+
+    sqlite.exec("UPDATE x_users SET approval_status='rejected' WHERE id='mgr_x'");
+    const rejectedStart = d1.stats.statements;
+    assert.deepEqual(
+      await loadManageVideoStatusSnapshot(db, manager, "evA", "v1"), denied,
+      "revoked X approval must deny the full video snapshot",
+    );
+    assert.equal(d1.stats.statements - rejectedStart, 1,
+      "rejected approval must not probe the event/video association");
+    sqlite.exec("UPDATE x_users SET approval_status='approved' WHERE id='mgr_x'");
+    sqlite.exec("UPDATE event_staff SET permission_preset='public_staff' WHERE event_id='evA' AND x_user_id='mgr_x'");
+    const revokedStart = d1.stats.statements;
+    assert.deepEqual(
+      await loadManageVideoStatusSnapshot(db, manager, "evA", "v1"), denied,
+      "revoked video.status permission must deny the full video snapshot",
+    );
+    assert.equal(d1.stats.statements - revokedStart, 1);
+    sqlite.exec("UPDATE event_staff SET permission_preset='manager' WHERE event_id='evA' AND x_user_id='mgr_x'");
+
+    // 256 joined staff rows are the inclusive cap. A 257th must never
+    // authorize or return a truncated snapshot, even if the first row grants.
+    const addStaff = (i) => {
+      const xId = `snapshot_cap_${i}`;
+      insert(sqlite, "x_users", { id: xId, x_name: xId, approval_status: "approved" });
+      insert(sqlite, "x_user_account_links", {
+        x_user_id: xId, auth_user_id: "u_mgr", link_role: "manager",
+      });
+      insert(sqlite, "event_staff", {
+        id: `snapshot_staff_${i}`, event_id: "evA", x_user_id: xId,
+        display_name: xId, permission_preset: "public_staff",
+      });
+    };
+    for (let i = 0; i < 255; i++) addStaff(i);
+    const capStart = d1.stats.statements;
+    const allowed = await loadManageVideoStatusSnapshot(db, manager, "evA", "v1");
+    assert.equal(allowed.ok, true, "256 joined rows allow a complete authorized video snapshot");
+    assert.equal(allowed.video.id, "v1");
+    assert.equal(d1.stats.statements - capStart, 2);
+    addStaff(255);
+    const overflowStart = d1.stats.statements;
+    await assert.rejects(
+      loadManageVideoStatusSnapshot(db, manager, "evA", "v1"),
+      /manage_video_status_staff_read_limit_exceeded/,
+    );
+    assert.equal(d1.stats.statements - overflowStart, 1,
+      "overflow aborts before any association/full-video read");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
