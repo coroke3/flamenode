@@ -646,6 +646,12 @@ test("MIG-0603: commit-time status authorization assertion rolls back on revoked
       sqlite.exec("UPDATE event_staff SET custom_permission_keys_json='[]' WHERE event_id='evA' AND x_user_id='custom_x'")],
     ["custom grant malformed", (sqlite) =>
       sqlite.exec("UPDATE event_staff SET custom_permission_keys_json='{broken' WHERE event_id='evA' AND x_user_id='custom_x'")],
+    ["actor banned after preflight", (sqlite) =>
+      sqlite.exec("UPDATE user SET is_banned=1 WHERE id='u_mgr'")],
+    ["site-admin role revoked after preflight", (sqlite) =>
+      sqlite.exec("UPDATE user SET role='user' WHERE id='u_admin'")],
+    ["site-admin banned after preflight", (sqlite) =>
+      sqlite.exec("UPDATE user SET is_banned=1 WHERE id='u_admin'")],
   ];
   for (const [description, revoke] of cases) {
     const sqlite = createSqlite();
@@ -654,7 +660,8 @@ test("MIG-0603: commit-time status authorization assertion rolls back on revoked
       const d1 = createVideoStatusD1(sqlite);
       const db = drizzle(d1, { schema });
       const custom = description.startsWith("custom");
-      const user = custom
+      const admin = description.startsWith("site-admin");
+      const user = admin ? { id: "u_admin", role: "admin" } : custom
         ? { id: "u_custom", role: "user" }
         : { id: "u_mgr", role: "user" };
       if (custom) {

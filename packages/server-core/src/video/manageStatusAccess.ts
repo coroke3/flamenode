@@ -7,7 +7,7 @@
  * R2 fencing remain STOP gates.
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { eventStaff, events, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
+import { eventStaff, events, users, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
 import { EVENT_STAFF_PRESETS, getPresetPermissions } from "@flamenode/domain/auth/permissions/presets";
 import { assertCondition } from "../audit/mutate.ts";
@@ -257,8 +257,9 @@ export async function loadAdminVideoStatusSnapshot(
  * video_event association can all change before the mutation begins.
  *
  * This is a narrowly scoped DB assertion, NOT an approved HTTP auth design:
- * the separate session/TOS/CostGuard budgets and actor snapshot remain
- * unresolved. Do not mount a route or wire into production on this basis.
+ * it checks persisted actor existence/ban and prevents stale site-admin role
+ * privileges, but does not validate the live session, TOS/major consent or
+ * CostGuard atomically. Do not mount a route or wire into production.
  */
 export function planManageVideoStatusCommitAssertion(
   db: ServerCoreDb,
@@ -301,6 +302,15 @@ export function planManageVideoStatusCommitAssertion(
           )
         )
     )`;
+  // A cached site-admin identity is not a durable authorization: a role
+  // downgrade or ban between the preflight and D1 batch must fail closed.
+  // This is still not the full session/TOS/CostGuard assertion from #692.
+  const actorStillAllowed = sql`EXISTS (
+    SELECT 1 FROM ${users}
+    WHERE ${users.id} = ${user.id}
+      AND COALESCE(${users.is_banned}, 0) = 0
+      ${user.role === "admin" ? sql`AND ${users.role} = 'admin'` : sql``}
+  )`;
   const targetStillLinked = sql`EXISTS (
     SELECT 1 FROM ${videoEvents}
     INNER JOIN ${videos} ON ${videos.id} = ${videoEvents.video_id}
@@ -308,5 +318,5 @@ export function planManageVideoStatusCommitAssertion(
     WHERE ${videoEvents.event_id} = ${eventId}
       AND ${videoEvents.video_id} = ${videoId}
   )`;
-  return db.run(assertCondition(sql`${hasCurrentStatusGrant} AND ${targetStillLinked}`));
+  return db.run(assertCondition(sql`${actorStillAllowed} AND ${hasCurrentStatusGrant} AND ${targetStillLinked}`));
 }
