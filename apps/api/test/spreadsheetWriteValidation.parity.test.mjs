@@ -1619,3 +1619,103 @@ test("MIG-0638 U02: forged import PK fingerprints cannot select unrelated audit 
   assert.equal(reads, 1, "valid identities still permit the existing one-read preflight");
   assert.equal(checked.size, 0);
 });
+
+
+test("MIG-0638 U01b: CRUD pre-read freezes the verified PK and before-image", async () => {
+  const {
+    fetchSpreadsheetRawSnapshot, buildSpreadsheetAuditedUpdate,
+    buildSpreadsheetAuditedDelete,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["id"],
+  };
+  let keyReads = 0, titleReads = 0;
+  const mutable = Object.defineProperties({}, {
+    id: { enumerable: true, configurable: true, get() {
+      keyReads++;
+      return keyReads === 1 ? "slot-1" : "wrong-slot";
+    } },
+    title: { enumerable: true, configurable: true, get() {
+      titleReads++;
+      return titleReads === 1 ? "before" : "tampered";
+    } },
+  });
+  let selects = 0;
+  const db = {
+    prepare(sql) {
+      selects++;
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE "id" = ? LIMIT 1');
+      return { bind(...values) {
+        assert.deepEqual(values, ["slot-1"]);
+        return { async first() { return mutable; } };
+      } };
+    },
+  };
+  const snapshot = await fetchSpreadsheetRawSnapshot(db, ctx, { id: "slot-1" }, 1);
+  assert.equal(selects, 1);
+  assert.deepEqual(snapshot, { id: "slot-1", title: "before" });
+  assert.equal(keyReads, 1, "key must be read once for PK match and CAS");
+  assert.equal(titleReads, 1, "before-image must be read once for CAS and audit");
+  assert.equal(Object.isFrozen(snapshot), true);
+  Object.defineProperty(mutable, "id", { value: "wrong-slot", configurable: true });
+  Object.defineProperty(mutable, "title", { value: "tampered", configurable: true });
+  const update = buildSpreadsheetAuditedUpdate(ctx, { id: "slot-1" },
+    snapshot, { title: "after" }, "operator");
+  assert.deepEqual(update.binds, ["after", "slot-1", "slot-1", "before"]);
+  assert.deepEqual(update.audit.before, { id: "slot-1", title: "before" });
+  assert.deepEqual(update.audit.after, { id: "slot-1", title: "after" });
+  const del = buildSpreadsheetAuditedDelete(ctx, { id: "slot-1" },
+    snapshot, "operator");
+  assert.deepEqual(del.binds, ["slot-1", "slot-1", "before"]);
+  assert.deepEqual(del.audit.before, snapshot);
+  assert.equal(keyReads, 1);
+  assert.equal(titleReads, 1);
+});
+
+test("MIG-0638 U01b: malformed/mismatched D1 CRUD pre-read snapshots fail closed", async () => {
+  const { fetchSpreadsheetRawSnapshot } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["id"],
+  };
+  const invalid = [
+    { id: "other", title: "unrelated" },
+    { id: "slot-1" },
+    { id: "slot-1", title: undefined },
+    { id: "slot-1", title: { nested: "invalid" } },
+    { id: "slot-1", title: true },
+    ["slot-1", "before"],
+    Object.defineProperty({ id: "slot-1" }, "title", {
+      get() { throw new Error("getter trap"); },
+    }),
+  ];
+  for (const bad of invalid) {
+    const db = { prepare() { return { bind() {
+      return { async first() { return bad; } };
+    } }; } };
+    await assert.rejects(
+      fetchSpreadsheetRawSnapshot(db, ctx, { id: "slot-1" }, 1),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+      "bad D1 row must never reach guarded CRUD mutation/audit planning",
+    );
+  }
+  const missingDb = { prepare() { return { bind() {
+    return { async first() { return null; } };
+  } }; } };
+  await assert.rejects(
+    fetchSpreadsheetRawSnapshot(missingDb, ctx, { id: "slot-1" }, 1),
+    /row_not_found/,
+  );
+});
