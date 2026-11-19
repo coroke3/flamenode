@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
+import { getTableColumns } from "drizzle-orm";
+import { videos } from "@flamenode/db/schema";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { restoreAuditLog } from "@flamenode/server-core/audit/restore";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
@@ -308,4 +310,118 @@ test("T04 R2 binding failure prevents an event visibility restore and preserves 
   assert.equal(ctx.sqlite.prepare("SELECT visibility_status FROM events WHERE id='ev-1'").get().visibility_status, "public");
   assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM public_visibility_fences").get().n, 0);
   assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'").get().n, 0);
+});
+
+// MIG-0662 T04 video variant. Keep the test table column names in lockstep
+// with the shared DB schema: a new video column will be selected by the
+// restore adapter and must also exist in the SQLite D1 fixture.
+function seedVideoVisibilityRestore(ctx) {
+  const { sqlite } = ctx;
+  const fields = Object.values(getTableColumns(videos));
+  const declarations = fields.map((column) => {
+    const sqlType = column.columnType === "SQLiteReal"
+      ? "REAL"
+      : column.columnType === "SQLiteInteger" ? "INTEGER" : "TEXT";
+    return `"${column.name}" ${sqlType}`;
+  });
+  sqlite.exec(`CREATE TABLE videos (${declarations.join(", ")})`);
+  sqlite.exec(`CREATE TABLE video_events (
+    video_id TEXT NOT NULL, event_id TEXT NOT NULL,
+    PRIMARY KEY(video_id, event_id)
+  )`);
+  sqlite.exec(`CREATE TABLE public_visibility_fences (
+    entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+    state TEXT NOT NULL, reason TEXT, requirements_json TEXT,
+    blocked_at INTEGER, release_requested_at INTEGER,
+    requested_by_auth_user_id TEXT, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(entity_type, entity_id)
+  )`);
+  const now = Math.floor(Date.now() / 1000);
+  const video = {
+    id: "vid-restore", submitted_by_user_id: "admin-1",
+    collaboration_type: "individual", source_type: "youtube",
+    creator_display_name: "Video Owner", creator_x_user_id: "creator-1",
+    primary_event_id: "ev-1", title: "Original",
+    youtube_video_id: "yt-restore-1", visibility_status: "public",
+    app_like_count: 0, score: 0, created_at: now - 100, updated_at: now,
+  };
+  const columnNames = Object.keys(video);
+  sqlite.prepare(`INSERT INTO videos (${columnNames.map((n) => `"${n}"`).join(",")})
+    VALUES (${columnNames.map(() => "?").join(",")})`)
+    .run(...columnNames.map((k) => video[k]));
+  const after = { ...sqlite.prepare("SELECT * FROM videos WHERE id='vid-restore'").get() };
+  const before = { ...after, visibility_status: "private" };
+  sqlite.prepare(`INSERT INTO audit_logs
+    (id,table_name,target_id,operation,restore_strategy,restore_status,before_json,after_json,created_at,actor_user_id)
+    VALUES ('video-audit','videos','vid-restore','UPDATE','update_before','restorable',?,?,?,'admin-1')`)
+    .run(JSON.stringify(before), JSON.stringify(after), now);
+}
+
+test("T04 video public->private restore commits D1+R2 CAS and invalidates full public key fanout", async () => {
+  const ctx = setup();
+  seedVideoVisibilityRestore(ctx);
+  const { state, bucket } = visibilityManifestBucket();
+  const previous = globalThis.caches;
+  const deleted = [];
+  globalThis.caches = { default: {
+    delete: async (url) => { deleted.push(decodeURIComponent(url)); return true; },
+  } };
+  try {
+    const res = await ctx.request({
+      audit_id: "video-audit", reason: "動画公開の取り消し",
+      confirm_text: "RESTORE video-audit",
+    }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+    assert.equal(res.status, 200);
+    const result = await res.json();
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT visibility_status FROM videos WHERE id='vid-restore'",
+    ).get().visibility_status, "private");
+    const fence = ctx.sqlite.prepare(
+      "SELECT state,fence_token FROM public_visibility_fences WHERE entity_type='video' AND entity_id='vid-restore'",
+    ).get();
+    assert.equal(fence.state, "blocked");
+    assert.equal(state.puts, 1);
+    assert.equal(state.manifest.entities.length, 1);
+    assert.equal(state.manifest.entities[0].entity_type, "video");
+    assert.equal(state.manifest.entities[0].entity_id, "vid-restore");
+    assert.equal(state.manifest.entities[0].fence_token, fence.fence_token);
+    for (const suffix of [
+      "videos/vid-restore.json", "videos/yt-restore-1.json",
+      "videos/random-pool.v1.json", "youtube/related-blocklist.v1.json",
+      "top/sections/recommended.v1.json", "top/sections/latest.v1.json",
+      "list/recent.json", "list/popular.json", "search-index-lite.json",
+      "users/creator-1.json", "users/creator-1/works/2.json",
+      "events/ev-1.json", "events/ev-1/base.v1.json",
+    ]) {
+      assert.ok(deleted.some((url) => url.endsWith(suffix)), `not evicted: ${suffix}`);
+    }
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'",
+    ).get().n, 1);
+    assert.equal(ctx.stats.batches, 1, "RESTORE mutation, audit and queue must use one atomic D1 batch");
+  } finally {
+    if (previous === undefined) delete globalThis.caches;
+    else globalThis.caches = previous;
+  }
+});
+
+test("T04 video restore fails closed when enforced visibility R2 bucket is unavailable", async () => {
+  const ctx = setup();
+  seedVideoVisibilityRestore(ctx);
+  const response = await ctx.request({
+    audit_id: "video-audit", reason: "動画公開の取り消し",
+    confirm_text: "RESTORE video-audit",
+  }, { Origin: SITE }, { PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).ok, false);
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT visibility_status FROM videos WHERE id='vid-restore'",
+  ).get().visibility_status, "public");
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM public_visibility_fences",
+  ).get().n, 0);
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'",
+  ).get().n, 0);
 });
