@@ -533,6 +533,9 @@ export function buildSpreadsheetAuditedDelete(
  */
 export const SPREADSHEET_IMPORT_PREVIEW_MAX_ROWS = 500;
 export const SPREADSHEET_IMPORT_APPLY_MAX_ROWS = 7;
+// Fetch one extra row to detect schema/PK cardinality drift without reading
+// an unbounded D1 result before the strict audit+CAS planner can reject it.
+export const MAX_SPREADSHEET_IMPORT_EXISTING_RESULT_ROWS = SPREADSHEET_IMPORT_APPLY_MAX_ROWS + 1;
 
 /**
  * Composite primary keys may contain NUL bytes: concatenating components
@@ -738,10 +741,18 @@ export async function fetchSpreadsheetExistingImportRows(
   // This is one D1 statement: 7 import rows times PK width can exceed the
   // 100-bind ceiling. Reject before preparing any SQL or using a partial map.
   if (binds.length > SPREADSHEET_SQL_MAX_BINDS) throw new Error("batch_too_large");
-  const sql = "SELECT * FROM " + spreadsheetTableIdentifier(ctx) + " WHERE " + clauses.join(" OR ");
+  // ZERO_1102 §4: request-time D1 reads require an explicit SQL LIMIT. A
+  // valid composite PK lookup can match at most one row per imported key.
+  // Fetch one extra sentinel row only to detect non-unique/schema-drift data.
+  const sql = "SELECT * FROM " + spreadsheetTableIdentifier(ctx) + " WHERE " +
+    clauses.join(" OR ") + " LIMIT " + MAX_SPREADSHEET_IMPORT_EXISTING_RESULT_ROWS;
   const result = await db.prepare(sql).bind(...binds).all<Record<string, unknown>>();
+  const rows = result.results ?? [];
+  if (!Array.isArray(rows) || rows.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS) {
+    throw new Error("invalid_snapshot");
+  }
   const out = new Map<string, Record<string, unknown>>();
-  for (const row of result.results ?? []) {
+  for (const row of rows) {
     // Materialize each database field exactly once BEFORE matching its PK.
     // Never let a mutable/mock D1 object or accessor change the audited
     // before-image between identity checks, CAS planning and audit metadata.
