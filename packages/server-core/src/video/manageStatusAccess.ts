@@ -64,7 +64,16 @@ function finishVideoStatusSnapshot(
       !linked.every((value) => typeof value === "string")) {
     throw new Error("manage_status_rebuild_event_snapshot_invalid");
   }
-  const rebuildEventIds = mergeVideoRebuildEventIds(target.video.primary_event_id, linked);
+  // The JSON bound does not cover videos.primary_event_id. Imported data may
+  // contain a very large primary ID even with zero linked rows. Guard that
+  // independent input before constructing the queue/rebuild target list.
+  const primaryEventId = target.video.primary_event_id;
+  if (primaryEventId != null &&
+      (typeof primaryEventId !== "string" ||
+       primaryEventId.length > MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH)) {
+    throw new Error("manage_status_rebuild_event_snapshot_invalid");
+  }
+  const rebuildEventIds = mergeVideoRebuildEventIds(primaryEventId, linked);
   if (rebuildEventIds.length > MAX_MANAGE_STATUS_REBUILD_EVENTS) {
     return { ok: false, message: "関連イベント数が処理上限を超えています。" };
   }

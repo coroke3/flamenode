@@ -574,3 +574,40 @@ test("MIG-0603: unmounted admin status preloads video and capped rebuild events 
     sqlite.close();
   }
 });
+
+test("MIG-0603: status snapshot rejects oversized primary event ID even when linked JSON is tiny", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    // FK enforcement is deliberately off in the real import/recovery SQLite
+    // fixture. The links remain valid but primary_event_id alone is oversized.
+    sqlite.prepare("UPDATE videos SET primary_event_id=? WHERE id='v1'")
+      .run("evt-" + "x".repeat(5000));
+    const cases = [
+      [{ id: "u_admin", role: "admin" }, 1, loadAdminVideoStatusSnapshot],
+      [{ id: "u_mgr", role: "user" }, 2, (db, user) =>
+        loadManageVideoStatusSnapshot(db, user, "evA", "v1")],
+    ];
+    for (const [user, expectedReads, load] of cases) {
+      const before = d1.stats.statements;
+      await assert.rejects(
+        load(db, user, "v1"),
+        /manage_status_rebuild_event_snapshot_invalid/,
+        "oversized primary_event_id must fail closed before a status planner can enqueue its target",
+      );
+      assert.equal(d1.stats.statements - before, expectedReads,
+        "rejecting a large primary ID needs no additional D1 read");
+    }
+    sqlite.prepare("UPDATE videos SET primary_event_id=NULL WHERE id='v1'").run();
+    const recovered = await loadAdminVideoStatusSnapshot(db, { id: "u_admin", role: "admin" }, "v1");
+    assert.equal(recovered.ok, true);
+    assert.deepEqual(recovered.rebuildEventIds, ["evA"],
+      "ordinary linked status snapshot remains available after data repair");
+    assert.equal(d1.stats.writes, 0, "read-only Hono D1 adapter did not mutate records");
+    assert.equal(d1.stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
