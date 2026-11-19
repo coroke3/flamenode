@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAuditRestoreHost } from "../src/visibility/auditRestoreHost.ts";
+import { RANDOM_VIDEO_POOL_OBJECT_KEY } from "@flamenode/server-core/publicData/randomVideoPoolCore";
+import { YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY } from "@flamenode/server-core/publicData/staticYoutubeRelatedBlocklistCore";
 
 function host(env = {}) {
   return createAuditRestoreHost({ env });
@@ -47,13 +49,16 @@ test("U01 conditional manifest writes preserve ETag and no-store, reads preserve
 test("U01 public cache key set and event artifact keys match CURRENT", () => {
   const current = host();
   assert.deepEqual([...current.publicCacheKeys.staticObjectKeys], [
-    "videos/random-pool.v1.json",
-    "youtube/related-blocklist.v1.json",
+    RANDOM_VIDEO_POOL_OBJECT_KEY,
+    YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
     "top/sections/recommended.v1.json",
     "top/sections/latest.v1.json",
     "top/sections/nostalgic.v1.json",
     "top/sections/stats.v1.json",
   ]);
+  // Producer keys and Hono invalidation remain coupled.
+  assert.equal(RANDOM_VIDEO_POOL_OBJECT_KEY, "videos/random-pool.v1.json");
+  assert.equal(YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY, "youtube/related-blocklist.v1.json");
   assert.equal(current.publicCacheKeys.userMaxPages, 5);
   assert.deepEqual(current.publicCacheKeys.eventObjectKeys("example"), [
     "events/example.json",

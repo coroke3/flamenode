@@ -3,6 +3,8 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../env.ts";
 import type { AuditRestoreHost } from "@flamenode/server-core/audit/restore";
+import { RANDOM_VIDEO_POOL_OBJECT_KEY } from "@flamenode/server-core/publicData/randomVideoPoolCore";
+import { YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY } from "@flamenode/server-core/publicData/staticYoutubeRelatedBlocklistCore";
 import { deletePublicJsonCaches } from "@flamenode/server-core/publicCache/delete";
 import {
   EVENT_EXPORT_REFRESH_MINUTES,
@@ -23,11 +25,12 @@ import {
   readVisibilityManifestObject,
 } from "@flamenode/server-core/visibility/manifestR2";
 
-// Mirrors CURRENT nextVideoPublicCacheKeyHost. U04 must replace this
-// provisional list with the MIG-0603 shared host before enabling the route.
+// Matches CURRENT nextVideoPublicCacheKeyHost. Shared producer keys are
+// imported to avoid silent drift. U04 replaces this provisional list with
+// MIG-0603's reviewed shared host before route activation.
 const STATIC_CACHE_KEYS = [
-  "videos/random-pool.v1.json",
-  "youtube/related-blocklist.v1.json",
+  RANDOM_VIDEO_POOL_OBJECT_KEY,
+  YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
   "top/sections/recommended.v1.json",
   "top/sections/latest.v1.json",
   "top/sections/nostalgic.v1.json",
