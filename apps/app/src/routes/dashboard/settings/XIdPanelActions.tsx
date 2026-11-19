@@ -6,6 +6,7 @@ import { SocialLinksEditor } from "../../../components/shared/SocialLinksEditor.
 import { YoutubeChannelPicker } from "../../../components/shared/YoutubeChannelPicker.js";
 import { SquareIconEditor } from "../../../components/shared/SquareIconEditor.js";
 import { SquareIconEditorBoundary } from "../../../components/shared/SquareIconEditorBoundary.js";
+import { ConfirmDialog } from "../../../components/shared/ConfirmDialog.js";
 
 /** MIG-0708 U03: Personal settings form controls, mounted after MIG-0636 contract integration. */
 const NETWORK_ERROR = "通信または処理中に問題が発生しました。再読み込みしてお試しください。";
@@ -291,7 +292,6 @@ export function DeleteXIdForm({
 }): React.ReactElement | null {
   const { pending, execute } = usePendingAction();
   const [open, setOpen] = React.useState(false);
-  const [confirmation, setConfirmation] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   // A -> B -> A must not reuse the first A request's confirmation or result.
   const identityRef = React.useRef({ xUserId, generation: 0 });
@@ -300,21 +300,21 @@ export function DeleteXIdForm({
   }
   React.useEffect(() => {
     setOpen(false);
-    setConfirmation("");
     setError(null);
   }, [xUserId]);
   const expected = `DELETE ${xUserId}`;
   if (isActive) return null;
-  const onDelete = () => {
-    if (confirmation !== expected) return;
+
+  const doDelete = () => {
     const requestIdentity = identityRef.current;
+    // ConfirmDialog only invokes onConfirm after the literal expectedText is
+    // entered. The HTTP client and Hono repeat the confirmation check.
     void execute(async () => {
       setError(null);
       try {
-        const result = await api.deleteXId(xUserId, confirmation);
+        const result = await api.deleteXId(xUserId, expected);
         if (identityRef.current !== requestIdentity) return;
         if (!result.ok) { setError(result.message ?? "削除に失敗しました。"); return; }
-        setOpen(false); setConfirmation("");
         onRefresh();
       } catch {
         if (identityRef.current === requestIdentity) setError(NETWORK_ERROR);
@@ -327,21 +327,22 @@ export function DeleteXIdForm({
         disabled={pending} onClick={() => { setError(null); setOpen(true); }}>
         連携を解除
       </button>
-      {open ? (
-        <section role="group" aria-label="X ID連携の解除確認" className="xids-stack">
-          <p>この X ID @{xUserId} とDiscordアカウントの紐付けを解除します。X ID自体・作品・履歴は削除されません。</p>
-          <label>確認のため「{expected}」と入力してください。
-            <input className="xids-input" value={confirmation} disabled={pending}
-              onInput={e => setConfirmation(e.currentTarget.value)} />
-          </label>
-          <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
-            disabled={pending} onClick={() => { setOpen(false); setConfirmation(""); }}>キャンセル</button>
-          <button type="button" className="fn-btn fn-btn-primary fn-btn-sm"
-            disabled={pending || confirmation !== expected} aria-busy={pending}
-            onClick={onDelete}>{pending ? "解除中…" : "連携を削除する"}</button>
-          {error ? <p role="alert" className="xids-msgErr">{error}</p> : null}
-        </section>
-      ) : null}
+      {error ? <p role="alert" className="xids-msgErr">{error}</p> : null}
+      <ConfirmDialog open={open} title="X ID 連携を削除しますか?"
+        message={<>
+          <p style={{ margin: 0 }}>
+            この X ID <strong>@{xUserId}</strong> とDiscordアカウントの紐付けを解除します。
+          </p>
+          <ul style={{ margin: "8px 0 0", paddingLeft: "1.2em", fontSize: 12 }}>
+            <li>X ID自体・過去の作品・履歴は削除されません。</li>
+            <li>このDiscordアカウントからは編集できなくなります。</li>
+            <li>同じX IDを再連携すれば編集権限は戻ります。</li>
+          </ul>
+        </>}
+        expectedText={expected} confirmLabel="連携を削除する" tone="danger"
+        busy={pending}
+        onConfirm={() => { setOpen(false); doDelete(); }}
+        onCancel={() => setOpen(false)} />
     </div>
   );
 }

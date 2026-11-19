@@ -313,11 +313,11 @@ test("MIG-0708 U03: unlink confirmation resets on X switch and stale delete cann
   const m = await render(DeleteXIdForm, { ...props, xUserId: "A" });
   try {
     await m.click(buttonWith(m.container, "連携を解除"));
-    const input = m.container.querySelector("input");
+    const input = m.container.querySelector(".cdlg-confirmation input");
+    assert.ok(m.container.querySelector('[role="alertdialog"][aria-modal="true"]'));
     await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
-      setter.call(input, "DELETE A");
-      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      const propKey = Object.keys(input).find(k => k.startsWith("__reactProps$"));
+      input[propKey].onChange({ target: { value: "DELETE A" } });
     });
     await m.click(buttonWith(m.container, "連携を削除する"));
     assert.deepEqual(calls, [["A", "DELETE A"]]);
@@ -338,18 +338,14 @@ test("MIG-0708 U03 T05: unlink cannot execute before exact confirmation",async()
   const confirm=buttonWith(m.container,"連携を削除する");
   assert.equal(confirm.disabled,true);
   assert.equal(calls.length,0);
-  const input=m.container.querySelector("input");
-  await act(async()=>{
-    const setter=Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,"value").set;
-    setter.call(input,"DELETE bar");
-    input.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
-  });
+  assert.ok(m.container.querySelector('[role="alertdialog"][aria-modal="true"]'));
+  assert.match(m.container.textContent,/X ID自体・過去の作品・履歴は削除されません/);
+  assert.match(m.container.textContent,/このDiscordアカウントからは編集できなくなります/);
+  const input=m.container.querySelector(".cdlg-confirmation input");
+  const key=Object.keys(input).find(k=>k.startsWith("__reactProps$"));
+  await act(async()=>input[key].onChange({target:{value:"DELETE bar"}}));
   assert.equal(confirm.disabled,true);
-  await act(async()=>{
-    const setter=Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,"value").set;
-    setter.call(input,"DELETE foo");
-    input.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
-  });
+  await act(async()=>input[key].onChange({target:{value:"DELETE foo"}}));
   assert.equal(confirm.disabled,false);
   await m.click(confirm);
   await m.flush();
