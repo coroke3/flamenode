@@ -4,6 +4,10 @@
  * Keep error codes and validation order identical; this module performs no D1
  * calls and must only run AFTER the admin write guard and table resolution.
  */
+import {
+  buildSpreadsheetImportPreviewBinding,
+  verifySpreadsheetImportPreviewToken,
+} from "./importPreviewToken.ts";
 import { sql, type SQL } from "@flamenode/server-core/sql";
 import type { ServerCoreDb } from "@flamenode/server-core/db";
 import {
@@ -1504,6 +1508,110 @@ export async function planSpreadsheetAtomicAuditedImport(
   }
   assertAtomicAuditMutationBindLimits(db, input);
   return input;
+}
+
+/**
+ * U02: UNMOUNTED verified commit preflight for future RH-008.
+ *
+ * This is intentionally NOT an HTTP handler and never writes by itself:
+ * request origin, authenticated admin identity, operation-mode CostGuard,
+ * authoritative FK catalog and public Queue targets MUST be obtained in the
+ * guarded route before calling this function. It verifies the HMAC preview
+ * against the *validated immutable payload*, then performs bounded D1 reads,
+ * checks effective FKs, and composes one atomic nonce + DML + audit + Queue
+ * transaction. The HTTP route must call mutateWithAudit once on the result.
+ */
+export async function planSpreadsheetVerifiedImportCommit(
+  args: {
+    db: ServerCoreDb;
+    rawDb: Parameters<typeof fetchSpreadsheetExistingImportRows>[0];
+    ctx: SpreadsheetSqlTableContext;
+    actorUserId: string;
+    mode: "insert" | "upsert";
+    rows: readonly Record<string, string | null>[];
+    previewToken: string;
+    previewSecret: string;
+    nowSeconds: number;
+    remainingReadQueries: number;
+    callerQueryCount: number;
+    foreignKeys: readonly SpreadsheetForeignKey[];
+    queueTargets: readonly EnqueueStaticRebuildInput[];
+    preloaded?: PreloadedAuditContext;
+  },
+): Promise<{ atomic: AtomicAuditMutationInput; result: {
+  inserted: number; updated: number; skipped: number;
+} }> {
+  if (!args || !args.ctx || !args.db || !args.rawDb ||
+      typeof args.actorUserId !== "string" || !args.actorUserId.trim() ||
+      (args.mode !== "insert" && args.mode !== "upsert") ||
+      typeof args.previewToken !== "string" || !args.previewToken ||
+      !Number.isSafeInteger(args.nowSeconds) || args.nowSeconds < 0 ||
+      !Number.isSafeInteger(args.remainingReadQueries) ||
+      args.remainingReadQueries < 0 ||
+      args.remainingReadQueries > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES ||
+      !Number.isSafeInteger(args.callerQueryCount) ||
+      args.callerQueryCount < 1 || args.callerQueryCount > 50 ||
+      !Array.isArray(args.foreignKeys) || !Array.isArray(args.rows)) {
+    throw new Error("preview_required");
+  }
+  if (args.ctx.def.mode !== "editable") throw new Error("table_readonly");
+  const prepared = prepareSpreadsheetImportMutationRows(args.ctx, args.rows);
+  if (prepared.errors.length > 0) throw new Error("invalid_row");
+  // Binding against frozen, validated rows prevents caller-side mutation
+  // between verification and SQL/audit construction (TOCTOU).
+  const binding = await buildSpreadsheetImportPreviewBinding({
+    operatorUserId: args.actorUserId,
+    table: args.ctx.def.table,
+    mode: args.mode,
+    columns: [...args.ctx.columnNames],
+    primaryKeys: [...args.ctx.primaryKeys],
+    schemaColumns: args.ctx.columns.map(column => ({
+      name: column.name,
+      type: column.type,
+      notNull: column.notNull,
+      pk: column.pk,
+      defaultValue: column.defaultValue,
+      generated: column.generated,
+      enumValues: column.enumValues,
+    })),
+    rows: prepared.preparedRows.map(entry => entry.row),
+  });
+  const claims = await verifySpreadsheetImportPreviewToken(
+    args.previewToken, args.previewSecret, binding, { now: args.nowSeconds },
+  );
+  if (!claims) throw new Error("preview_required");
+
+  // A signed UPSERT always spends one bounded row-snapshot SELECT, even when
+  // every row is later skipped. Reject over-budget BEFORE any D1 read.
+  const upsertReads = args.mode === "upsert" ? 1 : 0;
+  if (args.remainingReadQueries < upsertReads) throw new Error("batch_too_large");
+  const existing = upsertReads > 0
+    ? await fetchSpreadsheetExistingImportRows(
+      args.rawDb, args.ctx, prepared, args.remainingReadQueries,
+    )
+    : null;
+  const planned = planSpreadsheetImportMutations(
+    args.ctx, prepared, args.mode, existing, args.actorUserId,
+  );
+  await validateSpreadsheetPlannedImportForeignKeys(
+    args.rawDb, args.ctx, args.foreignKeys, prepared, planned,
+    args.remainingReadQueries - upsertReads,
+  );
+  const atomic = await planSpreadsheetAtomicAuditedImport(
+    args.db, args.ctx, planned, claims, {
+      authorizedActorId: args.actorUserId,
+      consumedAt: args.nowSeconds,
+      callerQueryCount: args.callerQueryCount,
+      queueTargets: args.queueTargets,
+      preloaded: args.preloaded,
+    },
+  );
+  return {
+    atomic,
+    result: {
+      inserted: planned.inserted, updated: planned.updated, skipped: planned.skipped,
+    },
+  };
 }
 
 /**
