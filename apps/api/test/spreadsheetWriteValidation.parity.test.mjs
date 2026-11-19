@@ -2371,3 +2371,191 @@ test("MIG-0638 U01b: numeric INSERT defaults and null FKs mirror persisted audit
   );
   assert.equal(prepared, 1);
 });
+
+
+test("MIG-0638 U02: import checks defaulted INSERT foreign keys along with supplied values", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows,
+    planSpreadsheetImportMutations,
+    validateSpreadsheetPlannedImportForeignKeys,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 0,
+      defaultValue: "'evt-default'" },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(column => column.name), primaryKeys: ["id"],
+  };
+  const foreignKeys = [
+    { column: "event_id", referencedTable: "events", referencedColumn: "id" },
+  ];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [
+    { id: "s1", title: "one" },
+    { id: "s2", title: "two", event_id: "evt-supplied" },
+  ]);
+  assert.deepEqual(prepared.errors, []);
+  const plan = planSpreadsheetImportMutations(ctx, prepared, "insert", null, "operator");
+  assert.deepEqual([plan.inserted, plan.updated, plan.skipped], [2, 0, 0]);
+  assert.deepEqual(plan.mutations.map(row => row.audit.after.event_id),
+    ["evt-default", "evt-supplied"]);
+  const queries = [], args = [];
+  const db = {
+    prepare(statement) {
+      queries.push(statement);
+      return { bind(...values) {
+        args.push(values);
+        return { async all() { return { results: values.map(value => ({ value })) }; } };
+      } };
+    },
+  };
+  await validateSpreadsheetPlannedImportForeignKeys(db, ctx,
+    foreignKeys, prepared, plan, 1);
+  assert.equal(queries.length, 1, "one S3 pre-read checks explicit + defaulted values");
+  assert.match(queries[0],
+    /^SELECT "id" AS value FROM "events" WHERE "id" IN \(\?, \?\) LIMIT 3$/);
+  assert.deepEqual(new Set(args[0]), new Set(["evt-default", "evt-supplied"]));
+  assert.equal(args[0].length, 2, "supplied FK is not read a second time");
+
+  queries.length = 0;
+  const missingDb = {
+    prepare(statement) {
+      queries.push(statement);
+      return { bind(...values) {
+        return { async all() {
+          return { results: values.filter(v => v !== "evt-default")
+            .map(value => ({ value })) };
+        } };
+      } };
+    },
+  };
+  await assert.rejects(
+    validateSpreadsheetPlannedImportForeignKeys(missingDb, ctx,
+      foreignKeys, prepared, plan, 1),
+    /foreign_key_violation/,
+    "missing defaulted FK must abort preflight before nonce/data/audit writes",
+  );
+  assert.equal(queries.length, 1);
+  let blockedReads = 0;
+  const blockedDb = { prepare() { blockedReads++; throw Error("no D1"); } };
+  await assert.rejects(
+    validateSpreadsheetPlannedImportForeignKeys(blockedDb, ctx,
+      foreignKeys, prepared, plan, 0), /batch_too_large/);
+  assert.equal(blockedReads, 0, "exhausted S3 budget cannot be bypassed by defaults");
+});
+
+test("MIG-0638 U02: UPSERT preflights supplied FK changes and newly inserted defaults", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows,
+    planSpreadsheetImportMutations,
+    validateSpreadsheetPlannedImportForeignKeys,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "INTEGER", notNull: false, pk: 0,
+      defaultValue: "42" },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(column => column.name), primaryKeys: ["id"],
+  };
+  const foreignKeys = [
+    { column: "event_id", referencedTable: "events", referencedColumn: "id" },
+  ];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [
+    { id: "old", event_id: "99" },
+    { id: "new", title: "Created" },
+  ]);
+  assert.deepEqual(prepared.errors, []);
+  const existingByPk = new Map([
+    [prepared.preparedRows[0].fingerprint,
+      Object.freeze({ id: "old", event_id: 88, title: "Before" })],
+  ]);
+  const plan = planSpreadsheetImportMutations(ctx, prepared, "upsert",
+    existingByPk, "operator");
+  assert.deepEqual([plan.inserted, plan.updated, plan.skipped], [1, 1, 0]);
+  const insert = plan.mutations.find(x => x.audit.operation === "CREATE");
+  const update = plan.mutations.find(x => x.audit.operation === "UPDATE");
+  assert.equal(insert.audit.after.event_id, 42);
+  assert.equal(update.audit.after.event_id, "99");
+  const bindCalls = [];
+  const db = { prepare(sql) {
+    assert.match(sql, / LIMIT 3$/);
+    return { bind(...values) {
+      bindCalls.push(values);
+      return { async all() {
+        return { results: values.map(value => ({ value })) };
+      } };
+    } };
+  } };
+  await validateSpreadsheetPlannedImportForeignKeys(db, ctx,
+    foreignKeys, prepared, plan, 1);
+  assert.equal(bindCalls.length, 1);
+  assert.deepEqual(new Set(bindCalls[0]), new Set(["42", "99"]));
+  assert.equal(insert.audit.after.event_id, 42,
+    "a numeric default stays numeric in SQL bind and audit after-image");
+  assert.ok(insert.binds.includes(42));
+
+  const noChangesPrepared = prepareSpreadsheetImportMutationRows(ctx,
+    [{ id: "old" }]);
+  const noChangeExisting = new Map([
+    [noChangesPrepared.preparedRows[0].fingerprint,
+      { id: "old", event_id: 88, title: "Before" }],
+  ]);
+  const skipped = planSpreadsheetImportMutations(ctx, noChangesPrepared,
+    "upsert", noChangeExisting, "operator");
+  assert.deepEqual([skipped.inserted, skipped.updated, skipped.skipped],
+    [0, 0, 1]);
+  let readCount = 0;
+  const neverRead = { prepare() { readCount++; throw Error("should not query FK"); } };
+  await validateSpreadsheetPlannedImportForeignKeys(neverRead, ctx,
+    foreignKeys, noChangesPrepared, skipped, 0);
+  assert.equal(readCount, 0, "unchanged legacy FK is not revalidated on skipped UPSERT");
+});
+
+test("MIG-0638 U02: invalid import plans and FK catalogs fail before D1 lookup", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows,
+    planSpreadsheetImportMutations,
+    validateSpreadsheetPlannedImportForeignKeys,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: false, pk: 0,
+      defaultValue: "'evt-default'" },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(column => column.name), primaryKeys: ["id"],
+  };
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: "s1" }]);
+  const plan = planSpreadsheetImportMutations(ctx, prepared,
+    "insert", null, "operator");
+  let reads = 0;
+  const db = { prepare() { reads++; throw Error("D1 must not be accessed"); } };
+  const cases = [
+    { ...plan, inserted: 2 },
+    { ...plan, inserted: -1 },
+    { ...plan, mutations: [] },
+    { ...plan, mutations: [{ ...plan.mutations[0],
+      audit: { ...plan.mutations[0].audit, table_name: "wrong_table" } }] },
+    { ...plan, mutations: [{ ...plan.mutations[0],
+      audit: { ...plan.mutations[0].audit, after: null } }] },
+  ];
+  for (const invalid of cases) {
+    await assert.rejects(
+      validateSpreadsheetPlannedImportForeignKeys(db, ctx,
+        fk, prepared, invalid, 1), /invalid_snapshot/);
+    assert.equal(reads, 0);
+  }
+  await assert.rejects(
+    validateSpreadsheetPlannedImportForeignKeys(db, ctx,
+      [{ column: "not_in_schema", referencedTable: "events",
+        referencedColumn: "id" }], prepared, plan, 1),
+    /invalid_snapshot/);
+  assert.equal(reads, 0);
+});
