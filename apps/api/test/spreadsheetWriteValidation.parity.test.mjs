@@ -2655,3 +2655,109 @@ test("MIG-0638 U01b: Drizzle D1 batch SQL bridge binds INSERT UPDATE DELETE and 
     sqlite.close();
   }
 });
+
+
+test("MIG-0638 U01b: atomic CRUD composer commits mutation, audit and Queue together", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
+  const { mutateWithAudit, planAtomicAuditMutationBudget } =
+    await import("@flamenode/server-core/audit/mutate");
+  const {
+    buildSpreadsheetAuditedInsert,
+    buildSpreadsheetAuditedUpdate,
+    buildSpreadsheetAuditedDelete,
+    planSpreadsheetAtomicAuditedCrud,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fixture = createAdminD1();
+  const { sqlite, stats } = fixture;
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE slots (id TEXT PRIMARY KEY NOT NULL, title TEXT, count INTEGER)");
+    const db = drizzle(fixture.db);
+    const columns = [
+      { name: "id", type: "TEXT", pk: 1, notNull: true },
+      { name: "title", type: "TEXT", pk: 0, notNull: false },
+      { name: "count", type: "INTEGER", pk: 0, notNull: false },
+    ];
+    const ctx = {
+      def: resolveSpreadsheetTableDef("slots", true),
+      primaryKeys: ["id"],
+      columns,
+      columnNames: columns.map(c => c.name),
+    };
+    const target = (id) => [{ targetType: "event_base", targetId: id,
+      reason: "admin_spreadsheet_change", priority: "normal", requestedByUserId: "admin-1" }];
+    const options = (id, more = {}) => ({
+      authorizedActorId: "admin-1", callerQueryCount: 3, queueTargets: target(id), ...more,
+    });
+    const wakeHost = async () => ({
+      readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+    });
+    const insert = buildSpreadsheetAuditedInsert(ctx,
+      { id: "slot-1", title: "initial", count: "3" }, "admin-1");
+    const prepared = await planSpreadsheetAtomicAuditedCrud(db, ctx, insert, options("event-create"));
+    assert.equal(stats.batches, 0, "planner must not execute a D1 batch");
+    assert.equal(prepared.mutationStatements.length, 2, "one CRUD and one queued rebuild");
+    assert.deepEqual(prepared.expectedMutationChanges, [1, 1]);
+    assert.equal(prepared.audits.length, 1);
+    assert.equal(prepared.staticRebuildWakeSource, "admin");
+    assert.ok(planAtomicAuditMutationBudget(prepared).withinLimit);
+    await mutateWithAudit(db, prepared, wakeHost);
+    assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id = ?").get("slot-1").title, "initial");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.equal(stats.batches, 1);
+
+    const before = sqlite.prepare("SELECT * FROM slots WHERE id = ?").get("slot-1");
+    const update = buildSpreadsheetAuditedUpdate(ctx, { id: "slot-1" }, before,
+      { title: "updated" }, "admin-1");
+    const updated = await planSpreadsheetAtomicAuditedCrud(db, ctx, update, options("event-update"));
+    await mutateWithAudit(db, updated, wakeHost);
+    assert.equal(sqlite.prepare('SELECT title FROM slots WHERE id = ?').get("slot-1").title, "updated");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+
+    // Concurrent writer after the before-image: exact-one full-row CAS fails,
+    // and audit plus the queued rebuild are rolled back in that same D1 batch.
+    const stale = buildSpreadsheetAuditedUpdate(ctx, { id: "slot-1" }, before,
+      { title: "stale-overwrite" }, "admin-1");
+    const stalePrepared = await planSpreadsheetAtomicAuditedCrud(db, ctx, stale, options("event-stale"));
+    await assert.rejects(() => mutateWithAudit(db, stalePrepared, wakeHost));
+    assert.equal(sqlite.prepare('SELECT title FROM slots WHERE id = ?').get("slot-1").title, "updated");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+    assert.equal(sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM static_rebuild_queue WHERE target_id='event-stale'"
+    ).get().n, 0);
+
+    // An authenticated caller cannot bypass persisted queue, actor/audit
+    // identity, or the hard D1 50-query budget with a forged source plan.
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { queueTargets: [] }),
+    ), /invalid_row/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { authorizedActorId: "other" }),
+    ), /invalid_row/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, { ...insert, audit: { ...insert.audit, target_id: "other" } }, options("invalid"),
+    ), /invalid_row/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { callerQueryCount: 48 }),
+    ), /batch_too_large/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, { ...insert, statement: 'UPDATE "slots" SET "title" = ? WHERE 1=1' },
+      options("invalid"),
+    ), /invalid_row|batch_too_large/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+
+    const deleteBefore = sqlite.prepare("SELECT * FROM slots WHERE id = ?").get("slot-1");
+    const deletion = buildSpreadsheetAuditedDelete(ctx, { id: "slot-1" }, deleteBefore, "admin-1");
+    const deleted = await planSpreadsheetAtomicAuditedCrud(db, ctx, deletion, options("event-delete"));
+    await mutateWithAudit(db, deleted, wakeHost);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 3);
+  } finally {
+    sqlite.close();
+  }
+});
