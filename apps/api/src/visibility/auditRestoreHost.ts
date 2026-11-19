@@ -1,5 +1,5 @@
 // MIG-0662 / D-16-1 provisional until MIG-0603 (#523) merges.
-// SA-011 restoration is NOT mounted until shared visibility hosts and parity are reviewed.
+// SA-011 route exists only in this unmerged Draft; do not deploy until U04 and security review.
 import type { Context } from "hono";
 import type { AppEnv } from "../env.ts";
 import type { AuditRestoreHost } from "@flamenode/server-core/audit/restore";
