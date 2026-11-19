@@ -3308,3 +3308,129 @@ test("MIG-0638 U02: signed import preview is verified before D1 reads and atomic
     sqlite.close();
   }
 });
+
+test("MIG-0638 U02: signed import rejects missing effective/default FKs before nonce consumption", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
+  const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+  const {
+    planSpreadsheetVerifiedImportCommit,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const {
+    buildSpreadsheetImportPreviewBinding, issueSpreadsheetImportPreviewToken,
+  } = await import("../src/routes/admin/spreadsheet/importPreviewToken.ts");
+  const fixture = createAdminD1();
+  const { sqlite, db: rawDb, stats } = fixture;
+  const db = drizzle(rawDb);
+  const secret = "s".repeat(64);
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1, defaultValue: null, generated: false },
+    { name: "title", type: "TEXT", notNull: false, pk: 0, defaultValue: null, generated: false },
+    { name: "event_ref", type: "TEXT", notNull: false, pk: 0, defaultValue: "'missing'", generated: false },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, primaryKeys: ["id"], columnNames: columns.map(x => x.name),
+  };
+  const foreignKeys = [{
+    column: "event_ref", referencedTable: "ref_events", referencedColumn: "id",
+  }];
+  const wakeHost = async () => ({
+    readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+  });
+  const preview = async (mode, rows, nonce, now) => {
+    const binding = await buildSpreadsheetImportPreviewBinding({
+      operatorUserId: "admin-1", table: "slots", mode,
+      columns: ctx.columnNames, primaryKeys: ctx.primaryKeys,
+      schemaColumns: columns, rows,
+    });
+    return issueSpreadsheetImportPreviewToken(binding, secret, { nonce, now });
+  };
+  const issueRun = claim => sqlite.prepare(
+    "INSERT INTO spreadsheet_import_runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)"
+  ).run(claim.nonce, claim.operatorUserId, claim.table, claim.mode,
+    claim.payloadHash, claim.schemaFingerprint, claim.expiresAt, claim.issuedAt);
+  const opts = (mode, rows, token, nowSeconds, more = {}) => ({
+    db, rawDb, ctx, actorUserId: "admin-1", mode, rows,
+    previewToken: token, previewSecret: secret, nowSeconds,
+    foreignKeys, callerQueryCount: 5, remainingReadQueries: 2,
+    queueTargets: [{
+      targetType: "event_base", targetId: "fk-test",
+      reason: "admin_spreadsheet_change", requestedByUserId: "admin-1",
+    }],
+    ...more,
+  });
+  const assertUnconsumed = nonce => assert.equal(sqlite.prepare(
+    "SELECT consumed_at FROM spreadsheet_import_runs WHERE nonce = ?"
+  ).get(nonce).consumed_at, null);
+  try {
+    seedBase(sqlite);
+    sqlite.exec('CREATE TABLE ref_events (id TEXT PRIMARY KEY NOT NULL)');
+    sqlite.exec("CREATE TABLE slots (id TEXT PRIMARY KEY NOT NULL, title TEXT, event_ref TEXT DEFAULT 'missing' REFERENCES ref_events(id))");
+    sqlite.exec('CREATE TABLE spreadsheet_import_runs (nonce TEXT PRIMARY KEY, operator_user_id TEXT NOT NULL, table_name TEXT NOT NULL, mode TEXT NOT NULL, payload_hash TEXT NOT NULL, schema_fingerprint TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, created_at INTEGER NOT NULL)');
+
+    // The preview payload omits the FK cell. The INSERT's SQL/audit after
+    // image nevertheless contains its SQLite default ('missing'), which must
+    // be checked against the referenced table before any nonce/DML batch.
+    const insertRows = [{ id: "new", title: "with-default" }];
+    const insert = await preview("insert", insertRows,
+      "33333333-3333-4333-8333-333333333333", 1000);
+    issueRun(insert.claims);
+    await assert.rejects(() => planSpreadsheetVerifiedImportCommit(
+      opts("insert", insertRows, insert.token, 1100),
+    ), error => error instanceof Error && error.message === "foreign_key_violation");
+    assert.equal(stats.batches, 0);
+    assertUnconsumed(insert.claims.nonce);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+    await assert.rejects(() => planSpreadsheetVerifiedImportCommit(
+      opts("insert", insertRows, insert.token, 1100, { remainingReadQueries: 0 }),
+    ), error => error instanceof Error && error.message === "batch_too_large");
+    assertUnconsumed(insert.claims.nonce);
+
+    sqlite.prepare("INSERT INTO ref_events (id) VALUES (?)").run("missing");
+    const accepted = await planSpreadsheetVerifiedImportCommit(
+      opts("insert", insertRows, insert.token, 1100),
+    );
+    assert.equal(stats.batches, 0, "preflight is read-only");
+    assert.deepEqual(accepted.result, { inserted: 1, updated: 0, skipped: 0 });
+    assert.deepEqual(accepted.atomic.expectedMutationChanges, [1, 1, 1]);
+    await mutateWithAudit(db, accepted.atomic, wakeHost);
+    assert.equal(sqlite.prepare("SELECT event_ref FROM slots WHERE id = ?")
+      .get("new").event_ref, "missing");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    // Signed UPSERT must validate the supplied new FK, not the unchanged old
+    // FK. It spends one D1 read for the existing row and one for FK checking.
+    const invalidUpsertRows = [{ id: "new", event_ref: "unknown" }];
+    const invalidUpsert = await preview("upsert", invalidUpsertRows,
+      "44444444-4444-4444-8444-444444444444", 1200);
+    issueRun(invalidUpsert.claims);
+    await assert.rejects(() => planSpreadsheetVerifiedImportCommit(
+      opts("upsert", invalidUpsertRows, invalidUpsert.token, 1201),
+    ), error => error instanceof Error && error.message === "foreign_key_violation");
+    assertUnconsumed(invalidUpsert.claims.nonce);
+    assert.equal(sqlite.prepare("SELECT event_ref FROM slots WHERE id = ?")
+      .get("new").event_ref, "missing");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+
+    sqlite.prepare("INSERT INTO ref_events (id) VALUES (?)").run("other");
+    const validUpsertRows = [{ id: "new", event_ref: "other" }];
+    const validUpsert = await preview("upsert", validUpsertRows,
+      "55555555-5555-4555-8555-555555555555", 1200);
+    issueRun(validUpsert.claims);
+    const updated = await planSpreadsheetVerifiedImportCommit(
+      opts("upsert", validUpsertRows, validUpsert.token, 1201),
+    );
+    assert.deepEqual(updated.result, { inserted: 0, updated: 1, skipped: 0 });
+    await mutateWithAudit(db, updated.atomic, wakeHost);
+    assert.equal(sqlite.prepare("SELECT event_ref FROM slots WHERE id = ?")
+      .get("new").event_ref, "other");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+    assertUnconsumed(invalidUpsert.claims.nonce);
+  } finally {
+    sqlite.close();
+  }
+});
