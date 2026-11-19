@@ -10,6 +10,7 @@
  * Importing this module alone never performs a mutation or registers a route.
  */
 import type { ServerCoreDb } from "../db.ts";
+import type { SQLWrapper } from "drizzle-orm";
 import type { QueueWakeHostLoader, QueueWakeHost } from "../ports.ts";
 import {
   mutateWithAudit,
@@ -165,6 +166,7 @@ export async function executeAdminMemberAtomicCandidate(
   db: ServerCoreDb,
   input: AdminMemberAtomicExecutionInput,
   loadWakeHost?: QueueWakeHostLoader,
+  options: { rebindReadOnlyPlan?: boolean } = {},
 ): Promise<{ committed: boolean; auditIds: string[] }> {
   const atomic = prepareAdminMemberAtomicExecution(input);
   if (!atomic) return { committed: false, auditIds: [] };
@@ -181,6 +183,21 @@ export async function executeAdminMemberAtomicCandidate(
         }
       }
     : undefined;
-  const auditIds = await mutateWithAudit(db, atomic, safeWakeHost);
+  // The UNMOUNTED Hono planner builds its SQL against a metered SELECT-only
+  // D1 binding and closes that binding before handing off a write. Drizzle
+  // BatchItem objects may capture their original D1 session; never feed these
+  // into db.batch() after sealing the read meter. Rebind each pure SQL AST to
+  // the separately authorized write handle. Preserve the original audited
+  // plan shape, expected changes and bind values (no SQL interpolation).
+  // Reject a foreign/forged BatchItem without a SQLWrapper AST fail-closed.
+  const writableAtomic = options.rebindReadOnlyPlan ? {
+    ...atomic,
+    mutationStatements: atomic.mutationStatements.map((statement) => {
+      const item = statement as unknown as Partial<SQLWrapper>;
+      if (typeof item.getSQL !== "function") invalid();
+      return db.run(item.getSQL.call(item));
+    }),
+  } : atomic;
+  const auditIds = await mutateWithAudit(db, writableAtomic, safeWakeHost);
   return { committed: true, auditIds };
 }
