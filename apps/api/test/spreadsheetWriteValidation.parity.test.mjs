@@ -1361,3 +1361,106 @@ test("MIG-0638 U02: import existing-row D1 PK must be an own field", async () =>
     fakeDB([{ notes: "old" }]), ctx, prepared, 1), /invalid_snapshot/,
     "an inherited Object.prototype value must not stand in for a DB PK");
 });
+
+
+test("MIG-0638 U02: D1 existing import rows are captured once before PK and audit planning", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+    planSpreadsheetImportMutations,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx,
+    [{ id: "slot-1", title: "new title" }]);
+  assert.deepEqual(prepared.errors, []);
+
+  let pkReads = 0, titleReads = 0;
+  const row = Object.defineProperties({}, {
+    id: { enumerable: true, configurable: true, get() {
+      pkReads++;
+      return pkReads === 1 ? "slot-1" : "different-key";
+    } },
+    title: { enumerable: true, configurable: true, get() {
+      titleReads++;
+      return titleReads === 1 ? "before title" : "changed after read";
+    } },
+  });
+  let selects = 0;
+  const db = {
+    prepare(sql) {
+      selects++;
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE ("id" = ?)');
+      return { bind(...args) {
+        assert.deepEqual(args, ["slot-1"]);
+        return { async all() { return { results: [row] }; } };
+      } };
+    },
+  };
+  const found = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+  const key = prepared.preparedRows[0].fingerprint;
+  const before = found.get(key);
+  assert.equal(selects, 1);
+  assert.equal(pkReads, 1, "PK getter must not change between lookup and audit");
+  assert.equal(titleReads, 1, "before-image must be a single consistent snapshot");
+  assert.deepEqual(before, { id: "slot-1", title: "before title" });
+  assert.ok(Object.isFrozen(before));
+  Object.defineProperty(row, "id", { configurable: true, value: "replaced" });
+  Object.defineProperty(row, "title", { configurable: true, value: "tampered" });
+  assert.equal(before.id, "slot-1");
+  assert.equal(before.title, "before title");
+
+  const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", found, "operator");
+  assert.deepEqual([planned.inserted, planned.updated, planned.skipped], [0, 1, 0]);
+  assert.deepEqual(planned.mutations[0].audit.before,
+    { id: "slot-1", title: "before title" });
+  assert.deepEqual(planned.mutations[0].audit.after,
+    { id: "slot-1", title: "new title" });
+  assert.deepEqual(planned.mutations[0].binds,
+    ["new title", "slot-1", "slot-1", "before title"]);
+  assert.equal(pkReads, 1);
+  assert.equal(titleReads, 1);
+});
+
+test("MIG-0638 U02: throwing D1 snapshot accessors fail as invalid_snapshot", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx,
+    [{ id: "slot-1", title: "new" }]);
+  const badRows = [
+    Object.defineProperty({ id: "slot-1" }, "title", {
+      enumerable: true, get() { throw Error("bad getter"); },
+    }),
+    Object.defineProperty({ title: "old" }, "id", {
+      enumerable: true, get() { throw Error("secret leaked"); },
+    }),
+    { id: "slot-1" },
+    null,
+    ["slot-1", "old"],
+  ];
+  for (const bad of badRows) {
+    const db = { prepare() { return { bind() {
+      return { async all() { return { results: [bad] }; } };
+    } }; } };
+    await assert.rejects(
+      fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+    );
+  }
+});
