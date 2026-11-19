@@ -65,7 +65,7 @@ function seedRestorableAnnouncement(sqlite, { currentTitle = "Current Title" } =
 function changes(sqlite) {
   return {
     row: sqlite.prepare("SELECT title,body,updated_at FROM announcements WHERE id = 'anc-1'").get(),
-    runs: sqlite.prepare("SELECT status,reason FROM audit_restore_runs ORDER BY status").all(),
+    runs: sqlite.prepare("SELECT status,reason FROM audit_restore_runs ORDER BY status").all().map((run) => ({ status: run.status, reason: run.reason })),
     restored: sqlite.prepare("SELECT restore_status FROM audit_logs WHERE id = 'audit-1'").get()?.restore_status,
     auditCount: sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,
   };
