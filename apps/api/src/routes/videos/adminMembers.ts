@@ -135,6 +135,12 @@ export function createDefaultVideoAdminMembersPreflightHost(
         'FROM "videos" WHERE "id" = ? LIMIT 1',
       ).bind(videoId, videoId, videoId).first<AdminVideoMemberTarget>();
       if (target && guardedContexts.has(c)) {
+        // Reference identity alone does not guarantee the snapshot's values:
+        // a future host hook could mutate the SAME object after the SELECT
+        // and silently change the CAS/audit/Queue plan. Every field returned
+        // by this fixed D1 query is a scalar, so a shallow freeze is complete.
+        // A mutation attempt fails closed before the canonical planner runs.
+        Object.freeze(target);
         authorizedTargets.set(c, { videoId, target });
       }
       return target;
