@@ -7,7 +7,7 @@
  * R2 fencing remain STOP gates.
  */
 import { and, eq, sql } from "drizzle-orm";
-import { eventStaff, videoEvents, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
+import { eventStaff, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
 import type { SessionUserLike } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
@@ -73,6 +73,9 @@ export async function checkManageVideoStatusAccess(
     await db
       .select({ video_id: videoEvents.video_id })
       .from(videoEvents)
+      // An orphaned association is not an authorized video target. The join
+      // checks target existence within the SAME single bounded D1 read.
+      .innerJoin(videos, eq(videos.id, videoEvents.video_id))
       .where(
         and(
           eq(videoEvents.event_id, eventId),
