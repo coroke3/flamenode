@@ -2780,3 +2780,73 @@ test("MIG-0638 U01b: atomic CRUD composer commits mutation, audit and Queue toge
     sqlite.close();
   }
 });
+
+test("MIG-0638 U02: incomplete D1 result and non-scalar before-images reject rather than INSERT", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+    spreadsheetImportPrimaryKeyFingerprint,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx,
+    [{ id: "slot-1", title: "new" }]);
+  assert.deepEqual(prepared.errors, []);
+  let reads = 0;
+  const db = response => ({
+    prepare(sql) {
+      reads++;
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE ("id" = ?) LIMIT 8');
+      return { bind(...params) {
+        assert.deepEqual(params, ["slot-1"]);
+        return { async all() { return response; } };
+      } };
+    },
+  });
+
+  // A missing result is not proof that an UPSERT target is absent. The
+  // eventual import route must not plan an INSERT from a corrupted D1 read.
+  const malformed = [
+    null, undefined, {}, { results: null }, { results: {} },
+    { results: [null] },
+    { results: [{ id: "slot-1" }] },
+    { results: [{ id: "slot-1", title: undefined }] },
+    { results: [{ id: "slot-1", title: true }] },
+    { results: [{ id: "slot-1", title: NaN }] },
+    { results: [{ id: "slot-1", title: Infinity }] },
+    { results: [{ id: "slot-1", title: { note: "not a SQLite cell" } }] },
+    { results: [{ id: { toString() { return "slot-1"; } }, title: "old" }] },
+    { results: [{ id: "slot-1", title: ["not a scalar"] }] },
+  ];
+  for (const response of malformed) {
+    const before = reads;
+    await assert.rejects(
+      fetchSpreadsheetExistingImportRows(db(response), ctx, prepared, 1),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+    );
+    assert.equal(reads, before + 1, "only one bounded read is permitted");
+  }
+
+  const absent = await fetchSpreadsheetExistingImportRows(db({ results: [] }), ctx, prepared, 1);
+  assert.equal(absent.size, 0, "a well-formed empty D1 result remains valid");
+  const found = await fetchSpreadsheetExistingImportRows(db({
+    results: [{ id: "slot-1", title: "old" }],
+  }), ctx, prepared, 1);
+  assert.equal(found.get(spreadsheetImportPrimaryKeyFingerprint({ id: "slot-1" })).title, "old");
+  assert.ok(Object.isFrozen(found.values().next().value));
+
+  // SQLite numeric PKs are still accepted when the requested canonical
+  // string key matches; the audit before-image retains the numeric type.
+  const numericPrepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: "42", title: "new" }]);
+  const numericDb = { prepare() { return { bind() {
+    return { async all() { return { results: [{ id: 42, title: "old" }] }; } };
+  } }; } };
+  const numeric = await fetchSpreadsheetExistingImportRows(numericDb, ctx, numericPrepared, 1);
+  assert.equal(numeric.get(spreadsheetImportPrimaryKeyFingerprint({ id: "42" })).id, 42);
+});
