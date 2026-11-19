@@ -678,6 +678,11 @@ export async function fetchSpreadsheetRawSnapshot(
     snapshot = Object.freeze(Object.fromEntries(cells));
     for (const key of ctx.primaryKeys) {
       const value = snapshot[key];
+      // D1 returns SQLite INTEGER values as JS numbers. Above the safe
+      // integer range, two distinct DB keys can collapse to one JS value;
+      // comparing their rounded decimal string would misattribute audit.
+      if (typeof value === "number" && Number.isInteger(value) &&
+          !Number.isSafeInteger(value)) throw new Error("invalid_snapshot");
       if (value === null || String(value) !== normalized[key]) throw new Error("invalid_snapshot");
     }
   } catch {
@@ -1360,6 +1365,12 @@ export async function fetchSpreadsheetExistingImportRows(
     const pkParts: Array<[string, string]> = [];
     for (const key of ctx.primaryKeys) {
       const value = snapshot[key];
+      if (typeof value === "number" && Number.isInteger(value) &&
+          !Number.isSafeInteger(value)) {
+        // A lossy INTEGER conversion cannot prove the requested PK identity,
+        // even if its rounded decimal text happens to match a request key.
+        throw new Error("invalid_snapshot");
+      }
       if (value == null || String(value).trim() === "" || String(value).includes("\0")) {
         throw new Error("invalid_snapshot");
       }
