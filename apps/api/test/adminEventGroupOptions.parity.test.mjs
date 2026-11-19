@@ -1306,6 +1306,14 @@ test("SA-029 U04 staged: 80 distinct IDs fit one atomic 49/50-query plan", async
     assert.equal(h.count("audit_logs"), 80);
     assert.equal(h.count("static_rebuild_queue"), 1);
     assert.equal(h.stats.batches, 1);
+    // The staged test injects an admin session, so add one real production S4
+    // SELECT to the two recorded D1 reads. Count each executed batch SQL,
+    // including audit chunk assertions and MIG-0516's build marker, not
+    // merely the number of batch() calls.
+    assert.equal(h.stats.reads, 2);
+    assert.equal(h.stats.batchStatements, 46);
+    assert.equal(h.stats.reads + 1 + h.stats.batchStatements, 49);
+    assert.ok(h.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id=1").get().requested_at > 0);
   } finally {
     h.sqlite.close();
   }
@@ -2149,6 +2157,19 @@ test("SA-028 U03: exact D1 Free 50-query group DELETE boundaries (private/public
         assert.equal(h.count("static_rebuild_queue"), accepted ? 1 : 0);
         assert.equal(h.count("event_groups"), accepted ? 0 : 1);
         assert.equal(h.count("event_group_events"), accepted ? 0 : n);
+        // Count the real executed SQL instead of trusting only a budget formula.
+        // S4 is the one production read deliberately substituted by this test.
+        assert.equal(h.stats.reads, 2, `guard/preflight D1 SELECTs for ${publicGroup ? "public" : "private"}/${n}`);
+        assert.equal(h.stats.batchStatements, accepted ? 47 : 0);
+        if (accepted) {
+          assert.equal(h.stats.reads + 1 + h.stats.batchStatements, 50,
+            "real atomic SQL statements + production S4 read must fit D1 Free");
+        }
+        const markedAt = h.sqlite.prepare(
+          "SELECT requested_at FROM public_build_state WHERE id=1",
+        ).get().requested_at;
+        assert.equal(markedAt > 0, accepted,
+          "successful group deletion marks rebuild; rejected budget leaves marker untouched");
         if (bucket) assert.equal(bucket.puts > 0, accepted);
       } finally { h.sqlite.close(); }
     }
