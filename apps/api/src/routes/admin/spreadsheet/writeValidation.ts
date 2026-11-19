@@ -1396,7 +1396,7 @@ export async function planSpreadsheetAtomicAuditedImport(
         !target || !isStaticRebuildTargetType(target.targetType) ||
         typeof target.targetId !== "string" || !target.targetId.trim() ||
         typeof target.reason !== "string" || !target.reason.trim() ||
-        target.targetId.includes("\\0") || target.reason.includes("\\0") ||
+        target.targetId.includes("\0") || target.reason.includes("\0") ||
         target.targetId.length > 256 || target.reason.length > 128 ||
         (target.requestedByUserId != null &&
           target.requestedByUserId !== options.authorizedActorId))) {
