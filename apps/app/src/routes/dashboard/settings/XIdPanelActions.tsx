@@ -91,6 +91,9 @@ export function XIdIconPicker({
   const [error, setError] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState(currentIconUrl);
+  // CURRENT: if no saved icon exists, the first server-scoped candidate is
+  // visually selected; it does not perform a write until the user clicks it.
+  const selectedIconUrl = selected ?? candidates[0] ?? null;
   // The same X ID can be selected again after a detour A -> B -> A.
   // Track a monotonically increasing generation, not only the identity string.
   const identityRef = React.useRef({ xUserId, generation: 0 });
@@ -174,7 +177,7 @@ export function XIdIconPicker({
       <div className="xids-iconRow" role="group" aria-label="X IDアイコン">
         {candidates.map(url => (
           <button key={url} type="button" className="xids-iconButton"
-            disabled={pending || uploadPending} aria-busy={pending || uploadPending} aria-pressed={url === selected}
+            disabled={pending || uploadPending} aria-busy={pending || uploadPending} aria-pressed={url === selectedIconUrl}
             aria-label="候補アイコンを選択"
             onClick={() => update(() => api.setIcon(xUserId, url), "アイコンを更新しました。")}>
             <img src={url} alt="" width={36} height={36} />

@@ -256,7 +256,8 @@ test("MIG-0708 U03: icon selection tracks authoritative icon changes after refre
     assert.equal(buttons[0].getAttribute("aria-pressed"), "false");
     assert.equal(buttons[1].getAttribute("aria-pressed"), "true");
     await m.rerender({ ...base, currentIconUrl: null });
-    assert.equal(buttons[0].getAttribute("aria-pressed"), "false");
+    assert.equal(buttons[0].getAttribute("aria-pressed"), "true",
+      "CURRENT visually selects the first eligible candidate if no icon is saved");
     assert.equal(buttons[1].getAttribute("aria-pressed"), "false");
   } finally { await m.dispose(); }
 });
@@ -308,20 +309,32 @@ test("MIG-0708 U03: A-B-A account switch rejects first A mutation completion", a
 });
 
 
-test("MIG-0708 U03: equal null server icon across A/B does not leak previous optimistic selection", async () => {
-  const chosen = "https://cdn.example/from-a.png";
-  const api = { setIcon: async () => ({ ok: true, iconUrl: chosen }) };
-  const props = { api, candidates: [chosen], currentIconUrl: null, onRefresh: () => {} };
-  const m = await render(XIdIconPicker, { ...props, xUserId: "A" });
+test("MIG-0708 U03: icon candidate fallback follows each X ID, not prior optimistic selection", async () => {
+  const fromA = "https://cdn.example/from-a.png";
+  const fromB = "https://cdn.example/from-b.png";
+  let writes = 0;
+  const api = { setIcon: async () => { writes++; return { ok: true, iconUrl: fromA }; } };
+  const props = { api, currentIconUrl: null, onRefresh: () => {} };
+  const m = await render(XIdIconPicker, { ...props, xUserId: "A", candidates: [fromA] });
   try {
-    const choose = m.container.querySelector('button[aria-label="候補アイコンを選択"]');
-    assert.equal(choose.getAttribute("aria-pressed"), "false");
-    await m.click(choose);
+    const aIcon = m.container.querySelector('button[aria-label="候補アイコンを選択"]');
+    assert.equal(aIcon.getAttribute("aria-pressed"), "true",
+      "CURRENT defaults to first server-scoped candidate without writing to server");
+    assert.equal(writes, 0);
+    await m.click(aIcon);
     await m.flush();
-    assert.equal(choose.getAttribute("aria-pressed"), "true", "A holds a provisional saved selection");
-    await m.rerender({ ...props, xUserId: "B" });
-    assert.equal(choose.getAttribute("aria-pressed"), "false",
-      "B must not inherit A's icon even if both authoritative icon_url fields are null");
+    assert.equal(writes, 1);
+    await m.rerender({ ...props, xUserId: "B", candidates: [fromB] });
+    const bIcon = m.container.querySelector('button[aria-label="候補アイコンを選択"]');
+    assert.equal(bIcon.getAttribute("aria-pressed"), "true",
+      "B must select its own candidate, not A's prior optimistic icon");
+    assert.ok(bIcon.querySelector("img").src.includes("from-b.png"));
+    assert.ok(!m.container.querySelector('img[src*="from-a.png"]'),
+      "B must not render A-only candidate after identity change");
+    assert.equal(writes, 1, "candidate fallback must not issue another mutation");
+    await m.rerender({ ...props, xUserId: "C", candidates: [] });
+    assert.equal(m.container.querySelector('button[aria-label="候補アイコンを選択"]'), null,
+      "no eligible candidates should show no selected icon");
   } finally {
     await m.dispose();
   }
