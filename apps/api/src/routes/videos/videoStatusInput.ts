@@ -31,11 +31,24 @@ function invalid(status: 400 | 413, message = INVALID_INPUT_MESSAGE) {
 }
 
 /**
+ * The bounded reader can reject if a client aborts its stream, the underlying
+ * reader errors, or another consumer already locked the body. None of these
+ * untrusted transport errors may escape into the framework error reporter.
+ */
+async function readStatusJsonBody(request: Request) {
+  try {
+    return await readAdminJsonBody(request);
+  } catch {
+    return { kind: "invalid" as const };
+  }
+}
+
+/**
  * Only the JSON shape and CURRENT domain rules are checked here.
  * NEVER use a successful result as evidence of authorization to mutate D1.
  */
 export async function parseAdminVideoStatusInput(request: Request) {
-  const body = await readAdminJsonBody(request);
+  const body = await readStatusJsonBody(request);
   if (body.kind === "too_large") return invalid(413, BODY_TOO_LARGE_MESSAGE);
   if (body.kind !== "ok") return invalid(400);
   const parsed = AdminVideoStatusBodySchema.safeParse(body.value);
@@ -47,7 +60,7 @@ export async function parseAdminVideoStatusInput(request: Request) {
 }
 
 export async function parseManageVideoStatusInput(request: Request) {
-  const body = await readAdminJsonBody(request);
+  const body = await readStatusJsonBody(request);
   if (body.kind === "too_large") return invalid(413, BODY_TOO_LARGE_MESSAGE);
   if (body.kind !== "ok") return invalid(400);
   const parsed = ManageVideoStatusBodySchema.safeParse(body.value);
