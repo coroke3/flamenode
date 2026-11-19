@@ -565,11 +565,11 @@ export function prepareSpreadsheetImportMutationRows(
   const preparedRows: PreparedSpreadsheetImportRow[] = [];
   const seenPks = new Set<string>();
   for (let index = 0; index < rows.length; index++) {
-    // Capture every supplied cell once. Do not let caller-owned objects or
-    // getters alter the reviewed PK, audit after-image or SQL binds after
-    // validation, especially across the future async preview/D1 pre-reads.
-    const row = Object.freeze(Object.fromEntries(Object.entries(rows[index]!))) as Record<string, string | null>;
     try {
+      // Capture each supplied cell once, within per-row error handling. A
+      // malformed row/getter must be reported at its index, not abort all.
+      // Subsequent async preview/D1 reads cannot alter validated PK or audit.
+      const row = Object.freeze(Object.fromEntries(Object.entries(rows[index]!))) as Record<string, string | null>;
       for (const key of Object.keys(row)) {
         if (!ctx.columnNames.includes(key)) throw new Error("unknown_column");
         if (!isSpreadsheetColumnEditable(ctx.def, key)) throw new Error("column_not_editable");
