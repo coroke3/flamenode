@@ -3045,6 +3045,33 @@ test("MIG-0638 U02: nonce, multi-row import, strict audit and rebuild Queue are 
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 2);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
 
+    // CURRENT rejects a signed preview for an old column order or PK
+    // schema even when actor, table, mode and nonce otherwise match.
+    // This applies to both INSERT and all-skipped UPSERT (nonce-only).
+    const obsoleteBindings = [
+      { columns: ["id"] },
+      { columns: ["title", "id"] },
+      { primaryKeys: [] },
+      { primaryKeys: ["title"] },
+    ];
+    for (const badBinding of obsoleteBindings) {
+      const oldInsert = { ...claims, ...badBinding };
+      const oldUpsert = { ...skippedClaims, ...badBinding };
+      await assert.rejects(
+        () => planSpreadsheetAtomicAuditedImport(db, ctx, planned,
+          oldInsert, options("old-schema")),
+        error => error instanceof Error && error.message === "preview_required",
+      );
+      await assert.rejects(
+        () => planSpreadsheetAtomicAuditedImport(db, ctx, skipped,
+          oldUpsert, options("no-op", { queueTargets: [] })),
+        error => error instanceof Error && error.message === "preview_required",
+      );
+    }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4,
+      "schema mismatches must never write an extra audit or nonce");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
     // Invalid authorization, actor/queue attribution, budget and preview
     // time never produce a live batch or data mutation.
     const errors = [
