@@ -28,7 +28,12 @@ const OVER_BUDGET = "video_admin_member_d1_read_limit_exceeded";
  */
 function assertReadOnlySql(sql: string): void {
   if (typeof sql !== "string" || !/^\s*select\b/i.test(sql) ||
-      sql.includes(";")) {
+      sql.includes(";") ||
+      // SQLite may expose side-effect functions through SELECT, including
+      // quoted function identifiers. SA-085 only runs fixed D1 lookup SQL;
+      // reject these names even inside literals/comments rather than trying
+      // to safely evaluate arbitrary SQLite expressions in this meter.
+      /\b(?:load_extension|writefile)\b/i.test(sql)) {
     throw new RangeError(FORBIDDEN);
   }
 }
