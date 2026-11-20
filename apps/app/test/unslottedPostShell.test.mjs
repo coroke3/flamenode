@@ -287,6 +287,45 @@ test("U03a: child form remounts on Active X or auth user change but not ordinary
   }
 });
 
+test("U03a: successful form submission clears only the active identity's shell draft", async () => {
+  dom.window.localStorage.clear();
+  const keyFor = (authUserId, xid) => buildFormDraftStorageKey({
+    authUserId, formId: `unslotted-shell:${xid}`, schemaVersion: "unslotted-shell-v1",
+  });
+  const currentKey = keyFor("u1", "alice");
+  const otherKey = keyFor("u2", "bob");
+  const savedValue = value => JSON.stringify({ savedAt: Date.now(), value });
+  dom.window.localStorage.setItem(currentKey, savedValue({
+    affiliation: "event", selectedEventId: "event-A",
+  }));
+  const otherDraft = savedValue({ affiliation: "none", selectedEventId: "" });
+  dom.window.localStorage.setItem(otherKey, otherDraft);
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  let success;
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      renderVideoForm: args => {
+        success = args.onSubmitSuccess;
+        return renderStub(args);
+      },
+    }))));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+    assert.equal(typeof success, "function");
+    assert.ok(dom.window.localStorage.getItem(currentKey), "draft exists before submit success");
+
+    await act(async () => success());
+    assert.equal(dom.window.localStorage.getItem(currentKey), null, "submitted draft is cleared");
+    assert.equal(dom.window.localStorage.getItem(otherKey), otherDraft,
+      "a different identity's draft must remain unchanged");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 test("U03a: shell is network and Next-free; CURRENT affiliation/draft contract is preserved", () => {
   const ported = readFileSync(new URL("../src/components/forms/UnslottedPostShell.tsx", import.meta.url), "utf8");
   const legacy = readFileSync(new URL("../../../src/components/forms/UnslottedPostForm.tsx", import.meta.url), "utf8");
