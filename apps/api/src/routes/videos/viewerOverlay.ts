@@ -331,7 +331,12 @@ SELECT
   (SELECT json_object(
       'is_tos_accepted', u."is_tos_accepted",
       'terms_reaccept_required', ${TERMS_REACCEPT_REQUIRED_CASE_SQL},
-      'active_x_id', u."active_x_user_id",
+      'active_x_id', CASE
+        WHEN length(u."active_x_user_id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} THEN NULL
+        ELSE u."active_x_user_id" END,
+      'invalid_active_x_id', CASE
+        WHEN length(u."active_x_user_id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} THEN 1
+        ELSE 0 END,
       'approved_x_ids', (SELECT coalesce(json_group_array(
         CASE WHEN length(a."id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} THEN NULL ELSE a."id" END
       ), '[]') FROM (
@@ -366,7 +371,11 @@ SELECT
       // private chapter authorization projection. A null SQL sentinel means
       // a legacy linked X id was too long to include safely in the JSON.
       // Do not silently omit this identity from the authorization set.
-      if (approvedXIds.length > ACCOUNT_SUMMARY_MAX_X_ROWS ||
+      // The selected active ID is an independently stored legacy TEXT field.
+      // Even with <=100 bounded links it could have megabytes of data; the
+      // D1 projection sends a compact invalidity marker, never that value.
+      if (userData.invalid_active_x_id === 1 ||
+          approvedXIds.length > ACCOUNT_SUMMARY_MAX_X_ROWS ||
           approvedXIds.some((id) => typeof id !== "string" ||
             id.length > MAX_APPROVED_X_ID_PROJECTION_CHARS)) {
         return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);

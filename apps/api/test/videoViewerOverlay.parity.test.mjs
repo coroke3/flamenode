@@ -685,6 +685,56 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3, "reject must not add an extra D1 read");
   });
 
+  test("Issue #709: legacy giant selected Active X ID is bounded at the D1 projection", async () => {
+    const { env, sqlite, d1 } = setupTestEnv();
+    const hugeActiveXId = "legacy_active_x_".repeat(12_000);
+    // Keep the ordinary small approved alice_x linked. An invalid selected
+    // legacy ID must not materialize into the signed-in auth JSON or silently
+    // switch to the only approved X as a substitute for validation.
+    sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?')
+      .run(hugeActiveXId, "u_alice");
+
+    const originalPrepare = env.DB.prepare.bind(env.DB);
+    let checkedRealD1Row = false;
+    env.DB.prepare = (sql) => {
+      const stmt = originalPrepare(sql);
+      if (!sql.includes("'approved_x_ids'")) return stmt;
+      assert.ok(sql.includes('length(u."active_x_user_id") > 128'),
+        "the selected X ID must be bounded inside D1 json_object");
+      const originalBind = stmt.bind.bind(stmt);
+      stmt.bind = (...params) => {
+        const bound = originalBind(...params);
+        const originalFirst = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await originalFirst();
+          assert.ok(row?.user_json, "must exercise the actual D1 user projection");
+          checkedRealD1Row = true;
+          assert.ok(Buffer.byteLength(row.user_json, "utf8") < 12_000,
+            "malformed selected X ID must not inflate signed-in D1 JSON");
+          assert.equal(row.user_json.includes(hugeActiveXId), false);
+          const projected = JSON.parse(row.user_json);
+          assert.equal(projected.invalid_active_x_id, 1);
+          assert.equal(projected.active_x_id, null);
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+
+    d1.stats.statements = 0;
+    const response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(checkedRealD1Row, true, "must execute real SQLite/Hono route");
+    assert.equal(response.status, 503, "invalid selected X ID must fail closed");
+    assert.equal(response.headers.get("Cache-Control"),
+      "private, no-store, no-cache, must-revalidate");
+    assert.equal(response.headers.get("Retry-After"), "3");
+    assert.deepEqual(await response.json(), { error: "viewer_overlay_unavailable" });
+    assert.ok(d1.stats.statements <= 3, "do not issue another D1 query");
+  });
+
   test("Issue #709: legacy giant approved X ID is not serialized into auth D1 JSON", async () => {
     const { env, sqlite, d1 } = setupTestEnv();
     const hugeLinkedId = "bad_x_".repeat(30_000);
