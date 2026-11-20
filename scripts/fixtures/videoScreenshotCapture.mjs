@@ -14,6 +14,64 @@ const VIEWPORTS = [
   { name: "desktop", width: 1440, height: 900 },
 ];
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+const MAX_PNG_BYTES = 64 * 1024 * 1024;
+
+// Reject truncated/corrupt captures before recording them as screenshot evidence.
+// PNG's dimension header alone is not evidence of a complete decodable file.
+function crc32(bytes, start, end) {
+  let crc = 0xffffffff;
+  for (let i = start; i < end; i++) {
+    crc ^= bytes[i];
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function validatedPngDimensions(image) {
+  if (image.length < 57 || image.length > MAX_PNG_BYTES ||
+      !image.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+    throw new Error("invalid PNG: signature, size or missing required chunks");
+  }
+  let offset = PNG_SIGNATURE.length;
+  let width = null;
+  let height = null;
+  let hasIdat = false;
+  let hasIend = false;
+  while (offset + 12 <= image.length) {
+    const length = image.readUInt32BE(offset);
+    const end = offset + 12 + length;
+    if (end > image.length) throw new Error("invalid PNG: truncated chunk");
+    const type = image.toString("ascii", offset + 4, offset + 8);
+    if (image.readUInt32BE(offset + 8 + length) !==
+        crc32(image, offset + 4, offset + 8 + length)) {
+      throw new Error("invalid PNG: chunk CRC mismatch");
+    }
+    if (offset === PNG_SIGNATURE.length) {
+      if (type !== "IHDR" || length !== 13) throw new Error("invalid PNG: missing IHDR");
+      width = image.readUInt32BE(offset + 8);
+      height = image.readUInt32BE(offset + 12);
+      if (width === 0 || height === 0) throw new Error("invalid PNG: zero dimensions");
+    } else if (type === "IHDR") {
+      throw new Error("invalid PNG: duplicate IHDR");
+    }
+    if (type === "IDAT") {
+      if (length === 0) throw new Error("invalid PNG: empty IDAT");
+      hasIdat = true;
+    }
+    if (type === "IEND") {
+      if (length !== 0 || end !== image.length) throw new Error("invalid PNG: trailing bytes");
+      hasIend = true;
+      break;
+    }
+    offset = end;
+  }
+  if (!hasIdat || !hasIend) throw new Error("invalid PNG: missing IDAT or IEND");
+  return { width, height };
+}
+
 const MOCK_REFERENCE = "docs/migration/mock/screenshots/VideoDetail";
 const HELP = "Usage: node scripts/fixtures/videoScreenshotCapture.mjs <http-loopback-origin> <member-video-slug> <existing-empty-absolute-output-dir>\n";
 
@@ -57,12 +115,7 @@ function screenshot(cli, url, destination, viewport) {
     url, destination,
   ], { timeout: 90000, stdio: "pipe" });
   const image = fs.readFileSync(destination);
-  if (image.length < 24 || !image.subarray(0, 8).equals(PNG_SIGNATURE) ||
-      image.toString("ascii", 12, 16) !== "IHDR") {
-    throw new Error("Playwright did not produce a valid PNG header");
-  }
-  const width = image.readUInt32BE(16);
-  const height = image.readUInt32BE(20);
+  const { width, height } = validatedPngDimensions(image);
   if (width !== viewport.width || height < viewport.height) {
     throw new Error("PNG dimensions mismatch: expected " + viewport.width + "x>=" +
       viewport.height + ", got " + width + "x" + height);
