@@ -69,6 +69,7 @@ export function buildVideoPages(
   key: string,
   now: number = Math.floor(Date.now() / 1000),
   iconMap: ReadonlyMap<string, PublicXIconEntry> = new Map(),
+  relatedBlockedIds: ReadonlySet<string> | null = null,
 ): VideoPage[] {
   const detail = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0]);
   if (!detail || detail.video.visibility_status !== "public") throw new VideoPageBuildError(key);
@@ -76,7 +77,10 @@ export function buildVideoPages(
   // Otherwise an allowed object could publish a page under a different route (including its alias).
   const snapshotId = /^snapshot\/video-detail\/([A-Za-z0-9_-]{1,64})\.json$/.exec(key)?.[1];
   if (snapshotId && detail.video.id !== snapshotId) throw new VideoPageBuildError(key);
-  const vm = buildPublicVideoViewModelFromStatic(detail);
+  // A video may have been withdrawn after an otherwise valid public detail
+  // snapshot was produced. Apply the build manifest's explicit deny set to
+  // semantic, reserve and randomized related cards before rendering HTML.
+  const vm = buildPublicVideoViewModelFromStatic(detail, { relatedBlockedIds });
   const { video } = vm;
   const youtubeVideoId = video.youtube_video_id?.trim() || null;
   const youtubeId = extractYoutubeId(youtubeVideoId);
@@ -202,10 +206,18 @@ export async function loadVideoPagesForBuild(
 ): Promise<VideoPage[]> {
   const access = snapshotAccessFromEnv(env);
   const iconMap = await loadPublicXIconMapForBuild(env);
+  // Manifest-level video withdrawals must also fence *related* cards inside
+  // other videos' stale-but-digest-valid public snapshots. The exact same
+  // video-detail key family is used by videoDetailKeys() and the loader.
+  const blockedRelatedVideoIds = new Set<string>();
+  for (const key of access?.options.manifest?.blockedKeys ?? []) {
+    const match = /^snapshot\/video-detail\/([A-Za-z0-9_-]{1,64})\.json$/.exec(key);
+    if (match) blockedRelatedVideoIds.add(match[1]);
+  }
   const pages: VideoPage[] = [];
   const playlistIds = new Map<string, string | null>();
   const buildWithPlaylist = async (payload: unknown, key: string): Promise<void> => {
-    const built = buildVideoPages(payload, key, now, iconMap);
+    const built = buildVideoPages(payload, key, now, iconMap, blockedRelatedVideoIds);
     const eventId = built[0]?.data.primaryEvent?.id;
     // Normalize for rendering, but never let the generic string/number coercers
     // turn arrays or objects into a valid authorization key or future timestamp.
