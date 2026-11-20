@@ -471,7 +471,8 @@ function XAccountPanel({
         ) : null}
         {profileApi && onRefresh && approved && !isActive ? (
           <SetActiveXButton api={profileApi} xUserId={x.id} approved={approved}
-            isActive={isActive} next={next} onRefresh={onRefresh} />
+            isActive={isActive} next={next} onRefresh={onRefresh}
+            className="settings-actionBtn settings-actionBtnPrimary" />
         ) : null}
         {publicHref ? (
           <AppLink href={publicHref} className="settings-actionBtn" target="_blank" rel="noopener noreferrer">
@@ -480,7 +481,8 @@ function XAccountPanel({
           </AppLink>
         ) : null}
         {profileApi && onRefresh && !isActive ? (
-          <DeleteXIdForm api={profileApi} xUserId={x.id} isActive={isActive} onRefresh={onRefresh} />
+          <DeleteXIdForm api={profileApi} xUserId={x.id} isActive={isActive} onRefresh={onRefresh}
+            label="連携を解除" className="settings-actionBtn settings-actionBtnDanger" />
         ) : null}
         {x.approval_status === "rejected" ? (
           <span

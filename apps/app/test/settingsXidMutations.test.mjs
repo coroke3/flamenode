@@ -23,8 +23,10 @@ test("MIG-0708 T02: approved nonactive X has switch, unlink and profile form; ac
   };
   const m = await mount("/dashboard/settings?x=second", a);
   assert.match(m.container.textContent, /公開プロフィール/);
-  assert.ok([...m.container.querySelectorAll("button")].some(b => b.textContent.includes("アクティブに設定")));
-  assert.ok([...m.container.querySelectorAll("button")].some(b => b.textContent.includes("連携を解除")));
+  const activeBtn = [...m.container.querySelectorAll("button")].find(b => b.textContent.includes("アクティブに設定"));
+  const unlinkBtn = [...m.container.querySelectorAll("button")].find(b => b.textContent.includes("連携を解除"));
+  assert.ok(activeBtn?.classList.contains("settings-actionBtnPrimary"), "SetActiveXButton uses CURRENT primary pill styling");
+  assert.ok(unlinkBtn?.classList.contains("settings-actionBtnDanger"), "DeleteXIdForm uses CURRENT danger pill styling");
   assert.ok(m.container.querySelector('input[name="other_social_links"]'), "structured social editor mounted");
   assert.ok(m.container.querySelector('input[name="youtube_channel_url"]'), "channel picker mounted");
   assert.match(m.container.textContent, /アイコン候補（作品サムネから自動取得）/);

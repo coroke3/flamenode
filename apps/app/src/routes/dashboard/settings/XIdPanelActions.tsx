@@ -37,7 +37,7 @@ function usePendingAction() {
 }
 
 export function SetActiveXButton({
-  api, xUserId, approved, isActive = false, next, onRefresh,
+  api, xUserId, approved, isActive = false, next, onRefresh, label = "アクティブに設定", className,
 }: {
   api: XidProfileApi;
   xUserId: string;
@@ -45,6 +45,8 @@ export function SetActiveXButton({
   isActive?: boolean;
   next?: string | null;
   onRefresh: () => void;
+  label?: string;
+  className?: string;
 }): React.ReactElement | null {
   const navigate = useNavigate();
   const { pending, execute } = usePendingAction();
@@ -77,13 +79,13 @@ export function SetActiveXButton({
     });
   };
   return (
-    <span className="xids-row">
-      <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
+    <>
+      <button type="button" className={className ?? "fn-btn fn-btn-ghost fn-btn-sm"}
         disabled={pending} aria-busy={pending} onClick={run}>
-        {pending ? "設定中…" : "アクティブに設定"}
+        {pending ? "設定中…" : label}
       </button>
-      {error ? <span className="xids-msgErr" role="alert">{error}</span> : null}
-    </span>
+      {error ? <p className="xids-msgErr xids-msgGap" role="alert">{error}</p> : null}
+    </>
   );
 }
 
@@ -227,14 +229,14 @@ export function XIdIconPicker({
       {candidates.length === 0
         ? <p className="fn-muted fn-text-sm">まだ候補がありません。＋からアップロードするか、作品に設定したアイコンが候補になります。</p> : null}
       {message ? (
-        <p role="status">
-          {message}
+        <p className="xids-msgOk" role="status">
+          <Icon name="check" size={12} aria-hidden /> {message}
           {savedIconUrl ? (
             <>{" "}<a href={savedIconUrl} className="xids-iconHint">保存済み画像を表示</a></>
           ) : null}
         </p>
       ) : null}
-      {error ? <p className="xids-msgErr" role="alert">{error}</p> : null}
+      {error ? <p className="xids-msgErr" role="alert"><Icon name="warning" size={12} aria-hidden /> {error}</p> : null}
     </div>
   );
 }
@@ -316,7 +318,7 @@ export function XIdCompactProfileForm({
           <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm"
             disabled={pending} aria-busy={pending}>{pending ? "保存中…" : "保存"}</button>
         </div>
-        {message ? <p role="status">{message}</p> : null}
+        {message ? <p className="xids-msgOk" role="status">{message}</p> : null}
         {error ? <p role="alert" className="xids-msgErr">{error}</p> : null}
       </form>
     </div>
@@ -324,12 +326,14 @@ export function XIdCompactProfileForm({
 }
 
 export function DeleteXIdForm({
-  api, xUserId, isActive, onRefresh,
+  api, xUserId, isActive, onRefresh, label = "連携を解除", className,
 }: {
   api: XidProfileApi;
   xUserId: string;
   isActive: boolean;
   onRefresh: () => void;
+  label?: string;
+  className?: string;
 }): React.ReactElement | null {
   const { pending, execute } = usePendingAction();
   const [open, setOpen] = React.useState(false);
@@ -363,10 +367,11 @@ export function DeleteXIdForm({
     });
   };
   return (
-    <div className="xids-row">
-      <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
+    <>
+      <button type="button" className={className ?? "fn-btn fn-btn-ghost fn-btn-sm"}
         disabled={pending} onClick={() => { setError(null); setOpen(true); }}>
-        連携を解除
+        <Icon name="trash" size={12} aria-hidden />
+        {label}
       </button>
       {error ? <p role="alert" className="xids-msgErr">{error}</p> : null}
       <ConfirmDialog open={open} title="X ID 連携を削除しますか?"
@@ -384,6 +389,6 @@ export function DeleteXIdForm({
         busy={pending}
         onConfirm={() => { setOpen(false); doDelete(); }}
         onCancel={() => setOpen(false)} />
-    </div>
+    </>
   );
 }
