@@ -920,6 +920,44 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(d1.stats.statements, 0, "anonymous path should perform 0 D1 reads");
   });
 
+  test("Issue #709: a huge public event playlist label is rejected before DTO serialization", async () => {
+    const { env, bucket, d1 } = setupTestEnv();
+    const hugeEventTitle = "公開イベント".repeat(25_000);
+    const hugeLabel = hugeEventTitle + " 上映順";
+    const storedVideo = await (await bucket.get("videos/vid-pub.json")).json();
+    storedVideo.public_events[0].title = hugeEventTitle;
+    await bucket.put("videos/vid-pub.json", JSON.stringify(storedVideo));
+    // The event playlist itself has only two small, schema-valid entries.
+    // Previously a long *label* alone bypassed the pre-stringify guard.
+    const originalStringify = JSON.stringify;
+    let hugeDtoAttempts = 0;
+    JSON.stringify = function(value, replacer, space) {
+      if (value && typeof value === "object" && value.playlistLabel === hugeLabel) {
+        hugeDtoAttempts += 1;
+        throw new Error("huge_playlist_label_dto_stringified");
+      }
+      return originalStringify.call(JSON, value, replacer, space);
+    };
+    let response;
+    try {
+      d1.stats.statements = 0;
+      response = await app.request("/api/videos/vid-pub/viewer-overlay?playlist=evt-1", {}, env);
+    } finally {
+      JSON.stringify = originalStringify;
+    }
+    assert.equal(hugeDtoAttempts, 0, "do not serialize the oversized event label");
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"),
+      "private, no-store, no-cache, must-revalidate");
+    const raw = await response.text();
+    assert.ok(Buffer.byteLength(raw, "utf8") <= 64 * 1024);
+    const dto = JSON.parse(raw);
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(dto).success, true);
+    assert.equal(dto.playlistLabel, "再生リスト");
+    assert.deepEqual(dto.playlistItems, [], "small playlist is an optional fallback when label is huge");
+    assert.equal(d1.stats.statements, 0, "anonymous response must not add any D1 reads");
+  });
+
   test("Issue #709: UTF-8 can exceed 64KiB even when JSON has fewer than 64K UTF-16 units", async () => {
     const { env, bucket, d1 } = setupTestEnv();
     const artifact = {

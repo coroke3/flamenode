@@ -114,20 +114,31 @@ function boundedOverlayResponse(c: Context<AppEnv>, body: VideoViewerOverlayDto)
       break;
     }
   }
-  let playlistUnits = 0;
-  for (const item of body.playlistItems) {
-    playlistUnits += units(item.id) + units(item.title) +
-      units(item.display_name) + units(item.youtube_video_id);
-    if (playlistUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
-      // A playlist this large cannot fit even after removing all optional
-      // editor rows. Preserve the exact existing no-editor/no-playlist fallback.
-      projectedBody = {
-        ...projectedBody,
-        editablePublicChapters: [],
-        playlistLabel: "再生リスト",
-        playlistItems: [],
-      };
-      break;
+  // Public-event names in the video snapshot also become the playlist
+  // label. Include that string before serializing the DTO: an unusually long
+  // event name must not force a multi-megabyte JSON.stringify on S2.
+  let playlistUnits = units(body.playlistLabel);
+  if (playlistUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+    projectedBody = {
+      ...projectedBody,
+      editablePublicChapters: [],
+      playlistLabel: "再生リスト",
+      playlistItems: [],
+    };
+  } else {
+    for (const item of body.playlistItems) {
+      playlistUnits += units(item.id) + units(item.title) +
+        units(item.display_name) + units(item.youtube_video_id);
+      if (playlistUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+        // Preserve the existing no-editor/no-playlist optional fallback.
+        projectedBody = {
+          ...projectedBody,
+          editablePublicChapters: [],
+          playlistLabel: "再生リスト",
+          playlistItems: [],
+        };
+        break;
+      }
     }
   }
 
