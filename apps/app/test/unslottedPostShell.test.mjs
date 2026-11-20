@@ -206,6 +206,38 @@ test("U03a: expired drafts are removed and a different auth user draft stays iso
   }
 });
 
+test("U03a: a selected event removed from the eligible candidates cannot stay in the submitted form", async () => {
+  dom.window.localStorage.clear();
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  let submissions = 0;
+  const renderVideoForm = args => {
+    submissions += 1;
+    return renderStub(args);
+  };
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({ renderVideoForm }))));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+    assert.ok(submissions > 0, "eligible event shows video form");
+
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      eventOptions: [],
+      renderVideoForm,
+    }))));
+    assert.equal(container.querySelector('input[name="event_ids"]'), null,
+      "previously selected but no longer eligible event must not reach the form");
+    assert.ok(container.textContent.includes("所属イベントを選択してください。"));
+    assert.equal(selected(container, "event").disabled, true);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 test("U03a: shell is network and Next-free; CURRENT affiliation/draft contract is preserved", () => {
   const ported = readFileSync(new URL("../src/components/forms/UnslottedPostShell.tsx", import.meta.url), "utf8");
   const legacy = readFileSync(new URL("../../../src/components/forms/UnslottedPostForm.tsx", import.meta.url), "utf8");
