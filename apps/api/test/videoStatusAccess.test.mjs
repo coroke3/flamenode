@@ -1278,7 +1278,16 @@ test("MIG-0603: equal-cardinality rebuild event replacement after preload is rej
     }
     await attempt(manager,"manage_video_status",false,"manager-swap");
     await attempt(admin,"admin_video_status",false,"admin-swap");
+
+    // The stale queue would also be incomplete when the other writer simply
+    // removes an association: permission to manage evA remains intact, but
+    // the preloaded evB rebuild must no longer be considered current.
     sqlite.exec("DELETE FROM video_events WHERE video_id='v1' AND event_id='evC'");
+    assert.equal((await loadManageVideoStatusSnapshot(db, manager, "evA", "v1")).ok, true,
+      "the manager still has the exact evA grant after the unrelated link removal");
+    await attempt(manager,"manage_video_status",false,"manager-link-removed");
+    await attempt(admin,"admin_video_status",false,"admin-link-removed");
+
     insert(sqlite, "video_events", { video_id: "v1", event_id: "evB" });
     await attempt(manager,"manage_video_status",true,"manager-restored");
     await attempt(admin,"admin_video_status",true,"admin-restored");
