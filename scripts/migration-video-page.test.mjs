@@ -397,3 +397,43 @@ test("U12: built default video fixture contains linked and unlinked members for 
   assert.match(text(noYoutube.querySelector(".vd-player-empty")), /YouTube動画は未登録/);
   assert.equal(noYoutube.querySelector(".vd-members"), null);
 });
+
+
+test("U12: forged public-profile flags cannot make malformed X handles into navigable links", { skip: skipUi }, () => {
+  const data = payload({
+    video: { creator_x_user_id: "../admin", creator_has_public_profile: true },
+    top: {
+      public_members: [
+        { id: "member-bad", display_name: "不正ID", x_user_id: "../dashboard", role_label: "動画", has_public_profile: true },
+        { id: "member-valid", display_name: "有効ID", x_user_id: "@VALID_MEMBER", role_label: "音楽", has_public_profile: true },
+      ],
+      member_chapters: [],
+    },
+  });
+  const r = build([["vid1", data]]);
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    const doc = dom(r, "AAAAAAAAA01/index.html");
+    const creator = doc.querySelector(".vd-creator");
+    assert.ok(creator, "creator display is preserved when its X handle is invalid");
+    assert.equal(creator.tagName, "SPAN", "malformed creator X handle cannot authorize /user/ href");
+    assert.equal(doc.querySelector('.vd-creator-row a[href^="https://x.com/"]'), null,
+      "malformed creator handle cannot generate an external X URL");
+
+    const members = [...doc.querySelectorAll("tr.vd-mrow")];
+    assert.equal(members.length, 2, "invalid handles must not hide public member attribution");
+    assert.match(text(members[0]), /不正ID/);
+    assert.equal(members[0].querySelector('a[href^="/user/"]'), null,
+      "public-profile flag cannot authorize a traversal-like member handle");
+    assert.equal(members[0].querySelector('a[href^="https://x.com/"]'), null,
+      "invalid member handle must not generate an external X URL");
+    assert.ok(members[1].querySelector('a[href="/user/valid_member"]'),
+      "valid legacy @-prefixed handle is normalized for a public profile route");
+    assert.ok(members[1].querySelector('a[href="https://x.com/valid_member"]'),
+      "canonical valid member still gets an external X link");
+    assert.equal(doc.querySelector('a[href^="/user/.."]'), null,
+      "no traversal-like public profile link survives projection");
+  } finally {
+    clean(r);
+  }
+});
