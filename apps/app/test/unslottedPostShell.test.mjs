@@ -144,6 +144,68 @@ test("U03a: stale event draft restores selection safely without inventing an una
   }
 });
 
+test("U03a: valid saved event restores the exact event instead of a default or stale selection", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  dom.window.localStorage.setItem(key, JSON.stringify({
+    savedAt: Date.now(),
+    value: { affiliation: "event", selectedEventId: "event-A" },
+  }));
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const snapshots = [];
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      renderVideoForm: args => { snapshots.push(args); return renderStub(args); },
+    }))));
+    assert.equal(container.querySelector("#unslotted_event_choice")?.value, "event-A");
+    assert.deepEqual(snapshots.at(-1)?.initial.event_ids, ["event-A"]);
+    assert.deepEqual(snapshots.at(-1)?.eventOptions, [eventA]);
+    assert.equal(selected(container, "event").checked, true);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
+test("U03a: expired drafts are removed and a different auth user draft stays isolated", async () => {
+  dom.window.localStorage.clear();
+  const keyFor = authUserId => buildFormDraftStorageKey({
+    authUserId, formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  dom.window.localStorage.setItem(keyFor("u1"), JSON.stringify({
+    savedAt: Date.now() - (8 * 24 * 60 * 60 * 1000),
+    value: { affiliation: "event", selectedEventId: "event-A" },
+  }));
+  const otherDraft = JSON.stringify({
+    savedAt: Date.now(),
+    value: { affiliation: "event", selectedEventId: "event-A" },
+  });
+  dom.window.localStorage.setItem(keyFor("u2"), otherDraft);
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  let childCalls = 0;
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      draftAuthUserId: "u1",
+      renderVideoForm: args => { childCalls += 1; return renderStub(args); },
+    }))));
+    assert.equal(childCalls, 0, "expired or other-user draft must not mount a video form");
+    assert.ok(container.textContent.includes("掲載方法を選択してください。"));
+    assert.equal(dom.window.localStorage.getItem(keyFor("u1")), null, "expired draft removed");
+    assert.equal(dom.window.localStorage.getItem(keyFor("u2")), otherDraft, "other user's draft untouched");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 test("U03a: shell is network and Next-free; CURRENT affiliation/draft contract is preserved", () => {
   const ported = readFileSync(new URL("../src/components/forms/UnslottedPostShell.tsx", import.meta.url), "utf8");
   const legacy = readFileSync(new URL("../../../src/components/forms/UnslottedPostForm.tsx", import.meta.url), "utf8");
