@@ -925,3 +925,55 @@ test("U03a ISSUE-703: late same-selection submit cannot discard later form edits
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: two consecutive child form changes refresh the latest submit callback", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const callbacks = [];
+  const renderVideoForm = args => {
+    callbacks.push(args.onSubmitSuccess);
+    return React.createElement("form", { "data-form-key": args.formKey },
+      React.createElement("select", { "data-testid": "two-edits", defaultValue: "first" },
+        React.createElement("option", { value: "first" }, "First"),
+        React.createElement("option", { value: "second" }, "Second")));
+  };
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      renderVideoForm,
+    }))));
+    await act(async () => selected(container, "none").click());
+    const field = container.querySelector('select[data-testid="two-edits"]');
+    assert.ok(field);
+    await act(async () => setSelect(field, "second"));
+    const firstEditCompletion = callbacks.at(-1);
+    assert.equal(field.value, "second");
+
+    // formDirty is already true, so setFormDirty(true) cannot force a
+    // subsequent render. This second edit must refresh the bound callback.
+    await act(async () => setSelect(field, "first"));
+    const secondEditCompletion = callbacks.at(-1);
+    assert.equal(field.value, "first");
+    assert.notEqual(firstEditCompletion, secondEditCompletion,
+      "every new edit generation must receive a different completion callback");
+
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const latestDraft = dom.window.localStorage.getItem(key);
+    assert.ok(latestDraft);
+
+    await act(async () => firstEditCompletion());
+    assert.equal(dom.window.localStorage.getItem(key), latestDraft,
+      "the previous form-edit generation must not clear newer work");
+    await act(async () => secondEditCompletion());
+    assert.equal(dom.window.localStorage.getItem(key), null,
+      "the latest form-edit generation can clear its own saved draft");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});

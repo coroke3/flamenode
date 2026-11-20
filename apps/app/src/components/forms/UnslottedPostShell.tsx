@@ -79,6 +79,9 @@ function UnslottedPostShellForIdentity<
   // Keep success scoped to the selection version that launched it; the new
   // selection's draft must not be cleared by the departed form.
   const selectionRevisionRef = React.useRef(0);
+  // A change event must also refresh the rendered child's success callback.
+  // setFormDirty(true) alone stops triggering renders once already dirty.
+  const [, refreshSubmitCallback] = React.useReducer((revision: number) => revision + 1, 0);
 
   const selectedEvent = eventOptions.find((event) => event.id === selectedEventId);
   const selectedEventOptions = React.useMemo(
@@ -219,6 +222,7 @@ function UnslottedPostShellForIdentity<
           // Only the submit callback from the latest rendered revision may
           // clear this shell's local draft.
           selectionRevisionRef.current += 1;
+          refreshSubmitCallback();
           setFormDirty(true);
         }
       }}
