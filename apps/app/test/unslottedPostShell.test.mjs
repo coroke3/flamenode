@@ -551,6 +551,49 @@ test("U03a ISSUE-703: switching only Active X preserves independent drafts and r
   }
 });
 
+test("U03a ISSUE-703: valid @unassigned X handle cannot inherit absent-Active-X shell draft", async () => {
+  dom.window.localStorage.clear();
+  const keyFor = segment => buildFormDraftStorageKey({
+    authUserId: "u1", formId: `unslotted-shell:${segment}`, schemaVersion: "unslotted-shell-v1",
+  });
+  const absentXKey = keyFor("unassigned"); // preserve CURRENT's empty-X draft key
+  const literalXKey = keyFor("xid:unassigned"); // valid, nonempty @unassigned must differ
+  assert.notEqual(absentXKey, literalXKey);
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({ activeXId: null }))));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+
+    // This is a different, valid X handle, not the missing-X sentinel.
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({ activeXId: "@UNASSIGNED" }))));
+    assert.equal(selected(container, "event").checked, false,
+      "the real @unassigned user must start with its own blank selection");
+    assert.equal(container.querySelector('input[name="event_ids"]'), null);
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(absentXKey)).value,
+      { affiliation: "event", selectedEventId: "event-A" },
+      "pending empty-X draft is flushed under the original legacy key");
+    assert.equal(dom.window.localStorage.getItem(literalXKey), null,
+      "the literal X handle must not adopt the absent-X draft");
+
+    await act(async () => selected(container, "none").click());
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({ activeXId: null }))));
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(literalXKey)).value,
+      { affiliation: "none", selectedEventId: "" },
+      "real @unassigned draft persists only in its distinct namespace");
+    assert.equal(selected(container, "event").checked, true);
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A",
+      "returning to missing Active X restores only its original draft");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 test("U03a ISSUE-703: switching only auth user restores destination draft without cross-user overwrite", async () => {
   dom.window.localStorage.clear();
   const keyFor = uid => buildFormDraftStorageKey({

@@ -41,6 +41,16 @@ export interface UnslottedPostShellProps<
 
 type AffiliationChoice = "none" | "event" | null;
 
+// A real canonical X handle can literally be "unassigned" (1–20 [a-z0-9_]).
+// Keep the legacy empty-active-X draft key unchanged, but give that valid
+// handle a separate namespace to prevent it reading the empty-X user's draft.
+// ISSUE-703: unmounted target candidate; CURRENT behavior/compatibility needs
+// qualified independent security and Lead review before any route integration.
+function draftActiveXSegment(value: string | null | undefined): string {
+  const normalized = normalizeXId(value ?? "");
+  return normalized === "unassigned" ? "xid:unassigned" : normalized || "unassigned";
+}
+
 // MIG-0714 ISSUE-703 candidate fix, pending Lead/security/browser parity approval.
 // Key the shell itself, not only the VideoForm child: the shell owns event
 // selection, dirty flags, and the localStorage draft. A different auth user or
@@ -49,7 +59,7 @@ export function UnslottedPostShell<
   Initial extends { event_ids?: string[]; part?: string | null },
   Event extends UnslottedEventChoice,
 >(props: UnslottedPostShellProps<Initial, Event>): React.ReactElement {
-  const activeXKey = normalizeXId(props.activeXId ?? "") || "unassigned";
+  const activeXKey = draftActiveXSegment(props.activeXId);
   const authUserId = props.draftAuthUserId?.trim() ?? "";
   return (
     <UnslottedPostShellForIdentity
@@ -88,7 +98,7 @@ function UnslottedPostShellForIdentity<
     () => (selectedEvent ? [selectedEvent] : []),
     [selectedEvent],
   );
-  const activeXKey = normalizeXId(activeXId ?? "") || "unassigned";
+  const activeXKey = draftActiveXSegment(activeXId);
   const authUserId = draftAuthUserId?.trim() ?? "";
   const shellDraftKey = authUserId
     ? buildFormDraftStorageKey({
