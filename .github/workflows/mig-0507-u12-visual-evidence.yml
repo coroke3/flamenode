@@ -43,6 +43,12 @@ jobs:
           curl --fail --retry 30 --retry-delay 1 --retry-connrefused http://127.0.0.1:4329/dKw1xV41f8s/ -o /dev/null
           mkdir -p "$RUNNER_TEMP/mig0507-u12"
           node scripts/fixtures/videoScreenshotCapture.mjs http://127.0.0.1:4329 dKw1xV41f8s "$RUNNER_TEMP/mig0507-u12"
+          # No-YouTube fixture is intentionally member-absent; capture separately.
+          curl --fail http://127.0.0.1:4329/vid-bbb/ -o "$RUNNER_TEMP/mig0507-u12/no-youtube.html"
+          grep -q 'YouTube動画は未登録' "$RUNNER_TEMP/mig0507-u12/no-youtube.html"
+          playwright screenshot --browser chromium --full-page --color-scheme dark --wait-for-timeout 800 --viewport-size "390,844" http://127.0.0.1:4329/vid-bbb/ "$RUNNER_TEMP/mig0507-u12/no-youtube.mobile.png"
+          playwright screenshot --browser chromium --full-page --color-scheme dark --wait-for-timeout 800 --viewport-size "1440,900" http://127.0.0.1:4329/vid-bbb/ "$RUNNER_TEMP/mig0507-u12/no-youtube.desktop.png"
+          sha256sum "$RUNNER_TEMP/mig0507-u12"/no-youtube.*.png > "$RUNNER_TEMP/mig0507-u12/no-youtube.sha256"
           cp docs/migration/mock/screenshots/VideoDetail.mobile.jpg "$RUNNER_TEMP/mig0507-u12/approved.mobile.jpg"
           cp docs/migration/mock/screenshots/VideoDetail.desktop.jpg "$RUNNER_TEMP/mig0507-u12/approved.desktop.jpg"
       - name: Upload U12 evidence (not an approval)
