@@ -7,12 +7,14 @@ import { siteOrigin } from "../lib/pageHead.ts";
 import { getEventBuildData } from "../lib/eventData.ts";
 import { loadUserBuildData } from "../lib/userData.ts";
 import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "../lib/videoFixtures.ts";
-import { loadVideoPagesForBuild, type VideoPage } from "../lib/videoPage.ts";
+import { extractYoutubeId } from "../../../../src/lib/youtube/id.ts";
 import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/staticVideoDetailCore.ts";
 import { snapshotAccessFromEnv, type SnapshotAccess } from "../lib/snapshotEnv.ts";
 import {
   loadSitemapVideosSnapshot,
   loadUsersIndexSnapshot,
+  loadVideoDetailPayload,
+  videoDetailKeys,
   SnapshotBuildError,
   SITEMAP_VIDEOS_KEY,
   type SitemapVideoRow,
@@ -58,12 +60,51 @@ export async function sitemapVideosOrEmpty(
 /**
  * The video index can contain an out-of-date YouTube alias while the published
  * detail page (and its canonical slug) has already changed. Use the actual
- * emitted static page set, never the index alias alone, for sitemap links.
- * Reads occur during the Astro build, not as request-time R2 lookups.
+ * public detail snapshots that the static page emitter uses, never the stale
+ * index alias alone. These verified reads run at Astro build time, not in R2 Worker requests.
  */
+/** Minimal canonical projection: identical CURRENT normalizer and YouTube-ID rule
+ * used by the static /[id] builder. Do NOT import the video page renderer here:
+ * its legacy extensionless server imports cannot load under the Node unit runner.
+ */
+export interface EmittedCanonicalVideoPage {
+  videoId: string;
+  canonicalSlug: string;
+  slug: string;
+  youtubeId: string | null;
+}
+
+function canonicalVideoPage(id: string, raw: unknown, sourceLabel: string): EmittedCanonicalVideoPage {
+  const detail = normalizeStaticVideoDetail(raw as Parameters<typeof normalizeStaticVideoDetail>[0]);
+  if (!detail || detail.video.visibility_status !== "public" || detail.video.id !== id) {
+    throw new Error(`[sitemap] ${sourceLabel} is not a public, matching video detail`);
+  }
+  const youtubeId = extractYoutubeId(detail.video.youtube_video_id?.trim() || null);
+  const canonicalSlug = youtubeId ?? id;
+  return { videoId: id, slug: canonicalSlug, canonicalSlug, youtubeId };
+}
+
+export async function loadSitemapCanonicalVideoPages(
+  access: SnapshotAccess | null,
+): Promise<EmittedCanonicalVideoPage[]> {
+  if (!access) {
+    return Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)
+      .map(([id, raw]) => canonicalVideoPage(id, raw, `fixture:${id}`));
+  }
+  const manifest = access.options.manifest;
+  if (!manifest) throw new Error("[sitemap] configured snapshot manifest is missing");
+  const pages: EmittedCanonicalVideoPage[] = [];
+  for (const key of videoDetailKeys(manifest)) {
+    const id = key.slice("snapshot/video-detail/".length, -".json".length);
+    const payload = await loadVideoDetailPayload(access.source, key, access.options);
+    pages.push(canonicalVideoPage(id, payload, key));
+  }
+  return pages;
+}
+
 export function sitemapRowsForEmittedVideoPages(
   rows: readonly SitemapVideoRow[],
-  pages: readonly Pick<VideoPage, "videoId" | "canonicalSlug" | "slug" | "youtubeId">[],
+  pages: readonly EmittedCanonicalVideoPage[],
 ): SitemapVideoRow[] {
   const canonical = new Map<string, string | null>();
   for (const page of pages) {
@@ -79,7 +120,7 @@ export async function GET(): Promise<Response> {
     sitemapVideosOrEmpty(access),
     getEventBuildData(),
     loadUserBuildData(),
-    loadVideoPagesForBuild(),
+    loadSitemapCanonicalVideoPages(access),
   ]);
   let userGeneratedAt: number | null = null;
   if (access && users.index) {
@@ -88,7 +129,7 @@ export async function GET(): Promise<Response> {
     if (Number.isFinite(value) && value > 0) userGeneratedAt = value;
   }
   // A public index row is not evidence that its canonical detail URL was emitted.
-  // Match the exact set of Astro-generated pages, not just manifest key names.
+  // Match the normalized public detail page canonical slugs, not just manifest keys.
   const manifest = access?.options.manifest;
   if (access && !manifest) {
     throw new Error("[sitemap] configured snapshot manifest is missing");
