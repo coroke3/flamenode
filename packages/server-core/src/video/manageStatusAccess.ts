@@ -378,6 +378,10 @@ export function planManageVideoStatusCommitAssertion(
   }
   const disabled = checkedList(systemSettings.disabled_features_json);
   const exception = checkedList(systemSettings.cost_guard_exception_features_json);
+  // A reviewer cannot borrow the enabled admin-only CostGuard feature when
+  // manage_video_status is disabled. This fail-closed guard is independent
+  // of future Hono route middleware wiring.
+  const featureMatchesActor = costGuardFeature !== "admin_video_status" || user.role === "admin";
   const costGuardStillAllows = sql`EXISTS (
     SELECT 1 FROM ${systemSettings}
     WHERE ${systemSettings.id} = 'default'
@@ -407,5 +411,5 @@ export function planManageVideoStatusCommitAssertion(
     WHERE ${videoEvents.event_id} = ${eventId}
       AND ${videoEvents.video_id} = ${videoId}
   )`;
-  return db.run(assertCondition(sql`${activeSessionStillValid} AND ${actorStillAllowed} AND ${costGuardStillAllows} AND ${hasCurrentStatusGrant} AND ${targetStillLinked}`));
+  return db.run(assertCondition(sql`${featureMatchesActor ? sql`1 = 1` : sql`0 = 1`} AND ${activeSessionStillValid} AND ${actorStillAllowed} AND ${costGuardStillAllows} AND ${hasCurrentStatusGrant} AND ${targetStillLinked}`));
 }

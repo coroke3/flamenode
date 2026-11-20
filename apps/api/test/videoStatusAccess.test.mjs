@@ -986,3 +986,45 @@ test("MIG-0603: atomic CostGuard checks match Hono across mode, list and excepti
     assert.ok(d1.stats.maxBinds <= 100, "bind count remains bounded");
   } finally { sqlite.close(); }
 });
+
+
+test("MIG-0603: reviewer cannot borrow admin-only CostGuard feature to bypass disabled manage", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    enableStatusCostGuard(sqlite);
+    sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+      .run('["manage_video_status"]');
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    assert.equal((await loadManageVideoStatusSnapshot(db, manager, "evA", "v1")).ok, true);
+    assert.equal((await evaluateCostGuardWithSettings(d1, "manage_video_status")).denied, "cost_guard_blocked");
+    assert.equal((await evaluateCostGuardWithSettings(d1, "admin_video_status")).denied, null);
+    const start = d1.stats.statements;
+    await assert.rejects(db.batch([
+      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "admin_video_status"),
+      db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+      db.run(sql`INSERT INTO audit_logs
+        (id,table_name,target_id,operation,actor_user_id,created_at)
+        VALUES ('feature-confusion-audit','videos','v1','UPDATE','u_mgr',1000)`),
+      db.run(sql`INSERT INTO notification_outbox
+        (id,type,payload_json,status,created_at)
+        VALUES ('feature-confusion-outbox','video_posted','{}','pending',1000)`),
+    ].map(item => preparedStatusTestBatchItem(db, item))), /malformed JSON|not-valid-json/);
+    assert.equal(d1.stats.statements-start, 1, "first batch assertion fails closed");
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+      "pending");
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE id='feature-confusion-audit'").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id='feature-confusion-outbox'").get().n, 0);
+
+    const admin = { id: "u_admin", role: "admin" };
+    await db.batch([
+      planManageVideoStatusCommitAssertion(db, admin, "evA", "v1", "tok-admin", "admin_video_status"),
+      db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+    ].map(item => preparedStatusTestBatchItem(db, item)));
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+      "public", "the rightful admin remains allowed");
+  } finally { sqlite.close(); }
+});
