@@ -212,7 +212,7 @@ export async function loadVideoPagesForBuild(
   const blockedRelatedVideoIds = new Set<string>();
   for (const key of access?.options.manifest?.blockedKeys ?? []) {
     const match = /^snapshot\/video-detail\/([A-Za-z0-9_-]{1,64})\.json$/.exec(key);
-    if (match) blockedRelatedVideoIds.add(match[1]);
+    if (match?.[1]) blockedRelatedVideoIds.add(match[1]);
   }
   const pages: VideoPage[] = [];
   const playlistIds = new Map<string, string | null>();
