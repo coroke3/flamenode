@@ -92,6 +92,12 @@ function UnslottedPostShellForIdentity<
     : "";
   const formKey = `unslotted-video:${authUserId || "anonymous"}:${activeXKey}`;
 
+  // Only a draft identity change should trigger restoration. Event-option
+  // arrays are refreshed independently while a person may be editing; tying
+  // onRestore to their reference would replay an older localStorage draft and
+  // discard the in-progress affiliation choice on every list refresh.
+  const latestEventOptionsRef = React.useRef(eventOptions);
+  latestEventOptionsRef.current = eventOptions;
   const restoreShellDraft = React.useCallback((value: unknown) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     const draft = value as Record<string, unknown>;
@@ -100,14 +106,14 @@ function UnslottedPostShellForIdentity<
       : null;
     const nextEventId = typeof draft.selectedEventId === "string" ? draft.selectedEventId : "";
     setAffiliation(nextAffiliation);
-    if (nextAffiliation === "event" && !eventOptions.some((event) => event.id === nextEventId)) {
+    if (nextAffiliation === "event" && !latestEventOptionsRef.current.some((event) => event.id === nextEventId)) {
       setSelectedEventId("");
       setMissingRestoredEvent(Boolean(nextEventId));
     } else {
       setSelectedEventId(nextAffiliation === "event" ? nextEventId : "");
       setMissingRestoredEvent(false);
     }
-  }, [eventOptions]);
+  }, []);
 
   const shellDraftValue = React.useMemo(
     () => ({ affiliation, selectedEventId }),
