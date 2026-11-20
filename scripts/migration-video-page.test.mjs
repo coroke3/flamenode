@@ -401,7 +401,9 @@ test("U12: built default video fixture contains linked and unlinked members for 
 
 test("U12: forged public-profile flags cannot make malformed X handles into navigable links", { skip: skipUi }, () => {
   const data = payload({
-    video: { creator_x_user_id: "../admin", creator_has_public_profile: true },
+    video: { creator_x_user_id: "../admin", creator_has_public_profile: true,
+      creator_youtube_channel_url: "https://www.youtube.com.evil.example/@fake",
+      music_reference_url: "javascript:alert(1)" },
     top: {
       public_members: [
         { id: "member-bad", display_name: "不正ID", x_user_id: "../dashboard", role_label: "動画", has_public_profile: true },
@@ -419,6 +421,12 @@ test("U12: forged public-profile flags cannot make malformed X handles into navi
     assert.equal(creator.tagName, "SPAN", "malformed creator X handle cannot authorize /user/ href");
     assert.equal(doc.querySelector('.vd-creator-row a[href^="https://x.com/"]'), null,
       "malformed creator handle cannot generate an external X URL");
+    assert.equal(doc.querySelector('a[href="https://www.youtube.com.evil.example/@fake"]'), null,
+      "a forged YouTube channel host cannot appear in an outgoing link");
+    assert.equal(doc.querySelector('a[href^="javascript:"]'), null,
+      "music reference text cannot create a javascript URL in SSR output");
+    assert.match(text(doc.querySelector(".vd-about")), /曲名/,
+      "invalid music reference must not remove the visible attribution");
     const ld = [...doc.querySelectorAll('script[type="application/ld+json"]')]
       .map((script) => JSON.parse(script.textContent))
       .find((item) => item["@type"] === "VideoObject");
