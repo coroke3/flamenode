@@ -378,4 +378,22 @@ test("U12: built default video fixture contains linked and unlinked members for 
   assert.equal(rows[1].querySelector('a[href^="/user/"]'), null,
     "member without an approved profile must not get an internal user link");
   assert.match(text(rows[0]), /0:24/, "member chapter is present in rendered SSR markup");
+  assert.deepEqual(
+    [...doc.querySelectorAll(".vd-chapter-time")].map(text),
+    ["0:24", "1:10", "1:36"],
+    "member and public chapters are sorted in the real SSR snapshot shape",
+  );
+  const related = doc.querySelectorAll('.vd-related a[href="/vid-bbb"]');
+  assert.equal(related.length, 1, "public related item points to the built no-YouTube sibling");
+  assert.equal(text(related[0].querySelector(".fn-row__title")), "模範囚");
+  assert.match(text(doc.querySelector(".vd-about")), /After Effects, Blender/);
+  assert.ok(fs.existsSync(path.resolve("apps/site/dist/vid-bbb/index.html")),
+    "related public-video link must resolve to a built fixture route");
+  // A no-YouTube video must not become a fabricated video player merely
+  // because the representative YouTube fixture has public collaborators.
+  const noYoutube = new JSDOM(
+    fs.readFileSync(path.resolve("apps/site/dist/vid-bbb/index.html"), "utf-8"),
+  ).window.document;
+  assert.match(text(noYoutube.querySelector(".vd-player-empty")), /YouTube動画は未登録/);
+  assert.equal(noYoutube.querySelector(".vd-members"), null);
 });
