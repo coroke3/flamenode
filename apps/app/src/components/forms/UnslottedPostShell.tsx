@@ -214,6 +214,11 @@ function UnslottedPostShellForIdentity<
       onChangeCapture={(event) => {
         const target = event.target;
         if (target instanceof HTMLElement && target.closest("form")) {
+          // Editing an existing form after an async submit started creates a
+          // newer draft generation, even if affiliation/event did not change.
+          // Only the submit callback from the latest rendered revision may
+          // clear this shell's local draft.
+          selectionRevisionRef.current += 1;
           setFormDirty(true);
         }
       }}
