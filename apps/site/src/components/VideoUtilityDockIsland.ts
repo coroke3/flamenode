@@ -313,6 +313,11 @@ export function VideoUtilityDockIsland({
   const editablePublicIds = new Set(
     editableChapters.filter((chapter) => chapter.visibility === "public").map((chapter) => chapter.id),
   );
+  // The displayed chapter list also contains the viewer's private rows.
+  // Only IDs from the signed public SSG list can request a public edit DTO.
+  const publicEditorCandidateIds = new Set(
+    publicChapters.filter((chapter) => chapter.kind !== "member").map((chapter) => chapter.id),
+  );
   const href = (item: NonNullable<typeof next>) => playlistItemHref(item, playlist);
   const onNavigation = (event: React.MouseEvent<HTMLElement>) => {
     if (!isMobile || panel === null || !historyOwned.current ||
@@ -388,7 +393,7 @@ export function VideoUtilityDockIsland({
               },
             }, chapter.timeLabel),
             " ", chapter.label, chapter.authorName ? ` · ${chapter.authorName}` : "",
-            canPost && onRequestPublicChapterEdit && chapter.kind !== "member" &&
+            canPost && onRequestPublicChapterEdit && publicEditorCandidateIds.has(chapter.id) &&
               !editablePublicIds.has(chapter.id)
               ? h("button", {
                 type: "button",

@@ -943,7 +943,12 @@ test("Issue #661: on-demand edit affordance checks permission without trusting S
       loggedIn: true, authUnavailable: false, isBanned: false,
       isTosAccepted: true, termsReacceptRequired: false,
       viewerXApproved: true, activeXId: "owner-x", viewerCanEditChapters: false,
-      privateChapters: [], editablePublicChapters: [],
+      privateChapters: [{
+        id: "private-visible", chapter_time: 75, chapter_label: "非公開コメント",
+        note: "private note", visibility: "private",
+        author_name: "Alice", author_icon: null, viewerCanManage: true,
+      }],
+      editablePublicChapters: [],
       likeActive: false, bookmarkActive: false, playlistLabel: "再生リスト", playlistItems: [],
     };
     let requested = [];
@@ -961,6 +966,9 @@ test("Issue #661: on-demand edit affordance checks permission without trusting S
     const find = () => [...doc.querySelectorAll("button")]
       .find((button) => button.getAttribute("aria-label") === "後続コメントの編集権限を確認");
     assert.ok(find(), "a published public chapter can request per-row authorization");
+    assert.equal([...doc.querySelectorAll("button")].some((button) =>
+      button.getAttribute("aria-label") === "非公開コメントの編集権限を確認"), false,
+      "private rows appear in the combined viewer list but never receive a public edit-lookup control");
     await React.act(async () => { find().click(); });
     assert.deepEqual(requested, ["chapter-after-100"]);
     assert.match(doc.body.textContent, /編集権限を確認できませんでした/);
