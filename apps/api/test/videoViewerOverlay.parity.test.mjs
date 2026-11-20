@@ -666,7 +666,8 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(dto.loggedIn, true);
     assert.ok(d1.stats.statements <= 3);
 
-    const overflowId = "approved_x_limit_overflow";
+    const overflowId = "x_limit_overflow";
+    assert.match(overflowId, /^[a-z0-9_]{1,20}$/, "overflow link must be a valid X ID");
     insert(sqlite, "x_users", { id: overflowId, x_name: overflowId, approval_status: "approved" });
     insert(sqlite, "x_user_account_links", {
       auth_user_id: "u_alice", x_user_id: overflowId, link_role: "manager", created_at: 1000,
