@@ -81,9 +81,11 @@ function monitorSessionAdapterFailures(
 
   if (adapter.deleteSession) {
     const original = adapter.deleteSession;
-    adapter.deleteSession = async (token) => {
+    adapter.deleteSession = async (token): Promise<void> => {
       try {
-        return await original(token);
+        // The configured adapter already discards the deleted session row.
+        // Keep Auth.js's permitted Promise<void> return shape.
+        await original(token);
       } catch (error) {
         markFailure();
         throw error;
