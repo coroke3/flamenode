@@ -357,6 +357,19 @@ Static Assets: home, lists / events index / search index JSON (build families of
 shards, fixed pages and bundles. R2: one HTML per public video / user / event, written by the
 MIG-0411 consumer.
 
+### MIG-0666 — API event artifact Class A PUT budget (estimate, not measurement)
+
+Build-time U01/U02 publishes only `events/index.json` and `events/<id>/release.v1.json`. On the recorded 2026-10-18 production count of **22 public events**, this is **23 candidate objects per build**. An unchanged SHA-256 payload causes **0 Class A PUTs**; R2 comparison/readback GETs are Class B, not included here.
+
+| Scenario | Candidate objects / build | Monthly builds | Worst-case Class A PUTs / month | Against 800,000 / month project target |
+| --- | ---: | ---: | ---: | ---: |
+| Fully unchanged | 23 | 720 (hourly) | 0 | 0% |
+| Every API artifact changes, readback succeeds | 23 | 720 | 16,560 | 2.07% |
+| Every artifact changes, every write requires 3 readback retry PUTs | 23 | 720 | 66,240 | 8.28% |
+| Stress: every 15 minutes, every artifact changes, 3 retries each | 23 | 2,880 | 264,960 | 33.12% |
+
+This estimate uses the project budget **80% of R2's 1,000,000 Class A operations/month = 800,000**. The 15-minute all-retry stress scenario leaves **535,040 operations** for all *other* R2 writers, including the separate detail HTML pipeline. Therefore this API sub-budget **does not demonstrate that total project Class A usage is below 800,000**: the detail-page worst case below is already above budget independently. Future event count/build cadence must be recomputed and actual Class A writes monitored before any authorized production R2 publication. The build's default invocation remains dry-run/no R2 publication, and `--publish-api-artifacts` requires an explicitly injected bucket; production write credentials and live R2 mutations remain STOP.
+
 R2 reads: each detail page view is one R2 GET (Class B; free 10 M/month ≈ 333,000/day) after one
 KV read and one route shard read. No traffic figures were read, so the volume is stated as that
 break-even: the free tier holds up to ~333 k detail views/day. R2 writes (D-11): the Queue consumer renders nothing, so it makes 0 PUTs; detail HTML is

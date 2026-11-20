@@ -12,7 +12,7 @@ import {publishApiArtifacts, type ApiArtifactBucket, type ApiArtifactPublishRepo
 
 const REPO=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"../../..");
 const SNAPSHOT_DIR_PREFIX="flamenode-public-build-";
-const USAGE="usage: buildPublicSite.ts (--sqlite FILE|--sql-dump FILE|--d1-api) [--trending-file FILE|--trending-r2] [--now SEC] [--generation ID]";
+const USAGE="usage: buildPublicSite.ts (--sqlite FILE|--sql-dump FILE|--d1-api) [--trending-file FILE|--trending-r2] [--now SEC] [--generation ID] [--publish-api-artifacts (injected nonproduction R2 bucket required)]";
 export interface BuildCommand {
   command:string; args:string[]; env:NodeJS.ProcessEnv;
 }

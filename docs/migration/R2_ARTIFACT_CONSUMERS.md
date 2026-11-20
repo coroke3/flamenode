@@ -63,6 +63,8 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 
 | Source path | Method and argument expression | Call sites (exact) | Disposition / reason |
 | --- | --- | ---: | --- |
+| `apps/site/scripts/publishApiArtifacts.ts` | `bucket.get(target.key)` | 1 | MIG-0666 build-only injected bucket, limited to manifest-verified events/index.json and events/<id>/release.v1.json; readback capped at 2 MiB; no live R2 binding |
+| `apps/site/scripts/publishApiArtifacts.ts` | `bucket.put(target.key)` | 1 | MIG-0666 opt-in build-only differential PUT with SHA-256 comparison and up to 3 retries; cannot be invoked by default CLI without an injected bucket; no production credentials |
 | `apps/site/src/gateway/r2Html.ts` | `bucket.get(r2HtmlKey(decision.key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
 | `apps/site/src/gateway/pageRenderQueue.ts` | `bucket.delete(r2HtmlKey(key))` | 1 | D-11 DELETE-only on unpublish/revocation; never renders or PUTs HTML |
 | `workers/json-generator/rebuild.ts` | `bucket.delete(pendingPostingArtifacts.map)` | 2 | Generator/producer key; MIG-0907 review required |
