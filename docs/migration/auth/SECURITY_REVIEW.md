@@ -46,6 +46,64 @@ Source baseline: `apps/api/src/auth/session.ts`, `apps/api/src/middleware/{write
 
 PR #445 (merged to `main` 2026-10-30, squash `ee6a6dce98961ede46dda33470eebc05f4c14496`) maps a throwing DB binding getter to a fixed private 503 in the three guards (plus `dbMiddleware`). PR #444 targets `main` and its head includes #445. The former `assert.rejects` reproducer was deleted so the suite no longer tests *for* the vulnerability. This does **not** constitute security approval of #444: an independent reviewer must still approve the exact final HEAD, and a human must authorize the merge.
 
-## §2. Future Auth.js implementation and cutover (MIG-0804)
+## §2. Unmounted Auth.js/OAuth security review (MIG-0804 U02 & U01)
 
-Reserved for MIG-0804 after its own prerequisite and independent review. Nothing in §1 asserts that OAuth, callback, PKCE, account linking, or production Auth.js routing has been validated or cut over.
+> **Status (2026-11-21): U02 Security PASS (pending independent review) / U01 CPU IN_PROGRESS (D1 query counts verified; Linux `workerd` / non-prod `wrangler tail` CPU confirmation still required).** This audit applies only to the *unmounted* `apps/api/src/auth/authjs.ts`, synthetic `apps/api/src/routes/auth.ts`, and synthetic `apps/api/src/routes/authComplete.ts` integrated against `main` (`0c34ec94c`, incl. PR `#695`). It does **not** authorize mounting Auth.js in `apps/api/src/app.ts`, enabling production OAuth traffic, changing Cloudflare Routes, or modifying secrets (all strictly scoped to `MIG-0805`).
+
+| Security boundary | Source of truth | Existing evidence / added check | U02 assessment |
+| --- | --- | --- | --- |
+| Session cookie tamper, expiry, deletion and current user claims | `apps/api/src/auth/authjs.ts:636-693`; shared `applyDatabaseAuthSessionClaims` in `packages/server-core/src/auth/config.ts` | `apps/api/test/authjsCrossRuntime.test.mjs`: valid/unknown/expired/deleted/banned session and both directions of session-cookie renewal (U01, U02a). `apps/api/test/authAccountLink.parity.test.mjs` tests user/account parity. | Baseline parity covered in synthetic SQLite; **BAN is present in session data, not an Auth.js login denial**, so private route write authorization still depends on the §1 Hono writeGuard |
+| CSRF and signout integrity | `apps/api/src/routes/auth.ts`: only POST signout; `@auth/core` native form token/cookie validation | `authjsCrossRuntime.test.mjs` U02b: invalid form token, absent CSRF cookie and cross-runtime CSRF token exchange. Tests check that a denial does **not** delete the D1 session. | Synthetic route contract covered; no production signout cutover |
+| OAuth callback/PKCE and Discord identity collision | `authjs.ts:463-599` atomic `linkDiscordAccountAtomically`, `accountRowWithoutTokens`; `routes/auth.ts` allowlist | `authAccountLink.parity.test.mjs`: mock Discord authorize/code exchange, PKCE, reused code, cross-account hijack denial, audit/outbox, no bearer/refresh/id token persistence. `authjsCrossRuntime.test.mjs`: GET/POST signin/callback return 404 from the *unmounted* Hono test router. | Mock parity covered; **full production signin/callback is intentionally unavailable** pending MIG-0805 and owner approval |
+| Untrusted redirect/Host and configured origin | `apps/api/src/auth/authjs.ts:108-132,636-686`; `packages/server-core/src/auth/redirect.ts` | `authjsCrossRuntime.test.mjs` configured HTTPS/credentials and origin mismatch checks; `authjsSecurityReview.test.mjs` U02 T01 direct callback cross-host/protocol-relative/`javascript:`/`data:` checks and T02 spoofed `Host`/`X-Forwarded-Host` negative check. | **U02 T01 & T02 PASS**: explicit configured origin is never derived from request `Host`; redirect callback never authorizes a foreign origin |
+| Auth/DB outage fail-closed, cache and secret disclosure | `apps/api/src/routes/auth.ts:51-133` (`monitorSessionAdapterFailures` + `databaseSessionUnavailableResponse`); `authjs.ts:98-106` redacts logger error detail | `authjsCrossRuntime.test.mjs` checks missing DB/config/secret responds 503. `authjsSecurityReview.test.mjs` U02 T03 (`D1.prepare()` runtime exception → `503` `private, no-store`, no provider sentinel). `authProviderFailures.test.mjs` (`#695`, 6/6 PASS: prepare/read/update/delete failures, concurrent request isolation, D1 session retention). | **U02 T03 PASS (remediated by PR `#695`, Issue `#694` resolved)** in unmounted `routes/auth.ts`. *Note for `MIG-0805`:* `apps/api/src/routes/authComplete.ts` (`MIG-0802`) calls `invokeUnmountedAuth` directly without `monitorSessionAdapterFailures`, so cutover wiring must share the adapter-failure guard on `/auth/complete` as well. |
+| CPU / D1 query budget (U01) | `PHASE_8_9_SPEC.md` MIG-0804 U01; `ZERO_1102.md` §3 & §5 | Deterministic per-request D1 statement counts locked in `authjsSecurityReview.test.mjs` (`MIG-0804 U01`). Local Windows `workerd` (`wrangler dev --local` 4.118.0, `win32/x64`) + Node `inproc` measurements recorded below. | **D1 counts measured; CPU IN_PROGRESS / INCONCLUSIVE on Windows host** (`BASELINE` max `19.70–21.71ms` noise floor and warm Auth.js `p50` `12.30–18.61ms` require quiet Linux `workerd` or non-prod `wrangler tail` `cpuTime` verification). |
+
+### U01 D1 query count & non-production local CPU measurements (2026-11-21)
+
+#### 1. Per-request D1 statement counts (`authjsSecurityReview.test.mjs` U01, deterministic local SQLite)
+
+| Path / input condition | HTTP status | D1 statements | SQL operations | Notes |
+| --- | ---: | ---: | --- | --- |
+| `GET /api/auth/session` (no cookie) | 200 | 0 | — | Short-circuits before D1 |
+| `GET /api/auth/session` (unknown token) | 200 | 1 | `SELECT` | Joins `session` + `user` |
+| `GET /api/auth/session` (valid fresh session, >29d remaining) | 200 | 1 | `SELECT` | Matches `S4` 1-read budget |
+| `GET /api/auth/session` (valid near-expiry <=29d, sliding renewal) | 200 | 2 | `SELECT`, `UPDATE` | Extends `session.expires` |
+| `GET /api/auth/session` (expired cookie) | 200 | 2 | `SELECT`, `DELETE` | Reads then deletes expired session |
+| `GET /api/auth/csrf` | 200 | 0 | — | Cookie + WebCrypto token only |
+| `POST /api/auth/signout` (invalid CSRF + session cookie) | 302 | 0 | — | Fails CSRF validation before D1 |
+| `POST /api/auth/signout` (valid CSRF + session cookie) | 302 | 1 | `DELETE` | Deletes `session` row |
+| `GET /auth/complete` (valid fresh session) | 303 | 1 | `SELECT` | 2 (`SELECT`, `UPDATE`) if sliding renewal triggers |
+| `GET /auth/complete` (missing/unknown cookie, 4 retries) | 303 | 4 | `SELECT` × 4 | Retry sequence `[80, 160, 320]` ms |
+| Reference: `S4 sessionMiddleware` (`apps/api/src/auth/session.ts`) | 200 | 1 | `SELECT` | Read-only middleware (`0` writes) |
+
+#### 2. Non-production local `workerd` probe (Windows 11 x64 — NOT a production value or final `ZERO_1102` pass)
+
+- **Environment & method:** `wrangler 4.118.0` (`wrangler dev --local`, `win32/x64`, Node `v22.23.2`), V8 inspector `Profiler.start/stop` (`100µs` sampling interval, non-idle sample deltas) with `--d1 replay` (D1 results recorded from `node:sqlite`, replayed in `workerd` without local D1 simulator overhead), `50` warm samples (`10` warmup discarded) + `10` cold isolate reloads, `0` unexpected HTTP statuses.
+- **Why Windows `workerd` is inconclusive for `ZERO_1102.md` §3 budgets (`S4 <= 2ms`, `S2 < 7ms`, `S3 < 8ms`):**
+  1. `wrangler dev --local` observability spans report `cpu_time_ms = 0` on local runs (`API_CPU_BENCHMARK.md` §4).
+  2. The V8 sampling profiler on this Windows host exhibits a high noise floor (`BASELINE` zero-work route max **`19.70ms`** in the Auth.js run and **`21.71ms`** in `scripts/benchmark-api-cpu.mjs --mode wrangler --only S4 --samples 10 --cold-samples 5`; max single non-idle sample delta `100.94ms`).
+  3. Even on warm `p50` (where `BASELINE` is `0.00ms`), Auth.js endpoints measured `12.30–18.61ms` in this Windows `workerd` probe (and `1.73–7.58ms` in a separate `50`-sample Node `inproc` wall-time proxy: `AUTH-SESSION-VALID-FRESH` `p50 7.34ms / max 50.77ms`, `AUTH-SESSION-UNKNOWN` `p50 7.58ms / max 22.73ms`, `AUTH-CSRF` `p50 2.00ms / max 9.66ms`, `AUTH-SIGNOUT-BAD-CSRF` `p50 1.73ms / max 8.10ms`, `AUTH-COMPLETE-VALID` `p50 2.19ms / max 8.92ms`). `buildUnmountedAuthConfig` currently builds `drizzle(input.d1, { schema })` + `DrizzleAdapter` + `Discord(...)` per request.
+
+| Scenario (`--d1 replay`, local Windows `workerd`) | D1 stmts | Bytes | Warm `p50 / p95 / max` (ms) | Cold `p50 / max` (ms) (`n=10`) |
+| --- | ---: | ---: | --- | --- |
+| `BASELINE` (zero-work no-op) | 0 | 2 | `0.00 / 15.66 / 19.70` | `0.00 / 14.01` |
+| `GET /api/auth/session` (valid, 29d sliding) | 2 | 513 | `12.30 / 28.38 / 44.52` | `28.79 / 79.05` |
+| `GET /api/auth/session` (valid, 2d sliding) | 2 | 513 | `18.03 / 24.04 / 24.65` | `26.10 / 58.39` |
+| `GET /api/auth/session` (unknown token) | 1 | 4 | `14.96 / 47.37 / 59.77` | `16.37 / 65.03` |
+| `GET /api/auth/csrf` | 0 | 80 | `14.83 / 41.42 / 110.10` | `13.08 / 34.31` |
+| `POST /api/auth/signout` (valid CSRF) | 1 | 0 | `18.61 / 32.13 / 101.75` | `16.31 / 40.97` |
+| `POST /api/auth/signout` (invalid CSRF) | 0 | 0 | `18.53 / 32.94 / 107.71` | `25.38 / 45.58` |
+| `GET /auth/complete` (valid, 29d sliding) | 2 | 0 | `17.20 / 26.97 / 86.71` | `27.65 / 57.17` |
+
+**Remaining U01 & MIG-0804 acceptance gate:**
+- U01 requires a quiet Linux `workerd` measurement or deployed non-production Worker `wrangler tail` `cpuTime` check (`ZERO_1102.md` §5) to confirm whether per-request `drizzle(d1, { schema })` / `@auth/core` initialization fits within `ZERO_1102.md` §3 budgets (or needs lightweight schema/per-request optimization before `MIG-0805` cutover).
+- U02 requires independent security review of this PR HEAD (`authjsSecurityReview.test.mjs`, `authProviderFailures.test.mjs`, `routes/auth.ts` integration) and green exact-HEAD CI (`migration-contract` + `migration-workspaces`). No `STATUS.md` `DONE` change, Auth.js route mount, production OAuth configuration, remote D1, R2, Worker Routes or secrets action is authorized.
+
+### 2026-11-20 — U02 T03 confirmed FAIL (historical pre-fix; remediated by PR #695)
+
+CI [#44657912902](https://github.com/coroke3/flamenode/actions/runs/44657912902) (pre-#695) compiled the target API and executed `apps/api/test/authjsSecurityReview.test.mjs` with `T01 PASS`, `T02 PASS`, `T03 FAIL`: `actual 200 !== expected 503` when `D1.prepare()` threw for a valid session (Issue [#694](https://github.com/coroke3/flamenode/issues/694)).
+
+### 2026-11-21 — SEC-0804-01 remediated (`#695`) + U01 D1/Windows-workerd baseline
+
+Merged `origin/main` (`0c34ec94c`, PR `#695`) into PR `#693`. Re-ran `authjsSecurityReview.test.mjs` (`T01`, `T02`, `T03`, and new `U01` D1 query-count test: `4/4 PASS`) and `authProviderFailures.test.mjs` (`6/6 PASS`). Executed U01 D1 statement-count and local Windows `workerd` probes (inconclusive noise floor `19.70–21.71ms`; Linux `workerd` / non-prod `wrangler tail` CPU confirmation still required before U01 `DONE`).
