@@ -629,6 +629,61 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3);
   });
 
+  test("Issue #709: approved-X fanout is bounded to 100 plus sentinel with no authorization truncation", async () => {
+    const { env, sqlite, d1 } = setupTestEnv();
+    const existing = sqlite.prepare(`
+      SELECT COUNT(*) AS n FROM x_user_account_links l
+      INNER JOIN x_users x ON x.id = l.x_user_id
+      WHERE l.auth_user_id = 'u_alice' AND x.approval_status = 'approved'
+    `).get().n;
+    assert.ok(existing > 0 && existing < 100, "fixture must start below the X-link budget");
+    for (let n = existing; n < 100; n++) {
+      const id = `approved_x_limit_${n}`;
+      insert(sqlite, "x_users", { id, x_name: id, approval_status: "approved" });
+      insert(sqlite, "x_user_account_links", {
+        auth_user_id: "u_alice", x_user_id: id, link_role: "manager", created_at: 1000,
+      });
+    }
+
+    let checkedQuery = 0;
+    const originalPrepare = env.DB.prepare.bind(env.DB);
+    env.DB.prepare = (sql) => {
+      if (sql.includes("'approved_x_ids'")) {
+        checkedQuery++;
+        assert.match(sql, /LIMIT 101/, "real correlated JSON subquery must cap at 100 + 1");
+      }
+      return originalPrepare(sql);
+    };
+
+    d1.stats.statements = 0;
+    const withinBudget = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(withinBudget.status, 200, "exactly 100 links must preserve existing rights");
+    const dto = await withinBudget.json();
+    assert.equal(dto.activeXId, "alice_x", "current approved Active X must stay selected");
+    assert.equal(dto.viewerXApproved, true, "boundary must not strip an approved X");
+    assert.equal(dto.loggedIn, true);
+    assert.ok(d1.stats.statements <= 3);
+
+    const overflowId = "approved_x_limit_overflow";
+    insert(sqlite, "x_users", { id: overflowId, x_name: overflowId, approval_status: "approved" });
+    insert(sqlite, "x_user_account_links", {
+      auth_user_id: "u_alice", x_user_id: overflowId, link_role: "manager", created_at: 1000,
+    });
+    d1.stats.statements = 0;
+    const overBudget = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(overBudget.status, 503, "101 approvals must not silently truncate authorization");
+    assert.equal(overBudget.headers.get("Cache-Control"),
+      "private, no-store, no-cache, must-revalidate");
+    assert.equal(overBudget.headers.get("Retry-After"), "3");
+    assert.deepEqual(await overBudget.json(), { error: "viewer_overlay_unavailable" });
+    assert.ok(checkedQuery >= 2, "both boundary requests must exercise the capped D1 query");
+    assert.ok(d1.stats.statements <= 3, "reject must not add an extra D1 read");
+  });
+
   test("Issue #661: default public edit projection is empty; any of 125 rows can be checked on demand", async () => {
     const { env, sqlite } = setupTestEnv();
     for (let i = 0; i < 125; i++) {

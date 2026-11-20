@@ -17,7 +17,7 @@ import {
   TERMS_REACCEPT_REQUIRED_CASE_SQL,
   TERMS_REACCEPT_REQUIRED_CTE_SQL,
 } from "../personal/context.ts";
-import { resolveActiveXUserId } from "../account/summary.ts";
+import { ACCOUNT_SUMMARY_MAX_X_ROWS, resolveActiveXUserId } from "../account/summary.ts";
 import type {
   VideoViewerOverlayDto,
   VideoViewerOverlayPlaylistItem,
@@ -328,7 +328,12 @@ SELECT
       'is_tos_accepted', u."is_tos_accepted",
       'terms_reaccept_required', ${TERMS_REACCEPT_REQUIRED_CASE_SQL},
       'active_x_id', u."active_x_user_id",
-      'approved_x_ids', (SELECT coalesce(json_group_array(x."id"), '[]') FROM "x_user_account_links" l INNER JOIN "x_users" x ON x."id" = l."x_user_id" WHERE l."auth_user_id" = u."id" AND x."approval_status" = 'approved')
+      'approved_x_ids', (SELECT coalesce(json_group_array(a."id"), '[]') FROM (
+        SELECT x."id" FROM "x_user_account_links" l
+        INNER JOIN "x_users" x ON x."id" = l."x_user_id"
+        WHERE l."auth_user_id" = u."id" AND x."approval_status" = 'approved'
+        LIMIT ${ACCOUNT_SUMMARY_MAX_X_ROWS + 1}
+      ) a)
    )
    FROM "user" u
    WHERE u."id" = ?
@@ -351,6 +356,13 @@ SELECT
       const termsReacceptRequired = userData.terms_reaccept_required === 1;
       const rawActiveX = typeof userData.active_x_id === "string" ? userData.active_x_id : null;
       const approvedXIds = parseJsonArray<string>(userData.approved_x_ids);
+      // S2: cap correlated D1 JSON aggregation *before* JSON.parse and the
+      // private chapter authorization projection. Use one sentinel row so
+      // a user with >100 approved links fails closed rather than silently
+      // truncating permissions or constructing an unbounded JSON blob.
+      if (approvedXIds.length > ACCOUNT_SUMMARY_MAX_X_ROWS) {
+        return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+      }
       // CURRENT resolveActiveXUserId: the D1 spelling of the matching approved X id, else the only
       // approved X id, else null; viewerXApproved is approvedXIds.includes(activeXId).
       const activeXId = resolveActiveXUserId(
