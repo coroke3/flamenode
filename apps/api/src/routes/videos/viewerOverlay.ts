@@ -34,6 +34,10 @@ const PLAYLIST_EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 /** ZERO_1102 S2: public chapter full notes are read only when one row is explicitly requested. */
 /** ZERO_1102 S2: response cap; never truncate a stored note in an editor DTO. */
 const MAX_VIEWER_OVERLAY_RESPONSE_BYTES = 64 * 1024;
+// A malformed legacy approved-X row can contain an arbitrarily large TEXT id.
+// The canonical public identifier is <=20 chars; permit legacy spellings up to
+// 128 code points, but never aggregate a larger value into the auth JSON.
+const MAX_APPROVED_X_ID_PROJECTION_CHARS = 128;
 
 const UNAVAILABLE_HEADERS = {
   ...PRIVATE_HEADERS,
@@ -328,7 +332,9 @@ SELECT
       'is_tos_accepted', u."is_tos_accepted",
       'terms_reaccept_required', ${TERMS_REACCEPT_REQUIRED_CASE_SQL},
       'active_x_id', u."active_x_user_id",
-      'approved_x_ids', (SELECT coalesce(json_group_array(a."id"), '[]') FROM (
+      'approved_x_ids', (SELECT coalesce(json_group_array(
+        CASE WHEN length(a."id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} THEN NULL ELSE a."id" END
+      ), '[]') FROM (
         SELECT x."id" FROM "x_user_account_links" l
         INNER JOIN "x_users" x ON x."id" = l."x_user_id"
         WHERE l."auth_user_id" = u."id" AND x."approval_status" = 'approved'
@@ -357,10 +363,12 @@ SELECT
       const rawActiveX = typeof userData.active_x_id === "string" ? userData.active_x_id : null;
       const approvedXIds = parseJsonArray<string>(userData.approved_x_ids);
       // S2: cap correlated D1 JSON aggregation *before* JSON.parse and the
-      // private chapter authorization projection. Use one sentinel row so
-      // a user with >100 approved links fails closed rather than silently
-      // truncating permissions or constructing an unbounded JSON blob.
-      if (approvedXIds.length > ACCOUNT_SUMMARY_MAX_X_ROWS) {
+      // private chapter authorization projection. A null SQL sentinel means
+      // a legacy linked X id was too long to include safely in the JSON.
+      // Do not silently omit this identity from the authorization set.
+      if (approvedXIds.length > ACCOUNT_SUMMARY_MAX_X_ROWS ||
+          approvedXIds.some((id) => typeof id !== "string" ||
+            id.length > MAX_APPROVED_X_ID_PROJECTION_CHARS)) {
         return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
       }
       // CURRENT resolveActiveXUserId: the D1 spelling of the matching approved X id, else the only

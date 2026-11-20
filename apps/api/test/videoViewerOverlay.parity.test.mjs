@@ -685,6 +685,57 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3, "reject must not add an extra D1 read");
   });
 
+  test("Issue #709: legacy giant approved X ID is not serialized into auth D1 JSON", async () => {
+    const { env, sqlite, d1 } = setupTestEnv();
+    const hugeLinkedId = "bad_x_".repeat(30_000);
+    // A legacy TEXT primary key has no application-level shape guarantee.
+    // Keep ALICE_X selected while another approved linked identity is invalid.
+    insert(sqlite, "x_users", {
+      id: hugeLinkedId, x_name: "Legacy malformed", approval_status: "approved",
+    });
+    insert(sqlite, "x_user_account_links", {
+      auth_user_id: "u_alice", x_user_id: hugeLinkedId,
+      link_role: "owner", created_at: 1000,
+    });
+
+    const originalPrepare = env.DB.prepare.bind(env.DB);
+    let checkedActualRow = false;
+    env.DB.prepare = (sql) => {
+      const stmt = originalPrepare(sql);
+      if (!sql.includes("'approved_x_ids'")) return stmt;
+      assert.match(sql, /CASE WHEN length\\(a\\."id"\\) > 128 THEN NULL/,
+        "oversized X IDs must become a D1-side invalid-identity sentinel");
+      const originalBind = stmt.bind.bind(stmt);
+      stmt.bind = (...params) => {
+        const bound = originalBind(...params);
+        const originalFirst = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await originalFirst();
+          assert.ok(row?.user_json, "the signed-in D1 projection must return a real row");
+          checkedActualRow = true;
+          assert.ok(Buffer.byteLength(row.user_json, "utf8") < 12_000,
+            "the giant legacy ID must not be materialized into the auth JSON");
+          assert.equal(row.user_json.includes(hugeLinkedId), false);
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+
+    d1.stats.statements = 0;
+    const response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(checkedActualRow, true, "exercise the mounted D1 aggregation");
+    assert.equal(response.status, 503, "legacy malformed approved links fail closed");
+    assert.equal(response.headers.get("Cache-Control"),
+      "private, no-store, no-cache, must-revalidate");
+    assert.equal(response.headers.get("Retry-After"), "3");
+    assert.deepEqual(await response.json(), { error: "viewer_overlay_unavailable" });
+    assert.ok(d1.stats.statements <= 3, "no extra D1 read for the invalid identity");
+  });
+
   test("Issue #661: default public edit projection is empty; any of 125 rows can be checked on demand", async () => {
     const { env, sqlite } = setupTestEnv();
     for (let i = 0; i < 125; i++) {
