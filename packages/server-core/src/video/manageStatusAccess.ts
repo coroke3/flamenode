@@ -440,6 +440,9 @@ export function planManageVideoStatusCommitAssertion(
   // status change whose already-planned rebuild queue omits the new target.
   // COUNT is bounded to nine IDs by LIMIT and stays inside this first atomic
   // D1 batch assertion, not an additional route-wide pre-read.
+  // Mirror mergeVideoRebuildEventIds(): the canonical CURRENT queue omits
+  // empty-string imported event IDs (both linked and primary). Including them
+  // in the SQL union would falsely reject otherwise valid audited writes.
   const rebuildTargetsStillBounded = sql`(
     SELECT COUNT(*) FROM (
       -- The (video_id,event_id) composite PK makes each linked ID unique.
@@ -447,12 +450,13 @@ export function planManageVideoStatusCommitAssertion(
       -- every linked row to build the UNION DISTINCT temporary B-tree.
       SELECT "event_id" AS "id" FROM (
         SELECT "event_id" FROM "video_events"
-        WHERE "video_id" = ${videoId}
+        WHERE "video_id" = ${videoId} AND "event_id" <> ''
         LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
       )
       UNION
       SELECT "primary_event_id" AS "id" FROM "videos"
       WHERE "id" = ${videoId} AND "primary_event_id" IS NOT NULL
+        AND "primary_event_id" <> ''
       LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
     ) current_rebuild_targets
   ) <= ${MAX_MANAGE_STATUS_REBUILD_EVENTS}`;
@@ -477,12 +481,13 @@ export function planManageVideoStatusCommitAssertion(
   // When <=8 linked targets exist this remains a full exact-set comparison.
   const currentRebuildIds = sql`(
     SELECT "event_id" AS "id" FROM (
-      SELECT "event_id" FROM "video_events" WHERE "video_id" = ${videoId}
+      SELECT "event_id" FROM "video_events" WHERE "video_id" = ${videoId} AND "event_id" <> ''
       LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
     )
     UNION
     SELECT "primary_event_id" AS "id" FROM "videos"
     WHERE "id" = ${videoId} AND "primary_event_id" IS NOT NULL
+      AND "primary_event_id" <> ''
     LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
   )`;
   const rebuildTargetsStillIdentical = expectedIdsBounded
