@@ -233,3 +233,64 @@ test("MIG-0627 U02a T09: canonical projection reads a verified public detail and
     /not a public, matching video detail/,
   );
 });
+
+test("MIG-0627 U02a T10: sitemap reads only detail snapshots named in the index", async () => {
+  const fixture = accessWith();
+  const relevant = "snapshot/video-detail/vid-aaa.json";
+  const unrelated = "snapshot/video-detail/vid-bbb.json";
+  fixture.access.options.manifest.allowedKeys.push(relevant, unrelated);
+  const relevantBytes = buildEnvelope(FIXTURE_VIDEO_DETAIL_PAYLOADS["vid-aaa"], { key: relevant });
+  fixture.access.source.read = async (key) => {
+    fixture.reads.push(key);
+    if (key !== relevant) throw new Error("unrelated public detail must never be read by sitemap");
+    return relevantBytes;
+  };
+  const pages = await loadSitemapCanonicalVideoPages(fixture.access, new Set(["vid-aaa"]));
+  assert.deepEqual(pages.map((page) => page.videoId), ["vid-aaa"]);
+  assert.deepEqual(fixture.reads, [relevant]);
+  assert.equal(fixture.metrics.reads, 1, "one verified source read even with extra manifest detail");
+  assert.equal(fixture.metrics.accepted, 1);
+  assert.equal(fixture.metrics.rejected, 0);
+});
+
+test("MIG-0627 U02a T11: empty index or missing candidate avoids unrelated detail reads", async () => {
+  const fixture = accessWith();
+  fixture.access.options.manifest.allowedKeys.push(
+    "snapshot/video-detail/vid-aaa.json",
+    "snapshot/video-detail/vid-bbb.json",
+  );
+  fixture.access.source.read = async (key) => {
+    fixture.reads.push(key);
+    throw new Error("no video-detail reads permitted");
+  };
+  assert.deepEqual(await loadSitemapCanonicalVideoPages(fixture.access, new Set()), []);
+  assert.deepEqual(
+    await loadSitemapCanonicalVideoPages(fixture.access, new Set(["vid-not-in-manifest"])),
+    [],
+  );
+  assert.deepEqual(fixture.reads, []);
+  assert.equal(fixture.metrics.reads, 0);
+
+  // Fixture fallback is filtered by the same candidates, without changing
+  // the canonical projection or adding request-time R2/HTTP access.
+  const fixtureSubset = await loadSitemapCanonicalVideoPages(null, new Set(["vid-bbb"]));
+  assert.deepEqual(fixtureSubset.map((page) => [page.videoId, page.canonicalSlug]),
+    [["vid-bbb", "vid-bbb"]]);
+  assert.deepEqual(await loadSitemapCanonicalVideoPages(null, new Set()), []);
+});
+
+test("MIG-0627 U02a T12: an indexed but broken public detail still fails closed", async () => {
+  const fixture = accessWith();
+  const key = "snapshot/video-detail/vid-aaa.json";
+  fixture.access.options.manifest.allowedKeys.push(key);
+  fixture.access.source.read = async (requested) => {
+    fixture.reads.push(requested);
+    return null;
+  };
+  await assert.rejects(
+    loadSitemapCanonicalVideoPages(fixture.access, new Set(["vid-aaa"])),
+    (error) => error?.code === "SNAPSHOT_MISSING",
+  );
+  assert.deepEqual(fixture.reads, [key]);
+  assert.equal(fixture.metrics.rejected, 1);
+});
