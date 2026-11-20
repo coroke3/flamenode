@@ -40,8 +40,8 @@ if (runTestWithTsx(import.meta.url)) {
         if (at === "prepare") throw new Error(SENTINEL);
         const statement = d1.prepare(sql);
         const operation = String(sql).toLowerCase().replace(/["`]/g, "");
-        const blockedWrite = (at === "update" && /^\\s*update\\s+session\\b/.test(operation)) ||
-          (at === "delete" && /^\\s*delete\\s+from\\s+session\\b/.test(operation));
+        const blockedWrite = (at === "update" && /^\s*update\s+session\b/.test(operation)) ||
+          (at === "delete" && /^\s*delete\s+from\s+session\b/.test(operation));
         return {
           ...statement,
           bind(...args) {
