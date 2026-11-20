@@ -274,14 +274,19 @@ SELECT
       degraded = { isTosAccepted, termsReacceptRequired, activeXId, viewerXApproved };
 
       let viewerCanEditChapters = false;
+      let matchesPublicD1Video = false;
       if (row1.video_json) {
         const videoData = JSON.parse(row1.video_json) as {
           id: string;
           primary_event_id: string | null;
+          visibility_status: string;
           ve_json: unknown;
           staff_json: unknown;
         };
         if (videoData.id === detail.video.id) {
+          // A stale R2 artifact must not grant public chapter editing after
+          // the canonical D1 video has been made private.
+          matchesPublicD1Video = videoData.visibility_status === "public";
           viewerCanEditChapters = canAdministerChapters(viewer.role, approvedXIds, {
             primary_event_id: videoData.primary_event_id,
             access: parseAccessFacts(videoData.ve_json, videoData.staff_json),
@@ -325,7 +330,7 @@ SELECT
       // satisfies the same active-X/terms guard as SA-012..015. Owner rows
       // require a still-approved link in this SQL statement; event managers
       // may edit all normal public chapters. No extra D1 statement is issued.
-      const editablePublicSubquery = viewerCanWriteChapters
+      const editablePublicSubquery = viewerCanWriteChapters && matchesPublicD1Video
         ? `(SELECT coalesce(json_group_array(json_object(
               'id', c."id",
               'chapter_time', c."chapter_time",
@@ -391,7 +396,7 @@ SELECT
           stmt2Binds.push(JSON.stringify(approvedXIds));
         }
       }
-      if (viewerCanWriteChapters) {
+      if (viewerCanWriteChapters && matchesPublicD1Video) {
         stmt2Binds.push(detail.video.id);
         if (!viewerCanEditChapters) stmt2Binds.push(activeXId, viewer.id);
       }
@@ -425,7 +430,7 @@ SELECT
         id: string; chapter_time: number; chapter_label: string;
         note: string | null; visibility: "public"; chapter_owner_x_id: string | null;
       }>(row2?.editable_public_chapters_json)
-        .filter((chapter) => viewerCanWriteChapters &&
+        .filter((chapter) => viewerCanWriteChapters && matchesPublicD1Video &&
           (viewerCanEditChapters || Boolean(activeXId && chapter.chapter_owner_x_id === activeXId)))
         .map(({ chapter_owner_x_id: _ownerId, ...chapter }) => ({
           ...chapter,
