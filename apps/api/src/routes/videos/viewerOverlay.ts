@@ -107,7 +107,7 @@ function boundedOverlayResponse(c: Context<AppEnv>, body: VideoViewerOverlayDto)
 
   let projectedBody = body;
   let editorUnits = 0;
-  for (const chapter of body.editablePublicChapters) {
+  for (const chapter of body.editablePublicChapters ?? []) {
     editorUnits += units(chapter.note) + units(chapter.chapter_label) + units(chapter.id);
     if (editorUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
       projectedBody = { ...projectedBody, editablePublicChapters: [] };
