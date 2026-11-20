@@ -803,7 +803,7 @@ test("MIG-0603: multibyte imported event IDs cannot bypass the 4096-byte rebuild
 });
 
 
-test("MIG-0603: atomic status grant keeps latest major-terms reacceptance in CURRENT/Hono parity", async () => {
+test("MIG-0603: atomic status grant matches Hono latest-major reacceptance fail-closed", async () => {
   const sqlite = createSqlite();
   try {
     seed(sqlite);
@@ -860,10 +860,11 @@ test("MIG-0603: atomic status grant keeps latest major-terms reacceptance in CUR
     }
 
     await check(true, "no published major requires no reacceptance");
-    // CURRENT treats published_at=0 as absent for major-term reacceptance.
-    // The SQL assertion must match that legacy edge case at commit time.
+    // GitHub Actions #44648501552 proved Hono loadTosState REQUIRES consent
+    // when published_at=0. CURRENT's termsReacceptRequiredCondition uses a
+    // falsy check and differs; reject at commit to avoid bypassing Hono auth.
     published("major-epoch-zero", "major", 0);
-    await check(true, "a major published at epoch zero does not require reacceptance in CURRENT");
+    await check(false, "Hono requires reacceptance for non-NULL epoch-zero major publication");
     published("major-1", "major", 100);
     await check(false, "new major publication after previously granted preflight");
     sqlite.prepare("UPDATE user SET accepted_terms_version_id='major-1' WHERE id='u_mgr'").run();

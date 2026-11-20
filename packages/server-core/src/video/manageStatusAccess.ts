@@ -320,17 +320,17 @@ export function planManageVideoStatusCommitAssertion(
       AND ${sessions.userId} = ${user.id}
       AND ${sessions.expires} > unixepoch('now') * 1000
   )`;
-  // Mirrors CURRENT termsReacceptRequiredCondition / Hono loadTosState:
-  // the latest once-published major is selected by published_at,updated_at;
-  // a major published_at=0 is treated as "no reaccept" by CURRENT's
-  // !requiredMajor?.published_at guard (unusual imported epoch timestamps).
-  // A mirror or historical consent to that version, or one published later,
+  // Mirrors the active Hono loadTosState guard: every once-published major
+  // with a non-NULL published_at (including 0) requires consent. CURRENT's
+  // termsReacceptRequiredCondition uses a falsy check and differs at epoch 0;
+  // keep the commit guard fail-closed and record this parity discrepancy for
+  // the cross-owner #692 decision. A mirror or historical consent, or a later
+  // published version,
   // satisfies the requirement. No major publication means no reaccept gate.
   // This is part of the SAME commit-time assertion, not a fourth pre-read.
   const majorTermsStillAccepted = sql`NOT EXISTS (
     SELECT 1 FROM "terms_versions" required
-    WHERE required."published_at" <> 0
-      AND required."id" = (
+    WHERE required."id" = (
       SELECT "id" FROM "terms_versions"
       WHERE "severity" = 'major' AND "published_at" IS NOT NULL
       ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
