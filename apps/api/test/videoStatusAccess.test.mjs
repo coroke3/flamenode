@@ -1211,6 +1211,18 @@ test("MIG-0603: ninth rebuild event added after valid preload aborts the atomic 
     await attempt(manager,"manage_video_status",false,"manager-late-ninth-link");
     await attempt(admin,"admin_video_status",false,"admin-late-ninth-link");
 
+    // Legacy imports with disabled foreign keys can contain unbounded dangling
+    // event links. Even when the eighth/ninth IDs do not match the snapshot,
+    // each branch must still reject in the FIRST atomic statement and leave
+    // status/audit/outbox untouched rather than scanning every imported ID.
+    sqlite.exec("PRAGMA foreign_keys=OFF");
+    const manyLinks = sqlite.prepare("INSERT INTO video_events (event_id, video_id) VALUES (?, ?)");
+    for (let i = 0; i < 64; i++) manyLinks.run("orphaned-overflow-" + i, "v1");
+    await attempt(manager,"manage_video_status",false,"manager-import-overflow");
+    await attempt(admin,"admin_video_status",false,"admin-import-overflow");
+    sqlite.exec("DELETE FROM video_events WHERE event_id LIKE 'orphaned-overflow-%'");
+    sqlite.exec("PRAGMA foreign_keys=ON");
+
     // Remove the ninth link; a changed primary event alone can also create
     // an unseen ninth target, even though link count stays at eight.
     sqlite.exec("DELETE FROM video_events WHERE video_id='v1' AND event_id='evGen19'");
