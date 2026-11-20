@@ -136,6 +136,10 @@ function UnslottedPostShellForIdentity<
     videoDraftFlushRef.current = flush;
   }, []);
   const handleVideoSubmitSuccess = React.useCallback(() => {
+    // A successful submit may synchronously navigate/unmount this shell before
+    // React commits the clean flags. Prevent the departing-identity cleanup
+    // from recreating the draft that clearShellDraft just removed.
+    departingDraftRef.current.dirty = false;
     clearShellDraft();
     setShellDirty(false);
     setFormDirty(false);
