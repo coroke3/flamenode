@@ -90,6 +90,14 @@ function finishVideoStatusSnapshot(
   if (rebuildEventIds.length > MAX_MANAGE_STATUS_REBUILD_EVENTS) {
     return { ok: false, message: "関連イベント数が処理上限を超えています。" };
   }
+  // The future atomic D1 batch binds JSON.stringify(rebuildEventIds) as ONE
+  // parameter, capped at 4096 UTF-8 bytes. The linked aggregate and primary
+  // ID can each fit separately while their combined deduped JSON does not.
+  // Reject that snapshot now instead of returning ok:true for a transition
+  // that the commit-time guard is guaranteed to reject later.
+  if (exceedsRebuildIdBytes(JSON.stringify(rebuildEventIds))) {
+    throw new Error("manage_status_rebuild_event_snapshot_invalid");
+  }
   return { ok: true, video: target.video, rebuildEventIds };
 }
 
