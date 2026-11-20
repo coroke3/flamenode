@@ -31,8 +31,7 @@ const PRIVATE_HEADERS = {
 
 /** CURRENT src/lib/publicData/r2EventPlaylist.ts readVisibleEventArtifact: other ids are never read. */
 const PLAYLIST_EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-/** ZERO_1102 S2: newly added editable public chapter list, not the legacy private-read cap. */
-const MAX_EDITABLE_PUBLIC_CHAPTER_ROWS = 100;
+/** ZERO_1102 S2: public chapter full notes are read only when one row is explicitly requested. */
 /** ZERO_1102 S2: response cap; never truncate a stored note in an editor DTO. */
 const MAX_VIEWER_OVERLAY_RESPONSE_BYTES = 64 * 1024;
 
@@ -302,9 +301,9 @@ SELECT
       // controls when D1 has already revoked the video's public visibility.
       const mayManagePublicView = viewerCanWriteChapters && matchesPublicD1Video;
       const canSeeAllPrivate = viewer.role === "admin" || viewerCanEditChapters;
-      // An explicit public chapter ID is an on-demand editor lookup for rows
-      // beyond the default bounded page (or hidden by its byte budget).
-      // It is never an authorization claim: the same SQL/Active-X gates apply.
+      // The ordinary viewer overlay never reads public editing notes. An
+      // explicit single-row request is not an authorization claim: the same
+      // SQL, Active-X, terms, approval and chapter-admin gates still apply.
       const requestedChapterId = c.req.query("editChapterId") ?? "";
       const targetPublicChapterId = requestedChapterId.length > 0 &&
         requestedChapterId.length <= 128 && requestedChapterId === requestedChapterId.trim()
@@ -341,12 +340,11 @@ SELECT
            ) c) AS chapters_json`
         : `'[]' AS chapters_json`;
 
-      // Issue #661: the static public chapter DTO intentionally lacks note.
-      // Return a bounded, current-D1 editing projection only when the viewer
-      // satisfies the same active-X/terms guard as SA-012..015. Owner rows
-      // require a still-approved link in this SQL statement; event managers
-      // may edit all normal public chapters. No extra D1 statement is issued.
-      const editablePublicSubquery = mayManagePublicView
+      // Issue #661: return full note/visibility from D1 for one explicitly
+      // requested row only. A signed SSG row is not a write grant; owner
+      // link and manager permissions are rechecked within the existing D1
+      // statement. No public chapter SELECT runs on normal page loads.
+      const editablePublicSubquery = mayManagePublicView && targetPublicChapterId
         ? `(SELECT coalesce(json_group_array(json_object(
               'id', c."id",
               'chapter_time', c."chapter_time",
@@ -359,7 +357,7 @@ SELECT
              SELECT ch."id", ch."chapter_time", ch."chapter_label", ch."note", ch."x_user_id"
                FROM "video_chapters" ch
               WHERE ch."video_id" = ? AND ch."visibility" = 'public'
-                ${targetPublicChapterId ? 'AND ch."id" = ?' : ''}
+                AND ch."id" = ?
                 AND (${viewerCanEditChapters ? "1=1" : `ch."x_user_id" = ? AND EXISTS (
                   SELECT 1 FROM "x_user_account_links" l
                   INNER JOIN "x_users" xu ON xu."id" = l."x_user_id"
@@ -369,7 +367,7 @@ SELECT
                 AND ch."id" NOT LIKE '%:member:%'
                 AND ch."id" NOT LIKE '%:legacy:%'
               ORDER BY ch."chapter_time" ASC, ch."id" ASC
-              LIMIT ${targetPublicChapterId ? 1 : MAX_EDITABLE_PUBLIC_CHAPTER_ROWS}
+              LIMIT 1
            ) c) AS editable_public_chapters_json`
         : `'[]' AS editable_public_chapters_json`;
 
@@ -413,9 +411,8 @@ SELECT
           stmt2Binds.push(JSON.stringify(approvedXIds));
         }
       }
-      if (mayManagePublicView) {
-        stmt2Binds.push(detail.video.id);
-        if (targetPublicChapterId) stmt2Binds.push(targetPublicChapterId);
+      if (mayManagePublicView && targetPublicChapterId) {
+        stmt2Binds.push(detail.video.id, targetPublicChapterId);
         if (!viewerCanEditChapters) stmt2Binds.push(activeXId, viewer.id);
       }
       stmt2Binds.push(viewer.id, detail.video.id);
@@ -484,6 +481,7 @@ SELECT
         ...finalPlaylist,
       };
 
+      // Public editor rows are requested one at a time, with original notes.
       // Notes must be complete when offered for PUT. If the response would
       // exceed S2's 64KiB limit, fail closed instead of truncating any note,
       // returning a partially usable editor, or serializing an oversized body.

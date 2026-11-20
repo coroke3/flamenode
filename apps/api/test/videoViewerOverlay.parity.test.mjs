@@ -385,7 +385,13 @@ if (runUnderRootTsx(import.meta.url)) {
     });
     // An ordinary approved owner can edit their own row, but not staff's.
     d1.stats.statements = 0;
-    const alice = await app.request("/api/videos/vid-pub/viewer-overlay", {
+    const aliceNormal = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(aliceNormal.status, 200);
+    assert.deepEqual((await aliceNormal.json()).editablePublicChapters, [],
+      "normal viewer loads never fetch public chapter notes");
+    const alice = await app.request("/api/videos/vid-pub/viewer-overlay?editChapterId=chap-pub", {
       headers: { cookie: "authjs.session-token=tok-alice" },
     }, env);
     assert.equal(alice.status, 200);
@@ -400,26 +406,36 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3, "the public editor may not add an extra D1 request");
 
     // A staff member with video.chapter_admin and approved Active X manages all.
-    const staff = await app.request("/api/videos/vid-pub/viewer-overlay", {
+    const staffNormal = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.deepEqual((await staffNormal.json()).editablePublicChapters, []);
+    const staff = await app.request("/api/videos/vid-pub/viewer-overlay?editChapterId=chap-pub", {
       headers: { cookie: "authjs.session-token=tok-staff" },
     }, env);
     const managed = await staff.json();
     assert.equal(managed.viewerCanEditChapters, true);
-    assert.deepEqual(managed.editablePublicChapters.map((c) => c.id), ["chap-pub", "chap-pub-staff"]);
+    assert.deepEqual(managed.editablePublicChapters.map((c) => c.id), ["chap-pub"]);
     assert.ok(managed.editablePublicChapters.every((c) => c.viewerCanManage === true &&
       !("chapter_owner_x_id" in c)));
+    const staffOwn = await app.request("/api/videos/vid-pub/viewer-overlay?editChapterId=chap-pub-staff", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.deepEqual((await staffOwn.json()).editablePublicChapters.map((c) => c.id),
+      ["chap-pub-staff"], "manager may select a different row by ID but not enumerate all");
 
     // Switching Active X to a different approved identity must revoke the
     // former owner's edit grant even though both remain readable elsewhere.
     sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?')
       .run("alice_y", "u_alice");
-    const switched = await app.request("/api/videos/vid-pub/viewer-overlay", {
+    const switched = await app.request("/api/videos/vid-pub/viewer-overlay?editChapterId=chap-pub", {
       headers: { cookie: "authjs.session-token=tok-alice" },
     }, env);
-    assert.deepEqual((await switched.json()).editablePublicChapters, []);
+    assert.deepEqual((await switched.json()).editablePublicChapters, [],
+      "changing approved Active X must deny a targeted edit");
 
     sqlite.prepare('UPDATE "user" SET "is_tos_accepted" = 0 WHERE "id" = ?').run("u_staff");
-    const revoked = await app.request("/api/videos/vid-pub/viewer-overlay", {
+    const revoked = await app.request("/api/videos/vid-pub/viewer-overlay?editChapterId=chap-pub", {
       headers: { cookie: "authjs.session-token=tok-staff" },
     }, env);
     assert.deepEqual((await revoked.json()).editablePublicChapters, [],
@@ -430,7 +446,7 @@ if (runUnderRootTsx(import.meta.url)) {
     sqlite.prepare('UPDATE "user" SET "is_tos_accepted" = 1 WHERE "id" = ?').run("u_staff");
     sqlite.prepare('UPDATE "videos" SET "visibility_status" = ? WHERE "id" = ?')
       .run("private", "vid-pub");
-    const stale = await app.request("/api/videos/vid-pub/viewer-overlay", {
+    const stale = await app.request("/api/videos/vid-pub/viewer-overlay?editChapterId=chap-pub", {
       headers: { cookie: "authjs.session-token=tok-staff" },
     }, env);
     assert.equal(stale.status, 200);
@@ -443,7 +459,7 @@ if (runUnderRootTsx(import.meta.url)) {
       "stale R2 public must not advertise private-row mutation controls");
   });
 
-  test("Issue #661: oversized optional editor data is dropped without losing the ordinary overlay", async () => {
+  test("Issue #661: normal viewer never enumerates a large public editing collection", async () => {
     const { env, sqlite, d1 } = setupTestEnv();
     const bulkNote = "あ".repeat(800);
     for (let i = 0; i < 45; i++) {
@@ -462,7 +478,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const bodyText = await res.text();
     assert.ok(new TextEncoder().encode(bodyText).byteLength <= 64 * 1024);
     const body = JSON.parse(bodyText);
-    assert.deepEqual(body.editablePublicChapters, [], "oversized notes cannot create truncated editors");
+    assert.deepEqual(body.editablePublicChapters, [], "normal viewer must not enumerate public notes");
     assert.equal(body.loggedIn, true);
     assert.equal(body.viewerCanEditChapters, true, "bulk authorization remains independent");
     assert.equal(body.privateChapters.length, 2, "private chapter reads survive optional-edit degradation");
@@ -502,7 +518,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3);
   });
 
-  test("Issue #661: public editor D1 list is bounded to 100 rows", async () => {
+  test("Issue #661: default public edit projection is empty; any of 125 rows can be checked on demand", async () => {
     const { env, sqlite } = setupTestEnv();
     for (let i = 0; i < 125; i++) {
       insert(sqlite, "video_chapters", {
@@ -516,9 +532,8 @@ if (runUnderRootTsx(import.meta.url)) {
     }, env);
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.equal(body.editablePublicChapters.length, 100);
-    assert.ok(body.editablePublicChapters.every((row) => row.viewerCanManage === true &&
-      !("chapter_owner_x_id" in row)), "bounded rows remain authorized and hide owner ids");
+    assert.deepEqual(body.editablePublicChapters, [],
+      "even a manager must not fetch 100 full notes before a user requests an edit");
     const targeted = await app.request(
       "/api/videos/vid-pub/viewer-overlay?editChapterId=chap-public-extra-124", {
         headers: { cookie: "authjs.session-token=tok-staff" },
@@ -535,6 +550,18 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(denied.status, 200);
     assert.deepEqual((await denied.json()).editablePublicChapters, [],
       "a targeted ID never overrides per-user public chapter authorization");
+  });
+
+  test("Issue #661: malformed or overlong targeted ID never unlocks public editing", async () => {
+    const { env } = setupTestEnv();
+    for (const id of ["%20chap-pub", "chap-pub%20", "x".repeat(129)]) {
+      const res = await app.request(`/api/videos/vid-pub/viewer-overlay?editChapterId=${id}`, {
+        headers: { cookie: "authjs.session-token=tok-staff" },
+      }, env);
+      assert.equal(res.status, 200);
+      assert.deepEqual((await res.json()).editablePublicChapters, [],
+        "an invalid targeted ID must not fall back to enumerating public editing notes");
+    }
   });
 
   test("RH-031 selecting a different approved X must not lend owner-edit capability", async () => {
