@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { sitemapVideosOrEmpty, sitemapRowsForEmittedVideoPages } from "../apps/site/src/pages/sitemap.xml.ts";
+import { sitemapVideosOrEmpty, sitemapRowsForEmittedVideoPages, loadSitemapCanonicalVideoPages } from "../apps/site/src/pages/sitemap.xml.ts";
+import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "../apps/site/src/lib/videoFixtures.ts";
 import { buildSitemapEntries } from "../apps/site/src/lib/sitemap.ts";
 import {
   SITEMAP_VIDEOS_KEY,
@@ -21,11 +22,11 @@ const publicVideos = {
   ],
 };
 
-function buildEnvelope(payload, { generationId = generation, visibility = "public", hash = null } = {}) {
+function buildEnvelope(payload, { generationId = generation, visibility = "public", hash = null, key = SITEMAP_VIDEOS_KEY } = {}) {
   return new TextEncoder().encode(JSON.stringify({
     schemaVersion: 1,
     generation: generationId,
-    key: SITEMAP_VIDEOS_KEY,
+    key,
     visibility,
     sha256: hash ?? createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
     payload,
@@ -192,4 +193,43 @@ test("MIG-0627 U02a T07: invalid index payload rejects build instead of advertis
   assert.deepEqual(invalid.reads, [SITEMAP_VIDEOS_KEY]);
   assert.equal(invalid.metrics.rejected, 1);
   assert.deepEqual(warnings, []);
+});
+
+test("MIG-0627 U02a T08: fixture canonical page projection is Node-import safe", async () => {
+  const pages = await loadSitemapCanonicalVideoPages(null);
+  const byId = new Map(pages.map((page) => [page.videoId, page]));
+  assert.equal(byId.get("vid-aaa")?.youtubeId, "dKw1xV41f8s");
+  assert.equal(byId.get("vid-aaa")?.canonicalSlug, "dKw1xV41f8s");
+  assert.equal(byId.get("vid-bbb")?.youtubeId, null);
+  assert.equal(byId.get("vid-bbb")?.canonicalSlug, "vid-bbb");
+});
+
+test("MIG-0627 U02a T09: canonical projection reads a verified public detail and rejects key-ID mismatch", async () => {
+  const id = "vid-aaa";
+  const key = `snapshot/video-detail/${id}.json`;
+  const fixture = accessWith();
+  fixture.access.options.manifest.allowedKeys.push(key);
+  const bytes = buildEnvelope(FIXTURE_VIDEO_DETAIL_PAYLOADS[id], { key });
+  fixture.access.source.read = async (requested) => {
+    fixture.reads.push(requested);
+    return requested === key ? bytes : null;
+  };
+  const pages = await loadSitemapCanonicalVideoPages(fixture.access);
+  assert.deepEqual(fixture.reads, [key]);
+  assert.deepEqual(pages, [{
+    videoId: id,
+    canonicalSlug: "dKw1xV41f8s",
+    slug: "dKw1xV41f8s",
+    youtubeId: "dKw1xV41f8s",
+  }]);
+
+  const mismatched = accessWith();
+  const wrongKey = "snapshot/video-detail/vid-other.json";
+  mismatched.access.options.manifest.allowedKeys.push(wrongKey);
+  const wrongBytes = buildEnvelope(FIXTURE_VIDEO_DETAIL_PAYLOADS[id], { key: wrongKey });
+  mismatched.access.source.read = async (requested) => requested === wrongKey ? wrongBytes : null;
+  await assert.rejects(
+    loadSitemapCanonicalVideoPages(mismatched.access),
+    /not a public, matching video detail/,
+  );
 });
