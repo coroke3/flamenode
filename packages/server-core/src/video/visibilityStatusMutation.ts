@@ -186,6 +186,26 @@ export async function executeVideoVisibilityStatusMutation<DB>(
         retryable: false,
       };
     }
+    // A guarded Hono status write re-checks live session, TOS, CostGuard,
+    // event grants and linked targets in its FIRST atomic D1 statement.
+    // If that batch aborts, neither a matching status reread nor a generic
+    // AuditMutationError proves that authorization still holds. Treat all
+    // failures with a trusted first-batch assertion as unverified and require
+    // a NEW authorized request; do not expose a foreign video's current
+    // status or allow an automatic CAS retry after permission revocation.
+    // Unguarded CURRENT callers keep their established CAS classification.
+    if (input.preMutationAssertions?.length) {
+      host.log("warn", `[${logTag}] guarded status mutation unverified`, {
+        traceId, error_code: "status_guard_or_mutation_failed",
+      });
+      return {
+        ok: false,
+        message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+        errorCode: "status_unverified",
+        traceId,
+        retryable: false,
+      };
+    }
     if (host.isAuditMutationError(error)) {
       let currentStatus: string | null | undefined;
       try {
