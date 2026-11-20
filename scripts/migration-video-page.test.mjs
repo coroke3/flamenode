@@ -79,6 +79,9 @@ function build(videos, over = {}) {
     keys.push(eventKey);
   }
   for (const id of over.manifestOnlyEventIds ?? []) keys.push(`snapshot/event-detail/${id}.json`);
+  // Model an already-withdrawn public detail entry: in the same generation's
+  // manifest but deny-listed, so no new HTML is built for that video.
+  for (const id of over.manifestOnlyVideoIds ?? []) keys.push(keyOf(id));
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ schemaVersion: 1, generation: "g1", allowedKeys: keys, blockedKeys: over.blocked ?? [] }));
   const env = { ...process.env, FLAMENODE_SNAPSHOT_DIR: dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(dir, "manifest.json"), FLAMENODE_SNAPSHOT_GENERATION: "g1" };
   try {
@@ -446,6 +449,41 @@ test("U12: forged public-profile flags cannot make malformed X handles into navi
       "canonical valid member still gets an external X link");
     assert.equal(doc.querySelector('a[href^="/user/.."]'), null,
       "no traversal-like public profile link survives projection");
+  } finally {
+    clean(r);
+  }
+});
+
+
+test("U12 privacy: a manifest-withdrawn video is absent from stale related semantic/random/reserve cards", { skip: skipUi }, () => {
+  const withdrawn = {
+    id: "withdrawn-video", title: "非公開へ変更した作品", youtube_video_id: "ZZZZZZZZZ00",
+    display_name: "非公開作成者",
+  };
+  const active = {
+    id: "public-related", title: "公開中の関連作品", youtube_video_id: "YYYYYYYYY00",
+    display_name: "公開作成者",
+  };
+  const r = build([["vid1", payload({ top: {
+    related_videos: [withdrawn, active],
+    related_reserve: [withdrawn],
+    related_random_ids: [withdrawn.id],
+    related_random_reserve: [withdrawn],
+  } })]], {
+    manifestOnlyVideoIds: [withdrawn.id],
+    blocked: [keyOf(withdrawn.id)],
+  });
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    const doc = dom(r, "AAAAAAAAA01/index.html");
+    const related = [...doc.querySelectorAll(".vd-related a")];
+    assert.equal(related.length, 1, "eligible public related item remains");
+    assert.equal(related[0].getAttribute("href"), "/YYYYYYYYY00");
+    assert.match(text(related[0]), /公開中の関連作品/);
+    assert.doesNotMatch(doc.body.textContent, /非公開へ変更した作品|非公開作成者/,
+      "denied title and creator cannot leak into generated HTML");
+    assert.equal(doc.querySelector('a[href="/ZZZZZZZZZ00"]'), null,
+      "no related-card link may target a withdrawn public video");
   } finally {
     clean(r);
   }
