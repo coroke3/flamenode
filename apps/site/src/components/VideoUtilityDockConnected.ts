@@ -75,6 +75,10 @@ export function VideoUtilityDockConnected({
   // changing video invalidates previously fetched editor DTOs immediately.
   const latestOverlay = React.useRef(overlay);
   latestOverlay.current = overlay;
+  // Refresh can be requested before the overlay hook emits a new object.
+  // Invalidate an in-flight targeted editor response immediately, even when
+  // the old overlay reference is still current for this React render.
+  const editRequestEpoch = React.useRef(0);
   const [confirmed, setConfirmed] = React.useState<{
     source: VideoViewerOverlayDto;
     rows: EditableChapter[];
@@ -86,6 +90,7 @@ export function VideoUtilityDockConnected({
 
   const requestPublicChapterEdit = async (chapterId: string): Promise<boolean> => {
     const originalOverlay = latestOverlay.current;
+    const requestEpoch = editRequestEpoch.current;
     if (loading || !originalOverlay.loggedIn || originalOverlay.authUnavailable ||
         originalOverlay.isBanned || !originalOverlay.isTosAccepted ||
         originalOverlay.termsReacceptRequired || !originalOverlay.viewerXApproved ||
@@ -100,19 +105,26 @@ export function VideoUtilityDockConnected({
         credentials: "same-origin", cache: "no-store",
         headers: { accept: "application/json" }, signal: controller.signal,
       });
-      if (!response.ok || latestOverlay.current !== originalOverlay) return false;
+      if (!response.ok || latestOverlay.current !== originalOverlay ||
+          editRequestEpoch.current !== requestEpoch) return false;
       const parsed = VideoViewerOverlayResponseSchema.safeParse(await response.json());
       if (!parsed.success || latestOverlay.current !== originalOverlay ||
+          editRequestEpoch.current !== requestEpoch ||
           parsed.data.activeXId !== originalOverlay.activeXId) return false;
       const editor = chapterManagementForOverlay(publicChapters, parsed.data, false)
         .editableChapters.find((chapter) => chapter.id === chapterId && chapter.visibility === "public");
-      if (!editor) return false;
-      setConfirmed((previous) => ({
-        source: originalOverlay,
-        rows: previous?.source === originalOverlay
-          ? [...previous.rows.filter((row) => row.id !== chapterId), editor]
-          : [editor],
-      }));
+      if (!editor || editRequestEpoch.current !== requestEpoch) return false;
+      setConfirmed((previous) => {
+        // React may defer this state updater until after a refresh has run.
+        if (editRequestEpoch.current !== requestEpoch ||
+            latestOverlay.current !== originalOverlay) return previous;
+        return {
+          source: originalOverlay,
+          rows: previous?.source === originalOverlay
+            ? [...previous.rows.filter((row) => row.id !== chapterId), editor]
+            : [editor],
+        };
+      });
       return true;
     } catch {
       return false;
@@ -131,6 +143,7 @@ export function VideoUtilityDockConnected({
     editableChapters: allEditableChapters,
     onRequestPublicChapterEdit: requestPublicChapterEdit,
     onRefresh: () => {
+      editRequestEpoch.current += 1;
       setConfirmed(null);
       notifyVideoViewerOverlayChanged(videoId);
     },
