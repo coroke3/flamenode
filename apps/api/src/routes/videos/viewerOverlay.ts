@@ -91,9 +91,49 @@ function boundedOverlayResponse(c: Context<AppEnv>, body: VideoViewerOverlayDto)
   const withinLimit = (json: string) =>
     json.length <= MAX_VIEWER_OVERLAY_RESPONSE_BYTES &&
     new TextEncoder().encode(json).byteLength <= MAX_VIEWER_OVERLAY_RESPONSE_BYTES;
-  let json = encode(body);
+  // S2 guard: an 8MiB-but-valid R2 playlist must never trigger an
+  // 8MiB JSON.stringify of the viewer DTO. Every UTF-16 code unit in a
+  // string value needs at least one UTF-8 byte in its JSON representation.
+  // This is a conservative lower bound, not a replacement for exact byte
+  // accounting of the surviving response. Stop as soon as it exceeds 64KiB.
+  const units = (value: unknown) => typeof value === "string" ? value.length : 0;
+  let mandatoryUnits = 0;
+  for (const chapter of body.privateChapters) {
+    mandatoryUnits += units(chapter.note);
+    if (mandatoryUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+      return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+    }
+  }
+
+  let projectedBody = body;
+  let editorUnits = 0;
+  for (const chapter of body.editablePublicChapters) {
+    editorUnits += units(chapter.note) + units(chapter.chapter_label) + units(chapter.id);
+    if (editorUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+      projectedBody = { ...projectedBody, editablePublicChapters: [] };
+      break;
+    }
+  }
+  let playlistUnits = 0;
+  for (const item of body.playlistItems) {
+    playlistUnits += units(item.id) + units(item.title) +
+      units(item.display_name) + units(item.youtube_video_id);
+    if (playlistUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+      // A playlist this large cannot fit even after removing all optional
+      // editor rows. Preserve the exact existing no-editor/no-playlist fallback.
+      projectedBody = {
+        ...projectedBody,
+        editablePublicChapters: [],
+        playlistLabel: "再生リスト",
+        playlistItems: [],
+      };
+      break;
+    }
+  }
+
+  let json = encode(projectedBody);
   if (!withinLimit(json)) {
-    const noEditor = { ...body, editablePublicChapters: [] };
+    const noEditor = { ...projectedBody, editablePublicChapters: [] };
     json = encode(noEditor);
     if (!withinLimit(json)) {
       // A valid full public R2 playlist can contain 500 long UTF-8 titles.

@@ -867,6 +867,59 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(await emptyIdRes.json(), { error: "invalid_video_id" });
   });
 
+  test("Issue #709: valid 300K-char playlist never serializes an oversized viewer DTO", async () => {
+    const { env, bucket, d1 } = setupTestEnv();
+    const hugeTitle = "Very long valid public title ".repeat(12_000);
+    const artifact = {
+      schema_version: 1, generated_at: 1000, event_id: "evt-1",
+      complete: true, items: [
+        { id: "vid-pub", title: hugeTitle, youtube_video_id: "yt_pub", display_name: "Alice" },
+        { id: "vid-other", title: "Other", youtube_video_id: "yt_other", display_name: "Bob" },
+      ],
+    };
+    const artifactJson = JSON.stringify(artifact);
+    assert.ok(Buffer.byteLength(artifactJson, "utf8") > 64 * 1024);
+    assert.ok(Buffer.byteLength(artifactJson, "utf8") < 8 * 1024 * 1024,
+      "test must use a schema-valid R2 object below its 8MiB read cap");
+    await bucket.put("events/evt-1/playlist.v1.json", artifactJson);
+
+    // Fail the mounted HTTP request if any implementation tries to stringify
+    // the full ~300K-char playlist DTO; JSON.stringify can still be used for
+    // the small, bounded response and framework-internal objects.
+    const originalStringify = JSON.stringify;
+    let oversizedDtoAttempts = 0;
+    JSON.stringify = function(value, replacer, space) {
+      if (value && typeof value === "object" &&
+          Array.isArray(value.playlistItems) &&
+          value.playlistItems.some((item) => item?.title === hugeTitle)) {
+        oversizedDtoAttempts += 1;
+        throw new Error("oversized_viewer_dto_was_stringified");
+      }
+      return originalStringify.call(JSON, value, replacer, space);
+    };
+    let response;
+    try {
+      d1.stats.statements = 0;
+      response = await app.request(
+        "/api/videos/vid-pub/viewer-overlay?playlist=evt-1", {}, env);
+    } finally {
+      JSON.stringify = originalStringify;
+    }
+    assert.equal(oversizedDtoAttempts, 0,
+      "preflight must skip the large DTO before calling JSON.stringify");
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"),
+      "private, no-store, no-cache, must-revalidate");
+    const raw = await response.text();
+    assert.ok(Buffer.byteLength(raw, "utf8") <= 64 * 1024);
+    const dto = JSON.parse(raw);
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(dto).success, true);
+    assert.deepEqual(dto.playlistItems, []);
+    assert.equal(dto.playlistLabel, "再生リスト");
+    assert.equal(dto.authUnavailable, false);
+    assert.equal(d1.stats.statements, 0, "anonymous path should perform 0 D1 reads");
+  });
+
   test("Issue #709: UTF-8 can exceed 64KiB even when JSON has fewer than 64K UTF-16 units", async () => {
     const { env, bucket, d1 } = setupTestEnv();
     const artifact = {
