@@ -54,14 +54,15 @@ export const VISIBILITY_MANIFEST_MAX_BYTES = 1024 * 1024;
  * CURRENT loadPublicJson resolvePublicVisibilityGuard for the "rules" target: the "rules" target maps to no
  * fenced entity, so only the enforce-mode fail-closed rule applies: without a committed, size-bounded
  * visibility manifest in R2 nothing is served (rules = null -> the client shows the built-in default terms).
- * The manifest body is not parsed here (S2 JSON bound); a malformed manifest is a known gap.
+ * A zero-byte (or non-integral-size) object cannot be a valid JSON manifest, so deny it at HEAD\n * without another R2 request. The manifest body remains unparsed (S2 JSON bound); a\n * nonempty malformed manifest is still a known gap and NOT an approved cutover state.
  */
 async function visibilityGuardAllows(env: AppEnv["Bindings"]): Promise<boolean> {
   if (env.PUBLIC_VISIBILITY_GUARD_MODE !== "enforce") return true;
   try {
     const head = await env.BUCKET?.head(VISIBILITY_MANIFEST_KEY);
     return Boolean(
-      head?.etag?.trim() && Number.isFinite(head.size) && head.size >= 0 && head.size <= VISIBILITY_MANIFEST_MAX_BYTES,
+      head?.etag?.trim() && Number.isSafeInteger(head.size) && head.size > 0 &&
+      head.size <= VISIBILITY_MANIFEST_MAX_BYTES,
     );
   } catch {
     return false;
