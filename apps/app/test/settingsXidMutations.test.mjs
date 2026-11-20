@@ -77,9 +77,9 @@ test("MIG-0708 T02 / MIG-0702 T03: manager-only approved X exposes CURRENT switc
     xIds: [settingsX("active"), settingsX(managerId, { approval_status: "pending" })],
     panel: { xId: managerId, iconCandidates: [], channelCandidates: [] },
   });
-  const pending = await mount(`/dashboard/settings?x=${managerId}`, fakeApi({
-    getSettings: ok(denied), xidProfile: a.xidProfile,
-  }));
+  const pendingApi = fakeApi({ getSettings: ok(denied) });
+  pendingApi.xidProfile = a.xidProfile;
+  const pending = await mount(`/dashboard/settings?x=${managerId}`, pendingApi);
   try {
     assert.ok(![...pending.container.querySelectorAll("button")].some(b => b.textContent.includes("アクティブに設定")),
       "unapproved manager X cannot switch Active X");
