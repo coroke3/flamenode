@@ -1,0 +1,1198 @@
+/**
+ * MIG-0657 U02/U03: SA-065..068 slot reservation / release / extend / merge core.
+ *
+ * Ports CURRENT src/lib/actions/slot.ts (:455..1009) to framework-neutral server-core:
+ * - Same validation messages, actor/X-ID/group-integrity/adjacency/limit rules
+ * - Single bounded D1 pre-read per request + 1 atomic mutateWithAudit batch (ZERO_1102 S3)
+ * - Same notification_outbox + static_rebuild_queue rows, 0 Queue wakes (D-13-41)
+ * - No Next revalidatePath; no ambient env/global access (D-10)
+ */
+import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
+import { slots } from "@flamenode/db/schema";
+import { expandPermissionAliases } from "@flamenode/domain/auth/permissions";
+import { staffRowHasPermissionKey, type StaffPermissionRow } from "@flamenode/domain/auth/permissions/resolver";
+import { isAcceptingEntries } from "@flamenode/domain/event/status";
+import { buildSlotReserveMutationPlan } from "@flamenode/domain/slots/reserveMutations";
+import { buildSlotReleaseMutationPlan } from "@flamenode/domain/slots/releaseMutations";
+import { buildRegroupMutations } from "@flamenode/domain/slots/regroupMutations";
+import { assertBoundedSlotGroupIntegrity } from "@flamenode/domain/slots/boundedGroup";
+import { MAX_SLOTS_PER_VIDEO, normalizeMaxSlotsPerVideo } from "@flamenode/domain/slots/limits";
+import { canUseSlotOperatorOverride } from "@flamenode/domain/slots/operatorReservation";
+import { slotPartGapSec } from "@flamenode/domain/slots/partGap";
+import { resolveSlotReservationSubject, subjectsEqual } from "@flamenode/domain/slots/reservationGroups";
+import {
+  resolveReservationXIdentityFromPending,
+  SLOT_RESERVATION_X_REQUEST_TYPES,
+} from "@flamenode/domain/slots/reservationIdentity";
+import { normalizeSlotReservationLimit, slotReservationLimitMessage } from "@flamenode/domain/slots/reservationLimit";
+import {
+  canActAsSlotActor,
+  resolveSlotGroupIdentity,
+  resolveSlotViewerRelation,
+  type SlotViewerRelation,
+} from "@flamenode/domain/slots/slotIdentity";
+import { normalizeXId } from "@flamenode/domain/xid";
+import type { PreloadedAuditContext } from "../audit/logger.ts";
+import type { ServerCoreDb } from "../db.ts";
+import { generateId } from "../id.ts";
+import type { NotificationActor } from "../notifications/actor.ts";
+import { buildOpsChannelWebhookStatement } from "../notifications/opsOutbox.ts";
+import {
+  buildChannelSlotReservedNotification,
+  buildSlotReservedOpsThreadName,
+} from "../notifications/slotReservedChannel.ts";
+import type { QueueWakeHostLoader } from "../ports.ts";
+import { commitSlotMutationPlanCore, type SlotCoreBulkMutation } from "./commitSlotMutationPlan.ts";
+import {
+  buildReservationLimitGuardStatement,
+  loadLogicalReservationCountForXId,
+} from "./reservationLimitGuard.ts";
+
+export type SlotRow = typeof slots.$inferSelect;
+
+export type SlotD1Like = {
+  prepare(query: string): {
+    bind(...values: unknown[]): {
+      first<T = Record<string, unknown>>(): Promise<T | null>;
+    };
+  };
+};
+
+export type SlotMutationContext = {
+  authUserId: string;
+  activeXId: string | null;
+  userRole: string | null;
+  siteUrl: string | null | undefined;
+  preloaded?: PreloadedAuditContext;
+};
+
+export type SlotMutationOutcome = {
+  status: 200 | 400 | 403 | 404 | 409 | 503;
+  body:
+    | {
+        ok: true;
+        slotId: string;
+        slotCount: number;
+        groupSize: number;
+        pendingPublicReflection: true;
+      }
+    | { ok: false; message: string };
+};
+
+type EventFacts = {
+  id: string;
+  title: string;
+  visibility_status: "private" | "public";
+  start_time: number | null;
+  end_time: number | null;
+  entry_start_time: number | null;
+  entry_end_time: number | null;
+  max_slots_per_video: number;
+  max_slot_reservation_groups_per_xid: number;
+  slot_part_gap_minutes: number | null;
+};
+
+const MAX_ATOMIC_SLOT_ROWS = 3;
+const MAX_APPROVED_X_IDS = 100;
+const MAX_PENDING_RESERVATION_REQUESTS = 100;
+const MAX_OPERATOR_STAFF_ROWS = 100;
+const JST_OFFSET_SEC = 9 * 60 * 60;
+const DEFAULT_PART_GAP_SEC = 15 * 60;
+const CALLER_PRE_READS_WITH_SESSION = 4;
+
+const SLOT_ACCOUNT_OTHER_MESSAGE =
+  "この枠は現在とは別の活動名義で確保されています。Active X IDを切り替えてから操作してください。";
+const SLOT_OPERATOR_PERMISSION_MESSAGE =
+  "イベント運営権限がないため、例外の枠確保は実行できません。";
+const SLOT_OPERATOR_WINDOW_MESSAGE =
+  "例外の枠確保は、受付開始前または受付中のイベントでのみ実行できます。";
+const GENERIC_MUTATION_ERROR_MESSAGE =
+  "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。";
+
+const KNOWN_MUTATION_MESSAGES = new Set([
+  SLOT_ACCOUNT_OTHER_MESSAGE,
+  "連続枠に別の利用者または状態が混在しています。",
+  "連続枠の完全な状態を確認できませんでした。",
+  `連続枠が上限 ${MAX_ATOMIC_SLOT_ROWS} 件を超えています。運営へ連絡してください。`,
+  `連続枠が上限 ${MAX_SLOTS_PER_VIDEO} 件を超えています。運営へ連絡してください。`,
+  "別の部または連続していない枠はまとめて操作できません。",
+  "原子的に処理できる枠数を超えています。",
+  "連続枠の状態を確定できませんでした。",
+]);
+
+// Drizzle select() column order of packages/db schema `slots` for byte-identical audit JSON.
+const SLOT_COLUMNS = [
+  "id",
+  "event_id",
+  "reserved_by_user_id",
+  "x_user_id",
+  "reserved_x_id_snapshot",
+  "display_name",
+  "slot_label",
+  "start_time",
+  "sort_order",
+  "reservation_group_id",
+  "video_id",
+  "status",
+  "updated_at",
+  "version",
+] as const;
+
+const NOOP_WAKE_HOST = {
+  readEnv: () => null,
+  readWaitUntil: () => null,
+  readKv: () => null,
+};
+const loadNoopWakeHost: QueueWakeHostLoader = async () => NOOP_WAKE_HOST;
+
+function okOutcome(slotId: string, groupSize = 1): SlotMutationOutcome {
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      slotId,
+      slotCount: groupSize,
+      groupSize,
+      pendingPublicReflection: true,
+    },
+  };
+}
+
+function failOutcome(status: 400 | 403 | 404 | 409 | 503, message: string): SlotMutationOutcome {
+  return { status, body: { ok: false, message } };
+}
+
+function slotJsonObjectSql(alias: string): string {
+  return `json_object(${SLOT_COLUMNS.map((c) => `'${c}', ${alias}."${c}"`).join(", ")})`;
+}
+
+function eventJsonObjectSql(alias: string): string {
+  const cols = [
+    "id",
+    "title",
+    "visibility_status",
+    "start_time",
+    "end_time",
+    "entry_start_time",
+    "entry_end_time",
+    "max_slots_per_video",
+    "max_slot_reservation_groups_per_xid",
+    "slot_part_gap_minutes",
+  ];
+  return `json_object(${cols.map((c) => `'${c}', ${alias}."${c}"`).join(", ")})`;
+}
+
+function approvedXJsonSql(userIdParamPlaceholder = "?"): string {
+  return `(SELECT json_group_array(q."x_user_id") FROM (
+    SELECT DISTINCT l."x_user_id" AS "x_user_id"
+    FROM "x_user_account_links" l
+    INNER JOIN "x_users" x ON x."id" = l."x_user_id"
+    WHERE l."auth_user_id" = ${userIdParamPlaceholder} AND x."approval_status" = 'approved'
+    LIMIT ${MAX_APPROVED_X_IDS + 1}
+  ) q)`;
+}
+
+function staffRowsJsonSql(): string {
+  return `(SELECT json_group_array(json_object(
+    'permission_preset', q."permission_preset",
+    'custom_permission_keys_json', q."custom_permission_keys_json"
+  )) FROM (
+    SELECT es."permission_preset" AS "permission_preset",
+           es."custom_permission_keys_json" AS "custom_permission_keys_json"
+    FROM "event_staff" es
+    INNER JOIN "x_user_account_links" xl ON xl."x_user_id" = es."x_user_id"
+    INNER JOIN "x_users" x ON x."id" = xl."x_user_id"
+    WHERE es."event_id" = ? AND xl."auth_user_id" = ? AND x."approval_status" = 'approved'
+    LIMIT ${MAX_OPERATOR_STAFF_ROWS + 1}
+  ) q)`;
+}
+
+function neighborConditionSql(alias: string, anchorAlias: string, direction: "forward" | "backward"): string {
+  const op = direction === "forward" ? ">" : "<";
+  return `(
+    (${anchorAlias}."start_time" IS NOT NULL AND ${alias}."start_time" IS NOT NULL AND (
+      ${alias}."start_time" ${op} ${anchorAlias}."start_time"
+      OR (${alias}."start_time" = ${anchorAlias}."start_time" AND (
+        COALESCE(${alias}."sort_order", 0) ${op} COALESCE(${anchorAlias}."sort_order", 0)
+        OR (COALESCE(${alias}."sort_order", 0) = COALESCE(${anchorAlias}."sort_order", 0) AND ${alias}."id" ${op} ${anchorAlias}."id")
+      ))
+    ))
+    OR
+    (${anchorAlias}."start_time" IS NULL AND ${alias}."start_time" IS NULL AND (
+      COALESCE(${alias}."sort_order", 0) ${op} COALESCE(${anchorAlias}."sort_order", 0)
+      OR (COALESCE(${alias}."sort_order", 0) = COALESCE(${anchorAlias}."sort_order", 0) AND ${alias}."id" ${op} ${anchorAlias}."id")
+    ))
+  )`;
+}
+
+function neighborOrderSql(alias: string, direction: "forward" | "backward"): string {
+  const dir = direction === "forward" ? "ASC" : "DESC";
+  return `${alias}."start_time" ${dir}, COALESCE(${alias}."sort_order", 0) ${dir}, ${alias}."id" ${dir}`;
+}
+
+function parseJsonOrThrow<T>(raw: string | null | undefined, fallback: T): T {
+  if (raw === null || raw === undefined) return fallback;
+  return JSON.parse(raw) as T;
+}
+
+function sortSlotsChronologically<
+  T extends { id?: string | null; start_time: number | null; sort_order?: number | null },
+>(rows: readonly T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const aTimed = a.start_time != null;
+    const bTimed = b.start_time != null;
+    if (aTimed !== bTimed) return aTimed ? -1 : 1;
+    const startDiff = (a.start_time ?? 0) - (b.start_time ?? 0);
+    if (startDiff !== 0) return startDiff;
+    const orderDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    return orderDiff || (a.id ?? "").localeCompare(b.id ?? "");
+  });
+}
+
+function jstDayBucket(unixSec: number | null): number | null {
+  return unixSec == null || !Number.isFinite(unixSec)
+    ? null
+    : Math.floor((unixSec + JST_OFFSET_SEC) / (24 * 60 * 60));
+}
+
+function normalizeGapSec(gapSec: number): number {
+  return Number.isFinite(gapSec) && gapSec >= 0 ? gapSec : DEFAULT_PART_GAP_SEC;
+}
+
+function areSlotsInSamePart<T extends { start_time: number | null; sort_order?: number | null }>(
+  prev: T,
+  next: T,
+  gapSec = DEFAULT_PART_GAP_SEC,
+): boolean {
+  if (prev.start_time != null && next.start_time != null) {
+    if (next.start_time < prev.start_time) return false;
+    if (jstDayBucket(prev.start_time) !== jstDayBucket(next.start_time)) return false;
+    return next.start_time - prev.start_time <= normalizeGapSec(gapSec);
+  }
+  if (prev.start_time == null && next.start_time == null) {
+    return (
+      prev.sort_order != null &&
+      next.sort_order != null &&
+      next.sort_order === prev.sort_order + 1
+    );
+  }
+  return false;
+}
+
+function assertAdjacentSequence(rows: readonly SlotRow[], gapSec: number): void {
+  for (let index = 1; index < rows.length; index += 1) {
+    if (!areSlotsInSamePart(rows[index - 1]!, rows[index]!, gapSec)) {
+      throw new Error("別の部または連続していない枠はまとめて操作できません。");
+    }
+  }
+}
+
+function slotViewerRelation(row: SlotRow, userId: string, activeXId: string | null): SlotViewerRelation {
+  return resolveSlotViewerRelation({
+    reservedByUserId: row.reserved_by_user_id,
+    slotXUserId: row.x_user_id,
+    authUserId: userId,
+    activeXId,
+  });
+}
+
+function assertSlotActor(
+  row: SlotRow,
+  userId: string,
+  activeXId: string | null,
+): { ok: true } | { ok: false; message: string } {
+  const relation = slotViewerRelation(row, userId, activeXId);
+  if (!canActAsSlotActor(relation)) {
+    return {
+      ok: false,
+      message:
+        relation === "account_other"
+          ? SLOT_ACCOUNT_OTHER_MESSAGE
+          : "自分が確保した枠のみ操作できます。",
+    };
+  }
+  return { ok: true };
+}
+
+function groupIdentityError(
+  reason: "different_active_x" | "mixed_non_null_x" | "mixed_auth_user",
+): string {
+  return reason === "mixed_auth_user"
+    ? "連続枠に別の利用者または状態が混在しています。"
+    : SLOT_ACCOUNT_OTHER_MESSAGE;
+}
+
+function resolveBoundedGroupFromSnapshot(
+  anchor: SlotRow,
+  groupRowsSnapshot: readonly SlotRow[],
+): SlotRow[] {
+  const groupId = anchor.reservation_group_id?.trim() ? anchor.reservation_group_id : null;
+  if (!groupId) return [anchor];
+  assertBoundedSlotGroupIntegrity(groupRowsSnapshot, anchor, MAX_SLOTS_PER_VIDEO);
+  return sortSlotsChronologically(groupRowsSnapshot);
+}
+
+function resolveBoundedGroupIdentity(
+  rows: readonly SlotRow[],
+  authUserId: string,
+  activeXId: string | null,
+): { targetXId: string | null; adoptNullRows: boolean } {
+  const result = resolveSlotGroupIdentity({
+    reservedByUserIds: rows.map((row) => row.reserved_by_user_id),
+    slotXUserIds: rows.map((row) => row.x_user_id),
+    authUserId,
+    activeXId,
+  });
+  if (!result.ok) {
+    throw new Error(groupIdentityError(result.reason));
+  }
+  return result;
+}
+
+function resolveOperatorOverride(args: {
+  requested: boolean;
+  userRole: string | null;
+  staffRows: readonly StaffPermissionRow[];
+  event: EventFacts;
+}): { ok: true; enabled: boolean } | { ok: false; status: 403 | 409; message: string } {
+  if (!args.requested) return { ok: true, enabled: false };
+  const candidateKeys = expandPermissionAliases("event.slots");
+  const hasPermission =
+    args.userRole === "admin" ||
+    (candidateKeys.length > 0 &&
+      args.staffRows.some((row) => candidateKeys.some((key) => staffRowHasPermissionKey(row, key))));
+  if (!hasPermission) {
+    return { ok: false, status: 403, message: SLOT_OPERATOR_PERMISSION_MESSAGE };
+  }
+  if (!canUseSlotOperatorOverride(args.event)) {
+    return { ok: false, status: 409, message: SLOT_OPERATOR_WINDOW_MESSAGE };
+  }
+  return { ok: true, enabled: true };
+}
+
+function resolveSlotXUserId(activeXId: string | null, approvedXIds: readonly string[]): string | null {
+  return activeXId && approvedXIds.includes(activeXId) ? activeXId : null;
+}
+
+function mapMutationError(error: unknown): SlotMutationOutcome {
+  if (error instanceof Error && KNOWN_MUTATION_MESSAGES.has(error.message)) {
+    const status = error.message === SLOT_ACCOUNT_OTHER_MESSAGE ? 403 : 409;
+    return failOutcome(status, error.message);
+  }
+  return failOutcome(409, GENERIC_MUTATION_ERROR_MESSAGE);
+}
+
+function orderConditionDrizzle(row: SlotRow, direction: "forward" | "backward"): SQL {
+  const sortOrder = row.sort_order ?? 0;
+  if (row.start_time != null) {
+    return direction === "forward"
+      ? sql`${slots.start_time} IS NOT NULL AND (${slots.start_time} > ${row.start_time} OR (${slots.start_time} = ${row.start_time} AND (COALESCE(${slots.sort_order}, 0) > ${sortOrder} OR (COALESCE(${slots.sort_order}, 0) = ${sortOrder} AND ${slots.id} > ${row.id}))))`
+      : sql`${slots.start_time} IS NOT NULL AND (${slots.start_time} < ${row.start_time} OR (${slots.start_time} = ${row.start_time} AND (COALESCE(${slots.sort_order}, 0) < ${sortOrder} OR (COALESCE(${slots.sort_order}, 0) = ${sortOrder} AND ${slots.id} < ${row.id}))))`;
+  }
+  return direction === "forward"
+    ? sql`${slots.start_time} IS NULL AND (COALESCE(${slots.sort_order}, 0) > ${sortOrder} OR (COALESCE(${slots.sort_order}, 0) = ${sortOrder} AND ${slots.id} > ${row.id}))`
+    : sql`${slots.start_time} IS NULL AND (COALESCE(${slots.sort_order}, 0) < ${sortOrder} OR (COALESCE(${slots.sort_order}, 0) = ${sortOrder} AND ${slots.id} < ${row.id}))`;
+}
+
+async function loadOrderedNeighborFallback(
+  db: ServerCoreDb,
+  row: SlotRow,
+  direction: "forward" | "backward",
+): Promise<SlotRow | undefined> {
+  const query = db
+    .select()
+    .from(slots)
+    .where(and(eq(slots.event_id, row.event_id), orderConditionDrizzle(row, direction))!);
+  if (row.start_time != null) {
+    return (
+      await (direction === "forward"
+        ? query.orderBy(asc(slots.start_time), asc(sql`COALESCE(${slots.sort_order}, 0)`), asc(slots.id))
+        : query.orderBy(desc(slots.start_time), desc(sql`COALESCE(${slots.sort_order}, 0)`), desc(slots.id))
+      ).limit(1)
+    )[0];
+  }
+  return (
+    await (direction === "forward"
+      ? query.orderBy(asc(sql`COALESCE(${slots.sort_order}, 0)`), asc(slots.id))
+      : query.orderBy(desc(sql`COALESCE(${slots.sort_order}, 0)`), desc(slots.id))
+    ).limit(1)
+  )[0];
+}
+
+function logicalCountSubquerySql(eventIdExpr: string, xIdExpr: string): string {
+  return `(SELECT COUNT(DISTINCT CASE
+    WHEN m.reservation_group_id IS NOT NULL AND TRIM(m.reservation_group_id) <> '' THEN 'group:' || TRIM(m.reservation_group_id)
+    ELSE 'slot:' || m.id
+  END) FROM (
+    SELECT id, reservation_group_id FROM slots
+    WHERE event_id = ${eventIdExpr} AND reserved_x_id_snapshot = ${xIdExpr} AND status IN ('reserved', 'submitted')
+    UNION ALL
+    SELECT id, reservation_group_id FROM slots
+    WHERE event_id = ${eventIdExpr} AND reserved_x_id_snapshot IS NOT NULL AND reserved_x_id_snapshot <> ${xIdExpr}
+      AND lower(trim(ltrim(trim(reserved_x_id_snapshot), '@'))) = ${xIdExpr}
+      AND status IN ('reserved', 'submitted')
+  ) m)`;
+}
+
+type ReserveSnapshotRow = {
+  event_json: string | null;
+  anchor_json: string | null;
+  actor_json: string | null;
+  approved_x_json: string | null;
+  pending_x_json: string | null;
+  staff_json: string | null;
+  neighbors_json: string | null;
+  replay_group_json: string | null;
+  active_x_count: number | null;
+  single_pending_x: string | null;
+  pending_x_count: number | null;
+};
+
+async function loadReserveSnapshot(
+  rawDb: SlotD1Like,
+  args: { eventId: string; slotId: string; userId: string; activeXId: string | null; neighborLimit: number },
+): Promise<ReserveSnapshotRow | null> {
+  const types = SLOT_RESERVATION_X_REQUEST_TYPES;
+  const normActive = args.activeXId ? normalizeXId(args.activeXId) : "";
+  const query = `
+    WITH anchor AS (
+      SELECT ${SLOT_COLUMNS.map((c) => `"${c}"`).join(", ")}
+      FROM "slots" WHERE "id" = ? AND "event_id" = ? LIMIT 1
+    ),
+    ev AS (
+      SELECT "id", "title", "visibility_status", "start_time", "end_time",
+             "entry_start_time", "entry_end_time", "max_slots_per_video",
+             "max_slot_reservation_groups_per_xid", "slot_part_gap_minutes"
+      FROM "events" WHERE "id" = ? LIMIT 1
+    ),
+    pending_list AS (
+      SELECT "requested_x_id" AS "requested_x_id"
+      FROM "x_identity_requests"
+      WHERE "requested_by_auth_user_id" = ? AND "status" = 'pending'
+        AND "request_type" IN (${types.map(() => "?").join(", ")})
+        AND "requested_x_id" IS NOT NULL
+      ORDER BY "requested_at" DESC, "id" DESC
+      LIMIT ${MAX_PENDING_RESERVATION_REQUESTS + 1}
+    ),
+    pending_distinct AS (
+      SELECT DISTINCT lower(trim(ltrim(trim("requested_x_id"), '@'))) AS "xid"
+      FROM pending_list
+      WHERE lower(trim(ltrim(trim("requested_x_id"), '@'))) <> ''
+    ),
+    single_pending AS (
+      SELECT CASE WHEN COUNT(*) = 1 THEN MIN("xid") ELSE NULL END AS "xid"
+      FROM pending_distinct
+    )
+    SELECT
+      (SELECT ${eventJsonObjectSql("ev")} FROM ev) AS event_json,
+      (SELECT ${slotJsonObjectSql("a")} FROM anchor a) AS anchor_json,
+      (SELECT json_object(
+        'userId', u."id", 'discordId', u."discord_id", 'discordName', u."name",
+        'activeXId', u."active_x_user_id", 'activeXName', x."x_name"
+      ) FROM "user" u LEFT JOIN "x_users" x ON x."id" = u."active_x_user_id" WHERE u."id" = ? LIMIT 1) AS actor_json,
+      ${approvedXJsonSql("?")} AS approved_x_json,
+      (SELECT json_group_array("requested_x_id") FROM pending_list) AS pending_x_json,
+      ${staffRowsJsonSql()} AS staff_json,
+      (SELECT json_group_array(${slotJsonObjectSql("n")}) FROM (
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, anchor a
+        WHERE s."event_id" = a."event_id" AND ${neighborConditionSql("s", "a", "forward")}
+        ORDER BY ${neighborOrderSql("s", "forward")}
+        LIMIT ?
+      ) n) AS neighbors_json,
+      (SELECT json_group_array(${slotJsonObjectSql("rg")}) FROM (
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, anchor a
+        WHERE a."reservation_group_id" IS NOT NULL AND TRIM(a."reservation_group_id") <> ''
+          AND s."event_id" = a."event_id" AND s."reservation_group_id" = a."reservation_group_id"
+        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
+      ) rg) AS replay_group_json,
+      CASE
+        WHEN COALESCE((SELECT "max_slot_reservation_groups_per_xid" FROM ev), 0) > 0 AND ? <> ''
+        THEN ${logicalCountSubquerySql("(SELECT id FROM ev)", "?")}
+        ELSE 0
+      END AS active_x_count,
+      (SELECT "xid" FROM single_pending) AS single_pending_x,
+      CASE
+        WHEN COALESCE((SELECT "max_slot_reservation_groups_per_xid" FROM ev), 0) > 0
+          AND (SELECT "xid" FROM single_pending) IS NOT NULL
+        THEN ${logicalCountSubquerySql("(SELECT id FROM ev)", "(SELECT \"xid\" FROM single_pending)")}
+        ELSE 0
+      END AS pending_x_count
+  `;
+  return rawDb
+    .prepare(query)
+    .bind(
+      args.slotId,
+      args.eventId,
+      args.eventId,
+      args.userId,
+      ...types,
+      args.userId,
+      args.userId,
+      args.eventId,
+      args.userId,
+      args.neighborLimit,
+      normActive,
+      normActive,
+    )
+    .first<ReserveSnapshotRow>();
+}
+
+/** SA-065 reserveSlot */
+export async function reserveSlotCore(
+  rawDb: SlotD1Like,
+  db: ServerCoreDb,
+  ctx: SlotMutationContext,
+  input: {
+    eventId: string;
+    slotId: string;
+    display_name: string;
+    consecutive_count: number;
+    operator_override: boolean;
+  },
+): Promise<SlotMutationOutcome> {
+  const snapshot = await loadReserveSnapshot(rawDb, {
+    eventId: input.eventId,
+    slotId: input.slotId,
+    userId: ctx.authUserId,
+    activeXId: ctx.activeXId,
+    neighborLimit: Math.max(0, input.consecutive_count - 1),
+  });
+  if (!snapshot) return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+
+  const approvedXIds = parseJsonOrThrow<string[]>(snapshot.approved_x_json, []);
+  const pendingXIds = parseJsonOrThrow<string[]>(snapshot.pending_x_json, []);
+  const staffRows = parseJsonOrThrow<StaffPermissionRow[]>(snapshot.staff_json, []);
+  if (
+    approvedXIds.length > MAX_APPROVED_X_IDS ||
+    pendingXIds.length > MAX_PENDING_RESERVATION_REQUESTS ||
+    staffRows.length > MAX_OPERATOR_STAFF_ROWS
+  ) {
+    return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  }
+
+  const identity = resolveReservationXIdentityFromPending({
+    activeXId: ctx.activeXId,
+    approvedXIds,
+    pendingRequestedXIds: pendingXIds,
+  });
+  const anchor = parseJsonOrThrow<SlotRow | null>(snapshot.anchor_json, null);
+  if (!anchor) return failOutcome(404, "枠が見つかりません。");
+  const event = parseJsonOrThrow<EventFacts | null>(snapshot.event_json, null);
+  const actor = parseJsonOrThrow<NotificationActor | null>(snapshot.actor_json, null);
+
+  if (anchor.status !== "available") {
+    if (anchor.status === "reserved" && anchor.reserved_by_user_id === ctx.authUserId) {
+      const relation = slotViewerRelation(anchor, ctx.authUserId, ctx.activeXId);
+      if (relation === "account_other") return failOutcome(403, SLOT_ACCOUNT_OTHER_MESSAGE);
+      if (canActAsSlotActor(relation)) {
+        let slotCount = Math.max(1, Number(input.consecutive_count) || 1);
+        try {
+          const replayRows = parseJsonOrThrow<SlotRow[]>(snapshot.replay_group_json, []);
+          slotCount = resolveBoundedGroupFromSnapshot(anchor, replayRows).length;
+        } catch {
+          // best-effort webhook requeue; dedupe key is anchor-scoped
+        }
+        try {
+          const title = event?.title ?? "イベント";
+          const payload = buildChannelSlotReservedNotification({
+            eventId: anchor.event_id,
+            eventTitle: title,
+            slotCount,
+            slotDisplayName: anchor.display_name ?? input.display_name,
+            actor,
+            siteUrl: ctx.siteUrl,
+          });
+          const webhook = await buildOpsChannelWebhookStatement(db, {
+            target: "event",
+            threadName: buildSlotReservedOpsThreadName(title, actor),
+            actorUserId: ctx.authUserId,
+            payload,
+            dedupeKey: `channel_slot_reserved:${anchor.event_id}:${ctx.authUserId}:${anchor.id}:${anchor.reservation_group_id ?? "solo"}`,
+            eventId: anchor.event_id,
+            recipientExists: Boolean(actor),
+          });
+          await webhook.statement;
+        } catch {
+          // best-effort post-commit parity
+        }
+        return okOutcome(anchor.id, slotCount);
+      }
+    }
+    return failOutcome(409, "この枠はすでに確保されています。");
+  }
+
+  if (!event) return failOutcome(404, "イベントが見つかりません。");
+  const operatorCheck = resolveOperatorOverride({
+    requested: input.operator_override,
+    userRole: ctx.userRole,
+    staffRows,
+    event,
+  });
+  if (!operatorCheck.ok) return failOutcome(operatorCheck.status, operatorCheck.message);
+  const operatorOverride = operatorCheck.enabled;
+  if (!isAcceptingEntries(event) && !operatorOverride) {
+    return failOutcome(409, "受付中ではないため枠を確保できません。");
+  }
+
+  const maxRows = operatorOverride ? MAX_SLOTS_PER_VIDEO : normalizeMaxSlotsPerVideo(event.max_slots_per_video);
+  if (input.consecutive_count > maxRows) {
+    return failOutcome(409, `一度に確保できる連続枠は ${maxRows} 件までです。`);
+  }
+
+  const xidReservationLimit = operatorOverride
+    ? 0
+    : normalizeSlotReservationLimit(event.max_slot_reservation_groups_per_xid);
+  if (xidReservationLimit > 0 && identity.snapshotXId) {
+    const normActive = ctx.activeXId ? normalizeXId(ctx.activeXId) : "";
+    let currentReservations: number;
+    if (identity.snapshotXId === normActive) {
+      currentReservations = Number(snapshot.active_x_count ?? 0);
+    } else if (identity.snapshotXId === snapshot.single_pending_x) {
+      currentReservations = Number(snapshot.pending_x_count ?? 0);
+    } else {
+      currentReservations = await loadLogicalReservationCountForXId(db, {
+        eventId: anchor.event_id,
+        xIdSnapshot: identity.snapshotXId,
+      });
+    }
+    if (currentReservations >= xidReservationLimit) {
+      return failOutcome(409, slotReservationLimitMessage(xidReservationLimit));
+    }
+  }
+
+  const neighbors = sortSlotsChronologically(parseJsonOrThrow<SlotRow[]>(snapshot.neighbors_json, []));
+  const targetRows = [anchor, ...neighbors];
+  if (targetRows.length !== input.consecutive_count) {
+    return failOutcome(409, "必要な数の連続空き枠がありません。");
+  }
+  if (targetRows.some((row) => row.status !== "available")) {
+    return failOutcome(409, "連続枠の途中に確保済みの枠があります。");
+  }
+  try {
+    assertAdjacentSequence(targetRows, slotPartGapSec(event));
+  } catch (error) {
+    return mapMutationError(error);
+  }
+
+  const groupId = targetRows.length > 1 ? generateId("sgrp") : null;
+  const reserveMutations = buildSlotReserveMutationPlan({
+    rows: targetRows,
+    actorUserId: ctx.authUserId,
+    identity,
+    displayName: input.display_name,
+    groupId,
+  });
+  const payload = buildChannelSlotReservedNotification({
+    eventId: anchor.event_id,
+    eventTitle: event.title ?? "イベント",
+    slotCount: targetRows.length,
+    slotDisplayName: input.display_name,
+    actor,
+    siteUrl: ctx.siteUrl,
+  });
+  const channelNotification = await buildOpsChannelWebhookStatement(db, {
+    target: "event",
+    threadName: buildSlotReservedOpsThreadName(event.title ?? "イベント", actor),
+    actorUserId: ctx.authUserId,
+    payload,
+    dedupeKey: `channel_slot_reserved:${anchor.event_id}:${ctx.authUserId}:${anchor.id}:${groupId ?? "solo"}`,
+    eventId: anchor.event_id,
+    recipientExists: Boolean(actor),
+  });
+  const extraStatements: BatchItem<"sqlite">[] = [channelNotification.statement];
+  const limitGuard = buildReservationLimitGuardStatement(db, {
+    eventId: anchor.event_id,
+    xIdSnapshot: identity.snapshotXId,
+    limit: xidReservationLimit,
+  });
+  if (limitGuard) extraStatements.push(limitGuard);
+
+  try {
+    await commitSlotMutationPlanCore({
+      db,
+      mutations: reserveMutations,
+      eventId: anchor.event_id,
+      actorUserId: ctx.authUserId,
+      reason: "slot_user_reserve",
+      extraStatements,
+      preloaded: ctx.preloaded,
+      callerQueryCount: CALLER_PRE_READS_WITH_SESSION,
+      loadWakeHost: loadNoopWakeHost,
+    });
+  } catch (error) {
+    if (xidReservationLimit > 0 && identity.snapshotXId) {
+      try {
+        const currentReservations = await loadLogicalReservationCountForXId(db, {
+          eventId: anchor.event_id,
+          xIdSnapshot: identity.snapshotXId,
+        });
+        if (currentReservations >= xidReservationLimit) {
+          return failOutcome(409, slotReservationLimitMessage(xidReservationLimit));
+        }
+      } catch {
+        // Fall back to standard atomic mutation error.
+      }
+    }
+    return mapMutationError(error);
+  }
+
+  return okOutcome(anchor.id, targetRows.length);
+}
+
+/** SA-066 releaseOwnSlot */
+export async function releaseSlotCore(
+  rawDb: SlotD1Like,
+  db: ServerCoreDb,
+  ctx: SlotMutationContext,
+  input: { eventId: string; slotId: string },
+): Promise<SlotMutationOutcome> {
+  const query = `
+    WITH anchor AS (
+      SELECT ${SLOT_COLUMNS.map((c) => `"${c}"`).join(", ")}
+      FROM "slots" WHERE "id" = ? AND "event_id" = ? LIMIT 1
+    )
+    SELECT
+      (SELECT ${slotJsonObjectSql("a")} FROM anchor a) AS anchor_json,
+      (SELECT json_group_array(${slotJsonObjectSql("g")}) FROM (
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, anchor a
+        WHERE a."reservation_group_id" IS NOT NULL AND TRIM(a."reservation_group_id") <> ''
+          AND s."event_id" = a."event_id" AND s."reservation_group_id" = a."reservation_group_id"
+        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
+      ) g) AS group_json
+  `;
+  const snapshot = await rawDb
+    .prepare(query)
+    .bind(input.slotId, input.eventId)
+    .first<{ anchor_json: string | null; group_json: string | null }>();
+  if (!snapshot) return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+
+  const anchor = parseJsonOrThrow<SlotRow | null>(snapshot.anchor_json, null);
+  if (!anchor) return failOutcome(404, "枠が見つかりません。");
+  const actorCheck = assertSlotActor(anchor, ctx.authUserId, ctx.activeXId);
+  if (!actorCheck.ok) return failOutcome(403, actorCheck.message);
+  if (anchor.status !== "reserved") {
+    return failOutcome(409, "提出済みの枠は解放できません。先に作品取り下げを相談してください。");
+  }
+
+  let groupRows: SlotRow[];
+  try {
+    groupRows = resolveBoundedGroupFromSnapshot(
+      anchor,
+      parseJsonOrThrow<SlotRow[]>(snapshot.group_json, []),
+    );
+    resolveBoundedGroupIdentity(groupRows, ctx.authUserId, ctx.activeXId);
+  } catch (error) {
+    return mapMutationError(error);
+  }
+  if (groupRows.some((row) => row.status !== "reserved")) {
+    return failOutcome(409, "予約中でない枠を含む連続枠は解放できません。");
+  }
+
+  try {
+    await commitSlotMutationPlanCore({
+      db,
+      mutations: buildSlotReleaseMutationPlan(groupRows, anchor.id, generateId("sgrp")) as unknown as SlotCoreBulkMutation[],
+      eventId: anchor.event_id,
+      actorUserId: ctx.authUserId,
+      reason: "slot_user_release",
+      preloaded: ctx.preloaded,
+      callerQueryCount: CALLER_PRE_READS_WITH_SESSION,
+      loadWakeHost: loadNoopWakeHost,
+    });
+  } catch (error) {
+    return mapMutationError(error);
+  }
+
+  return okOutcome(anchor.id, groupRows.length);
+}
+
+/** SA-067 extendOwnSlotGroup */
+export async function extendSlotGroupCore(
+  rawDb: SlotD1Like,
+  db: ServerCoreDb,
+  ctx: SlotMutationContext,
+  input: {
+    eventId: string;
+    slotId: string;
+    direction: "forward" | "backward";
+    operator_override: boolean;
+  },
+): Promise<SlotMutationOutcome> {
+  const edgeDir = input.direction === "backward" ? "ASC" : "DESC";
+  const edgeNullDir = input.direction === "backward" ? "ASC" : "DESC";
+  const query = `
+    WITH anchor AS (
+      SELECT ${SLOT_COLUMNS.map((c) => `"${c}"`).join(", ")}
+      FROM "slots" WHERE "id" = ? AND "event_id" = ? LIMIT 1
+    ),
+    group_rows AS (
+      SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+      FROM "slots" s, anchor a
+      WHERE a."reservation_group_id" IS NOT NULL AND TRIM(a."reservation_group_id") <> ''
+        AND s."event_id" = a."event_id" AND s."reservation_group_id" = a."reservation_group_id"
+      LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
+    ),
+    cte_edge AS (
+      SELECT * FROM (
+        SELECT * FROM group_rows
+        UNION ALL
+        SELECT * FROM anchor WHERE NOT EXISTS (SELECT 1 FROM group_rows)
+      )
+      ORDER BY CASE WHEN "start_time" IS NULL THEN 1 ELSE 0 END ${edgeNullDir},
+               "start_time" ${edgeDir},
+               COALESCE("sort_order", 0) ${edgeDir},
+               "id" ${edgeDir}
+      LIMIT 1
+    )
+    SELECT
+      (SELECT ${eventJsonObjectSql("e")} FROM "events" e WHERE e."id" = ? LIMIT 1) AS event_json,
+      (SELECT ${slotJsonObjectSql("a")} FROM anchor a) AS anchor_json,
+      ${approvedXJsonSql("?")} AS approved_x_json,
+      ${staffRowsJsonSql()} AS staff_json,
+      (SELECT json_group_array(${slotJsonObjectSql("g")}) FROM group_rows g) AS group_json,
+      (SELECT "id" FROM cte_edge) AS cte_edge_id,
+      (SELECT ${slotJsonObjectSql("n")} FROM (
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, cte_edge ce
+        WHERE s."event_id" = ce."event_id" AND ${neighborConditionSql("s", "ce", input.direction)}
+        ORDER BY ${neighborOrderSql("s", input.direction)}
+        LIMIT 1
+      ) n) AS neighbor_json
+  `;
+  const snapshot = await rawDb
+    .prepare(query)
+    .bind(input.slotId, input.eventId, input.eventId, ctx.authUserId, input.eventId, ctx.authUserId)
+    .first<{
+      event_json: string | null;
+      anchor_json: string | null;
+      approved_x_json: string | null;
+      staff_json: string | null;
+      group_json: string | null;
+      cte_edge_id: string | null;
+      neighbor_json: string | null;
+    }>();
+  if (!snapshot) return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+
+  const approvedXIds = parseJsonOrThrow<string[]>(snapshot.approved_x_json, []);
+  const staffRows = parseJsonOrThrow<StaffPermissionRow[]>(snapshot.staff_json, []);
+  if (approvedXIds.length > MAX_APPROVED_X_IDS || staffRows.length > MAX_OPERATOR_STAFF_ROWS) {
+    return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  }
+
+  const anchor = parseJsonOrThrow<SlotRow | null>(snapshot.anchor_json, null);
+  if (!anchor) return failOutcome(404, "枠が見つかりません。");
+  const actorCheck = assertSlotActor(anchor, ctx.authUserId, ctx.activeXId);
+  if (anchor.status !== "reserved" || !actorCheck.ok) {
+    return failOutcome(
+      actorCheck.ok ? 409 : 403,
+      actorCheck.ok ? "自分の予約中の枠のみ拡張できます。" : actorCheck.message,
+    );
+  }
+  const event = parseJsonOrThrow<EventFacts | null>(snapshot.event_json, null);
+  if (!event) return failOutcome(404, "イベントが見つかりません。");
+
+  const operatorCheck = resolveOperatorOverride({
+    requested: input.operator_override,
+    userRole: ctx.userRole,
+    staffRows,
+    event,
+  });
+  if (!operatorCheck.ok) return failOutcome(operatorCheck.status, operatorCheck.message);
+  const operatorOverride = operatorCheck.enabled;
+  if (!isAcceptingEntries(event) && !operatorOverride) {
+    return failOutcome(409, "受付中ではないため枠を拡張できません。");
+  }
+
+  const slotXUserId = resolveSlotXUserId(ctx.activeXId, approvedXIds);
+  let groupRows: SlotRow[];
+  let identity: { targetXId: string | null; adoptNullRows: boolean };
+  try {
+    groupRows = resolveBoundedGroupFromSnapshot(
+      anchor,
+      parseJsonOrThrow<SlotRow[]>(snapshot.group_json, []),
+    );
+    identity = resolveBoundedGroupIdentity(groupRows, ctx.authUserId, ctx.activeXId);
+  } catch (error) {
+    return mapMutationError(error);
+  }
+
+  const maxRows = operatorOverride ? MAX_SLOTS_PER_VIDEO : normalizeMaxSlotsPerVideo(event.max_slots_per_video);
+  if (groupRows.length + 1 > maxRows) {
+    return failOutcome(409, "連続枠の上限を超えるため拡張できません。");
+  }
+  if (groupRows.some((row) => row.status !== "reserved")) {
+    return failOutcome(409, "予約中でない枠を含む連続枠は拡張できません。");
+  }
+  const subjectResult = resolveSlotReservationSubject(groupRows);
+  if (!subjectResult.ok) {
+    return failOutcome(409, "連続枠の予約者情報が不整合です。運営へ連絡してください。");
+  }
+  if (ctx.authUserId !== subjectResult.subject.reservedByUserId) {
+    return failOutcome(403, "自分の予約中の枠のみ拡張できます。");
+  }
+
+  const edge = input.direction === "backward" ? groupRows[0]! : groupRows[groupRows.length - 1]!;
+  const candidate =
+    edge.id === snapshot.cte_edge_id
+      ? parseJsonOrThrow<SlotRow | null>(snapshot.neighbor_json, null) ?? undefined
+      : await loadOrderedNeighborFallback(db, edge, input.direction);
+  if (!candidate || candidate.status !== "available") {
+    return failOutcome(409, "拡張可能な隣接空き枠がありません。");
+  }
+  try {
+    assertAdjacentSequence(
+      input.direction === "backward" ? [candidate, edge] : [edge, candidate],
+      slotPartGapSec(event),
+    );
+  } catch (error) {
+    return mapMutationError(error);
+  }
+
+  const groupXUserId = groupRows[0]?.x_user_id ?? null;
+  const groupSnapshotXId = groupRows[0]?.reserved_x_id_snapshot ?? null;
+  if (groupXUserId != null && slotXUserId != null && groupXUserId !== slotXUserId) {
+    return failOutcome(409, "この連続枠は別の X ID で確保されているため拡張できません。");
+  }
+
+  const groupId = anchor.reservation_group_id || generateId("sgrp");
+  const targetXId = identity.targetXId ?? slotXUserId;
+  const displayName = groupRows[0]!.display_name;
+  const candidateMutations = buildSlotReserveMutationPlan({
+    rows: [candidate],
+    actorUserId: ctx.authUserId,
+    identity: { canonicalXUserId: targetXId, snapshotXId: groupSnapshotXId },
+    displayName,
+    groupId,
+  });
+
+  try {
+    await commitSlotMutationPlanCore({
+      db,
+      mutations: [
+        ...buildRegroupMutations(groupRows, { reservation_group_id: groupId }, identity),
+        ...candidateMutations,
+      ],
+      eventId: anchor.event_id,
+      actorUserId: ctx.authUserId,
+      reason: "slot_user_extend",
+      preloaded: ctx.preloaded,
+      callerQueryCount: CALLER_PRE_READS_WITH_SESSION,
+      loadWakeHost: loadNoopWakeHost,
+    });
+  } catch (error) {
+    return mapMutationError(error);
+  }
+
+  return okOutcome(candidate.id, groupRows.length + 1);
+}
+
+/** SA-068 mergeOwnSlotGroups */
+export async function mergeSlotGroupsCore(
+  rawDb: SlotD1Like,
+  db: ServerCoreDb,
+  ctx: SlotMutationContext,
+  input: {
+    eventId: string;
+    gap_slot_id: string;
+    display_name: string;
+    operator_override: boolean;
+  },
+): Promise<SlotMutationOutcome> {
+  const query = `
+    WITH gap AS (
+      SELECT ${SLOT_COLUMNS.map((c) => `"${c}"`).join(", ")}
+      FROM "slots" WHERE "id" = ? AND "event_id" = ? LIMIT 1
+    ),
+    left_cte AS (
+      SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+      FROM "slots" s, gap g
+      WHERE s."event_id" = g."event_id" AND ${neighborConditionSql("s", "g", "backward")}
+      ORDER BY ${neighborOrderSql("s", "backward")}
+      LIMIT 1
+    ),
+    right_cte AS (
+      SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+      FROM "slots" s, gap g
+      WHERE s."event_id" = g."event_id" AND ${neighborConditionSql("s", "g", "forward")}
+      ORDER BY ${neighborOrderSql("s", "forward")}
+      LIMIT 1
+    )
+    SELECT
+      (SELECT ${eventJsonObjectSql("e")} FROM "events" e WHERE e."id" = ? LIMIT 1) AS event_json,
+      (SELECT ${slotJsonObjectSql("g")} FROM gap g) AS gap_json,
+      ${approvedXJsonSql("?")} AS approved_x_json,
+      ${staffRowsJsonSql()} AS staff_json,
+      (SELECT ${slotJsonObjectSql("l")} FROM left_cte l) AS left_json,
+      (SELECT ${slotJsonObjectSql("r")} FROM right_cte r) AS right_json,
+      (SELECT json_group_array(${slotJsonObjectSql("lg")}) FROM (
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, left_cte l
+        WHERE l."reservation_group_id" IS NOT NULL AND TRIM(l."reservation_group_id") <> ''
+          AND s."event_id" = l."event_id" AND s."reservation_group_id" = l."reservation_group_id"
+        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
+      ) lg) AS left_group_json,
+      (SELECT json_group_array(${slotJsonObjectSql("rg")}) FROM (
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, right_cte r
+        WHERE r."reservation_group_id" IS NOT NULL AND TRIM(r."reservation_group_id") <> ''
+          AND s."event_id" = r."event_id" AND s."reservation_group_id" = r."reservation_group_id"
+        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
+      ) rg) AS right_group_json
+  `;
+  const snapshot = await rawDb
+    .prepare(query)
+    .bind(input.gap_slot_id, input.eventId, input.eventId, ctx.authUserId, input.eventId, ctx.authUserId)
+    .first<{
+      event_json: string | null;
+      gap_json: string | null;
+      approved_x_json: string | null;
+      staff_json: string | null;
+      left_json: string | null;
+      right_json: string | null;
+      left_group_json: string | null;
+      right_group_json: string | null;
+    }>();
+  if (!snapshot) return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+
+  const approvedXIds = parseJsonOrThrow<string[]>(snapshot.approved_x_json, []);
+  const staffRows = parseJsonOrThrow<StaffPermissionRow[]>(snapshot.staff_json, []);
+  if (approvedXIds.length > MAX_APPROVED_X_IDS || staffRows.length > MAX_OPERATOR_STAFF_ROWS) {
+    return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  }
+
+  const gap = parseJsonOrThrow<SlotRow | null>(snapshot.gap_json, null);
+  if (!gap) return failOutcome(404, "枠が見つかりません。");
+  if (gap.status !== "available") return failOutcome(409, "対象の枠はすでに確保されています。");
+  const event = parseJsonOrThrow<EventFacts | null>(snapshot.event_json, null);
+  if (!event) return failOutcome(404, "イベントが見つかりません。");
+
+  const operatorCheck = resolveOperatorOverride({
+    requested: input.operator_override,
+    userRole: ctx.userRole,
+    staffRows,
+    event,
+  });
+  if (!operatorCheck.ok) return failOutcome(operatorCheck.status, operatorCheck.message);
+  const operatorOverride = operatorCheck.enabled;
+  if (!isAcceptingEntries(event) && !operatorOverride) {
+    return failOutcome(409, "受付中ではないため結合できません。");
+  }
+
+  const left = parseJsonOrThrow<SlotRow | null>(snapshot.left_json, null);
+  const right = parseJsonOrThrow<SlotRow | null>(snapshot.right_json, null);
+  if (!left || !right) return failOutcome(409, "結合対象の隣接枠がありません。");
+
+  const partGap = slotPartGapSec(event);
+  try {
+    assertAdjacentSequence([left, gap, right], partGap);
+  } catch (error) {
+    return mapMutationError(error);
+  }
+
+  const leftActor = assertSlotActor(left, ctx.authUserId, ctx.activeXId);
+  const rightActor = assertSlotActor(right, ctx.authUserId, ctx.activeXId);
+  if (left.status !== "reserved" || right.status !== "reserved" || !leftActor.ok || !rightActor.ok) {
+    return failOutcome(
+      !leftActor.ok || !rightActor.ok ? 403 : 409,
+      !leftActor.ok
+        ? leftActor.message
+        : !rightActor.ok
+          ? rightActor.message
+          : "自分の予約中の隣接枠どうしのみ結合できます。",
+    );
+  }
+  if (left.x_user_id !== right.x_user_id || left.reserved_x_id_snapshot !== right.reserved_x_id_snapshot) {
+    return failOutcome(409, "連続枠に別の X ID が混在しているため結合できません。");
+  }
+
+  let leftGroup: SlotRow[];
+  let rightGroup: SlotRow[];
+  try {
+    leftGroup = resolveBoundedGroupFromSnapshot(
+      left,
+      parseJsonOrThrow<SlotRow[]>(snapshot.left_group_json, []),
+    );
+    rightGroup = resolveBoundedGroupFromSnapshot(
+      right,
+      parseJsonOrThrow<SlotRow[]>(snapshot.right_group_json, []),
+    );
+  } catch (error) {
+    return mapMutationError(error);
+  }
+  if (left.event_id !== right.event_id) {
+    return failOutcome(409, "異なるイベントの枠は結合できません。");
+  }
+  const leftSubject = resolveSlotReservationSubject(leftGroup);
+  const rightSubject = resolveSlotReservationSubject(rightGroup);
+  if (!leftSubject.ok || !rightSubject.ok) {
+    return failOutcome(409, "連続枠の予約者情報が不整合です。運営へ連絡してください。");
+  }
+  if (!subjectsEqual(leftSubject.subject, rightSubject.subject)) {
+    return failOutcome(409, "異なるX IDの連続枠は結合できません。");
+  }
+
+  const byId = new Map<string, SlotRow>();
+  for (const row of [...leftGroup, ...rightGroup]) byId.set(row.id, row);
+  const reservedRows = sortSlotsChronologically([...byId.values()]);
+  for (const row of reservedRows) {
+    const actorCheck = assertSlotActor(row, ctx.authUserId, ctx.activeXId);
+    if (row.status !== "reserved" || !actorCheck.ok) {
+      return failOutcome(
+        actorCheck.ok ? 409 : 403,
+        actorCheck.ok ? "連続枠に別の利用者または状態が混在しています。" : actorCheck.message,
+      );
+    }
+  }
+
+  let identity: { targetXId: string | null; adoptNullRows: boolean };
+  try {
+    identity = resolveBoundedGroupIdentity(reservedRows, ctx.authUserId, ctx.activeXId);
+    const maxRows = operatorOverride ? MAX_SLOTS_PER_VIDEO : normalizeMaxSlotsPerVideo(event.max_slots_per_video);
+    if (reservedRows.length + 1 > maxRows) {
+      return failOutcome(409, "連続枠の上限を超えるため結合できません。");
+    }
+    assertAdjacentSequence(sortSlotsChronologically([...reservedRows, gap]), partGap);
+  } catch (error) {
+    return mapMutationError(error);
+  }
+
+  const slotXUserId = resolveSlotXUserId(ctx.activeXId, approvedXIds);
+  const groupId = generateId("sgrp");
+  const targetXId = identity.targetXId ?? slotXUserId;
+  const inheritedSnapshot = reservedRows[0]?.reserved_x_id_snapshot ?? left.reserved_x_id_snapshot;
+  const gapMutations = buildSlotReserveMutationPlan({
+    rows: [gap],
+    actorUserId: ctx.authUserId,
+    identity: { canonicalXUserId: targetXId, snapshotXId: inheritedSnapshot },
+    displayName: input.display_name,
+    groupId,
+  });
+
+  try {
+    await commitSlotMutationPlanCore({
+      db,
+      mutations: [
+        ...buildRegroupMutations(
+          reservedRows,
+          { display_name: input.display_name, reservation_group_id: groupId },
+          identity,
+        ),
+        ...gapMutations,
+      ],
+      eventId: gap.event_id,
+      actorUserId: ctx.authUserId,
+      reason: "slot_user_merge",
+      preloaded: ctx.preloaded,
+      callerQueryCount: CALLER_PRE_READS_WITH_SESSION,
+      loadWakeHost: loadNoopWakeHost,
+    });
+  } catch (error) {
+    return mapMutationError(error);
+  }
+
+  return okOutcome(gap.id, reservedRows.length + 1);
+}

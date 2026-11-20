@@ -13,6 +13,7 @@ import { sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { slots } from "@flamenode/db/schema";
 import { buildSlotAtomicAuditPlan } from "@flamenode/domain/slots/atomicAuditPlan";
+import type { PreloadedAuditContext } from "../audit/logger.ts";
 import { mutateWithAudit } from "../audit/mutate.ts";
 import type { ServerCoreDb } from "../db.ts";
 import type { QueueWakeHostLoader } from "../ports.ts";
@@ -36,6 +37,8 @@ export async function commitSlotMutationPlanCore(args: {
   reason: string;
   extraStatements?: BatchItem<"sqlite">[];
   notificationWakeSource?: "web";
+  preloaded?: PreloadedAuditContext;
+  callerQueryCount?: number;
   loadWakeHost: QueueWakeHostLoader;
 }): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
@@ -111,6 +114,8 @@ export async function commitSlotMutationPlanCore(args: {
       ...extra.map(() => null),
     ],
     audits,
+    preloaded: args.preloaded,
+    callerQueryCount: args.callerQueryCount,
     notificationWakeSource: wakeNotification,
     staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
   }, args.loadWakeHost);

@@ -10,6 +10,7 @@ import { softwareSuggestionsRoutes } from "./routes/softwareSuggestions.ts";
 import { createAdminRoutes } from "./routes/admin/index.ts";
 import { liveEventRoutes } from "./routes/live/events.ts";
 import { adminEventRoutes } from "./routes/events/index.ts";
+import { slotReservationRoutes } from "./routes/events/slotReservation.ts";
 import { slotViewerOverlayRoutes } from "./routes/events/viewerOverlay.ts";
 import { publicListRoutes } from "./routes/events/publicList.ts";
 import { publicReleaseRoutes } from "./routes/events/publicRelease.ts";
@@ -49,6 +50,8 @@ app.route("/api/live/events", liveEventRoutes);
 app.route("/api/events", slotViewerOverlayRoutes);
 // MIG-0631 (RH-015): GET /api/events
 app.route("/api/events", publicListRoutes);
+// MIG-0657 (SA-065..068): POST slot reserve / release / extend / merge (path-scoped write stack, GET stays public).
+app.route("/api/events", slotReservationRoutes);
 // MIG-0631 (RH-012): GET /api/event-endpoints/:id/release
 app.route("/api/event-endpoints", publicReleaseRoutes);
 // MIG-0632 RH-013: public event export, authorization checked fresh before every cache HIT.

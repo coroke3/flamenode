@@ -110,7 +110,8 @@
     "./publicData/staticYoutubeRelatedBlocklistCore": "./src/publicData/staticYoutubeRelatedBlocklistCore.ts",
     "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts",
     "./slots/versionedPredicate": "./src/slots/versionedPredicate.ts",
-    "./slots/commitSlotMutationPlan": "./src/slots/commitSlotMutationPlan.ts"
+    "./slots/commitSlotMutationPlan": "./src/slots/commitSlotMutationPlan.ts",
+    "./slots/reservation": "./src/slots/reservation.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
