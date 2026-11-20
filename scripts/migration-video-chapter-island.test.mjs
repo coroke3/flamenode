@@ -903,6 +903,39 @@ test("Issue #661: only trusted complete D1 public rows unlock SSG edit/delete", 
     { canBulk: false, editableChapters: [] }, "loading cannot expose stale edit controls");
 });
 
+test("Issue #661: public chapter PUT preserves the current D1 note and public visibility", async () => {
+  await withChapterDom(async (doc, root) => {
+    const requests = [];
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, method: init.method, body: JSON.parse(init.body) });
+      return { ok: true, status: 200, json: async () => ({ ok: true, chapterId: "public-own" }) };
+    };
+    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
+      videoId: "video-a", activeXId: "approved", canPost: true,
+      chapters: [{
+        id: "public-own", chapter_time: "0:11", chapter_label: "D1 current title",
+        note: "Existing D1 note must survive", visibility: "public", canManage: true,
+      }],
+    })));
+    await clickButton(doc, "編集");
+    assert.equal(doc.querySelector("form textarea").value, "Existing D1 note must survive",
+      "editor must prefill from the private per-viewer DTO, not from incomplete SSG");
+    assert.equal(doc.querySelector("form input[type=checkbox]").checked, true,
+      "editing a public chapter must retain public visibility");
+    await React.act(async () => {
+      doc.querySelector("form").dispatchEvent(
+        new doc.defaultView.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.deepEqual(requests, [{
+      url: "/api/videos/chapters/public-own", method: "PUT",
+      body: {
+        chapter_time: "0:11", chapter_label: "D1 current title",
+        note: "Existing D1 note must survive", visibility: "public",
+      },
+    }], "an untouched edit must not erase note or change visibility");
+  });
+});
+
 test("MIG-0518 chapter owner edits own private chapter without admin/bulk access", async () => {
   const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
   const base = {
