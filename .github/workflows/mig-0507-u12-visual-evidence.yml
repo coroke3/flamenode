@@ -1,0 +1,55 @@
+name: MIG-0507 U12 browser visual evidence (PR 448 only)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/mig-0507-u12-visual-evidence.yml
+      - apps/site/src/lib/videoFixtures.ts
+      - scripts/fixtures/videoScreenshotCapture.mjs
+      - scripts/fixtures/videoScreenshotCapture.test.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  capture-u12:
+    if: github.event.pull_request.number == 448
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install pinned workspace dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build the no-snapshot fixture site
+        run: |
+          npm run build --workspace=@flamenode/contracts
+          npm run build --workspace=@flamenode/domain
+          npm run build --workspace=@flamenode/ui
+          npm run build --workspace=@flamenode/site
+          node --test scripts/fixtures/videoScreenshotCapture.test.mjs
+      - name: Install Playwright Chromium
+        run: |
+          npm install --global playwright@1.56.1 --no-audit --no-fund
+          playwright install --with-deps chromium
+      - name: Capture actual browser frames and mock references
+        run: |
+          set -eu
+          python3 -m http.server 4329 --bind 127.0.0.1 --directory apps/site/dist > "$RUNNER_TEMP/u12-http.log" 2>&1 &
+          curl --fail --retry 30 --retry-delay 1 --retry-connrefused http://127.0.0.1:4329/dKw1xV41f8s/ -o /dev/null
+          mkdir -p "$RUNNER_TEMP/mig0507-u12"
+          node scripts/fixtures/videoScreenshotCapture.mjs http://127.0.0.1:4329 dKw1xV41f8s "$RUNNER_TEMP/mig0507-u12"
+          cp docs/migration/mock/screenshots/VideoDetail.mobile.jpg "$RUNNER_TEMP/mig0507-u12/approved.mobile.jpg"
+          cp docs/migration/mock/screenshots/VideoDetail.desktop.jpg "$RUNNER_TEMP/mig0507-u12/approved.desktop.jpg"
+      - name: Upload U12 evidence (not an approval)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mig-0507-u12-member-present-visual-evidence
+          path: ${{ runner.temp }}/mig0507-u12
+          if-no-files-found: warn
+          retention-days: 7
