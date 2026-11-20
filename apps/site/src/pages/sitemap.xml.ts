@@ -14,7 +14,6 @@ import {
   loadSitemapVideosSnapshot,
   loadUsersIndexSnapshot,
   loadVideoDetailPayload,
-  videoDetailKeys,
   SnapshotBuildError,
   SITEMAP_VIDEOS_KEY,
   type SitemapVideoRow,
@@ -105,16 +104,24 @@ export async function loadSitemapCanonicalVideoPages(
       .map(([id, raw]) => canonicalVideoPage(id, raw, `fixture:${id}`));
   }
   const manifest = access.options.manifest;
-  if (!manifest) throw new Error("[sitemap] configured snapshot manifest is missing");
+  if (!manifest || manifest.schemaVersion !== 1 || manifest.generation !== access.options.generation ||
+    !Array.isArray(manifest.allowedKeys) || !Array.isArray(manifest.blockedKeys) ||
+    !manifest.allowedKeys.every((key) => typeof key === "string") ||
+    !manifest.blockedKeys.every((key) => typeof key === "string")) {
+    throw new Error("[sitemap] configured snapshot manifest is invalid");
+  }
   const pages: EmittedCanonicalVideoPage[] = [];
-  // The sitemap video index has at most 500 entries. Avoid re-reading every
-  // manifest-approved detail (potentially thousands) when most cannot appear
-  // in the sitemap. The page emitter still independently validates all pages.
-  // An allow-list may repeat the same key. Deduplicate it so even duplicate
-  // manifest rows cannot multiply the bounded index's verified source reads.
-  for (const key of new Set(videoDetailKeys(manifest))) {
-    const id = key.slice("snapshot/video-detail/".length, -".json".length);
-    if (candidateVideoIds && !candidateVideoIds.has(id)) continue;
+  // This build verified at most 500 index candidates. Drive detail lookup by
+  // those IDs instead of scanning every allowed key and repeatedly searching
+  // a potentially large blocked-key array. The independent page emitter still
+  // validates all published pages and the route map.
+  const allowed = new Set(manifest.allowedKeys);
+  const blocked = new Set(manifest.blockedKeys);
+  for (const id of candidateVideoIds ?? []) {
+    // Only keys that could be emitted by the static detail page are eligible.
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) continue;
+    const key = `snapshot/video-detail/${id}.json`;
+    if (!allowed.has(key) || blocked.has(key)) continue;
     const payload = await loadVideoDetailPayload(access.source, key, access.options);
     pages.push(canonicalVideoPage(id, payload, key));
   }

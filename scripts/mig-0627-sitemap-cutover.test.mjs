@@ -392,3 +392,49 @@ test("MIG-0627 U02a T17: a valid envelope containing private video detail fails 
   assert.equal(fixture.metrics.reads, 1);
   assert.equal(fixture.metrics.accepted, 1, "envelope validity alone does not make its detail public");
 });
+
+test("MIG-0627 U02a T18: large manifests do not amplify candidate-driven snapshot reads", async () => {
+  const fixture = accessWith();
+  const keyA = "snapshot/video-detail/vid-aaa.json";
+  const keyB = "snapshot/video-detail/vid-bbb.json";
+  const blocked = "snapshot/video-detail/vid-blocked.json";
+  const unrelated = Array.from({ length: 2500 }, (_, i) => `snapshot/video-detail/unrelated-${i}.json`);
+  fixture.access.options.manifest.allowedKeys.push(...unrelated, keyA, keyA, keyB, blocked);
+  fixture.access.options.manifest.blockedKeys.push(...unrelated.slice(0, 1250), blocked);
+  const payloads = new Map([
+    [keyA, buildEnvelope(FIXTURE_VIDEO_DETAIL_PAYLOADS["vid-aaa"], { key: keyA })],
+    [keyB, buildEnvelope(FIXTURE_VIDEO_DETAIL_PAYLOADS["vid-bbb"], { key: keyB })],
+  ]);
+  fixture.access.source.read = async (key) => {
+    fixture.reads.push(key);
+    assert.ok(payloads.has(key), "unrelated or blocked manifest key must not trigger a read");
+    return payloads.get(key);
+  };
+  const pages = await loadSitemapCanonicalVideoPages(
+    fixture.access, new Set(["vid-aaa", "bad/path", "vid-blocked", "vid-bbb", "long".repeat(30)]),
+  );
+  assert.deepEqual(pages.map((page) => page.videoId), ["vid-aaa", "vid-bbb"]);
+  assert.deepEqual(fixture.reads, [keyA, keyB]);
+  assert.deepEqual(
+    { reads: fixture.metrics.reads, accepted: fixture.metrics.accepted, rejected: fixture.metrics.rejected },
+    { reads: 2, accepted: 2, rejected: 0 },
+  );
+});
+
+test("MIG-0627 U02a T19: invalid manifest is rejected before any indexed source read", async () => {
+  for (const damage of [
+    (manifest) => { manifest.generation = "wrong-generation"; },
+    (manifest) => { manifest.allowedKeys = [42]; },
+    (manifest) => { manifest.blockedKeys = null; },
+  ]) {
+    const fixture = accessWith();
+    fixture.access.options.manifest.allowedKeys.push("snapshot/video-detail/vid-aaa.json");
+    damage(fixture.access.options.manifest);
+    await assert.rejects(
+      loadSitemapCanonicalVideoPages(fixture.access, new Set(["vid-aaa"])),
+      /configured snapshot manifest is invalid/,
+    );
+    assert.deepEqual(fixture.reads, [], "a damaged manifest cannot trigger source reads");
+    assert.equal(fixture.metrics.reads, 0);
+  }
+});
