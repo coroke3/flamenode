@@ -616,6 +616,39 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("MIG-0708 T02 / MIG-0702 T03: an approved manager-only X link has CURRENT settings parity and stays within S2", async () => {
+    // The user owns alice_x but is only a manager (never an owner) of this X identity.
+    // CURRENT reads link_role for its authority checks; the Settings DTO intentionally
+    // omits it. A manager link must nevertheless appear as an approved linked X.
+    const id = "manager_only_x";
+    sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)").run(id, "Manager only", "approved");
+    sqlite.prepare(
+      "INSERT INTO x_user_account_links (x_user_id, auth_user_id, link_role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(id, "u_alice", "manager", 1, 1);
+    try {
+      const currentLinks = await getLinkedXUsersForAuthUser(refDb, "u_alice");
+      const actualLink = currentLinks.find((link) => link.x_user_id === id);
+      assert.equal(actualLink?.link_role, "manager", "seed must exercise manager rather than owner");
+      assert.ok(!currentLinks.some((link) => link.x_user_id === id && link.link_role === "owner"));
+
+      const response = await call("/api/personal/settings?x=manager_only_x", "tok-alice");
+      assert.equal(response.status, 200);
+      assert.deepEqual(response.body, await refSettings("alice", { x: id }),
+        "manager linked X must match CURRENT source settings projection");
+      assert.equal(response.body.panel.xId, id, "manager X is selectable in Personal settings");
+      assert.equal(response.body.user.active_x_user_id, "alice_x", "reading manager X does not switch Active X");
+      const manager = response.body.xIds.find((x) => x.id === id);
+      assert.equal(manager?.approval_status, "approved");
+      assert.equal(Object.hasOwn(manager, "link_role"), false,
+        "the public settings DTO must not leak internal link roles");
+      record("settings", response);
+      assert.equal(response.stats.statements, 3, "session + context + profile rows");
+    } finally {
+      sqlite.prepare("DELETE FROM x_user_account_links WHERE x_user_id = ? AND auth_user_id = ?").run(id, "u_alice");
+      sqlite.prepare("DELETE FROM x_users WHERE id = ?").run(id);
+    }
+  });
+
   test("T05 settings: normalisation and candidate rules", async () => {
     const { body } = await call("/api/personal/settings", "tok-alice");
     assert.equal(body.xIds.find((x) => x.id === "alice_x").portfolio_contact, null, "placeholder contact is dropped");
