@@ -7,7 +7,7 @@
  * R2 fencing remain STOP gates.
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { eventStaff, events, users, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
+import { eventStaff, events, sessions, users, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
 import { EVENT_STAFF_PRESETS, getPresetPermissions } from "@flamenode/domain/auth/permissions/presets";
 import { assertCondition } from "../audit/mutate.ts";
@@ -257,16 +257,19 @@ export async function loadAdminVideoStatusSnapshot(
  * video_event association can all change before the mutation begins.
  *
  * This is a narrowly scoped DB assertion, NOT an approved HTTP auth design:
- * it checks persisted actor existence/ban, the base TOS acceptance flag and
- * prevents stale site-admin role privileges. This does NOT atomically check
- * the live session, current major-terms reacceptance or CostGuard; keep this
- * candidate unmounted until the shared Issue #692 architecture is approved.
+ * it checks persisted actor existence/ban, base TOS acceptance, current
+ * Auth.js session token ownership/expiry and stale site-admin role. Major
+ * terms reacceptance and CostGuard remain unresolved: keep this candidate
+ * unmounted until the shared Issue #692 architecture is approved.
  */
 export function planManageVideoStatusCommitAssertion(
   db: ServerCoreDb,
   user: SessionUserLike,
   eventId: string,
   videoId: string,
+  // Trusted token from Auth.js session resolution, NEVER a JSON body field.
+  // This signature is a design-only candidate; MIG-0602 does not expose it.
+  sessionToken: string,
 ) {
   // Derive presets from the canonical permission definitions, rather than
   // allowing a diverging hand-maintained list in the SQL commit fence.
@@ -305,7 +308,13 @@ export function planManageVideoStatusCommitAssertion(
     )`;
   // A cached actor is not durable: role downgrade, ban, or base TOS
   // acceptance withdrawal between preflight and D1 batch must fail closed.
-  // Major-term reacceptance/session/CostGuard still need shared Issue #692 design.
+  // Major-term reacceptance/CostGuard still need shared Issue #692 design.
+  const activeSessionStillValid = sql`EXISTS (
+    SELECT 1 FROM ${sessions}
+    WHERE ${sessions.sessionToken} = ${sessionToken}
+      AND ${sessions.userId} = ${user.id}
+      AND ${sessions.expires} > unixepoch('now') * 1000
+  )`;
   const actorStillAllowed = sql`EXISTS (
     SELECT 1 FROM ${users}
     WHERE ${users.id} = ${user.id}
@@ -320,5 +329,5 @@ export function planManageVideoStatusCommitAssertion(
     WHERE ${videoEvents.event_id} = ${eventId}
       AND ${videoEvents.video_id} = ${videoId}
   )`;
-  return db.run(assertCondition(sql`${actorStillAllowed} AND ${hasCurrentStatusGrant} AND ${targetStillLinked}`));
+  return db.run(assertCondition(sql`${activeSessionStillValid} AND ${actorStillAllowed} AND ${hasCurrentStatusGrant} AND ${targetStillLinked}`));
 }

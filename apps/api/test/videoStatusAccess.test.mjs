@@ -656,6 +656,14 @@ test("MIG-0603: commit-time status authorization assertion rolls back on revoked
       sqlite.exec("UPDATE user SET is_tos_accepted=0 WHERE id='u_mgr'")],
     ["site-admin TOS acceptance cleared after preflight", (sqlite) =>
       sqlite.exec("UPDATE user SET is_tos_accepted=NULL WHERE id='u_admin'")],
+    ["session revoked after preflight", (sqlite) =>
+      sqlite.exec("DELETE FROM session WHERE sessionToken='tok-mgr'")],
+    ["session expired after preflight", (sqlite) =>
+      sqlite.exec("UPDATE session SET expires=0 WHERE sessionToken='tok-mgr'")],
+    ["session reassigned to another actor", (sqlite) =>
+      sqlite.exec("UPDATE session SET userId='u_plain' WHERE sessionToken='tok-mgr'")],
+    ["site-admin session revoked after preflight", (sqlite) =>
+      sqlite.exec("DELETE FROM session WHERE sessionToken='tok-admin'")],
   ];
   for (const [description, revoke] of cases) {
     const sqlite = createSqlite();
@@ -681,7 +689,9 @@ test("MIG-0603: commit-time status authorization assertion rolls back on revoked
 
       // Interleaved SQL mutation by another caller, AFTER our preflight.
       revoke(sqlite);
-      const guard = planManageVideoStatusCommitAssertion(db, user, "evA", "v1");
+      const guard = planManageVideoStatusCommitAssertion(
+        db, user, "evA", "v1", `tok-${user.id.slice(2)}`,
+      );
       const update = db.run(sql`UPDATE videos
         SET visibility_status = 'public' WHERE id = 'v1'`);
       const audit = db.run(sql`INSERT INTO audit_logs
@@ -726,7 +736,7 @@ test("MIG-0603: commit-time status assertion accepts current canonical preset an
       assert.equal(prior.ok, true, name);
       const initial = d1.stats.statements;
       await db.batch([
-        planManageVideoStatusCommitAssertion(db, user, "evA", "v1"),
+        planManageVideoStatusCommitAssertion(db, user, "evA", "v1", `tok-${user.id.slice(2)}`),
         db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
       ].map((stmt) => preparedStatusTestBatchItem(db, stmt)));
       assert.equal(d1.stats.statements - initial, 2,
