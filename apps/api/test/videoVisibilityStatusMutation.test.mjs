@@ -146,6 +146,50 @@ test("audit CAS error with a different current status returns retryable conflict
   assert.equal(result.retryable, true);
 });
 
+test("MIG-0603: aborted trusted first-batch guards never become idempotent success or auto-retry", async () => {
+  const secret = "session=private-bearer-token SQL=SELECT";
+  for (const [tag, classifiedAsAuditError, current] of [
+    ["same-status-CAS", true, "private"],
+    ["other-status-CAS", true, "public"],
+    ["revoked-guard-provider-error", false, "private"],
+    ["revoked-guard-other-status", false, "public"],
+  ]) {
+    const calls = [];
+    const abort = new Error("failed first batch guard " + secret);
+    if (classifiedAsAuditError) abort.auditMutation = true;
+    const result = await executeVideoVisibilityStatusMutation({
+      db: {}, videoId: "v-1", requestedStatus: "private",
+      transition: transition({
+        fenceToken: null, depublicizedFromPublic: false,
+        queueBatch: { statements: [], expectedChanges: [], acceptedTargetCount: 0 },
+      }),
+      preMutationAssertions: ["trusted-live-revocable-identity-grant"],
+      reason: "review", logTag: "manage-video-status",
+    }, host({
+      mutate: async () => { calls.push("mutate"); throw abort; },
+      isAuditMutationError: (error) => Boolean(error?.auditMutation),
+      rereadStatus: async () => {
+        calls.push("reread");
+        return current;
+      },
+      log: (level, message, details) => calls.push(["log", level, message, details]),
+    }, calls));
+    assert.deepEqual(result, {
+      ok: false,
+      message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+      errorCode: "status_unverified", traceId: "trace-1", retryable: false,
+    }, tag);
+    assert.deepEqual(calls.map((call) => Array.isArray(call) ? call[0] : call),
+      ["mutate", "log"], tag + ": never perform status-oracle reread after an unverified guard");
+    assert.equal(calls[1][1], "warn");
+    assert.deepEqual(calls[1][3], {
+      traceId: "trace-1", error_code: "status_guard_or_mutation_failed",
+    });
+    assert.doesNotMatch(JSON.stringify({ result, calls }), /private-bearer-token|SQL=SELECT/,
+      "sensitive provider errors never reach responses or logs");
+  }
+});
+
 test("shared CURRENT/Hono status failures log fixed codes, never provider SQL or tokens", async () => {
   const secret = "Authorization:Bearer private-credential password=secret";
   for (const [name, overrides, expectedCode] of [
