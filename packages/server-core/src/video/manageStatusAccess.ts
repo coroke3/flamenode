@@ -440,13 +440,13 @@ export function planManageVideoStatusCommitAssertion(
   const rebuildTargetsStillBounded = sql`(
     SELECT COUNT(*) FROM (
       SELECT "event_id" AS "id" FROM "video_events"
-      WHERE "video_id" = \${videoId}
+      WHERE "video_id" = ${videoId}
       UNION
       SELECT "primary_event_id" AS "id" FROM "videos"
-      WHERE "id" = \${videoId} AND "primary_event_id" IS NOT NULL
-      LIMIT \${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
+      WHERE "id" = ${videoId} AND "primary_event_id" IS NOT NULL
+      LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
     ) current_rebuild_targets
-  ) <= \${MAX_MANAGE_STATUS_REBUILD_EVENTS}`;
+  ) <= ${MAX_MANAGE_STATUS_REBUILD_EVENTS}`;
   const targetStillLinked = costGuardFeature === "admin_video_status"
     ? sql`EXISTS (SELECT 1 FROM ${videos} WHERE ${videos.id} = ${videoId})`
     : eventId === null

@@ -1182,10 +1182,10 @@ test("MIG-0603: ninth rebuild event added after valid preload aborts the atomic 
         db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
         db.run(sql`INSERT INTO audit_logs
           (id,table_name,target_id,operation,actor_user_id,created_at)
-          VALUES (\${"event-cap-audit-"+tag},'videos','v1','UPDATE',\${user.id},1000)`),
+          VALUES (${"event-cap-audit-"+tag},'videos','v1','UPDATE',${user.id},1000)`),
         db.run(sql`INSERT INTO notification_outbox
           (id,type,payload_json,status,created_at)
-          VALUES (\${"event-cap-outbox-"+tag},'video_posted','{}','pending',1000)`),
+          VALUES (${"event-cap-outbox-"+tag},'video_posted','{}','pending',1000)`),
       ].map(item=>preparedStatusTestBatchItem(db,item));
       if(expectAllow) await db.batch(batch);
       else await assert.rejects(db.batch(batch), /malformed JSON|not-valid-json/,
