@@ -12,7 +12,6 @@ import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/stati
 import { snapshotAccessFromEnv, type SnapshotAccess } from "../lib/snapshotEnv.ts";
 import {
   loadSitemapVideosSnapshot,
-  loadUsersIndexSnapshot,
   loadVideoDetailPayload,
   SnapshotBuildError,
   SITEMAP_VIDEOS_KEY,
@@ -156,12 +155,10 @@ export async function GET(): Promise<Response> {
     loadUserBuildData(),
   ]);
   const { videos, videoPages } = videoBuild;
-  let userGeneratedAt: number | null = null;
-  if (access && users.index) {
-    const index = await loadUsersIndexSnapshot(access.source, access.options);
-    const value = Number(index.generated_at);
-    if (Number.isFinite(value) && value > 0) userGeneratedAt = value;
-  }
+  // The user page builder already loaded, verified and normalized users/index.
+  // Reuse its generation timestamp; a second source read can race an in-progress
+  // snapshot publish and doubles the build-time artifact read for this key.
+  const userGeneratedAt = users.generatedAt;
   // A public index row is not evidence that its canonical detail URL was emitted.
   // Match the normalized public detail page canonical slugs, not just manifest keys.
   const manifest = access?.options.manifest;

@@ -438,3 +438,29 @@ test("MIG-0627 U02a T19: invalid manifest is rejected before any indexed source 
     assert.equal(fixture.metrics.reads, 0);
   }
 });
+
+test("MIG-0627 U02a T20: sitemap reuses the emitted user-index timestamp without a second snapshot read", async () => {
+  const source = fixturePayloadSource();
+  let indexReads = 0;
+  const build = await loadUserBuildDataFrom({
+    ...source,
+    index: async () => {
+      indexReads += 1;
+      return source.index();
+    },
+  });
+  assert.equal(indexReads, 1, "user listing and sitemap must share the same verified index read");
+  assert.equal(build.generatedAt, 1_760_000_000);
+  assert.ok(build.index.some((entry) => entry.x_id === "miku_producer"));
+  assert.equal(build.index.some((entry) => entry.x_id === "suspended_user"), false);
+  const withNoIndex = await loadUserBuildDataFrom({
+    ...source,
+    index: async () => null,
+  });
+  assert.equal(withNoIndex.generatedAt, null, "unavailable user index must not contribute a timestamp");
+
+  const sitemapSource = await readFile(new URL("apps/site/src/pages/sitemap.xml.ts", root), "utf8");
+  assert.match(sitemapSource, /userGeneratedAt\s*=\s*users\.generatedAt/);
+  assert.doesNotMatch(sitemapSource, /loadUsersIndexSnapshot\s*\(/,
+    "the sitemap must not independently read the same user index");
+});

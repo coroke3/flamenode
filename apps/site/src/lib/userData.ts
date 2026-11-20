@@ -46,6 +46,8 @@ export interface UserBuildData {
   users: Map<string, UserBuildEntry>;
   /** CURRENT legacy index entries; null when the index object is not published. */
   index: StaticUsersIndexEntry[] | null;
+  /** Generation timestamp from the SAME verified index read as the emitted user pages. */
+  generatedAt: number | null;
   source: "snapshot" | "fixture";
 }
 
@@ -150,7 +152,7 @@ export async function loadUserBuildDataFrom(source: UserPayloadSource): Promise<
   }
   // The index lists only creators that have a page: a card must not lead to the gateway 404.
   const listed = index ? index.filter((entry) => users.has(normalizeXId(entry.x_id))) : null;
-  return { users, index: listed, source: source.kind };
+  return { users, index: listed, generatedAt: normalizedIndex?.generatedAt ?? null, source: source.kind };
 }
 
 let cached: Promise<UserBuildData> | null = null;
