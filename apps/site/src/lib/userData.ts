@@ -152,7 +152,13 @@ export async function loadUserBuildDataFrom(source: UserPayloadSource): Promise<
   }
   // The index lists only creators that have a page: a card must not lead to the gateway 404.
   const listed = index ? index.filter((entry) => users.has(normalizeXId(entry.x_id))) : null;
-  return { users, index: listed, generatedAt: normalizedIndex?.generatedAt ?? null, source: source.kind };
+  // Preserve the sitemap's previous Number(raw generated_at) semantics (including
+  // sub-second fractions). normalizeStaticUsersIndex intentionally floors it for
+  // user views; using that projection here silently changes sitemap lastmod.
+  // Only a published user index may contribute a sitemap generation timestamp.
+  const rawGeneratedAt = index && indexPayload ? Number(indexPayload.generated_at) : NaN;
+  const generatedAt = Number.isFinite(rawGeneratedAt) && rawGeneratedAt > 0 ? rawGeneratedAt : null;
+  return { users, index: listed, generatedAt, source: source.kind };
 }
 
 let cached: Promise<UserBuildData> | null = null;

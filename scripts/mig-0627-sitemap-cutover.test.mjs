@@ -466,3 +466,38 @@ test("MIG-0627 U02a T20: sitemap reuses the emitted user-index timestamp without
   assert.doesNotMatch(sitemapSource, /loadUsersIndexSnapshot\s*\(/,
     "the sitemap must not independently read the same user index");
 });
+
+test("MIG-0627 U02a T21: single-read user index keeps CURRENT fractional lastmod precision", async () => {
+  const fixture = fixturePayloadSource();
+  const cases = [
+    { value: 1_760_000_000.25, expected: 1_760_000_000.25 },
+    { value: "1760000000.125", expected: 1_760_000_000.125 },
+    { value: 0, expected: null },
+    { value: -1, expected: null },
+    { value: "not-a-timestamp", expected: null },
+    { value: null, expected: null },
+  ];
+  for (const { value, expected } of cases) {
+    let indexReads = 0;
+    const source = {
+      ...fixture,
+      index: async () => {
+        indexReads++;
+        return { ...(await fixture.index()), generated_at: value };
+      },
+    };
+    const built = await loadUserBuildDataFrom(source);
+    assert.equal(indexReads, 1, "sitemap metadata cannot trigger a second users-index read");
+    assert.equal(built.generatedAt, expected, "preserve the old Number(index.generated_at) semantics");
+    if (expected !== null) {
+      const entries = buildSitemapEntries({
+        origin: "https://flamenode.net",
+        videos: [], events: [], creators: built.index ?? [],
+        generatedAt: [built.generatedAt],
+        now: new Date("2026-01-01T00:00:00Z"),
+      });
+      assert.equal(entries[0].lastModified.toISOString(), new Date(expected * 1000).toISOString(),
+        "fractional timestamp must not be rounded down in sitemap lastmod");
+    }
+  }
+});
