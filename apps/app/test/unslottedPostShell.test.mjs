@@ -658,3 +658,60 @@ test("U03a ISSUE-703: late previous-identity flush registration cannot override 
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: late submit success cannot clear a new identity draft", async () => {
+  dom.window.localStorage.clear();
+  const keyFor = (authUserId, xid) => buildFormDraftStorageKey({
+    authUserId, formId: `unslotted-shell:${xid}`, schemaVersion: "unslotted-shell-v1",
+  });
+  const aliceKey = keyFor("u1", "alice");
+  const bobKey = keyFor("u2", "bob");
+  const destinationDraft = JSON.stringify({
+    savedAt: Date.now(),
+    value: { affiliation: "none", selectedEventId: "" },
+  });
+  dom.window.localStorage.setItem(bobKey, destinationDraft);
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  let oldSubmitSuccess;
+  let currentSubmitSuccess;
+  const renderVideoForm = args => {
+    if (args.formKey === "unslotted-video:u1:alice") oldSubmitSuccess = args.onSubmitSuccess;
+    else if (args.formKey === "unslotted-video:u2:bob") currentSubmitSuccess = args.onSubmitSuccess;
+    return renderStub(args);
+  };
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      renderVideoForm,
+    }))));
+    await act(async () => selected(container, "none").click());
+    assert.equal(typeof oldSubmitSuccess, "function");
+
+    // A network response may arrive after the first identity has unmounted.
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      draftAuthUserId: "u2", activeXId: "@BOB", renderVideoForm,
+    }))));
+    assert.ok(dom.window.localStorage.getItem(aliceKey),
+      "departing identity's dirty shell draft was flushed");
+    assert.equal(dom.window.localStorage.getItem(bobKey), destinationDraft);
+    assert.equal(selected(container, "none").checked, true,
+      "new identity restored its own saved selection");
+    assert.equal(typeof currentSubmitSuccess, "function");
+
+    await act(async () => oldSubmitSuccess());
+    assert.equal(dom.window.localStorage.getItem(aliceKey), null,
+      "late success only clears the old identity's draft");
+    assert.equal(dom.window.localStorage.getItem(bobKey), destinationDraft,
+      "old success must not clear or replace the current identity's draft");
+    assert.equal(selected(container, "none").checked, true);
+
+    await act(async () => currentSubmitSuccess());
+    assert.equal(dom.window.localStorage.getItem(bobKey), null,
+      "current identity may still clear its own draft after successful submission");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
