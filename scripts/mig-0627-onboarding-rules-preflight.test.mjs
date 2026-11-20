@@ -27,7 +27,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const db = breakD1 ? {
       ...d1,
       prepare(sql) {
-        if (/FROM terms_versions\\b/i.test(sql)) throw new Error("SYNTHETIC_D1_UNAVAILABLE");
+        if (/FROM terms_versions\b/i.test(sql)) throw new Error("SYNTHETIC_D1_UNAVAILABLE");
         return d1.prepare(sql);
       },
     } : d1;
@@ -40,7 +40,7 @@ if (runUnderRootTsx(import.meta.url)) {
 
   test("MIG-0627 U02c PREP T01: published R2 rules are CURRENT-normalized, no fallback D1 statement", async (t) => {
     const payload = {
-      body_markdown: "# Published rules\\n\\nPublished text",
+      body_markdown: "# Published rules\n\nPublished text",
       version_label: "published-v3",
       published_at: 1700000000,
     };
@@ -61,7 +61,7 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   test("MIG-0627 U02c PREP T02: build-time published rules project identical version/body to Hono", async (t) => {
-    const payload = { version_label: "v2026.11", body_markdown: "# Rules 2026\\n\\nA", published_at: 1700000000 };
+    const payload = { version_label: "v2026.11", body_markdown: "# Rules 2026\n\nA", published_at: 1700000000 };
     const build = await loadRulesForBuild({ read: async () => payload });
     const hono = await request(t, { objects: { [key]: payload } });
     assert.equal(hono.response.status, 200);
