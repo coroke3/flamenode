@@ -15,7 +15,7 @@ permissions:
 jobs:
   capture-u12:
     if: github.event.pull_request.number == 448
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
