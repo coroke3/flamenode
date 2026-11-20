@@ -335,6 +335,53 @@ test("U03a: successful form submission clears only the active identity's shell d
   }
 });
 
+test("U03a ISSUE-703: submit success followed by immediate unmount cannot resurrect a cleared draft", async () => {
+  dom.window.localStorage.clear();
+  const keyFor = (authUserId, xid) => buildFormDraftStorageKey({
+    authUserId, formId: `unslotted-shell:${xid}`, schemaVersion: "unslotted-shell-v1",
+  });
+  const key = keyFor("u1", "alice");
+  const otherKey = keyFor("u2", "bob");
+  const otherDraft = JSON.stringify({
+    savedAt: Date.now(), value: { affiliation: "none", selectedEventId: "" },
+  });
+  dom.window.localStorage.setItem(otherKey, otherDraft);
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  let unmounted = false;
+  let submitSuccess;
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      renderVideoForm: args => {
+        submitSuccess = args.onSubmitSuccess;
+        return renderStub(args);
+      },
+    }))));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.ok(dom.window.localStorage.getItem(key));
+    assert.equal(typeof submitSuccess, "function");
+
+    // Synchronous route change can unmount before React renders dirty=false.
+    // The old cleanup must not flush the just-submitted draft a second time.
+    await act(async () => {
+      submitSuccess();
+      root.unmount();
+      unmounted = true;
+    });
+    assert.equal(dom.window.localStorage.getItem(key), null,
+      "success must leave the source draft removed even on immediate unmount");
+    assert.equal(dom.window.localStorage.getItem(otherKey), otherDraft,
+      "success cannot affect another user's existing draft");
+  } finally {
+    if (!unmounted) await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 // ISSUE-703 negative regression for the candidate shell-only identity boundary.
 // This is NOT evidence of parity in the mounted Next route or Lead approval.
 test("U03a ISSUE-703: switching auth user and Active X never copies a prior event draft", async () => {
