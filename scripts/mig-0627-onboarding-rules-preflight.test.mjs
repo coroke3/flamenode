@@ -13,7 +13,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const key = "rules/current.json";
   const visibilityKey = "visibility/blocked-entities.v1.json";
 
-  async function request(t, { objects = {}, mode, token = "tok-carol", breakD1 = false } = {}) {
+  async function request(t, { objects = {}, mode, token = "tok-carol", breakD1 = false, visibilityHeadOverride } = {}) {
     const sqlite = createSqlite();
     seed(sqlite);
     t.after(() => sqlite.close());
@@ -22,7 +22,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const bucket = fakeBucket(objects);
     const observedBucket = {
       async get(objectKey) { reads.get.push(objectKey); return bucket.get(objectKey); },
-      async head(objectKey) { reads.head.push(objectKey); return bucket.head(objectKey); },
+      async head(objectKey) { reads.head.push(objectKey); return objectKey === visibilityKey && visibilityHeadOverride !== undefined ? visibilityHeadOverride : bucket.head(objectKey); },
     };
     const db = breakD1 ? {
       ...d1,
@@ -120,5 +120,39 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(a.body.rules, null);
     assert.deepEqual(a.reads, { get: [], head: [] });
     assert.equal(a.stats.writes, 0);
+  });
+
+  test("MIG-0627 U02c PREP T07: zero-byte visibility manifest is rejected with zero rules reads", async (t) => {
+    const rules = { version_label: "v3", body_markdown: "# Current terms" };
+    const zero = await request(t, {
+      mode: "enforce", objects: { [key]: rules, [visibilityKey]: "" },
+    });
+    assert.equal(zero.response.status, 200);
+    assert.equal(zero.body.rules, null, "0-byte object cannot contain valid manifest JSON");
+    assert.deepEqual(zero.reads, { head: [visibilityKey], get: [] });
+    assert.equal(zero.stats.writes, 0);
+    const fractional = await request(t, {
+      mode: "enforce", objects: { [key]: rules },
+      visibilityHeadOverride: { etag: "etag-nonempty", size: 0.5 },
+    });
+    assert.equal(fractional.body.rules, null, "a non-integer HEAD size is not valid");
+    assert.deepEqual(fractional.reads, { head: [visibilityKey], get: [] });
+  });
+
+  test("MIG-0627 U02c PREP T08: visibility manifest HEAD enforces the existing 1-MiB boundary", async (t) => {
+    const rules = { version_label: "v3", body_markdown: "# Current terms" };
+    const max = 1024 * 1024;
+    const exact = await request(t, {
+      mode: "enforce", objects: { [key]: rules, [visibilityKey]: "x".repeat(max) },
+    });
+    assert.equal(exact.body.rules?.versionLabel, "v3",
+      "boundary test is only HEAD size parity, not valid manifest-body verification");
+    assert.deepEqual(exact.reads, { head: [visibilityKey], get: [key] });
+    const oversized = await request(t, {
+      mode: "enforce", objects: { [key]: rules, [visibilityKey]: "x".repeat(max + 1) },
+    });
+    assert.equal(oversized.body.rules, null);
+    assert.deepEqual(oversized.reads, { head: [visibilityKey], get: [] });
+    assert.equal(oversized.stats.writes, 0);
   });
 }
