@@ -13,6 +13,7 @@ import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/stati
 import { computeEventStatus, eventStatusLabel, isAcceptingEntries } from "../../../../src/lib/utils/eventStatusCore.ts";
 import { formatChapterTime } from "../../../../src/lib/utils/chapterTime.ts";
 import { formatUnix } from "../../../../src/lib/utils/format.ts";
+import { parseCanonicalXId } from "../../../../src/lib/utils/xid.ts";
 import { extractYoutubeId, videoPageHref, youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { extractYoutubePlaylistId } from "../../../../src/lib/youtube/playlist.ts";
 import { buildRouteMap } from "./routeMap.ts";
@@ -62,9 +63,12 @@ export function buildVideoPages(
   const youtubeVideoId = video.youtube_video_id?.trim() || null;
   const youtubeId = extractYoutubeId(youtubeVideoId);
   const canonicalSlug = youtubeId ?? video.id;
-  const creatorId = video.creator_x_user_id ?? "anonymous";
+  // The public snapshot is integrity-checked, but an old row may still have
+  // a non-canonical X handle. Never turn that handle into a navigable
+  // /user/ URL or an external X link (including dot/slash segments).
+  const creatorId = parseCanonicalXId(video.creator_x_user_id);
   const creatorName = video.creator_display_name?.trim() || "作者未設定";
-  const creatorHref = creatorId !== "anonymous" && ((video.creator_has_public_profile ?? false) || hasProjectedPublicProfile({ xUserId: creatorId, iconMap })) ? `/user/${creatorId}` : null;
+  const creatorHref = creatorId && ((video.creator_has_public_profile ?? false) || hasProjectedPublicProfile({ xUserId: creatorId, iconMap })) ? `/user/${creatorId}` : null;
   const primary = vm.primaryEvent;
   const primaryStatus = primary ? computeEventStatus(primary, now) : null;
 
@@ -79,7 +83,7 @@ export function buildVideoPages(
     title: video.title,
     creator: {
       name: creatorName,
-      xUserId: creatorId !== "anonymous" ? creatorId : null,
+      xUserId: creatorId,
       iconUrl: cachedGoogleImageUrl(video.creator_icon_url),
       profileHref: creatorHref,
       youtubeChannelUrl: video.creator_youtube_channel_url ?? null,
@@ -107,15 +111,18 @@ export function buildVideoPages(
         }
       : null,
     otherEvents: vm.publicEvents.filter((e) => e.id !== primary?.id).map((e) => ({ id: e.id, title: e.title })),
-    members: vm.publicMembers.map((m) => ({
-      id: m.id,
-      name: m.display_name,
-      xUserId: m.x_user_id,
-      ...projectVideoMemberPresentation(m, iconMap),
-      role: m.role_label,
-      comment: m.comment ?? null,
-      chapterTimes: vm.memberChapters.filter((c) => c.video_member_id === m.id).map((c) => formatChapterTime(c.chapter_time)),
-    })),
+    members: vm.publicMembers.map((m) => {
+      const xUserId = parseCanonicalXId(m.x_user_id);
+      return {
+        id: m.id,
+        name: m.display_name,
+        xUserId,
+        ...projectVideoMemberPresentation({ ...m, x_user_id: xUserId }, iconMap),
+        role: m.role_label,
+        comment: m.comment ?? null,
+        chapterTimes: vm.memberChapters.filter((c) => c.video_member_id === m.id).map((c) => formatChapterTime(c.chapter_time)),
+      };
+    }),
     chapters: chapters.map((c) => ({ id: c.id, timeLabel: formatChapterTime(c.t), label: c.label, authorName: c.author, kind: c.kind })),
     related: vm.relatedVideos.map((r) => ({
       href: videoPageHref(r),
