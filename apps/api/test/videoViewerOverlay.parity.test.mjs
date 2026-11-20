@@ -468,6 +468,18 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(body.privateChapters.length, 2, "private chapter reads survive optional-edit degradation");
     assert.ok(d1.stats.statements <= 3, "size fallback may not issue another D1 statement");
     assert.ok(bulkNote.length < 1000, "the fixture uses a valid complete chapter note");
+    const targeted = await app.request(
+      "/api/videos/vid-pub/viewer-overlay?editChapterId=chap-public-large-44", {
+        headers: { cookie: "authjs.session-token=tok-staff" },
+      }, env);
+    assert.equal(targeted.status, 200);
+    const targetedBody = await targeted.json();
+    assert.deepEqual(targetedBody.editablePublicChapters.map((c) => c.id),
+      ["chap-public-large-44"], "the single-row edit read can reach beyond the large default payload");
+    assert.equal(targetedBody.editablePublicChapters[0].note, bulkNote,
+      "on-demand editor must return complete original note");
+    assert.deepEqual(targetedBody.privateChapters, [],
+      "on-demand read does not waste its byte budget on unrelated private rows");
   });
 
   test("Issue #661: oversized required private data returns safe 503 instead of >64KiB payload", async () => {
@@ -507,6 +519,22 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(body.editablePublicChapters.length, 100);
     assert.ok(body.editablePublicChapters.every((row) => row.viewerCanManage === true &&
       !("chapter_owner_x_id" in row)), "bounded rows remain authorized and hide owner ids");
+    const targeted = await app.request(
+      "/api/videos/vid-pub/viewer-overlay?editChapterId=chap-public-extra-124", {
+        headers: { cookie: "authjs.session-token=tok-staff" },
+      }, env);
+    assert.equal(targeted.status, 200);
+    const targetBody = await targeted.json();
+    assert.deepEqual(targetBody.editablePublicChapters.map((row) => row.id),
+      ["chap-public-extra-124"], "single-row lookup reaches the chapter beyond the first 100");
+    assert.deepEqual(targetBody.privateChapters, [], "single-row lookup is resource bounded");
+    const denied = await app.request(
+      "/api/videos/vid-pub/viewer-overlay?editChapterId=chap-public-extra-124", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+    assert.equal(denied.status, 200);
+    assert.deepEqual((await denied.json()).editablePublicChapters, [],
+      "a targeted ID never overrides per-user public chapter authorization");
   });
 
   test("RH-031 selecting a different approved X must not lend owner-edit capability", async () => {

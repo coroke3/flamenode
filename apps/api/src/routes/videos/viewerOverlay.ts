@@ -302,7 +302,16 @@ SELECT
       // controls when D1 has already revoked the video's public visibility.
       const mayManagePublicView = viewerCanWriteChapters && matchesPublicD1Video;
       const canSeeAllPrivate = viewer.role === "admin" || viewerCanEditChapters;
-      const canSeeAnyPrivate = canSeeAllPrivate || approvedXIds.length > 0;
+      // An explicit public chapter ID is an on-demand editor lookup for rows
+      // beyond the default bounded page (or hidden by its byte budget).
+      // It is never an authorization claim: the same SQL/Active-X gates apply.
+      const requestedChapterId = c.req.query("editChapterId") ?? "";
+      const targetPublicChapterId = requestedChapterId.length > 0 &&
+        requestedChapterId.length <= 128 && requestedChapterId === requestedChapterId.trim()
+        ? requestedChapterId : null;
+      // Targeted requests only need an edit grant, not the unrelated private
+      // chapter list; keep the response small without a fourth D1 statement.
+      const canSeeAnyPrivate = !targetPublicChapterId && (canSeeAllPrivate || approvedXIds.length > 0);
       const isLibPlaylist = playlist === "lib-like" || playlist === "lib-bookmark";
       const libKind = playlist === "lib-like" ? "like" : "bookmark";
 
@@ -350,6 +359,7 @@ SELECT
              SELECT ch."id", ch."chapter_time", ch."chapter_label", ch."note", ch."x_user_id"
                FROM "video_chapters" ch
               WHERE ch."video_id" = ? AND ch."visibility" = 'public'
+                ${targetPublicChapterId ? 'AND ch."id" = ?' : ''}
                 AND (${viewerCanEditChapters ? "1=1" : `ch."x_user_id" = ? AND EXISTS (
                   SELECT 1 FROM "x_user_account_links" l
                   INNER JOIN "x_users" xu ON xu."id" = l."x_user_id"
@@ -359,7 +369,7 @@ SELECT
                 AND ch."id" NOT LIKE '%:member:%'
                 AND ch."id" NOT LIKE '%:legacy:%'
               ORDER BY ch."chapter_time" ASC, ch."id" ASC
-              LIMIT ${MAX_EDITABLE_PUBLIC_CHAPTER_ROWS}
+              LIMIT ${targetPublicChapterId ? 1 : MAX_EDITABLE_PUBLIC_CHAPTER_ROWS}
            ) c) AS editable_public_chapters_json`
         : `'[]' AS editable_public_chapters_json`;
 
@@ -405,6 +415,7 @@ SELECT
       }
       if (mayManagePublicView) {
         stmt2Binds.push(detail.video.id);
+        if (targetPublicChapterId) stmt2Binds.push(targetPublicChapterId);
         if (!viewerCanEditChapters) stmt2Binds.push(activeXId, viewer.id);
       }
       stmt2Binds.push(viewer.id, detail.video.id);
