@@ -361,3 +361,21 @@ test("T09: a manifest-allowed but digest-tampered event snapshot fails closed", 
     } finally { fs.rmSync(out, { recursive: true, force: true }); }
   } finally { clean(r); }
 });
+
+
+test("U12: built default video fixture contains linked and unlinked members for responsive evidence", { skip: skipUi }, () => {
+  // This checks the same HTML served to the local Playwright screenshot tool;
+  // it is NOT a screenshot/visual comparison with the approved design.
+  const file = path.resolve("apps/site/dist/dKw1xV41f8s/index.html");
+  assert.ok(fs.existsSync(file), "fixture Astro site must be built for U12 preflight");
+  const doc = new JSDOM(fs.readFileSync(file, "utf-8")).window.document;
+  const rows = [...doc.querySelectorAll("tr.vd-mrow")];
+  assert.equal(rows.length, 2, "the public video fixture must have both types of member");
+  assert.match(text(rows[0]), /映像担当（公開）/);
+  assert.match(text(rows[1]), /音楽担当（非公開）/);
+  assert.ok(rows[0].querySelector('a[href="/user/fixture_video_member_public"]'),
+    "public-profile member is linked");
+  assert.equal(rows[1].querySelector('a[href^="/user/"]'), null,
+    "member without an approved profile must not get an internal user link");
+  assert.match(text(rows[0]), /0:24/, "member chapter is present in rendered SSR markup");
+});
