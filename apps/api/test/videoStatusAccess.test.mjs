@@ -1303,6 +1303,28 @@ test("MIG-0603: equal-cardinality rebuild event replacement after preload is rej
     insert(sqlite, "video_events", { video_id: "v1", event_id: "evB" });
     await attempt(manager,"manage_video_status",true,"manager-restored");
     await attempt(admin,"admin_video_status",true,"admin-restored");
+
+    // Primary-event replacement is a separate race from link replacement.
+    // The manager retains the exact evA grant and the combined target set
+    // remains at TWO distinct IDs: evA + evB (preload) -> evA + evC (commit).
+    // An unchanged cardinality must not authorize a stale rebuild plan.
+    sqlite.exec("DELETE FROM video_events WHERE video_id='v1' AND event_id='evB'");
+    sqlite.exec("UPDATE videos SET primary_event_id='evB' WHERE id='v1'");
+    const primarySnapshot = await loadManageVideoStatusSnapshot(db, manager, "evA", "v1");
+    const adminPrimarySnapshot = await loadAdminVideoStatusSnapshot(db, admin, "v1");
+    assert.equal(primarySnapshot.ok, true);
+    assert.equal(adminPrimarySnapshot.ok, true);
+    assert.deepEqual([...primarySnapshot.rebuildEventIds].sort(), ["evA", "evB"]);
+    assert.deepEqual([...adminPrimarySnapshot.rebuildEventIds].sort(), ["evA", "evB"]);
+    sqlite.exec("UPDATE videos SET primary_event_id='evC' WHERE id='v1'");
+    assert.equal((await loadManageVideoStatusSnapshot(db, manager, "evA", "v1")).ok, true,
+      "the manager is still authorized; only the primary rebuild target changed");
+    await attempt(manager,"manage_video_status",false,"manager-primary-swap");
+    await attempt(admin,"admin_video_status",false,"admin-primary-swap");
+    sqlite.exec("UPDATE videos SET primary_event_id='evB' WHERE id='v1'");
+    await attempt(manager,"manage_video_status",true,"manager-primary-restored");
+    await attempt(admin,"admin_video_status",true,"admin-primary-restored");
+
     assert.ok(d1.stats.maxBinds <= 100,"exact snapshot set check must use bounded JSON binds");
   } finally { sqlite.close(); }
 });
