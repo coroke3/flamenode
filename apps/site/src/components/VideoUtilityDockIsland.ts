@@ -26,6 +26,8 @@ export interface VideoUtilityDockIslandProps {
   /** The mount caller must authorize bulk from the actual operator permission, not active X alone. */
   canBulk?: boolean;
   editableChapters?: readonly EditableChapter[];
+  /** A user action triggers a separately authorized single-chapter read. */
+  onRequestPublicChapterEdit?: (chapterId: string) => Promise<boolean>;
   onRefresh?: () => void;
 }
 
@@ -160,7 +162,7 @@ export function uniquePlaylistItems(items: VideoViewerOverlayDto["playlistItems"
 /** U03: no Next import, private viewer state is injected by the eventual U01 owner. */
 export function VideoUtilityDockIsland({
   videoId, currentId, publicChapters, overlay, loading,
-  canBulk = false, editableChapters = [], onRefresh,
+  canBulk = false, editableChapters = [], onRequestPublicChapterEdit, onRefresh,
 }: VideoUtilityDockIslandProps): React.ReactElement | null {
   const [mounted, setMounted] = React.useState(false);
   const [playlist, setPlaylist] = React.useState("");
@@ -171,6 +173,10 @@ export function VideoUtilityDockIsland({
   const [orderPlaylist, setOrderPlaylist] = React.useState<string | null>(null);
   const [ready, setReady] = React.useState(false);
   const [isMobile, setIsMobile] = React.useState(false);
+  const [chapterEditLookup, setChapterEditLookup] = React.useState<{
+    id: string; status: "loading" | "denied" | "allowed";
+  } | null>(null);
+  React.useEffect(() => { setChapterEditLookup(null); }, [overlay, videoId, loading]);
   const historyOwned = React.useRef(false);
   const pendingHref = React.useRef<string | null>(null);
   const autoNextNavigated = React.useRef(false);
@@ -297,6 +303,9 @@ export function VideoUtilityDockIsland({
   if (!mounted) return null;
   const postPolicy = chapterPostPolicy(overlay, loading, window.location.pathname + window.location.search);
   const canPost = postPolicy.canPost;
+  const editablePublicIds = new Set(
+    editableChapters.filter((chapter) => chapter.visibility === "public").map((chapter) => chapter.id),
+  );
   const href = (item: NonNullable<typeof next>) => playlistItemHref(item, playlist);
   const onNavigation = (event: React.MouseEvent<HTMLElement>) => {
     if (!isMobile || panel === null || !historyOwned.current ||
@@ -371,7 +380,28 @@ export function VideoUtilityDockIsland({
                 if (seconds !== null) seekToTime(seconds);
               },
             }, chapter.timeLabel),
-            " ", chapter.label, chapter.authorName ? ` · ${chapter.authorName}` : ""),
+            " ", chapter.label, chapter.authorName ? ` · ${chapter.authorName}` : "",
+            canPost && onRequestPublicChapterEdit && chapter.kind !== "member" &&
+              !editablePublicIds.has(chapter.id)
+              ? h("button", {
+                type: "button",
+                disabled: chapterEditLookup?.id === chapter.id && chapterEditLookup.status === "loading",
+                "aria-label": `${chapter.label}の編集権限を確認`,
+                onClick: () => {
+                  setChapterEditLookup({ id: chapter.id, status: "loading" });
+                  void onRequestPublicChapterEdit(chapter.id).then((allowed) => {
+                    setChapterEditLookup({ id: chapter.id, status: allowed ? "allowed" : "denied" });
+                  }).catch(() => {
+                    setChapterEditLookup({ id: chapter.id, status: "denied" });
+                  });
+                },
+              }, chapterEditLookup?.id === chapter.id && chapterEditLookup.status === "loading"
+                ? "確認中…" : "編集を確認")
+              : null,
+            chapterEditLookup?.id === chapter.id && chapterEditLookup.status === "denied"
+              ? h("span", { role: "status" }, "編集権限を確認できませんでした。") : null,
+            chapterEditLookup?.id === chapter.id && chapterEditLookup.status === "allowed"
+              ? h("span", { role: "status" }, "下の編集欄から操作できます。") : null),
         )),
       h(VideoChapterIsland, {
         videoId, activeXId: overlay.activeXId, canPost,

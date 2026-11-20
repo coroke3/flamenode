@@ -2,7 +2,7 @@ import React from "react";
 import { useVideoViewerOverlay, notifyVideoViewerOverlayChanged } from "../lib/viewerOverlay.ts";
 import { VideoUtilityDockIsland, type PublicVideoChapter } from "./VideoUtilityDockIsland.ts";
 import type { EditableChapter } from "./VideoChapterIsland.ts";
-import type { VideoViewerOverlayDto } from "@flamenode/contracts";
+import { VideoViewerOverlayResponseSchema, type VideoViewerOverlayDto } from "@flamenode/contracts";
 import { formatChapterTime } from "../../../../packages/domain/src/video/chapterTime.ts";
 
 /**
@@ -70,7 +70,57 @@ export function VideoUtilityDockConnected({
   publicChapters: readonly PublicVideoChapter[];
 }): React.ReactElement {
   const { overlay, loading } = useVideoViewerOverlay(videoId);
+  // Keep per-viewer single-chapter lookups ephemeral. The baseline overlay
+  // object is a version token: switching X, signing out, refreshing or
+  // changing video invalidates previously fetched editor DTOs immediately.
+  const latestOverlay = React.useRef(overlay);
+  latestOverlay.current = overlay;
+  const [confirmed, setConfirmed] = React.useState<{
+    source: VideoViewerOverlayDto;
+    rows: EditableChapter[];
+  } | null>(null);
   const { canBulk, editableChapters } = chapterManagementForOverlay(publicChapters, overlay, loading);
+  const trustedExtras = !loading && confirmed?.source === overlay ? confirmed.rows : [];
+  const seen = new Set(editableChapters.map((chapter) => chapter.id));
+  const allEditableChapters = [...editableChapters, ...trustedExtras.filter((chapter) => !seen.has(chapter.id))];
+
+  const requestPublicChapterEdit = async (chapterId: string): Promise<boolean> => {
+    const originalOverlay = latestOverlay.current;
+    if (loading || !originalOverlay.loggedIn || originalOverlay.authUnavailable ||
+        originalOverlay.isBanned || !originalOverlay.isTosAccepted ||
+        originalOverlay.termsReacceptRequired || !originalOverlay.viewerXApproved ||
+        !originalOverlay.activeXId?.trim() ||
+        !publicChapters.some((chapter) => chapter.id === chapterId && chapter.kind !== "member") ||
+        chapterId.length > 128) return false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const url = `/api/videos/${encodeURIComponent(videoId)}/viewer-overlay?editChapterId=${encodeURIComponent(chapterId)}`;
+      const response = await fetch(url, {
+        credentials: "same-origin", cache: "no-store",
+        headers: { accept: "application/json" }, signal: controller.signal,
+      });
+      if (!response.ok || latestOverlay.current !== originalOverlay) return false;
+      const parsed = VideoViewerOverlayResponseSchema.safeParse(await response.json());
+      if (!parsed.success || latestOverlay.current !== originalOverlay ||
+          parsed.data.activeXId !== originalOverlay.activeXId) return false;
+      const editor = chapterManagementForOverlay(publicChapters, parsed.data, false)
+        .editableChapters.find((chapter) => chapter.id === chapterId && chapter.visibility === "public");
+      if (!editor) return false;
+      setConfirmed((previous) => ({
+        source: originalOverlay,
+        rows: previous?.source === originalOverlay
+          ? [...previous.rows.filter((row) => row.id !== chapterId), editor]
+          : [editor],
+      }));
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   return React.createElement(VideoUtilityDockIsland, {
     videoId,
     currentId,
@@ -78,8 +128,12 @@ export function VideoUtilityDockConnected({
     overlay,
     loading,
     canBulk,
-    editableChapters,
-    onRefresh: () => notifyVideoViewerOverlayChanged(videoId),
+    editableChapters: allEditableChapters,
+    onRequestPublicChapterEdit: requestPublicChapterEdit,
+    onRefresh: () => {
+      setConfirmed(null);
+      notifyVideoViewerOverlayChanged(videoId);
+    },
   });
 }
 export default VideoUtilityDockConnected;

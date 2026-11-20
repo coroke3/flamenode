@@ -936,6 +936,39 @@ test("Issue #661: public chapter PUT preserves the current D1 note and public vi
   });
 });
 
+test("Issue #661: on-demand edit affordance checks permission without trusting SSG row", async () => {
+  await withChapterDom(async (doc, root) => {
+    const { VideoUtilityDockIsland } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+    const overlay = {
+      loggedIn: true, authUnavailable: false, isBanned: false,
+      isTosAccepted: true, termsReacceptRequired: false,
+      viewerXApproved: true, activeXId: "owner-x", viewerCanEditChapters: false,
+      privateChapters: [], editablePublicChapters: [],
+      likeActive: false, bookmarkActive: false, playlistLabel: "再生リスト", playlistItems: [],
+    };
+    let requested = [];
+    const render = (override = {}) => React.createElement(VideoUtilityDockIsland, {
+      videoId: "vid-pub", currentId: "vid-pub",
+      publicChapters: [{ id: "chapter-after-100", timeLabel: "1:00", label: "後続コメント", kind: "comment" }],
+      overlay, loading: false,
+      onRequestPublicChapterEdit: async (id) => {
+        requested.push(id);
+        return false;
+      },
+      ...override,
+    });
+    await React.act(async () => root.render(render()));
+    const find = () => [...doc.querySelectorAll("button")]
+      .find((button) => button.getAttribute("aria-label") === "後続コメントの編集権限を確認");
+    assert.ok(find(), "a published public chapter can request per-row authorization");
+    await React.act(async () => { find().click(); });
+    assert.deepEqual(requested, ["chapter-after-100"]);
+    assert.match(doc.body.textContent, /編集権限を確認できませんでした/);
+    await React.act(async () => root.render(render({ loading: true })));
+    assert.equal(find(), undefined, "no check affordance while viewer permissions are loading");
+  });
+});
+
 test("MIG-0518 chapter owner edits own private chapter without admin/bulk access", async () => {
   const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
   const base = {
