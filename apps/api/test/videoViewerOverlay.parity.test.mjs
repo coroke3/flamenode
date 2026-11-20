@@ -867,6 +867,88 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(await emptyIdRes.json(), { error: "invalid_video_id" });
   });
 
+  test("Issue #709: 500 valid multibyte public playlist rows stay <=64KiB on every RH-031 early-return", async () => {
+    const items = Array.from({ length: 500 }, (_, i) => ({
+      id: "large-video-" + i,
+      title: "あ".repeat(120),
+      youtube_video_id: "yt_" + i,
+      display_name: "表示名".repeat(40),
+    }));
+    const artifact = {
+      schema_version: 1, generated_at: 1000, event_id: "evt-1",
+      complete: true, items,
+    };
+    assert.ok(Buffer.byteLength(JSON.stringify(artifact), "utf8") > 64 * 1024,
+      "a valid complete 500-item artifact must exceed the S2 byte ceiling");
+
+    const cases = [
+      "static-only", "anonymous", "session-unavailable", "missing-user-row",
+      "banned", "db-read-degraded", "authenticated",
+    ];
+    for (const name of cases) {
+      const { env, bucket, d1 } = setupTestEnv();
+      await bucket.put("events/evt-1/playlist.v1.json", JSON.stringify(artifact));
+      const headers = ["session-unavailable", "missing-user-row", "db-read-degraded", "authenticated"].includes(name)
+        ? { cookie: "authjs.session-token=tok-alice" }
+        : name === "banned" ? { cookie: "authjs.session-token=tok-banned" } : {};
+      if (name === "static-only") env.FORCE_STATIC_ONLY = "1";
+      if (name === "session-unavailable") env.DB = undefined;
+      let intercepted = 0;
+      if (name === "missing-user-row" || name === "db-read-degraded") {
+        const originalPrepare = env.DB.prepare.bind(env.DB);
+        env.DB.prepare = (sql) => {
+          const stmt = originalPrepare(sql);
+          const match = name === "missing-user-row"
+            ? sql.includes("AS video_json") && sql.includes("AS user_json")
+            : sql.includes("AS interactions_json");
+          if (!match) return stmt;
+          intercepted += 1;
+          const originalBind = stmt.bind.bind(stmt);
+          stmt.bind = (...args) => {
+            const bound = originalBind(...args);
+            bound.first = name === "missing-user-row"
+              ? async () => ({ video_json: null, user_json: null })
+              : async () => { throw new Error("injected D1 read failure"); };
+            return bound;
+          };
+          return stmt;
+        };
+      }
+
+      d1.stats.statements = 0;
+      const response = await app.request(
+        "/api/videos/vid-pub/viewer-overlay?playlist=evt-1", { headers }, env);
+      const raw = await response.text();
+      assert.equal(response.status, 200, name);
+      assert.ok(Buffer.byteLength(raw, "utf8") <= 64 * 1024,
+        name + ": actual HTTP UTF-8 response exceeds S2 64KiB");
+      assert.equal(response.headers.get("Cache-Control"),
+        "private, no-store, no-cache, must-revalidate", name);
+      const dto = JSON.parse(raw);
+      assert.equal(VideoViewerOverlayResponseSchema.safeParse(dto).success, true, name);
+      assert.deepEqual(dto.playlistItems, [], name + ": oversized optional playlist must be removed");
+      assert.equal(dto.playlistLabel, "再生リスト", name);
+      assert.deepEqual(dto.editablePublicChapters, [], name + ": no unauthorized public editor");
+      if (name === "static-only" || name === "anonymous") {
+        assert.equal(d1.stats.statements, 0, name + ": no D1 read required");
+        assert.equal(dto.loggedIn, false, name);
+      }
+      if (name === "session-unavailable" || name === "db-read-degraded")
+        assert.equal(dto.authUnavailable, true, name);
+      if (name === "banned") {
+        assert.equal(dto.isBanned, true);
+        assert.equal(dto.viewerCanEditChapters, false);
+      }
+      if (name === "authenticated") {
+        assert.equal(dto.loggedIn, true);
+        assert.ok(dto.privateChapters.length > 0, "required private chapter DTO survives playlist drop");
+      }
+      if (name === "missing-user-row" || name === "db-read-degraded")
+        assert.equal(intercepted, 1, name + ": must hit the intended D1 failure branch");
+      assert.ok(d1.stats.statements <= 3, name + ": S2 D1 read budget");
+    }
+  });
+
   test("T06: RH-031 playlist query for event上映順 returns playlist items", async () => {
     const { env } = setupTestEnv();
 

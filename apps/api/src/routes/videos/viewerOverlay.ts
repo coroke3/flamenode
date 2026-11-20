@@ -1,4 +1,4 @@
-import { Hono, type MiddlewareHandler } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { AppEnv } from "../../env.ts";
 import { sessionMiddleware } from "../../auth/session.ts";
 import { loadPublicSnapshot } from "../../lib/publicSnapshot.ts";
@@ -73,6 +73,36 @@ function emptyOverlay(args?: {
     playlistLabel: args?.playlistLabel ?? "再生リスト",
     playlistItems: args?.playlistItems ?? [],
   };
+}
+
+
+/**
+ * Issue #709: every successful/degraded RH-031 response, including early
+ * static-only and unauthenticated returns, must honor the UTF-8 S2 ceiling.
+ * The playlist and one-row editor projection are optional; private chapters
+ * and permission facts are not. Never truncate a PUT-ready chapter note.
+ */
+function boundedOverlayResponse(c: Context<AppEnv>, body: VideoViewerOverlayDto): Response {
+  const encode = (dto: VideoViewerOverlayDto) => JSON.stringify(dto);
+  const withinLimit = (json: string) =>
+    new TextEncoder().encode(json).byteLength <= MAX_VIEWER_OVERLAY_RESPONSE_BYTES;
+  let json = encode(body);
+  if (!withinLimit(json)) {
+    const noEditor = { ...body, editablePublicChapters: [] };
+    json = encode(noEditor);
+    if (!withinLimit(json)) {
+      // A valid full public R2 playlist can contain 500 long UTF-8 titles.
+      // Do not let that optional list bypass the cap on early-return routes.
+      json = encode({ ...noEditor, playlistLabel: "再生リスト", playlistItems: [] });
+      if (!withinLimit(json)) {
+        return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+      }
+    }
+  }
+  return c.body(json, 200, {
+    ...PRIVATE_HEADERS,
+    "Content-Type": "application/json; charset=utf-8",
+  });
 }
 
 async function loadStaticEventPlaylistOverlay(
@@ -181,30 +211,26 @@ export function createVideoViewerOverlayRoutes(
 
     const operationMode = await resolvePublicOperationMode(c.env, { allowD1: false });
     if (!isLiveApiEnabled(operationMode)) {
-      return c.json(emptyOverlay(publicPlaylist), 200, PRIVATE_HEADERS);
+      return boundedOverlayResponse(c, emptyOverlay(publicPlaylist));
     }
 
     await resolveSession(c, async () => {});
     if (c.get("sessionState") === "unavailable") {
-      return c.json(
-        {
-          ...emptyOverlay(publicPlaylist),
-          authUnavailable: true,
-        },
-        200,
-        PRIVATE_HEADERS,
-      );
+      return boundedOverlayResponse(c, {
+        ...emptyOverlay(publicPlaylist),
+        authUnavailable: true,
+      });
     }
 
     const viewer = c.get("user");
     if (!viewer) {
-      return c.json(emptyOverlay(publicPlaylist), 200, PRIVATE_HEADERS);
+      return boundedOverlayResponse(c, emptyOverlay(publicPlaylist));
     }
 
     // CURRENT getCurrentUserContext: the user row (terms) and the approved linked X ids are read for
     // every signed-in viewer, banned included; a failed read is "auth unavailable" (signed out shape).
     const authUnavailable = () =>
-      c.json({ ...emptyOverlay(publicPlaylist), authUnavailable: true }, 200, PRIVATE_HEADERS);
+      boundedOverlayResponse(c, { ...emptyOverlay(publicPlaylist), authUnavailable: true });
     if (!c.env.DB) return authUnavailable();
 
     let degraded: Pick<
@@ -253,7 +279,7 @@ SELECT
         return authUnavailable();
       }
       // CURRENT: a session whose user row is gone is signed out.
-      if (!row1?.user_json) return c.json(emptyOverlay(publicPlaylist), 200, PRIVATE_HEADERS);
+      if (!row1?.user_json) return boundedOverlayResponse(c, emptyOverlay(publicPlaylist));
 
       const userData = JSON.parse(row1.user_json) as Record<string, unknown>;
       const isTosAccepted = userData.is_tos_accepted === 1;
@@ -272,18 +298,14 @@ SELECT
       const viewerCanWriteChapters = viewerXApproved && isTosAccepted && !termsReacceptRequired && viewer.is_banned !== 1;
 
       if (viewer.is_banned === 1) {
-        return c.json(
-          {
-            ...emptyOverlay(publicPlaylist),
-            loggedIn: true,
-            isBanned: true,
-            isTosAccepted,
-            termsReacceptRequired,
-            activeXId,
-          },
-          200,
-          PRIVATE_HEADERS,
-        );
+        return boundedOverlayResponse(c, {
+          ...emptyOverlay(publicPlaylist),
+          loggedIn: true,
+          isBanned: true,
+          isTosAccepted,
+          termsReacceptRequired,
+          activeXId,
+        });
       }
       degraded = { isTosAccepted, termsReacceptRequired, activeXId, viewerXApproved };
 
@@ -495,36 +517,17 @@ SELECT
       // Notes must be complete when offered for PUT. If the response would
       // exceed S2's 64KiB limit, fail closed instead of truncating any note,
       // returning a partially usable editor, or serializing an oversized body.
-      const responseJson = JSON.stringify(result);
-      let boundedResponseJson = responseJson;
-      if (new TextEncoder().encode(responseJson).byteLength > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
-        // The optional full-note edit projection must not take unrelated
-        // likes, bookmarks or private-chapter reads offline. Revoke all public
-        // edit controls and preserve the baseline overlay when it still fits.
-        // Never send a partly truncated chapter note as an editable row.
-        boundedResponseJson = JSON.stringify({ ...result, editablePublicChapters: [] });
-        if (new TextEncoder().encode(boundedResponseJson).byteLength > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
-          return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
-        }
-      }
-      return c.body(boundedResponseJson, 200, {
-        ...PRIVATE_HEADERS,
-        "Content-Type": "application/json; charset=utf-8",
-      });
+      return boundedOverlayResponse(c, result);
     } catch (error) {
       console.error("[video-viewer-overlay] db read failed", { rawId, error });
       if (!degraded) return authUnavailable();
       // CURRENT: the viewer is known, the overlay read failed.
-      return c.json(
-        {
-          ...emptyOverlay(publicPlaylist),
-          loggedIn: true,
-          authUnavailable: true,
-          ...degraded,
-        },
-        200,
-        PRIVATE_HEADERS,
-      );
+      return boundedOverlayResponse(c, {
+        ...emptyOverlay(publicPlaylist),
+        loggedIn: true,
+        authUnavailable: true,
+        ...degraded,
+      });
     }
   });
 
