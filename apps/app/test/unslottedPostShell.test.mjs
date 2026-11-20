@@ -715,3 +715,49 @@ test("U03a ISSUE-703: late submit success cannot clear a new identity draft", as
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: updated eligible options cannot revert an in-progress affiliation choice", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  dom.window.localStorage.setItem(key, JSON.stringify({
+    savedAt: Date.now(),
+    value: { affiliation: "event", selectedEventId: "event-A" },
+  }));
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const render = eventOptions => React.createElement(UnslottedPostShell, props({
+    eventOptions,
+  }));
+  try {
+    await act(async () => root.render(render([eventA])));
+    assert.equal(selected(container, "event").checked, true,
+      "the initial saved draft is restored");
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+
+    // Change affiliation without waiting for the debounce. The persisted
+    // event-A draft is intentionally still present while the UI has new state.
+    await act(async () => selected(container, "none").click());
+    assert.equal(selected(container, "none").checked, true);
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "");
+
+    // A public event-list refresh can provide a fresh array reference for the
+    // SAME eligible IDs; it must not replay the older draft over dirty state.
+    await act(async () => root.render(render([{ ...eventA }])));
+    assert.equal(selected(container, "none").checked, true,
+      "refreshed eligibility cannot undo an in-progress selection");
+    assert.equal(selected(container, "event").checked, false);
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "");
+
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const after = JSON.parse(dom.window.localStorage.getItem(key));
+    assert.deepEqual(after.value, { affiliation: "none", selectedEventId: "" },
+      "the edited draft must flush the current choice, not the old saved event");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
