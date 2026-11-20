@@ -860,6 +860,10 @@ test("MIG-0603: atomic status grant keeps latest major-terms reacceptance in CUR
     }
 
     await check(true, "no published major requires no reacceptance");
+    // CURRENT treats published_at=0 as absent for major-term reacceptance.
+    // The SQL assertion must match that legacy edge case at commit time.
+    published("major-epoch-zero", "major", 0);
+    await check(true, "a major published at epoch zero does not require reacceptance in CURRENT");
     published("major-1", "major", 100);
     await check(false, "new major publication after previously granted preflight");
     sqlite.prepare("UPDATE user SET accepted_terms_version_id='major-1' WHERE id='u_mgr'").run();
@@ -876,6 +880,19 @@ test("MIG-0603: atomic status grant keeps latest major-terms reacceptance in CUR
       terms_version_id: "major-2", consented_at: 251, consent_context: "edit",
     });
     await check(true, "historical consent to the current major satisfies reacceptance");
+    // With tied published_at, updated_at decides the latest once-published
+    // major. Consent to an earlier equal-time ID is insufficient.
+    published("major-2-reissued", "major", 200);
+    sqlite.prepare("UPDATE terms_versions SET updated_at=205 WHERE id='major-2-reissued'").run();
+    await check(false, "later updated major at same publish time requires its own consent");
+    insert(sqlite, "user_tos_consents", {
+      id: "consent-major-2-reissued", user_id: "u_mgr",
+      terms_version_id: "major-2-reissued", consented_at: 252, consent_context: "edit",
+    });
+    await check(true, "consent to the newer equal-publication-time major is sufficient");
+    // Published major remains authoritative even after archiving.
+    sqlite.exec("UPDATE terms_versions SET status='archived' WHERE id='major-2-reissued'");
+    await check(true, "archiving a once-published major does not change required consent");
     published("major-3", "major", 300);
     await check(false, "newer major revokes previous consent at commit");
     published("minor-4", "minor", 400);
