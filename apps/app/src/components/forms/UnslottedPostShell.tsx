@@ -259,18 +259,18 @@ export function UnslottedPostShell<
         // boundary even when the injected renderer returns an unkeyed form.
         <React.Fragment key={formKey}>
           {renderVideoForm({
-          formKey,
-          mode: "free",
-          activeXSnapshot: activeXId,
-          initial: {
-            ...initial,
-            event_ids: selectedEvent ? [selectedEvent.id] : [],
-            part: null,
-          } as Initial & { event_ids: string[]; part: null },
-          eventOptions: selectedEventOptions,
-          canEditEvents: false,
-          onDraftFlushReady: handleVideoDraftFlushReady,
-          onSubmitSuccess: handleVideoSubmitSuccess,
+            formKey,
+            mode: "free",
+            activeXSnapshot: activeXId,
+            initial: {
+              ...initial,
+              event_ids: selectedEvent ? [selectedEvent.id] : [],
+              part: null,
+            } as Initial & { event_ids: string[]; part: null },
+            eventOptions: selectedEventOptions,
+            canEditEvents: false,
+            onDraftFlushReady: handleVideoDraftFlushReady,
+            onSubmitSuccess: handleVideoSubmitSuccess,
           })}
         </React.Fragment>
       )}
