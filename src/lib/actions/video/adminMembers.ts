@@ -3,12 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
+import { readAdminVideoCollabFlag } from "@flamenode/domain/video";
+import { adminVideoMembersRebuildTargets } from "@flamenode/server-core/video/adminMemberRebuildTargets";
+import { buildAdminVideoMemberMetadataPlan } from "@flamenode/server-core/video/adminMemberMetadataPlan";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import {
-  collectMemberAggregationAffectedXUserIds,
-  extractPreviousPublicMemberXUserIdsFromMembersPlan,
+  deriveAdminVideoMemberSaveEffects,
 } from "@/lib/video/memberAggregationFanOut";
 import { validateVideoMemberSubmission } from "@/lib/video/submissionValidation";
 import type { VideoActionResult } from "@/lib/video/types";
@@ -24,12 +26,6 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusAction";
 import { publicVideoRevalidationPaths } from "@/lib/video/publicVideoRevalidationPaths";
-
-function formDataBoolean(formData: FormData, name: string): boolean {
-  return formData
-    .getAll(name)
-    .some((value) => value === "on" || value === "true");
-}
 
 function revalidateVideoMembersAdminPaths(input: {
   videoId: string;
@@ -96,12 +92,11 @@ export async function updateVideoMembersAdmin(
   );
   if (!rebuildEvents.ok) return { ok: false, message: rebuildEvents.message };
 
-  const isCollab = formDataBoolean(formData, "is_collab");
+  const isCollab = readAdminVideoCollabFlag(formData);
   const memberValidation = validateVideoMemberSubmission(formData, isCollab);
   if (!memberValidation.ok) return memberValidation;
 
   const members = memberValidation.value.members;
-  const nextCollaborationType = members.length > 0 || isCollab ? "collab" : "individual";
   const now = Math.floor(Date.now() / 1000);
   const traceId = createTraceId();
 
@@ -116,107 +111,39 @@ export async function updateVideoMembersAdmin(
     });
     appendVideoAtomicWritePlan(plan, membersPlan);
 
-    const hasMemberAudit = membersPlan.audits.some(
-      (audit) => audit.table_name === "video_members_set",
-    );
-    const hasChapterAudit = membersPlan.audits.some(
-      (audit) => audit.table_name === "video_chapters_member_set",
-    );
-    const collaborationTypeChanged =
-      target.collaboration_type !== nextCollaborationType;
-    const videoPublicContentChanged =
-      collaborationTypeChanged || hasMemberAudit || hasChapterAudit;
+    const {
+      nextCollaborationType,
+      videoPublicContentChanged,
+      affectedCreatorIds,
+      membersPlanChanged,
+    } = deriveAdminVideoMemberSaveEffects({
+      membersPlan,
+      previousCollaborationType: target.collaboration_type,
+      members,
+      isCollab,
+      isPublicVideo: target.visibility_status === "public",
+      creatorXUserId: target.creator_x_user_id,
+    });
 
     // 旧実装は保存内容が同じでもvideos.updated_atを毎回更新し、score dirty化と
     // 不要なstatic rebuildを誘発していた。公開内容か合作区分が実際に変わる時だけ
     // video本体をdirtyにする。member-set CASはmembersPlan側で引き続きfail-closed。
-    if (videoPublicContentChanged) {
-      plan.statements.push(
-        db
-          .update(videos)
-          .set({
-            collaboration_type: nextCollaborationType,
-            updated_at: now,
-          })
-          .where(eq(videos.id, videoId)),
-      );
-      plan.expectedChanges.push(1);
-      plan.audits.push({
-        table_name: "videos",
-        target_id: videoId,
-        operation: "UPDATE",
-        before: {
-          id: target.id,
-          collaboration_type: target.collaboration_type,
-          updated_at: target.updated_at,
-        },
-        after: {
-          id: target.id,
-          collaboration_type: nextCollaborationType,
-          updated_at: now,
-        },
-        actor_user_id: user.id,
-        context: "admin-video-members",
-        reason: "参加者設定から合作区分を同期",
-        retention_class: "normal",
-        restore_strategy: "none",
-        strict: true,
-      });
-    }
+    const metadataPlan = buildAdminVideoMemberMetadataPlan(db, {
+      target, nextCollaborationType, now, actorUserId: user.id,
+      publicContentChanged: videoPublicContentChanged,
+    });
+    appendVideoAtomicWritePlan(plan, metadataPlan);
 
-    const isPublicVideo = target.visibility_status === "public";
-    const affectedCreatorIds = isPublicVideo && hasMemberAudit
-      ? collectMemberAggregationAffectedXUserIds({
-          previousCreatorXUserId: target.creator_x_user_id,
-          nextCreatorXUserId: target.creator_x_user_id,
-          previousMemberXUserIds:
-            extractPreviousPublicMemberXUserIdsFromMembersPlan(membersPlan),
-          nextMembers: members,
-        })
-      : new Set<string>();
-    const memberAggregationChanged = affectedCreatorIds.size > 0;
-    const hasMembersPlanChanges = membersPlan.statements.length > 0;
 
-    const queueItems = [
-      ...(videoPublicContentChanged
-        ? [{
-            targetType: "video" as const,
-            targetId: videoId,
-            reason: "video_members_update",
-            requestedByUserId: user.id,
-          }]
-        : []),
-      ...(hasMembersPlanChanges
-        ? [{
-            targetType: "member_suggestions" as const,
-            targetId: "global",
-            reason: "video_members_update",
-          }]
-        : []),
-      ...(videoPublicContentChanged
-        ? rebuildEvents.eventIds.map((eventId) => ({
-            targetType: "event_release" as const,
-            targetId: eventId,
-            reason: "video_members_update",
-            priority: "high" as const,
-            requestedByUserId: user.id,
-          }))
-        : []),
-      ...(isPublicVideo && memberAggregationChanged
-        ? [
-            {
-              targetType: "users_index" as const,
-              targetId: "global",
-              reason: "video_members_update",
-            },
-            ...[...affectedCreatorIds].map((xUserId) => ({
-              targetType: "user" as const,
-              targetId: xUserId,
-              reason: "video_members_update",
-            })),
-          ]
-        : []),
-    ];
+    const queueItems = adminVideoMembersRebuildTargets({
+      videoId,
+      actorUserId: user.id,
+      publicContentChanged: videoPublicContentChanged,
+      membersPlanChanged,
+      eventIds: rebuildEvents.eventIds,
+      isPublicVideo: target.visibility_status === "public",
+      affectedCreatorIds,
+    });
 
     // 完全no-opならD1 mutation・audit・static rebuildを発生させない。
     if (plan.statements.length === 0) {

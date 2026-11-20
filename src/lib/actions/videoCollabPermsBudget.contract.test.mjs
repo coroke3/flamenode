@@ -6,22 +6,49 @@ const actionSource = await readFile(
   new URL("./video-collab-perms.ts", import.meta.url),
   "utf8",
 );
+const domainInputSource = await readFile(
+  new URL("../../../packages/domain/src/video/collaboratorPermissionInput.ts", import.meta.url),
+  "utf8",
+);
+const permissionMutationSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionMutationBatch.ts", import.meta.url),
+  "utf8",
+);
+const permissionPlanSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionPlan.ts", import.meta.url),
+  "utf8",
+);
+const permissionPreparationSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionPreparation.ts", import.meta.url),
+  "utf8",
+);
 const budgetSource = await readFile(
   new URL("../../../packages/server-core/src/audit/mutateBudget.ts", import.meta.url),
+  "utf8",
+);
+const notificationSqlSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionNotificationBulkSql.ts", import.meta.url),
   "utf8",
 );
 const notificationSource = await readFile(
   new URL("../notifications/enqueue.ts", import.meta.url),
   "utf8",
 );
+const notificationBatchSource = await readFile(
+  new URL("../../../packages/server-core/src/video/permissionNotificationBatch.ts", import.meta.url),
+  "utf8",
+);
 
 test("100人permission batchは人数分のmutation/auditを生成しない", () => {
-  assert.match(actionSource, /MAX_COLLABORATOR_PERMISSION_BATCH/);
-  assert.match(actionSource, /buildPermissionSetGuardSql/);
-  assert.match(actionSource, /buildMemberPermissionBulkUpdateSql/);
-  assert.match(actionSource, /buildVideoMemberBulkInsertSql\(insertHiddenRows/);
-  assert.match(actionSource, /buildHiddenMemberBulkDeleteSql/);
-  assert.match(actionSource, /table_name: "video_member_permissions_batch"/);
+  assert.match(actionSource, /permissionBatchSchema/);
+  assert.match(domainInputSource, /MAX_COLLABORATOR_PERMISSION_BATCH/);
+  assert.match(actionSource, /buildPermissionMutationBatch\(db, \{/);
+  assert.match(permissionMutationSource, /buildPermissionSetGuardSql/);
+  assert.match(permissionMutationSource, /buildMemberPermissionBulkUpdateSql/);
+  assert.match(permissionMutationSource, /buildVideoMemberBulkInsertSql\(/);
+  assert.match(permissionMutationSource, /buildHiddenMemberBulkDeleteSql/);
+  assert.match(actionSource, /buildPermissionWriteAudits\(\{/);
+  assert.match(permissionPlanSource, /table_name: "video_member_permissions_batch"/);
   assert.doesNotMatch(
     actionSource,
     /for \(const \[xid, intentInfo\] of intents\)[\s\S]*?statements\.push\(\s*db\.(?:insert|update|delete)/,
@@ -53,34 +80,25 @@ test("100人permission batchの通常最大経路はD1 Free 50-query budgetに�
   assert.ok(total <= 50);
   assert.match(budgetSource, /D1_MAX_BATCH_QUERIES = 50/);
   assert.match(budgetSource, /D1_RESERVED_CALLER_QUERIES = 18/);
-  assert.match(actionSource, /canonicalizePermissionIntents/);
+  assert.match(actionSource, /preparePermissionWrite/);
+  assert.match(permissionPreparationSource, /canonicalizePermissionIntents/);
   assert.doesNotMatch(actionSource, /Promise\.all\([^)]*resolveCanonicalXUserId/);
 });
 
 test("100人通知はJSON1 bindの1 statementへまとめ、必要時だけ200件単位でchunkする", () => {
   assert.match(notificationSource, /buildKnownRecipientNotificationBulkBatch/);
-  assert.match(notificationSource, /INSERT OR IGNORE INTO notification_outbox/);
-  assert.match(notificationSource, /FROM json_each\(\$\{payload\}\)/);
-  assert.match(notificationSource, /notification_bulk_batch_limit_exceeded/);
+  assert.match(notificationSource, /preparePermissionNotificationBulkBatch\(inputs, validateNotificationPayload\)/);
+  assert.match(notificationBatchSource, /buildPermissionNotificationBulkInsertSql\(rows\)/);
+  assert.match(notificationSqlSource, /INSERT OR IGNORE INTO notification_outbox/);
+  assert.match(notificationSqlSource, /FROM json_each\(\$\{payload\}\)/);
+  assert.match(notificationBatchSource, /notification_bulk_batch_limit_exceeded/);
   assert.match(actionSource, /offset \+= 200/);
   assert.match(actionSource, /notificationInputs\.slice\(offset, offset \+ 200\)/);
 });
 
 test("編集権限の解除後再付与は過去sent dedupeに吸収されず新しい通知遷移になる", () => {
-  assert.match(
-    notificationSource,
-    /function scopeBulkNotificationDedupeForTransition\(/,
-  );
-  assert.match(
-    notificationSource,
-    /prepared\.type !== "video_edit_permission_granted"/,
-  );
-  assert.match(
-    notificationSource,
-    /dedupeKey: `\$\{prepared\.dedupeKey\}:transition:\$\{crypto\.randomUUID\(\)\}`/,
-  );
-  assert.match(
-    notificationSource,
-    /scopeBulkNotificationDedupeForTransition\(prepared\)/,
-  );
+  assert.match(notificationSource, /preparePermissionNotificationBulkBatch/);
+  assert.match(notificationBatchSource, /prepared\.type === "video_edit_permission_granted"/);
+  assert.ok(notificationBatchSource.includes(":transition:"));
+  assert.match(notificationBatchSource, /new Set\(nonNullKeys\)\.size !== nonNullKeys\.length/);
 });

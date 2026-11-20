@@ -13,6 +13,7 @@ if (runTestWithTsx(import.meta.url)) {
     notificationSiteOrigin,
     validateNotificationPayload,
   } = await import("./format.ts");
+  const sharedPayload = await import("@flamenode/domain/notifications/payload");
 
   test("通知URLはNEXT_PUBLIC_SITE_URLだけをorigin正本にする", () => {
     const env = {
@@ -62,6 +63,14 @@ if (runTestWithTsx(import.meta.url)) {
     };
     assert.throws(() => appUrl("https://evil.example/path", env), /MUST_BE_RELATIVE/);
     assert.throws(() => appUrl("//evil.example/path", env), /MUST_BE_RELATIVE/);
+  });
+
+  test("Next notification format uses the exact shared Hono-safe domain validator", () => {
+    assert.equal(validateNotificationPayload, sharedPayload.validateNotificationPayload);
+    assert.deepEqual(
+      validateNotificationPayload("video_edit_permission_granted", { content: "ok" }),
+      sharedPayload.validateNotificationPayload("video_edit_permission_granted", { content: "ok" }),
+    );
   });
 
   test("正常系: 最小限の type + payload で OK", () => {

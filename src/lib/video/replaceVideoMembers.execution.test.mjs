@@ -30,6 +30,14 @@ if (runTestWithTsx(import.meta.url)) {
     MAX_STATIC_REBUILD_BATCH_TARGETS,
   } = await import("../staticRebuild/enqueue.ts");
 
+  test("MIG-0650 U03v legacy Next member plan is the exact runtime core function", async () => {
+    const core = await import("@flamenode/server-core/video/replaceVideoMembers");
+    assert.strictEqual(buildReplaceVideoMembersPlan, core.buildReplaceVideoMembersPlan);
+    const bridgeChunking = await import("./replaceVideoMembers.ts");
+    assert.equal(bridgeChunking.VIDEO_CHAPTER_JSON_MAX_BYTES, VIDEO_CHAPTER_JSON_MAX_BYTES);
+    assert.equal(bridgeChunking.VIDEO_CHAPTER_JSON_MAX_BINDS, VIDEO_CHAPTER_JSON_MAX_BINDS);
+  });
+
   function createDatabase() {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(`

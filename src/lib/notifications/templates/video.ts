@@ -1,3 +1,4 @@
+import { buildPermissionGrantDm } from "@flamenode/server-core/video/permissionGrantDm";
 import type { NotificationActor } from "../actor";
 import { formatOpsActorSection } from "../actor";
 import { appUrl, videoPublicPath } from "../format";
@@ -165,29 +166,10 @@ export function buildVideoEditPermissionGrantedNotification(args: {
   videoId: string;
   videoTitle: string;
 }): ReturnType<typeof buildDiscordPayload> {
+  // CURRENT supplies the validated public-origin URL; the shared template
+  // is pure so Hono can provide its independently validated host origin.
   const editUrl = appUrl(`/dashboard/edit/${args.videoId}`);
-  const title = escapeDiscordMention(args.videoTitle);
-  const content = buildNotificationBlocks([
-    {
-      heading: "【FlameNode】作品の編集権限が付与されました",
-      lines: [
-        `作品「${title}」を共同編集できるようになりました。`,
-        "タイトル・紹介文・メンバー情報など、許可された範囲を編集できます。",
-      ],
-    },
-    {
-      heading: "■ 次に行うこと",
-      lines: [
-        "編集画面を開き、担当範囲の修正を行ってください。",
-        linkLine("編集画面を開く", `/dashboard/edit/${args.videoId}`),
-      ],
-    },
-  ]);
-  return buildDiscordPayload({
-    content,
-    video_id: args.videoId,
-    url: editUrl,
-  });
+  return buildPermissionGrantDm({ ...args, editUrl });
 }
 
 /** 運営チャンネル向け: 作品新規登録通知。 */

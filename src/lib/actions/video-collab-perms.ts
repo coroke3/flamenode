@@ -2,52 +2,28 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { z } from "zod";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
-import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
+import { loadNotifiableRecipientLinks } from "@flamenode/server-core/video/permissionRecipients";
+import { buildPermissionGrantNotificationInputs } from "@flamenode/server-core/video/permissionNotificationInputs";
+import { buildPermissionMutationBatch } from "@flamenode/server-core/video/permissionMutationBatch";
+import { preparePermissionWrite } from "@flamenode/server-core/video/permissionPreparation";
+import { resolvePermissionSubjectXUserId } from "@flamenode/server-core/video/permissionSubject";
+import { loadAuthorizedPermissionVideo } from "@flamenode/server-core/video/permissionAccess";
+import { buildPermissionWriteAudits } from "@flamenode/server-core/video/permissionPlan";
+import { permissionRebuildTargets } from "@flamenode/server-core/video/permissionRebuildTargets";
+
 import { writeGuard } from "@/lib/auth/writeGuard";
-import {
-  canEditVideo,
-  canUseEventPrivilegeModeForVideo,
-  resolveVideoEditAccessContext,
-  type CanEditVideoPrivilegeMode,
-  type VideoEditAccessContext,
-} from "@/lib/auth/ownership";
-import {
-  users,
-  videoMembers,
-  videos,
-  xUserAccountLinks,
-  xUsers,
-} from "@/lib/db/schema";
-import {
-  MAX_COLLABORATOR_PERMISSION_BATCH,
-  MAX_VIDEO_HIDDEN_EDITORS,
-  MAX_VIDEO_MEMBERS,
-} from "@/lib/video/atomicLimits";
-import {
-  buildVideoMemberBulkInsertSql,
-  compareSqliteBinaryText,
-  toVideoMemberSnapshotRow,
-  VIDEO_MEMBER_ROW_JSON_SQL,
-} from "@/lib/video/memberSetSnapshot";
+import type { CanEditVideoPrivilegeMode } from "@/lib/auth/ownership";
+import { videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
-import { isCanonicalXId, normalizeXId } from "@/lib/utils/xid";
+import { upsertSchema, permissionBatchSchema, parseVideoCollaboratorDeleteInput } from "@flamenode/domain/video";
 import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/enqueue";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
-import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
-import { memberSuggestionsTarget } from "@/lib/staticRebuild/hooks";
 import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusAction";
-import {
-  getLinkedXUserIdsForAuthUser,
-  resolveCanonicalXUserId,
-  resolveCanonicalXUserResolutions,
-} from "@/lib/auth/xIdentity";
 
 export interface VideoCollabResult {
   ok: boolean;
@@ -61,7 +37,6 @@ export interface VideoCollabPermissionBatchResult extends VideoCollabResult {
 }
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
-type VideoMemberRow = typeof videoMembers.$inferSelect;
 type PermissionIntent = {
   x_user_id: string;
   display_name: string;
@@ -93,365 +68,13 @@ async function revalidateVideoCollabPathsBestEffort(videoId: string): Promise<vo
   );
 }
 
-const optionalXIdSchema = z
-  .string()
-  .trim()
-  .max(32)
-  .optional()
-  .transform((value) => normalizeXId(value ?? ""))
-  .refine((value) => !value || isCanonicalXId(value), {
-    message: "X ID は英数字とアンダースコア20文字以内で入力してください。",
-  });
-
-const permissionXIdSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(32)
-  .transform((value) => normalizeXId(value))
-  .refine((value) => isCanonicalXId(value), {
-    message: "X ID は英数字とアンダースコア20文字以内で入力してください。",
-  });
-
-const upsertSchema = z.object({
-  video_id: z.string().trim().min(1).max(64),
-  x_user_id: optionalXIdSchema,
-  user_id: z.string().trim().max(128).optional().nullable(),
-  display_name: z.string().trim().min(1).max(80),
-  can_edit: z
-    .union([z.literal("1"), z.literal("0"), z.literal("true"), z.literal("false")])
-    .optional()
-    .transform((value) => value === "1" || value === "true" || value === undefined),
-  notify: z
-    .union([z.literal("1"), z.literal("0")])
-    .optional()
-    .transform((value) => value === "1"),
-});
-
-const permissionIntentSchema = z.object({
-  x_user_id: permissionXIdSchema,
-  display_name: z.string().trim().min(1).max(80),
-  intent: z.union([z.literal("on"), z.literal("off")]),
-});
-
-const permissionBatchSchema = z.object({
-  video_id: z.string().trim().min(1).max(64),
-  edit_privilege_mode: z.enum(["normal", "admin", "event"]).optional(),
-  notify: z.boolean().optional().default(true),
-  intents: z
-    .array(permissionIntentSchema)
-    .min(1)
-    .max(MAX_COLLABORATOR_PERMISSION_BATCH),
-});
-
-async function resolvePrivilegeMode(
-  rawMode: string,
-  user: { id: string; role?: string | null },
-  video: Pick<typeof videos.$inferSelect, "id">,
-  accessContext: VideoEditAccessContext,
-): Promise<CanEditVideoPrivilegeMode> {
-  if (rawMode === "admin" && user.role === "admin") return "admin";
-  if (rawMode === "event") {
-    const canUseEvent = await canUseEventPrivilegeModeForVideo({ user, video, accessContext });
-    if (canUseEvent) return "event";
-  }
-  return "normal";
-}
-
 async function loadEditableVideoForPermissions(
   db: DB,
   actor: { id: string; role?: string | null },
   videoId: string,
   privilegeModeRaw: string,
 ): Promise<EditableVideo | null> {
-  const row = (
-    await db
-      .select({
-        id: videos.id,
-        title: videos.title,
-        primary_event_id: videos.primary_event_id,
-        creator_x_user_id: videos.creator_x_user_id,
-        submitted_by_user_id: videos.submitted_by_user_id,
-        visibility_status: videos.visibility_status,
-      })
-      .from(videos)
-      .where(eq(videos.id, videoId))
-      .limit(1)
-  )[0];
-  if (!row) return null;
-
-  const video = {
-    ...row,
-    submitted_by_user_id: row.submitted_by_user_id ?? "",
-  };
-  const accessContext = await resolveVideoEditAccessContext({
-    db,
-    user: actor,
-    video,
-  });
-  const requested = privilegeModeRaw.trim();
-  const requestedMode = await resolvePrivilegeMode(requested, actor, video, accessContext);
-  const requestedAllowed = await canEditVideo({
-    db,
-    user: actor,
-    video,
-    requiredKey: "video.permissions",
-    privilegeMode: requestedMode,
-    accessContext,
-  });
-  if (requestedAllowed) return { ...video, privilegeMode: requestedMode };
-
-  if (requested) return null;
-  if (actor.role === "admin") {
-    const adminAllowed = await canEditVideo({
-      db,
-      user: actor,
-      video,
-      requiredKey: "video.permissions",
-      privilegeMode: "admin",
-      accessContext,
-    });
-    if (adminAllowed) return { ...video, privilegeMode: "admin" };
-  }
-
-  const canUseEvent = await canUseEventPrivilegeModeForVideo({ user: actor, video, accessContext });
-  if (canUseEvent) {
-    const eventAllowed = await canEditVideo({
-      db,
-      user: actor,
-      video,
-      requiredKey: "video.permissions",
-      privilegeMode: "event",
-      accessContext,
-    });
-    if (eventAllowed) return { ...video, privilegeMode: "event" };
-  }
-  return null;
-}
-
-async function resolveSubjectXUserId(
-  db: DB,
-  xUserId: string | null,
-  authUserId: string | null,
-): Promise<{ ok: true; xUserId: string } | { ok: false; message: string }> {
-  if (xUserId) {
-    // A caller-supplied identity is a write target.  Do not turn an
-    // unresolved/corrupt alias into a new raw identifier here: that would
-    // bypass the common fail-closed alias policy and could create a dangling
-    // permission row.
-    const canonical = await resolveCanonicalXUserId(db, xUserId);
-    if (!canonical) {
-      return {
-        ok: false,
-        message: "指定した X ID を一意な正本として解決できません。",
-      };
-    }
-    if (authUserId) {
-      const approvedLinks = await getLinkedXUserIdsForAuthUser(db, authUserId, {
-        approvedOnly: true,
-      });
-      if (!approvedLinks.includes(canonical)) {
-        return {
-          ok: false,
-          message: "指定した認証ユーザーはその承認済み X ID に紐づいていません。",
-        };
-      }
-    }
-    return { ok: true, xUserId: canonical };
-  }
-
-  if (!authUserId) return { ok: false, message: "共同編集者の X ID が必要です。" };
-  const linked = await getLinkedXUserIdsForAuthUser(db, authUserId, {
-    approvedOnly: true,
-  });
-  if (linked.length === 0) {
-    return { ok: false, message: "指定した認証ユーザーに承認済み X ID がありません。" };
-  }
-  if (linked.length > 1) {
-    return {
-      ok: false,
-      message: "複数の X ID が紐づいているため、共同編集者の X ID を明示してください。",
-    };
-  }
-  return { ok: true, xUserId: linked[0]! };
-}
-
-async function canonicalizePermissionIntents(
-  db: DB,
-  input: readonly PermissionIntent[],
-): Promise<PermissionIntent[]> {
-  const normalized = input.map((item) => ({
-    ...item,
-    x_user_id: normalizeXId(item.x_user_id),
-  }));
-  const candidates = Array.from(
-    new Set(normalized.map((item) => item.x_user_id).filter(Boolean)),
-  );
-  if (candidates.length === 0) return normalized;
-
-  // Permission writes must use the same fail-closed identity policy as X ID
-  // lifecycle actions.  In particular, never turn a dangling/rejected or
-  // ambiguous historical alias into a new permission row.
-  const resolutions = await resolveCanonicalXUserResolutions(db, candidates);
-
-  return normalized.map((item) => {
-    const resolution = resolutions.get(item.x_user_id);
-    if (
-      resolution?.reason === "invalid_alias_target" ||
-      resolution?.reason === "ambiguous_alias" ||
-      resolution?.reason === "canonical_alias_collision" ||
-      resolution?.reason === "rejected_or_invalid"
-    ) {
-      throw new Error(`video_permission_x_user_resolution_invalid:${item.x_user_id}`);
-    }
-    return resolution?.value
-      ? { ...item, x_user_id: resolution.value }
-      : item;
-  });
-}
-
-function sortPermissionRows(rows: readonly VideoMemberRow[]): VideoMemberRow[] {
-  return [...rows].sort((left, right) => compareSqliteBinaryText(left.id, right.id));
-}
-
-function buildPermissionSetGuardSql(
-  videoId: string,
-  xids: readonly string[],
-  expectedRows: readonly VideoMemberRow[],
-) {
-  const xidsPayload = JSON.stringify([...xids].sort());
-  const expectedPayload = JSON.stringify(
-    sortPermissionRows(expectedRows).map(toVideoMemberSnapshotRow),
-  );
-  return sql`
-    SELECT CASE
-      WHEN (
-        SELECT COALESCE(json_group_array(json(row_json)), json('[]'))
-        FROM (
-          SELECT ${VIDEO_MEMBER_ROW_JSON_SQL} AS row_json
-          FROM video_members
-          WHERE video_id = ${videoId}
-            AND x_user_id IS NOT NULL
-            AND lower(x_user_id) IN (
-              SELECT lower(CAST(value AS TEXT)) FROM json_each(${xidsPayload})
-            )
-          ORDER BY id ASC
-        )
-      ) = json(${expectedPayload})
-      THEN 1
-      ELSE json_extract('video-permission-set-conflict', '$')
-    END
-  `;
-}
-
-function buildHiddenEditorCountGuardSql(videoId: string, expectedCount: number) {
-  return sql`
-    SELECT CASE
-      WHEN (
-        SELECT COUNT(*) FROM video_members
-        WHERE video_id = ${videoId} AND is_public_member = 0
-      ) = ${expectedCount}
-      THEN 1
-      ELSE json_extract('video-hidden-editor-count-conflict', '$')
-    END
-  `;
-}
-
-function buildXUsersBulkInsertSql(rows: readonly (typeof xUsers.$inferInsert)[]) {
-  const payload = JSON.stringify(rows);
-  return sql`
-    INSERT INTO x_users (
-      id,
-      x_name,
-      icon_url,
-      profile_text,
-      portfolio_contact,
-      youtube_channel_url,
-      other_social_links,
-      creative_start_date,
-      approval_status
-    )
-    SELECT
-      json_extract(value, '$.id'),
-      json_extract(value, '$.x_name'),
-      json_extract(value, '$.icon_url'),
-      json_extract(value, '$.profile_text'),
-      json_extract(value, '$.portfolio_contact'),
-      json_extract(value, '$.youtube_channel_url'),
-      json_extract(value, '$.other_social_links'),
-      json_extract(value, '$.creative_start_date'),
-      json_extract(value, '$.approval_status')
-    FROM json_each(${payload})
-    WHERE 1 = 1
-    ON CONFLICT(id) DO UPDATE SET
-      id = excluded.id
-    WHERE COALESCE(x_users.approval_status, 'pending') <> 'rejected'
-  `;
-}
-
-function buildMemberPermissionBulkUpdateSql(rows: readonly VideoMemberRow[]) {
-  const payload = JSON.stringify(rows.map(toVideoMemberSnapshotRow));
-  return sql`
-    WITH patches AS (
-      SELECT
-        json_extract(value, '$.id') AS id,
-        json_extract(value, '$.can_edit') AS can_edit,
-        json_extract(value, '$.edit_granted_by_auth_user_id') AS edit_granted_by_auth_user_id,
-        json_extract(value, '$.edit_granted_at') AS edit_granted_at,
-        json_extract(value, '$.edit_updated_at') AS edit_updated_at
-      FROM json_each(${payload})
-    )
-    UPDATE video_members
-    SET
-      can_edit = (SELECT can_edit FROM patches WHERE patches.id = video_members.id),
-      edit_granted_by_auth_user_id = (
-        SELECT edit_granted_by_auth_user_id FROM patches WHERE patches.id = video_members.id
-      ),
-      edit_granted_at = (
-        SELECT edit_granted_at FROM patches WHERE patches.id = video_members.id
-      ),
-      edit_updated_at = (
-        SELECT edit_updated_at FROM patches WHERE patches.id = video_members.id
-      )
-    WHERE id IN (SELECT id FROM patches)
-  `;
-}
-
-function buildHiddenMemberBulkDeleteSql(videoId: string, ids: readonly string[]) {
-  const payload = JSON.stringify(ids);
-  return sql`
-    DELETE FROM video_members
-    WHERE video_id = ${videoId}
-      AND is_public_member = 0
-      AND id IN (
-        SELECT CAST(value AS TEXT) FROM json_each(${payload})
-      )
-  `;
-}
-
-async function loadNotifiableRecipientLinks(
-  db: DB,
-  xids: readonly string[],
-): Promise<Array<{ x_user_id: string; auth_user_id: string }>> {
-  if (xids.length === 0) return [];
-  const payload = JSON.stringify(Array.from(new Set(xids)));
-  return db
-    .select({
-      x_user_id: xUserAccountLinks.x_user_id,
-      auth_user_id: xUserAccountLinks.auth_user_id,
-    })
-    .from(xUserAccountLinks)
-    .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
-    .innerJoin(users, eq(users.id, xUserAccountLinks.auth_user_id))
-    .where(
-      and(
-        sql`lower(${xUserAccountLinks.x_user_id}) IN (
-          SELECT lower(CAST(value AS TEXT)) FROM json_each(${payload})
-        )`,
-        eq(xUsers.approval_status, "approved"),
-        eq(users.is_notification_enabled, 1),
-      )!,
-    );
+  return loadAuthorizedPermissionVideo(db, actor, videoId, privilegeModeRaw);
 }
 
 async function applyPermissionIntentsToVideo(
@@ -463,362 +86,47 @@ async function applyPermissionIntentsToVideo(
     notify: boolean;
   },
 ): Promise<VideoCollabPermissionBatchResult> {
-  const canonicalIntents = await canonicalizePermissionIntents(db, args.intents);
-  const intents = new Map<string, { displayName: string; intent: "on" | "off" }>();
-  const duplicateXids = new Set<string>();
-  for (const item of canonicalIntents) {
-    const xid = normalizeXId(item.x_user_id);
-    if (!xid || !isCanonicalXId(xid)) {
-      return { ok: false, message: "有効な X ID を指定してください。" };
-    }
-    if (intents.has(xid)) {
-      duplicateXids.add(xid);
-      continue;
-    }
-    intents.set(xid, {
-      displayName: item.display_name.trim() || `@${xid}`,
-      intent: item.intent,
-    });
-  }
-  if (duplicateXids.size > 0) {
-    return {
-      ok: false,
-      message: `同じ X ID の権限指定が重複しています: ${Array.from(duplicateXids)
-        .map((xid) => `@${xid}`)
-        .join("、")}`,
-    };
-  }
+  const preparation = await preparePermissionWrite(db, {
+    videoId: video.id,
+    actorId: actor.id,
+    intents: args.intents,
+    notify: args.notify,
+    now: Math.floor(Date.now() / 1000),
+    makeMemberId: () => generateId("vm"),
+  });
+  if (preparation.kind === "error") return { ok: false, message: preparation.message };
+  if (preparation.kind === "terminal") return preparation.result;
+  const { xids, existingRows, currentHiddenEditorCount, plan } = preparation;
+  const { newXUsers, grantedNames, revokedNames, notifyXids, unchanged } = plan;
 
-  const xids = Array.from(intents.keys());
-  if (xids.length === 0) {
-    return {
-      ok: true,
-      message: "変更対象がありません。",
-      granted: [],
-      revoked: [],
-      unchanged: 0,
-    };
-  }
-
-  const xidsPayload = JSON.stringify(xids);
-  const existingRowLimit = MAX_VIDEO_MEMBERS + MAX_VIDEO_HIDDEN_EDITORS + 1;
-  const existingRows = await db
-    .select()
-    .from(videoMembers)
-    .where(
-      and(
-        eq(videoMembers.video_id, video.id),
-        isNotNull(videoMembers.x_user_id),
-        sql`lower(${videoMembers.x_user_id}) IN (
-          SELECT lower(CAST(value AS TEXT)) FROM json_each(${xidsPayload})
-        )`,
-      )!,
-    )
-    .limit(existingRowLimit);
-  if (existingRows.length >= existingRowLimit) {
-    return {
-      ok: false,
-      message: "同じ X ID の権限行が多すぎるため、安全に更新できません。重複データを整理してください。",
-    };
-  }
-
-  const rowsByXid = new Map<string, VideoMemberRow[]>();
-  for (const row of existingRows) {
-    const key = normalizeXId(row.x_user_id ?? "");
-    if (!key) continue;
-    const current = rowsByXid.get(key) ?? [];
-    current.push(row);
-    rowsByXid.set(key, current);
-  }
-  for (const rows of rowsByXid.values()) {
-    rows.sort(
-      (left, right) =>
-        right.is_public_member - left.is_public_member ||
-        right.can_edit - left.can_edit ||
-        compareSqliteBinaryText(left.id, right.id),
-    );
-  }
-
-  const currentHiddenCountRow = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(videoMembers)
-    .where(
-      and(
-        eq(videoMembers.video_id, video.id),
-        eq(videoMembers.is_public_member, 0),
-      )!,
-    );
-  const currentHiddenEditorCount = Number(currentHiddenCountRow[0]?.count ?? 0);
-  let nextHiddenEditorCount = currentHiddenEditorCount;
-
-  const grantXids = xids.filter((xid) => intents.get(xid)?.intent === "on");
-  const existingProfiles =
-    grantXids.length === 0
-      ? []
-      : await db
-          .select({
-            id: xUsers.id,
-            approval_status: xUsers.approval_status,
-          })
-          .from(xUsers)
-          .where(sql`lower(${xUsers.id}) IN (
-            SELECT lower(CAST(value AS TEXT))
-            FROM json_each(${JSON.stringify(grantXids)})
-          )`)
-          .limit(grantXids.length + 1);
-  const rejectedProfileIds = existingProfiles
-    .filter((row) => row.approval_status === "rejected")
-    .map((row) => normalizeXId(row.id));
-  if (rejectedProfileIds.length > 0) {
-    return {
-      ok: false,
-      message: `拒否済みの X ID には編集権限を付与できません: ${rejectedProfileIds
-        .map((xid) => `@${xid}`)
-        .join("、")}`,
-    };
-  }
-  const existingProfileIds = new Set(
-    existingProfiles.map((row) => normalizeXId(row.id)),
-  );
-
-  const now = Math.floor(Date.now() / 1000);
-  const updateRows: VideoMemberRow[] = [];
-  const insertHiddenRows: VideoMemberRow[] = [];
-  const deleteHiddenIds: string[] = [];
-  const newXUsers: Array<typeof xUsers.$inferInsert> = [];
-  const grantedNames: string[] = [];
-  const revokedNames: string[] = [];
-  const notifyXids: string[] = [];
-  let unchanged = 0;
-
-  for (const [xid, intentInfo] of intents) {
-    const label = `${intentInfo.displayName} @${xid}`;
-    const rowsForXid = rowsByXid.get(xid) ?? [];
-    const publicRows = rowsForXid.filter((row) => row.is_public_member === 1);
-    const hiddenRows = rowsForXid.filter((row) => row.is_public_member === 0);
-    const hadEffectiveEdit = rowsForXid.some((row) => row.can_edit === 1);
-
-    if (intentInfo.intent === "on") {
-      if (!existingProfileIds.has(xid)) {
-        newXUsers.push({
-          id: xid,
-          x_name: intentInfo.displayName || `@${xid}`,
-          icon_url: null,
-          profile_text: null,
-          portfolio_contact: null,
-          youtube_channel_url: null,
-          other_social_links: null,
-          creative_start_date: null,
-          approval_status: "pending",
-        });
-        existingProfileIds.add(xid);
-      }
-
-      if (publicRows.length > 0) {
-        const permissionSource = [...rowsForXid].sort(
-          (left, right) =>
-            right.can_edit - left.can_edit ||
-            Number(right.edit_updated_at ?? 0) - Number(left.edit_updated_at ?? 0) ||
-            compareSqliteBinaryText(left.id, right.id),
-        )[0]!;
-
-        for (const target of publicRows) {
-          if (target.can_edit === 1) continue;
-          updateRows.push({
-            ...target,
-            can_edit: 1,
-            edit_granted_by_auth_user_id:
-              permissionSource.can_edit === 1
-                ? permissionSource.edit_granted_by_auth_user_id
-                : actor.id,
-            edit_granted_at:
-              permissionSource.can_edit === 1 && permissionSource.edit_granted_at != null
-                ? permissionSource.edit_granted_at
-                : now,
-            edit_updated_at: now,
-          });
-        }
-        for (const hidden of hiddenRows) {
-          deleteHiddenIds.push(hidden.id);
-          nextHiddenEditorCount -= 1;
-        }
-      } else if (hiddenRows.length > 0) {
-        const target = hiddenRows[0]!;
-        if (target.can_edit !== 1) {
-          updateRows.push({
-            ...target,
-            can_edit: 1,
-            edit_granted_by_auth_user_id: actor.id,
-            edit_granted_at: target.edit_granted_at ?? now,
-            edit_updated_at: now,
-          });
-        }
-        for (const duplicate of hiddenRows.slice(1)) {
-          deleteHiddenIds.push(duplicate.id);
-          nextHiddenEditorCount -= 1;
-        }
-      } else {
-        insertHiddenRows.push({
-          id: generateId("vm"),
-          video_id: video.id,
-          x_user_id: xid,
-          name: intentInfo.displayName || `@${xid}`,
-          role: null,
-          comment: null,
-          order_index: 9999,
-          can_edit: 1,
-          is_public_member: 0,
-          edit_granted_by_auth_user_id: actor.id,
-          edit_granted_at: now,
-          edit_updated_at: now,
-        });
-        nextHiddenEditorCount += 1;
-      }
-
-      if (hadEffectiveEdit) {
-        unchanged += 1;
-      } else {
-        grantedNames.push(label);
-        if (args.notify) notifyXids.push(xid);
-      }
-      continue;
-    }
-
-    for (const row of publicRows) {
-      if (row.can_edit !== 1) continue;
-      updateRows.push({ ...row, can_edit: 0, edit_updated_at: now });
-    }
-    for (const hidden of hiddenRows) {
-      deleteHiddenIds.push(hidden.id);
-      nextHiddenEditorCount -= 1;
-    }
-    if (hadEffectiveEdit) revokedNames.push(label);
-    else unchanged += 1;
-  }
-
-  if (
-    insertHiddenRows.length > 0 &&
-    nextHiddenEditorCount > MAX_VIDEO_HIDDEN_EDITORS
-  ) {
-    return {
-      ok: false,
-      message: `非公開編集者は最大${MAX_VIDEO_HIDDEN_EDITORS}人です。これ以上編集権を付与できません。`,
-    };
-  }
-
-  if (
-    updateRows.length === 0 &&
-    insertHiddenRows.length === 0 &&
-    deleteHiddenIds.length === 0 &&
-    newXUsers.length === 0
-  ) {
-    return {
-      ok: true,
-      message: `編集権限を反映しました（付与 0 / 解除 0 / 変更なし ${unchanged}）`,
-      granted: [],
-      revoked: [],
-      unchanged,
-    };
-  }
-
-  const statements: BatchItem<"sqlite">[] = [];
-  const expected: Array<number | null> = [];
-  const audits: WriteAuditLogInput[] = [];
-
-  statements.push(db.run(buildPermissionSetGuardSql(video.id, xids, existingRows)));
-  expected.push(null);
-  if (insertHiddenRows.length > 0 || deleteHiddenIds.length > 0) {
-    statements.push(
-      db.run(buildHiddenEditorCountGuardSql(video.id, currentHiddenEditorCount)),
-    );
-    expected.push(null);
-  }
-  if (newXUsers.length > 0) {
-    statements.push(db.run(buildXUsersBulkInsertSql(newXUsers)));
-    // INSERT/同時作成済みpending・approvedはいずれも1 change/rowになる。
-    // 同時にrejected化された行だけDO UPDATE WHEREが0 changeとなり、直後の
-    // changes assertionでpermission mutation全体をfail-closed rollbackする。
-    expected.push(newXUsers.length);
-    audits.push({
-      table_name: "x_users_permission_batch",
-      target_id: video.id,
-      operation: "MERGE",
-      before: null,
-      after: { id: video.id, rows: newXUsers },
-      actor_user_id: actor.id,
-      context: "video_collab_permissions",
-      reason: `共同編集者X IDをpending一括確保 privilege:${video.privilegeMode}`,
-      retention_class: "long_audit",
-      restore_strategy: "none",
-      strict: true,
-    });
-  }
-  if (updateRows.length > 0) {
-    statements.push(db.run(buildMemberPermissionBulkUpdateSql(updateRows)));
-    expected.push(updateRows.length);
-  }
-  if (insertHiddenRows.length > 0) {
-    statements.push(db.run(buildVideoMemberBulkInsertSql(insertHiddenRows.map(toVideoMemberSnapshotRow))));
-    expected.push(insertHiddenRows.length);
-  }
-  if (deleteHiddenIds.length > 0) {
-    statements.push(db.run(buildHiddenMemberBulkDeleteSql(video.id, deleteHiddenIds)));
-    expected.push(deleteHiddenIds.length);
-  }
-
-  const afterById = new Map(existingRows.map((row) => [row.id, row]));
-  for (const row of updateRows) afterById.set(row.id, row);
-  for (const id of deleteHiddenIds) afterById.delete(id);
-  for (const row of insertHiddenRows) afterById.set(row.id, row);
-  audits.push({
-    table_name: "video_member_permissions_batch",
-    target_id: video.id,
-    operation: "MERGE",
-    before: {
-      id: video.id,
-      rows: sortPermissionRows(existingRows).map(toVideoMemberSnapshotRow),
-    },
-    after: {
-      id: video.id,
-      rows: sortPermissionRows([...afterById.values()]).map(toVideoMemberSnapshotRow),
-    },
-    actor_user_id: actor.id,
-    context: "video_collab_permissions",
-    reason: `共同編集権限を一括更新 privilege:${video.privilegeMode}`,
-    retention_class: "long_audit",
-    restore_strategy: "none",
-    strict: true,
+  const mutation = buildPermissionMutationBatch(db, {
+    videoId: video.id,
+    xids,
+    existingRows,
+    currentHiddenEditorCount,
+    plan,
+  });
+  const statements = [...mutation.statements];
+  const expected: Array<number | null> = [...mutation.expectedChanges];
+  const audits = buildPermissionWriteAudits({
+    videoId: video.id,
+    actorUserId: actor.id,
+    privilegeMode: video.privilegeMode,
+    existingRows,
+    plan,
   });
 
   let notificationWakeSource: "manage" | undefined;
   if (notifyXids.length > 0) {
     const links = await loadNotifiableRecipientLinks(db, notifyXids);
-    const notificationByKey = new Map<
-      string,
-      {
-        recipientUserId: string;
-        type: "video_edit_permission_granted";
-        dedupeKey: string;
-        payload: ReturnType<typeof buildVideoEditPermissionGrantedNotification>;
-        eventId: string | null;
-      }
-    >();
-    for (const link of links) {
-      if (link.auth_user_id === actor.id) continue;
-      const dedupeKey = `video_edit_permission_granted:${video.id}:x:${link.x_user_id}:user:${link.auth_user_id}`;
-      notificationByKey.set(dedupeKey, {
-        recipientUserId: link.auth_user_id,
-        type: "video_edit_permission_granted",
-        dedupeKey,
-        payload: buildVideoEditPermissionGrantedNotification({
-          videoId: video.id,
-          videoTitle: video.title,
-        }),
-        eventId: video.primary_event_id,
-      });
-    }
-
-    const notificationInputs = [...notificationByKey.values()];
+    const notificationInputs = buildPermissionGrantNotificationInputs({
+      links,
+      actorUserId: actor.id,
+      videoId: video.id,
+      videoTitle: video.title,
+      eventId: video.primary_event_id,
+      buildPayload: buildVideoEditPermissionGrantedNotification,
+    });
     for (let offset = 0; offset < notificationInputs.length; offset += 200) {
       const notification = await buildKnownRecipientNotificationBulkBatch(
         db,
@@ -837,27 +145,12 @@ async function applyPermissionIntentsToVideo(
   );
   if (!rebuildEvents.ok) return { ok: false, message: rebuildEvents.message };
 
-  const queue = await buildStaticRebuildQueueBatch(db, [
-    memberSuggestionsTarget("video_permissions_batch"),
-    ...(newXUsers.length > 0
-      ? [{
-          targetType: "users_index" as const,
-          targetId: "global",
-          reason: "video_permissions_new_x_user",
-          priority: "low" as const,
-          requestedByUserId: actor.id,
-        }]
-      : []),
-    ...(video.visibility_status === "public"
-      ? rebuildEvents.eventIds.map((eventId) => ({
-          targetType: "event_release" as const,
-          targetId: eventId,
-          reason: "video_permissions_batch",
-          priority: "high" as const,
-          requestedByUserId: actor.id,
-        }))
-      : []),
-  ]);
+  const queue = await buildStaticRebuildQueueBatch(db, permissionRebuildTargets({
+    hasNewXUsers: newXUsers.length > 0,
+    visibilityStatus: video.visibility_status,
+    eventIds: rebuildEvents.eventIds,
+    actorUserId: actor.id,
+  }));
   statements.push(...queue.statements);
   expected.push(...queue.expectedChanges);
 
@@ -915,7 +208,7 @@ export async function upsertVideoCollaborator(
       return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
     }
 
-    const resolved = await resolveSubjectXUserId(
+    const resolved = await resolvePermissionSubjectXUserId(
       db,
       parsed.data.x_user_id || null,
       parsed.data.user_id?.trim() || null,
@@ -952,11 +245,12 @@ export async function deleteVideoCollaborator(
   const guard = await writeGuard({ feature: "edit_video" });
   if (!guard.ok) return { ok: false, message: guard.message };
   const actor = { id: guard.user.id, role: guard.user.role ?? null };
-  const videoId = String(formData.get("video_id") ?? "").trim();
-  const rawXId = normalizeXId(String(formData.get("x_user_id") ?? ""));
-  if (!videoId || !rawXId || !isCanonicalXId(rawXId)) {
-    return { ok: false, message: "video_id と有効な X ID が必要です。" };
-  }
+  const input = parseVideoCollaboratorDeleteInput({
+    video_id: formData.get("video_id"),
+    x_user_id: formData.get("x_user_id"),
+  });
+  if (!input.ok) return { ok: false, message: input.message };
+  const { videoId, xUserId: rawXId } = input;
 
   const db = guard.db;
 
@@ -970,7 +264,7 @@ export async function deleteVideoCollaborator(
     if (!video) {
       return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
     }
-    const resolved = await resolveSubjectXUserId(db, rawXId, null);
+    const resolved = await resolvePermissionSubjectXUserId(db, rawXId, null);
     if (!resolved.ok) return { ok: false, message: resolved.message };
 
     const result = await applyPermissionIntentsToVideo(db, actor, video, {

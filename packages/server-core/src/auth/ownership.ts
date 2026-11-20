@@ -389,6 +389,8 @@ export async function resolveVideoEditAccessContext(args: {
   video: Pick<VideoRow, "id" | "creator_x_user_id" | "primary_event_id" | "visibility_status">;
   approvedXUserIds?: readonly string[];
   currentEventIds?: readonly string[];
+  /** Only video.permissions: skips the unnecessary owner general-field D1 read. Default preserves existing callers. */
+  skipOwnerEditableFields?: boolean;
 }): Promise<VideoEditAccessContext> {
   const approved = Array.from(
     args.approvedXUserIds ?? (await getApprovedXIds(args.db, args.user.id)),
@@ -434,7 +436,7 @@ export async function resolveVideoEditAccessContext(args: {
   // Event staff/admin requests do not need the normal owner policy.  Avoid an
   // extra primary-event/system-settings read for non-owners while retaining
   // the complete policy snapshot for owner/edit UI requests.
-  const ownerEditableFields = ownership.isOwner
+  const ownerEditableFields = ownership.isOwner && !args.skipOwnerEditableFields
     ? await loadEffectiveOwnerEditableFieldSet(args.db, args.video)
     : new Set<GeneralEditableFieldKey>();
   return {
