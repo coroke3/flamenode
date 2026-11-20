@@ -349,3 +349,46 @@ test("MIG-0627 U02a T15: duplicated allowed detail keys cannot amplify source re
     { reads: 1, accepted: 1, rejected: 0 },
   );
 });
+
+test("MIG-0627 U02a T16: visibility-blocked detail is never read or advertised", async () => {
+  const fixture = accessWith();
+  const key = "snapshot/video-detail/vid-aaa.json";
+  fixture.access.options.manifest.allowedKeys.push(key);
+  fixture.access.options.manifest.blockedKeys.push(key);
+  fixture.access.source.read = async (requested) => {
+    fixture.reads.push(requested);
+    throw new Error("blocked detail must not be read");
+  };
+  const pages = await loadSitemapCanonicalVideoPages(fixture.access, new Set(["vid-aaa"]));
+  assert.deepEqual(pages, []);
+  assert.deepEqual(fixture.reads, []);
+  assert.equal(fixture.metrics.reads, 0);
+  assert.deepEqual(
+    sitemapRowsForEmittedVideoPages([{ id: "vid-aaa", youtube_video_id: "dKw1xV41f8s", scheduled_time: null }], pages),
+    [],
+    "even a stale public index cannot re-advertise a manifest-revoked video",
+  );
+});
+
+test("MIG-0627 U02a T17: a valid envelope containing private video detail fails closed", async () => {
+  const fixture = accessWith();
+  const key = "snapshot/video-detail/vid-aaa.json";
+  fixture.access.options.manifest.allowedKeys.push(key);
+  const publicDetail = FIXTURE_VIDEO_DETAIL_PAYLOADS["vid-aaa"];
+  const privateDetail = {
+    ...publicDetail,
+    video: { ...publicDetail.video, visibility_status: "private" },
+  };
+  const bytes = buildEnvelope(privateDetail, { key });
+  fixture.access.source.read = async (requested) => {
+    fixture.reads.push(requested);
+    return requested === key ? bytes : null;
+  };
+  await assert.rejects(
+    loadSitemapCanonicalVideoPages(fixture.access, new Set(["vid-aaa"])),
+    /not a public, matching video detail/,
+  );
+  assert.deepEqual(fixture.reads, [key]);
+  assert.equal(fixture.metrics.reads, 1);
+  assert.equal(fixture.metrics.accepted, 1, "envelope validity alone does not make its detail public");
+});
