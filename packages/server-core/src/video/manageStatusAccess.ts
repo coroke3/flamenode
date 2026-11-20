@@ -442,8 +442,14 @@ export function planManageVideoStatusCommitAssertion(
   // D1 batch assertion, not an additional route-wide pre-read.
   const rebuildTargetsStillBounded = sql`(
     SELECT COUNT(*) FROM (
-      SELECT "event_id" AS "id" FROM "video_events"
-      WHERE "video_id" = ${videoId}
+      -- The (video_id,event_id) composite PK makes each linked ID unique.
+      -- Cap SOURCE rows, not just UNION output: SQLite may otherwise read
+      -- every linked row to build the UNION DISTINCT temporary B-tree.
+      SELECT "event_id" AS "id" FROM (
+        SELECT "event_id" FROM "video_events"
+        WHERE "video_id" = ${videoId}
+        LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
+      )
       UNION
       SELECT "primary_event_id" AS "id" FROM "videos"
       WHERE "id" = ${videoId} AND "primary_event_id" IS NOT NULL
@@ -464,12 +470,16 @@ export function planManageVideoStatusCommitAssertion(
     && new Set(expectedRebuildEventIds).size === expectedRebuildEventIds.length;
   const expectedIdsJson = validExpectedIds ? JSON.stringify(expectedRebuildEventIds) : "[]";
   const expectedIdsBounded = validExpectedIds && !exceedsRebuildIdBytes(expectedIdsJson);
-  // A missing/mismatched snapshot is already denied when the distinct count
-  // exceeds eight. Apply the same ninth-row ceiling to BOTH EXCEPT queries:
-  // malformed/imported fan-out must not force full-set materialization in D1.
-  // When the total is <=8, LIMIT 9 preserves the complete exact set.
+  // Both EXCEPT directions reuse the ninth-row ceiling, including on the
+  // linked-source SELECT (before UNION DISTINCT). A LIMIT on the outer UNION
+  // alone does NOT guarantee a bounded SQLite source scan. The composite
+  // video_events PK guarantees uniqueness of these linked event IDs.
+  // When <=8 linked targets exist this remains a full exact-set comparison.
   const currentRebuildIds = sql`(
-    SELECT "event_id" AS "id" FROM "video_events" WHERE "video_id" = ${videoId}
+    SELECT "event_id" AS "id" FROM (
+      SELECT "event_id" FROM "video_events" WHERE "video_id" = ${videoId}
+      LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
+    )
     UNION
     SELECT "primary_event_id" AS "id" FROM "videos"
     WHERE "id" = ${videoId} AND "primary_event_id" IS NOT NULL
