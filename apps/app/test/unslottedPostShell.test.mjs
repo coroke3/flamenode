@@ -873,3 +873,55 @@ test("U03a ISSUE-703: late submit from a previous affiliation cannot erase a new
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: late same-selection submit cannot discard later form edits", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const callbacks = [];
+  const renderVideoForm = args => {
+    callbacks.push(args.onSubmitSuccess);
+    return React.createElement("form", { "data-form-key": args.formKey },
+      React.createElement("select", { "data-testid": "edit-field", defaultValue: "before" },
+        React.createElement("option", { value: "before" }, "Before"),
+        React.createElement("option", { value: "after" }, "After")));
+  };
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      renderVideoForm,
+    }))));
+    await act(async () => selected(container, "none").click());
+    const submitSuccessBeforeEdit = callbacks.at(-1);
+    assert.equal(typeof submitSuccessBeforeEdit, "function");
+
+    // A changed form field in the same affiliation/user must protect new work.
+    const field = container.querySelector('select[data-testid="edit-field"]');
+    assert.ok(field);
+    await act(async () => setSelect(field, "after"));
+    assert.equal(field.value, "after");
+    const submitSuccessAfterEdit = callbacks.at(-1);
+    assert.equal(typeof submitSuccessAfterEdit, "function");
+    assert.notEqual(submitSuccessBeforeEdit, submitSuccessAfterEdit);
+
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const latestDraft = dom.window.localStorage.getItem(key);
+    assert.ok(latestDraft, "dirty shell draft is still present after editing a child field");
+
+    await act(async () => submitSuccessBeforeEdit());
+    assert.equal(dom.window.localStorage.getItem(key), latestDraft,
+      "an earlier pending submit cannot erase later edits in the same selection");
+    assert.equal(field.value, "after");
+
+    await act(async () => submitSuccessAfterEdit());
+    assert.equal(dom.window.localStorage.getItem(key), null,
+      "only completion for the latest edit generation can clear this shell draft");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
