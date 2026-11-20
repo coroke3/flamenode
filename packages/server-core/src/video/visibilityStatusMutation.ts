@@ -21,6 +21,8 @@ export type ExecuteVideoVisibilityStatusMutationInput<DB> = {
   transition: VideoVisibilityTransitionPlan;
   reason: string | null;
   logTag: string;
+  /** Trusted, preplanned authorization/frozen-target checks; never request JSON. */
+  preMutationAssertions?: readonly BatchItem<"sqlite">[];
   extraStatements?: BatchItem<"sqlite">[];
   extraExpected?: (number | null)[];
   extraAudits?: WriteAuditLogInput[];
@@ -29,6 +31,8 @@ export type ExecuteVideoVisibilityStatusMutationInput<DB> = {
 };
 
 type MutationPayload = {
+  /** Runs FIRST in the same strict audited D1 batch, before any status DML. */
+  preMutationAssertions?: readonly BatchItem<"sqlite">[];
   mutationStatements: BatchItem<"sqlite">[];
   expectedMutationChanges: (number | null)[];
   audits: WriteAuditLogInput[];
@@ -125,6 +129,7 @@ export async function executeVideoVisibilityStatusMutation<DB>(
     }
 
     await host.mutate(db, {
+      preMutationAssertions: input.preMutationAssertions,
       mutationStatements,
       expectedMutationChanges,
       audits,
