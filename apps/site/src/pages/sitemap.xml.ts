@@ -7,6 +7,7 @@ import { siteOrigin } from "../lib/pageHead.ts";
 import { getEventBuildData } from "../lib/eventData.ts";
 import { loadUserBuildData } from "../lib/userData.ts";
 import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "../lib/videoFixtures.ts";
+import { loadVideoPagesForBuild, type VideoPage } from "../lib/videoPage.ts";
 import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/staticVideoDetailCore.ts";
 import { snapshotAccessFromEnv, type SnapshotAccess } from "../lib/snapshotEnv.ts";
 import {
@@ -14,7 +15,7 @@ import {
   loadUsersIndexSnapshot,
   SnapshotBuildError,
   SITEMAP_VIDEOS_KEY,
-  videoDetailKeys,
+  type SitemapVideoRow,
   type SitemapVideoSnapshot,
 } from "../lib/publicDataLoader.ts";
 
@@ -54,12 +55,31 @@ export async function sitemapVideosOrEmpty(
   }
 }
 
+/**
+ * The video index can contain an out-of-date YouTube alias while the published
+ * detail page (and its canonical slug) has already changed. Use the actual
+ * emitted static page set, never the index alias alone, for sitemap links.
+ * Reads occur during the Astro build, not as request-time R2 lookups.
+ */
+export function sitemapRowsForEmittedVideoPages(
+  rows: readonly SitemapVideoRow[],
+  pages: readonly Pick<VideoPage, "videoId" | "canonicalSlug" | "slug" | "youtubeId">[],
+): SitemapVideoRow[] {
+  const canonical = new Map<string, string | null>();
+  for (const page of pages) {
+    if (page.slug === page.canonicalSlug) canonical.set(page.videoId, page.youtubeId);
+  }
+  return rows.filter((row) => canonical.has(row.id))
+    .map((row) => ({ ...row, youtube_video_id: canonical.get(row.id) ?? null }));
+}
+
 export async function GET(): Promise<Response> {
   const access = snapshotAccessFromEnv();
-  const [videos, events, users] = await Promise.all([
+  const [videos, events, users, videoPages] = await Promise.all([
     sitemapVideosOrEmpty(access),
     getEventBuildData(),
     loadUserBuildData(),
+    loadVideoPagesForBuild(),
   ]);
   let userGeneratedAt: number | null = null;
   if (access && users.index) {
@@ -67,19 +87,17 @@ export async function GET(): Promise<Response> {
     const value = Number(index.generated_at);
     if (Number.isFinite(value) && value > 0) userGeneratedAt = value;
   }
-  // The recent index may contain a public row without a static detail asset.
-  // Match the same manifest / detail map that Astro uses to emit the pages.
+  // A public index row is not evidence that its canonical detail URL was emitted.
+  // Match the exact set of Astro-generated pages, not just manifest key names.
   const manifest = access?.options.manifest;
   if (access && !manifest) {
     throw new Error("[sitemap] configured snapshot manifest is missing");
   }
-  const publishedVideoIds = manifest
-    ? new Set(videoDetailKeys(manifest).map((key) => key.slice("snapshot/video-detail/".length, -".json".length)))
-    : new Set(videos.videos.map((video) => video.id)); // no snapshot: verified fixture page emitter
+  const publishedVideos = sitemapRowsForEmittedVideoPages(videos.videos, videoPages);
   const publishedEventIds = new Set(events.details.keys());
   const entries = buildSitemapEntries({
     origin: siteOrigin(),
-    videos: publishedSitemapRows(videos.videos, publishedVideoIds),
+    videos: publishedVideos,
     events: publishedSitemapRows(events.index?.events ?? [], publishedEventIds),
     creators: users.index ?? [],
     generatedAt: [videos.generated_at, events.index?.generatedAt, userGeneratedAt],
