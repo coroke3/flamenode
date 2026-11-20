@@ -46,6 +46,24 @@ export type VideoPage = Readonly<{
 
 const TONE = { active: "public", published: "public", scheduled: "warning", ended: "draft", private: "draft" } as const;
 
+const PUBLIC_YOUTUBE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"]);
+
+/** Public snapshot text is not an outbound URL authorization. Only absolute
+ * web URLs may be linked; a "YouTube channel" additionally needs a trusted
+ * YouTube host over HTTPS. Invalid/legacy values render as plain text instead. */
+function safePublicExternalUrl(value: string | null | undefined, youtubeChannel = false): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value);
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) return null;
+    if (youtubeChannel && (url.protocol !== "https:" || !PUBLIC_YOUTUBE_HOSTS.has(url.hostname.toLowerCase()))) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+
 export function buildVideoPages(
   payload: unknown,
   key: string,
@@ -86,14 +104,14 @@ export function buildVideoPages(
       xUserId: creatorId,
       iconUrl: cachedGoogleImageUrl(video.creator_icon_url),
       profileHref: creatorHref,
-      youtubeChannelUrl: video.creator_youtube_channel_url ?? null,
+      youtubeChannelUrl: safePublicExternalUrl(video.creator_youtube_channel_url, true),
     },
     publishedLabel: video.scheduled_time ? formatUnix(video.scheduled_time, { dateOnly: true }) : null,
     thumbnailUrl: youtubeId ? youtubeThumbUrl(youtubeId, "maxresdefault") : null,
     hasYoutube: Boolean(youtubeId),
     music: video.music,
     credit: video.credit,
-    musicReferenceUrl: video.music_reference_url,
+    musicReferenceUrl: safePublicExternalUrl(video.music_reference_url),
     introComment: video.intro_comment,
     softwareLabel: vm.softwareLabel,
     highlights: video.highlights,
