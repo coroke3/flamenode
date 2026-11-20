@@ -541,6 +541,41 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3);
   });
 
+  test("Issue #709: huge required private chapter label fails before oversized JSON serialization", async () => {
+    const { env, sqlite, d1 } = setupTestEnv();
+    const hugeChapterLabel = "非公開チャプター".repeat(18_000);
+    sqlite.prepare('UPDATE "video_chapters" SET "chapter_label" = ? WHERE "id" = ?')
+      .run(hugeChapterLabel, "chap-priv-alice");
+    const originalStringify = JSON.stringify;
+    let oversizedDtoAttempts = 0;
+    JSON.stringify = function(value, replacer, space) {
+      if (value && typeof value === "object" &&
+          Array.isArray(value.privateChapters) &&
+          value.privateChapters.some((chapter) => chapter.chapter_label === hugeChapterLabel)) {
+        oversizedDtoAttempts += 1;
+        throw new Error("oversized_private_chapter_dto_stringified");
+      }
+      return originalStringify.call(JSON, value, replacer, space);
+    };
+    let response;
+    try {
+      d1.stats.statements = 0;
+      response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+    } finally {
+      JSON.stringify = originalStringify;
+    }
+    assert.equal(oversizedDtoAttempts, 0,
+      "large required chapter fields must fail before serializing a huge DTO");
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Cache-Control"),
+      "private, no-store, no-cache, must-revalidate");
+    assert.equal(response.headers.get("Retry-After"), "3");
+    assert.deepEqual(await response.json(), { error: "viewer_overlay_unavailable" });
+    assert.ok(d1.stats.statements <= 3, "S2 read budget must still hold");
+  });
+
   test("Issue #661: default public edit projection is empty; any of 125 rows can be checked on demand", async () => {
     const { env, sqlite } = setupTestEnv();
     for (let i = 0; i < 125; i++) {

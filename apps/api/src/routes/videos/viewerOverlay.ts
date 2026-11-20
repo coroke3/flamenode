@@ -99,7 +99,10 @@ function boundedOverlayResponse(c: Context<AppEnv>, body: VideoViewerOverlayDto)
   const units = (value: unknown) => typeof value === "string" ? value.length : 0;
   let mandatoryUnits = 0;
   for (const chapter of body.privateChapters) {
-    mandatoryUnits += units(chapter.note);
+    // Every string in a required private chapter is non-droppable; long
+    // legacy labels/author fields must fail before serializing the DTO too.
+    mandatoryUnits += units(chapter.id) + units(chapter.chapter_label) +
+      units(chapter.note) + units(chapter.author_name) + units(chapter.author_icon);
     if (mandatoryUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
       return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
     }
