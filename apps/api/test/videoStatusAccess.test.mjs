@@ -7,7 +7,7 @@ import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import { checkManageVideoStatusAccess, loadManageVideoStatusSnapshot, loadAdminVideoStatusSnapshot } from "../src/routes/videos/videoStatusAccess.ts";
-import { MAX_MANAGE_STATUS_REBUILD_EVENTS, planManageVideoStatusCommitAssertion } from "@flamenode/server-core/video/manageStatusAccess";
+import { MAX_MANAGE_STATUS_REBUILD_EVENTS, planAdminVideoStatusCommitAssertion, planManageVideoStatusCommitAssertion } from "@flamenode/server-core/video/manageStatusAccess";
 import { loadTosState } from "../src/middleware/writeOrigin.ts";
 import { evaluateCostGuardWithSettings } from "../src/middleware/costGuard.ts";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
@@ -1091,4 +1091,63 @@ test("MIG-0603: atomic grant fails closed when joined approved staff exceeds 256
   } finally {
     sqlite.close();
   }
+});
+
+
+test("MIG-0603: admin-only status guard handles unlinked video without event ID", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    enableStatusCostGuard(sqlite);
+    sqlite.exec("DELETE FROM video_events WHERE video_id='v1'");
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const admin = { id: "u_admin", role: "admin" };
+    const manager = { id: "u_mgr", role: "user" };
+    const preload = await loadAdminVideoStatusSnapshot(db, admin, "v1");
+    assert.equal(preload.ok, true);
+    assert.deepEqual(preload.rebuildEventIds, []);
+
+    const denied = [
+      ["admin-manage-unlinked", planManageVideoStatusCommitAssertion(db, admin, "evA", "v1", "tok-admin", "manage_video_status")],
+      ["admin-manage-null-event", planManageVideoStatusCommitAssertion(db, admin, null, "v1", "tok-admin", "manage_video_status")],
+      ["nonadmin-admin-key", planAdminVideoStatusCommitAssertion(db, manager, "v1", "tok-mgr")],
+      ["admin-video-missing", planAdminVideoStatusCommitAssertion(db, admin, "missing", "tok-admin")],
+    ];
+    for (const [description, guard] of denied) {
+      const start = d1.stats.statements;
+      await assert.rejects(db.batch([
+        guard,
+        db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+        db.run(sql`INSERT INTO audit_logs
+          (id,table_name,target_id,operation,actor_user_id,created_at)
+          VALUES ('unlinked-deny-audit','videos','v1','UPDATE','u_admin',1000)`),
+        db.run(sql`INSERT INTO notification_outbox
+          (id,type,payload_json,status,created_at)
+          VALUES ('unlinked-deny-outbox','video_posted','{}','pending',1000)`),
+      ].map(item=>preparedStatusTestBatchItem(db,item))),
+      /malformed JSON|not-valid-json/, description);
+      assert.equal(d1.stats.statements-start, 1, description + ": first atomic guard fails");
+      assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status, "pending");
+      assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE id='unlinked-deny-audit'").get().n, 0);
+      assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id='unlinked-deny-outbox'").get().n, 0);
+    }
+    const start = d1.stats.statements;
+    await db.batch([
+      planAdminVideoStatusCommitAssertion(db, admin, "v1", "tok-admin"),
+      db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+      db.run(sql`INSERT INTO audit_logs
+        (id,table_name,target_id,operation,actor_user_id,created_at)
+        VALUES ('unlinked-allow-audit','videos','v1','UPDATE','u_admin',1000)`),
+      db.run(sql`INSERT INTO notification_outbox
+        (id,type,payload_json,status,created_at)
+        VALUES ('unlinked-allow-outbox','video_posted','{}','pending',1000)`),
+    ].map(item=>preparedStatusTestBatchItem(db,item)));
+    assert.equal(d1.stats.statements-start,4, "same atomic batch, no extra D1 pre-read");
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status, "public");
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE id='unlinked-allow-audit'").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id='unlinked-allow-outbox'").get().n, 1);
+    assert.ok(d1.stats.maxBinds <= 100);
+  } finally { sqlite.close(); }
 });

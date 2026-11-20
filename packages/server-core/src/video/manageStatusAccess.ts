@@ -266,7 +266,9 @@ export async function loadAdminVideoStatusSnapshot(
 export function planManageVideoStatusCommitAssertion(
   db: ServerCoreDb,
   user: SessionUserLike,
-  eventId: string,
+  // Site-admin status input carries only videoId. Event-scoped manage calls
+  // must supply an event ID to prove exact video association.
+  eventId: string | null,
   videoId: string,
   // Trusted token from Auth.js session resolution, NEVER a JSON body field.
   // This signature is a design-only candidate; MIG-0602 does not expose it.
@@ -289,7 +291,9 @@ export function planManageVideoStatusCommitAssertion(
     ELSE '[]' END`;
   const hasCurrentStatusGrant = user.role === "admin"
     ? sql`1 = 1`
-    : sql`EXISTS (
+    : eventId === null
+      ? sql`0 = 1`
+      : sql`EXISTS (
       SELECT 1 FROM ${eventStaff}
       INNER JOIN ${xUserAccountLinks}
         ON ${eventStaff.x_user_id} = trim(${xUserAccountLinks.x_user_id})
@@ -425,12 +429,34 @@ export function planManageVideoStatusCommitAssertion(
         LIMIT ${MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT + 1}
       ) approved_staff
     ) <= ${MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT}`;
-  const targetStillLinked = sql`EXISTS (
-    SELECT 1 FROM ${videoEvents}
-    INNER JOIN ${videos} ON ${videos.id} = ${videoEvents.video_id}
-    INNER JOIN ${events} ON ${events.id} = ${videoEvents.event_id}
-    WHERE ${videoEvents.event_id} = ${eventId}
-      AND ${videoEvents.video_id} = ${videoId}
-  )`;
+  // Admin video status is GLOBAL; CURRENT admin body contains no event_id.
+  // Manage is event-scoped even for a site admin acting through that route.
+  const targetStillLinked = costGuardFeature === "admin_video_status"
+    ? sql`EXISTS (SELECT 1 FROM ${videos} WHERE ${videos.id} = ${videoId})`
+    : eventId === null
+      ? sql`0 = 1`
+      : sql`EXISTS (
+        SELECT 1 FROM ${videoEvents}
+        INNER JOIN ${videos} ON ${videos.id} = ${videoEvents.video_id}
+        INNER JOIN ${events} ON ${events.id} = ${videoEvents.event_id}
+        WHERE ${videoEvents.event_id} = ${eventId}
+          AND ${videoEvents.video_id} = ${videoId}
+      )`;
   return db.run(assertCondition(sql`${featureMatchesActor ? sql`1 = 1` : sql`0 = 1`} AND ${activeSessionStillValid} AND ${actorStillAllowed} AND ${costGuardStillAllows} AND ${hasCurrentStatusGrant} AND ${staffRowsStillBounded} AND ${targetStillLinked}`));
+}
+
+/**
+ * Design-only global site-admin first-batch guard. The admin input contract
+ * supplies video_id without event_id; do not force a fabricated event link.
+ * Shared identity/CostGuard/atomic audit route wiring is still UNMOUNTED.
+ */
+export function planAdminVideoStatusCommitAssertion(
+  db: ServerCoreDb,
+  user: SessionUserLike,
+  videoId: string,
+  sessionToken: string,
+) {
+  return planManageVideoStatusCommitAssertion(
+    db, user, null, videoId, sessionToken, "admin_video_status",
+  );
 }
