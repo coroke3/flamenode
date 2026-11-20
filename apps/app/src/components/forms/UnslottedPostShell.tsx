@@ -1,6 +1,6 @@
 // MIG-0714 U03a: unmounted, dependency-inverted port of CURRENT UnslottedPostForm shell.
 // This is NOT the complete VideoForm or a route: the parent supplies renderVideoForm.
-// State, labels, draft key, event/affiliation choice and flush semantics mirror CURRENT.
+// Labels/draft format mirror CURRENT. ISSUE-703 tightens shell identity lifecycle;\n// candidate-only until Lead review of the CURRENT parity deviation.
 import * as React from "react";
 import { Icon } from "../../routes/ui/Icon.js";
 import { normalizeXId } from "@flamenode/domain/xid";
@@ -41,7 +41,25 @@ export interface UnslottedPostShellProps<
 
 type AffiliationChoice = "none" | "event" | null;
 
+// MIG-0714 ISSUE-703 candidate fix, pending Lead/security/browser parity approval.
+// Key the shell itself, not only the VideoForm child: the shell owns event
+// selection, dirty flags, and the localStorage draft. A different auth user or
+// Active X ID must never inherit those values on a same-instance rerender.
 export function UnslottedPostShell<
+  Initial extends { event_ids?: string[]; part?: string | null },
+  Event extends UnslottedEventChoice,
+>(props: UnslottedPostShellProps<Initial, Event>): React.ReactElement {
+  const activeXKey = normalizeXId(props.activeXId ?? "") || "unassigned";
+  const authUserId = props.draftAuthUserId?.trim() ?? "";
+  return (
+    <UnslottedPostShellForIdentity
+      key={`unslotted-video:${authUserId || "anonymous"}:${activeXKey}`}
+      {...props}
+    />
+  );
+}
+
+function UnslottedPostShellForIdentity<
   Initial extends { event_ids?: string[]; part?: string | null },
   Event extends UnslottedEventChoice,
 >({
