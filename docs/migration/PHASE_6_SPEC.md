@@ -1299,10 +1299,23 @@ PRをrevert（bridge なので revert で戻る）。
 - 変更: 読み手の file（1 PR につき1消費系統）、`docs/migration/R2_ARTIFACT_CONSUMERS.md`、`docs/migration/FILE_MIGRATION_MATRIX.md`
 #### Micro-units
 - **U01 inventory**: MIG-0649 へ分割（DONE）。
-- **U02 replace**: Hono / Worker / sitemap の残存 R2 artifact 読み手を build 時 snapshot 等へ1系統ずつ置換。DTO は変えない。
-- **U03 gate**: MIG-0907 の U01 が参照できる状態（対象読み手の置換・`R2_ARTIFACT_CONSUMERS.md` 更新、`check:r2-artifact-consumers` 通過）を確認。
+- **U02 replace（1 PR = 1 consumer family）**: 次の U02a–U02e は**分割実行候補**。一度に削除・リライトせず各系統の DTO/欠損時の劣化/visibility/fallback と Worker からの配信到達性を実コードとテストで確認する。2026-11-20 main `879bb435923349772a4dddf722ab91d1f86dc9c7` に対する lead 検証であり、未実行の比較を PASS と書かない。
+  - **U02a sitemap（TARGET already implemented; audit before retirement）**: TARGET `apps/site/src/pages/sitemap.xml.ts` / `apps/site/src/lib/sitemap.ts` は `snapshotAccessFromEnv()` と build-only snapshot により URL を生成する。既存 `scripts/migration-robots-sitemap.test.mjs` が CURRENT の XML serializer、公開 detail に対する URL 検証、manifest 不足・hash 不一致時の振る舞いを検査する。**旧 CURRENT** `src/lib/publicData/sitemapSources.ts` は `loadPublicJson` 経由で R2 を読むため Phase 9 切替前には削除しない。TARGET で R2 読取0件、旧 CURRENT では RETAINED の別々の証跡を残す。
+  - **U02b RH-026 about-stats**: CURRENT Hono `apps/api/src/routes/publicAboutStats.ts` は `top/sections/stats.v1.json` を R2 GET 1回（64KiB上限）して `{stats:{publicVideos,creators,events}}` を返す。build producer `apps/site/scripts/produceSnapshots.ts` は `snapshot/about-stats/current.json` を生成するが、`apps/api/src/env.ts` に Astro build snapshot の直接読取 binding は無い。**別 Worker にファイルが存在するという仮定で R2 GET を消してはいけない。** 検証可能な配信経路/公開世代の一致/配信失敗時503を承認された設計で確定後、同一 DTO・Cache-Control・64KiB と欠損/過大/壊れた入力の fail-closed を `apps/api/test/publicAboutStats.test.mjs` で比較する。本番 binding/Route 変更はこの unit に含めない。
+  - **U02c onboarding published rules**: `apps/api/src/routes/personal/onboarding.ts` は `rules/current.json` から受信し、R2欠損時のみ公開済み `terms_versions` を1文で取得する。build snapshot と現在の公開版の一致、利用規約の更新反映、64KiB境界、`PUBLIC_VISIBILITY_GUARD_MODE=enforce`、D1文数予算を明示してから切り替える。単純な「常時D1 fallback化」は読み取り予算と更新頻度の契約を変えるため**禁止**。認証・規約同意 UX は不変。
+  - **U02d search/playlist**: `apps/api/src/routes/videos/list.ts` の `search-index-postings.v1/*` と `apps/api/src/routes/videos/viewerOverlay.ts` の `events/<id>/playlist.v1.json` は別々の consumer unit。検索一致、並び・件数上限、playlist権限/公開遮断・公開後反映、スナップショット欠損時の応答を CURRENT と比較し、同 DTO が配信可能になるまで従来の reader を残す。
+  - **U02e event readers**: `apps/api/src/routes/public/eventStaff.ts`（`events/<id>/base.v1.json`）と `apps/api/src/routes/events/publicList.ts` / `publicRelease.ts`（`events/index.json` / `events/<id>/release.v1.json`）を、個別公開性・staff権限・maintenance/static_only劣化・visibility fencing について別々に比較。**MIG-0666（PR #686）は index/release の build publish と完全性担当**なので、producerの統合が確定するまで Hono reader を消さない。
+- **U02f CURRENT/GA4 retention gate**: `src/lib/publicData/sitemapSources.ts` 等の現行 Next 読者、`workers/ga-analytics`、`visibility/blocked-entities.v1.json` は site cutover / 独立 owner の検証まで RETAINED。producer を先に削除すると現行サイトの sitemap / privacy 経路を破壊する。PR #680 にも cache/CDN失効の未解決 gate があるため、writer の R2 更新成功だけで公開撤回完了としない。
+- **U03 gate**: 各 unit の置換後、`R2_ARTIFACT_CONSUMERS.md` の**該当1行**に旧 reader の残存状態と代替経路・テスト証跡を追加し、`npm run check:r2-artifact-consumers` と DTO/欠損/visibility parity の PASS を記録する。すべての対象 runtime reader が実際に撤去されるまで MIG-0627 DONE / MIG-0907 解放を禁止。共有 ledger は他 Open PR の同一行 owner を再確認する（例: PR #478 が `R2_ARTIFACT_CONSUMERS.md` を編集中）。
 - **U04 API artifact publish / U05 integrity**: MIG-0666 へ分割（D-19-4）。
 - **shared-input diagnostics（D-13-52）**: MIG-0665 へ分割（D-19-4）。
+
+#### Unit acceptance / STOP refinement (2026-11-20)
+1. 各 Hono reader の代替 source は同 Worker から認証・visibilityに違反せずアクセス可能であることを**実装と非本番テストで**証明する。単に Astro build directory に存在するだけでは不可。未確定なら該当 unit を BLOCKED として次へ進む。
+2. メソッド/HTTP status/Cache-Control/JSON DTO/表示範囲/欠損劣化を旧実装と比較し、R2 GET・D1 statement・CPUの前後差を記録する。新規 Cloudflare binding/Route/Remote D1・本番 R2 PUT/DELETE は別途明示承認。
+3. `visibility/blocked-entities.v1.json` を一般公開 artifact と混同しない。公開済み静的HTMLとCache API/CDNの撤回経路は別のセキュリティ受入条件であり、未達なら production cutover は STOP。
+4. `apps/site/src/pages/sitemap.xml.ts` と `scripts/migration-robots-sitemap.test.mjs` は既に TARGET build parity の証拠だが、旧 CURRENT の R2 が不要になった証拠ではない。作業対象を誤って CURRENT から先に削除しない。
+
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
