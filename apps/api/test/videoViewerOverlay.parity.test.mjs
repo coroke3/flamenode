@@ -575,6 +575,36 @@ if (runUnderRootTsx(import.meta.url)) {
       "a targeted ID never overrides per-user public chapter authorization");
   });
 
+  test("Issue #661: explicit one-row edit skips event playlist R2 reads", async () => {
+    const { env } = setupTestEnv();
+    const originalGet = env.BUCKET.get.bind(env.BUCKET);
+    const readKeys = [];
+    env.BUCKET.get = async (key) => {
+      readKeys.push(key);
+      return originalGet(key);
+    };
+    const res = await app.request(
+      "/api/videos/vid-pub/viewer-overlay?playlist=evt-1&editChapterId=chap-pub", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+    assert.equal(res.status, 200);
+    const dto = await res.json();
+    assert.deepEqual(dto.editablePublicChapters.map((chapter) => chapter.id), ["chap-pub"]);
+    assert.deepEqual(dto.playlistItems, [], "editor lookup omits unrelated event playlist");
+    assert.equal(readKeys.some((key) => String(key).includes("playlist")), false,
+      "single-row authorization must not fetch the event playlist artifact");
+    assert.ok(readKeys.some((key) => String(key).startsWith("videos/")),
+      "public video gate is still required");
+
+    const duplicated = await app.request(
+      "/api/videos/vid-pub/viewer-overlay?editChapterId=chap-pub&editChapterId=chap-pub-staff", {
+        headers: { cookie: "authjs.session-token=tok-staff" },
+      }, env);
+    assert.equal(duplicated.status, 200);
+    assert.deepEqual((await duplicated.json()).editablePublicChapters, [],
+      "ambiguous duplicate edit IDs must not select the first target");
+  });
+
   test("Issue #661: malformed or overlong targeted ID never unlocks public editing", async () => {
     const { env } = setupTestEnv();
     for (const id of ["%20chap-pub", "chap-pub%20", "x".repeat(129)]) {

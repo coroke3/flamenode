@@ -156,17 +156,28 @@ export function createVideoViewerOverlayRoutes(
       return c.json({ error: "video_not_found" }, 404, PRIVATE_HEADERS);
     }
 
+    // An editor lookup is one user-selected D1 row, not a playlist view.
+    // Skip the unrelated event-playlist R2 read and any large playlist DTO.
+    // Duplicate query keys are ambiguous and never grant a targeted edit.
+    const requestedChapterIds = c.req.queries("editChapterId") ?? [];
+    const requestedChapterId = requestedChapterIds.length === 1 ? requestedChapterIds[0]! : "";
+    const targetPublicChapterId = requestedChapterId.length > 0 &&
+      requestedChapterId.length <= 128 && requestedChapterId === requestedChapterId.trim()
+      ? requestedChapterId : null;
     const playlist = (c.req.query("playlist") ?? "").trim().slice(0, 128);
     const playlistEventTitle = playlist
       ? detail.publicEvents.find((event) => event.id === playlist)?.title ?? null
       : null;
 
-    const publicPlaylist = await loadStaticEventPlaylistOverlay(
-      c.env.BUCKET,
-      c.env.PUBLIC_VISIBILITY_GUARD_MODE,
-      playlist,
-      playlistEventTitle,
-    );
+    const publicPlaylist: Pick<VideoViewerOverlayDto, "playlistLabel" | "playlistItems"> =
+      targetPublicChapterId
+        ? { playlistLabel: "再生リスト", playlistItems: [] }
+        : await loadStaticEventPlaylistOverlay(
+            c.env.BUCKET,
+            c.env.PUBLIC_VISIBILITY_GUARD_MODE,
+            playlist,
+            playlistEventTitle,
+          );
 
     const operationMode = await resolvePublicOperationMode(c.env, { allowD1: false });
     if (!isLiveApiEnabled(operationMode)) {
@@ -304,10 +315,6 @@ SELECT
       // The ordinary viewer overlay never reads public editing notes. An
       // explicit single-row request is not an authorization claim: the same
       // SQL, Active-X, terms, approval and chapter-admin gates still apply.
-      const requestedChapterId = c.req.query("editChapterId") ?? "";
-      const targetPublicChapterId = requestedChapterId.length > 0 &&
-        requestedChapterId.length <= 128 && requestedChapterId === requestedChapterId.trim()
-        ? requestedChapterId : null;
       // Targeted requests only need an edit grant, not the unrelated private
       // chapter list; keep the response small without a fourth D1 statement.
       const canSeeAnyPrivate = !targetPublicChapterId && (canSeeAllPrivate || approvedXIds.length > 0);
