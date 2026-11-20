@@ -962,7 +962,9 @@ test("MIG-0603: atomic CostGuard checks match Hono across mode, list and excepti
           title + " " + key + ": actual shared Hono CostGuard");
         const auditId = "costguard-atomic-" + (++idx);
         const statements = [
-          planManageVideoStatusCommitAssertion(db,user,"evA","v1",token,key,["evA"]),
+          key === "admin_video_status"
+            ? planAdminVideoStatusCommitAssertion(db,user,"v1",token,["evA"])
+            : planManageVideoStatusCommitAssertion(db,user,"evA","v1",token,key,["evA"]),
           db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
           db.run(sql`INSERT INTO audit_logs
             (id,table_name,target_id,operation,actor_user_id,created_at)
