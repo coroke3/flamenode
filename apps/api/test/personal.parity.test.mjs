@@ -633,8 +633,18 @@ if (runUnderRootTsx(import.meta.url)) {
 
       const response = await call("/api/personal/settings?x=manager_only_x", "tok-alice");
       assert.equal(response.status, 200);
-      assert.deepEqual(response.body, await refSettings("alice", { x: id }),
-        "manager linked X must match CURRENT source settings projection");
+      const current = await refSettings("alice", { x: id });
+      // CURRENT's linked-X SELECT has no ORDER BY; synthetic late inserts can
+      // appear in an arbitrary position. Compare every row exactly by X ID,
+      // while preserving exact user, history, panel selection and candidates.
+      // Sorting only at the assertion boundary must not alter either DTO.
+      const stableRows = (dto) => ({
+        ...dto,
+        xIds: [...dto.xIds].sort((left, right) =>
+          left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+      });
+      assert.deepEqual(stableRows(response.body), stableRows(current),
+        "manager linked X must match CURRENT settings content and permissions");
       assert.equal(response.body.panel.xId, id, "manager X is selectable in Personal settings");
       assert.equal(response.body.user.active_x_user_id, "alice_x", "reading manager X does not switch Active X");
       const manager = response.body.xIds.find((x) => x.id === id);
