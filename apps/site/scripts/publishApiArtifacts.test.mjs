@@ -95,6 +95,20 @@ test("MIG-0666 T03: envelope, manifest, generation, checksum, visibility and eve
   mutate((x) => { const s = x.snapshots.find((v) => v.key === EVENT_INDEX_KEY); s.sha256 = "0".repeat(64); });
   mutate((x) => { const s = x.snapshots.find((v) => v.key === EVENT_INDEX_KEY); const p = JSON.parse(s.json); p.visibility = "private"; s.json = JSON.stringify(p); });
   mutate((x) => { const s = x.snapshots.find((v) => v.key === EVENT_INDEX_KEY); const p = JSON.parse(s.json); p.generation = "other"; s.json = JSON.stringify(p); });
+  // The index may name an event whose detail and release are both absent from
+  // the manifest. Valid digests alone must not turn that into a successful build.
+  const changeIndex = (fn) => mutate((x) => {
+    const s = x.snapshots.find((v) => v.key === EVENT_INDEX_KEY);
+    const envelope = JSON.parse(s.json);
+    fn(envelope.payload);
+    s.sha256 = sha(JSON.stringify(envelope.payload));
+    envelope.sha256 = s.sha256;
+    s.json = JSON.stringify(envelope);
+  });
+  changeIndex((index) => index.items.push({ id: "missing-both" }));
+  changeIndex((index) => index.items.push({ id: "evt_a" }));
+  changeIndex((index) => { index.items[0].visibility_status = "private"; });
+  changeIndex((index) => { index.items = "not-an-array"; });
 });
 
 test("MIG-0666: remote oversized object is refused without any write", async () => {

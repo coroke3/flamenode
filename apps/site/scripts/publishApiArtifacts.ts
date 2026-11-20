@@ -11,6 +11,7 @@ const RELEASE_SOURCE_PATTERN = /^snapshot\/event-release\/([A-Za-z0-9_-]{1,128})
 const EVENT_DETAIL_SOURCE_PATTERN = /^snapshot\/event-detail\/([A-Za-z0-9_-]{1,128})\.json$/;
 const MAX_API_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const MAX_API_RELEASE_OBJECTS = 5000;
+const EVENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const MAX_READBACK_RETRIES = 3;
 
 export interface ApiArtifactBucket {
@@ -69,7 +70,7 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
     throw new Error("api artifact publish: incomplete event release coverage");
   }
   const sourceKeys = [EVENT_INDEX_KEY, ...[...releaseIds].sort().map(eventReleaseKey)];
-  return sourceKeys.map((sourceKey) => {
+  const artifacts = sourceKeys.map((sourceKey) => {
     if (!allowed.has(sourceKey) || blocked.has(sourceKey)) {
       throw new Error("api artifact publish: event artifact is not allowed by build manifest");
     }
@@ -92,6 +93,35 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
     const key = match ? eventReleaseObjectKey(match[1]!) : "events/index.json";
     return { key, body, sha256: digest(body) };
   });
+  // The manifest alone cannot expose an event whose detail AND release
+  // both failed to build. Compare against the CURRENT events/index.json
+  // items, which were generated from the public event IDs for this build.
+  let eventIndex: unknown;
+  try { eventIndex = JSON.parse(artifacts[0]!.body); }
+  catch { throw new Error("api artifact publish: event index JSON is invalid"); }
+  const items = eventIndex && typeof eventIndex === "object" &&
+    !Array.isArray(eventIndex) ? (eventIndex as { items?: unknown }).items : undefined;
+  if (!Array.isArray(items) || items.length > MAX_API_RELEASE_OBJECTS) {
+    throw new Error("api artifact publish: event index items are invalid or over budget");
+  }
+  const indexIds = new Set<string>();
+  for (const item of items) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error("api artifact publish: invalid event index entry");
+    }
+    const row = item as { id?: unknown; visibility_status?: unknown };
+    if (typeof row.id !== "string" || !EVENT_ID_PATTERN.test(row.id) ||
+        (row.visibility_status !== undefined && row.visibility_status !== "public") ||
+        indexIds.has(row.id)) {
+      throw new Error("api artifact publish: invalid, duplicate or nonpublic event index entry");
+    }
+    indexIds.add(row.id);
+  }
+  if (indexIds.size !== releaseIds.size ||
+      [...indexIds].some((id) => !releaseIds.has(id))) {
+    throw new Error("api artifact publish: event index / release set mismatch");
+  }
+  return artifacts;
 }
 
 async function readExisting(bucket: ApiArtifactBucket, target: ApiArtifactToPublish): Promise<boolean> {
