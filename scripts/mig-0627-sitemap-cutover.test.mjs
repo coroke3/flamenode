@@ -461,7 +461,8 @@ test("MIG-0627 U02a T20: sitemap reuses the emitted user-index timestamp without
   assert.equal(withNoIndex.generatedAt, null, "unavailable user index must not contribute a timestamp");
 
   const sitemapSource = await readFile(new URL("apps/site/src/pages/sitemap.xml.ts", root), "utf8");
-  assert.match(sitemapSource, /userGeneratedAt\s*=\s*access\s*&&\s*users\.index\s*\?\s*users\.generatedAt\s*:\s*null/,\n    "snapshot-free fixture builds must retain the previous generatedAt fallback");
+  assert.match(sitemapSource, /userGeneratedAt\s*=\s*access\s*&&\s*users\.index\s*\?\s*users\.generatedAt\s*:\s*null/,
+    "snapshot-free fixture builds must retain the previous generatedAt fallback");
   assert.doesNotMatch(sitemapSource, /loadUsersIndexSnapshot\s*\(/,
     "the sitemap must not independently read the same user index");
 });
