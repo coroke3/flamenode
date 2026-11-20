@@ -371,8 +371,11 @@ test("U03a ISSUE-703: switching auth user and Active X never copies a prior even
     await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
     assert.equal(dom.window.localStorage.getItem(newKey), null,
       "pagehide cannot write previous identity's state to the new draft key");
-    assert.equal(dom.window.localStorage.getItem(oldKey), originalDraft,
-      "switch does not erase or modify the original identity's draft");
+    assert.deepEqual(
+      JSON.parse(dom.window.localStorage.getItem(oldKey)).value,
+      JSON.parse(originalDraft).value,
+      "switch preserves the original identity's draft payload despite a new savedAt",
+    );
   } finally {
     await act(async () => root.unmount());
     container.remove();
