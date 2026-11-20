@@ -391,6 +391,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(aliceNormal.status, 200);
     assert.deepEqual((await aliceNormal.json()).editablePublicChapters, [],
       "normal viewer loads never fetch public chapter notes");
+    d1.stats.statements = 0;
     const alice = await app.request("/api/videos/vid-pub/viewer-overlay?editChapterId=chap-pub", {
       headers: { cookie: "authjs.session-token=tok-alice" },
     }, env);
@@ -496,6 +497,28 @@ if (runUnderRootTsx(import.meta.url)) {
       "on-demand editor must return complete original note");
     assert.deepEqual(targetedBody.privateChapters, [],
       "on-demand read does not waste its byte budget on unrelated private rows");
+  });
+
+  test("Issue #661: pathological legacy note cannot leak an oversized editable one-row DTO", async () => {
+    const { env, sqlite, d1 } = setupTestEnv();
+    // Written directly to simulate old/unvalidated stored content, not a valid
+    // SA-012 body. Do not trim it into a PUT-ready note on retrieval.
+    sqlite.prepare('UPDATE "video_chapters" SET "note" = ? WHERE "id" = ?')
+      .run("あ".repeat(25_000), "chap-pub");
+    d1.stats.statements = 0;
+    const res = await app.request(
+      "/api/videos/vid-pub/viewer-overlay?editChapterId=chap-pub", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+    assert.equal(res.status, 200, "optional oversized edit data must not break interactions");
+    const body = await res.text();
+    assert.ok(new TextEncoder().encode(body).byteLength <= 64 * 1024);
+    const dto = JSON.parse(body);
+    assert.deepEqual(dto.editablePublicChapters, [],
+      "a too-large stored note must not become a truncated editable row");
+    assert.deepEqual(dto.privateChapters, [], "a one-row read excludes unrelated private notes");
+    assert.equal(dto.likeActive, true, "ordinary interactions remain available");
+    assert.ok(d1.stats.statements <= 3);
   });
 
   test("Issue #661: oversized required private data returns safe 503 instead of >64KiB payload", async () => {
