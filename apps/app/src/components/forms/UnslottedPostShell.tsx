@@ -61,13 +61,19 @@ export function UnslottedPostShell<
 >(props: UnslottedPostShellProps<Initial, Event>): React.ReactElement {
   const activeXKey = draftActiveXSegment(props.activeXId);
   const authUserId = props.draftAuthUserId?.trim() ?? "";
-  // The real auth user ID may itself equal the old "anonymous" fallback.
-  // Type-tag only the parent remount boundary: CURRENT formKey stays stable,
-  // while guest -> authenticated transitions always reset shell state.
-  const authIdentity = authUserId ? `auth:${authUserId}` : "guest";
+  // Distinguish guest from a literal user ID "anonymous" and encode each
+  // identity dimension separately. A joined ":" string would alias the
+  // authenticated user "u:xid" / no X with "u" / real @unassigned.
+  // This is only the React remount key; CURRENT-compatible formKey remains.
+  const shellIdentityKey = JSON.stringify([
+    "unslotted-video",
+    authUserId ? "authenticated" : "guest",
+    authUserId,
+    activeXKey,
+  ]);
   return (
     <UnslottedPostShellForIdentity
-      key={`unslotted-video:${authIdentity}:${activeXKey}`}
+      key={shellIdentityKey}
       {...props}
     />
   );

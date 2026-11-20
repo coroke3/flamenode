@@ -551,6 +551,52 @@ test("U03a ISSUE-703: switching only Active X preserves independent drafts and r
   }
 });
 
+test("U03a ISSUE-703: colon-bearing auth ID and tagged X handle cannot share a React shell key", async () => {
+  dom.window.localStorage.clear();
+  const firstDraft = buildFormDraftStorageKey({
+    authUserId: "u:xid", formId: "unslotted-shell:unassigned", schemaVersion: "unslotted-shell-v1",
+  });
+  const secondDraft = buildFormDraftStorageKey({
+    authUserId: "u", formId: "unslotted-shell:xid:unassigned", schemaVersion: "unslotted-shell-v1",
+  });
+  assert.notEqual(firstDraft, secondDraft);
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const render = (draftAuthUserId, activeXId) => React.createElement(UnslottedPostShell, props({
+    draftAuthUserId, activeXId,
+  }));
+  try {
+    // Under the previous colon-joined key BOTH states were
+    // "unslotted-video:auth:u:xid:unassigned".
+    await act(async () => root.render(render("u:xid", null)));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+
+    await act(async () => root.render(render("u", "@UNASSIGNED")));
+    assert.equal(selected(container, "event").checked, false,
+      "different user/X tuple must not inherit an event choice despite its old joined-key collision");
+    assert.equal(container.querySelector('input[name="event_ids"]'), null);
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(firstDraft)).value,
+      { affiliation: "event", selectedEventId: "event-A" },
+      "the departed draft was flushed only to its original identity");
+    assert.equal(dom.window.localStorage.getItem(secondDraft), null);
+
+    await act(async () => selected(container, "none").click());
+    await act(async () => root.render(render("u:xid", null)));
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(secondDraft)).value,
+      { affiliation: "none", selectedEventId: "" },
+      "the second user has its own saved choice");
+    assert.equal(selected(container, "event").checked, true);
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 test("U03a ISSUE-703: guest shell cannot become authenticated user literally named anonymous", async () => {
   dom.window.localStorage.clear();
   const authKey = buildFormDraftStorageKey({
