@@ -654,6 +654,46 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(actual.wakes.length, 0);
   });
 
+  test("T02/T03: all four slot mutation D1 snapshot SQL bindings match placeholder counts", async () => {
+    // Cloudflare D1 rejects mismatched bind arity; node:sqlite may silently
+    // substitute NULL for missing arguments, masking failures.
+    const w = world();
+    const observed = [];
+    const prepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = (sql) => {
+      const stmt = prepare(sql);
+      if (/^\s*WITH (?:anchor|gap) AS \(/.test(sql)) {
+        const bind = stmt.bind.bind(stmt);
+        stmt.bind = (...params) => {
+          assert.equal(params.length, (sql.match(/\?/g) ?? []).length,
+            "SA-065..068 D1 pre-read SQL and bound parameters must have equal arity");
+          observed.push(params.length);
+          return bind(...params);
+        };
+      }
+      return stmt;
+    };
+    const thaw = freeze();
+    try {
+      const steps = [
+        ["reserve", { eventId: "ev1", slot_id: "s02", display_name: "Arity", consecutive_count: 2 }],
+        ["extend", { eventId: "ev1", slot_id: "s02", direction: "forward" }],
+        ["extend", { eventId: "ev1", slot_id: "s02", direction: "backward" }],
+        ["release", { eventId: "ev1", slot_id: "s02" }],
+        ["merge", { eventId: "ev1", gap_slot_id: "s02", display_name: "Merged" }],
+      ];
+      for (const [op, args] of steps) {
+        const response = await runHono(w, "u_owner", op, args);
+        assert.equal(response.status, 200, op);
+        assert.equal(response.result.ok, true, op);
+      }
+    } finally {
+      thaw();
+    }
+    assert.deepEqual(observed, [16, 6, 6, 2, 6],
+      "reserve/extend/extend/release/merge must each read a single complete D1 snapshot");
+  });
+
   test("T02: 20-slot bulk reserve stays within D1 query/bind budget and matches CURRENT", async () => {
     const a = world();
     const b = world();
