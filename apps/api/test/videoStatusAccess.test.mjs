@@ -8,6 +8,7 @@ import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import { checkManageVideoStatusAccess, loadManageVideoStatusSnapshot, loadAdminVideoStatusSnapshot } from "../src/routes/videos/videoStatusAccess.ts";
 import { MAX_MANAGE_STATUS_REBUILD_EVENTS, planManageVideoStatusCommitAssertion } from "@flamenode/server-core/video/manageStatusAccess";
+import { loadTosState } from "../src/middleware/writeOrigin.ts";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
 import { canEditEvent } from "@flamenode/server-core/auth/ownership";
 
@@ -782,6 +783,94 @@ test("MIG-0603: multibyte imported event IDs cannot bypass the 4096-byte rebuild
     assert.equal(d1.stats.statements - second, 2, "manager denial adds no preflight reads");
     assert.equal(d1.stats.batches, 0, "failed preloads never start an audited transaction");
     assert.equal(d1.stats.writes, 0, "preload itself performs no D1 writes");
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("MIG-0603: atomic status grant keeps latest major-terms reacceptance in CURRENT/Hono parity", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    assert.equal((await loadManageVideoStatusSnapshot(db, manager, "evA", "v1")).ok, true,
+      "legitimate granted preflight before any change to the published major rules");
+
+    const published = (id, severity, at) => insert(sqlite, "terms_versions", {
+      id, version_label: id, body_markdown: "terms " + id, status: "published",
+      severity, published_at: at, created_by_user_id: "u_admin",
+      created_at: at, updated_at: at,
+    });
+    let attempt = 0;
+    async function check(shouldAllow, description) {
+      const tos = await loadTosState(d1, manager.id);
+      assert.ok(tos, "real shared Hono TOS-state read returned a user");
+      assert.equal(tos.terms_reaccept_required, shouldAllow ? 0 : 1,
+        description + ": reference Hono major-version consent policy");
+
+      const suffix = ++attempt;
+      const auditId = "atomic-terms-audit-" + suffix;
+      const outboxId = "atomic-terms-outbox-" + suffix;
+      const batch = [
+        planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr"),
+        db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+        db.run(sql`INSERT INTO audit_logs
+          (id, table_name, target_id, operation, actor_user_id, created_at)
+          VALUES (${auditId}, 'videos', 'v1', 'UPDATE', 'u_mgr', 1000)`),
+        db.run(sql`INSERT INTO notification_outbox
+          (id, type, payload_json, status, created_at)
+          VALUES (${outboxId}, 'video_posted', '{}', 'pending', 1000)`),
+      ].map((stmt) => preparedStatusTestBatchItem(db, stmt));
+      const start = d1.stats.statements;
+      if (shouldAllow) {
+        await db.batch(batch);
+        assert.equal(d1.stats.statements - start, 4, description + ": one atomic assertion + three writes");
+      } else {
+        await assert.rejects(db.batch(batch), /malformed JSON|not-valid-json/,
+          description + ": a late rule revocation must roll back the whole D1 batch");
+        assert.equal(d1.stats.statements - start, 1, description + ": fail at first batch assertion");
+      }
+      assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+        shouldAllow ? "public" : "pending", description + ": video status");
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE id=?").get(auditId).n,
+        shouldAllow ? 1 : 0, description + ": no unaudited mutation");
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox WHERE id=?").get(outboxId).n,
+        shouldAllow ? 1 : 0, description + ": no leaked notification");
+      // Reset using the fixture's direct SQLite connection, not a candidate D1 API.
+      sqlite.exec("UPDATE videos SET visibility_status='pending'");
+    }
+
+    await check(true, "no published major requires no reacceptance");
+    published("major-1", "major", 100);
+    await check(false, "new major publication after previously granted preflight");
+    sqlite.prepare("UPDATE user SET accepted_terms_version_id='major-1' WHERE id='u_mgr'").run();
+    await check(true, "accepted-version mirror satisfies newest major");
+    published("major-2", "major", 200);
+    await check(false, "old accepted mirror cannot satisfy newly published major");
+    insert(sqlite, "user_tos_consents", {
+      id: "consent-major-1", user_id: "u_mgr",
+      terms_version_id: "major-1", consented_at: 250, consent_context: "edit",
+    });
+    await check(false, "late consent timestamp does not upgrade an older terms version");
+    insert(sqlite, "user_tos_consents", {
+      id: "consent-major-2", user_id: "u_mgr",
+      terms_version_id: "major-2", consented_at: 251, consent_context: "edit",
+    });
+    await check(true, "historical consent to the current major satisfies reacceptance");
+    published("major-3", "major", 300);
+    await check(false, "newer major revokes previous consent at commit");
+    published("minor-4", "minor", 400);
+    await check(false, "later minor publication alone cannot grant consent");
+    sqlite.prepare("UPDATE user SET accepted_terms_version_id='minor-4' WHERE id='u_mgr'").run();
+    await check(true, "explicit acceptance of a later-published minor also satisfies current major");
+    sqlite.prepare("UPDATE user SET accepted_terms_version_id=NULL WHERE id='u_mgr'").run();
+    await check(false, "removing later accepted mirror restores major reaccept requirement");
+
+    assert.equal(d1.stats.maxBinds <= 100, true, "commit assertion keeps a bounded bind count");
   } finally {
     sqlite.close();
   }

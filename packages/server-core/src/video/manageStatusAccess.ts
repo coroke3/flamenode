@@ -258,9 +258,9 @@ export async function loadAdminVideoStatusSnapshot(
  *
  * This is a narrowly scoped DB assertion, NOT an approved HTTP auth design:
  * it checks persisted actor existence/ban, base TOS acceptance, current
- * Auth.js session token ownership/expiry and stale site-admin role. Major
- * terms reacceptance and CostGuard remain unresolved: keep this candidate
- * unmounted until the shared Issue #692 architecture is approved.
+ * Auth.js session token ownership/expiry, current major-terms reacceptance
+ * and stale site-admin role. CostGuard and full write parity remain unresolved:
+ * keep this candidate unmounted until Issue #692 architecture is approved.
  */
 export function planManageVideoStatusCommitAssertion(
   db: ServerCoreDb,
@@ -315,11 +315,41 @@ export function planManageVideoStatusCommitAssertion(
       AND ${sessions.userId} = ${user.id}
       AND ${sessions.expires} > unixepoch('now') * 1000
   )`;
+  // Mirrors CURRENT termsReacceptRequiredCondition / Hono loadTosState:
+  // the latest once-published major is selected by published_at,updated_at;
+  // a mirror or historical consent to that version, or one published later,
+  // satisfies the requirement. No major publication means no reaccept gate.
+  // This is part of the SAME commit-time assertion, not a fourth pre-read.
+  const majorTermsStillAccepted = sql`NOT EXISTS (
+    SELECT 1 FROM "terms_versions" required
+    WHERE required."id" = (
+      SELECT "id" FROM "terms_versions"
+      WHERE "severity" = 'major' AND "published_at" IS NOT NULL
+      ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM "terms_versions" accepted_terms
+      WHERE accepted_terms."id" = ${users.accepted_terms_version_id}
+        AND accepted_terms."published_at" IS NOT NULL
+        AND (accepted_terms."id" = required."id"
+          OR accepted_terms."published_at" > required."published_at")
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM "user_tos_consents" consent
+      INNER JOIN "terms_versions" consent_terms
+        ON consent_terms."id" = consent."terms_version_id"
+      WHERE consent."user_id" = ${users.id}
+        AND consent_terms."published_at" IS NOT NULL
+        AND (consent_terms."id" = required."id"
+          OR consent_terms."published_at" > required."published_at")
+    )
+  )`;
   const actorStillAllowed = sql`EXISTS (
     SELECT 1 FROM ${users}
     WHERE ${users.id} = ${user.id}
       AND COALESCE(${users.is_banned}, 0) = 0
       AND ${users.is_tos_accepted} = 1
+      AND ${majorTermsStillAccepted}
       ${user.role === "admin" ? sql`AND ${users.role} = 'admin'` : sql``}
   )`;
   const targetStillLinked = sql`EXISTS (
