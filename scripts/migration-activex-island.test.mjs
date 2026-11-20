@@ -130,3 +130,31 @@ test("T03: header injects the client and JS-off account markup has no inactive s
   assert.doesNotMatch(html, /別の X ID に切り替え/);
   assert.doesNotMatch(html, /x_user_id/);
 });
+
+
+test("U03: MIG-0636 result contract preserves iconUrl and rejects malformed typed fields", async () => {
+  const iconUrl = "https://example.test/x-icon.png";
+  const success = await switchActiveX("second", fakeFetch(json({
+    ok: true, message: "切り替えました。", iconUrl,
+  })), () => assert.fail("success must not redirect"));
+  assert.deepEqual(success, { ok: true, message: "切り替えました。", iconUrl });
+
+  for (const invalid of [
+    { ok: true, message: 123 },
+    { ok: true, reason: 10 },
+    { ok: true, iconUrl: false },
+    { ok: "true", message: "success" },
+  ]) {
+    const redirects = [];
+    const res = await switchActiveX("second", fakeFetch(json(invalid)), (url) => redirects.push(url));
+    assert.deepEqual(res, { ok: false, message: "X ID の切り替えに失敗しました。" });
+    assert.deepEqual(redirects, []);
+  }
+});
+
+test("U03: invalid SA-098 request contract fails before HTTP", async () => {
+  const fetcher = fakeFetch(json({ ok: true }));
+  const result = await switchActiveX(null, fetcher, () => assert.fail("must not redirect"));
+  assert.deepEqual(result, { ok: false, message: "X ID の切り替えに失敗しました。" });
+  assert.equal(fetcher.calls.length, 0);
+});

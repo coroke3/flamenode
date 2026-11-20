@@ -1,24 +1,14 @@
-// D-16-1 provisional: replace with @flamenode/contracts at merge
+import { SetActiveXBodySchema, XIdWriteResultSchema, type XIdWriteResult } from "@flamenode/contracts";
 import { redirectForGuardReason } from "./guardRedirect.ts";
 
-/** SA-098: preserve the CURRENT Server Action response fields until MIG-0636 is merged. */
-export interface ActiveXSwitchResult {
-  ok: boolean;
-  message?: string;
-  reason?: string;
-}
+/** MIG-0636 SA-098: use the same HTTP result contract as the Hono route. */
+export type ActiveXSwitchResult = XIdWriteResult;
 
 const FAILURE_MESSAGE = "X ID の切り替えに失敗しました。";
 
 function decodeResult(value: unknown): ActiveXSwitchResult | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const result = value as Record<string, unknown>;
-  if (typeof result.ok !== "boolean") return null;
-  return {
-    ok: result.ok,
-    ...(typeof result.message === "string" ? { message: result.message } : {}),
-    ...(typeof result.reason === "string" ? { reason: result.reason } : {}),
-  };
+  const result = XIdWriteResultSchema.safeParse(value);
+  return result.success ? result.data : null;
 }
 
 function currentPath(): string {
@@ -38,6 +28,8 @@ export async function switchActiveX(
   fetchImpl: typeof fetch = fetch,
   navigate: (path: string) => void = (path) => window.location.assign(path),
 ): Promise<ActiveXSwitchResult> {
+  const body = SetActiveXBodySchema.safeParse({ x_user_id: xUserId });
+  if (!body.success) return { ok: false, message: FAILURE_MESSAGE };
   let response: Response;
   try {
     response = await fetchImpl("/api/xid/active", {
@@ -45,7 +37,7 @@ export async function switchActiveX(
       credentials: "same-origin",
       cache: "no-store",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ x_user_id: xUserId }),
+      body: JSON.stringify(body.data),
     });
   } catch {
     return { ok: false, message: FAILURE_MESSAGE };
