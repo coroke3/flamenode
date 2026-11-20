@@ -46,8 +46,11 @@ function boundedVideoRebuildEventIdsJson(videoId: string) {
   return sql<string>`(
     SELECT COALESCE(json_group_array(linked.event_id), '[]')
     FROM (
+      -- CURRENT rebuild targets omit empty-string imported event IDs.
+      -- Filter BEFORE LIMIT: an empty ID must not consume a bounded slot
+      -- and hide a ninth real event from the overflow detection.
       SELECT "event_id" FROM "video_events"
-      WHERE "video_id" = ${videoId}
+      WHERE "video_id" = ${videoId} AND "event_id" <> ''
       ORDER BY "event_id"
       LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
     ) linked
