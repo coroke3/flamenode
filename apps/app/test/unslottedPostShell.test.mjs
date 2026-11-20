@@ -326,6 +326,48 @@ test("U03a: successful form submission clears only the active identity's shell d
   }
 });
 
+// ISSUE-703 characterization, NOT a safety acceptance test. The target intentionally
+// retains CURRENT's parent-shell behavior until a separate Lead decision authorizes
+// a compatibility/security fix. When fixed, invert this observed-state assertion.
+test("U03a ISSUE-703: same-instance identity switch can carry the prior event into a new draft key", async () => {
+  dom.window.localStorage.clear();
+  const keyFor = (authUserId, xid) => buildFormDraftStorageKey({
+    authUserId, formId: `unslotted-shell:${xid}`, schemaVersion: "unslotted-shell-v1",
+  });
+  const oldKey = keyFor("u1", "alice");
+  const newKey = keyFor("u2", "bob");
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props())));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+    assert.equal(dom.window.localStorage.getItem(newKey), null);
+
+    // Deliberately retain the SAME React shell component instance while both
+    // identity props change; the VideoForm child already has a keyed boundary.
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      draftAuthUserId: "u2", activeXId: "@BOB",
+    }))));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A",
+      "characterization: old parent selection persists across a new user/X ID");
+
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const migrated = dom.window.localStorage.getItem(newKey);
+    assert.ok(migrated, "characterization: pagehide writes a new-identity draft");
+    assert.deepEqual(JSON.parse(migrated).value, {
+      affiliation: "event", selectedEventId: "event-A",
+    }, "characterization: previous identity selection is stored under new draft key");
+    assert.notEqual(oldKey, newKey);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 test("U03a: shell is network and Next-free; CURRENT affiliation/draft contract is preserved", () => {
   const ported = readFileSync(new URL("../src/components/forms/UnslottedPostShell.tsx", import.meta.url), "utf8");
   const legacy = readFileSync(new URL("../../../src/components/forms/UnslottedPostForm.tsx", import.meta.url), "utf8");
