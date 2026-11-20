@@ -603,6 +603,49 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("T02: pending X-ID reservation cap and legacy normalized snapshot match CURRENT", async () => {
+    // u_pend has no approved X link, only a pending new_link(x_pend).
+    // This exercises the single_pending CTE and pending_x_count, not the
+    // active-X branch tested by u_owner, while preserving the one-group cap.
+    await compareSteps([
+      ["u_pend", "reserve", { eventId: "ev_limit", slot_id: "lim_1", display_name: "Pending first", consecutive_count: 1 }, 200],
+      ["u_pend", "reserve", { eventId: "ev_limit", slot_id: "lim_3", display_name: "Pending second", consecutive_count: 1 }, 409],
+    ]);
+
+    const a = world();
+    const b = world();
+    for (const w of [a, b]) {
+      w.sqlite.prepare(
+        "UPDATE slots SET status = 'reserved', reserved_by_user_id = 'u_pend', " +
+        "x_user_id = NULL, reserved_x_id_snapshot = '@X_Pend', " +
+        "display_name = 'Legacy pending', version = version + 1 " +
+        "WHERE id = 'lim_1' AND event_id = 'ev_limit'",
+      ).run();
+    }
+
+    const args = { eventId: "ev_limit", slot_id: "lim_2", display_name: "Duplicate pending", consecutive_count: 1 };
+    const thawA = freeze();
+    let expected;
+    try {
+      expected = await runCurrent(a, "u_pend", "reserve", args);
+    } finally {
+      thawA();
+    }
+    const thawB = freeze();
+    let actual;
+    try {
+      actual = await runHono(b, "u_pend", "reserve", args);
+    } finally {
+      thawB();
+    }
+    assert.equal(actual.status, 409, "pending identity must not bypass the single-X reservation cap");
+    assert.deepEqual(actual.result, expected.result, "legacy pending snapshot must match CURRENT");
+    assert.match(actual.result.message, /最大1件まで枠を確保できます/);
+    assert.deepEqual(state(b), state(a), "rejection must not mutate slots, audit, outbox or static queue");
+    assert.equal(actual.wakes.length, 0);
+    assert.equal(b.d1.stats.batches, 0, "pre-read limit rejection must never start a D1 mutation batch");
+  });
+
   test("T02: reserve D1 bind arity and legacy @/uppercase X-ID reservation cap match CURRENT", async () => {
     const a = world();
     const b = world();
