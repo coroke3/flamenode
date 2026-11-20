@@ -38,14 +38,85 @@ function isAuthConfigUnavailable(error: unknown): boolean {
   return false;
 }
 
-/** Match CURRENT authRouteError.ts: fail closed as private no-store 503 without leaking config details. */
+/**
+ * Auth.js can catch adapter errors internally and answer GET /session as 200
+ * null, indistinguishable from a genuinely missing session. Record failures
+ * at the adapter operation boundary, before Auth.js handles them.
+ *
+ * The adapter/config is created anew for every HTTP request. This detector
+ * does not share state between requests, log error content or add a D1 read.
+ * Only the three adapter operations used by this intentionally limited router
+ * are wrapped; OAuth sign-in/callback remain unmounted until MIG-0805.
+ */
+function monitorSessionAdapterFailures(
+  config: ReturnType<typeof buildUnmountedAuthConfig>,
+  markFailure: () => void,
+): void {
+  const adapter = config.adapter;
+  if (!adapter) return;
+
+  if (adapter.getSessionAndUser) {
+    const original = adapter.getSessionAndUser;
+    adapter.getSessionAndUser = async (token) => {
+      try {
+        return await original(token);
+      } catch (error) {
+        markFailure();
+        throw error;
+      }
+    };
+  }
+
+  if (adapter.updateSession) {
+    const original = adapter.updateSession;
+    adapter.updateSession = async (session) => {
+      try {
+        return await original(session);
+      } catch (error) {
+        markFailure();
+        throw error;
+      }
+    };
+  }
+
+  if (adapter.deleteSession) {
+    const original = adapter.deleteSession;
+    adapter.deleteSession = async (token) => {
+      try {
+        return await original(token);
+      } catch (error) {
+        markFailure();
+        throw error;
+      }
+    };
+  }
+}
+
+function databaseSessionUnavailableResponse(): Response {
+  return new Response(JSON.stringify({ error: "auth_temporarily_unavailable" }), {
+    status: 503,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
+/** Match CURRENT authRouteError.ts: fail closed without leaking config details. */
 async function handleUnmountedAuthRequest(
   request: Request,
   input: UnmountedAuthInputs,
 ): Promise<Response> {
+  let databaseFailed = false;
   try {
-    return await invokeUnmountedAuth(request, buildUnmountedAuthConfig(input));
+    const config = buildUnmountedAuthConfig(input);
+    monitorSessionAdapterFailures(config, () => { databaseFailed = true; });
+    const response = await invokeUnmountedAuth(request, config);
+    // Auth.js may have converted AdapterError into a successful 200/null.
+    // Never return its Set-Cookie or cacheable response on a D1 outage.
+    return databaseFailed ? databaseSessionUnavailableResponse() : response;
   } catch (error) {
+    if (databaseFailed) return databaseSessionUnavailableResponse();
     if (isAuthConfigUnavailable(error)) {
       return new Response(JSON.stringify({ error: "auth_temporarily_unavailable" }), {
         status: 503,
