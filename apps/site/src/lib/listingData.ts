@@ -66,7 +66,7 @@ export function projectRecommend(payload: unknown): StaticRecommendViewModel {
 }
 
 export function projectTrending(payload: unknown, nowSec: number): ListingData["trending"] {
-  const data = normalizeStaticTrending((payload ?? {}) as Parameters<typeof normalizeStaticTrending>[0]);
+  const data = normalizeStaticTrending((payload ?? {}) as Parameters<typeof normalizeStaticTrending>[0], nowSec);
   if (!data) throw new ListingBuildError(TRENDING_KEY);
   return { ...data, stale: resolveStaticTrendingStaleMeta(data.generatedAt, nowSec).stale };
 }

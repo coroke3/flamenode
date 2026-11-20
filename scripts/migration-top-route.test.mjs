@@ -196,6 +196,14 @@ test("trending joins the top page only while fresh (CURRENT tooOldForHome); brok
     await assert.rejects(loadTopForBuild(writeSnapshot(dir, {}, { top: { sha256: "a".repeat(64) } }), nowSec), { code: "HASH_MISMATCH" });
     await assert.rejects(loadTopForBuild(writeSnapshot(dir, {}, { top: { visibility: "private" } }), nowSec), { code: "NOT_PUBLIC" });
     await assert.rejects(loadTopForBuild(writeSnapshot(dir, { top: { recommended: [], latest: [] } }), nowSec), { code: "TOP_INVALID" });
+    const futureBoundary = await loadTopForBuild(
+      writeSnapshot(dir, { trending: trendingPayload(nowSec + 300) }), nowSec);
+    assert.equal(futureBoundary.shelves[0].id, "trending",
+      "TARGET accepts a bounded 300-second clock skew at build time");
+    await assert.rejects(
+      loadTopForBuild(writeSnapshot(dir, { trending: trendingPayload(nowSec + 301) }), nowSec),
+      { code: "TOP_INVALID" },
+      "TARGET refuses a future-dated R2 snapshot beyond 300 seconds");
     await assert.rejects(loadTopForBuild(writeSnapshot(dir, { trending: { schema_version: 9, generated_at: 1, items: [] } }), nowSec), { code: "TOP_INVALID" });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

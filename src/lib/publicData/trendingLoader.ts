@@ -19,9 +19,9 @@ export interface StaticTrendingLoadResult {
   state: "ready" | "empty" | "stale" | "unavailable";
 }
 
-function normalizeTrendingPayload(value: unknown): StaticTrendingData | null {
+function normalizeTrendingPayload(value: unknown, nowSec: number): StaticTrendingData | null {
   if (!value || typeof value !== "object") return null;
-  return normalizeStaticTrending(value as StaticTrendingPayload);
+  return normalizeStaticTrending(value as StaticTrendingPayload, nowSec);
 }
 
 // Writer側は最大200件。通常生成物を十分に上回る余裕を持たせつつ、
@@ -34,7 +34,7 @@ export async function loadStaticTrending(
 ): Promise<StaticTrendingLoadResult> {
   const loaded = await loadStaticJsonFreshStaleUnavailable<StaticTrendingData>({
     key: TRENDING_OBJECT_KEY,
-    normalize: normalizeTrendingPayload,
+    normalize: (value) => normalizeTrendingPayload(value, nowSec),
     maxStaleAgeSec: TRENDING_STALE_MAX_AGE_SEC,
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.trending,
     maxObjectBytes: TRENDING_MAX_OBJECT_BYTES,

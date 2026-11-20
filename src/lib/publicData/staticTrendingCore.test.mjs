@@ -5,6 +5,7 @@ import {
   resolveStaticTrendingStaleMeta,
   TRENDING_STALE_MAX_AGE_SEC,
   TRENDING_TOO_OLD_FOR_HOME_SEC,
+  TRENDING_MAX_FUTURE_SKEW_SEC,
 } from "./staticTrendingCore.ts";
 
 const sampleItem = {
@@ -157,6 +158,83 @@ test("normalizeStaticTrending: public 以外の status は除外", () => {
 
   assert.ok(data);
   assert.deepEqual(data.items, []);
+});
+
+test("Issue #653: noncanonical generated_at wire types cannot render public ranking", () => {
+  const nowSec = 1_700_000_000;
+  const payload = { schema_version: 1, generated_at: nowSec, items: [sampleItem] };
+  const invalid = [
+    null, false, true, "", "1700000000", -1, -0.5, 0.5, NaN,
+    Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1, {}, [],
+  ];
+
+  for (const generated_at of invalid) {
+    assert.equal(
+      normalizeStaticTrending({ ...payload, generated_at }, nowSec),
+      null,
+      `reject malformed R2 generated_at: ${String(generated_at)}`,
+    );
+  }
+
+  assert.equal(normalizeStaticTrending({ ...payload, generated_at: 0 }, nowSec)?.generatedAt, 0,
+    "the numeric Unix epoch remains valid for legacy artifacts");
+  assert.equal(normalizeStaticTrending(payload, nowSec)?.generatedAt, nowSec,
+    "canonical numeric timestamps remain accepted");
+});
+
+test("Issue #653: future-dated trending artifact beyond clock skew is rejected at read", () => {
+  const nowSec = 1_700_000_000;
+  const payload = {
+    schema_version: 1,
+    generated_at: nowSec + TRENDING_MAX_FUTURE_SKEW_SEC,
+    items: [sampleItem],
+  };
+  assert.ok(normalizeStaticTrending(payload, nowSec),
+    "small bounded clock skew must remain usable at the supplied build time");
+  assert.equal(normalizeStaticTrending({
+    ...payload,
+    generated_at: nowSec + TRENDING_MAX_FUTURE_SKEW_SEC + 1,
+  }, nowSec), null, "far-future artifact must never be treated as fresh");
+  assert.equal(normalizeStaticTrending({
+    ...payload,
+    generated_at: Math.floor(Date.now() / 1000) + 86400,
+  }), null, "default call sites use the real clock when no build time is supplied");
+});
+
+test("Issue #653: future trending metadata fails closed even without the normalizer", () => {
+  const nowSec = 1_700_000_000;
+  assert.deepEqual(resolveStaticTrendingStaleMeta(
+    nowSec + TRENDING_MAX_FUTURE_SKEW_SEC + 1, nowSec,
+  ), { stale: true, ageSeconds: null, tooOldForHome: true });
+  assert.deepEqual(resolveStaticTrendingStaleMeta(
+    nowSec + TRENDING_MAX_FUTURE_SKEW_SEC, nowSec,
+  ), { stale: false, ageSeconds: 0, tooOldForHome: false });
+});
+
+test("Issue #653: malformed injected clock and raw stale timestamp always fail closed", () => {
+  const nowSec = 1_700_000_000;
+  const payload = {
+    schema_version: 1,
+    generated_at: nowSec,
+    items: [sampleItem],
+  };
+  const blocked = { stale: true, ageSeconds: null, tooOldForHome: true };
+  const invalidSeconds = [NaN, Infinity, -Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER + 1];
+
+  for (const invalid of invalidSeconds) {
+    assert.equal(normalizeStaticTrending(payload, invalid), null,
+      `invalid injected nowSec ${String(invalid)} must not bypass future validation`);
+    assert.deepEqual(resolveStaticTrendingStaleMeta(nowSec, invalid), blocked,
+      `invalid nowSec ${String(invalid)} must not be treated as fresh`);
+    assert.deepEqual(resolveStaticTrendingStaleMeta(invalid, nowSec), blocked,
+      `invalid generatedAt ${String(invalid)} must not be treated as fresh`);
+  }
+
+  const zero = normalizeStaticTrending({ ...payload, generated_at: 0 }, 0);
+  assert.ok(zero, "Unix epoch zero remains a valid reader timestamp");
+  assert.deepEqual(resolveStaticTrendingStaleMeta(0, 0), {
+    stale: false, ageSeconds: 0, tooOldForHome: false,
+  });
 });
 
 test("resolveStaticTrendingStaleMeta: 3時間超で stale、24時間超で tooOldForHome", () => {

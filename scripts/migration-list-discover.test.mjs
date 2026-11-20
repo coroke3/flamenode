@@ -14,6 +14,8 @@ import { LIST_QUERY_KEYS, LIST_PAGE_SIZE, LIST_MAX_PAGE, normalizeListQuery } fr
 import { loadListingForBuild, projectListFirstPage } from "../apps/site/src/lib/listingData.ts";
 import { writeSnapshot, writeFixtureSnapshot, fixture } from "./fixtures/listingSnapshotFixture.mjs";
 import { formatUnix } from "../src/lib/utils/format.ts";
+import { syncGa4Trending, GA4_TRENDING_OUTPUT_KEY } from "../workers/ga-analytics/sync.ts";
+import { normalizeStaticTrending } from "../src/lib/publicData/staticTrendingCore.ts";
 
 const DIST = path.resolve("apps/site/dist");
 const built = fs.existsSync(path.join(DIST, "list/index.html"));
@@ -262,7 +264,114 @@ test("fail closed: a configured but broken snapshot fails the build instead of p
     await assert.rejects(loadListingForBuild(writeSnapshot(dir, good, { trending: { visibility: "private" } })), { code: "NOT_PUBLIC" });
     await assert.rejects(loadListingForBuild(writeSnapshot(dir, { ...good, list: { videos: good.list.videos, total: 1 } })), { code: "LISTING_INVALID" });
     await assert.rejects(loadListingForBuild(writeSnapshot(dir, { ...good, recommend: { generated_at: 1, recommended: [], latest: [], underrated: [], creators: [] } })), { code: "LISTING_INVALID" });
+    const buildNowSec = 1_790_000_000;
+    const atLimit = await loadListingForBuild(writeSnapshot(dir, {
+      ...good, trending: { ...good.trending, generated_at: buildNowSec + 300 },
+    }), buildNowSec);
+    assert.equal(atLimit.trending.items.length, 2,
+      "TARGET Astro listing accepts exact 300-second clock skew");
+    await assert.rejects(loadListingForBuild(writeSnapshot(dir, {
+      ...good, trending: { ...good.trending, generated_at: buildNowSec + 301 },
+    }), buildNowSec), { code: "LISTING_INVALID" },
+    "TARGET Astro listing rejects future-dated snapshot beyond 300 seconds");
     await assert.rejects(loadListingForBuild(writeSnapshot(dir, { ...good, trending: { schema_version: 9, generated_at: 1, items: [] } })), { code: "LISTING_INVALID" });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Issue #653: D1 private transition -> GA4-disabled R2 repair -> fresh Astro /trending snapshot excludes revoked rows", async () => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const kept = {
+    id: "still-public", title: "Old public title", youtube_video_id: "yt-public",
+    display_name: "creator", icon_url: null,
+    primary_event_id: null, primary_event_title: null,
+    scheduled_time: nowSec - 3600, status: "public",
+    rank: 1, video_id: "still-public",
+    views_2d: 9, views_5d: 10, views_7d: 11, views_30d: 12,
+  };
+  const revoked = {
+    ...kept, id: "now-private", video_id: "now-private",
+    title: "Sensitive former public title", rank: 2,
+    views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+  };
+  const prior = { schema_version: 1, generated_at: nowSec - 60, items: [kept, revoked] };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fn-ga4-privacy-handoff-"));
+  let stored = JSON.stringify(prior);
+  let d1Reads = 0;
+  let r2Gets = 0;
+  let r2Puts = 0;
+  try {
+    const before = await loadListingForBuild(
+      writeSnapshot(dir, { ...fixture(), trending: prior }), nowSec);
+    assert.deepEqual(before.trending.items.map(({ id }) => id), ["still-public", "now-private"],
+      "a pre-revocation snapshot demonstrably contains the now-private item");
+
+    // Current D1 state contains only the surviving public video. GA4 is off,
+    // so privacy repair must use the D1 allow-list without external API calls.
+    const db = {
+      prepare(sql) {
+        d1Reads += 1;
+        assert.match(sql, /FROM videos AS v/);
+        return { bind(limit) {
+          assert.equal(limit, 5001);
+          return { async all() {
+            return { results: [{
+              id: "still-public", title: "Current public title",
+              youtube_video_id: "yt-public", display_name: "Current public creator",
+              creator_x_user_id: null, icon_url: "https://example.invalid/current-icon.png",
+              primary_event_id: null, primary_event_title: null,
+              scheduled_time: nowSec - 3600,
+            }] };
+          } };
+        } };
+      },
+    };
+    const oldLog = console.log;
+    const logs = [];
+    try {
+      console.log = (line) => logs.push(JSON.parse(String(line)));
+      const result = await syncGa4Trending({
+        DB: db, GA4_SYNC_ENABLED: "0",
+        R2: {
+          async get(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            r2Gets += 1;
+            return { size: Buffer.byteLength(stored), async text() { return stored; } };
+          },
+          async put(key, data) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            r2Puts += 1;
+            stored = String(data);
+          },
+        },
+      });
+      assert.equal(result.skipped, 1);
+      assert.equal(result.external_api_calls, 0);
+      assert.equal(logs.at(-1).privacy_rewrite_on_disabled, true);
+    } finally {
+      console.log = oldLog;
+    }
+    assert.deepEqual([d1Reads, r2Gets, r2Puts], [1, 1, 1]);
+
+    const repaired = JSON.parse(stored);
+    assert.deepEqual(repaired.items.map(({ id }) => id), ["still-public"]);
+    assert.equal(repaired.items[0].title, "Current public title",
+      "writer must use current D1 display data, not stale R2 title");
+    assert.equal(repaired.items[0].display_name, "Current public creator",
+      "D1 SELECT aliases display_name directly; stale creator metadata must be replaced");
+    assert.equal(repaired.items[0].icon_url, "https://example.invalid/current-icon.png",
+      "D1 SELECT aliases icon_url directly; stale icon metadata must be replaced");
+    assert.doesNotMatch(stored, /Sensitive former public title|now-private/);
+    assert.deepEqual(normalizeStaticTrending(repaired, nowSec)?.items.map(({ id }) => id),
+      ["still-public"], "CURRENT reader normalizes the sanitized R2 payload");
+
+    // A *new* TARGET build picks up the repaired R2 payload in its verified
+    // snapshot. This does not prove old deployed HTML/CDN was invalidated.
+    const after = await loadListingForBuild(
+      writeSnapshot(dir, { ...fixture(), trending: repaired }), nowSec);
+    assert.deepEqual(after.trending.items.map(({ id }) => id), ["still-public"]);
+    assert.equal(after.trending.items[0].title, "Current public title");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
