@@ -113,7 +113,7 @@ function UnslottedPostShellForIdentity<
     () => ({ affiliation, selectedEventId }),
     [affiliation, selectedEventId],
   );
-  const { clearDraft: clearShellDraft } = useFormDraft({
+  const { clearDraft: clearShellDraft, flushDraft: flushShellDraft } = useFormDraft({
     storageKey: shellDraftKey || "fn:draft:disabled:unslotted-shell-v1",
     value: shellDraftValue,
     enabled: Boolean(authUserId),
@@ -121,6 +121,16 @@ function UnslottedPostShellForIdentity<
     shouldSave: shellDirty || formDirty,
     onRestore: restoreShellDraft,
   });
+
+  // An identity-keyed remount cancels the draft hook's pending debounce.
+  // Flush only the departing shell's dirty draft, using its old storage key,
+  // before a new user / Active X shell can mount. Never flush a pristine form.
+  const departingDraftRef = React.useRef({ dirty: false, flush: flushShellDraft });
+  departingDraftRef.current = { dirty: shellDirty || formDirty, flush: flushShellDraft };
+  React.useEffect(() => () => {
+    const departing = departingDraftRef.current;
+    if (departing.dirty) departing.flush();
+  }, []);
 
   const handleVideoDraftFlushReady = React.useCallback((flush: () => boolean) => {
     videoDraftFlushRef.current = flush;
