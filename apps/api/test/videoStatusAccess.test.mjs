@@ -1435,3 +1435,64 @@ test("MIG-0603: malformed frozen rebuild IDs cannot authorize an atomic status b
     sqlite.close();
   }
 });
+
+
+test("MIG-0603: mismatched admin/global and manage/event scopes fail closed in first batch", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    enableStatusCostGuard(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const admin = { id: "u_admin", role: "admin" };
+    assert.deepEqual((await loadAdminVideoStatusSnapshot(db, admin, "v1")).rebuildEventIds, ["evA"]);
+    assert.deepEqual((await loadManageVideoStatusSnapshot(db, admin, "evA", "v1")).rebuildEventIds, ["evA"]);
+
+    const mismatched = [
+      ["admin-feature-with-event", "evA", "admin_video_status"],
+      ["manage-feature-without-event", null, "manage_video_status"],
+    ];
+    for (const [tag, eventId, feature] of mismatched) {
+      // Both carry a valid session, live admin identity, valid video and a
+      // correct rebuild snapshot; only the server-selected route scope is wrong.
+      const guard = planManageVideoStatusCommitAssertion(
+        db, admin, eventId, "v1", "tok-admin", feature, ["evA"]);
+      const start = d1.stats.statements;
+      await assert.rejects(db.batch([
+        guard,
+        db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+        db.run(sql`INSERT INTO audit_logs
+          (id,table_name,target_id,operation,actor_user_id,created_at)
+          VALUES (${"scope-mismatch-audit-" + tag},'videos','v1','UPDATE','u_admin',1000)`),
+        db.run(sql`INSERT INTO notification_outbox
+          (id,type,payload_json,status,created_at)
+          VALUES (${"scope-mismatch-outbox-" + tag},'video_posted','{}','pending',1000)`),
+      ].map(stmt => preparedStatusTestBatchItem(db, stmt))), /malformed JSON|not-valid-json/,
+      tag + ": a mismatched trusted route scope must fail closed");
+      assert.equal(d1.stats.statements - start, 1, tag + ": deny in first atomic assertion");
+      assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+        "pending");
+      assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE id=?")
+        .get("scope-mismatch-audit-" + tag).n, 0);
+      assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id=?")
+        .get("scope-mismatch-outbox-" + tag).n, 0);
+    }
+    for (const [tag, guard] of [
+      ["admin-global", planAdminVideoStatusCommitAssertion(db, admin, "v1", "tok-admin", ["evA"])],
+      ["admin-manage", planManageVideoStatusCommitAssertion(db, admin, "evA", "v1",
+        "tok-admin", "manage_video_status", ["evA"])],
+    ]) {
+      sqlite.exec("UPDATE videos SET visibility_status='pending' WHERE id='v1'");
+      const start = d1.stats.statements;
+      await db.batch([guard, db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`)]
+        .map(stmt => preparedStatusTestBatchItem(db, stmt)));
+      assert.equal(d1.stats.statements - start, 2, tag + ": correct route scope remains authorized");
+      assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+        "public");
+    }
+    assert.ok(d1.stats.maxBinds <= 100, "route-scope check uses bounded D1 parameters");
+  } finally {
+    sqlite.close();
+  }
+});
