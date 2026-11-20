@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { sitemapVideosOrEmpty, sitemapRowsForEmittedVideoPages, loadSitemapCanonicalVideoPages } from "../apps/site/src/pages/sitemap.xml.ts";
 import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "../apps/site/src/lib/videoFixtures.ts";
+import { fixturePayloadSource, loadUserBuildDataFrom } from "../apps/site/src/lib/userData.ts";
 import { buildSitemapEntries } from "../apps/site/src/lib/sitemap.ts";
 import {
   SITEMAP_VIDEOS_KEY,
