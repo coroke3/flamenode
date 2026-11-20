@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { sitemapVideosOrEmpty } from "../apps/site/src/pages/sitemap.xml.ts";
+import { sitemapVideosOrEmpty, sitemapRowsForEmittedVideoPages } from "../apps/site/src/pages/sitemap.xml.ts";
+import { buildSitemapEntries } from "../apps/site/src/lib/sitemap.ts";
 import {
   SITEMAP_VIDEOS_KEY,
   newSnapshotBuildMetrics,
@@ -119,4 +120,76 @@ test("MIG-0627 U02a T04: CURRENT keeps its R2 sitemap readers until authorized c
   assert.match(target, /snapshotAccessFromEnv\(/, "Astro must use the build-only snapshot adapter");
   assert.doesNotMatch(target, /loadPublicJson|\.BUCKET\.get\(|\bfetch\(/,
     "Astro sitemap must not regain request-time D1/R2/HTTP sources");
+});
+
+test("MIG-0627 U02a T05: stale video-index alias cannot advertise an unbuilt canonical page", () => {
+  const index = [
+    { id: "vid-one", youtube_video_id: "BBBBBBBBBBB", scheduled_time: 1_760_000_000 },
+    { id: "vid-unpublished", youtube_video_id: "CCCCCCCCCCC", scheduled_time: 1_760_000_000 },
+  ];
+  const emitted = [
+    // Astro emits both aliases for one verified public detail, with one canonical slug.
+    { videoId: "vid-one", canonicalSlug: "AAAAAAAAAAA", slug: "AAAAAAAAAAA", youtubeId: "AAAAAAAAAAA" },
+    { videoId: "vid-one", canonicalSlug: "AAAAAAAAAAA", slug: "vid-one", youtubeId: "AAAAAAAAAAA" },
+  ];
+  const published = sitemapRowsForEmittedVideoPages(index, emitted);
+  assert.deepEqual(published, [
+    { id: "vid-one", youtube_video_id: "AAAAAAAAAAA", scheduled_time: 1_760_000_000 },
+  ]);
+  const urls = buildSitemapEntries({
+    origin: "https://example.test",
+    videos: published,
+    events: [],
+    creators: [],
+    now: new Date("2026-01-01T00:00:00.000Z"),
+  }).map((entry) => entry.url);
+  assert.ok(urls.includes("https://example.test/AAAAAAAAAAA"));
+  assert.equal(urls.includes("https://example.test/BBBBBBBBBBB"), false,
+    "the stale index alias was not emitted as a static page");
+  assert.equal(urls.includes("https://example.test/CCCCCCCCCCC"), false,
+    "private/missing detail is not in the emitted page set");
+});
+
+test("MIG-0627 U02a T06: optional missing index omits video URLs; source failure aborts build", async () => {
+  const missing = accessWith({ bytes: null });
+  const warnings = [];
+  assert.deepEqual(
+    await sitemapVideosOrEmpty(missing.access, (message) => warnings.push(message)),
+    { generated_at: null, videos: [] },
+  );
+  assert.deepEqual(missing.reads, [SITEMAP_VIDEOS_KEY]);
+  assert.equal(missing.metrics.rejected, 1);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /SNAPSHOT_MISSING/);
+
+  const failure = accessWith();
+  failure.access.source.read = async (key) => {
+    failure.reads.push(key);
+    throw new Error("synthetic filesystem/R2 read failure");
+  };
+  const errors = [];
+  await assert.rejects(
+    sitemapVideosOrEmpty(failure.access, (message) => errors.push(message)),
+    (error) => error?.code === "SOURCE_UNAVAILABLE",
+  );
+  assert.deepEqual(failure.reads, [SITEMAP_VIDEOS_KEY]);
+  assert.equal(failure.metrics.rejected, 1);
+  assert.deepEqual(errors, [], "source failures must not publish stale or fixture aliases");
+});
+
+test("MIG-0627 U02a T07: invalid index payload rejects build instead of advertising bad URLs", async () => {
+  const invalid = accessWith({
+    bytes: buildEnvelope({
+      generated_at: 1_760_000_000,
+      videos: [{ id: 42, youtube_video_id: "AAAAAAAAAAA", scheduled_time: null }],
+    }),
+  });
+  const warnings = [];
+  await assert.rejects(
+    sitemapVideosOrEmpty(invalid.access, (message) => warnings.push(message)),
+    (error) => error?.code === "INVALID_PAYLOAD",
+  );
+  assert.deepEqual(invalid.reads, [SITEMAP_VIDEOS_KEY]);
+  assert.equal(invalid.metrics.rejected, 1);
+  assert.deepEqual(warnings, []);
 });
