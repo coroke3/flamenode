@@ -158,7 +158,7 @@ export async function GET(): Promise<Response> {
   // The user page builder already loaded, verified and normalized users/index.
   // Reuse its generation timestamp; a second source read can race an in-progress
   // snapshot publish and doubles the build-time artifact read for this key.
-  const userGeneratedAt = users.generatedAt;
+  const userGeneratedAt = access && users.index ? users.generatedAt : null;
   // A public index row is not evidence that its canonical detail URL was emitted.
   // Match the normalized public detail page canonical slugs, not just manifest keys.
   const manifest = access?.options.manifest;
