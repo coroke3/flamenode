@@ -88,6 +88,12 @@ export async function loadSitemapCanonicalVideoPages(
   access: SnapshotAccess | null,
   candidateVideoIds?: ReadonlySet<string>,
 ): Promise<EmittedCanonicalVideoPage[]> {
+  // The verified sitemap index accepts at most 500 videos. Enforce the same
+  // read budget here so direct/future callers cannot trigger unbounded detail
+  // reads by supplying an unchecked candidate set.
+  if (candidateVideoIds && candidateVideoIds.size > 500) {
+    throw new RangeError("[sitemap] video candidate limit exceeded (500)");
+  }
   if (!access) {
     return Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)
       .filter(([id]) => !candidateVideoIds || candidateVideoIds.has(id))
