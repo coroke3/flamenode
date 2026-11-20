@@ -29,6 +29,7 @@ test("Hono status mutation adapter keeps audit preloads and never wakes either q
   });
   const db = { marker: "request-db" };
   await host.mutate(db, {
+    preMutationAssertions: ["trusted-first-batch-authz"],
     mutationStatements: ["mutation"],
     expectedMutationChanges: [1],
     audits: [{ table_name: "videos", target_id: "v-1", operation: "UPDATE" }],
@@ -37,6 +38,8 @@ test("Hono status mutation adapter keeps audit preloads and never wakes either q
   });
 
   assert.equal(received.db, db);
+  assert.deepEqual(received.input.preMutationAssertions, ["trusted-first-batch-authz"],
+    "adapter forwards the server-owned authorization guard to mutateWithAudit");
   assert.deepEqual(received.input.mutationStatements, ["mutation"]);
   assert.deepEqual(received.input.expectedMutationChanges, [1]);
   assert.equal(received.input.preloaded.settings.enabled, true);
@@ -81,6 +84,7 @@ test("Hono executor composes the shared status core with the durable-outbox zero
     requestedStatus: "private",
     reason: "review",
     logTag: "admin-video-status",
+    preMutationAssertions: ["frozen-current-event-authz"],
     transition: {
       mutationStatements: ["video-update"],
       expectedMutationChanges: [1],
@@ -100,6 +104,8 @@ test("Hono executor composes the shared status core with the durable-outbox zero
     message: "ステータスを更新しました。",
     pendingPublicReflection: true,
   });
+  assert.deepEqual(mutationInput.preMutationAssertions, ["frozen-current-event-authz"],
+    "the executor preserves the trusted assertion for the Hono audit transaction");
   assert.deepEqual(mutationInput.mutationStatements, ["video-update", "notification-outbox"]);
   assert.deepEqual(mutationInput.expectedMutationChanges, [1, 1]);
   assert.equal(Object.hasOwn(mutationInput, "notificationWakeSource"), false);
