@@ -380,6 +380,46 @@ test("U03a ISSUE-703: switching auth user and Active X never copies a prior even
   }
 });
 
+test("U03a ISSUE-703: pending source draft is flushed to its old key before identity remount", async () => {
+  dom.window.localStorage.clear();
+  const keyFor = (authUserId, xid) => buildFormDraftStorageKey({
+    authUserId, formId: `unslotted-shell:${xid}`, schemaVersion: "unslotted-shell-v1",
+  });
+  const oldKey = keyFor("u1", "alice");
+  const newKey = keyFor("u2", "bob");
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props())));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+
+    // Do not dispatch pagehide or await the normal 500ms debounce.
+    // The identity-keyed shell unmount must preserve this unsaved selection
+    // under the DEPARTING identity, never the incoming draft namespace.
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      draftAuthUserId: "u2", activeXId: "@BOB",
+    }))));
+    const original = dom.window.localStorage.getItem(oldKey);
+    assert.ok(original, "pending source draft survives an immediate identity change");
+    assert.deepEqual(JSON.parse(original).value, {
+      affiliation: "event", selectedEventId: "event-A",
+    });
+    assert.equal(dom.window.localStorage.getItem(newKey), null,
+      "new user/X ID receives no copy of the source draft");
+    assert.equal(container.querySelector('input[name="event_ids"]'), null);
+
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.equal(dom.window.localStorage.getItem(newKey), null);
+    assert.equal(dom.window.localStorage.getItem(oldKey), original);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 test("U03a ISSUE-703: existing destination draft restores only to its own identity", async () => {
   dom.window.localStorage.clear();
   const keyFor = (authUserId, xid) => buildFormDraftStorageKey({
