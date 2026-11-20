@@ -190,6 +190,70 @@ test("MIG-0603: aborted trusted first-batch guards never become idempotent succe
   }
 });
 
+test("MIG-0603: R2 precommit plus revoked first-batch grant cannot become an authorized CAS success", async () => {
+  const sensitiveError = "D1 session=private-secret SQL=SELECT * FROM session";
+  for (const rollbackConfirmed of [true, false]) {
+    const calls = [];
+    const result = await executeVideoVisibilityStatusMutation({
+      db: {},
+      videoId: "v-1",
+      requestedStatus: "private",
+      transition: transition({
+        fenceToken: "fence-guard-r2",
+        depublicizedFromPublic: true,
+        queueBatch: { statements: [], expectedChanges: [], acceptedTargetCount: 0 },
+      }),
+      reason: "review",
+      logTag: "manage-video-status",
+      preMutationAssertions: ["trusted-live-session-and-revocable-event-grant"],
+    }, host({
+      preCommit: async () => { calls.push("r2-precommit"); },
+      mutate: async (_db, input) => {
+        calls.push("d1-batch");
+        assert.deepEqual(input.preMutationAssertions, [
+          "trusted-live-session-and-revocable-event-grant",
+        ], "live authorization is the first audited batch condition");
+        throw Object.assign(new Error(sensitiveError), { auditMutation: true });
+      },
+      isAuditMutationError: error => Boolean(error?.auditMutation),
+      compensate: async (_db, input) => {
+        calls.push("r2-compensate");
+        assert.equal(input.fenceToken, "fence-guard-r2",
+          "compensation applies only to this request's original R2 fence token");
+        assert.equal(input.allowNonPublicRollback, false,
+          "public depublication may not blindly clear concurrent foreign fences");
+      },
+      confirmCompensation: async videoId => {
+        calls.push("r2-confirm");
+        assert.equal(videoId, "v-1");
+        return rollbackConfirmed;
+      },
+      rereadStatus: async () => {
+        calls.push("d1-status-reread");
+        return "private";
+      },
+      log: (level, tag, details) => calls.push(["log", level, tag, details]),
+    }, calls));
+    assert.deepEqual(result, {
+      ok: false,
+      message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+      errorCode: "status_unverified", traceId: "trace-1", retryable: false,
+    }, "a failed revocable grant is never idempotent success even if video is private");
+    assert.deepEqual(calls.map(x => Array.isArray(x) ? x[0] : x), [
+      "r2-precommit", "d1-batch", "r2-compensate", "r2-confirm", "log",
+    ], "first batch fails, request-scoped R2 compensation executes, and no status oracle runs");
+    assert.deepEqual(calls[4][3], {
+      traceId: "trace-1",
+      error_code: rollbackConfirmed
+        ? "status_guard_or_mutation_failed"
+        : "visibility_compensation_failed",
+    }, "fixed diagnostics preserve confirmed-vs-unconfirmed compensation distinction");
+    assert.equal(calls[4][1], "warn");
+    assert.doesNotMatch(JSON.stringify({ result, calls }), /private-secret|SELECT \* FROM session/,
+      "no provider SQL, session token, or R2 secrets enter responses or logs");
+  }
+});
+
 test("shared CURRENT/Hono status failures log fixed codes, never provider SQL or tokens", async () => {
   const secret = "Authorization:Bearer private-credential password=secret";
   for (const [name, overrides, expectedCode] of [
