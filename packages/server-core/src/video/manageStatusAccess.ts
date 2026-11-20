@@ -464,11 +464,16 @@ export function planManageVideoStatusCommitAssertion(
     && new Set(expectedRebuildEventIds).size === expectedRebuildEventIds.length;
   const expectedIdsJson = validExpectedIds ? JSON.stringify(expectedRebuildEventIds) : "[]";
   const expectedIdsBounded = validExpectedIds && !exceedsRebuildIdBytes(expectedIdsJson);
+  // A missing/mismatched snapshot is already denied when the distinct count
+  // exceeds eight. Apply the same ninth-row ceiling to BOTH EXCEPT queries:
+  // malformed/imported fan-out must not force full-set materialization in D1.
+  // When the total is <=8, LIMIT 9 preserves the complete exact set.
   const currentRebuildIds = sql`(
     SELECT "event_id" AS "id" FROM "video_events" WHERE "video_id" = ${videoId}
     UNION
     SELECT "primary_event_id" AS "id" FROM "videos"
     WHERE "id" = ${videoId} AND "primary_event_id" IS NOT NULL
+    LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
   )`;
   const rebuildTargetsStillIdentical = expectedIdsBounded
     ? sql`NOT EXISTS (
