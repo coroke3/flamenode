@@ -916,7 +916,14 @@ test("MIG-0603: atomic CostGuard checks match Hono across mode, list and excepti
       ["normal", null, '{broken', 3600, false, false, "bad exception JSON"],
       ["normal", null, '["unknown_feature"]', 3600, false, false, "unknown exception key"],
       ["normal", null, '[5]', 3600, false, false, "nonstring exception"],
-      ["normal", '["manage_video_status"]', '["manage_video_status"]', 3600, true, false, "manage active exception"],
+      // A manage-only disable does not block admin: the enabled exception is
+      // a no-op for admin, which is still allowed by the normal policy.
+      ["normal", '["manage_video_status"]', '["manage_video_status"]', 3600, true, true, "manage active exception leaves admin enabled"],
+      ["normal", '["admin_video_status"]', '["manage_video_status"]', 3600, true, false, "manage exception cannot bypass separate admin disable"],
+      ["normal", '{bad', '["manage_video_status"]', 3600, true, false, "valid manage exception overrides invalid disabled list only for its feature"],
+      ["normal", '["manage_video_status"]', '["manage_video_status"]', -1, false, true, "expired manage exception still blocks only manage"],
+      ["normal", JSON.stringify(Array(101).fill("manage_video_status")), null, null, false, false, "disabled feature list over 100 entries"],
+      ["normal", null, JSON.stringify(Array(101).fill("manage_video_status")), 3600, false, false, "exception feature list over 100 entries"],
       ["maintenance", null, '["admin_video_status"]', 3600, false, true, "admin active exception overrides mode"],
       ["maintenance", null, '["manage_video_status"]', -1, false, false, "expired exception"],
       ["normal", null, '[]', 3600, true, true, "empty exception"],
