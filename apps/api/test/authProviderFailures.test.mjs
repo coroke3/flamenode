@@ -61,6 +61,11 @@ if (runTestWithTsx(import.meta.url)) {
                 if (fail()) throw new Error(SENTINEL);
                 return bound.run(...rest);
               },
+              // Drizzle's D1 driver selects through raw(), not only all()/first().
+              raw: async (...rest) => {
+                if (fail()) throw new Error(SENTINEL);
+                return bound.raw(...rest);
+              },
             };
           },
         };
