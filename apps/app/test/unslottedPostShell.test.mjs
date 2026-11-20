@@ -271,13 +271,22 @@ test("U03a: child form remounts on Active X or auth user change but not ordinary
     assert.deepEqual([mounts, unmounts], [1, 0]);
 
     await act(async () => root.render(render({ activeXId: "@BOB" })));
+    assert.equal(container.querySelector("form button"), null,
+      "new Active X starts with no affiliation or inherited child form");
+    assert.equal(selected(container, "none").checked, false);
+    assert.deepEqual([mounts, unmounts], [1, 1]);
+    await act(async () => selected(container, "none").click());
     assert.equal(container.querySelector("form button")?.textContent, "0",
-      "Active X change must not reuse old form state");
+      "new Active X receives a fresh child");
     assert.deepEqual([mounts, unmounts], [2, 1]);
 
     await act(async () => root.render(render({ activeXId: "@BOB", draftAuthUserId: "u2" })));
-    assert.equal(container.querySelector("form button")?.textContent, "0",
-      "auth user change must also remount the form");
+    assert.equal(container.querySelector("form button"), null,
+      "new auth user must not inherit parent affiliation or child form");
+    assert.equal(selected(container, "none").checked, false);
+    assert.deepEqual([mounts, unmounts], [2, 2]);
+    await act(async () => selected(container, "none").click());
+    assert.equal(container.querySelector("form button")?.textContent, "0");
     assert.deepEqual([mounts, unmounts], [3, 2]);
   } finally {
     await act(async () => root.unmount());
@@ -326,10 +335,9 @@ test("U03a: successful form submission clears only the active identity's shell d
   }
 });
 
-// ISSUE-703 characterization, NOT a safety acceptance test. The target intentionally
-// retains CURRENT's parent-shell behavior until a separate Lead decision authorizes
-// a compatibility/security fix. When fixed, invert this observed-state assertion.
-test("U03a ISSUE-703: same-instance identity switch can carry the prior event into a new draft key", async () => {
+// ISSUE-703 negative regression for the candidate shell-only identity boundary.
+// This is NOT evidence of parity in the mounted Next route or Lead approval.
+test("U03a ISSUE-703: switching auth user and Active X never copies a prior event draft", async () => {
   dom.window.localStorage.clear();
   const keyFor = (authUserId, xid) => buildFormDraftStorageKey({
     authUserId, formId: `unslotted-shell:${xid}`, schemaVersion: "unslotted-shell-v1",
@@ -344,23 +352,64 @@ test("U03a ISSUE-703: same-instance identity switch can carry the prior event in
     await act(async () => selected(container, "event").click());
     await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
     assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const originalDraft = dom.window.localStorage.getItem(oldKey);
+    assert.ok(originalDraft, "old user's draft is preserved for return navigation");
     assert.equal(dom.window.localStorage.getItem(newKey), null);
 
-    // Deliberately retain the SAME React shell component instance while both
-    // identity props change; the VideoForm child already has a keyed boundary.
+    // The outer React element remains the same component: the shell owns an
+    // identity-keyed boundary internally, not just the injected VideoForm.
     await act(async () => root.render(React.createElement(UnslottedPostShell, props({
       draftAuthUserId: "u2", activeXId: "@BOB",
     }))));
-    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A",
-      "characterization: old parent selection persists across a new user/X ID");
+    assert.equal(container.querySelector('input[name="event_ids"]'), null,
+      "new user/X ID cannot submit the previous account's event");
+    assert.equal(selected(container, "event").checked, false);
+    assert.equal(selected(container, "none").checked, false);
+    assert.ok(container.textContent.includes("掲載方法を選択してください"));
 
     await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
-    const migrated = dom.window.localStorage.getItem(newKey);
-    assert.ok(migrated, "characterization: pagehide writes a new-identity draft");
-    assert.deepEqual(JSON.parse(migrated).value, {
-      affiliation: "event", selectedEventId: "event-A",
-    }, "characterization: previous identity selection is stored under new draft key");
-    assert.notEqual(oldKey, newKey);
+    assert.equal(dom.window.localStorage.getItem(newKey), null,
+      "pagehide cannot write previous identity's state to the new draft key");
+    assert.equal(dom.window.localStorage.getItem(oldKey), originalDraft,
+      "switch does not erase or modify the original identity's draft");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
+test("U03a ISSUE-703: existing destination draft restores only to its own identity", async () => {
+  dom.window.localStorage.clear();
+  const keyFor = (authUserId, xid) => buildFormDraftStorageKey({
+    authUserId, formId: `unslotted-shell:${xid}`, schemaVersion: "unslotted-shell-v1",
+  });
+  const oldKey = keyFor("u1", "alice");
+  const destinationKey = keyFor("u2", "bob");
+  const existingDraft = JSON.stringify({
+    savedAt: Date.now(), value: { affiliation: "none", selectedEventId: "" },
+  });
+  dom.window.localStorage.setItem(destinationKey, existingDraft);
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props())));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      draftAuthUserId: "u2", activeXId: "@BOB",
+    }))));
+    assert.equal(selected(container, "none").checked, true,
+      "the destination user's own saved affiliation is restored");
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "");
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.equal(dom.window.localStorage.getItem(destinationKey), existingDraft,
+      "preexisting destination draft is not overwritten during transition");
+    assert.notEqual(oldKey, destinationKey);
   } finally {
     await act(async () => root.unmount());
     container.remove();
