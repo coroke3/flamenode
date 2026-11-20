@@ -419,6 +419,11 @@ test("U12: forged public-profile flags cannot make malformed X handles into navi
     assert.equal(creator.tagName, "SPAN", "malformed creator X handle cannot authorize /user/ href");
     assert.equal(doc.querySelector('.vd-creator-row a[href^="https://x.com/"]'), null,
       "malformed creator handle cannot generate an external X URL");
+    const ld = [...doc.querySelectorAll('script[type="application/ld+json"]')]
+      .map((script) => JSON.parse(script.textContent))
+      .find((item) => item["@type"] === "VideoObject");
+    assert.deepEqual(ld.author, { "@type": "Person", name: "作者" },
+      "structured VideoObject author cannot publish a malformed internal profile URL");
 
     const members = [...doc.querySelectorAll("tr.vd-mrow")];
     assert.equal(members.length, 2, "invalid handles must not hide public member attribution");
