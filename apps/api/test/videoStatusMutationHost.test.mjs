@@ -206,6 +206,8 @@ test("Hono status execution actually rolls back first-batch authz after a revoke
     const deniedStart = d1.stats.statements;
     const denied = await execute();
     assert.equal(denied.ok, false, "revoked reviewer cannot update through Hono executor");
+    assert.equal(denied.errorCode, "status_unverified");
+    assert.equal(denied.retryable, false, "revoked grant cannot be retried without reauthorization");
     assert.equal(d1.stats.statements - deniedStart, 1,
       "first batch assertion rejects before all three mutation statements");
     assert.equal(d1.stats.batches, 1);
@@ -234,9 +236,10 @@ test("Hono status execution actually rolls back first-batch authz after a revoke
     assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id='status-wiring-outbox'")
       .get().n, 1);
     assert.ok(d1.stats.maxBinds <= 100, "first-batch guard and DML remain D1-bind-bounded");
-    assert.ok(logs.every(([level, _tag, details]) =>
-      level === "error" && details.error_code === "mutation_failed"),
-      "provider errors are not included in structured logs");
+    assert.deepEqual(logs, [[
+      "warn", "[status-guard-wiring] guarded status mutation unverified",
+      { traceId: "trace-guard-wiring", error_code: "status_guard_or_mutation_failed" },
+    ]], "revoked guard emits only a redacted, non-retryable error code");
   } finally {
     sqlite.close();
   }
@@ -321,6 +324,8 @@ test("Hono status real mutateWithAudit keeps revoked reviewer writes and audit c
     const beforeDeny = d1.stats.statements;
     const denied = await execute();
     assert.equal(denied.ok, false, "no stale grant can authorize status");
+    assert.equal(denied.errorCode, "status_unverified");
+    assert.equal(denied.retryable, false);
     assert.equal(d1.stats.statements - beforeDeny, 1,
       "valid canonical audit preloads avoid extra D1 reads; guard fails first");
     assert.equal(d1.stats.batches, 1, "one atomic aborted audited batch");
@@ -448,6 +453,8 @@ test("MIG-0603: full quiet-status planner, real audited D1 queue and stale grant
     const deniedStart = d1.stats.statements;
     const denied = await execute();
     assert.equal(denied.ok, false);
+    assert.equal(denied.errorCode, "status_unverified");
+    assert.equal(denied.retryable, false);
     assert.equal(d1.stats.statements - deniedStart, 1,
       "revoked privilege rejects at the first D1 statement before the real queue UPSERT");
     assert.equal(d1.stats.batches, 1);
