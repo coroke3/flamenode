@@ -94,6 +94,11 @@ export async function loadSitemapCanonicalVideoPages(
   if (candidateVideoIds && candidateVideoIds.size > 500) {
     throw new RangeError("[sitemap] video candidate limit exceeded (500)");
   }
+  // A configured build must never silently scan every manifest detail when
+  // a caller forgets to pass the verified sitemap index's candidate set.
+  if (access && !candidateVideoIds) {
+    throw new TypeError("[sitemap] verified video candidate set is required");
+  }
   if (!access) {
     return Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)
       .filter(([id]) => !candidateVideoIds || candidateVideoIds.has(id))
@@ -105,7 +110,9 @@ export async function loadSitemapCanonicalVideoPages(
   // The sitemap video index has at most 500 entries. Avoid re-reading every
   // manifest-approved detail (potentially thousands) when most cannot appear
   // in the sitemap. The page emitter still independently validates all pages.
-  for (const key of videoDetailKeys(manifest)) {
+  // An allow-list may repeat the same key. Deduplicate it so even duplicate
+  // manifest rows cannot multiply the bounded index's verified source reads.
+  for (const key of new Set(videoDetailKeys(manifest))) {
     const id = key.slice("snapshot/video-detail/".length, -".json".length);
     if (candidateVideoIds && !candidateVideoIds.has(id)) continue;
     const payload = await loadVideoDetailPayload(access.source, key, access.options);
