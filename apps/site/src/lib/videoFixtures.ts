@@ -53,6 +53,16 @@ export const FIXTURE_VIDEO_DETAIL_PAYLOADS: Readonly<Record<string, Record<strin
     member_chapters: [
       { id: "fixture-chapter-1", video_member_id: "fixture-member-public", chapter_time: 24, chapter_label: "冒頭" },
     ],
+    // U12 representative *public* content: real video-detail rendering branches
+    // for later visual inspection. Related links must resolve to built fixtures.
+    public_chapters: [
+      { id: "fixture-public-chapter-1", chapter_time: 70, chapter_label: "ここが好き", author_name: "視聴者" },
+      { id: "fixture-public-chapter-2", chapter_time: 96, chapter_label: "後半", author_name: "視聴者" },
+    ],
+    software_labels: ["After Effects", "Blender"],
+    related_videos: [
+      { id: "vid-bbb", title: "模範囚", youtube_video_id: null, display_name: "hato", visibility_status: "public" },
+    ],
   },
   "vid-bbb": payload({
     id: "vid-bbb", title: "模範囚", youtube_video_id: null, creator_display_name: "hato", creator_x_user_id: "hato",
