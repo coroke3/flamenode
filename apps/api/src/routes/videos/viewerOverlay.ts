@@ -84,7 +84,12 @@ function emptyOverlay(args?: {
  */
 function boundedOverlayResponse(c: Context<AppEnv>, body: VideoViewerOverlayDto): Response {
   const encode = (dto: VideoViewerOverlayDto) => JSON.stringify(dto);
+  // Every UTF-16 code unit needs at least one UTF-8 byte (surrogate pairs
+  // need four bytes for two units). Reject obviously oversized JSON before
+  // allocating a potentially multi-megabyte TextEncoder output. For shorter
+  // strings still count *bytes*, never treat code-unit length as UTF-8 length.
   const withinLimit = (json: string) =>
+    json.length <= MAX_VIEWER_OVERLAY_RESPONSE_BYTES &&
     new TextEncoder().encode(json).byteLength <= MAX_VIEWER_OVERLAY_RESPONSE_BYTES;
   let json = encode(body);
   if (!withinLimit(json)) {

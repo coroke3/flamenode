@@ -867,6 +867,36 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(await emptyIdRes.json(), { error: "invalid_video_id" });
   });
 
+  test("Issue #709: UTF-8 can exceed 64KiB even when JSON has fewer than 64K UTF-16 units", async () => {
+    const { env, bucket, d1 } = setupTestEnv();
+    const artifact = {
+      schema_version: 1, generated_at: 1000, event_id: "evt-1", complete: true,
+      items: Array.from({ length: 160 }, (_, i) => ({
+        id: "utf8-video-" + i, title: "あ".repeat(150),
+        youtube_video_id: "yt_" + i, display_name: "Bob",
+      })),
+    };
+    const artifactJson = JSON.stringify(artifact);
+    assert.ok(artifactJson.length < 64 * 1024, "UTF-16 units are under the budget");
+    assert.ok(Buffer.byteLength(artifactJson, "utf8") > 64 * 1024,
+      "UTF-8 bytes exceed the same budget for valid Japanese titles");
+    await bucket.put("events/evt-1/playlist.v1.json", artifactJson);
+    d1.stats.statements = 0;
+    const response = await app.request(
+      "/api/videos/vid-pub/viewer-overlay?playlist=evt-1", {}, env);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"),
+      "private, no-store, no-cache, must-revalidate");
+    const jsonText = await response.text();
+    assert.ok(Buffer.byteLength(jsonText, "utf8") <= 64 * 1024,
+      "byte budget must not be approximated using JavaScript string.length");
+    const dto = JSON.parse(jsonText);
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(dto).success, true);
+    assert.deepEqual(dto.playlistItems, [], "oversized Japanese playlist must be omitted");
+    assert.equal(dto.playlistLabel, "再生リスト");
+    assert.equal(d1.stats.statements, 0, "anonymous public viewer must not query D1");
+  });
+
   test("Issue #709: 500 valid multibyte public playlist rows stay <=64KiB on every RH-031 early-return", async () => {
     const items = Array.from({ length: 500 }, (_, i) => ({
       id: "large-video-" + i,
