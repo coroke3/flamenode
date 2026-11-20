@@ -97,7 +97,17 @@ const dom = (r, file) => new JSDOM(fs.readFileSync(path.join(r.out, file), "utf-
 test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body follow CURRENT", { skip: skipUi }, () => {
   // The other pages of the build need no snapshot unless the env is set; the video build alone must be accepted
   // by every page, so give the site's other readers an empty-by-design environment (about-stats is optional).
-  const r = build([["vid1", payload()]]);
+  const mainPayload = payload();
+  // The complete public manifest explicitly allows each related detail page.
+  // A stale reference with no page in the manifest must not be exposed.
+  const related = mainPayload.related_videos.map((item) => [item.id, payload({
+    video: {
+      id: item.id, title: item.title, creator_display_name: item.display_name,
+      youtube_video_id: item.youtube_video_id, primary_event_id: null,
+    },
+    top: { related_videos: [], related_reserve: [], related_random_reserve: [] },
+  })]);
+  const r = build([["vid1", mainPayload], ...related]);
   try {
     assert.equal(r.error, null, r.error ?? "");
     const doc = dom(r, "AAAAAAAAA01/index.html");
@@ -464,12 +474,23 @@ test("U12 privacy: a manifest-withdrawn video is absent from stale related seman
     id: "public-related", title: "公開中の関連作品", youtube_video_id: "YYYYYYYYY00",
     display_name: "公開作成者",
   };
-  const r = build([["vid1", payload({ top: {
-    related_videos: [withdrawn, active],
-    related_reserve: [withdrawn],
-    related_random_ids: [withdrawn.id],
-    related_random_reserve: [withdrawn],
-  } })]], {
+  const omitted = {
+    id: "missing-video", title: "許可一覧にない作品", youtube_video_id: "XXXXXXXXX00",
+    display_name: "非公開に戻した作成者",
+  };
+  const r = build([
+    ["vid1", payload({ top: {
+      related_videos: [withdrawn, omitted, active],
+      related_reserve: [withdrawn, omitted],
+      related_random_ids: [withdrawn.id, omitted.id],
+      related_random_reserve: [omitted, withdrawn],
+    } })],
+    [active.id, payload({
+      video: { id: active.id, title: active.title, youtube_video_id: active.youtube_video_id,
+        creator_display_name: active.display_name, primary_event_id: null },
+      top: { related_videos: [], related_reserve: [], related_random_reserve: [] },
+    })],
+  ], {
     manifestOnlyVideoIds: [withdrawn.id],
     blocked: [keyOf(withdrawn.id)],
   });
@@ -480,10 +501,12 @@ test("U12 privacy: a manifest-withdrawn video is absent from stale related seman
     assert.equal(related.length, 1, "eligible public related item remains");
     assert.equal(related[0].getAttribute("href"), "/YYYYYYYYY00");
     assert.match(text(related[0]), /公開中の関連作品/);
-    assert.doesNotMatch(doc.body.textContent, /非公開へ変更した作品|非公開作成者/,
-      "denied title and creator cannot leak into generated HTML");
+    assert.doesNotMatch(doc.body.textContent, /非公開へ変更した作品|非公開作成者|許可一覧にない作品|非公開に戻した作成者/,
+      "blocked or not-allowed title/creator cannot leak into generated HTML");
     assert.equal(doc.querySelector('a[href="/ZZZZZZZZZ00"]'), null,
-      "no related-card link may target a withdrawn public video");
+      "no related-card link may target a deny-listed video");
+    assert.equal(doc.querySelector('a[href="/XXXXXXXXX00"]'), null,
+      "an absent public manifest entry also blocks a stale related target");
   } finally {
     clean(r);
   }
