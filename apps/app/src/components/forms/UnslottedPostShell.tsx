@@ -75,6 +75,10 @@ function UnslottedPostShellForIdentity<
   const [shellDirty, setShellDirty] = React.useState(false);
   const [missingRestoredEvent, setMissingRestoredEvent] = React.useState(false);
   const videoDraftFlushRef = React.useRef<() => boolean>(() => false);
+  // An in-flight submit may complete after an affiliation/event change.
+  // Keep success scoped to the selection version that launched it; the new
+  // selection's draft must not be cleared by the departed form.
+  const selectionRevisionRef = React.useRef(0);
 
   const selectedEvent = eventOptions.find((event) => event.id === selectedEventId);
   const selectedEventOptions = React.useMemo(
@@ -182,6 +186,7 @@ function UnslottedPostShellForIdentity<
   const selectAffiliation = (next: Exclude<AffiliationChoice, null>) => {
     if (next === affiliation || !confirmReset()) return;
     pendingRestoredEventIdRef.current = "";
+    selectionRevisionRef.current += 1;
     videoDraftFlushRef.current();
     setShellDirty(true);
     setAffiliation(next);
@@ -194,11 +199,14 @@ function UnslottedPostShellForIdentity<
   const selectEvent = (eventId: string) => {
     if (eventId === selectedEventId || !confirmReset()) return;
     pendingRestoredEventIdRef.current = "";
+    selectionRevisionRef.current += 1;
     videoDraftFlushRef.current();
     setShellDirty(true);
     setMissingRestoredEvent(false);
     setSelectedEventId(eventId);
   };
+
+  const selectionRevisionAtRender = selectionRevisionRef.current;
 
   return (
     <div
@@ -328,7 +336,10 @@ function UnslottedPostShellForIdentity<
             eventOptions: selectedEventOptions,
             canEditEvents: false,
             onDraftFlushReady: handleVideoDraftFlushReady,
-            onSubmitSuccess: handleVideoSubmitSuccess,
+            onSubmitSuccess: () => {
+              if (selectionRevisionAtRender !== selectionRevisionRef.current) return;
+              handleVideoSubmitSuccess();
+            },
           })}
         </React.Fragment>
       )}
