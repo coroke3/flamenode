@@ -31,6 +31,10 @@ const PRIVATE_HEADERS = {
 
 /** CURRENT src/lib/publicData/r2EventPlaylist.ts readVisibleEventArtifact: other ids are never read. */
 const PLAYLIST_EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+/** ZERO_1102 S2: newly added editable public chapter list, not the legacy private-read cap. */
+const MAX_EDITABLE_PUBLIC_CHAPTER_ROWS = 100;
+/** ZERO_1102 S2: response cap; never truncate a stored note in an editor DTO. */
+const MAX_VIEWER_OVERLAY_RESPONSE_BYTES = 64 * 1024;
 
 const UNAVAILABLE_HEADERS = {
   ...PRIVATE_HEADERS,
@@ -355,7 +359,7 @@ SELECT
                 AND ch."id" NOT LIKE '%:member:%'
                 AND ch."id" NOT LIKE '%:legacy:%'
               ORDER BY ch."chapter_time" ASC, ch."id" ASC
-              LIMIT 500
+              LIMIT ${MAX_EDITABLE_PUBLIC_CHAPTER_ROWS}
            ) c) AS editable_public_chapters_json`
         : `'[]' AS editable_public_chapters_json`;
 
@@ -469,7 +473,17 @@ SELECT
         ...finalPlaylist,
       };
 
-      return c.json(result, 200, PRIVATE_HEADERS);
+      // Notes must be complete when offered for PUT. If the response would
+      // exceed S2's 64KiB limit, fail closed instead of truncating any note,
+      // returning a partially usable editor, or serializing an oversized body.
+      const responseJson = JSON.stringify(result);
+      if (new TextEncoder().encode(responseJson).byteLength > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+        return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+      }
+      return c.body(responseJson, 200, {
+        ...PRIVATE_HEADERS,
+        "Content-Type": "application/json; charset=utf-8",
+      });
     } catch (error) {
       console.error("[video-viewer-overlay] db read failed", { rawId, error });
       if (!degraded) return authUnavailable();
