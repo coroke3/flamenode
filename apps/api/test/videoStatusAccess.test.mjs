@@ -643,6 +643,65 @@ test("MIG-0603: status snapshot rejects oversized primary event ID even when lin
   }
 });
 
+test("MIG-0603: combined primary and linked snapshot JSON must fit the atomic 4096-byte bound", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    enableStatusCostGuard(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const admin = { id: "u_admin", role: "admin" };
+    const manager = { id: "u_mgr", role: "user" };
+    const primary = "primary-" + "p".repeat(2290);
+    const linked = "linked-" + "l".repeat(2290);
+    // The linked JSON and primary ID are EACH within the 4096-byte input
+    // bound, yet the canonical combined snapshot exceeds the SAME JSON bind
+    // bound enforced at the commit-time atomic SQL assertion.
+    assert.ok(Buffer.byteLength(JSON.stringify(["evA", linked]), "utf8") <= 4096);
+    assert.ok(Buffer.byteLength(primary, "utf8") <= 4096);
+    assert.ok(Buffer.byteLength(JSON.stringify([primary, "evA", linked]), "utf8") > 4096);
+    sqlite.prepare("UPDATE videos SET primary_event_id=? WHERE id='v1'").run(primary);
+    sqlite.prepare("INSERT INTO video_events (video_id,event_id) VALUES ('v1',?)").run(linked);
+    for (const [tag, load, reads] of [
+      ["admin", () => loadAdminVideoStatusSnapshot(db, admin, "v1"), 1],
+      ["manager", () => loadManageVideoStatusSnapshot(db, manager, "evA", "v1"), 2],
+    ]) {
+      const start = d1.stats.statements;
+      await assert.rejects(load(), /manage_status_rebuild_event_snapshot_invalid/,
+        tag + ": never return ok:true when exact atomic rebuild JSON cannot be bound");
+      assert.equal(d1.stats.statements - start, reads,
+        tag + ": combined size failure must add no route-wide D1 query");
+    }
+    assert.equal(d1.stats.batches, 0, "invalid preloads never start a mutation batch");
+    assert.equal(d1.stats.writes, 0, "invalid preloads are strictly read only");
+
+    // Repair only the independent primary field: the original linked target
+    // stays large but the combined frozen array is again within the cap.
+    const repairedPrimary = "primary-" + "p".repeat(1100);
+    sqlite.prepare("UPDATE videos SET primary_event_id=? WHERE id='v1'").run(repairedPrimary);
+    const expected = [repairedPrimary, "evA", linked];
+    assert.ok(Buffer.byteLength(JSON.stringify(expected), "utf8") <= 4096);
+    const adminSnapshot = await loadAdminVideoStatusSnapshot(db, admin, "v1");
+    const managerSnapshot = await loadManageVideoStatusSnapshot(db, manager, "evA", "v1");
+    assert.deepEqual(adminSnapshot.rebuildEventIds, expected,
+      "admin snapshot retains the complete, bounded rebuild set");
+    assert.deepEqual(managerSnapshot.rebuildEventIds, expected,
+      "manager snapshot retains the complete, bounded rebuild set");
+    await db.batch([
+      planAdminVideoStatusCommitAssertion(db, admin, "v1", "tok-admin", adminSnapshot.rebuildEventIds),
+    ].map(stmt => preparedStatusTestBatchItem(db, stmt)));
+    await db.batch([
+      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr",
+        "manage_video_status", managerSnapshot.rebuildEventIds),
+    ].map(stmt => preparedStatusTestBatchItem(db, stmt)));
+    assert.ok(d1.stats.maxBinds <= 100, "the complete snapshot uses bounded bind count");
+  } finally {
+    sqlite.close();
+  }
+});
+
+
 test("MIG-0603: commit-time status authorization assertion rolls back on revoked grant or link", async () => {
   const cases = [
     ["approved X revoked", (sqlite) =>
