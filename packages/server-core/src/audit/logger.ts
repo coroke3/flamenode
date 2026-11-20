@@ -254,11 +254,119 @@ export function isValidPreloadedActorSnapshotJson(value: unknown): value is stri
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const row = parsed as Record<string, unknown>;
     const keys = ["discord_id", "discord_name", "x_user_id", "x_name", "icon_url"] as const;
-    return Object.keys(row).length === keys.length &&
-      keys.every((key) =>
-        Object.hasOwn(row, key) && (row[key] === null || typeof row[key] === "string"));
+    const actualKeys = Object.keys(row);
+    return actualKeys.length === keys.length &&
+      keys.every((key, index) =>
+        actualKeys[index] === key &&
+        Object.hasOwn(row, key) &&
+        (row[key] === null || typeof row[key] === "string")) &&
+      // The guard supplies exactly JSON.stringify(actorSnapshotFromRow(row))
+      // in this field order. JSON.parse silently drops duplicate keys; raw
+      // bytes with aliases, whitespace or changed order are not guard evidence.
+      // Reject and charge an authoritative D1 actor SELECT.
+      JSON.stringify(row) === value;
   } catch {
     return false;
+  }
+}
+
+/**
+ * A preload may skip the settings SELECT only when it is the complete
+ * five-field settings snapshot the write guard supplies. Partial or malformed
+ * placeholders must pay for the authoritative D1 read.
+ */
+function snapshotPreloadedAuditSettings(value: unknown): AuditLogSettings | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const keys = [
+    "normal_retention_days",
+    "restorable_retention_days",
+    "long_audit_retention_days",
+    "max_payload_bytes",
+    "compact_after_days",
+  ] as const;
+  try {
+    // Inspect descriptors, not property values: a Proxy may return different
+    // data from its get trap after the shape check has already succeeded.
+    const prototype = Object.getPrototypeOf(row);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    if (Reflect.ownKeys(row).length !== keys.length) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(row);
+    if (!keys.every((key) => {
+      const field = descriptors[key];
+      return Boolean(
+        field?.enumerable && Object.hasOwn(field, "value") &&
+        typeof field.value === "number" &&
+        Number.isSafeInteger(field.value) && field.value >= 0
+      );
+    })) return null;
+
+    // Use only these validated primitive values downstream. Never read
+    // caller-controlled properties (or invoke get traps) after validation.
+    return {
+      normal_retention_days: descriptors.normal_retention_days.value as number,
+      restorable_retention_days: descriptors.restorable_retention_days.value as number,
+      long_audit_retention_days: descriptors.long_audit_retention_days.value as number,
+      max_payload_bytes: descriptors.max_payload_bytes.value as number,
+      compact_after_days: descriptors.compact_after_days.value as number,
+    };
+  } catch {
+    // Invalid or exotic preloads must pay for a real settings SELECT.
+    return null;
+  }
+}
+
+export function isValidPreloadedAuditSettings(value: unknown): value is AuditLogSettings {
+  return snapshotPreloadedAuditSettings(value) !== null;
+}
+
+/**
+ * A settings accessor can throw before the shape validator receives a value.
+ * The planner and logger must both charge the authoritative D1 SELECT instead
+ * of aborting with a caller-controlled exception.
+ */
+export function readCanonicalPreloadedAuditSettings(
+  preloaded: PreloadedAuditContext | undefined,
+): AuditLogSettings | null {
+  try {
+    return snapshotPreloadedAuditSettings(preloaded?.settings);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Freeze guard-provided audit preloads once per mutation. Both the D1 budget
+ * planner and the actual logger must consume identical validated values,
+ * even if the caller supplied mutable objects or dynamic Proxy traps.
+ */
+export function snapshotPreloadedAuditContext(
+  preloaded: PreloadedAuditContext | undefined,
+  actorUserIds: readonly string[],
+): PreloadedAuditContext | undefined {
+  if (!preloaded) return undefined;
+  const settings = readCanonicalPreloadedAuditSettings(preloaded) ?? undefined;
+  const actorSnapshotJsonById: Record<string, string> = Object.create(null);
+  for (const actorId of new Set(actorUserIds)) {
+    const actorJson = readCanonicalPreloadedActorJson(preloaded, actorId);
+    if (actorJson !== null) actorSnapshotJsonById[actorId] = actorJson;
+  }
+  return { settings, actorSnapshotJsonById };
+}
+
+/**
+ * Read a canonical actor preload without allowing a throwing accessor/Proxy
+ * to abort D1 budget planning or audit preparation before a real actor read.
+ */
+export function readCanonicalPreloadedActorJson(
+  preloaded: PreloadedAuditContext | undefined,
+  actorUserId: string,
+): string | null {
+  try {
+    const candidate = preloaded?.actorSnapshotJsonById?.[actorUserId];
+    return isValidPreloadedActorSnapshotJson(candidate) ? candidate : null;
+  } catch {
+    return null;
   }
 }
 
@@ -271,8 +379,11 @@ export async function prepareAuditLogEntries(
   const activeInputs = inputs.filter((input) => !BLOCKED_TABLES.has(input.table_name));
   if (activeInputs.length === 0) return inputs.map(() => null);
 
-  let settings = preloaded?.settings ?? DEFAULT_AUDIT_LOG_SETTINGS;
-  if (!preloaded?.settings) {
+  const preloadedSettings = readCanonicalPreloadedAuditSettings(preloaded);
+  // The planner credits only descriptor-valid preloads, and runtime uses the
+  // same detached primitive snapshot rather than the caller's mutable object.
+  let settings: AuditLogSettings = preloadedSettings ?? DEFAULT_AUDIT_LOG_SETTINGS;
+  if (!preloadedSettings) {
     try {
       settings = await getAuditLogSettings(db);
     } catch (error) {
@@ -287,10 +398,10 @@ export async function prepareAuditLogEntries(
   for (let offset = 0; offset < actorUserIds.length; offset += 4) {
     await Promise.all(
       actorUserIds.slice(offset, offset + 4).map(async (actorUserId) => {
-        const known = preloaded?.actorSnapshotJsonById?.[actorUserId];
+        const known = readCanonicalPreloadedActorJson(preloaded, actorUserId);
         // Budget and runtime both reuse only canonical actor snapshots.
-        // Invalid strings and non-strings are charged a fresh D1 SELECT.
-        if (isValidPreloadedActorSnapshotJson(known)) {
+        // Invalid strings, throwing accessors and non-strings pay for D1.
+        if (known !== null) {
           actorJsonById.set(actorUserId, known);
           return;
         }
