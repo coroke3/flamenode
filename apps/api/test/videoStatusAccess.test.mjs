@@ -1362,3 +1362,74 @@ test("MIG-0603: equal-cardinality rebuild event replacement after preload is rej
     assert.ok(d1.stats.maxBinds <= 100,"exact snapshot set check must use bounded JSON binds");
   } finally { sqlite.close(); }
 });
+
+
+test("MIG-0603: malformed frozen rebuild IDs cannot authorize an atomic status batch", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    enableStatusCostGuard(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    const admin = { id: "u_admin", role: "admin" };
+    assert.deepEqual((await loadManageVideoStatusSnapshot(db, manager, "evA", "v1")).rebuildEventIds, ["evA"]);
+    assert.deepEqual((await loadAdminVideoStatusSnapshot(db, admin, "v1")).rebuildEventIds, ["evA"]);
+
+    const incorrect = [
+      ["missing", []],
+      ["duplicate", ["evA", "evA"]],
+      ["unexpected", ["evA", "evB"]],
+      ["empty-id", ["evA", ""]],
+      ["nine-ids", ["evA", "evB", "evC", "evD", "evE", "evF", "evG", "evH", "evI"]],
+      // Under the 4096 UTF-16 code-unit cap but over 4096 UTF-8 bytes.
+      ["oversized-utf8", ["evA", "漢".repeat(1800)]],
+    ];
+    for (const [actor, feature, token] of [
+      [manager, "manage_video_status", "tok-mgr"],
+      [admin, "admin_video_status", "tok-admin"],
+    ]) {
+      for (const [caseName, expected] of incorrect) {
+        const tag = actor.id + "-" + caseName;
+        const guard = feature === "admin_video_status"
+          ? planAdminVideoStatusCommitAssertion(db, actor, "v1", token, expected)
+          : planManageVideoStatusCommitAssertion(
+              db, actor, "evA", "v1", token, feature, expected);
+        const start = d1.stats.statements;
+        await assert.rejects(db.batch([
+          guard,
+          db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+          db.run(sql`INSERT INTO audit_logs
+            (id,table_name,target_id,operation,actor_user_id,created_at)
+            VALUES (${"invalid-snapshot-audit-" + tag},'videos','v1','UPDATE',${actor.id},1000)`),
+          db.run(sql`INSERT INTO notification_outbox
+            (id,type,payload_json,status,created_at)
+            VALUES (${"invalid-snapshot-outbox-" + tag},'video_posted','{}','pending',1000)`),
+        ].map(stmt => preparedStatusTestBatchItem(db, stmt))), /malformed JSON|not-valid-json/,
+        tag + ": malformed/stale expected set must fail closed");
+        assert.equal(d1.stats.statements - start, 1, tag + ": reject at first batch statement");
+        assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+          "pending", tag + ": video unchanged");
+        assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE id=?")
+          .get("invalid-snapshot-audit-" + tag).n, 0, tag + ": audit unchanged");
+        assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id=?")
+          .get("invalid-snapshot-outbox-" + tag).n, 0, tag + ": outbox unchanged");
+      }
+    }
+    // A genuinely preloaded, unmodified snapshot still authorizes the same
+    // first-assertion batch: deny tests must not be blanket-false positives.
+    const start = d1.stats.statements;
+    await db.batch([
+      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr",
+        "manage_video_status", ["evA"]),
+      db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+    ].map(stmt => preparedStatusTestBatchItem(db, stmt)));
+    assert.equal(d1.stats.statements - start, 2, "valid frozen IDs use the same atomic batch");
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+      "public", "valid manager snapshot remains permitted");
+    assert.ok(d1.stats.maxBinds <= 100, "untrusted/malformed snapshot inputs cannot exceed D1 binds");
+  } finally {
+    sqlite.close();
+  }
+});
