@@ -31,8 +31,13 @@ export function chapterManagementForOverlay(
   const publicIds = new Set(publicChapters.map((chapter) => chapter.id));
   const seen = new Set<string>();
   const editablePublic: EditableChapter[] = (perRowOverlay.editablePublicChapters ?? [])
-    .filter((chapter) => chapter.viewerCanManage === true &&
-      publicIds.has(chapter.id) && !seen.has(chapter.id) && seen.add(chapter.id))
+    .filter((chapter) => {
+      if (chapter.viewerCanManage !== true || !publicIds.has(chapter.id) || seen.has(chapter.id)) {
+        return false;
+      }
+      seen.add(chapter.id);
+      return true;
+    })
     .map((chapter) => ({
       id: chapter.id,
       chapter_time: formatChapterTime(chapter.chapter_time),
