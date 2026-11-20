@@ -214,7 +214,7 @@ test("MIG-0627 U02a T09: canonical projection reads a verified public detail and
     fixture.reads.push(requested);
     return requested === key ? bytes : null;
   };
-  const pages = await loadSitemapCanonicalVideoPages(fixture.access);
+  const pages = await loadSitemapCanonicalVideoPages(fixture.access, new Set([id]));
   assert.deepEqual(fixture.reads, [key]);
   assert.deepEqual(pages, [{
     videoId: id,
@@ -229,7 +229,7 @@ test("MIG-0627 U02a T09: canonical projection reads a verified public detail and
   const wrongBytes = buildEnvelope(FIXTURE_VIDEO_DETAIL_PAYLOADS[id], { key: wrongKey });
   mismatched.access.source.read = async (requested) => requested === wrongKey ? wrongBytes : null;
   await assert.rejects(
-    loadSitemapCanonicalVideoPages(mismatched.access),
+    loadSitemapCanonicalVideoPages(mismatched.access, new Set(["vid-other"])),
     /not a public, matching video detail/,
   );
 });
@@ -315,4 +315,37 @@ test("MIG-0627 U02a T13: oversized candidate set fails before any verified detai
   const boundary = new Set(Array.from({ length: 500 }, (_, i) => `video-${i}`));
   assert.deepEqual(await loadSitemapCanonicalVideoPages(fixture.access, boundary), []);
   assert.deepEqual(fixture.reads, []);
+});
+
+test("MIG-0627 U02a T14: configured build requires verified candidate set before any read", async () => {
+  const fixture = accessWith();
+  fixture.access.options.manifest.allowedKeys.push("snapshot/video-detail/vid-aaa.json");
+  await assert.rejects(
+    loadSitemapCanonicalVideoPages(fixture.access),
+    /verified video candidate set is required/,
+  );
+  assert.deepEqual(fixture.reads, [], "missing candidate set cannot scan all manifest details");
+  assert.equal(fixture.metrics.reads, 0);
+  // An explicitly verified empty index remains valid and reads nothing.
+  assert.deepEqual(await loadSitemapCanonicalVideoPages(fixture.access, new Set()), []);
+  assert.equal(fixture.metrics.reads, 0);
+});
+
+test("MIG-0627 U02a T15: duplicated allowed detail keys cannot amplify source reads", async () => {
+  const fixture = accessWith();
+  const key = "snapshot/video-detail/vid-aaa.json";
+  fixture.access.options.manifest.allowedKeys.push(key, key, key, key);
+  const bytes = buildEnvelope(FIXTURE_VIDEO_DETAIL_PAYLOADS["vid-aaa"], { key });
+  fixture.access.source.read = async (requested) => {
+    fixture.reads.push(requested);
+    return requested === key ? bytes : null;
+  };
+  const pages = await loadSitemapCanonicalVideoPages(fixture.access, new Set(["vid-aaa"]));
+  assert.equal(pages.length, 1, "one canonical video page per verified detail key");
+  assert.equal(pages[0].videoId, "vid-aaa");
+  assert.deepEqual(fixture.reads, [key]);
+  assert.deepEqual(
+    { reads: fixture.metrics.reads, accepted: fixture.metrics.accepted, rejected: fixture.metrics.rejected },
+    { reads: 1, accepted: 1, rejected: 0 },
+  );
 });
