@@ -612,3 +612,49 @@ test("U03a: shell is network and Next-free; CURRENT affiliation/draft contract i
     assert.ok(ported.includes(phrase), "ported shell must retain CURRENT wording");
   }
 });
+
+test("U03a ISSUE-703: late previous-identity flush registration cannot override the current child", async () => {
+  dom.window.localStorage.clear();
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  let registerFromOldChild;
+  let oldFlushCalls = 0;
+  let currentFlushCalls = 0;
+  const renderVideoForm = args => {
+    const isOldIdentity = args.formKey === "unslotted-video:u1:alice";
+    args.onDraftFlushReady(() => {
+      if (isOldIdentity) oldFlushCalls += 1;
+      else currentFlushCalls += 1;
+      return true;
+    });
+    if (isOldIdentity) registerFromOldChild = args.onDraftFlushReady;
+    return renderStub(args);
+  };
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      renderVideoForm,
+    }))));
+    await act(async () => selected(container, "none").click());
+    assert.equal(typeof registerFromOldChild, "function");
+
+    // Remount the outer shell by changing the identity, not the child alone.
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      activeXId: "@BOB", draftAuthUserId: "u2", renderVideoForm,
+    }))));
+    assert.equal(selected(container, "none").checked, false);
+    assert.equal(container.querySelector("form"), null);
+
+    // A late async child callback still closes over the old shell. It must
+    // not replace the new shell's registered flush function.
+    registerFromOldChild(() => { oldFlushCalls += 100; return true; });
+    await act(async () => selected(container, "none").click());
+    await act(async () => selected(container, "event").click());
+    assert.equal(oldFlushCalls, 0, "the unmounted child's flush must never run");
+    assert.equal(currentFlushCalls, 1, "only the current identity's child is flushed");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
