@@ -1206,6 +1206,25 @@ test("MIG-0603: ninth rebuild event added after valid preload aborts the atomic 
     await attempt(manager,"manage_video_status",true,"manager-eight-with-duplicate-primary");
     await attempt(admin,"admin_video_status",true,"admin-eight-with-duplicate-primary");
 
+    // CURRENT mergeVideoRebuildEventIds discards empty-string IDs. Imported
+    // legacy data may have empty primary_event_id and a dangling empty link;
+    // these are not ninth rebuild targets and must not cause a false deny.
+    // The canonical preloader may see nine linked rows, but its deduped,
+    // nonempty queue target set still has exactly eight valid event IDs.
+    sqlite.exec("UPDATE videos SET primary_event_id='' WHERE id='v1'");
+    insert(sqlite, "video_events", { video_id: "v1", event_id: "" });
+    const emptyManager = await loadManageVideoStatusSnapshot(db, manager, "evA", "v1");
+    const emptyAdmin = await loadAdminVideoStatusSnapshot(db, admin, "v1");
+    assert.equal(emptyManager.ok, true);
+    assert.equal(emptyAdmin.ok, true);
+    assert.deepEqual([...emptyManager.rebuildEventIds].sort(),
+      ["evA", ...extraEvents].sort(), "CURRENT drops imported empty linked/primary IDs");
+    assert.deepEqual(emptyAdmin.rebuildEventIds, emptyManager.rebuildEventIds);
+    await attempt(manager,"manage_video_status",true,"manager-eight-with-empty-import");
+    await attempt(admin,"admin_video_status",true,"admin-eight-with-empty-import");
+    sqlite.exec("DELETE FROM video_events WHERE video_id='v1' AND event_id=''");
+    sqlite.exec("UPDATE videos SET primary_event_id='evA' WHERE id='v1'");
+
     // An importer/other writer adds ninth distinct link after accepted preflight.
     insert(sqlite, "video_events", { video_id: "v1", event_id: "evGen19" });
     await attempt(manager,"manage_video_status",false,"manager-late-ninth-link");
