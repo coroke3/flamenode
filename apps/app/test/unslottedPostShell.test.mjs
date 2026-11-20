@@ -99,9 +99,10 @@ test("U03a: existing form metadata remains, while affiliation and event IDs over
     assert.deepEqual(args.initial, { ...initial, event_ids: ["event-A"], part: null });
     assert.deepEqual(args.eventOptions, [eventA]);
     assert.equal(container.querySelector('input[name="event_ids"]').value, "event-A");
+    assert.equal(flushCount, 2, "selecting an event flushes the last available form draft");
 
     await act(async () => selected(container, "none").click());
-    assert.equal(flushCount, 2, "switching back flushes the most recent child");
+    assert.equal(flushCount, 3, "switching back flushes the most recent child");
     args = snapshots.at(-1);
     assert.deepEqual(args.initial.event_ids, []);
     assert.deepEqual(args.eventOptions, []);
