@@ -66,6 +66,7 @@ function emptyOverlay(args?: {
     viewerXApproved: false,
     viewerCanEditChapters: false,
     privateChapters: [],
+    editablePublicChapters: [],
     playlistLabel: args?.playlistLabel ?? "再生リスト",
     playlistItems: args?.playlistItems ?? [],
   };
@@ -319,6 +320,37 @@ SELECT
            ) c) AS chapters_json`
         : `'[]' AS chapters_json`;
 
+      // Issue #661: the static public chapter DTO intentionally lacks note.
+      // Return a bounded, current-D1 editing projection only when the viewer
+      // satisfies the same active-X/terms guard as SA-012..015. Owner rows
+      // require a still-approved link in this SQL statement; event managers
+      // may edit all normal public chapters. No extra D1 statement is issued.
+      const editablePublicSubquery = viewerCanWriteChapters
+        ? `(SELECT coalesce(json_group_array(json_object(
+              'id', c."id",
+              'chapter_time', c."chapter_time",
+              'chapter_label', c."chapter_label",
+              'visibility', 'public',
+              'note', c."note",
+              'chapter_owner_x_id', c."x_user_id"
+           )), '[]')
+           FROM (
+             SELECT ch."id", ch."chapter_time", ch."chapter_label", ch."note", ch."x_user_id"
+               FROM "video_chapters" ch
+              WHERE ch."video_id" = ? AND ch."visibility" = 'public'
+                AND (${viewerCanEditChapters ? "1=1" : `ch."x_user_id" = ? AND EXISTS (
+                  SELECT 1 FROM "x_user_account_links" l
+                  INNER JOIN "x_users" xu ON xu."id" = l."x_user_id"
+                  WHERE l."auth_user_id" = ? AND l."x_user_id" = ch."x_user_id"
+                    AND xu."approval_status" = 'approved'
+                )`})
+                AND ch."id" NOT LIKE '%:member:%'
+                AND ch."id" NOT LIKE '%:legacy:%'
+              ORDER BY ch."chapter_time" ASC, ch."id" ASC
+              LIMIT 500
+           ) c) AS editable_public_chapters_json`
+        : `'[]' AS editable_public_chapters_json`;
+
       const libPlaylistSubquery = isLibPlaylist
         ? `, (SELECT coalesce(json_group_array(json_object(
               'id', p."id",
@@ -339,6 +371,7 @@ SELECT
 
       const stmt2Sql = `SELECT 
         ${chaptersSubquery},
+        ${editablePublicSubquery},
         (SELECT coalesce(json_group_array("interaction_type"), '[]')
            FROM (
              SELECT "interaction_type"
@@ -358,6 +391,10 @@ SELECT
           stmt2Binds.push(JSON.stringify(approvedXIds));
         }
       }
+      if (viewerCanWriteChapters) {
+        stmt2Binds.push(detail.video.id);
+        if (!viewerCanEditChapters) stmt2Binds.push(activeXId, viewer.id);
+      }
       stmt2Binds.push(viewer.id, detail.video.id);
       if (isLibPlaylist) {
         stmt2Binds.push(viewer.id, libKind);
@@ -367,6 +404,7 @@ SELECT
         .bind(...stmt2Binds)
         .first<{
           chapters_json: string | null;
+          editable_public_chapters_json: string | null;
           interactions_json: string | null;
           lib_playlist_json?: string | null;
         }>();
@@ -380,6 +418,19 @@ SELECT
         viewerCanManage: viewerCanWriteChapters &&
           (viewerCanEditChapters || Boolean(activeXId && chapter_owner_x_id === activeXId)),
       }));
+      // Never send raw chapter-owner X identities to the browser. The SQL
+      // grants only authorized rows; re-check the active X before labeling
+      // each row manageable, then drop owner metadata unconditionally.
+      const editablePublicChapters = parseJsonArray<{
+        id: string; chapter_time: number; chapter_label: string;
+        note: string | null; visibility: "public"; chapter_owner_x_id: string | null;
+      }>(row2?.editable_public_chapters_json)
+        .filter((chapter) => viewerCanWriteChapters &&
+          (viewerCanEditChapters || Boolean(activeXId && chapter.chapter_owner_x_id === activeXId)))
+        .map(({ chapter_owner_x_id: _ownerId, ...chapter }) => ({
+          ...chapter,
+          viewerCanManage: true as const,
+        }));
       const interactions = parseJsonArray<string>(row2?.interactions_json);
       const likeActive = interactions.includes("like");
       const bookmarkActive = interactions.includes("bookmark");
@@ -406,6 +457,7 @@ SELECT
         // Server-side capability only; do not derive from the viewer X approval bit.
         viewerCanEditChapters: viewerCanEditChapters && viewerCanWriteChapters,
         privateChapters,
+        editablePublicChapters,
         ...finalPlaylist,
       };
 

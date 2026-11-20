@@ -865,6 +865,44 @@ test("MIG-0518 authorized manager edits only complete private chapter DTOs", asy
 });
 
 
+test("Issue #661: only trusted complete D1 public rows unlock SSG edit/delete", async () => {
+  const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
+  const publicChapters = [
+    { id: "public-own", timeLabel: "0:10", label: "SSG stale title" },
+    { id: "public-foreign", timeLabel: "0:20", label: "Foreign" },
+  ];
+  const overlay = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    isTosAccepted: true, termsReacceptRequired: false,
+    viewerXApproved: true, activeXId: "alice_x", viewerCanEditChapters: false,
+    privateChapters: [],
+    editablePublicChapters: [
+      { id: "public-own", chapter_time: 11, chapter_label: "D1 current title",
+        note: "Preserve this stored note", visibility: "public", viewerCanManage: true },
+      { id: "public-foreign", chapter_time: 20, chapter_label: "No authority",
+        note: "Private-to-editor", visibility: "public", viewerCanManage: false },
+      { id: "not-in-ssg", chapter_time: 40, chapter_label: "Unmatched",
+        note: "Unmatched note", visibility: "public", viewerCanManage: true },
+    ],
+  };
+  const result = chapterManagementForOverlay(publicChapters, overlay, false);
+  assert.equal(result.canBulk, false, "owner is not an event manager");
+  assert.deepEqual(result.editableChapters, [{
+    id: "public-own", chapter_time: "0:11", chapter_label: "D1 current title",
+    note: "Preserve this stored note", visibility: "public", canManage: true,
+  }]);
+  assert.deepEqual(chapterManagementForOverlay(publicChapters, {
+    ...overlay, editablePublicChapters: undefined,
+  }, false).editableChapters, [], "legacy CURRENT or missing edit data cannot grant access");
+  for (const blocked of [
+    { authUnavailable: true }, { isBanned: true }, { viewerXApproved: false },
+    { isTosAccepted: false }, { termsReacceptRequired: true }, { activeXId: null },
+  ]) assert.deepEqual(chapterManagementForOverlay(publicChapters, { ...overlay, ...blocked }, false),
+    { canBulk: false, editableChapters: [] });
+  assert.deepEqual(chapterManagementForOverlay(publicChapters, overlay, true),
+    { canBulk: false, editableChapters: [] }, "loading cannot expose stale edit controls");
+});
+
 test("MIG-0518 chapter owner edits own private chapter without admin/bulk access", async () => {
   const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
   const base = {

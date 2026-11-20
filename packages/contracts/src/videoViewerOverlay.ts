@@ -16,6 +16,17 @@ export const VideoViewerOverlayChapterSchema = z.object({
   viewerCanManage: z.boolean().optional(),
 });
 
+// Issue #661: editable public rows are returned only to the current authorized
+// viewer. A signed SSG chapter alone is not an edit grant and lacks its note.
+export const VideoViewerEditablePublicChapterSchema = z.object({
+  id: z.string(),
+  chapter_time: z.number(),
+  chapter_label: z.string(),
+  note: z.string().nullable(),
+  visibility: z.literal("public"),
+  viewerCanManage: z.literal(true),
+});
+
 export const VideoViewerOverlayPlaylistItemSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -37,6 +48,8 @@ export const VideoViewerOverlayResponseSchema = z.object({
   // Consumers must treat absence as false; never infer chapter-admin from viewerXApproved.
   viewerCanEditChapters: z.boolean().optional(),
   privateChapters: z.array(VideoViewerOverlayChapterSchema),
+  // Optional to preserve CURRENT Next responses. Missing is deny, never infer from SSG.
+  editablePublicChapters: z.array(VideoViewerEditablePublicChapterSchema).optional(),
   playlistLabel: z.string(),
   playlistItems: z.array(VideoViewerOverlayPlaylistItemSchema),
 });
@@ -46,6 +59,7 @@ export const VideoViewerOverlayErrorSchema = z.object({
 });
 
 export type VideoViewerOverlayChapter = z.infer<typeof VideoViewerOverlayChapterSchema>;
+export type VideoViewerEditablePublicChapter = z.infer<typeof VideoViewerEditablePublicChapterSchema>;
 export type VideoViewerOverlayPlaylistItem = z.infer<typeof VideoViewerOverlayPlaylistItemSchema>;
 export type VideoViewerOverlayResponse = z.infer<typeof VideoViewerOverlayResponseSchema>;
 export type VideoViewerOverlayDto = VideoViewerOverlayResponse;

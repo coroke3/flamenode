@@ -376,6 +376,56 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3, `Expected statements <= 3, got ${d1.stats.statements}`);
   });
 
+  test("Issue #661: editable public chapters carry complete notes and explicit server grants", async () => {
+    const { env, sqlite, d1 } = setupTestEnv();
+    insert(sqlite, "video_chapters", {
+      id: "chap-pub-staff", video_id: "vid-pub", x_user_id: "staff_x",
+      chapter_time: 12, chapter_label: "Staff public", note: "Staff note",
+      visibility: "public", created_at: 1000, updated_at: 1000,
+    });
+    // An ordinary approved owner can edit their own row, but not staff's.
+    d1.stats.statements = 0;
+    const alice = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(alice.status, 200);
+    const mine = await alice.json();
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(mine).success, true);
+    assert.deepEqual(mine.editablePublicChapters.map((chapter) => chapter.id), ["chap-pub"]);
+    assert.equal(mine.editablePublicChapters[0].note, "Public Note",
+      "editing must preserve the D1 note rather than overwrite it with a blank SSG field");
+    assert.equal(mine.editablePublicChapters[0].visibility, "public");
+    assert.equal(mine.editablePublicChapters[0].viewerCanManage, true);
+    assert.ok(mine.editablePublicChapters.every((c) => !("chapter_owner_x_id" in c)));
+    assert.ok(d1.stats.statements <= 3, "the public editor may not add an extra D1 request");
+
+    // A staff member with video.chapter_admin and approved Active X manages all.
+    const staff = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    const managed = await staff.json();
+    assert.equal(managed.viewerCanEditChapters, true);
+    assert.deepEqual(managed.editablePublicChapters.map((c) => c.id), ["chap-pub", "chap-pub-staff"]);
+    assert.ok(managed.editablePublicChapters.every((c) => c.viewerCanManage === true &&
+      !("chapter_owner_x_id" in c)));
+
+    // Switching Active X to a different approved identity must revoke the
+    // former owner's edit grant even though both remain readable elsewhere.
+    sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?')
+      .run("alice_y", "u_alice");
+    const switched = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.deepEqual((await switched.json()).editablePublicChapters, []);
+
+    sqlite.prepare('UPDATE "user" SET "is_tos_accepted" = 0 WHERE "id" = ?').run("u_staff");
+    const revoked = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.deepEqual((await revoked.json()).editablePublicChapters, [],
+      "TOS revocation denies public edit, even for an event manager");
+  });
+
   test("RH-031 selecting a different approved X must not lend owner-edit capability", async () => {
     const { env, sqlite } = setupTestEnv();
     // A linked account may read chapters from all of its approved identities,
@@ -691,8 +741,11 @@ if (runUnderRootTsx(import.meta.url)) {
         const label = `${user ?? "anon"} ${query || "(no playlist)"}`;
         assert.equal(got.status, cur.status, label);
         assert.equal(got.cache, cur.cache, label);
-        const { viewerCanEditChapters, ...honoLegacyDto } = got.body;
+        const { viewerCanEditChapters, editablePublicChapters, ...honoLegacyDto } = got.body;
         assert.equal(typeof viewerCanEditChapters, "boolean", `${label}: capability must be explicit`);
+        assert.ok(Array.isArray(editablePublicChapters), `${label}: public edit projection exists`);
+        assert.ok(editablePublicChapters.every((row) => row.viewerCanManage === true &&
+          !("chapter_owner_x_id" in row)), `${label}: public edit DTO must not leak owner ids`);
         // Compare all CURRENT fields, stripping only Hono's additive capability bits.
         const legacyPrivate = honoLegacyDto.privateChapters.map(({ viewerCanManage, ...chapter }) => {
           assert.equal(typeof viewerCanManage, "boolean", `${label}: per-chapter permission explicit`);
