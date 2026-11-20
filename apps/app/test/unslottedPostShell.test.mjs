@@ -238,6 +238,55 @@ test("U03a: a selected event removed from the eligible candidates cannot stay in
   }
 });
 
+test("U03a: child form remounts on Active X or auth user change but not ordinary rerender", async () => {
+  dom.window.localStorage.clear();
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  let mounts = 0;
+  let unmounts = 0;
+  function StatefulForm() {
+    const [count, setCount] = React.useState(0);
+    React.useEffect(() => {
+      mounts += 1;
+      return () => { unmounts += 1; };
+    }, []);
+    return React.createElement("form", null,
+      React.createElement("button", { type: "button", onClick: () => setCount(n => n + 1) }, String(count)));
+  }
+  const renderVideoForm = () => React.createElement(StatefulForm);
+  const render = (extra = {}) =>
+    React.createElement(UnslottedPostShell, props({ renderVideoForm, ...extra }));
+  try {
+    await act(async () => root.render(render()));
+    await act(async () => selected(container, "none").click());
+    assert.equal(container.querySelector("form button")?.textContent, "0");
+    assert.deepEqual([mounts, unmounts], [1, 0]);
+
+    await act(async () => container.querySelector("form button").click());
+    assert.equal(container.querySelector("form button")?.textContent, "1");
+    await act(async () => root.render(render({ initial: { ...initial, title: "new prop" } })));
+    assert.equal(container.querySelector("form button")?.textContent, "1",
+      "same formKey preserves in-progress local form state");
+    assert.deepEqual([mounts, unmounts], [1, 0]);
+
+    await act(async () => root.render(render({ activeXId: "@BOB" })));
+    assert.equal(container.querySelector("form button")?.textContent, "0",
+      "Active X change must not reuse old form state");
+    assert.deepEqual([mounts, unmounts], [2, 1]);
+
+    await act(async () => root.render(render({ activeXId: "@BOB", draftAuthUserId: "u2" })));
+    assert.equal(container.querySelector("form button")?.textContent, "0",
+      "auth user change must also remount the form");
+    assert.deepEqual([mounts, unmounts], [3, 2]);
+  } finally {
+    await act(async () => root.unmount());
+    assert.equal(mounts, unmounts, "all child mounts are cleaned up");
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 test("U03a: shell is network and Next-free; CURRENT affiliation/draft contract is preserved", () => {
   const ported = readFileSync(new URL("../src/components/forms/UnslottedPostShell.tsx", import.meta.url), "utf8");
   const legacy = readFileSync(new URL("../../../src/components/forms/UnslottedPostForm.tsx", import.meta.url), "utf8");
