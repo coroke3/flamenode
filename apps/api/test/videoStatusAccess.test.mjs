@@ -1022,11 +1022,13 @@ test("MIG-0603: reviewer cannot borrow admin-only CostGuard feature to bypass di
 
     const admin = { id: "u_admin", role: "admin" };
     await db.batch([
-      planManageVideoStatusCommitAssertion(db, admin, "evA", "v1", "tok-admin", "admin_video_status", ["evA"]),
+      // The admin status route is global: eventId must be null and the
+      // dedicated wrapper enforces that server-owned scope.
+      planAdminVideoStatusCommitAssertion(db, admin, "v1", "tok-admin", ["evA"]),
       db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
     ].map(item => preparedStatusTestBatchItem(db, item)));
     assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
-      "public", "the rightful admin remains allowed");
+      "public", "the rightful global admin route remains allowed");
   } finally { sqlite.close(); }
 });
 
