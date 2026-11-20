@@ -147,17 +147,47 @@ if (runTestWithTsx(import.meta.url)) {
     assert.ok(stored, "a rejected delete must not silently log out the user");
   });
 
-  test("SEC-0804-01: a D1 outage in one request does not poison a concurrent healthy session", async (t) => {
-    const { d1 } = createHarness(t);
-    const brokenApp = createUnmountedAuthRoutes(inputs(brokenD1(d1, "read")));
-    const healthyApp = createUnmountedAuthRoutes(inputs(d1));
+  test("SEC-0804-01: one Hono router isolates concurrent failed and healthy sessions", async (t) => {
+    const { d1, sqlite } = createHarness(t);
+    let rejectedReads = 0;
+    // The same D1 binding and the same Hono app serve both requests. Only the
+    // selected session fails at the bound statement boundary; another valid
+    // session must not inherit its adapter error or become logged out.
+    const scopedFailureD1 = {
+      ...d1,
+      prepare(sql) {
+        const statement = d1.prepare(sql);
+        return {
+          ...statement,
+          bind(...params) {
+            const bound = statement.bind(...params);
+            if (!params.includes(SESSIONS.valid.sessionToken)) return bound;
+            const fail = async () => {
+              rejectedReads += 1;
+              await Promise.resolve(); // allow the other request to interleave
+              throw new Error(SENTINEL);
+            };
+            return { ...bound, first: fail, all: fail, raw: fail, run: fail };
+          },
+        };
+      },
+    };
+    const app = createUnmountedAuthRoutes(inputs(scopedFailureD1));
     const [failed, healthy] = await Promise.all([
-      sessionRequest(brokenApp, SESSIONS.valid.sessionToken),
-      sessionRequest(healthyApp, SESSIONS.valid.sessionToken),
+      sessionRequest(app, SESSIONS.valid.sessionToken),
+      sessionRequest(app, SESSIONS.noX.sessionToken),
     ]);
+    assert.ok(rejectedReads > 0, "the failing request must reach a bound D1 operation");
     await assertUnavailable(failed);
     assert.equal(healthy.status, 200);
     const body = await healthy.json();
-    assert.equal(body.user.id, USERS.valid.id);
+    assert.equal(body?.user?.id, USERS.noX.id);
+    const afterFailure = await sessionRequest(app, SESSIONS.noX.sessionToken);
+    assert.equal(afterFailure.status, 200, "later requests must not inherit failure state");
+    assert.equal((await afterFailure.json())?.user?.id, USERS.noX.id);
+    for (const token of [SESSIONS.valid.sessionToken, SESSIONS.noX.sessionToken]) {
+      const stored = sqlite.prepare('SELECT "sessionToken" FROM "session" WHERE "sessionToken" = ?').get(token);
+      assert.ok(stored, "neither failed nor healthy read may delete the D1 session");
+    }
   });
 }
