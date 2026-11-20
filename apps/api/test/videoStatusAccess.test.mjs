@@ -1151,3 +1151,72 @@ test("MIG-0603: admin-only status guard handles unlinked video without event ID"
     assert.ok(d1.stats.maxBinds <= 100);
   } finally { sqlite.close(); }
 });
+
+
+test("MIG-0603: ninth rebuild event added after valid preload aborts the atomic status write", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    enableStatusCostGuard(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const admin = { id: "u_admin", role: "admin" };
+    const manager = { id: "u_mgr", role: "user" };
+    const extraEvents = ["evB", "evC", "evD", "evNull", "evPoint", "evTie1", "evTie2"];
+    for (const eventId of extraEvents) {
+      insert(sqlite, "video_events", { video_id: "v1", event_id: eventId });
+    }
+    assert.equal((await loadManageVideoStatusSnapshot(db, manager, "evA", "v1")).ok, true,
+      "inclusive eight-event manage preflight must be allowed");
+    assert.equal((await loadAdminVideoStatusSnapshot(db, admin, "v1")).ok, true,
+      "inclusive eight-event admin preflight must be allowed");
+
+    async function attempt(user, feature, expectAllow, tag) {
+      const guard = feature === "admin_video_status"
+        ? planAdminVideoStatusCommitAssertion(db, user, "v1", "tok-admin")
+        : planManageVideoStatusCommitAssertion(db, user, "evA", "v1", "tok-mgr", "manage_video_status");
+      const statusBefore = d1.stats.statements;
+      const batch = [
+        guard,
+        db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+        db.run(sql`INSERT INTO audit_logs
+          (id,table_name,target_id,operation,actor_user_id,created_at)
+          VALUES (\${"event-cap-audit-"+tag},'videos','v1','UPDATE',\${user.id},1000)`),
+        db.run(sql`INSERT INTO notification_outbox
+          (id,type,payload_json,status,created_at)
+          VALUES (\${"event-cap-outbox-"+tag},'video_posted','{}','pending',1000)`),
+      ].map(item=>preparedStatusTestBatchItem(db,item));
+      if(expectAllow) await db.batch(batch);
+      else await assert.rejects(db.batch(batch), /malformed JSON|not-valid-json/,
+        tag+": unexpected extra rebuild target must fail closed");
+      assert.equal(d1.stats.statements-statusBefore, expectAllow?4:1,
+        tag+": all decisions inside first atomic D1 batch; no fourth pre-read");
+      assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+        expectAllow ? "public":"pending");
+      assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE id=?").get("event-cap-audit-"+tag).n,
+        expectAllow?1:0);
+      assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id=?").get("event-cap-outbox-"+tag).n,
+        expectAllow?1:0);
+      sqlite.exec("UPDATE videos SET visibility_status='pending'");
+    }
+
+    // An identical primary event does not increase the distinct fan-out.
+    sqlite.prepare("UPDATE videos SET primary_event_id='evA' WHERE id='v1'").run();
+    await attempt(manager,"manage_video_status",true,"manager-eight-with-duplicate-primary");
+    await attempt(admin,"admin_video_status",true,"admin-eight-with-duplicate-primary");
+
+    // An importer/other writer adds ninth distinct link after accepted preflight.
+    insert(sqlite, "video_events", { video_id: "v1", event_id: "evGen19" });
+    await attempt(manager,"manage_video_status",false,"manager-late-ninth-link");
+    await attempt(admin,"admin_video_status",false,"admin-late-ninth-link");
+
+    // Remove the ninth link; a changed primary event alone can also create
+    // an unseen ninth target, even though link count stays at eight.
+    sqlite.exec("DELETE FROM video_events WHERE video_id='v1' AND event_id='evGen19'");
+    sqlite.prepare("UPDATE videos SET primary_event_id='evGen19' WHERE id='v1'").run();
+    await attempt(manager,"manage_video_status",false,"manager-late-ninth-primary");
+    await attempt(admin,"admin_video_status",false,"admin-late-ninth-primary");
+    assert.ok(d1.stats.maxBinds <= 100, "rebuild fan-out count keeps D1 binds bounded");
+  } finally { sqlite.close(); }
+});

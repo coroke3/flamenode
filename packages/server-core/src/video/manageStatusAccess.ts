@@ -431,6 +431,22 @@ export function planManageVideoStatusCommitAssertion(
     ) <= ${MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT}`;
   // Admin video status is GLOBAL; CURRENT admin body contains no event_id.
   // Manage is event-scoped even for a site admin acting through that route.
+  // A prior admin/manage status snapshot contains at most eight unique
+  // rebuild targets (linked video_events plus primary_event_id). A second
+  // writer may attach a ninth event AFTER that snapshot: do not commit a
+  // status change whose already-planned rebuild queue omits the new target.
+  // COUNT is bounded to nine IDs by LIMIT and stays inside this first atomic
+  // D1 batch assertion, not an additional route-wide pre-read.
+  const rebuildTargetsStillBounded = sql`(
+    SELECT COUNT(*) FROM (
+      SELECT "event_id" AS "id" FROM "video_events"
+      WHERE "video_id" = \${videoId}
+      UNION
+      SELECT "primary_event_id" AS "id" FROM "videos"
+      WHERE "id" = \${videoId} AND "primary_event_id" IS NOT NULL
+      LIMIT \${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
+    ) current_rebuild_targets
+  ) <= \${MAX_MANAGE_STATUS_REBUILD_EVENTS}`;
   const targetStillLinked = costGuardFeature === "admin_video_status"
     ? sql`EXISTS (SELECT 1 FROM ${videos} WHERE ${videos.id} = ${videoId})`
     : eventId === null
@@ -442,7 +458,7 @@ export function planManageVideoStatusCommitAssertion(
         WHERE ${videoEvents.event_id} = ${eventId}
           AND ${videoEvents.video_id} = ${videoId}
       )`;
-  return db.run(assertCondition(sql`${featureMatchesActor ? sql`1 = 1` : sql`0 = 1`} AND ${activeSessionStillValid} AND ${actorStillAllowed} AND ${costGuardStillAllows} AND ${hasCurrentStatusGrant} AND ${staffRowsStillBounded} AND ${targetStillLinked}`));
+  return db.run(assertCondition(sql`${featureMatchesActor ? sql`1 = 1` : sql`0 = 1`} AND ${activeSessionStillValid} AND ${actorStillAllowed} AND ${costGuardStillAllows} AND ${hasCurrentStatusGrant} AND ${staffRowsStillBounded} AND ${rebuildTargetsStillBounded} AND ${targetStillLinked}`));
 }
 
 /**
