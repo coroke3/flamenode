@@ -98,6 +98,9 @@ function UnslottedPostShellForIdentity<
   // discard the in-progress affiliation choice on every list refresh.
   const latestEventOptionsRef = React.useRef(eventOptions);
   latestEventOptionsRef.current = eventOptions;
+  // An event may be temporarily absent while its options are loading. Keep
+  // only that original ID pending; never invent a replacement from the list.
+  const pendingRestoredEventIdRef = React.useRef("");
   const restoreShellDraft = React.useCallback((value: unknown) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     const draft = value as Record<string, unknown>;
@@ -105,15 +108,29 @@ function UnslottedPostShellForIdentity<
       ? draft.affiliation
       : null;
     const nextEventId = typeof draft.selectedEventId === "string" ? draft.selectedEventId : "";
+    const unavailable = nextAffiliation === "event" && Boolean(nextEventId) &&
+      !latestEventOptionsRef.current.some((event) => event.id === nextEventId);
+    pendingRestoredEventIdRef.current = unavailable ? nextEventId : "";
     setAffiliation(nextAffiliation);
-    if (nextAffiliation === "event" && !latestEventOptionsRef.current.some((event) => event.id === nextEventId)) {
+    if (unavailable) {
       setSelectedEventId("");
-      setMissingRestoredEvent(Boolean(nextEventId));
+      setMissingRestoredEvent(true);
     } else {
       setSelectedEventId(nextAffiliation === "event" ? nextEventId : "");
       setMissingRestoredEvent(false);
     }
   }, []);
+
+  // Restore only when the exact previously saved event becomes eligible.
+  // A new options array must never replay localStorage over the user's edits.
+  React.useEffect(() => {
+    const pendingId = pendingRestoredEventIdRef.current;
+    if (!pendingId || shellDirty || formDirty ||
+        !eventOptions.some((event) => event.id === pendingId)) return;
+    pendingRestoredEventIdRef.current = "";
+    setSelectedEventId(pendingId);
+    setMissingRestoredEvent(false);
+  }, [eventOptions, shellDirty, formDirty]);
 
   const shellDraftValue = React.useMemo(
     () => ({ affiliation, selectedEventId }),
@@ -142,6 +159,7 @@ function UnslottedPostShellForIdentity<
     videoDraftFlushRef.current = flush;
   }, []);
   const handleVideoSubmitSuccess = React.useCallback(() => {
+    pendingRestoredEventIdRef.current = "";
     // A successful submit may synchronously navigate/unmount this shell before
     // React commits the clean flags. Prevent the departing-identity cleanup
     // from recreating the draft that clearShellDraft just removed.
@@ -163,6 +181,7 @@ function UnslottedPostShellForIdentity<
 
   const selectAffiliation = (next: Exclude<AffiliationChoice, null>) => {
     if (next === affiliation || !confirmReset()) return;
+    pendingRestoredEventIdRef.current = "";
     videoDraftFlushRef.current();
     setShellDirty(true);
     setAffiliation(next);
@@ -174,6 +193,7 @@ function UnslottedPostShellForIdentity<
 
   const selectEvent = (eventId: string) => {
     if (eventId === selectedEventId || !confirmReset()) return;
+    pendingRestoredEventIdRef.current = "";
     videoDraftFlushRef.current();
     setShellDirty(true);
     setMissingRestoredEvent(false);
