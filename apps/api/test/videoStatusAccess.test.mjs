@@ -704,7 +704,7 @@ test("MIG-0603: commit-time status authorization assertion rolls back on revoked
       // Interleaved SQL mutation by another caller, AFTER our preflight.
       revoke(sqlite);
       const guard = planManageVideoStatusCommitAssertion(
-        db, user, "evA", "v1", `tok-${user.id.slice(2)}`, "manage_video_status",
+        db, user, "evA", "v1", `tok-${user.id.slice(2)}`, "manage_video_status", ["evA"],
       );
       const update = db.run(sql`UPDATE videos
         SET visibility_status = 'public' WHERE id = 'v1'`);
@@ -751,7 +751,7 @@ test("MIG-0603: commit-time status assertion accepts current canonical preset an
       assert.equal(prior.ok, true, name);
       const initial = d1.stats.statements;
       await db.batch([
-        planManageVideoStatusCommitAssertion(db, user, "evA", "v1", `tok-${user.id.slice(2)}`, "manage_video_status"),
+        planManageVideoStatusCommitAssertion(db, user, "evA", "v1", `tok-${user.id.slice(2)}`, "manage_video_status", ["evA"]),
         db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
       ].map((stmt) => preparedStatusTestBatchItem(db, stmt)));
       assert.equal(d1.stats.statements - initial, 2,
@@ -831,7 +831,7 @@ test("MIG-0603: atomic status grant matches Hono latest-major reacceptance fail-
       const auditId = "atomic-terms-audit-" + suffix;
       const outboxId = "atomic-terms-outbox-" + suffix;
       const batch = [
-        planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "manage_video_status"),
+        planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "manage_video_status", ["evA"]),
         db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
         db.run(sql`INSERT INTO audit_logs
           (id, table_name, target_id, operation, actor_user_id, created_at)
@@ -962,7 +962,7 @@ test("MIG-0603: atomic CostGuard checks match Hono across mode, list and excepti
           title + " " + key + ": actual shared Hono CostGuard");
         const auditId = "costguard-atomic-" + (++idx);
         const statements = [
-          planManageVideoStatusCommitAssertion(db,user,"evA","v1",token,key),
+          planManageVideoStatusCommitAssertion(db,user,"evA","v1",token,key,["evA"]),
           db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
           db.run(sql`INSERT INTO audit_logs
             (id,table_name,target_id,operation,actor_user_id,created_at)
@@ -1005,7 +1005,7 @@ test("MIG-0603: reviewer cannot borrow admin-only CostGuard feature to bypass di
     assert.equal((await evaluateCostGuardWithSettings(d1, "admin_video_status")).denied, null);
     const start = d1.stats.statements;
     await assert.rejects(db.batch([
-      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "admin_video_status"),
+      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "admin_video_status", ["evA"]),
       db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
       db.run(sql`INSERT INTO audit_logs
         (id,table_name,target_id,operation,actor_user_id,created_at)
@@ -1022,7 +1022,7 @@ test("MIG-0603: reviewer cannot borrow admin-only CostGuard feature to bypass di
 
     const admin = { id: "u_admin", role: "admin" };
     await db.batch([
-      planManageVideoStatusCommitAssertion(db, admin, "evA", "v1", "tok-admin", "admin_video_status"),
+      planManageVideoStatusCommitAssertion(db, admin, "evA", "v1", "tok-admin", "admin_video_status", ["evA"]),
       db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
     ].map(item => preparedStatusTestBatchItem(db, item)));
     assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
@@ -1058,7 +1058,7 @@ test("MIG-0603: atomic grant fails closed when joined approved staff exceeds 256
     assert.equal(snapshot.ok, true, "256-row preload must accept the legitimate manager");
     const baselineStart = d1.stats.statements;
     await db.batch([
-      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "manage_video_status"),
+      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "manage_video_status", ["evA"]),
       db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
     ].map(item => preparedStatusTestBatchItem(db, item)));
     assert.equal(d1.stats.statements - baselineStart, 2, "cap check is inside the batch, not a new pre-read");
@@ -1071,7 +1071,7 @@ test("MIG-0603: atomic grant fails closed when joined approved staff exceeds 256
     addStaff(255);
     const deniedStart = d1.stats.statements;
     await assert.rejects(db.batch([
-      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "manage_video_status"),
+      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "manage_video_status", ["evA"]),
       db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
       db.run(sql`INSERT INTO audit_logs
         (id,table_name,target_id,operation,actor_user_id,created_at)
@@ -1110,10 +1110,10 @@ test("MIG-0603: admin-only status guard handles unlinked video without event ID"
     assert.deepEqual(preload.rebuildEventIds, []);
 
     const denied = [
-      ["admin-manage-unlinked", planManageVideoStatusCommitAssertion(db, admin, "evA", "v1", "tok-admin", "manage_video_status")],
-      ["admin-manage-null-event", planManageVideoStatusCommitAssertion(db, admin, null, "v1", "tok-admin", "manage_video_status")],
-      ["nonadmin-admin-key", planAdminVideoStatusCommitAssertion(db, manager, "v1", "tok-mgr")],
-      ["admin-video-missing", planAdminVideoStatusCommitAssertion(db, admin, "missing", "tok-admin")],
+      ["admin-manage-unlinked", planManageVideoStatusCommitAssertion(db, admin, "evA", "v1", "tok-admin", "manage_video_status", [])],
+      ["admin-manage-null-event", planManageVideoStatusCommitAssertion(db, admin, null, "v1", "tok-admin", "manage_video_status", [])],
+      ["nonadmin-admin-key", planAdminVideoStatusCommitAssertion(db, manager, "v1", "tok-mgr", [])],
+      ["admin-video-missing", planAdminVideoStatusCommitAssertion(db, admin, "missing", "tok-admin", [])],
     ];
     for (const [description, guard] of denied) {
       const start = d1.stats.statements;
@@ -1135,7 +1135,7 @@ test("MIG-0603: admin-only status guard handles unlinked video without event ID"
     }
     const start = d1.stats.statements;
     await db.batch([
-      planAdminVideoStatusCommitAssertion(db, admin, "v1", "tok-admin"),
+      planAdminVideoStatusCommitAssertion(db, admin, "v1", "tok-admin", []),
       db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
       db.run(sql`INSERT INTO audit_logs
         (id,table_name,target_id,operation,actor_user_id,created_at)
@@ -1174,8 +1174,8 @@ test("MIG-0603: ninth rebuild event added after valid preload aborts the atomic 
 
     async function attempt(user, feature, expectAllow, tag) {
       const guard = feature === "admin_video_status"
-        ? planAdminVideoStatusCommitAssertion(db, user, "v1", "tok-admin")
-        : planManageVideoStatusCommitAssertion(db, user, "evA", "v1", "tok-mgr", "manage_video_status");
+        ? planAdminVideoStatusCommitAssertion(db, user, "v1", "tok-admin", ["evA", ...extraEvents])
+        : planManageVideoStatusCommitAssertion(db, user, "evA", "v1", "tok-mgr", "manage_video_status", ["evA", ...extraEvents]);
       const statusBefore = d1.stats.statements;
       const batch = [
         guard,
@@ -1218,5 +1218,70 @@ test("MIG-0603: ninth rebuild event added after valid preload aborts the atomic 
     await attempt(manager,"manage_video_status",false,"manager-late-ninth-primary");
     await attempt(admin,"admin_video_status",false,"admin-late-ninth-primary");
     assert.ok(d1.stats.maxBinds <= 100, "rebuild fan-out count keeps D1 binds bounded");
+  } finally { sqlite.close(); }
+});
+
+
+test("MIG-0603: equal-cardinality rebuild event replacement after preload is rejected atomically", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    enableStatusCostGuard(sqlite);
+    insert(sqlite, "video_events", { video_id: "v1", event_id: "evB" });
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    const admin = { id: "u_admin", role: "admin" };
+    const manageSnapshot = await loadManageVideoStatusSnapshot(db, manager, "evA", "v1");
+    const adminSnapshot = await loadAdminVideoStatusSnapshot(db, admin, "v1");
+    assert.equal(manageSnapshot.ok, true);
+    assert.equal(adminSnapshot.ok, true);
+    assert.deepEqual(manageSnapshot.rebuildEventIds, ["evA", "evB"]);
+    assert.deepEqual(adminSnapshot.rebuildEventIds, manageSnapshot.rebuildEventIds);
+
+    // This swap preserves TWO rebuild IDs and retains the granted evA link.
+    // The previous <=8 assertion would have let an outdated queue proceed.
+    sqlite.exec("DELETE FROM video_events WHERE video_id='v1' AND event_id='evB'");
+    insert(sqlite, "video_events", { video_id: "v1", event_id: "evC" });
+    assert.equal((await loadManageVideoStatusSnapshot(db, manager, "evA", "v1")).ok, true,
+      "preflight remains permission-valid; only the rebuild set was replaced");
+    async function attempt(actor, key, allow, tag) {
+      const expected = ["evA", "evB"];
+      const guard = key === "admin_video_status"
+        ? planAdminVideoStatusCommitAssertion(db, actor, "v1", "tok-admin", expected)
+        : planManageVideoStatusCommitAssertion(db, actor, "evA", "v1", "tok-mgr",
+          "manage_video_status", expected);
+      const auditId = "snapshot-swap-audit-" + tag;
+      const outboxId = "snapshot-swap-outbox-" + tag;
+      const before = d1.stats.statements;
+      const batch = [
+        guard,
+        db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+        db.run(sql`INSERT INTO audit_logs
+          (id,table_name,target_id,operation,actor_user_id,created_at)
+          VALUES (${auditId},'videos','v1','UPDATE',${actor.id},1000)`),
+        db.run(sql`INSERT INTO notification_outbox
+          (id,type,payload_json,status,created_at)
+          VALUES (${outboxId},'video_posted','{}','pending',1000)`),
+      ].map(stmt=>preparedStatusTestBatchItem(db,stmt));
+      if (allow) await db.batch(batch);
+      else await assert.rejects(db.batch(batch), /malformed JSON|not-valid-json/,
+        tag+": must not commit an obsolete 2-ID rebuild snapshot");
+      assert.equal(d1.stats.statements-before,allow?4:1,
+        tag+": decision is inside first atomic batch statement");
+      assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+        allow?"public":"pending");
+      assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE id=?").get(auditId).n,allow?1:0);
+      assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id=?").get(outboxId).n,allow?1:0);
+      sqlite.exec("UPDATE videos SET visibility_status='pending'");
+    }
+    await attempt(manager,"manage_video_status",false,"manager-swap");
+    await attempt(admin,"admin_video_status",false,"admin-swap");
+    sqlite.exec("DELETE FROM video_events WHERE video_id='v1' AND event_id='evC'");
+    insert(sqlite, "video_events", { video_id: "v1", event_id: "evB" });
+    await attempt(manager,"manage_video_status",true,"manager-restored");
+    await attempt(admin,"admin_video_status",true,"admin-restored");
+    assert.ok(d1.stats.maxBinds <= 100,"exact snapshot set check must use bounded JSON binds");
   } finally { sqlite.close(); }
 });

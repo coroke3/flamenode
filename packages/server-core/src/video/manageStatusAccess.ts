@@ -275,6 +275,9 @@ export function planManageVideoStatusCommitAssertion(
   sessionToken: string,
   // Server-owned feature key (not request JSON); shared middleware owns its policy.
   costGuardFeature: Extract<WriteFeatureKey, "manage_video_status" | "admin_video_status">,
+  // Must be sourced from the successful, trusted (unmounted) video preload.
+  // Never accept this array or its JSON from request-controlled input.
+  expectedRebuildEventIds: readonly string[],
 ) {
   // Derive presets from the canonical permission definitions, rather than
   // allowing a diverging hand-maintained list in the SQL commit fence.
@@ -447,6 +450,35 @@ export function planManageVideoStatusCommitAssertion(
       LIMIT ${MAX_MANAGE_STATUS_REBUILD_EVENTS + 1}
     ) current_rebuild_targets
   ) <= ${MAX_MANAGE_STATUS_REBUILD_EVENTS}`;
+  // An upper bound alone is insufficient: a concurrent writer can replace
+  // evB with evC while keeping total rebuild targets at two. Require EXACT
+  // preloaded target-set equality at commit (including primary_event_id),
+  // not only a count. The canonical preloader already returns deduped IDs.
+  // The two EXCEPT directions are a strict symmetric-difference check.
+  // This runs inside the first atomic D1 batch statement, never as an
+  // additional S3 route read or an untrusted caller-provided authorization.
+  const validExpectedIds = Array.isArray(expectedRebuildEventIds)
+    && expectedRebuildEventIds.length <= MAX_MANAGE_STATUS_REBUILD_EVENTS
+    && expectedRebuildEventIds.every((id) =>
+      typeof id === "string" && !exceedsRebuildIdBytes(id))
+    && new Set(expectedRebuildEventIds).size === expectedRebuildEventIds.length;
+  const expectedIdsJson = validExpectedIds ? JSON.stringify(expectedRebuildEventIds) : "[]";
+  const expectedIdsBounded = validExpectedIds && !exceedsRebuildIdBytes(expectedIdsJson);
+  const currentRebuildIds = sql`(
+    SELECT "event_id" AS "id" FROM "video_events" WHERE "video_id" = ${videoId}
+    UNION
+    SELECT "primary_event_id" AS "id" FROM "videos"
+    WHERE "id" = ${videoId} AND "primary_event_id" IS NOT NULL
+  )`;
+  const rebuildTargetsStillIdentical = expectedIdsBounded
+    ? sql`NOT EXISTS (
+        SELECT "id" FROM ${currentRebuildIds}
+        EXCEPT SELECT value AS "id" FROM json_each(${expectedIdsJson})
+      ) AND NOT EXISTS (
+        SELECT value AS "id" FROM json_each(${expectedIdsJson})
+        EXCEPT SELECT "id" FROM ${currentRebuildIds}
+      )`
+    : sql`0 = 1`;
   const targetStillLinked = costGuardFeature === "admin_video_status"
     ? sql`EXISTS (SELECT 1 FROM ${videos} WHERE ${videos.id} = ${videoId})`
     : eventId === null
@@ -458,7 +490,7 @@ export function planManageVideoStatusCommitAssertion(
         WHERE ${videoEvents.event_id} = ${eventId}
           AND ${videoEvents.video_id} = ${videoId}
       )`;
-  return db.run(assertCondition(sql`${featureMatchesActor ? sql`1 = 1` : sql`0 = 1`} AND ${activeSessionStillValid} AND ${actorStillAllowed} AND ${costGuardStillAllows} AND ${hasCurrentStatusGrant} AND ${staffRowsStillBounded} AND ${rebuildTargetsStillBounded} AND ${targetStillLinked}`));
+  return db.run(assertCondition(sql`${featureMatchesActor ? sql`1 = 1` : sql`0 = 1`} AND ${activeSessionStillValid} AND ${actorStillAllowed} AND ${costGuardStillAllows} AND ${hasCurrentStatusGrant} AND ${staffRowsStillBounded} AND ${rebuildTargetsStillBounded} AND ${rebuildTargetsStillIdentical} AND ${targetStillLinked}`));
 }
 
 /**
@@ -471,8 +503,9 @@ export function planAdminVideoStatusCommitAssertion(
   user: SessionUserLike,
   videoId: string,
   sessionToken: string,
+  expectedRebuildEventIds: readonly string[],
 ) {
   return planManageVideoStatusCommitAssertion(
-    db, user, null, videoId, sessionToken, "admin_video_status",
+    db, user, null, videoId, sessionToken, "admin_video_status", expectedRebuildEventIds,
   );
 }
