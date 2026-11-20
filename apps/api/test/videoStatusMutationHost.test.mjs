@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { drizzle } from "drizzle-orm/d1";
-import { AuditMutationError } from "@flamenode/server-core/audit/mutate";
+import { sql } from "drizzle-orm";
+import { AuditMutationError, asBatchRunnable } from "@flamenode/server-core/audit/mutate";
+import { loadManageVideoStatusSnapshot, planManageVideoStatusCommitAssertion } from "@flamenode/server-core/video/manageStatusAccess";
 import * as schema from "@flamenode/db/schema";
 import { createSqlite } from "./support/personalHarness.mjs";
+import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import {
   createVideoVisibilityStatusMutationHost,
@@ -113,6 +116,129 @@ test("Hono executor composes the shared status core with the durable-outbox zero
   assert.equal(mutationInput.preloaded.settings.enabled, true);
 });
 
+
+
+test("Hono status execution actually rolls back first-batch authz after a revoked X grant", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    sqlite.exec(`INSERT INTO system_settings
+      (id,operation_mode,disabled_features_json,cost_guard_exception_until,cost_guard_exception_features_json)
+      VALUES ('default','normal',NULL,NULL,NULL)
+      ON CONFLICT(id) DO UPDATE SET operation_mode='normal',disabled_features_json=NULL,
+        cost_guard_exception_until=NULL,cost_guard_exception_features_json=NULL`);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const actor = { id: "u_mgr", role: "user" };
+    const snapshot = await loadManageVideoStatusSnapshot(db, actor, "evA", "v1");
+    assert.equal(snapshot.ok, true, "legitimate reviewer had a complete trusted preload");
+    assert.deepEqual(snapshot.rebuildEventIds, ["evA"]);
+
+    let auditedBatchCalls = 0;
+    const host = createVideoVisibilityStatusMutationHost({
+      env: {},
+      get(key) {
+        if (key === "auditSettings") return { enabled: true, retentionDays: 90 };
+        if (key === "actorSnapshotJsonById") return { u_mgr: '{"role":"user"}' };
+        throw new Error("unexpected context key: " + key);
+      },
+    }, {
+      createTraceId: () => "trace-guard-wiring",
+      // This callback executes the real transactional SQLite/D1 batch with
+      // production asBatchRunnable conversions, not the full audit logger.
+      // The fixture includes explicit audit/outbox INSERTs as mutation DML.
+      mutateWithAudit: async (requestDb, payload) => {
+        auditedBatchCalls++;
+        assert.equal(payload.preMutationAssertions?.length, 1,
+          "trusted authorization must be the first statement inside the batch");
+        assert.equal(payload.mutationStatements.length, 3,
+          "status, audit and notification outbox must share the batch");
+        assert.equal(payload.audits.length, 1);
+        await requestDb.batch([
+          ...payload.preMutationAssertions,
+          ...payload.mutationStatements,
+        ].map(stmt => asBatchRunnable(requestDb, stmt)));
+        return ["guard-wiring-audit"];
+      },
+    });
+    const logs = [];
+    host.log = (level, tag, details) => logs.push([level, tag, details]);
+    const transition = {
+      mutationStatements: [
+        db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+        db.run(sql`INSERT INTO audit_logs
+          (id,table_name,target_id,operation,actor_user_id,created_at)
+          VALUES ('status-wiring-audit','videos','v1','UPDATE','u_mgr',1000)`),
+      ],
+      expectedMutationChanges: [1, 1],
+      audits: [{ table_name: "videos", target_id: "v1",
+        operation: "UPDATE", actor_user_id: "u_mgr" }],
+      notificationBatch: {
+        statements: [db.run(sql`INSERT INTO notification_outbox
+          (id,type,payload_json,status,created_at)
+          VALUES ('status-wiring-outbox','video_posted','{}','pending',1000)`)],
+        expectedChanges: [1],
+      },
+      queueBatch: { statements: [], expectedChanges: [] },
+      fenceToken: null,
+      depublicizedFromPublic: false,
+      visibilityChanged: true,
+      publicCacheKeys: [],
+      exportEventIds: [],
+    };
+    const execute = () => executeHonoVideoVisibilityStatusMutation({
+      db, videoId: "v1", requestedStatus: "public",
+      reason: "review", logTag: "status-guard-wiring",
+      preMutationAssertions: [
+        planManageVideoStatusCommitAssertion(
+          db, actor, "evA", "v1", "tok-mgr", "manage_video_status",
+          snapshot.rebuildEventIds),
+      ],
+      transition,
+    }, host);
+
+    // A concurrent writer revokes the formerly valid approved X AFTER
+    // preload but BEFORE the video status transaction.
+    sqlite.exec("UPDATE x_users SET approval_status='rejected' WHERE id='mgr_x'");
+    const deniedStart = d1.stats.statements;
+    const denied = await execute();
+    assert.equal(denied.ok, false, "revoked reviewer cannot update through Hono executor");
+    assert.equal(d1.stats.statements - deniedStart, 1,
+      "first batch assertion rejects before all three mutation statements");
+    assert.equal(d1.stats.batches, 1);
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'")
+      .get().visibility_status, "pending");
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE id='status-wiring-audit'")
+      .get().n, 0, "the audit INSERT is rolled back");
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id='status-wiring-outbox'")
+      .get().n, 0, "the notification outbox INSERT is rolled back");
+    assert.equal(auditedBatchCalls, 1);
+
+    // Restoring the previously trusted X privilege makes the exact same
+    // frozen preflight and status/audit/outbox transaction valid again.
+    sqlite.exec("UPDATE x_users SET approval_status='approved' WHERE id='mgr_x'");
+    const allowedStart = d1.stats.statements;
+    const allowed = await execute();
+    assert.equal(allowed.ok, true);
+    assert.equal(d1.stats.statements - allowedStart, 4,
+      "one trusted guard and three DML writes, no additional D1 pre-read");
+    assert.equal(d1.stats.batches, 2);
+    assert.equal(auditedBatchCalls, 2);
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'")
+      .get().visibility_status, "public");
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE id='status-wiring-audit'")
+      .get().n, 1);
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id='status-wiring-outbox'")
+      .get().n, 1);
+    assert.ok(d1.stats.maxBinds <= 100, "first-batch guard and DML remain D1-bind-bounded");
+    assert.ok(logs.every(([level, _tag, details]) =>
+      level === "error" && details.error_code === "mutation_failed"),
+      "provider errors are not included in structured logs");
+  } finally {
+    sqlite.close();
+  }
+});
 
 test("Hono status mutation host rereads visibility from the migrated SQLite D1 schema", async () => {
   const sqlite = createSqlite();
