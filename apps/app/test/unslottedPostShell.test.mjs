@@ -828,3 +828,48 @@ test("U03a ISSUE-703: user dismissal blocks delayed saved event restoration", as
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: late submit from a previous affiliation cannot erase a newer draft", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const snapshots = [];
+  const renderVideoForm = args => {
+    snapshots.push({ onSubmitSuccess: args.onSubmitSuccess, events: args.initial.event_ids });
+    return renderStub(args);
+  };
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({ renderVideoForm }))));
+    await act(async () => selected(container, "none").click());
+    assert.deepEqual(snapshots.at(-1)?.events, []);
+    const oldSubmitSuccess = snapshots.at(-1).onSubmitSuccess;
+
+    // The old form's in-flight request outlives a user's choice of an event.
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    const currentSubmitSuccess = snapshots.at(-1).onSubmitSuccess;
+    assert.deepEqual(snapshots.at(-1)?.events, ["event-A"]);
+    assert.notEqual(oldSubmitSuccess, currentSubmitSuccess,
+      "each changed affiliation must expose a generation-bound success callback");
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const freshDraft = dom.window.localStorage.getItem(key);
+    assert.deepEqual(JSON.parse(freshDraft).value,
+      { affiliation: "event", selectedEventId: "event-A" });
+
+    await act(async () => oldSubmitSuccess());
+    assert.equal(dom.window.localStorage.getItem(key), freshDraft,
+      "old affiliation completion must not delete the newer saved choice");
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+    await act(async () => currentSubmitSuccess());
+    assert.equal(dom.window.localStorage.getItem(key), null,
+      "the current form's success can still clear its own draft");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
