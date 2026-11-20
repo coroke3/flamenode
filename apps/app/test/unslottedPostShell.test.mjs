@@ -551,6 +551,54 @@ test("U03a ISSUE-703: switching only Active X preserves independent drafts and r
   }
 });
 
+test("U03a ISSUE-703: guest shell cannot become authenticated user literally named anonymous", async () => {
+  dom.window.localStorage.clear();
+  const authKey = buildFormDraftStorageKey({
+    authUserId: "anonymous", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const render = draftAuthUserId => React.createElement(UnslottedPostShell, props({
+    draftAuthUserId,
+  }));
+  try {
+    await act(async () => root.render(render(undefined)));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+    assert.equal(dom.window.localStorage.getItem(authKey), null,
+      "guest draft persistence must remain disabled");
+
+    // The former React parent key aliased both states to "anonymous".
+    // A real auth user with that literal ID must start with fresh choices.
+    await act(async () => root.render(render("anonymous")));
+    assert.equal(selected(container, "event").checked, false,
+      "guest affiliation must not carry into the newly authenticated identity");
+    assert.equal(selected(container, "none").checked, false);
+    assert.equal(container.querySelector('input[name="event_ids"]'), null);
+    assert.equal(dom.window.localStorage.getItem(authKey), null);
+
+    await act(async () => selected(container, "none").click());
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(authKey)).value,
+      { affiliation: "none", selectedEventId: "" },
+      "authenticated draft belongs to that literal user ID only");
+
+    await act(async () => root.render(render(undefined)));
+    assert.equal(selected(container, "none").checked, false,
+      "the guest must not inherit the authenticated user's choice");
+    assert.equal(container.querySelector('input[name="event_ids"]'), null);
+    await act(async () => root.render(render("anonymous")));
+    assert.equal(selected(container, "none").checked, true,
+      "returning authenticated user restores its own draft");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 test("U03a ISSUE-703: valid @unassigned X handle cannot inherit absent-Active-X shell draft", async () => {
   dom.window.localStorage.clear();
   const keyFor = segment => buildFormDraftStorageKey({
