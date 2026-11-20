@@ -42,7 +42,7 @@ export const FIXTURE_VIDEO_DETAIL_PAYLOADS: Readonly<Record<string, Record<strin
     // Include one published profile and one unlinked profile to verify both states.
     public_members: [
       {
-        id: "fixture-member-public", display_name: "映像担当（公開）", x_user_id: "fixture_video_member_public",
+        id: "fixture-member-public", display_name: "映像担当（公開）", x_user_id: "minimal_user",
         role_label: "映像", comment: "イントロ", has_public_profile: true, icon_url: null,
       },
       {
