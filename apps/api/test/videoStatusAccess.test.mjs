@@ -1227,6 +1227,21 @@ test("MIG-0603: ninth rebuild event added after valid preload aborts the atomic 
 
     // An importer/other writer adds ninth distinct link after accepted preflight.
     insert(sqlite, "video_events", { video_id: "v1", event_id: "evGen19" });
+
+    // The empty imported link sorts before every real ID. If it consumes
+    // the limited nine-row projection, the ninth REAL event is omitted and
+    // the snapshot incorrectly reports only eight affected rebuild targets.
+    // Reject this already-invalid preflight, not only the later batch.
+    insert(sqlite, "video_events", { video_id: "v1", event_id: "" });
+    const ninthWithEmptyManager = await loadManageVideoStatusSnapshot(db, manager, "evA", "v1");
+    const ninthWithEmptyAdmin = await loadAdminVideoStatusSnapshot(db, admin, "v1");
+    assert.deepEqual(ninthWithEmptyManager,
+      { ok: false, message: "関連イベント数が処理上限を超えています。" },
+      "empty imported event cannot hide the ninth real linked event from manager preflight");
+    assert.deepEqual(ninthWithEmptyAdmin, ninthWithEmptyManager,
+      "site-admin preflight must reject the same true nine-target overflow");
+    sqlite.exec("DELETE FROM video_events WHERE video_id='v1' AND event_id=''");
+
     await attempt(manager,"manage_video_status",false,"manager-late-ninth-link");
     await attempt(admin,"admin_video_status",false,"admin-late-ninth-link");
 
