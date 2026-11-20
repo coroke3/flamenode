@@ -294,6 +294,9 @@ SELECT
         }
       }
 
+      // A stale R2 public artifact is not authority to offer chapter mutation
+      // controls when D1 has already revoked the video's public visibility.
+      const mayManagePublicView = viewerCanWriteChapters && matchesPublicD1Video;
       const canSeeAllPrivate = viewer.role === "admin" || viewerCanEditChapters;
       const canSeeAnyPrivate = canSeeAllPrivate || approvedXIds.length > 0;
       const isLibPlaylist = playlist === "lib-like" || playlist === "lib-bookmark";
@@ -330,7 +333,7 @@ SELECT
       // satisfies the same active-X/terms guard as SA-012..015. Owner rows
       // require a still-approved link in this SQL statement; event managers
       // may edit all normal public chapters. No extra D1 statement is issued.
-      const editablePublicSubquery = viewerCanWriteChapters && matchesPublicD1Video
+      const editablePublicSubquery = mayManagePublicView
         ? `(SELECT coalesce(json_group_array(json_object(
               'id', c."id",
               'chapter_time', c."chapter_time",
@@ -396,7 +399,7 @@ SELECT
           stmt2Binds.push(JSON.stringify(approvedXIds));
         }
       }
-      if (viewerCanWriteChapters && matchesPublicD1Video) {
+      if (mayManagePublicView) {
         stmt2Binds.push(detail.video.id);
         if (!viewerCanEditChapters) stmt2Binds.push(activeXId, viewer.id);
       }
@@ -420,7 +423,7 @@ SELECT
         VideoViewerOverlayDto["privateChapters"][number] & { chapter_owner_x_id: string | null }
       >(row2?.chapters_json).map(({ chapter_owner_x_id, ...chapter }) => ({
         ...chapter,
-        viewerCanManage: viewerCanWriteChapters &&
+        viewerCanManage: mayManagePublicView &&
           (viewerCanEditChapters || Boolean(activeXId && chapter_owner_x_id === activeXId)),
       }));
       // Never send raw chapter-owner X identities to the browser. The SQL
@@ -430,7 +433,7 @@ SELECT
         id: string; chapter_time: number; chapter_label: string;
         note: string | null; visibility: "public"; chapter_owner_x_id: string | null;
       }>(row2?.editable_public_chapters_json)
-        .filter((chapter) => viewerCanWriteChapters && matchesPublicD1Video &&
+        .filter((chapter) => mayManagePublicView &&
           (viewerCanEditChapters || Boolean(activeXId && chapter.chapter_owner_x_id === activeXId)))
         .map(({ chapter_owner_x_id: _ownerId, ...chapter }) => ({
           ...chapter,
@@ -460,7 +463,7 @@ SELECT
         bookmarkActive,
         viewerXApproved,
         // Server-side capability only; do not derive from the viewer X approval bit.
-        viewerCanEditChapters: viewerCanEditChapters && viewerCanWriteChapters,
+        viewerCanEditChapters: viewerCanEditChapters && mayManagePublicView,
         privateChapters,
         editablePublicChapters,
         ...finalPlaylist,

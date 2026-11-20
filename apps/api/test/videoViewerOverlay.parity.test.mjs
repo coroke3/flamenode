@@ -434,8 +434,13 @@ if (runUnderRootTsx(import.meta.url)) {
       headers: { cookie: "authjs.session-token=tok-staff" },
     }, env);
     assert.equal(stale.status, 200);
-    assert.deepEqual((await stale.json()).editablePublicChapters, [],
+    const staleBody = await stale.json();
+    assert.deepEqual(staleBody.editablePublicChapters, [],
       "canonical D1 private video must not lend edit authority via stale R2");
+    assert.equal(staleBody.viewerCanEditChapters, false,
+      "stale R2 public must not advertise a bulk editor after D1 private transition");
+    assert.ok(staleBody.privateChapters.every((chapter) => chapter.viewerCanManage === false),
+      "stale R2 public must not advertise private-row mutation controls");
   });
 
   test("RH-031 selecting a different approved X must not lend owner-edit capability", async () => {
