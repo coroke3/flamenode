@@ -534,8 +534,10 @@ async function loadReserveSnapshot(
       args.eventId,
       args.userId,
       args.neighborLimit,
-      normActive,
-      normActive,
+      normActive, // nonempty active-X guard
+      normActive, // exact snapshot match
+      normActive, // legacy snapshot exclusion predicate
+      normActive, // normalized legacy snapshot match
     )
     .first<ReserveSnapshotRow>();
 }

@@ -603,6 +603,57 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("T02: reserve D1 bind arity and legacy @/uppercase X-ID reservation cap match CURRENT", async () => {
+    const a = world();
+    const b = world();
+    for (const w of [a, b]) {
+      w.sqlite.prepare(
+        "UPDATE slots SET status = 'reserved', reserved_by_user_id = 'u_owner', " +
+        "x_user_id = 'x_owner', reserved_x_id_snapshot = '@X_Owner', " +
+        "display_name = 'Legacy', version = version + 1 " +
+        "WHERE id = 'lim_1' AND event_id = 'ev_limit'",
+      ).run();
+    }
+
+    let validatedReserveReads = 0;
+    const prepare = b.d1.prepare.bind(b.d1);
+    b.d1.prepare = (sql) => {
+      const stmt = prepare(sql);
+      if (sql.includes("WITH anchor AS") && sql.includes("AS active_x_count")) {
+        const bind = stmt.bind.bind(stmt);
+        stmt.bind = (...params) => {
+          validatedReserveReads += 1;
+          const placeholderCount = (sql.match(/\?/g) ?? []).length;
+          assert.equal(params.length, placeholderCount,
+            "Cloudflare D1 requires every reserve snapshot SQL placeholder to be bound");
+          return bind(...params);
+        };
+      }
+      return stmt;
+    };
+    const args = { eventId: "ev_limit", slot_id: "lim_2", display_name: "Second group", consecutive_count: 1 };
+    const thawA = freeze();
+    let expected;
+    try {
+      expected = await runCurrent(a, "u_owner", "reserve", args);
+    } finally {
+      thawA();
+    }
+    const thawB = freeze();
+    let actual;
+    try {
+      actual = await runHono(b, "u_owner", "reserve", args);
+    } finally {
+      thawB();
+    }
+    assert.equal(validatedReserveReads, 1, "one batched reserve snapshot read must be checked");
+    assert.equal(actual.status, 409);
+    assert.deepEqual(actual.result, expected.result);
+    assert.match(actual.result.message, /最大1件まで枠を確保できます/);
+    assert.deepEqual(state(b), state(a), "denied legacy-X second reservation must never write");
+    assert.equal(actual.wakes.length, 0);
+  });
+
   test("T02: 20-slot bulk reserve stays within D1 query/bind budget and matches CURRENT", async () => {
     const a = world();
     const b = world();
