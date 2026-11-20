@@ -424,6 +424,18 @@ if (runUnderRootTsx(import.meta.url)) {
     }, env);
     assert.deepEqual((await revoked.json()).editablePublicChapters, [],
       "TOS revocation denies public edit, even for an event manager");
+
+    // R2/SSG can still carry the public video while canonical D1 is already
+    // private. Treat this mismatch as a deny, not an owner/admin edit grant.
+    sqlite.prepare('UPDATE "user" SET "is_tos_accepted" = 1 WHERE "id" = ?').run("u_staff");
+    sqlite.prepare('UPDATE "videos" SET "visibility_status" = ? WHERE "id" = ?')
+      .run("private", "vid-pub");
+    const stale = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.equal(stale.status, 200);
+    assert.deepEqual((await stale.json()).editablePublicChapters, [],
+      "canonical D1 private video must not lend edit authority via stale R2");
   });
 
   test("RH-031 selecting a different approved X must not lend owner-edit capability", async () => {
