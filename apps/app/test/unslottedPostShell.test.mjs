@@ -507,6 +507,94 @@ test("U03a ISSUE-703: existing destination draft restores only to its own identi
   }
 });
 
+// ISSUE-703: identity-isolation must hold when only ONE identity dimension
+// changes; switching both dimensions was verified by the earlier regressions.
+test("U03a ISSUE-703: switching only Active X preserves independent drafts and restores on return", async () => {
+  dom.window.localStorage.clear();
+  const keyFor = xid => buildFormDraftStorageKey({
+    authUserId: "u1", formId: `unslotted-shell:${xid}`, schemaVersion: "unslotted-shell-v1",
+  });
+  const aliceKey = keyFor("alice");
+  const bobKey = keyFor("bob");
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props())));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+
+    // Change only the X identity, without flushing via pagehide or debounce.
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      activeXId: "@BOB",
+    }))));
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(aliceKey)).value, {
+      affiliation: "event", selectedEventId: "event-A",
+    }, "ALICE's unsaved event is retained under ALICE");
+    assert.equal(dom.window.localStorage.getItem(bobKey), null);
+    assert.equal(selected(container, "event").checked, false);
+    assert.equal(container.querySelector('input[name="event_ids"]'), null);
+
+    await act(async () => selected(container, "none").click());
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props())));
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(bobKey)).value, {
+      affiliation: "none", selectedEventId: "",
+    }, "BOB's distinct draft is flushed under BOB");
+    assert.equal(selected(container, "event").checked, true);
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A",
+      "returning to ALICE restores only ALICE's saved selection");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
+test("U03a ISSUE-703: switching only auth user restores destination draft without cross-user overwrite", async () => {
+  dom.window.localStorage.clear();
+  const keyFor = uid => buildFormDraftStorageKey({
+    authUserId: uid, formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  const key1 = keyFor("u1");
+  const key2 = keyFor("u2");
+  const existing = JSON.stringify({
+    savedAt: Date.now(), value: { affiliation: "none", selectedEventId: "" },
+  });
+  dom.window.localStorage.setItem(key2, existing);
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props())));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+
+    // X ID remains ALICE. Only auth ownership changes.
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      draftAuthUserId: "u2",
+    }))));
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(key1)).value, {
+      affiliation: "event", selectedEventId: "event-A",
+    });
+    assert.equal(selected(container, "none").checked, true,
+      "u2 restores its own saved affiliation, not u1's event");
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "");
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.equal(dom.window.localStorage.getItem(key2), existing,
+      "a pristine restored destination remains byte-for-byte unchanged");
+
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props())));
+    assert.equal(selected(container, "event").checked, true);
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A",
+      "returning to u1 restores u1's event and does not reuse u2's draft");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
 test("U03a: shell is network and Next-free; CURRENT affiliation/draft contract is preserved", () => {
   const ported = readFileSync(new URL("../src/components/forms/UnslottedPostShell.tsx", import.meta.url), "utf8");
   const legacy = readFileSync(new URL("../../../src/components/forms/UnslottedPostForm.tsx", import.meta.url), "utf8");
