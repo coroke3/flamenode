@@ -126,4 +126,66 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(h.d1.stats.statements, 0);
     assert.equal(h.d1.stats.writes, 0);
   });
+  test("MIG-0627 U02d PREP T05: enforce-mode malformed visibility manifest cannot release public search", async (t) => {
+    const h = harness(t, "enforce");
+    await seedPostings(h.storage);
+    await seedLite(h.storage);
+    const visibilityKey = "visibility/blocked-entities.v1.json";
+    await h.storage.put(visibilityKey, "{broken-visibility-manifest");
+    const { response, payload } = await h.query();
+    assert.equal(response.status, 503);
+    assert.deepEqual(payload, { error: "static_list_unavailable" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.ok(h.reads.length >= 1 && h.reads.every((key) => key === visibilityKey),
+      "invalid visibility manifest must prevent every search-index and lite data read");
+    assert.equal(h.d1.stats.statements, 0);
+    assert.equal(h.d1.stats.writes, 0);
+  });
+
+  test("MIG-0627 U02d PREP T06: postings spanning more than 32 pages fall back before shard reads", async (t) => {
+    const h = harness(t);
+    const pages = Array.from({ length: 33 }, (_, index) => index + 1);
+    await seedPostings(h.storage, {
+      directory: (directory) => ({
+        ...directory,
+        grams: Object.fromEntries(Object.entries(directory.grams).map(([gram, entry]) => [
+          gram, { ...entry, pages, total: 33 },
+        ])),
+      }),
+    });
+    await seedLite(h.storage);
+    const { response, payload } = await h.query();
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload.items.map((item) => item.id), ["lite-only-tokyo"]);
+    assert.ok(h.reads.includes(manifestKey));
+    assert.ok(h.reads.includes(liteKey), "over-limit posting path must use existing lite fallback");
+    assert.equal(h.reads.some((key) => /\/bucket\/\d+\/\d+\.json$/.test(key)), false,
+      "query must not fetch any of the 33 advertised posting pages");
+    assert.equal(h.d1.stats.statements, 0);
+    assert.equal(h.d1.stats.writes, 0);
+  });
+
+  test("MIG-0627 U02d PREP T07: missing posting manifest still reads legacy lite once", async (t) => {
+    const h = harness(t);
+    await seedLite(h.storage);
+    const { response, payload } = await h.query();
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload.items.map((item) => item.id), ["lite-only-tokyo"]);
+    assert.deepEqual(h.reads, [manifestKey, liteKey]);
+    assert.equal(h.d1.stats.statements, 0);
+    assert.equal(h.d1.stats.writes, 0);
+  });
+
+  test("MIG-0627 U02d PREP T08: both indexes missing returns noncacheable retryable 503", async (t) => {
+    const h = harness(t);
+    const { response, payload } = await h.query();
+    assert.equal(response.status, 503);
+    assert.deepEqual(payload, { error: "static_list_unavailable" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("Retry-After"), "30");
+    assert.deepEqual(h.reads, [manifestKey, liteKey], "only the two documented index keys can be read");
+    assert.equal(h.d1.stats.statements, 0);
+    assert.equal(h.d1.stats.writes, 0);
+  });
+
 }
