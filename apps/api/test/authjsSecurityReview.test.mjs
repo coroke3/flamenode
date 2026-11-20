@@ -11,9 +11,10 @@ import {
 process.env.TSX_TSCONFIG_PATH ??= fileURLToPath(new URL("../../../tsconfig.json", import.meta.url));
 
 if (runTestWithTsx(import.meta.url)) {
-  const { createHarness } = await loadAuthBaseline();
+  const { createHarness, setCookies } = await loadAuthBaseline();
   const { buildUnmountedAuthConfig } = await import("../src/auth/authjs.ts");
   const { createUnmountedAuthRoutes } = await import("../src/routes/auth.ts");
+  const { createUnmountedAuthCompleteRoutes } = await import("../src/routes/authComplete.ts");
 
   const origin = AUTH_BASELINE_ENV.AUTH_URL;
   function credentials(d1) {
@@ -83,5 +84,141 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(res.status, 503, "a provider outage cannot be represented as a logged-out 200 session");
     assert.match(res.headers.get("cache-control") ?? "", /no-store/i);
     assert.doesNotMatch(body, new RegExp(providerSentinel));
+  });
+
+  function countD1Statements(d1) {
+    const ops = [];
+    const wrapStmt = (sql, stmt) => ({
+      ...stmt,
+      bind(...args) {
+        const bound = stmt.bind(...args);
+        const record = () => {
+          ops.push(String(sql).trim().split(/\s+/)[0].toUpperCase());
+        };
+        return {
+          ...bound,
+          first: async (...rest) => { record(); return bound.first(...rest); },
+          all: async (...rest) => { record(); return bound.all(...rest); },
+          raw: async (...rest) => { record(); return bound.raw(...rest); },
+          run: async (...rest) => { record(); return bound.run(...rest); },
+        };
+      },
+    });
+    return {
+      ops,
+      d1: {
+        ...d1,
+        prepare: (sql) => wrapStmt(sql, d1.prepare(sql)),
+        batch: async (list) => {
+          ops.push("BATCH");
+          return d1.batch(list);
+        },
+      },
+    };
+  }
+
+  test("MIG-0804 U01: per-request D1 query counts across session, csrf, signout, and complete", async (t) => {
+    const cookieName = BASELINE_COOKIES.sessionToken.name;
+    const csrfName = BASELINE_COOKIES.csrfToken.name;
+    const validCookie = `${cookieName}=${SESSIONS.valid.sessionToken}`;
+
+    async function measure(fn) {
+      const { d1, sqlite } = createHarness(t);
+      const tracked = countD1Statements(d1);
+      const res = await fn(tracked.d1, sqlite);
+      return { status: res.status, ops: tracked.ops };
+    }
+
+    assert.deepEqual(
+      await measure((d1) => createUnmountedAuthRoutes(credentials(d1)).request(`${origin}/api/auth/session`)),
+      { status: 200, ops: [] },
+    );
+    assert.deepEqual(
+      await measure((d1) => createUnmountedAuthRoutes(credentials(d1)).request(`${origin}/api/auth/session`, {
+        headers: { cookie: `${cookieName}=${SESSIONS.deletedToken}` },
+      })),
+      { status: 200, ops: ["SELECT"] },
+    );
+    assert.deepEqual(
+      await measure((d1) => createUnmountedAuthRoutes(credentials(d1)).request(`${origin}/api/auth/session`, {
+        headers: { cookie: `${cookieName}=${SESSIONS.expired.sessionToken}` },
+      })),
+      { status: 200, ops: ["SELECT", "DELETE"] },
+    );
+    assert.deepEqual(
+      await measure((d1, sqlite) => {
+        sqlite.prepare('UPDATE "session" SET expires = ? WHERE "sessionToken" = ?')
+          .run(Date.now() + 29.9 * 86_400_000, SESSIONS.valid.sessionToken);
+        return createUnmountedAuthRoutes(credentials(d1)).request(`${origin}/api/auth/session`, {
+          headers: { cookie: validCookie },
+        });
+      }),
+      { status: 200, ops: ["SELECT"] },
+    );
+    assert.deepEqual(
+      await measure((d1, sqlite) => {
+        sqlite.prepare('UPDATE "session" SET expires = ? WHERE "sessionToken" = ?')
+          .run(Date.now() + 2 * 86_400_000, SESSIONS.valid.sessionToken);
+        return createUnmountedAuthRoutes(credentials(d1)).request(`${origin}/api/auth/session`, {
+          headers: { cookie: validCookie },
+        });
+      }),
+      { status: 200, ops: ["SELECT", "UPDATE"] },
+    );
+    assert.deepEqual(
+      await measure((d1) => createUnmountedAuthRoutes(credentials(d1)).request(`${origin}/api/auth/csrf`)),
+      { status: 200, ops: [] },
+    );
+    assert.deepEqual(
+      await measure(async (d1) => {
+        const app = createUnmountedAuthRoutes(credentials(d1));
+        const csrf = await app.request(`${origin}/api/auth/csrf`);
+        const csrfCookie = setCookies(csrf)[csrfName]?.value;
+        return app.request(`${origin}/api/auth/signout`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: `${validCookie}; ${csrfName}=${csrfCookie}`,
+          },
+          body: new URLSearchParams({ csrfToken: "invalid-csrf-token" }),
+        });
+      }),
+      { status: 302, ops: [] },
+    );
+    assert.deepEqual(
+      await measure(async (d1) => {
+        const app = createUnmountedAuthRoutes(credentials(d1));
+        const csrf = await app.request(`${origin}/api/auth/csrf`);
+        const { csrfToken } = await csrf.json();
+        const csrfCookie = setCookies(csrf)[csrfName]?.value;
+        return app.request(`${origin}/api/auth/signout`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: `${validCookie}; ${csrfName}=${csrfCookie}`,
+          },
+          body: new URLSearchParams({ csrfToken }),
+        });
+      }),
+      { status: 302, ops: ["DELETE"] },
+    );
+    assert.deepEqual(
+      await measure((d1, sqlite) => {
+        sqlite.prepare('UPDATE "session" SET expires = ? WHERE "sessionToken" = ?')
+          .run(Date.now() + 29.9 * 86_400_000, SESSIONS.valid.sessionToken);
+        return createUnmountedAuthCompleteRoutes(credentials(d1), async () => {}).request(
+          `${origin}/auth/complete?next=%2Fdashboard`,
+          { headers: { cookie: validCookie } },
+        );
+      }),
+      { status: 303, ops: ["SELECT"] },
+    );
+    assert.deepEqual(
+      await measure((d1) => createUnmountedAuthCompleteRoutes(credentials(d1), async () => {}).request(
+        `${origin}/auth/complete?next=%2Fdashboard`,
+        { headers: { cookie: `${cookieName}=${SESSIONS.deletedToken}` } },
+      )),
+      { status: 303, ops: ["SELECT", "SELECT", "SELECT", "SELECT"] },
+    );
   });
 }
