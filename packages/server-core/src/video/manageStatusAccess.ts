@@ -311,8 +311,9 @@ export function planManageVideoStatusCommitAssertion(
     )`;
   // A cached actor is not durable: role downgrade, ban, or base TOS
   // acceptance withdrawal between preflight and D1 batch must fail closed.
-  // Dynamic major-terms are checked in this same assertion below; commit-time
-  // CostGuard and shared middleware provenance still need Issue #692 design.
+  // Dynamic major-terms and current CostGuard are checked inside this
+  // assertion; wiring their trusted context into the shared MIG-0602 route
+  // and proving the route-wide S3 budget still need Issue #692 approval.
   const activeSessionStillValid = sql`EXISTS (
     SELECT 1 FROM ${sessions}
     WHERE ${sessions.sessionToken} = ${sessionToken}
