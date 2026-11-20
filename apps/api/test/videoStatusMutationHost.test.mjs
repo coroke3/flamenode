@@ -4,6 +4,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { sql } from "drizzle-orm";
 import { AuditMutationError, asBatchRunnable } from "@flamenode/server-core/audit/mutate";
 import { loadManageVideoStatusSnapshot, planManageVideoStatusCommitAssertion } from "@flamenode/server-core/video/manageStatusAccess";
+import { planVideoVisibilityTransition } from "@flamenode/server-core/visibility/videoTransition";
+import { createVideoVisibilityTransitionHost } from "../src/visibility/videoTransitionHost.ts";
 import * as schema from "@flamenode/db/schema";
 import { createSqlite } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
@@ -356,6 +358,136 @@ test("Hono status real mutateWithAudit keeps revoked reviewer writes and audit c
     assert.ok(logs.every(([_level, _tag, details]) =>
       !Object.values(details).some(value => /token|password|secret/i.test(String(value)))),
       "structured logs cannot expose credentials");
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0603: full quiet-status planner, real audited D1 queue and stale grant are atomic", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    sqlite.exec(`INSERT INTO system_settings
+      (id,operation_mode,disabled_features_json,cost_guard_exception_until,cost_guard_exception_features_json)
+      VALUES ('default','normal',NULL,NULL,NULL)
+      ON CONFLICT(id) DO UPDATE SET operation_mode='normal',disabled_features_json=NULL,
+        cost_guard_exception_until=NULL,cost_guard_exception_features_json=NULL`);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const actor = { id: "u_mgr", role: "user" };
+    const preloadStart = d1.stats.statements;
+    const snapshot = await loadManageVideoStatusSnapshot(db, actor, "evA", "v1");
+    assert.equal(snapshot.ok, true);
+    assert.equal(d1.stats.statements - preloadStart, 2,
+      "manager grant and exact video+full linked-ID snapshot use exactly two D1 reads");
+    assert.deepEqual(snapshot.rebuildEventIds, ["evA"]);
+
+    const visibilityHost = createVideoVisibilityTransitionHost({
+      env: { NEXT_PUBLIC_SITE_URL: "https://flamenode.example.test" },
+    });
+    const planStart = d1.stats.statements;
+    const transition = await planVideoVisibilityTransition(db, {
+      video: snapshot.video,
+      nextStatus: "private",
+      actorUserId: actor.id,
+      context: "manage_video_status",
+      reason: "private review",
+      eventIds: snapshot.rebuildEventIds,
+      notificationEventId: "evA",
+    }, visibilityHost);
+    assert.equal(d1.stats.statements - planStart, 0,
+      "quiet pending-to-private status builds the real queue without a fourth read");
+    assert.equal(transition.validationError, undefined);
+    assert.equal(transition.fenceToken, null,
+      "pending-to-private must not precommit a public R2 visibility fence");
+    assert.equal(transition.notificationBatch.statements.length, 0,
+      "private changes do not notify recipients");
+    assert.equal(transition.audits.length, 1);
+    assert.equal(transition.queueBatch.statements.length, 1,
+      "the real static-rebuild target fanout is one bounded bulk UPSERT");
+    assert.ok(transition.queueBatch.acceptedTargetCount >= 10,
+      "the real planner retains global, event and video targets");
+
+    const actorSnapshot = {
+      discord_id: "d_mgr", discord_name: "Name mgr",
+      x_user_id: null, x_name: null, icon_url: null,
+    };
+    const host = createVideoVisibilityStatusMutationHost({
+      env: { NEXT_PUBLIC_SITE_URL: "https://flamenode.example.test" },
+      get(key) {
+        if (key === "auditSettings") {
+          return {
+            normal_retention_days: 30, restorable_retention_days: 180,
+            long_audit_retention_days: 365, max_payload_bytes: 120_000,
+            compact_after_days: 30,
+          };
+        }
+        if (key === "actorSnapshotJsonById") {
+          return { u_mgr: JSON.stringify(actorSnapshot) };
+        }
+        throw new Error("unexpected context key: " + key);
+      },
+    }, { createTraceId: () => "trace-quiet-planned-status" });
+    const logs = [];
+    host.log = (level, tag, details) => logs.push([level, tag, details]);
+    const execute = () => executeHonoVideoVisibilityStatusMutation({
+      db, videoId: "v1", requestedStatus: "private",
+      reason: "private review", logTag: "quiet-planned-status",
+      preMutationAssertions: [
+        planManageVideoStatusCommitAssertion(
+          db, actor, "evA", "v1", "tok-mgr", "manage_video_status",
+          snapshot.rebuildEventIds),
+      ],
+      transition,
+    }, host);
+
+    // Real planner and real production audit are now joined through a Hono
+    // adapter. Revoke between reads and the first atomic D1 statement.
+    sqlite.exec("UPDATE x_users SET approval_status='rejected' WHERE id='mgr_x'");
+    const deniedStart = d1.stats.statements;
+    const denied = await execute();
+    assert.equal(denied.ok, false);
+    assert.equal(d1.stats.statements - deniedStart, 1,
+      "revoked privilege rejects at the first D1 statement before the real queue UPSERT");
+    assert.equal(d1.stats.batches, 1);
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'")
+      .get().visibility_status, "pending");
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE table_name='videos' AND target_id='v1'")
+      .get().n, 0);
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM static_rebuild_queue").get().n, 0,
+      "all real static-rebuild targets must roll back when the grant expires");
+
+    sqlite.exec("UPDATE x_users SET approval_status='approved' WHERE id='mgr_x'");
+    const allowedStart = d1.stats.statements;
+    const allowed = await execute();
+    assert.equal(allowed.ok, true);
+    assert.equal(allowed.pendingPublicReflection, true,
+      "one committed static-rebuild UPSERT signals eventual public reflection");
+    assert.equal(d1.stats.statements - allowedStart, 7,
+      "one guard + video UPDATE, queue UPSERT, 2 changes assertions, audit INSERT/check");
+    assert.equal(d1.stats.batches, 2, "only one atomic attempt per invocation");
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'")
+      .get().visibility_status, "private");
+    const audit = sqlite.prepare(`SELECT before_json,after_json,changed_keys_json,actor_snapshot_json,
+      reason,context FROM audit_logs WHERE table_name='videos' AND target_id='v1'`).get();
+    assert.ok(audit, "real strict production audit must be present");
+    assert.equal(JSON.parse(audit.before_json).visibility_status, "pending");
+    assert.equal(JSON.parse(audit.after_json).visibility_status, "private");
+    assert.ok(JSON.parse(audit.changed_keys_json).includes("visibility_status"));
+    assert.deepEqual(JSON.parse(audit.actor_snapshot_json), actorSnapshot);
+    assert.equal(audit.reason, "private review");
+    assert.equal(audit.context, "manage_video_status");
+    const targets = sqlite.prepare(`SELECT target_type,target_id,status
+      FROM static_rebuild_queue ORDER BY target_type,target_id`).all();
+    assert.equal(targets.length, transition.queueBatch.acceptedTargetCount,
+      "all deduped real planner queue targets are durable");
+    assert.ok(targets.every(t => t.status === "pending"));
+    assert.ok(targets.some(t => t.target_type === "video" && t.target_id === "v1"));
+    assert.ok(d1.stats.maxBinds <= 100);
+    assert.ok(logs.every(([_level, _tag, details]) =>
+      !Object.values(details).some(v => /tok-mgr|secret/i.test(String(v)))),
+      "no user session token or provider error may be logged");
   } finally {
     sqlite.close();
   }
