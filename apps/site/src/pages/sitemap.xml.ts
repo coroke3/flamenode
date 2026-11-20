@@ -86,16 +86,22 @@ function canonicalVideoPage(id: string, raw: unknown, sourceLabel: string): Emit
 
 export async function loadSitemapCanonicalVideoPages(
   access: SnapshotAccess | null,
+  candidateVideoIds?: ReadonlySet<string>,
 ): Promise<EmittedCanonicalVideoPage[]> {
   if (!access) {
     return Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)
+      .filter(([id]) => !candidateVideoIds || candidateVideoIds.has(id))
       .map(([id, raw]) => canonicalVideoPage(id, raw, `fixture:${id}`));
   }
   const manifest = access.options.manifest;
   if (!manifest) throw new Error("[sitemap] configured snapshot manifest is missing");
   const pages: EmittedCanonicalVideoPage[] = [];
+  // The sitemap video index has at most 500 entries. Avoid re-reading every
+  // manifest-approved detail (potentially thousands) when most cannot appear
+  // in the sitemap. The page emitter still independently validates all pages.
   for (const key of videoDetailKeys(manifest)) {
     const id = key.slice("snapshot/video-detail/".length, -".json".length);
+    if (candidateVideoIds && !candidateVideoIds.has(id)) continue;
     const payload = await loadVideoDetailPayload(access.source, key, access.options);
     pages.push(canonicalVideoPage(id, payload, key));
   }
@@ -116,12 +122,20 @@ export function sitemapRowsForEmittedVideoPages(
 
 export async function GET(): Promise<Response> {
   const access = snapshotAccessFromEnv();
-  const [videos, events, users, videoPages] = await Promise.all([
-    sitemapVideosOrEmpty(access),
+  const [videoBuild, events, users] = await Promise.all([
+    (async () => {
+      const videos = await sitemapVideosOrEmpty(access);
+      // Only snapshot-listed candidates can contribute sitemap URLs. A denied
+      // optional index must cause zero video-detail reads, not a full scan.
+      const videoPages = await loadSitemapCanonicalVideoPages(
+        access, new Set(videos.videos.map((video) => video.id)),
+      );
+      return { videos, videoPages };
+    })(),
     getEventBuildData(),
     loadUserBuildData(),
-    loadSitemapCanonicalVideoPages(access),
   ]);
+  const { videos, videoPages } = videoBuild;
   let userGeneratedAt: number | null = null;
   if (access && users.index) {
     const index = await loadUsersIndexSnapshot(access.source, access.options);
