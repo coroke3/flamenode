@@ -255,7 +255,10 @@ export function UnslottedPostShell<
             : "所属イベントを選択してください。"}
         </div>
       ) : (
-        renderVideoForm({
+        // CURRENT renders <VideoForm key={formKey}>. Keep the same remount
+        // boundary even when the injected renderer returns an unkeyed form.
+        <React.Fragment key={formKey}>
+          {renderVideoForm({
           formKey,
           mode: "free",
           activeXSnapshot: activeXId,
@@ -268,7 +271,8 @@ export function UnslottedPostShell<
           canEditEvents: false,
           onDraftFlushReady: handleVideoDraftFlushReady,
           onSubmitSuccess: handleVideoSubmitSuccess,
-        })
+          })}
+        </React.Fragment>
       )}
     </div>
   );
