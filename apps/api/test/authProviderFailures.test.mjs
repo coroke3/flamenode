@@ -39,19 +39,27 @@ if (runTestWithTsx(import.meta.url)) {
       prepare(sql) {
         if (at === "prepare") throw new Error(SENTINEL);
         const statement = d1.prepare(sql);
+        const operation = String(sql).toLowerCase().replace(/["`]/g, "");
+        const blockedWrite = (at === "update" && /^\\s*update\\s+session\\b/.test(operation)) ||
+          (at === "delete" && /^\\s*delete\\s+from\\s+session\\b/.test(operation));
         return {
           ...statement,
           bind(...args) {
             const bound = statement.bind(...args);
+            const fail = () => at === "read" || blockedWrite;
             return {
               ...bound,
               first: async (...rest) => {
-                if (at === "read") throw new Error(SENTINEL);
+                if (fail()) throw new Error(SENTINEL);
                 return bound.first(...rest);
               },
               all: async (...rest) => {
-                if (at === "read") throw new Error(SENTINEL);
+                if (fail()) throw new Error(SENTINEL);
                 return bound.all(...rest);
+              },
+              run: async (...rest) => {
+                if (fail()) throw new Error(SENTINEL);
+                return bound.run(...rest);
               },
             };
           },
@@ -96,6 +104,42 @@ if (runTestWithTsx(import.meta.url)) {
     const withoutCookie = await app.request(`${ORIGIN}/api/auth/session`);
     assert.equal(withoutCookie.status, 200);
     assert.equal(await withoutCookie.json(), null);
+  });
+
+  test("SEC-0804-01: session sliding-update failure is unavailable, not a successful renewal", async (t) => {
+    const { d1, sqlite } = createHarness(t);
+    const nearExpiry = Date.now() + 2 * 86_400_000;
+    sqlite.prepare('UPDATE "session" SET expires = ? WHERE "sessionToken" = ?')
+      .run(nearExpiry, SESSIONS.valid.sessionToken);
+    const app = createUnmountedAuthRoutes(inputs(brokenD1(d1, "update")));
+    await assertUnavailable(await sessionRequest(app, SESSIONS.valid.sessionToken));
+    const stored = sqlite.prepare('SELECT expires FROM "session" WHERE "sessionToken" = ?')
+      .get(SESSIONS.valid.sessionToken);
+    assert.equal(stored.expires, nearExpiry, "failed renewal must not mutate the D1 expiry");
+  });
+
+  test("SEC-0804-01: failed signout deletion keeps D1 session and returns private 503", async (t) => {
+    const { d1, sqlite } = createHarness(t);
+    const app = createUnmountedAuthRoutes(inputs(brokenD1(d1, "delete")));
+    const csrf = await app.request(`${ORIGIN}/api/auth/csrf`);
+    assert.equal(csrf.status, 200);
+    const { csrfToken } = await csrf.json();
+    const cookieName = BASELINE_COOKIES.csrfToken.name;
+    const line = csrf.headers.getSetCookie().find((value) => value.startsWith(cookieName + "="));
+    assert.ok(line && csrfToken, "must obtain a real Auth.js CSRF token and cookie");
+    const csrfCookie = line.slice(cookieName.length + 1).split(";")[0];
+    const response = await app.request(`${ORIGIN}/api/auth/signout`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${cookie(SESSIONS.valid.sessionToken)}; ${cookieName}=${csrfCookie}`,
+      },
+      body: new URLSearchParams({ csrfToken }),
+    });
+    await assertUnavailable(response);
+    const stored = sqlite.prepare('SELECT "sessionToken" FROM "session" WHERE "sessionToken" = ?')
+      .get(SESSIONS.valid.sessionToken);
+    assert.ok(stored, "a rejected delete must not silently log out the user");
   });
 
   test("SEC-0804-01: a D1 outage in one request does not poison a concurrent healthy session", async (t) => {
