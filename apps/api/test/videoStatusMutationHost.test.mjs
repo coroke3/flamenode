@@ -240,6 +240,127 @@ test("Hono status execution actually rolls back first-batch authz after a revoke
   }
 });
 
+test("Hono status real mutateWithAudit keeps revoked reviewer writes and audit completely atomic", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    sqlite.exec(`INSERT INTO system_settings
+      (id,operation_mode,disabled_features_json,cost_guard_exception_until,cost_guard_exception_features_json)
+      VALUES ('default','normal',NULL,NULL,NULL)
+      ON CONFLICT(id) DO UPDATE SET operation_mode='normal',disabled_features_json=NULL,
+        cost_guard_exception_until=NULL,cost_guard_exception_features_json=NULL`);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const actor = { id: "u_mgr", role: "user" };
+    const snapshot = await loadManageVideoStatusSnapshot(db, actor, "evA", "v1");
+    assert.equal(snapshot.ok, true);
+    assert.deepEqual(snapshot.rebuildEventIds, ["evA"]);
+
+    // These snapshots are canonical five-field values from the trusted
+    // user/settings guard, not the user's body or a partial test shortcut.
+    const actorSnapshot = {
+      discord_id: "d_mgr", discord_name: "Name mgr", x_user_id: null,
+      x_name: null, icon_url: null,
+    };
+    const auditSettings = {
+      normal_retention_days: 30, restorable_retention_days: 180,
+      long_audit_retention_days: 365, max_payload_bytes: 120_000,
+      compact_after_days: 30,
+    };
+    const host = createVideoVisibilityStatusMutationHost({
+      env: {},
+      get(key) {
+        if (key === "auditSettings") return auditSettings;
+        if (key === "actorSnapshotJsonById") {
+          return { u_mgr: JSON.stringify(actorSnapshot) };
+        }
+        throw new Error("unexpected audit context key: " + key);
+      },
+    }, { createTraceId: () => "trace-real-audit-status" });
+    const logs = [];
+    host.log = (level, tag, details) => logs.push([level, tag, details]);
+
+    const transition = {
+      mutationStatements: [
+        db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+      ],
+      expectedMutationChanges: [1],
+      audits: [{
+        table_name: "videos", target_id: "v1", operation: "UPDATE",
+        before: { id: "v1", visibility_status: "pending" },
+        after: { id: "v1", visibility_status: "public" },
+        actor_user_id: "u_mgr", reason: "review", context: "manage_video_status",
+        retention_class: "normal", restore_strategy: "none",
+      }],
+      notificationBatch: {
+        statements: [db.run(sql`INSERT INTO notification_outbox
+          (id,type,payload_json,status,created_at)
+          VALUES ('real-audit-status-outbox','video_posted','{}','pending',1000)`)],
+        expectedChanges: [1],
+      },
+      queueBatch: { statements: [], expectedChanges: [] },
+      fenceToken: null, depublicizedFromPublic: false,
+      visibilityChanged: true, publicCacheKeys: [], exportEventIds: [],
+    };
+    const execute = () => executeHonoVideoVisibilityStatusMutation({
+      db, videoId: "v1", requestedStatus: "public",
+      reason: "review", logTag: "real-audit-status",
+      preMutationAssertions: [
+        planManageVideoStatusCommitAssertion(db, actor, "evA", "v1",
+          "tok-mgr", "manage_video_status", snapshot.rebuildEventIds),
+      ],
+      transition,
+    }, host);
+
+    // Revocation after a legitimate read-only preload, before the audited
+    // commit. This uses the REAL mutateWithAudit, not an injected writer.
+    sqlite.exec("UPDATE x_users SET approval_status='rejected' WHERE id='mgr_x'");
+    const beforeDeny = d1.stats.statements;
+    const denied = await execute();
+    assert.equal(denied.ok, false, "no stale grant can authorize status");
+    assert.equal(d1.stats.statements - beforeDeny, 1,
+      "valid canonical audit preloads avoid extra D1 reads; guard fails first");
+    assert.equal(d1.stats.batches, 1, "one atomic aborted audited batch");
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'")
+      .get().visibility_status, "pending");
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE table_name='videos' AND target_id='v1'")
+      .get().n, 0, "real audit logger cannot persist a denied action");
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM notification_outbox WHERE id='real-audit-status-outbox'")
+      .get().n, 0, "no notification survives a denied action");
+
+    sqlite.exec("UPDATE x_users SET approval_status='approved' WHERE id='mgr_x'");
+    const beforeAllow = d1.stats.statements;
+    const allowed = await execute();
+    assert.equal(allowed.ok, true);
+    assert.equal(d1.stats.statements - beforeAllow, 7,
+      "guard + update/CAS assertion + notification/CAS assertion + audit insert/assertion");
+    assert.equal(d1.stats.batches, 2);
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'")
+      .get().visibility_status, "public");
+    const audit = sqlite.prepare(`SELECT before_json,after_json,changed_keys_json,actor_snapshot_json,reason,context
+      FROM audit_logs WHERE table_name='videos' AND target_id='v1'`).get();
+    assert.ok(audit, "production mutateWithAudit persisted one strict audit row");
+    assert.deepEqual(JSON.parse(audit.before_json), { id: "v1", visibility_status: "pending" });
+    assert.deepEqual(JSON.parse(audit.after_json), { id: "v1", visibility_status: "public" });
+    assert.deepEqual(JSON.parse(audit.changed_keys_json), ["visibility_status"]);
+    assert.deepEqual(JSON.parse(audit.actor_snapshot_json), actorSnapshot);
+    assert.equal(audit.reason, "review");
+    assert.equal(audit.context, "manage_video_status");
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE table_name='videos' AND target_id='v1'")
+      .get().n, 1);
+    assert.equal(sqlite.prepare("SELECT status FROM notification_outbox WHERE id='real-audit-status-outbox'")
+      .get().status, "pending");
+    assert.ok(d1.stats.maxBinds <= 100,
+      "production audit chunks and trusted guard stay below D1 bind cap");
+    assert.ok(logs.every(([_level, _tag, details]) =>
+      !Object.values(details).some(value => /token|password|secret/i.test(String(value)))),
+      "structured logs cannot expose credentials");
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("Hono status mutation host rereads visibility from the migrated SQLite D1 schema", async () => {
   const sqlite = createSqlite();
   try {
