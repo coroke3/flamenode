@@ -761,3 +761,70 @@ test("U03a ISSUE-703: updated eligible options cannot revert an in-progress affi
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: delayed eligible event restores only the matching saved event", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  const original = JSON.stringify({
+    savedAt: Date.now(), value: { affiliation: "event", selectedEventId: "event-A" },
+  });
+  dom.window.localStorage.setItem(key, original);
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const render = eventOptions => React.createElement(UnslottedPostShell, props({ eventOptions }));
+  try {
+    await act(async () => root.render(render([])));
+    assert.equal(selected(container, "event").checked, true);
+    assert.equal(container.querySelector('input[name="event_ids"]'), null,
+      "an unavailable event cannot reach the form");
+    assert.ok(container.textContent.includes("保存済みイベントは現在の候補にありません"));
+
+    await act(async () => root.render(render([{ ...eventA }])));
+    assert.equal(selected(container, "event").checked, true);
+    assert.equal(container.querySelector("#unslotted_event_choice")?.value, "event-A");
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A",
+      "only the exact saved event can become selected when eligible");
+    assert.equal(dom.window.localStorage.getItem(key), original,
+      "eligibility arrival alone must not overwrite the stored draft");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
+test("U03a ISSUE-703: user dismissal blocks delayed saved event restoration", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  dom.window.localStorage.setItem(key, JSON.stringify({
+    savedAt: Date.now(), value: { affiliation: "event", selectedEventId: "event-A" },
+  }));
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const render = eventOptions => React.createElement(UnslottedPostShell, props({ eventOptions }));
+  try {
+    await act(async () => root.render(render([])));
+    assert.equal(container.querySelector('input[name="event_ids"]'), null);
+    await act(async () => selected(container, "none").click());
+    assert.equal(selected(container, "none").checked, true);
+
+    await act(async () => root.render(render([{ ...eventA }])));
+    assert.equal(selected(container, "none").checked, true,
+      "explicit user edit cannot be overridden by later eligibility");
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "");
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(key)).value, {
+      affiliation: "none", selectedEventId: "",
+    });
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
