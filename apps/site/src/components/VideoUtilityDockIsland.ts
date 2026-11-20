@@ -176,7 +176,14 @@ export function VideoUtilityDockIsland({
   const [chapterEditLookup, setChapterEditLookup] = React.useState<{
     id: string; status: "loading" | "denied" | "allowed";
   } | null>(null);
-  React.useEffect(() => { setChapterEditLookup(null); }, [overlay, videoId, loading]);
+  const lookupEpoch = React.useRef(0);
+  // A resolved network check must never paint a permission badge after a
+  // viewer/X/video switch, nor overwrite the result of a newer check.
+  React.useEffect(() => {
+    lookupEpoch.current += 1;
+    setChapterEditLookup(null);
+    return () => { lookupEpoch.current += 1; };
+  }, [overlay, videoId, loading]);
   const historyOwned = React.useRef(false);
   const pendingHref = React.useRef<string | null>(null);
   const autoNextNavigated = React.useRef(false);
@@ -388,10 +395,13 @@ export function VideoUtilityDockIsland({
                 disabled: chapterEditLookup?.id === chapter.id && chapterEditLookup.status === "loading",
                 "aria-label": `${chapter.label}の編集権限を確認`,
                 onClick: () => {
+                  const generation = ++lookupEpoch.current;
                   setChapterEditLookup({ id: chapter.id, status: "loading" });
                   void onRequestPublicChapterEdit(chapter.id).then((allowed) => {
+                    if (lookupEpoch.current !== generation) return;
                     setChapterEditLookup({ id: chapter.id, status: allowed ? "allowed" : "denied" });
                   }).catch(() => {
+                    if (lookupEpoch.current !== generation) return;
                     setChapterEditLookup({ id: chapter.id, status: "denied" });
                   });
                 },

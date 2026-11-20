@@ -969,6 +969,38 @@ test("Issue #661: on-demand edit affordance checks permission without trusting S
   });
 });
 
+test("Issue #661: stale successful public edit lookup cannot show an authorized badge after X switch", async () => {
+  await withChapterDom(async (doc, root) => {
+    const { VideoUtilityDockIsland } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+    const base = {
+      loggedIn: true, authUnavailable: false, isBanned: false,
+      isTosAccepted: true, termsReacceptRequired: false,
+      viewerXApproved: true, activeXId: "alice-x",
+      viewerCanEditChapters: false, privateChapters: [], editablePublicChapters: [],
+      likeActive: false, bookmarkActive: false, playlistLabel: "再生リスト", playlistItems: [],
+    };
+    let resolvePending;
+    const lookup = new Promise((resolve) => { resolvePending = resolve; });
+    const render = (overlay) => React.createElement(VideoUtilityDockIsland, {
+      videoId: "vid-pub", currentId: "vid-pub", loading: false, overlay,
+      publicChapters: [{ id: "chapter-target", timeLabel: "1:00", label: "可視コメント", kind: "comment" }],
+      onRequestPublicChapterEdit: () => lookup,
+    });
+    await React.act(async () => root.render(render(base)));
+    const check = [...doc.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label") === "可視コメントの編集権限を確認");
+    assert.ok(check);
+    await React.act(async () => { check.click(); });
+    assert.match(doc.body.textContent, /確認中/);
+    await React.act(async () => root.render(render({ ...base, activeXId: "bob-x" })));
+    await React.act(async () => { resolvePending(true); });
+    assert.doesNotMatch(doc.body.textContent, /下の編集欄から操作できます/,
+      "late approval from the previous X cannot paint an authorized badge");
+    assert.doesNotMatch(doc.body.textContent, /編集権限を確認できませんでした/,
+      "an outdated failure cannot overwrite the new viewer either");
+  });
+});
+
 test("MIG-0518 chapter owner edits own private chapter without admin/bulk access", async () => {
   const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
   const base = {
