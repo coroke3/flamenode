@@ -391,7 +391,13 @@ export function planManageVideoStatusCommitAssertion(
   // A reviewer cannot borrow the enabled admin-only CostGuard feature when
   // manage_video_status is disabled. This fail-closed guard is independent
   // of future Hono route middleware wiring.
-  const featureMatchesActor = costGuardFeature !== "admin_video_status" || user.role === "admin";
+  // The admin status action is global and never carries event_id; manage
+  // is always event-scoped, even when invoked by a site admin. Fail closed
+  // on a mismatched server-selected feature/event context, so a future Hono
+  // wiring error cannot accidentally skip the manage association check.
+  const featureMatchesActor = costGuardFeature === "admin_video_status"
+    ? user.role === "admin" && eventId === null
+    : eventId !== null;
   const costGuardStillAllows = sql`EXISTS (
     SELECT 1 FROM ${systemSettings}
     WHERE ${systemSettings.id} = 'default'
