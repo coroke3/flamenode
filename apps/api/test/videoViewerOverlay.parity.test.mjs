@@ -703,7 +703,7 @@ if (runUnderRootTsx(import.meta.url)) {
     env.DB.prepare = (sql) => {
       const stmt = originalPrepare(sql);
       if (!sql.includes("'approved_x_ids'")) return stmt;
-      assert.match(sql, /CASE WHEN length\\(a\\."id"\\) > 128 THEN NULL/,
+      assert.ok(sql.includes('CASE WHEN length(a."id") > 128 THEN NULL'),
         "oversized X IDs must become a D1-side invalid-identity sentinel");
       const originalBind = stmt.bind.bind(stmt);
       stmt.bind = (...params) => {
