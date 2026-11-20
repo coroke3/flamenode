@@ -103,3 +103,70 @@ test("MIG-0666: remote oversized object is refused without any write", async () 
   await assert.rejects(publishApiArtifacts(data, b), /remote object exceeds comparison budget/);
   assert.equal(b.writes.length, 0);
 });
+
+
+test("MIG-0666 build wiring: publish opt-in requires explicit bucket; default build makes zero R2 writes", async () => {
+  const { buildPublicSite } = await import("./buildPublicSite.ts");
+  const data = fixture([]);
+  const fakeProduce = async (argv) => {
+    assert.ok(argv.includes("--out"));
+    assert.equal(argv.includes("--publish-api-artifacts"), false,
+      "publish flag must not leak to read-only snapshot producer");
+    return {
+      ...data, rules: null,
+      report: {
+        generation: "test-generation-1", keys: 1, bytes: 99, d1Statements: 0,
+        creators: 0, mirroredRows: 0, skippedCreators: [], blockedKeys: 0,
+        trending: "produced", rules: false, elapsedMs: 1,
+      },
+    };
+  };
+  const b = bucket();
+  const builds = [];
+  const run = async (cmd) => { builds.push(cmd); };
+  const args = ["--sqlite", "nonproduction-test-fixture", "--generation", "test-generation-1"];
+  const ordinary = await buildPublicSite(args, {
+    apiArtifactBucket: b, produce: fakeProduce, run,
+  });
+  assert.equal(ordinary.apiArtifactPublish, undefined);
+  assert.equal(b.writes.length, 0);
+  assert.equal(builds.length, 2, "default build runs Astro and site budget verification");
+  const published = await buildPublicSite([...args, "--publish-api-artifacts"], {
+    apiArtifactBucket: b, produce: fakeProduce, run,
+  });
+  assert.equal(published.apiArtifactPublish.puts, 1);
+  assert.equal(b.writes.length, 1);
+  const second = await buildPublicSite([...args, "--publish-api-artifacts"], {
+    apiArtifactBucket: b, produce: fakeProduce, run,
+  });
+  assert.equal(second.apiArtifactPublish.puts, 0, "build rerun skips identical public API artifacts");
+  assert.equal(second.apiArtifactPublish.skipped, 1);
+  await assert.rejects(
+    buildPublicSite([...args, "--publish-api-artifacts"], { produce: fakeProduce, run }),
+    /requires an explicit injected R2 bucket/,
+  );
+  await assert.rejects(
+    buildPublicSite([...args, "--publish-api-artifacts", "--publish-api-artifacts"], {
+      apiArtifactBucket: b, produce: fakeProduce, run,
+    }), /duplicate/,
+  );
+});
+
+test("MIG-0666 build wiring: failed local site verification must never PUT an API artifact", async () => {
+  const { buildPublicSite } = await import("./buildPublicSite.ts");
+  const b = bucket();
+  await assert.rejects(
+    buildPublicSite([
+      "--sqlite", "nonproduction-test-fixture", "--generation", "test-generation-1",
+      "--publish-api-artifacts",
+    ], {
+      apiArtifactBucket: b,
+      produce: async () => ({
+        ...fixture([]),
+        report: { trending: "produced", generation: "test-generation-1", elapsedMs: 0 },
+      }),
+      run: async () => { throw new Error("local-build-failed"); },
+    }), /local-build-failed/,
+  );
+  assert.equal(b.writes.length, 0, "R2 PUT occurs only after both local checks pass");
+});

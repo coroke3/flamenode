@@ -8,6 +8,7 @@ import path from "node:path";
 import {spawn} from "node:child_process";
 import {fileURLToPath} from "node:url";
 import {main as produceMain} from "./produceSnapshots.ts";
+import {publishApiArtifacts, type ApiArtifactBucket, type ApiArtifactPublishReport} from "./publishApiArtifacts.ts";
 
 const REPO=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"../../..");
 const SNAPSHOT_DIR_PREFIX="flamenode-public-build-";
@@ -18,6 +19,8 @@ export interface BuildCommand {
 export interface BuildReport {
   keys:number; bytes:number; d1Statements:number; elapsedMs:number;
   buildElapsedMs:number; generation:string; snapshotDir?:string;
+  /** Present only for an explicitly requested, injected nonproduction R2 publication. */
+  apiArtifactPublish?:ApiArtifactPublishReport;
 }
 export function buildPublicSiteArgs(argv:readonly string[], env:Record<string,string|undefined>=process.env):string[] {
   if(argv.includes("--out"))throw new Error("buildPublicSite manages its own temporary snapshot directory");
@@ -62,14 +65,22 @@ export async function runBuildCommand({command,args,env}:BuildCommand):Promise<v
 }
 export async function buildPublicSite(
   argv:string[],
-  options:{env?:NodeJS.ProcessEnv;fetchFn?:typeof fetch;run?:typeof runBuildCommand;keepSnapshotDir?:boolean}={},
+  options:{env?:NodeJS.ProcessEnv;fetchFn?:typeof fetch;run?:typeof runBuildCommand;
+    keepSnapshotDir?:boolean; apiArtifactBucket?:ApiArtifactBucket; produce?:typeof produceMain}={},
 ):Promise<BuildReport>{
   const started=performance.now();
   const env=options.env??process.env;
-  const args=buildPublicSiteArgs(argv,env);
+  // No CLI secret or live R2 client is provided. The explicit flag only
+  // works with an injected, separately authorized nonproduction R2 bucket.
+  const publishFlags=argv.filter(arg=>arg==="--publish-api-artifacts").length;
+  if(publishFlags>1)throw new Error("duplicate --publish-api-artifacts flag");
+  if(publishFlags===1&&!options.apiArtifactBucket)
+    throw new Error("API artifact publishing requires an explicit injected R2 bucket (no production credentials)");
+  const args=buildPublicSiteArgs(argv.filter(arg=>arg!=="--publish-api-artifacts"),env);
   const snapshotDir=fs.mkdtempSync(path.join(os.tmpdir(),SNAPSHOT_DIR_PREFIX));
   try{
-    const result=await produceMain([...args,"--out",snapshotDir],{env,fetchFn:options.fetchFn,quiet:true});
+    const produce=options.produce??produceMain;
+    const result=await produce([...args,"--out",snapshotDir],{env,fetchFn:options.fetchFn,quiet:true});
     // Required content includes trending. Missing R2 object is not replaced with arbitrary fake data.
     if(result.report.trending==="missing")throw new Error("public build aborted: trending snapshot is unavailable");
     const childEnv=safeBuildEnv(env,snapshotDir,result.manifest.generation);
@@ -77,10 +88,16 @@ export async function buildPublicSite(
     const npm=process.platform==="win32"?"npm.cmd":"npm";
     await run({command:npm,args:["run","build","--workspace=@flamenode/site"],env:childEnv});
     await run({command:process.execPath,args:["scripts/check-public-site-build-budget.mjs"],env:childEnv});
+    // Never write live artifacts before the local build and size checks pass.
+    // No flag means zero R2 GETs/PUTs and preserves MIG-0509 dry-run behavior.
+    const apiArtifactPublish=publishFlags===1
+      ? await publishApiArtifacts(result,options.apiArtifactBucket!)
+      : undefined;
     const report={keys:result.report.keys,bytes:result.report.bytes,d1Statements:result.report.d1Statements,
       elapsedMs:Math.round(performance.now()-started),
       buildElapsedMs:Math.round(performance.now()-started-result.report.elapsedMs),
       generation:result.report.generation,
+      ...(apiArtifactPublish?{apiArtifactPublish}:{}),
       // Only reported when the caller keeps it; otherwise finally{} removes the directory.
       ...(options.keepSnapshotDir?{snapshotDir}:{})};
     console.log(JSON.stringify({buildPublicSite:report}));
