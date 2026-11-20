@@ -294,3 +294,25 @@ test("MIG-0627 U02a T12: an indexed but broken public detail still fails closed"
   assert.deepEqual(fixture.reads, [key]);
   assert.equal(fixture.metrics.rejected, 1);
 });
+
+test("MIG-0627 U02a T13: oversized candidate set fails before any verified detail read", async () => {
+  const fixture = accessWith();
+  fixture.access.options.manifest.allowedKeys.push("snapshot/video-detail/vid-aaa.json");
+  const candidateIds = new Set(Array.from({ length: 501 }, (_, i) => `video-${i}`));
+  candidateIds.add("vid-aaa");
+  await assert.rejects(
+    loadSitemapCanonicalVideoPages(fixture.access, candidateIds),
+    /video candidate limit exceeded \(500\)/,
+  );
+  await assert.rejects(
+    loadSitemapCanonicalVideoPages(null, candidateIds),
+    /video candidate limit exceeded \(500\)/,
+  );
+  assert.deepEqual(fixture.reads, [], "no source reads after oversized input");
+  assert.equal(fixture.metrics.reads, 0, "no build-snapshot budget consumed");
+
+  // The exact 500-candidate boundary is allowed, with unrelated entries skipped.
+  const boundary = new Set(Array.from({ length: 500 }, (_, i) => `video-${i}`));
+  assert.deepEqual(await loadSitemapCanonicalVideoPages(fixture.access, boundary), []);
+  assert.deepEqual(fixture.reads, []);
+});
