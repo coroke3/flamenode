@@ -318,7 +318,10 @@ SELECT
       // Targeted requests only need an edit grant, not the unrelated private
       // chapter list; keep the response small without a fourth D1 statement.
       const canSeeAnyPrivate = !targetPublicChapterId && (canSeeAllPrivate || approvedXIds.length > 0);
-      const isLibPlaylist = playlist === "lib-like" || playlist === "lib-bookmark";
+      // A targeted editor lookup must also avoid the unrelated 500-item
+      // personal library aggregation when given a playlist query parameter.
+      const isLibPlaylist = !targetPublicChapterId &&
+        (playlist === "lib-like" || playlist === "lib-bookmark");
       const libKind = playlist === "lib-like" ? "like" : "bookmark";
 
       // Statement 2: private chapters + interactions + lib playlist

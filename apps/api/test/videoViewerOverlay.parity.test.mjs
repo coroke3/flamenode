@@ -596,6 +596,23 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(readKeys.some((key) => String(key).startsWith("videos/")),
       "public video gate is still required");
 
+    const ordinaryLibrary = await app.request(
+      "/api/videos/vid-pub/viewer-overlay?playlist=lib-like", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+    assert.equal(ordinaryLibrary.status, 200);
+    assert.ok((await ordinaryLibrary.json()).playlistItems.length > 0,
+      "ordinary personal library behavior must remain intact");
+    const targetedLibrary = await app.request(
+      "/api/videos/vid-pub/viewer-overlay?playlist=lib-like&editChapterId=chap-pub", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+    assert.equal(targetedLibrary.status, 200);
+    const targetedDto = await targetedLibrary.json();
+    assert.deepEqual(targetedDto.editablePublicChapters.map((c) => c.id), ["chap-pub"]);
+    assert.deepEqual(targetedDto.playlistItems, [],
+      "targeted editor does not enumerate unrelated personal library items");
+
     const duplicated = await app.request(
       "/api/videos/vid-pub/viewer-overlay?editChapterId=chap-pub&editChapterId=chap-pub-staff", {
         headers: { cookie: "authjs.session-token=tok-staff" },
