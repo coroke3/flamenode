@@ -443,7 +443,7 @@ if (runUnderRootTsx(import.meta.url)) {
       "stale R2 public must not advertise private-row mutation controls");
   });
 
-  test("Issue #661: public editor output is S2-bounded and fails closed rather than truncating notes", async () => {
+  test("Issue #661: oversized optional editor data is dropped without losing the ordinary overlay", async () => {
     const { env, sqlite, d1 } = setupTestEnv();
     const bulkNote = "あ".repeat(800);
     for (let i = 0; i < 45; i++) {
@@ -457,13 +457,37 @@ if (runUnderRootTsx(import.meta.url)) {
     const res = await app.request("/api/videos/vid-pub/viewer-overlay", {
       headers: { cookie: "authjs.session-token=tok-staff" },
     }, env);
-    assert.equal(res.status, 503, "too much editor data must not be sent as a partial success");
-    assert.equal(res.headers.get("Retry-After"), "3");
+    assert.equal(res.status, 200, "large optional edit data must not make likes/bookmarks unavailable");
     assert.equal(res.headers.get("Cache-Control"), "private, no-store, no-cache, must-revalidate");
-    assert.deepEqual(await res.json(), { error: "viewer_overlay_unavailable" });
-    assert.ok(d1.stats.statements <= 3, "size rejection may not issue another D1 statement");
-    // A note must never be truncated into a seemingly successful PUT editor.
+    const bodyText = await res.text();
+    assert.ok(new TextEncoder().encode(bodyText).byteLength <= 64 * 1024);
+    const body = JSON.parse(bodyText);
+    assert.deepEqual(body.editablePublicChapters, [], "oversized notes cannot create truncated editors");
+    assert.equal(body.loggedIn, true);
+    assert.equal(body.viewerCanEditChapters, true, "bulk authorization remains independent");
+    assert.equal(body.privateChapters.length, 2, "private chapter reads survive optional-edit degradation");
+    assert.ok(d1.stats.statements <= 3, "size fallback may not issue another D1 statement");
     assert.ok(bulkNote.length < 1000, "the fixture uses a valid complete chapter note");
+  });
+
+  test("Issue #661: oversized required private data returns safe 503 instead of >64KiB payload", async () => {
+    const { env, sqlite, d1 } = setupTestEnv();
+    for (let i = 0; i < 45; i++) {
+      insert(sqlite, "video_chapters", {
+        id: `chap-private-large-${i}`, video_id: "vid-pub", x_user_id: "staff_x",
+        chapter_time: 100 + i, chapter_label: `Private ${i}`, note: "あ".repeat(800),
+        visibility: "private", created_at: 1000, updated_at: 1000,
+      });
+    }
+    d1.stats.statements = 0;
+    const response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.equal(response.status, 503, "mandatory oversized private payload cannot be serialized to client");
+    assert.equal(response.headers.get("Retry-After"), "3");
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store, no-cache, must-revalidate");
+    assert.deepEqual(await response.json(), { error: "viewer_overlay_unavailable" });
+    assert.ok(d1.stats.statements <= 3);
   });
 
   test("Issue #661: public editor D1 list is bounded to 100 rows", async () => {

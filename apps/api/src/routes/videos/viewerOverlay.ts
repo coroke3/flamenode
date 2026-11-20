@@ -477,10 +477,18 @@ SELECT
       // exceed S2's 64KiB limit, fail closed instead of truncating any note,
       // returning a partially usable editor, or serializing an oversized body.
       const responseJson = JSON.stringify(result);
+      let boundedResponseJson = responseJson;
       if (new TextEncoder().encode(responseJson).byteLength > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
-        return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+        // The optional full-note edit projection must not take unrelated
+        // likes, bookmarks or private-chapter reads offline. Revoke all public
+        // edit controls and preserve the baseline overlay when it still fits.
+        // Never send a partly truncated chapter note as an editable row.
+        boundedResponseJson = JSON.stringify({ ...result, editablePublicChapters: [] });
+        if (new TextEncoder().encode(boundedResponseJson).byteLength > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+          return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+        }
       }
-      return c.body(responseJson, 200, {
+      return c.body(boundedResponseJson, 200, {
         ...PRIVATE_HEADERS,
         "Content-Type": "application/json; charset=utf-8",
       });
