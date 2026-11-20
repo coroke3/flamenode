@@ -1028,3 +1028,66 @@ test("MIG-0603: reviewer cannot borrow admin-only CostGuard feature to bypass di
       "public", "the rightful admin remains allowed");
   } finally { sqlite.close(); }
 });
+
+
+test("MIG-0603: atomic grant fails closed when joined approved staff exceeds 256 after preload", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    enableStatusCostGuard(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    function addStaff(i) {
+      const xId = "commit_cap_x_" + i;
+      insert(sqlite, "x_users", { id: xId, x_name: xId, approval_status: "approved" });
+      insert(sqlite, "x_user_account_links", {
+        x_user_id: xId, auth_user_id: "u_mgr", link_role: "manager",
+      });
+      insert(sqlite, "event_staff", {
+        id: "commit_cap_staff_" + i, event_id: "evA", x_user_id: xId,
+        display_name: xId, permission_preset: "public_staff",
+      });
+    }
+    // The manager's canonical granting staff row plus 255 additional
+    // approved-but-unprivileged rows is the *inclusive* valid preflight limit.
+    for (let i = 0; i < 255; i++) addStaff(i);
+    const snapshot = await loadManageVideoStatusSnapshot(db, manager, "evA", "v1");
+    assert.equal(snapshot.ok, true, "256-row preload must accept the legitimate manager");
+    const baselineStart = d1.stats.statements;
+    await db.batch([
+      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "manage_video_status"),
+      db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+    ].map(item => preparedStatusTestBatchItem(db, item)));
+    assert.equal(d1.stats.statements - baselineStart, 2, "cap check is inside the batch, not a new pre-read");
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+      "public", "exactly 256 approved staff rows still allow the update");
+    sqlite.exec("UPDATE videos SET visibility_status='pending'");
+
+    // Another writer links the 257th approved staff row AFTER the successful
+    // preload; the stale preflight grant must no longer authorize a mutation.
+    addStaff(255);
+    const deniedStart = d1.stats.statements;
+    await assert.rejects(db.batch([
+      planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "manage_video_status"),
+      db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+      db.run(sql`INSERT INTO audit_logs
+        (id,table_name,target_id,operation,actor_user_id,created_at)
+        VALUES ('staff-cap-audit','videos','v1','UPDATE','u_mgr',1000)`),
+      db.run(sql`INSERT INTO notification_outbox
+        (id,type,payload_json,status,created_at)
+        VALUES ('staff-cap-outbox','video_posted','{}','pending',1000)`),
+    ].map(item => preparedStatusTestBatchItem(db, item))), /malformed JSON|not-valid-json/,
+    "257 joined staff rows must abort even while the original manager grant still exists");
+    assert.equal(d1.stats.statements - deniedStart, 1,
+      "staff fan-out overflow must reject in first atomic D1 batch statement");
+    assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+      "pending");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE id='staff-cap-audit'").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox WHERE id='staff-cap-outbox'").get().n, 0);
+    assert.ok(d1.stats.maxBinds <= 100, "bounded nested count must not create unbounded bind lists");
+  } finally {
+    sqlite.close();
+  }
+});

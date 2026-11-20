@@ -404,6 +404,27 @@ export function planManageVideoStatusCommitAssertion(
       AND ${majorTermsStillAccepted}
       ${user.role === "admin" ? sql`AND ${users.role} = 'admin'` : sql``}
   )`;
+  // Commit-time bound mirrors hasManageVideoStatusGrant()'s preflight
+  // LIMIT 257 fail-closed rule. An importer or concurrent manager may add a
+  // 257th approved/joined staff row AFTER the authorized preload. A single
+  // permission-granting row must not silently authorize an incomplete set.
+  // The inner LIMIT caps D1 work. This is part of the first batch assertion,
+  // never a fourth S3 pre-read; site-admin bypass matches preflight behavior.
+  const staffRowsStillBounded = user.role === "admin"
+    ? sql`1 = 1`
+    : sql`(
+      SELECT COUNT(*) FROM (
+        SELECT 1 FROM "event_staff" bounded_staff
+        INNER JOIN "x_user_account_links" bounded_link
+          ON bounded_staff."x_user_id" = trim(bounded_link."x_user_id")
+        INNER JOIN "x_users" bounded_x
+          ON bounded_x."id" = bounded_link."x_user_id"
+        WHERE bounded_staff."event_id" = ${eventId}
+          AND bounded_link."auth_user_id" = ${user.id}
+          AND bounded_x."approval_status" = 'approved'
+        LIMIT ${MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT + 1}
+      ) approved_staff
+    ) <= ${MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT}`;
   const targetStillLinked = sql`EXISTS (
     SELECT 1 FROM ${videoEvents}
     INNER JOIN ${videos} ON ${videos.id} = ${videoEvents.video_id}
@@ -411,5 +432,5 @@ export function planManageVideoStatusCommitAssertion(
     WHERE ${videoEvents.event_id} = ${eventId}
       AND ${videoEvents.video_id} = ${videoId}
   )`;
-  return db.run(assertCondition(sql`${featureMatchesActor ? sql`1 = 1` : sql`0 = 1`} AND ${activeSessionStillValid} AND ${actorStillAllowed} AND ${costGuardStillAllows} AND ${hasCurrentStatusGrant} AND ${targetStillLinked}`));
+  return db.run(assertCondition(sql`${featureMatchesActor ? sql`1 = 1` : sql`0 = 1`} AND ${activeSessionStillValid} AND ${actorStillAllowed} AND ${costGuardStillAllows} AND ${hasCurrentStatusGrant} AND ${staffRowsStillBounded} AND ${targetStillLinked}`));
 }
