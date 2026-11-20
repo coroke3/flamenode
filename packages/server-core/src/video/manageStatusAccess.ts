@@ -6,9 +6,10 @@
  * to activate an HTTP mutation route: full S3/D1 budget and moderation/audit/
  * R2 fencing remain STOP gates.
  */
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { eventStaff, events, sessions, users, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
+import { and, eq, inArray, sql, type SQLWrapper } from "drizzle-orm";
+import { eventStaff, events, sessions, systemSettings, users, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
+import { WRITE_FEATURE_KEYS, type WriteFeatureKey } from "@flamenode/domain/admin";
 import { EVENT_STAFF_PRESETS, getPresetPermissions } from "@flamenode/domain/auth/permissions/presets";
 import { assertCondition } from "../audit/mutate.ts";
 import { mergeVideoRebuildEventIds, type SessionUserLike } from "@flamenode/domain/video";
@@ -259,8 +260,8 @@ export async function loadAdminVideoStatusSnapshot(
  * This is a narrowly scoped DB assertion, NOT an approved HTTP auth design:
  * it checks persisted actor existence/ban, base TOS acceptance, current
  * Auth.js session token ownership/expiry, current major-terms reacceptance
- * and stale site-admin role. CostGuard and full write parity remain unresolved:
- * keep this candidate unmounted until Issue #692 architecture is approved.
+ * and stale site-admin role. CostGuard settings are also rechecked in this
+ * unmounted candidate; real HTTP wiring/S3 acceptance remain unresolved.
  */
 export function planManageVideoStatusCommitAssertion(
   db: ServerCoreDb,
@@ -270,6 +271,8 @@ export function planManageVideoStatusCommitAssertion(
   // Trusted token from Auth.js session resolution, NEVER a JSON body field.
   // This signature is a design-only candidate; MIG-0602 does not expose it.
   sessionToken: string,
+  // Server-owned feature key (not request JSON); shared middleware owns its policy.
+  costGuardFeature: Extract<WriteFeatureKey, "manage_video_status" | "admin_video_status">,
 ) {
   // Derive presets from the canonical permission definitions, rather than
   // allowing a diverging hand-maintained list in the SQL commit fence.
@@ -345,6 +348,46 @@ export function planManageVideoStatusCommitAssertion(
           OR consent_terms."published_at" > required."published_at")
     )
   )`;
+  // Mirror evaluateCostGuardCore's fail-closed JSON parser, using a bounded
+  // canonical feature list as one parameter, not an unbounded SQL IN list.
+  const allowedFeaturesJson = JSON.stringify(WRITE_FEATURE_KEYS);
+  function checkedList(column: SQLWrapper) {
+    const safe = sql`CASE WHEN json_valid(${column}) THEN ${column} ELSE '[]' END`;
+    const valid = sql`CASE
+      WHEN ${column} IS NULL OR ${column} = '' THEN 1
+      WHEN json_valid(${column}) THEN CASE WHEN json_type(${column}) = 'array'
+        AND json_array_length(${column}) <= 100
+        AND NOT EXISTS (
+          SELECT 1 FROM json_each(${safe}) item
+          WHERE item.type <> 'text'
+            OR NOT EXISTS (
+              SELECT 1 FROM json_each(${allowedFeaturesJson}) allowed
+              WHERE allowed.value = item.value
+            )
+        ) THEN 1 ELSE 0 END
+      ELSE 0 END`;
+    const contains = sql`EXISTS (
+      SELECT 1 FROM json_each(${safe}) item
+      WHERE item.type = 'text' AND item.value = ${costGuardFeature}
+    )`;
+    return { valid, contains };
+  }
+  const disabled = checkedList(systemSettings.disabled_features_json);
+  const exception = checkedList(systemSettings.cost_guard_exception_features_json);
+  const costGuardStillAllows = sql`EXISTS (
+    SELECT 1 FROM ${systemSettings}
+    WHERE ${systemSettings.id} = 'default'
+      AND ${exception.valid} = 1
+      AND (
+        (${systemSettings.cost_guard_exception_until} > unixepoch('now')
+          AND ${exception.contains})
+        OR (
+          ${inArray(systemSettings.operation_mode, ["normal", "economy"])}
+          AND ${disabled.valid} = 1
+          AND NOT ${disabled.contains}
+        )
+      )
+  )`;
   const actorStillAllowed = sql`EXISTS (
     SELECT 1 FROM ${users}
     WHERE ${users.id} = ${user.id}
@@ -360,5 +403,5 @@ export function planManageVideoStatusCommitAssertion(
     WHERE ${videoEvents.event_id} = ${eventId}
       AND ${videoEvents.video_id} = ${videoId}
   )`;
-  return db.run(assertCondition(sql`${activeSessionStillValid} AND ${actorStillAllowed} AND ${hasCurrentStatusGrant} AND ${targetStillLinked}`));
+  return db.run(assertCondition(sql`${activeSessionStillValid} AND ${actorStillAllowed} AND ${costGuardStillAllows} AND ${hasCurrentStatusGrant} AND ${targetStillLinked}`));
 }

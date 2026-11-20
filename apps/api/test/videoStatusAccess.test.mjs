@@ -9,6 +9,7 @@ import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import { checkManageVideoStatusAccess, loadManageVideoStatusSnapshot, loadAdminVideoStatusSnapshot } from "../src/routes/videos/videoStatusAccess.ts";
 import { MAX_MANAGE_STATUS_REBUILD_EVENTS, planManageVideoStatusCommitAssertion } from "@flamenode/server-core/video/manageStatusAccess";
 import { loadTosState } from "../src/middleware/writeOrigin.ts";
+import { evaluateCostGuardWithSettings } from "../src/middleware/costGuard.ts";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
 import { canEditEvent } from "@flamenode/server-core/auth/ownership";
 
@@ -27,6 +28,17 @@ function preparedStatusTestBatchItem(db, sqlWrapper) {
       mapResult: (result) => result,
     }),
   };
+}
+
+
+// Every legit status mutation requires a real, enabled system_settings row.
+function enableStatusCostGuard(sqlite) {
+  sqlite.exec(`INSERT INTO system_settings
+    (id, operation_mode, disabled_features_json, cost_guard_exception_until, cost_guard_exception_features_json)
+    VALUES ('default', 'normal', NULL, NULL, NULL)
+    ON CONFLICT(id) DO UPDATE SET operation_mode='normal',
+      disabled_features_json=NULL, cost_guard_exception_until=NULL,
+      cost_guard_exception_features_json=NULL`);
 }
 
 test("MIG-0603: unmounted manage status gate matches CURRENT event privilege and exact video link", async () => {
@@ -672,6 +684,7 @@ test("MIG-0603: commit-time status authorization assertion rolls back on revoked
       seed(sqlite);
       // The shared seed defaults to TOS=0; model a legitimate write preflight.
       sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+      enableStatusCostGuard(sqlite);
       const d1 = createVideoStatusD1(sqlite);
       const db = drizzle(d1, { schema });
       const custom = description.startsWith("custom");
@@ -691,7 +704,7 @@ test("MIG-0603: commit-time status authorization assertion rolls back on revoked
       // Interleaved SQL mutation by another caller, AFTER our preflight.
       revoke(sqlite);
       const guard = planManageVideoStatusCommitAssertion(
-        db, user, "evA", "v1", `tok-${user.id.slice(2)}`,
+        db, user, "evA", "v1", `tok-${user.id.slice(2)}`, "manage_video_status",
       );
       const update = db.run(sql`UPDATE videos
         SET visibility_status = 'public' WHERE id = 'v1'`);
@@ -729,6 +742,7 @@ test("MIG-0603: commit-time status assertion accepts current canonical preset an
     try {
       seed(sqlite);
       sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+      enableStatusCostGuard(sqlite);
       if (custom) sqlite.exec(`UPDATE event_staff SET custom_permission_keys_json='["video.status"]'
         WHERE event_id='evA' AND x_user_id='custom_x'`);
       const d1 = createVideoStatusD1(sqlite);
@@ -737,7 +751,7 @@ test("MIG-0603: commit-time status assertion accepts current canonical preset an
       assert.equal(prior.ok, true, name);
       const initial = d1.stats.statements;
       await db.batch([
-        planManageVideoStatusCommitAssertion(db, user, "evA", "v1", `tok-${user.id.slice(2)}`),
+        planManageVideoStatusCommitAssertion(db, user, "evA", "v1", `tok-${user.id.slice(2)}`, "manage_video_status"),
         db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
       ].map((stmt) => preparedStatusTestBatchItem(db, stmt)));
       assert.equal(d1.stats.statements - initial, 2,
@@ -794,6 +808,7 @@ test("MIG-0603: atomic status grant keeps latest major-terms reacceptance in CUR
   try {
     seed(sqlite);
     sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    enableStatusCostGuard(sqlite);
     const d1 = createVideoStatusD1(sqlite);
     const db = drizzle(d1, { schema });
     const manager = { id: "u_mgr", role: "user" };
@@ -816,7 +831,7 @@ test("MIG-0603: atomic status grant keeps latest major-terms reacceptance in CUR
       const auditId = "atomic-terms-audit-" + suffix;
       const outboxId = "atomic-terms-outbox-" + suffix;
       const batch = [
-        planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr"),
+        planManageVideoStatusCommitAssertion(db, manager, "evA", "v1", "tok-mgr", "manage_video_status"),
         db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
         db.run(sql`INSERT INTO audit_logs
           (id, table_name, target_id, operation, actor_user_id, created_at)
@@ -874,4 +889,76 @@ test("MIG-0603: atomic status grant keeps latest major-terms reacceptance in CUR
   } finally {
     sqlite.close();
   }
+});
+
+test("MIG-0603: atomic CostGuard checks match Hono across mode, list and exception changes", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
+    enableStatusCostGuard(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    const admin = { id: "u_admin", role: "admin" };
+    assert.equal((await loadManageVideoStatusSnapshot(db, manager, "evA", "v1")).ok, true);
+    const scenarios = [
+      ["normal", null, null, null, true, true, "baseline normal"],
+      ["economy", null, null, null, true, true, "economy"],
+      ["read_only", null, null, null, false, false, "read only"],
+      ["maintenance", null, null, null, false, false, "maintenance"],
+      ["normal", '["manage_video_status"]', null, null, false, true, "disable manage only"],
+      ["normal", '["admin_video_status"]', null, null, true, false, "disable admin only"],
+      ["normal", '{bad', null, null, false, false, "bad disabled JSON"],
+      ["normal", '["manage_video_status",5]', null, null, false, false, "nonstring disabled entry"],
+      ["normal", '"manage_video_status"', null, null, false, false, "scalar disabled JSON"],
+      ["normal", '["unknown_feature"]', null, null, false, false, "unknown disabled key"],
+      ["normal", null, '{broken', 3600, false, false, "bad exception JSON"],
+      ["normal", null, '["unknown_feature"]', 3600, false, false, "unknown exception key"],
+      ["normal", null, '[5]', 3600, false, false, "nonstring exception"],
+      ["normal", '["manage_video_status"]', '["manage_video_status"]', 3600, true, false, "manage active exception"],
+      ["maintenance", null, '["admin_video_status"]', 3600, false, true, "admin active exception overrides mode"],
+      ["maintenance", null, '["manage_video_status"]', -1, false, false, "expired exception"],
+      ["normal", null, '[]', 3600, true, true, "empty exception"],
+    ];
+    const now = Math.floor(Date.now()/1000);
+    let idx = 0;
+    for (const [mode, disabled, exceptions, delta, manageAllowed, adminAllowed, title] of scenarios) {
+      const until = delta === null ? null : now + delta;
+      sqlite.prepare(`UPDATE system_settings SET operation_mode=?,disabled_features_json=?,
+        cost_guard_exception_features_json=?,cost_guard_exception_until=? WHERE id='default'`)
+        .run(mode, disabled, exceptions, until);
+      for (const [key,user,token,expected] of [
+        ["manage_video_status", manager, "tok-mgr", manageAllowed],
+        ["admin_video_status", admin, "tok-admin", adminAllowed],
+      ]) {
+        const reference = await evaluateCostGuardWithSettings(d1, key, now);
+        assert.equal(reference.denied === null, expected,
+          title + " " + key + ": actual shared Hono CostGuard");
+        const auditId = "costguard-atomic-" + (++idx);
+        const statements = [
+          planManageVideoStatusCommitAssertion(db,user,"evA","v1",token,key),
+          db.run(sql`UPDATE videos SET visibility_status='public' WHERE id='v1'`),
+          db.run(sql`INSERT INTO audit_logs
+            (id,table_name,target_id,operation,actor_user_id,created_at)
+            VALUES (${auditId},'videos','v1','UPDATE',${user.id},1000)`),
+        ].map(item=>preparedStatusTestBatchItem(db,item));
+        const start = d1.stats.statements;
+        if(expected) {
+          await db.batch(statements);
+          assert.equal(d1.stats.statements-start,3,title+": one atomic batch");
+        } else {
+          await assert.rejects(db.batch(statements),/malformed JSON|not-valid-json/,
+            title+": first assertion must deny");
+          assert.equal(d1.stats.statements-start,1,title+": abort before write");
+        }
+        assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'").get().visibility_status,
+          expected ? "public" : "pending", title+": status");
+        assert.equal(sqlite.prepare("SELECT count(*) AS n FROM audit_logs WHERE id=?").get(auditId).n,
+          expected ? 1 : 0,title+": audit");
+        sqlite.exec("UPDATE videos SET visibility_status='pending'");
+      }
+    }
+    assert.ok(d1.stats.maxBinds <= 100, "bind count remains bounded");
+  } finally { sqlite.close(); }
 });
