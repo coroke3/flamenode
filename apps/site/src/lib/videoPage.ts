@@ -13,14 +13,17 @@ import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/stati
 import { computeEventStatus, eventStatusLabel, isAcceptingEntries } from "../../../../src/lib/utils/eventStatusCore.ts";
 import { formatChapterTime } from "../../../../src/lib/utils/chapterTime.ts";
 import { formatUnix } from "../../../../src/lib/utils/format.ts";
+import { parseCanonicalXId } from "../../../../src/lib/utils/xid.ts";
 import { extractYoutubeId, videoPageHref, youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
+import { extractYoutubePlaylistId } from "../../../../src/lib/youtube/playlist.ts";
 import { buildRouteMap } from "./routeMap.ts";
 import { buildPageHead, compactText, siteOrigin, type PageHead } from "./pageHead.ts";
-import { loadVideoDetailPayload, videoDetailKeys } from "./publicDataLoader.ts";
+import { SnapshotBuildError, eventDetailKey, loadEventPayloadSnapshot, loadVideoDetailPayload, videoDetailKeys } from "./publicDataLoader.ts";
 import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
 import { loadPublicXIconMapForBuild, projectVideoMemberPresentation } from "./publicIconMap.ts";
 import { hasProjectedPublicProfile, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
 import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "./videoFixtures.ts";
+import { FIXTURE_EVENT_DETAIL_PAYLOADS } from "./eventFixtures.ts";
 
 export class VideoPageBuildError extends Error {
   readonly code = "VIDEO_DETAIL_INVALID";
@@ -43,22 +46,60 @@ export type VideoPage = Readonly<{
 
 const TONE = { active: "public", published: "public", scheduled: "warning", ended: "draft", private: "draft" } as const;
 
+const PUBLIC_YOUTUBE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"]);
+
+/** Public snapshot text is not an outbound URL authorization. Only absolute
+ * web URLs may be linked; a "YouTube channel" additionally needs a trusted
+ * YouTube host over HTTPS. Invalid/legacy values render as plain text instead. */
+function safePublicExternalUrl(value: string | null | undefined, youtubeChannel = false): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value);
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) return null;
+    if (youtubeChannel && (url.protocol !== "https:" || !PUBLIC_YOUTUBE_HOSTS.has(url.hostname.toLowerCase()))) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+
 export function buildVideoPages(
   payload: unknown,
   key: string,
   now: number = Math.floor(Date.now() / 1000),
   iconMap: ReadonlyMap<string, PublicXIconEntry> = new Map(),
+  relatedAllowedIds: ReadonlySet<string> | null = null,
 ): VideoPage[] {
   const detail = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0]);
   if (!detail || detail.video.visibility_status !== "public") throw new VideoPageBuildError(key);
-  const vm = buildPublicVideoViewModelFromStatic(detail);
+  // Reject a valid-digest snapshot whose entity ID disagrees with its manifest-authorized key.
+  // Otherwise an allowed object could publish a page under a different route (including its alias).
+  const snapshotId = /^snapshot\/video-detail\/([A-Za-z0-9_-]{1,64})\.json$/.exec(key)?.[1];
+  if (snapshotId && detail.video.id !== snapshotId) throw new VideoPageBuildError(key);
+  // A digest-valid snapshot can still contain stale related cards. A related
+  // video must have its own currently manifest-allowed (and not blocked) public
+  // detail snapshot, otherwise do not publish its title or creator on this page.
+  // Derive the deny set *before* the shared 12-card projection so reserve/random
+  // cards can replace withdrawn or missing targets without underfilling.
+  const relatedBlockedIds = relatedAllowedIds
+    ? new Set(
+        [...detail.relatedVideos, ...detail.relatedReserve, ...detail.relatedRandomReserve]
+          .filter((candidate) => !relatedAllowedIds.has(candidate.id))
+          .map((candidate) => candidate.id),
+      )
+    : null;
+  const vm = buildPublicVideoViewModelFromStatic(detail, { relatedBlockedIds });
   const { video } = vm;
   const youtubeVideoId = video.youtube_video_id?.trim() || null;
   const youtubeId = extractYoutubeId(youtubeVideoId);
   const canonicalSlug = youtubeId ?? video.id;
-  const creatorId = video.creator_x_user_id ?? "anonymous";
+  // The public snapshot is integrity-checked, but an old row may still have
+  // a non-canonical X handle. Never turn that handle into a navigable
+  // /user/ URL or an external X link (including dot/slash segments).
+  const creatorId = parseCanonicalXId(video.creator_x_user_id);
   const creatorName = video.creator_display_name?.trim() || "作者未設定";
-  const creatorHref = creatorId !== "anonymous" && ((video.creator_has_public_profile ?? false) || hasProjectedPublicProfile({ xUserId: creatorId, iconMap })) ? `/user/${creatorId}` : null;
+  const creatorHref = creatorId && ((video.creator_has_public_profile ?? false) || hasProjectedPublicProfile({ xUserId: creatorId, iconMap })) ? `/user/${creatorId}` : null;
   const primary = vm.primaryEvent;
   const primaryStatus = primary ? computeEventStatus(primary, now) : null;
 
@@ -73,17 +114,17 @@ export function buildVideoPages(
     title: video.title,
     creator: {
       name: creatorName,
-      xUserId: creatorId !== "anonymous" ? creatorId : null,
+      xUserId: creatorId,
       iconUrl: cachedGoogleImageUrl(video.creator_icon_url),
       profileHref: creatorHref,
-      youtubeChannelUrl: video.creator_youtube_channel_url ?? null,
+      youtubeChannelUrl: safePublicExternalUrl(video.creator_youtube_channel_url, true),
     },
     publishedLabel: video.scheduled_time ? formatUnix(video.scheduled_time, { dateOnly: true }) : null,
     thumbnailUrl: youtubeId ? youtubeThumbUrl(youtubeId, "maxresdefault") : null,
     hasYoutube: Boolean(youtubeId),
     music: video.music,
     credit: video.credit,
-    musicReferenceUrl: video.music_reference_url,
+    musicReferenceUrl: safePublicExternalUrl(video.music_reference_url),
     introComment: video.intro_comment,
     softwareLabel: vm.softwareLabel,
     highlights: video.highlights,
@@ -101,15 +142,18 @@ export function buildVideoPages(
         }
       : null,
     otherEvents: vm.publicEvents.filter((e) => e.id !== primary?.id).map((e) => ({ id: e.id, title: e.title })),
-    members: vm.publicMembers.map((m) => ({
-      id: m.id,
-      name: m.display_name,
-      xUserId: m.x_user_id,
-      ...projectVideoMemberPresentation(m, iconMap),
-      role: m.role_label,
-      comment: m.comment ?? null,
-      chapterTimes: vm.memberChapters.filter((c) => c.video_member_id === m.id).map((c) => formatChapterTime(c.chapter_time)),
-    })),
+    members: vm.publicMembers.map((m) => {
+      const xUserId = parseCanonicalXId(m.x_user_id);
+      return {
+        id: m.id,
+        name: m.display_name,
+        xUserId,
+        ...projectVideoMemberPresentation({ ...m, x_user_id: xUserId }, iconMap),
+        role: m.role_label,
+        comment: m.comment ?? null,
+        chapterTimes: vm.memberChapters.filter((c) => c.video_member_id === m.id).map((c) => formatChapterTime(c.chapter_time)),
+      };
+    }),
     chapters: chapters.map((c) => ({ id: c.id, timeLabel: formatChapterTime(c.t), label: c.label, authorName: c.author, kind: c.kind })),
     related: vm.relatedVideos.map((r) => ({
       href: videoPageHref(r),
@@ -152,18 +196,117 @@ export function buildVideoPages(
   return [{ ...page, slug: canonicalSlug }, ...(canonicalSlug !== video.id ? [{ ...page, slug: video.id }] : [])];
 }
 
+/**
+ * CURRENT's optional R2 event-base lookup is represented by a verified event-detail build snapshot.
+ * Never expose a playlist for a mismatched or non-public event, even when its envelope is allowed.
+ */
+function publicEventPlaylistId(payload: unknown, expectedId: string): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const event = (payload as { event?: unknown }).event;
+  if (!event || typeof event !== "object" || Array.isArray(event)) return null;
+  const row = event as Record<string, unknown>;
+  if (row.id !== expectedId || row.visibility_status !== "public") return null;
+  return extractYoutubePlaylistId(typeof row.youtube_playlist_id === "string" ? row.youtube_playlist_id : null);
+}
+
 export async function loadVideoPagesForBuild(
   env: Record<string, string | undefined> = process.env,
   now: number = Math.floor(Date.now() / 1000),
 ): Promise<VideoPage[]> {
   const access = snapshotAccessFromEnv(env);
   const iconMap = await loadPublicXIconMapForBuild(env);
+  // videoDetailKeys already applies both the allowedKeys and blockedKeys
+  // visibility fences. A missing related detail target must also be treated as
+  // unavailable, not just a target explicitly present in blockedKeys.
+  const relatedAllowedIds = access
+    ? new Set(videoDetailKeys(access.options.manifest!).map((key) =>
+        key.slice("snapshot/video-detail/".length, -".json".length)))
+    : null;
   const pages: VideoPage[] = [];
+  const playlistIds = new Map<string, string | null>();
+  const buildWithPlaylist = async (payload: unknown, key: string): Promise<void> => {
+    const built = buildVideoPages(payload, key, now, iconMap, relatedAllowedIds);
+    const eventId = built[0]?.data.primaryEvent?.id;
+    // Normalize for rendering, but never let the generic string/number coercers
+    // turn arrays or objects into a valid authorization key or future timestamp.
+    const video = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0])?.video;
+    const rawVideo = payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as { video?: unknown }).video
+      : null;
+    const raw = rawVideo && typeof rawVideo === "object" && !Array.isArray(rawVideo)
+      ? rawVideo as Record<string, unknown>
+      : null;
+    const rawSchedule = raw?.scheduled_time;
+    // The shared normalizer floors timestamps for legacy display compatibility.
+    // Playlist authorization must not round a past fractional timestamp up to
+    // the current second, which would turn a past release into a future release.
+    const exactScheduledTime = typeof rawSchedule === "number" || typeof rawSchedule === "string"
+      ? Number(rawSchedule)
+      : NaN;
+    const scheduledTime = Number.isFinite(exactScheduledTime) &&
+      Math.abs(exactScheduledTime) <= 8.64e12 && video?.scheduled_time != null
+      ? exactScheduledTime
+      : null;
+    const primaryEventId = typeof raw?.primary_event_id === "string"
+      ? video?.primary_event_id ?? null
+      : null;
+
+    // CURRENT looks up a playlist only for the video-selected primary event.
+    // Display fallback events must not inherit an unrelated event's playlist.
+    // Preserve CURRENT second-granularity scheduling semantics: a timestamp
+    // within the current second is not a future scheduled release, even if the
+    // supplied raw value has fractional microseconds.
+    if (!eventId || eventId !== primaryEventId || scheduledTime == null || Math.floor(scheduledTime) <= now) {
+      pages.push(...built);
+      return;
+    }
+
+    if (!playlistIds.has(eventId)) {
+      let eventPayload: unknown = null;
+      if (!access) {
+        eventPayload = FIXTURE_EVENT_DETAIL_PAYLOADS[eventId] ?? null;
+      } else {
+        const eventKey = eventDetailKey(eventId);
+        const manifest = access.options.manifest!;
+        // A missing or explicitly blocked event is an optional absent link, not a build failure.
+        if (manifest.allowedKeys.includes(eventKey) && !manifest.blockedKeys.includes(eventKey)) {
+          try {
+            // Digest/generation/shape errors still fail the build; absent or withdrawn events hide the link.
+            eventPayload = await loadEventPayloadSnapshot(access.source, eventKey, access.options);
+          } catch (error) {
+            if (!(error instanceof SnapshotBuildError && (error.code === "SNAPSHOT_MISSING" || error.code === "NOT_PUBLIC"))) {
+              throw error;
+            }
+          }
+        }
+      }
+      playlistIds.set(eventId, publicEventPlaylistId(eventPayload, eventId));
+    }
+    const playlistId = playlistIds.get(eventId);
+    if (!playlistId) {
+      pages.push(...built);
+      return;
+    }
+
+    const playlistUrl = `https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}`;
+    pages.push(...built.map((page) => ({
+      ...page,
+      data: {
+        ...page.data,
+        primaryEvent: page.data.primaryEvent
+          ? { ...page.data.primaryEvent, playlistUrl }
+          : null,
+      },
+    })));
+  };
+
   if (!access) {
-    for (const [id, p] of Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)) pages.push(...buildVideoPages(p, `fixture:${id}`, now, iconMap));
+    for (const [id, payload] of Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)) {
+      await buildWithPlaylist(payload, `fixture:${id}`);
+    }
   } else {
     for (const key of videoDetailKeys(access.options.manifest!)) {
-      pages.push(...buildVideoPages(await loadVideoDetailPayload(access.source, key, access.options), key, now, iconMap));
+      await buildWithPlaylist(await loadVideoDetailPayload(access.source, key, access.options), key);
     }
   }
   // MIG-0404 route map: reserved roots, assets, duplicates and traversal are build errors.
