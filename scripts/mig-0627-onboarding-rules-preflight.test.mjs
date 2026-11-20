@@ -27,7 +27,11 @@ if (runUnderRootTsx(import.meta.url)) {
     const db = breakD1 ? {
       ...d1,
       prepare(sql) {
-        if (/FROM terms_versions\b/i.test(sql)) throw new Error("SYNTHETIC_D1_UNAVAILABLE");
+        if (/CASE WHEN length\(CAST\(body_markdown AS BLOB\)\)/i.test(sql)) {
+          // Inject only at the published-rules fallback, not the onboarding
+          // context's separate current-major terms query.
+          throw new Error("SYNTHETIC_D1_UNAVAILABLE");
+        }
         return d1.prepare(sql);
       },
     } : d1;
