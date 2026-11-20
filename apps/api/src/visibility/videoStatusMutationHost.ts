@@ -78,6 +78,10 @@ export function createVideoVisibilityStatusMutationHost(
       preCommitVideoVisibilityDepublicization(input, transitionHost),
     mutate: (db, payload) =>
       runMutation(db, {
+        // Only a trusted server-side snapshot/commit guard may supply this.
+        // mutateWithAudit executes it FIRST inside its single atomic D1 batch;
+        // it is not an additional preflight read or permission bypass.
+        preMutationAssertions: payload.preMutationAssertions,
         mutationStatements: payload.mutationStatements,
         expectedMutationChanges: payload.expectedMutationChanges,
         audits: payload.audits,
