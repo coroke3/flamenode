@@ -97,7 +97,13 @@ function boundedOverlayResponse(c: Context<AppEnv>, body: VideoViewerOverlayDto)
   // This is a conservative lower bound, not a replacement for exact byte
   // accounting of the surviving response. Stop as soon as it exceeds 64KiB.
   const units = (value: unknown) => typeof value === "string" ? value.length : 0;
-  let mandatoryUnits = 0;
+  // The active X identity is required auth context, just like private
+  // chapters: dropping or truncating it would silently change permissions.
+  // A malformed legacy D1 identity must fail before a huge JSON.stringify.
+  let mandatoryUnits = units(body.activeXId);
+  if (mandatoryUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+    return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+  }
   for (const chapter of body.privateChapters) {
     // Every string in a required private chapter is non-droppable; long
     // legacy labels/author fields must fail before serializing the DTO too.

@@ -576,6 +576,59 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3, "S2 read budget must still hold");
   });
 
+  test("Issue #709: oversized approved active X id fails before JSON serialization", async () => {
+    const { env, d1 } = setupTestEnv();
+    const hugeXId = "legacy-x-".repeat(20_000);
+    const userJson = JSON.stringify({
+      is_tos_accepted: 1,
+      terms_reaccept_required: 0,
+      active_x_id: hugeXId,
+      approved_x_ids: JSON.stringify([hugeXId]),
+    });
+    // Emulate a legacy D1 row whose approved X link violates the current
+    // identifier-size expectation without modifying any live schema or data.
+    const originalPrepare = env.DB.prepare.bind(env.DB);
+    let intercepted = 0;
+    env.DB.prepare = (sql) => {
+      const stmt = originalPrepare(sql);
+      if (!sql.includes("AS video_json") || !sql.includes("AS user_json")) return stmt;
+      intercepted += 1;
+      const originalBind = stmt.bind.bind(stmt);
+      stmt.bind = (...args) => {
+        const bound = originalBind(...args);
+        bound.first = async () => ({ video_json: null, user_json: userJson });
+        return bound;
+      };
+      return stmt;
+    };
+    const originalStringify = JSON.stringify;
+    let oversizedDtoAttempts = 0;
+    JSON.stringify = function(value, replacer, space) {
+      if (value && typeof value === "object" && value.activeXId === hugeXId) {
+        oversizedDtoAttempts += 1;
+        throw new Error("oversized_active_x_dto_stringified");
+      }
+      return originalStringify.call(JSON, value, replacer, space);
+    };
+    let response;
+    try {
+      d1.stats.statements = 0;
+      response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+    } finally {
+      JSON.stringify = originalStringify;
+    }
+    assert.equal(intercepted, 1, "exercise the actual signed-in D1 user projection");
+    assert.equal(oversizedDtoAttempts, 0, "do not stringify a giant mandatory identity");
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Cache-Control"),
+      "private, no-store, no-cache, must-revalidate");
+    assert.equal(response.headers.get("Retry-After"), "3");
+    assert.deepEqual(await response.json(), { error: "viewer_overlay_unavailable" });
+    assert.ok(d1.stats.statements <= 3);
+  });
+
   test("Issue #661: default public edit projection is empty; any of 125 rows can be checked on demand", async () => {
     const { env, sqlite } = setupTestEnv();
     for (let i = 0; i < 125; i++) {
