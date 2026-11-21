@@ -97,6 +97,49 @@ const MAX_ATOMIC_SLOT_ROWS = 3;
 const MAX_APPROVED_X_IDS = 100;
 const MAX_PENDING_RESERVATION_REQUESTS = 100;
 const MAX_OPERATOR_STAFF_ROWS = 100;
+// SEC #716: SQLite length(TEXT) stops at NUL. Bound the complete legacy TEXT
+// bytes in SQL before its first D1 JSON1 projection, not after JSON.parse.
+const MAX_LEGACY_X_ID_BYTES = 128;
+const MAX_X_ID_JSON_BUDGET_BYTES = 12 * 1024;
+const MAX_ACTOR_NAME_BYTES = 512;
+const MAX_ACTOR_USER_ID_BYTES = 128;
+const MAX_ACTOR_DISCORD_ID_BYTES = 128;
+
+function invalidSqlText(expr: string, bytes: number): string {
+  return `(${expr} IS NOT NULL AND (
+    typeof(${expr}) <> 'text' OR
+    instr(${expr}, char(0)) > 0 OR
+    length(CAST(${expr} AS BLOB)) > ${bytes}
+  ))`;
+}
+
+function boundedReserveActorJsonSql(): string {
+  const invalid = [
+    invalidSqlText('u."id"', MAX_ACTOR_USER_ID_BYTES),
+    invalidSqlText('u."discord_id"', MAX_ACTOR_DISCORD_ID_BYTES),
+    invalidSqlText('u."name"', MAX_ACTOR_NAME_BYTES),
+    invalidSqlText('u."active_x_user_id"', MAX_LEGACY_X_ID_BYTES),
+    invalidSqlText('x."x_name"', MAX_ACTOR_NAME_BYTES),
+  ].join(" OR ");
+  // Keep a corrupted user row observable as an invalid sentinel: do not
+  // treat it as signed out or silently select another Active X identity.
+  return `(SELECT CASE WHEN ${invalid}
+    THEN json_object('__invalid_projection', 1)
+    ELSE json_object(
+      'userId', u."id", 'discordId', u."discord_id",
+      'discordName', u."name", 'activeXId', u."active_x_user_id",
+      'activeXName', x."x_name"
+    ) END
+    FROM "user" u LEFT JOIN "x_users" x ON x."id" = u."active_x_user_id"
+    WHERE u."id" = ? LIMIT 1)`;
+}
+
+function invalidArrayIdentity(values: readonly unknown[]): boolean {
+  return values.some((value) => typeof value !== "string" ||
+    value.includes(String.fromCharCode(0)) ||
+    new TextEncoder().encode(value).byteLength > MAX_LEGACY_X_ID_BYTES);
+}
+
 const JST_OFFSET_SEC = 9 * 60 * 60;
 const DEFAULT_PART_GAP_SEC = 15 * 60;
 const CALLER_PRE_READS_WITH_SESSION = 4;
@@ -184,13 +227,21 @@ function eventJsonObjectSql(alias: string): string {
 }
 
 function approvedXJsonSql(userIdParamPlaceholder = "?"): string {
-  return `(SELECT json_group_array(q."x_user_id") FROM (
-    SELECT DISTINCT l."x_user_id" AS "x_user_id"
-    FROM "x_user_account_links" l
-    INNER JOIN "x_users" x ON x."id" = l."x_user_id"
-    WHERE l."auth_user_id" = ${userIdParamPlaceholder} AND x."approval_status" = 'approved'
-    LIMIT ${MAX_APPROVED_X_IDS + 1}
-  ) q)`;
+  const invalid = invalidSqlText('q."x_user_id"', MAX_LEGACY_X_ID_BYTES);
+  // 6x covers JSON1 escape amplification. Never return a truncated
+  // authorization list; a malformed row produces [null] and forces 503.
+  return `(SELECT CASE
+    WHEN MAX(CASE WHEN ${invalid} THEN 1 ELSE 0 END) = 1 OR
+         COALESCE(SUM(6 * length(CAST(q."x_user_id" AS BLOB)) + 4), 0) > ${MAX_X_ID_JSON_BUDGET_BYTES}
+      THEN json_array(NULL)
+    ELSE json_group_array(q."x_user_id") END
+    FROM (
+      SELECT DISTINCT l."x_user_id" AS "x_user_id"
+      FROM "x_user_account_links" l
+      INNER JOIN "x_users" x ON x."id" = l."x_user_id"
+      WHERE l."auth_user_id" = ${userIdParamPlaceholder} AND x."approval_status" = 'approved'
+      LIMIT ${MAX_APPROVED_X_IDS + 1}
+    ) q)`;
 }
 
 function staffRowsJsonSql(): string {
@@ -467,7 +518,8 @@ async function loadReserveSnapshot(
       FROM "events" WHERE "id" = ? LIMIT 1
     ),
     pending_list AS (
-      SELECT "requested_x_id" AS "requested_x_id"
+      SELECT CASE WHEN ${invalidSqlText('"requested_x_id"', MAX_LEGACY_X_ID_BYTES)}
+                  THEN NULL ELSE "requested_x_id" END AS "requested_x_id"
       FROM "x_identity_requests"
       WHERE "requested_by_auth_user_id" = ? AND "status" = 'pending'
         AND "request_type" IN (${types.map(() => "?").join(", ")})
@@ -487,12 +539,13 @@ async function loadReserveSnapshot(
     SELECT
       (SELECT ${eventJsonObjectSql("ev")} FROM ev) AS event_json,
       (SELECT ${slotJsonObjectSql("a")} FROM anchor a) AS anchor_json,
-      (SELECT json_object(
-        'userId', u."id", 'discordId', u."discord_id", 'discordName', u."name",
-        'activeXId', u."active_x_user_id", 'activeXName', x."x_name"
-      ) FROM "user" u LEFT JOIN "x_users" x ON x."id" = u."active_x_user_id" WHERE u."id" = ? LIMIT 1) AS actor_json,
+      ${boundedReserveActorJsonSql()} AS actor_json,
       ${approvedXJsonSql("?")} AS approved_x_json,
-      (SELECT json_group_array("requested_x_id") FROM pending_list) AS pending_x_json,
+      (SELECT CASE WHEN
+         COALESCE(SUM(6 * COALESCE(length(CAST("requested_x_id" AS BLOB)), 0) + 4), 0)
+           > ${MAX_X_ID_JSON_BUDGET_BYTES}
+           THEN json_array(NULL) ELSE json_group_array("requested_x_id") END
+        FROM pending_list) AS pending_x_json,
       ${staffRowsJsonSql()} AS staff_json,
       (SELECT json_group_array(${slotJsonObjectSql("n")}) FROM (
         SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
@@ -568,6 +621,9 @@ export async function reserveSlotCore(
   const pendingXIds = parseJsonOrThrow<string[]>(snapshot.pending_x_json, []);
   const staffRows = parseJsonOrThrow<StaffPermissionRow[]>(snapshot.staff_json, []);
   if (
+    snapshot.actor_json?.includes('"__invalid_projection":1') ||
+    invalidArrayIdentity(approvedXIds) ||
+    invalidArrayIdentity(pendingXIds) ||
     approvedXIds.length > MAX_APPROVED_X_IDS ||
     pendingXIds.length > MAX_PENDING_RESERVATION_REQUESTS ||
     staffRows.length > MAX_OPERATOR_STAFF_ROWS
@@ -881,7 +937,9 @@ export async function extendSlotGroupCore(
 
   const approvedXIds = parseJsonOrThrow<string[]>(snapshot.approved_x_json, []);
   const staffRows = parseJsonOrThrow<StaffPermissionRow[]>(snapshot.staff_json, []);
-  if (approvedXIds.length > MAX_APPROVED_X_IDS || staffRows.length > MAX_OPERATOR_STAFF_ROWS) {
+  if (invalidArrayIdentity(approvedXIds) ||
+      approvedXIds.length > MAX_APPROVED_X_IDS ||
+      staffRows.length > MAX_OPERATOR_STAFF_ROWS) {
     return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
   }
 
@@ -1062,7 +1120,9 @@ export async function mergeSlotGroupsCore(
 
   const approvedXIds = parseJsonOrThrow<string[]>(snapshot.approved_x_json, []);
   const staffRows = parseJsonOrThrow<StaffPermissionRow[]>(snapshot.staff_json, []);
-  if (approvedXIds.length > MAX_APPROVED_X_IDS || staffRows.length > MAX_OPERATOR_STAFF_ROWS) {
+  if (invalidArrayIdentity(approvedXIds) ||
+      approvedXIds.length > MAX_APPROVED_X_IDS ||
+      staffRows.length > MAX_OPERATOR_STAFF_ROWS) {
     return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
   }
 
