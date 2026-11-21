@@ -10,6 +10,8 @@ import {
 } from "./unslottedEventPlans.ts";
 import { buildFreeVideoInsertPlan, buildFreeVideoYoutubeMetadataInsertPlan } from "./freeVideoInsertPlan.ts";
 import { buildFreeVideoCustomAnswerInsertPlan } from "./freeVideoCustomAnswerInsertPlan.ts";
+import { buildStaticRebuildQueueBatch } from "../staticRebuild/enqueue.ts";
+import { buildFreeVideoRebuildTargets } from "./freeVideoRebuildTargets.ts";
 import type { LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
 
 /**
@@ -133,6 +135,39 @@ export function buildFreeVideoSubmissionAtomicPlan(
     statements,
     expectedChanges,
     audits: [...videoInsert.audits, ...youtubeMetadata.audits, ...eventLink.audits, ...answerPlan.audits],
+  };
+}
+
+/**
+ * SA-086 U02 UNMOUNTED next slice: include the exact CURRENT 13/16 static
+ * rebuild targets in the SAME guarded transaction as the video INSERT.
+ * The queue builder prepares a bounded single JSON1 UPSERT and performs no
+ * D1 read or wake. The future authenticated caller still owns notification,
+ * members/software/derived rows, strict audits and post-commit wake.
+ */
+export async function buildFreeVideoSubmissionWithRebuildPlan(
+  db: ServerCoreDb,
+  args: Parameters<typeof buildFreeVideoSubmissionAtomicPlan>[1],
+): Promise<UnslottedVideoAtomicPlan> {
+  const base = buildFreeVideoSubmissionAtomicPlan(db, args);
+  const targets = buildFreeVideoRebuildTargets({
+    videoId: args.videoAfter.id,
+    userId: args.actorUserId,
+    activeXId: args.trustedActiveXId,
+    eventId: args.eventId,
+  });
+  const queue = await buildStaticRebuildQueueBatch(db, targets);
+  // A new video always invalidates at least its own page. Fail before
+  // execution if the builder silently loses any target.
+  if (queue.acceptedTargetCount !== targets.length ||
+      queue.statements.length === 0 ||
+      queue.statements.length !== queue.expectedChanges.length) {
+    throw new Error("free_video_submission_rebuild_plan_incomplete");
+  }
+  return {
+    statements: [...base.statements, ...queue.statements],
+    expectedChanges: [...base.expectedChanges, ...queue.expectedChanges],
+    audits: [...base.audits],
   };
 }
 
