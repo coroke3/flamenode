@@ -120,8 +120,10 @@ const MAX_SLOT_DISPLAY_NAME_BYTES = 512;
 const MAX_SLOT_LABEL_BYTES = 2048;
 const MAX_EVENT_STATUS_BYTES = 32;
 const MAX_SLOT_STATUS_BYTES = 32;
-// Leave room for the D1 row keys and metadata when capping JSON payloads.
-const MAX_FIRST_D1_SNAPSHOT_BYTES = 60 * 1024;
+// D1 transports every SQL string as an enclosing JSON string. JSON1 escape
+// characters are escaped AGAIN on the wire, so raw SQL column bytes alone
+// are NOT a safe response-size bound. Reserve ~6KiB for row keys/metadata.
+const MAX_FIRST_D1_SNAPSHOT_BYTES = 58 * 1024;
 
 function invalidSqlNumber(expr: string): string {
   return `(typeof(${expr}) NOT IN ('integer', 'real', 'null'))`;
@@ -137,13 +139,15 @@ function invalidJsonSnapshot(snapshot: object): boolean {
 }
 
 // Only known aliases are passed by the four core mutation paths. The inner
-// query remains ONE D1 statement with identical bind order, while the
-// materialized outer projection clears ALL oversized payload columns before
-// they leave SQLite and sends an explicit invalid_snapshot marker. The cap
-// applies to the combined first D1 row, not each field independently.
+// query remains ONE D1 statement with identical bind order. Preflight the
+// actual outer JSON string quoting of each already-bounded SQL result field,
+// including the *second* layer of escaping for embedded JSON strings. This
+// prevents a 37KiB SQL string-row from becoming a >64KiB D1 transport row.
+// Reject all oversized columns atomically with an explicit sentinel.
 function boundedFirstD1SnapshotSql(query: string, fields: readonly string[]): string {
   const items = fields.map(field => `p."${field}"`);
-  const total = items.map(item => `COALESCE(length(CAST(${item} AS BLOB)), 0)`).join(" + ");
+  const total = items.map(item =>
+    `length(CAST(json_quote(${item}) AS BLOB))`).join(" + ");
   const projection = fields.map((field, index) =>
     `CASE WHEN sz."bytes" > ${MAX_FIRST_D1_SNAPSHOT_BYTES} THEN NULL ELSE ${items[index]} END AS "${field}"`,
   ).join(", ");
