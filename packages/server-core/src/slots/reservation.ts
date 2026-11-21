@@ -99,7 +99,10 @@ const MAX_PENDING_RESERVATION_REQUESTS = 100;
 const MAX_OPERATOR_STAFF_ROWS = 100;
 // SEC #716: SQLite length(TEXT) stops at NUL. Bound the complete legacy TEXT
 // bytes in SQL before its first D1 JSON1 projection, not after JSON.parse.
-const MAX_LEGACY_X_ID_BYTES = 128;
+// CURRENT legacy X identity uses up to 128 Unicode codepoints. The 128-emoji
+// positive boundary occupies 512 UTF-8 bytes (same as viewer-overlay #705).
+const MAX_LEGACY_X_ID_CODEPOINTS = 128;
+const MAX_LEGACY_X_ID_BYTES = 512;
 const MAX_X_ID_JSON_BUDGET_BYTES = 12 * 1024;
 const MAX_ACTOR_NAME_BYTES = 512;
 const MAX_ACTOR_USER_ID_BYTES = 128;
@@ -162,12 +165,19 @@ function invalidSqlText(expr: string, bytes: number): string {
   ))`;
 }
 
+// Preserve 128 Unicode codepoints, including 4-byte emoji. LENGTH(TEXT)
+// counts SQLite Unicode codepoints, while BLOB covers all bytes after NUL.
+function invalidLegacyXIdSql(expr: string): string {
+  return `(${invalidSqlText(expr, MAX_LEGACY_X_ID_BYTES)} OR
+    (${expr} IS NOT NULL AND length(${expr}) > ${MAX_LEGACY_X_ID_CODEPOINTS}))`;
+}
+
 function boundedReserveActorJsonSql(): string {
   const invalid = [
     invalidSqlText('u."id"', MAX_ACTOR_USER_ID_BYTES),
     invalidSqlText('u."discord_id"', MAX_ACTOR_DISCORD_ID_BYTES),
     invalidSqlText('u."name"', MAX_ACTOR_NAME_BYTES),
-    invalidSqlText('u."active_x_user_id"', MAX_LEGACY_X_ID_BYTES),
+    invalidLegacyXIdSql('u."active_x_user_id"'),
     invalidSqlText('x."x_name"', MAX_ACTOR_NAME_BYTES),
   ].join(" OR ");
   // Keep a corrupted user row observable as an invalid sentinel: do not
@@ -186,6 +196,7 @@ function boundedReserveActorJsonSql(): string {
 function invalidArrayIdentity(values: readonly unknown[]): boolean {
   return values.some((value) => typeof value !== "string" ||
     value.includes(String.fromCharCode(0)) ||
+    Array.from(value).length > MAX_LEGACY_X_ID_CODEPOINTS ||
     new TextEncoder().encode(value).byteLength > MAX_LEGACY_X_ID_BYTES);
 }
 
@@ -279,6 +290,8 @@ function slotJsonObjectSql(alias: string): string {
   const invalid = [
     ...Object.entries(textCaps).map(([key, maxBytes]) =>
       invalidSqlText(`${alias}."${key}"`, maxBytes)),
+    ...["x_user_id", "reserved_x_id_snapshot"].map(key =>
+      `(${alias}."${key}" IS NOT NULL AND length(${alias}."${key}") > ${MAX_LEGACY_X_ID_CODEPOINTS})`),
     ...numberFields.map(key => invalidSqlNumber(`${alias}."${key}"`)),
   ].join(" OR ");
   return `(CASE WHEN ${invalid}
@@ -341,7 +354,7 @@ function eventJsonObjectSql(alias: string): string {
 }
 
 function approvedXJsonSql(userIdParamPlaceholder = "?"): string {
-  const invalid = invalidSqlText('q."x_user_id"', MAX_LEGACY_X_ID_BYTES);
+  const invalid = invalidLegacyXIdSql('q."x_user_id"');
   // A first CASE branch rejects malformed raw TEXT before json_quote even runs.
   // The next branch measures JSON's actual escaped bytes on already-bounded
   // strings, so 100 valid 20-character IDs are not falsely rejected. Never
@@ -668,7 +681,7 @@ async function loadReserveSnapshot(
       FROM "events" WHERE "id" = ? LIMIT 1
     ),
     pending_list AS (
-      SELECT CASE WHEN ${invalidSqlText('"requested_x_id"', MAX_LEGACY_X_ID_BYTES)}
+      SELECT CASE WHEN ${invalidLegacyXIdSql('"requested_x_id"')}
                   THEN NULL ELSE "requested_x_id" END AS "requested_x_id"
       FROM "x_identity_requests"
       WHERE "requested_by_auth_user_id" = ? AND "status" = 'pending'
