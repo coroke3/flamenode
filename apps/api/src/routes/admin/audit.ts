@@ -155,7 +155,8 @@ auditAdminRoutes.post("/dry-run", async (c) => {
 // an unapproved audit restoration even after an accidental target deploy.
 // Parent admin origin/session/write guards apply; local parity tests opt in.
 export const auditRestoreCandidateRoutes = new Hono<AppEnv>();
-auditRestoreCandidateRoutes.use("*", onlyMutating(costGuardMiddleware("admin_permissions")));
+// The mounted auditAdminRoutes wildcard already supplies the single CostGuard
+// for this opt-in sibling route; do not evaluate it a second time.
 auditRestoreCandidateRoutes.post("/restore", async (c) => {
   // Audit restoration may return sensitive snapshots and conflict diffs.
   // Explicitly prevent HTTP/edge caching on 200, 400 and 413 responses.
