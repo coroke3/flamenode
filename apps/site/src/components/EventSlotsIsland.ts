@@ -102,17 +102,13 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
             ),
           })),
         };
-        return React.createElement(
-          React.Fragment,
-          null,
-          stalePublicNotice && phase === "ready"
-            ? React.createElement("p", {
-                role: "status",
-                className: "notice ev-slots-notice",
-              }, "枠の最新状況を再取得できませんでした。前回取得した枠情報を表示しています。")
-            : null,
-          React.createElement(EventSlotsView, { model: viewerModel }),
-        );
+        // The public view owns the .ev-scope styles and visible slot grid;
+        // keep its stale-refresh notice *inside* that root, not as an
+        // unstyled sibling of EventSlotsView.
+        const displayedModel: EventSlotsViewModel = stalePublicNotice && phase === "ready"
+          ? { ...viewerModel, stalePublicNotice: true }
+          : viewerModel;
+        return React.createElement(EventSlotsView, { model: displayedModel });
       },
     ),
   );

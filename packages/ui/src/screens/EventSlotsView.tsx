@@ -42,6 +42,8 @@ export interface EventSlotsViewModel {
   accentStyle?: Readonly<Record<string, string>>;
   /** loading = live read not finished, ready = shown, unavailable = the read failed (T05). */
   live: "loading" | "ready" | "unavailable";
+  /** A later RH-020 refresh failed; the last successful public snapshot is still shown. */
+  stalePublicNotice?: boolean;
   stats: { filled: number; total: number; ratio: number } | null;
   days: readonly SlotsDay[];
 }
@@ -104,6 +106,11 @@ export function EventSlotsView({ model, className }: EventSlotsViewProps): React
         {model.live === "unavailable" ? (
           <div className="notice ev-slots-notice" role="status">
             <span className="t-sm">枠の最新状況を取得できませんでした。時間をおいて再読み込みしてください。</span>
+          </div>
+        ) : null}
+        {model.live === "ready" && model.stalePublicNotice ? (
+          <div className="notice ev-slots-notice" role="status">
+            <span className="t-sm">枠の最新状況を再取得できませんでした。前回取得した枠情報を表示しています。</span>
           </div>
         ) : null}
 

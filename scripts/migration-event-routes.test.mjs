@@ -930,8 +930,12 @@ test("MIG-0514 U03b: RH-020 refresh outage shows a stale-data notice without dro
       "a failed refresh retains the most recent public snapshot");
     assert.ok(text(container).includes("前回の公開枠"));
     assert.ok(text(container).includes(notice), "refresh failure must be visible");
-    assert.equal([...container.querySelectorAll('[role="status"]')].filter(el =>
-      el.textContent.includes(notice)).length, 1, "only one public stale notice");
+    const staleNoticeNodes = [...container.querySelectorAll('main.ev-scope.ev-slots > .notice.ev-slots-notice[role="status"]')]
+      .filter(el => el.textContent.includes(notice));
+    assert.equal(staleNoticeNodes.length, 1,
+      "exactly one stale notice must be inside the styled public slot screen");
+    assert.ok(staleNoticeNodes[0].closest(".p-root"),
+      "notice must inherit the same theme variables as the event slot grid");
 
     // The next successful read clears the warning and applies fresh state.
     publicFail = false;
