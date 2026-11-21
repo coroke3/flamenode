@@ -109,8 +109,14 @@ export function buildFreeVideoCustomAnswerInsertPlan(
     }
   }
   const replay = validateSubmissionCustomAnswers(form, questions);
-  if (!replay.ok ||
-      JSON.stringify(replay.drafts) !== JSON.stringify(drafts)) {
+  if (!replay.ok || replay.drafts.length !== drafts.length ||
+      replay.drafts.some((answer, i) => (
+        answer.event_id !== drafts[i]?.event_id ||
+        answer.question_id !== drafts[i]?.question_id ||
+        answer.question_key !== drafts[i]?.question_key ||
+        answer.answer_text !== drafts[i]?.answer_text ||
+        answer.answer_json !== drafts[i]?.answer_json
+      ))) {
     throw new Error("video_custom_answer_draft_policy_invalid");
   }
   const rows: (typeof videoCustomAnswers.$inferSelect)[] = drafts.map((draft) => ({
