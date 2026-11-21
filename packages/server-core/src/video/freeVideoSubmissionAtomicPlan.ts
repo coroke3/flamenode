@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { users, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
-import type { SubmissionCustomAnswerDraft } from "@flamenode/domain/video";
+import type { SubmissionCustomAnswerDraft, ValidatedMemberSubmission } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 import { planD1AuditMutationBudget, type D1AuditMutationBudget } from "../audit/mutateBudget.ts";
 import type { UnslottedVideoAtomicPlan } from "./unslottedEventPlans.ts";
@@ -15,6 +15,7 @@ import { buildFreeVideoRebuildTargets } from "./freeVideoRebuildTargets.ts";
 import { buildFreeVideoSoftwareInsertPlan } from "./freeVideoSoftwareInsertPlan.ts";
 import { buildFreeVideoSubmittedNotificationPlan } from "./freeVideoSubmittedNotificationPlan.ts";
 import { buildFreeVideoRegisteredChannelPlan } from "./freeVideoRegisteredChannelPlan.ts";
+import { buildFreeVideoNewMemberPlan } from "./freeVideoNewMemberPlan.ts";
 import type { LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
 
 /**
@@ -151,14 +152,16 @@ export function buildFreeVideoSubmissionAtomicPlan(
  * UNMOUNTED SA-086 proposal. Appends the canonical rebuild targets to the
  * same prepared D1 batch as the video INSERT; no DB writes or wake occur.
  * The authenticated caller must still provide the remaining CURRENT atomic
- * member, derived and icon integration. Software rows and CURRENT-style DM/
- * ops-channel notifications are included only with trusted host inputs.
+ * authenticated route and icon integration. Member/chapters, software and
+ * CURRENT-style DM/ops notifications are included with trusted host inputs.
  */
 export async function buildFreeVideoSubmissionWithRebuildPlan(
   db: ServerCoreDb,
   args: Parameters<typeof buildFreeVideoSubmissionAtomicPlan>[1] & {
     /** Canonical parsed videoForm.used_software; omit only for legacy tests. */
     usedSoftware?: string | null;
+    /** Parsed via shared validateVideoMemberSubmission, not client JSON. */
+    memberSubmission?: ValidatedMemberSubmission;
     /** Trusted, CURRENT-formatted notification payload. Legacy tests omit it. */
     submittedNotificationPayload?: Record<string, unknown>;
     /** Trusted CURRENT ops channel payload + resolved thread name. */
@@ -166,6 +169,14 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
   },
 ): Promise<UnslottedVideoAtomicPlan> {
   const base = buildFreeVideoSubmissionAtomicPlan(db, args);
+  const member = args.memberSubmission
+    ? await buildFreeVideoNewMemberPlan(db, {
+      videoId: args.videoAfter.id,
+      actorUserId: args.actorUserId,
+      now: args.now,
+      submission: args.memberSubmission,
+    })
+    : { statements: [], expectedChanges: [], audits: [] };
   const software = await buildFreeVideoSoftwareInsertPlan(db, {
     videoId: args.videoAfter.id,
     actorUserId: args.actorUserId,
@@ -204,9 +215,9 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
     throw new Error("free_video_submission_rebuild_plan_incomplete");
   }
   return {
-    statements: [...base.statements, ...software.statements, ...notification.statements, ...channelNotification.statements, ...queue.statements],
-    expectedChanges: [...base.expectedChanges, ...software.expectedChanges, ...notification.expectedChanges, ...channelNotification.expectedChanges, ...queue.expectedChanges],
-    audits: [...base.audits, ...software.audits],
+    statements: [...base.statements, ...member.statements, ...software.statements, ...notification.statements, ...channelNotification.statements, ...queue.statements],
+    expectedChanges: [...base.expectedChanges, ...member.expectedChanges, ...software.expectedChanges, ...notification.expectedChanges, ...channelNotification.expectedChanges, ...queue.expectedChanges],
+    audits: [...base.audits, ...member.audits, ...software.audits],
   };
 }
 
