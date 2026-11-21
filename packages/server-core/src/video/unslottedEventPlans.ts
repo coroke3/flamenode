@@ -6,6 +6,8 @@ import type { ServerCoreDb } from "../db.ts";
 
 /** MIG-0651 unmounted SA-086 answer INSERT candidate. */
 export { buildFreeVideoCustomAnswerInsertPlan } from "./freeVideoCustomAnswerInsertPlan.ts";
+/** MIG-0651 U02 unmounted software-catalog/link atomic candidate. */
+export { buildFreeVideoSoftwareInsertPlan } from "./freeVideoSoftwareInsertPlan.ts";
 export {
   buildFreeVideoSubmissionAtomicPlan,
   buildFreeVideoSubmissionWithRebuildPlan,
