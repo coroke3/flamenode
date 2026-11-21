@@ -12,6 +12,7 @@ import {
   type VideoMemberSnapshotRow,
 } from "./memberSetSnapshot.ts";
 import type { UnslottedVideoAtomicPlan } from "./unslottedEventPlans.ts";
+import { buildFreeVideoMemberIdentityGuardSql } from "./freeVideoMemberIdentityGuard.ts";
 
 const MAX_CHAPTER_ROW_JSON_BYTES = 1_000_000;
 const MAX_CHAPTER_JSON_BINDS = 90;
@@ -49,9 +50,9 @@ function chunkChapterRows(rows: readonly (typeof videoChapters.$inferSelect)[]) 
  * The caller must include the statements in the same audited D1 batch AFTER
  * the new video row, and count the resolver's actual 2 reads per 80 X IDs.
  *
- * It is not an update/edit member algorithm. Alias/direct identity changes
- * between pre-read and commit still require transaction-time identity CAS
- * before a real Hono mount; currently a blocker rather than accepted parity.
+ * It is not an update/edit member algorithm. A same-batch SQL assertion now
+ * rejects alias/approval remaps between pre-read and commit; full Worker CPU
+ * and Hono use still require live-runtime validation before mounting.
  */
 export async function buildFreeVideoNewMemberPlan(
   db: ServerCoreDb,
@@ -122,6 +123,7 @@ export async function buildFreeVideoNewMemberPlan(
     approval_status: "pending";
   }> = [];
   const rows: VideoMemberSnapshotRow[] = [];
+  const identities: Array<{ candidate: string; canonical: string }> = [];
   for (const [index, member] of members.entries()) {
     const original = normalizeXId(member.x_user_id);
     const resolved = original ? canonical.get(original) : undefined;
@@ -138,6 +140,7 @@ export async function buildFreeVideoNewMemberPlan(
       throw new Error("free_video_new_member_duplicate_canonical_id");
     }
     if (xId) seenCanonical.add(xId);
+    if (original && xId) identities.push({ candidate: original, canonical: xId });
     if (xId && resolved?.reason === "not_found") {
       newXUsers.push({
         id: xId, x_name: member.name.trim() || `@${xId}`,
@@ -173,6 +176,12 @@ export async function buildFreeVideoNewMemberPlan(
   const statements: UnslottedVideoAtomicPlan["statements"] = [];
   const expectedChanges: UnslottedVideoAtomicPlan["expectedChanges"] = [];
   const audits: UnslottedVideoAtomicPlan["audits"] = [];
+  if (identities.length) {
+    // Must precede profile/member mutations: fail the whole D1 batch if alias
+    // or approval state changed since the two canonical resolver reads.
+    statements.push(db.run(buildFreeVideoMemberIdentityGuardSql(identities)));
+    expectedChanges.push(null);
+  }
   if (newXUsers.length) {
     const payload = JSON.stringify(newXUsers);
     statements.push(db.run(sql`
