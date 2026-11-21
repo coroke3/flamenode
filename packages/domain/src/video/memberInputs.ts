@@ -1,0 +1,172 @@
+import { z } from "zod";
+import { isCanonicalXId, normalizeXId } from "../xid/format.ts";
+export function parseMemberChapterTime(raw: string): number | null {
+  const match = raw.trim().match(/^(\d{1,4}):([0-5]?\d)$/);
+  if (!match) return null;
+  const minutes = Number(match[1]);
+  const seconds = Number(match[2]);
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59) {
+    return null;
+  }
+  return minutes * 60 + seconds;
+}
+
+import { MAX_VIDEO_MEMBERS } from "./atomicLimits.ts";
+
+const memberChapterSchema = z.object({
+  time: z.string().trim().min(1, "メンバーチャプターの時刻を入力してください。"),
+  label: z.string().trim().max(120).optional().default(""),
+  note: z.string().trim().max(1000).optional().default(""),
+});
+
+const memberInputSchema = z.object({
+  name: z.string().trim().max(80),
+  x_user_id: z.string().trim().max(32),
+  role: z.string().trim().max(80).optional().default(""),
+  comment: z.string().trim().max(500).optional().default(""),
+  chapters: z.array(memberChapterSchema).max(30).optional().default([]),
+});
+
+/** Defense-in-depth: the future Hono multipart request is capped at 8 MiB (D-15-3).
+ * A single members_json field cannot be larger than the complete HTTP body.
+ * CURRENT Server Actions share this validator and reject the same oversized field.
+ */
+export const MAX_MEMBERS_JSON_BYTES = 8 * 1024 * 1024;
+
+const membersJsonSchema = z.array(memberInputSchema).max(
+  MAX_VIDEO_MEMBERS,
+  `合作メンバーは最大${MAX_VIDEO_MEMBERS}人です。`,
+);
+
+export interface MemberChapterInput {
+  time: string;
+  label: string;
+  note: string;
+}
+
+export interface MemberInput {
+  name: string;
+  x_user_id: string;
+  role: string;
+  comment: string;
+  chapters: MemberChapterInput[];
+}
+
+export interface ParsedMemberChapter {
+  time_seconds: number;
+  label: string;
+  note: string;
+  order_index: number;
+}
+
+export function parseVideoMemberInputs(
+  raw: FormDataEntryValue | null,
+  isCollab: boolean,
+):
+  | { ok: true; members: MemberInput[] }
+  | { ok: false; message: string } {
+  if (!isCollab) return { ok: true, members: [] };
+  if (raw !== null && typeof raw !== "string") {
+    // A multipart File must never be interpreted as omitted member metadata.
+    return { ok: false, message: "合作メンバーの入力が不正です。" };
+  }
+  if (raw === null) return { ok: true, members: [] };
+  // Guard JSON.parse (and trim) before allocating nested arrays or Zod objects.
+  // UTF-8 matters: a short UTF-16 string can exceed the multipart byte cap.
+  if (raw.length > MAX_MEMBERS_JSON_BYTES ||
+      new TextEncoder().encode(raw).byteLength > MAX_MEMBERS_JSON_BYTES) {
+    return { ok: false, message: "合作メンバーの入力が大きすぎます。" };
+  }
+  if (!raw.trim()) return { ok: true, members: [] };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, message: "合作メンバーの JSON が不正です。" };
+  }
+
+  // Reject oversized arrays before Zod walks every member and nested chapter.
+  // Preserve the schema's exact existing maximum-member error message.
+  if (Array.isArray(parsed) && parsed.length > MAX_VIDEO_MEMBERS) {
+    return { ok: false, message: `合作メンバーは最大${MAX_VIDEO_MEMBERS}人です。` };
+  }
+
+  const result = membersJsonSchema.safeParse(parsed);
+  if (!result.success) {
+    return {
+      ok: false,
+      message: result.error.issues[0]?.message ?? "合作メンバーの入力が不正です。",
+    };
+  }
+
+  const members: MemberInput[] = [];
+  const seenXIds = new Set<string>();
+  for (const item of result.data) {
+    const xid = normalizeXId(item.x_user_id);
+    const name = item.name.trim();
+
+    // フロントのpatternだけに依存せず、DB write境界でもcanonical X handleを保証する。
+    // 空欄は許可するが、入力された値は英数字/underscore 20文字以内だけを保存する。
+    // A non-empty supplied handle that normalizes to an empty value (e.g. "@")
+    // is invalid, not an intentionally blank/optional X identity.
+    if (item.x_user_id && !isCanonicalXId(xid)) {
+      return {
+        ok: false,
+        message: `${name || item.x_user_id} の X ID が不正です。英数字とアンダースコア20文字以内で入力してください。`,
+      };
+    }
+    // Do not discard unnamed rows until a supplied malformed X ID is rejected.
+    if (!name && !xid) continue;
+    if (xid && seenXIds.has(xid)) {
+      return {
+        ok: false,
+        message: `同じ X ID（@${xid}）が複数のメンバーに設定されています。1人にまとめてください。`,
+      };
+    }
+    if (xid) seenXIds.add(xid);
+
+    members.push({
+      name: name || (xid ? `@${xid}` : ""),
+      x_user_id: xid,
+      role: item.role ?? "",
+      comment: item.comment ?? "",
+      chapters: item.chapters ?? [],
+    });
+  }
+  return { ok: true, members };
+}
+
+export function normalizeMemberChapters(
+  member: MemberInput,
+  memberIndex: number,
+): { ok: true; chapters: ParsedMemberChapter[] } | { ok: false; message: string } {
+  const fallbackLabel =
+    member.role || member.name || (member.x_user_id ? `@${member.x_user_id}` : `メンバー${memberIndex + 1}`);
+  const chapters: ParsedMemberChapter[] = [];
+
+  for (const [order, ch] of (member.chapters ?? []).entries()) {
+    const sec = parseMemberChapterTime(ch.time);
+    if (sec === null) {
+      return {
+        ok: false,
+        message: `${member.name || member.x_user_id} のチャプター時刻「${ch.time}」が不正です。`,
+      };
+    }
+    const label = (ch.label || "").trim() || fallbackLabel;
+    if (label.length > 120) {
+      return { ok: false, message: `${member.name} のチャプターラベルが長すぎます。` };
+    }
+    const note = (ch.note || "").trim();
+    if (note.length > 1000) {
+      return { ok: false, message: `${member.name} のチャプターメモが長すぎます。` };
+    }
+    chapters.push({
+      time_seconds: sec,
+      label,
+      note,
+      order_index: order,
+    });
+  }
+  return { ok: true, chapters };
+}

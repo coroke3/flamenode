@@ -22,8 +22,26 @@ export const XID_ACTION_BODY_LIMITS = {
 
 export type XIdWriteAction = keyof typeof XID_ACTION_BODY_LIMITS;
 
+/** D-15-3: CURRENT SA-086 / 088 / 089 Server Actions accept up to 8 MiB. */
+export const VIDEO_SUBMISSION_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
+export const VIDEO_ACTION_BODY_LIMITS = {
+  "SA-086": VIDEO_SUBMISSION_BODY_LIMIT_BYTES,
+  "SA-088": VIDEO_SUBMISSION_BODY_LIMIT_BYTES,
+  "SA-089": VIDEO_SUBMISSION_BODY_LIMIT_BYTES,
+} as const;
+export type VideoWriteAction = keyof typeof VIDEO_ACTION_BODY_LIMITS;
+
+/** Candidate MIG-0651 transport guard; the 3 video mutation routes are not mounted yet. */
+export function limitVideoActionBody(action: VideoWriteAction): MiddlewareHandler<AppEnv> {
+  return limitRequestBodyBytes(VIDEO_ACTION_BODY_LIMITS[action]);
+}
+
+/** Existing MIG-0636 behavior is preserved through the same bounded reader. */
 export function limitXIdActionBody(action: XIdWriteAction): MiddlewareHandler<AppEnv> {
-  const maxBytes = XID_ACTION_BODY_LIMITS[action];
+  return limitRequestBodyBytes(XID_ACTION_BODY_LIMITS[action]);
+}
+
+function limitRequestBodyBytes(maxBytes: number): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const deny = (reason: "body_too_large" | "invalid_body_length" | "body_unreadable", status: 400 | 413) => {
       c.header("Cache-Control", "private, no-store");

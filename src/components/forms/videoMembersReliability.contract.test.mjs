@@ -42,7 +42,10 @@ test("managed chapterのmember ID prefixはLIKE wildcardでなく完全prefix判
 });
 
 test("member X IDはServer write境界でもcanonical形式と重複を検証する", async () => {
-  const source = await read("src/lib/video/memberInputs.ts");
+  const legacy = await read("src/lib/video/memberInputs.ts");
+  const source = await read("packages/domain/src/video/memberInputs.ts");
+  assert.match(legacy, /from "@flamenode\/domain\/video"/);
+  assert.match(legacy, /parseVideoMemberInputs/);
   assert.match(source, /isCanonicalXId/);
   assert.match(source, /英数字とアンダースコア20文字以内/);
   assert.match(source, /const seenXIds = new Set/);

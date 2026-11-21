@@ -5,6 +5,11 @@ import { test } from "node:test";
 register("../../../scripts/ts-path-alias-loader.mjs", import.meta.url);
 
 const { parseVideoForm } = await import("./videoFormSchema.ts");
+const { parseVideoForm: parseDomainVideoForm } = await import("@flamenode/domain/video");
+
+test("MIG-0651 canonical schema: legacy Next entrypoint is the same exported function", () => {
+  assert.equal(parseVideoForm, parseDomainVideoForm);
+});
 
 const base = {
   display_name: "test",
