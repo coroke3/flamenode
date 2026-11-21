@@ -236,7 +236,7 @@ test("T01 real Hono session D1 failure is 503 and never mutates or logs cookie",
     const response = await ctx.request(body());
     assert.equal(response.status, 503);
     assert.equal(response.headers.get("Cache-Control"), "private, no-store");
-    assert.equal((await response.json()).error, "database_unavailable");
+    assert.equal((await response.json()).reason, "database_unavailable");
     assert.equal(ctx.stats.batches, 0);
     assert.equal(changes(ctx.sqlite).row.title, "Current Title");
     assert.equal(changes(ctx.sqlite).runs.length, 0);
