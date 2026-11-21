@@ -768,13 +768,6 @@ if (runTestWithTsx(import.meta.url)) {
       writeFileSync(SNAPSHOT_URL, serialized);
     }
     const expected = readFileSync(SNAPSHOT_URL, "utf8");
-    if (serialized !== expected) {
-      // Temporary SEC-731 CI diagnostic: capture only changed synthetic fixtures.
-      const baseline = JSON.parse(expected);
-      const changed = Object.fromEntries(Object.entries(actual).filter(([name, value]) =>
-        JSON.stringify(value) !== JSON.stringify(baseline[name])));
-      console.log("SEC731_SNAPSHOT_CHANGED_JSON=" + JSON.stringify(changed));
-    }
     assert.equal(serialized, expected);
     assert.equal(Object.keys(actual).length, scenarios.length);
   });
