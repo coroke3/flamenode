@@ -139,7 +139,7 @@ if (runUnderRootTsx(import.meta.url)) {
       readFile(new URL("apps/api/src/routes/public/eventStaff.ts", root), "utf8"),
       readFile(new URL("apps/api/src/env.ts", root), "utf8"),
     ]);
-    assert.match(currentList, /loadPublicJson|loadPublicEvents/);
+    assert.match(currentList, /loadStaticEventsIndex/);
     assert.match(honoList, /key: "events\/index\.json"/);
     assert.match(honoRelease, /loadPublicSnapshot/);
     assert.match(honoStaff, /eventBaseObjectKey\(eventId\)/);
