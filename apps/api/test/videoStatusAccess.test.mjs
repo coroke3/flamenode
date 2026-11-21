@@ -1681,11 +1681,26 @@ test("MIG-0603: unmounted notification DML rechecks recipient and dedupe inside 
     ).get(id);
     async function attempt(id, status = "public") {
       const before = d1.stats.statements;
-      await db.batch([preparedStatusTestBatchItem(db, prepare(id, status))]);
-      assert.equal(d1.stats.statements - before, 1,
-        "atomic notification INSERT/SELECT adds one audited-batch statement, no pre-read");
+      // The real status mutation precedes notice INSERT in ONE D1 batch.
+      const statusUpdate = db.run(sql`UPDATE "videos"
+        SET "visibility_status" = ${status} WHERE "id" = ${"v1"}`);
+      await db.batch([
+        preparedStatusTestBatchItem(db, statusUpdate),
+        preparedStatusTestBatchItem(db, prepare(id, status)),
+      ]);
+      assert.equal(d1.stats.statements - before, 2,
+        "one status UPDATE + one conditional notification INSERT, zero extra pre-reads");
       return outbox(id);
     }
+
+    // A notifier invoked without the matching completed status UPDATE must
+    // suppress notification rather than publish a stale-state event.
+    const mismatchStart = d1.stats.statements;
+    await db.batch([preparedStatusTestBatchItem(db, prepare("atomic-uncommitted", "public"))]);
+    assert.equal(outbox("atomic-uncommitted"), undefined,
+      "pending video must not enqueue a public notification");
+    assert.equal(d1.stats.statements - mismatchStart, 1,
+      "stale-state suppression uses no additional D1 preflight query");
 
     // A stale, optimistic preflight cannot override notification preferences
     // changed before the actual D1 batch.
@@ -1737,15 +1752,38 @@ test("MIG-0603: unmounted notification DML rechecks recipient and dedupe inside 
     // The INSERT is transactional, not a best-effort write that can survive
     // a later failed audit assertion in the same batch.
     sqlite.prepare("UPDATE notification_outbox SET status='failed' WHERE id='atomic-padded'").run();
+    const preRollbackVisibility = sqlite.prepare(
+      "SELECT visibility_status FROM videos WHERE id='v1'",
+    ).get().visibility_status;
+    assert.equal(preRollbackVisibility, "public");
     await assert.rejects(
       db.batch([
+        db.run(sql`UPDATE "videos" SET "visibility_status" = ${"voided"} WHERE "id" = ${"v1"}`),
         prepare("atomic-rolled-back", "voided"),
-        db.run(sql.raw("SELECT json_extract('not-valid-json', '$')")),
+        db.run(sql.raw("SELECT json_extract('not-valid-json', '
+    assert.throws(
+      () => prepare("force-not-supported", "public", { forceNotify: true }),
+      /video_status_atomic_notification_requires_normal_validated_input/,
+      "CURRENT forceNotify semantics require a separate Lead-owned decision");
+    assert.throws(
+      () => prepare("same-status-not-supported", "public", { prevStatus: "public" }),
+      /video_status_atomic_notification_requires_normal_validated_input/,
+      "CURRENT never sends a notification on no-op visibility transitions");
+    assert.ok(d1.stats.maxBinds <= 100, "bounded D1 bind count");
+  } finally {
+    sqlite.close();
+  }
+});
+)")),
       ].map(stmt => preparedStatusTestBatchItem(db, stmt))),
       /malformed JSON|not-valid-json/,
     );
     assert.equal(outbox("atomic-rolled-back"), undefined,
       "atomic batch failure must roll back the pending notification");
+    assert.equal(sqlite.prepare(
+      "SELECT visibility_status FROM videos WHERE id='v1'",
+    ).get().visibility_status, preRollbackVisibility,
+      "audit failure rolls back the video update AND notice in the same batch");
     assert.throws(
       () => prepare("force-not-supported", "public", { forceNotify: true }),
       /video_status_atomic_notification_requires_normal_validated_input/,
