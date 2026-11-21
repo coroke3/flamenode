@@ -177,6 +177,7 @@ export function planUnboundAtomicVideoStatusNotificationInsert(
   db: ServerCoreDb,
   input: {
     videoId: string;
+    prevStatus: string;
     nextStatus: "public" | "voided";
     notificationId: string;
     payloadJson: string;
@@ -186,6 +187,7 @@ export function planUnboundAtomicVideoStatusNotificationInsert(
   },
 ) {
   if (input.forceNotify ||
+      input.prevStatus === input.nextStatus ||
       (input.nextStatus !== "public" && input.nextStatus !== "voided") ||
       !input.videoId || !input.notificationId ||
       !Number.isSafeInteger(input.createdAt) ||
