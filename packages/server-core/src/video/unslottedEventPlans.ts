@@ -12,6 +12,8 @@ export { buildFreeVideoSoftwareInsertPlan } from "./freeVideoSoftwareInsertPlan.
 export { buildFreeVideoSubmittedNotificationPlan } from "./freeVideoSubmittedNotificationPlan.ts";
 /** MIG-0651 U02: unmounted CURRENT video-registration ops channel outbox. */
 export { buildFreeVideoRegisteredChannelPlan } from "./freeVideoRegisteredChannelPlan.ts";
+/** MIG-0651 U02 unmounted new-video X profile, member and chapter plan. */
+export { buildFreeVideoNewMemberPlan } from "./freeVideoNewMemberPlan.ts";
 export {
   buildFreeVideoSubmissionAtomicPlan,
   buildFreeVideoSubmissionWithRebuildPlan,
