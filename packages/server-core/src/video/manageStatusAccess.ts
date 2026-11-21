@@ -24,6 +24,12 @@ export const MAX_MANAGE_STATUS_REBUILD_EVENTS = 8;
 // Both UTF-16 code units and UTF-8 bytes are bounded: a multibyte imported
 // event ID must not silently bypass the queue/rebuild input safety limit.
 export const MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH = 4096;
+// Bound every request-time JSON parse and stored notification payload.
+// The canonical notification validator uses 8KiB and ZERO_1102 §4 caps JSON
+// processing at 64KiB. This is an UNMOUNTED candidate, not a live API.
+export const MAX_VIDEO_STATUS_NOTIFICATION_PAYLOAD_BYTES = 8 * 1024;
+export const MAX_VIDEO_STATUS_NOTIFICATION_ID_LENGTH = 128;
+
 
 // Match String.prototype.trim() used by CURRENT's video-status notification
 // recipient resolution. SQLite trim(X) removes only U+0020 by default:
@@ -184,6 +190,37 @@ function finishVideoStatusSnapshotWithNotification(
  * forceNotify is deliberately rejected: CURRENT's forced duplicate behavior
  * cannot be silently replaced by an idempotent insert.
  */
+function isBoundedNotificationPayloadJson(raw: unknown): raw is string {
+  if (typeof raw !== "string" || raw.length < 2 ||
+      raw.length > MAX_VIDEO_STATUS_NOTIFICATION_PAYLOAD_BYTES ||
+      new TextEncoder().encode(raw).byteLength > MAX_VIDEO_STATUS_NOTIFICATION_PAYLOAD_BYTES) {
+    return false;
+  }
+  try {
+    const value: unknown = JSON.parse(raw);
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  } catch {
+    return false;
+  }
+}
+
+/** Only validated and size-bounded, server-owned inputs reach the D1 binder. */
+function hasBoundedAtomicNoticeInput(input: {
+  videoId: string; prevStatus: string; nextStatus: "public" | "voided";
+  notificationId: string; payloadJson: string; eventId: string | null;
+  createdAt: number; forceNotify?: boolean;
+}): boolean {
+  return typeof input.videoId === "string" && input.videoId.length > 0 &&
+    input.videoId.length <= MAX_VIDEO_STATUS_NOTIFICATION_ID_LENGTH &&
+    typeof input.notificationId === "string" && input.notificationId.length > 0 &&
+    input.notificationId.length <= MAX_VIDEO_STATUS_NOTIFICATION_ID_LENGTH &&
+    typeof input.prevStatus === "string" &&
+    (input.eventId === null || (typeof input.eventId === "string" &&
+      input.eventId.length <= MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH &&
+      !exceedsRebuildIdBytes(input.eventId))) &&
+    isBoundedNotificationPayloadJson(input.payloadJson);
+}
+
 export function planUnboundAtomicVideoStatusNotificationInsert(
   db: ServerCoreDb,
   input: {
@@ -200,7 +237,7 @@ export function planUnboundAtomicVideoStatusNotificationInsert(
   if (input.forceNotify ||
       input.prevStatus === input.nextStatus ||
       (input.nextStatus !== "public" && input.nextStatus !== "voided") ||
-      !input.videoId || !input.notificationId ||
+      !hasBoundedAtomicNoticeInput(input) ||
       !Number.isSafeInteger(input.createdAt) ||
       input.createdAt < 0) {
     throw new Error("video_status_atomic_notification_requires_normal_validated_input");
