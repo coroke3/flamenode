@@ -861,10 +861,12 @@ if (runUnderRootTsx(import.meta.url)) {
     {
       name: "merge",
       setup: [
-        ["reserve", { eventId: "ev1", slot_id: "s02", display_name: "Left", consecutive_count: 1 }],
-        ["reserve", { eventId: "ev1", slot_id: "s04", display_name: "Right", consecutive_count: 1 }],
+        ["reserve", { eventId: "ev1", slot_id: "s01", display_name: "Left", consecutive_count: 2 }],
+        ["reserve", { eventId: "ev1", slot_id: "s04", display_name: "Right", consecutive_count: 2 }],
       ],
-      corrupt: "s04",
+      // The adjacent right anchor s04 must stay valid; corrupt only s05
+      // so that this test exercises right_group_json, not right_json.
+      corrupt: "s05",
       operation: "merge",
       args: { eventId: "ev1", gap_slot_id: "s03", display_name: "Merge" },
       field: "right_group_json",
