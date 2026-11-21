@@ -27,10 +27,14 @@ export function EventSlotsIsland({ detail, builtAt }: EventSlotsIslandProps): Re
   const [live, setLive] = React.useState<LiveSlots | null>(null);
   React.useEffect(() => {
     const controller = new AbortController();
+    // Two 30-second polls can overlap. An older RH-020 response must never
+    // overwrite the grid after a newer poll has started and completed.
+    let latestRequest = 0;
     const load = async () => {
+      const request = ++latestRequest;
       setNow(Math.floor(Date.now() / 1000));
       const result = await fetchLiveSlots(detail.event.id, controller.signal);
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || request !== latestRequest) return;
       if (result) {
         setLive(result);
         setPhase("ready");

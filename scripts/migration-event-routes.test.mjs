@@ -876,6 +876,80 @@ test("MIG-0514 U03a RH-014 outage preserves public grid and denies actions", { s
   await act(async () => root.unmount());
 });
 
+test("MIG-0514 U03b: out-of-order RH-020 refresh cannot roll back newer public slot state", { skip: skipUi }, async () => {
+  const detail = detailOf("autumn-collab-2026");
+  const props = { detail, builtAt: NOW };
+  const pendingPublic = [];
+  let refresh = null;
+  const formerFetch = globalThis.fetch;
+  const formerInterval = dom.window.setInterval;
+  const formerClear = dom.window.clearInterval;
+  const manualTimerId = 79_514;
+  dom.window.setInterval = function (fn, delay, ...args) {
+    if (delay === 30_000) {
+      assert.equal(refresh, null, "only one RH-020 polling interval is mounted");
+      refresh = () => fn(...args);
+      return manualTimerId;
+    }
+    return formerInterval.call(this, fn, delay, ...args);
+  };
+  dom.window.clearInterval = function (timerId) {
+    if (timerId === manualTimerId) return;
+    return formerClear.call(this, timerId);
+  };
+  globalThis.fetch = (url) => {
+    if (String(url).endsWith("/viewer-overlay")) return Promise.resolve({ ok: false, status: 503 });
+    assert.ok(String(url).startsWith("/api/live/events/"), "only RH-020 public polling may be deferred");
+    return new Promise((resolve) => pendingPublic.push(resolve));
+  };
+  const container = mount();
+  let root;
+  const payload = (status, name) => ({
+    slots: [{ id: "s1", status, display_name: name },
+      { id: "s2", status: "available" },
+      { id: "s3", status: "available" },
+      { id: "s4", status: "available" }],
+  });
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(h(EventSlotsIsland, props));
+    });
+    assert.equal(typeof refresh, "function");
+    assert.equal(pendingPublic.length, 1, "first public RH-020 read is outstanding");
+    await act(async () => refresh());
+    assert.equal(pendingPublic.length, 2, "second poll overlaps the first");
+
+    // Newer response arrives first: its occupied slot is now canonical.
+    await act(async () => pendingPublic[1]({
+      ok: true, json: async () => payload("reserved", "最新の確保"),
+    }));
+    await settle();
+    assert.equal(container.querySelectorAll(".sl.taken").length, 1);
+    assert.ok(text(container).includes("最新の確保"));
+
+    // The older request ignores cancellation and replies after the newest.
+    // It must not change the visible public slot back to available.
+    await act(async () => pendingPublic[0]({
+      ok: true, json: async () => payload("available", null),
+    }));
+    await settle();
+    assert.equal(container.querySelectorAll(".sl.taken").length, 1,
+      "stale RH-020 read must not replace the more recent slot status");
+    assert.ok(text(container).includes("最新の確保"));
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0,
+      "private ownership is never inferred from public polling");
+    assert.equal(container.querySelectorAll("button").length, 0,
+      "U03b read-only route must never mount reservation controls");
+  } finally {
+    if (root) await act(async () => root.unmount());
+    globalThis.fetch = formerFetch;
+    dom.window.setInterval = formerInterval;
+    dom.window.clearInterval = formerClear;
+    container.remove();
+  }
+});
+
 test("Island /event/[id]/release: list on the server, mode follows the URL hash like CURRENT", { skip: skipUi }, async () => {
   const model = buildEventReleaseModel(data.releases.get("autumn-collab-2026"));
   dom.reconfigure({ url: "https://flamenode.net/event/autumn-collab-2026/release" });
