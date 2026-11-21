@@ -16,6 +16,8 @@ const layoutSrc = read("../../../app/(auth)/layout.tsx");
 const dashboardSrc = read("../../../app/(auth)/dashboard/page.tsx");
 const entrySrc = read("../../../app/(auth)/entry/page.tsx");
 const slotAction = read("../actions/slot.ts");
+const reservePlanner = read("../../../packages/domain/src/slots/reserveMutations.ts");
+const reserveBridge = read("../slots/slotReserveMutations.ts");
 const interactionAction = read("../actions/video/interaction.ts");
 const writeGuard = read("./writeGuard.ts");
 const videoDetailPage = read("../../../app/(public)/[id]/page.tsx");
@@ -149,13 +151,17 @@ test("枠確保は identityRequirement: 'none' を使う（X 不要）", () => {
   }
   // x_user_id は承認済み active X があるときだけ canonical に設定する
   assert.match(slotAction, /resolveReservationXIdentity/);
-  assert.match(slotAction, /reserved_x_id_snapshot: identity\.snapshotXId/);
+  assert.match(slotAction, /const reserveMutations = buildSlotReserveMutationPlan/);
+  assert.match(reserveBridge, /@flamenode\/domain\/slots\/reserveMutations/);
+  assert.match(reservePlanner, /reserved_x_id_snapshot: input\.identity\.snapshotXId/);
 });
 
 test("枠確保は reserved_by_user_id を正本として設定する", () => {
   // reserveSlot 内で x_user_id: guard.activeXId を直接使わない (identity を経由)
-  assert.match(slotAction, /reserved_by_user_id: guard\.user\.id/);
-  assert.match(slotAction, /x_user_id: identity\.canonicalXUserId/);
+  assert.match(slotAction, /actorUserId: guard\.user\.id/);
+  assert.match(reservePlanner, /reserved_by_user_id: input\.actorUserId/);
+  assert.match(reservePlanner, /x_user_id: input\.identity\.canonicalXUserId/);
+  assert.match(reservePlanner, /reserved_x_id_snapshot: input\.identity\.snapshotXId/);
   // reserveSlot 関数内に guard.activeXId をスロット x_user_id に直書きしていない
   const sliceFn = (fn) => {
     const start = slotAction.indexOf(`export async function ${fn}`);

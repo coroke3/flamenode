@@ -30,6 +30,8 @@ export async function buildOpsChannelWebhookStatement(
     actorUserId: string;
     payload: Record<string, unknown>;
     dedupeKey: string;
+    eventId?: string | null;
+    recipientExists?: boolean;
   },
 ): Promise<OpsChannelWebhookStatement> {
   const payload = {
@@ -38,12 +40,14 @@ export async function buildOpsChannelWebhookStatement(
     thread_name: sanitizeDiscordThreadName(input.threadName, `[通知] ${input.target}`),
   };
   assertValidWebhookPayload("discord_webhook", payload);
-  const recipient = (
-    await db.select({ id: users.id }).from(users).where(eq(users.id, input.actorUserId)).limit(1)
-  )[0];
+  const recipientId = input.recipientExists !== undefined
+    ? (input.recipientExists ? input.actorUserId : null)
+    : ((
+        await db.select({ id: users.id }).from(users).where(eq(users.id, input.actorUserId)).limit(1)
+      )[0]?.id ?? null);
   const row: typeof notificationOutbox.$inferSelect = {
     id: crypto.randomUUID(),
-    recipient_user_id: recipient?.id ?? null,
+    recipient_user_id: recipientId,
     type: "discord_webhook",
     payload_json: JSON.stringify(payload),
     delivery_route: "channel",
@@ -56,7 +60,7 @@ export async function buildOpsChannelWebhookStatement(
     next_attempt_at: null,
     last_error: null,
     processed_at: null,
-    event_id: null,
+    event_id: input.eventId ?? null,
     dedupe_key: input.dedupeKey.trim() || null,
     created_at: Math.floor(Date.now() / 1000),
   };

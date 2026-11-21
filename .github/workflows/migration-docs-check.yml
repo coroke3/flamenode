@@ -101,6 +101,7 @@ jobs:
           # MIG-0519 unit tests import the real @flamenode/contracts entrypoint.
           # Compile it before test:unit; the package main points to dist/index.js.
           npm run build --workspace=@flamenode/contracts
+          npm run test --workspace=@flamenode/contracts
           npm run typecheck
           npm run test:unit
           npm run verify:fast
