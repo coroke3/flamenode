@@ -642,6 +642,20 @@ async function loadReserveSnapshot(
 ): Promise<ReserveSnapshotRow | null> {
   const types = SLOT_RESERVATION_X_REQUEST_TYPES;
   const normActive = args.activeXId ? normalizeXId(args.activeXId) : "";
+  const neighborRowsSql = `
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, anchor a
+        WHERE s."event_id" = a."event_id" AND ${neighborConditionSql("s", "a", "forward")}
+        ORDER BY ${neighborOrderSql("s", "forward")}
+        LIMIT ?
+      `;
+  const replayRowsSql = `
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, anchor a
+        WHERE a."reservation_group_id" IS NOT NULL AND TRIM(a."reservation_group_id") <> ''
+          AND s."event_id" = a."event_id" AND s."reservation_group_id" = a."reservation_group_id"
+        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
+      `;
   const query = `
     WITH anchor AS (
       SELECT ${SLOT_COLUMNS.map((c) => `"${c}"`).join(", ")}
@@ -686,20 +700,8 @@ async function loadReserveSnapshot(
          ELSE (SELECT json_group_array("requested_x_id") FROM pending_list)
         END) AS pending_x_json,
       ${staffRowsJsonSql()} AS staff_json,
-      (SELECT json_group_array(${slotJsonObjectSql("n")}) FROM (
-        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
-        FROM "slots" s, anchor a
-        WHERE s."event_id" = a."event_id" AND ${neighborConditionSql("s", "a", "forward")}
-        ORDER BY ${neighborOrderSql("s", "forward")}
-        LIMIT ?
-      ) n) AS neighbors_json,
-      (SELECT json_group_array(${slotJsonObjectSql("rg")}) FROM (
-        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
-        FROM "slots" s, anchor a
-        WHERE a."reservation_group_id" IS NOT NULL AND TRIM(a."reservation_group_id") <> ''
-          AND s."event_id" = a."event_id" AND s."reservation_group_id" = a."reservation_group_id"
-        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
-      ) rg) AS replay_group_json,
+      ${boundedSlotArraySql(neighborRowsSql, "n")} AS neighbors_json,
+      ${boundedSlotArraySql(replayRowsSql, "rg")} AS replay_group_json,
       CASE
         WHEN COALESCE((SELECT "max_slot_reservation_groups_per_xid" FROM ev), 0) > 0 AND ? <> ''
         THEN ${logicalCountSubquerySql("(SELECT id FROM ev)", "?")}
@@ -953,6 +955,13 @@ export async function releaseSlotCore(
   ctx: SlotMutationContext,
   input: { eventId: string; slotId: string },
 ): Promise<SlotMutationOutcome> {
+  const releaseGroupRowsSql = `
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, anchor a
+        WHERE a."reservation_group_id" IS NOT NULL AND TRIM(a."reservation_group_id") <> ''
+          AND s."event_id" = a."event_id" AND s."reservation_group_id" = a."reservation_group_id"
+        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
+      `;
   const query = `
     WITH anchor AS (
       SELECT ${SLOT_COLUMNS.map((c) => `"${c}"`).join(", ")}
@@ -960,13 +969,7 @@ export async function releaseSlotCore(
     )
     SELECT
       (SELECT ${slotJsonObjectSql("a")} FROM anchor a) AS anchor_json,
-      (SELECT json_group_array(${slotJsonObjectSql("g")}) FROM (
-        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
-        FROM "slots" s, anchor a
-        WHERE a."reservation_group_id" IS NOT NULL AND TRIM(a."reservation_group_id") <> ''
-          AND s."event_id" = a."event_id" AND s."reservation_group_id" = a."reservation_group_id"
-        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
-      ) g) AS group_json
+      ${boundedSlotArraySql(releaseGroupRowsSql, "g")} AS group_json
   `;
   const snapshot = await rawDb
     .prepare(boundedFirstD1SnapshotSql(query, ["anchor_json", "group_json"]))
@@ -1059,7 +1062,7 @@ export async function extendSlotGroupCore(
       (SELECT ${slotJsonObjectSql("a")} FROM anchor a) AS anchor_json,
       ${approvedXJsonSql("?")} AS approved_x_json,
       ${staffRowsJsonSql()} AS staff_json,
-      (SELECT json_group_array(${slotJsonObjectSql("g")}) FROM group_rows g) AS group_json,
+      ${boundedSlotArraySql("SELECT * FROM group_rows", "g")} AS group_json,
       (SELECT "id" FROM cte_edge) AS cte_edge_id,
       (SELECT ${slotJsonObjectSql("n")} FROM (
         SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
@@ -1216,6 +1219,20 @@ export async function mergeSlotGroupsCore(
     operator_override: boolean;
   },
 ): Promise<SlotMutationOutcome> {
+  const leftGroupRowsSql = `
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, left_cte l
+        WHERE l."reservation_group_id" IS NOT NULL AND TRIM(l."reservation_group_id") <> ''
+          AND s."event_id" = l."event_id" AND s."reservation_group_id" = l."reservation_group_id"
+        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
+      `;
+  const rightGroupRowsSql = `
+        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+        FROM "slots" s, right_cte r
+        WHERE r."reservation_group_id" IS NOT NULL AND TRIM(r."reservation_group_id") <> ''
+          AND s."event_id" = r."event_id" AND s."reservation_group_id" = r."reservation_group_id"
+        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
+      `;
   const query = `
     WITH gap AS (
       SELECT ${SLOT_COLUMNS.map((c) => `"${c}"`).join(", ")}
@@ -1242,20 +1259,8 @@ export async function mergeSlotGroupsCore(
       ${staffRowsJsonSql()} AS staff_json,
       (SELECT ${slotJsonObjectSql("l")} FROM left_cte l) AS left_json,
       (SELECT ${slotJsonObjectSql("r")} FROM right_cte r) AS right_json,
-      (SELECT json_group_array(${slotJsonObjectSql("lg")}) FROM (
-        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
-        FROM "slots" s, left_cte l
-        WHERE l."reservation_group_id" IS NOT NULL AND TRIM(l."reservation_group_id") <> ''
-          AND s."event_id" = l."event_id" AND s."reservation_group_id" = l."reservation_group_id"
-        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
-      ) lg) AS left_group_json,
-      (SELECT json_group_array(${slotJsonObjectSql("rg")}) FROM (
-        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
-        FROM "slots" s, right_cte r
-        WHERE r."reservation_group_id" IS NOT NULL AND TRIM(r."reservation_group_id") <> ''
-          AND s."event_id" = r."event_id" AND s."reservation_group_id" = r."reservation_group_id"
-        LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
-      ) rg) AS right_group_json
+      ${boundedSlotArraySql(leftGroupRowsSql, "lg")} AS left_group_json,
+      ${boundedSlotArraySql(rightGroupRowsSql, "rg")} AS right_group_json
   `;
   const snapshot = await rawDb
     .prepare(boundedFirstD1SnapshotSql(query, [
