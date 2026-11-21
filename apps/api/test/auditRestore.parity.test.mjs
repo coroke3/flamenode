@@ -9,6 +9,10 @@ import { videos } from "@flamenode/db/schema";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { app as deployedApiRouter } from "../src/app.ts";
 import { restoreAuditLog } from "@flamenode/server-core/audit/restore";
+import {
+  EVENT_EXPORT_REFRESH_MINUTES,
+  eventExportPayloadCacheKey,
+} from "@flamenode/server-core/publicCache/eventExportKeys";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
@@ -489,6 +493,45 @@ test("T04 event restore commits one atomic D1 batch after R2 CAS, then invalidat
   }
 });
 
+// Revalidate every canonical scheduled event-export key, not only the first
+// and last refresh window. Keep unrelated event export payloads intact.
+test("T04 successful event audit restore evicts all eight scheduled export variants", async () => {
+  const ctx = setup();
+  seedVisibilityRestore(ctx);
+  const { bucket } = visibilityManifestBucket();
+  const previous = globalThis.caches;
+  const deleted = [];
+  globalThis.caches = { default: { delete: async (url) => {
+    deleted.push(decodeURIComponent(String(url)));
+    return true;
+  } } };
+  try {
+    const response = await ctx.request({
+      audit_id: "event-audit",
+      reason: "イベント出力キャッシュ無効化",
+      confirm_text: "RESTORE event-audit",
+    }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).ok, true);
+    const expected = ["v5", "legacy"].flatMap((format) =>
+      EVENT_EXPORT_REFRESH_MINUTES.map((minutes) =>
+        eventExportPayloadCacheKey("ev-1", format, minutes),
+      ),
+    );
+    assert.equal(expected.length, 8);
+    for (const key of expected) {
+      assert.ok(deleted.includes("https://flamenode.internal/public-json/" + key),
+        "missing scheduled export invalidation: " + key);
+    }
+    assert.equal(deleted.filter((url) =>
+      url.includes("public-event-export:9:ev-unrelated:"),
+    ).length, 0, "an unrelated event's scheduled exports must not be evicted");
+  } finally {
+    if (previous === undefined) delete globalThis.caches;
+    else globalThis.caches = previous;
+  }
+});
+
 test("T04 R2 binding failure prevents an event visibility restore and preserves public state", async () => {
   const ctx = setup();
   seedVisibilityRestore(ctx);
@@ -594,6 +637,63 @@ test("T04 video restore commits one atomic D1 batch after R2 CAS, then invalidat
     ).get().n, 1);
     assert.equal(ctx.stats.batches, 1, "RESTORE mutation, audit and queue must use one atomic D1 batch");
   recordRestoreD1Budget("videos_private_restore_success", ctx.stats, ctx.readTrace);
+  } finally {
+    if (previous === undefined) delete globalThis.caches;
+    else globalThis.caches = previous;
+  }
+});
+
+// Issue #718: establish executable evidence without modifying the shared
+// restore.ts writer-owned by PR #679. The current implementation omits
+// scheduled event-export invalidation after a successful video audit restore.
+// A TODO is not a pass or waiver of the security gate: when the shared-core
+// owner fixes the parity gap this test becomes a normal strict assertion.
+test("T04 #718 video restore invalidates scheduled exports for primary and linked events", async (t) => {
+  const ctx = setup();
+  seedVideoVisibilityRestore(ctx);
+  ctx.sqlite.prepare(
+    "INSERT INTO video_events(video_id,event_id) VALUES (?, ?)",
+  ).run("vid-restore", "ev-linked");
+  const { bucket } = visibilityManifestBucket();
+  const previous = globalThis.caches;
+  const deleted = [];
+  globalThis.caches = { default: { delete: async (url) => {
+    deleted.push(decodeURIComponent(String(url)));
+    return true;
+  } } };
+  try {
+    const response = await ctx.request({
+      audit_id: "video-audit",
+      reason: "動画復元のイベント配信キャッシュ検証",
+      confirm_text: "RESTORE video-audit",
+    }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT visibility_status FROM videos WHERE id = 'vid-restore'",
+    ).get().visibility_status, "private");
+
+    const keys = ["ev-1", "ev-linked"].flatMap((eventId) =>
+      ["v5", "legacy"].flatMap((format) =>
+        EVENT_EXPORT_REFRESH_MINUTES.map((minutes) =>
+          eventExportPayloadCacheKey(eventId, format, minutes),
+        ),
+      ),
+    );
+    const missing = keys.filter((key) =>
+      !deleted.includes("https://flamenode.internal/public-json/" + key),
+    );
+    if (missing.length !== 0) {
+      t.todo("#718 open: shared-core video audit restore must invalidate " +
+        missing.length + "/" + keys.length + " scheduled event-export keys; not release-ready");
+      return;
+    }
+    assert.equal(keys.length, 16);
+    assert.equal(missing.length, 0);
+    assert.equal(deleted.some((url) =>
+      url.includes("public-event-export:9:ev-unrelated:"),
+    ), false, "only affected event export keys may be deleted");
   } finally {
     if (previous === undefined) delete globalThis.caches;
     else globalThis.caches = previous;
