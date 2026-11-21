@@ -28,6 +28,9 @@ if (runUnderRootTsx(import.meta.url)) {
 
   function fixture() {
     const calls = [];
+    // Each fake R2 bucket owns its own artifact, so test-added legacy flags
+    // cannot bleed into concurrent scenarios or mask an earlier regression.
+    const localPlaylist = structuredClone(playlist);
     let currentEtag = '"manifest-v1"';
     let mode = "normal";
     let blockedEvent = false;
@@ -54,7 +57,8 @@ if (runUnderRootTsx(import.meta.url)) {
         }
         if (key === playlistKey) {
           if (mode === "race") currentEtag = '"manifest-v2"';
-          return { size: Buffer.byteLength(JSON.stringify(playlist)), json: async () => structuredClone(playlist) };
+          return { size: Buffer.byteLength(JSON.stringify(localPlaylist)),
+            json: async () => structuredClone(localPlaylist) };
         }
         if (key === slotsKey) {
           return { size: 40, json: async () => ({ slots: [{ id: "slot-1" }] }) };
@@ -71,7 +75,7 @@ if (runUnderRootTsx(import.meta.url)) {
       },
     };
     return {
-      calls, bucket, playlist,
+      calls, bucket, playlist: localPlaylist,
       setMode: (value) => { mode = value; },
       setBlockedEvent: (value) => { blockedEvent = value; },
       setEtag: (value) => { currentEtag = value; },
@@ -181,6 +185,49 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(denied.dto.playlistItems, [], "deny stale playlist after ETag change");
     assert.doesNotMatch(denied.text, /vid-revoked|OLD SECRET TITLE|OLD SECRET AUTHOR/);
     assert.equal(stale.playlist.items.length, 2, "source artifact must remain unchanged");
+  });
+
+  test("SEC-712 Hono route parity: off/observe preserve historical playlist rows with private markers", async (t) => {
+    // Companion #719 filters rows before normalization, but must not silently
+    // change the no-enforcement rollout modes. On <=2 rows a stray filter
+    // removes the *whole* playlist because viewer overlay requires >1 item.
+    // This tests the actual Hono response, not merely the shared helper.
+    const { app } = await import("../src/app.ts");
+    const { createSqlite, createD1, createFakeKv } = await import("./support/publicEventsHarness.mjs");
+    const { resetOperationModeCachesForTests } = await import("../src/routes/live/operationMode.ts");
+
+    for (const guardMode of ["off", "observe"]) {
+      resetOperationModeCachesForTests();
+      const sqlite = createSqlite();
+      t.after(() => sqlite.close());
+      const db = createD1(sqlite);
+      const h = fixture();
+      h.playlist.items[1].status = "private";
+      const original = structuredClone(h.playlist);
+
+      const response = await app.request(
+        "/api/videos/vid-safe/viewer-overlay?playlist=evt-1", {}, {
+          DB: db, KV: createFakeKv(), BUCKET: h.bucket,
+          FORCE_STATIC_ONLY: "1", PUBLIC_VISIBILITY_GUARD_MODE: guardMode,
+        },
+      );
+      assert.equal(response.status, 200, guardMode);
+      assert.equal(response.headers.get("Cache-Control"),
+        "private, no-store, no-cache, must-revalidate", guardMode);
+      const body = await response.json();
+      assert.deepEqual(body.playlistItems.map((row) => row.id),
+        ["vid-safe", "vid-revoked"],
+        guardMode + ": absent enforce fence must not silently drop a legacy row");
+      assert.equal(body.playlistLabel, "Event 上映順", guardMode);
+      assert.equal(db.stats.statements, 0, "static-only cannot read D1");
+      assert.equal(db.stats.writes, 0, "must never write D1");
+      assert.deepEqual(h.playlist, original, "R2 source artifact must not mutate");
+      assert.equal(h.calls.filter((c) => c === "HEAD " + manifestKey).length, 0,
+        guardMode + ": no post-read HEAD outside enforce");
+      assert.equal(h.calls.filter((c) => c === "GET " + manifestKey).length,
+        guardMode === "off" ? 0 : 2, guardMode);
+      assert.equal(h.calls.filter((c) => c === "GET " + playlistKey).length, 1);
+    }
   });
 
   test("SEC-712 Hono: synthetic bucket without HEAD performs bounded manifest re-read", async () => {
