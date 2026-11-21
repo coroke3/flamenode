@@ -14,6 +14,7 @@ import { buildStaticRebuildQueueBatch } from "../staticRebuild/enqueue.ts";
 import { buildFreeVideoRebuildTargets } from "./freeVideoRebuildTargets.ts";
 import { buildFreeVideoSoftwareInsertPlan } from "./freeVideoSoftwareInsertPlan.ts";
 import { buildFreeVideoSubmittedNotificationPlan } from "./freeVideoSubmittedNotificationPlan.ts";
+import { buildFreeVideoRegisteredChannelPlan } from "./freeVideoRegisteredChannelPlan.ts";
 import type { LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
 
 /**
@@ -150,8 +151,8 @@ export function buildFreeVideoSubmissionAtomicPlan(
  * UNMOUNTED SA-086 proposal. Appends the canonical rebuild targets to the
  * same prepared D1 batch as the video INSERT; no DB writes or wake occur.
  * The authenticated caller must still provide the remaining CURRENT atomic
- * member, derived and icon integration. Software rows and CURRENT-style DM
- * notification are included only with trusted inputs from the host.
+ * member, derived and icon integration. Software rows and CURRENT-style DM/
+ * ops-channel notifications are included only with trusted host inputs.
  */
 export async function buildFreeVideoSubmissionWithRebuildPlan(
   db: ServerCoreDb,
@@ -160,6 +161,8 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
     usedSoftware?: string | null;
     /** Trusted, CURRENT-formatted notification payload. Legacy tests omit it. */
     submittedNotificationPayload?: Record<string, unknown>;
+    /** Trusted CURRENT ops channel payload + resolved thread name. */
+    registeredChannelNotification?: { payload: Record<string, unknown>; threadName: string };
   },
 ): Promise<UnslottedVideoAtomicPlan> {
   const base = buildFreeVideoSubmissionAtomicPlan(db, args);
@@ -178,6 +181,16 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
       now: args.now,
     })
     : { statements: [], expectedChanges: [], audits: [] };
+  const channelNotification = args.registeredChannelNotification
+    ? await buildFreeVideoRegisteredChannelPlan(db, {
+      videoId: args.videoAfter.id,
+      actorUserId: args.actorUserId,
+      eventId: args.eventId,
+      payload: args.registeredChannelNotification.payload,
+      threadName: args.registeredChannelNotification.threadName,
+      now: args.now,
+    })
+    : { statements: [], expectedChanges: [], audits: [] };
   const targets = buildFreeVideoRebuildTargets({
     videoId: args.videoAfter.id,
     userId: args.actorUserId,
@@ -191,8 +204,8 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
     throw new Error("free_video_submission_rebuild_plan_incomplete");
   }
   return {
-    statements: [...base.statements, ...software.statements, ...notification.statements, ...queue.statements],
-    expectedChanges: [...base.expectedChanges, ...software.expectedChanges, ...notification.expectedChanges, ...queue.expectedChanges],
+    statements: [...base.statements, ...software.statements, ...notification.statements, ...channelNotification.statements, ...queue.statements],
+    expectedChanges: [...base.expectedChanges, ...software.expectedChanges, ...notification.expectedChanges, ...channelNotification.expectedChanges, ...queue.expectedChanges],
     audits: [...base.audits, ...software.audits],
   };
 }
