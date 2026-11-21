@@ -840,7 +840,10 @@ test("MIG-0514 U03a read-only viewer notice hydrates privately and never replace
 });
 
 test("MIG-0514 U03a RH-014 outage preserves public grid and denies actions", { skip: skipUi }, async () => {
-  const detail = detailOf("autumn-collab-2026");
+  const fixture = detailOf("autumn-collab-2026");
+  // Force a currently accepting *synthetic* event so the outage notice is not
+  // legitimately hidden by the "reception not started" precedence branch.
+  const detail = { ...fixture, event: { ...fixture.event, entry_start_time: 0, entry_end_time: 4_102_444_800 } };
   globalThis.fetch = async (url) => String(url).endsWith("/viewer-overlay")
     ? { ok: false, status: 503 }
     : { ok: true, json: async () => ({ slots: [
