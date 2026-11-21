@@ -84,7 +84,9 @@ test("SEC-726 explicit remote read-only path uses argument-vector Wrangler and a
   const capture = path.join(dir, "args.json");
   try {
     fs.mkdirSync(path.join(dir, "scripts/sql"), { recursive: true });
-    fs.copyFileSync(SQL_PATH, path.join(dir, "scripts/sql/check-sec-726-active-x.sql"));
+    // A poisoned working-directory SQL must not replace the reviewed script-local query.
+    fs.writeFileSync(path.join(dir, "scripts/sql/check-sec-726-active-x.sql"),
+      'DELETE FROM "user";\n');
     fs.mkdirSync(path.join(dir, "node_modules/wrangler/bin"), { recursive: true });
     fs.writeFileSync(path.join(dir, "node_modules/wrangler/bin/wrangler.js"), [
       'const fs = require("node:fs");',
