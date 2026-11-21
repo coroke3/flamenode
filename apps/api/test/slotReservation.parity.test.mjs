@@ -1497,4 +1497,125 @@ if (runUnderRootTsx(import.meta.url)) {
       thaw();
     }
   });
+
+  test("S3 #725: real HTTPS cookie checks latest major ToS and recovery without stale acceptance", async () => {
+    const w = world();
+    insert(w.sqlite, "session", {
+      sessionToken: "s3-current-terms", userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+    });
+    const thaw = freeze();
+    const post = (slotId) => app.request(SITE + "/api/events/ev1/slots/" + slotId + "/reserve", {
+      method: "POST",
+      headers: {
+        Origin: SITE, cookie: "__Secure-authjs.session-token=s3-current-terms",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ display_name: "Current major" }),
+    }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+    const major = (id, at) => insert(w.sqlite, "terms_versions", {
+      id, version_label: id, body_markdown: "synthetic terms", status: "published",
+      severity: "major", published_at: at, created_by_user_id: "u_admin",
+      created_at: at, updated_at: at,
+    });
+    const denied = async (slotId, reason) => {
+      const beforeReads = w.d1.stats.reads;
+      const beforeBatches = w.d1.stats.batches;
+      const previous = state(w);
+      const response = await post(slotId);
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal((await response.json()).reason, reason);
+      assert.equal(w.d1.stats.reads - beforeReads, 2,
+        "session and fresh ToS only; no CostGuard/slot snapshot on deny");
+      assert.equal(w.d1.stats.batches - beforeBatches, 0);
+      assert.deepEqual(state(w), previous, "a ToS rejection never writes");
+    };
+    try {
+      major("s3-major-1", NOW_SEC - 100);
+      await denied("s20", "tos_reaccept_required");
+      // A persisted stale flag is NOT authoritative. Only current major
+      // version acceptance or an applicable consent row clears the gate.
+      w.sqlite.prepare("UPDATE user SET accepted_terms_version_id = ?, terms_reaccept_required = 0 WHERE id = ?")
+        .run("s3-major-1", "u_owner");
+      const first = await post("s20");
+      assert.equal(first.status, 200);
+      assert.equal((await first.json()).ok, true);
+
+      major("s3-major-2", NOW_SEC - 50);
+      await denied("s21", "tos_reaccept_required");
+      insert(w.sqlite, "user_tos_consents", {
+        id: "s3-consent-major-2", user_id: "u_owner",
+        terms_version_id: "s3-major-2", consented_at: NOW_SEC - 40,
+        consent_context: "entry",
+      });
+      const allowed = await post("s21");
+      assert.equal(allowed.status, 200,
+        "the new major's explicit consent permits a fresh valid reservation");
+      assert.equal((await allowed.json()).ok, true);
+    } finally {
+      thaw();
+    }
+  });
+
+  test("S3 #725: real HTTPS cookie D1 faults fail closed at each pre-read boundary", async () => {
+    const stages = [
+      ["session", /FROM "session" s/, "database_unavailable"],
+      ["tos", /terms_reaccept_required/, "db_unavailable"],
+      ["cost", /FROM system_settings/, "cost_guard_blocked"],
+      ["slot", /invalid_snapshot/, null],
+    ];
+    for (const [stage, sqlPattern, denyReason] of stages) {
+      const w = world();
+      insert(w.sqlite, "session", {
+        sessionToken: "s3-lookup-fault", userId: "u_owner",
+        expires: NOW_SEC * 1000 + 60000,
+      });
+      const initial = state(w);
+      const prepare = w.d1.prepare.bind(w.d1);
+      let intercepted = 0;
+      w.d1.prepare = (sql) => {
+        const statement = prepare(sql);
+        if (!sqlPattern.test(sql)) return statement;
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...args) => {
+          const bound = bind(...args);
+          bound.first = async () => {
+            intercepted += 1;
+            throw new Error("S3_SENSITIVE_PROVIDER_ERROR_MUST_NOT_LEAK");
+          };
+          return bound;
+        };
+        return statement;
+      };
+      const originalError = console.error;
+      const captured = [];
+      console.error = (...args) => { captured.push(args.join(" ")); };
+      const thaw = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev1/slots/s20/reserve", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=s3-lookup-fault",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ display_name: "No write on failure" }),
+        }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        const body = await response.json();
+        assert.equal(response.status, 503, stage);
+        assert.equal(response.headers.get("cache-control"), "private, no-store", stage);
+        assert.equal(body.ok, false, stage);
+        if (denyReason) assert.equal(body.reason, denyReason, stage);
+        assert.equal(intercepted, 1, stage + " must actually exercise the injected D1 fault");
+        assert.equal(w.d1.stats.batches, 0, stage);
+        assert.deepEqual(state(w), initial, stage + " must not mutate DB state");
+        assert.doesNotMatch(captured.join("\n"), /S3_SENSITIVE_PROVIDER_ERROR_MUST_NOT_LEAK/,
+          "provider error content must not enter logs");
+        assert.doesNotMatch(JSON.stringify(body), /S3_SENSITIVE_PROVIDER_ERROR_MUST_NOT_LEAK/,
+          "provider error content must not reach client");
+      } finally {
+        thaw();
+        console.error = originalError;
+      }
+    }
+  });
 }
