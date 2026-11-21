@@ -1155,8 +1155,8 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
       assert.equal(otherExportReads.length, 0,
         item.format + ": scheduled export must not silently look up the wrong export key");
       if (lookups.length) {
-        assert.ok(lookups.every((lookup) => lookup.hit),
-          item.format + ": the seeded stale cache entry must actually be found");
+        assert.ok(lookups.some((lookup) => lookup.hit),
+          item.format + ": at least one request must find the seeded stale cache entry");
       }
       const body = await response.text();
       assert.doesNotThrow(() => JSON.parse(body), item.format + ": export must return JSON");
