@@ -287,6 +287,29 @@ function slotJsonObjectSql(alias: string): string {
   END)`;
 }
 
+// All slot arrays (reserve neighbors/replay, release group, extend group,
+// merge left/right) share this guard. Each row has already passed the
+// per-column text/type check before being serialized as JSON in the bounded
+// MATERIALIZED CTE. Large or corrupted groups are replaced with a sentinel
+// BEFORE json_group_array/json(...) executes, never silently truncated.
+const MAX_SLOT_GROUP_JSON_BYTES = 20 * 1024;
+function boundedSlotArraySql(rowsSql: string, alias: string): string {
+  return `(WITH raw_slot_rows AS MATERIALIZED (${rowsSql}),
+    slot_json_rows AS MATERIALIZED (
+      SELECT ${slotJsonObjectSql(alias)} AS "item"
+      FROM raw_slot_rows ${alias}
+    )
+    SELECT CASE
+      WHEN EXISTS (SELECT 1 FROM slot_json_rows
+                   WHERE instr("item", '"__invalid_projection":1') > 0)
+        THEN json_array(json_object('__invalid_projection', 1))
+      WHEN (SELECT COALESCE(SUM(length(CAST("item" AS BLOB)) + 1), 0) + 2
+            FROM slot_json_rows) > ${MAX_SLOT_GROUP_JSON_BYTES}
+        THEN json_array(json_object('__invalid_projection', 1))
+      ELSE (SELECT json_group_array(json("item")) FROM slot_json_rows)
+    END)`;
+}
+
 function eventJsonObjectSql(alias: string): string {
   const cols = [
     "id",
