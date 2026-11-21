@@ -690,6 +690,85 @@ test("T04 R2 CAS succeeds but D1 batch fails: event/video remain public, compens
   }
 });
 
+// If both the restore D1 batch and the subsequent compensation R2 read fail,
+// the precommitted visibility block must not be removed or treated as success.
+// The shared core owns compensation/logging policy; this test exercises only the
+// candidate Hono route and its synthetic D1/R2 bindings.
+test("T04 double failure: R2 precommit survives D1 rollback and unavailable compensation", async () => {
+  for (const scenario of [
+    { kind: "event", auditId: "event-audit", entityId: "ev-1", table: "events" },
+    { kind: "video", auditId: "video-audit", entityId: "vid-restore", table: "videos" },
+  ]) {
+    const ctx = setup();
+    if (scenario.kind === "event") seedVisibilityRestore(ctx);
+    else seedVideoVisibilityRestore(ctx);
+
+    const { state, bucket } = visibilityManifestBucket();
+    const originalBatch = ctx.db.batch.bind(ctx.db);
+    const originalGet = bucket.get.bind(bucket);
+    let d1FailureStarted = false;
+    ctx.db.batch = async (statements) => {
+      assert.equal(d1FailureStarted, false, "only the restore commit batch is attempted");
+      assert.equal(state.puts, 1, "the R2 visibility CAS precedes the D1 batch");
+      d1FailureStarted = true;
+      return originalBatch([...statements, {
+        _sql: 'INSERT INTO "__mig_0662_fault_missing_table" ("value") VALUES (1)',
+        _params: [],
+      }]);
+    };
+    bucket.get = async (...args) => {
+      if (d1FailureStarted) throw new Error("injected_compensation_manifest_unavailable");
+      return originalGet(...args);
+    };
+
+    const warnings = [];
+    const previousWarn = console.warn;
+    console.warn = (...args) => {
+      warnings.push(args.map((v) => String(v)).join(" "));
+    };
+    let response;
+    try {
+      response = await ctx.request({
+        audit_id: scenario.auditId,
+        reason: "二重障害の復旧回帰",
+        confirm_text: `RESTORE ${scenario.auditId}`,
+      }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+    } finally {
+      console.warn = previousWarn;
+    }
+
+    assert.equal(d1FailureStarted, true);
+    assert.equal(ctx.stats.batches, 1, "one failed atomic D1 restore batch");
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    const result = await response.json();
+    assert.equal(result.ok, false, "compensation failure must never report restore success");
+    assert.match(result.message, /復元を確定できませんでした/);
+    assert.equal(ctx.sqlite.prepare(
+      `SELECT visibility_status FROM ${scenario.table} WHERE id = ?`,
+    ).get(scenario.entityId).visibility_status, "public");
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'success'",
+    ).get().n, 0);
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'failed'",
+    ).get().n, 1);
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM public_visibility_fences",
+    ).get().n, 0, "rolled back D1 visibility fence cannot become durable");
+    assert.equal(state.puts, 1,
+      "compensation read failed; no second R2 write could release the block");
+    assert.ok(state.manifest.entities.some((entry) =>
+      entry.entity_type === scenario.kind
+      && entry.entity_id === scenario.entityId
+      && typeof entry.fence_token === "string"
+      && entry.fence_token.length > 0,
+    ), "failed compensation leaves the original R2 block in place");
+    assert.ok(warnings.some((line) => line.includes("visibility compensation failed")),
+      "the shared core reports the failure for investigation");
+  }
+});
+
 // The Hono route test injects an in-memory session middleware, not Auth.js.
 // These counts therefore form a *lower bound*, not a production D1 profile.
 // Reports remain observational until the approved S3 <=3 pre-read gate is met.
