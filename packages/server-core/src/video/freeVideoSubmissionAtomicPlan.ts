@@ -65,6 +65,9 @@ export function buildFreeVideoSubmissionAtomicPlan(
   // Recheck the authenticated Active X on the SAME D1 batch as creation.
   // This prevents a concurrent ban, active-X switch, link revocation or
   // approval downgrade from committing with a stale request-time guard.
+  // This batch-time assertion also mirrors CURRENT's TOS gate; a request
+  // that passed an earlier guard must fail if consent is revoked or the user
+  // is required to re-accept a newer terms version before commit.
   const activeXAssertion = db.run(sql`
     SELECT CASE WHEN EXISTS (
       SELECT 1 FROM ${users}
@@ -76,6 +79,8 @@ export function buildFreeVideoSubmissionAtomicPlan(
       WHERE ${users.id} = ${actorUserId}
         AND ${users.active_x_user_id} = ${trustedActiveXId}
         AND COALESCE(${users.is_banned}, 0) = 0
+        AND ${users.is_tos_accepted} = 1
+        AND COALESCE(${users.terms_reaccept_required}, 0) <> 1
         AND ${xUsers.approval_status} = 'approved'
     ) THEN 1 ELSE json_extract('not-valid-json', '$') END
   `);
