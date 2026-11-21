@@ -91,7 +91,8 @@ test("SEC-726 explicit remote read-only path uses argument-vector Wrangler and a
     fs.writeFileSync(path.join(dir, "node_modules/wrangler/bin/wrangler.js"), [
       'const fs = require("node:fs");',
       'fs.writeFileSync(process.env.SEC726_CAPTURE, JSON.stringify(process.argv.slice(2)));',
-      'process.stdout.write(JSON.stringify([{results:[{unsafe_selected_legacy_ids:0}]}]));',
+      'const count = process.env.SEC726_MALFORMED === "1" ? "  " : 0;',
+      'process.stdout.write(JSON.stringify([{results:[{unsafe_selected_legacy_ids:count}]}]));',
     ].join("\n"));
     fs.writeFileSync(path.join(dir, "wrangler.toml"),
       'database_id = "11111111-1111-4111-8111-111111111111"\n');
@@ -109,6 +110,13 @@ test("SEC-726 explicit remote read-only path uses argument-vector Wrangler and a
       ["d1", "execute", "flamenode_db", "--remote", "--json", "--command"]);
     assert.match(args[6], /^SELECT COUNT\(\*\) AS unsafe_selected_legacy_ids/);
     assert.doesNotMatch(args[6], /\b(?:UPDATE|DELETE|INSERT|DROP|ALTER|PRAGMA)\b/i);
+    // Malformed aggregate output ("  ") must not silently coerce to zero.
+    const malformed = spawnSync(process.execPath, [SCRIPT, "--remote"], {
+      cwd: dir, env: { ...env, SEC726_MALFORMED: "1" }, encoding: "utf8",
+    });
+    assert.equal(malformed.status, 2);
+    assert.match(malformed.stderr, /BLOCKED/);
+    assert.doesNotMatch(malformed.stdout, /unsafe_selected_legacy_ids=0/);
     fs.rmSync(capture);
     fs.writeFileSync(path.join(dir, "wrangler.toml"),
       'database_id = "00000000-0000-0000-0000-000000000000"\n');
