@@ -82,7 +82,7 @@ const body = (extra = {}) => ({
 
 test("T00 production/default admin router physically excludes unapproved SA-011 write route", async () => {
   const isRestore = (r) => r.method === "POST" &&
-    r.path.replace(/\\/$/, "") === RESTORE;
+    r.path.replace(/[/]$/, "") === RESTORE;
   assert.equal(
     deployedApiRouter.routes.filter(isRestore).length, 0,
     "deployed app.ts must not mount the candidate route",
