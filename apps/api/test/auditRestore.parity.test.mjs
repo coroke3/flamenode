@@ -1129,6 +1129,74 @@ test("T04 #718 video restore invalidates scheduled exports for primary and linke
   }
 });
 
+// #718 primary-only fallback: video_events may contain no rows even though a
+// video has an authoritative primary_event_id. The export cache invalidation
+// contract must not lose that event when collecting relations.
+test("T04 #718 video primary-event-only scheduled export invalidation", async (t) => {
+  const ctx = setup();
+  seedEvent(ctx.sqlite, { id: "ev-1", visibility_status: "public", public_api_enabled: 1 });
+  seedVideoVisibilityRestore(ctx);
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM video_events WHERE video_id='vid-restore'",
+  ).get().n, 0, "the scenario must not have any video_events relations");
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT primary_event_id FROM videos WHERE id='vid-restore'",
+  ).get().primary_event_id, "ev-1");
+
+  const { bucket } = visibilityManifestBucket();
+  const previous = globalThis.caches;
+  const deleted = [];
+  globalThis.caches = { default: { delete: async (url) => {
+    deleted.push(decodeURIComponent(String(url)));
+    return true;
+  } } };
+  try {
+    const response = await ctx.request({
+      audit_id: "video-audit",
+      reason: "主イベントのみの配信キャッシュ失効を検証",
+      confirm_text: "RESTORE video-audit",
+    }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).ok, true);
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT visibility_status FROM videos WHERE id='vid-restore'",
+    ).get().visibility_status, "private");
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT visibility_status FROM events WHERE id='ev-1'",
+    ).get().visibility_status, "public", "primary event remains visible");
+    assert.equal(ctx.stats.batches, 1, "restore remains one audited D1 batch");
+
+    const expectedKeys = ["v5", "legacy"].flatMap((format) =>
+      EVENT_EXPORT_REFRESH_MINUTES.map((minutes) =>
+        eventExportPayloadCacheKey("ev-1", format, minutes),
+      ),
+    );
+    assert.equal(expectedKeys.length, 8,
+      "primary-only case must cover both formats and all refresh windows");
+    assert.ok(deleted.some((url) => url.endsWith("events/ev-1.json")),
+      "the existing public JSON invalidation still includes the primary event");
+    assert.equal(deleted.some((url) =>
+      url.includes("public-event-export:9:ev-unrelated:"),
+    ), false, "unrelated events must never be invalidated");
+    const missing = expectedKeys.filter((key) =>
+      !deleted.includes("https://flamenode.internal/public-json/" + key),
+    );
+    // The shared core is owned by #679. Only its known missing export-key
+    // fanout is a non-accepting TODO; parent validity is never waived.
+    await t.test("#718 primary-only export cache must be invalidated", (subtest) => {
+      if (missing.length > 0) {
+        subtest.todo("#718 STOP: video restore misses " + missing.length +
+          "/8 export keys with no video_events relations");
+        return;
+      }
+      assert.deepEqual(missing, []);
+    });
+  } finally {
+    if (previous === undefined) delete globalThis.caches;
+    else globalThis.caches = previous;
+  }
+});
+
 test("T04 video restore fails closed when enforced visibility R2 bucket is unavailable", async () => {
   const ctx = setup();
   seedVideoVisibilityRestore(ctx);
