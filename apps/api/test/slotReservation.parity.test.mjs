@@ -493,6 +493,12 @@ if (runUnderRootTsx(import.meta.url)) {
         "shared approved-X JSON needs full-byte bound before materialization");
       assert.match(sql, /instr\(u\."active_x_user_id", char\(0\)\)/,
         "reserve actor must reject an embedded NUL in the selected ID");
+      assert.match(sql, /WITH approved_ids AS MATERIALIZED/,
+        "approved X bytes must be preflighted before the JSON aggregate");
+      assert.match(sql, /WITH staff_entries AS MATERIALIZED/,
+        "staff permission bytes must be preflighted before the JSON aggregate");
+      assert.match(sql, /ELSE \(SELECT json_group_array\(q\."x_user_id"\) FROM approved_ids q\)/,
+        "the approved X JSON builder must be in a lazy scalar CASE branch");
       const bind = stmt.bind.bind(stmt);
       stmt.bind = (...values) => {
         const bound = bind(...values);
@@ -514,14 +520,14 @@ if (runUnderRootTsx(import.meta.url)) {
     return () => assert.equal(calls, 1, "reserve uses one inspected first D1 snapshot");
   }
 
-  async function expectMalformedReservationRejected(w, user, inspect) {
+  async function expectMalformedReservationRejected(w, user, inspect, args = {
+    eventId: "ev1", slot_id: "s01", display_name: "Safe", consecutive_count: 1,
+  }) {
     const watched = watchReserveFirstD1Row(w, inspect);
     const originalState = state(w);
     const beforeReads = w.d1.stats.reads;
     const beforeBatches = w.d1.stats.batches;
-    const response = await runHono(w, user, "reserve", {
-      eventId: "ev1", slot_id: "s01", display_name: "Safe", consecutive_count: 1,
-    });
+    const response = await runHono(w, user, "reserve", args);
     watched();
     assert.equal(response.status, 503, "invalid SQL projection must fail closed");
     assert.deepEqual(response.result, {
@@ -572,6 +578,29 @@ if (runUnderRootTsx(import.meta.url)) {
         const pending = JSON.parse(raw.pending_x_json);
         assert.ok(pending.includes(null), "do not silently exclude the malformed request");
         assert.equal(raw.pending_x_json.includes(bad), false);
+      });
+    });
+  }
+
+  for (const [label, updateColumn, invalidValue] of [
+    ["permission preset: NUL + 180K", "permission_preset", "\u0000" + "x".repeat(180_000)],
+    ["custom permission JSON: NUL + 180K", "custom_permission_keys_json", "\u0000" + "x".repeat(180_000)],
+    ["custom permission JSON: short NUL", "custom_permission_keys_json", "a\u0000b"],
+  ]) {
+    test("SEC #716: staff JSON (" + label + ") is bounded and fails closed", async () => {
+      const w = world();
+      assert.ok(["permission_preset", "custom_permission_keys_json"].includes(updateColumn));
+      const result = w.sqlite.prepare(
+        'UPDATE "event_staff" SET "' + updateColumn + '" = ? WHERE "id" = ?',
+      ).run(invalidValue, "staff_ev2_slot");
+      assert.equal(result.changes, 1, "fixture has exactly one approved event staff row");
+      await expectMalformedReservationRejected(w, "u_staff", raw => {
+        assert.equal(raw.staff_json, "[null]",
+          "unauthorized staff details must never enter first D1 JSON");
+        assert.equal(raw.staff_json.includes(invalidValue), false);
+      }, {
+        eventId: "ev2", slot_id: "ev2_1", display_name: "Safe", consecutive_count: 1,
+        operator_override: true,
       });
     });
   }
