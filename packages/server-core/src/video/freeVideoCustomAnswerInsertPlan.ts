@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { eventCustomQuestions, videoCustomAnswers } from "@flamenode/db/schema";
 import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@flamenode/domain/video/atomicLimits";
-import type { SubmissionCustomAnswerDraft } from "@flamenode/domain/video/customAnswers";
+import type { SubmissionCustomAnswerDraft } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 import type { UnslottedVideoAtomicPlan } from "./unslottedEventPlans.ts";
 
