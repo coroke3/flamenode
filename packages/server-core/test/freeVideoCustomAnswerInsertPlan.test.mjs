@@ -4,6 +4,7 @@ import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { videoCustomAnswers } from "@flamenode/db/schema";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import { buildFreeVideoCustomAnswerInsertPlan } from "../src/video/freeVideoCustomAnswerInsertPlan.ts";
+import { compareSqliteBinaryText } from "../src/video/memberSetSnapshot.ts";
 
 const args = { videoId: "v:a/b", eventId: "ev-a", actorUserId: "user-a", now: 1700000000 };
 const draft = (q) => ({ event_id: "ev-a", question_id: q, question_key: q, answer_text: "test", answer_json: null });
@@ -35,7 +36,7 @@ function fixture() {
 }
 const sorted = (...values) => values.sort((a, b) =>
   a.source.sort_order - b.source.sort_order ||
-  a.id.localeCompare(b.id, "en"),
+  compareSqliteBinaryText(a.id, b.id),
 );
 
 test("MIG-0651 custom-answer plan: unaffiliated zero plan, no stale event answers", () => {
@@ -74,9 +75,10 @@ test("MIG-0651 custom-answer plan: policy snapshot assertion precedes single INS
   const qs = sorted(question("q:A"), question("q-B", {
     type: "checkbox", options_json: '["A"]',
   }));
+  assert.deepEqual(qs.map(q => q.id), ["q-B", "q:A"], "SQLite BINARY differs from locale collation");
   const plan = buildFreeVideoCustomAnswerInsertPlan(db, {
     ...args, questions: qs,
-    drafts: [draft("q:A"), { ...draft("q-B"), answer_text: null, answer_json: '["A"]' }],
+    drafts: [{ ...draft("q-B"), answer_text: null, answer_json: '["A"]' }, draft("q:A")],
   });
   assert.strictEqual(recorded.table, videoCustomAnswers);
   assert.equal(plan.statements.length, 2);
