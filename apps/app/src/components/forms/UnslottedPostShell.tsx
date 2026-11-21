@@ -147,7 +147,12 @@ function UnslottedPostShellForIdentity<
   // onRestore to their reference would replay an older localStorage draft and
   // discard the in-progress affiliation choice on every list refresh.
   const latestEventOptionsRef = React.useRef(eventOptions);
-  latestEventOptionsRef.current = eventOptions;
+  // A suspended/concurrent React render can be abandoned. Only publish the
+  // choices from the committed tree: in-flight submit callbacks must not
+  // reject an event based on options that were never shown to the user.
+  React.useLayoutEffect(() => {
+    latestEventOptionsRef.current = eventOptions;
+  }, [eventOptions]);
   // An event may be temporarily absent while its options are loading. Keep
   // only that original ID pending; never invent a replacement from the list.
   const pendingRestoredEventIdRef = React.useRef("");

@@ -1367,3 +1367,70 @@ test("U03a / MIG-0713 integration: actual member reorder has no native change ev
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: an abandoned event-options transition cannot revoke the committed form", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  const callbacks = [];
+  const renderedOptions = [];
+  const never = new Promise(() => {});
+  const renderVideoForm = args => {
+    callbacks.push(args.onSubmitSuccess);
+    return renderStub(args);
+  };
+  function Suspender({ blocked }) {
+    if (blocked) throw never;
+    return null;
+  }
+  function Host({ choices, blocked = false }) {
+    return React.createElement(React.Suspense,
+      { fallback: React.createElement("div", { "data-testid": "suspended-update" }, "Loading") },
+      React.createElement(UnslottedPostShell, props({
+        eventOptions: choices,
+        renderVideoForm,
+      })),
+      React.createElement(React.Fragment, null,
+        React.createElement("output", { "data-testid": "render-observation" },
+          String(renderedOptions.push(choices.length))),
+        React.createElement(Suspender, { blocked })),
+    );
+  }
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(Host, { choices: [eventA] })));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    const committedSuccess = callbacks.at(-1);
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.ok(dom.window.localStorage.getItem(key));
+    const priorAttempts = renderedOptions.length;
+
+    // Render the unavailable list in a transition, but suspend a sibling
+    // before the new tree can commit. The old event-A form stays displayed.
+    await act(async () => {
+      React.startTransition(() => root.render(React.createElement(Host, {
+        choices: [], blocked: true,
+      })));
+    });
+    assert.ok(renderedOptions.length > priorAttempts,
+      "the withheld options must actually have been rendered");
+    assert.equal(renderedOptions.at(-1), 0);
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A",
+      "the transition has not committed; event-A remains the actual visible form");
+    assert.equal(container.querySelector('[data-testid="suspended-update"]'), null);
+
+    // A render-phase write to latestEventOptionsRef would incorrectly deny
+    // this valid completion based on the abandoned, uncommitted [] options.
+    await act(async () => committedSuccess());
+    assert.equal(dom.window.localStorage.getItem(key), null,
+      "committed eligibility, not speculative render input, controls draft cleanup");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
