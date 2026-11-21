@@ -870,23 +870,22 @@ test("T03 #730 authenticated restore masks SQL params and provider metadata on D
       "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='failed'",
     ).get().n, 1, "failed-run record still persists separately");
 
-    // The HTTP candidate masks mutation_failed already, but shared-core's
-    // failed-run error_message is a distinct persistent data boundary.
-    // Record a TODO until the existing #679 shared-core owner fixes it; never
-    // count this as a privacy pass while the raw SQL parameter remains stored.
-    const stored = ctx.sqlite.prepare(
-      "SELECT error_message FROM audit_restore_runs WHERE status='failed' LIMIT 1",
-    ).get()?.error_message;
-    assert.equal(typeof stored, "string", "failed-run error is recorded for audit");
-    if (stored.includes(marker) || stored.includes(privateUrl)
-        || stored.includes("Failed query") || stored.includes("params:")) {
-      t.todo("#730 shared-core failed-run error_message persists untrusted SQL parameters; owner #679 must fix");
-    } else {
-      assert.equal(stored.includes(marker), false);
-      assert.equal(stored.includes(privateUrl), false);
-      assert.equal(stored.includes("Failed query"), false);
-      assert.equal(stored.includes("params:"), false);
-    }
+    // A separate TODO subtest tracks the shared-core persistence blocker.
+    // Do not mark the parent HTTP redaction test TODO: otherwise a future
+    // regression in its strict HTTP/rollback assertions could be overlooked.
+    await t.test("#730 failed-run persistence has no SQL/provider canary", (subtest) => {
+      const stored = ctx.sqlite.prepare(
+        "SELECT error_message FROM audit_restore_runs WHERE status='failed' LIMIT 1",
+      ).get()?.error_message;
+      assert.equal(typeof stored, "string", "failed-run error is recorded for audit");
+      const leaked = [marker, privateUrl, "Failed query", "params:"]
+        .some((sensitive) => stored.includes(sensitive));
+      if (leaked) {
+        subtest.todo("#730 shared-core failed-run stores raw SQL details; owner #679 must fix");
+      } else {
+        assert.equal(leaked, false, "failed-run error_message must be data-minimized");
+      }
+    });
     assert.equal(logged.join("\n").includes(marker), false,
       "the Hono error path must not log the canary");
     assert.equal(logged.join("\n").includes(privateUrl), false,
