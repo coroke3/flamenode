@@ -117,17 +117,41 @@ const MAX_SLOT_DISPLAY_NAME_BYTES = 512;
 const MAX_SLOT_LABEL_BYTES = 2048;
 const MAX_EVENT_STATUS_BYTES = 32;
 const MAX_SLOT_STATUS_BYTES = 32;
+// Leave room for the D1 row keys and metadata when capping JSON payloads.
+const MAX_FIRST_D1_SNAPSHOT_BYTES = 60 * 1024;
 
 function invalidSqlNumber(expr: string): string {
   return `(typeof(${expr}) NOT IN ('integer', 'real', 'null'))`;
 }
 
-function invalidJsonSnapshot(snapshot: Record<string, unknown>): boolean {
-  // The SQL helpers emit this marker only when a source row was rejected
-  // before serializing legacy TEXT. Never parse/use partial authorized groups.
-  return Object.values(snapshot).some(
-    value => typeof value === "string" && value.includes('"__invalid_projection":1'),
+function invalidJsonSnapshot(snapshot: object): boolean {
+  // All first-D1 snapshots return a fixed synthetic error marker if their
+  // projected row was over budget. Never parse/use partial authorized groups.
+  return Object.entries(snapshot).some(
+    ([key, value]) => (key === "invalid_snapshot" && value === 1) ||
+      (typeof value === "string" && value.includes('"__invalid_projection":1')),
   );
+}
+
+// Only known aliases are passed by the four core mutation paths. The inner
+// query remains ONE D1 statement with identical bind order, while the
+// materialized outer projection clears ALL oversized payload columns before
+// they leave SQLite and sends an explicit invalid_snapshot marker. The cap
+// applies to the combined first D1 row, not each field independently.
+function boundedFirstD1SnapshotSql(query: string, fields: readonly string[]): string {
+  const items = fields.map(field => `p."${field}"`);
+  const total = items.map(item => `COALESCE(length(CAST(${item} AS BLOB)), 0)`).join(" + ");
+  const projection = fields.map((field, index) =>
+    `CASE WHEN sz."bytes" > ${MAX_FIRST_D1_SNAPSHOT_BYTES} THEN NULL ELSE ${items[index]} END AS "${field}"`,
+  ).join(", ");
+  return `WITH projected_snapshot AS MATERIALIZED (${query}),
+    snapshot_bytes AS MATERIALIZED (
+      SELECT (${total}) AS "bytes" FROM projected_snapshot p
+    )
+    SELECT ${projection},
+           CASE WHEN sz."bytes" > ${MAX_FIRST_D1_SNAPSHOT_BYTES}
+             THEN 1 ELSE 0 END AS "invalid_snapshot"
+    FROM projected_snapshot p CROSS JOIN snapshot_bytes sz`;
 }
 
 function invalidSqlText(expr: string, bytes: number): string {
@@ -667,7 +691,11 @@ async function loadReserveSnapshot(
       END AS pending_x_count
   `;
   return rawDb
-    .prepare(query)
+    .prepare(boundedFirstD1SnapshotSql(query, [
+      "event_json", "anchor_json", "actor_json", "approved_x_json",
+      "pending_x_json", "staff_json", "neighbors_json", "replay_group_json",
+      "active_x_count", "single_pending_x", "pending_x_count",
+    ]))
     .bind(
       args.slotId,
       args.eventId,
@@ -918,9 +946,9 @@ export async function releaseSlotCore(
       ) g) AS group_json
   `;
   const snapshot = await rawDb
-    .prepare(query)
+    .prepare(boundedFirstD1SnapshotSql(query, ["anchor_json", "group_json"]))
     .bind(input.slotId, input.eventId)
-    .first<{ anchor_json: string | null; group_json: string | null }>();
+    .first<{ anchor_json: string | null; group_json: string | null; invalid_snapshot: number }>();
   if (!snapshot || invalidJsonSnapshot(snapshot)) {
     return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
   }
@@ -1019,7 +1047,10 @@ export async function extendSlotGroupCore(
       ) n) AS neighbor_json
   `;
   const snapshot = await rawDb
-    .prepare(query)
+    .prepare(boundedFirstD1SnapshotSql(query, [
+      "event_json", "anchor_json", "approved_x_json", "staff_json",
+      "group_json", "cte_edge_id", "neighbor_json",
+    ]))
     .bind(input.slotId, input.eventId, input.eventId, ctx.authUserId, input.eventId, ctx.authUserId)
     .first<{
       event_json: string | null;
@@ -1204,7 +1235,10 @@ export async function mergeSlotGroupsCore(
       ) rg) AS right_group_json
   `;
   const snapshot = await rawDb
-    .prepare(query)
+    .prepare(boundedFirstD1SnapshotSql(query, [
+      "event_json", "gap_json", "approved_x_json", "staff_json", "left_json",
+      "right_json", "left_group_json", "right_group_json",
+    ]))
     .bind(input.gap_slot_id, input.eventId, input.eventId, ctx.authUserId, input.eventId, ctx.authUserId)
     .first<{
       event_json: string | null;
