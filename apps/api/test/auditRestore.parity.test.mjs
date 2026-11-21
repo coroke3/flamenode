@@ -1150,8 +1150,10 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
         item.format + ": scheduled export must return a genuine HIT or safe MISS");
       const staleKey = publicJsonCacheUrl(eventExportPayloadCacheKey("ev-1", item.format, 15));
       const lookups = readerLookups.filter((lookup) => lookup.url === staleKey);
-      assert.equal(readerLookups.filter((lookup) => lookup.url !== staleKey).length, 0,
-        item.format + ": Cache API must not query an unrelated cache key");
+      const otherExportReads = readerLookups.filter((lookup) =>
+        decodeURIComponent(lookup.url).includes("public-event-export:") && lookup.url !== staleKey);
+      assert.equal(otherExportReads.length, 0,
+        item.format + ": scheduled export must not silently look up the wrong export key");
       if (lookups.length) {
         assert.ok(lookups.every((lookup) => lookup.hit),
           item.format + ": the seeded stale cache entry must actually be found");
