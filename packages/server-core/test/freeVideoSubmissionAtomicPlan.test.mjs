@@ -328,3 +328,53 @@ test("MIG-0651 atomic composer: D1 50 query budget uses explicit actual caller-r
     ...linked, audits: linked.audits.map(a => ({ ...a, strict: false })),
   }, 0), /budget_arguments_invalid/);
 });
+
+test("MIG-0651 atomic composer: concurrent YouTube ID unique collision rolls back the fresh candidate", () => {
+  const sqlite = createSqlite();
+  try {
+    const drizzleDb = drizzle(async () => ({ rows: [] }));
+    const planDb = {
+      run(expr) { return { assertSql: expr }; },
+      insert(table) { return drizzleDb.insert(table); },
+      batch() { throw new Error("candidate cannot execute before auth and audit"); },
+    };
+    // Construct this request's plan first, then another request claims the
+    // same YouTube video ID. The canonical SQLite active unique index must
+    // resolve this race even though the read-only duplicate probe already ran.
+    const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
+      videoAfter: video(null), actorUserId: "user-1", eventId: null,
+      questions: [], customAnswerDrafts: [], now: NOW,
+    });
+    insert(sqlite, "videos", {
+      id: "v:previous",
+      submitted_by_user_id: "user-2",
+      creator_display_name: "Previous",
+      title: "Existing upload",
+      youtube_video_id: "dQw4w9WgXcQ",
+      visibility_status: "public",
+    });
+    const dialect = new SQLiteSyncDialect();
+    sqlite.exec("BEGIN");
+    assert.throws(() => {
+      for (const statement of plan.statements) {
+        const compiled = "assertSql" in statement
+          ? dialect.sqlToQuery(statement.assertSql)
+          : statement.toSQL();
+        if ("assertSql" in statement) sqlite.prepare(compiled.sql).get(...compiled.params);
+        else sqlite.prepare(compiled.sql).run(...compiled.params);
+      }
+    }, /UNIQUE|constraint/i);
+    sqlite.exec("ROLLBACK");
+    assert.deepEqual(
+      sqlite.prepare("SELECT id FROM videos ORDER BY id").all().map(({ id }) => id),
+      ["v:previous"],
+    );
+    assert.equal(
+      sqlite.prepare("SELECT COUNT(*) AS n FROM video_youtube_metadata").get().n,
+      0, "no partial pending metadata from rejected duplicate",
+    );
+    assert.equal(plan.audits.length, 2, "audit metadata remains prepared, never written");
+  } finally {
+    sqlite.close();
+  }
+});
