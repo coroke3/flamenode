@@ -616,16 +616,26 @@ test("T01 admin origin, session, role and BAN guards reject before any restore w
 
 test("T02 invalid body and oversized JSON return 400/413 without D1 mutation", async () => {
   const ctx = setup();
+  // Force-overwrite semantics are most important when the existing row is
+  // actually in conflict. The public JSON endpoint must reject boolean true
+  // rather than coercing it into the destructive FormData numeric 1.
+  seedRestorableAnnouncement(ctx.sqlite, { currentTitle: "Concurrent edit" });
   const invalid = [
     { audit_id: "", reason: "test" },
     body({ reason: "" }),
     body({ reason: "x".repeat(501) }),
     body({ force_overwrite: 2 }),
     body({ force_overwrite: -1 }),
+    body({ force_overwrite: true }),
+    body({ force_overwrite: false }),
+    body({ force_overwrite: null }),
+    body({ force_overwrite: [] }),
+    body({ force_overwrite: [1] }),
+    body({ force_overwrite: { value: 1 } }),
   ];
   for (const data of invalid) {
     const res = await ctx.request(data);
-    assert.equal(res.status, 400);
+    assert.equal(res.status, 400, JSON.stringify(data));
     assert.equal((await res.json()).ok, false);
   }
   const huge = await ctx.request(body({ reason: "x".repeat(70000) }));
@@ -634,6 +644,25 @@ test("T02 invalid body and oversized JSON return 400/413 without D1 mutation", a
     ok: false, message: "リクエストが大きすぎます。",
   });
   assert.equal(ctx.stats.batches, 0);
+  assert.equal(changes(ctx.sqlite).row.title, "Concurrent edit");
+  assert.equal(changes(ctx.sqlite).runs.length, 0,
+    "no invalid force-overwrite representation may create a restore run");
+});
+
+test("T02 explicit FormData-style and numeric JSON force flags allow a confirmed conflict restore", async () => {
+  for (const value of ["1", 1]) {
+    const ctx = setup();
+    seedRestorableAnnouncement(ctx.sqlite, { currentTitle: "Concurrent edit" });
+    const res = await ctx.request(body({ force_overwrite: value }));
+    assert.equal(res.status, 200, String(value));
+    const result = await res.json();
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(changes(ctx.sqlite).row.title, "Old Title");
+    assert.equal(changes(ctx.sqlite).runs.find((run) =>
+      run.status === "success")?.status, "success");
+    assert.equal(ctx.stats.batches, 1,
+      "explicit authorized force overwrite remains one audited D1 batch");
+  }
 });
 
 test("T05 restore responses are private no-store across validation, rejection, and success", async () => {
