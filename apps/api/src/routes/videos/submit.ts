@@ -12,6 +12,10 @@
  */
 import {
   parseVideoForm,
+  extractYoutubeId,
+  firstMissingRequiredVideoField,
+  missingRequiredVideoFieldMessage,
+  UnslottedEventSyncError,
   validateUniqueUnslottedVideoScalarFields,
   validateFreeVideoMultipartPreflight,
   type VideoFormData,
@@ -19,6 +23,10 @@ import {
 } from "@flamenode/domain/video";
 import type { Context } from "hono";
 import type { AppEnv } from "../../env.ts";
+import type { ServerCoreDb } from "@flamenode/server-core/db";
+import { resolveUnslottedEventIdForNewVideo } from "@flamenode/server-core/video/unslottedEventEligibility";
+import { loadUnionRequiredVideoFields } from "@flamenode/server-core/video/requiredVideoFields";
+import { checkYoutubeVideoDuplicate } from "@flamenode/server-core/video/youtubeDuplicate";
 
 const BAD_FORM_MESSAGE = "投稿フォームの入力が不正です。";
 
@@ -70,4 +78,73 @@ export async function readFreeVideoMultipartPreflight(
     ok: true,
     value: { ...preflight.value, videoForm: parsed.data },
   };
+}
+
+
+/**
+ * U02 read-only D1 candidate, called only after the authenticated transport
+ * preflight. It follows CURRENT's YouTube -> event eligibility -> required
+ * fields -> duplicate order and uses the same shared predicates/loaders.
+ *
+ * The caller must still validate custom answers, recheck event eligibility
+ * inside its atomic D1 batch, persist member/derived rows, strict audit and
+ * queue plans, and apply icon rollback/post-commit behavior. This helper must
+ * never be treated as write authorization or mounted as an HTTP route alone.
+ */
+export async function validateFreeVideoDbReadPreflight(
+  db: ServerCoreDb,
+  input: Pick<
+    Extract<Awaited<ReturnType<typeof readFreeVideoMultipartPreflight>>, { ok: true }>["value"],
+    "requestedEventId" | "videoForm"
+  >,
+  nowSec: number,
+): Promise<
+  | { ok: false; message: string }
+  | { ok: true; value: { youtubeId: string; eventId: string | null } }
+> {
+  if (!Number.isSafeInteger(nowSec) || nowSec < 0) {
+    return { ok: false, message: BAD_FORM_MESSAGE };
+  }
+  const youtubeId = extractYoutubeId(input.videoForm.youtube_url);
+  if (!youtubeId) {
+    return { ok: false, message: "YouTube URLを解析できません。" };
+  }
+
+  let eventId: string | null;
+  try {
+    eventId = await resolveUnslottedEventIdForNewVideo(db, input.requestedEventId, nowSec);
+  } catch (error) {
+    if (
+      error instanceof UnslottedEventSyncError &&
+      error.code === "unslotted_event_selection_invalid"
+    ) {
+      return { ok: false, message: "枠なし投稿で所属できるイベントは1件までです。" };
+    }
+    return {
+      ok: false,
+      message: "選択したイベントは枠なし投稿を受け付けていません。公開状態・終了日時・イベント設定を確認してください。",
+    };
+  }
+
+  try {
+    const required = await loadUnionRequiredVideoFields(db, eventId ? [eventId] : []);
+    const missing = firstMissingRequiredVideoField(required, {
+      ...input.videoForm,
+      existing_icon_url: null,
+    });
+    if (missing) {
+      return { ok: false, message: missingRequiredVideoFieldMessage(missing) };
+    }
+
+    if (await checkYoutubeVideoDuplicate(db, youtubeId)) {
+      return { ok: false, message: "このYouTube動画は既に登録されています。" };
+    }
+  } catch {
+    // Do not expose D1 internals at an eventual HTTP boundary; no writes made.
+    return {
+      ok: false,
+      message: "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。",
+    };
+  }
+  return { ok: true, value: { youtubeId, eventId } };
 }
