@@ -181,7 +181,15 @@ if (runTestWithTsx(import.meta.url)) {
       delete: async () => {},
       get: async (key) => {
         log.push({ op: "r2.get", key });
-        if (options.failGetsWhen?.()) throw new Error("r2 get failed");
+        if (options.failGetsWhen?.()) {
+          if (options.secretOnFailure) {
+            const error = new Error(`r2 get failed ${options.secretOnFailure}`);
+            error.providerDetails = { headers: { authorization: options.secretOnFailure } };
+            error.cause = new Error(`upstream ${options.secretOnFailure}`);
+            throw error;
+          }
+          throw new Error("r2 get failed");
+        }
         const found = objects.get(key);
         if (!found) return null;
         return {
@@ -234,6 +242,7 @@ if (runTestWithTsx(import.meta.url)) {
     });
     const bucket = createBucket(log, bucketSpec?.initial ?? {}, {
       failGetsWhen: bucketSpec?.failGetsAfterRollback ? () => state.rolledBack : undefined,
+      secretOnFailure: bucketSpec?.secretOnFailure,
     });
     globalThis.__auditRestoreGoldenContext = {
       env: {
@@ -757,5 +766,41 @@ if (runTestWithTsx(import.meta.url)) {
     const expected = readFileSync(SNAPSHOT_URL, "utf8");
     assert.equal(serialized, expected);
     assert.equal(Object.keys(actual).length, scenarios.length);
+  });
+
+  test("SEC-717: event/video restore compensation logs no nested provider canary", async () => {
+    const secret = "SEC717_PRIVATE_PROVIDER_CANARY";
+    const scenariosWithCompensationFailure = [
+      ["event", {
+        arrange: arrangeEvent("evt-1", { beforePatch: { visibility_status: "private" } }),
+        hooks: { beforeBatch: raceEvent },
+        bucket: { failGetsAfterRollback: true, secretOnFailure: secret },
+      }],
+      ["video", {
+        setup: seedVideoWithEvents(),
+        arrange: arrangeVideo(videoPublicToPrivate),
+        hooks: { beforeBatch: raceVideo },
+        bucket: { failGetsAfterRollback: true, secretOnFailure: secret },
+      }],
+    ];
+    for (const [entityType, spec] of scenariosWithCompensationFailure) {
+      const [, result] = await runScenario(`secret_compensation_${entityType}`, spec);
+      const warnings = result.log.filter((entry) =>
+        entry.op === "console.warn" &&
+        entry.args[0] === "[audit-restore] visibility compensation failed"
+      );
+      assert.equal(warnings.length, 1, `${entityType}: exactly one fixed-code warning`);
+      assert.deepEqual(warnings[0].args,
+        ["[audit-restore] visibility compensation failed", "provider_error"]);
+      assert.ok(!JSON.stringify(result).includes(secret),
+        `${entityType}: provider message, cause and nested fields must not escape`);
+      assert.equal(result.outcome.returned?.ok, false,
+        `${entityType}: failed D1 restore remains failed`);
+      assert.equal(result.audit_restore_runs.filter((run) => run.status === "success").length, 0);
+      assert.ok(result.audit_restore_runs.some((run) => run.status === "failed"),
+        `${entityType}: failed restore remains audited`);
+      assert.ok(result.manifest_after?.entities?.some((entry) => entry.entity_type === entityType),
+        `${entityType}: failed compensation leaves the R2 safety block intact`);
+    }
   });
 }

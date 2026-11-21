@@ -679,8 +679,10 @@ export async function restoreAuditLog(
             allowNonPublicRollback: !depublicizedFromPublic,
           }, host);
         }
-      } catch (compensationError) {
-        console.warn("[audit-restore] visibility compensation failed", compensationError);
+      } catch {
+        // The R2 provider exception may carry credentials or resource metadata.
+        // Keep this outcome observable without logging the exception or its cause.
+        console.warn("[audit-restore] visibility compensation failed", "provider_error");
       }
     }
 

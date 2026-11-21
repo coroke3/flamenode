@@ -11185,10 +11185,7 @@
         "op": "console.warn",
         "args": [
           "[audit-restore] visibility compensation failed",
-          {
-            "error": "r2 get failed",
-            "name": "Error"
-          }
+          "provider_error"
         ]
       },
       {
