@@ -218,6 +218,31 @@ test("T00 mounted SA-010 dry-run preflight D1 failure hides SQL/provider excepti
   }
 });
 
+// SA-009 is mounted in the default admin router. A private configuration write
+// and its validation/size errors must never become an HTTP/edge cache entry.
+test("T00 mounted SA-009 settings never caches success, validation, or oversize responses", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true, enableRestoreCandidate: false });
+  const path = "/api/admin/audit/settings";
+  for (const scenario of [
+    { payload: { normal_retention_days: -1 }, status: 400, label: "invalid" },
+    { payload: { normal_retention_days: "x".repeat(70000) }, status: 413, label: "oversized" },
+    { payload: { normal_retention_days: 45 }, status: 200, label: "success" },
+  ]) {
+    const response = await ctx.request(scenario.payload, undefined, {}, path);
+    assert.equal(response.status, scenario.status, scenario.label);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store", scenario.label);
+    const result = await response.json();
+    assert.equal(result.ok, scenario.status === 200, scenario.label);
+  }
+  assert.equal(ctx.stats.batches, 1, "only the valid request may execute a D1 batch");
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT audit_normal_retention_days FROM system_settings WHERE id='default'",
+  ).get().audit_normal_retention_days, 45);
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM audit_logs WHERE table_name='system_settings'",
+  ).get().n, 1, "settings write must remain audited");
+});
+
 test("T00 mounted SA-009 settings failure never echoes SQL/provider parameters", async () => {
   const ctx = setup({ useRealSessionMiddleware: true, enableRestoreCandidate: false });
   const marker = "MIG0662_SETTINGS_PRIVATE_SQL_PARAM_CANARY";
