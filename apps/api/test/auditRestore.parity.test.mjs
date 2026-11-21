@@ -1072,8 +1072,14 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
   const perColo = { writer: new Map(), reader: new Map() };
   let activeColo = "reader";
   const deleted = [];
+  const readerLookups = [];
   globalThis.caches = { default: {
-    match: async (request) => perColo[activeColo].get(request.url)?.clone(),
+    match: async (request) => {
+      const url = typeof request === "string" ? request : request.url;
+      const entry = perColo[activeColo].get(url);
+      if (activeColo === "reader") readerLookups.push({ url, hit: !!entry });
+      return entry?.clone();
+    },
     put: async (request, response) => {
       perColo[activeColo].set(request.url, response.clone());
     },
@@ -1134,12 +1140,28 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
       );
       assert.equal(response.status, 200, item.format);
       assert.equal(response.headers.get("Cache-Control"), "no-store", item.format);
-      assert.equal(response.headers.get("X-FlameNode-Cache"), "HIT", 
-        item.format + ": stale reader-colo Cache API entry must be exercised, not a safe MISS");
-      const body = await response.text();
-      if (body.includes("vid-restore")) {
-        exposed.push(item.format + ":" + response.headers.get("X-FlameNode-Cache"));
+      // A corrected reader may reject the stale HIT and safely regenerate a
+      // MISS, or deliberately bypass it after fresh visibility validation.
+      // Requiring HIT here would reject the security fix itself. If the
+      // handler *does* consult Cache API, the lookup must hit the actual stale
+      // v5/legacy entry rather than an accidentally wrong test key.
+      const cacheState = response.headers.get("X-FlameNode-Cache");
+      assert.ok(cacheState === "HIT" || cacheState === "MISS",
+        item.format + ": scheduled export must return a genuine HIT or safe MISS");
+      const staleKey = publicJsonCacheUrl(eventExportPayloadCacheKey("ev-1", item.format, 15));
+      const lookups = readerLookups.filter((lookup) => lookup.url === staleKey);
+      assert.equal(readerLookups.filter((lookup) => lookup.url !== staleKey).length, 0,
+        item.format + ": Cache API must not query an unrelated cache key");
+      if (lookups.length) {
+        assert.ok(lookups.every((lookup) => lookup.hit),
+          item.format + ": the seeded stale cache entry must actually be found");
       }
+      const body = await response.text();
+      assert.doesNotThrow(() => JSON.parse(body), item.format + ": export must return JSON");
+      if (body.includes("vid-restore")) {
+        exposed.push(item.format + ":" + cacheState);
+      }
+      readerLookups.length = 0;
     }
     // Keep the real restore, cache-HIT, HTTP response and colo-isolation
     // invariants on the STRICT parent. Only the known cross-colo leak is TODO;
