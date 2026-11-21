@@ -300,7 +300,7 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
   d1.resetQueryCount();
   const normal = await resolveSessionUser(inspectingD1, token, opts);
   assert.equal(normal?.active_x_user_id, USERS.valid.active_x_user_id);
-  assert.equal(projected.at(-1).user_active_x_id_oversize, 0);
+  assert.equal(projected.at(-1).user_active_x_id_invalid, 0);
   assert.equal(d1.getQueryCount(), 1);
 
   const edge = "x".repeat(bound);
@@ -308,7 +308,7 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
   d1.resetQueryCount();
   const atBoundary = await resolveSessionUser(inspectingD1, token, opts);
   assert.equal(atBoundary?.active_x_user_id, edge, "legacy IDs at the cap preserve their value");
-  assert.equal(projected.at(-1).user_active_x_id_oversize, 0);
+  assert.equal(projected.at(-1).user_active_x_id_invalid, 0);
   assert.equal(d1.getQueryCount(), 1);
 
   // SQLite length(TEXT) stops at the first NUL; 43 Japanese characters use
@@ -326,10 +326,33 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
     assert.equal(d1.getQueryCount(), 1, "no extra D1 lookup to validate selected X");
     assert.equal(projected.length, 1);
     const row = projected[0];
-    assert.equal(row.user_active_x_id_oversize, 1);
+    assert.equal(row.user_active_x_id_invalid, 1);
     assert.equal(row.user_active_x_user_id, null, "D1 must remove the giant field before transport");
     assert.ok(Buffer.byteLength(JSON.stringify(row)) < 2048,
       "actual SQLite projection must stay small even for the 180K legacy row");
+  }
+
+  // SQLite permits BLOB values inside a TEXT-affinity column. A small BLOB
+  // passes a byte-length-only check, but must never become SessionUser's
+  // declared string Active X identity. Embedded NUL is likewise not a valid
+  // X identifier even when its byte length is below the legacy cap.
+  for (const invalidTypedValue of [
+    new Uint8Array([0x00, 0xff, 0x41]),
+    new Uint8Array([0x78, 0x2d, 0x31]),
+    "\0x-short",
+  ]) {
+    d1.setActiveX(USERS.valid.id, invalidTypedValue);
+    projected.length = 0;
+    d1.resetQueryCount();
+    await assert.rejects(
+      () => resolveSessionUser(inspectingD1, token, opts),
+      (error) => error.name === "SessionUnavailableError" && error.code === "database_unavailable",
+    );
+    assert.equal(d1.getQueryCount(), 1);
+    assert.equal(projected.length, 1);
+    assert.equal(projected[0].user_active_x_id_invalid, 1);
+    assert.equal(projected[0].user_active_x_user_id, null,
+      "invalid storage types and NUL-terminated text must be rejected by the SQL projection");
   }
 
   const utf8WithinByteLimit = "あ".repeat(42); // 126 bytes
@@ -337,14 +360,14 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
   d1.resetQueryCount();
   const unicodeAtBoundary = await resolveSessionUser(inspectingD1, token, opts);
   assert.equal(unicodeAtBoundary?.active_x_user_id, utf8WithinByteLimit);
-  assert.equal(projected.at(-1).user_active_x_id_oversize, 0);
+  assert.equal(projected.at(-1).user_active_x_id_invalid, 0);
   assert.equal(d1.getQueryCount(), 1);
 
   d1.setActiveX(USERS.valid.id, null);
   d1.resetQueryCount();
   const noSelection = await resolveSessionUser(inspectingD1, token, opts);
   assert.equal(noSelection?.active_x_user_id, null, "a genuinely null Active X stays null");
-  assert.equal(projected.at(-1).user_active_x_id_oversize, 0);
+  assert.equal(projected.at(-1).user_active_x_id_invalid, 0);
   assert.equal(d1.getQueryCount(), 1);
 });
 
@@ -366,7 +389,7 @@ test("SEC-713: invalid persisted Active X is logged with a fixed code, not as a 
     console.error = originalConsoleError;
   }
 
-  assert.deepEqual(messages, ["[auth:session] INVALID_ACTIVE_X_ID_LENGTH"],
+  assert.deepEqual(messages, ["[auth:session] INVALID_ACTIVE_X_ID_VALUE"],
     "distinguish malformed persisted identity from a genuine D1 lookup failure");
   assert.ok(!messages.join(" ").includes("SENSITIVE_SUFFIX"));
   assert.ok(!messages.join(" ").includes(malformedId));
