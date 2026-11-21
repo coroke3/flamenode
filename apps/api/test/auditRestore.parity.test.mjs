@@ -650,7 +650,7 @@ test("T04 R2 CAS succeeds but D1 batch fails: event/video remain public, compens
           _params: [],
         }]);
       }
-      // Failed-run recording is a separate, valid transaction.
+      // Other batches (if any) must remain unmodified after the injected failure.
       return originalBatch(statements);
     };
 
@@ -661,8 +661,8 @@ test("T04 R2 CAS succeeds but D1 batch fails: event/video remain public, compens
     }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
 
     assert.equal(injected, true);
-    assert.ok(ctx.stats.batches >= 2,
-      "the failed SQLite transaction and subsequent failure-record transaction both execute");
+    assert.equal(ctx.stats.batches, 1,
+      "restore uses one failing atomic SQLite batch; the failed-run INSERT is standalone");
     assert.equal(response.status, 200, "CURRENT returns an ok:false domain result");
     assert.equal(response.headers.get("Cache-Control"), "private, no-store");
     const result = await response.json();
@@ -674,6 +674,12 @@ test("T04 R2 CAS succeeds but D1 batch fails: event/video remain public, compens
     assert.equal(ctx.sqlite.prepare(
       "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'success'",
     ).get().n, 0);
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'failed'",
+    ).get().n, 1, "failed-run INSERT is committed separately after rollback");
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT restore_status FROM audit_logs WHERE id = ?",
+    ).get(scenario.auditId).restore_status, "restorable");
     assert.equal(ctx.sqlite.prepare(
       "SELECT COUNT(*) AS n FROM public_visibility_fences",
     ).get().n, 0, "failed D1 batch cannot persist the D1 visibility fence");
