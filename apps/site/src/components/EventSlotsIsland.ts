@@ -4,6 +4,9 @@ import type { EventIslandDetail } from "../lib/eventDetail.ts";
 import { buildEventSlotsModel, type SlotsLivePhase } from "../lib/eventSlots.ts";
 import { fetchLiveSlots, type LiveSlots } from "../lib/liveSlots.ts";
 import { IslandWrapper } from "./IslandWrapper.ts";
+import { EventSlotsViewerIsland } from "./EventSlotsViewerIsland.ts";
+import { slotLayoutOf } from "../lib/eventDetail.ts";
+import { computeEventStatus, isAcceptingEntries } from "../../../../src/lib/utils/eventStatusCore.ts";
 
 export interface EventSlotsIslandProps {
   detail: EventIslandDetail;
@@ -43,7 +46,26 @@ export function EventSlotsIsland({ detail, builtAt }: EventSlotsIslandProps): Re
     };
   }, [detail]);
   const model = React.useMemo(() => buildEventSlotsModel(detail, now, phase, live), [detail, now, phase, live]);
-  return React.createElement(IslandWrapper, null, React.createElement(EventSlotsView, { model }));
+  // U03a: private RH-014 read is mounted only for hydration notices; write controls
+  // and private slot names remain unmounted until approved MIG-0657 + U03b/U04.
+  // Stable public IDs avoid repeated private re-reads during overlay state renders.
+  const publicSlotIds = React.useMemo(
+    () => slotLayoutOf(detail).map((slot) => ({ id: slot.id })),
+    [detail],
+  );
+  return React.createElement(
+    IslandWrapper, null,
+    React.createElement(
+      EventSlotsViewerIsland,
+      {
+        eventId: detail.event.id,
+        baseSlots: publicSlotIds,
+        accepting: isAcceptingEntries(detail.event, now),
+        eventStatus: computeEventStatus(detail.event, now),
+      },
+      () => React.createElement(EventSlotsView, { model }),
+    ),
+  );
 }
 
 export default EventSlotsIsland;

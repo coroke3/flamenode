@@ -793,6 +793,72 @@ test("Island /event/[id]/slots: pending -> live names; failure notice; never a b
   await act(async () => r.unmount());
 });
 
+test("MIG-0514 U03a read-only viewer notice hydrates privately and never replaces public names", { skip: skipUi }, async () => {
+  const detail = detailOf("autumn-collab-2026");
+  const props = { detail, builtAt: NOW };
+  const calls = [];
+  const privateNotice = "X IDの連携を確認してください";
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    if (String(url).endsWith("/viewer-overlay")) return { ok: true, json: async () => ({
+      loggedIn: true, authUnavailable: false, isBanned: false,
+      needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+      operatorOverrideAllowed: false, viewerXId: "x-private", viewerXIdNotice: privateNotice,
+      slots: [{ id: "s1", display_name: "非公開本人枠", is_owned_by_viewer: true,
+        viewer_relation: "active", group_key: "private-group", x_user_id: "x-private" }],
+    }) };
+    assert.match(String(url), /^\\/api\\/live\\/events\\//);
+    assert.equal(init.credentials, "omit");
+    return { ok: true, json: async () => ({ slots: [
+      { id: "s1", status: "reserved", display_name: "公開枠の名前" },
+      { id: "s2", status: "available" }, { id: "s3", status: "available" },
+      { id: "s4", status: "available" },
+    ] }) };
+  };
+  document.body.innerHTML = "";
+  const c = mount();
+  c.innerHTML = renderToString(h(EventSlotsIsland, props));
+  assert.equal(c.querySelectorAll(".sl.pending").length, 4);
+  assert.ok(!text(c).includes(privateNotice) && !text(c).includes("非公開本人枠"),
+    "SSR must contain no identity-specific data");
+  const errors = [];
+  let root;
+  await act(async () => { root = hydrateRoot(c, h(EventSlotsIsland, props), {
+    onRecoverableError: (err) => errors.push(err),
+  }); });
+  await settle();
+  assert.deepEqual(errors, [], "SSR hydration must be compatible");
+  const reads = calls.filter(c => String(c.url).endsWith("/viewer-overlay"));
+  assert.equal(reads.length, 1, "no RH-014 refetch loop");
+  assert.equal(reads[0].init.credentials, "same-origin");
+  assert.equal(reads[0].init.cache, "no-store");
+  assert.ok(text(c).includes(privateNotice), "notice appears only after hydration");
+  assert.ok(text(c).includes("公開枠の名前"), "RH-020 public grid remains canonical");
+  assert.ok(!text(c).includes("非公開本人枠"), "private slot names not mounted in U03a");
+  assert.equal(c.querySelectorAll("button").length, 0, "no write controls");
+  await act(async () => root.unmount());
+});
+
+test("MIG-0514 U03a RH-014 outage preserves public grid and denies actions", { skip: skipUi }, async () => {
+  const detail = detailOf("autumn-collab-2026");
+  globalThis.fetch = async (url) => String(url).endsWith("/viewer-overlay")
+    ? { ok: false, status: 503 }
+    : { ok: true, json: async () => ({ slots: [
+        { id: "s1", status: "reserved", display_name: "公開枠の名前" },
+        { id: "s2", status: "available" }, { id: "s3", status: "available" },
+        { id: "s4", status: "available" },
+      ] }) };
+  document.body.innerHTML = "";
+  const c = mount();
+  let root;
+  await act(async () => { root = createRoot(c); root.render(h(EventSlotsIsland, { detail, builtAt: NOW })); });
+  await settle();
+  assert.ok(text(c).includes("ログイン状態を一時的に確認できません"));
+  assert.ok(text(c).includes("公開枠の名前"));
+  assert.equal(c.querySelectorAll("button").length, 0);
+  await act(async () => root.unmount());
+});
+
 test("Island /event/[id]/release: list on the server, mode follows the URL hash like CURRENT", { skip: skipUi }, async () => {
   const model = buildEventReleaseModel(data.releases.get("autumn-collab-2026"));
   dom.reconfigure({ url: "https://flamenode.net/event/autumn-collab-2026/release" });
