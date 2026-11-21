@@ -53,6 +53,11 @@ test("T03 #730 mutation-failed HTTP message preserves reviewed codes but rejects
       "unknown SQL/provider error is never exposed to the caller");
   }
   assert.equal(safeAuditRestoreFailureMessage({
+    ok: false, reason_code: "adapter_missing",
+    message: "テーブル「SENSITIVE_STORED_AUDIT_CANARY params: hidden」の復元アダプターがありません。",
+  }), "復元アダプターが見つかりません。",
+  "unregistered database-sourced table name must never be reflected in HTTP");
+  assert.equal(safeAuditRestoreFailureMessage({
     ok: false, reason_code: "target_conflict", message: "競合が検出されました: title。",
   }), "競合が検出されました: title。",
   "known domain conflicts preserve the existing CURRENT action contract");
@@ -859,6 +864,37 @@ test("T03 #730 real Hono preserves known builder rejection without data mutation
   assert.equal(ctx.sqlite.prepare(
     "SELECT COUNT(*) AS n FROM video_members",
   ).get().n, 0, "no member writes are issued");
+});
+
+// Shared-core capability messages for unregistered tables include the raw
+// database-sourced table name. This HTTP-specific privacy safeguard must
+// operate after the genuine admin/session/CostGuard chain; the underlying
+// audit persistence is still owned by shared-core PR #679 / Issue #730.
+test("T03 #730 unregistered audit table cannot echo stored canary over authenticated HTTP", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true });
+  seedRestorableAnnouncement(ctx.sqlite);
+  const privateCanary = "STORED_AUDIT_TABLE_CANARY params: confidential";
+  ctx.sqlite.prepare("UPDATE audit_logs SET table_name = ? WHERE id = 'audit-1'")
+    .run("unsupported_" + privateCanary);
+  const response = await ctx.request(body());
+  assert.equal(response.status, 200, "CURRENT returns domain failure as 200 ok:false");
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  const dto = await response.json();
+  assert.equal(dto.ok, false);
+  assert.equal(dto.message, "復元アダプターが見つかりません。");
+  assert.equal(JSON.stringify(dto).includes(privateCanary), false,
+    "database-provenance text must not reach the HTTP response");
+  assert.equal(typeof dto.restore_run_id, "string");
+  assert.equal(ctx.stats.batches, 1,
+    "permanent capability rejection preserves the audited D1 batch");
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT restore_status FROM audit_logs WHERE id = 'audit-1'",
+  ).get().restore_status, "not_restorable");
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE audit_log_id = 'audit-1' AND status = 'failed'",
+  ).get().n, 1);
+  assert.equal(changes(ctx.sqlite).row.title, "Current Title",
+    "unsupported targets cannot change the real source row");
 });
 
 test("T03 missing audit log matches CURRENT 200 ok:false and no restore row", async () => {

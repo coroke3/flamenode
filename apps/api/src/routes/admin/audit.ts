@@ -203,6 +203,14 @@ export function safeAuditRestoreFailureMessage(result: {
   reason_code?: string;
   message?: string;
 }): string | undefined {
+  // A stored audit_logs.table_name is not necessarily a registered table.
+  // Shared evaluateRestoreCapability embeds an unknown table name verbatim in
+  // the adapter_missing message. Do not reflect that database-sourced string
+  // into privileged HTTP responses, even before the shared-core owner fixes
+  // persistence of such diagnostics. Other domain outcomes keep CURRENT parity.
+  if (!result.ok && result.reason_code === "adapter_missing") {
+    return "復元アダプターが見つかりません。";
+  }
   if (result.ok || result.reason_code !== "mutation_failed") return result.message;
   return typeof result.message === "string" &&
     ALLOWED_AUDIT_RESTORE_FAILURE_MESSAGES.has(result.message)
