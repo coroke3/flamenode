@@ -87,8 +87,8 @@ test("MIG-0651 custom-answer plan: policy snapshot assertion precedes single INS
   assert.deepEqual(plan.expectedChanges, [null, 2]);
   assert.equal(recorded.execution, 0);
   assert.deepEqual(recorded.inserted[0], {
-    video_id: "v:a/b", event_id: "ev-a", question_id: "q:A",
-    answer_text: "test", answer_json: null,
+    video_id: "v:a/b", event_id: "ev-a", question_id: "q-B",
+    answer_text: null, answer_json: '["A"]',
     created_at: args.now, updated_at: args.now,
   });
   const query = new SQLiteSyncDialect().sqlToQuery(recorded.run[0]);
@@ -98,8 +98,8 @@ test("MIG-0651 custom-answer plan: policy snapshot assertion precedes single INS
   assert.ok(query.params.includes("ev-a"));
   assert.ok(query.params.some(p => typeof p === "string" && p.includes('"q:A"') && p.includes('"q-B"')));
   assert.deepEqual(plan.audits.map(a => [a.table_name, a.operation, a.strict, a.target_id]), [
-    ["video_custom_answers", "CREATE", true, "v%3Aa%2Fb:ev-a:q%3AA"],
     ["video_custom_answers", "CREATE", true, "v%3Aa%2Fb:ev-a:q-B"],
+    ["video_custom_answers", "CREATE", true, "v%3Aa%2Fb:ev-a:q%3AA"],
   ]);
   assert.deepEqual(plan.audits[0].after, recorded.inserted[0]);
   assert.notStrictEqual(plan.audits[0].after, recorded.inserted[0]);
