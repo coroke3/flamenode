@@ -1034,24 +1034,37 @@ if (runUnderRootTsx(import.meta.url)) {
   }
 
   test("T-xlink: x-link-requests (enrichment, legacy ids, video icon fallback, signing) equals CURRENT; only xid reviewers and admins", async () => {
-    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
-      const r = await call("/api/manage/x-link-requests", `tok-${name}`);
-      const ref = await refXLinks(name);
-      if (ref === 404) {
-        assert.equal(r.status, 404, name);
-        continue;
+    // #728: CURRENT and Hono sign x-icons in 60-second buckets. Sequential
+    // HTTP/reference calls can cross a real clock boundary and differ by one
+    // minute even when the full signed exp/sig contract is identical. Use a
+    // fixed interior of a minute for this comparison; unlike normalizing URLs,
+    // this still asserts the *entire* signature and expiration are equal.
+    // The staff test above separately verifies real t=59/60 signature rotation.
+    const realDateNow = Date.now;
+    const frozenNow = Math.floor(realDateNow() / 60_000) * 60_000 + 30_000;
+    Date.now = () => frozenNow;
+    try {
+      for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+        const r = await call("/api/manage/x-link-requests", `tok-${name}`);
+        const ref = await refXLinks(name);
+        if (ref === 404) {
+          assert.equal(r.status, 404, name);
+          continue;
+        }
+        assert.equal(r.status, 200, name);
+        assert.deepEqual(r.body, canon(ref), name);
+        record("xlink", r);
       }
-      assert.equal(r.status, 200, name);
-      assert.deepEqual(r.body, canon(ref), name);
-      record("xlink", r);
+      const body = (await call("/api/manage/x-link-requests", "tok-admin")).body;
+      assert.equal(body.rows.length, 100, "pending list is capped at 100 (PENDING_LIMIT)");
+      assert.ok(body.rows.every((row) => row.request_type === "new_link" || row.request_type === "existing_link"));
+      assert.equal((await call("/api/manage/x-link-requests", "tok-owner")).status, 404);
+      assert.equal((await call("/api/manage/x-link-requests", "tok-plain")).status, 403);
+      const stats0 = (await call("/api/manage/x-link-requests", "tok-custom")).stats;
+      assert.equal(stats0.statements, 3);
+    } finally {
+      Date.now = realDateNow;
     }
-    const body = (await call("/api/manage/x-link-requests", "tok-admin")).body;
-    assert.equal(body.rows.length, 100, "pending list is capped at 100 (PENDING_LIMIT)");
-    assert.ok(body.rows.every((row) => row.request_type === "new_link" || row.request_type === "existing_link"));
-    assert.equal((await call("/api/manage/x-link-requests", "tok-owner")).status, 404);
-    assert.equal((await call("/api/manage/x-link-requests", "tok-plain")).status, 403);
-    const stats0 = (await call("/api/manage/x-link-requests", "tok-custom")).stats;
-    assert.equal(stats0.statements, 3);
   });
 
   test("T-overview: event overview equals CURRENT for every user, event and notification filter", async () => {
