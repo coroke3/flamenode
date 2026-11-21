@@ -111,12 +111,14 @@ export function validateSubmissionCustomAnswers(
       answer_text: answerText,
       answer_json: answerJson,
     });
-    if (drafts.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
-      return {
-        ok: false,
-        message: `カスタム質問の回答は最大${MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS}件まで保存できます。`,
-      };
-    }
+  }
+  // CURRENT validates every answer first, then applies the atomic write cap;
+  // an invalid late answer must not be hidden by an earlier count violation.
+  if (drafts.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
+    return {
+      ok: false,
+      message: `カスタム質問の回答は最大${MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS}件まで保存できます。`,
+    };
   }
   return { ok: true, drafts };
 }
