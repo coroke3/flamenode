@@ -1408,4 +1408,91 @@ if (runUnderRootTsx(import.meta.url)) {
 
     assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
   });
+
+  test("S3 #725: real-cookie mounted mutation paths use 4 D1 pre-reads (known over-budget)", async () => {
+    const w = world();
+    const token = "synthetic-s3-reservation-session";
+    insert(w.sqlite, "session", {
+      sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+    });
+    const thaw = freeze();
+    const post = (path, body, headers = {}) => app.request(path, {
+      method: "POST",
+      headers: {
+        Origin: SITE, cookie: "authjs.session-token=" + token,
+        "content-type": "application/json", ...headers,
+      },
+      body: JSON.stringify(body),
+    }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+    const cases = [
+      ["reserve", "/api/events/ev1/slots/s02/reserve",
+        { display_name: "Real Cookie", consecutive_count: 2 }],
+      ["extend-forward", "/api/events/ev1/slots/s02/extend", { direction: "forward" }],
+      ["extend-backward", "/api/events/ev1/slots/s02/extend", { direction: "backward" }],
+      ["release", "/api/events/ev1/slots/s02/release", {}],
+      ["merge", "/api/events/ev1/slot-groups/merge",
+        { gap_slot_id: "s02", display_name: "Merged" }],
+    ];
+    try {
+      for (const [operation, path, body] of cases) {
+        const beforeReads = w.d1.stats.reads;
+        const sqlOffset = w.d1.stats.readSql.length;
+        const beforeBatches = w.d1.stats.batches;
+        const response = await post(path, body);
+        const result = await response.json();
+        assert.equal(response.status, 200, operation + ": " + JSON.stringify(result));
+        assert.equal(result.ok, true, operation);
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        const readCount = w.d1.stats.reads - beforeReads;
+        const statements = w.d1.stats.readSql.slice(sqlOffset);
+        // Characterization, NOT acceptance: ZERO_1102 S3 demands <=3.
+        // After an approved read fusion, replace exact 4 with <=3 here.
+        assert.equal(readCount, 4, "KNOWN S3 #725 " + operation + " over-budget");
+        assert.equal(statements.length, readCount);
+        assert.match(statements[0], /FROM "session" s/);
+        assert.match(statements[1], /terms_reaccept_required/);
+        assert.match(statements[2], /FROM system_settings/);
+        assert.match(statements[3], /invalid_snapshot/);
+        assert.equal(w.d1.stats.batches - beforeBatches, 1,
+          operation + " must use one atomic batch");
+      }
+      for (const [name, headers, status, expectedReads, reason] of [
+        ["invalid-origin", { Origin: "https://evil.example" }, 403, 0, "invalid_origin"],
+        ["no-cookie", { cookie: "" }, 401, 0, "unauthenticated"],
+        ["invalid-token", { cookie: "authjs.session-token=invalid" }, 401, 1, "unauthenticated"],
+      ]) {
+        const beforeReads = w.d1.stats.reads;
+        const beforeBatches = w.d1.stats.batches;
+        const response = await post("/api/events/ev1/slots/s20/reserve",
+          { display_name: "Denied" }, headers);
+        assert.equal(response.status, status, name);
+        assert.equal((await response.json()).reason, reason, name);
+        assert.equal(w.d1.stats.reads - beforeReads, expectedReads, name);
+        assert.equal(w.d1.stats.batches - beforeBatches, 0, name);
+      }
+      insert(w.sqlite, "session", {
+        sessionToken: "s3-noto", userId: "u_notos", expires: NOW_SEC * 1000 + 60000,
+      });
+      const beforeTos = w.d1.stats.reads;
+      const batchesBeforeTos = w.d1.stats.batches;
+      const noTos = await post("/api/events/ev1/slots/s20/reserve",
+        { display_name: "Denied" }, { cookie: "authjs.session-token=s3-noto" });
+      assert.equal(noTos.status, 403);
+      assert.equal((await noTos.json()).reason, "tos_required");
+      assert.equal(w.d1.stats.reads - beforeTos, 2);
+      assert.equal(w.d1.stats.batches - batchesBeforeTos, 0);
+
+      w.sqlite.prepare("UPDATE system_settings SET operation_mode = 'maintenance' WHERE id = 'default'").run();
+      const beforeCost = w.d1.stats.reads;
+      const batchesBeforeCost = w.d1.stats.batches;
+      const maintenance = await post("/api/events/ev1/slots/s20/reserve",
+        { display_name: "Denied" });
+      assert.equal(maintenance.status, 503);
+      assert.equal((await maintenance.json()).reason, "maintenance_mode");
+      assert.equal(w.d1.stats.reads - beforeCost, 3);
+      assert.equal(w.d1.stats.batches - batchesBeforeCost, 0);
+    } finally {
+      thaw();
+    }
+  });
 }
