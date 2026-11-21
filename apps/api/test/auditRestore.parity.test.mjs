@@ -1043,6 +1043,8 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
       );
       assert.equal(response.status, 200, item.format);
       assert.equal(response.headers.get("Cache-Control"), "no-store", item.format);
+      assert.equal(response.headers.get("X-FlameNode-Cache"), "HIT", 
+        item.format + ": stale reader-colo Cache API entry must be exercised, not a safe MISS");
       const body = await response.text();
       if (body.includes("vid-restore")) {
         exposed.push(item.format + ":" + response.headers.get("X-FlameNode-Cache"));
