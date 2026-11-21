@@ -13,9 +13,10 @@ if (runUnderRootTsx(import.meta.url)) {
   const key = "rules/current.json";
   const visibilityKey = "visibility/blocked-entities.v1.json";
 
-  async function request(t, { objects = {}, mode, token = "tok-carol", breakD1 = false, visibilityGetOverride } = {}) {
+  async function request(t, { objects = {}, mode, token = "tok-carol", breakD1 = false, visibilityGetOverride, seedSqlite } = {}) {
     const sqlite = createSqlite();
     seed(sqlite);
+    if (seedSqlite) seedSqlite(sqlite);
     t.after(() => sqlite.close());
     const d1 = createD1(sqlite);
     const reads = { get: [], head: [] };
@@ -200,5 +201,45 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.deepEqual(h.reads, { head: [], get: [visibilityKey] });
       assert.equal(h.stats.writes, 0);
     }
+  });
+  test("MIG-0627 U02c PREP T10: published-major update without R2 promotion can show stale rules (BLOCKER characterization)", async (t) => {
+    // Current reader parity deliberately returns the present R2 artifact; the
+    // visibility fence validates entity revocations, not terms publication
+    // generation. Do NOT silently rewrite runtime behavior from this test.
+    const publishedMajor = (db) => db.exec(
+      "INSERT INTO terms_versions (id, version_label, body_markdown, status, severity, published_at, created_by_user_id, updated_at) " +
+      "VALUES ('T4', 'v4', '# Terms v4', 'published', 'major', 4000, 'admin', 4000)"
+    );
+    const committedFence = {
+      schema_version: 1, revision: 1, generated_at: 1700000000, entities: [],
+    };
+    const previousPublished = {
+      version_label: "v2", body_markdown: "# Terms v2\n\n* a", published_at: 2000,
+    };
+    // Alice accepted the old T2 major in the real migrated-schema fixture.
+    const stale = await request(t, {
+      token: "tok-alice", mode: "enforce", seedSqlite: publishedMajor,
+      objects: { [visibilityKey]: committedFence, [key]: previousPublished },
+    });
+    const withoutR2 = await request(t, {
+      token: "tok-alice", mode: "enforce", seedSqlite: publishedMajor,
+      objects: { [visibilityKey]: committedFence },
+    });
+
+    assert.equal(stale.response.status, 200);
+    assert.equal(stale.body.state.needsTermsAcceptance, true,
+      "D1 recognizes the newly published major and demands reacceptance");
+    assert.equal(stale.body.rules?.versionLabel, "v2",
+      "KNOWN GAP: old valid R2 object is returned despite D1's newer major");
+    assert.deepEqual(stale.reads, { head: [], get: [visibilityKey, key] });
+    assert.equal(withoutR2.response.status, 200);
+    assert.equal(withoutR2.body.state.needsTermsAcceptance, true);
+    assert.equal(withoutR2.body.rules?.versionLabel, "v4",
+      "D1 fallback selects latest published major only when R2 object is absent");
+    assert.deepEqual(withoutR2.reads, { head: [], get: [visibilityKey, key] });
+    assert.equal(withoutR2.stats.statements, stale.stats.statements + 1,
+      "always querying D1 to hide stale R2 would exceed the existing S2 statement budget");
+    assert.equal(stale.stats.writes, 0);
+    assert.equal(withoutR2.stats.writes, 0);
   });
 }
