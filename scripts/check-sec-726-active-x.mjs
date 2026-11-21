@@ -13,7 +13,7 @@
  *       2 = unavailable/malformed preflight (also STOP cutover).
  */
 import fs from "node:fs";
-import path from "node:path";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -23,7 +23,8 @@ import {
 
 const SCRIPT = "check:sec-726-active-x";
 const ROOT = process.cwd();
-const SQL_PATH = path.join(ROOT, "scripts/sql/check-sec-726-active-x.sql");
+// SQL source is anchored to this reviewed file, never to an untrusted cwd.
+const SQL_PATH = fileURLToPath(new URL("./sql/check-sec-726-active-x.sql", import.meta.url));
 
 function parseMode(args) {
   const dbArgs = args.filter((x) => x.startsWith("--database="));
