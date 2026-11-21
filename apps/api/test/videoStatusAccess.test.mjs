@@ -1631,6 +1631,16 @@ test("MIG-0603: notifiable status facts fit inside existing authorized snapshot 
     );
     legacyRecipient.run("  u_plain  ", "v1");
     await read("voided", { recipientEnabled: true, activeDedupe: true });
+    // CURRENT uses String.prototype.trim(), while SQLite trim(X) only
+    // removes ASCII space. Keep Unicode legacy recipient IDs equivalent in
+    // the opt-in notification projection, with no additional D1 round-trip.
+    for (const whitespace of ["\t", "\u00A0", "\u3000", "\u2028", "\uFEFF"]) {
+      legacyRecipient.run(whitespace + "u_plain" + whitespace, "v1");
+      await read("voided", { recipientEnabled: true, activeDedupe: true });
+    }
+    // ECMAScript trim intentionally does not remove U+200B ZERO WIDTH SPACE.
+    legacyRecipient.run("\u200Bu_plain\u200B", "v1");
+    await read("voided", { recipientEnabled: false, activeDedupe: true });
     legacyRecipient.run("  missing_imported_user  ", "v1");
     await read("voided", { recipientEnabled: false, activeDedupe: true });
     legacyRecipient.run("u_plain", "v1");
@@ -1743,6 +1753,26 @@ test("MIG-0603: unmounted notification DML rechecks recipient and dedupe inside 
       .run("  u_plain  ");
     sqlite.prepare("UPDATE notification_outbox SET status='failed' WHERE id='atomic-voided'").run();
     assert.equal((await attempt("atomic-padded", "voided")).recipient_user_id, "u_plain");
+    // The conditional INSERT must use the same JS trim code-point set as the
+    // CURRENT notification builder (and the preceding read-only projection).
+    // A new active notice is made 'failed' before each case to isolate the
+    // recipient-resolution result from the unique-dedupe protection.
+    const setRecipient = sqlite.prepare("UPDATE videos SET submitted_by_user_id=? WHERE id='v1'");
+    const releaseDedupe = sqlite.prepare(
+      "UPDATE notification_outbox SET status='failed' " +
+      "WHERE dedupe_key='video_voided:v1' AND status IN ('pending','processing','sent')",
+    );
+    for (const [index, whitespace] of ["\t", "\u00A0", "\u3000", "\u2028", "\uFEFF"].entries()) {
+      releaseDedupe.run();
+      setRecipient.run(whitespace + "u_plain" + whitespace);
+      const inserted = await attempt("atomic-unicode-" + index, "voided");
+      assert.equal(inserted?.recipient_user_id, "u_plain",
+        "conditional D1 outbox must match CURRENT JS trim for Unicode-padded legacy user IDs");
+    }
+    releaseDedupe.run();
+    setRecipient.run("\u200Bu_plain\u200B");
+    assert.equal(await attempt("atomic-untrimmed-zwsp", "voided"), undefined,
+      "U+200B is not whitespace in CURRENT JS trim; do not misdeliver the notice");
     sqlite.prepare("UPDATE videos SET submitted_by_user_id=? WHERE id='v1'")
       .run("  missing_user  ");
     assert.equal(await attempt("atomic-missing", "public"), undefined,
