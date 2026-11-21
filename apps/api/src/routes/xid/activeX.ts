@@ -47,9 +47,75 @@ function isSessionSafeSelectedXId(value: string): boolean {
 }
 
 
+/**
+ * SEC-716/726 S3 first-row budget: validate every user and guard/actor
+ * projection *in SQLite*, before D1 serializes the first() JSON object.
+ * The caps total < 10KiB of raw TEXT; even worst-case JSON control escapes
+ * (6 bytes per input byte), numeric columns and field keys stay under 64KiB.
+ *
+ * A malformed/oversized legacy value is projected as NULL AND flagged for
+ * private HTTP 503. Never truncate a value and then mutate/audit a different
+ * identity. Each user column is explicitly mapped to avoid SELECT u.* leaks.
+ */
+const XID_USER_TEXT_COLUMNS = [
+  ['id', 128], ['name', 768], ['email', 512], ['image', 2048],
+  ['discord_id', 256], ['role', 32], ['accepted_terms_version_id', 128],
+  ['active_x_user_id', 512],
+] as const;
+const XID_USER_NUMBER_COLUMNS = [
+  'emailVerified', 'can_create_events', 'is_tos_accepted',
+  'terms_reaccept_required', 'is_banned', 'is_notification_enabled',
+  'onboarding_completed_at', 'last_guild_check', 'created_at',
+] as const;
+const XID_EXTRA_TEXT_COLUMNS = [
+  ['active_x."x_name"', 768],
+  ['active_x."icon_url"', 2048],
+  ['settings."operation_mode"', 32],
+  ['settings."disabled_features_json"', 768],
+  ['settings."cost_guard_exception_features_json"', 768],
+] as const;
+const XID_EXTRA_NUMBER_COLUMNS = [
+  'settings."cost_guard_exception_until"',
+  'settings."audit_normal_retention_days"',
+  'settings."audit_restorable_retention_days"',
+  'settings."audit_long_retention_days"',
+  'settings."audit_max_payload_bytes"',
+  'settings."audit_compact_after_days"',
+] as const;
+
+function unsafeTextExpr(column: string, maxBytes: number): string {
+  return `(${column} IS NOT NULL AND (typeof(${column}) <> 'text'
+    OR length(CAST(${column} AS BLOB)) > ${maxBytes}))`;
+}
+function guardedTextExpr(column: string, maxBytes: number): string {
+  return `CASE WHEN ${unsafeTextExpr(column, maxBytes)} THEN NULL ELSE ${column} END`;
+}
+function unsafeNumericExpr(column: string): string {
+  return `typeof(${column}) NOT IN ('integer', 'real', 'null')`;
+}
+function guardedNumericExpr(column: string): string {
+  return `CASE WHEN ${unsafeNumericExpr(column)} THEN NULL ELSE ${column} END`;
+}
+const XID_USER_SQL_PROJECTION = [
+  ...XID_USER_TEXT_COLUMNS.map(([name, bytes]) =>
+    `${guardedTextExpr('u."' + name + '"', bytes)} AS "${name}"`),
+  ...XID_USER_NUMBER_COLUMNS.map((name) =>
+    `${guardedNumericExpr('u."' + name + '"')} AS "${name}"`),
+].join(',\n      ');
+const XID_INVALID_SNAPSHOT_SQL = [
+  ...XID_USER_TEXT_COLUMNS.map(([name, bytes]) =>
+    unsafeTextExpr('u."' + name + '"', bytes)),
+  ...XID_USER_NUMBER_COLUMNS.map((name) =>
+    unsafeNumericExpr('u."' + name + '"')),
+  ...XID_EXTRA_TEXT_COLUMNS.map(([column, bytes]) =>
+    unsafeTextExpr(column, bytes)),
+  ...XID_EXTRA_NUMBER_COLUMNS.map(unsafeNumericExpr),
+].join(' OR ');
+
 type RawUserRow = Record<string, string | number | null> & {
   id: string;
   active_x_user_id: string | null;
+  invalid_gate_snapshot: number;
   linked_approval_status?: string | null;
   resolved_x_user_id?: string | null;
   derived_terms_reaccept_required?: number | null;
@@ -145,20 +211,22 @@ async function loadSelectedIdentity(
       THEN canonical_id ELSE NULL END AS canonical_id
       FROM resolved
     )
-    SELECT u.*,
+    SELECT
+      CASE WHEN ${XID_INVALID_SNAPSHOT_SQL} THEN 1 ELSE 0 END AS invalid_gate_snapshot,
+      ${XID_USER_SQL_PROJECTION},
       ${TERMS_REACCEPT_REQUIRED_CASE_SQL} AS derived_terms_reaccept_required,
-      active_x.x_name AS actor_x_name,
-      active_x.icon_url AS actor_x_icon_url,
+      ${guardedTextExpr('active_x."x_name"', 768)} AS actor_x_name,
+      ${guardedTextExpr('active_x."icon_url"', 2048)} AS actor_x_icon_url,
       settings.id AS cg_settings_id,
-      settings.operation_mode AS cg_operation_mode,
-      settings.disabled_features_json AS cg_disabled_features_json,
-      settings.cost_guard_exception_until AS cg_cost_guard_exception_until,
-      settings.cost_guard_exception_features_json AS cg_cost_guard_exception_features_json,
-      settings.audit_normal_retention_days AS cg_audit_normal_retention_days,
-      settings.audit_restorable_retention_days AS cg_audit_restorable_retention_days,
-      settings.audit_long_retention_days AS cg_audit_long_retention_days,
-      settings.audit_max_payload_bytes AS cg_audit_max_payload_bytes,
-      settings.audit_compact_after_days AS cg_audit_compact_after_days,
+      ${guardedTextExpr('settings."operation_mode"', 32)} AS cg_operation_mode,
+      ${guardedTextExpr('settings."disabled_features_json"', 768)} AS cg_disabled_features_json,
+      ${guardedNumericExpr('settings."cost_guard_exception_until"')} AS cg_cost_guard_exception_until,
+      ${guardedTextExpr('settings."cost_guard_exception_features_json"', 768)} AS cg_cost_guard_exception_features_json,
+      ${guardedNumericExpr('settings."audit_normal_retention_days"')} AS cg_audit_normal_retention_days,
+      ${guardedNumericExpr('settings."audit_restorable_retention_days"')} AS cg_audit_restorable_retention_days,
+      ${guardedNumericExpr('settings."audit_long_retention_days"')} AS cg_audit_long_retention_days,
+      ${guardedNumericExpr('settings."audit_max_payload_bytes"')} AS cg_audit_max_payload_bytes,
+      ${guardedNumericExpr('settings."audit_compact_after_days"')} AS cg_audit_compact_after_days,
       (SELECT canonical_id FROM bounded_resolved) AS resolved_x_user_id,
       (SELECT x.approval_status FROM x_user_account_links l
        INNER JOIN x_users x ON x.id = l.x_user_id
@@ -174,6 +242,7 @@ async function loadSelectedIdentity(
 
   if (!row) return null;
   const {
+    invalid_gate_snapshot,
     linked_approval_status, resolved_x_user_id, derived_terms_reaccept_required,
     actor_x_name, actor_x_icon_url,
     cg_settings_id, cg_operation_mode, cg_disabled_features_json,
@@ -182,6 +251,10 @@ async function loadSelectedIdentity(
     cg_audit_long_retention_days, cg_audit_max_payload_bytes, cg_audit_compact_after_days,
     ...user
   } = row;
+  if (invalid_gate_snapshot !== 0) {
+    // The outer route maps this fixed, PII-free failure to private HTTP 503.
+    throw new Error("invalid_sa098_first_row_projection");
+  }
   // Drizzle timestamp_ms columns are Date objects in CURRENT select().
   if (typeof user.emailVerified === "number") {
     (user as Record<string, unknown>).emailVerified = new Date(user.emailVerified);
