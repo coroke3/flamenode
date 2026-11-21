@@ -807,6 +807,60 @@ test("T03 #730 authenticated preflight D1 exception returns fixed 500 without SQ
   }
 });
 
+// The shared CURRENT restore builder intentionally exposes a fixed code for
+// malformed video-member audit snapshots. Test the mounted opt-in Hono route
+// rather than only the message-sanitizer helper: a false-positive generic
+// response here would conceal a separately reviewed domain failure.
+test("T03 #730 real Hono preserves known builder rejection without data mutation", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true });
+  ctx.sqlite.exec(`CREATE TABLE video_members (
+    id TEXT PRIMARY KEY, video_id TEXT NOT NULL, x_user_id TEXT,
+    name TEXT NOT NULL, role TEXT, comment TEXT,
+    order_index INTEGER NOT NULL DEFAULT 0,
+    can_edit INTEGER NOT NULL DEFAULT 0,
+    is_public_member INTEGER NOT NULL DEFAULT 1,
+    edit_granted_by_auth_user_id TEXT,
+    edit_granted_at INTEGER, edit_updated_at INTEGER
+  )`);
+  const auditId = "audit-members-invalid";
+  const videoId = "video-members-1";
+  const now = Math.floor(Date.now() / 1000);
+  // This shape passes the top-level audit target ID check, but fails
+  // parseVideoMemberSetSnapshot in the registered mutation adapter.
+  ctx.sqlite.prepare(`INSERT INTO audit_logs
+    (id, table_name, target_id, operation, restore_strategy, restore_status,
+     before_json, after_json, created_at, actor_user_id)
+    VALUES (?, 'video_members_set', ?, 'UPDATE', 'custom_adapter',
+      'restorable', ?, NULL, ?, 'admin-1')`)
+    .run(auditId, videoId, JSON.stringify({ id: videoId, rows: "broken" }), now - 30);
+  const response = await ctx.request({
+    audit_id: auditId,
+    reason: "test-only invalid members snapshot",
+    confirm_text: "RESTORE " + auditId,
+  });
+  assert.equal(response.status, 200, "CURRENT domain rejections use HTTP 200");
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  const received = await response.json();
+  assert.equal(received.ok, false);
+  assert.equal(received.message, "video_members_set_snapshot_invalid",
+    "reviewed domain code survives Hono and is not flattened to a generic provider failure");
+  assert.equal(typeof received.restore_run_id, "string");
+  assert.equal(ctx.stats.batches, 0,
+    "builder failure must occur before a restoration mutation batch");
+  const runs = ctx.sqlite.prepare(
+    "SELECT status,error_message FROM audit_restore_runs WHERE audit_log_id = ?",
+  ).all(auditId);
+  assert.equal(runs.length, 1, "failure is recorded without a successful restore");
+  assert.equal(runs[0].status, "failed");
+  assert.match(runs[0].error_message, /video_members_set_snapshot_invalid/);
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT restore_status FROM audit_logs WHERE id = ?",
+  ).get(auditId).restore_status, "restorable");
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM video_members",
+  ).get().n, 0, "no member writes are issued");
+});
+
 test("T03 missing audit log matches CURRENT 200 ok:false and no restore row", async () => {
   const ctx = setup();
   const res = await ctx.request({ audit_id: "missing", reason: "test", confirm_text: "RESTORE missing" });
