@@ -100,10 +100,10 @@ test("U03a: existing form metadata remains, while affiliation and event IDs over
     assert.deepEqual(args.initial, { ...initial, event_ids: ["event-A"], part: null });
     assert.deepEqual(args.eventOptions, [eventA]);
     assert.equal(container.querySelector('input[name="event_ids"]').value, "event-A");
-    assert.equal(flushCount, 2, "selecting an event flushes the last available form draft");
+    assert.equal(flushCount, 1, "no mounted child exists until an event is selected; do not replay the departed flush");
 
     await act(async () => selected(container, "none").click());
-    assert.equal(flushCount, 3, "switching back flushes the most recent child");
+    assert.equal(flushCount, 2, "switching back flushes only the newly registered event child");
     args = snapshots.at(-1);
     assert.deepEqual(args.initial.event_ids, []);
     assert.deepEqual(args.eventOptions, []);
@@ -1479,7 +1479,7 @@ test("U03a ISSUE-703: a delayed previous-affiliation flush registration cannot o
     await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-B"));
     assert.equal(currentFlushes, 1, "the live event-A form is flushed exactly once");
     assert.equal(staleFlushes, 0, "a detached no-event form must never replace the live flush");
-    assert.equal(previousFlushes, 2, "historical affiliation/event transitions are not changed");
+    assert.equal(previousFlushes, 1, "the departed no-event flusher is consumed once and never replayed");
     assert.equal(container.querySelector('input[name="event_ids"]').value, "event-B");
   } finally {
     await act(async () => root.unmount());
