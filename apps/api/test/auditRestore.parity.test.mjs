@@ -97,7 +97,7 @@ function setup({
       body: JSON.stringify(body),
     }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE, ...extraEnv },
   );
-  return { sqlite, db, stats, readTrace, request };
+  return { sqlite, db, stats, readTrace, request, app };
 }
 
 function seedRestorableAnnouncement(sqlite, { currentTitle = "Current Title" } = {}) {
@@ -166,6 +166,67 @@ test("T00 production/default admin router physically excludes unapproved SA-011 
   assert.equal(accepted.status, 200, "isolated test-only opt-in still exercises real candidate");
   assert.equal((await accepted.json()).ok, true);
   assert.equal(changes(enabled.sqlite).runs.length, 1);
+});
+
+// The body parser is shared, but this audit route's error boundary must
+// contain stream-provider failures in both already-mounted audit endpoints
+// and the opt-in SA-011 candidate. No provider/Error object reaches Hono logs.
+test("T00 authenticated audit POST body stream failure cannot leak exception details", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true });
+  seedRestorableAnnouncement(ctx.sqlite);
+  const marker = "MIG0662_PRIVATE_STREAM_PROVIDER_CANARY";
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  const logs = [];
+  const capture = (...parts) => {
+    logs.push(parts.map((part) => part instanceof Error
+      ? (part.stack ?? part.message) : String(part)).join(" "));
+  };
+  try {
+    console.error = capture;
+    console.warn = capture;
+    for (const path of [
+      "/api/admin/audit/settings",
+      "/api/admin/audit/dry-run",
+      "/api/admin/audit/restore",
+    ]) {
+      const stream = new ReadableStream({
+        start(controller) {
+          const error = new Error("Failed query: READ audit_json; params: " + marker, {
+            cause: new Error("private request stream cause: " + marker),
+          });
+          error.provider = { authorization: marker };
+          controller.error(error);
+        },
+      });
+      // Node's request-stream constructor requires duplex when the body is
+      // a ReadableStream; no real HTTP/Cloudflare request is made.
+      const request = new Request(SITE + path, {
+        method: "POST",
+        headers: {
+          Origin: SITE,
+          Cookie: `__Secure-authjs.session-token=${SQLITE_AUTH_SESSION_TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: stream,
+        duplex: "half",
+      });
+      const response = await ctx.app.fetch(request, {
+        DB: ctx.db, NEXT_PUBLIC_SITE_URL: SITE,
+      });
+      assert.equal(response.status, 400, path);
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store", path);
+      assert.deepEqual(await response.json(), { ok: false, message: "入力エラー" }, path);
+    }
+    assert.equal(ctx.stats.batches, 0, "invalid audit streams never create an audited D1 write");
+    assert.equal(changes(ctx.sqlite).row.title, "Current Title");
+    assert.equal(changes(ctx.sqlite).runs.length, 0);
+    assert.equal(logs.join("\n").includes(marker), false,
+      "neither the body provider error nor its nested cause may reach console logs");
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
 });
 
 // SA-009 is already mounted; D1 errors may include private SQL parameters.
