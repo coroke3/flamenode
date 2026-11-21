@@ -6,7 +6,7 @@ import {
   buildUnslottedEventEligibilityAssertionPlan,
   buildUnslottedVideoEventPlan,
 } from "./unslottedEventPlans.ts";
-import { buildFreeVideoInsertPlan } from "./freeVideoInsertPlan.ts";
+import { buildFreeVideoInsertPlan, buildFreeVideoYoutubeMetadataInsertPlan } from "./freeVideoInsertPlan.ts";
 import { buildFreeVideoCustomAnswerInsertPlan } from "./freeVideoCustomAnswerInsertPlan.ts";
 import type { LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
 
@@ -62,6 +62,9 @@ export function buildFreeVideoSubmissionAtomicPlan(
     throw new Error("free_video_submission_assertion_plan_invalid");
   }
   const videoInsert = buildFreeVideoInsertPlan(db, videoAfter, actorUserId);
+  const youtubeMetadata = buildFreeVideoYoutubeMetadataInsertPlan(db, {
+    videoId: videoAfter.id, actorUserId, now,
+  });
   const eventLink = buildUnslottedVideoEventPlan(db, {
     videoId: videoAfter.id, eventId, actorUserId,
   });
@@ -76,6 +79,7 @@ export function buildFreeVideoSubmissionAtomicPlan(
     ...eventAssertion.statements,
     ...(questionAssertion ? [questionAssertion] : []),
     ...videoInsert.statements,
+    ...youtubeMetadata.statements,
     ...eventLink.statements,
     ...answerMutations,
   ];
@@ -83,6 +87,7 @@ export function buildFreeVideoSubmissionAtomicPlan(
     ...eventAssertion.expectedChanges,
     ...(questionAssertion ? [null] : []),
     ...videoInsert.expectedChanges,
+    ...youtubeMetadata.expectedChanges,
     ...eventLink.expectedChanges,
     ...answerMutationChanges,
   ];
@@ -92,6 +97,6 @@ export function buildFreeVideoSubmissionAtomicPlan(
   return {
     statements,
     expectedChanges,
-    audits: [...videoInsert.audits, ...eventLink.audits, ...answerPlan.audits],
+    audits: [...videoInsert.audits, ...youtubeMetadata.audits, ...eventLink.audits, ...answerPlan.audits],
   };
 }
