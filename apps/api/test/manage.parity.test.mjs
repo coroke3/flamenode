@@ -1067,6 +1067,44 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("Issue #728: X-link signed-icon parity across the 59/60-second boundary", async () => {
+    // Compare the *complete* payload and HMAC, not a normalized URL. The
+    // existing T-xlink comparison freezes one clock bucket; this separate
+    // regression proves that real signature rotation still occurs across it.
+    const realDateNow = Date.now;
+    const bucketStart = Math.floor(realDateNow() / 60_000) * 60_000;
+    const urls = [];
+    try {
+      for (const frozenNow of [bucketStart + 59_000, bucketStart + 60_000]) {
+        Date.now = () => frozenNow;
+        const r = await call("/api/manage/x-link-requests", "tok-admin");
+        assert.equal(r.status, 200);
+        const ref = await refXLinks("admin");
+        assert.deepEqual(r.body, canon(ref), "CURRENT/Hono full signed URL parity");
+        const signedIcon = r.body.rows.find((row) =>
+          row.id === "xr9" && row.target_icon_url?.startsWith("/api/media/manage-x-icon/"));
+        assert.ok(signedIcon, "the signed target icon fixture must be present");
+        const url = new URL(signedIcon.target_icon_url, "https://x.test");
+        const expiresAt = Number(url.searchParams.get("exp"));
+        const signature = url.searchParams.get("sig");
+        assert.ok(signature, "signed icon URL retains an HMAC signature");
+        assert.equal(await verifyManageXIconSignatureInput({
+          key: "xicons/i.png", expiresAt, signature,
+          secret: "test-secret", now: Math.floor(frozenNow / 1000),
+        }), true, "CURRENT verifier must accept the Hono URL's signature");
+        urls.push(url);
+      }
+    } finally {
+      Date.now = realDateNow;
+    }
+    assert.equal(
+      Number(urls[1].searchParams.get("exp")) - Number(urls[0].searchParams.get("exp")),
+      60, "the expiry advances exactly one minute at a 59/60-second boundary",
+    );
+    assert.notEqual(urls[0].searchParams.get("sig"), urls[1].searchParams.get("sig"),
+      "the signed HMAC must rotate at the minute boundary");
+  });
+
   test("T-overview: event overview equals CURRENT for every user, event and notification filter", async () => {
     for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
       for (const eventId of ["evA", "evB", "evC", "evD", "evNull", "nope"]) {
