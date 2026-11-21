@@ -336,6 +336,8 @@ if (runUnderRootTsx(import.meta.url)) {
         reason: "audited differential", logTag: "status-differential",
         ...(enableWake ? { notificationWakeSource: "admin", staticRebuildWakeSource: "admin" } : {}),
       };
+      // An R2 transport error, foreign token or unreadable rollback cannot
+      // certify cleanup. Both runtimes return fail-closed status_unverified.
       // Exercise CURRENT's actual Next mutation bridge rather than Hono twice.
       let result;
       let controlThrown = null;
@@ -363,7 +365,8 @@ if (runUnderRootTsx(import.meta.url)) {
           r2Fault === "read-after-write" ||
           r2Fault === "write-committed-foreign-owner-once") {
         assert.equal(result.ok, false, "persistent R2 errors or lost R2 ownership must stop before D1");
-        assert.equal(result.errorCode, "visibility_precommit_failed");
+        assert.equal(result.errorCode, "status_unverified",
+          "an unverified R2 precommit/rollback cannot be reported as a confirmed rejection");
         assert.equal(result.retryable, false, "no unsafe retry after an unconfirmed R2 fence");
       } else if (r2Fault === "compensation-rejected" && forceStaleCas) {
         assert.deepEqual(result, {
@@ -375,7 +378,8 @@ if (runUnderRootTsx(import.meta.url)) {
         }, "unconfirmed R2 compensation must never report D1 CAS retry or public success");
       } else if (replaceR2FenceOwner) {
         assert.equal(result.ok, false, "R2 owner changes must stop before D1");
-        assert.equal(result.errorCode, "visibility_precommit_failed");
+        assert.equal(result.errorCode, "status_unverified",
+          "an unverified R2 precommit/rollback cannot be reported as a confirmed rejection");
         assert.equal(result.retryable, false, "lost R2 ownership is fail-closed");
       } else if (forceStaleCas) {
         assert.equal(result.ok, false, "the stale CAS must fail");
@@ -567,7 +571,8 @@ if (runUnderRootTsx(import.meta.url)) {
         );
         assert.deepEqual(hono, current, "both runtimes must fail closed on the same R2 outage");
         assert.equal(current.result.ok, false);
-        assert.equal(current.result.errorCode, "visibility_precommit_failed");
+        assert.equal(current.result.errorCode, "status_unverified",
+          "unknown or foreign-owned R2 state must remain nonretryable and unverified");
         assert.equal(current.batches, 0, "R2 errors prevent any audited D1 transaction");
         assert.equal(current.video.visibility_status, initialStatus);
         assert.equal(current.video.updated_at, 1000);
@@ -651,7 +656,8 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.deepEqual(hono, current,
         "CURRENT Next and unmounted Hono must fail closed with identical effects after owner replacement");
       assert.equal(current.result.ok, false);
-      assert.equal(current.result.errorCode, "visibility_precommit_failed");
+      assert.equal(current.result.errorCode, "status_unverified",
+          "unknown or foreign-owned R2 state must remain nonretryable and unverified");
       assert.equal(current.result.retryable, false, "never automatically retry a lost foreign fence");
       assert.equal(current.batches, 0, "no audited D1 transaction begins without confirmed R2 ownership");
       assert.equal(current.video.visibility_status, initialStatus, "video visibility is unchanged");
@@ -684,7 +690,8 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.deepEqual(hono, current,
         "CURRENT bridge and Hono adapter must fail closed identically without a confirmed R2 read-back");
       assert.equal(current.result.ok, false);
-      assert.equal(current.result.errorCode, "visibility_precommit_failed");
+      assert.equal(current.result.errorCode, "status_unverified",
+          "unknown or foreign-owned R2 state must remain nonretryable and unverified");
       assert.equal(current.result.retryable, false,
         "unconfirmed R2 fence state is never safe to retry automatically");
       assert.equal(current.batches, 0, "an unverified R2 fence cannot authorize any D1 mutation");
@@ -712,7 +719,8 @@ if (runUnderRootTsx(import.meta.url)) {
     const hono = await executeAuditedStatus("public", false, false, true, false, "private");
     assert.deepEqual(hono, current, "both adapters reject a lost release-block owner");
     assert.equal(current.result.ok, false);
-    assert.equal(current.result.errorCode, "visibility_precommit_failed");
+    assert.equal(current.result.errorCode, "status_unverified",
+          "unknown or foreign-owned R2 state must remain nonretryable and unverified");
     assert.equal(current.result.retryable, false);
     assert.equal(current.batches, 0, "no mutation may start after losing the R2 CAS");
     assert.equal(current.video.visibility_status, "private");
