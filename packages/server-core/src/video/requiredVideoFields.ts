@@ -6,6 +6,9 @@ import {
 } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 
+/** MIG-0651 unmounted SA-086 general-question read candidate. */
+export { loadGeneralCustomQuestionsForFreeVideo } from "./freeVideoCustomQuestionRead.ts";
+
 /** SA-086/088/089: reads the union of required fields across linked events. */
 export async function loadUnionRequiredVideoFields(
   db: ServerCoreDb,
