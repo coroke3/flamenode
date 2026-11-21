@@ -241,12 +241,21 @@ function UnslottedPostShellForIdentity<
   // 親でも同じイベントを購読すると1回の切替でconfirmが二重表示されるため、
   // shell側は選択状態のdraft保存だけを担当する。
 
+  // A new selection may render before its child registers a draft flusher.
+  // Consume the previous form's callback exactly once, or a second rapid
+  // selection could re-flush an already detached child and miss the new form.
+  const flushPreviousVideoDraft = () => {
+    const flush = videoDraftFlushRef.current;
+    videoDraftFlushRef.current = () => false;
+    flush();
+  };
+
   const selectAffiliation = (next: Exclude<AffiliationChoice, null>) => {
     if (next === affiliation || !confirmReset()) return;
     pendingRestoredEventIdRef.current = "";
     selectionRevisionRef.current += 1;
     formOwnerEpochRef.current += 1;
-    videoDraftFlushRef.current();
+    flushPreviousVideoDraft();
     setShellDirty(true);
     setAffiliation(next);
     if (next === "none") {
@@ -260,7 +269,7 @@ function UnslottedPostShellForIdentity<
     pendingRestoredEventIdRef.current = "";
     selectionRevisionRef.current += 1;
     formOwnerEpochRef.current += 1;
-    videoDraftFlushRef.current();
+    flushPreviousVideoDraft();
     setShellDirty(true);
     setMissingRestoredEvent(false);
     setSelectedEventId(eventId);

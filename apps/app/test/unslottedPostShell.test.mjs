@@ -1487,3 +1487,49 @@ test("U03a ISSUE-703: a delayed previous-affiliation flush registration cannot o
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: one-shot flush registration during rapid event selections", async () => {
+  dom.window.localStorage.clear();
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const eventB = { ...eventA, id: "event-B", title: "Event B" };
+  const eventC = { ...eventA, id: "event-C", title: "Event C" };
+  const snapshots = [];
+  const renderVideoForm = args => {
+    snapshots.push(args);
+    return renderStub(args);
+  };
+  let oldFormFlushes = 0;
+  let newFormFlushes = 0;
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      eventOptions: [eventA, eventB, eventC], renderVideoForm,
+    }))));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    const oldForm = snapshots.at(-1);
+    assert.deepEqual(oldForm.initial.event_ids, ["event-A"]);
+    oldForm.onDraftFlushReady(() => { oldFormFlushes += 1; return true; });
+
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-B"));
+    assert.equal(oldFormFlushes, 1, "event-A is flushed on departure");
+    // Simulate an async/slow event-B child that has not registered its flusher
+    // yet: a second choice must not invoke event-A's stale callback again.
+    assert.deepEqual(snapshots.at(-1).initial.event_ids, ["event-B"]);
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-C"));
+    assert.equal(oldFormFlushes, 1, "the departed event-A flusher is consumed exactly once");
+    assert.deepEqual(snapshots.at(-1).initial.event_ids, ["event-C"]);
+
+    const current = snapshots.at(-1);
+    current.onDraftFlushReady(() => { newFormFlushes += 1; return true; });
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-B"));
+    assert.equal(newFormFlushes, 1, "the newly registered event-C flusher still operates");
+    assert.equal(oldFormFlushes, 1, "event-A cannot be flushed by the later transition");
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-B");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
