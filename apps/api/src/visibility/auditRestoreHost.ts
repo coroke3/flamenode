@@ -44,6 +44,16 @@ function safeAuditManifestError(error: unknown, fallback: string): Error {
   return new Error(message && SAFE_MANIFEST_ERROR_CODES.has(message) ? message : fallback);
 }
 
+// A malformed runtime binding can throw before the R2 read/put begins.
+// Never let a binding getter's provider error enter shared restore-core logs.
+function auditManifestBucket(c: Context<AppEnv>, fallback: string): R2Bucket | undefined {
+  try {
+    return c.env?.BUCKET;
+  } catch {
+    throw new Error(fallback);
+  }
+}
+
 // Matches CURRENT nextVideoPublicCacheKeyHost. Shared producer keys are
 // imported to avoid silent drift. U04 replaces this provisional list with
 // MIG-0603's reviewed shared host before route activation.
@@ -71,9 +81,15 @@ export function createAuditRestoreHost(c: Context<AppEnv>): AuditRestoreHost {
   return {
     manifest: {
       read: async () => {
-        const bucket = c.env?.BUCKET;
+        const bucket = auditManifestBucket(c, "public_visibility_manifest_read_failed");
         if (!bucket) {
-          const mode = resolvePublicVisibilityGuardMode(c.env?.PUBLIC_VISIBILITY_GUARD_MODE);
+          // Do not reflect a failing environment/guard-mode getter either.
+          let mode: ReturnType<typeof resolvePublicVisibilityGuardMode>;
+          try {
+            mode = resolvePublicVisibilityGuardMode(c.env?.PUBLIC_VISIBILITY_GUARD_MODE);
+          } catch {
+            throw new Error("public_visibility_manifest_read_failed");
+          }
           if (mode === "enforce") {
             throw new Error("public_visibility_manifest_bucket_missing");
           }
@@ -98,7 +114,7 @@ export function createAuditRestoreHost(c: Context<AppEnv>): AuditRestoreHost {
         }
       },
       write: async (manifest, options) => {
-        const bucket = c.env?.BUCKET;
+        const bucket = auditManifestBucket(c, "public_visibility_manifest_put_failed");
         if (!bucket) throw new Error("public_visibility_manifest_bucket_missing");
         const conditional = options != null && Object.prototype.hasOwnProperty.call(options, "ifMatchEtag");
         try {
