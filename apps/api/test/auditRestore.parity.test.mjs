@@ -1108,16 +1108,21 @@ test("T04 #718 video restore invalidates scheduled exports for primary and linke
     const missing = keys.filter((key) =>
       !deleted.includes("https://flamenode.internal/public-json/" + key),
     );
-    if (missing.length !== 0) {
-      t.todo("#718 open: shared-core video audit restore must invalidate " +
-        missing.length + "/" + keys.length + " scheduled event-export keys; not release-ready");
-      return;
-    }
-    assert.equal(keys.length, 16);
-    assert.equal(missing.length, 0);
+    // Keep scope and negative-cache assertions on the strict parent even
+    // while the shared-core fanout defect is a non-accepting #718 TODO.
+    // Marking this entire parent TODO would also mask unrelated-event purges.
+    assert.equal(keys.length, 16, "two affected events x two formats x four windows");
     assert.equal(deleted.some((url) =>
       url.includes("public-event-export:9:ev-unrelated:"),
     ), false, "only affected event export keys may be deleted");
+    await t.test("#718 related event scheduled exports must be invalidated", (subtest) => {
+      if (missing.length !== 0) {
+        subtest.todo("#718 STOP: shared-core video audit restore misses " +
+          missing.length + "/" + keys.length + " scheduled event-export keys");
+        return;
+      }
+      assert.deepEqual(missing, [], "primary and related events must have all export keys evicted");
+    });
   } finally {
     if (previous === undefined) delete globalThis.caches;
     else globalThis.caches = previous;
