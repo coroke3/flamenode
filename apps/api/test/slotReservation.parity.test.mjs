@@ -928,6 +928,73 @@ if (runUnderRootTsx(import.meta.url)) {
     });
   }
 
+  test("SEC #716: extend CTE edge ID is NUL-safe before outer D1 JSON quote", async () => {
+    const w = world();
+    const thaw = freeze();
+    try {
+      const seeded = await runHono(w, "u_owner", "reserve", {
+        eventId: "ev1", slot_id: "s02", display_name: "Group", consecutive_count: 2,
+      });
+      assert.equal(seeded.status, 200, "establish valid ownership and event window first");
+      const groupId = w.sqlite.prepare(
+        "SELECT reservation_group_id FROM slots WHERE id = 's02'",
+      ).get().reservation_group_id;
+      assert.ok(groupId, "two-slot reserve must assign a shared group ID");
+
+      // This non-adjacent third legacy row shares the same group ID, and its
+      // later start_time forces it to be cte_edge. A raw SELECT id would feed
+      // >180KiB of untrusted TEXT into json_quote before the D1 size gate.
+      const id = "\u0000" + "e".repeat(180_000);
+      insert(w.sqlite, "slots", {
+        id, event_id: "ev1", slot_label: "Legacy", start_time: NOW_SEC + 9000,
+        sort_order: 100, reserved_by_user_id: "u_owner", x_user_id: "x_owner",
+        reserved_x_id_snapshot: "x_owner", reservation_group_id: groupId,
+        display_name: "Legacy", status: "reserved", updated_at: 100, version: 1,
+      });
+
+      let firstD1Reads = 0;
+      const prepare = w.d1.prepare.bind(w.d1);
+      w.d1.prepare = sql => {
+        const stmt = prepare(sql);
+        if (!sql.includes("AS cte_edge_id") ||
+            !sql.includes("projected_snapshot AS MATERIALIZED")) return stmt;
+        assert.match(sql, /instr\("id", char\(0\)\)/,
+          "raw edge id must be checked before first D1 JSON quote");
+        const bind = stmt.bind.bind(stmt);
+        stmt.bind = (...args) => {
+          const bound = bind(...args);
+          const first = bound.first.bind(bound);
+          bound.first = async () => {
+            const row = await first();
+            firstD1Reads++;
+            assert.equal(row.invalid_snapshot, 0, "bounded sentinel fits the outer row");
+            assert.equal(row.cte_edge_id, '{"__invalid_projection":1}');
+            assert.equal(JSON.stringify(row).includes(id), false);
+            assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024);
+            return row;
+          };
+          return bound;
+        };
+        return stmt;
+      };
+      const before = state(w);
+      const batchesBefore = w.d1.stats.batches;
+      const readsBefore = w.d1.stats.reads;
+      const res = await runHono(w, "u_owner", "extend", {
+        eventId: "ev1", slot_id: "s02", direction: "forward",
+      });
+      assert.equal(firstD1Reads, 1, "inspect exactly one initial D1 snapshot");
+      assert.equal(res.status, 503);
+      assert.equal(res.cacheControl, "private, no-store");
+      assert.equal(res.wakes.length, 0);
+      assert.equal(w.d1.stats.batches, batchesBefore, "no mutation batch");
+      assert.ok(w.d1.stats.reads - readsBefore <= 3);
+      assert.deepEqual(state(w), before, "no slots/outbox/audit/queue changes");
+    } finally {
+      thaw();
+    }
+  });
+
   test("T03 & T05: reserve, replay, extend (fwd/back/null-adopt), merge, and release match CURRENT field-by-field with 0 wakes", async () => {
     const { b, outcomes } = await compareSteps([
       // SA-065 reserve 2 slots (s02, s03) by u_owner (approved active X).
