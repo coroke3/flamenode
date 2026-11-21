@@ -10,6 +10,7 @@ import {
   MAX_SESSION_COOKIE_CHUNKS,
   MAX_SESSION_TOKEN_LENGTH,
   MAX_SESSION_COOKIE_NAMES,
+  MAX_LEGACY_SESSION_ACTIVE_X_ID_LENGTH,
 } from "../src/auth/session.ts";
 import {
   USERS,
@@ -95,6 +96,7 @@ function createTestD1() {
     resetQueryCount: () => {
       queryCount = 0;
     },
+    setActiveX: (userId, xId) => sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?').run(xId, userId),
     close: () => sqlite.close(),
   };
 
@@ -265,6 +267,110 @@ test("T01: valid Next session cookie resolves to the same user", async (t) => {
   assert.equal(user.role, "user");
   assert.equal(user.is_banned, 0);
   assert.equal(user.active_x_user_id, USERS.valid.active_x_user_id);
+});
+
+test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changing normal sessions", async (t) => {
+  const d1 = createTestD1();
+  t.after(() => d1.close());
+
+  const token = SESSIONS.valid.sessionToken;
+  const opts = { now: BASELINE_NOW_MS };
+  const bound = MAX_LEGACY_SESSION_ACTIVE_X_ID_LENGTH;
+  const projected = [];
+  const inspectingD1 = {
+    prepare(sql) {
+      const prepared = d1.prepare(sql);
+      return {
+        bind(...args) {
+          const statement = prepared.bind(...args);
+          return {
+            async first() {
+              const row = await statement.first();
+              projected.push(row);
+              return row;
+            },
+          };
+        },
+      };
+    },
+  };
+
+  // The documented 128-character legacy budget does not silently rewrite valid
+  // identities; this also preserves the normal session's original Active X.
+  d1.resetQueryCount();
+  const normal = await resolveSessionUser(inspectingD1, token, opts);
+  assert.equal(normal?.active_x_user_id, USERS.valid.active_x_user_id);
+  assert.equal(projected.at(-1).user_active_x_id_oversize, 0);
+  assert.equal(d1.getQueryCount(), 1);
+
+  const edge = "x".repeat(bound);
+  d1.setActiveX(USERS.valid.id, edge);
+  d1.resetQueryCount();
+  const atBoundary = await resolveSessionUser(inspectingD1, token, opts);
+  assert.equal(atBoundary?.active_x_user_id, edge, "legacy IDs at the cap preserve their value");
+  assert.equal(projected.at(-1).user_active_x_id_oversize, 0);
+  assert.equal(d1.getQueryCount(), 1);
+
+  for (const oversized of ["x".repeat(bound + 1), "x".repeat(180_000)]) {
+    d1.setActiveX(USERS.valid.id, oversized);
+    projected.length = 0;
+    d1.resetQueryCount();
+    await assert.rejects(
+      () => resolveSessionUser(inspectingD1, token, opts),
+      (error) => error.name === "SessionUnavailableError" && error.code === "database_unavailable",
+      "an invalid selected X must never become a successful session with null/other Active X",
+    );
+    assert.equal(d1.getQueryCount(), 1, "no extra D1 lookup to validate selected X");
+    assert.equal(projected.length, 1);
+    const row = projected[0];
+    assert.equal(row.user_active_x_id_oversize, 1);
+    assert.equal(row.user_active_x_user_id, null, "D1 must remove the giant field before transport");
+    assert.ok(Buffer.byteLength(JSON.stringify(row)) < 2048,
+      "actual SQLite projection must stay small even for the 180K legacy row");
+  }
+
+  d1.setActiveX(USERS.valid.id, null);
+  d1.resetQueryCount();
+  const noSelection = await resolveSessionUser(inspectingD1, token, opts);
+  assert.equal(noSelection?.active_x_user_id, null, "a genuinely null Active X stays null");
+  assert.equal(projected.at(-1).user_active_x_id_oversize, 0);
+  assert.equal(d1.getQueryCount(), 1);
+});
+
+test("SEC-713: corrupt Active X causes private 503, not anonymous 401 or an authorization grant", async (t) => {
+  const d1 = createTestD1();
+  t.after(() => d1.close());
+  d1.setActiveX(USERS.valid.id, "x".repeat(180_000));
+  d1.resetQueryCount();
+
+  const values = new Map();
+  const headers = new Map();
+  const context = {
+    req: {
+      url: "https://flamenode.net/api/me",
+      header(name) {
+        return name.toLowerCase() === "cookie"
+          ? `${BASELINE_COOKIES.sessionToken.name}=${SESSIONS.valid.sessionToken}`
+          : undefined;
+      },
+    },
+    env: { DB: d1 },
+    set: (key, val) => values.set(key, val),
+    get: (key) => values.get(key),
+    header: (key, val) => headers.set(key.toLowerCase(), val),
+    json: (body, status) => ({ body, status }),
+  };
+  await sessionMiddleware({ now: () => BASELINE_NOW_MS })(context, async () => {});
+  assert.equal(values.get("sessionState"), "unavailable");
+  assert.equal(values.get("user"), null);
+  assert.equal(values.get("session"), null);
+  assert.equal(d1.getQueryCount(), 1, "middleware must use the existing single session read");
+  let reached = false;
+  const denied = await requireAuth()(context, async () => { reached = true; });
+  assert.equal(reached, false);
+  assert.equal(denied.status, 503);
+  assert.equal(denied.body.error, "database_unavailable");
+  assert.equal(headers.get("cache-control"), "private, no-store");
 });
 
 test("T02: expired session resolves to null (unauthenticated)", async (t) => {
