@@ -6673,19 +6673,19 @@
             "params": [
               1760000000,
               1760000000,
-              "[{\"id\":\"srb_00000000-0000-4000-8000-000000000003\",\"target_type\":\"video\",\"target_id\":\"vid-1\",\"reason\":\"video_visibility_update\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000004\",\"target_type\":\"youtube_related_blocklist\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000005\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000006\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000007\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000008\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000009\",\"target_type\":\"user\",\"target_id\":\"x_creator\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000010\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000011\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000012\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000013\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000014\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000015\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000016\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000017\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000018\",\"target_type\":\"event_base\",\"target_id\":\"evt-private\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000019\",\"target_type\":\"event_release\",\"target_id\":\"evt-private\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"}]"
+              "[{\"id\":\"srb_00000000-0000-4000-8000-000000000003\",\"target_type\":\"video\",\"target_id\":\"vid-1\",\"reason\":\"video_visibility_update\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000004\",\"target_type\":\"youtube_related_blocklist\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000005\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000006\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000007\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000008\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000009\",\"target_type\":\"user\",\"target_id\":\"x_creator\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000010\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000011\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000012\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000013\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000014\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000015\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000016\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000017\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000018\",\"target_type\":\"event_base\",\"target_id\":\"evt-private\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000019\",\"target_type\":\"event_release\",\"target_id\":\"evt-private\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000020\",\"target_type\":\"user\",\"target_id\":\"x_actor\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
             ]
           },
           {
             "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
             "params": [
-              17
+              18
             ]
           },
           {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
-              "audit_00000000-0000-4000-8000-000000000020",
+              "audit_00000000-0000-4000-8000-000000000021",
               "videos",
               "vid-1",
               "RESTORE",
@@ -6711,7 +6711,7 @@
           {
             "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
             "params": [
-              "audit_00000000-0000-4000-8000-000000000020",
+              "audit_00000000-0000-4000-8000-000000000021",
               1
             ]
           },
@@ -6755,7 +6755,7 @@
           0,
           1,
           0,
-          17,
+          18,
           0,
           1,
           0,
@@ -6776,7 +6776,7 @@
           "kind": "static_rebuild_available",
           "source": "admin",
           "requested_at": 1760000000,
-          "trace_id": "00000000-0000-4000-8000-000000000021"
+          "trace_id": "00000000-0000-4000-8000-000000000022"
         }
       },
       {
@@ -7051,7 +7051,7 @@
         "actor_x_user_id": null
       },
       {
-        "id": "audit_00000000-0000-4000-8000-000000000020",
+        "id": "audit_00000000-0000-4000-8000-000000000021",
         "table_name": "videos",
         "target_id": "vid-1",
         "operation": "RESTORE",
@@ -7308,6 +7308,14 @@
         "priority": "low",
         "status": "pending",
         "requested_by_user_id": "u-actor"
+      },
+      {
+        "target_type": "user",
+        "target_id": "x_actor",
+        "reason": "video_update",
+        "priority": "normal",
+        "status": "pending",
+        "requested_by_user_id": null
       },
       {
         "target_type": "user",
@@ -10704,7 +10712,7 @@
         "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable",
-        "restore_run_id": "rst_00000000-0000-4000-8000-000000000021"
+        "restore_run_id": "rst_00000000-0000-4000-8000-000000000022"
       }
     },
     "log": [
@@ -10879,19 +10887,19 @@
             "params": [
               1760000000,
               1760000000,
-              "[{\"id\":\"srb_00000000-0000-4000-8000-000000000003\",\"target_type\":\"video\",\"target_id\":\"vid-1\",\"reason\":\"video_visibility_update\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000004\",\"target_type\":\"youtube_related_blocklist\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000005\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000006\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000007\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000008\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000009\",\"target_type\":\"user\",\"target_id\":\"x_creator\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000010\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000011\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000012\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000013\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000014\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000015\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000016\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000017\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000018\",\"target_type\":\"event_base\",\"target_id\":\"evt-private\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000019\",\"target_type\":\"event_release\",\"target_id\":\"evt-private\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"}]"
+              "[{\"id\":\"srb_00000000-0000-4000-8000-000000000003\",\"target_type\":\"video\",\"target_id\":\"vid-1\",\"reason\":\"video_visibility_update\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000004\",\"target_type\":\"youtube_related_blocklist\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000005\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000006\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000007\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000008\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000009\",\"target_type\":\"user\",\"target_id\":\"x_creator\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000010\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000011\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000012\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000013\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000014\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000015\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000016\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000017\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000018\",\"target_type\":\"event_base\",\"target_id\":\"evt-private\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000019\",\"target_type\":\"event_release\",\"target_id\":\"evt-private\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000020\",\"target_type\":\"user\",\"target_id\":\"x_actor\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
             ]
           },
           {
             "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
             "params": [
-              17
+              18
             ]
           },
           {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
-              "audit_00000000-0000-4000-8000-000000000020",
+              "audit_00000000-0000-4000-8000-000000000021",
               "videos",
               "vid-1",
               "RESTORE",
@@ -10917,7 +10925,7 @@
           {
             "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
             "params": [
-              "audit_00000000-0000-4000-8000-000000000020",
+              "audit_00000000-0000-4000-8000-000000000021",
               1
             ]
           },
@@ -11002,7 +11010,7 @@
         "op": "d1",
         "sql": "insert into \"audit_restore_runs\" (\"id\", \"audit_log_id\", \"executed_by_user_id\", \"reason\", \"status\", \"error_message\", \"executed_at\") values (?, ?, ?, ?, ?, ?, ?)",
         "params": [
-          "rst_00000000-0000-4000-8000-000000000021",
+          "rst_00000000-0000-4000-8000-000000000022",
           "aud-1",
           "u-actor",
           "restore because",
@@ -11045,7 +11053,7 @@
     ],
     "audit_restore_runs": [
       {
-        "id": "rst_00000000-0000-4000-8000-000000000021",
+        "id": "rst_00000000-0000-4000-8000-000000000022",
         "audit_log_id": "aud-1",
         "executed_by_user_id": "u-actor",
         "reason": "restore because",
