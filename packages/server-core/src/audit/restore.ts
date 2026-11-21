@@ -562,6 +562,9 @@ export async function restoreAuditLog(
           String(target.primary_event_id ?? "").trim(),
         ].filter(Boolean),
         creatorXUserId: String(current?.creator_x_user_id ?? "").trim() || null,
+        // Restore snapshots can change creator identity independently of event
+        // membership. Queue the restored profile too, without another D1 read.
+        additionalCreatorXUserIds: [String(target.creator_x_user_id ?? "").trim()],
         primaryEventId: String(current?.primary_event_id ?? "").trim() || null,
         requestedByUserId: userId,
       });
