@@ -693,7 +693,12 @@ if (runUnderRootTsx(import.meta.url)) {
       ["Japanese129codepoints", "あ".repeat(129), true, 387, 129],
       ["Emoji129codepoints", "🌀".repeat(129), true, 516, 129],
     ]) {
-      const w = world();
+      // The fixture opens entries at NOW_SEC; the host's current clock is
+      // deliberately unrelated. Compare allowed CURRENT/Hono paths at the
+      // same deterministic instant used by the parity harness.
+      const thaw = freeze();
+      try {
+        const w = world();
       assert.equal(Buffer.byteLength(id, "utf8"), utf8Bytes, label);
       assert.equal(Array.from(id).length, codepoints, label);
       insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
@@ -715,10 +720,15 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(response.status, 200, "valid <=128 Unicode-codepoint linked X retains CURRENT rights");
         assert.equal(response.wakes.length, 0);
       }
+      } finally {
+        thaw();
+      }
     }
   });
 
   test("SEC #716: exactly 100 canonical 20-byte approved links remain authorized and bounded", async () => {
+    const thaw = freeze();
+    try {
     const w = world();
     let count = w.sqlite.prepare(
       "SELECT COUNT(*) AS n FROM x_user_account_links WHERE auth_user_id = ?",
@@ -742,6 +752,9 @@ if (runUnderRootTsx(import.meta.url)) {
     watched();
     assert.equal(response.status, 200);
     assert.equal(response.wakes.length, 0);
+    } finally {
+      thaw();
+    }
   });
 
   test("T03 & T05: reserve, replay, extend (fwd/back/null-adopt), merge, and release match CURRENT field-by-field with 0 wakes", async () => {
