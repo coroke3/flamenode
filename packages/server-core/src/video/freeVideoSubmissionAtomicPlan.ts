@@ -44,8 +44,9 @@ export function buildFreeVideoSubmissionAtomicPlan(
       !/^[A-Za-z0-9_-]{11}$/.test(videoAfter.youtube_video_id) ||
       videoAfter.visibility_status !== "public" ||
       videoAfter.scheduling_type !== "manual" ||
-      !Number.isSafeInteger(videoAfter.scheduled_time) ||
-      videoAfter.scheduled_time < 0 ||
+      (typeof videoAfter.scheduled_time !== "number" ||
+        !Number.isSafeInteger(videoAfter.scheduled_time) ||
+        videoAfter.scheduled_time < 0) ||
       videoAfter.app_like_count !== 0 ||
       videoAfter.score !== 0 ||
       videoAfter.score_updated_at !== null ||
