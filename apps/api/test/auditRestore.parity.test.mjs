@@ -167,6 +167,51 @@ test("T00 production/default admin router physically excludes unapproved SA-011 
   assert.equal(changes(enabled.sqlite).runs.length, 1);
 });
 
+// SA-009 is already mounted; D1 errors may include private SQL parameters.
+// Unlike CURRENT's raw error.message, the Hono boundary must return a fixed
+// message while preserving 500 and rollback semantics.
+test("T00 mounted SA-009 settings failure never echoes SQL/provider parameters", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true, enableRestoreCandidate: false });
+  const marker = "MIG0662_SETTINGS_PRIVATE_SQL_PARAM_CANARY";
+  const before = ctx.sqlite.prepare(
+    "SELECT audit_normal_retention_days FROM system_settings WHERE id='default'",
+  ).get().audit_normal_retention_days;
+  const originalBatch = ctx.db.batch.bind(ctx.db);
+  let injected = false;
+  ctx.db.batch = async (statements) => {
+    try {
+      return await originalBatch([...statements, {
+        _sql: 'INSERT INTO "__mig_0662_missing_settings_fault" ("v") VALUES (?)',
+        _params: [marker],
+      }]);
+    } catch (cause) {
+      injected = true;
+      throw new Error("Failed query: UPDATE system_settings SET audit_normal_retention_days=? params: " + marker, {
+        cause,
+      });
+    }
+  };
+  const response = await ctx.request(
+    { normal_retention_days: 45 }, undefined, {}, "/api/admin/audit/settings",
+  );
+  assert.equal(response.status, 500);
+  const result = await response.json();
+  assert.deepEqual(result, {
+    ok: false, message: "設定の更新に失敗しました。",
+  });
+  assert.equal(injected, true, "fail after executing an actual SQLite D1 batch");
+  assert.equal(JSON.stringify(result).includes(marker), false);
+  assert.equal(JSON.stringify(result).includes("Failed query"), false);
+  assert.equal(JSON.stringify(result).includes("params:"), false);
+  assert.equal(ctx.stats.batches, 1);
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT audit_normal_retention_days FROM system_settings WHERE id='default'",
+  ).get().audit_normal_retention_days, before, "failed settings update must rollback");
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM audit_logs",
+  ).get().n, 0, "no audit success from a rolled-back batch");
+});
+
 // SA-010 is already mounted in the default admin router and includes full
 // CURRENT/target snapshots in its result, unlike the unmounted SA-011 write.
 test("T00 SA-010 dry-run snapshots and errors are never HTTP/edge cached", async () => {
