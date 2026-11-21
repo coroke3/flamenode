@@ -965,7 +965,7 @@ test("T04 R2 binding failure prevents an event visibility restore and preserves 
 // MIG-0662 T04 video variant. Keep the test table column names in lockstep
 // with the shared DB schema: a new video column will be selected by the
 // restore adapter and must also exist in the SQLite D1 fixture.
-function seedVideoVisibilityRestore(ctx) {
+function seedVideoVisibilityRestore(ctx, { title = "Original" } = {}) {
   const { sqlite } = ctx;
   const fields = Object.values(getTableColumns(videos));
   const declarations = fields.map((column) => {
@@ -991,7 +991,7 @@ function seedVideoVisibilityRestore(ctx) {
     id: "vid-restore", submitted_by_user_id: "admin-1",
     collaboration_type: "individual", source_type: "youtube",
     creator_display_name: "Video Owner", creator_x_user_id: "creator-1",
-    primary_event_id: "ev-1", title: "Original",
+    primary_event_id: "ev-1", title,
     youtube_video_id: "yt-restore-1", visibility_status: "public",
     app_like_count: 0, score: 0, created_at: now - 100, updated_at: now,
   };
@@ -1066,7 +1066,9 @@ test("T04 video restore commits one atomic D1 batch after R2 CAS, then invalidat
 test("T04 #718 separate-colo scheduled export cannot expose a restored private video", async (t) => {
   const ctx = setup();
   seedEvent(ctx.sqlite, { id: "ev-1", visibility_status: "public", public_api_enabled: 1 });
-  seedVideoVisibilityRestore(ctx);
+  const privateTitleCanary = "PRIVATE_RESTORED_VIDEO_TITLE_718";
+  seedVideoVisibilityRestore(ctx, { title: privateTitleCanary });
+  const privateVideoMarkers = ["vid-restore", "yt-restore-1", privateTitleCanary];
   // The scheduled export reader must be able to generate a fresh D1 DTO
   // after rejecting stale Cache API content. The admin mutation fixture has
   // only the audit tables, so add the empty export relation tables here.
@@ -1163,6 +1165,9 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
         : parsed.videos.map((video) => video.id);
       assert.deepEqual(ids.sort(), ["vid-public-control", "vid-restore"].sort(),
         item.format + ": both public videos must actually be exported before restore");
+      const preRestoreBody = JSON.stringify(parsed);
+      assert.ok(privateVideoMarkers.every((marker) => preRestoreBody.includes(marker)),
+        item.format + ": control must prove all private video markers were present before restore");
     }
     await Promise.all(pendingCacheWrites);
     for (const item of snapshots) {
@@ -1172,8 +1177,9 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
       const envelope = JSON.parse(await canonical.clone().text());
       assert.equal(envelope.payload?.metadata?.format, item.format,
         item.format + ": stale fixture must contain canonical export cache metadata");
-      assert.ok(envelope.payload?.body?.includes("vid-restore"),
-        item.format + ": cached body must contain the soon-to-be-revoked video");
+      assert.ok(privateVideoMarkers.every((marker) =>
+        envelope.payload?.body?.includes(marker)),
+      item.format + ": canonical stale cache must hold id, title and YouTube id markers");
       perColo.reader.set(key, canonical.clone());
     }
     assert.equal(perColo.reader.size, 2, "both real export formats are seeded in the other colo");
@@ -1279,10 +1285,14 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
         : parsed.videos.map((video) => video.id);
       assert.ok(visibleIds.includes("vid-public-control"),
         item.format + ": a privacy fix must keep the unrelated public video accessible");
-      // Inspect *decoded* JSON values: a malicious/stale representation may
-      // escape the ID (e.g. vid\\u002drestore) and bypass raw substring checks.
-      if (JSON.stringify(parsed).includes("vid-restore")) {
-        exposed.push(item.format + ":" + cacheState);
+      // Inspect all *decoded* fields, not only video.id: a broken reader
+      // could suppress an ID but still expose a now-private title or YouTube
+      // link/thumbnail. Escaped markers are normalized by JSON.parse first.
+      const decodedBody = JSON.stringify(parsed);
+      const leakedMarkers = privateVideoMarkers.filter((marker) =>
+        decodedBody.includes(marker));
+      if (leakedMarkers.length > 0) {
+        exposed.push(item.format + ":" + cacheState + ":" + leakedMarkers.join("+"));
       }
       readerLookups.length = 0;
     }
