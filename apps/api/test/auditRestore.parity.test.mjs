@@ -268,6 +268,7 @@ test("T00 mounted SA-009 settings failure never echoes SQL/provider parameters",
     { normal_retention_days: 45 }, undefined, {}, "/api/admin/audit/settings",
   );
   assert.equal(response.status, 500);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
   const result = await response.json();
   assert.deepEqual(result, {
     ok: false, message: "設定の更新に失敗しました。",
