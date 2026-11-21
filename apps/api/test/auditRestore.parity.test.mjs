@@ -1021,6 +1021,7 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
     assert.equal(ctx.sqlite.prepare(
       "SELECT visibility_status FROM events WHERE id = 'ev-1'",
     ).get().visibility_status, "public", "parent event remains publicly accessible");
+    assert.ok(deleted.length > 0, "restore must execute writer-colo cache invalidations");
     assert.equal(deleted.every((item) => item.colo === "writer"), true,
       "Cache API deletes cannot directly target another colo");
     assert.equal(perColo.reader.size, 2, "the independent reader-colo cache remains populated");
