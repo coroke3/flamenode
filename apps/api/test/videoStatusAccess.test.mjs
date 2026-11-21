@@ -1622,6 +1622,20 @@ test("MIG-0603: notifiable status facts fit inside existing authorized snapshot 
       .run("u_plain");
     await read("voided", { recipientEnabled: true, activeDedupe: true });
 
+    // CURRENT's notification builder invokes recipientUserId.trim() before
+    // querying user; legacy imported video IDs may carry surrounding spaces.
+    // Keep exact parity without an extra D1 SELECT (read is still authorized).
+    sqlite.exec("PRAGMA foreign_keys = OFF");
+    const legacyRecipient = sqlite.prepare(
+      'UPDATE "videos" SET "submitted_by_user_id" = ? WHERE id = ?',
+    );
+    legacyRecipient.run("  u_plain  ", "v1");
+    await read("voided", { recipientEnabled: true, activeDedupe: true });
+    legacyRecipient.run("  missing_imported_user  ", "v1");
+    await read("voided", { recipientEnabled: false, activeDedupe: true });
+    legacyRecipient.run("u_plain", "v1");
+    await read("public", { recipientEnabled: true, activeDedupe: false });
+
     const deniedAt = d1.stats.statements;
     assert.deepEqual(
       await loadManageVideoStatusSnapshot(db, outsider, "evA", "v1", "public"),
