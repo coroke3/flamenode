@@ -987,8 +987,11 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
       perColo[activeColo].set(request.url, response.clone());
     },
     delete: async (request) => {
-      deleted.push({ colo: activeColo, url: request.url });
-      return perColo[activeColo].delete(request.url);
+      // Shared delete helper supplies a canonical URL string, whereas the
+      // read/write Cache API ports use Request objects. Model both shapes.
+      const url = typeof request === "string" ? request : request.url;
+      deleted.push({ colo: activeColo, url });
+      return perColo[activeColo].delete(url);
     },
   } };
   const now = Math.floor(Date.now() / 1000);
