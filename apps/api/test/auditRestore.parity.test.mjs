@@ -90,8 +90,8 @@ function setup({
   const defaultHeaders = useRealSessionMiddleware
     ? { Origin: SITE, Cookie: `__Secure-authjs.session-token=${SQLITE_AUTH_SESSION_TOKEN}` }
     : { Origin: SITE };
-  const request = (body, headers = defaultHeaders, extraEnv = {}) => app.request(
-    useRealSessionMiddleware ? SITE + RESTORE : RESTORE, {
+  const request = (body, headers = defaultHeaders, extraEnv = {}, path = RESTORE) => app.request(
+    useRealSessionMiddleware ? SITE + path : path, {
       method: "POST", headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
     }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE, ...extraEnv },
@@ -165,6 +165,37 @@ test("T00 production/default admin router physically excludes unapproved SA-011 
   assert.equal(accepted.status, 200, "isolated test-only opt-in still exercises real candidate");
   assert.equal((await accepted.json()).ok, true);
   assert.equal(changes(enabled.sqlite).runs.length, 1);
+});
+
+// SA-010 is already mounted in the default admin router and includes full
+// CURRENT/target snapshots in its result, unlike the unmounted SA-011 write.
+test("T00 SA-010 dry-run snapshots and errors are never HTTP/edge cached", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true, enableRestoreCandidate: false });
+  seedRestorableAnnouncement(ctx.sqlite);
+  const path = "/api/admin/audit/dry-run";
+  for (const scenario of [
+    { payload: body(), status: 200, kind: "valid" },
+    { payload: body({ audit_id: "" }), status: 400, kind: "invalid" },
+    { payload: body({ reason: "x".repeat(70000) }), status: 413, kind: "oversized" },
+  ]) {
+    const response = await ctx.request(scenario.payload, undefined, {}, path);
+    assert.equal(response.status, scenario.status, scenario.kind);
+    assert.equal(
+      response.headers.get("Cache-Control"), "private, no-store",
+      scenario.kind + ": audit snapshots and error bodies must not be cached",
+    );
+    const result = await response.json();
+    if (scenario.kind === "valid") {
+      assert.equal(result.ok, true);
+      assert.equal(result.diff?.current?.title, "Current Title");
+      assert.equal(result.diff?.target?.title, "Old Title");
+    } else {
+      assert.equal(result.ok, false);
+    }
+  }
+  assert.equal(ctx.stats.batches, 0, "dry-run cannot mutate audit or entity rows");
+  assert.equal(changes(ctx.sqlite).row.title, "Current Title");
+  assert.equal(changes(ctx.sqlite).runs.length, 0);
 });
 
 test("T01 real Hono session resolver on SQLite adds one pre-read to SA-011 S3 trace", async () => {
