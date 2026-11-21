@@ -450,7 +450,7 @@ function visibilityManifestBucket() {
   return { state, bucket };
 }
 
-test("T04 public event -> private restore commits R2 CAS fence and D1 atomically, invalidates all public caches", async () => {
+test("T04 event restore commits one atomic D1 batch after R2 CAS, then invalidates public caches", async () => {
   const ctx = setup();
   seedVisibilityRestore(ctx);
   const { state, bucket } = visibilityManifestBucket();
@@ -550,7 +550,7 @@ function seedVideoVisibilityRestore(ctx) {
     .run(JSON.stringify(before), JSON.stringify(after), now);
 }
 
-test("T04 video public->private restore commits D1+R2 CAS and invalidates full public key fanout", async () => {
+test("T04 video restore commits one atomic D1 batch after R2 CAS, then invalidates public caches", async () => {
   const ctx = setup();
   seedVideoVisibilityRestore(ctx);
   const { state, bucket } = visibilityManifestBucket();
@@ -619,6 +619,61 @@ test("T04 video restore fails closed when enforced visibility R2 bucket is unava
     "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'",
   ).get().n, 0);
   recordRestoreD1Budget("videos_missing_r2_fail_closed", ctx.stats, ctx.readTrace);
+});
+
+// D1 and R2 are not one transaction. Inject a D1 batch failure strictly
+// after the manifest CAS write, using the real SQLite-backed Hono route.
+// The CURRENT shared-core policy compensates the R2 fence when D1 remains
+// public; this is not a guarantee of all-storage atomicity. Any decision to
+// keep that fence instead requires an explicit visibility/security review.
+test("T04 R2 CAS succeeds but D1 batch fails: event/video remain public, compensated R2, no success", async () => {
+  for (const scenario of [
+    { kind: "event", auditId: "event-audit", entityId: "ev-1", table: "events" },
+    { kind: "video", auditId: "video-audit", entityId: "vid-restore", table: "videos" },
+  ]) {
+    const ctx = setup();
+    if (scenario.kind === "event") seedVisibilityRestore(ctx);
+    else seedVideoVisibilityRestore(ctx);
+
+    const { state, bucket } = visibilityManifestBucket();
+    const originalBatch = ctx.db.batch.bind(ctx.db);
+    let injected = false;
+    ctx.db.batch = async (statements) => {
+      if (!injected) {
+        injected = true;
+        assert.equal(state.puts, 1, "R2 CAS must complete before the injected D1 failure");
+        throw new Error("injected_d1_batch_failure");
+      }
+      // Keep subsequent failure-run recording operational.
+      return originalBatch(statements);
+    };
+
+    const response = await ctx.request({
+      audit_id: scenario.auditId,
+      reason: "整合性の失敗注入テスト",
+      confirm_text: `RESTORE ${scenario.auditId}`,
+    }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+
+    assert.equal(injected, true);
+    assert.equal(response.status, 200, "CURRENT returns an ok:false domain result");
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    const result = await response.json();
+    assert.equal(result.ok, false, "no false restore success after D1 failure");
+    assert.equal(result.reason_code, "mutation_failed");
+    assert.equal(ctx.sqlite.prepare(
+      `SELECT visibility_status FROM ${scenario.table} WHERE id = ?`,
+    ).get(scenario.entityId).visibility_status, "public", "failed D1 batch cannot change publication");
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'success'",
+    ).get().n, 0);
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM public_visibility_fences",
+    ).get().n, 0, "failed D1 batch cannot persist the D1 visibility fence");
+    assert.ok(state.puts >= 2, "compensation must issue a separate conditional R2 write");
+    assert.equal(state.manifest.entities.some((entry) =>
+      entry.entity_type === scenario.kind && entry.entity_id === scenario.entityId,
+    ), false, "shared-core compensation releases our precommitted block if D1 stays public");
+  }
 });
 
 // The Hono route test injects an in-memory session middleware, not Auth.js.
