@@ -240,10 +240,10 @@ function eventJsonObjectSql(alias: string): string {
 
 function approvedXJsonSql(userIdParamPlaceholder = "?"): string {
   const invalid = invalidSqlText('q."x_user_id"', MAX_LEGACY_X_ID_BYTES);
-  // The separate scalar subqueries matter: SQLite evaluates aggregate
-  // json_group_array() BEFORE a same-SELECT CASE condition. This CTE first
-  // checks raw bytes; only a safe set enters JSON1 at all. No linked identity
-  // is silently skipped. Exactly one auth user binding is preserved.
+  // A first CASE branch rejects malformed raw TEXT before json_quote even runs.
+  // The next branch measures JSON's actual escaped bytes on already-bounded
+  // strings, so 100 valid 20-character IDs are not falsely rejected. Never
+  // place JSON aggregation in the same SELECT as its byte preflight.
   return `(WITH approved_ids AS MATERIALIZED (
       SELECT DISTINCT l."x_user_id" AS "x_user_id"
       FROM "x_user_account_links" l
@@ -251,11 +251,12 @@ function approvedXJsonSql(userIdParamPlaceholder = "?"): string {
       WHERE l."auth_user_id" = ${userIdParamPlaceholder} AND x."approval_status" = 'approved'
       LIMIT ${MAX_APPROVED_X_IDS + 1}
     )
-    SELECT CASE WHEN
-      EXISTS (SELECT 1 FROM approved_ids q WHERE ${invalid}) OR
-      (SELECT COALESCE(SUM(6 * length(CAST(q."x_user_id" AS BLOB)) + 4), 0)
-       FROM approved_ids q) > ${MAX_X_ID_JSON_BUDGET_BYTES}
-      THEN json_array(NULL)
+    SELECT CASE
+      WHEN EXISTS (SELECT 1 FROM approved_ids q WHERE ${invalid})
+        THEN json_array(NULL)
+      WHEN (SELECT COALESCE(SUM(length(CAST(json_quote(q."x_user_id") AS BLOB)) + 1), 0) + 2
+            FROM approved_ids q) > ${MAX_X_ID_JSON_BUDGET_BYTES}
+        THEN json_array(NULL)
       ELSE (SELECT json_group_array(q."x_user_id") FROM approved_ids q)
     END)`;
 }
@@ -278,10 +279,11 @@ function staffRowsJsonSql(): string {
     LIMIT ${MAX_OPERATOR_STAFF_ROWS + 1}
   )
   SELECT CASE WHEN
-    EXISTS (SELECT 1 FROM staff_entries q WHERE ${invalid}) OR
-    (SELECT COALESCE(SUM(
-      6 * COALESCE(length(CAST(q."permission_preset" AS BLOB)), 0) +
-      6 * COALESCE(length(CAST(q."custom_permission_keys_json" AS BLOB)), 0) + 70
+    EXISTS (SELECT 1 FROM staff_entries q WHERE ${invalid})
+    THEN json_array(NULL)
+    WHEN (SELECT COALESCE(SUM(
+      length(CAST(json_quote(q."permission_preset") AS BLOB)) +
+      length(CAST(json_quote(q."custom_permission_keys_json") AS BLOB)) + 70
     ), 0) FROM staff_entries q) > ${MAX_STAFF_JSON_BUDGET_BYTES}
     THEN json_array(NULL)
     ELSE (SELECT json_group_array(json_object(
@@ -573,12 +575,13 @@ async function loadReserveSnapshot(
       (SELECT ${slotJsonObjectSql("a")} FROM anchor a) AS anchor_json,
       ${boundedReserveActorJsonSql()} AS actor_json,
       ${approvedXJsonSql("?")} AS approved_x_json,
-      (SELECT CASE WHEN
-         EXISTS (SELECT 1 FROM pending_list WHERE "requested_x_id" IS NULL) OR
-         (SELECT COALESCE(SUM(6 * length(CAST("requested_x_id" AS BLOB)) + 4), 0)
-          FROM pending_list) > ${MAX_X_ID_JSON_BUDGET_BYTES}
+      (SELECT CASE
+         WHEN EXISTS (SELECT 1 FROM pending_list WHERE "requested_x_id" IS NULL)
            THEN json_array(NULL)
-           ELSE (SELECT json_group_array("requested_x_id") FROM pending_list)
+         WHEN (SELECT COALESCE(SUM(length(CAST(json_quote("requested_x_id") AS BLOB)) + 1), 0) + 2
+               FROM pending_list) > ${MAX_X_ID_JSON_BUDGET_BYTES}
+           THEN json_array(NULL)
+         ELSE (SELECT json_group_array("requested_x_id") FROM pending_list)
         END) AS pending_x_json,
       ${staffRowsJsonSql()} AS staff_json,
       (SELECT json_group_array(${slotJsonObjectSql("n")}) FROM (
