@@ -248,6 +248,58 @@ test("U01 timeout/abort fail closed without a stale viewer", async () => {
   assert.equal(cancelled.authUnavailable, true);
 });
 
+test("U01 RH-014 hard deadline settles even if fetch or JSON ignores AbortSignal forever", async () => {
+  const { fetchSlotViewerOverlay } =
+    await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  async function withTestDeadline(promise, message) {
+    let timer;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(message)), 300);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  let networkSignal;
+  const neverFetch = (_url, init) => {
+    networkSignal = init.signal;
+    return new Promise(() => {});
+  };
+  const timed = await withTestDeadline(
+    fetchSlotViewerOverlay("e", undefined, neverFetch, 5),
+    "RH-014 timeout failed to settle a fetch that ignored abort",
+  );
+  assert.equal(networkSignal.aborted, true);
+  assert.equal(timed.authUnavailable, true);
+  assert.equal(timed.canReserveSlot, false);
+  assert.deepEqual(timed.slots, []);
+
+  let bodySignal;
+  const neverJson = async (_url, init) => {
+    bodySignal = init.signal;
+    return { ok: true, json: () => new Promise(() => {}) };
+  };
+  const body = await withTestDeadline(
+    fetchSlotViewerOverlay("e", undefined, neverJson, 5),
+    "RH-014 timeout failed to settle a JSON parse that ignored abort",
+  );
+  assert.equal(bodySignal.aborted, true);
+  assert.equal(body.authUnavailable, true);
+  assert.equal(body.operatorOverrideAllowed, false);
+
+  const external = new AbortController();
+  const cancelledPromise = fetchSlotViewerOverlay("e", external.signal, neverFetch, 10_000);
+  external.abort();
+  const cancelled = await withTestDeadline(cancelledPromise,
+    "parent RH-014 cancellation did not settle a hung fetch");
+  assert.equal(cancelled.authUnavailable, true);
+  assert.equal(cancelled.loggedIn, false);
+});
+
 test("U01 abort wins even when a fetch implementation ignores AbortSignal", async () => {
   const { fetchSlotViewerOverlay } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
   const privileged = {

@@ -104,24 +104,38 @@ export async function fetchSlotViewerOverlay(
   fetcher: typeof fetch = fetch,
   timeoutMs = SLOT_VIEWER_OVERLAY_TIMEOUT_MS,
 ): Promise<SlotViewerOverlayDto> {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
   if (signal?.aborted) return unavailableSlotViewerOverlay();
+  const controller = new AbortController();
+  // AbortSignal is advisory: a custom fetch or response.json() may never
+  // settle after abort. Resolve the caller independently of network promises.
+  let finishAbort: (() => void) | undefined;
+  const interrupted = new Promise<null>((resolve) => {
+    finishAbort = () => resolve(null);
+  });
+  const abort = () => {
+    controller.abort();
+    finishAbort?.();
+  };
   signal?.addEventListener("abort", abort, { once: true });
   const timeout = setTimeout(abort, timeoutMs);
   try {
-    const response = await fetcher(`/api/events/${encodeURIComponent(eventId)}/slots/viewer-overlay`, {
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
-    // Some custom fetch implementations resolve after AbortSignal is fired.
-    // Never grant stale viewer permissions after timeout or a cancelled refresh.
-    if (controller.signal.aborted || !response.ok) return unavailableSlotViewerOverlay();
-    const payload = await response.json();
-    if (controller.signal.aborted) return unavailableSlotViewerOverlay();
-    return parseSlotViewerOverlay(payload) ?? unavailableSlotViewerOverlay();
+    const result = await Promise.race([
+      (async (): Promise<SlotViewerOverlayDto> => {
+        const response = await fetcher(`/api/events/${encodeURIComponent(eventId)}/slots/viewer-overlay`, {
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        // A late fetch/JSON result must never restore expired permissions.
+        if (controller.signal.aborted || !response.ok) return unavailableSlotViewerOverlay();
+        const payload = await response.json();
+        if (controller.signal.aborted) return unavailableSlotViewerOverlay();
+        return parseSlotViewerOverlay(payload) ?? unavailableSlotViewerOverlay();
+      })(),
+      interrupted,
+    ]);
+    return result ?? unavailableSlotViewerOverlay();
   } catch {
     return unavailableSlotViewerOverlay();
   } finally {
