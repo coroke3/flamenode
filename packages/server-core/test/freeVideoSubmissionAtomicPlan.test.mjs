@@ -4,6 +4,7 @@ import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import { videoCustomAnswers, videoEvents, videoYoutubeMetadata, videos } from "@flamenode/db/schema";
+import * as schema from "@flamenode/db/schema";
 import { buildFreeVideoSubmissionAtomicPlan, buildFreeVideoSubmissionWithRebuildPlan, inspectFreeVideoSubmissionAtomicPlanBudget } from "../src/video/freeVideoSubmissionAtomicPlan.ts";
 import { buildFreeVideoRow } from "../src/video/freeVideoRow.ts";
 import { buildFreeVideoSubmissionWithRebuildPlan as exportedRebuildPlan, inspectFreeVideoSubmissionAtomicPlanBudget as exportedD1Budget } from "@flamenode/server-core/video/unslottedEventPlans";
@@ -607,6 +608,95 @@ test("MIG-0651 U02 rebuild queue: queue write failure also rolls back prior vide
     sqlite.exec("ROLLBACK");
     for (const table of ["videos", "video_youtube_metadata", "static_rebuild_queue"]) {
       assert.equal(sqlite.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n, 0);
+    }
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 U02: new software catalog + links and static queue commit together with video", async () => {
+  const sqlite = createSqlite();
+  seedApprovedActiveX(sqlite);
+  try {
+    let preReads = 0;
+    const proxy = drizzle(async (query, params, method) => {
+      preReads += 1;
+      const rows = sqlite.prepare(query).all(...params);
+      return { rows: method === "all" || method === "values" ? rows.map(r => Object.values(r)) : rows };
+    }, { schema });
+    const db = {
+      select: (...args) => proxy.select(...args),
+      insert: (...args) => proxy.insert(...args),
+      run(expr) { return { sqlExpr: expr }; },
+    };
+    const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+      videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
+      eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+      usedSoftware: "Fresh Tool",
+    });
+    assert.equal(preReads, 2, "bounded alias and active catalog pre-reads");
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 1, 13]);
+    assert.equal(plan.audits.length, 4, "video, metadata, catalog and link each strictly audited");
+    assert.ok(plan.audits.every(a => a.strict));
+    assert.equal(inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads).withinLimit, true);
+    sqlite.exec("BEGIN");
+    try {
+      const dialect = new SQLiteSyncDialect();
+      for (const [i, statement] of plan.statements.entries()) {
+        const isSql = "sqlExpr" in statement;
+        const q = isSql ? dialect.sqlToQuery(statement.sqlExpr) : statement.toSQL();
+        assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
+        const prepared = sqlite.prepare(q.sql);
+        const result = isSql && i < plan.statements.length - 1
+          ? prepared.get(...q.params) : prepared.run(...q.params);
+        if (plan.expectedChanges[i] !== null) {
+          assert.equal(Number(result.changes), plan.expectedChanges[i]);
+        }
+      }
+      sqlite.exec("COMMIT");
+    } catch (error) { sqlite.exec("ROLLBACK"); throw error; }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM software_catalog").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_softwares").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 13);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 U02: failing rebuild queue rolls back fresh software/catalog/video graph", async () => {
+  const sqlite = createSqlite();
+  seedApprovedActiveX(sqlite);
+  try {
+    sqlite.exec("CREATE TRIGGER reject_queue BEFORE INSERT ON static_rebuild_queue BEGIN SELECT RAISE(ABORT, 'queue-down'); END;");
+    const proxy = drizzle(async (query, params, method) => {
+      const rows = sqlite.prepare(query).all(...params);
+      return { rows: method === "all" || method === "values" ? rows.map(r => Object.values(r)) : rows };
+    }, { schema });
+    const db = {
+      select: (...args) => proxy.select(...args),
+      insert: (...args) => proxy.insert(...args),
+      run(expr) { return { sqlExpr: expr }; },
+    };
+    const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+      videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
+      eventId: null, now: NOW, questions: [], customAnswerDrafts: [], usedSoftware: "Fresh Tool",
+    });
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 1, 13]);
+    const dialect = new SQLiteSyncDialect();
+    sqlite.exec("BEGIN");
+    assert.throws(() => {
+      for (const [index, statement] of plan.statements.entries()) {
+        const isSql = "sqlExpr" in statement;
+        const q = isSql ? dialect.sqlToQuery(statement.sqlExpr) : statement.toSQL();
+        const prepared = sqlite.prepare(q.sql);
+        if (isSql && index < plan.statements.length - 1) prepared.get(...q.params);
+        else prepared.run(...q.params);
+      }
+    }, /queue-down/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM software_catalog").get().n, 1,
+      "new catalog exists before rollback");
+    sqlite.exec("ROLLBACK");
+    for (const table of ["videos", "video_youtube_metadata", "software_catalog",
+      "video_softwares", "static_rebuild_queue"]) {
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0,
+        "queue failure must roll back " + table);
     }
   } finally { sqlite.close(); }
 });
