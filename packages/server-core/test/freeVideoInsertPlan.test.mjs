@@ -75,7 +75,7 @@ test("MIG-0651 U02: new YouTube pending metadata is one prepared INSERT and stri
   assert.equal(count, 1);
   assert.strictEqual(calls[0].table, videoYoutubeMetadata);
   assert.deepEqual(calls[0].row, {
-    video_id: "v:1", youtube_video_id: null,
+    video_id: "v:1",
     youtube_privacy_status: null,
     youtube_availability_status: null,
     duration_seconds: null, view_count: 0,
