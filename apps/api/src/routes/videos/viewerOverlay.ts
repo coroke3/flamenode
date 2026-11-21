@@ -35,9 +35,26 @@ const PLAYLIST_EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 /** ZERO_1102 S2: response cap; never truncate a stored note in an editor DTO. */
 const MAX_VIEWER_OVERLAY_RESPONSE_BYTES = 64 * 1024;
 // A malformed legacy approved-X row can contain an arbitrarily large TEXT id.
-// The canonical public identifier is <=20 chars; permit legacy spellings up to
-// 128 code points, but never aggregate a larger value into the auth JSON.
+// The canonical public identifier is <=20 chars; retain 128-character legacy
+// spellings (including four-byte Unicode scalars) while bounding D1 JSON bytes.
+// SQLite length(TEXT) stops at NUL: reject embedded NUL and check complete BLOB
+// byte lengths in the FIRST D1 projection, before JSON is materialized.
 const MAX_APPROVED_X_ID_PROJECTION_CHARS = 128;
+const MAX_APPROVED_X_ID_PROJECTION_BYTES = MAX_APPROVED_X_ID_PROJECTION_CHARS * 4;
+const INVALID_SELECTED_X_ID_SQL = `(
+  u."active_x_user_id" IS NOT NULL AND (
+    typeof(u."active_x_user_id") != 'text' OR
+    instr(u."active_x_user_id", char(0)) > 0 OR
+    length(u."active_x_user_id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} OR
+    length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_APPROVED_X_ID_PROJECTION_BYTES}
+  )
+)`;
+const INVALID_LINKED_X_ID_SQL = `(
+  typeof(a."id") != 'text' OR
+  instr(a."id", char(0)) > 0 OR
+  length(a."id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} OR
+  length(CAST(a."id" AS BLOB)) > ${MAX_APPROVED_X_ID_PROJECTION_BYTES}
+)`;
 
 const UNAVAILABLE_HEADERS = {
   ...PRIVATE_HEADERS,
@@ -332,13 +349,13 @@ SELECT
       'is_tos_accepted', u."is_tos_accepted",
       'terms_reaccept_required', ${TERMS_REACCEPT_REQUIRED_CASE_SQL},
       'active_x_id', CASE
-        WHEN length(u."active_x_user_id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} THEN NULL
+        WHEN ${INVALID_SELECTED_X_ID_SQL} THEN NULL
         ELSE u."active_x_user_id" END,
       'invalid_active_x_id', CASE
-        WHEN length(u."active_x_user_id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} THEN 1
+        WHEN ${INVALID_SELECTED_X_ID_SQL} THEN 1
         ELSE 0 END,
       'approved_x_ids', (SELECT coalesce(json_group_array(
-        CASE WHEN length(a."id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} THEN NULL ELSE a."id" END
+        CASE WHEN ${INVALID_LINKED_X_ID_SQL} THEN NULL ELSE a."id" END
       ), '[]') FROM (
         SELECT x."id" FROM "x_user_account_links" l
         INNER JOIN "x_users" x ON x."id" = l."x_user_id"
