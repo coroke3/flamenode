@@ -137,7 +137,21 @@ export async function executeVideoVisibilityStatusMutation<DB>(
       staticRebuildWakeSource: input.staticRebuildWakeSource,
     });
   } catch (error) {
-    host.rethrowFrameworkControl(error);
+    // Next control-flow exceptions (redirect/notFound) must still propagate,
+    // but only AFTER a possibly-written R2 visibility fence is compensated
+    // and its removal is confirmed. Re-throwing first strands the fence.
+    let frameworkControlRaised = false;
+    let frameworkControlError: unknown;
+    if (!transition.fenceToken) {
+      host.rethrowFrameworkControl(error);
+    } else {
+      try {
+        host.rethrowFrameworkControl(error);
+      } catch (controlError) {
+        frameworkControlRaised = true;
+        frameworkControlError = controlError;
+      }
+    }
     if (transition.fenceToken) {
       try {
         await host.compensate(db, {
@@ -160,6 +174,20 @@ export async function executeVideoVisibilityStatusMutation<DB>(
           error_code: "visibility_compensation_failed",
         });
       }
+    }
+    if (frameworkControlRaised) {
+      // Do not redirect when rollback is unverified: leave the visibility
+      // state explicitly unknown and require a fresh authorized request.
+      if (compensationFailed) {
+        return {
+          ok: false,
+          message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+          errorCode: "status_unverified",
+          traceId,
+          retryable: false,
+        };
+      }
+      throw frameworkControlError;
     }
     if (preCommitInFlight) {
       host.log("error", `[${logTag}] visibility precommit failed`, {
