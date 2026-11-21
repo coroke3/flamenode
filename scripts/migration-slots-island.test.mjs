@@ -143,6 +143,18 @@ test("U01 contradictory RH-014 slot actor relation never grants ownership", asyn
     assert.equal(result?.slots[0]?.is_owned_by_viewer, true,
       `CURRENT valid ${relation} owner remains supported`);
   }
+  // The inverse inconsistency matters too: a false owner flag paired with
+  // an authorized relation must not copy private display/X/group data.
+  for (const relation of ["active", "unassigned"]) {
+    const result = parseSlotViewerOverlay({ ...base, slots: [
+      { id: "s1", viewer_relation: relation, is_owned_by_viewer: false,
+        display_name: "private-leak", x_user_id: "other-x", group_key: "private-group" },
+      { id: "s2", viewer_relation: "active", is_owned_by_viewer: true },
+    ] });
+    assert.ok(result);
+    assert.deepEqual(result.slots.map(slot => slot.id), ["s2"],
+      `malformed ${relation}/false flag row must not merge its private identity`);
+  }
   const differentAccount = parseSlotViewerOverlay({ ...base, slots: [
     { id: "s1", viewer_relation: "account_other", is_owned_by_viewer: false },
   ] });
