@@ -210,8 +210,8 @@ export function planUnboundAtomicVideoStatusNotificationInsert(
       ON notification_recipient."id" =
         trim(notification_video."submitted_by_user_id")
     WHERE notification_video."id" = ${input.videoId}
-      -- The audited status UPDATE must have committed earlier in THIS
-      -- same D1 batch. Never enqueue a public/voided notice on stale state.
+      -- The audited status UPDATE must have executed earlier in THIS
+      -- atomic D1 batch. Never enqueue a public/voided notice on stale state.
       AND notification_video."visibility_status" = ${input.nextStatus}
       AND (
         notification_recipient."is_notification_enabled" IS NULL OR
