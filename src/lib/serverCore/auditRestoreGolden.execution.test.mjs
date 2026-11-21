@@ -862,8 +862,8 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(result.audit_restore_runs.filter((row) => row.status === "success").length, 1);
     assert.equal(result.log.filter((entry) => entry.op === "batch").length, 1,
       "parent reassignment and queue targets must commit atomically");
-    assert.equal(result.log.filter((entry) => entry.op === "d1").length, 8,
-      "restored primary must not require an extra preflight query");
+    assert.equal(result.log.filter((entry) => entry.op === "d1").length, 7,
+      "unchanged visibility avoids the fence pre-read (one less than the public-to-private path)");
     assert.equal(result.log.filter((entry) => entry.op === "r2.put").length, 0,
       "unchanged public visibility must not write an unrelated R2 fence");
     const parents = result.static_rebuild_queue
