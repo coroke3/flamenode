@@ -213,7 +213,8 @@ function invalidStaffProjection(values: readonly unknown[]): boolean {
 
 const JST_OFFSET_SEC = 9 * 60 * 60;
 const DEFAULT_PART_GAP_SEC = 15 * 60;
-const CALLER_PRE_READS_WITH_SESSION = 4;
+// Auth.js session + merged route-scoped ToS/CostGuard/actor + slot snapshot.
+const CALLER_PRE_READS_WITH_SESSION = 3;
 
 const SLOT_ACCOUNT_OTHER_MESSAGE =
   "この枠は現在とは別の活動名義で確保されています。Active X IDを切り替えてから操作してください。";

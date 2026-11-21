@@ -2,9 +2,8 @@
  * MIG-0657 U02/U03 (SA-065..068): Slot reserve / release / extend / merge Hono APIs.
  *
  * Mounted under `/api/events` in `apps/api/src/app.ts`. Each POST route uses its own
- * path-scoped write stack (origin -> session -> writeGuard(requiredRole: null) ->
- * costGuard(feature) -> db) so public GET endpoints under `/api/events` never execute
- * session or write guards.
+ * path-scoped write stack (origin -> session -> combined ToS/CostGuard -> db).
+ * Public GET endpoints under `/api/events` never execute the write guards.
  */
 import {
   isSlotOperatorOverrideRequested,
@@ -14,7 +13,9 @@ import {
   SlotReserveBodySchema,
   type SlotMutationResult,
 } from "@flamenode/contracts";
-import type { WriteFeatureKey } from "@flamenode/domain/admin";
+import { evaluateCostGuardCore, type WriteFeatureKey } from "@flamenode/domain/admin";
+import { actorSnapshotFromRow, type ActorSnapshotRow } from "@flamenode/server-core/audit/logger";
+import { mapAuditSettings, type AuditSettingsRow } from "@flamenode/server-core/audit/settings";
 import {
   extendSlotGroupCore,
   mergeSlotGroupsCore,
@@ -26,9 +27,10 @@ import {
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { sessionMiddleware } from "../../auth/session.ts";
 import type { AppEnv } from "../../env.ts";
-import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { dbMiddleware } from "../../middleware/db.ts";
-import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
+import { MAX_SINGLE_ROW_LIMIT } from "../../lib/limits.ts";
+import { evaluateAdminWriteGuard, originGuardMiddleware, writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
+import { TERMS_REACCEPT_REQUIRED_CTE_SQL } from "../personal/context.ts";
 import {
   auditPreloaded,
   BODY_TOO_LARGE_MESSAGE,
@@ -38,6 +40,116 @@ import {
 
 const GENERIC_FAILURE_MESSAGE =
   "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。";
+
+/**
+ * S3 #725: route-local one-statement ToS + CostGuard + audit actor gate.
+ * Origin and Auth.js session are still checked FIRST by existing middleware.
+ * published_at=0 is a valid latest major in the existing write guard.
+ */
+const SLOT_WRITE_GATE_SQL = `${TERMS_REACCEPT_REQUIRED_CTE_SQL}
+ SELECT u."is_tos_accepted" AS is_tos_accepted,
+   CASE WHEN u."is_tos_accepted" = 1
+         AND (SELECT "published_at" FROM required_major) IS NOT NULL
+         AND NOT (
+           EXISTS (
+             SELECT 1 FROM "terms_versions" accepted_terms
+             WHERE accepted_terms."id" = u."accepted_terms_version_id"
+               AND accepted_terms."published_at" IS NOT NULL
+               AND (accepted_terms."id" = (SELECT "id" FROM required_major)
+                 OR accepted_terms."published_at" > (SELECT "published_at" FROM required_major))
+           )
+           OR EXISTS (
+             SELECT 1 FROM "user_tos_consents" consent
+             INNER JOIN "terms_versions" consent_terms ON consent_terms."id" = consent."terms_version_id"
+             WHERE consent."user_id" = u."id"
+               AND consent_terms."published_at" IS NOT NULL
+               AND (consent_terms."id" = (SELECT "id" FROM required_major)
+                 OR consent_terms."published_at" > (SELECT "published_at" FROM required_major))
+           )
+         ) THEN 1 ELSE 0 END AS terms_reaccept_required,
+   u."discord_id" AS discord_id, u."name" AS discord_name,
+   u."active_x_user_id" AS active_x_user_id, u."image" AS user_image,
+   x."x_name" AS x_name, x."icon_url" AS x_icon_url,
+   settings."id" AS settings_id, settings."operation_mode" AS operation_mode,
+   settings."disabled_features_json" AS disabled_features_json,
+   settings."cost_guard_exception_until" AS cost_guard_exception_until,
+   settings."cost_guard_exception_features_json" AS cost_guard_exception_features_json,
+   settings."audit_normal_retention_days" AS audit_normal_retention_days,
+   settings."audit_restorable_retention_days" AS audit_restorable_retention_days,
+   settings."audit_long_retention_days" AS audit_long_retention_days,
+   settings."audit_max_payload_bytes" AS audit_max_payload_bytes,
+   settings."audit_compact_after_days" AS audit_compact_after_days
+ FROM "user" u
+ LEFT JOIN "x_users" x ON x."id" = u."active_x_user_id"
+ LEFT JOIN "system_settings" settings ON settings."id" = 'default'
+ WHERE u."id" = ?
+ LIMIT ${MAX_SINGLE_ROW_LIMIT}`;
+
+type SlotWriteGateRow = ActorSnapshotRow & AuditSettingsRow & {
+  is_tos_accepted: number | null;
+  terms_reaccept_required: number | null;
+  settings_id: string | null;
+  operation_mode: string | null;
+  disabled_features_json: string | null;
+  cost_guard_exception_until: number | null;
+  cost_guard_exception_features_json: string | null;
+};
+
+function slotCombinedWriteGuard(feature: WriteFeatureKey): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const user = c.get("user");
+    const sessionUnavailable = c.get("sessionState") === "unavailable";
+    let db: D1Database | undefined;
+    if (!sessionUnavailable && user) {
+      try {
+        db = c.env.DB;
+      } catch {
+        return writeGuardDenyResponse(c, "db_unavailable", 503);
+      }
+    }
+    let row: SlotWriteGateRow | null = null;
+    const identity = await evaluateAdminWriteGuard({
+      user,
+      hasDb: db !== undefined,
+      originOk: true, // checked by originGuardMiddleware before session lookup
+      sessionUnavailable,
+      requiredRole: null,
+      loadTosState: user && db ? async () => {
+        row = await db.prepare(SLOT_WRITE_GATE_SQL).bind(user.id).first<SlotWriteGateRow>();
+        return row ? {
+          is_tos_accepted: row.is_tos_accepted === 1 ? 1 : 0,
+          terms_reaccept_required: row.terms_reaccept_required === 1 ? 1 : 0,
+        } : null;
+      } : undefined,
+    });
+    if (!identity.ok) return writeGuardDenyResponse(c, identity.reason, identity.status);
+    if (!row || row.settings_id !== "default") {
+      return writeGuardDenyResponse(c, "maintenance_mode", 503);
+    }
+    try {
+      const cost = evaluateCostGuardCore({
+        feature,
+        operationMode: row.operation_mode,
+        disabledFeaturesJson: row.disabled_features_json,
+        exceptionUntil: row.cost_guard_exception_until,
+        exceptionFeaturesJson: row.cost_guard_exception_features_json,
+        now: Math.floor(Date.now() / 1000),
+      });
+      if (cost.blocked) {
+        return writeGuardDenyResponse(c,
+          cost.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked", 503);
+      }
+      c.set("auditSettings", mapAuditSettings(row));
+      c.set("actorSnapshotJsonById", {
+        [user!.id]: JSON.stringify(actorSnapshotFromRow(row)),
+      });
+    } catch {
+      return writeGuardDenyResponse(c, "cost_guard_blocked", 503);
+    }
+    await next();
+  };
+}
+
 
 function slotWriteStack(
   session: MiddlewareHandler<AppEnv> | undefined,
@@ -50,8 +162,7 @@ function slotWriteStack(
   const stack: MiddlewareHandler<AppEnv>[] = [
     (c, next) => originGuardMiddleware(originOptions(c))(c, next),
     session ?? (sessionMiddleware() as unknown as MiddlewareHandler<AppEnv>),
-    (c, next) => writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next),
-    costGuardMiddleware(feature) as MiddlewareHandler<AppEnv>,
+    slotCombinedWriteGuard(feature),
     dbMiddleware,
   ];
   return async (c, next) => {

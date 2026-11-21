@@ -1279,7 +1279,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(actual.result, expected.result);
     assert.deepEqual(state(b), state(a));
     assert.ok(b.d1.stats.maxBinds <= 100, `maxBinds=${b.d1.stats.maxBinds} <= 100`);
-    assert.equal(b.d1.stats.reads, 3);
+    assert.equal(b.d1.stats.reads, 2, "injected session: merged guard + mutation snapshot");
     assert.equal(b.d1.stats.batches, 1);
   });
 
@@ -1409,7 +1409,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
   });
 
-  test("S3 #725: real HTTPS secure-cookie mutation paths use 4 D1 pre-reads (known over-budget)", async () => {
+  test("S3 #725: real HTTPS secure-cookie mutation paths stay within 3 D1 pre-reads", async () => {
     const w = world();
     const token = "synthetic-s3-reservation-session";
     insert(w.sqlite, "session", {
@@ -1447,14 +1447,12 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(response.headers.get("cache-control"), "private, no-store");
         const readCount = w.d1.stats.reads - beforeReads;
         const statements = w.d1.stats.readSql.slice(sqlOffset);
-        // Characterization, NOT acceptance: ZERO_1102 S3 demands <=3.
-        // After an approved read fusion, replace exact 4 with <=3 here.
-        assert.equal(readCount, 4, "KNOWN S3 #725 " + operation + " over-budget");
+        assert.equal(readCount, 3, "ZERO_1102 S3 three-read budget " + operation);
         assert.equal(statements.length, readCount);
         assert.match(statements[0], /FROM "session" s/);
         assert.match(statements[1], /terms_reaccept_required/);
-        assert.match(statements[2], /FROM system_settings/);
-        assert.match(statements[3], /invalid_snapshot/);
+        assert.match(statements[1], /JOIN "system_settings" settings/);
+        assert.match(statements[2], /invalid_snapshot/);
         assert.equal(w.d1.stats.batches - beforeBatches, 1,
           operation + " must use one atomic batch");
       }
@@ -1491,7 +1489,7 @@ if (runUnderRootTsx(import.meta.url)) {
         { display_name: "Denied" });
       assert.equal(maintenance.status, 503);
       assert.equal((await maintenance.json()).reason, "maintenance_mode");
-      assert.equal(w.d1.stats.reads - beforeCost, 3);
+      assert.equal(w.d1.stats.reads - beforeCost, 2, "merged CostGuard stops before snapshot");
       assert.equal(w.d1.stats.batches - batchesBeforeCost, 0);
     } finally {
       thaw();
@@ -1560,8 +1558,7 @@ if (runUnderRootTsx(import.meta.url)) {
   test("S3 #725: real HTTPS cookie D1 faults fail closed at each pre-read boundary", async () => {
     const stages = [
       ["session", /FROM "session" s/, "database_unavailable"],
-      ["tos", /terms_reaccept_required/, "db_unavailable"],
-      ["cost", /FROM system_settings/, "cost_guard_blocked"],
+      ["merged-tos-cost", /JOIN "system_settings" settings/, "db_unavailable"],
       ["slot", /invalid_snapshot/, null],
     ];
     for (const [stage, sqlPattern, denyReason] of stages) {
