@@ -123,7 +123,7 @@ export async function buildFreeVideoNewMemberPlan(
     approval_status: "pending";
   }> = [];
   const rows: VideoMemberSnapshotRow[] = [];
-  const identities: Array<{ candidate: string; canonical: string }> = [];
+  const identities: Array<{ candidate: string; canonical: string; allowAbsent: boolean }> = [];
   for (const [index, member] of members.entries()) {
     const original = normalizeXId(member.x_user_id);
     const resolved = original ? canonical.get(original) : undefined;
@@ -140,7 +140,11 @@ export async function buildFreeVideoNewMemberPlan(
       throw new Error("free_video_new_member_duplicate_canonical_id");
     }
     if (xId) seenCanonical.add(xId);
-    if (original && xId) identities.push({ candidate: original, canonical: xId });
+    if (original && xId) identities.push({
+      candidate: original,
+      canonical: xId,
+      allowAbsent: resolved?.reason === "not_found",
+    });
     if (xId && resolved?.reason === "not_found") {
       newXUsers.push({
         id: xId, x_name: member.name.trim() || `@${xId}`,
