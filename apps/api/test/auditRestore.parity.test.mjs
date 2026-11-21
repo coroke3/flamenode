@@ -199,6 +199,54 @@ test("T01 real Hono session resolver denies expired or role-revoked users before
   }
 });
 
+test("T01 real Hono session resolves no cookie and rejects invalid Origin without D1 reads", async () => {
+  const noCookie = setup({ useRealSessionMiddleware: true });
+  seedRestorableAnnouncement(noCookie.sqlite);
+  const absent = await noCookie.request(body(), { Origin: SITE });
+  assert.equal(absent.status, 401);
+  assert.equal(absent.headers.get("Cache-Control"), "private, no-store");
+  assert.equal((await absent.json()).reason, "unauthenticated");
+  assert.equal(noCookie.stats.reads, 0);
+  assert.equal(noCookie.stats.batches, 0);
+  assert.equal(changes(noCookie.sqlite).row.title, "Current Title");
+
+  const crossOrigin = setup({ useRealSessionMiddleware: true });
+  seedRestorableAnnouncement(crossOrigin.sqlite);
+  const denied = await crossOrigin.request(body(), {
+    Origin: "https://untrusted.example",
+    Cookie: `__Secure-authjs.session-token=${SQLITE_AUTH_SESSION_TOKEN}`,
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.headers.get("Cache-Control"), "private, no-store");
+  assert.equal((await denied.json()).reason, "invalid_origin");
+  assert.equal(crossOrigin.stats.reads, 0, "Origin gate precedes real session D1 lookup");
+  assert.equal(crossOrigin.stats.batches, 0);
+  assert.equal(changes(crossOrigin.sqlite).row.title, "Current Title");
+});
+
+test("T01 real Hono session D1 failure is 503 and never mutates or logs cookie", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true });
+  seedRestorableAnnouncement(ctx.sqlite);
+  // A broken session SELECT is an unavailable session, never anonymous/fallback.
+  ctx.sqlite.exec('DROP TABLE "session"');
+  const originalError = console.error;
+  const logs = [];
+  try {
+    console.error = (...args) => { logs.push(args.map(String).join(" ")); };
+    const response = await ctx.request(body());
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    assert.equal((await response.json()).error, "database_unavailable");
+    assert.equal(ctx.stats.batches, 0);
+    assert.equal(changes(ctx.sqlite).row.title, "Current Title");
+    assert.equal(changes(ctx.sqlite).runs.length, 0);
+    assert.deepEqual(logs, ["[auth:session] D1_LOOKUP_FAILED"]);
+    assert.ok(logs.every((s) => !s.includes(SQLITE_AUTH_SESSION_TOKEN)));
+  } finally {
+    console.error = originalError;
+  }
+});
+
 test("T01 admin origin, session, role and BAN guards reject before any restore write", async () => {
   for (const opts of [
     { user: null, status: 401 },
