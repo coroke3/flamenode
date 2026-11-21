@@ -52,7 +52,7 @@ test("MIG-0651 software: migrated SQLite resolves active alias before catalog na
       is_active: 1, is_verified: 0, usage_count: 0, created_at: NOW, updated_at: NOW,
     });
     insert(sqlite, "software_aliases", {
-      software_id: "sw_blender", alias: "B3D", normalized_alias: "b3d",
+      id: "alias_b3d", software_id: "sw_blender", alias: "B3D", normalized_alias: "b3d",
     });
     insert(sqlite, "videos", {
       id: "v-software", submitted_by_user_id: "u", creator_display_name: "Example",
