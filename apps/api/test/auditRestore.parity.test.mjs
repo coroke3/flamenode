@@ -17,6 +17,7 @@ const ADMIN = {
   role: "admin", is_banned: 0, active_x_user_id: null,
 };
 const RESTORE = "/api/admin/audit/restore";
+const SQLITE_AUTH_SESSION_TOKEN = "fixture-only-session-token-not-a-real-credential";
 
 // D1 fake read-trace: observe table names only (never SQL bind values or tokens).
 // This is diagnostic evidence for Issue #691, NOT a real Auth.js/workerd profile.
@@ -29,7 +30,10 @@ function readTableLabels(sql) {
   )].map((match) => match[1]))].slice(0, 12);
 }
 
-function setup({ user = ADMIN, role = "admin", disabled = [], enableRestoreCandidate = true } = {}) {
+function setup({
+  user = ADMIN, role = "admin", disabled = [], enableRestoreCandidate = true,
+  useRealSessionMiddleware = false, sessionExpired = false,
+} = {}) {
   const { sqlite, db, stats } = createAdminD1();
   const readTrace = [];
   const originalPrepare = db.prepare.bind(db);
@@ -52,6 +56,19 @@ function setup({ user = ADMIN, role = "admin", disabled = [], enableRestoreCandi
     };
   };
   seedBase(sqlite, { role });
+  if (useRealSessionMiddleware) {
+    // Use the real Hono Auth.js-cookie/D1 resolver against a synthetic SQLite
+    // session table. This does NOT execute against real Cloudflare/workerd.
+    sqlite.exec(`CREATE TABLE "session" (
+      "sessionToken" TEXT PRIMARY KEY,
+      "userId" TEXT NOT NULL,
+      "expires" INTEGER NOT NULL
+    )`);
+    sqlite.prepare(
+      'INSERT INTO "session" ("sessionToken","userId","expires") VALUES (?, ?, ?)',
+    ).run(SQLITE_AUTH_SESSION_TOKEN, ADMIN.id,
+      Date.now() + (sessionExpired ? -60_000 : 60_000));
+  }
   if (disabled.length) {
     sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = 'default'")
       .run(JSON.stringify(disabled));
@@ -59,14 +76,18 @@ function setup({ user = ADMIN, role = "admin", disabled = [], enableRestoreCandi
   const app = new Hono();
   app.route("/api/admin", createAdminRoutes({
     enableAuditRestoreCandidate: enableRestoreCandidate,
-    session: async (c, next) => {
+    // Omitting the injected session exercises the production sessionMiddleware.
+    session: useRealSessionMiddleware ? undefined : async (c, next) => {
       c.set("user", user);
       c.set("sessionState", user ? "user" : "none");
       await next();
     },
   }));
-  const request = (body, headers = { Origin: SITE }, extraEnv = {}) => app.request(
-    RESTORE, {
+  const defaultHeaders = useRealSessionMiddleware
+    ? { Origin: SITE, Cookie: `__Secure-authjs.session-token=${SQLITE_AUTH_SESSION_TOKEN}` }
+    : { Origin: SITE };
+  const request = (body, headers = defaultHeaders, extraEnv = {}) => app.request(
+    useRealSessionMiddleware ? SITE + RESTORE : RESTORE, {
       method: "POST", headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
     }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE, ...extraEnv },
@@ -140,6 +161,42 @@ test("T00 production/default admin router physically excludes unapproved SA-011 
   assert.equal(accepted.status, 200, "isolated test-only opt-in still exercises real candidate");
   assert.equal((await accepted.json()).ok, true);
   assert.equal(changes(enabled.sqlite).runs.length, 1);
+});
+
+test("T01 real Hono session resolver on SQLite adds one pre-read to SA-011 S3 trace", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true });
+  seedRestorableAnnouncement(ctx.sqlite);
+  const res = await ctx.request(body());
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("Cache-Control"), "private, no-store");
+  assert.equal((await res.json()).ok, true);
+  assert.equal(changes(ctx.sqlite).row.title, "Old Title");
+  assert.equal(ctx.stats.reads, 9, "one session SELECT plus 8 mocked-session pre-reads");
+  assert.equal(ctx.stats.batches, 1);
+  assert.deepEqual(ctx.readTrace[0].referenced_tables, ["session", "user"]);
+  recordRestoreD1Budget(
+    "announcements_authjs_sqlite_session_success", ctx.stats, ctx.readTrace,
+    "authjs_middleware_sqlite_fixture",
+  );
+});
+
+test("T01 real Hono session resolver denies expired or role-revoked users before restore", async () => {
+  for (const { options, status, expectedReads } of [
+    { options: { sessionExpired: true }, status: 401, expectedReads: 1 },
+    { options: { role: "user" }, status: 403, expectedReads: 2 },
+  ]) {
+    const ctx = setup({ useRealSessionMiddleware: true, ...options });
+    seedRestorableAnnouncement(ctx.sqlite);
+    const res = await ctx.request(body());
+    assert.equal(res.status, status);
+    assert.equal(res.headers.get("Cache-Control"), "private, no-store");
+    assert.equal((await res.json()).ok, false);
+    assert.equal(ctx.stats.reads, expectedReads);
+    assert.equal(ctx.stats.batches, 0);
+    assert.equal(changes(ctx.sqlite).row.title, "Current Title");
+    assert.equal(changes(ctx.sqlite).runs.length, 0);
+    assert.equal(ctx.readTrace[0].referenced_tables[0], "session");
+  }
 });
 
 test("T01 admin origin, session, role and BAN guards reject before any restore write", async () => {
@@ -519,13 +576,14 @@ test("T04 video restore fails closed when enforced visibility R2 bucket is unava
 // The Hono route test injects an in-memory session middleware, not Auth.js.
 // These counts therefore form a *lower bound*, not a production D1 profile.
 // Reports remain observational until the approved S3 <=3 pre-read gate is met.
-function recordRestoreD1Budget(scenario, stats, readTrace) {
+function recordRestoreD1Budget(scenario, stats, readTrace, sessionSource = "injected_mock") {
   assert.equal(readTrace.length, stats.reads,
     "trace must account for every fake D1 first/all/raw read");
   // Bounded, sanitized read order is more actionable than totals alone.
   const record = {
     read_trace: readTrace.slice(0, 20),
-    scenario, mocked_session: true,
+    scenario, mocked_session: sessionSource === "injected_mock",
+    session_source: sessionSource, actual_workerd: false,
     d1_reads: stats.reads, d1_batches: stats.batches,
     s3_max_pre_reads: 3, s3_max_batches: 1,
     over_s3_budget: stats.reads > 3 || stats.batches > 1,
