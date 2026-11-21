@@ -837,4 +837,46 @@ if (runTestWithTsx(import.meta.url)) {
       entry.op === "cache.delete" && entry.key.includes("public-event-export%3A")
     ).length, 0, "D1 rollback cannot evict committed exports");
   });
+
+  test("SEC-718: dry-run video restore never invalidates related scheduled exports", async () => {
+    const [, result] = await runScenario("video_export_dry_run", {
+      setup: seedVideoWithEvents(),
+      arrange: arrangeVideo(videoPublicToPrivate),
+      options: { dry_run: true },
+    });
+    assert.ok(result.outcome.returned && !result.outcome.threw, "dry-run must return normally");
+    assert.equal(result.log.filter((entry) => entry.op === "cache.delete").length, 0);
+    assert.equal(result.log.filter((entry) => entry.op === "r2.put").length, 0);
+    assert.equal(result.log.filter((entry) => entry.op === "batch").length, 0);
+    assert.equal(result.audit_restore_runs.length, 0, "dry-run cannot persist success/failure");
+  });
+
+  test("SEC-718: eight relations plus new primary must reject nine export targets before writes", async () => {
+    const setup = (sqlite) => {
+      seedVideo(sqlite);
+      insertRow(sqlite, "video_events", { video_id: "vid-1", event_id: "evt-1" });
+      for (let i = 0; i < 7; i += 1) {
+        const id = `evt-extra-${i}`;
+        insertRow(sqlite, "events", {
+          id, title: `Extra Event ${i}`, visibility_status: "public",
+          created_at: 1000, updated_at: 1000,
+        });
+        insertRow(sqlite, "video_events", { video_id: "vid-1", event_id: id });
+      }
+      // The snapshot's old/new primary IDs are evt-private / evt-1.
+      // evt-private is outside the eight video_events relations.
+    };
+    const [, result] = await runScenario("video_export_union_overflow", {
+      setup,
+      arrange: arrangeVideo(videoPublicToPrivate),
+    });
+    assert.equal(result.outcome.returned?.ok, false, "nine distinct export targets must fail closed");
+    assert.equal(result.log.filter((entry) => entry.op === "batch").length, 0,
+      "reject before an atomic mutation");
+    assert.equal(result.log.filter((entry) => entry.op === "r2.put").length, 0,
+      "reject before public visibility precommit");
+    assert.equal(result.log.filter((entry) => entry.op === "cache.delete").length, 0,
+      "never partially invalidate an over-budget target set");
+    assert.ok(result.audit_restore_runs.every((row) => row.status !== "success"));
+  });
 }
