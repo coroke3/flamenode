@@ -804,8 +804,12 @@ test("MIG-0514 U03a read-only viewer notice hydrates privately and never replace
       loggedIn: true, authUnavailable: false, isBanned: false,
       needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
       operatorOverrideAllowed: false, viewerXId: "x-private", viewerXIdNotice: privateNotice,
-      slots: [{ id: "s1", display_name: "非公開本人枠", is_owned_by_viewer: true,
-        viewer_relation: "active", group_key: "private-group", x_user_id: "x-private" }],
+      slots: [
+        { id: "s1", display_name: "非公開本人枠", is_owned_by_viewer: true,
+          viewer_relation: "active", group_key: "private-group", x_user_id: "x-private" },
+        { id: "s2", display_name: "stale-private-reservation", is_owned_by_viewer: true,
+          viewer_relation: "active", group_key: null, x_user_id: "x-private" },
+      ],
     }) };
     assert.ok(String(url).startsWith("/api/live/events/"), "public slots use RH-020");
     assert.equal(init.credentials, "omit");
@@ -834,6 +838,13 @@ test("MIG-0514 U03a read-only viewer notice hydrates privately and never replace
   assert.equal(reads[0].init.cache, "no-store");
   assert.ok(text(c).includes(privateNotice), "notice appears only after hydration");
   assert.ok(text(c).includes("公開枠の名前"), "RH-020 public grid remains canonical");
+  assert.equal(c.querySelectorAll(".sl.mine").length, 1,
+    "only an authorized and publicly taken slot has the private ownership badge");
+  assert.match(c.querySelector(".sl.mine").getAttribute("aria-label"), /自分の枠/,
+    "ownership is visible to assistive technology, without exposing private X IDs");
+  assert.ok(text(c).includes("自分の枠"));
+  assert.ok(!text(c).includes("stale-private-reservation"),
+    "stale private state cannot override the public available slot");
   assert.ok(!text(c).includes("非公開本人枠"), "private slot names not mounted in U03a");
   assert.equal(c.querySelectorAll("button").length, 0, "no write controls");
   await act(async () => root.unmount());
@@ -858,6 +869,9 @@ test("MIG-0514 U03a RH-014 outage preserves public grid and denies actions", { s
   await settle();
   assert.ok(text(c).includes("ログイン状態を一時的に確認できません"));
   assert.ok(text(c).includes("公開枠の名前"));
+  assert.equal(c.querySelectorAll(".sl.mine").length, 0,
+    "RH-014 outage must not retain ownership or authenticated badge");
+  assert.ok(!text(c).includes("自分の枠"));
   assert.equal(c.querySelectorAll("button").length, 0);
   await act(async () => root.unmount());
 });

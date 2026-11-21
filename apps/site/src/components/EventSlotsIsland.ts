@@ -1,5 +1,5 @@
 import React from "react";
-import { EventSlotsView } from "@flamenode/ui";
+import { EventSlotsView, type EventSlotsViewModel } from "@flamenode/ui";
 import type { EventIslandDetail } from "../lib/eventDetail.ts";
 import { buildEventSlotsModel, type SlotsLivePhase } from "../lib/eventSlots.ts";
 import { fetchLiveSlots, type LiveSlots } from "../lib/liveSlots.ts";
@@ -63,7 +63,29 @@ export function EventSlotsIsland({ detail, builtAt }: EventSlotsIslandProps): Re
         accepting: isAcceptingEntries(detail.event, now),
         eventStatus: computeEventStatus(detail.event, now),
       },
-      () => React.createElement(EventSlotsView, { model }),
+      (viewer) => {
+        // U03b1 is visual-only: RH-020 remains the public name/status authority.
+        // Reveal ownership only after a current, valid RH-014 session overlay;
+        // never label an RH-020 "available" slot as owned, even if the viewer
+        // response is stale. No private X ID/name or mutation control is rendered.
+        const owned = new Set(
+          viewer.canManageOwnSlots
+            ? viewer.slots.filter((slot) => slot.is_owned_by_viewer).map((slot) => slot.id)
+            : [],
+        );
+        const viewerModel: EventSlotsViewModel = owned.size === 0 ? model : {
+          ...model,
+          days: model.days.map((day) => ({
+            ...day,
+            blocks: day.blocks.map((block) =>
+              block.kind === "slot" && block.state === "taken" && owned.has(block.id)
+                ? { ...block, ownedByViewer: true }
+                : block,
+            ),
+          })),
+        };
+        return React.createElement(EventSlotsView, { model: viewerModel });
+      },
     ),
   );
 }

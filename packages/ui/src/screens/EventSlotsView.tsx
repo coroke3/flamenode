@@ -18,7 +18,7 @@ export type SlotCellState = "pending" | "open" | "taken" | "unknown";
 export type SlotsBlock =
   | { kind: "part"; label: string }
   | { kind: "gap"; range: string }
-  | { kind: "slot"; id: string; time: string; state: SlotCellState; name?: string | null };
+  | { kind: "slot"; id: string; time: string; state: SlotCellState; name?: string | null; ownedByViewer?: boolean };
 
 export interface SlotsDay {
   key: string;
@@ -60,14 +60,17 @@ const CELL_LABEL: Record<SlotCellState, string> = {
 
 function Cell({ block }: { block: Extract<SlotsBlock, { kind: "slot" }> }): React.ReactElement {
   const name = block.state === "taken" ? block.name?.trim() || CELL_LABEL.taken : CELL_LABEL[block.state];
+  // Ownership is a private overlay hint, never an authority or write control.
+  const mine = block.state === "taken" && block.ownedByViewer === true;
   return (
     <div className="srow2">
       <span className="tm">{block.time}</span>
       <div
-        className={cx("sl", block.state === "taken" && "taken", block.state === "open" && "open", block.state === "pending" && "pending")}
-        aria-label={`${block.time} ${name}`}
+        className={cx("sl", block.state === "taken" && "taken", block.state === "open" && "open", block.state === "pending" && "pending", mine && "mine")}
+        aria-label={`${block.time} ${name}${mine ? " 自分の枠" : ""}`}
       >
         <span className="nm">{name}</span>
+        {mine ? <span className="t-sm muted" aria-hidden="true">自分の枠</span> : null}
       </div>
     </div>
   );
