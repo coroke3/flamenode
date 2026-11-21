@@ -4,7 +4,7 @@ import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import { videoCustomAnswers, videoEvents, videoYoutubeMetadata, videos } from "@flamenode/db/schema";
-import { buildFreeVideoSubmissionAtomicPlan, inspectFreeVideoSubmissionAtomicPlanBudget } from "../src/video/freeVideoSubmissionAtomicPlan.ts";
+import { buildFreeVideoSubmissionAtomicPlan, buildFreeVideoSubmissionWithRebuildPlan, inspectFreeVideoSubmissionAtomicPlanBudget } from "../src/video/freeVideoSubmissionAtomicPlan.ts";
 import { buildFreeVideoRow } from "../src/video/freeVideoRow.ts";
 import { D1_MAX_BIND_PARAMETERS } from "../src/audit/mutateBudget.ts";
 
@@ -476,4 +476,107 @@ test("MIG-0651 atomic composer: mid-batch metadata failure rolls back the earlie
   } finally {
     sqlite.close();
   }
+});
+
+test("MIG-0651 U02 rebuild queue: real SQLite inserts 13/16 exact targets in the same video transaction", async () => {
+  for (const eventId of [null, "event-a"]) {
+    const sqlite = createSqlite();
+    seedApprovedActiveX(sqlite);
+    try {
+      if (eventId) {
+        insert(sqlite, "events", {
+          id: eventId, title: "Public event", visibility_status: "public",
+          allow_unslotted_posts: 1,
+        });
+      }
+      const drizzleDb = drizzle(async () => ({ rows: [] }));
+      const db = {
+        run(expr) { return { sqlExpr: expr }; },
+        insert(table) { return drizzleDb.insert(table); },
+        batch() { throw new Error("must not execute an unmounted candidate"); },
+      };
+      const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+        videoAfter: video(eventId), actorUserId: "user-1",
+        trustedActiveXId: "alice", eventId, now: NOW,
+        questions: [], customAnswerDrafts: [],
+      });
+      assert.equal(plan.statements.length, eventId ? 7 : 4);
+      assert.deepEqual(plan.expectedChanges, eventId
+        ? [null, null, null, 1, 1, 1, 16]
+        : [null, 1, 1, 13]);
+      assert.equal(plan.audits.length, eventId ? 3 : 2,
+        "queue UPSERT is not a duplicate audit entry");
+      assert.equal(plan.statements[0].sqlExpr !== undefined, true);
+      const last = plan.statements.at(-1);
+      assert.ok(last.sqlExpr, "the queue write is appended after video/event INSERTs");
+      assert.match(new SQLiteSyncDialect().sqlToQuery(last.sqlExpr).sql,
+        /INSERT INTO static_rebuild_queue/);
+      const cost = inspectFreeVideoSubmissionAtomicPlanBudget(plan, 0);
+      assert.equal(cost.withinLimit, true);
+
+      const dialect = new SQLiteSyncDialect();
+      sqlite.exec("BEGIN");
+      try {
+        for (const [index, statement] of plan.statements.entries()) {
+          const expr = "sqlExpr" in statement;
+          const compiled = expr ? dialect.sqlToQuery(statement.sqlExpr) : statement.toSQL();
+          assert.ok(compiled.params.length <= D1_MAX_BIND_PARAMETERS,
+            "all D1 binds must stay <=100");
+          const stmt = sqlite.prepare(compiled.sql);
+          const result = expr && index !== plan.statements.length - 1
+            ? stmt.get(...compiled.params)
+            : stmt.run(...compiled.params);
+          if (plan.expectedChanges[index] !== null) {
+            assert.equal(Number(result.changes), plan.expectedChanges[index]);
+          }
+        }
+        sqlite.exec("COMMIT");
+      } catch (error) {
+        sqlite.exec("ROLLBACK");
+        throw error;
+      }
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 1);
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n,
+        eventId ? 16 : 13);
+      assert.equal(sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM static_rebuild_queue WHERE target_type='video' AND target_id='v:1'",
+      ).get().n, 1);
+    } finally { sqlite.close(); }
+  }
+});
+
+test("MIG-0651 U02 rebuild queue: queue write failure also rolls back prior video INSERT", async () => {
+  const sqlite = createSqlite();
+  seedApprovedActiveX(sqlite);
+  try {
+    sqlite.exec(`
+      CREATE TRIGGER fail_queue_insertion
+      BEFORE INSERT ON static_rebuild_queue
+      BEGIN SELECT RAISE(ABORT, 'queue-test-abort'); END;
+    `);
+    const drizzleDb = drizzle(async () => ({ rows: [] }));
+    const db = {
+      run(expr) { return { sqlExpr: expr }; },
+      insert(table) { return drizzleDb.insert(table); },
+    };
+    const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+      videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
+      eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+    });
+    const dialect = new SQLiteSyncDialect();
+    sqlite.exec("BEGIN");
+    assert.throws(() => {
+      for (const [index, statement] of plan.statements.entries()) {
+        const isSql = "sqlExpr" in statement;
+        const compiled = isSql ? dialect.sqlToQuery(statement.sqlExpr) : statement.toSQL();
+        const stmt = sqlite.prepare(compiled.sql);
+        if (isSql && index !== plan.statements.length - 1) stmt.get(...compiled.params);
+        else stmt.run(...compiled.params);
+      }
+    }, /queue-test-abort/);
+    sqlite.exec("ROLLBACK");
+    for (const table of ["videos", "video_youtube_metadata", "static_rebuild_queue"]) {
+      assert.equal(sqlite.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n, 0);
+    }
+  } finally { sqlite.close(); }
 });
