@@ -4531,7 +4531,7 @@
     "outcome": {
       "returned": {
         "ok": false,
-        "message": "復元を確定できませんでした。変更はロールバックされました: malformed JSON",
+        "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable",
         "restore_run_id": "rst_00000000-0000-4000-8000-000000000003"
@@ -4699,7 +4699,7 @@
           "u-actor",
           "restore because",
           "failed",
-          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
           1760000000
         ]
       }
@@ -4737,7 +4737,7 @@
         "executed_by_user_id": "u-actor",
         "reason": "restore because",
         "status": "failed",
-        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
         "executed_at": 1760000000
       }
     ],
@@ -10282,7 +10282,7 @@
     "outcome": {
       "returned": {
         "ok": false,
-        "message": "復元を確定できませんでした。変更はロールバックされました: malformed JSON",
+        "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable",
         "restore_run_id": "rst_00000000-0000-4000-8000-000000000013"
@@ -10575,7 +10575,7 @@
           "u-actor",
           "restore because",
           "failed",
-          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
           1760000000
         ]
       }
@@ -10618,7 +10618,7 @@
         "executed_by_user_id": "u-actor",
         "reason": "restore because",
         "status": "failed",
-        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
         "executed_at": 1760000000
       }
     ],
@@ -10701,7 +10701,7 @@
     "outcome": {
       "returned": {
         "ok": false,
-        "message": "復元を確定できませんでした。変更はロールバックされました: malformed JSON",
+        "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable",
         "restore_run_id": "rst_00000000-0000-4000-8000-000000000021"
@@ -11007,7 +11007,7 @@
           "u-actor",
           "restore because",
           "failed",
-          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
           1760000000
         ]
       }
@@ -11050,7 +11050,7 @@
         "executed_by_user_id": "u-actor",
         "reason": "restore because",
         "status": "failed",
-        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
         "executed_at": 1760000000
       }
     ],
@@ -11166,7 +11166,7 @@
     "outcome": {
       "returned": {
         "ok": false,
-        "message": "復元を確定できませんでした。変更はロールバックされました: malformed JSON",
+        "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable",
         "restore_run_id": "rst_00000000-0000-4000-8000-000000000013"
@@ -11453,7 +11453,7 @@
           "u-actor",
           "restore because",
           "failed",
-          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
           1760000000
         ]
       }
@@ -11504,7 +11504,7 @@
         "executed_by_user_id": "u-actor",
         "reason": "restore because",
         "status": "failed",
-        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
         "executed_at": 1760000000
       }
     ],
@@ -11587,7 +11587,7 @@
     "outcome": {
       "returned": {
         "ok": false,
-        "message": "復元を確定できませんでした。変更はロールバックされました: malformed JSON",
+        "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable"
       }
@@ -11748,7 +11748,7 @@
           "u-actor",
           "restore because",
           "failed",
-          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
           1760000000
         ]
       },

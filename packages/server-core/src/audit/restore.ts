@@ -167,6 +167,18 @@ async function persistPermanentRestoreFailure(args: {
   return runId;
 }
 
+/** Only explicitly enumerated invariant codes may be shown to the caller.
+ * Arbitrary Drizzle/provider exceptions can contain SQL parameters, user data
+ * and headers even when they have no token:/secret: prefix.
+ */
+function publicRestoreMutationFailureMessage(error: unknown): string {
+  const prefix = "復元を確定できませんでした。変更はロールバックされました";
+  if (error instanceof Error && error.message === "video_status_rebuild_event_limit_exceeded") {
+    return `${prefix}: video_status_rebuild_event_limit_exceeded`;
+  }
+  return `${prefix}。`;
+}
+
 /**
  * 復元本体、復元履歴、元ログの状態更新、RESTORE 監査ログを単一 D1 batch で確定する。
  * いずれか一つでも失敗した場合は、復元対象を含めて全て rollback される。
@@ -663,10 +675,8 @@ export async function restoreAuditLog(
       staticRebuildWakeSource: visibilityEntity ? "admin" : undefined,
     }, host.loadQueueWakeHost);
   } catch (error) {
-    const message =
-      `復元を確定できませんでした。変更はロールバックされました: ${
-        sanitizeRestoreError(error)
-      }`;
+    // Never reflect an arbitrary SQL/provider exception into the HTTP body.
+    const message = publicRestoreMutationFailureMessage(error);
 
     let failedRunId: string | undefined;
 

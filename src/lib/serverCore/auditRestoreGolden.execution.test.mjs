@@ -838,6 +838,46 @@ if (runTestWithTsx(import.meta.url)) {
     "audit and actor IDs must not be logged");
   });
 
+  test("SEC-730: failed D1 mutation never reflects SQL/provider secrets in HTTP or audit rows", async () => {
+    const secret = "SEC730_PRIVATE_SQL_PROVIDER_CANARY";
+    const expectedMessage = "復元を確定できませんでした。変更はロールバックされました。";
+    for (const [entityType, spec] of [
+      ["event", {
+        arrange: arrangeEvent("evt-1", { beforePatch: { visibility_status: "private" } }),
+      }],
+      ["video", {
+        setup: seedVideoWithEvents(),
+        arrange: arrangeVideo(videoPublicToPrivate),
+      }],
+    ]) {
+      const [, result] = await runScenario(`private_mutation_error_${entityType}`, {
+        ...spec,
+        hooks: {
+          beforeBatch: () => {
+            const err = new Error(`Failed query: UPDATE audit_thing; params: ${secret}`);
+            err.cause = new Error(`upstream provider ${secret}`);
+            err.providerDetails = { headers: { authorization: secret } };
+            throw err;
+          },
+        },
+      });
+      assert.equal(result.outcome.returned?.ok, false, entityType);
+      assert.equal(result.outcome.returned?.reason_code, "mutation_failed", entityType);
+      assert.equal(result.outcome.returned?.message, expectedMessage,
+        `${entityType}: unknown SQL errors cannot appear in HTTP responses`);
+      assert.ok(result.audit_restore_runs.some((row) => row.status === "failed"),
+        `${entityType}: failed restore remains audited`);
+      assert.equal(result.audit_restore_runs.filter((row) => row.status === "success").length, 0);
+      assert.ok(!JSON.stringify(result.outcome).includes(secret),
+        `${entityType}: response must not reflect the secret-bearing error`);
+      assert.ok(!JSON.stringify(result.audit_restore_runs).includes(secret),
+        `${entityType}: persisted failure history must not reflect provider metadata`);
+      assert.ok(!JSON.stringify(result.log.filter((entry) =>
+        entry.op.startsWith("console."))).includes(secret),
+      `${entityType}: external console must never contain SQL/provider canaries`);
+    }
+  });
+
   test("SEC-718: successful video audit restore invalidates all bounded related exports", async () => {
     const formats = ["v5", "legacy"];
     const windows = [15, 60, 360, 1440];
