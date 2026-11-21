@@ -1050,12 +1050,17 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
         exposed.push(item.format + ":" + response.headers.get("X-FlameNode-Cache"));
       }
     }
-    if (exposed.length > 0) {
-      t.todo("#718 STOP: a different colo still serves restored private video via " +
-        exposed.join(", ") + "; require cross-colo cache epoch or member revalidation");
-      return;
-    }
-    assert.deepEqual(exposed, [], "neither v5 nor legacy may disclose private video");
+    // Keep the real restore, cache-HIT, HTTP response and colo-isolation
+    // invariants on the STRICT parent. Only the known cross-colo leak is TODO;
+    // marking the parent TODO would waive those critical assertions too.
+    await t.test("#718 reader-colo cached exports hide restored private videos", (subtest) => {
+      if (exposed.length > 0) {
+        subtest.todo("#718 STOP: a different colo still serves restored private video via " +
+          exposed.join(", ") + "; require cross-colo cache epoch or member revalidation");
+        return;
+      }
+      assert.deepEqual(exposed, [], "neither v5 nor legacy may disclose private video");
+    });
   } finally {
     if (previousCache === undefined) delete globalThis.caches;
     else globalThis.caches = previousCache;
