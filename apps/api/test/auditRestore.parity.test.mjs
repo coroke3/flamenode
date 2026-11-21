@@ -659,7 +659,7 @@ test("T04 R2 CAS succeeds but D1 batch fails: event/video remain public, compens
     assert.equal(response.headers.get("Cache-Control"), "private, no-store");
     const result = await response.json();
     assert.equal(result.ok, false, "no false restore success after D1 failure");
-    assert.equal(result.reason_code, "mutation_failed");
+    assert.match(result.message, /復元を確定できませんでした/);
     assert.equal(ctx.sqlite.prepare(
       `SELECT visibility_status FROM ${scenario.table} WHERE id = ?`,
     ).get(scenario.entityId).visibility_status, "public", "failed D1 batch cannot change publication");
