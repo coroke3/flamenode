@@ -33,8 +33,13 @@ test("event exportのCache API HITはmetadataを信用せずDTO検証を必ず�
 
 test("scheduled exportはCache API HITでもD1公開可否確認を先に維持する", () => {
   const authIndex = route.indexOf("prefetchedEvent = await loadEventExportEvent");
-  const cacheIndex = route.indexOf("const response = await cachedResponse()");
-  assert.ok(authIndex >= 0 && cacheIndex > authIndex);
+  const snapshotIndex = route.indexOf("snapshot = await loadEventExportSnapshot(");
+  const serializationIndex = route.indexOf("body = JSON.stringify(payload)");
+  const cacheIndex = route.indexOf("const response = await cachedResponse(body)");
+  assert.ok(authIndex >= 0 && snapshotIndex > authIndex &&
+    serializationIndex > snapshotIndex && cacheIndex > serializationIndex,
+    "scheduled cache reuse must follow the fresh D1 relation snapshot and public DTO");
+  assert.match(route, /cached === null \|\| !eventExportBodyMatchesFresh\(cached, freshBody, format\)/);
 });
 
 test("web WorkerはSmart Placementを有効化し静的assetはWorkerを迂回する", () => {
