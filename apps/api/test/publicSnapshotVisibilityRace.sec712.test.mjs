@@ -9,6 +9,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const { loadPublicSnapshot } = await import("../src/lib/publicSnapshot.ts");
   const manifestKey = "visibility/blocked-entities.v1.json";
   const playlistKey = "events/evt-1/playlist.v1.json";
+  const videoKey = "videos/vid-safe.json";
   const slotsKey = "events/evt-1/slots.json";
   const playlist = {
     schema_version: 1, event_id: "evt-1", complete: true,
@@ -17,6 +18,12 @@ if (runUnderRootTsx(import.meta.url)) {
       { id: "vid-safe", title: "Safe", display_name: "Safe creator" },
       { id: "vid-revoked", title: "OLD SECRET TITLE", display_name: "OLD SECRET AUTHOR" },
     ],
+  };
+
+  const videoDetail = {
+    schema_version: 1, generated_at: 1700000000,
+    video: { id: "vid-safe", title: "Safe", visibility_status: "public", youtube_video_id: "yt-safe" },
+    public_events: [{ id: "evt-1", title: "Event", visibility_status: "public" }],
   };
 
   function fixture() {
@@ -40,6 +47,10 @@ if (runUnderRootTsx(import.meta.url)) {
           if (mode === "missing-initial") return null;
           const value = manifest();
           return { etag: currentEtag, size: Buffer.byteLength(value), text: async () => value };
+        }
+        if (key === videoKey) {
+          return { size: Buffer.byteLength(JSON.stringify(videoDetail)),
+            json: async () => structuredClone(videoDetail) };
         }
         if (key === playlistKey) {
           if (mode === "race") currentEtag = '"manifest-v2"';
@@ -129,6 +140,47 @@ if (runUnderRootTsx(import.meta.url)) {
     const slots = fixture();
     assert.equal((await loadPublicSnapshot(options(slots.bucket, "enforce", slotsKey))).kind, "ok");
     assert.deepEqual(slots.calls, ["GET " + manifestKey, "GET " + slotsKey]);
+  });
+
+
+  test("SEC-712 mounted Hono route: a mid-read video revocation never reaches playlistItems", async (t) => {
+    // Exercise the actual GET /api/videos/:id/viewer-overlay response boundary,
+    // not only loadPublicSnapshot. No real Cloudflare binding or D1 writes.
+    const { app } = await import("../src/app.ts");
+    const { createSqlite, createD1, createFakeKv } = await import("./support/publicEventsHarness.mjs");
+    const { resetOperationModeCachesForTests } = await import("../src/routes/live/operationMode.ts");
+    const sqlite = createSqlite();
+    t.after(() => sqlite.close());
+    const db = createD1(sqlite);
+    async function invoke(h) {
+      resetOperationModeCachesForTests();
+      const response = await app.request(
+        "/api/videos/vid-safe/viewer-overlay?playlist=evt-1", {}, {
+          DB: db, KV: createFakeKv(), BUCKET: h.bucket,
+          FORCE_STATIC_ONLY: "1", PUBLIC_VISIBILITY_GUARD_MODE: "enforce",
+        },
+      );
+      const text = await response.text();
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store, no-cache, must-revalidate");
+      assert.equal(db.stats.statements, 0, "static-only must not read D1");
+      assert.equal(db.stats.writes, 0, "never write to D1");
+      assert.equal(h.calls.filter((c) => c === "GET " + manifestKey).length, 2,
+        "video and playlist readers each consult the manifest before their R2 read");
+      assert.equal(h.calls.filter((c) => c === "GET " + playlistKey).length, 1);
+      assert.equal(h.calls.filter((c) => c === "HEAD " + manifestKey).length, 1);
+      return { dto: JSON.parse(text), text };
+    }
+    const stable = fixture();
+    const allowed = await invoke(stable);
+    assert.deepEqual(allowed.dto.playlistItems.map((row) => row.id), ["vid-safe", "vid-revoked"]);
+
+    const stale = fixture();
+    stale.setMode("race");
+    const denied = await invoke(stale);
+    assert.deepEqual(denied.dto.playlistItems, [], "deny stale playlist after ETag change");
+    assert.doesNotMatch(denied.text, /vid-revoked|OLD SECRET TITLE|OLD SECRET AUTHOR/);
+    assert.equal(stale.playlist.items.length, 2, "source artifact must remain unchanged");
   });
 
   test("SEC-712 Hono: synthetic bucket without HEAD performs bounded manifest re-read", async () => {
