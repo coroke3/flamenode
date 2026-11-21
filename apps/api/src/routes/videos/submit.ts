@@ -114,15 +114,22 @@ export async function validateFreeVideoDbReadPreflight(
   try {
     eventId = await resolveUnslottedEventIdForNewVideo(db, input.requestedEventId, nowSec);
   } catch (error) {
-    if (
-      error instanceof UnslottedEventSyncError &&
-      error.code === "unslotted_event_selection_invalid"
-    ) {
-      return { ok: false, message: "枠なし投稿で所属できるイベントは1件までです。" };
+    if (error instanceof UnslottedEventSyncError) {
+      if (error.code === "unslotted_event_selection_invalid") {
+        return { ok: false, message: "枠なし投稿で所属できるイベントは1件までです。" };
+      }
+      if (error.code === "unslotted_event_not_allowed") {
+        return {
+          ok: false,
+          message: "選択したイベントは枠なし投稿を受け付けていません。公開状態・終了日時・イベント設定を確認してください。",
+        };
+      }
     }
+    // A failed D1 read is NOT proof that a chosen event is ineligible.
+    // Keep it fail-closed, but preserve the temporary-error classification.
     return {
       ok: false,
-      message: "選択したイベントは枠なし投稿を受け付けていません。公開状態・終了日時・イベント設定を確認してください。",
+      message: "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。",
     };
   }
 
