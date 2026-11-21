@@ -955,22 +955,41 @@ test("T04 double failure: R2 precommit survives D1 rollback and unavailable comp
         _params: [],
       }]);
     };
+    // #717: this error simulates a provider exception that includes a
+    // sensitive token; the candidate Hono host must reconstruct a safe code
+    // before CURRENT shared-core compensation logging sees the exception.
+    const providerSecret = "R2_PROVIDER_SECRET_DO_NOT_LOG_987";
     bucket.get = async (...args) => {
-      if (d1FailureStarted) throw new Error("injected_compensation_manifest_unavailable");
+      if (d1FailureStarted) throw new Error("R2 provider: " + providerSecret);
       return originalGet(...args);
     };
 
-    const response = await ctx.request({
-      audit_id: scenario.auditId,
-      reason: "二重障害の復旧回帰",
-      confirm_text: `RESTORE ${scenario.auditId}`,
-    }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
-
+    const previousWarn = console.warn;
+    const capturedWarnings = [];
+    let response;
+    try {
+      console.warn = (...parts) => {
+        capturedWarnings.push(parts.map((part) =>
+          part instanceof Error ? (part.stack ?? part.message) : String(part),
+        ).join(" "));
+      };
+      response = await ctx.request({
+        audit_id: scenario.auditId,
+        reason: "二重障害の復旧回帰",
+        confirm_text: `RESTORE ${scenario.auditId}`,
+      }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+    } finally {
+      console.warn = previousWarn;
+    }
+    assert.ok(capturedWarnings.every((line) => !line.includes(providerSecret)),
+      "Hono restore compensation must not log a raw provider secret");
     assert.equal(d1FailureStarted, true);
     assert.equal(ctx.stats.batches, 1, "one failed atomic D1 restore batch");
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("Cache-Control"), "private, no-store");
     const result = await response.json();
+    assert.equal(JSON.stringify(result).includes(providerSecret), false,
+      "provider failure secret cannot reach the HTTP response");
     assert.equal(result.ok, false, "compensation failure must never report restore success");
     assert.match(result.message, /復元を確定できませんでした/);
     assert.equal(ctx.sqlite.prepare(
