@@ -40,7 +40,16 @@ const SAFE_MANIFEST_ERROR_CODES = new Set([
 ]);
 
 function safeAuditManifestError(error: unknown, fallback: string): Error {
-  const message = error instanceof Error ? error.message : null;
+  // Provider Error.message can itself be a throwing getter or Proxy trap.
+  // Even reading it must never let an untrusted nested exception escape into
+  // shared restore-core compensation logs or Hono's error handler.
+  let message: string | null = null;
+  try {
+    const raw = error instanceof Error ? error.message : null;
+    if (typeof raw === "string") message = raw;
+  } catch {
+    // Keep the fixed fallback without preserving the provider error/cause.
+  }
   return new Error(message && SAFE_MANIFEST_ERROR_CODES.has(message) ? message : fallback);
 }
 
