@@ -84,6 +84,7 @@ if (!runningWithTsx) {
     namedExports: {
       nextVisibilityManifestHost: {
         async read() {
+          currentHarness.compensationReadbackCalls += 1;
           if (currentHarness.compensationReadbackMode === "read_error") {
             throw new Error("private R2 provider error");
           }
@@ -129,6 +130,8 @@ if (!runningWithTsx) {
       mutationMode: "success",
       precommitMode: "success",
       compensationReadbackMode: "confirmed",
+      compensationReadbackCalls: 0,
+      rereadCalls: 0,
       mutationCalls: 0,
       AuditMutationError,
       db: {
@@ -139,6 +142,7 @@ if (!runningWithTsx) {
                 where() {
                   return {
                     async limit() {
+                      currentHarness.rereadCalls += 1;
                       const row = sqlite
                         .prepare(
                           "SELECT id, visibility_status, updated_at FROM videos WHERE id = ?",
@@ -255,6 +259,10 @@ if (!runningWithTsx) {
     assert.equal(result.retryable, false);
     assert.equal(result.message, "公開ブロックの記録に失敗しました。");
     assert.equal(currentHarness.mutationCalls, 0);
+    assert.equal(currentHarness.rereadCalls, 0,
+      "a failed R2 precommit must not reread the D1 status");
+    assert.equal(currentHarness.compensationReadbackCalls, 1,
+      "a verified cleanup requires a fresh R2 manifest readback");
     currentHarness.sqlite.close();
   });
 
@@ -284,6 +292,10 @@ if (!runningWithTsx) {
         "状態の確認に失敗しました。状態を再取得してから操作してください。",
       );
       assert.equal(currentHarness.mutationCalls, 0);
+      assert.equal(currentHarness.rereadCalls, 0,
+        "no D1 status-oracle reread may occur after an ambiguous R2 precommit");
+      assert.equal(currentHarness.compensationReadbackCalls, 1,
+        "R2 compensation must be confirmed by one fresh manifest readback");
       currentHarness.sqlite.close();
     });
   }
