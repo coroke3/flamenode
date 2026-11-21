@@ -8,7 +8,11 @@ export const AuditRestoreSchema = z.object({
   audit_id: z.string().trim().min(1),
   reason: z.string().trim().min(1).max(500),
   confirm_text: z.string().trim().optional(),
-  force_overwrite: z.coerce.number().int().min(0).max(1).default(0),
+  // CURRENT receives FormData strings only. The Hono JSON adapter also
+  // accepts numeric 0/1, but must not coerce JSON true, null or arrays to
+  // 1/0: true would silently opt into a destructive conflict overwrite.
+  force_overwrite: z.union([z.string(), z.number()])
+    .pipe(z.coerce.number().int().min(0).max(1)).default(0),
 });
 
 export type AuditRestoreRequest = z.infer<typeof AuditRestoreSchema>;
