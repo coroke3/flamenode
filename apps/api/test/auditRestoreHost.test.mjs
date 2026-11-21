@@ -413,3 +413,40 @@ test("U01 #717 R2 binding and guard-mode getter exceptions are sanitized before 
   });
   assert.equal(modeGets, 1, "missing bucket guard-mode resolution must not leak provider errors");
 });
+
+test("U01 #717 Error.message throwing accessor cannot bypass manifest provider redaction", async () => {
+  // A provider may expose an Error subclass or Proxy with an accessor that
+  // throws an unrelated credential-bearing exception while being inspected.
+  // This is distinct from ordinary provider rejects and throwing env bindings.
+  const secret = "SQL_PARAMS_PRIVATE_CANARY_0662";
+  const hostile = new Error("opaque_provider_failure");
+  let getterReads = 0;
+  Object.defineProperty(hostile, "message", {
+    get() {
+      getterReads++;
+      throw new Error("failed query params: " + secret, {
+        cause: new Error("Authorization: bearer " + secret),
+      });
+    },
+  });
+  const poisoned = host({ BUCKET: {
+    get: async () => { throw hostile; },
+    put: async () => { throw hostile; },
+  } });
+  const empty = { schema_version: 1, revision: 0, generated_at: 1, entities: [] };
+  for (const [action, code] of [
+    [() => poisoned.manifest.read(), "public_visibility_manifest_read_failed"],
+    [() => poisoned.manifest.write(empty, { ifMatchEtag: "prior-etag" }),
+      "public_visibility_manifest_put_failed"],
+  ]) {
+    await assert.rejects(action, (error) => {
+      assert.equal(error.message, code);
+      assert.equal(error.cause, undefined);
+      assert.equal(Object.hasOwn(error, "cause"), false);
+      assert.doesNotMatch(String(error.stack), /SQL_PARAMS_PRIVATE_CANARY_0662|Authorization|params:/);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    });
+  }
+  assert.equal(getterReads, 2, "both paths must deliberately inspect but never leak a hostile message");
+});
