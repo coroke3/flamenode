@@ -70,13 +70,18 @@ test("MIG-0651 custom answer HTTP + SQLite: required question fails, valid check
     response = await send(app, data);
     assert.equal(response.status, 200);
     const result = await response.json();
-    assert.deepEqual(result, { ok: true, value: {
+    assert.equal(result.ok, true);
+    const { questionSnapshot, ...data } = result.value;
+    assert.deepEqual(data, {
       youtubeId: "dQw4w9WgXcQ", eventId: "ev-a",
       customAnswerDrafts: [
         { event_id: "ev-a", question_id: "reason", question_key: "reason", answer_text: "demo", answer_json: null },
         { event_id: "ev-a", question_id: "choices", question_key: "choices", answer_text: null, answer_json: '["B","A"]' },
       ],
-    } });
+    });
+    assert.deepEqual(questionSnapshot.map(q => q.id), ["reason", "choices"]);
+    assert.equal(questionSnapshot[1].source.options_json, '["A","B"]');
+    assert.equal(questionSnapshot[0].source.required, 1);
   } finally { sqlite.close(); }
 });
 
