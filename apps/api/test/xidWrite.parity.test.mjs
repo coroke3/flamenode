@@ -326,6 +326,18 @@ if (runUnderRootTsx(import.meta.url)) {
     w.sqlite.prepare('UPDATE "user" SET is_tos_accepted = 1 WHERE id = ?').run("u_multi");
     assert.deepEqual(snapshot(w), before);
 
+    // A valid alias must not bypass the existing CostGuard release gate.
+    w.sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'")
+      .run("maintenance");
+    const deniedCost = await runHono(w, "u_multi", "POST", "/api/xid/active", {
+      x_user_id: "legacy_alias",
+    });
+    assert.equal(deniedCost.status, 503, "maintenance mode must block SA-098");
+    assert.equal(deniedCost.result.ok, false);
+    assert.deepEqual(snapshot(w), before, "CostGuard denial has no user/audit/queue mutation");
+    w.sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'")
+      .run("normal");
+
     const crossOrigin = await mountedApp.request(
       SITE + "/api/xid/active",
       { method: "POST", headers: {
