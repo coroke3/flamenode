@@ -10,6 +10,29 @@ import {
 import { createXidRoutes } from "../src/routes/xid/index.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
+/**
+ * The lightweight admin fixture predates seven canonical "user" columns.
+ * SEC-726's first D1 gate now projects all production user columns explicitly,
+ * so only this SA-098 parity fixture needs to match that stable schema.
+ * The real migrated-schema test also verifies exact original field order.
+ */
+function createXidAdminD1() {
+  const fixture = createAdminD1();
+  const missingCanonicalColumns = [
+    ['emailVerified', 'INTEGER'],
+    ['can_create_events', 'INTEGER DEFAULT 0'],
+    ['terms_reaccept_required', 'INTEGER DEFAULT 0'],
+    ['is_notification_enabled', 'INTEGER DEFAULT 1'],
+    ['onboarding_completed_at', 'INTEGER'],
+    ['last_guild_check', 'INTEGER'],
+    ['created_at', 'INTEGER DEFAULT 1800000000'],
+  ];
+  for (const [name, definition] of missingCanonicalColumns) {
+    fixture.sqlite.exec(`ALTER TABLE "user" ADD COLUMN "${name}" ${definition}`);
+  }
+  return fixture;
+}
+
 const SITE = "https://app.flamenode.example";
 const USER = {
   id: "admin-1", name: "Admin", email: null, image: null,
@@ -17,7 +40,7 @@ const USER = {
 };
 
 function setup({ authenticated = true, role = "user", approved = true, linked = true, banned = false } = {}) {
-  const { db, sqlite, stats } = createAdminD1();
+  const { db, sqlite, stats } = createXidAdminD1();
   seedBase(sqlite, { role });
   if (banned) sqlite.prepare('UPDATE "user" SET is_banned = 1 WHERE id = ?').run(USER.id);
   sqlite.exec("CREATE TABLE x_user_aliases (x_user_id TEXT, alias_x_id TEXT)");
@@ -266,7 +289,7 @@ test("SA-098 throwing D1 binding fails closed with private 503 and no provider l
 });
 
 test("SA-098 slash-variant cross-origin POST cannot bypass the write guard", async () => {
-  const { db, sqlite } = createAdminD1();
+  const { db, sqlite } = createXidAdminD1();
   seedBase(sqlite, { role: "user" });
   let sessionCalls = 0;
   const app = new Hono();
@@ -289,7 +312,7 @@ test("SA-098 slash-variant cross-origin POST cannot bypass the write guard", asy
 });
 
 test("SA-098 real Auth.js session is included in the S3 budget (3 pre-reads + 1 batch)", async () => {
-  const { db, sqlite, stats } = createAdminD1();
+  const { db, sqlite, stats } = createXidAdminD1();
   seedBase(sqlite, { role: "user" });
   sqlite.exec("CREATE TABLE x_user_aliases (x_user_id TEXT, alias_x_id TEXT)");
   sqlite.exec('CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, expires INTEGER)');
@@ -363,7 +386,7 @@ test("MIG-0636 U05 SA-102..104 JSON input contracts retain CURRENT field names w
 });
 
 test("MIG-0636 U05/U06 mounted write routes enforce fail-closed unmatched methods and real-router auth", async () => {
-  const { db, sqlite, stats } = createAdminD1();
+  const { db, sqlite, stats } = createXidAdminD1();
   seedBase(sqlite, { role: "user" });
   const app = new Hono();
   let sessionCalls = 0;
