@@ -1409,17 +1409,19 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
   });
 
-  test("S3 #725: real-cookie mounted mutation paths use 4 D1 pre-reads (known over-budget)", async () => {
+  test("S3 #725: real HTTPS secure-cookie mutation paths use 4 D1 pre-reads (known over-budget)", async () => {
     const w = world();
     const token = "synthetic-s3-reservation-session";
     insert(w.sqlite, "session", {
       sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
     });
     const thaw = freeze();
-    const post = (path, body, headers = {}) => app.request(path, {
+    // Match production HTTPS URL semantics: Hono's relative app.request(path)
+    // uses a local HTTP origin and would select a different Auth.js cookie name.
+    const post = (path, body, headers = {}) => app.request(SITE + path, {
       method: "POST",
       headers: {
-        Origin: SITE, cookie: "authjs.session-token=" + token,
+        Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
         "content-type": "application/json", ...headers,
       },
       body: JSON.stringify(body),
@@ -1459,7 +1461,7 @@ if (runUnderRootTsx(import.meta.url)) {
       for (const [name, headers, status, expectedReads, reason] of [
         ["invalid-origin", { Origin: "https://evil.example" }, 403, 0, "invalid_origin"],
         ["no-cookie", { cookie: "" }, 401, 0, "unauthenticated"],
-        ["invalid-token", { cookie: "authjs.session-token=invalid" }, 401, 1, "unauthenticated"],
+        ["invalid-token", { cookie: "__Secure-authjs.session-token=invalid" }, 401, 1, "unauthenticated"],
       ]) {
         const beforeReads = w.d1.stats.reads;
         const beforeBatches = w.d1.stats.batches;
@@ -1476,7 +1478,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const beforeTos = w.d1.stats.reads;
       const batchesBeforeTos = w.d1.stats.batches;
       const noTos = await post("/api/events/ev1/slots/s20/reserve",
-        { display_name: "Denied" }, { cookie: "authjs.session-token=s3-noto" });
+        { display_name: "Denied" }, { cookie: "__Secure-authjs.session-token=s3-noto" });
       assert.equal(noTos.status, 403);
       assert.equal((await noTos.json()).reason, "tos_required");
       assert.equal(w.d1.stats.reads - beforeTos, 2);
