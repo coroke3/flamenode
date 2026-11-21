@@ -15,6 +15,8 @@ export interface EventSlotsIslandProps {
 
 /** Re-read the live state while the page stays open (CURRENT ISR revalidate was 30 s). */
 const REFRESH_MS = 30_000;
+/** RH-020 is best effort; never leave the public grid waiting on a hung request. */
+const LIVE_READ_TIMEOUT_MS = 5_000;
 
 /**
  * `/event/[id]/slots` as one Island (MIG-0502 U03). Server HTML: header + the slot time grid with every slot
@@ -49,7 +51,29 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
     const load = async () => {
       const request = ++latestRequest;
       setNow(Math.floor(Date.now() / 1000));
-      const result = await fetchLiveSlots(detail.event.id, controller.signal);
+      // The common effect controller only aborts on unmount. An unanswered
+      // RH-020 fetch could otherwise leave the initial grid "loading" forever.
+      // Race a finite deadline even when a custom fetch ignores AbortSignal.
+      const requestController = new AbortController();
+      const abortOnUnmount = () => requestController.abort();
+      controller.signal.addEventListener("abort", abortOnUnmount, { once: true });
+      let deadlineId: number | undefined;
+      const deadline = new Promise<null>((resolve) => {
+        deadlineId = window.setTimeout(() => {
+          requestController.abort();
+          resolve(null);
+        }, LIVE_READ_TIMEOUT_MS);
+      });
+      let result: LiveSlots | null;
+      try {
+        result = await Promise.race([
+          fetchLiveSlots(detail.event.id, requestController.signal),
+          deadline,
+        ]);
+      } finally {
+        if (deadlineId !== undefined) window.clearTimeout(deadlineId);
+        controller.signal.removeEventListener("abort", abortOnUnmount);
+      }
       if (controller.signal.aborted || request !== latestRequest) return;
       if (result) {
         setLive(result);

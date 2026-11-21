@@ -913,6 +913,105 @@ test("MIG-0514 U03a contradictory RH-014 actor relation cannot paint a public ow
   }
 });
 
+test("MIG-0514 U03b9: an unresponsive RH-020 read times out, recovers and ignores its late result", { skip: skipUi }, async () => {
+  const detail = detailOf("autumn-collab-2026");
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = dom.window.setTimeout;
+  const originalClearTimeout = dom.window.clearTimeout;
+  const originalSetInterval = dom.window.setInterval;
+  const originalClearInterval = dom.window.clearInterval;
+  const deadlineTimer = 89_001;
+  const pollTimer = 89_002;
+  let fireDeadline = null;
+  let refresh = null;
+  let resolveOld = null;
+  let originalSignal = null;
+  let publicCalls = 0;
+  dom.window.setTimeout = function (callback, delay, ...args) {
+    if (delay === 5_000) {
+      fireDeadline = () => callback(...args);
+      return deadlineTimer;
+    }
+    return originalSetTimeout.call(this, callback, delay, ...args);
+  };
+  dom.window.clearTimeout = function (id) {
+    if (id === deadlineTimer) return;
+    return originalClearTimeout.call(this, id);
+  };
+  dom.window.setInterval = function (callback, delay, ...args) {
+    if (delay === 30_000) {
+      refresh = () => callback(...args);
+      return pollTimer;
+    }
+    return originalSetInterval.call(this, callback, delay, ...args);
+  };
+  dom.window.clearInterval = function (id) {
+    if (id === pollTimer) return;
+    return originalClearInterval.call(this, id);
+  };
+  globalThis.fetch = (url, init) => {
+    if (String(url).endsWith("/viewer-overlay")) return Promise.resolve({ ok: false, status: 503 });
+    publicCalls += 1;
+    if (publicCalls === 1) {
+      originalSignal = init.signal;
+      // A misbehaving fetch does not settle on abort. The timeout itself must
+      // resolve the grid's read to unavailable, independently of fetch.
+      return new Promise((resolve) => { resolveOld = resolve; });
+    }
+    return Promise.resolve({ ok: true, json: async () => ({ slots: [
+      { id: "s1", status: "available" },
+      { id: "s2", status: "available" },
+      { id: "s3", status: "available" },
+      { id: "s4", status: "available" },
+    ] }) });
+  };
+  const container = mount();
+  let root;
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(h(EventSlotsIsland, { detail, builtAt: NOW }));
+    });
+    await settle();
+    assert.equal(typeof fireDeadline, "function");
+    assert.equal(typeof refresh, "function");
+    assert.equal(container.querySelectorAll(".sl.pending").length, 4);
+
+    await act(async () => { fireDeadline(); });
+    await settle();
+    assert.equal(originalSignal.aborted, true, "timeout aborts the stuck request");
+    assert.equal(container.querySelectorAll(".sl.open").length, 0);
+    assert.ok(text(container).includes("枠の最新状況を取得できませんでした。"));
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0);
+    assert.equal(container.querySelectorAll("button").length, 0);
+
+    // A later successful poll recovers, while the initial hung request remains
+    // unsettled. This also preserves the existing out-of-order response fence.
+    await act(async () => { refresh(); });
+    await settle();
+    assert.equal(publicCalls, 2);
+    assert.equal(container.querySelectorAll(".sl.open").length, 4);
+    assert.ok(!text(container).includes("枠の最新状況を取得できませんでした。"));
+
+    await act(async () => {
+      resolveOld({ ok: true, json: async () => ({ slots: [
+        { id: "s1", status: "reserved", display_name: "古い失効レスポンス" },
+      ] }) });
+    });
+    await settle();
+    assert.equal(container.querySelectorAll(".sl.open").length, 4);
+    assert.ok(!text(container).includes("古い失効レスポンス"));
+  } finally {
+    if (root) await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+    dom.window.setTimeout = originalSetTimeout;
+    dom.window.clearTimeout = originalClearTimeout;
+    dom.window.setInterval = originalSetInterval;
+    dom.window.clearInterval = originalClearInterval;
+    container.remove();
+  }
+});
+
 test("MIG-0514 U03b: RH-020 refresh outage shows a stale-data notice without dropping last public grid", { skip: skipUi }, async () => {
   const detail = detailOf("autumn-collab-2026");
   const props = { detail, builtAt: NOW };
