@@ -772,6 +772,61 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(Object.keys(actual).length, scenarios.length);
   });
 
+  test("SEC-731: video audit restore rebuilds both primary events without video_events", async () => {
+    // Legacy videos may have no membership rows. The audit snapshot can still
+    // restore a different primary event; both old and new static artifacts
+    // must be enqueued in the same successful D1 audit batch.
+    const spec = {
+      setup: (sqlite) => seedVideo(sqlite),
+      arrange: arrangeVideo({
+        beforePatch: { visibility_status: "private", primary_event_id: "evt-private" },
+      }),
+    };
+    const [, result] = await runScenario("sec731_primary_event_fanout", spec);
+    assert.equal(result.outcome.returned?.ok, true);
+    assert.equal(result.videos.find((row) => row.id === "vid-1")?.primary_event_id, "evt-private");
+    assert.equal(result.audit_restore_runs.filter((row) => row.status === "success").length, 1);
+    assert.equal(result.log.filter((entry) => entry.op === "batch").length, 1,
+      "restore, audit and all rebuild targets must use one atomic D1 batch");
+    assert.equal(result.log.filter((entry) => entry.op === "d1").length, 8,
+      "rebuild target discovery must not add a D1 pre-read");
+    const eventTargets = result.static_rebuild_queue
+      .filter((row) => row.target_type === "event_base" || row.target_type === "event_release")
+      .map((row) => `${row.target_type}:${row.target_id}`);
+    assert.deepEqual(eventTargets, [
+      "event_base:evt-1", "event_base:evt-private",
+      "event_release:evt-1", "event_release:evt-private",
+    ], "old and restored parents are both invalidated, with no unrelated events");
+    assert.ok(result.manifest_after?.entities?.some((entry) =>
+      entry.entity_type === "video" && entry.entity_id === "vid-1"),
+    "a successful public-to-private restore preserves the R2 video block");
+    for (const eventId of ["evt-1", "evt-private"]) {
+      assert.ok(result.log.some((entry) =>
+        entry.op === "cache.delete" &&
+        entry.key.includes(encodeURIComponent(`public-event-export:9:${encodeURIComponent(eventId)}:`))),
+      `scheduled export for ${eventId} must be evicted after commit`);
+    }
+
+    const [, rolledBack] = await runScenario("sec731_primary_event_rollback", {
+      ...spec,
+      hooks: { beforeBatch: raceVideo },
+    });
+    assert.equal(rolledBack.outcome.returned?.ok, false);
+    assert.equal(rolledBack.static_rebuild_queue.length, 0,
+      "a failed audited D1 mutation may not persist any rebuild target");
+    assert.equal(rolledBack.log.filter((entry) => entry.op === "cache.delete").length, 0,
+      "a D1 rollback may not trigger public cache invalidation");
+
+    const [, dryRun] = await runScenario("sec731_primary_event_dry_run", {
+      ...spec,
+      options: { dry_run: true },
+    });
+    assert.equal(dryRun.outcome.returned?.ok, true);
+    assert.equal(dryRun.static_rebuild_queue.length, 0);
+    assert.equal(dryRun.log.filter((entry) => entry.op === "batch").length, 0);
+    assert.equal(dryRun.log.filter((entry) => entry.op === "r2.put").length, 0);
+  });
+
   test("SEC-717: event/video restore compensation logs no nested provider canary", async () => {
     const secret = "SEC717_PRIVATE_PROVIDER_CANARY";
     const scenariosWithCompensationFailure = [
