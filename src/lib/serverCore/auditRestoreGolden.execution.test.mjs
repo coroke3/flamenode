@@ -865,15 +865,22 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(result.audit_restore_runs.filter((row) => row.status === "success").length, 1);
     assert.equal(result.videos.find((row) => row.id === "vid-1")?.visibility_status,
       "private", "the restored private state must be durable");
+    // The real CURRENT host calls deletePublicJsonCaches(), which catches
+    // each individual Cache API exception before audit-restoration can see it.
+    // Two event IDs x (v5,legacy) x four windows = 16 fixed-code warnings.
     const warnings = result.log.filter((entry) =>
       entry.op === "console.warn" &&
-      entry.args[0] === "[audit-restore] event export invalidation failed"
+      entry.args[0] === "[public-cache] cache_api_delete_failed"
     );
-    assert.equal(warnings.length, 2, "one bounded warning per affected event");
+    assert.equal(warnings.length, 16,
+      "cache failures are logged once per scheduled export key without provider details");
     for (const warning of warnings) {
-      assert.deepEqual(warning.args,
-        ["[audit-restore] event export invalidation failed", "provider_error"]);
+      assert.deepEqual(warning.args, ["[public-cache] cache_api_delete_failed"]);
     }
+    assert.equal(result.log.filter((entry) =>
+      entry.op === "console.warn" &&
+      entry.args[0] === "[audit-restore] event export invalidation failed"
+    ).length, 0, "inner best-effort cache deletion must not throw to the audit caller");
     assert.ok(!JSON.stringify(result).includes(secret),
       "provider message/cause/nested Authorization header must not reach the log or response");
     assert.ok(result.log.some((entry) =>
