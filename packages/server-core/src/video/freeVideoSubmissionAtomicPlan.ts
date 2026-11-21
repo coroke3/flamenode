@@ -12,6 +12,7 @@ import { buildFreeVideoInsertPlan, buildFreeVideoYoutubeMetadataInsertPlan } fro
 import { buildFreeVideoCustomAnswerInsertPlan } from "./freeVideoCustomAnswerInsertPlan.ts";
 import { buildStaticRebuildQueueBatch } from "../staticRebuild/enqueue.ts";
 import { buildFreeVideoRebuildTargets } from "./freeVideoRebuildTargets.ts";
+import { buildFreeVideoSoftwareInsertPlan } from "./freeVideoSoftwareInsertPlan.ts";
 import type { LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
 
 /**
@@ -148,13 +149,23 @@ export function buildFreeVideoSubmissionAtomicPlan(
  * UNMOUNTED SA-086 proposal. Appends the canonical rebuild targets to the
  * same prepared D1 batch as the video INSERT; no DB writes or wake occur.
  * The authenticated caller must still provide the remaining CURRENT atomic
- * member, derived, software, notification and icon integration.
+ * member, derived, notification and icon integration. Software rows are
+ * included when a normalized/validated usedSoftware field is supplied.
  */
 export async function buildFreeVideoSubmissionWithRebuildPlan(
   db: ServerCoreDb,
-  args: Parameters<typeof buildFreeVideoSubmissionAtomicPlan>[1],
+  args: Parameters<typeof buildFreeVideoSubmissionAtomicPlan>[1] & {
+    /** Canonical parsed videoForm.used_software; omit only for legacy tests. */
+    usedSoftware?: string | null;
+  },
 ): Promise<UnslottedVideoAtomicPlan> {
   const base = buildFreeVideoSubmissionAtomicPlan(db, args);
+  const software = await buildFreeVideoSoftwareInsertPlan(db, {
+    videoId: args.videoAfter.id,
+    actorUserId: args.actorUserId,
+    raw: args.usedSoftware ?? null,
+    now: args.now,
+  });
   const targets = buildFreeVideoRebuildTargets({
     videoId: args.videoAfter.id,
     userId: args.actorUserId,
@@ -168,9 +179,9 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
     throw new Error("free_video_submission_rebuild_plan_incomplete");
   }
   return {
-    statements: [...base.statements, ...queue.statements],
-    expectedChanges: [...base.expectedChanges, ...queue.expectedChanges],
-    audits: [...base.audits],
+    statements: [...base.statements, ...software.statements, ...queue.statements],
+    expectedChanges: [...base.expectedChanges, ...software.expectedChanges, ...queue.expectedChanges],
+    audits: [...base.audits, ...software.audits],
   };
 }
 
