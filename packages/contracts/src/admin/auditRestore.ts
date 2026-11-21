@@ -8,11 +8,15 @@ export const AuditRestoreSchema = z.object({
   audit_id: z.string().trim().min(1),
   reason: z.string().trim().min(1).max(500),
   confirm_text: z.string().trim().optional(),
-  // CURRENT receives FormData strings only. The Hono JSON adapter also
-  // accepts numeric 0/1, but must not coerce JSON true, null or arrays to
-  // 1/0: true would silently opt into a destructive conflict overwrite.
-  force_overwrite: z.union([z.string(), z.number()])
-    .pipe(z.coerce.number().int().min(0).max(1)).default(0),
+  // A conflict override is a destructive, explicitly confirmed operation.
+  // CURRENT's FormData checkbox supplies literal "0"/"1"; Hono JSON also
+  // accepts numeric 0/1. Generic numeric coercion would additionally turn
+  // "01", "+1", "1e0", "0x1", " 1 " etc. into a destructive 1 despite
+  // none being the explicit UI flag. Reject such noncanonical spellings,
+  // along with JSON booleans/null/arrays/objects, rather than silently force.
+  force_overwrite: z.union([
+    z.literal("0"), z.literal("1"), z.literal(0), z.literal(1),
+  ]).transform(Number).default(0),
 });
 
 export type AuditRestoreRequest = z.infer<typeof AuditRestoreSchema>;

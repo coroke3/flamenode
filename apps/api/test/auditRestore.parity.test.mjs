@@ -632,6 +632,17 @@ test("T02 invalid body and oversized JSON return 400/413 without D1 mutation", a
     body({ force_overwrite: [] }),
     body({ force_overwrite: [1] }),
     body({ force_overwrite: { value: 1 } }),
+    // CURRENT's generic FormData numeric coerce accepts several variants,
+    // but a destructive JSON endpoint should require the exact canonical
+    // UI string/number flag rather than treating these as an implicit 1.
+    body({ force_overwrite: "01" }),
+    body({ force_overwrite: "+1" }),
+    body({ force_overwrite: "1e0" }),
+    body({ force_overwrite: "0x1" }),
+    body({ force_overwrite: "1.0" }),
+    body({ force_overwrite: " 1 " }),
+    body({ force_overwrite: " " }),
+    body({ force_overwrite: "" }),
   ];
   for (const data of invalid) {
     const res = await ctx.request(data);
@@ -662,6 +673,24 @@ test("T02 explicit FormData-style and numeric JSON force flags allow a confirmed
       run.status === "success")?.status, "success");
     assert.equal(ctx.stats.batches, 1,
       "explicit authorized force overwrite remains one audited D1 batch");
+  }
+});
+
+test("T02 canonical false flags reject conflicted restore without force while keeping audit state", async () => {
+  for (const value of [undefined, "0", 0]) {
+    const ctx = setup();
+    seedRestorableAnnouncement(ctx.sqlite, { currentTitle: "Concurrent edit" });
+    const requestBody = body();
+    if (value !== undefined) requestBody.force_overwrite = value;
+    const response = await ctx.request(requestBody);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    const result = await response.json();
+    assert.equal(result.ok, false, "0 and omitted must never override a conflict");
+    assert.equal(ctx.stats.batches, 0, "conflict check cannot start a restore batch");
+    assert.equal(changes(ctx.sqlite).row.title, "Concurrent edit");
+    assert.equal(changes(ctx.sqlite).restored, "restorable");
+    assert.equal(changes(ctx.sqlite).runs.some((run) => run.status === "success"), false);
   }
 });
 
