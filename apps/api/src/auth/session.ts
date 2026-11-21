@@ -233,6 +233,9 @@ export function extractSessionToken(
     .join("");
 }
 
+/** Oversized legacy Active X IDs must not be transferred by the session D1 projection. */
+export const MAX_LEGACY_SESSION_ACTIVE_X_ID_LENGTH = 128;
+
 export interface ResolveSessionOptions {
   now?: number;
 }
@@ -271,7 +274,10 @@ export async function resolveSessionUser(
           u."image" AS user_image,
           u."role" AS user_role,
           u."is_banned" AS user_is_banned,
-          u."active_x_user_id" AS user_active_x_user_id
+          CASE WHEN length(u."active_x_user_id") > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_LENGTH}
+            THEN NULL ELSE u."active_x_user_id" END AS user_active_x_user_id,
+          CASE WHEN length(u."active_x_user_id") > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_LENGTH}
+            THEN 1 ELSE 0 END AS user_active_x_id_oversize
         FROM "session" s
         INNER JOIN "user" u ON s."userId" = u."id"
         WHERE s."sessionToken" = ?
@@ -287,6 +293,7 @@ export async function resolveSessionUser(
         user_role: string | null;
         user_is_banned: number | null;
         user_active_x_user_id: string | null;
+        user_active_x_id_oversize: number;
       }>();
 
     if (!row) {
@@ -297,6 +304,12 @@ export async function resolveSessionUser(
     const expiresMs = Number(row.session_expires);
     if (isNaN(expiresMs) || expiresMs <= now) {
       return null;
+    }
+
+    // Do not turn a corrupted legacy Active X into a valid-looking null selection.
+    // D1 projects a bounded value and a separate sentinel before JavaScript sees it.
+    if (row.user_active_x_id_oversize === 1) {
+      throw new SessionUnavailableError();
     }
 
     const role =
