@@ -21,7 +21,7 @@ const RESTORE = "/api/admin/audit/restore";
 // D1 fake read-trace: observe table names only (never SQL bind values or tokens).
 // This is diagnostic evidence for Issue #691, NOT a real Auth.js/workerd profile.
 function readTableLabel(sql) {
-  return /\\bfrom\\s+"?([a-z_][a-z_0-9]*)"?/i.exec(sql)?.[1] ?? "unknown";
+  return /\bfrom\s+"?([a-z_][a-z_0-9]*)"?/i.exec(sql)?.[1] ?? "unknown";
 }
 
 function setup({ user = ADMIN, role = "admin", disabled = [], enableRestoreCandidate = true } = {}) {
