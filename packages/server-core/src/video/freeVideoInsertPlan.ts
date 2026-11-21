@@ -47,7 +47,6 @@ export function buildFreeVideoYoutubeMetadataInsertPlan(
   }
   const row: typeof videoYoutubeMetadata.$inferSelect = {
     video_id: videoId,
-    youtube_video_id: null,
     youtube_privacy_status: null,
     youtube_availability_status: null,
     duration_seconds: null,
