@@ -190,7 +190,9 @@ test("U01 viewer patches retain public base and lose write ownership on auth deg
     needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
     operatorOverrideAllowed: false, viewerXId: "active", viewerXIdNotice: null,
     slots: [
-      { id: "a", display_name: "me", group_key: "own-group", x_user_id: "active",
+      { id: "a", display_name: "me", reserved_x_id: "private-reserved",
+        profile_x_user_id: "private-profile", submitted_icon_url: "https://private.invalid/icon",
+        group_key: "own-group", x_user_id: "active",
         is_owned_by_viewer: true, viewer_relation: "active" },
       { id: "NOT_IN_PUBLIC_BASE", is_owned_by_viewer: true, viewer_relation: "active" },
       { id: "b", viewer_relation: "bad", is_owned_by_viewer: true },
@@ -207,6 +209,14 @@ test("U01 viewer patches retain public base and lose write ownership on auth deg
   assert.equal(merged[1].is_owned_by_viewer, false);
   const locked = mergeViewerSlotOverlay(base, overlay, false);
   assert.equal(locked[0].is_owned_by_viewer, false);
+  assert.equal(locked[0].display_name, "public", "only public base name remains");
+  assert.equal(locked[0].group_key, "public-group", "no private opaque group");
+  assert.equal(locked[0].viewer_relation, "none");
+  for (const key of ["reserved_x_id", "profile_x_user_id", "submitted_icon_url", "x_user_id"]) {
+    assert.equal(locked[0][key] ?? null, null, `denied viewer must not expose ${key}`);
+  }
+  assert.equal(merged[0].x_user_id, "active", "permitted viewer still receives scoped data");
+  assert.equal(merged[0].profile_x_user_id, "private-profile");
 });
 
 test("U01 Active X changed event invalidates old identity before refetch resolves", async () => {

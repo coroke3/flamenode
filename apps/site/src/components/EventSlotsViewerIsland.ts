@@ -130,7 +130,11 @@ export function mergeViewerSlotOverlay<T extends ViewerSlotBase>(
 ): ViewerSlot<T>[] {
   const byId = new Map(overlay.slots.map((slot) => [slot.id, slot] as const));
   return baseSlots.map((slot) => {
-    const patch = byId.get(slot.id);
+    // Denied/banned/terms-unaccepted viewers may still receive a contradictory
+    // private patch from a stale or malformed overlay response. Never copy its
+    // name, X identifiers, opaque group or profile fields into renderable rows.
+    // The independently fetched public base is the only allowed fallback.
+    const patch = allowOwnOperations ? byId.get(slot.id) : undefined;
     return {
       ...slot,
       display_name: patch?.display_name ?? slot.display_name ?? null,
