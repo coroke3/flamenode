@@ -14,6 +14,7 @@ import {
   eventExportPayloadCacheKey,
 } from "@flamenode/server-core/publicCache/eventExportKeys";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
+import { publicJsonCacheUrl } from "@flamenode/server-core/publicCache/delete";
 
 const SITE = "https://app.flamenode.example";
 const ADMIN = {
@@ -962,6 +963,96 @@ test("T04 video restore commits one atomic D1 batch after R2 CAS, then invalidat
   } finally {
     if (previous === undefined) delete globalThis.caches;
     else globalThis.caches = previous;
+  }
+});
+
+// #718 acceptance gap: Cloudflare Cache API is colo-local. A successful
+// video restore can evict only the writer colo; a still-public parent event
+// may serve a scheduled DTO containing that now-private video from another
+// colo. Exercise the *actual* Hono GET route on a second independent Cache
+// API store, not just a mock delete-key list. This intentionally reports TODO
+// while the shared cache-epoch/revalidation owner gate remains open.
+test("T04 #718 separate-colo scheduled export cannot expose a restored private video", async (t) => {
+  const ctx = setup();
+  seedEvent(ctx.sqlite, { id: "ev-1", visibility_status: "public", public_api_enabled: 1 });
+  seedVideoVisibilityRestore(ctx);
+  const { bucket } = visibilityManifestBucket();
+  const previousCache = globalThis.caches;
+  const perColo = { writer: new Map(), reader: new Map() };
+  let activeColo = "reader";
+  const deleted = [];
+  globalThis.caches = { default: {
+    match: async (request) => perColo[activeColo].get(request.url)?.clone(),
+    put: async (request, response) => {
+      perColo[activeColo].set(request.url, response.clone());
+    },
+    delete: async (request) => {
+      deleted.push({ colo: activeColo, url: request.url });
+      return perColo[activeColo].delete(request.url);
+    },
+  } };
+  const now = Math.floor(Date.now() / 1000);
+  const snapshots = [
+    { format: "v5", body: JSON.stringify({
+      schema_version: 5, videos: [{ id: "vid-restore" }],
+    }) },
+    { format: "legacy", body: JSON.stringify([{ video_id: "vid-restore" }]) },
+  ];
+  try {
+    for (const item of snapshots) {
+      const key = eventExportPayloadCacheKey("ev-1", item.format, 15);
+      perColo.reader.set(publicJsonCacheUrl(key), new Response(JSON.stringify({
+        payload: { body: item.body }, stored_at: now - 3,
+      }), { headers: { "Content-Type": "application/json" } }));
+    }
+    assert.equal(perColo.reader.size, 2, "both export formats are seeded in the other colo");
+
+    activeColo = "writer";
+    const restored = await ctx.request({
+      audit_id: "video-audit",
+      reason: "別拠点キャッシュの公開情報残存を検証",
+      confirm_text: "RESTORE video-audit",
+    }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+    assert.equal(restored.status, 200);
+    assert.equal((await restored.json()).ok, true, "video privacy restore commits");
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT visibility_status FROM videos WHERE id = 'vid-restore'",
+    ).get().visibility_status, "private");
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT visibility_status FROM events WHERE id = 'ev-1'",
+    ).get().visibility_status, "public", "parent event remains publicly accessible");
+    assert.equal(deleted.every((item) => item.colo === "writer"), true,
+      "Cache API deletes cannot directly target another colo");
+    assert.equal(perColo.reader.size, 2, "the independent reader-colo cache remains populated");
+
+    activeColo = "reader";
+    const exposed = [];
+    for (const item of snapshots) {
+      const request = new Request(
+        SITE + "/api/event-endpoints/ev-1?format=" +
+        item.format + "&update=scheduled&refresh=15",
+      );
+      const response = await deployedApiRouter.fetch(
+        request,
+        { DB: ctx.db },
+        { waitUntil: () => undefined, passThroughOnException: () => undefined },
+      );
+      assert.equal(response.status, 200, item.format);
+      assert.equal(response.headers.get("Cache-Control"), "no-store", item.format);
+      const body = await response.text();
+      if (body.includes("vid-restore")) {
+        exposed.push(item.format + ":" + response.headers.get("X-FlameNode-Cache"));
+      }
+    }
+    if (exposed.length > 0) {
+      t.todo("#718 STOP: a different colo still serves restored private video via " +
+        exposed.join(", ") + "; require cross-colo cache epoch or member revalidation");
+      return;
+    }
+    assert.deepEqual(exposed, [], "neither v5 nor legacy may disclose private video");
+  } finally {
+    if (previousCache === undefined) delete globalThis.caches;
+    else globalThis.caches = previousCache;
   }
 });
 
