@@ -4,7 +4,7 @@ import {
   parseSubmissionQuestionOptionsJson,
   parseSubmissionQuestionType,
   type SubmissionCustomQuestion,
-} from "@flamenode/domain/video/customAnswers";
+} from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 
 export const MAX_VIDEO_CUSTOM_QUESTIONS_READ = 18;
