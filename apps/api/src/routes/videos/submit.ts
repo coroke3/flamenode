@@ -29,7 +29,7 @@ import type { ServerCoreDb } from "@flamenode/server-core/db";
 import { resolveUnslottedEventIdForNewVideo } from "@flamenode/server-core/video/unslottedEventEligibility";
 import { loadUnionRequiredVideoFields } from "@flamenode/server-core/video/requiredVideoFields";
 import { checkYoutubeVideoDuplicate } from "@flamenode/server-core/video/youtubeDuplicate";
-import { loadGeneralCustomQuestionsForFreeVideo } from "@flamenode/server-core/video/freeVideoCustomQuestionRead";
+import { loadGeneralCustomQuestionsForFreeVideo } from "@flamenode/server-core/video/requiredVideoFields";
 
 const BAD_FORM_MESSAGE = "投稿フォームの入力が不正です。";
 
