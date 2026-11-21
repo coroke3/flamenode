@@ -7,7 +7,7 @@
  * R2 fencing remain STOP gates.
  */
 import { and, eq, inArray, sql, type SQLWrapper } from "drizzle-orm";
-import { eventStaff, events, sessions, systemSettings, users, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
+import { eventStaff, events, notificationOutbox, sessions, systemSettings, users, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
 import { WRITE_FEATURE_KEYS, type WriteFeatureKey } from "@flamenode/domain/admin";
 import { EVENT_STAFF_PRESETS, getPresetPermissions } from "@flamenode/domain/auth/permissions/presets";
@@ -38,7 +38,9 @@ export type ManageVideoStatusAccess =
 // it checks expectedRowCondition on every original field, not only status.
 // This opt-in read is NEVER returned in the active HTTP response.
 export type ManageVideoStatusSnapshot =
-  | { ok: true; video: typeof videos.$inferSelect; rebuildEventIds: string[] }
+  | { ok: true; video: typeof videos.$inferSelect; rebuildEventIds: string[];
+      /** Opt-in, untrusted-at-commit notification read facts; NEVER a write grant. */
+      notification?: { recipientEnabled: boolean; activeDedupe: boolean } }
   | { ok: false; message: string };
 
 /** Reuse the same bounded projection for the unmounted admin/manage planners. */
@@ -99,6 +101,61 @@ function finishVideoStatusSnapshot(
     throw new Error("manage_status_rebuild_event_snapshot_invalid");
   }
   return { ok: true, video: target.video, rebuildEventIds };
+}
+
+/**
+ * #692 notifiable-status experiment: fold recipient enabled + active outbox
+ * dedupe into the already authorized video snapshot SELECT. The CURRENT
+ * notification builder separately reads both. This optional projection is
+ * NOT yet consumed by the planner, does not replace its two reads, and is
+ * NOT safe for a mutation without an atomic commit-time recheck.
+ *
+ * The status is a server-side validated notifiable status (not arbitrary
+ * request JSON). Quiet statuses request no projection and keep the old DTO.
+ */
+function notificationReadProjection(
+  status: "public" | "voided" | undefined,
+  videoId: string,
+) {
+  if (!status) {
+    return { recipientEnabled: sql<number>`0`, activeDedupe: sql<number>`0` };
+  }
+  const dedupeKey = status === "public"
+    ? `video_approved:${videoId}`
+    : `video_voided:${videoId}`;
+  return {
+    recipientEnabled: sql<number>`CASE WHEN EXISTS (
+      SELECT 1 FROM ${users} notification_recipient
+      WHERE notification_recipient."id" = ${videos.submitted_by_user_id}
+        AND (notification_recipient."is_notification_enabled" IS NULL
+          OR notification_recipient."is_notification_enabled" <> 0)
+    ) THEN 1 ELSE 0 END`,
+    activeDedupe: sql<number>`CASE WHEN EXISTS (
+      SELECT 1 FROM ${notificationOutbox} notification_existing
+      WHERE notification_existing."dedupe_key" = ${dedupeKey}
+        AND notification_existing."status" IN ('pending', 'processing', 'sent')
+    ) THEN 1 ELSE 0 END`,
+  };
+}
+
+function finishVideoStatusSnapshotWithNotification(
+  row: {
+    video: typeof videos.$inferSelect;
+    rebuildEventIdsJson: string;
+    recipientEnabled: number;
+    activeDedupe: number;
+  },
+  status?: "public" | "voided",
+): ManageVideoStatusSnapshot {
+  const snapshot = finishVideoStatusSnapshot(row);
+  if (!snapshot.ok || !status) return snapshot;
+  return {
+    ...snapshot,
+    notification: {
+      recipientEnabled: row.recipientEnabled === 1,
+      activeDedupe: row.activeDedupe === 1,
+    },
+  };
 }
 
 /**
@@ -196,6 +253,7 @@ export async function loadManageVideoStatusSnapshot(
   user: SessionUserLike,
   eventId: string,
   videoId: string,
+  notificationStatus?: "public" | "voided",
 ): Promise<ManageVideoStatusSnapshot> {
   if (!(await hasManageVideoStatusGrant(db, user, eventId))) {
     return { ok: false, message: "このイベントの作品審査権限がありません。" };
@@ -208,7 +266,8 @@ export async function loadManageVideoStatusSnapshot(
   const rebuildEventIdsJson = boundedVideoRebuildEventIdsJson(videoId);
   const target = (
     await db
-      .select({ video: videos, rebuildEventIdsJson })
+      .select({ video: videos, rebuildEventIdsJson,
+        ...notificationReadProjection(notificationStatus, videoId) })
       .from(videoEvents)
       .innerJoin(videos, eq(videos.id, videoEvents.video_id))
       .innerJoin(events, eq(events.id, videoEvents.event_id))
@@ -223,7 +282,7 @@ export async function loadManageVideoStatusSnapshot(
   if (!target) {
     return { ok: false, message: "このイベントに紐づく作品ではありません。" };
   }
-  return finishVideoStatusSnapshot(target);
+  return finishVideoStatusSnapshotWithNotification(target, notificationStatus);
 }
 
 
@@ -239,6 +298,7 @@ export async function loadAdminVideoStatusSnapshot(
   db: ServerCoreDb,
   user: SessionUserLike,
   videoId: string,
+  notificationStatus?: "public" | "voided",
 ): Promise<ManageVideoStatusSnapshot> {
   if (user.role !== "admin") {
     return { ok: false, message: "管理者権限が必要です。" };
@@ -248,6 +308,7 @@ export async function loadAdminVideoStatusSnapshot(
       .select({
         video: videos,
         rebuildEventIdsJson: boundedVideoRebuildEventIdsJson(videoId),
+        ...notificationReadProjection(notificationStatus, videoId),
       })
       .from(videos)
       .where(eq(videos.id, videoId))
@@ -256,7 +317,7 @@ export async function loadAdminVideoStatusSnapshot(
   if (!target) {
     return { ok: false, message: "対象作品が見つかりません。" };
   }
-  return finishVideoStatusSnapshot(target);
+  return finishVideoStatusSnapshotWithNotification(target, notificationStatus);
 }
 
 
