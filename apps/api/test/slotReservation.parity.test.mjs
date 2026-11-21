@@ -605,6 +605,81 @@ if (runUnderRootTsx(import.meta.url)) {
     });
   }
 
+  for (const [description, apply, field] of [
+    ["180K event title", w =>
+      w.sqlite.prepare('UPDATE events SET title = ? WHERE id = ?')
+        .run("\u0000" + "x".repeat(180_000), "ev1"), "event_json"],
+    ["180K anchor slot label", w =>
+      w.sqlite.prepare('UPDATE slots SET slot_label = ? WHERE id = ?')
+        .run("\u0000" + "x".repeat(180_000), "s01"), "anchor_json"],
+    ["180K next slot label inside group JSON", w =>
+      w.sqlite.prepare('UPDATE slots SET slot_label = ? WHERE id = ?')
+        .run("\u0000" + "x".repeat(180_000), "s02"), "neighbors_json"],
+    ["TEXT in a numeric slot field", w =>
+      w.sqlite.prepare('UPDATE slots SET version = ? WHERE id = ?')
+        .run("x".repeat(180_000), "s01"), "anchor_json"],
+  ]) {
+    test("SEC #716: unsafe " + description + " is rejected before first D1 JSON", async () => {
+      const w = world();
+      apply(w);
+      await expectMalformedReservationRejected(w, "u_owner", raw => {
+        assert.ok(raw[field].includes('"__invalid_projection":1'),
+          "malformed legacy event/slot row becomes an explicit bounded sentinel");
+        assert.ok(Buffer.byteLength(raw[field], "utf8") < 2048);
+      }, {
+        eventId: "ev1", slot_id: "s01", display_name: "Safe",
+        consecutive_count: field === "neighbors_json" ? 2 : 1,
+      });
+    });
+  }
+
+  test("SEC #716: combined first D1 row over 60KiB is suppressed before D1 transport", async () => {
+    const w = world();
+    w.sqlite.prepare('UPDATE events SET max_slots_per_video = 20 WHERE id = ?').run("ev1");
+    // Every individual value is within its SQL cap. The aggregate first
+    // snapshot still exceeds 60KiB due to 20 neighboring rows.
+    for (let i = 1; i <= 20; i++) {
+      const id = "s" + String(i).padStart(2, "0");
+      w.sqlite.prepare(
+        'UPDATE slots SET slot_label = ?, display_name = ? WHERE id = ?',
+      ).run("L".repeat(2048), "D".repeat(512), id);
+    }
+    let firstReads = 0;
+    const prepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = (sql) => {
+      const stmt = prepare(sql);
+      if (!sql.includes("AS neighbors_json") || !sql.includes("AS actor_json")) return stmt;
+      const bind = stmt.bind.bind(stmt);
+      stmt.bind = (...values) => {
+        const bound = bind(...values);
+        const first = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await first();
+          firstReads++;
+          assert.equal(row.invalid_snapshot, 1);
+          assert.equal(row.neighbors_json, null);
+          assert.equal(row.actor_json, null);
+          assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 1024,
+            "large combined result must not leave SQLite into D1");
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    const before = state(w);
+    const batchesBefore = w.d1.stats.batches;
+    const response = await runHono(w, "u_owner", "reserve", {
+      eventId: "ev1", slot_id: "s01", display_name: "No mutation", consecutive_count: 20,
+    });
+    assert.equal(firstReads, 1, "only one first D1 reservation snapshot");
+    assert.equal(response.status, 503);
+    assert.equal(response.cacheControl, "private, no-store");
+    assert.deepEqual(state(w), before, "over-budget source must not mutate");
+    assert.equal(w.d1.stats.batches, batchesBefore);
+    assert.equal(response.wakes.length, 0);
+  });
+
   test("SEC #716: SQL accepts 128 UTF-8 bytes but rejects 129 without mutation", async () => {
     for (const [label, id, invalid] of [
       ["ASCII128", "a".repeat(128), false],
@@ -887,7 +962,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const prepare = w.d1.prepare.bind(w.d1);
     w.d1.prepare = (sql) => {
       const stmt = prepare(sql);
-      if (/^\s*WITH (?:anchor|gap) AS \(/.test(sql)) {
+      if (/WITH (?:anchor|gap) AS \(/.test(sql) && sql.includes('projected_snapshot')) {
         const bind = stmt.bind.bind(stmt);
         stmt.bind = (...params) => {
           assert.equal(params.length, (sql.match(/\?/g) ?? []).length,
