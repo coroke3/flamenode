@@ -233,7 +233,7 @@ export function extractSessionToken(
     .join("");
 }
 
-/** Oversized legacy Active X IDs must not be transferred by the session D1 projection. Count UTF-8 bytes via CAST(... AS BLOB), not SQLite length(TEXT), which stops at NUL. */
+/** Malformed legacy Active X IDs must not cross D1 -> JS. Check SQLite storage type, embedded NUL, and UTF-8 bytes (not length(TEXT), which stops at NUL). */
 export const MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES = 128;
 
 export interface ResolveSessionOptions {
@@ -274,10 +274,16 @@ export async function resolveSessionUser(
           u."image" AS user_image,
           u."role" AS user_role,
           u."is_banned" AS user_is_banned,
-          CASE WHEN length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES}
+          CASE WHEN u."active_x_user_id" IS NOT NULL
+            AND (typeof(u."active_x_user_id") <> 'text'
+              OR instr(u."active_x_user_id", char(0)) > 0
+              OR length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES})
             THEN NULL ELSE u."active_x_user_id" END AS user_active_x_user_id,
-          CASE WHEN length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES}
-            THEN 1 ELSE 0 END AS user_active_x_id_oversize
+          CASE WHEN u."active_x_user_id" IS NOT NULL
+            AND (typeof(u."active_x_user_id") <> 'text'
+              OR instr(u."active_x_user_id", char(0)) > 0
+              OR length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES})
+            THEN 1 ELSE 0 END AS user_active_x_id_invalid
         FROM "session" s
         INNER JOIN "user" u ON s."userId" = u."id"
         WHERE s."sessionToken" = ?
@@ -293,7 +299,7 @@ export async function resolveSessionUser(
         user_role: string | null;
         user_is_banned: number | null;
         user_active_x_user_id: string | null;
-        user_active_x_id_oversize: number;
+        user_active_x_id_invalid: number;
       }>();
 
     if (!row) {
@@ -307,11 +313,11 @@ export async function resolveSessionUser(
     }
 
     // Do not turn a corrupted legacy Active X into a valid-looking null selection.
-    // D1 projects a bounded value and a separate sentinel before JavaScript sees it.
-    if (row.user_active_x_id_oversize === 1) {
+    // D1 projects only a valid text value plus a separate invalidity marker.
+    if (row.user_active_x_id_invalid === 1) {
       // This is malformed persisted identity data, not a failed D1 lookup.
       // Use a fixed code; never include the selected X ID in diagnostics.
-      console.error("[auth:session] INVALID_ACTIVE_X_ID_LENGTH");
+      console.error("[auth:session] INVALID_ACTIVE_X_ID_VALUE");
       throw new SessionUnavailableError();
     }
 
