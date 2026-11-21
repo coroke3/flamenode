@@ -184,6 +184,96 @@ test("T01 real Hono session resolver on SQLite adds one pre-read to SA-011 S3 tr
   );
 });
 
+// Issue #691: previous visibility tests use an injected session. Exercise the
+// actual secure-cookie Auth.js resolver on every successful R2 CAS path before
+// drawing conclusions about the complete S3 pre-read budget. SQLite + fake R2
+// are synthetic and cannot establish real workerd CPU/subrequest acceptance.
+test("T01 real Auth.js cookie restores event and video with full S3 read trace", async () => {
+  const previous = globalThis.caches;
+  globalThis.caches = { default: { delete: async () => true } };
+  try {
+    for (const scenario of [
+      { kind: "event", auditId: "event-audit", entityId: "ev-1", table: "events",
+        seed: seedVisibilityRestore, expectedReads: 9 },
+      { kind: "video", auditId: "video-audit", entityId: "vid-restore", table: "videos",
+        seed: seedVideoVisibilityRestore, expectedReads: 10 },
+    ]) {
+      const ctx = setup({ useRealSessionMiddleware: true });
+      scenario.seed(ctx);
+      const { state, bucket } = visibilityManifestBucket();
+      // No headers override: setup() must supply the real HTTPS __Secure cookie.
+      const response = await ctx.request({
+        audit_id: scenario.auditId,
+        reason: "実セッションで監査復元の読取数を検証",
+        confirm_text: `RESTORE ${scenario.auditId}`,
+      }, undefined, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+      assert.equal(response.status, 200, scenario.kind);
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+      const result = await response.json();
+      assert.equal(result.ok, true, scenario.kind + ": " + JSON.stringify(result));
+      assert.equal(ctx.sqlite.prepare(
+        `SELECT visibility_status FROM ${scenario.table} WHERE id = ?`,
+      ).get(scenario.entityId).visibility_status, "private");
+      assert.equal(ctx.sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'success'",
+      ).get().n, 1);
+      assert.equal(state.puts, 1, "R2 CAS must precede successful D1 commit");
+      assert.ok(state.manifest.entities.some((entry) =>
+        entry.entity_type === scenario.kind && entry.entity_id === scenario.entityId),
+      "the restored entity must have a matching R2 visibility block");
+      assert.deepEqual(ctx.readTrace[0].referenced_tables, ["session", "user"],
+        "the first D1 read must be the real secure-cookie Auth.js session");
+      assert.equal(ctx.stats.reads, scenario.expectedReads,
+        "record the entire authenticated route budget, not mocked-session reads");
+      assert.equal(ctx.stats.batches, 1,
+        "restore, audit and fence must use one D1 atomic batch");
+      recordRestoreD1Budget(
+        `${scenario.table}_authjs_sqlite_session_success`,
+        ctx.stats, ctx.readTrace, "authjs_middleware_sqlite_fixture",
+      );
+    }
+  } finally {
+    if (previous === undefined) delete globalThis.caches;
+    else globalThis.caches = previous;
+  }
+});
+
+test("T01 real Auth.js cookie visibility restore missing R2 fails closed before D1 batch", async () => {
+  for (const scenario of [
+    { kind: "event", auditId: "event-audit", entityId: "ev-1", table: "events",
+      seed: seedVisibilityRestore, expectedReads: 9 },
+    { kind: "video", auditId: "video-audit", entityId: "vid-restore", table: "videos",
+      seed: seedVideoVisibilityRestore, expectedReads: 10 },
+  ]) {
+    const ctx = setup({ useRealSessionMiddleware: true });
+    scenario.seed(ctx);
+    const response = await ctx.request({
+      audit_id: scenario.auditId,
+      reason: "実セッションとR2障害の監査復元回帰",
+      confirm_text: `RESTORE ${scenario.auditId}`,
+    }, undefined, { PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+    assert.equal(response.status, 200, scenario.kind);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    assert.equal((await response.json()).ok, false, "missing enforce R2 must deny restore");
+    assert.equal(ctx.sqlite.prepare(
+      `SELECT visibility_status FROM ${scenario.table} WHERE id = ?`,
+    ).get(scenario.entityId).visibility_status, "public");
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'success'",
+    ).get().n, 0);
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM public_visibility_fences",
+    ).get().n, 0, "no D1 visibility fence may commit when R2 is missing");
+    assert.deepEqual(ctx.readTrace[0].referenced_tables, ["session", "user"]);
+    assert.equal(ctx.stats.reads, scenario.expectedReads);
+    assert.equal(ctx.stats.batches, 0, "no restore batch on visibility guard failure");
+    recordRestoreD1Budget(
+      `${scenario.table}_authjs_sqlite_session_missing_r2`,
+      ctx.stats, ctx.readTrace, "authjs_middleware_sqlite_fixture",
+    );
+  }
+});
+
 test("T01 real Hono session resolver denies expired or role-revoked users before restore", async () => {
   for (const { options, status, expectedReads } of [
     { options: { sessionExpired: true }, status: 401, expectedReads: 1 },
