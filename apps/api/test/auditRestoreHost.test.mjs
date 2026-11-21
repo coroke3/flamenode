@@ -124,7 +124,7 @@ test("U01 audit restore invalidation cache keys follow CURRENT producer definiti
     return match[1];
   });
   const userPagesMatch = userSource.match(
-    /export\\s+const\\s+STATIC_USER_MAX_PAGES\\s*=\\s*(\\d+)/,
+    /export\s+const\s+STATIC_USER_MAX_PAGES\s*=\s*(\d+)/,
   );
   assert.ok(userPagesMatch, "CURRENT public user page limit must remain discoverable");
   const current = host().publicCacheKeys;
