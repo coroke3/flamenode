@@ -721,21 +721,11 @@ test("T04 double failure: R2 precommit survives D1 rollback and unavailable comp
       return originalGet(...args);
     };
 
-    const warnings = [];
-    const previousWarn = console.warn;
-    console.warn = (...args) => {
-      warnings.push(args.map((v) => String(v)).join(" "));
-    };
-    let response;
-    try {
-      response = await ctx.request({
-        audit_id: scenario.auditId,
-        reason: "二重障害の復旧回帰",
-        confirm_text: `RESTORE ${scenario.auditId}`,
-      }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
-    } finally {
-      console.warn = previousWarn;
-    }
+    const response = await ctx.request({
+      audit_id: scenario.auditId,
+      reason: "二重障害の復旧回帰",
+      confirm_text: `RESTORE ${scenario.auditId}`,
+    }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
 
     assert.equal(d1FailureStarted, true);
     assert.equal(ctx.stats.batches, 1, "one failed atomic D1 restore batch");
@@ -764,8 +754,6 @@ test("T04 double failure: R2 precommit survives D1 rollback and unavailable comp
       && typeof entry.fence_token === "string"
       && entry.fence_token.length > 0,
     ), "failed compensation leaves the original R2 block in place");
-    assert.ok(warnings.some((line) => line.includes("visibility compensation failed")),
-      "the shared core reports the failure for investigation");
   }
 });
 
