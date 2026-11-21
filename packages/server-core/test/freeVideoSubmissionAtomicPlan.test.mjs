@@ -194,11 +194,11 @@ test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded 
       assert.equal(statementsExecuted, eventId ? 6 : 2);
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 1);
       assert.deepEqual(
-        sqlite.prepare("SELECT youtube_video_id, primary_event_id FROM videos").get(),
+        { ...sqlite.prepare("SELECT youtube_video_id, primary_event_id FROM videos").get() },
         { youtube_video_id: "dQw4w9WgXcQ", primary_event_id: eventId },
       );
       assert.deepEqual(
-        sqlite.prepare("SELECT video_id, sync_status, view_count FROM video_youtube_metadata").get(),
+        { ...sqlite.prepare("SELECT video_id, sync_status, view_count FROM video_youtube_metadata").get() },
         { video_id: "v:1", sync_status: "pending", view_count: 0 },
       );
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_events").get().n, eventId ? 1 : 0);
