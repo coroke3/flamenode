@@ -307,3 +307,62 @@ test("U01 absent Cache API and delete failure are fail-soft without leaking keys
     else globalThis.caches = originalCache;
   }
 });
+
+
+// #717: Hono-specific defense in depth, not a replacement for shared-core
+// logger remediation. No raw provider exception, stack, URL or token can reach
+// the restore core through the candidate host's R2 port.
+test("U01 #717 manifest R2 provider failures expose only fixed safe error codes", async () => {
+  const secret = "provider_cookie=SESSION_SECRET_987_sensitive";
+  const current = host({ BUCKET: {
+    get: async () => { throw new Error(secret); },
+    put: async () => { throw new Error(secret); },
+  } });
+  for (const [action, expected] of [
+    [() => current.manifest.read(), "public_visibility_manifest_read_failed"],
+    [() => current.manifest.write({
+      schema_version: 1, revision: 0, generated_at: 1, entities: [],
+    }, { ifMatchEtag: "old" }), "public_visibility_manifest_put_failed"],
+  ]) {
+    await assert.rejects(action, (error) => {
+      assert.equal(error.message, expected);
+      assert.equal(error.cause, undefined);
+      assert.equal(Object.hasOwn(error, "cause"), false);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      assert.equal(String(error.stack).includes(secret), false);
+      return true;
+    });
+  }
+
+  const malformed = host({ BUCKET: {
+    get: async () => {
+      const text = '{"token":"RAW_SECRET_VALUE","entities":';
+      return { size: Buffer.byteLength(text), etag: "etag-1", text: async () => text };
+    },
+  } });
+  await assert.rejects(malformed.manifest.read(), (error) => {
+    assert.equal(error.message, "public_visibility_manifest_read_failed");
+    assert.doesNotMatch(String(error.stack), /RAW_SECRET_VALUE/);
+    return true;
+  });
+});
+
+test("U01 #717 known manifest domain failures retain stable codes without raw stacks", async () => {
+  const blocked = { schema_version: 1, revision: 0, generated_at: 1, entities: [] };
+  const current = host({ BUCKET: {
+    get: async () => {
+      throw new Error("public_visibility_manifest_too_large");
+    },
+    put: async () => { throw new Error("public_visibility_manifest_precondition_failed"); },
+  } });
+  await assert.rejects(current.manifest.read(), (error) => {
+    assert.equal(error.message, "public_visibility_manifest_too_large");
+    assert.equal(error.cause, undefined);
+    return true;
+  });
+  await assert.rejects(current.manifest.write(blocked, { ifMatchEtag: "old" }), (error) => {
+    assert.equal(error.message, "public_visibility_manifest_precondition_failed");
+    assert.equal(error.cause, undefined);
+    return true;
+  });
+});
