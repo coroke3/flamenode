@@ -636,19 +636,30 @@ if (runUnderRootTsx(import.meta.url)) {
 
   test("SEC #716: D1 wire JSON double-escaping stays under 64KiB", async () => {
     const w = world();
-    // All fields satisfy their own TEXT limits. SQLite JSON1 serializes 4096
-    // and 2048 U+0001 controls as 6 bytes each, then D1's enclosing JSON
-    // string quotes every backslash AGAIN. Raw SQL bytes ~37KiB, wire >64KiB.
-    const eventTitle = String.fromCharCode(1).repeat(4096);
-    const slotLabel = String.fromCharCode(1).repeat(2048);
-    const a = JSON.stringify({ title: eventTitle });
-    const b = JSON.stringify({ slot_label: slotLabel });
-    assert.ok(Buffer.byteLength(a + b, "utf8") < 58 * 1024,
-      "single-escaping by SQL alone appears to fit the old 60KiB cap");
-    assert.ok(Buffer.byteLength(JSON.stringify(a) + JSON.stringify(b), "utf8") > 64 * 1024,
-      "outer D1 JSON double-escaping crosses the hard S3 transport ceiling");
+    // Every individual field is within the SQL byte limit. JSON1 expands
+    // U+0001 to 6 ASCII bytes and D1 quotes each backslash one more time.
+    // Four independently bounded JSON columns total ~58KiB on the SQL side
+    // yet >64KiB in the actual nested D1 transport JSON.
+    const controls = count => String.fromCharCode(1).repeat(count);
+    const eventTitle = controls(4096);
+    const slotLabel = controls(2048);
+    const displayName = controls(512);
+    const actorName = controls(512);
+    const innerJsonParts = [
+      JSON.stringify({ title: eventTitle }),
+      JSON.stringify({ slot_label: slotLabel, display_name: displayName }),
+      JSON.stringify([{ slot_label: slotLabel, display_name: displayName }]),
+      JSON.stringify({ discordName: actorName }),
+    ];
+    assert.ok(Buffer.byteLength(innerJsonParts.join(""), "utf8") < 60 * 1024,
+      "raw SQL JSON fits the old incorrect 60KiB first-row budget");
+    assert.ok(Buffer.byteLength(innerJsonParts.map(p => JSON.stringify(p)).join(""), "utf8") > 64 * 1024,
+      "outer D1 JSON double-escaping must cross the S3 transport ceiling");
     w.sqlite.prepare('UPDATE events SET title = ? WHERE id = ?').run(eventTitle, "ev1");
-    w.sqlite.prepare('UPDATE slots SET slot_label = ? WHERE id = ?').run(slotLabel, "s01");
+    w.sqlite.prepare(
+      "UPDATE slots SET slot_label = ?, display_name = ? WHERE id IN ('s01', 's02')",
+    ).run(slotLabel, displayName);
+    w.sqlite.prepare('UPDATE "user" SET name = ? WHERE id = ?').run(actorName, "u_owner");
 
     let firstReads = 0;
     const prepare = w.d1.prepare.bind(w.d1);
@@ -685,7 +696,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const thaw = freeze();
     try {
       const response = await runHono(w, "u_owner", "reserve", {
-        eventId: "ev1", slot_id: "s01", display_name: "Wire-safe", consecutive_count: 1,
+        eventId: "ev1", slot_id: "s01", display_name: "Wire-safe", consecutive_count: 2,
       });
       assert.equal(response.status, 503);
       assert.equal(response.cacheControl, "private, no-store");
