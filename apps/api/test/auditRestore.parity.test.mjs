@@ -1127,6 +1127,11 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
     assert.equal(perColo.reader.size, 2, "the independent reader-colo cache remains populated");
 
     activeColo = "reader";
+    // This local control ensures the privacy detector is semantic, not raw
+    // text matching: JSON escaping of a private ID must still be detected.
+    const escapedVideoId = String.raw`{"videos":[{"id":"vid\u002drestore"}]}`;
+    assert.ok(JSON.stringify(JSON.parse(escapedVideoId)).includes("vid-restore"),
+      "escaped private IDs must not evade the two-colo regression");
     const exposed = [];
     for (const item of snapshots) {
       const request = new Request(
@@ -1159,8 +1164,16 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
           item.format + ": at least one request must find the seeded stale cache entry");
       }
       const body = await response.text();
-      assert.doesNotThrow(() => JSON.parse(body), item.format + ": export must return JSON");
-      if (body.includes("vid-restore")) {
+      const parsed = JSON.parse(body);
+      // A 200 error-shaped JSON object is not a successful public export.
+      if (item.format === "v5") {
+        assert.equal(parsed?.schema_version, 5, "v5 must return an actual v5 DTO");
+      } else {
+        assert.ok(Array.isArray(parsed), "legacy must return an actual array DTO");
+      }
+      // Inspect *decoded* JSON values: a malicious/stale representation may
+      // escape the ID (e.g. vid\\u002drestore) and bypass raw substring checks.
+      if (JSON.stringify(parsed).includes("vid-restore")) {
         exposed.push(item.format + ":" + cacheState);
       }
       readerLookups.length = 0;
