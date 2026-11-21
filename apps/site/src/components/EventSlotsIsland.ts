@@ -43,7 +43,9 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
     // Two 30-second polls can overlap. An older RH-020 response must never
     // overwrite the grid after a newer poll has started and completed.
     let latestRequest = 0;
-    let hasSuccessfulPublicRead = false;
+    // First successful read after an earlier failure must also invalidate
+    // RH-014 fetched during that failed initial poll.
+    let hasSettledPublicRead = false;
     const load = async () => {
       const request = ++latestRequest;
       setNow(Math.floor(Date.now() / 1000));
@@ -53,16 +55,17 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
         setLive(result);
         setPhase("ready");
         setStalePublicNotice(false);
-        // The first public read races the initial private fetch; don't start
-        // two initial overlays. Every *later* successful public poll invalidates
-        // the earlier RH-014 owner badge before re-checking private ownership.
-        if (hasSuccessfulPublicRead) setViewerRefreshEpoch((n) => n + 1);
-        hasSuccessfulPublicRead = true;
+        // A first *completed* public read does not duplicate RH-014.
+        // Success after ANY preceding completed attempt (including 503) must
+        // invalidate that prior identity snapshot before showing ownership.
+        if (hasSettledPublicRead) setViewerRefreshEpoch((n) => n + 1);
+        hasSettledPublicRead = true;
       } else {
         // A failed *refresh* preserves the last successfully fetched grid, but
         // must not imply that these slot names/states were just revalidated.
         // Initial RH-020 failures keep their existing unavailable notice.
         setStalePublicNotice(true);
+        hasSettledPublicRead = true;
         setPhase((current) => (current === "ready" ? current : "unavailable"));
       }
     };
