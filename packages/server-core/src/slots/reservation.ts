@@ -109,6 +109,26 @@ const MAX_ACTOR_DISCORD_ID_BYTES = 128;
 const MAX_STAFF_PRESET_BYTES = 128;
 const MAX_STAFF_CUSTOM_KEYS_BYTES = 2048;
 const MAX_STAFF_JSON_BUDGET_BYTES = 20 * 1024;
+// Individual event/slot strings must never enter JSON1 unbounded. These are
+// conservative byte limits for legacy data, NOT silent truncation limits.
+const MAX_LEGACY_RECORD_ID_BYTES = 128;
+const MAX_EVENT_TITLE_BYTES = 4096;
+const MAX_SLOT_DISPLAY_NAME_BYTES = 512;
+const MAX_SLOT_LABEL_BYTES = 2048;
+const MAX_EVENT_STATUS_BYTES = 32;
+const MAX_SLOT_STATUS_BYTES = 32;
+
+function invalidSqlNumber(expr: string): string {
+  return `(typeof(${expr}) NOT IN ('integer', 'real', 'null'))`;
+}
+
+function invalidJsonSnapshot(snapshot: Record<string, unknown>): boolean {
+  // The SQL helpers emit this marker only when a source row was rejected
+  // before serializing legacy TEXT. Never parse/use partial authorized groups.
+  return Object.values(snapshot).some(
+    value => typeof value === "string" && value.includes('"__invalid_projection":1'),
+  );
+}
 
 function invalidSqlText(expr: string, bytes: number): string {
   return `(${expr} IS NOT NULL AND (
@@ -219,7 +239,28 @@ function failOutcome(status: 400 | 403 | 404 | 409 | 503, message: string): Slot
 }
 
 function slotJsonObjectSql(alias: string): string {
-  return `json_object(${SLOT_COLUMNS.map((c) => `'${c}', ${alias}."${c}"`).join(", ")})`;
+  const textCaps: Record<string, number> = {
+    id: MAX_LEGACY_RECORD_ID_BYTES,
+    event_id: MAX_LEGACY_RECORD_ID_BYTES,
+    reserved_by_user_id: MAX_LEGACY_RECORD_ID_BYTES,
+    x_user_id: MAX_LEGACY_X_ID_BYTES,
+    reserved_x_id_snapshot: MAX_LEGACY_X_ID_BYTES,
+    display_name: MAX_SLOT_DISPLAY_NAME_BYTES,
+    slot_label: MAX_SLOT_LABEL_BYTES,
+    reservation_group_id: MAX_LEGACY_RECORD_ID_BYTES,
+    video_id: MAX_LEGACY_RECORD_ID_BYTES,
+    status: MAX_SLOT_STATUS_BYTES,
+  };
+  const numberFields = ["start_time", "sort_order", "updated_at", "version"];
+  const invalid = [
+    ...Object.entries(textCaps).map(([key, maxBytes]) =>
+      invalidSqlText(`${alias}."${key}"`, maxBytes)),
+    ...numberFields.map(key => invalidSqlNumber(`${alias}."${key}"`)),
+  ].join(" OR ");
+  return `(CASE WHEN ${invalid}
+    THEN json_object('__invalid_projection', 1)
+    ELSE json_object(${SLOT_COLUMNS.map((c) => `'${c}', ${alias}."${c}"`).join(", ")})
+  END)`;
 }
 
 function eventJsonObjectSql(alias: string): string {
@@ -235,7 +276,21 @@ function eventJsonObjectSql(alias: string): string {
     "max_slot_reservation_groups_per_xid",
     "slot_part_gap_minutes",
   ];
-  return `json_object(${cols.map((c) => `'${c}', ${alias}."${c}"`).join(", ")})`;
+  const textCaps: Record<string, number> = {
+    id: MAX_LEGACY_RECORD_ID_BYTES,
+    title: MAX_EVENT_TITLE_BYTES,
+    visibility_status: MAX_EVENT_STATUS_BYTES,
+  };
+  const numericFields = cols.filter(c => !(c in textCaps));
+  const invalid = [
+    ...Object.entries(textCaps).map(([key, maxBytes]) =>
+      invalidSqlText(`${alias}."${key}"`, maxBytes)),
+    ...numericFields.map(key => invalidSqlNumber(`${alias}."${key}"`)),
+  ].join(" OR ");
+  return `(CASE WHEN ${invalid}
+    THEN json_object('__invalid_projection', 1)
+    ELSE json_object(${cols.map((c) => `'${c}', ${alias}."${c}"`).join(", ")})
+  END)`;
 }
 
 function approvedXJsonSql(userIdParamPlaceholder = "?"): string {
@@ -652,7 +707,9 @@ export async function reserveSlotCore(
     activeXId: ctx.activeXId,
     neighborLimit: Math.max(0, input.consecutive_count - 1),
   });
-  if (!snapshot) return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  if (!snapshot || invalidJsonSnapshot(snapshot)) {
+    return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  }
 
   const approvedXIds = parseJsonOrThrow<string[]>(snapshot.approved_x_json, []);
   const pendingXIds = parseJsonOrThrow<string[]>(snapshot.pending_x_json, []);
@@ -864,7 +921,9 @@ export async function releaseSlotCore(
     .prepare(query)
     .bind(input.slotId, input.eventId)
     .first<{ anchor_json: string | null; group_json: string | null }>();
-  if (!snapshot) return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  if (!snapshot || invalidJsonSnapshot(snapshot)) {
+    return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  }
 
   const anchor = parseJsonOrThrow<SlotRow | null>(snapshot.anchor_json, null);
   if (!anchor) return failOutcome(404, "枠が見つかりません。");
@@ -971,7 +1030,9 @@ export async function extendSlotGroupCore(
       cte_edge_id: string | null;
       neighbor_json: string | null;
     }>();
-  if (!snapshot) return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  if (!snapshot || invalidJsonSnapshot(snapshot)) {
+    return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  }
 
   const approvedXIds = parseJsonOrThrow<string[]>(snapshot.approved_x_json, []);
   const staffRows = parseJsonOrThrow<StaffPermissionRow[]>(snapshot.staff_json, []);
@@ -1155,7 +1216,9 @@ export async function mergeSlotGroupsCore(
       left_group_json: string | null;
       right_group_json: string | null;
     }>();
-  if (!snapshot) return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  if (!snapshot || invalidJsonSnapshot(snapshot)) {
+    return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+  }
 
   const approvedXIds = parseJsonOrThrow<string[]>(snapshot.approved_x_json, []);
   const staffRows = parseJsonOrThrow<StaffPermissionRow[]>(snapshot.staff_json, []);
