@@ -57,7 +57,8 @@ function fixture() {
 }
 
 function seedApprovedActiveX(sqlite) {
-  insert(sqlite, "user", { id: "user-1", active_x_user_id: "alice", is_banned: 0 });
+  insert(sqlite, "user", { id: "user-1", active_x_user_id: "alice", is_banned: 0,
+    is_tos_accepted: 1, terms_reaccept_required: 0 });
   insert(sqlite, "x_users", { id: "alice", x_name: "Alice", approval_status: "approved" });
   insert(sqlite, "x_user_account_links", {
     x_user_id: "alice", auth_user_id: "user-1", link_role: "manager",
@@ -106,6 +107,8 @@ test("MIG-0651 atomic composer: event and entire question-set assertions MUST pr
   const statements = plan.statements.slice(0, 3).map(s =>
     new SQLiteSyncDialect().sqlToQuery(s.expr));
   assert.match(statements[0].sql, /x_user_account_links/);
+  assert.match(statements[0].sql, /is_tos_accepted/);
+  assert.match(statements[0].sql, /terms_reaccept_required/);
   assert.ok(statements[0].params.includes("user-1"));
   assert.ok(statements[0].params.includes("alice"));
   assert.match(statements[1].sql, /events/);
@@ -254,7 +257,7 @@ test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded 
   }
 });
 
-test("MIG-0651 atomic composer: stale Active X switch/unlink/revocation/ban aborts before INSERT", () => {
+test("MIG-0651 atomic composer: stale Active X, TOS or account authority aborts before INSERT", () => {
   // All changes happen AFTER plan construction but BEFORE the same-batch
   // assertion. A previously valid HTTP preflight never grants write authority.
   const mutations = {
@@ -262,6 +265,8 @@ test("MIG-0651 atomic composer: stale Active X switch/unlink/revocation/ban abor
     unlinked: sqlite => sqlite.prepare("DELETE FROM x_user_account_links WHERE x_user_id='alice' AND auth_user_id='user-1'").run(),
     revoked: sqlite => sqlite.prepare("UPDATE x_users SET approval_status='rejected' WHERE id='alice'").run(),
     banned: sqlite => sqlite.prepare("UPDATE user SET is_banned=1 WHERE id='user-1'").run(),
+    tos_revoked: sqlite => sqlite.prepare("UPDATE user SET is_tos_accepted=0 WHERE id='user-1'").run(),
+    tos_reaccept: sqlite => sqlite.prepare("UPDATE user SET terms_reaccept_required=1 WHERE id='user-1'").run(),
   };
   for (const [name, mutate] of Object.entries(mutations)) {
     const sqlite = createSqlite();
