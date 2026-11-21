@@ -8,6 +8,8 @@ import type { ServerCoreDb } from "../db.ts";
 export { buildFreeVideoCustomAnswerInsertPlan } from "./freeVideoCustomAnswerInsertPlan.ts";
 /** MIG-0651 U02 unmounted software-catalog/link atomic candidate. */
 export { buildFreeVideoSoftwareInsertPlan } from "./freeVideoSoftwareInsertPlan.ts";
+/** MIG-0651 U02: unmounted CURRENT video_submitted DM outbox plan. */
+export { buildFreeVideoSubmittedNotificationPlan } from "./freeVideoSubmittedNotificationPlan.ts";
 export {
   buildFreeVideoSubmissionAtomicPlan,
   buildFreeVideoSubmissionWithRebuildPlan,
