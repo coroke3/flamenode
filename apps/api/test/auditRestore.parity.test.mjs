@@ -946,6 +946,71 @@ test("T04 successful event audit restore evicts all eight scheduled export varia
   }
 });
 
+// U01/#659 adapter defense in depth: the shared R2 CAS helper's truthy
+// condition would otherwise convert a blank ETag of an *existing* manifest
+// into an unconditional PUT. Host-level tests pin 0 PUT; this HTTP path also
+// pins the important safety effect: no audited D1 visibility mutation, no
+// public cache delete and no loss of a preexisting foreign visibility fence.
+// Real Cloudflare R2 returning blank ETag is NOT asserted or assumed.
+test("T04 #659 blank existing R2 ETag refuses event/video restore before D1 commit", async () => {
+  for (const scenario of [
+    { kind: "event", auditId: "event-audit", entityId: "ev-1",
+      table: "events", seed: seedVisibilityRestore },
+    { kind: "video", auditId: "video-audit", entityId: "vid-restore",
+      table: "videos", seed: seedVideoVisibilityRestore },
+  ]) {
+    const ctx = setup();
+    scenario.seed(ctx);
+    const { state, bucket } = visibilityManifestBucket();
+    state.etag = "";
+    const foreignBlock = {
+      entity_type: "event", entity_id: "foreign-protected-event",
+      fence_token: "foreign-block-token-must-survive", blocked_at: 100,
+    };
+    state.manifest = { ...state.manifest, revision: 3, entities: [foreignBlock] };
+    const originalManifest = structuredClone(state.manifest);
+    const oldCache = globalThis.caches;
+    const deleted = [];
+    globalThis.caches = { default: {
+      delete: async (url) => { deleted.push(String(url)); return true; },
+    } };
+    try {
+      const response = await ctx.request({
+        audit_id: scenario.auditId,
+        reason: "不正ETagで監査復元を禁止",
+        confirm_text: `RESTORE ${scenario.auditId}`,
+      }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+      assert.equal(response.status, 200, scenario.kind);
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+      const result = await response.json();
+      assert.equal(result.ok, false, scenario.kind + ": malformed R2 ETag must fail closed");
+      assert.equal(state.puts, 0,
+        scenario.kind + ": never downgrade conditional R2 CAS to unconditional PUT");
+      assert.deepEqual(state.manifest, originalManifest,
+        scenario.kind + ": original foreign event fence must survive");
+      assert.equal(ctx.stats.batches, 0,
+        scenario.kind + ": denied pre-commit cannot enter the audited D1 batch");
+      assert.equal(ctx.sqlite.prepare(
+        `SELECT visibility_status FROM ${scenario.table} WHERE id = ?`,
+      ).get(scenario.entityId).visibility_status, "public");
+      assert.equal(ctx.sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'",
+      ).get().n, 0);
+      assert.equal(ctx.sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM public_visibility_fences",
+      ).get().n, 0, "no D1 visibility fence was committed");
+      assert.equal(ctx.sqlite.prepare(
+        "SELECT restore_status FROM audit_logs WHERE id = ?",
+      ).get(scenario.auditId).restore_status, "restorable");
+      assert.deepEqual(deleted, [],
+        scenario.kind + ": failed restore must not evict public or event-export cache");
+    } finally {
+      if (oldCache === undefined) delete globalThis.caches;
+      else globalThis.caches = oldCache;
+    }
+  }
+});
+
 test("T04 R2 binding failure prevents an event visibility restore and preserves public state", async () => {
   const ctx = setup();
   seedVisibilityRestore(ctx);
