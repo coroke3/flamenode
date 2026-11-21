@@ -1037,14 +1037,6 @@
             ]
           },
           {
-            "sql": "\n      UPDATE event_staff\n      SET permission_preset = 'owner', updated_at = ?\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM event_staff source_row\n          WHERE source_row.x_user_id = ?\n            AND source_row.event_id = event_staff.event_id\n            AND source_row.permission_preset = 'owner'\n        )\n        AND permission_preset <> 'owner'\n    ",
-            "params": [
-              1760000000,
-              "x_tgt",
-              "x_src"
-            ]
-          },
-          {
             "sql": "\n      DELETE FROM event_staff\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM event_staff target_row\n          WHERE target_row.x_user_id = ?\n            AND target_row.event_id = event_staff.event_id\n        )\n    ",
             "params": [
               "x_src",
@@ -1052,14 +1044,9 @@
             ]
           },
           {
-            "sql": "DELETE FROM x_user_aliases WHERE alias_x_id = ?",
+            "sql": "\n      DELETE FROM x_user_aliases\n      WHERE alias_x_id = ?\n         OR (\n           x_user_id = ?\n           AND EXISTS (\n             SELECT 1 FROM x_user_aliases target_row\n             WHERE target_row.x_user_id = ?\n               AND target_row.alias_x_id = x_user_aliases.alias_x_id\n           )\n         )\n    ",
             "params": [
-              "x_src"
-            ]
-          },
-          {
-            "sql": "\n      DELETE FROM x_user_aliases\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM x_user_aliases target_row\n          WHERE target_row.x_user_id = ?\n            AND target_row.alias_x_id = x_user_aliases.alias_x_id\n        )\n    ",
-            "params": [
+              "x_src",
               "x_src",
               "x_tgt"
             ]
@@ -1122,8 +1109,10 @@
             ]
           },
           {
-            "sql": "UPDATE event_staff SET x_user_id = ?, updated_at = ? WHERE x_user_id = ?",
+            "sql": "\n      WITH promote AS (\n        SELECT value AS staff_id FROM json_each(?)\n      )\n      UPDATE event_staff\n      SET x_user_id = CASE\n            WHEN x_user_id = ? THEN ? ELSE x_user_id\n          END,\n          permission_preset = CASE\n            WHEN id IN (SELECT staff_id FROM promote) THEN 'owner'\n            ELSE permission_preset\n          END,\n          updated_at = ?\n      WHERE x_user_id = ?\n         OR id IN (SELECT staff_id FROM promote)\n    ",
             "params": [
+              "[\"staff-2\"]",
+              "x_src",
               "x_tgt",
               1760000000,
               "x_src"
@@ -2453,14 +2442,6 @@
             ]
           },
           {
-            "sql": "\n      UPDATE event_staff\n      SET permission_preset = 'owner', updated_at = ?\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM event_staff source_row\n          WHERE source_row.x_user_id = ?\n            AND source_row.event_id = event_staff.event_id\n            AND source_row.permission_preset = 'owner'\n        )\n        AND permission_preset <> 'owner'\n    ",
-            "params": [
-              1760000000,
-              "x_tgt",
-              "x_src"
-            ]
-          },
-          {
             "sql": "\n      DELETE FROM event_staff\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM event_staff target_row\n          WHERE target_row.x_user_id = ?\n            AND target_row.event_id = event_staff.event_id\n        )\n    ",
             "params": [
               "x_src",
@@ -2468,14 +2449,9 @@
             ]
           },
           {
-            "sql": "DELETE FROM x_user_aliases WHERE alias_x_id = ?",
+            "sql": "\n      DELETE FROM x_user_aliases\n      WHERE alias_x_id = ?\n         OR (\n           x_user_id = ?\n           AND EXISTS (\n             SELECT 1 FROM x_user_aliases target_row\n             WHERE target_row.x_user_id = ?\n               AND target_row.alias_x_id = x_user_aliases.alias_x_id\n           )\n         )\n    ",
             "params": [
-              "x_src"
-            ]
-          },
-          {
-            "sql": "\n      DELETE FROM x_user_aliases\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM x_user_aliases target_row\n          WHERE target_row.x_user_id = ?\n            AND target_row.alias_x_id = x_user_aliases.alias_x_id\n        )\n    ",
-            "params": [
+              "x_src",
               "x_src",
               "x_tgt"
             ]
@@ -2538,8 +2514,10 @@
             ]
           },
           {
-            "sql": "UPDATE event_staff SET x_user_id = ?, updated_at = ? WHERE x_user_id = ?",
+            "sql": "\n      WITH promote AS (\n        SELECT value AS staff_id FROM json_each(?)\n      )\n      UPDATE event_staff\n      SET x_user_id = CASE\n            WHEN x_user_id = ? THEN ? ELSE x_user_id\n          END,\n          permission_preset = CASE\n            WHEN id IN (SELECT staff_id FROM promote) THEN 'owner'\n            ELSE permission_preset\n          END,\n          updated_at = ?\n      WHERE x_user_id = ?\n         OR id IN (SELECT staff_id FROM promote)\n    ",
             "params": [
+              "[\"staff-2\"]",
+              "x_src",
               "x_tgt",
               1760000000,
               "x_src"
@@ -3881,14 +3859,6 @@
             ]
           },
           {
-            "sql": "\n      UPDATE event_staff\n      SET permission_preset = 'owner', updated_at = ?\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM event_staff source_row\n          WHERE source_row.x_user_id = ?\n            AND source_row.event_id = event_staff.event_id\n            AND source_row.permission_preset = 'owner'\n        )\n        AND permission_preset <> 'owner'\n    ",
-            "params": [
-              1760000000,
-              "x_tgt",
-              "x_src"
-            ]
-          },
-          {
             "sql": "\n      DELETE FROM event_staff\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM event_staff target_row\n          WHERE target_row.x_user_id = ?\n            AND target_row.event_id = event_staff.event_id\n        )\n    ",
             "params": [
               "x_src",
@@ -3896,14 +3866,9 @@
             ]
           },
           {
-            "sql": "DELETE FROM x_user_aliases WHERE alias_x_id = ?",
+            "sql": "\n      DELETE FROM x_user_aliases\n      WHERE alias_x_id = ?\n         OR (\n           x_user_id = ?\n           AND EXISTS (\n             SELECT 1 FROM x_user_aliases target_row\n             WHERE target_row.x_user_id = ?\n               AND target_row.alias_x_id = x_user_aliases.alias_x_id\n           )\n         )\n    ",
             "params": [
-              "x_src"
-            ]
-          },
-          {
-            "sql": "\n      DELETE FROM x_user_aliases\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM x_user_aliases target_row\n          WHERE target_row.x_user_id = ?\n            AND target_row.alias_x_id = x_user_aliases.alias_x_id\n        )\n    ",
-            "params": [
+              "x_src",
               "x_src",
               "x_tgt"
             ]
@@ -3966,8 +3931,10 @@
             ]
           },
           {
-            "sql": "UPDATE event_staff SET x_user_id = ?, updated_at = ? WHERE x_user_id = ?",
+            "sql": "\n      WITH promote AS (\n        SELECT value AS staff_id FROM json_each(?)\n      )\n      UPDATE event_staff\n      SET x_user_id = CASE\n            WHEN x_user_id = ? THEN ? ELSE x_user_id\n          END,\n          permission_preset = CASE\n            WHEN id IN (SELECT staff_id FROM promote) THEN 'owner'\n            ELSE permission_preset\n          END,\n          updated_at = ?\n      WHERE x_user_id = ?\n         OR id IN (SELECT staff_id FROM promote)\n    ",
             "params": [
+              "[\"staff-2\"]",
+              "x_src",
               "x_tgt",
               1760000000,
               "x_src"
@@ -5803,14 +5770,6 @@
             ]
           },
           {
-            "sql": "\n      UPDATE event_staff\n      SET permission_preset = 'owner', updated_at = ?\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM event_staff source_row\n          WHERE source_row.x_user_id = ?\n            AND source_row.event_id = event_staff.event_id\n            AND source_row.permission_preset = 'owner'\n        )\n        AND permission_preset <> 'owner'\n    ",
-            "params": [
-              1760000000,
-              "x_tgt",
-              "x_src"
-            ]
-          },
-          {
             "sql": "\n      DELETE FROM event_staff\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM event_staff target_row\n          WHERE target_row.x_user_id = ?\n            AND target_row.event_id = event_staff.event_id\n        )\n    ",
             "params": [
               "x_src",
@@ -5818,14 +5777,9 @@
             ]
           },
           {
-            "sql": "DELETE FROM x_user_aliases WHERE alias_x_id = ?",
+            "sql": "\n      DELETE FROM x_user_aliases\n      WHERE alias_x_id = ?\n         OR (\n           x_user_id = ?\n           AND EXISTS (\n             SELECT 1 FROM x_user_aliases target_row\n             WHERE target_row.x_user_id = ?\n               AND target_row.alias_x_id = x_user_aliases.alias_x_id\n           )\n         )\n    ",
             "params": [
-              "x_src"
-            ]
-          },
-          {
-            "sql": "\n      DELETE FROM x_user_aliases\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM x_user_aliases target_row\n          WHERE target_row.x_user_id = ?\n            AND target_row.alias_x_id = x_user_aliases.alias_x_id\n        )\n    ",
-            "params": [
+              "x_src",
               "x_src",
               "x_tgt"
             ]
@@ -5888,8 +5842,10 @@
             ]
           },
           {
-            "sql": "UPDATE event_staff SET x_user_id = ?, updated_at = ? WHERE x_user_id = ?",
+            "sql": "\n      WITH promote AS (\n        SELECT value AS staff_id FROM json_each(?)\n      )\n      UPDATE event_staff\n      SET x_user_id = CASE\n            WHEN x_user_id = ? THEN ? ELSE x_user_id\n          END,\n          permission_preset = CASE\n            WHEN id IN (SELECT staff_id FROM promote) THEN 'owner'\n            ELSE permission_preset\n          END,\n          updated_at = ?\n      WHERE x_user_id = ?\n         OR id IN (SELECT staff_id FROM promote)\n    ",
             "params": [
+              "[]",
+              "x_src",
               "x_tgt",
               1760000000,
               "x_src"
@@ -6670,14 +6626,6 @@
             ]
           },
           {
-            "sql": "\n      UPDATE event_staff\n      SET permission_preset = 'owner', updated_at = ?\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM event_staff source_row\n          WHERE source_row.x_user_id = ?\n            AND source_row.event_id = event_staff.event_id\n            AND source_row.permission_preset = 'owner'\n        )\n        AND permission_preset <> 'owner'\n    ",
-            "params": [
-              1760000000,
-              "x_tgt",
-              "x_src"
-            ]
-          },
-          {
             "sql": "\n      DELETE FROM event_staff\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM event_staff target_row\n          WHERE target_row.x_user_id = ?\n            AND target_row.event_id = event_staff.event_id\n        )\n    ",
             "params": [
               "x_src",
@@ -6685,14 +6633,9 @@
             ]
           },
           {
-            "sql": "DELETE FROM x_user_aliases WHERE alias_x_id = ?",
+            "sql": "\n      DELETE FROM x_user_aliases\n      WHERE alias_x_id = ?\n         OR (\n           x_user_id = ?\n           AND EXISTS (\n             SELECT 1 FROM x_user_aliases target_row\n             WHERE target_row.x_user_id = ?\n               AND target_row.alias_x_id = x_user_aliases.alias_x_id\n           )\n         )\n    ",
             "params": [
-              "x_src"
-            ]
-          },
-          {
-            "sql": "\n      DELETE FROM x_user_aliases\n      WHERE x_user_id = ?\n        AND EXISTS (\n          SELECT 1 FROM x_user_aliases target_row\n          WHERE target_row.x_user_id = ?\n            AND target_row.alias_x_id = x_user_aliases.alias_x_id\n        )\n    ",
-            "params": [
+              "x_src",
               "x_src",
               "x_tgt"
             ]
@@ -6755,8 +6698,10 @@
             ]
           },
           {
-            "sql": "UPDATE event_staff SET x_user_id = ?, updated_at = ? WHERE x_user_id = ?",
+            "sql": "\n      WITH promote AS (\n        SELECT value AS staff_id FROM json_each(?)\n      )\n      UPDATE event_staff\n      SET x_user_id = CASE\n            WHEN x_user_id = ? THEN ? ELSE x_user_id\n          END,\n          permission_preset = CASE\n            WHEN id IN (SELECT staff_id FROM promote) THEN 'owner'\n            ELSE permission_preset\n          END,\n          updated_at = ?\n      WHERE x_user_id = ?\n         OR id IN (SELECT staff_id FROM promote)\n    ",
             "params": [
+              "[\"staff-2\"]",
+              "x_src",
               "x_tgt",
               1760000000,
               "x_src"

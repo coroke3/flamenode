@@ -1,0 +1,143 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { Hono } from "hono";
+import { createAdminRoutes } from "../src/routes/admin/index.ts";
+import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
+
+// Verify the real production admin parent route registration and the full guard chain.
+const SITE = "https://app.flamenode.example";
+const ADMIN = { id: "admin-1", role: "admin", name: "Admin", is_banned: 0 };
+const CASES = [
+  { name: "SA-050 visibility repair", path: "/api/admin/visibility-repair", body: { entity_type: "video", entity_id: "v1", fence_token: "t1" } },
+  { name: "SA-069 backfill", path: "/api/admin/static-builds/backfill", body: { kind: "event_crew" } },
+  { name: "SA-070 retry failed", path: "/api/admin/static-builds/queue/q1/retry" },
+  { name: "SA-071 manual enqueue", path: "/api/admin/static-builds/rebuild", body: { target_type: "video", target_id: "v1" } },
+  { name: "SA-072 rebuild shared inputs", path: "/api/admin/static-builds/shared-inputs/rebuild" },
+  { name: "SA-073 retry all failed", path: "/api/admin/static-builds/retry-failed" },
+  { name: "SA-106 Youtube resync", path: "/api/admin/youtube-sync/videos/v1/resync" },
+];
+
+function setup({ user = ADMIN, mode = "normal" } = {}) {
+  const fake = createAdminD1();
+  seedBase(fake.sqlite, { settings: mode });
+  const app = new Hono();
+  // The REAL createAdminRoutes() registers all seven MIG-0643 routes internally.
+  const admin = createAdminRoutes({
+    session: async (c, next) => {
+      c.set("user", user);
+      c.set("sessionState", user ? "user" : "none");
+      await next();
+    },
+  });
+  app.route("/api/admin", admin);
+  const request = (item, origin = SITE) => app.request(item.path, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: JSON.stringify(item.body ?? {}),
+  }, { DB: fake.db, NEXT_PUBLIC_SITE_URL: SITE });
+  const auditCount = () => fake.sqlite.prepare("SELECT COUNT(*) n FROM audit_logs").get().n;
+  return { ...fake, request, auditCount };
+}
+
+test("MIG-0643 T02: actual createAdminRoutes parent applies origin guard to all seven mounted routes", async () => {
+  const s = setup();
+  for (const item of CASES) {
+    const res = await s.request(item, "https://not-our-site.example");
+    assert.equal(res.status, 403, item.name);
+    assert.equal((await res.json()).reason, "invalid_origin", item.name);
+  }
+  assert.equal(s.stats.reads, 0, "origin must deny before any D1 reads");
+  assert.equal(s.stats.batches, 0);
+  assert.equal(s.auditCount(), 0);
+});
+
+for (const [label, user, status, reason] of [
+  ["unauthenticated", null, 401, "unauthenticated"],
+  ["non-admin", { ...ADMIN, role: "user" }, 403, "forbidden"],
+  ["banned", { ...ADMIN, is_banned: 1 }, 403, "banned"],
+]) {
+  test("MIG-0643 T02: " + label + " denied across all seven ops without write", async () => {
+    const s = setup({ user });
+    for (const item of CASES) {
+      const res = await s.request(item);
+      assert.equal(res.status, status, item.name);
+      assert.equal((await res.json()).reason, reason, item.name);
+    }
+    assert.equal(s.stats.batches, 0);
+    assert.equal(s.auditCount(), 0);
+  });
+}
+
+test("MIG-0643 T02: maintenance mode denies all seven ops before any mutation", async () => {
+  const s = setup({ mode: "maintenance" });
+  for (const item of CASES) {
+    const res = await s.request(item);
+    assert.equal(res.status, 503, item.name);
+    assert.equal((await res.json()).reason, "maintenance_mode", item.name);
+  }
+  assert.equal(s.stats.batches, 0);
+  assert.equal(s.auditCount(), 0);
+});
+
+test("MIG-0643 T01: actual parent guard permits audited manual rebuild", async () => {
+  const s = setup();
+  const res = await s.request(CASES.find((item) => item.name === "SA-071 manual enqueue"));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true, queued: 1 });
+  assert.equal(s.stats.reads, 2, "writeGuard user + CostGuard settings, queue upsert zero reads");
+  assert.equal(s.stats.batches, 1, "queue UPSERT and strict audit share an atomic batch");
+  assert.equal(s.auditCount(), 1);
+  const queue = s.sqlite.prepare(
+    "SELECT target_type, target_id, status, priority FROM static_rebuild_queue",
+  ).get();
+  assert.equal(queue.target_type, "video");
+  assert.equal(queue.target_id, "v1");
+  assert.equal(queue.status, "pending");
+  assert.equal(queue.priority, "high");
+});
+
+test("MIG-0643 S3: sibling static routes cannot double-charge backfill CostGuard", async () => {
+  const s = setup();
+  const item = CASES.find((candidate) => candidate.name === "SA-069 backfill");
+  assert.ok(item);
+  const res = await s.request(item);
+  assert.equal(res.status, 200);
+  const payload = await res.json();
+  assert.equal(payload.backfill_kind, "event_crew");
+  assert.equal(payload.backfill_done, "1");
+  assert.equal(s.stats.reads, 3,
+    "real admin writeGuard (1) + exactly one CostGuard (1) + bounded backfill count/page (1)");
+  assert.equal(s.stats.batches, 0, "empty backfill writes no queue");
+  assert.equal(s.auditCount(), 0);
+});
+
+test("MIG-0643 T04: CURRENT queue wake is deliberately zero in Hono for migrated admin mutations", () => {
+  // The CURRENT actions emit an immediate *best-effort* Queue wake after a
+  // committed D1 batch. D-0603-1 / D-13-41 deliberately defer wake to Cron
+  // in the Hono API. Keep this exception executable, not only documented.
+  const read = (relative) => readFileSync(new URL(relative, import.meta.url), "utf8");
+  const currentRebuild = read("../../../src/lib/actions/static-rebuild-admin.ts");
+  const currentYoutube = read("../../../src/lib/actions/youtube-sync-admin.ts");
+  const honoRebuild = read("../src/routes/admin/staticRebuild.ts");
+  const honoBackfill = read("../src/routes/admin/staticBackfill.ts");
+  const honoYoutube = read("../src/routes/admin/youtubeSync.ts");
+  const bindings = read("../src/env.ts");
+
+  assert.match(currentRebuild, /staticRebuildWakeSource:\s*["']admin["']/,
+    "CURRENT static backfill/manual/shared enqueue has a post-commit Queue wake");
+  assert.match(currentYoutube, /await sendYoutubeSyncPendingWakeBestEffort\(["']admin["']/,
+    "CURRENT resync sends an immediate best-effort wake after the audit commit");
+  for (const [route, source] of [
+    ["SA-069 backfill", honoBackfill],
+    ["SA-070–073 rebuild/retry", honoRebuild],
+    ["SA-106 Youtube resync", honoYoutube],
+  ]) {
+    assert.doesNotMatch(source, /staticRebuildWakeSource\s*:|sendYoutubeSyncPendingWakeBestEffort\s*\(/,
+      route + ": target must persist atomic D1 state without immediate wake");
+  }
+  const envFields = bindings.split("export type Bindings = {")[1]?.split("};")[0];
+  assert.ok(envFields, "the actual Hono worker Bindings type must be available");
+  assert.doesNotMatch(envFields, /^\s*(?:\w*QUEUE\w*|\w*Queue\w*)\??\s*:/m,
+    "Hono migration must not introduce an unapproved Queue binding");
+});

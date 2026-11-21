@@ -2,6 +2,11 @@ import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import type { SettingsResponse, SettingsXId, XApprovalStatus, XIdentityRequestRow } from "@flamenode/contracts";
 import type { PersonalApi } from "../../api/personal.js";
+import type { XidRequestsApi } from "../../api/xidRequests.js";
+import type { XidProfileApi } from "../../api/xidProfile.js";
+import { XIdLinkForm, XIdMergeForm } from "./settings/XIdRequestForms.js";
+import { XIdRequestActions } from "./settings/XIdRequestActions.js";
+import { DeleteXIdForm, SetActiveXButton, XIdCompactProfileForm } from "./settings/XIdPanelActions.js";
 import { ResultView, useApiResult } from "../guard.js";
 import { onboardingHref, onboardingRulesHref, settingsGateNext, settingsNext } from "../next.js";
 import { AppLink, ExternalRedirect, useDocumentTitle } from "../ui/AppLink.js";
@@ -28,24 +33,26 @@ function sortXIds(xIds: readonly SettingsXId[], activeXUserId: string | null): S
 }
 
 /**
- * CURRENT app/(auth)/dashboard/settings/page.tsx, read-only part (MIG-0701).
- * The forms (X ID link / merge / profile / active switch / unlink / withdraw / revert) are MIG-0702:
- * they are not rendered here and no write is sent.
+ * CURRENT app/(auth)/dashboard/settings/page.tsx (MIG-0701, 0709, 0708).
+ * Mutations use explicit Personal X ID adapters; auth/approval remain server-authoritative.
  * ?tab / ?x / ?onboarding / ?next live in the URL (deep link, reload, back-forward).
  */
 export function Settings({ api }: { api: PersonalApi }): React.ReactElement {
   useDocumentTitle("設定");
   const [params] = useSearchParams();
+  const [refreshKey, setRefreshKey] = React.useState(0);
   const tab = params.get("tab");
   const x = params.get("x");
   const onboarding = params.get("onboarding");
   const state = useApiResult(api, `settings?tab=${tab ?? ""}&x=${x ?? ""}&onboarding=${onboarding ?? ""}`, (a, signal) =>
-    a.getSettings({ tab, x, onboarding }, signal),
+    a.getSettings({ tab, x, onboarding }, signal), refreshKey,
   );
   return (
     <ResultView state={state} next={settingsGateNext(params.get("next"))}>
       {(data) => (
-        <SettingsView data={data} tab={tab} x={x} isOnboarding={onboarding === "1"} next={settingsNext(params.get("next"))} />
+        <SettingsView data={data} tab={tab} x={x} isOnboarding={onboarding === "1"} next={settingsNext(params.get("next"))}
+          requestApi={api.xidRequests} profileApi={api.xidProfile}
+          onRefresh={() => setRefreshKey((key) => key + 1)} />
       )}
     </ResultView>
   );
@@ -57,12 +64,18 @@ export function SettingsView({
   x: requestedXRaw,
   isOnboarding,
   next,
+  requestApi,
+  profileApi,
+  onRefresh,
 }: {
   data: SettingsResponse;
   tab: string | null;
   x: string | null;
   isOnboarding: boolean;
   next: string | null;
+  requestApi?: XidRequestsApi;
+  profileApi?: XidProfileApi;
+  onRefresh?: () => void;
 }): React.ReactElement {
   const { user, xIds, requestHistory } = data;
 
@@ -237,7 +250,10 @@ export function SettingsView({
             </h2>
             <p className="settings-cardDesc">この X ID の公開プロフィールとアクティブ設定を管理します。</p>
           </div>
-          <XAccountPanel x={activeXPanel} isActive={activeXPanel.id === user.active_x_user_id} />
+          <XAccountPanel x={activeXPanel} isActive={activeXPanel.id === user.active_x_user_id}
+            profileApi={profileApi} onRefresh={onRefresh} next={next}
+            iconCandidates={data.panel.xId === activeXPanel.id ? data.panel.iconCandidates : []}
+            channelCandidates={data.panel.xId === activeXPanel.id ? data.panel.channelCandidates : []} />
         </section>
       ) : null}
 
@@ -251,7 +267,7 @@ export function SettingsView({
               申請中・承認・却下・取り下げを含む全状態を、新しいものから最大50件確認できます。
             </p>
           </div>
-          <RequestHistoryList rows={requestHistory} />
+          <RequestHistoryList rows={requestHistory} requestApi={requestApi} onRefresh={onRefresh} />
         </section>
       ) : null}
 
@@ -266,15 +282,18 @@ export function SettingsView({
               @ を除いたユーザー名を入力して申請してください。初回・2件目以降とも同じ手順で、運営承認後に反映されます。
             </p>
           </div>
-          {/* MIG-0702: XIdLinkForm (X ID link request) */}
+          {requestApi && onRefresh ? <XIdLinkForm api={requestApi} onRefresh={onRefresh} compact onSuccessRedirect={isOnboarding ? next : null} /> : null}
           {isOnboarding && requestHistory.length > 0 ? (
             <div className="settings-addBox">
               <h3 className="settings-cardTitle">申請履歴</h3>
               <p className="settings-cardDesc">申請済みのX IDと現在の状態を確認できます。</p>
-              <RequestHistoryList rows={requestHistory} />
+              <RequestHistoryList rows={requestHistory} requestApi={requestApi} onRefresh={onRefresh} />
             </div>
           ) : null}
-          {/* MIG-0702: XIdMergeForm (shown when two or more X IDs are approved) */}
+          {requestApi && onRefresh ? (
+            <XIdMergeForm api={requestApi} onRefresh={onRefresh}
+              linkedXIds={sortedXIds.filter((row) => row.approval_status === "approved").map((row) => ({ id: row.id, label: row.x_name || `@${row.id}` }))} />
+          ) : null}
         </section>
       ) : null}
 
@@ -396,8 +415,18 @@ function StatusPill({ status }: { status: XApprovalStatus }): React.ReactElement
   );
 }
 
-/** CURRENT SettingsXAccountPanel without the MIG-0702 forms (active switch, unlink, profile edit). */
-function XAccountPanel({ x, isActive }: { x: SettingsXId; isActive: boolean }): React.ReactElement {
+/** CURRENT SettingsXAccountPanel with the MIG-0708 forms; absent fixture adapters stay read-only. */
+function XAccountPanel({
+  x, isActive, profileApi, onRefresh, next, iconCandidates, channelCandidates,
+}: {
+  x: SettingsXId;
+  isActive: boolean;
+  profileApi?: XidProfileApi;
+  onRefresh?: () => void;
+  next: string | null;
+  iconCandidates: readonly string[];
+  channelCandidates: readonly string[];
+}): React.ReactElement {
   const approved = x.approval_status === "approved";
   const imported = x.approval_status === "imported";
   const publicHref = approved || imported ? `/user/${encodeURIComponent(x.id)}` : null;
@@ -440,14 +469,21 @@ function XAccountPanel({ x, isActive }: { x: SettingsXId; isActive: boolean }): 
             投稿・枠確保で使用中
           </span>
         ) : null}
-        {/* MIG-0702: SetActiveXButton ("アクティブに設定", approved && !isActive) */}
+        {profileApi && onRefresh && approved && !isActive ? (
+          <SetActiveXButton api={profileApi} xUserId={x.id} approved={approved}
+            isActive={isActive} next={next} onRefresh={onRefresh}
+            className="settings-actionBtn settings-actionBtnPrimary" />
+        ) : null}
         {publicHref ? (
           <AppLink href={publicHref} className="settings-actionBtn" target="_blank" rel="noopener noreferrer">
             <Icon name="user" size={12} aria-hidden />
             公開ページ
           </AppLink>
         ) : null}
-        {/* MIG-0702: DeleteXIdForm ("連携を解除", !isActive) */}
+        {profileApi && onRefresh && !isActive ? (
+          <DeleteXIdForm api={profileApi} xUserId={x.id} isActive={isActive} onRefresh={onRefresh}
+            label="連携を解除" className="settings-actionBtn settings-actionBtnDanger" />
+        ) : null}
         {x.approval_status === "rejected" ? (
           <span
             className="settings-actionBtn settings-actionBtnMuted"
@@ -458,7 +494,14 @@ function XAccountPanel({ x, isActive }: { x: SettingsXId; isActive: boolean }): 
         ) : null}
       </div>
 
-      {/* MIG-0702: approved -> "公開プロフィール" XIdCompactProfileForm */}
+      {approved && profileApi && onRefresh ? (
+        <div className="settings-editPanel">
+          <p className="settings-editTitle">公開プロフィール</p>
+          <XIdCompactProfileForm key={x.id} api={profileApi} x={x}
+            iconCandidates={iconCandidates} channelCandidates={[...channelCandidates]}
+            onRefresh={onRefresh} />
+        </div>
+      ) : null}
       {x.approval_status === "pending" ? (
         <p className="settings-accountNote">運営の承認後、この X ID をアクティブに設定して投稿できます。</p>
       ) : imported ? (
@@ -515,8 +558,8 @@ function requestStatusClass(status: XIdentityRequestRow["status"]): string {
   return "fn-badge fn-badge-accent";
 }
 
-/** CURRENT XIdentityRequestHistoryList without the MIG-0702 withdraw / revert buttons. */
-function RequestHistoryList({ rows }: { rows: readonly XIdentityRequestRow[] }): React.ReactElement | null {
+/** CURRENT XIdentityRequestHistoryList plus MIG-0709 actions (API remains authoritative). */
+function RequestHistoryList({ rows, requestApi, onRefresh }: { rows: readonly XIdentityRequestRow[]; requestApi?: XidRequestsApi; onRefresh?: () => void }): React.ReactElement | null {
   if (rows.length === 0) return null;
 
   const now = Math.floor(Date.now() / 1000);
@@ -583,7 +626,7 @@ function RequestHistoryList({ rows }: { rows: readonly XIdentityRequestRow[] }):
                   <span className={requestStatusClass(row.status)}>{REQUEST_STATUS_LABELS[row.status]}</span>
                 </div>
               </div>
-              {/* MIG-0702: "取り下げる" (pending) / "統合を取り消す申請" (canRequestRevert) buttons */}
+              {requestApi && onRefresh ? <XIdRequestActions row={row} blockedRevert={revertBlocked} api={requestApi} onRefresh={onRefresh} /> : null}
             </li>
           );
         })}

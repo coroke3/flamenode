@@ -21,9 +21,12 @@ test("actor X検証queryはmutateWithAuditのD1予算にも含める", () => {
   assert.match(mutateSource, /const actorXValidationQueryCount = input\.audits\.some/);
   assert.match(mutateSource, /actorXValidationQueryCount,/);
   assert.match(budgetSource, /actorXValidationQueryCount\?: number/);
+  assert.match(budgetSource, /const preparationQueryCount = auditEntryCount > 0/);
+  assert.match(budgetSource, /input\.preloadedSettings \? 0 : 1/);
   assert.match(
     budgetSource,
-    /1 \+ Math\.max\(0, input\.distinctActorCount\) \+ actorXValidationQueryCount/,
+    /\(distinctActors - creditedActors\) \+ actorXValidationQueryCount/,
+    "actor-X approval SELECT must still be counted after valid preload credits",
   );
 });
 
