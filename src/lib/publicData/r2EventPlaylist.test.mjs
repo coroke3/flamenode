@@ -176,6 +176,29 @@ if (runTestWithTsx(import.meta.url)) {
       use("no-fence");
       assert.deepEqual((await loadPublicEventPlaylistR2Only("event-1"))?.items.map((x) => x.id),
         ["vid-a", "vid-hidden", "vid-c"], "public entries remain unchanged");
+      // The normalizer's documented cap is 500 items; filtering must retain
+      // stable ordering at the boundary and never mutate the source list.
+      const originalItems = original.items;
+      original.items = Array.from({ length: 500 }, (_, index) => ({
+        id: index === 321 ? "vid-hidden" : `vid-${index}`,
+        title: `Title ${index}`, display_name: `Creator ${index}`,
+        youtube_video_id: `youtube-${index}`,
+      }));
+      use("video-fence");
+      const atCap = await loadPublicEventPlaylistR2Only("event-1");
+      assert.equal(atCap?.items.length, 499);
+      assert.equal(atCap.items[320].id, "vid-320");
+      assert.equal(atCap.items[321].id, "vid-322");
+      assert.equal(atCap.items.at(-1).id, "vid-499");
+      assert.equal(original.items.length, 500, "cached 500-item input remains unchanged");
+      assert.deepEqual(reads, [manifestKey, playlistKey, manifestKey]);
+      original.items = [...original.items, {
+        id: "vid-501", title: "Over limit", display_name: "Over limit",
+      }];
+      use("no-fence");
+      assert.equal(await loadPublicEventPlaylistR2Only("event-1"), null,
+        "an oversized playlist still fails closed before filtering");
+      original.items = originalItems;
       use("video-race");
       assert.equal(await loadPublicEventPlaylistR2Only("event-1"), null,
         "a video revoked between pre/post manifests must fail closed on changed ETag");
