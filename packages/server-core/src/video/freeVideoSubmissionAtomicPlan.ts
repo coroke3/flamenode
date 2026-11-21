@@ -26,6 +26,8 @@ export function buildFreeVideoSubmissionAtomicPlan(
   args: {
     videoAfter: typeof videos.$inferSelect;
     actorUserId: string;
+    /** Trusted Active X from the authenticated write guard, never request data. */
+    trustedActiveXId: string;
     eventId: string | null;
     now: number;
     /** Trusted, D1-loaded full question set; not submitted FormData. */
@@ -34,11 +36,11 @@ export function buildFreeVideoSubmissionAtomicPlan(
     customAnswerDrafts: readonly SubmissionCustomAnswerDraft[];
   },
 ): UnslottedVideoAtomicPlan {
-  const { videoAfter, actorUserId, eventId, now, questions, customAnswerDrafts } = args;
-  if (!actorUserId || !videoAfter.id ||
+  const { videoAfter, actorUserId, trustedActiveXId, eventId, now, questions, customAnswerDrafts } = args;
+  if (!actorUserId || !trustedActiveXId?.trim() || !videoAfter.id ||
       videoAfter.submitted_by_user_id !== actorUserId ||
       videoAfter.primary_event_id !== eventId ||
-      !videoAfter.creator_x_user_id ||
+      videoAfter.creator_x_user_id !== trustedActiveXId ||
       videoAfter.source_type !== "youtube" ||
       !videoAfter.youtube_video_id ||
       !/^[A-Za-z0-9_-]{11}$/.test(videoAfter.youtube_video_id) ||
