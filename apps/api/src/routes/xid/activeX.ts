@@ -40,7 +40,11 @@ const MAX_SELECTED_LEGACY_X_UTF8_BYTES = 512;
 function isSessionSafeSelectedXId(value: string): boolean {
   if (!value || value.includes("\0")) return false;
   let codepoints = 0;
-  for (const _ of value) {
+  for (const char of value) {
+    // Unpaired UTF-16 surrogates are silently replaced by TextEncoder.
+    // Reject rather than selecting/auditing a different stored identity.
+    const scalar = char.codePointAt(0)!;
+    if (scalar >= 0xd800 && scalar <= 0xdfff) return false;
     if (++codepoints > MAX_SELECTED_LEGACY_X_CODEPOINTS) return false;
   }
   return new TextEncoder().encode(value).byteLength <= MAX_SELECTED_LEGACY_X_UTF8_BYTES;
@@ -96,12 +100,22 @@ function unsafeNumericExpr(column: string): string {
 function guardedNumericExpr(column: string): string {
   return `CASE WHEN ${unsafeNumericExpr(column)} THEN NULL ELSE ${column} END`;
 }
-const XID_USER_SQL_PROJECTION = [
-  ...XID_USER_TEXT_COLUMNS.map(([name, bytes]) =>
-    `${guardedTextExpr('u."' + name + '"', bytes)} AS "${name}"`),
-  ...XID_USER_NUMBER_COLUMNS.map((name) =>
-    `${guardedNumericExpr('u."' + name + '"')} AS "${name}"`),
-].join(',\n      ');
+// Preserve canonical SQLite user row field order: audit before_json and
+// expectedRowCondition compare the COMPLETE pre-mutation snapshot with CURRENT.
+const XID_USER_COLUMN_ORDER = [
+  'id', 'name', 'email', 'emailVerified', 'image', 'discord_id',
+  'role', 'can_create_events', 'is_tos_accepted', 'accepted_terms_version_id',
+  'terms_reaccept_required', 'is_banned', 'is_notification_enabled',
+  'active_x_user_id', 'onboarding_completed_at', 'last_guild_check',
+  'created_at',
+] as const;
+const XID_USER_SQL_PROJECTION = XID_USER_COLUMN_ORDER.map((name) => {
+  const text = XID_USER_TEXT_COLUMNS.find(([n]) => n === name);
+  const column = 'u."' + name + '"';
+  return `${text
+    ? guardedTextExpr(column, text[1])
+    : guardedNumericExpr(column)} AS "${name}"`;
+}).join(',\n      ');
 const XID_INVALID_SNAPSHOT_SQL = [
   ...XID_USER_TEXT_COLUMNS.map(([name, bytes]) =>
     unsafeTextExpr('u."' + name + '"', bytes)),
@@ -228,7 +242,8 @@ async function loadSelectedIdentity(
       ${guardedNumericExpr('settings."audit_max_payload_bytes"')} AS cg_audit_max_payload_bytes,
       ${guardedNumericExpr('settings."audit_compact_after_days"')} AS cg_audit_compact_after_days,
       (SELECT canonical_id FROM bounded_resolved) AS resolved_x_user_id,
-      (SELECT x.approval_status FROM x_user_account_links l
+      (SELECT ${guardedTextExpr('x."approval_status"', 32)}
+       FROM x_user_account_links l
        INNER JOIN x_users x ON x.id = l.x_user_id
        CROSS JOIN bounded_resolved r
        WHERE l.auth_user_id = u.id
