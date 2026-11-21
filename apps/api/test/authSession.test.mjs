@@ -295,7 +295,7 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
     },
   };
 
-  // The documented 128-character legacy budget does not silently rewrite valid
+  // The documented 128-byte legacy budget does not silently rewrite valid
   // identities; this also preserves the normal session's original Active X.
   d1.resetQueryCount();
   const normal = await resolveSessionUser(inspectingD1, token, opts);
