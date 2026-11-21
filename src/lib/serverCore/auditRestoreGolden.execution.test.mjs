@@ -809,12 +809,21 @@ if (runTestWithTsx(import.meta.url)) {
     assert.ok(result.manifest_after?.entities?.some((entry) =>
       entry.entity_type === "video" && entry.entity_id === "vid-1"),
     "a successful public-to-private restore preserves the R2 video block");
-    for (const eventId of ["evt-1", "evt-private"]) {
-      assert.ok(result.log.some((entry) =>
-        entry.op === "cache.delete" &&
-        entry.key.includes(encodeURIComponent(`public-event-export:9:${encodeURIComponent(eventId)}:`))),
-      `scheduled export for ${eventId} must be evicted after commit`);
-    }
+    // SEC-718: each of the prior/restored event parents requires exactly the
+    // four refresh buckets for BOTH public export formats (16 total deletes).
+    // A single matching cache key is insufficient parity evidence.
+    const evictedExportTokens = result.log
+      .filter((entry) => entry.op === "cache.delete" &&
+        entry.key.includes("public-event-export%3A"))
+      .map((entry) => decodeURIComponent(entry.key.slice(entry.key.lastIndexOf("/") + 1)))
+      .sort();
+    const requiredExportTokens = ["evt-1", "evt-private"].flatMap((eventId) =>
+      ["v5", "legacy"].flatMap((format) =>
+        [15, 60, 360, 1440].map((minutes) =>
+          `public-event-export:9:${eventId}:${format}:${minutes}`)))
+      .sort();
+    assert.deepEqual(evictedExportTokens, requiredExportTokens,
+      "both event parents must invalidate all 16 scheduled export variants once, without unrelated keys");
 
     const [, rolledBack] = await runScenario("sec731_primary_event_rollback", {
       ...spec,
