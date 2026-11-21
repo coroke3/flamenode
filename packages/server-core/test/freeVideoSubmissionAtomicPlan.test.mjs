@@ -937,7 +937,7 @@ test("MIG-0651 U02 new-video member/chapter plan is atomic with video/metadata/r
       memberSubmission: verifiedMembersForNewVideo(),
     });
     assert.equal(preReads, 2, "member lifecycle resolution uses two reads");
-    assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 2, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 1, 2, 1, 13]);
     assert.equal(plan.audits.length, 5);
     assert.ok(plan.audits.every(a => a.strict));
     assert.equal(inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads).withinLimit, true);
@@ -982,7 +982,7 @@ test("MIG-0651 U02 new-video: rebuild failure rolls back member X, chapter and v
       eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
       memberSubmission: verifiedMembersForNewVideo(),
     });
-    assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 2, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 1, 2, 1, 13]);
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
     assert.throws(() => {
