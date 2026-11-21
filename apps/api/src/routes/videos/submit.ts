@@ -9,7 +9,13 @@
  * It performs no DB reads, R2 uploads, Queue work, mutations or post-commit
  * wake. Do not mount a POST route until all S3 parity/CPU and Lead gates pass.
  */
-import { validateFreeVideoMultipartPreflight, type FreeVideoPreflightContext } from "@flamenode/domain/video";
+import {
+  parseVideoForm,
+  validateUniqueUnslottedVideoScalarFields,
+  validateFreeVideoMultipartPreflight,
+  type VideoFormData,
+  type FreeVideoPreflightContext,
+} from "@flamenode/domain/video";
 import type { Context } from "hono";
 import type { AppEnv } from "../../env.ts";
 
@@ -22,8 +28,16 @@ const BAD_FORM_MESSAGE = "投稿フォームの入力が不正です。";
  */
 export async function readFreeVideoMultipartPreflight(
   c: Context<AppEnv>,
-  trustedContext: FreeVideoPreflightContext,
-): Promise<ReturnType<typeof validateFreeVideoMultipartPreflight>> {
+  trustedContext: Pick<FreeVideoPreflightContext, "activeXId" | "nowSec">,
+): Promise<
+  | { ok: false; message: string }
+  | { ok: true; value: {
+      requestedEventId: string | null;
+      memberSubmission: Extract<ReturnType<typeof validateFreeVideoMultipartPreflight>, { ok: true }>["value"]["memberSubmission"];
+      scheduledTime: number;
+      videoForm: VideoFormData;
+    } }
+> {
   const contentType = c.req.header("content-type")?.trim() ?? "";
   if (!/^(multipart\/form-data|application\/x-www-form-urlencoded)(?:\s*;|$)/i.test(contentType)) {
     return { ok: false, message: BAD_FORM_MESSAGE };
@@ -35,5 +49,24 @@ export async function readFreeVideoMultipartPreflight(
   } catch {
     return { ok: false, message: BAD_FORM_MESSAGE };
   }
-  return validateFreeVideoMultipartPreflight(formData, trustedContext);
+  // Do not collapse FormData into an object until repeated scalar fields and
+  // pathological entry counts have been rejected. CURRENT and target then
+  // share exactly the same canonical Zod form schema.
+  const unique = validateUniqueUnslottedVideoScalarFields(formData);
+  if (!unique.ok) return unique;
+
+  const parsed = parseVideoForm(Object.fromEntries(formData));
+  if (!parsed.ok) return parsed;
+
+  // Only the canonical validated schema may determine is_collab. The active X
+  // ID and trusted nowSec are from the authenticated server-side guard.
+  const preflight = validateFreeVideoMultipartPreflight(formData, {
+    ...trustedContext,
+    isCollab: parsed.data.is_collab,
+  });
+  if (!preflight.ok) return preflight;
+  return {
+    ok: true,
+    value: { ...preflight.value, videoForm: parsed.data },
+  };
 }

@@ -6,7 +6,6 @@ import { readFreeVideoMultipartPreflight } from "../src/routes/videos/submit.ts"
 
 const authenticated = () => ({
   activeXId: "alice",
-  isCollab: false,
   nowSec: 1_700_000_000,
 });
 
@@ -25,6 +24,8 @@ function fixture(context = authenticated()) {
       requestedEventId: parsed.value.requestedEventId,
       scheduledTime: parsed.value.scheduledTime,
       members: parsed.value.memberSubmission.members.length,
+      title: parsed.value.videoForm.title,
+      youtubeUrl: parsed.value.videoForm.youtube_url,
     }, 200);
   });
   return { app, mutations };
@@ -33,6 +34,9 @@ function fixture(context = authenticated()) {
 const validForm = () => {
   const form = new FormData();
   form.set("active_x_snapshot", "@alice");
+  form.set("display_name", " Alice ");
+  form.set("title", " Artwork ");
+  form.set("youtube_url", "https://youtu.be/dQw4w9WgXcQ");
   form.set("event_ids", "event-a");
   form.set("scheduled_time", "2026-11-21T12:34");
   return form;
@@ -50,6 +54,8 @@ test("MIG-0651 U02 HTTP: real multipart passes clone byte cap then pure validati
     requestedEventId: "event-a",
     scheduledTime: Date.UTC(2026, 10, 21, 3, 34) / 1000,
     members: 0,
+    title: "Artwork",
+    youtubeUrl: "https://youtu.be/dQw4w9WgXcQ",
   });
   assert.equal(mutations.count, 1);
 });
@@ -105,7 +111,7 @@ test("MIG-0651 U02 HTTP: urlencoded body accepted, bad field file denied", async
   const url = await app.request("http://localhost/api/videos/free", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: "active_x_snapshot=%40alice&event_ids=event-a",
+    body: "active_x_snapshot=%40alice&display_name=Alice&title=Artwork&youtube_url=dQw4w9WgXcQ&event_ids=event-a",
   });
   assert.equal(url.status, 200);
   assert.equal((await url.json()).requestedEventId, "event-a");
@@ -118,4 +124,34 @@ test("MIG-0651 U02 HTTP: urlencoded body accepted, bad field file denied", async
   assert.equal(bad.status, 400);
   assert.match((await bad.json()).message, /イベントは1件/);
   assert.equal(mutations.count, 1, "only urlencoded input reached the simulated downstream stage");
+});
+
+
+test("MIG-0651 U02 HTTP: canonical video schema rejects missing title or malformed YouTube before downstream writes", async () => {
+  const { app, mutations } = fixture();
+  const path = "http://localhost/api/videos/free";
+  const noTitle = validForm();
+  noTitle.delete("title");
+  const titleResp = await app.request(path, { method: "POST", body: noTitle });
+  assert.equal(titleResp.status, 400);
+  assert.equal((await titleResp.json()).ok, false);
+  const invalidUrl = validForm();
+  invalidUrl.set("youtube_url", "https://example.com/video");
+  const urlResp = await app.request(path, { method: "POST", body: invalidUrl });
+  assert.equal(urlResp.status, 400);
+  assert.match((await urlResp.json()).message, /YouTube/);
+  assert.equal(mutations.count, 0);
+});
+
+test("MIG-0651 U02 HTTP: schema-controlled collaboration flag rejects malformed members JSON", async () => {
+  const { app, mutations } = fixture();
+  const form = validForm();
+  form.set("is_collab", "on");
+  form.set("members_json", "{bad");
+  const response = await app.request("http://localhost/api/videos/free", {
+    method: "POST", body: form,
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { ok: false, message: "合作メンバーの JSON が不正です。" });
+  assert.equal(mutations.count, 0);
 });
