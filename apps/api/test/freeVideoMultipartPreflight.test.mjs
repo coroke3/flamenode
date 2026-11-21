@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
+import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+import { events, videos } from "@flamenode/db/schema";
+import { parseVideoForm } from "@flamenode/domain/video";
 import { limitVideoActionBody } from "../src/middleware/bodyLimit.ts";
-import { readFreeVideoMultipartPreflight } from "../src/routes/videos/submit.ts";
+import {
+  readFreeVideoMultipartPreflight,
+  validateFreeVideoDbReadPreflight,
+} from "../src/routes/videos/submit.ts";
 
 const authenticated = () => ({
   activeXId: "alice",
@@ -178,4 +184,127 @@ test("MIG-0651 U02 HTTP: bounded field count is enforced before canonical form p
     ok: false, message: "投稿フォームの入力が不正です。",
   });
   assert.equal(mutations.count, 1, "rejected form does not execute mock downstream step");
+});
+
+
+const dialect = new SQLiteSyncDialect();
+function dbCandidate(form = validForm()) {
+  const parsed = parseVideoForm(Object.fromEntries(form));
+  assert.equal(parsed.ok, true, "fixture schema must be valid");
+  return { requestedEventId: form.get("event_ids"), videoForm: parsed.data };
+}
+
+/** D1 mock implements read-only Drizzle SELECT/WHERE/LIMIT and records SQL. */
+function readOnlyVideoDb({ eligible = true, required = [], duplicate = false, fail = null } = {}) {
+  const reads = [];
+  const db = {
+    insert: () => { throw new Error("read preflight must never INSERT"); },
+    update: () => { throw new Error("read preflight must never UPDATE"); },
+    delete: () => { throw new Error("read preflight must never DELETE"); },
+    select(columns) {
+      const kind = columns.id === videos.id ? "youtube" :
+        columns.id === events.id ? "eligibility" : "required";
+      return {
+        from(table) {
+          assert.equal(table, kind === "youtube" ? videos : events);
+          return {
+            where(query) {
+              const sql = dialect.sqlToQuery(query);
+              reads.push({ kind, sql });
+              const rows = kind === "youtube" ? (duplicate ? [{ id: "v-existing" }] : []) :
+                kind === "eligibility" ? (eligible ? [{ id: "event-a" }] : []) :
+                [{ required_video_fields_json: JSON.stringify(required) }];
+              const result = () => {
+                if (fail === kind) throw new Error("D1 connection detail (must not leak)");
+                return rows;
+              };
+              return {
+                then(onFulfilled, onRejected) {
+                  return Promise.resolve().then(result).then(onFulfilled, onRejected);
+                },
+                limit(n) {
+                  assert.equal(n, 1);
+                  return Promise.resolve().then(result).then((values) => values.slice(0, n));
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  return { db, reads };
+}
+
+test("MIG-0651 U02 D1 read: no event uses exactly one bounded YouTube duplicate lookup", async () => {
+  const form = validForm();
+  form.delete("event_ids");
+  const { db, reads } = readOnlyVideoDb();
+  const result = await validateFreeVideoDbReadPreflight(db, dbCandidate(form), authenticated().nowSec);
+  assert.deepEqual(result, {
+    ok: true, value: { eventId: null, youtubeId: "dQw4w9WgXcQ" },
+  });
+  assert.deepEqual(reads.map((r) => r.kind), ["youtube"]);
+  assert.ok(reads[0].sql.params.includes("dQw4w9WgXcQ"));
+  assert.ok(reads[0].sql.params.includes("voided"));
+});
+
+test("MIG-0651 U02 D1 read: eligible event is checked before required fields and duplicate", async () => {
+  const { db, reads } = readOnlyVideoDb({ required: ["music"] });
+  const missing = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
+  assert.deepEqual(missing, { ok: false, message: "「使用楽曲」は必須です。" });
+  assert.deepEqual(reads.map((r) => r.kind), ["eligibility", "required"]);
+  assert.ok(reads[0].sql.params.includes("event-a"));
+  assert.ok(reads[0].sql.params.includes(authenticated().nowSec));
+  assert.ok(reads[1].sql.params.includes("event-a"));
+
+  const form = validForm();
+  form.set("music", "Song");
+  const permitted = await validateFreeVideoDbReadPreflight(db, dbCandidate(form), authenticated().nowSec);
+  assert.deepEqual(permitted, { ok: true, value: {
+    eventId: "event-a", youtubeId: "dQw4w9WgXcQ",
+  } });
+  assert.deepEqual(reads.map((r) => r.kind).slice(2),
+    ["eligibility", "required", "youtube"]);
+});
+
+test("MIG-0651 U02 D1 read: ineligible event fails closed without later reads", async () => {
+  const { db, reads } = readOnlyVideoDb({ eligible: false });
+  const result = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
+  assert.deepEqual(result, {
+    ok: false,
+    message: "選択したイベントは枠なし投稿を受け付けていません。公開状態・終了日時・イベント設定を確認してください。",
+  });
+  assert.deepEqual(reads.map((r) => r.kind), ["eligibility"]);
+});
+
+test("MIG-0651 U02 D1 read: existing non-voided YouTube video is refused", async () => {
+  const { db, reads } = readOnlyVideoDb({ duplicate: true });
+  const result = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
+  assert.deepEqual(result, { ok: false, message: "このYouTube動画は既に登録されています。" });
+  assert.deepEqual(reads.map((r) => r.kind), ["eligibility", "required", "youtube"]);
+});
+
+test("MIG-0651 U02 D1 read: invalid clock and YouTube ID cause zero reads", async () => {
+  const { db, reads } = readOnlyVideoDb();
+  const input = dbCandidate();
+  assert.equal((await validateFreeVideoDbReadPreflight(db, input, Number.NaN)).ok, false);
+  assert.equal((await validateFreeVideoDbReadPreflight(db, input, -1)).ok, false);
+  assert.deepEqual(await validateFreeVideoDbReadPreflight(db, {
+    ...input, videoForm: { ...input.videoForm, youtube_url: "not youtube" },
+  }, authenticated().nowSec), {
+    ok: false, message: "YouTube URLを解析できません。",
+  });
+  assert.deepEqual(reads, []);
+});
+
+test("MIG-0651 U02 D1 read: D1 failures do not leak internal messages or allow writes", async () => {
+  for (const kind of ["required", "youtube"]) {
+    const { db, reads } = readOnlyVideoDb({ fail: kind });
+    const result = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
+    assert.deepEqual(result, {
+      ok: false, message: "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。",
+    });
+    assert.equal(reads.at(-1).kind, kind);
+  }
 });
