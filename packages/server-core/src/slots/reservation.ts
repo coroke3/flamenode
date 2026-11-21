@@ -1080,7 +1080,10 @@ export async function extendSlotGroupCore(
       ${approvedXJsonSql("?")} AS approved_x_json,
       ${staffRowsJsonSql()} AS staff_json,
       ${boundedSlotArraySql("SELECT * FROM group_rows", "g")} AS group_json,
-      (SELECT "id" FROM cte_edge) AS cte_edge_id,
+      (SELECT CASE
+        WHEN ${invalidSqlText('"id"', MAX_LEGACY_RECORD_ID_BYTES)}
+          THEN '{"__invalid_projection":1}'
+        ELSE "id" END FROM cte_edge) AS cte_edge_id,
       (SELECT ${slotJsonObjectSql("n")} FROM (
         SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
         FROM "slots" s, cte_edge ce
