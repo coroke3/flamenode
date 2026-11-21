@@ -309,6 +309,9 @@ export async function resolveSessionUser(
     // Do not turn a corrupted legacy Active X into a valid-looking null selection.
     // D1 projects a bounded value and a separate sentinel before JavaScript sees it.
     if (row.user_active_x_id_oversize === 1) {
+      // This is malformed persisted identity data, not a failed D1 lookup.
+      // Use a fixed code; never include the selected X ID in diagnostics.
+      console.error("[auth:session] INVALID_ACTIVE_X_ID_LENGTH");
       throw new SessionUnavailableError();
     }
 
@@ -326,7 +329,8 @@ export async function resolveSessionUser(
       is_banned: row.user_is_banned === 1 ? 1 : 0,
       active_x_user_id: row.user_active_x_user_id ?? null,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof SessionUnavailableError) throw error;
     // D1/adapter errors may include bound session tokens in their message/stack.
     // Emit a fixed code only; do not serialize the underlying exception.
     console.error("[auth:session] D1_LOOKUP_FAILED");
