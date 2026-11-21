@@ -171,7 +171,11 @@ test("投稿候補はvideos snapshotから導出し候補履歴を二重書込�
 test("FormData parserとUIはatomic上限の共通定数を使う", () => {
   const memberParserBridge = read("./memberInputs.ts");
   const memberParser = read("../../../packages/domain/src/video/memberInputs.ts");
-  const videoSchema = read("./videoFormSchema.ts");
+  const videoSchemaBridge = read("./videoFormSchema.ts");
+  // MIG-0651: Next forwards to the canonical domain schema. Keep checking
+  // the actual limit enforcement, not a source file that now only re-exports.
+  assert.match(videoSchemaBridge, /from "@flamenode\\/domain\\/video"/);
+  const videoSchema = read("../../../packages/domain/src/video/videoFormSchema.ts");
   const videoForm = read("../../components/forms/VideoForm.tsx");
   const memberForm = read("../../components/forms/VideoMembersField.tsx");
   assert.match(memberParserBridge, /from "@flamenode\/domain\/video"/);
