@@ -168,6 +168,13 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
     registeredChannelNotification?: { payload: Record<string, unknown>; threadName: string };
   },
 ): Promise<UnslottedVideoAtomicPlan> {
+  if (args.videoAfter.collaboration_type === "collab" && !args.memberSubmission) {
+    throw new Error("free_video_collab_members_required");
+  }
+  if (args.videoAfter.collaboration_type !== "collab" &&
+      args.memberSubmission?.members.length) {
+    throw new Error("free_video_noncollab_members_forbidden");
+  }
   const base = buildFreeVideoSubmissionAtomicPlan(db, args);
   const member = args.memberSubmission
     ? await buildFreeVideoNewMemberPlan(db, {
