@@ -6,7 +6,13 @@ import { createSqlite, insert } from "../../../apps/api/test/support/personalHar
 import { videoCustomAnswers, videoEvents, videoYoutubeMetadata, videos } from "@flamenode/db/schema";
 import { buildFreeVideoSubmissionAtomicPlan, buildFreeVideoSubmissionWithRebuildPlan, inspectFreeVideoSubmissionAtomicPlanBudget } from "../src/video/freeVideoSubmissionAtomicPlan.ts";
 import { buildFreeVideoRow } from "../src/video/freeVideoRow.ts";
+import { buildFreeVideoSubmissionWithRebuildPlan as exportedRebuildPlan, inspectFreeVideoSubmissionAtomicPlanBudget as exportedD1Budget } from "@flamenode/server-core/video/unslottedEventPlans";
 import { D1_MAX_BIND_PARAMETERS } from "../src/audit/mutateBudget.ts";
+
+test("MIG-0651 U02: existing public server-core entrypoint exports rebuild and budget plans", () => {
+  assert.strictEqual(exportedRebuildPlan, buildFreeVideoSubmissionWithRebuildPlan);
+  assert.strictEqual(exportedD1Budget, inspectFreeVideoSubmissionAtomicPlanBudget);
+});
 
 const NOW = 1770000000;
 function video(eventId = null) {
