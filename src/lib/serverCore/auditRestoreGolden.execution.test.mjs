@@ -845,6 +845,68 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(dryRun.log.filter((entry) => entry.op === "r2.put").length, 0);
   });
 
+  test("SEC-718: primary-event-only video restore invalidates both event exports without an R2 fence", async () => {
+    // No visibility transition: a historical primary-event reassignment still
+    // moves the video between scheduled exports and must invalidate BOTH.
+    const spec = {
+      setup: (sqlite) => seedVideo(sqlite),
+      arrange: arrangeVideo({
+        beforePatch: { primary_event_id: "evt-private" },
+      }),
+    };
+    const [, result] = await runScenario("sec718_primary_only_reassignment", spec);
+    assert.equal(result.outcome.returned?.ok, true);
+    assert.equal(result.videos.find((row) => row.id === "vid-1")?.primary_event_id, "evt-private");
+    assert.equal(result.videos.find((row) => row.id === "vid-1")?.visibility_status, "public",
+      "primary reassignment must not alter visibility");
+    assert.equal(result.audit_restore_runs.filter((row) => row.status === "success").length, 1);
+    assert.equal(result.log.filter((entry) => entry.op === "batch").length, 1,
+      "parent reassignment and queue targets must commit atomically");
+    assert.equal(result.log.filter((entry) => entry.op === "d1").length, 8,
+      "restored primary must not require an extra preflight query");
+    assert.equal(result.log.filter((entry) => entry.op === "r2.put").length, 0,
+      "unchanged public visibility must not write an unrelated R2 fence");
+    const parents = result.static_rebuild_queue
+      .filter((row) => row.target_type === "event_base" || row.target_type === "event_release")
+      .map((row) => `${row.target_type}:${row.target_id}`)
+      .sort();
+    assert.deepEqual(parents, [
+      "event_base:evt-1", "event_base:evt-private",
+      "event_release:evt-1", "event_release:evt-private",
+    ].sort(), "old/new primary event builds must both be queued");
+    const actualExportKeys = result.log
+      .filter((entry) => entry.op === "cache.delete" &&
+        entry.key.includes("public-event-export%3A"))
+      .map((entry) => decodeURIComponent(entry.key.slice(entry.key.lastIndexOf("/") + 1)))
+      .sort();
+    const expectedExportKeys = ["evt-1", "evt-private"].flatMap((eventId) =>
+      ["v5", "legacy"].flatMap((format) =>
+        [15, 60, 360, 1440].map((minutes) =>
+          `public-event-export:9:${eventId}:${format}:${minutes}`)))
+      .sort();
+    assert.deepEqual(actualExportKeys, expectedExportKeys,
+      "reassignment without visibility change still evicts exactly 16 old/new export keys");
+
+    const [, failed] = await runScenario("sec718_primary_only_rollback", {
+      ...spec, hooks: { beforeBatch: raceVideo },
+    });
+    assert.equal(failed.outcome.returned?.ok, false);
+    assert.equal(failed.videos.find((row) => row.id === "vid-1")?.primary_event_id, "evt-1");
+    assert.equal(failed.static_rebuild_queue.length, 0);
+    assert.equal(failed.log.filter((entry) => entry.op === "cache.delete").length, 0,
+      "failed reassignment must not remove old or new export cache keys");
+    assert.equal(failed.log.filter((entry) => entry.op === "r2.put").length, 0);
+
+    const [, dryRun] = await runScenario("sec718_primary_only_dry_run", {
+      ...spec, options: { dry_run: true },
+    });
+    assert.equal(dryRun.outcome.returned?.ok, true);
+    assert.equal(dryRun.static_rebuild_queue.length, 0);
+    assert.equal(dryRun.log.filter((entry) => entry.op === "cache.delete").length, 0);
+    assert.equal(dryRun.log.filter((entry) => entry.op === "batch").length, 0);
+    assert.equal(dryRun.log.filter((entry) => entry.op === "r2.put").length, 0);
+  });
+
   test("SEC-731: restored primary outside eight relations fails closed; exactly eight unique events succeed", async () => {
     const specForRelationCount = (count) => ({
       setup: (sqlite) => {
