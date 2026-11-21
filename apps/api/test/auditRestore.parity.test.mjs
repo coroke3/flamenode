@@ -87,6 +87,15 @@ test("T00 production/default admin router physically excludes unapproved SA-011 
     deployedApiRouter.routes.filter(isRestore).length, 0,
     "deployed app.ts must not mount the candidate route",
   );
+  // Hono route() flattens the earlier auditAdminRoutes ALL middleware into
+  // the parent route table; a second sibling guard would double D1 reads.
+  const optedIn = createAdminRoutes({ enableAuditRestoreCandidate: true });
+  const guarded = optedIn.routes.map((route, index) => ({ route, index }))
+    .filter(({ route }) => route.method === "ALL" && route.path === "/audit/*");
+  const restoreIndex = optedIn.routes.findIndex((route) =>
+    route.method === "POST" && route.path === "/audit/restore");
+  assert.equal(guarded.length, 1, "one audit wildcard guard, not two");
+  assert.ok(restoreIndex > guarded[0].index, "CostGuard must precede candidate restore");
   const ctx = setup({ enableRestoreCandidate: false });
   seedRestorableAnnouncement(ctx.sqlite);
   const result = await ctx.request(body());
