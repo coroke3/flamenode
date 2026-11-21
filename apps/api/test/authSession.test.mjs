@@ -348,6 +348,30 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
   assert.equal(d1.getQueryCount(), 1);
 });
 
+test("SEC-713: invalid persisted Active X is logged with a fixed code, not as a D1 outage or secret", async (t) => {
+  const d1 = createTestD1();
+  t.after(() => d1.close());
+  const malformedId = "x".repeat(180_000) + "SENSITIVE_SUFFIX";
+  d1.setActiveX(USERS.valid.id, malformedId);
+
+  const originalConsoleError = console.error;
+  const messages = [];
+  console.error = (...args) => { messages.push(args.join(" ")); };
+  try {
+    await assert.rejects(
+      () => resolveSessionUser(d1, SESSIONS.valid.sessionToken, { now: BASELINE_NOW_MS }),
+      (error) => error.name === "SessionUnavailableError" && error.code === "database_unavailable",
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.deepEqual(messages, ["[auth:session] INVALID_ACTIVE_X_ID_LENGTH"],
+    "distinguish malformed persisted identity from a genuine D1 lookup failure");
+  assert.ok(!messages.join(" ").includes("SENSITIVE_SUFFIX"));
+  assert.ok(!messages.join(" ").includes(malformedId));
+});
+
 test("SEC-713: corrupt Active X causes private 503, not anonymous 401 or an authorization grant", async (t) => {
   const d1 = createTestD1();
   t.after(() => d1.close());
