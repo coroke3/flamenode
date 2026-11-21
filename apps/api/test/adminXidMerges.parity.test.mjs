@@ -117,3 +117,29 @@ test("U01: documented D-17-4 method/URL agreement remains unchanged", () => {
     assert.ok(contractLine.includes(path), `Missing agreed endpoint: ${path}`);
   }
 });
+
+test("U01: nested JSON payloads never become legacy FormData scalars", () => {
+  const nested = [{}, [], ["MERGE"], { confirmation: "MERGE" }];
+  for (const value of nested) {
+    assert.equal(
+      AdminXIdMergeCreateBodySchema.safeParse({ from_x_user_id: value, to_x_user_id: "target" }).success,
+      false,
+      "from_x_user_id nested payload must be rejected",
+    );
+    assert.equal(
+      AdminXIdMergeCreateBodySchema.safeParse({ from_x_user_id: "source", to_x_user_id: value }).success,
+      false,
+      "to_x_user_id nested payload must be rejected",
+    );
+    assert.equal(
+      AdminXIdMergeConfirmBodySchema.safeParse({ confirm: value }).success,
+      false,
+      "confirm nested payload must be rejected",
+    );
+  }
+  // CURRENT stringifies scalar FormData values after the authorization gate.
+  // A valid transport scalar must reach domain validation unmodified.
+  for (const scalar of [null, "", " ", false, 0]) {
+    assert.deepEqual(AdminXIdMergeConfirmBodySchema.parse({ confirm: scalar }), { confirm: scalar });
+  }
+});

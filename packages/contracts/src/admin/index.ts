@@ -1,8 +1,9 @@
 export * from "./announcements.ts";
 export * from "./apiEndpoints.ts";
+export * from "./eventGroups.ts";
+export * from "./xidMerges.ts";
 export * from "./spreadsheet.ts";
 export * from "./audit.ts";
-export * from "./xidMerges.ts";
 
 export * from "./ops.ts";
 export * from "./termsNotifications.ts";
