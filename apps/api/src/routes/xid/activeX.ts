@@ -28,6 +28,24 @@ const USER_NOT_FOUND = "ユーザーが見つかりません。";
 const LINK_NOT_FOUND = "この X ID は現在のアカウントに紐づいていません。";
 const NOT_APPROVED = "承認済みの X ID だけをアクティブにできます。";
 const MUTATION_FAILED = "アクティブ X ID の変更に失敗しました。再読み込みしてお試しください。";
+/**
+ * SEC-726: an approved legacy X ID must remain readable by the Auth.js
+ * session after SA-098 selects it. Match SEC-713's SQL-side session limit,
+ * not the narrower canonical 20-ASCII-handle input contract.
+ * Local to SA-098: the shared session reader belongs to PR #714.
+ */
+const MAX_SELECTED_LEGACY_X_CODEPOINTS = 128;
+const MAX_SELECTED_LEGACY_X_UTF8_BYTES = 512;
+
+function isSessionSafeSelectedXId(value: string): boolean {
+  if (!value || value.includes("\0")) return false;
+  let codepoints = 0;
+  for (const _ of value) {
+    if (++codepoints > MAX_SELECTED_LEGACY_X_CODEPOINTS) return false;
+  }
+  return new TextEncoder().encode(value).byteLength <= MAX_SELECTED_LEGACY_X_UTF8_BYTES;
+}
+
 
 type RawUserRow = Record<string, string | number | null> & {
   id: string;
@@ -116,6 +134,16 @@ async function loadSelectedIdentity(
         THEN direct_id ELSE NULL
       END AS canonical_id
       FROM facts
+    ),
+    -- SEC-726: even a short alias may resolve to a huge legacy ID. Bound in SQL.
+    bounded_resolved AS (
+      SELECT CASE WHEN canonical_id IS NOT NULL
+        AND typeof(canonical_id) = 'text'
+        AND instr(canonical_id, char(0)) = 0
+        AND length(canonical_id) BETWEEN 1 AND ${MAX_SELECTED_LEGACY_X_CODEPOINTS}
+        AND length(CAST(canonical_id AS BLOB)) <= ${MAX_SELECTED_LEGACY_X_UTF8_BYTES}
+      THEN canonical_id ELSE NULL END AS canonical_id
+      FROM resolved
     )
     SELECT u.*,
       ${TERMS_REACCEPT_REQUIRED_CASE_SQL} AS derived_terms_reaccept_required,
@@ -131,10 +159,10 @@ async function loadSelectedIdentity(
       settings.audit_long_retention_days AS cg_audit_long_retention_days,
       settings.audit_max_payload_bytes AS cg_audit_max_payload_bytes,
       settings.audit_compact_after_days AS cg_audit_compact_after_days,
-      (SELECT canonical_id FROM resolved) AS resolved_x_user_id,
+      (SELECT canonical_id FROM bounded_resolved) AS resolved_x_user_id,
       (SELECT x.approval_status FROM x_user_account_links l
        INNER JOIN x_users x ON x.id = l.x_user_id
-       CROSS JOIN resolved r
+       CROSS JOIN bounded_resolved r
        WHERE l.auth_user_id = u.id
          AND lower(trim(ltrim(trim(l.x_user_id), '@'))) = r.canonical_id
        LIMIT 1) AS linked_approval_status
@@ -225,6 +253,11 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c, next) => {
   const parsed = SetActiveXBodySchema.safeParse(raw);
   const xUserId = parsed.success ? normalizeXId(parsed.data.x_user_id) : "";
   if (!xUserId) return c.json({ ok: false, message: "X ID が指定されていません。" }, 400);
+  // A successful switch to an identity rejected by the next session read
+  // would lock the user out of the endpoint needed to switch back.
+  if (!isSessionSafeSelectedXId(xUserId)) {
+    return c.json({ ok: false, message: LINK_NOT_FOUND }, 403);
+  }
 
   let selected: Awaited<ReturnType<typeof loadSelectedIdentity>>;
   try {
@@ -267,6 +300,12 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c, next) => {
   }
   if (selected.linkedApproval !== "approved") {
     return c.json({ ok: false, message: NOT_APPROVED }, 403);
+  }
+
+  // Recheck the resolved ID, not just the request: a short alias may point
+  // at a legacy ID that is unrepresentable by the next Auth.js session.
+  if (!isSessionSafeSelectedXId(selected.canonicalXId)) {
+    return c.json({ ok: false, message: LINK_NOT_FOUND }, 403);
   }
 
   c.set("actorSnapshotJsonById", { [sessionUser.id]: selected.actorSnapshotJson });
