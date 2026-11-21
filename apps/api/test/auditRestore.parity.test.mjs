@@ -642,9 +642,15 @@ test("T04 R2 CAS succeeds but D1 batch fails: event/video remain public, compens
       if (!injected) {
         injected = true;
         assert.equal(state.puts, 1, "R2 CAS must complete before the injected D1 failure");
-        throw new Error("injected_d1_batch_failure");
+        // Execute the real SQLite BEGIN and every legitimate restore statement
+        // before triggering a final invalid write. The fake D1 batch must ROLLBACK
+        // the already-executed UPDATE, fence and success-audit statements.
+        return originalBatch([...statements, {
+          _sql: 'INSERT INTO "__mig_0662_fault_missing_table" ("value") VALUES (1)',
+          _params: [],
+        }]);
       }
-      // Keep subsequent failure-run recording operational.
+      // Failed-run recording is a separate, valid transaction.
       return originalBatch(statements);
     };
 
@@ -655,6 +661,8 @@ test("T04 R2 CAS succeeds but D1 batch fails: event/video remain public, compens
     }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
 
     assert.equal(injected, true);
+    assert.ok(ctx.stats.batches >= 2,
+      "the failed SQLite transaction and subsequent failure-record transaction both execute");
     assert.equal(response.status, 200, "CURRENT returns an ok:false domain result");
     assert.equal(response.headers.get("Cache-Control"), "private, no-store");
     const result = await response.json();
