@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseUnslottedEventIdFromForm,
   UnslottedEventSyncError,
+  MAX_UNSLOTTED_EVENT_SELECTION_CHARS,
 } from "@flamenode/domain/video";
 import {
   parseUnslottedEventIdFromForm as legacyParse,
@@ -82,4 +83,21 @@ test("MIG-0651: long repeated event selections do not require large intermediate
   // Each ID remains subject to the 64 UTF-16-unit cap after trimming.
   invalid(selection("event-a," + "x".repeat(65)));
   assert.equal(parseUnslottedEventIdFromForm(selection(" ,  event-a , event-a,  ")), "event-a");
+});
+
+
+test("MIG-0651: bounded event selection input rejects CPU-amplifying comma runs", () => {
+  // Preserve the existing 30,000 repeated valid tokens and 100,000 empty
+  // tokens; only pathological oversize inputs are rejected before scanning.
+  assert.equal(MAX_UNSLOTTED_EVENT_SELECTION_CHARS, 256 * 1024);
+  assert.equal(parseUnslottedEventIdFromForm(
+    selection(",".repeat(MAX_UNSLOTTED_EVENT_SELECTION_CHARS)),
+  ), null);
+  invalid(selection(",".repeat(MAX_UNSLOTTED_EVENT_SELECTION_CHARS + 1)));
+  invalid(selection("event-a,".repeat(Math.ceil(
+    (MAX_UNSLOTTED_EVENT_SELECTION_CHARS + 1) / 8,
+  ))));
+  assert.equal(parseUnslottedEventIdFromForm(selection(
+    Array(30_000).fill("event-a").join(","),
+  )), "event-a");
 });

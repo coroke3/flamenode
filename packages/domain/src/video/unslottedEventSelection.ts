@@ -13,6 +13,14 @@ export class UnslottedEventSyncError extends Error {
   }
 }
 
+/** A single event ID is <=64 characters. Allow ample legacy duplicate tokens
+ * (the 30,000-token regression remains valid) but reject unbounded comma runs
+ * before iterating. An 8-MiB multipart cap alone permits millions of loops.
+ * This intentionally narrows malformed/redundant oversized CURRENT inputs;
+ * approval and runtime CPU parity remain separate migration gates.
+ */
+export const MAX_UNSLOTTED_EVENT_SELECTION_CHARS = 256 * 1024;
+
 /** 枠なし投稿専用。event_ids の汎用複数選択形式を0件または1件へ縮約する。 */
 export function parseUnslottedEventIdFromForm(formData: FormData): string | null {
   // Reject repeated form keys instead of silently picking the first value.
@@ -30,6 +38,10 @@ export function parseUnslottedEventIdFromForm(formData: FormData): string | null
   }
   if (raw == null || raw === "") return null;
   if (typeof raw !== "string") {
+    throw new UnslottedEventSyncError("unslotted_event_selection_invalid");
+  }
+
+  if (raw.length > MAX_UNSLOTTED_EVENT_SELECTION_CHARS) {
     throw new UnslottedEventSyncError("unslotted_event_selection_invalid");
   }
 
