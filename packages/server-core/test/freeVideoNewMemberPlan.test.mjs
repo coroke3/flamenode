@@ -79,7 +79,7 @@ test("MIG-0651 new members: canonical X alias, pending placeholder, public membe
     const stats = { reads: 0 };
     const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(submission));
     assert.equal(stats.reads, 2, "same CURRENT resolver: one aliases and one direct X read");
-    assert.deepEqual(plan.expectedChanges, [1, 2, 1]);
+    assert.deepEqual(plan.expectedChanges, [null, 1, 2, 1]);
     assert.deepEqual(plan.audits.map(a => [a.table_name,a.operation,a.strict]), [
       ["x_users_member_batch", "MERGE", true],
       ["video_members_set", "MERGE", true],
@@ -134,7 +134,7 @@ test("MIG-0651 new members: pending X placeholder race preserves existing canoni
     const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, {reads:0}), args(parsedMemberSubmission([
       { name: "Member", x_user_id: "racingx", chapters: [] },
     ])));
-    assert.deepEqual(plan.expectedChanges, [1,1]);
+    assert.deepEqual(plan.expectedChanges, [null,1,1]);
     insert(sqlite, "x_users", { id: "racingx", x_name: "Current Name", approval_status: "approved" });
     executePrepared(sqlite, plan);
     const row = sqlite.prepare("SELECT x_name,approval_status FROM x_users WHERE id='racingx'").get();
@@ -153,8 +153,8 @@ test("MIG-0651 new members: 80 validated members use two identity reads and two 
     const stats={reads:0};
     const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite,stats),args(parsedMemberSubmission(many)));
     assert.equal(stats.reads,2);
-    assert.deepEqual(plan.expectedChanges,[80,80]);
-    assert.equal(plan.statements.length,2);
+    assert.deepEqual(plan.expectedChanges,[null,80,80]);
+    assert.equal(plan.statements.length,3);
     const dialect=new SQLiteSyncDialect();
     for(const statement of plan.statements) {
       const q=dialect.sqlToQuery(statement.sqlExpr);
@@ -182,4 +182,37 @@ test("MIG-0651 new members: invalid chapter index, blank row and too-many member
   const large = {members:Array.from({length:101},()=>({name:"Member",x_user_id:"",role:"",comment:""})),chaptersByIndex:new Map()};
   await assert.rejects(() => buildFreeVideoNewMemberPlan(noDb,args(large)),
     /free_video_new_member_arguments_invalid/);
+});
+
+test("MIG-0651 new members: in-batch identity CAS rejects stale alias retarget before writing", async () => {
+  const sqlite = createSqlite();
+  try {
+    const stats = { reads: 0 };
+    const submission = parsedMemberSubmission([
+      {name:"Candidate",x_user_id:"futurealias",chapters:[]},
+    ]);
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite,stats),args(submission));
+    assert.equal(stats.reads,2);
+    assert.deepEqual(plan.expectedChanges,[null,1,1]);
+    insert(sqlite,"x_users",{id:"otherowner",x_name:"Other",approval_status:"approved"});
+    insert(sqlite,"x_user_aliases",{alias_x_id:"futurealias",x_user_id:"otherowner"});
+    assert.throws(() => executePrepared(sqlite,plan),/malformed JSON/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='futurealias'").get().n,0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='otherowner'").get().n,1);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 new members: in-batch identity CAS rejects post-read X approval revocation", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite,"x_users",{id:"creator",x_name:"Creator",approval_status:"approved"});
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite,{reads:0}),args(
+      parsedMemberSubmission([{name:"Creator",x_user_id:"creator",chapters:[]}])
+    ));
+    assert.deepEqual(plan.expectedChanges,[null,1]);
+    sqlite.prepare("UPDATE x_users SET approval_status='rejected' WHERE id='creator'").run();
+    assert.throws(() => executePrepared(sqlite,plan),/malformed JSON/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,0);
+  } finally { sqlite.close(); }
 });
