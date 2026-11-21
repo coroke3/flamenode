@@ -179,6 +179,18 @@ function publicRestoreMutationFailureMessage(error: unknown): string {
   return `${prefix}。`;
 }
 
+/** Preserve only intentional adapter diagnostics, never arbitrary SQL/provider errors. */
+function publicRestoreBuildFailureMessage(error: unknown): string {
+  const safeCodes = new Set([
+    "video_members_set_snapshot_invalid",
+    "video_members_set_target_mismatch",
+  ]);
+  if (error instanceof Error && safeCodes.has(error.message)) {
+    return error.message;
+  }
+  return "復元mutationを作成できません。";
+}
+
 /**
  * 復元本体、復元履歴、元ログの状態更新、RESTORE 監査ログを単一 D1 batch で確定する。
  * いずれか一つでも失敗した場合は、復元対象を含めて全て rollback される。
@@ -417,10 +429,9 @@ export async function restoreAuditLog(
       expectedCurrent: current,
     });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "復元mutationを作成できません。";
+    // Adapter construction can throw SQL/framework errors; they are not
+    // user-facing diagnostics even when an explicit secret key is absent.
+    const message = publicRestoreBuildFailureMessage(error);
 
     if (dry_run) {
       return {
