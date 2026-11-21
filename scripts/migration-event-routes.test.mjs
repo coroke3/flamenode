@@ -950,6 +950,79 @@ test("MIG-0514 U03b: out-of-order RH-020 refresh cannot roll back newer public s
   }
 });
 
+test("MIG-0514 U03b: reused Island never leaks previous event slots or private ownership", { skip: skipUi }, async () => {
+  const eventA = detailOf("autumn-collab-2026");
+  const eventB = { ...eventA, event: { ...eventA.event, id: "different-event", title: "別のイベント" } };
+  const props = (detail) => ({ detail, builtAt: NOW });
+  // Deliberately use the same public slot IDs across both event identities.
+  // A new event must show loading state instead of the old "taken" snapshot.
+  const pendingNewPublic = [];
+  const requests = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url) => {
+    const u = String(url);
+    requests.push(u);
+    if (u.endsWith("/viewer-overlay")) {
+      if (u.includes("different-event")) return Promise.resolve({ ok: false, status: 503 });
+      return Promise.resolve({ ok: true, json: async () => ({
+        loggedIn: true, authUnavailable: false, isBanned: false,
+        needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+        operatorOverrideAllowed: false, viewerXId: "owner-a",
+        viewerXIdNotice: null,
+        slots: [{ id: "s1", display_name: "秘密の所有者名",
+          is_owned_by_viewer: true, viewer_relation: "active", x_user_id: "owner-a" }],
+      }) });
+    }
+    assert.ok(u.startsWith("/api/live/events/"), "public RH-020 read only");
+    if (u.includes("different-event")) {
+      return new Promise((resolve) => pendingNewPublic.push(resolve));
+    }
+    return Promise.resolve({ ok: true, json: async () => ({ slots: [
+      { id: "s1", status: "reserved", display_name: "旧イベントの公開名" },
+      { id: "s2", status: "available" }, { id: "s3", status: "available" },
+      { id: "s4", status: "available" },
+    ] }) });
+  };
+  const container = mount();
+  let root;
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(h(EventSlotsIsland, props(eventA)));
+    });
+    await settle();
+    assert.equal(container.querySelectorAll(".sl.taken").length, 1);
+    assert.equal(container.querySelectorAll(".sl.mine").length, 1);
+    assert.ok(text(container).includes("旧イベントの公開名"));
+
+    await act(async () => root.render(h(EventSlotsIsland, props(eventB))));
+    assert.ok(text(container).includes("別のイベント"));
+    assert.equal(pendingNewPublic.length, 1, "new event must start a new RH-020 request");
+    assert.equal(container.querySelectorAll(".sl.pending").length, 4,
+      "the new event cannot reuse a ready snapshot with overlapping slot IDs");
+    assert.equal(container.querySelectorAll(".sl.taken").length, 0);
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0,
+      "old event's RH-014 ownership must not cross the event boundary");
+    assert.ok(!text(container).includes("旧イベントの公開名"));
+    assert.ok(!text(container).includes("秘密の所有者名"));
+
+    await act(async () => pendingNewPublic[0]({ ok: true, json: async () => ({
+      slots: [{ id: "s1", status: "available" },
+        { id: "s2", status: "available" }, { id: "s3", status: "available" },
+        { id: "s4", status: "available" }],
+    }) }));
+    await settle();
+    assert.equal(container.querySelectorAll(".sl.open").length, 4);
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0);
+    assert.equal(container.querySelectorAll("button").length, 0);
+    assert.ok(requests.some(u => u.includes("/different-event/slots/viewer-overlay")));
+  } finally {
+    if (root) await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+    container.remove();
+  }
+});
+
 test("Island /event/[id]/release: list on the server, mode follows the URL hash like CURRENT", { skip: skipUi }, async () => {
   const model = buildEventReleaseModel(data.releases.get("autumn-collab-2026"));
   dom.reconfigure({ url: "https://flamenode.net/event/autumn-collab-2026/release" });

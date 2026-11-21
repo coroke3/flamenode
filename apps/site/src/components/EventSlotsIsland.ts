@@ -21,7 +21,15 @@ const REFRESH_MS = 30_000;
  * "読み込み中" (no slot state is baked). After mount it reads RH-020 and refreshes every 30 s; a failed read
  * keeps the grid and shows a notice (T05). The reservation controls belong to MIG-0604 / MIG-0606.
  */
-export function EventSlotsIsland({ detail, builtAt }: EventSlotsIslandProps): React.ReactElement {
+// Astro normally navigates between event pages, but the Island may also be
+// reused by client navigation. Remount both the RH-020 public state and nested
+// RH-014 private overlay whenever the event identity changes, even when slot
+// IDs are reused. A stale previous event must never paint a new event.
+export function EventSlotsIsland(props: EventSlotsIslandProps): React.ReactElement {
+  return React.createElement(EventSlotsIslandForEvent, { ...props, key: props.detail.event.id });
+}
+
+function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): React.ReactElement {
   const [now, setNow] = React.useState(builtAt);
   const [phase, setPhase] = React.useState<SlotsLivePhase>("loading");
   const [live, setLive] = React.useState<LiveSlots | null>(null);
