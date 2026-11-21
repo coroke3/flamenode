@@ -378,3 +378,42 @@ test("MIG-0651 atomic composer: concurrent YouTube ID unique collision rolls bac
     sqlite.close();
   }
 });
+
+test("MIG-0651 atomic composer: mid-batch metadata failure rolls back the earlier video INSERT", () => {
+  const sqlite = createSqlite();
+  try {
+    sqlite.exec(`
+      CREATE TRIGGER fail_fresh_video_metadata
+      BEFORE INSERT ON video_youtube_metadata
+      BEGIN SELECT RAISE(ABORT, 'metadata-test-abort'); END;
+    `);
+    const drizzleDb = drizzle(async () => ({ rows: [] }));
+    const planDb = {
+      run(expr) { return { assertSql: expr }; },
+      insert(table) { return drizzleDb.insert(table); },
+    };
+    const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
+      videoAfter: video(null), actorUserId: "user-1", eventId: null,
+      questions: [], customAnswerDrafts: [], now: NOW,
+    });
+    assert.deepEqual(plan.expectedChanges, [1, 1]);
+    sqlite.exec("BEGIN");
+    assert.throws(() => {
+      for (const stmt of plan.statements) {
+        const compiled = "assertSql" in stmt
+          ? new SQLiteSyncDialect().sqlToQuery(stmt.assertSql)
+          : stmt.toSQL();
+        if ("assertSql" in stmt) sqlite.prepare(compiled.sql).get(...compiled.params);
+        else sqlite.prepare(compiled.sql).run(...compiled.params);
+      }
+    }, /metadata-test-abort/);
+    // The video INSERT succeeded before the intentionally failing metadata
+    // statement; rollback must remove that earlier row as well.
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 1);
+    sqlite.exec("ROLLBACK");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_youtube_metadata").get().n, 0);
+  } finally {
+    sqlite.close();
+  }
+});
