@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { OnboardingResponse, OnboardingRules } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
 import { computeOnboardingState, loadPersonalContext } from "./context.ts";
+import { readVisibilityManifestObject } from "@flamenode/server-core/visibility/manifestR2";
 
 // CURRENT: app/(auth)/onboarding/page.tsx.
 // D1: 1 batch (terms + linked X + pending request), plus the rules text only while terms acceptance is
@@ -51,18 +52,20 @@ export const VISIBILITY_MANIFEST_KEY = "visibility/blocked-entities.v1.json";
 export const VISIBILITY_MANIFEST_MAX_BYTES = 1024 * 1024;
 
 /**
- * CURRENT loadPublicJson resolvePublicVisibilityGuard for the "rules" target: the "rules" target maps to no
- * fenced entity, so only the enforce-mode fail-closed rule applies: without a committed, size-bounded
- * visibility manifest in R2 nothing is served (rules = null -> the client shows the built-in default terms).
- * The manifest body is not parsed here (S2 JSON bound); a malformed manifest is a known gap.
+ * CURRENT enforce-mode parity: do not trust a committed HEAD/ETag alone.
+ * The shared bounded reader parses the manifest and validates schema, entries
+ * and size. A missing, malformed, oversized or uncommitted snapshot denies
+ * access to both R2 rules and older degraded D1 rules.
+ *
+ * The shared manifest reader permits up to 1 MiB (CURRENT contract), so the
+ * S2 64-KiB JSON/CPU budget remains an explicit migration acceptance gate.
  */
 async function visibilityGuardAllows(env: AppEnv["Bindings"]): Promise<boolean> {
   if (env.PUBLIC_VISIBILITY_GUARD_MODE !== "enforce") return true;
+  if (!env.BUCKET) return false;
   try {
-    const head = await env.BUCKET?.head(VISIBILITY_MANIFEST_KEY);
-    return Boolean(
-      head?.etag?.trim() && Number.isFinite(head.size) && head.size >= 0 && head.size <= VISIBILITY_MANIFEST_MAX_BYTES,
-    );
+    const { etag } = await readVisibilityManifestObject(env.BUCKET);
+    return Boolean(etag?.trim());
   } catch {
     return false;
   }

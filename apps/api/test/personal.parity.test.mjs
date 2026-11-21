@@ -670,16 +670,33 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(noBucket.body.rules.versionLabel, "v2");
   });
 
-  test("T08 onboarding: visibility guard mirrors CURRENT (enforce needs a committed manifest; unpublished terms never served)", async () => {
+  test("T08 onboarding: visibility guard mirrors CURRENT (enforce needs a verified committed manifest; unpublished terms never served)", async () => {
+    const manifestKey = "visibility/blocked-entities.v1.json";
     const run = (mode, objects) => {
       const d1 = createD1(sqlite);
+      const storage = fakeBucket(objects);
+      // Emulate a real R2 manifest object (size/etag/text) only in this
+      // integration test. Other fake R2 objects retain their old behavior.
+      const bucket = {
+        ...storage,
+        async get(key) {
+          const object = await storage.get(key);
+          if (!object || key !== manifestKey) return object;
+          const value = objects[key];
+          const text = typeof value === "string" ? value : JSON.stringify(value);
+          return { ...object, etag: `etag-${key}`, text: async () => text };
+        },
+      };
       return app
-        .request("/api/personal/onboarding", { headers: cookie("tok-carol") }, { DB: d1, BUCKET: fakeBucket(objects), PUBLIC_VISIBILITY_GUARD_MODE: mode })
+        .request("/api/personal/onboarding", { headers: cookie("tok-carol") }, { DB: d1, BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: mode })
         .then((r) => r.json());
     };
     const rules = { version_label: "r2-label", body_markdown: "# from r2" };
+    const committed = { schema_version: 1, revision: 1, generated_at: 1700000000, entities: [] };
     assert.equal((await run("enforce", { "rules/current.json": rules })).rules, null, "no manifest -> fail closed");
-    assert.equal((await run("enforce", { "rules/current.json": rules, "visibility/blocked-entities.v1.json": {} })).rules.versionLabel, "r2-label");
+    assert.equal((await run("enforce", { "rules/current.json": rules, [manifestKey]: {} })).rules, null,
+      "an R2 object with an ETag but invalid manifest body must fail closed");
+    assert.equal((await run("enforce", { "rules/current.json": rules, [manifestKey]: committed })).rules.versionLabel, "r2-label");
     assert.equal((await run("observe", { "rules/current.json": rules })).rules.versionLabel, "r2-label");
     assert.equal((await run("off", {})).rules.versionLabel, "v2", "D1 fallback only returns published terms");
     sqlite.exec("UPDATE terms_versions SET status = 'draft' WHERE id = 'T2'");
