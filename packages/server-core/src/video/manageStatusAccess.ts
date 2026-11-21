@@ -25,6 +25,17 @@ export const MAX_MANAGE_STATUS_REBUILD_EVENTS = 8;
 // event ID must not silently bypass the queue/rebuild input safety limit.
 export const MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH = 4096;
 
+// Match String.prototype.trim() used by CURRENT's video-status notification
+// recipient resolution. SQLite trim(X) removes only U+0020 by default:
+// imported recipient IDs padded with tabs, NBSP, ideographic spaces or BOM
+// would otherwise silently suppress an authorized notification.
+// This is a fixed server-owned constant; never accept trim characters from
+// request JSON. U+200B intentionally is NOT in the ECMAScript trim set.
+const ECMASCRIPT_TRIM_CHARS =
+  "\u0009\u000A\u000B\u000C\u000D\u0020\u00A0\u1680" +
+  "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A" +
+  "\u2028\u2029\u202F\u205F\u3000\uFEFF";
+
 function exceedsRebuildIdBytes(value: string): boolean {
   return value.length > MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH ||
     new TextEncoder().encode(value).byteLength > MAX_MANAGE_STATUS_EVENTS_JSON_LENGTH;
@@ -126,7 +137,7 @@ function notificationReadProjection(
   return {
     recipientEnabled: sql<number>`CASE WHEN EXISTS (
       SELECT 1 FROM ${users} notification_recipient
-      WHERE notification_recipient."id" = trim(${videos.submitted_by_user_id})
+      WHERE notification_recipient."id" = trim(${videos.submitted_by_user_id}, ${ECMASCRIPT_TRIM_CHARS})
         AND (notification_recipient."is_notification_enabled" IS NULL
           OR notification_recipient."is_notification_enabled" <> 0)
     ) THEN 1 ELSE 0 END`,
@@ -208,7 +219,7 @@ export function planUnboundAtomicVideoStatusNotificationInsert(
     FROM "videos" notification_video
     INNER JOIN "user" notification_recipient
       ON notification_recipient."id" =
-        trim(notification_video."submitted_by_user_id")
+        trim(notification_video."submitted_by_user_id", ${ECMASCRIPT_TRIM_CHARS})
     WHERE notification_video."id" = ${input.videoId}
       -- The audited status UPDATE must have executed earlier in THIS
       -- atomic D1 batch. Never enqueue a public/voided notice on stale state.
