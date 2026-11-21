@@ -192,10 +192,18 @@ auditRestoreCandidateRoutes.post("/restore", async (c) => {
     createAuditRestoreHost(c),
   );
 
+  // #730: mutation_failed may wrap an untrusted D1/Drizzle/provider Error
+  // including SQL params or metadata. Preserve internal reason/audit IDs and
+  // other intentional validation/conflict messages, but never echo this
+  // arbitrary failure text to the authorized HTTP caller. The shared core's
+  // CURRENT/error-audit sanitization remains a separate owner review gate.
+  const publicMessage = !result.ok && result.reason_code === "mutation_failed"
+    ? "復元を確定できませんでした。変更はロールバックされました。"
+    : result.message;
   return c.json<AuditRestoreResponse>(
     {
       ok: result.ok,
-      message: result.message,
+      message: publicMessage,
       restore_run_id: result.restore_run_id,
       diff: result.diff,
     },
