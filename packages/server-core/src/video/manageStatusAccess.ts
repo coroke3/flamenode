@@ -159,6 +159,72 @@ function finishVideoStatusSnapshotWithNotification(
 }
 
 /**
+ * Issue #692 / U02a research-only conditional notification outbox insert.
+ *
+ * Unlike CURRENT's separate recipient/dedupe pre-reads, the recipient check,
+ * active dedupe check and INSERT execute in the SAME D1 statement and thus in
+ * the SAME audited batch as the video status mutation. In particular, a
+ * preflight snapshot is not authoritative for recipient preference/dedupe.
+ *
+ * This returns a batch statement; no HTTP route or planner calls it yet.
+ * Future integration MUST use expectedMutationChanges=null for this safe
+ * idempotent INSERT together with post-commit assertions, preserve the
+ * canonical template payload bytes and obtain Lead-approved S3 acceptance.
+ * forceNotify is deliberately rejected: CURRENT's forced duplicate behavior
+ * cannot be silently replaced by an idempotent insert.
+ */
+export function planUnboundAtomicVideoStatusNotificationInsert(
+  db: ServerCoreDb,
+  input: {
+    videoId: string;
+    nextStatus: "public" | "voided";
+    notificationId: string;
+    payloadJson: string;
+    eventId: string | null;
+    createdAt: number;
+    forceNotify?: boolean;
+  },
+) {
+  if (input.forceNotify ||
+      (input.nextStatus !== "public" && input.nextStatus !== "voided") ||
+      !input.videoId || !input.notificationId ||
+      !Number.isSafeInteger(input.createdAt) ||
+      input.createdAt < 0) {
+    throw new Error("video_status_atomic_notification_requires_normal_validated_input");
+  }
+  const type = input.nextStatus === "public" ? "video_approved" : "video_voided";
+  const dedupeKey = `${type}:${input.videoId}`;
+  return db.run(sql`
+    INSERT INTO "notification_outbox" (
+      "id", "recipient_user_id", "type", "payload_json", "status",
+      "attempt_count", "processing_started_at", "next_attempt_at",
+      "last_error", "event_id", "dedupe_key", "created_at"
+    )
+    SELECT ${input.notificationId}, notification_recipient."id", ${type},
+      ${input.payloadJson}, 'pending', 0, NULL, NULL, NULL,
+      ${input.eventId}, ${dedupeKey}, ${input.createdAt}
+    FROM "videos" notification_video
+    INNER JOIN "user" notification_recipient
+      ON notification_recipient."id" =
+        trim(notification_video."submitted_by_user_id")
+    WHERE notification_video."id" = ${input.videoId}
+      AND (
+        notification_recipient."is_notification_enabled" IS NULL OR
+        notification_recipient."is_notification_enabled" <> 0
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM "notification_outbox" notification_existing
+        WHERE notification_existing."dedupe_key" = ${dedupeKey}
+          AND notification_existing."status" IN ('pending', 'processing', 'sent')
+      )
+    ON CONFLICT ("dedupe_key")
+      WHERE "dedupe_key" IS NOT NULL
+        AND "status" IN ('pending', 'processing', 'sent')
+    DO NOTHING
+  `);
+}
+
+/**
  * CURRENT canEditEvent resolves approved linked X IDs, then matches event_staff
  * permission presets/custom keys. Do the same in ONE read using inner joins
  * and the SAME canonical staffRowHasPermissionKey resolver. Importantly:
