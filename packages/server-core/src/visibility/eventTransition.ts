@@ -13,6 +13,7 @@ import {
   releaseBlockedEntityInManifest,
   upsertBlockedEntityInManifest,
   type PublicVisibilityBlockedEntity,
+  type PublicVisibilityBlockedEntitiesManifest,
 } from "./manifestCore.ts";
 
 type EventVisibilityStatus = typeof events.$inferSelect["visibility_status"];
@@ -29,6 +30,9 @@ export type EventVisibilityFenceRenamePrecommit = {
   newEventId: string;
   fenceToken: string;
   previousOldEntry: PublicVisibilityBlockedEntity | null;
+  /** Exact new-ID R2 entry produced by the successful CAS write. Never
+   * compensate a later same-token update as if it were this copy. */
+  writtenNewEntry: PublicVisibilityBlockedEntity;
 };
 
 /**
@@ -41,6 +45,9 @@ export type EventVisibilityRenameTombstonePrecommit = {
   eventId: string;
   fenceToken: string;
   previousEntry: PublicVisibilityBlockedEntity | null;
+  /** R2 tombstone confirmed after CAS. Compensation must not erase a newer
+   * same-token update to the old ID's block metadata. */
+  writtenEntry: PublicVisibilityBlockedEntity;
 };
 
 function logEventVisibilityCompensationFailure(
@@ -63,7 +70,7 @@ function logEventVisibilityCompensationFailure(
  * に追加する。再公開時も一度 blocked として manifest に載せ、event artifact
  * の生成が完了するまで古い成果物を公開しない。
  */
-export function planEventVisibilityTransition(input: {
+export async function planEventVisibilityTransition(input: {
   db: ServerCoreDb;
   eventId: string;
   previousStatus: EventVisibilityStatus;
@@ -71,7 +78,7 @@ export function planEventVisibilityTransition(input: {
   actorUserId: string;
   reason?: string | null;
   now: number;
-}): EventVisibilityTransitionPlan {
+}): Promise<EventVisibilityTransitionPlan> {
   const fence = planEventVisibilityFence(input);
   if (!fence) {
     return {
@@ -82,7 +89,14 @@ export function planEventVisibilityTransition(input: {
     };
   }
 
-  const fenceToken = generateId("vf");
+  // Existing blocked/release_pending D1 fence already owns the R2 manifest
+  // token. Reuse it or the precommit's foreign-token protection would also
+  // reject a legitimate private -> public transition after a prior block.
+  const existing = await getPublicVisibilityFence(input.db, "event", input.eventId);
+  const reusableToken = existing &&
+    (existing.state === "blocked" || existing.state === "release_pending")
+    ? existing.fence_token : null;
+  const fenceToken = reusableToken || generateId("vf");
   const { state, depublicizedFromPublic } = fence;
 
   return {
@@ -91,6 +105,9 @@ export function planEventVisibilityTransition(input: {
         entityType: "event",
         entityId: input.eventId,
         fenceToken,
+        observedFence: existing
+          ? { fenceToken: existing.fence_token, state: existing.state }
+          : null,
         state,
         reason: input.reason,
         actorUserId: input.actorUserId,
@@ -114,6 +131,15 @@ export async function preCommitEventVisibilityTransition(
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
+  // The first CAS write can succeed without invoking mutateOnConflict. Guard
+  // its initial snapshot too, or a later D1 rollback may release a prior
+  // writer's block after overwriting that writer's manifest token.
+  if (manifest.entities.some(
+    (entry) => entry.entity_type === "event" &&
+      entry.entity_id === input.eventId && entry.fence_token !== input.fenceToken,
+  )) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
   const updated = upsertBlockedEntityInManifest(
     manifest,
     {
@@ -128,11 +154,10 @@ export async function preCommitEventVisibilityTransition(
   await host.manifest.write(updated, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
-      const current = latest.entities.find(
-        (entry) =>
-          entry.entity_type === "event" && entry.entity_id === input.eventId,
-      );
-      if (current && current.fence_token !== input.fenceToken) {
+      if (latest.entities.some(
+        (entry) => entry.entity_type === "event" &&
+          entry.entity_id === input.eventId && entry.fence_token !== input.fenceToken,
+      )) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       return upsertBlockedEntityInManifest(
@@ -158,6 +183,10 @@ export async function preCommitEventVisibilityTransition(
         entry.entity_type === "event" &&
         entry.entity_id === input.eventId &&
         entry.fence_token === input.fenceToken,
+    ) ||
+    confirmed.entities.some(
+      (entry) => entry.entity_type === "event" &&
+        entry.entity_id === input.eventId && entry.fence_token !== input.fenceToken,
     )
   ) {
     throw new Error("public_visibility_fence_token_mismatch");
@@ -180,20 +209,34 @@ export async function preCommitEventVisibilityFenceRename(
 ): Promise<EventVisibilityFenceRenamePrecommit> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
-  const previousOldEntry =
+  // The destination must be unclaimed before we copy a blocked source.
+  // Even an existing destination with the SAME token is not our copy: erasing
+  // it on D1 rollback could expose a pre-existing block. The caller's target
+  // tombstone reuse precommit must release its R2 owner before this stage.
+  // Check the first GET and every ETag-CAS retry, not only foreign tokens.
+  const hasUnsafeRenameOwnership = (snapshot: PublicVisibilityBlockedEntitiesManifest) =>
+    snapshot.entities.some(
+      (entry) => entry.entity_type === "event" &&
+        ((entry.entity_id === input.oldEventId &&
+          entry.fence_token !== input.fenceToken) ||
+          entry.entity_id === input.newEventId),
+    );
+  // After our CAS has written the destination, its presence is expected.
+  // Confirmation must still reject foreign token duplicates at either ID.
+  const hasForeignRenameToken = (snapshot: PublicVisibilityBlockedEntitiesManifest) =>
+    snapshot.entities.some(
+      (entry) => entry.entity_type === "event" &&
+        (entry.entity_id === input.oldEventId || entry.entity_id === input.newEventId) &&
+        entry.fence_token !== input.fenceToken,
+    );
+  // The successful CAS retry may have observed a newer same-owner snapshot.
+  // Compensation must restore that snapshot, not the stale initial GET.
+  let previousOldEntry =
     manifest.entities.find(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.oldEventId,
     ) ?? null;
-  const currentNewEntry =
-    manifest.entities.find(
-      (entry) =>
-        entry.entity_type === "event" && entry.entity_id === input.newEventId,
-    ) ?? null;
-  if (
-    (previousOldEntry && previousOldEntry.fence_token !== input.fenceToken) ||
-    (currentNewEntry && currentNewEntry.fence_token !== input.fenceToken)
-  ) {
+  if (hasUnsafeRenameOwnership(manifest)) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
 
@@ -221,6 +264,11 @@ export async function preCommitEventVisibilityFenceRename(
     },
     now,
   );
+  // The confirmation GET may already contain a different same-token
+  // writer's metadata. Only the actual successful CAS write is our lease.
+  let writtenNewEntry = next.entities.find((entry) =>
+    entry.entity_type === "event" && entry.entity_id === input.newEventId
+  )!;
   await host.manifest.write(next, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
@@ -228,16 +276,10 @@ export async function preCommitEventVisibilityFenceRename(
         (entry) =>
           entry.entity_type === "event" && entry.entity_id === input.oldEventId,
       ) ?? null;
-      const current = latest.entities.find(
-        (entry) =>
-          entry.entity_type === "event" && entry.entity_id === input.newEventId,
-      );
-      if (
-        (previous && previous.fence_token !== input.fenceToken) ||
-        (current && current.fence_token !== input.fenceToken)
-      ) {
+      if (hasUnsafeRenameOwnership(latest)) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
+      previousOldEntry = previous;
       const withoutNew = {
         ...latest,
         entities: latest.entities.filter(
@@ -248,7 +290,7 @@ export async function preCommitEventVisibilityFenceRename(
             ),
         ),
       };
-      return upsertBlockedEntityInManifest(
+      const merged = upsertBlockedEntityInManifest(
         withoutNew,
         {
           entity_type: "event",
@@ -259,6 +301,10 @@ export async function preCommitEventVisibilityFenceRename(
         },
         Math.floor(Date.now() / 1000),
       );
+      writtenNewEntry = merged.entities.find((entry) =>
+        entry.entity_type === "event" && entry.entity_id === input.newEventId
+      )!;
+      return merged;
     },
   });
 
@@ -271,6 +317,7 @@ export async function preCommitEventVisibilityFenceRename(
   if (
     !confirmedEntry ||
     confirmedEntry.fence_token !== input.fenceToken ||
+    hasForeignRenameToken(confirmed) ||
     previousOldEntry !== null &&
     !confirmed.entities.some(
       (entry) =>
@@ -284,6 +331,7 @@ export async function preCommitEventVisibilityFenceRename(
     newEventId: input.newEventId,
     fenceToken: input.fenceToken,
     previousOldEntry,
+    writtenNewEntry,
   };
 }
 
@@ -292,12 +340,34 @@ export async function preCommitEventVisibilityRenameTombstone(
     eventId: string;
     fenceToken: string;
     reason?: string | null;
+    /** Required previous R2 owner (or null when absent). Callers may not
+     * rotate a tombstone with an unobserved owner, even on the first CAS. */
+    expectedPreviousFenceToken: string | null;
   },
   host: VisibilityFenceHost,
 ): Promise<EventVisibilityRenameTombstonePrecommit> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
-  const previousEntry =
+  // A rename may rotate exactly the old-ID token observed by its caller.
+  // Reject a missing ownership expectation at runtime as well as via TypeScript:
+  // an unguarded direct JS call must never overwrite a foreign R2 block.
+  // A null expectation means the caller observed no old-ID owner.
+  const hasUnexpectedOldIdToken = (snapshot: PublicVisibilityBlockedEntitiesManifest) => {
+    const tokens = snapshot.entities
+      .filter((entry) => entry.entity_type === "event" && entry.entity_id === input.eventId)
+      .map((entry) => entry.fence_token);
+    if (tokens.some((token) => token !== tokens[0])) return true;
+    if (input.expectedPreviousFenceToken === undefined) return true;
+    if (input.expectedPreviousFenceToken === null) return tokens.length > 0;
+    return tokens.length === 0 ||
+      tokens.some((token) => token !== input.expectedPreviousFenceToken);
+  };
+  if (hasUnexpectedOldIdToken(manifest)) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
+  // A successful CAS conflict retry may observe a newer same-owner entry.
+  // Preserve the entry actually replaced so D1 rollback restores its metadata.
+  let previousEntry =
     manifest.entities.find(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.eventId,
@@ -313,14 +383,24 @@ export async function preCommitEventVisibilityRenameTombstone(
     },
     now,
   );
+  // Keep the exact candidate produced by our successful CAS attempt.
+  // A same-token writer may refresh metadata before confirmation, and that
+  // newer snapshot must not become our rollback lease.
+  let writtenEntry = next.entities.find((entry) =>
+    entry.entity_type === "event" && entry.entity_id === input.eventId
+  )!;
   await host.manifest.write(next, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
+      if (hasUnexpectedOldIdToken(latest)) {
+        throw new Error("public_visibility_fence_token_mismatch");
+      }
       const previous = latest.entities.find(
         (entry) =>
           entry.entity_type === "event" && entry.entity_id === input.eventId,
       ) ?? null;
-      return upsertBlockedEntityInManifest(
+      previousEntry = previous;
+      const merged = upsertBlockedEntityInManifest(
         latest,
         {
           entity_type: "event",
@@ -332,6 +412,10 @@ export async function preCommitEventVisibilityRenameTombstone(
         },
         Math.floor(Date.now() / 1000),
       );
+      writtenEntry = merged.entities.find((entry) =>
+        entry.entity_type === "event" && entry.entity_id === input.eventId
+      )!;
+      return merged;
     },
   });
 
@@ -341,13 +425,19 @@ export async function preCommitEventVisibilityRenameTombstone(
     (entry) =>
       entry.entity_type === "event" && entry.entity_id === input.eventId,
   );
-  if (!confirmedEntry || confirmedEntry.fence_token !== input.fenceToken) {
+  if (
+    !confirmedEntry || confirmedEntry.fence_token !== input.fenceToken ||
+    confirmed.entities.some((entry) =>
+      entry.entity_type === "event" && entry.entity_id === input.eventId &&
+      entry.fence_token !== input.fenceToken)
+  ) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
   return {
     eventId: input.eventId,
     fenceToken: input.fenceToken,
     previousEntry,
+    writtenEntry,
   };
 }
 
@@ -364,7 +454,26 @@ export async function compensateEventVisibilityFenceRenameOnD1Failure(
         entry.entity_type === "event" &&
         entry.entity_id === input.newEventId,
     );
-    if (!currentNewEntry || currentNewEntry.fence_token !== input.fenceToken) {
+    const previousOldEntry = input.previousOldEntry;
+    if (
+      !currentNewEntry || currentNewEntry.fence_token !== input.fenceToken ||
+      // CAS ownership also includes the copied block's metadata. If another
+      // same-token writer refreshed it, leave its block intact on rollback.
+      manifest.entities.some((entry) =>
+        entry.entity_type === "event" &&
+        entry.entity_id === input.newEventId &&
+        (entry.fence_token !== input.writtenNewEntry.fence_token ||
+          entry.blocked_at !== input.writtenNewEntry.blocked_at ||
+          (entry.reason ?? null) !== (input.writtenNewEntry.reason ?? null))) ||
+      // Restoring the old ID via upsert removes *all* entries for that key.
+      // A concurrent writer may now own the old ID: never erase its block
+      // during a failed D1 rename compensation.
+      (previousOldEntry !== null &&
+        manifest.entities.some((entry) =>
+          entry.entity_type === "event" &&
+          entry.entity_id === input.oldEventId &&
+          entry.fence_token !== previousOldEntry.fence_token))
+    ) {
       return;
     }
     const withoutNew = {
@@ -377,7 +486,14 @@ export async function compensateEventVisibilityFenceRenameOnD1Failure(
           ),
       ),
     };
-    const restored = input.previousOldEntry
+    // Copy precommit never removes the old-ID block. If another same-token
+    // writer has refreshed it since our precommit, removing the temporary
+    // new-ID copy must not replace that live metadata with our old snapshot.
+    // Only restore the prior block if old-ID is now entirely absent.
+    const oldIdStillBlocked = manifest.entities.some((entry) =>
+      entry.entity_type === "event" && entry.entity_id === input.oldEventId
+    );
+    const restored = input.previousOldEntry && !oldIdStillBlocked
       ? upsertBlockedEntityInManifest(
           withoutNew,
           input.previousOldEntry,
@@ -419,7 +535,18 @@ export async function compensateEventVisibilityRenameTombstoneOnD1Failure(
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.eventId,
     );
-    if (!currentEntry || currentEntry.fence_token !== input.fenceToken) {
+    // A concurrent same-owner R2 writer can refresh blocked_at/reason after
+    // our precommit. Token equality alone is not a safe rollback lease:
+    // only undo the exact tombstone snapshot we confirmed writing.
+    if (
+      !currentEntry || currentEntry.fence_token !== input.fenceToken ||
+      manifest.entities.some((entry) =>
+        entry.entity_type === "event" &&
+        entry.entity_id === input.eventId &&
+        (entry.fence_token !== input.writtenEntry.fence_token ||
+          entry.blocked_at !== input.writtenEntry.blocked_at ||
+          (entry.reason ?? null) !== (input.writtenEntry.reason ?? null)))
+    ) {
       return;
     }
     const withoutCurrent = {

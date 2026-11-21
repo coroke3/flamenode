@@ -181,7 +181,15 @@ if (runTestWithTsx(import.meta.url)) {
       delete: async () => {},
       get: async (key) => {
         log.push({ op: "r2.get", key });
-        if (options.failGetsWhen?.()) throw new Error("r2 get failed");
+        if (options.failGetsWhen?.()) {
+          if (options.secretOnFailure) {
+            const error = new Error(`r2 get failed ${options.secretOnFailure}`);
+            error.providerDetails = { headers: { authorization: options.secretOnFailure } };
+            error.cause = new Error(`upstream ${options.secretOnFailure}`);
+            throw error;
+          }
+          throw new Error("r2 get failed");
+        }
         const found = objects.get(key);
         if (!found) return null;
         return {
@@ -209,6 +217,10 @@ if (runTestWithTsx(import.meta.url)) {
     delete: async (request) => {
       const key = typeof request === "string" ? request : request.url;
       log.push({ op: "cache.delete", key });
+      // Inject a provider-shaped failure without serializing the Error into
+      // the harness log. Production code must not log its message or metadata.
+      const injected = behaviour.errorOn?.(key);
+      if (injected) throw injected;
       if (behaviour.failOn?.(key)) throw new Error("cache api unavailable");
       return true;
     },
@@ -234,6 +246,7 @@ if (runTestWithTsx(import.meta.url)) {
     });
     const bucket = createBucket(log, bucketSpec?.initial ?? {}, {
       failGetsWhen: bucketSpec?.failGetsAfterRollback ? () => state.rolledBack : undefined,
+      secretOnFailure: bucketSpec?.secretOnFailure,
     });
     globalThis.__auditRestoreGoldenContext = {
       env: {
@@ -717,6 +730,33 @@ if (runTestWithTsx(import.meta.url)) {
       const [key, value] = await runScenario(name, spec);
       assert.ok(!(key in actual), `duplicate scenario name ${key}`);
       actual[key] = value;
+
+      // Local D1 budget regression for the tested audit-restore video paths.
+      // Count all direct D1 operations and statements inside each D1 batch;
+      // unlike a production workerd probe this does NOT include HTTP auth,
+      // CostGuard, or unrelated pre/post-commit caller work.
+      const guardedVideoRestores = new Set([
+        "video_public_to_private",
+        "video_private_to_public",
+        "video_snapshot_without_source_keys_uses_current",
+        "video_snapshot_null_youtube_id_is_not_rejected",
+        "video_cas_conflict_rolls_back_and_compensates",
+      ]);
+      if (guardedVideoRestores.has(key)) {
+        const directD1 = value.log.filter((entry) => entry.op === "d1");
+        const batchD1 = value.log
+          .filter((entry) => entry.op === "batch")
+          .reduce((count, entry) => count + entry.statements.length, 0);
+        const fenceReads = directD1.filter((entry) =>
+          entry.sql.includes('from "public_visibility_fences"')
+        ).length;
+        const expectedFenceReads =
+          key === "video_cas_conflict_rolls_back_and_compensates" ? 2 : 1;
+        assert.equal(fenceReads, expectedFenceReads,
+          `${key}: one authoritative fence pre-read per transition; compensation adds one`);
+        assert.ok(directD1.length + batchD1 <= 30,
+          `${key}: synthetic D1 budget exceeded: ${directD1.length} direct + ${batchD1} batched`);
+      }
     }
     const serialized = JSON.stringify(actual, null, 2) + "\n";
     if (process.env.FLAMENODE_UPDATE_GOLDEN === "1" || !existsSync(SNAPSHOT_URL)) {
@@ -730,5 +770,236 @@ if (runTestWithTsx(import.meta.url)) {
     const expected = readFileSync(SNAPSHOT_URL, "utf8");
     assert.equal(serialized, expected);
     assert.equal(Object.keys(actual).length, scenarios.length);
+  });
+
+  test("SEC-717: event/video restore compensation logs no nested provider canary", async () => {
+    const secret = "SEC717_PRIVATE_PROVIDER_CANARY";
+    const scenariosWithCompensationFailure = [
+      ["event", {
+        arrange: arrangeEvent("evt-1", { beforePatch: { visibility_status: "private" } }),
+        hooks: { beforeBatch: raceEvent },
+        bucket: { failGetsAfterRollback: true, secretOnFailure: secret },
+      }],
+      ["video", {
+        setup: seedVideoWithEvents(),
+        arrange: arrangeVideo(videoPublicToPrivate),
+        hooks: { beforeBatch: raceVideo },
+        bucket: { failGetsAfterRollback: true, secretOnFailure: secret },
+      }],
+    ];
+    for (const [entityType, spec] of scenariosWithCompensationFailure) {
+      const [, result] = await runScenario(`secret_compensation_${entityType}`, spec);
+      const warnings = result.log.filter((entry) =>
+        entry.op === "console.warn" &&
+        entry.args[0] === "[audit-restore] visibility compensation failed"
+      );
+      assert.equal(warnings.length, 1, `${entityType}: exactly one fixed-code warning`);
+      assert.deepEqual(warnings[0].args,
+        ["[audit-restore] visibility compensation failed", "provider_error"]);
+      assert.ok(!JSON.stringify(result).includes(secret),
+        `${entityType}: provider message, cause and nested fields must not escape`);
+      assert.equal(result.outcome.returned?.ok, false,
+        `${entityType}: failed D1 restore remains failed`);
+      assert.equal(result.audit_restore_runs.filter((run) => run.status === "success").length, 0);
+      assert.ok(result.audit_restore_runs.some((run) => run.status === "failed"),
+        `${entityType}: failed restore remains audited`);
+      assert.ok(result.manifest_after?.entities?.some((entry) => entry.entity_type === entityType),
+        `${entityType}: failed compensation leaves the R2 safety block intact`);
+    }
+  });
+
+  test("SEC-717: failed audit-run persistence never logs SQL parameters or restore reason", async () => {
+    const secret = "SEC717_FAILED_RUN_SQL_PARAMETER_PRIVATE_CANARY";
+    const [, result] = await runScenario("failed_run_private_sql_params", {
+      ...withAnn,
+      arrange: arrangeAnn(staleAnn),
+      options: { reason: secret },
+      hooks: {
+        beforeBatch: raceAnn,
+        failRun: /insert into "audit_restore_runs"/i,
+      },
+    });
+    assert.equal(result.outcome.returned?.ok, false,
+      "failed atomic restoration and failed error-run write must not report success");
+    assert.equal(result.audit_restore_runs.length, 0,
+      "injected failed-run write must not create false audit success");
+    const emitted = result.log.filter((entry) => entry.op.startsWith("console."));
+    assert.deepEqual(emitted, [{
+      op: "console.error",
+      args: [JSON.stringify({
+        event: "restore_failure_record_failed",
+        code: "d1_write_failed",
+      })],
+    }], "only the fixed failure event/code is emitted; no user IDs or SQL");
+    assert.ok(!JSON.stringify(emitted).includes(secret),
+      "a Drizzle SQL-parameter error cannot leak the user-supplied restore reason");
+    assert.ok(!JSON.stringify(emitted).includes("aud-1") &&
+      !JSON.stringify(emitted).includes("u-actor"),
+    "audit and actor IDs must not be logged");
+  });
+
+  test("SEC-730: failed D1 mutation never reflects SQL/provider secrets in HTTP or audit rows", async () => {
+    const secret = "SEC730_PRIVATE_SQL_PROVIDER_CANARY";
+    const expectedMessage = "復元を確定できませんでした。変更はロールバックされました。";
+    for (const [entityType, spec] of [
+      ["event", {
+        arrange: arrangeEvent("evt-1", { beforePatch: { visibility_status: "private" } }),
+      }],
+      ["video", {
+        setup: seedVideoWithEvents(),
+        arrange: arrangeVideo(videoPublicToPrivate),
+      }],
+    ]) {
+      const [, result] = await runScenario(`private_mutation_error_${entityType}`, {
+        ...spec,
+        hooks: {
+          beforeBatch: () => {
+            const err = new Error(`Failed query: UPDATE audit_thing; params: ${secret}`);
+            err.cause = new Error(`upstream provider ${secret}`);
+            err.providerDetails = { headers: { authorization: secret } };
+            throw err;
+          },
+        },
+      });
+      assert.equal(result.outcome.returned?.ok, false, entityType);
+      assert.equal(result.outcome.returned?.reason_code, "mutation_failed", entityType);
+      assert.equal(result.outcome.returned?.message, expectedMessage,
+        `${entityType}: unknown SQL errors cannot appear in HTTP responses`);
+      assert.ok(result.audit_restore_runs.some((row) => row.status === "failed"),
+        `${entityType}: failed restore remains audited`);
+      assert.equal(result.audit_restore_runs.filter((row) => row.status === "success").length, 0);
+      assert.ok(!JSON.stringify(result.outcome).includes(secret),
+        `${entityType}: response must not reflect the secret-bearing error`);
+      assert.ok(!JSON.stringify(result.audit_restore_runs).includes(secret),
+        `${entityType}: persisted failure history must not reflect provider metadata`);
+      assert.ok(!JSON.stringify(result.log.filter((entry) =>
+        entry.op.startsWith("console."))).includes(secret),
+      `${entityType}: external console must never contain SQL/provider canaries`);
+    }
+  });
+
+  test("SEC-718: successful video audit restore invalidates all bounded related exports", async () => {
+    const formats = ["v5", "legacy"];
+    const windows = [15, 60, 360, 1440];
+    const expected = ["evt-1", "evt-private"].flatMap((eventId) =>
+      formats.flatMap((format) => windows.map((minutes) =>
+        `https://flamenode.internal/public-json/${encodeURIComponent(
+          `public-event-export:9:${encodeURIComponent(eventId)}:${format}:${minutes}`
+        )}`
+      ))
+    );
+    for (const [label, setup, arrange] of [
+      ["normal", seedVideoWithEvents(), arrangeVideo(videoPublicToPrivate)],
+      ["primary-only", (sqlite) => seedVideo(sqlite), arrangeVideo(videoPublicToPrivate)],
+    ]) {
+      const [, actual] = await runScenario(`video_export_${label}`, { setup, arrange });
+      assert.equal(actual.outcome.returned?.ok, true, label);
+      const urls = actual.log.filter((entry) =>
+        entry.op === "cache.delete" && entry.key.includes("public-event-export%3A")
+      ).map((entry) => entry.key);
+      assert.deepEqual(urls, expected, `${label}: complete v5+legacy x4 for both relation and primary IDs`);
+      assert.equal(new Set(urls).size, 16, `${label}: no duplicate deletions`);
+    }
+
+    const [, rollback] = await runScenario("video_export_failed_commit", {
+      setup: seedVideoWithEvents(),
+      arrange: arrangeVideo(videoPublicToPrivate),
+      hooks: { beforeBatch: raceVideo },
+    });
+    assert.equal(rollback.outcome.returned?.ok, false);
+    assert.equal(rollback.log.filter((entry) =>
+      entry.op === "cache.delete" && entry.key.includes("public-event-export%3A")
+    ).length, 0, "D1 rollback cannot evict committed exports");
+  });
+
+  test("SEC-718: export cache provider failure logs only fixed code and preserves committed video restore", async () => {
+    // Cache API is colo-local and an eviction can fail after an irreversible
+    // D1 restore commit. This regression pins the best-effort boundary and
+    // proves provider exceptions cannot leak nested credentials into logs.
+    const secret = "SEC718_PRIVATE_CACHE_PROVIDER_CANARY";
+    const [, result] = await runScenario("video_export_provider_failure", {
+      setup: seedVideoWithEvents(),
+      arrange: arrangeVideo(videoPublicToPrivate),
+      caches: cacheRecorder({
+        errorOn(key) {
+          if (!key.includes("public-event-export%3A")) return null;
+          const error = new Error(`cache provider failure ${secret}`);
+          error.cause = new Error(`upstream ${secret}`);
+          error.providerDetails = { headers: { authorization: secret } };
+          return error;
+        },
+      }),
+    });
+    assert.equal(result.outcome.returned?.ok, true,
+      "a completed D1 commit must not be falsely reported as rolled back");
+    assert.equal(result.audit_restore_runs.filter((row) => row.status === "success").length, 1);
+    assert.equal(result.videos.find((row) => row.id === "vid-1")?.visibility_status,
+      "private", "the restored private state must be durable");
+    // The real CURRENT host calls deletePublicJsonCaches(), which catches
+    // each individual Cache API exception before audit-restoration can see it.
+    // Two event IDs x (v5,legacy) x four windows = 16 fixed-code warnings.
+    const warnings = result.log.filter((entry) =>
+      entry.op === "console.warn" &&
+      entry.args[0] === "[public-cache] cache_api_delete_failed"
+    );
+    assert.equal(warnings.length, 16,
+      "cache failures are logged once per scheduled export key without provider details");
+    for (const warning of warnings) {
+      assert.deepEqual(warning.args, ["[public-cache] cache_api_delete_failed"]);
+    }
+    assert.equal(result.log.filter((entry) =>
+      entry.op === "console.warn" &&
+      entry.args[0] === "[audit-restore] event export invalidation failed"
+    ).length, 0, "inner best-effort cache deletion must not throw to the audit caller");
+    assert.ok(!JSON.stringify(result).includes(secret),
+      "provider message/cause/nested Authorization header must not reach the log or response");
+    assert.ok(result.log.some((entry) =>
+      entry.op === "cache.delete" && entry.key.includes("public-event-export%3A")),
+    "the scheduled export eviction must actually be attempted");
+    assert.ok(result.log.some((entry) =>
+      entry.op === "cache.delete" && !entry.key.includes("public-event-export%3A")),
+    "other public JSON cache evictions must still run");
+  });
+
+  test("SEC-718: dry-run video restore never invalidates related scheduled exports", async () => {
+    const [, result] = await runScenario("video_export_dry_run", {
+      setup: seedVideoWithEvents(),
+      arrange: arrangeVideo(videoPublicToPrivate),
+      options: { dry_run: true },
+    });
+    assert.ok(result.outcome.returned && !result.outcome.threw, "dry-run must return normally");
+    assert.equal(result.log.filter((entry) => entry.op === "cache.delete").length, 0);
+    assert.equal(result.log.filter((entry) => entry.op === "r2.put").length, 0);
+    assert.equal(result.log.filter((entry) => entry.op === "batch").length, 0);
+    assert.equal(result.audit_restore_runs.length, 0, "dry-run cannot persist success/failure");
+  });
+
+  test("SEC-718: eight relations plus new primary must reject nine export targets before writes", async () => {
+    const setup = (sqlite) => {
+      seedVideo(sqlite);
+      insertRow(sqlite, "video_events", { video_id: "vid-1", event_id: "evt-1" });
+      for (let i = 0; i < 7; i += 1) {
+        const id = `evt-extra-${i}`;
+        insertRow(sqlite, "events", {
+          id, title: `Extra Event ${i}`, visibility_status: "public",
+          created_at: 1000, updated_at: 1000,
+        });
+        insertRow(sqlite, "video_events", { video_id: "vid-1", event_id: id });
+      }
+      // The snapshot's old/new primary IDs are evt-private / evt-1.
+      // evt-private is outside the eight video_events relations.
+    };
+    const [, result] = await runScenario("video_export_union_overflow", {
+      setup,
+      arrange: arrangeVideo(videoPublicToPrivate),
+    });
+    assert.equal(result.outcome.returned?.ok, false, "nine distinct export targets must fail closed");
+    assert.equal(result.log.filter((entry) => entry.op === "batch").length, 0,
+      "reject before an atomic mutation");
+    assert.equal(result.log.filter((entry) => entry.op === "r2.put").length, 0,
+      "reject before public visibility precommit");
+    assert.equal(result.log.filter((entry) => entry.op === "cache.delete").length, 0,
+      "never partially invalidate an over-budget target set");
+    assert.ok(result.audit_restore_runs.every((row) => row.status !== "success"));
   });
 }

@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { publicVisibilityFences } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "../db.ts";
@@ -10,6 +11,7 @@ import {
   upsertBlockedEntityInManifest,
   type PublicVisibilityBlockedEntitiesManifest,
   type PublicVisibilityFenceEntityType,
+  type PublicVisibilityFenceState,
 } from "./manifestCore.ts";
 
 /**
@@ -37,12 +39,31 @@ function findManifestEntry(
   );
 }
 
+/** Duplicate manifest keys must not let an earlier matching entry hide a foreign token. */
+function hasForeignManifestToken(
+  manifest: PublicVisibilityBlockedEntitiesManifest,
+  entityType: PublicVisibilityFenceEntityType,
+  entityId: string,
+  fenceToken: string,
+): boolean {
+  return manifest.entities.some(
+    (entry) =>
+      entry.entity_type === entityType &&
+      normalizeEntityId(entityType, entry.entity_id) === entityId &&
+      entry.fence_token !== fenceToken,
+  );
+}
+
 export function buildPublicVisibilityFenceUpsertStatement(
   db: ServerCoreDb,
   input: {
     entityType: PublicVisibilityFenceEntityType;
     entityId: string;
     fenceToken: string;
+    /** Authoritative D1 row observed before R2 precommit. Null means absent. */
+    observedFence: { fenceToken: string; state: PublicVisibilityFenceState } | null;
+    /** Video legacy UPDATE preserved an existing release requirements payload. */
+    preserveRequirementsJsonOnUpdate?: boolean;
     state: "blocked" | "release_pending";
     actorUserId: string;
     reason?: string | null;
@@ -59,20 +80,30 @@ export function buildPublicVisibilityFenceUpsertStatement(
     requested_by_auth_user_id: input.actorUserId,
     updated_at: input.now,
   };
-  return db
-    .insert(publicVisibilityFences)
-    .values({
+  const entityId = normalizeEntityId(input.entityType, input.entityId);
+  // Once an owner was observed, an UPSERT can resurrect its row after a
+  // concurrent DELETE. Use a conditional UPDATE: changed/deleted ownership
+  // yields zero rows and the canonical [1] batch assertion fails closed.
+  if (input.observedFence === null) {
+    return db.insert(publicVisibilityFences).values({
       entity_type: input.entityType,
-      entity_id: normalizeEntityId(input.entityType, input.entityId),
+      entity_id: entityId,
       ...fields,
-    })
-    .onConflictDoUpdate({
-      target: [
-        publicVisibilityFences.entity_type,
-        publicVisibilityFences.entity_id,
-      ],
-      set: fields,
-    });
+    }).onConflictDoNothing();
+  }
+  // Existing video fences can have release requirements. Preserve the legacy
+  // update contract: INSERT explicitly writes NULL, but a guarded UPDATE must
+  // not erase an earlier requirements payload.
+  const updateFields: Partial<typeof fields> = { ...fields };
+  if (input.preserveRequirementsJsonOnUpdate) {
+    delete updateFields.requirements_json;
+  }
+  return db.update(publicVisibilityFences).set(updateFields).where(and(
+    eq(publicVisibilityFences.entity_type, input.entityType),
+    eq(publicVisibilityFences.entity_id, entityId),
+    eq(publicVisibilityFences.fence_token, input.observedFence.fenceToken),
+    eq(publicVisibilityFences.state, input.observedFence.state),
+  ));
 }
 
 export type PublicVisibilityFencePlan<Status> = {
@@ -94,6 +125,8 @@ export async function planPublicVisibilityFenceTransition<Status>(input: {
   previousStatus: Status;
   nextStatus: Status;
   isPublic: (status: Status) => boolean;
+  /** Keep existing video-only requirements when updating an active D1 fence. */
+  preserveRequirementsJsonOnUpdate?: boolean;
   actorUserId: string;
   reason?: string | null;
   now: number;
@@ -131,6 +164,10 @@ export async function planPublicVisibilityFenceTransition<Status>(input: {
         entityType: input.entityType,
         entityId: input.entityId,
         fenceToken,
+        observedFence: existing
+          ? { fenceToken: existing.fence_token, state: existing.state }
+          : null,
+        preserveRequirementsJsonOnUpdate: input.preserveRequirementsJsonOnUpdate,
         state: input.isPublic(input.nextStatus) ? "release_pending" : "blocked",
         actorUserId: input.actorUserId,
         reason: input.reason,
@@ -168,11 +205,15 @@ export async function preCommitPublicVisibilityFence(
     );
   };
   const { manifest, etag } = await host.manifest.read();
+  // A successful initial R2 CAS does not run mutateOnConflict. Reject an
+  // existing foreign token here as well, before trying any PUT.
+  if (hasForeignManifestToken(manifest, input.entityType, entityId, input.fenceToken)) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
   await host.manifest.write(block(manifest), {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
-      const current = findManifestEntry(latest, input.entityType, entityId);
-      if (current && current.fence_token !== input.fenceToken) {
+      if (hasForeignManifestToken(latest, input.entityType, entityId, input.fenceToken)) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       return block(latest);
@@ -182,7 +223,10 @@ export async function preCommitPublicVisibilityFence(
   const { manifest: confirmed } =
     await host.manifest.read();
   const entry = findManifestEntry(confirmed, input.entityType, entityId);
-  if (!entry || entry.fence_token !== input.fenceToken) {
+  if (
+    !entry || entry.fence_token !== input.fenceToken ||
+    hasForeignManifestToken(confirmed, input.entityType, entityId, input.fenceToken)
+  ) {
     throw new Error("public_visibility_fence_token_mismatch");
   }
 }
@@ -216,7 +260,16 @@ export async function compensatePublicVisibilityFenceOnD1Failure(
       input.entityType,
       entityId,
     );
-    if (fence?.fence_token === input.fenceToken) return;
+    // A different canonical D1 writer may have claimed a new active fence
+    // while our earlier R2 precommit still owns the manifest entry. Removing
+    // that entry would expose the entity despite D1 requiring a block. Do not
+    // compensate while ANY authoritative active D1 block/release is present.
+    // Preserve the existing same-token check for released/legacy rows too.
+    if (
+      fence?.fence_token === input.fenceToken ||
+      fence?.state === "blocked" ||
+      fence?.state === "release_pending"
+    ) return;
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const { manifest, etag } =

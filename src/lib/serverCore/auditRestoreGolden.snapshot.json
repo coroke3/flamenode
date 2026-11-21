@@ -4531,7 +4531,7 @@
     "outcome": {
       "returned": {
         "ok": false,
-        "message": "復元を確定できませんでした。変更はロールバックされました: malformed JSON",
+        "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable",
         "restore_run_id": "rst_00000000-0000-4000-8000-000000000003"
@@ -4699,7 +4699,7 @@
           "u-actor",
           "restore because",
           "failed",
-          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
           1760000000
         ]
       }
@@ -4737,7 +4737,7 @@
         "executed_by_user_id": "u-actor",
         "reason": "restore because",
         "status": "failed",
-        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
         "executed_at": 1760000000
       }
     ],
@@ -4871,6 +4871,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -4970,18 +4979,10 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "event",
               "evt-1",
-              "vf_00000000-0000-4000-8000-000000000002",
-              "blocked",
-              "audit_restore_visibility",
-              null,
-              1760000000,
-              null,
-              "u-actor",
-              1760000000,
               "vf_00000000-0000-4000-8000-000000000002",
               "blocked",
               "audit_restore_visibility",
@@ -5452,6 +5453,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-private",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -5551,18 +5561,10 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "event",
               "evt-private",
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "audit_restore_visibility",
-              null,
-              null,
-              1760000000,
-              "u-actor",
-              1760000000,
               "vf_00000000-0000-4000-8000-000000000002",
               "release_pending",
               "audit_restore_visibility",
@@ -6539,6 +6541,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -6637,7 +6648,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -6645,13 +6656,6 @@
               "blocked",
               "audit_restore_visibility",
               null,
-              1760000000,
-              null,
-              "u-actor",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "blocked",
-              "audit_restore_visibility",
               1760000000,
               null,
               "u-actor",
@@ -6774,6 +6778,70 @@
           "requested_at": 1760000000,
           "trace_id": "00000000-0000-4000-8000-000000000021"
         }
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A1440"
       },
       {
         "op": "cache.delete",
@@ -7323,6 +7391,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -7421,7 +7498,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -7429,13 +7506,6 @@
               "release_pending",
               "audit_restore_visibility",
               null,
-              null,
-              1760000000,
-              "u-actor",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "audit_restore_visibility",
               null,
               1760000000,
               "u-actor",
@@ -7558,6 +7628,70 @@
           "requested_at": 1760000000,
           "trace_id": "00000000-0000-4000-8000-000000000021"
         }
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A1440"
       },
       {
         "op": "cache.delete",
@@ -8071,6 +8205,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -8165,7 +8308,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -8173,13 +8316,6 @@
               "release_pending",
               "audit_restore_visibility",
               null,
-              null,
-              1760000000,
-              "u-actor",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "audit_restore_visibility",
               null,
               1760000000,
               "u-actor",
@@ -8302,6 +8438,70 @@
           "requested_at": 1760000000,
           "trace_id": "00000000-0000-4000-8000-000000000021"
         }
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A1440"
       },
       {
         "op": "cache.delete",
@@ -8811,6 +9011,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -8909,7 +9118,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -8917,13 +9126,6 @@
               "release_pending",
               "audit_restore_visibility",
               null,
-              null,
-              1760000000,
-              "u-actor",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "audit_restore_visibility",
               null,
               1760000000,
               "u-actor",
@@ -9046,6 +9248,70 @@
           "requested_at": 1760000000,
           "trace_id": "00000000-0000-4000-8000-000000000021"
         }
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A1440"
       },
       {
         "op": "cache.delete",
@@ -10016,7 +10282,7 @@
     "outcome": {
       "returned": {
         "ok": false,
-        "message": "復元を確定できませんでした。変更はロールバックされました: malformed JSON",
+        "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable",
         "restore_run_id": "rst_00000000-0000-4000-8000-000000000013"
@@ -10051,6 +10317,15 @@
         "sql": "select \"id\", \"title\", \"event_type\", \"explanation\", \"youtube_description_template\", \"required_video_fields_json\", \"icon_url\", \"img_url\", \"accent_color\", \"visibility_status\", \"allow_user_video_event_links\", \"allow_unslotted_posts\", \"allow_user_video_edits\", \"user_video_edit_permission_keys_json\", \"slot_type\", \"slot_visibility_mode\", \"start_time\", \"end_time\", \"entry_start_time\", \"entry_end_time\", \"created_at\", \"updated_at\", \"max_slots_per_video\", \"max_slot_reservation_groups_per_xid\", \"slot_interval_minutes\", \"review_settings\", \"editable_fields\", \"repeat_rules\", \"slot_part_gap_minutes\", \"parts_json\", \"public_api_enabled\" from \"events\" where \"events\".\"id\" = ?",
         "params": [
           "evt-1"
+        ]
+      },
+      {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
         ]
       },
       {
@@ -10153,18 +10428,10 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "event",
               "evt-1",
-              "vf_00000000-0000-4000-8000-000000000002",
-              "blocked",
-              "audit_restore_visibility",
-              null,
-              1760000000,
-              null,
-              "u-actor",
-              1760000000,
               "vf_00000000-0000-4000-8000-000000000002",
               "blocked",
               "audit_restore_visibility",
@@ -10308,7 +10575,7 @@
           "u-actor",
           "restore because",
           "failed",
-          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
           1760000000
         ]
       }
@@ -10351,7 +10618,7 @@
         "executed_by_user_id": "u-actor",
         "reason": "restore because",
         "status": "failed",
-        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
         "executed_at": 1760000000
       }
     ],
@@ -10434,7 +10701,7 @@
     "outcome": {
       "returned": {
         "ok": false,
-        "message": "復元を確定できませんでした。変更はロールバックされました: malformed JSON",
+        "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable",
         "restore_run_id": "rst_00000000-0000-4000-8000-000000000021"
@@ -10477,6 +10744,15 @@
         "params": [
           "vid-1",
           9
+        ]
+      },
+      {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
         ]
       },
       {
@@ -10578,7 +10854,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -10586,13 +10862,6 @@
               "blocked",
               "audit_restore_visibility",
               null,
-              1760000000,
-              null,
-              "u-actor",
-              1760000000,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "blocked",
-              "audit_restore_visibility",
               1760000000,
               null,
               "u-actor",
@@ -10738,7 +11007,7 @@
           "u-actor",
           "restore because",
           "failed",
-          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
           1760000000
         ]
       }
@@ -10781,7 +11050,7 @@
         "executed_by_user_id": "u-actor",
         "reason": "restore because",
         "status": "failed",
-        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
         "executed_at": 1760000000
       }
     ],
@@ -10897,7 +11166,7 @@
     "outcome": {
       "returned": {
         "ok": false,
-        "message": "復元を確定できませんでした。変更はロールバックされました: malformed JSON",
+        "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable",
         "restore_run_id": "rst_00000000-0000-4000-8000-000000000013"
@@ -10932,6 +11201,15 @@
         "sql": "select \"id\", \"title\", \"event_type\", \"explanation\", \"youtube_description_template\", \"required_video_fields_json\", \"icon_url\", \"img_url\", \"accent_color\", \"visibility_status\", \"allow_user_video_event_links\", \"allow_unslotted_posts\", \"allow_user_video_edits\", \"user_video_edit_permission_keys_json\", \"slot_type\", \"slot_visibility_mode\", \"start_time\", \"end_time\", \"entry_start_time\", \"entry_end_time\", \"created_at\", \"updated_at\", \"max_slots_per_video\", \"max_slot_reservation_groups_per_xid\", \"slot_interval_minutes\", \"review_settings\", \"editable_fields\", \"repeat_rules\", \"slot_part_gap_minutes\", \"parts_json\", \"public_api_enabled\" from \"events\" where \"events\".\"id\" = ?",
         "params": [
           "evt-1"
+        ]
+      },
+      {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
         ]
       },
       {
@@ -11034,18 +11312,10 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "event",
               "evt-1",
-              "vf_00000000-0000-4000-8000-000000000002",
-              "blocked",
-              "audit_restore_visibility",
-              null,
-              1760000000,
-              null,
-              "u-actor",
-              1760000000,
               "vf_00000000-0000-4000-8000-000000000002",
               "blocked",
               "audit_restore_visibility",
@@ -11171,10 +11441,7 @@
         "op": "console.warn",
         "args": [
           "[audit-restore] visibility compensation failed",
-          {
-            "error": "r2 get failed",
-            "name": "Error"
-          }
+          "provider_error"
         ]
       },
       {
@@ -11186,7 +11453,7 @@
           "u-actor",
           "restore because",
           "failed",
-          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
           1760000000
         ]
       }
@@ -11237,7 +11504,7 @@
         "executed_by_user_id": "u-actor",
         "reason": "restore because",
         "status": "failed",
-        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+        "error_message": "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
         "executed_at": 1760000000
       }
     ],
@@ -11320,7 +11587,7 @@
     "outcome": {
       "returned": {
         "ok": false,
-        "message": "復元を確定できませんでした。変更はロールバックされました: malformed JSON",
+        "message": "復元を確定できませんでした。変更はロールバックされました。",
         "reason_code": "mutation_failed",
         "restore_status": "restorable"
       }
@@ -11481,14 +11748,14 @@
           "u-actor",
           "restore because",
           "failed",
-          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\"}",
+          "{\"code\":\"mutation_failed\",\"message\":\"復元を確定できませんでした。変更はロールバックされました。\"}",
           1760000000
         ]
       },
       {
         "op": "console.error",
         "args": [
-          "{\"event\":\"restore_failure_record_failed\",\"auditId\":\"aud-1\",\"error\":\"Failed query: insert into \\\"audit_restore_runs\\\" (\\\"id\\\", \\\"audit_log_id\\\", \\\"executed_by_user_id\\\", \\\"reason\\\", \\\"status\\\", \\\"error_message\\\", \\\"executed_at\\\") values (?, ?, ?, ?, ?, ?, ?)\\nparams: rst_00000000-0000-4000-8000-000000000003,aud-1,u-actor,restore because,failed,{\\\"code\\\":\\\"mutation_failed\\\",\\\"message\\\":\\\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\\\"},1760000000\",\"originalError\":\"malformed JSON\"}"
+          "{\"event\":\"restore_failure_record_failed\",\"code\":\"d1_write_failed\"}"
         ]
       }
     ],
@@ -11648,6 +11915,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -11747,18 +12023,10 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "event",
               "evt-1",
-              "vf_00000000-0000-4000-8000-000000000002",
-              "blocked",
-              "audit_restore_visibility",
-              null,
-              1760000000,
-              null,
-              "u-actor",
-              1760000000,
               "vf_00000000-0000-4000-8000-000000000002",
               "blocked",
               "audit_restore_visibility",
@@ -12331,6 +12599,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "r2.get",
         "key": "visibility/blocked-entities.v1.json"
       },
@@ -12430,18 +12707,10 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "event",
               "evt-1",
-              "vf_00000000-0000-4000-8000-000000000002",
-              "blocked",
-              "audit_restore_visibility",
-              null,
-              1760000000,
-              null,
-              "u-actor",
-              1760000000,
               "vf_00000000-0000-4000-8000-000000000002",
               "blocked",
               "audit_restore_visibility",

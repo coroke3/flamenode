@@ -167,6 +167,18 @@ async function persistPermanentRestoreFailure(args: {
   return runId;
 }
 
+/** Only explicitly enumerated invariant codes may be shown to the caller.
+ * Arbitrary Drizzle/provider exceptions can contain SQL parameters, user data
+ * and headers even when they have no token:/secret: prefix.
+ */
+function publicRestoreMutationFailureMessage(error: unknown): string {
+  const prefix = "復元を確定できませんでした。変更はロールバックされました";
+  if (error instanceof Error && error.message === "video_status_rebuild_event_limit_exceeded") {
+    return `${prefix}: video_status_rebuild_event_limit_exceeded`;
+  }
+  return `${prefix}。`;
+}
+
 /**
  * 復元本体、復元履歴、元ログの状態更新、RESTORE 監査ログを単一 D1 batch で確定する。
  * いずれか一つでも失敗した場合は、復元対象を含めて全て rollback される。
@@ -459,11 +471,12 @@ export async function restoreAuditLog(
   let visibilityFenceToken: string | null = null;
   let depublicizedFromPublic = false;
   let publicCacheKeys: string[] = [];
+  let videoExportEventIds: string[] = [];
   try {
     if (log.table_name === "events") {
       const previousStatus = String(current?.visibility_status ?? "");
       const nextStatus = String(target.visibility_status ?? "");
-      const transition = planEventVisibilityTransition({
+      const transition = await planEventVisibilityTransition({
         db,
         eventId: log.target_id,
         previousStatus: previousStatus as "private" | "public",
@@ -530,7 +543,7 @@ export async function restoreAuditLog(
       if (!publicEligibility.ok) {
         throw new Error(publicEligibility.message);
       }
-      const transition = planVideoVisibilityFenceTransition(db, {
+      const transition = await planVideoVisibilityFenceTransition(db, {
         videoId: log.target_id,
         previousStatus: previousStatus as "pending" | "public" | "private" | "voided",
         nextStatus: nextStatus as "pending" | "public" | "private" | "voided",
@@ -595,8 +608,14 @@ export async function restoreAuditLog(
         String(current?.primary_event_id ?? "").trim(),
         String(target.primary_event_id ?? "").trim(),
       ]);
-      for (const eventId of eventIds) {
-        if (!eventId) continue;
+      eventIds.delete("");
+      // The 8-target budget also applies when legacy primary-event fallback
+      // and the before/after primary ID add entries outside video_events.
+      if (eventIds.size > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
+        throw new Error("video_status_rebuild_event_limit_exceeded");
+      }
+      videoExportEventIds = [...eventIds];
+      for (const eventId of videoExportEventIds) {
         for (const key of host.publicCacheKeys.eventObjectKeys(eventId)) {
           cacheKeys.add(key);
         }
@@ -656,10 +675,8 @@ export async function restoreAuditLog(
       staticRebuildWakeSource: visibilityEntity ? "admin" : undefined,
     }, host.loadQueueWakeHost);
   } catch (error) {
-    const message =
-      `復元を確定できませんでした。変更はロールバックされました: ${
-        sanitizeRestoreError(error)
-      }`;
+    // Never reflect an arbitrary SQL/provider exception into the HTTP body.
+    const message = publicRestoreMutationFailureMessage(error);
 
     let failedRunId: string | undefined;
 
@@ -679,8 +696,10 @@ export async function restoreAuditLog(
             allowNonPublicRollback: !depublicizedFromPublic,
           }, host);
         }
-      } catch (compensationError) {
-        console.warn("[audit-restore] visibility compensation failed", compensationError);
+      } catch {
+        // The R2 provider exception may carry credentials or resource metadata.
+        // Keep this outcome observable without logging the exception or its cause.
+        console.warn("[audit-restore] visibility compensation failed", "provider_error");
       }
     }
 
@@ -696,17 +715,14 @@ export async function restoreAuditLog(
           message,
           now,
         });
-    } catch (recordError) {
-      console.error(
-        JSON.stringify({
-          event: "restore_failure_record_failed",
-          auditId,
-          error:
-            sanitizeRestoreError(recordError),
-          originalError:
-            sanitizeRestoreError(error),
-        }),
-      );
+    } catch {
+      // D1/Drizzle errors can embed the full SQL statement, parameters,
+      // restore reason, user IDs and provider metadata. This failure is
+      // observable through a fixed code without ever serializing an Error.
+      console.error(JSON.stringify({
+        event: "restore_failure_record_failed",
+        code: "d1_write_failed",
+      }));
     }
 
     return {
@@ -719,6 +735,19 @@ export async function restoreAuditLog(
     };
   }
 
+  // Invalidate scheduled exports for every affected video relation/primary
+  // after the D1 commit only. Failed/dry-run restores never evict exports.
+  if (log.table_name === "videos") {
+    for (const eventId of videoExportEventIds) {
+      try {
+        await host.invalidateEventExportCache(eventId);
+      } catch {
+        // Match normal video transition fail-soft behavior without leaking
+        // provider errors, identifiers or cached response contents.
+        console.warn("[audit-restore] event export invalidation failed", "provider_error");
+      }
+    }
+  }
   if (publicCacheKeys.length > 0) {
     await host.deletePublicJsonCaches(publicCacheKeys);
   }

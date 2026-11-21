@@ -15,7 +15,7 @@
           "expectedMutationChanges": [
             1
           ],
-          "fenceToken": "vf_00000000-0000-4000-8000-000000000002",
+          "fenceToken": "vf_00000000-0000-4000-8000-000000000001",
           "depublicizedFromPublic": false
         },
         "public_to_public": {
@@ -34,10 +34,19 @@
     },
     "log": [
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "batch",
         "statements": [
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -45,13 +54,6 @@
               "blocked",
               "why",
               null,
-              1760000100,
-              null,
-              "u-actor",
-              1760000100,
-              "vf_00000000-0000-4000-8000-000000000001",
-              "blocked",
-              "why",
               1760000100,
               null,
               "u-actor",
@@ -67,28 +69,31 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "batch",
         "statements": [
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "update \"public_visibility_fences\" set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ? where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ? and \"public_visibility_fences\".\"fence_token\" = ? and \"public_visibility_fences\".\"state\" = ?)",
             "params": [
+              "vf_00000000-0000-4000-8000-000000000001",
+              "release_pending",
+              "why",
+              null,
+              1760000100,
+              "u-actor",
+              1760000100,
               "video",
               "vid-1",
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "why",
-              null,
-              null,
-              1760000100,
-              "u-actor",
-              1760000100,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "why",
-              null,
-              1760000100,
-              "u-actor",
-              1760000100
+              "vf_00000000-0000-4000-8000-000000000001",
+              "blocked"
             ]
           }
         ]
@@ -105,7 +110,7 @@
       {
         "entity_type": "video",
         "entity_id": "vid-1",
-        "fence_token": "vf_00000000-0000-4000-8000-000000000002",
+        "fence_token": "vf_00000000-0000-4000-8000-000000000001",
         "state": "release_pending",
         "reason": "why",
         "requirements_json": null,
@@ -281,6 +286,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "batch",
         "statements": [
           {
@@ -307,7 +321,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -315,13 +329,6 @@
               "blocked",
               "takedown",
               null,
-              1760000100,
-              null,
-              "u-actor",
-              1760000100,
-              "vf_00000000-0000-4000-8000-000000000001",
-              "blocked",
-              "takedown",
               1760000100,
               null,
               "u-actor",
@@ -644,6 +651,15 @@
       },
       {
         "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
+        "op": "d1",
         "sql": "select \"id\", \"is_notification_enabled\" from \"user\" where \"user\".\"id\" = ? limit ?",
         "params": [
           "u-recipient",
@@ -686,20 +702,13 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
               "vf_00000000-0000-4000-8000-000000000001",
               "release_pending",
               null,
-              null,
-              null,
-              1760000100,
-              "u-actor",
-              1760000100,
-              "vf_00000000-0000-4000-8000-000000000001",
-              "release_pending",
               null,
               null,
               1760000100,
@@ -1010,6 +1019,15 @@
       },
       {
         "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
+        "op": "d1",
         "sql": "select \"id\", \"is_notification_enabled\" from \"user\" where \"user\".\"id\" = ? limit ?",
         "params": [
           "u-recipient",
@@ -1054,7 +1072,7 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
@@ -1062,13 +1080,6 @@
               "blocked",
               "rights",
               null,
-              1760000100,
-              null,
-              "u-actor",
-              1760000100,
-              "vf_00000000-0000-4000-8000-000000000001",
-              "blocked",
-              "rights",
               1760000100,
               null,
               "u-actor",
@@ -1426,6 +1437,15 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "video",
+          "vid-1",
+          1
+        ]
+      },
+      {
         "op": "batch",
         "statements": [
           {
@@ -1452,20 +1472,13 @@
             ]
           },
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "video",
               "vid-1",
               "vf_00000000-0000-4000-8000-000000000001",
               "blocked",
               null,
-              null,
-              1760000501,
-              null,
-              "u-actor",
-              1760000501,
-              "vf_00000000-0000-4000-8000-000000000001",
-              "blocked",
               null,
               1760000501,
               null,
@@ -3137,7 +3150,7 @@
           "expectedMutationChanges": [
             1
           ],
-          "fenceToken": "vf_00000000-0000-4000-8000-000000000002",
+          "fenceToken": "vf_00000000-0000-4000-8000-000000000001",
           "depublicizedFromPublic": false
         },
         "draft_to_archived": {
@@ -3145,7 +3158,7 @@
           "expectedMutationChanges": [
             1
           ],
-          "fenceToken": "vf_00000000-0000-4000-8000-000000000003",
+          "fenceToken": "vf_00000000-0000-4000-8000-000000000001",
           "depublicizedFromPublic": false
         },
         "unchanged": {
@@ -3158,21 +3171,22 @@
     },
     "log": [
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "batch",
         "statements": [
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "event",
               "evt-1",
-              "vf_00000000-0000-4000-8000-000000000001",
-              "blocked",
-              "r",
-              null,
-              1760000100,
-              null,
-              "u-actor",
-              1760000100,
               "vf_00000000-0000-4000-8000-000000000001",
               "blocked",
               "r",
@@ -3192,29 +3206,32 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "batch",
         "statements": [
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "update \"public_visibility_fences\" set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ? where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ? and \"public_visibility_fences\".\"fence_token\" = ? and \"public_visibility_fences\".\"state\" = ?)",
             "params": [
+              "vf_00000000-0000-4000-8000-000000000001",
+              "release_pending",
+              "r",
+              null,
+              null,
+              1760000100,
+              "u-actor",
+              1760000100,
               "event",
               "evt-1",
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "r",
-              null,
-              null,
-              1760000100,
-              "u-actor",
-              1760000100,
-              "vf_00000000-0000-4000-8000-000000000002",
-              "release_pending",
-              "r",
-              null,
-              null,
-              1760000100,
-              "u-actor",
-              1760000100
+              "vf_00000000-0000-4000-8000-000000000001",
+              "blocked"
             ]
           }
         ]
@@ -3226,29 +3243,32 @@
         ]
       },
       {
+        "op": "d1",
+        "sql": "select \"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\" from \"public_visibility_fences\" where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ?) limit ?",
+        "params": [
+          "event",
+          "evt-1",
+          1
+        ]
+      },
+      {
         "op": "batch",
         "statements": [
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "update \"public_visibility_fences\" set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ? where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ? and \"public_visibility_fences\".\"fence_token\" = ? and \"public_visibility_fences\".\"state\" = ?)",
             "params": [
+              "vf_00000000-0000-4000-8000-000000000001",
+              "blocked",
+              "r",
+              null,
+              1760000100,
+              null,
+              "u-actor",
+              1760000100,
               "event",
               "evt-1",
-              "vf_00000000-0000-4000-8000-000000000003",
-              "blocked",
-              "r",
-              null,
-              1760000100,
-              null,
-              "u-actor",
-              1760000100,
-              "vf_00000000-0000-4000-8000-000000000003",
-              "blocked",
-              "r",
-              null,
-              1760000100,
-              null,
-              "u-actor",
-              1760000100
+              "vf_00000000-0000-4000-8000-000000000001",
+              "release_pending"
             ]
           }
         ]
@@ -3265,7 +3285,7 @@
       {
         "entity_type": "event",
         "entity_id": "evt-1",
-        "fence_token": "vf_00000000-0000-4000-8000-000000000003",
+        "fence_token": "vf_00000000-0000-4000-8000-000000000001",
         "state": "blocked",
         "reason": "r",
         "requirements_json": null,
@@ -3508,6 +3528,13 @@
           "fence_token": "ef_tok",
           "blocked_at": 77,
           "reason": "kept"
+        },
+        "writtenNewEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-new",
+          "fence_token": "ef_tok",
+          "blocked_at": 77,
+          "reason": "kept"
         }
       }
     },
@@ -3567,7 +3594,14 @@
         "oldEventId": "evt-old",
         "newEventId": "evt-new",
         "fenceToken": "ef_tok",
-        "previousOldEntry": null
+        "previousOldEntry": null,
+        "writtenNewEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-new",
+          "fence_token": "ef_tok",
+          "blocked_at": 1760000000,
+          "reason": "rename"
+        }
       }
     },
     "log": [
@@ -3657,7 +3691,14 @@
           "entity_type": "event",
           "entity_id": "evt-old",
           "fence_token": "ef_tok",
-          "blocked_at": 77,
+          "blocked_at": 88,
+          "reason": null
+        },
+        "writtenNewEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-new",
+          "fence_token": "ef_tok",
+          "blocked_at": 88,
           "reason": null
         }
       }
@@ -3740,6 +3781,13 @@
           "fence_token": "ef_prev",
           "blocked_at": 55,
           "reason": "old reason"
+        },
+        "writtenEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-old",
+          "fence_token": "ef_tok",
+          "blocked_at": 55,
+          "reason": "old reason"
         }
       }
     },
@@ -3791,7 +3839,14 @@
       "returned": {
         "eventId": "evt-old",
         "fenceToken": "ef_tok",
-        "previousEntry": null
+        "previousEntry": null,
+        "writtenEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-old",
+          "fence_token": "ef_tok",
+          "blocked_at": 1760000000,
+          "reason": "event_id_rename"
+        }
       }
     },
     "log": [
@@ -3847,7 +3902,20 @@
       "returned": {
         "eventId": "evt-old",
         "fenceToken": "ef_tok",
-        "previousEntry": null
+        "previousEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-old",
+          "fence_token": "ef_x",
+          "blocked_at": 66,
+          "reason": "latest"
+        },
+        "writtenEntry": {
+          "entity_type": "event",
+          "entity_id": "evt-old",
+          "fence_token": "ef_tok",
+          "blocked_at": 66,
+          "reason": "latest"
+        }
       }
     },
     "log": [
@@ -3858,18 +3926,13 @@
       {
         "op": "r2.put",
         "key": "visibility/blocked-entities.v1.json",
-        "value": "{\"schema_version\":1,\"revision\":1,\"generated_at\":1760000000,\"entities\":[{\"entity_type\":\"event\",\"entity_id\":\"evt-old\",\"fence_token\":\"ef_tok\",\"blocked_at\":1760000000,\"reason\":\"event_id_rename\"}]}",
+        "value": "{\"schema_version\":1,\"revision\":2,\"generated_at\":1760000000,\"entities\":[{\"entity_type\":\"event\",\"entity_id\":\"evt-old\",\"fence_token\":\"ef_tok\",\"blocked_at\":55,\"reason\":\"stale\"}]}",
         "options": {
           "httpMetadata": {
             "cacheControl": "no-store"
           },
           "onlyIf": {
-            "headers": [
-              [
-                "if-none-match",
-                "*"
-              ]
-            ]
+            "etagMatches": "etag-seed"
           }
         }
       },
@@ -4856,18 +4919,10 @@
         "op": "batch",
         "statements": [
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "event_group",
               "grp-1",
-              "vf_00000000-0000-4000-8000-000000000001",
-              "blocked",
-              "r",
-              null,
-              1760000100,
-              null,
-              "u-actor",
-              1760000100,
               "vf_00000000-0000-4000-8000-000000000001",
               "blocked",
               "r",
@@ -4899,26 +4954,20 @@
         "op": "batch",
         "statements": [
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "update \"public_visibility_fences\" set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ? where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ? and \"public_visibility_fences\".\"fence_token\" = ? and \"public_visibility_fences\".\"state\" = ?)",
             "params": [
+              "vf_00000000-0000-4000-8000-000000000001",
+              "release_pending",
+              "r",
+              null,
+              null,
+              1760000100,
+              "u-actor",
+              1760000100,
               "event_group",
               "grp-1",
               "vf_00000000-0000-4000-8000-000000000001",
-              "release_pending",
-              "r",
-              null,
-              null,
-              1760000100,
-              "u-actor",
-              1760000100,
-              "vf_00000000-0000-4000-8000-000000000001",
-              "release_pending",
-              "r",
-              null,
-              null,
-              1760000100,
-              "u-actor",
-              1760000100
+              "blocked"
             ]
           }
         ]
@@ -4963,30 +5012,21 @@
           "grp-1",
           1
         ]
-      },
-      {
-        "op": "r2.get",
-        "key": "visibility/blocked-entities.v1.json"
-      },
-      {
-        "op": "r2.put",
-        "key": "visibility/blocked-entities.v1.json",
-        "value": "{\"schema_version\":1,\"revision\":2,\"generated_at\":1760000000,\"entities\":[]}",
-        "options": {
-          "httpMetadata": {
-            "cacheControl": "no-store"
-          },
-          "onlyIf": {
-            "etagMatches": "etag-1"
-          }
-        }
       }
     ],
     "manifest_after": {
       "schema_version": 1,
-      "revision": 2,
+      "revision": 1,
       "generated_at": 1760000000,
-      "entities": []
+      "entities": [
+        {
+          "entity_type": "event_group",
+          "entity_id": "grp-1",
+          "fence_token": "gf_tok",
+          "blocked_at": 1760000000,
+          "reason": "r"
+        }
+      ]
     },
     "public_visibility_fences": [
       {
@@ -5058,18 +5098,10 @@
         "op": "batch",
         "statements": [
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing",
             "params": [
               "x_user",
               "x_creator",
-              "vf_00000000-0000-4000-8000-000000000001",
-              "blocked",
-              "r",
-              null,
-              1760000100,
-              null,
-              "u-actor",
-              1760000100,
               "vf_00000000-0000-4000-8000-000000000001",
               "blocked",
               "r",
@@ -5101,26 +5133,20 @@
         "op": "batch",
         "statements": [
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "update \"public_visibility_fences\" set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ? where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ? and \"public_visibility_fences\".\"fence_token\" = ? and \"public_visibility_fences\".\"state\" = ?)",
             "params": [
+              "vf_00000000-0000-4000-8000-000000000001",
+              "release_pending",
+              "r",
+              null,
+              null,
+              1760000100,
+              "u-actor",
+              1760000100,
               "x_user",
               "x_creator",
               "vf_00000000-0000-4000-8000-000000000001",
-              "release_pending",
-              "r",
-              null,
-              null,
-              1760000100,
-              "u-actor",
-              1760000100,
-              "vf_00000000-0000-4000-8000-000000000001",
-              "release_pending",
-              "r",
-              null,
-              null,
-              1760000100,
-              "u-actor",
-              1760000100
+              "blocked"
             ]
           }
         ]
@@ -5172,26 +5198,20 @@
         "op": "batch",
         "statements": [
           {
-            "sql": "insert into \"public_visibility_fences\" (\"entity_type\", \"entity_id\", \"fence_token\", \"state\", \"reason\", \"requirements_json\", \"blocked_at\", \"release_requested_at\", \"requested_by_auth_user_id\", \"updated_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (\"public_visibility_fences\".\"entity_type\", \"public_visibility_fences\".\"entity_id\") do update set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ?",
+            "sql": "update \"public_visibility_fences\" set \"fence_token\" = ?, \"state\" = ?, \"reason\" = ?, \"requirements_json\" = ?, \"blocked_at\" = ?, \"release_requested_at\" = ?, \"requested_by_auth_user_id\" = ?, \"updated_at\" = ? where (\"public_visibility_fences\".\"entity_type\" = ? and \"public_visibility_fences\".\"entity_id\" = ? and \"public_visibility_fences\".\"fence_token\" = ? and \"public_visibility_fences\".\"state\" = ?)",
             "params": [
+              "xf_existing",
+              "release_pending",
+              "r",
+              null,
+              null,
+              1760000100,
+              "u-actor",
+              1760000100,
               "x_user",
               "x_creator",
               "xf_existing",
-              "release_pending",
-              "r",
-              null,
-              null,
-              1760000100,
-              "u-actor",
-              1760000100,
-              "xf_existing",
-              "release_pending",
-              "r",
-              null,
-              null,
-              1760000100,
-              "u-actor",
-              1760000100
+              "blocked"
             ]
           }
         ]
