@@ -1576,6 +1576,19 @@ test("T04 failed D1 audit restore never evicts event/video public or export cach
       assert.equal(ctx.sqlite.prepare(
         "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'success'",
       ).get().n, 0);
+      assert.equal(ctx.stats.batches, 1,
+        "the injected fault must roll back the single audited D1 batch");
+      assert.equal(ctx.sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM static_rebuild_queue",
+      ).get().n, 0,
+      "a rolled-back event/video restore must not leave any pending rebuild work");
+      assert.equal(ctx.sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM public_visibility_fences",
+      ).get().n, 0, "failed D1 audit batch cannot commit a visibility fence");
+      assert.equal(ctx.sqlite.prepare(
+        "SELECT restore_status FROM audit_logs WHERE id = ?",
+      ).get(scenario.auditId).restore_status, "restorable",
+      "failed D1 restore cannot mark the source audit as restored");
       assert.deepEqual(deletes, [],
         "a rolled-back restore must not invalidate any public JSON or scheduled export cache");
     } finally {
