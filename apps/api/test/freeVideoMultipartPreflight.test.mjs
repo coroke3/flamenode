@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+import { drizzle } from "drizzle-orm/sqlite-proxy";
+import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { events, videos } from "@flamenode/db/schema";
 import { parseVideoForm } from "@flamenode/domain/video";
 import { limitVideoActionBody } from "../src/middleware/bodyLimit.ts";
@@ -306,5 +308,86 @@ test("MIG-0651 U02 D1 read: D1 failures do not leak internal messages or allow w
       ok: false, message: "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。",
     });
     assert.equal(reads.at(-1).kind, kind);
+  }
+});
+
+/** Unlike the earlier mock tests, these exercise the actual migrated SQLite
+ * schema and Drizzle SQL. Only fixture setup can write; the candidate preflight
+ * is explicitly denied access to any SQL mutation.
+ */
+test("MIG-0651 U02 SQLite: event visibility, end-time, required fields and YouTube uniqueness", async () => {
+  const sqlite = createSqlite();
+  const queries = [];
+  const db = drizzle(async (statement, params, method) => {
+    assert.match(statement, /^\\s*(SELECT|WITH)\\b/i, "preflight must be read-only");
+    queries.push({ statement, params });
+    const rows = sqlite.prepare(statement).all(...params).map((row) => Object.values(row));
+    return { rows: method === "get" ? rows[0] : rows };
+  });
+  const now = authenticated().nowSec;
+  const good = dbCandidate();
+  const music = validForm();
+  music.set("music", "Test track");
+  const withMusic = dbCandidate(music);
+  try {
+    insert(sqlite, "events", {
+      id: "event-a", title: "Test public event",
+      visibility_status: "public", allow_unslotted_posts: 1,
+      end_time: now + 3600,
+      required_video_fields_json: JSON.stringify(["music"]),
+    });
+
+    // Active public event is eligible, but its event-specific field is required.
+    let result = await validateFreeVideoDbReadPreflight(db, good, now);
+    assert.deepEqual(result, { ok: false, message: "「使用楽曲」は必須です。" });
+    assert.equal(queries.length, 2, "eligibility and required-fields are two SELECTs");
+
+    queries.length = 0;
+    result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
+    assert.deepEqual(result, { ok: true, value: {
+      youtubeId: "dQw4w9WgXcQ", eventId: "event-a",
+    } });
+    assert.equal(queries.length, 3, "eligible + required + YouTube duplicate");
+    assert.ok(queries.every(({ statement }) => /^\\s*SELECT/i.test(statement)));
+
+    // Even an explicitly enabled event is denied if private.
+    sqlite.prepare("UPDATE events SET visibility_status='private' WHERE id='event-a'").run();
+    queries.length = 0;
+    result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
+    assert.equal(result.ok, false);
+    assert.match(result.message, /枠なし投稿を受け付けていません/);
+    assert.equal(queries.length, 1);
+
+    // A public event with allow_unslotted_posts=0 becomes eligible at end_time.
+    sqlite.prepare("UPDATE events SET visibility_status='public', allow_unslotted_posts=0, end_time=? WHERE id='event-a'").run(now + 1);
+    result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
+    assert.equal(result.ok, false);
+    sqlite.prepare("UPDATE events SET end_time=? WHERE id='event-a'").run(now);
+    result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
+    assert.equal(result.ok, true, "end_time is inclusive at the server-supplied second");
+
+    // Existing non-voided YouTube ID must deny a new video even if unpublished.
+    insert(sqlite, "videos", {
+      id: "existing-video", title: "Existing",
+      creator_display_name: "Creator",
+      submitted_by_user_id: "u_test",
+      youtube_video_id: "dQw4w9WgXcQ",
+      visibility_status: "private",
+      scheduled_time: now, created_at: now,
+    });
+    result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
+    assert.deepEqual(result, { ok: false, message: "このYouTube動画は既に登録されています。" });
+    sqlite.prepare("UPDATE videos SET visibility_status='voided' WHERE id='existing-video'").run();
+    result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
+    assert.equal(result.ok, true, "voided record does not prevent CURRENT duplicate predicate");
+
+    // Unaffiliated free posts skip all event reads.
+    const unlinked = { ...withMusic, requestedEventId: null };
+    queries.length = 0;
+    result = await validateFreeVideoDbReadPreflight(db, unlinked, now);
+    assert.equal(result.ok, true);
+    assert.equal(queries.length, 1, "only YouTube duplicate lookup is required");
+  } finally {
+    sqlite.close();
   }
 });
