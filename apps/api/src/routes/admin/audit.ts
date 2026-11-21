@@ -136,16 +136,27 @@ auditAdminRoutes.post("/dry-run", async (c) => {
   const db = c.get("db");
   const userId = c.get("user")!.id;
 
-  const result = await restoreAuditLog(
-    db,
-    {
-      auditId: parsed.data.audit_id,
-      userId,
-      reason: parsed.data.reason,
-      dry_run: true,
-    },
-    dryRunAuditHost,
-  );
+  // SA-010 is mounted even while the SA-011 mutation candidate is disabled.
+  // An early D1/Drizzle preflight error must never reach Hono's default
+  // error logger with private audit IDs, SQL binds or provider metadata.
+  let result: Awaited<ReturnType<typeof restoreAuditLog>>;
+  try {
+    result = await restoreAuditLog(
+      db,
+      {
+        auditId: parsed.data.audit_id,
+        userId,
+        reason: parsed.data.reason,
+        dry_run: true,
+      },
+      dryRunAuditHost,
+    );
+  } catch {
+    return c.json<AuditLogDryRunResult>(
+      { ok: false, message: "事前確認を完了できませんでした。" },
+      500,
+    );
+  }
 
   return c.json<AuditLogDryRunResult>(
     {
