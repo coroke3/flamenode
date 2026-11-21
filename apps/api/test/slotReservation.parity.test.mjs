@@ -1563,7 +1563,7 @@ if (runUnderRootTsx(import.meta.url)) {
         label: "active X icon",
         table: "x_users", column: "icon_url", idColumn: "id",
         userId: (db) => db.prepare("SELECT active_x_user_id AS id FROM user WHERE id = 'u_owner'").get().id,
-        alias: "x_icon_url", value: "\\u0001".repeat(180_000),
+        alias: "x_icon_url", value: String.fromCharCode(1).repeat(180_000),
       },
       {
         label: "CostGuard disabled feature JSON",
