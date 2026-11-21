@@ -1081,8 +1081,10 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(r.status, 200);
         const ref = await refXLinks("admin");
         assert.deepEqual(r.body, canon(ref), "CURRENT/Hono full signed URL parity");
+        // manageSeed: xr3 targets approved req_i (internal xicons/i.png).
+        // xr9 targets req_c (empty icon) and is intentionally NOT signed.
         const signedIcon = r.body.rows.find((row) =>
-          row.id === "xr9" && row.target_icon_url?.startsWith("/api/media/manage-x-icon/"));
+          row.id === "xr3" && row.target_icon_url?.startsWith("/api/media/manage-x-icon/"));
         assert.ok(signedIcon, "the signed target icon fixture must be present");
         const url = new URL(signedIcon.target_icon_url, "https://x.test");
         const expiresAt = Number(url.searchParams.get("exp"));
