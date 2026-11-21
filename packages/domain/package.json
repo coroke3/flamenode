@@ -17,7 +17,6 @@
     "./auth/permissions/resolver": "./src/auth/permissions/resolver.ts",
     "./video": "./src/video/index.ts",
     "./video/atomicLimits": "./src/video/atomicLimits.ts",
-    "./video/customAnswers": "./src/video/customAnswers.ts",
     "./event": "./src/event/index.ts",
     "./event/limits": "./src/event/limits.ts",
     "./xid": "./src/xid/index.ts",
