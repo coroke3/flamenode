@@ -24,6 +24,8 @@ export interface UnslottedFormRenderInput<
   eventOptions: Event[];
   canEditEvents: false;
   onDraftFlushReady: (flush: () => boolean) => void;
+  /** Required for programmatic child edits that do not fire native change events. */
+  onFormStateChanged: () => void;
   onSubmitSuccess: () => void;
 }
 
@@ -244,6 +246,11 @@ function UnslottedPostShellForIdentity<
     setSelectedEventId(eventId);
   };
 
+  const markFormDirty = React.useCallback(() => {
+    selectionRevisionRef.current += 1;
+    refreshSubmitCallback();
+    setFormDirty(true);
+  }, [refreshSubmitCallback]);
   const selectionRevisionAtRender = selectionRevisionRef.current;
 
   return (
@@ -252,13 +259,8 @@ function UnslottedPostShellForIdentity<
       onChangeCapture={(event) => {
         const target = event.target;
         if (target instanceof HTMLElement && target.closest("form")) {
-          // Editing an existing form after an async submit started creates a
-          // newer draft generation, even if affiliation/event did not change.
-          // Only the submit callback from the latest rendered revision may
-          // clear this shell's local draft.
-          selectionRevisionRef.current += 1;
-          refreshSubmitCallback();
-          setFormDirty(true);
+          // Native form edits invalidate an older in-flight submission.
+          markFormDirty();
         }
       }}
     >
@@ -380,6 +382,16 @@ function UnslottedPostShellForIdentity<
             eventOptions: selectedEventOptions,
             canEditEvents: false,
             onDraftFlushReady: handleVideoDraftFlushReady,
+            onFormStateChanged: () => {
+              // CURRENT VideoForm updates members and other controlled fields
+              // without necessarily dispatching a DOM form change. Old
+              // unmounted children cannot invalidate the new selection's work.
+              if (selectionRevisionAtRender !== selectionRevisionRef.current) return;
+              if (selectedEvent && !latestEventOptionsRef.current.some(
+                (event) => event.id === selectedEvent.id
+              )) return;
+              markFormDirty();
+            },
             onSubmitSuccess: () => {
               if (selectionRevisionAtRender !== selectionRevisionRef.current) return;
               // The refreshed choices may revoke the event before the effect

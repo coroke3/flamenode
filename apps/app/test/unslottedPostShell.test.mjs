@@ -1169,3 +1169,87 @@ test("U03a ISSUE-703: removing a submitted event from eligible choices preserves
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: programmatic member edits invalidate an earlier in-flight success without native change", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const callbacks = [];
+  function MembersEditor({ args }) {
+    const [count, setCount] = React.useState(0);
+    return React.createElement("form", { "data-form-key": args.formKey },
+      React.createElement("button", { type: "button", onClick: () => {
+        setCount(current => current + 1);
+        args.onFormStateChanged();
+      } }, "add member"),
+      React.createElement("output", { "data-testid": "members" }, String(count)));
+  }
+  const renderVideoForm = args => {
+    callbacks.push(args.onSubmitSuccess);
+    return React.createElement(MembersEditor, { args });
+  };
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({ renderVideoForm }))));
+    await act(async () => selected(container, "none").click());
+    const oldCompletion = callbacks.at(-1);
+    assert.equal(typeof oldCompletion, "function");
+
+    // This button only updates React state, not a native form input.
+    await act(async () => container.querySelector("button").click());
+    assert.equal(container.querySelector('output[data-testid="members"]')?.textContent, "1");
+    const latestCompletion = callbacks.at(-1);
+    assert.notEqual(oldCompletion, latestCompletion);
+
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const retained = dom.window.localStorage.getItem(key);
+    assert.ok(retained, "programmatic-only edits still persist a shell draft");
+
+    await act(async () => oldCompletion());
+    assert.equal(dom.window.localStorage.getItem(key), retained,
+      "old submit success cannot erase a later member edit");
+    await act(async () => latestCompletion());
+    assert.equal(dom.window.localStorage.getItem(key), null,
+      "latest success can still clear the active identity's draft");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
+test("U03a ISSUE-703: stale unmounted programmatic edit callbacks cannot taint a different affiliation", async () => {
+  dom.window.localStorage.clear();
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const callbacks = [];
+  const renderVideoForm = args => {
+    callbacks.push({ success: args.onSubmitSuccess, changed: args.onFormStateChanged });
+    return renderStub(args);
+  };
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({ renderVideoForm }))));
+    await act(async () => selected(container, "none").click());
+    const oldChanged = callbacks.at(-1).changed;
+    assert.equal(typeof oldChanged, "function");
+
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    const currentSuccess = callbacks.at(-1).success;
+
+    // An obsolete child's deferred state update must not mark the new
+    // event-A form dirty or replace its submit-success generation.
+    await act(async () => oldChanged());
+    assert.strictEqual(callbacks.at(-1).success, currentSuccess,
+      "obsolete form callbacks are rejected after an affiliation change");
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
