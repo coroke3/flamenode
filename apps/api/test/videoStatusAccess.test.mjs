@@ -1813,3 +1813,59 @@ test("MIG-0603: unmounted notification DML rechecks recipient and dedupe inside 
     sqlite.close();
   }
 });
+
+
+test("MIG-0603: atomic notice builder rejects malformed or oversized server-owned inputs before D1", () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const valid = {
+      videoId: "v1",
+      prevStatus: "pending",
+      nextStatus: "public",
+      notificationId: "bounded-notice",
+      payloadJson: '{"text":"valid"}',
+      eventId: "evA",
+      createdAt: 1000,
+    };
+    const reject = (field, value, why) => {
+      assert.throws(
+        () => planUnboundAtomicVideoStatusNotificationInsert(db, {
+          ...valid, [field]: value,
+        }),
+        /video_status_atomic_notification_requires_normal_validated_input/,
+        why,
+      );
+    };
+    // Bound both UTF-16 length and UTF-8 bytes. Multibyte legacy text can
+    // otherwise remain below the code-unit limit while exceeding the D1 bind
+    // and notification downstream processing budget.
+    reject("payloadJson", JSON.stringify({ text: "x".repeat(8192) }), "ASCII payload >8KiB");
+    reject("payloadJson", JSON.stringify({ text: "　".repeat(3000) }), "multibyte payload >8KiB");
+    for (const invalid of ["{bad json", "[]", "null", "1", '"string"']) {
+      reject("payloadJson", invalid, "only a valid JSON object is an outbox payload");
+    }
+    reject("videoId", "v".repeat(129), "target status ID is bounded at 128");
+    reject("notificationId", "n".repeat(129), "generated notice ID is bounded at 128");
+    reject("eventId", "e".repeat(4097), "legacy event ID has a 4096-byte cap");
+    reject("eventId", "界".repeat(1500), "UTF-8 event ID byte bound must be enforced");
+
+    // The exact 8KiB JSON boundary is valid, as are the normal UUID and
+    // nullable event ID variants. Planning MUST NOT execute a D1 statement.
+    const exact = JSON.stringify({ x: "a".repeat(8192 - 8) });
+    assert.equal(Buffer.byteLength(exact, "utf8"), 8192);
+    const initial = d1.stats.statements;
+    const planned = planUnboundAtomicVideoStatusNotificationInsert(db, {
+      ...valid, payloadJson: exact, notificationId: "n".repeat(128),
+      eventId: null,
+    });
+    assert.equal(typeof planned.getSQL, "function");
+    assert.equal(d1.stats.statements, initial, "planning cannot run extra D1 pre-reads");
+    assert.equal(d1.stats.writes, 0);
+    assert.equal(d1.stats.batches, 0);
+  } finally {
+    sqlite.close();
+  }
+});
