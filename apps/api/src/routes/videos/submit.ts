@@ -13,6 +13,7 @@
 import {
   parseVideoForm,
   validateSubmissionCustomAnswers,
+  type SubmissionCustomAnswerDraft,
   extractYoutubeId,
   firstMissingRequiredVideoField,
   missingRequiredVideoFieldMessage,
@@ -176,9 +177,7 @@ export async function validateFreeVideoSubmissionReadPreflight(
   | { ok: true; value: {
       youtubeId: string;
       eventId: string | null;
-      customAnswerDrafts: ReturnType<typeof validateSubmissionCustomAnswers> extends infer T
-        ? Extract<T, { ok: true }>["drafts"]
-        : never;
+      customAnswerDrafts: SubmissionCustomAnswerDraft[];
     } }
 > {
   const base = await validateFreeVideoDbReadPreflight(db, input, nowSec);
