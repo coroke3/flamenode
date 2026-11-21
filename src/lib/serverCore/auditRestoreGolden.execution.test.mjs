@@ -845,6 +845,59 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(dryRun.log.filter((entry) => entry.op === "r2.put").length, 0);
   });
 
+  test("SEC-731: restored primary outside eight relations fails closed; exactly eight unique events succeed", async () => {
+    const specForRelationCount = (count) => ({
+      setup: (sqlite) => {
+        seedVideo(sqlite);
+        insertRow(sqlite, "video_events", { video_id: "vid-1", event_id: "evt-1" });
+        for (let i = 1; i < count; i += 1) {
+          const eventId = `evt-extra-${i}`;
+          insertRow(sqlite, "events", {
+            id: eventId, title: `Extra ${i}`, visibility_status: "public",
+            created_at: 1000, updated_at: 1000,
+          });
+          insertRow(sqlite, "video_events", { video_id: "vid-1", event_id: eventId });
+        }
+      },
+      arrange: arrangeVideo({
+        beforePatch: { visibility_status: "private", primary_event_id: "evt-private" },
+      }),
+    });
+    const [, atLimit] = await runScenario("sec731_eight_unique_targets", specForRelationCount(7));
+    assert.equal(atLimit.outcome.returned?.ok, true,
+      "seven related events plus the restored primary must fit the eight-event cap");
+    assert.equal(atLimit.log.filter((entry) => entry.op === "d1").length, 8,
+      "checking the union of parent events must not add a D1 pre-read");
+    assert.equal(atLimit.log.filter((entry) => entry.op === "batch").length, 1,
+      "the successful restore and rebuild fanout must share one atomic batch");
+    const eventTargets = atLimit.static_rebuild_queue
+      .filter((row) => row.target_type === "event_base" || row.target_type === "event_release");
+    assert.equal(eventTargets.length, 16,
+      "all eight distinct event parents must have both rebuild target types");
+    assert.equal(new Set(eventTargets.map((row) => `${row.target_type}:${row.target_id}`)).size, 16,
+      "no event-target duplicates may consume the bounded queue");
+    const scheduledExportDeletes = atLimit.log.filter((entry) =>
+      entry.op === "cache.delete" && entry.key.includes("public-event-export%3A"));
+    assert.equal(scheduledExportDeletes.length, 64,
+      "eight parents × two export formats × four cache buckets must all be evicted");
+    assert.equal(new Set(scheduledExportDeletes.map((entry) => entry.key)).size, 64);
+
+    const [, overLimit] = await runScenario("sec731_ninth_restored_parent", specForRelationCount(8));
+    assert.equal(overLimit.outcome.returned?.ok, false,
+      "eight related events plus a different restored primary must be rejected");
+    assert.equal(overLimit.outcome.returned?.reason_code, "mutation_failed");
+    assert.match(overLimit.outcome.returned?.message ?? "",
+      /video_status_rebuild_event_limit_exceeded/);
+    assert.equal(overLimit.static_rebuild_queue.length, 0,
+      "over-limit fanout must leave the queue entirely untouched");
+    assert.equal(overLimit.log.filter((entry) => entry.op === "batch").length, 0,
+      "an over-limit restore must never begin the atomic mutation");
+    assert.equal(overLimit.log.filter((entry) => entry.op === "r2.put").length, 0,
+      "an over-limit restore must not write the visibility fence");
+    assert.equal(overLimit.log.filter((entry) => entry.op === "cache.delete").length, 0,
+      "failed restore must not evict any public event export");
+  });
+
   test("SEC-730: adapter mutation-build exceptions never expose SQL/provider data", async () => {
     const secret = "SEC730_BUILD_SQL_PARAMETER_PRIVATE_CANARY";
     const adapter = getAdapter("announcements");
