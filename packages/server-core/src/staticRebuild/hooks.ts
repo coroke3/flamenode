@@ -432,6 +432,8 @@ export function buildAfterVideoStatusChangeQueueBatch(
     videoId: string;
     eventIds: string[];
     creatorXUserId?: string | null;
+    /** Audit restoration may change the creator: rebuild both previous and restored profiles. */
+    additionalCreatorXUserIds?: readonly string[];
     primaryEventId?: string | null;
     requestedByUserId?: string | null;
   },
@@ -481,6 +483,17 @@ export function buildAfterVideoStatusChangeQueueBatch(
   for (const eventId of eventIds) {
     items.push(eventBaseTarget(eventId, "video_update", undefined, opts.requestedByUserId));
     items.push(eventReleaseTarget(eventId, "video_update", undefined, opts.requestedByUserId));
+  }
+  // Keep additional creator rebuilds in the same D1 mutation batch. The
+  // single queue builder deduplicates active targets without any D1 pre-read.
+  // Existing video status callers pass no additions and retain their fanout.
+  const additionalCreatorIds = [...new Set(opts.additionalCreatorXUserIds ?? [])]
+    .filter((id) => id.length > 0 && id !== opts.creatorXUserId);
+  for (const creatorId of additionalCreatorIds) {
+    items.push({ targetType: "user", targetId: creatorId, reason: "video_update" });
+  }
+  if (additionalCreatorIds.length > 0 && !opts.creatorXUserId) {
+    items.push(usersIndexTarget("video_update"));
   }
   return buildStaticRebuildQueueBatch(db, items);
 }
