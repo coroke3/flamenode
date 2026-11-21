@@ -897,6 +897,53 @@ test("T03 #730 unregistered audit table cannot echo stored canary over authentic
     "unsupported targets cannot change the real source row");
 });
 
+// SA-010 is an already mounted read-only preflight, unlike the gated SA-011
+// mutation candidate. Test it with the candidate explicitly disabled so
+// SOURCE-to-HTTP name exposure cannot be hidden by the release gate.
+test("T03 #730 mounted dry-run hides unregistered stored table and never mutates", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true, enableRestoreCandidate: false });
+  seedRestorableAnnouncement(ctx.sqlite);
+  const canary = "SA010_STORED_TABLE_PRIVATE_CANARY params: do-not-echo";
+  ctx.sqlite.prepare("UPDATE audit_logs SET table_name = ? WHERE id = 'audit-1'")
+    .run("unregistered_" + canary);
+  const response = await ctx.request(
+    { audit_id: "audit-1", reason: "audit preflight only" },
+    { Origin: SITE, Cookie: `__Secure-authjs.session-token=${SQLITE_AUTH_SESSION_TOKEN}` },
+    {}, "/api/admin/audit/dry-run",
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  const json = await response.json();
+  assert.deepEqual(json, { ok: false, message: "復元アダプターが見つかりません。" },
+    "no table name, SQL parameters or sensitive diagnostics in mounted dry-run");
+  assert.equal(JSON.stringify(json).includes(canary), false);
+  assert.equal(ctx.stats.batches, 0, "dry-run is strictly read-only");
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM audit_restore_runs",
+  ).get().n, 0);
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT restore_status FROM audit_logs WHERE id = 'audit-1'",
+  ).get().restore_status, "restorable");
+  assert.equal(changes(ctx.sqlite).row.title, "Current Title");
+
+  // An ordinary supported audit must continue to return the full CURRENT
+  // dry-run difference and normal domain message, not a blanket generic text.
+  ctx.sqlite.prepare("UPDATE audit_logs SET table_name = 'announcements' WHERE id = 'audit-1'")
+    .run();
+  const positive = await ctx.request(
+    { audit_id: "audit-1", reason: "audit preflight only" },
+    { Origin: SITE, Cookie: `__Secure-authjs.session-token=${SQLITE_AUTH_SESSION_TOKEN}` },
+    {}, "/api/admin/audit/dry-run",
+  );
+  assert.equal(positive.status, 200);
+  const normal = await positive.json();
+  assert.equal(normal.ok, true);
+  assert.equal(normal.message, "競合なし。復元可能です。");
+  assert.equal(normal.diff?.current?.title, "Current Title");
+  assert.equal(normal.diff?.target?.title, "Old Title");
+  assert.equal(ctx.stats.batches, 0);
+});
+
 test("T03 missing audit log matches CURRENT 200 ok:false and no restore row", async () => {
   const ctx = setup();
   const res = await ctx.request({ audit_id: "missing", reason: "test", confirm_text: "RESTORE missing" });

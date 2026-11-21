@@ -175,10 +175,14 @@ auditAdminRoutes.post("/dry-run", async (c) => {
     );
   }
 
+  // #730: SA-010 is mounted even when SA-011 stays unmounted. An
+  // unregistered audit_logs.table_name is interpolated into the shared-core
+  // adapter_missing message; never reflect this database-sourced string on
+  // either privileged endpoint. Preserve normal dry-run diffs and conflicts.
   return c.json<AuditLogDryRunResult>(
     {
       ok: result.ok,
-      message: result.message,
+      message: safeAuditRestoreFailureMessage(result),
       diff: result.diff,
     },
     200,
