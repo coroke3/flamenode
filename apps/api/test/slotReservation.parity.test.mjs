@@ -549,10 +549,57 @@ if (runUnderRootTsx(import.meta.url)) {
       const w = world();
       w.sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?')
         .run(bad, "u_owner");
-      await expectMalformedReservationRejected(w, "u_owner", (raw) => {
-        assert.equal(raw.actor_json, '{"__invalid_projection":1}');
-        assert.equal(raw.actor_json.includes(bad), false);
-      });
+      if (label === "180K after leading NUL") {
+        // The new fused guard now rejects this oversized selected ID BEFORE
+        // the slot snapshot is queried. The old first-slot-row expectation
+        // cannot remain unconditional: 0 slot reads is strictly safer.
+        let gateReads = 0;
+        const prepare = w.d1.prepare.bind(w.d1);
+        w.d1.prepare = (sql) => {
+          const stmt = prepare(sql);
+          if (!sql.includes("AS invalid_gate_snapshot")) return stmt;
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...args) => {
+            const bound = bind(...args);
+            const first = bound.first.bind(bound);
+            bound.first = async () => {
+              const raw = await first();
+              gateReads += 1;
+              assert.equal(raw?.invalid_gate_snapshot, 1);
+              assert.equal(raw?.active_x_user_id, null,
+                "oversized selected ID never enters the fused D1 result");
+              assert.doesNotMatch(JSON.stringify(raw), /x{1000}/);
+              assert.ok(Buffer.byteLength(JSON.stringify(raw)) < 64 * 1024,
+                "fused guard first-row D1 wire bound");
+              return raw;
+            };
+            return bound;
+          };
+          return stmt;
+        };
+        const originalState = state(w);
+        const beforeReads = w.d1.stats.reads;
+        const beforeBatches = w.d1.stats.batches;
+        const response = await runHono(w, "u_owner", "reserve", {
+          eventId: "ev1", slot_id: "s01", display_name: "Safe", consecutive_count: 1,
+        });
+        assert.equal(gateReads, 1);
+        assert.equal(w.d1.stats.reads - beforeReads, 1,
+          "fake-session route stops at fused gate, before the slot snapshot");
+        assert.equal(response.status, 503);
+        assert.equal(response.result?.reason, "db_unavailable");
+        assert.equal(response.cacheControl, "private, no-store");
+        assert.equal(response.wakes.length, 0);
+        assert.equal(w.d1.stats.batches, beforeBatches);
+        assert.deepEqual(state(w), originalState);
+      } else {
+        // Short embedded NUL is within the gate's byte cap, but the slot
+        // snapshot's identity validator must still reject it.
+        await expectMalformedReservationRejected(w, "u_owner", (raw) => {
+          assert.equal(raw.actor_json, '{"__invalid_projection":1}');
+          assert.equal(raw.actor_json.includes(bad), false);
+        });
+      }
     });
 
     test("SEC #716: approved linked X (" + label + ") fails closed without auth truncation", async () => {
