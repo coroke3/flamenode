@@ -12,6 +12,7 @@
  */
 import {
   parseVideoForm,
+  validateSubmissionCustomAnswers,
   extractYoutubeId,
   firstMissingRequiredVideoField,
   missingRequiredVideoFieldMessage,
@@ -27,6 +28,7 @@ import type { ServerCoreDb } from "@flamenode/server-core/db";
 import { resolveUnslottedEventIdForNewVideo } from "@flamenode/server-core/video/unslottedEventEligibility";
 import { loadUnionRequiredVideoFields } from "@flamenode/server-core/video/requiredVideoFields";
 import { checkYoutubeVideoDuplicate } from "@flamenode/server-core/video/youtubeDuplicate";
+import { loadGeneralCustomQuestionsForFreeVideo } from "@flamenode/server-core/video/freeVideoCustomQuestionRead";
 
 const BAD_FORM_MESSAGE = "投稿フォームの入力が不正です。";
 
@@ -45,6 +47,7 @@ export async function readFreeVideoMultipartPreflight(
       memberSubmission: Extract<ReturnType<typeof validateFreeVideoMultipartPreflight>, { ok: true }>["value"]["memberSubmission"];
       scheduledTime: number;
       videoForm: VideoFormData;
+      formData: FormData;
     } }
 > {
   const contentType = c.req.header("content-type")?.trim() ?? "";
@@ -76,7 +79,7 @@ export async function readFreeVideoMultipartPreflight(
   if (!preflight.ok) return preflight;
   return {
     ok: true,
-    value: { ...preflight.value, videoForm: parsed.data },
+    value: { ...preflight.value, videoForm: parsed.data, formData },
   };
 }
 
@@ -154,4 +157,42 @@ export async function validateFreeVideoDbReadPreflight(
     };
   }
   return { ok: true, value: { youtubeId, eventId } };
+}
+
+
+/**
+ * Complete read-only candidate for SA-086. Composes the existing transport,
+ * event, required-field and duplicate checks with CURRENT-compatible general
+ * custom-question/answer validation. No HTTP route is mounted and a positive
+ * result does NOT grant write authorization; atomic revalidation is still
+ * mandatory before any D1 insert or icon upload.
+ */
+export async function validateFreeVideoSubmissionReadPreflight(
+  db: ServerCoreDb,
+  input: Extract<Awaited<ReturnType<typeof readFreeVideoMultipartPreflight>>, { ok: true }>["value"],
+  nowSec: number,
+): Promise<
+  | { ok: false; message: string }
+  | { ok: true; value: {
+      youtubeId: string;
+      eventId: string | null;
+      customAnswerDrafts: ReturnType<typeof validateSubmissionCustomAnswers> extends infer T
+        ? Extract<T, { ok: true }>["drafts"]
+        : never;
+    } }
+> {
+  const base = await validateFreeVideoDbReadPreflight(db, input, nowSec);
+  if (!base.ok) return base;
+  try {
+    const questions = await loadGeneralCustomQuestionsForFreeVideo(db, base.value.eventId);
+    const custom = validateSubmissionCustomAnswers(input.formData, questions);
+    if (!custom.ok) return custom;
+    return { ok: true, value: { ...base.value, customAnswerDrafts: custom.drafts } };
+  } catch {
+    // A read-limit/schema/D1 failure must stop submission before any writes.
+    return {
+      ok: false,
+      message: "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。",
+    };
+  }
 }
