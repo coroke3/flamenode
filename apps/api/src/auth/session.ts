@@ -233,6 +233,15 @@ export function extractSessionToken(
     .join("");
 }
 
+/**
+ * SEC-713 / MIG-0657 parity: legacy X identity accepts up to 128 Unicode
+ * codepoints (max 512 UTF-8 bytes), not merely 128 ASCII bytes. Check both
+ * limits inside SQLite before the first D1 response; an embedded NUL makes
+ * SQLite length(TEXT) unsafe, so reject it separately.
+ */
+export const MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS = 128;
+export const MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES = 512;
+
 export interface ResolveSessionOptions {
   now?: number;
 }
@@ -271,7 +280,18 @@ export async function resolveSessionUser(
           u."image" AS user_image,
           u."role" AS user_role,
           u."is_banned" AS user_is_banned,
-          u."active_x_user_id" AS user_active_x_user_id
+          CASE WHEN u."active_x_user_id" IS NOT NULL
+            AND (typeof(u."active_x_user_id") <> 'text'
+              OR instr(u."active_x_user_id", char(0)) > 0
+              OR length(u."active_x_user_id") > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS}
+              OR length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES})
+            THEN NULL ELSE u."active_x_user_id" END AS user_active_x_user_id,
+          CASE WHEN u."active_x_user_id" IS NOT NULL
+            AND (typeof(u."active_x_user_id") <> 'text'
+              OR instr(u."active_x_user_id", char(0)) > 0
+              OR length(u."active_x_user_id") > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS}
+              OR length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES})
+            THEN 1 ELSE 0 END AS user_active_x_id_invalid
         FROM "session" s
         INNER JOIN "user" u ON s."userId" = u."id"
         WHERE s."sessionToken" = ?
@@ -287,6 +307,7 @@ export async function resolveSessionUser(
         user_role: string | null;
         user_is_banned: number | null;
         user_active_x_user_id: string | null;
+        user_active_x_id_invalid: number;
       }>();
 
     if (!row) {
@@ -297,6 +318,15 @@ export async function resolveSessionUser(
     const expiresMs = Number(row.session_expires);
     if (isNaN(expiresMs) || expiresMs <= now) {
       return null;
+    }
+
+    // Do not turn a corrupted legacy Active X into a valid-looking null selection.
+    // D1 projects only a valid text value plus a separate invalidity marker.
+    if (row.user_active_x_id_invalid === 1) {
+      // This is malformed persisted identity data, not a failed D1 lookup.
+      // Use a fixed code; never include the selected X ID in diagnostics.
+      console.error("[auth:session] INVALID_ACTIVE_X_ID_VALUE");
+      throw new SessionUnavailableError();
     }
 
     const role =
@@ -313,7 +343,8 @@ export async function resolveSessionUser(
       is_banned: row.user_is_banned === 1 ? 1 : 0,
       active_x_user_id: row.user_active_x_user_id ?? null,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof SessionUnavailableError) throw error;
     // D1/adapter errors may include bound session tokens in their message/stack.
     // Emit a fixed code only; do not serialize the underlying exception.
     console.error("[auth:session] D1_LOOKUP_FAILED");
