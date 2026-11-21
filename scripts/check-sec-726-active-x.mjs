@@ -62,9 +62,12 @@ function main() {
       throw new Error("Unexpected aggregate row count.");
     }
     const raw = rows[0]?.unsafe_selected_legacy_ids;
-    const value = Number(raw);
-    if (raw === undefined || raw === null || raw === "" ||
-        !Number.isSafeInteger(value) || value < 0) {
+    // Number(null), Number(false), Number([]) and Number("  ") all yield 0.
+    // These are NOT valid D1 COUNT(*) results and must never release cutover.
+    const decimalText = typeof raw === "string" && /^(0|[1-9][0-9]*)$/.test(raw);
+    const integerNumber = typeof raw === "number" && Number.isSafeInteger(raw);
+    const value = decimalText || integerNumber ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(value) || value < 0) {
       throw new Error("Invalid aggregate count.");
     }
     // Emit only the aggregate; never log D1 row data, selected IDs or auth tokens.
