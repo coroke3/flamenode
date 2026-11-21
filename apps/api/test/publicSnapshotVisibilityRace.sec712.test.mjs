@@ -187,11 +187,12 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(stale.playlist.items.length, 2, "source artifact must remain unchanged");
   });
 
-  test("SEC-712 Hono route parity: off/observe preserve historical playlist rows with private markers", async (t) => {
-    // Companion #719 filters rows before normalization, but must not silently
-    // change the no-enforcement rollout modes. On <=2 rows a stray filter
-    // removes the *whole* playlist because viewer overlay requires >1 item.
-    // This tests the actual Hono response, not merely the shared helper.
+  test("SEC-712 Hono route: off/observe retain public playlist and avoid post-read HEAD", async (t) => {
+    // Guard off/observe skips the R2 manifest revocation fence; it must not
+    // require an extra HEAD or lose an otherwise-public two-item playlist.
+    // Do NOT assert that explicit status:private rows must be returned:
+    // shared-core #719 intentionally treats those markers as non-public.
+    // This is an HTTP route regression, not merely the shared helper.
     const { app } = await import("../src/app.ts");
     const { createSqlite, createD1, createFakeKv } = await import("./support/publicEventsHarness.mjs");
     const { resetOperationModeCachesForTests } = await import("../src/routes/live/operationMode.ts");
@@ -202,7 +203,7 @@ if (runUnderRootTsx(import.meta.url)) {
       t.after(() => sqlite.close());
       const db = createD1(sqlite);
       const h = fixture();
-      h.playlist.items[1].status = "private";
+      h.playlist.items[1].status = "public";
       const original = structuredClone(h.playlist);
 
       const response = await app.request(
@@ -217,7 +218,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const body = await response.json();
       assert.deepEqual(body.playlistItems.map((row) => row.id),
         ["vid-safe", "vid-revoked"],
-        guardMode + ": absent enforce fence must not silently drop a legacy row");
+        guardMode + ": both explicitly public playlist items remain visible");
       assert.equal(body.playlistLabel, "Event 上映順", guardMode);
       assert.equal(db.stats.statements, 0, "static-only cannot read D1");
       assert.equal(db.stats.writes, 0, "must never write D1");
