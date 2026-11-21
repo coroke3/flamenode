@@ -424,6 +424,45 @@ test("T01 real Auth.js cookie visibility restore missing R2 fails closed before 
   }
 });
 
+// #691: reducing the 9/10 D1 pre-reads must not remove the independent
+// role check inside shared restore core. Simulate a concurrent admin downgrade
+// AFTER Auth.js has accepted the cookie, but BEFORE core reads current role.
+test("T01 #691 mid-request admin role revocation blocks the restore before D1 batch", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true });
+  seedRestorableAnnouncement(ctx.sqlite);
+  const prepare = ctx.db.prepare.bind(ctx.db);
+  let downgraded = false;
+  ctx.db.prepare = (sql) => {
+    const normalized = sql.toLowerCase();
+    if (!downgraded &&
+        normalized.includes('from "user"') &&
+        normalized.includes('"role"') &&
+        !normalized.includes('"session"')) {
+      // An external concurrent admin operation changes the canonical SQLite
+      // user record; this is intentionally not a batch from the restore route.
+      ctx.sqlite.prepare('UPDATE "user" SET role = ? WHERE id = ?')
+        .run("user", ADMIN.id);
+      downgraded = true;
+    }
+    return prepare(sql);
+  };
+  const response = await ctx.request(body());
+  assert.equal(downgraded, true, "downgrade must occur at the shared-core role read");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  const result = await response.json();
+  assert.equal(result.ok, false);
+  assert.match(result.message, /site admin/);
+  assert.equal(ctx.stats.batches, 0, "a revoked admin must never start the restore D1 batch");
+  assert.equal(ctx.sqlite.prepare('SELECT role FROM "user" WHERE id = ?')
+    .get(ADMIN.id).role, "user");
+  assert.equal(changes(ctx.sqlite).row.title, "Current Title");
+  assert.equal(changes(ctx.sqlite).runs.length, 0);
+  assert.equal(changes(ctx.sqlite).restored, "restorable");
+  assert.deepEqual(ctx.readTrace.at(-1).referenced_tables, ["user"],
+    "shared core must independently consult current role after the middleware guard");
+});
+
 test("T01 real Hono session resolver denies expired or role-revoked users before restore", async () => {
   for (const { options, status, expectedReads } of [
     { options: { sessionExpired: true }, status: 401, expectedReads: 1 },
