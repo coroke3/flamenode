@@ -16,6 +16,7 @@ import { readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { gzipSync } from "node:zlib";
 import { runTestWithTsx } from "../testing/runTestWithTsx.mjs";
 
 const SNAPSHOT_URL = new URL("./auditRestoreGolden.snapshot.json", import.meta.url);
@@ -768,6 +769,14 @@ if (runTestWithTsx(import.meta.url)) {
       writeFileSync(SNAPSHOT_URL, serialized);
     }
     const expected = readFileSync(SNAPSHOT_URL, "utf8");
+    if (serialized !== expected) {
+      // Temporary SEC-731 CI diagnostic: capture only changed synthetic fixtures.
+      const baseline = JSON.parse(expected);
+      const changed = Object.fromEntries(Object.entries(actual).filter(([name, value]) =>
+        JSON.stringify(value) !== JSON.stringify(baseline[name])));
+      console.log("SEC731_SNAPSHOT_DIFF_GZIP_BASE64=" +
+        gzipSync(JSON.stringify(changed)).toString("base64"));
+    }
     assert.equal(serialized, expected);
     assert.equal(Object.keys(actual).length, scenarios.length);
   });
