@@ -1304,12 +1304,12 @@ test("T04 video restore queues rebuilds for both old and new event/creator IDs",
     assert.equal(response.headers.get("Cache-Control"), "private, no-store");
     const result = await response.json();
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.deepEqual(ctx.sqlite.prepare(
+    const restored = ctx.sqlite.prepare(
       "SELECT visibility_status, primary_event_id, creator_x_user_id FROM videos WHERE id = 'vid-restore'",
-    ).get(), {
-      visibility_status: "private", primary_event_id: "ev-new",
-      creator_x_user_id: "creator-new",
-    });
+    ).get();
+    assert.equal(restored.visibility_status, "private");
+    assert.equal(restored.primary_event_id, "ev-new");
+    assert.equal(restored.creator_x_user_id, "creator-new");
     assert.equal(ctx.stats.batches, 1, "restore and queue must commit atomically");
     assert.equal(ctx.sqlite.prepare(
       "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'success'",
