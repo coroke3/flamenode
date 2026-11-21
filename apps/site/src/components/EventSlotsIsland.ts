@@ -34,11 +34,16 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
   const [phase, setPhase] = React.useState<SlotsLivePhase>("loading");
   const [live, setLive] = React.useState<LiveSlots | null>(null);
   const [stalePublicNotice, setStalePublicNotice] = React.useState(false);
+  // RH-014 is a snapshot of per-viewer ownership, NOT a permanent claim for
+  // a slot ID. A subsequent RH-020 success can mean that the slot was released
+  // and reserved by another account without changing the public layout.
+  const [viewerRefreshEpoch, setViewerRefreshEpoch] = React.useState(0);
   React.useEffect(() => {
     const controller = new AbortController();
     // Two 30-second polls can overlap. An older RH-020 response must never
     // overwrite the grid after a newer poll has started and completed.
     let latestRequest = 0;
+    let hasSuccessfulPublicRead = false;
     const load = async () => {
       const request = ++latestRequest;
       setNow(Math.floor(Date.now() / 1000));
@@ -48,6 +53,11 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
         setLive(result);
         setPhase("ready");
         setStalePublicNotice(false);
+        // The first public read races the initial private fetch; don't start
+        // two initial overlays. Every *later* successful public poll invalidates
+        // the earlier RH-014 owner badge before re-checking private ownership.
+        if (hasSuccessfulPublicRead) setViewerRefreshEpoch((n) => n + 1);
+        hasSuccessfulPublicRead = true;
       } else {
         // A failed *refresh* preserves the last successfully fetched grid, but
         // must not imply that these slot names/states were just revalidated.
@@ -66,10 +76,13 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
   const model = React.useMemo(() => buildEventSlotsModel(detail, now, phase, live), [detail, now, phase, live]);
   // U03a: private RH-014 read is mounted only for hydration notices; write controls
   // and private slot names remain unmounted until approved MIG-0657 + U03b/U04.
-  // Stable public IDs avoid repeated private re-reads during overlay state renders.
+  // Slot IDs remain public-only. Changing the array identity on a later
+  // successful RH-020 read forces useEventSlotsViewer to discard its old RH-014
+  // owner claims immediately, even when the exact same IDs remain reserved.
+  // Other state rerenders cannot trigger a private fetch loop.
   const publicSlotIds = React.useMemo(
     () => slotLayoutOf(detail).map((slot) => ({ id: slot.id })),
-    [detail],
+    [detail, viewerRefreshEpoch],
   );
   return React.createElement(
     IslandWrapper, null,
@@ -87,7 +100,7 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
         // never label an RH-020 "available" slot as owned, even if the viewer
         // response is stale. No private X ID/name or mutation control is rendered.
         const owned = new Set(
-          viewer.canManageOwnSlots
+          viewer.canManageOwnSlots && !stalePublicNotice && phase === "ready"
             ? viewer.slots.filter((slot) => slot.is_owned_by_viewer).map((slot) => slot.id)
             : [],
         );

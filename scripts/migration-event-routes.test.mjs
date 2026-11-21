@@ -956,6 +956,104 @@ test("MIG-0514 U03b: RH-020 refresh outage shows a stale-data notice without dro
   }
 });
 
+test("MIG-0514 U03b: RH-020 revalidation clears previous viewer ownership for the same slot ID", { skip: skipUi }, async () => {
+  const detail = detailOf("autumn-collab-2026");
+  const props = { detail, builtAt: NOW };
+  const originalFetch = globalThis.fetch;
+  const originalInterval = dom.window.setInterval;
+  const originalClear = dom.window.clearInterval;
+  const timerId = 79_516;
+  let refresh = null;
+  let publicReads = 0;
+  let privateReads = 0;
+  const pendingPrivate = [];
+  dom.window.setInterval = function (fn, delay, ...args) {
+    if (delay === 30_000) {
+      refresh = () => fn(...args);
+      return timerId;
+    }
+    return originalInterval.call(this, fn, delay, ...args);
+  };
+  dom.window.clearInterval = function (id) {
+    if (id === timerId) return;
+    return originalClear.call(this, id);
+  };
+  const overlay = (owned) => ({
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: false, viewerXId: "previous-x", viewerXIdNotice: null,
+    slots: [{ id: "s1", viewer_relation: owned ? "active" : "none",
+      is_owned_by_viewer: owned, x_user_id: owned ? "previous-x" : null }],
+  });
+  globalThis.fetch = (url) => {
+    const path = String(url);
+    if (path.endsWith("/viewer-overlay")) {
+      privateReads++;
+      if (privateReads === 1) return Promise.resolve({
+        ok: true, json: async () => overlay(true),
+      });
+      return new Promise((resolve) => pendingPrivate.push(resolve));
+    }
+    assert.ok(path.startsWith("/api/live/events/"), "only RH-020 can update the public grid");
+    publicReads++;
+    if (publicReads === 2) return Promise.resolve({ ok: false, status: 503 });
+    const name = publicReads === 1 ? "旧利用者の公開枠" : "新利用者の公開枠";
+    return Promise.resolve({ ok: true, json: async () => ({ slots: [
+      { id: "s1", status: "reserved", display_name: name },
+      { id: "s2", status: "available" }, { id: "s3", status: "available" },
+      { id: "s4", status: "available" },
+    ] }) });
+  };
+  const container = mount();
+  let root;
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(h(EventSlotsIsland, props));
+    });
+    await settle();
+    assert.equal(privateReads, 1, "initial public read does not duplicate RH-014");
+    assert.equal(container.querySelectorAll(".sl.mine").length, 1,
+      "initial public taken slot may show a freshly authorized owned badge");
+
+    // The public refresh fails: last-known grid stays visible with an explicit
+    // stale warning, but its old private ownership badge is not trusted.
+    await act(async () => refresh());
+    await settle();
+    assert.ok(text(container).includes("前回取得した枠情報"));
+    assert.equal(container.querySelectorAll(".sl.taken").length, 1);
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0,
+      "stale public data must not imply ongoing slot ownership");
+    assert.equal(privateReads, 1, "a failed RH-020 read does not trigger another private read");
+
+    // The same s1 slot is still publicly reserved but by a different account.
+    // A successful public poll must invalidate the earlier RH-014 immediately,
+    // before the replacement private overlay has completed.
+    await act(async () => refresh());
+    assert.equal(privateReads, 2, "later public success revalidates RH-014");
+    assert.equal(pendingPrivate.length, 1);
+    assert.ok(text(container).includes("新利用者の公開枠"));
+    assert.ok(!text(container).includes("旧利用者の公開枠"));
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0,
+      "old private owner cannot be painted on the new public reservation");
+
+    await act(async () => pendingPrivate.shift()({
+      ok: true, json: async () => overlay(false),
+    }));
+    await settle();
+    assert.equal(container.querySelectorAll(".sl.taken").length, 1);
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0);
+    assert.equal(container.querySelectorAll("button").length, 0,
+      "U03b remains read-only until MIG-0657 is approved");
+  } finally {
+    if (root) await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+    dom.window.setInterval = originalInterval;
+    dom.window.clearInterval = originalClear;
+    container.remove();
+  }
+});
+
 test("MIG-0514 U03b: out-of-order RH-020 refresh cannot roll back newer public slot state", { skip: skipUi }, async () => {
   const detail = detailOf("autumn-collab-2026");
   const props = { detail, builtAt: NOW };
