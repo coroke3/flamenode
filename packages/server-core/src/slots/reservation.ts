@@ -228,20 +228,24 @@ function eventJsonObjectSql(alias: string): string {
 
 function approvedXJsonSql(userIdParamPlaceholder = "?"): string {
   const invalid = invalidSqlText('q."x_user_id"', MAX_LEGACY_X_ID_BYTES);
-  // 6x covers JSON1 escape amplification. Never return a truncated
-  // authorization list; a malformed row produces [null] and forces 503.
-  return `(SELECT CASE
-    WHEN MAX(CASE WHEN ${invalid} THEN 1 ELSE 0 END) = 1 OR
-         COALESCE(SUM(6 * length(CAST(q."x_user_id" AS BLOB)) + 4), 0) > ${MAX_X_ID_JSON_BUDGET_BYTES}
-      THEN json_array(NULL)
-    ELSE json_group_array(q."x_user_id") END
-    FROM (
+  // The separate scalar subqueries matter: SQLite evaluates aggregate
+  // json_group_array() BEFORE a same-SELECT CASE condition. This CTE first
+  // checks raw bytes; only a safe set enters JSON1 at all. No linked identity
+  // is silently skipped. Exactly one auth user binding is preserved.
+  return `(WITH approved_ids AS MATERIALIZED (
       SELECT DISTINCT l."x_user_id" AS "x_user_id"
       FROM "x_user_account_links" l
       INNER JOIN "x_users" x ON x."id" = l."x_user_id"
       WHERE l."auth_user_id" = ${userIdParamPlaceholder} AND x."approval_status" = 'approved'
       LIMIT ${MAX_APPROVED_X_IDS + 1}
-    ) q)`;
+    )
+    SELECT CASE WHEN
+      EXISTS (SELECT 1 FROM approved_ids q WHERE ${invalid}) OR
+      (SELECT COALESCE(SUM(6 * length(CAST(q."x_user_id" AS BLOB)) + 4), 0)
+       FROM approved_ids q) > ${MAX_X_ID_JSON_BUDGET_BYTES}
+      THEN json_array(NULL)
+      ELSE (SELECT json_group_array(q."x_user_id") FROM approved_ids q)
+    END)`;
 }
 
 function staffRowsJsonSql(): string {
@@ -542,10 +546,12 @@ async function loadReserveSnapshot(
       ${boundedReserveActorJsonSql()} AS actor_json,
       ${approvedXJsonSql("?")} AS approved_x_json,
       (SELECT CASE WHEN
-         COALESCE(SUM(6 * COALESCE(length(CAST("requested_x_id" AS BLOB)), 0) + 4), 0)
-           > ${MAX_X_ID_JSON_BUDGET_BYTES}
-           THEN json_array(NULL) ELSE json_group_array("requested_x_id") END
-        FROM pending_list) AS pending_x_json,
+         EXISTS (SELECT 1 FROM pending_list WHERE "requested_x_id" IS NULL) OR
+         (SELECT COALESCE(SUM(6 * length(CAST("requested_x_id" AS BLOB)) + 4), 0)
+          FROM pending_list) > ${MAX_X_ID_JSON_BUDGET_BYTES}
+           THEN json_array(NULL)
+           ELSE (SELECT json_group_array("requested_x_id") FROM pending_list)
+        END) AS pending_x_json,
       ${staffRowsJsonSql()} AS staff_json,
       (SELECT json_group_array(${slotJsonObjectSql("n")}) FROM (
         SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
