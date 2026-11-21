@@ -1,5 +1,6 @@
 // MIG-0662 U01 — provisional, UNMOUNTED Hono audit restore host.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createAuditRestoreHost } from "../src/visibility/auditRestoreHost.ts";
 import { upsertBlockedEntityInManifest } from "@flamenode/server-core/visibility/manifestCore";
@@ -96,6 +97,39 @@ test("U01 public cache key set and event artifact keys match CURRENT", () => {
     "events/example/slots.v1.json",
     "events/example/release.v1.json",
   ]);
+});
+
+
+// The target host cannot import CURRENT's Next.js-only module at runtime.
+// Read the producers' actual public key constants so this regression fails
+// if CURRENT changes a cache identity without updating the Hono invalidator.
+test("U01 audit restore invalidation cache keys follow CURRENT producer definitions", () => {
+  const topSource = readFileSync(
+    new URL("../../../src/lib/publicData/staticTopSectionsCore.ts", import.meta.url),
+    "utf8",
+  );
+  const userSource = readFileSync(
+    new URL("../../../src/lib/publicData/staticUserProfileCore.ts", import.meta.url),
+    "utf8",
+  );
+  const topKeys = [
+    "TOP_RECOMMENDED_OBJECT_KEY",
+    "TOP_LATEST_OBJECT_KEY",
+    "TOP_NOSTALGIC_OBJECT_KEY",
+    "TOP_STATS_OBJECT_KEY",
+  ].map((name) => {
+    const assignment = topSource.split("export const " + name + " = ")[1];
+    const match = assignment?.match(/^["']([^"']+)["']/);
+    assert.ok(match, "CURRENT producer constant must remain discoverable: " + name);
+    return match[1];
+  });
+  const userPagesMatch = userSource.match(
+    /export\\s+const\\s+STATIC_USER_MAX_PAGES\\s*=\\s*(\\d+)/,
+  );
+  assert.ok(userPagesMatch, "CURRENT public user page limit must remain discoverable");
+  const current = host().publicCacheKeys;
+  assert.deepEqual([...current.staticObjectKeys].slice(2), topKeys);
+  assert.equal(current.userMaxPages, Number(userPagesMatch[1]));
 });
 
 test("U01 event export cache invalidation targets 2 formats x 4 windows", async () => {
