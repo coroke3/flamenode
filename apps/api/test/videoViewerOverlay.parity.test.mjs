@@ -912,8 +912,30 @@ if (runUnderRootTsx(import.meta.url)) {
     }, env);
     inspected();
     assert.equal(response.status, 200);
-    assert.equal((await response.json()).activeXId, "alice_x",
-      "null selected X preserves CURRENT single-approved-link fallback");
+    const multiX = await response.json();
+    assert.equal(multiX.activeXId, null,
+      "CURRENT never silently chooses among multiple approved X IDs when selected X is NULL");
+    assert.equal(multiX.viewerXApproved, false);
+    assert.ok(d1.stats.statements <= 3);
+
+    // Exercise the distinct CURRENT fallback case: exactly one approved X.
+    sqlite.prepare(
+      'DELETE FROM "x_user_account_links" WHERE "auth_user_id" = ? AND "x_user_id" <> ?',
+    ).run("u_alice", "alice_x");
+    const approvedCount = sqlite.prepare(
+      `SELECT COUNT(*) AS n FROM "x_user_account_links" l
+       INNER JOIN "x_users" x ON x."id" = l."x_user_id"
+       WHERE l."auth_user_id" = ? AND x."approval_status" = 'approved'`,
+    ).get("u_alice").n;
+    assert.equal(approvedCount, 1, "single-approved-link control must have exactly one X");
+    d1.stats.statements = 0;
+    const onlyXResponse = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(onlyXResponse.status, 200);
+    const singleX = await onlyXResponse.json();
+    assert.equal(singleX.activeXId, "alice_x", "single approved link preserves CURRENT fallback");
+    assert.equal(singleX.viewerXApproved, true);
     assert.ok(d1.stats.statements <= 3);
   });
 
