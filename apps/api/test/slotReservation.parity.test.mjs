@@ -683,15 +683,19 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(response.wakes.length, 0);
   });
 
-  test("SEC #716: SQL accepts 128 UTF-8 bytes but rejects 129 without mutation", async () => {
-    for (const [label, id, invalid] of [
-      ["ASCII128", "a".repeat(128), false],
-      ["UTF8-128", "あ".repeat(42) + "ab", false],
-      ["ASCII129", "a".repeat(129), true],
-      ["UTF8-129", "あ".repeat(43), true],
+  test("SEC #716: legacy X IDs accept 128 Unicode codepoints / 512 UTF-8 bytes but reject 129 codepoints", async () => {
+    for (const [label, id, invalid, utf8Bytes, codepoints] of [
+      ["ASCII128", "a".repeat(128), false, 128, 128],
+      ["UTF8-128bytes", "あ".repeat(42) + "ab", false, 128, 44],
+      ["Japanese128codepoints", "あ".repeat(128), false, 384, 128],
+      ["Emoji128codepoints", "🌀".repeat(128), false, 512, 128],
+      ["ASCII129", "a".repeat(129), true, 129, 129],
+      ["Japanese129codepoints", "あ".repeat(129), true, 387, 129],
+      ["Emoji129codepoints", "🌀".repeat(129), true, 516, 129],
     ]) {
       const w = world();
-      assert.equal(Buffer.byteLength(id, "utf8"), invalid ? 129 : 128, label);
+      assert.equal(Buffer.byteLength(id, "utf8"), utf8Bytes, label);
+      assert.equal(Array.from(id).length, codepoints, label);
       insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
       insert(w.sqlite, "x_user_account_links", {
         x_user_id: id, auth_user_id: "u_owner", link_role: "manager", created_at: 1,
@@ -708,7 +712,7 @@ if (runUnderRootTsx(import.meta.url)) {
           eventId: "ev1", slot_id: "s01", display_name: "Valid " + label, consecutive_count: 1,
         });
         watched();
-        assert.equal(response.status, 200, "valid 128-byte linked X retains normal rights");
+        assert.equal(response.status, 200, "valid <=128 Unicode-codepoint linked X retains CURRENT rights");
         assert.equal(response.wakes.length, 0);
       }
     }
