@@ -636,14 +636,15 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
-  test("SEC #716: exactly 100 short approved links remain authorized and bounded", async () => {
+  test("SEC #716: exactly 100 canonical 20-byte approved links remain authorized and bounded", async () => {
     const w = world();
     let count = w.sqlite.prepare(
       "SELECT COUNT(*) AS n FROM x_user_account_links WHERE auth_user_id = ?",
     ).get("u_owner").n;
     assert.ok(count >= 1 && count < 100);
     for (; count < 100; count++) {
-      const id = "approved_" + String(count);
+      const id = "approved_" + String(count).padStart(11, "0");
+      assert.equal(Buffer.byteLength(id, "utf8"), 20, "exercise the max canonical X handle");
       insert(w.sqlite, "x_users", { id, x_name: id, approval_status: "approved" });
       insert(w.sqlite, "x_user_account_links", {
         x_user_id: id, auth_user_id: "u_owner", link_role: "manager", created_at: 1,
