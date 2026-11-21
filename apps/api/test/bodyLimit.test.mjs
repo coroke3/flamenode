@@ -161,3 +161,43 @@ test("MIG-0651 D-15-3: declared oversized video request and forged zero length f
   assert.equal(malformed.status, 400);
   assert.deepEqual(await malformed.json(), { ok: false, reason: "invalid_body_length" });
 });
+
+
+test("MIG-0651 T05: multipart envelope bytes, not only uploaded file bytes, count toward 8 MiB", async () => {
+  const boundary = "fn-mig0651-test-boundary";
+  const encode = new TextEncoder();
+  const prefix = encode.encode(
+    `--${boundary}\r\nContent-Disposition: form-data; name="icon_file"; filename="icon.png"\r\nContent-Type: image/png\r\n\r\n`,
+  );
+  const suffix = encode.encode(`\r\n--${boundary}--\r\n`);
+  const multipartBody = (totalBytes) => {
+    const body = new Uint8Array(totalBytes);
+    assert.ok(totalBytes > prefix.byteLength + suffix.byteLength);
+    body.set(prefix);
+    body.fill(65, prefix.byteLength, totalBytes - suffix.byteLength);
+    body.set(suffix, totalBytes - suffix.byteLength);
+    return body;
+  };
+  const app = new Hono();
+  app.use("/video", limitVideoActionBody("SA-086"));
+  app.post("/video", async (c) => {
+    const data = await c.req.formData();
+    const file = data.get("icon_file");
+    return c.json({ ok: true, fileBytes: file instanceof File ? file.size : null });
+  });
+  const sendMultipart = (totalBytes) => app.request("http://localhost/video", {
+    method: "POST",
+    headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
+    body: multipartBody(totalBytes),
+  });
+  const exact = await sendMultipart(VIDEO_SUBMISSION_BODY_LIMIT_BYTES);
+  assert.equal(exact.status, 200);
+  assert.deepEqual(await exact.json(), {
+    ok: true,
+    fileBytes: VIDEO_SUBMISSION_BODY_LIMIT_BYTES - prefix.byteLength - suffix.byteLength,
+  });
+  const tooLarge = await sendMultipart(VIDEO_SUBMISSION_BODY_LIMIT_BYTES + 1);
+  assert.equal(tooLarge.status, 413);
+  assert.equal(tooLarge.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await tooLarge.json(), { ok: false, reason: "body_too_large" });
+});
