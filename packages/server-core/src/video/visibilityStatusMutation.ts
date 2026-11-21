@@ -189,6 +189,20 @@ export async function executeVideoVisibilityStatusMutation<DB>(
       }
       throw frameworkControlError;
     }
+    // Compensation can also fail AFTER an ambiguous R2 precommit transport
+    // error. In that case the request may have left a visibility fence behind
+    // even though D1 mutation was never entered. Report the state as unknown,
+    // not an ordinary precommit rejection: no automatic retry or status reread.
+    // This also preserves the existing fail-closed post-D1 CAS behavior.
+    if (compensationFailed) {
+      return {
+        ok: false,
+        message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+        errorCode: "status_unverified",
+        traceId,
+        retryable: false,
+      };
+    }
     if (preCommitInFlight) {
       host.log("error", `[${logTag}] visibility precommit failed`, {
         traceId, error_code: "visibility_precommit_failed",
@@ -197,19 +211,6 @@ export async function executeVideoVisibilityStatusMutation<DB>(
         ok: false,
         message: "公開ブロックの記録に失敗しました。",
         errorCode: "visibility_precommit_failed",
-        traceId,
-        retryable: false,
-      };
-    }
-    // Even if a D1 CAS reread reports the requested status, it cannot prove
-    // public visibility while the R2 fence rollback is unconfirmed. A
-    // retryable conflict or idempotent success would hide a potentially
-    // stranded public block; do not spend another D1 read in that state.
-    if (compensationFailed) {
-      return {
-        ok: false,
-        message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
-        errorCode: "status_unverified",
         traceId,
         retryable: false,
       };

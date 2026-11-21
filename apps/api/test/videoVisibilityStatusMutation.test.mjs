@@ -357,6 +357,59 @@ test("generic R2 precommit transport failure is never retryable or mislabeled as
   }
 });
 
+// Even when the R2 *precommit* throws, it may have written the block before
+// the transport failed. If compensation or persisted readback cannot prove
+// removal, an ordinary visibility_precommit_failed code is misleading: the
+// surviving fence state is unknown and must be reported as such.
+test("R2 precommit uncertainty plus failed compensation returns status_unverified", async () => {
+  const privateMarker = "Authorization:Bearer R2-private-marker SQL=SELECT";
+  for (const phase of ["compensation-throw", "readback-false", "readback-throw"]) {
+    const calls = [];
+    const result = await executeVideoVisibilityStatusMutation({
+      db: {}, videoId: "v-1", requestedStatus: "private",
+      transition: transition(), reason: "moderation",
+      logTag: "admin-video-status",
+    }, host({
+      preCommit: async () => {
+        calls.push("precommit");
+        throw new Error("ambiguous R2 PUT " + privateMarker);
+      },
+      compensate: async (_db, input) => {
+        calls.push("compensate");
+        assert.equal(input.fenceToken, "fence-1");
+        assert.equal(input.allowNonPublicRollback, false);
+        if (phase === "compensation-throw") throw new Error(privateMarker);
+      },
+      confirmCompensation: async () => {
+        calls.push("confirm");
+        if (phase === "readback-throw") throw new Error(privateMarker);
+        return false;
+      },
+      mutate: async () => { calls.push("unexpected-D1-mutate"); },
+      rereadStatus: async () => { calls.push("unexpected-D1-reread"); return "private"; },
+      log: (level, tag, details) => calls.push(["log", level, tag, details]),
+    }, calls));
+    assert.deepEqual(result, {
+      ok: false,
+      message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+      errorCode: "status_unverified",
+      traceId: "trace-1",
+      retryable: false,
+    }, phase);
+    assert.deepEqual(calls.map((x) => Array.isArray(x) ? x[0] : x), [
+      "precommit", "compensate",
+      ...(phase === "compensation-throw" ? [] : ["confirm"]),
+      "log",
+    ], phase + ": never mutate, reread or claim a safe retry");
+    assert.deepEqual(calls.at(-1), [
+      "log", "warn", "[admin-video-status] visibility compensation failed",
+      { traceId: "trace-1", error_code: "visibility_compensation_failed" },
+    ], phase + ": only a fixed safe warning is logged");
+    assert.doesNotMatch(JSON.stringify({ result, calls }), /R2-private-marker|Authorization:Bearer|SQL=SELECT/,
+      phase + ": raw provider metadata is not logged or serialized");
+  }
+});
+
 test("failed R2 fence compensation prevents unsafe retryable D1 CAS response", async () => {
   const calls = [];
   const result = await executeVideoVisibilityStatusMutation({
