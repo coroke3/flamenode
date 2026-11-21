@@ -40,6 +40,12 @@ function parseSlot(value: unknown): SlotViewerOverlaySlot | null {
   if (typeof row.id !== "string" || !row.id) return null;
   if (!["active", "unassigned", "account_other", "none"].includes(String(row.viewer_relation))) return null;
   if (typeof row.is_owned_by_viewer !== "boolean") return null;
+  // CURRENT's resolveSlotViewerRelation/canActAsSlotActor contract: an owned
+  // slot can only be active or unassigned. Never display a private owner badge
+  // from a contradictory (possibly stale) RH-014 row, even if the public slot
+  // still reports reserved. Filter the bad row, not other valid overlay rows.
+  if (row.is_owned_by_viewer && row.viewer_relation !== "active" &&
+      row.viewer_relation !== "unassigned") return null;
   return {
     id: row.id,
     display_name: nullableString(row.display_name),

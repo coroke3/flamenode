@@ -119,6 +119,37 @@ test("U01 RH-014 invalid privilege flags and malformed JSON fail closed", async 
   assert.equal(invalid.calls[0].init.headers.Accept, "application/json");
 });
 
+test("U01 contradictory RH-014 slot actor relation never grants ownership", async () => {
+  const { parseSlotViewerOverlay } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const base = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: false, viewerXId: "active-x", viewerXIdNotice: null,
+  };
+  for (const relation of ["none", "account_other"]) {
+    const result = parseSlotViewerOverlay({ ...base, slots: [
+      { id: "s1", viewer_relation: relation, is_owned_by_viewer: true,
+        group_key: "invalid-ownership" },
+      { id: "s2", viewer_relation: "active", is_owned_by_viewer: true },
+    ] });
+    assert.ok(result, "valid sibling rows keep their UI rights");
+    assert.deepEqual(result.slots.map(s => s.id), ["s2"],
+      `RH-014 ${relation} cannot authorize an owned badge`);
+  }
+  for (const relation of ["active", "unassigned"]) {
+    const result = parseSlotViewerOverlay({ ...base, slots: [
+      { id: "s1", viewer_relation: relation, is_owned_by_viewer: true },
+    ] });
+    assert.equal(result?.slots[0]?.is_owned_by_viewer, true,
+      `CURRENT valid ${relation} owner remains supported`);
+  }
+  const differentAccount = parseSlotViewerOverlay({ ...base, slots: [
+    { id: "s1", viewer_relation: "account_other", is_owned_by_viewer: false },
+  ] });
+  assert.equal(differentAccount?.slots[0]?.is_owned_by_viewer, false,
+    "account_other remains visible as a non-owned relation");
+});
+
 test("U01 viewer overlay RH-014 503/404/network error never grants ownership", async () => {
   const { fetchSlotViewerOverlay } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
   for (const status of [404, 503]) {

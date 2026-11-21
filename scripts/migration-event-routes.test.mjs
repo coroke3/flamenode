@@ -876,6 +876,43 @@ test("MIG-0514 U03a RH-014 outage preserves public grid and denies actions", { s
   await act(async () => root.unmount());
 });
 
+test("MIG-0514 U03a contradictory RH-014 actor relation cannot paint a public owned badge", { skip: skipUi }, async () => {
+  const detail = detailOf("autumn-collab-2026");
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => String(url).endsWith("/viewer-overlay")
+    ? { ok: true, json: async () => ({
+        loggedIn: true, authUnavailable: false, isBanned: false,
+        needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+        operatorOverrideAllowed: false, viewerXId: "current-x", viewerXIdNotice: null,
+        slots: [{ id: "s1", viewer_relation: "account_other", is_owned_by_viewer: true,
+          display_name: "秘密の予約名", group_key: "secret", x_user_id: "other-x" }],
+      }) }
+    : { ok: true, json: async () => ({ slots: [
+        { id: "s1", status: "reserved", display_name: "正しい公開名" },
+        { id: "s2", status: "available" }, { id: "s3", status: "available" },
+        { id: "s4", status: "available" },
+      ] }) };
+  const container = mount();
+  let root;
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(h(EventSlotsIsland, { detail, builtAt: NOW }));
+    });
+    await settle();
+    assert.equal(container.querySelectorAll(".sl.taken").length, 1);
+    assert.ok(text(container).includes("正しい公開名"));
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0,
+      "account_other cannot claim current ownership even with a malformed true flag");
+    assert.ok(!text(container).includes("秘密の予約名"));
+    assert.equal(container.querySelectorAll("button").length, 0);
+  } finally {
+    if (root) await act(async () => root.unmount());
+    globalThis.fetch = previousFetch;
+    container.remove();
+  }
+});
+
 test("MIG-0514 U03b: RH-020 refresh outage shows a stale-data notice without dropping last public grid", { skip: skipUi }, async () => {
   const detail = detailOf("autumn-collab-2026");
   const props = { detail, builtAt: NOW };
