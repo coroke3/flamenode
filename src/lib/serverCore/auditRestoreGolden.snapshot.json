@@ -11755,7 +11755,7 @@
       {
         "op": "console.error",
         "args": [
-          "{\"event\":\"restore_failure_record_failed\",\"auditId\":\"aud-1\",\"error\":\"Failed query: insert into \\\"audit_restore_runs\\\" (\\\"id\\\", \\\"audit_log_id\\\", \\\"executed_by_user_id\\\", \\\"reason\\\", \\\"status\\\", \\\"error_message\\\", \\\"executed_at\\\") values (?, ?, ?, ?, ?, ?, ?)\\nparams: rst_00000000-0000-4000-8000-000000000003,aud-1,u-actor,restore because,failed,{\\\"code\\\":\\\"mutation_failed\\\",\\\"message\\\":\\\"復元を確定できませんでした。変更はロールバックされました: malformed JSON\\\"},1760000000\",\"originalError\":\"malformed JSON\"}"
+          "{\"event\":\"restore_failure_record_failed\",\"code\":\"d1_write_failed\"}"
         ]
       }
     ],

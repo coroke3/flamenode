@@ -808,6 +808,36 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("SEC-717: failed audit-run persistence never logs SQL parameters or restore reason", async () => {
+    const secret = "SEC717_FAILED_RUN_SQL_PARAMETER_PRIVATE_CANARY";
+    const [, result] = await runScenario("failed_run_private_sql_params", {
+      ...withAnn,
+      arrange: arrangeAnn(staleAnn),
+      options: { reason: secret },
+      hooks: {
+        beforeBatch: raceAnn,
+        failRun: /insert into "audit_restore_runs"/i,
+      },
+    });
+    assert.equal(result.outcome.returned?.ok, false,
+      "failed atomic restoration and failed error-run write must not report success");
+    assert.equal(result.audit_restore_runs.length, 0,
+      "injected failed-run write must not create false audit success");
+    const emitted = result.log.filter((entry) => entry.op.startsWith("console."));
+    assert.deepEqual(emitted, [{
+      op: "console.error",
+      args: [JSON.stringify({
+        event: "restore_failure_record_failed",
+        code: "d1_write_failed",
+      })],
+    }], "only the fixed failure event/code is emitted; no user IDs or SQL");
+    assert.ok(!JSON.stringify(emitted).includes(secret),
+      "a Drizzle SQL-parameter error cannot leak the user-supplied restore reason");
+    assert.ok(!JSON.stringify(emitted).includes("aud-1") &&
+      !JSON.stringify(emitted).includes("u-actor"),
+    "audit and actor IDs must not be logged");
+  });
+
   test("SEC-718: successful video audit restore invalidates all bounded related exports", async () => {
     const formats = ["v5", "legacy"];
     const windows = [15, 60, 360, 1440];

@@ -705,17 +705,14 @@ export async function restoreAuditLog(
           message,
           now,
         });
-    } catch (recordError) {
-      console.error(
-        JSON.stringify({
-          event: "restore_failure_record_failed",
-          auditId,
-          error:
-            sanitizeRestoreError(recordError),
-          originalError:
-            sanitizeRestoreError(error),
-        }),
-      );
+    } catch {
+      // D1/Drizzle errors can embed the full SQL statement, parameters,
+      // restore reason, user IDs and provider metadata. This failure is
+      // observable through a fixed code without ever serializing an Error.
+      console.error(JSON.stringify({
+        event: "restore_failure_record_failed",
+        code: "d1_write_failed",
+      }));
     }
 
     return {
