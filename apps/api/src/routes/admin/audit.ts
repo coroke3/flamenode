@@ -149,10 +149,14 @@ auditAdminRoutes.post("/dry-run", async (c) => {
   );
 });
 
-// MIG-0662 SA-011: restore audit snapshot via the same server-core entry as
-// CURRENT. The admin router supplies origin/session/write-identity/CostGuard.
-// Production routing remains CURRENT until the MIG-0603 merge and release gates.
-auditAdminRoutes.post("/restore", async (c) => {
+// MIG-0662 SA-011 remains a candidate, NOT a deployable default route.
+// createAdminRoutes() intentionally does not mount this separate router without
+// an explicit source-level opt-in; the default app.ts route graph cannot execute
+// an unapproved audit restoration even after an accidental target deploy.
+// Parent admin origin/session/write guards apply; local parity tests opt in.
+export const auditRestoreCandidateRoutes = new Hono<AppEnv>();
+auditRestoreCandidateRoutes.use("*", onlyMutating(costGuardMiddleware("admin_permissions")));
+auditRestoreCandidateRoutes.post("/restore", async (c) => {
   // Audit restoration may return sensitive snapshots and conflict diffs.
   // Explicitly prevent HTTP/edge caching on 200, 400 and 413 responses.
   c.header("Cache-Control", "private, no-store");

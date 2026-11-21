@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { getTableColumns } from "drizzle-orm";
 import { videos } from "@flamenode/db/schema";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
+import { app as deployedApiRouter } from "../src/app.ts";
 import { restoreAuditLog } from "@flamenode/server-core/audit/restore";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
@@ -17,7 +18,7 @@ const ADMIN = {
 };
 const RESTORE = "/api/admin/audit/restore";
 
-function setup({ user = ADMIN, role = "admin", disabled = [] } = {}) {
+function setup({ user = ADMIN, role = "admin", disabled = [], enableRestoreCandidate = true } = {}) {
   const { sqlite, db, stats } = createAdminD1();
   seedBase(sqlite, { role });
   if (disabled.length) {
@@ -26,6 +27,7 @@ function setup({ user = ADMIN, role = "admin", disabled = [] } = {}) {
   }
   const app = new Hono();
   app.route("/api/admin", createAdminRoutes({
+    enableAuditRestoreCandidate: enableRestoreCandidate,
     session: async (c, next) => {
       c.set("user", user);
       c.set("sessionState", user ? "user" : "none");
@@ -76,6 +78,28 @@ function changes(sqlite) {
 const body = (extra = {}) => ({
   audit_id: "audit-1", reason: "業務上の監査復元",
   confirm_text: "RESTORE audit-1", ...extra,
+});
+
+test("T00 production/default admin router physically excludes unapproved SA-011 write route", async () => {
+  const isRestore = (r) => r.method === "POST" &&
+    r.path.replace(/\\/$/, "") === RESTORE;
+  assert.equal(
+    deployedApiRouter.routes.filter(isRestore).length, 0,
+    "deployed app.ts must not mount the candidate route",
+  );
+  const ctx = setup({ enableRestoreCandidate: false });
+  seedRestorableAnnouncement(ctx.sqlite);
+  const result = await ctx.request(body());
+  assert.equal(result.status, 404, "default admin routes must not execute SA-011");
+  assert.equal(ctx.stats.batches, 0, "unmounted write cannot commit a D1 batch");
+  assert.equal(changes(ctx.sqlite).row.title, "Current Title");
+  assert.equal(changes(ctx.sqlite).runs.length, 0);
+  const enabled = setup();
+  seedRestorableAnnouncement(enabled.sqlite);
+  const accepted = await enabled.request(body());
+  assert.equal(accepted.status, 200, "isolated test-only opt-in still exercises real candidate");
+  assert.equal((await accepted.json()).ok, true);
+  assert.equal(changes(enabled.sqlite).runs.length, 1);
 });
 
 test("T01 admin origin, session, role and BAN guards reject before any restore write", async () => {
