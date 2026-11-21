@@ -394,7 +394,7 @@ SELECT
       if (userData.invalid_active_x_id === 1 ||
           approvedXIds.length > ACCOUNT_SUMMARY_MAX_X_ROWS ||
           approvedXIds.some((id) => typeof id !== "string" ||
-            id.length > MAX_APPROVED_X_ID_PROJECTION_CHARS)) {
+            Array.from(id).length > MAX_APPROVED_X_ID_PROJECTION_CHARS)) {
         return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
       }
       // CURRENT resolveActiveXUserId: the D1 spelling of the matching approved X id, else the only
