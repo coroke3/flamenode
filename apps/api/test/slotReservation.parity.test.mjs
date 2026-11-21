@@ -637,12 +637,13 @@ if (runUnderRootTsx(import.meta.url)) {
     const w = world();
     w.sqlite.prepare('UPDATE events SET max_slots_per_video = 20 WHERE id = ?').run("ev1");
     // Every individual value is within its SQL cap. The aggregate first
-    // snapshot still exceeds 60KiB due to 20 neighboring rows.
+    // snapshot still exceeds 60KiB due to 20 neighboring rows (JSON
+    // escapes control U+0001 to six output bytes per raw byte).
     for (let i = 1; i <= 20; i++) {
       const id = "s" + String(i).padStart(2, "0");
       w.sqlite.prepare(
         'UPDATE slots SET slot_label = ?, display_name = ? WHERE id = ?',
-      ).run("L".repeat(2048), "D".repeat(512), id);
+      ).run(String.fromCharCode(1).repeat(2048), "D".repeat(512), id);
     }
     let firstReads = 0;
     const prepare = w.d1.prepare.bind(w.d1);
