@@ -91,10 +91,15 @@ auditAdminRoutes.post("/settings", async (c) => {
   try {
     await updateAuditLogSettings(db, userId, parsed.data, auditPreloaded(c));
     return c.json<UpdateAuditLogSettingsResult>({ ok: true }, 200);
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "設定の更新に失敗しました。";
-    return c.json<UpdateAuditLogSettingsResult>({ ok: false, message }, 500);
+  } catch {
+    // A D1/Drizzle failure may contain a full SQL statement, bind values, or
+    // request metadata. CURRENT echoes error.message; migration intentionally
+    // uses a constant error to avoid reflecting private audit parameters.
+    // Keep the existing 500 status and fail-closed atomic update behavior.
+    return c.json<UpdateAuditLogSettingsResult>(
+      { ok: false, message: "設定の更新に失敗しました。" },
+      500,
+    );
   }
 });
 
