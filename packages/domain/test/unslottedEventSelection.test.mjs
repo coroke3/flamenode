@@ -4,6 +4,7 @@ import {
   parseUnslottedEventIdFromForm,
   UnslottedEventSyncError,
   MAX_UNSLOTTED_EVENT_SELECTION_CHARS,
+  validateUniqueUnslottedVideoScalarFields,
 } from "@flamenode/domain/video";
 import {
   parseUnslottedEventIdFromForm as legacyParse,
@@ -100,4 +101,60 @@ test("MIG-0651: bounded event selection input rejects CPU-amplifying comma runs"
   assert.equal(parseUnslottedEventIdFromForm(selection(
     Array(30_000).fill("event-a").join(","),
   )), "event-a");
+});
+
+
+test("MIG-0651 U02: scalar multipart preflight is last/first-wins ambiguity safe", () => {
+  const keys = [
+    "active_x_snapshot", "scheduled_time", "youtube_url", "display_name",
+    "creator_x_user_id", "icon_mode", "icon_url", "icon_file",
+    "profile_text", "youtube_channel_url", "other_social_links",
+    "title", "music", "music_reference_url", "credit", "intro_comment",
+    "highlights", "production_story", "used_software", "closing_comment",
+    "is_collab", "part",
+  ];
+  for (const key of keys) {
+    const value = new FormData();
+    value.append(key, "first");
+    value.append("unrelated_dynamic_question", "answer");
+    value.append(key, "second");
+    assert.deepEqual(validateUniqueUnslottedVideoScalarFields(value), {
+      ok: false, message: "投稿フォームの入力が不正です。",
+    }, key);
+  }
+});
+
+
+test("MIG-0651 U02: normal scalars, dynamic question repeats and specialized validators coexist", () => {
+  const form = new FormData();
+  const keys = [
+    "active_x_snapshot", "scheduled_time", "youtube_url", "display_name",
+    "creator_x_user_id", "icon_mode", "icon_url", "icon_file", "title",
+    "is_collab", "part",
+  ];
+  keys.forEach((key) => form.set(key, key === "icon_file" ? new Blob(["image"]) : "ok"));
+  form.append("custom_question:q1", "first answer");
+  form.append("custom_question:q1", "second answer");
+  form.append("event_ids", "event-a");
+  form.append("members_json", "[]");
+  assert.deepEqual(validateUniqueUnslottedVideoScalarFields(form), { ok: true });
+  assert.equal(parseUnslottedEventIdFromForm(form), "event-a");
+
+  // Only event_ids/members_json's existing dedicated validators own their
+  // repeated-key errors (and user-facing messages), not this candidate.
+  form.append("event_ids", "event-b");
+  assert.deepEqual(validateUniqueUnslottedVideoScalarFields(form), { ok: true });
+  invalid(form);
+
+  const ambiguous = new FormData();
+  ambiguous.append("icon_mode", "none");
+  ambiguous.append("icon_mode", "upload");
+  assert.equal(ambiguous.get("icon_mode"), "none");
+  assert.equal(Object.fromEntries(ambiguous).icon_mode, "upload");
+  assert.equal(validateUniqueUnslottedVideoScalarFields(ambiguous).ok, false);
+
+  const files = new FormData();
+  files.append("icon_file", new Blob(["first"]), "a.png");
+  files.append("icon_file", new Blob(["second"]), "b.png");
+  assert.equal(validateUniqueUnslottedVideoScalarFields(files).ok, false);
 });
