@@ -6,6 +6,7 @@ import { createSqlite, insert } from "../../../apps/api/test/support/personalHar
 import { videoCustomAnswers, videoEvents, videoYoutubeMetadata, videos } from "@flamenode/db/schema";
 import { buildFreeVideoSubmissionAtomicPlan, inspectFreeVideoSubmissionAtomicPlanBudget } from "../src/video/freeVideoSubmissionAtomicPlan.ts";
 import { buildFreeVideoRow } from "../src/video/freeVideoRow.ts";
+import { D1_MAX_BIND_PARAMETERS } from "../src/audit/mutateBudget.ts";
 
 const NOW = 1770000000;
 function video(eventId = null) {
@@ -119,6 +120,18 @@ test("MIG-0651 atomic composer: actor, selected event, clock and stale answer mi
     { videoAfter: video(), actorUserId: "other", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
     { videoAfter: video(), actorUserId: "user-1", eventId: "event-a", questions: [], customAnswerDrafts: [], now: NOW },
     { videoAfter: video(), actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW+1 },
+    { videoAfter: { ...video(), source_type: "external" }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), youtube_video_id: "short" }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), youtube_video_id: null }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), visibility_status: "private" }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), scheduling_type: "slotted" }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), scheduled_time: null }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), scheduled_time: -1 }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), app_like_count: 1 }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), score: 1 }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), score_updated_at: NOW }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), creator_display_name: "  " }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), title: " " }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
   ];
   for (const sample of samples) {
     const { db, calls } = fixture();
@@ -176,6 +189,14 @@ test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded 
           const compiled = isAssertion
             ? dialect.sqlToQuery(statement.assertSql)
             : statement.toSQL();
+          assert.ok(compiled.params.length <= D1_MAX_BIND_PARAMETERS,
+            `D1 bind ceiling exceeded: ${compiled.params.length}`);
+          for (const param of compiled.params) {
+            if (typeof param === "string") {
+              assert.ok(Buffer.byteLength(param, "utf8") < 2_000_000,
+                "bound JSON/string must fit D1's 2MB per-value ceiling");
+            }
+          }
           const run = sqlite.prepare(compiled.sql);
           if (isAssertion) {
             assert.equal(plan.expectedChanges[index], null);
