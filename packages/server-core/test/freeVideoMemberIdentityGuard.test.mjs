@@ -16,13 +16,14 @@ function assertGuard(sqlite, entries, allowed) {
     assert.throws(() => sqlite.prepare(statement.sql).get(...statement.params), /malformed JSON/);
   }
 }
-function identity(candidate, canonical = candidate) {
-  return [{ candidate, canonical }];
+function identity(candidate, canonical = candidate, allowAbsent = false) {
+  return [{ candidate, canonical, allowAbsent }];
 }
 
 test("MIG-0651 identity CAS: invalid/duplicate inputs are rejected without D1", () => {
   for (const rows of [[], identity("", ""), identity("a", "not a handle"),
     [identity("raw")[0], identity("raw")[0]],
+    [{candidate:"abc",canonical:"abc",allowAbsent:null}],
     Array.from({length:101},(_,i) => ({candidate:"member"+i,canonical:"member"+i})),
   ]) {
     assert.throws(() => buildFreeVideoMemberIdentityGuardSql(rows),
@@ -33,11 +34,11 @@ test("MIG-0651 identity CAS: invalid/duplicate inputs are rejected without D1", 
 test("MIG-0651 identity CAS: not-found placeholder remains valid, same-canonical arrival valid, rejection aborts", () => {
   const db = createSqlite();
   try {
-    assertGuard(db, identity("newone"), true);
+    assertGuard(db, identity("newone", "newone", true), true);
     insert(db, "x_users", {id:"newone",x_name:"New",approval_status:"approved"});
-    assertGuard(db, identity("newone"), true);
+    assertGuard(db, identity("newone", "newone", true), true);
     db.prepare("UPDATE x_users SET approval_status='rejected' WHERE id='newone'").run();
-    assertGuard(db, identity("newone"), false);
+    assertGuard(db, identity("newone", "newone", true), false);
   } finally { db.close(); }
 });
 
@@ -90,11 +91,23 @@ test("MIG-0651 identity CAS: canonical direct collision and normalized duplicate
   } finally { db.close(); }
 });
 
+test("MIG-0651 identity CAS: a previously resolved direct X must not disappear before commit", () => {
+  const db = createSqlite();
+  try {
+    insert(db, "x_users", {id:"present",x_name:"Present",approval_status:"approved"});
+    assertGuard(db, identity("present"), true);
+    db.prepare("DELETE FROM x_users WHERE id='present'").run();
+    assertGuard(db, identity("present"), false);
+    // A genuinely not-found preflight is permitted to remain absent.
+    assertGuard(db, identity("present", "present", true), true);
+  } finally { db.close(); }
+});
+
 test("MIG-0651 identity CAS: 100 handles occupy one D1 bind and detect one stale mapping", () => {
   const db = createSqlite();
   try {
     const entries = Array.from({length:100},(_,i) => ({
-      candidate:"new"+i,canonical:"new"+i,
+      candidate:"new"+i,canonical:"new"+i,allowAbsent:true,
     }));
     assertGuard(db, entries, true);
     insert(db, "x_users", {id:"new79",x_name:"New 79",approval_status:"rejected"});
