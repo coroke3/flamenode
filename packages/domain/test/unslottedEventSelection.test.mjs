@@ -161,10 +161,18 @@ test("MIG-0651 U02: normal scalars, dynamic question repeats and specialized val
 });
 
 
+
+function preflightContext(isCollab = false) {
+  return { isCollab, activeXId: "alice", nowSec: 1_700_000_000 };
+}
+
 test("MIG-0651 U02: pure free-video preflight returns selected event and canonical collab chapters", () => {
-  const absent = validateFreeVideoMultipartPreflight(new FormData(), false);
+  const noEvent = new FormData();
+  noEvent.set("active_x_snapshot", "@alice");
+  const absent = validateFreeVideoMultipartPreflight(noEvent, preflightContext());
   assert.deepEqual(absent, { ok: true, value: {
     requestedEventId: null,
+    scheduledTime: 1_700_000_000,
     memberSubmission: { members: [], chaptersByIndex: new Map() },
   } });
 
@@ -176,10 +184,11 @@ test("MIG-0651 U02: pure free-video preflight returns selected event and canonic
   }]));
   form.append("custom_question:q1", "first");
   form.append("custom_question:q1", "second");
-  const parsed = validateFreeVideoMultipartPreflight(form, true);
+  const parsed = validateFreeVideoMultipartPreflight(form, preflightContext(true));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
   assert.equal(parsed.value.requestedEventId, "event-a");
+  assert.equal(parsed.value.scheduledTime, 1_700_000_000);
   assert.deepEqual(parsed.value.memberSubmission.members.map((m) => m.x_user_id), ["alice"]);
   assert.deepEqual([...parsed.value.memberSubmission.chaptersByIndex.values()], [[{
     time_seconds: 65, label: "editor", note: "fine", order_index: 0,
@@ -188,26 +197,28 @@ test("MIG-0651 U02: pure free-video preflight returns selected event and canonic
 
 test("MIG-0651 U02: preflight denies duplicate scalars before event/member parsing and never mutates FormData", () => {
   const form = selection("event-a,event-b");
+  form.set("active_x_snapshot", "@alice");
   form.set("members_json", "{invalid");
   form.append("icon_mode", "none");
   form.append("icon_mode", "upload");
   const before = [...form];
-  assert.deepEqual(validateFreeVideoMultipartPreflight(form, true), {
+  assert.deepEqual(validateFreeVideoMultipartPreflight(form, preflightContext(true)), {
     ok: false, message: "投稿フォームの入力が不正です。",
   });
   assert.deepEqual([...form], before);
 
   form.delete("icon_mode");
-  assert.deepEqual(validateFreeVideoMultipartPreflight(form, true), {
+  assert.deepEqual(validateFreeVideoMultipartPreflight(form, preflightContext(true)), {
     ok: false, message: "枠なし投稿で所属できるイベントは1件までです。",
   }, "CURRENT checks event selection before members");
   form.set("event_ids", "event-a");
-  assert.deepEqual(validateFreeVideoMultipartPreflight(form, true), {
+  assert.deepEqual(validateFreeVideoMultipartPreflight(form, preflightContext(true)), {
     ok: false, message: "合作メンバーの JSON が不正です。",
   });
-  assert.deepEqual(validateFreeVideoMultipartPreflight(form, false), {
+  assert.deepEqual(validateFreeVideoMultipartPreflight(form, preflightContext(false)), {
     ok: true, value: {
       requestedEventId: "event-a",
+      scheduledTime: 1_700_000_000,
       memberSubmission: { members: [], chaptersByIndex: new Map() },
     },
   }, "non-collab ignores members_json exactly as CURRENT");
@@ -215,19 +226,56 @@ test("MIG-0651 U02: preflight denies duplicate scalars before event/member parsi
 
 test("MIG-0651 U02: repeated specialized multipart member/event keys retain their own rejection", () => {
   const duplicateMembers = selection("event-a");
+  duplicateMembers.set("active_x_snapshot", "@alice");
   duplicateMembers.append("members_json", "[]");
   duplicateMembers.append("members_json", "[]");
-  assert.deepEqual(validateFreeVideoMultipartPreflight(duplicateMembers, true), {
+  assert.deepEqual(validateFreeVideoMultipartPreflight(duplicateMembers, preflightContext(true)), {
     ok: false, message: "合作メンバーの入力が不正です。",
   });
   const duplicateEvents = selection("event-a");
+  duplicateEvents.set("active_x_snapshot", "@alice");
   duplicateEvents.append("event_ids", "event-a");
-  assert.deepEqual(validateFreeVideoMultipartPreflight(duplicateEvents, true), {
+  assert.deepEqual(validateFreeVideoMultipartPreflight(duplicateEvents, preflightContext(true)), {
     ok: false, message: "枠なし投稿で所属できるイベントは1件までです。",
   });
   const file = new FormData();
+  file.set("active_x_snapshot", "@alice");
   file.set("event_ids", new Blob(["event-a"]), "event.txt");
-  assert.deepEqual(validateFreeVideoMultipartPreflight(file, false), {
+  assert.deepEqual(validateFreeVideoMultipartPreflight(file, preflightContext(false)), {
     ok: false, message: "枠なし投稿で所属できるイベントは1件までです。",
   });
+});
+
+
+test("MIG-0651 U02: current Active X snapshot is required and tied to authenticated context", () => {
+  const form = selection("event-a");
+  assert.deepEqual(validateFreeVideoMultipartPreflight(form, preflightContext()), {
+    ok: false,
+    message: "投稿画面を開いた後にActive X IDが変更されました。最新の活動名義を確認してからもう一度投稿してください。",
+  });
+  form.set("active_x_snapshot", "@alice");
+  assert.equal(validateFreeVideoMultipartPreflight(form, preflightContext()).ok, true);
+  assert.equal(validateFreeVideoMultipartPreflight(form, { ...preflightContext(), activeXId: "bob" }).ok, false);
+  form.set("active_x_snapshot", new Blob(["alice"]), "user.txt");
+  assert.equal(validateFreeVideoMultipartPreflight(form, preflightContext()).ok, false);
+});
+
+test("MIG-0651 U02: JST scheduled_time is strict and falls back only to trusted server clock", () => {
+  const form = selection();
+  form.set("active_x_snapshot", "@alice");
+  form.set("scheduled_time", "2026-11-21T12:34");
+  const date = validateFreeVideoMultipartPreflight(form, preflightContext());
+  assert.equal(date.ok, true);
+  if (date.ok) assert.equal(date.value.scheduledTime, Date.UTC(2026, 10, 21, 3, 34, 0) / 1000);
+  for (const raw of ["2026-02-30T10:00", "2026-11-21T24:00", "not-a-date"]) {
+    form.set("scheduled_time", raw);
+    assert.deepEqual(validateFreeVideoMultipartPreflight(form, preflightContext()), {
+      ok: false, message: "scheduled_time の日時が正しくありません。",
+    }, raw);
+  }
+  form.set("scheduled_time", new Blob(["2026-11-21T12:34"]), "date.txt");
+  assert.equal(validateFreeVideoMultipartPreflight(form, preflightContext()).ok, false);
+  form.delete("scheduled_time");
+  assert.equal(validateFreeVideoMultipartPreflight(form, preflightContext()).value?.scheduledTime, 1_700_000_000);
+  assert.equal(validateFreeVideoMultipartPreflight(form, { ...preflightContext(), nowSec: NaN }).ok, false);
 });

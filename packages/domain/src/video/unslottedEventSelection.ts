@@ -2,6 +2,8 @@ import {
   validateVideoMemberSubmission,
   type ValidatedMemberSubmission,
 } from "./memberSubmission.ts";
+import { validateActiveXSnapshot } from "../xid/activeXSnapshot.ts";
+import { parseJstDatetimeLocalStrict } from "../datetime.ts";
 
 export type UnslottedEventSyncErrorCode =
   | "unslotted_event_selection_invalid"
@@ -106,39 +108,68 @@ export function validateUniqueUnslottedVideoScalarFields(
 
 
 /**
- * Pure SA-086 multipart preflight for the future Hono handler. The result is
- * deliberately limited to validated event selection + member/chapter input;
- * it does NOT authorize the caller, validate the full video form, read D1,
- * upload files or write audit/Queue rows. Call it only after the size and
- * session/write guards and before any storage mutation.
- *
- * CURRENT delegates event/member checks separately, with event selection
- * taking precedence over member errors. The new scalar-duplicate rejection
- * is an intentional Hono contract tightening pending Lead parity approval.
+ * Authenticated context is supplied by the Hono writeGuard, never by form
+ * fields. It must carry the *currently approved* Active X ID; the submitted
+ * snapshot is checked against this server-side identity.
+ */
+export type FreeVideoPreflightContext = {
+  isCollab: boolean; // canonical parseVideoForm result, not raw input
+  activeXId: string; // approved authenticated Active X ID from guard
+  nowSec: number;    // validated server clock, not client-submitted
+};
+
+/**
+ * Pure SA-086 preflight for the future authenticated Hono POST. Keep the
+ * duplicate-scalar, Active X snapshot, event, member, datetime check ordering
+ * explicit. This does NOT validate the full video form, event eligibility,
+ * authorization, YouTube duplicate, media upload or D1/Queue/audit effects.
+ * CURRENT performs full video form/DB checks interleaved with these, so
+ * rejection precedence can differ; obtain a Lead parity decision before mount.
  */
 export function validateFreeVideoMultipartPreflight(
   formData: FormData,
-  isCollab: boolean,
+  context: FreeVideoPreflightContext,
 ):
-  | { ok: true; value: { requestedEventId: string | null; memberSubmission: ValidatedMemberSubmission } }
+  | { ok: true; value: {
+      requestedEventId: string | null;
+      memberSubmission: ValidatedMemberSubmission;
+      scheduledTime: number;
+    } }
   | { ok: false; message: string } {
   const unique = validateUniqueUnslottedVideoScalarFields(formData);
   if (!unique.ok) return unique;
+
+  const submittedSnapshot = formData.get("active_x_snapshot");
+  const snapshot = validateActiveXSnapshot({
+    submittedSnapshot: typeof submittedSnapshot === "string" ? submittedSnapshot : null,
+    currentActiveXId: context.activeXId,
+  });
+  if (!snapshot.ok) return snapshot;
 
   let requestedEventId: string | null;
   try {
     requestedEventId = parseUnslottedEventIdFromForm(formData);
   } catch {
-    // Match CURRENT SA-086's user-facing event error; never disclose a raw
-    // File object, input, parser stack, or provider diagnostic.
     return { ok: false, message: "枠なし投稿で所属できるイベントは1件までです。" };
   }
 
-  const memberValidation = validateVideoMemberSubmission(formData, isCollab);
+  const memberValidation = validateVideoMemberSubmission(formData, context.isCollab);
   if (!memberValidation.ok) return memberValidation;
 
+  const rawTime = formData.get("scheduled_time");
+  if (rawTime !== null && typeof rawTime !== "string") {
+    return { ok: false, message: "scheduled_time の日時が正しくありません。" };
+  }
+  const scheduled = parseJstDatetimeLocalStrict(rawTime);
+  if (!scheduled.ok || !Number.isSafeInteger(context.nowSec) || context.nowSec < 0) {
+    return { ok: false, message: "scheduled_time の日時が正しくありません。" };
+  }
   return {
     ok: true,
-    value: { requestedEventId, memberSubmission: memberValidation.value },
+    value: {
+      requestedEventId,
+      memberSubmission: memberValidation.value,
+      scheduledTime: scheduled.value ?? context.nowSec,
+    },
   };
 }
