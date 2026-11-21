@@ -33,6 +33,7 @@ export async function buildFreeVideoRegisteredChannelPlan(
       !threadName?.trim() ||
       !payload || typeof payload !== "object" || Array.isArray(payload) ||
       payload.video_id !== videoId ||
+      typeof payload.content !== "string" || payload.content.length === 0 ||
       (payload.event_id !== undefined && payload.event_id !== eventId) ||
       typeof payload.url !== "string" || !/^https?:\/\//.test(payload.url)) {
     throw new Error("free_video_registered_channel_invalid");
