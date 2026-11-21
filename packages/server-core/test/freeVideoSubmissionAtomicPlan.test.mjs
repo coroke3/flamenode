@@ -4,7 +4,7 @@ import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import { videoCustomAnswers, videoEvents, videoYoutubeMetadata, videos } from "@flamenode/db/schema";
-import { buildFreeVideoSubmissionAtomicPlan } from "../src/video/freeVideoSubmissionAtomicPlan.ts";
+import { buildFreeVideoSubmissionAtomicPlan, inspectFreeVideoSubmissionAtomicPlanBudget } from "../src/video/freeVideoSubmissionAtomicPlan.ts";
 import { buildFreeVideoRow } from "../src/video/freeVideoRow.ts";
 
 const NOW = 1770000000;
@@ -260,4 +260,50 @@ test("MIG-0651 atomic composer: real SQLite changed event/question policy aborts
       sqlite.close();
     }
   }
+});
+
+test("MIG-0651 atomic composer: D1 50 query budget uses explicit actual caller-read count", () => {
+  const { db } = fixture();
+  const noEvent = buildFreeVideoSubmissionAtomicPlan(db, {
+    videoAfter: video(null), actorUserId: "user-1", eventId: null,
+    questions: [], customAnswerDrafts: [], now: NOW,
+  });
+  const noEventBudget = inspectFreeVideoSubmissionAtomicPlanBudget(noEvent, 0);
+  assert.equal(noEventBudget.mutationStatementCount, 2);
+  assert.equal(noEventBudget.mutationAssertionCount, 2);
+  assert.equal(noEventBudget.auditEntryCount, undefined, "budget exposes derived query costs, not input row count");
+  assert.equal(noEventBudget.auditChunkCount, 1);
+  assert.equal(noEventBudget.auditQueryCount, 2);
+  assert.equal(noEventBudget.preparationQueryCount, 2);
+  assert.equal(noEventBudget.totalQueryCount, 8);
+  assert.equal(noEventBudget.withinLimit, true);
+
+  const linked = buildFreeVideoSubmissionAtomicPlan(db, {
+    videoAfter: video("event-a"), actorUserId: "user-1", eventId: "event-a",
+    questions: [question()], customAnswerDrafts: [{
+      event_id: "event-a", question_id: "q:1", question_key: "q:1",
+      answer_text: "demo", answer_json: null,
+    }], now: NOW,
+  });
+  const edge = inspectFreeVideoSubmissionAtomicPlanBudget(linked, 36);
+  assert.equal(edge.mutationStatementCount, 6);
+  assert.equal(edge.mutationAssertionCount, 4);
+  assert.equal(edge.auditChunkCount, 1);
+  assert.equal(edge.preparationQueryCount, 2);
+  assert.equal(edge.batchQueryCount, 12);
+  assert.equal(edge.totalQueryCount, 50);
+  assert.equal(edge.withinLimit, true);
+  const exceeded = inspectFreeVideoSubmissionAtomicPlanBudget(linked, 37);
+  assert.equal(exceeded.totalQueryCount, 51);
+  assert.equal(exceeded.withinLimit, false, "caller must fail closed before D1 batch");
+  for (const invalid of [-1, 1.5, Infinity, NaN]) {
+    assert.throws(() => inspectFreeVideoSubmissionAtomicPlanBudget(linked, invalid),
+      /budget_arguments_invalid/);
+  }
+  assert.throws(() => inspectFreeVideoSubmissionAtomicPlanBudget({
+    ...linked, expectedChanges: [1],
+  }, 0), /budget_arguments_invalid/);
+  assert.throws(() => inspectFreeVideoSubmissionAtomicPlanBudget({
+    ...linked, audits: linked.audits.map(a => ({ ...a, strict: false })),
+  }, 0), /budget_arguments_invalid/);
 });
