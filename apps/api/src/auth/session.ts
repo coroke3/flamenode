@@ -233,8 +233,14 @@ export function extractSessionToken(
     .join("");
 }
 
-/** Malformed legacy Active X IDs must not cross D1 -> JS. Check SQLite storage type, embedded NUL, and UTF-8 bytes (not length(TEXT), which stops at NUL). */
-export const MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES = 128;
+/**
+ * SEC-713 / MIG-0657 parity: legacy X identity accepts up to 128 Unicode
+ * codepoints (max 512 UTF-8 bytes), not merely 128 ASCII bytes. Check both
+ * limits inside SQLite before the first D1 response; an embedded NUL makes
+ * SQLite length(TEXT) unsafe, so reject it separately.
+ */
+export const MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS = 128;
+export const MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES = 512;
 
 export interface ResolveSessionOptions {
   now?: number;
@@ -277,11 +283,13 @@ export async function resolveSessionUser(
           CASE WHEN u."active_x_user_id" IS NOT NULL
             AND (typeof(u."active_x_user_id") <> 'text'
               OR instr(u."active_x_user_id", char(0)) > 0
+              OR length(u."active_x_user_id") > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS}
               OR length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES})
             THEN NULL ELSE u."active_x_user_id" END AS user_active_x_user_id,
           CASE WHEN u."active_x_user_id" IS NOT NULL
             AND (typeof(u."active_x_user_id") <> 'text'
               OR instr(u."active_x_user_id", char(0)) > 0
+              OR length(u."active_x_user_id") > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS}
               OR length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES})
             THEN 1 ELSE 0 END AS user_active_x_id_invalid
         FROM "session" s
