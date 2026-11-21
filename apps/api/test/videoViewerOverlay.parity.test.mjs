@@ -699,8 +699,9 @@ if (runUnderRootTsx(import.meta.url)) {
     env.DB.prepare = (sql) => {
       const stmt = originalPrepare(sql);
       if (!sql.includes("'approved_x_ids'")) return stmt;
-      assert.ok(sql.includes('length(u."active_x_user_id") > 128'),
-        "the selected X ID must be bounded inside D1 json_object");
+      assert.ok(sql.includes('instr(u."active_x_user_id", char(0)) > 0') &&
+        sql.includes('length(CAST(u."active_x_user_id" AS BLOB)) > 512'),
+        "selected X ID must be NUL-safe and byte-bounded inside D1 json_object");
       const originalBind = stmt.bind.bind(stmt);
       stmt.bind = (...params) => {
         const bound = originalBind(...params);
@@ -753,8 +754,9 @@ if (runUnderRootTsx(import.meta.url)) {
     env.DB.prepare = (sql) => {
       const stmt = originalPrepare(sql);
       if (!sql.includes("'approved_x_ids'")) return stmt;
-      assert.ok(sql.includes('CASE WHEN length(a."id") > 128 THEN NULL'),
-        "oversized X IDs must become a D1-side invalid-identity sentinel");
+      assert.ok(sql.includes('instr(a."id", char(0)) > 0') &&
+        sql.includes('length(CAST(a."id" AS BLOB)) > 512'),
+        "linked X IDs must become a NUL-safe D1-side invalidity sentinel");
       const originalBind = stmt.bind.bind(stmt);
       stmt.bind = (...params) => {
         const bound = originalBind(...params);
@@ -784,6 +786,135 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(response.headers.get("Retry-After"), "3");
     assert.deepEqual(await response.json(), { error: "viewer_overlay_unavailable" });
     assert.ok(d1.stats.statements <= 3, "no extra D1 read for the invalid identity");
+  });
+
+
+  // The D1/SQLite JSON projection is inspected before Hono parses it. This
+  // catches resource-budget bypasses that a final HTTP size cap cannot detect.
+  function inspectFirstUserProjection(env, inspect) {
+    let projections = 0;
+    const originalPrepare = env.DB.prepare.bind(env.DB);
+    env.DB.prepare = (sql) => {
+      const stmt = originalPrepare(sql);
+      if (!sql.includes("'approved_x_ids'")) return stmt;
+      assert.ok(sql.includes("length(CAST("), "SQL must measure full UTF-8 bytes");
+      const originalBind = stmt.bind.bind(stmt);
+      stmt.bind = (...params) => {
+        const bound = originalBind(...params);
+        const originalFirst = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await originalFirst();
+          projections++;
+          assert.ok(row?.user_json, "read the real first D1 auth projection");
+          assert.ok(Buffer.byteLength(row.user_json, "utf8") < 12_000,
+            "D1 user JSON must stay small even for malformed legacy IDs");
+          inspect(JSON.parse(row.user_json), row.user_json);
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    return () => assert.equal(projections, 1, "inspect exactly one D1 user projection");
+  }
+
+  for (const [name, malformedId] of [
+    ["leading NUL and 180K tail", "\u0000" + "x".repeat(180_000)],
+    ["short embedded NUL", "a\u0000x"],
+  ]) {
+    test("Issue #715: invalid selected Active X ID (" + name + ") is rejected before D1 JSON", async () => {
+      const { env, sqlite, d1 } = setupTestEnv();
+      sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?')
+        .run(malformedId, "u_alice");
+      const inspected = inspectFirstUserProjection(env, (authJson, rawJson) => {
+        assert.equal(authJson.active_x_id, null);
+        assert.equal(authJson.invalid_active_x_id, 1,
+          "NUL-bearing identities must not pass the invalidity sentinel");
+        assert.equal(rawJson.includes(malformedId), false);
+      });
+      d1.stats.statements = 0;
+      const response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+      inspected();
+      assert.equal(response.status, 503, "do not fall back to another approved identity");
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store, no-cache, must-revalidate");
+      assert.equal(response.headers.get("Retry-After"), "3");
+      assert.deepEqual(await response.json(), { error: "viewer_overlay_unavailable" });
+      assert.ok(d1.stats.statements <= 3);
+    });
+
+    test("Issue #715: invalid linked approved X ID (" + name + ") is bounded in D1 JSON", async () => {
+      const { env, sqlite, d1 } = setupTestEnv();
+      insert(sqlite, "x_users", {
+        id: malformedId, x_name: "Corrupt legacy link", approval_status: "approved",
+      });
+      insert(sqlite, "x_user_account_links", {
+        auth_user_id: "u_alice", x_user_id: malformedId,
+        link_role: "owner", created_at: 1000,
+      });
+      const inspected = inspectFirstUserProjection(env, (authJson, rawJson) => {
+        assert.ok(authJson.approved_x_ids.includes(null),
+          "SQL must insert a null sentinel instead of silently dropping a linked identity");
+        assert.equal(rawJson.includes(malformedId), false);
+      });
+      d1.stats.statements = 0;
+      const response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+      inspected();
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store, no-cache, must-revalidate");
+      assert.equal(response.headers.get("Retry-After"), "3");
+      assert.deepEqual(await response.json(), { error: "viewer_overlay_unavailable" });
+      assert.ok(d1.stats.statements <= 3);
+    });
+  }
+
+  test("Issue #715: 128-codepoint ASCII/Unicode identities and NULL remain valid", async () => {
+    for (const validId of ["a".repeat(128), "あ".repeat(128), "😀".repeat(128)]) {
+      const { env, sqlite, d1 } = setupTestEnv();
+      insert(sqlite, "x_users", {
+        id: validId, x_name: "Legacy valid", approval_status: "approved",
+      });
+      insert(sqlite, "x_user_account_links", {
+        auth_user_id: "u_alice", x_user_id: validId, link_role: "owner", created_at: 1000,
+      });
+      sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?')
+        .run(validId, "u_alice");
+      const inspected = inspectFirstUserProjection(env, (authJson) => {
+        assert.equal(authJson.active_x_id, validId);
+        assert.equal(authJson.invalid_active_x_id, 0);
+        assert.ok(authJson.approved_x_ids.includes(validId));
+      });
+      d1.stats.statements = 0;
+      const response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+      inspected();
+      assert.equal(response.status, 200, "128 valid Unicode codepoints must retain selection");
+      const dto = await response.json();
+      assert.equal(dto.activeXId, validId);
+      assert.equal(dto.viewerXApproved, true);
+      assert.ok(d1.stats.statements <= 3);
+    }
+
+    const { env, sqlite, d1 } = setupTestEnv();
+    sqlite.prepare('UPDATE "user" SET "active_x_user_id" = NULL WHERE "id" = ?')
+      .run("u_alice");
+    const inspected = inspectFirstUserProjection(env, (authJson) => {
+      assert.equal(authJson.active_x_id, null);
+      assert.equal(authJson.invalid_active_x_id, 0);
+    });
+    d1.stats.statements = 0;
+    const response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    inspected();
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).activeXId, "alice_x",
+      "null selected X preserves CURRENT single-approved-link fallback");
+    assert.ok(d1.stats.statements <= 3);
   });
 
   test("Issue #661: default public edit projection is empty; any of 125 rows can be checked on demand", async () => {
