@@ -1,3 +1,8 @@
+import {
+  validateVideoMemberSubmission,
+  type ValidatedMemberSubmission,
+} from "./memberSubmission.ts";
+
 export type UnslottedEventSyncErrorCode =
   | "unslotted_event_selection_invalid"
   | "unslotted_event_not_allowed";
@@ -97,4 +102,43 @@ export function validateUniqueUnslottedVideoScalarFields(
     seen.add(key);
   }
   return { ok: true };
+}
+
+
+/**
+ * Pure SA-086 multipart preflight for the future Hono handler. The result is
+ * deliberately limited to validated event selection + member/chapter input;
+ * it does NOT authorize the caller, validate the full video form, read D1,
+ * upload files or write audit/Queue rows. Call it only after the size and
+ * session/write guards and before any storage mutation.
+ *
+ * CURRENT delegates event/member checks separately, with event selection
+ * taking precedence over member errors. The new scalar-duplicate rejection
+ * is an intentional Hono contract tightening pending Lead parity approval.
+ */
+export function validateFreeVideoMultipartPreflight(
+  formData: FormData,
+  isCollab: boolean,
+):
+  | { ok: true; value: { requestedEventId: string | null; memberSubmission: ValidatedMemberSubmission } }
+  | { ok: false; message: string } {
+  const unique = validateUniqueUnslottedVideoScalarFields(formData);
+  if (!unique.ok) return unique;
+
+  let requestedEventId: string | null;
+  try {
+    requestedEventId = parseUnslottedEventIdFromForm(formData);
+  } catch {
+    // Match CURRENT SA-086's user-facing event error; never disclose a raw
+    // File object, input, parser stack, or provider diagnostic.
+    return { ok: false, message: "枠なし投稿で所属できるイベントは1件までです。" };
+  }
+
+  const memberValidation = validateVideoMemberSubmission(formData, isCollab);
+  if (!memberValidation.ok) return memberValidation;
+
+  return {
+    ok: true,
+    value: { requestedEventId, memberSubmission: memberValidation.value },
+  };
 }

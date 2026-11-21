@@ -5,6 +5,7 @@ import {
   UnslottedEventSyncError,
   MAX_UNSLOTTED_EVENT_SELECTION_CHARS,
   validateUniqueUnslottedVideoScalarFields,
+  validateFreeVideoMultipartPreflight,
 } from "@flamenode/domain/video";
 import {
   parseUnslottedEventIdFromForm as legacyParse,
@@ -157,4 +158,76 @@ test("MIG-0651 U02: normal scalars, dynamic question repeats and specialized val
   files.append("icon_file", new Blob(["first"]), "a.png");
   files.append("icon_file", new Blob(["second"]), "b.png");
   assert.equal(validateUniqueUnslottedVideoScalarFields(files).ok, false);
+});
+
+
+test("MIG-0651 U02: pure free-video preflight returns selected event and canonical collab chapters", () => {
+  const absent = validateFreeVideoMultipartPreflight(new FormData(), false);
+  assert.deepEqual(absent, { ok: true, value: {
+    requestedEventId: null,
+    memberSubmission: { members: [], chaptersByIndex: new Map() },
+  } });
+
+  const form = selection("event-a");
+  form.set("active_x_snapshot", "@alice");
+  form.set("title", "video");
+  form.set("members_json", JSON.stringify([{ name: " Alice ", x_user_id: "@Alice",
+    role: "editor", chapters: [{ time: "1:05", label: "", note: " fine " }],
+  }]));
+  form.append("custom_question:q1", "first");
+  form.append("custom_question:q1", "second");
+  const parsed = validateFreeVideoMultipartPreflight(form, true);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.value.requestedEventId, "event-a");
+  assert.deepEqual(parsed.value.memberSubmission.members.map((m) => m.x_user_id), ["alice"]);
+  assert.deepEqual([...parsed.value.memberSubmission.chaptersByIndex.values()], [[{
+    time_seconds: 65, label: "editor", note: "fine", order_index: 0,
+  }]]);
+});
+
+test("MIG-0651 U02: preflight denies duplicate scalars before event/member parsing and never mutates FormData", () => {
+  const form = selection("event-a,event-b");
+  form.set("members_json", "{invalid");
+  form.append("icon_mode", "none");
+  form.append("icon_mode", "upload");
+  const before = [...form];
+  assert.deepEqual(validateFreeVideoMultipartPreflight(form, true), {
+    ok: false, message: "投稿フォームの入力が不正です。",
+  });
+  assert.deepEqual([...form], before);
+
+  form.delete("icon_mode");
+  assert.deepEqual(validateFreeVideoMultipartPreflight(form, true), {
+    ok: false, message: "枠なし投稿で所属できるイベントは1件までです。",
+  }, "CURRENT checks event selection before members");
+  form.set("event_ids", "event-a");
+  assert.deepEqual(validateFreeVideoMultipartPreflight(form, true), {
+    ok: false, message: "合作メンバーの JSON が不正です。",
+  });
+  assert.deepEqual(validateFreeVideoMultipartPreflight(form, false), {
+    ok: true, value: {
+      requestedEventId: "event-a",
+      memberSubmission: { members: [], chaptersByIndex: new Map() },
+    },
+  }, "non-collab ignores members_json exactly as CURRENT");
+});
+
+test("MIG-0651 U02: repeated specialized multipart member/event keys retain their own rejection", () => {
+  const duplicateMembers = selection("event-a");
+  duplicateMembers.append("members_json", "[]");
+  duplicateMembers.append("members_json", "[]");
+  assert.deepEqual(validateFreeVideoMultipartPreflight(duplicateMembers, true), {
+    ok: false, message: "合作メンバーの入力が不正です。",
+  });
+  const duplicateEvents = selection("event-a");
+  duplicateEvents.append("event_ids", "event-a");
+  assert.deepEqual(validateFreeVideoMultipartPreflight(duplicateEvents, true), {
+    ok: false, message: "枠なし投稿で所属できるイベントは1件までです。",
+  });
+  const file = new FormData();
+  file.set("event_ids", new Blob(["event-a"]), "event.txt");
+  assert.deepEqual(validateFreeVideoMultipartPreflight(file, false), {
+    ok: false, message: "枠なし投稿で所属できるイベントは1件までです。",
+  });
 });
