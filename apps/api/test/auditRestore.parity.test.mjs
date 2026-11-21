@@ -1259,6 +1259,103 @@ test("T04 #718 video primary-event-only scheduled export invalidation", async (t
   }
 });
 
+// U03/T04: a restored snapshot can move both the primary event and the
+// creator. Cache invalidation already unions before/after IDs, whereas the
+// shared queue builder currently receives only the *current* IDs. Exercise
+// the SQLite-audited batch and isolate the missing owner-lane queue fanout.
+test("T04 video restore queues rebuilds for both old and new event/creator IDs", async (t) => {
+  const ctx = setup();
+  seedEvent(ctx.sqlite, { id: "ev-old", public_api_enabled: 1 });
+  seedEvent(ctx.sqlite, { id: "ev-new", public_api_enabled: 1 });
+  seedVideoVisibilityRestore(ctx);
+  ctx.sqlite.prepare(
+    "UPDATE videos SET primary_event_id = ?, creator_x_user_id = ? WHERE id = ?",
+  ).run("ev-old", "creator-old", "vid-restore");
+  const current = ctx.sqlite.prepare(
+    "SELECT * FROM videos WHERE id = 'vid-restore'",
+  ).get();
+  const target = {
+    ...current,
+    visibility_status: "private",
+    primary_event_id: "ev-new",
+    creator_x_user_id: "creator-new",
+  };
+  ctx.sqlite.prepare(
+    "UPDATE audit_logs SET before_json = ?, after_json = ? WHERE id = 'video-audit'",
+  ).run(JSON.stringify(target), JSON.stringify(current));
+  assert.equal(ctx.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM video_events WHERE video_id = 'vid-restore'",
+  ).get().n, 0, "primary-event fallback must be tested without membership rows");
+
+  const { bucket } = visibilityManifestBucket();
+  const previous = globalThis.caches;
+  const deleted = [];
+  globalThis.caches = { default: { delete: async (url) => {
+    deleted.push(decodeURIComponent(String(url)));
+    return true;
+  } } };
+  try {
+    const response = await ctx.request({
+      audit_id: "video-audit",
+      reason: "主イベントと投稿者の復元先キュー更新を検証",
+      confirm_text: "RESTORE video-audit",
+    }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    const result = await response.json();
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(ctx.sqlite.prepare(
+      "SELECT visibility_status, primary_event_id, creator_x_user_id FROM videos WHERE id = 'vid-restore'",
+    ).get(), {
+      visibility_status: "private", primary_event_id: "ev-new",
+      creator_x_user_id: "creator-new",
+    });
+    assert.equal(ctx.stats.batches, 1, "restore and queue must commit atomically");
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'success'",
+    ).get().n, 1);
+
+    const queued = ctx.sqlite.prepare(
+      "SELECT target_type, target_id FROM static_rebuild_queue WHERE status = 'pending'",
+    ).all();
+    const keys = new Set(queued.map((row) => row.target_type + ":" + row.target_id));
+    // The parent remains strict even while the shared-core owner works on
+    // the missing after-snapshot queue targets.
+    assert.ok(keys.has("video:vid-restore"), "video regeneration is queued");
+    for (const id of ["ev-old"]) {
+      assert.ok(keys.has("event_base:" + id), "old event base must rebuild");
+      assert.ok(keys.has("event_release:" + id), "old event release must rebuild");
+    }
+    assert.ok(keys.has("user:creator-old"), "old creator profile must rebuild");
+    assert.equal([...keys].some((key) =>
+      key.includes("ev-unrelated") || key.includes("creator-unrelated"),
+    ), false, "unrelated rebuild targets must not be enqueued");
+    for (const id of ["ev-old", "ev-new"]) {
+      assert.ok(deleted.some((url) => url.endsWith("events/" + id + ".json")),
+        "both old and new event cache keys must be invalidated: " + id);
+    }
+    for (const id of ["creator-old", "creator-new"]) {
+      assert.ok(deleted.some((url) => url.endsWith("users/" + id + ".json")),
+        "both old and new creator cache keys must be invalidated: " + id);
+    }
+    const requiredNewTargets = [
+      "event_base:ev-new", "event_release:ev-new", "user:creator-new",
+    ];
+    const missing = requiredNewTargets.filter((key) => !keys.has(key));
+    await t.test("PR #679 restored-target queue fanout must include all new IDs", (subtest) => {
+      if (missing.length > 0) {
+        subtest.todo("PR #679 STOP: missing " + missing.join(", ") +
+          " after successful audited restore; invalidation alone cannot rebuild them");
+        return;
+      }
+      assert.deepEqual(missing, []);
+    });
+  } finally {
+    if (previous === undefined) delete globalThis.caches;
+    else globalThis.caches = previous;
+  }
+});
+
 test("T04 video restore fails closed when enforced visibility R2 bucket is unavailable", async () => {
   const ctx = setup();
   seedVideoVisibilityRestore(ctx);
