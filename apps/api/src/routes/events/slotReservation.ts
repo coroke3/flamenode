@@ -107,7 +107,8 @@ function slotCombinedWriteGuard(feature: WriteFeatureKey): MiddlewareHandler<App
         return writeGuardDenyResponse(c, "db_unavailable", 503);
       }
     }
-    let row: SlotWriteGateRow | null = null;
+    // A mutable holder retains the callback-loaded row across the awaited guard.
+    const gate: { row: SlotWriteGateRow | null } = { row: null };
     const identity = await evaluateAdminWriteGuard({
       user,
       hasDb: db !== undefined,
@@ -115,14 +116,15 @@ function slotCombinedWriteGuard(feature: WriteFeatureKey): MiddlewareHandler<App
       sessionUnavailable,
       requiredRole: null,
       loadTosState: user && db ? async () => {
-        row = await db.prepare(SLOT_WRITE_GATE_SQL).bind(user.id).first<SlotWriteGateRow>();
-        return row ? {
-          is_tos_accepted: row.is_tos_accepted === 1 ? 1 : 0,
-          terms_reaccept_required: row.terms_reaccept_required === 1 ? 1 : 0,
+        gate.row = await db.prepare(SLOT_WRITE_GATE_SQL).bind(user.id).first<SlotWriteGateRow>();
+        return gate.row ? {
+          is_tos_accepted: gate.row.is_tos_accepted === 1 ? 1 : 0,
+          terms_reaccept_required: gate.row.terms_reaccept_required === 1 ? 1 : 0,
         } : null;
       } : undefined,
     });
     if (!identity.ok) return writeGuardDenyResponse(c, identity.reason, identity.status);
+    const row = gate.row;
     if (!row || row.settings_id !== "default") {
       return writeGuardDenyResponse(c, "maintenance_mode", 503);
     }
