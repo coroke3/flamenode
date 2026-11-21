@@ -10,7 +10,7 @@ import {
   MAX_SESSION_COOKIE_CHUNKS,
   MAX_SESSION_TOKEN_LENGTH,
   MAX_SESSION_COOKIE_NAMES,
-  MAX_LEGACY_SESSION_ACTIVE_X_ID_LENGTH,
+  MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES,
 } from "../src/auth/session.ts";
 import {
   USERS,
@@ -275,7 +275,7 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
 
   const token = SESSIONS.valid.sessionToken;
   const opts = { now: BASELINE_NOW_MS };
-  const bound = MAX_LEGACY_SESSION_ACTIVE_X_ID_LENGTH;
+  const bound = MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES;
   const projected = [];
   const inspectingD1 = {
     prepare(sql) {
@@ -311,7 +311,10 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
   assert.equal(projected.at(-1).user_active_x_id_oversize, 0);
   assert.equal(d1.getQueryCount(), 1);
 
-  for (const oversized of ["x".repeat(bound + 1), "x".repeat(180_000)]) {
+  // SQLite length(TEXT) stops at the first NUL; 43 Japanese characters use
+  // 129 UTF-8 bytes despite being only 43 code points. Both must be rejected
+  // by length(CAST(... AS BLOB)) in the actual D1 query.
+  for (const oversized of ["x".repeat(bound + 1), "あ".repeat(43), "\0" + "x".repeat(180_000), "x".repeat(180_000)]) {
     d1.setActiveX(USERS.valid.id, oversized);
     projected.length = 0;
     d1.resetQueryCount();
@@ -328,6 +331,14 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
     assert.ok(Buffer.byteLength(JSON.stringify(row)) < 2048,
       "actual SQLite projection must stay small even for the 180K legacy row");
   }
+
+  const utf8WithinByteLimit = "あ".repeat(42); // 126 bytes
+  d1.setActiveX(USERS.valid.id, utf8WithinByteLimit);
+  d1.resetQueryCount();
+  const unicodeAtBoundary = await resolveSessionUser(inspectingD1, token, opts);
+  assert.equal(unicodeAtBoundary?.active_x_user_id, utf8WithinByteLimit);
+  assert.equal(projected.at(-1).user_active_x_id_oversize, 0);
+  assert.equal(d1.getQueryCount(), 1);
 
   d1.setActiveX(USERS.valid.id, null);
   d1.resetQueryCount();
