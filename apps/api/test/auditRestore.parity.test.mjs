@@ -1198,6 +1198,19 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
     assert.ok(deleted.length > 0, "restore must execute writer-colo cache invalidations");
     assert.equal(deleted.every((item) => item.colo === "writer"), true,
       "Cache API deletes cannot directly target another colo");
+    // A generic successful cache.delete is insufficient: the restore must
+    // invalidate the *actual canonical export entries* from the writer colo.
+    // Those exact old entries must remain in the other colo until the reader
+    // independently revalidates fresh public video/staff visibility.
+    for (const item of snapshots) {
+      const staleKey = publicJsonCacheUrl(eventExportPayloadCacheKey("ev-1", item.format, 15));
+      assert.ok(deleted.some((entry) => entry.colo === "writer" && entry.url === staleKey),
+        item.format + ": restore must delete the canonical writer-colo export key");
+      assert.equal(perColo.writer.has(staleKey), false,
+        item.format + ": writer-colo must not retain its pre-restore export body");
+      assert.equal(perColo.reader.has(staleKey), true,
+        item.format + ": reader-colo stale entry must remain independently present");
+    }
     assert.equal(perColo.reader.size, 2, "the independent reader-colo cache remains populated");
 
     activeColo = "reader";
