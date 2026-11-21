@@ -692,8 +692,8 @@ test("T04 R2 CAS succeeds but D1 batch fails: event/video remain public, compens
 
 // A repeatedly lost R2 conditional PUT must never let the audit restore
 // advance to its D1 transaction. Exercise both event/video HTTP paths using
-// an R2 fixture that rejects every conditional write while retaining the
-// previously observed manifest and ETag for safe compensation checks.
+// an R2 fixture where a different writer wins each conditional PUT race,
+// advancing the manifest and ETag. Our restore must preserve all foreign blocks.
 test("T04 exhausted R2 CAS refuses event/video restore before D1 mutation", async () => {
   for (const scenario of [
     { kind: "event", auditId: "event-audit", entityId: "ev-1", table: "events" },
@@ -709,12 +709,30 @@ test("T04 exhausted R2 CAS refuses event/video restore before D1 mutation", asyn
       failedCasAttempts += 1;
       assert.equal(key, "visibility/blocked-entities.v1.json");
       assert.equal(options?.onlyIf?.etagMatches, state.etag,
-        "failed CAS retains the original manifest ETag");
+        "every retry must conditionally use the latest observed ETag");
       assert.equal(options?.httpMetadata?.cacheControl, "no-store");
-      assert.ok(JSON.parse(value).entities.some((entry) =>
+      const candidate = JSON.parse(value);
+      assert.ok(candidate.entities.some((entry) =>
         entry.entity_type === scenario.kind && entry.entity_id === scenario.entityId),
-      "failed R2 write was intended to block the affected entity");
-      return null; // Cloudflare R2 rejects a lost onlyIf precondition.
+      "every attempted R2 CAS must include our intended visibility block");
+      assert.equal(candidate.entities.filter((entry) =>
+        entry.entity_type !== scenario.kind || entry.entity_id !== scenario.entityId,
+      ).length, failedCasAttempts - 1,
+      "a retry must preserve all earlier foreign writers' blocks");
+      // A foreign writer wins the race between our read and conditional PUT.
+      // Its updated ETag and unrelated block become the next read snapshot.
+      state.manifest = {
+        ...state.manifest,
+        revision: state.manifest.revision + 1,
+        entities: [...state.manifest.entities, {
+          entity_type: "event",
+          entity_id: "concurrent-" + failedCasAttempts,
+          fence_token: "foreign-" + failedCasAttempts,
+          blocked_at: 100 + failedCasAttempts,
+        }],
+      };
+      state.etag = "etag-foreign-" + failedCasAttempts;
+      return null; // R2 rejects our stale conditional PUT.
     };
 
     const response = await ctx.request({
@@ -724,8 +742,15 @@ test("T04 exhausted R2 CAS refuses event/video restore before D1 mutation", asyn
     }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
 
     assert.equal(failedCasAttempts, 3, "R2 CAS retries are bounded");
-    assert.equal(state.puts, 0, "no R2 write was committed");
-    assert.deepEqual(state.manifest.entities, [], "failed CAS must not alter the manifest");
+    assert.equal(state.puts, 0, "none of our R2 PUT attempts committed");
+    assert.deepEqual(
+      state.manifest.entities.map((entry) => [entry.entity_id, entry.fence_token]),
+      [["concurrent-1", "foreign-1"], ["concurrent-2", "foreign-2"], ["concurrent-3", "foreign-3"]],
+      "the three winning foreign writes remain intact after our failed CAS",
+    );
+    assert.equal(state.manifest.entities.some((entry) =>
+      entry.entity_type === scenario.kind && entry.entity_id === scenario.entityId,
+    ), false, "our failed CAS never becomes visible");
     assert.equal(ctx.stats.batches, 0, "D1 mutation batch must not execute");
     assert.equal(response.status, 200, "CURRENT expresses a domain-level failure");
     assert.equal(response.headers.get("Cache-Control"), "private, no-store");
