@@ -50,6 +50,14 @@ function fixture() {
   return { db, calls };
 }
 
+function seedApprovedActiveX(sqlite) {
+  insert(sqlite, "user", { id: "user-1", active_x_user_id: "alice", is_banned: 0 });
+  insert(sqlite, "x_users", { id: "alice", x_name: "Alice", approval_status: "approved" });
+  insert(sqlite, "x_user_account_links", {
+    x_user_id: "alice", auth_user_id: "user-1", link_role: "manager",
+  });
+}
+
 test("MIG-0651 atomic composer: null event inserts video and pending YouTube metadata with strict audits", () => {
   const { db, calls } = fixture();
   const row = video();
@@ -57,19 +65,20 @@ test("MIG-0651 atomic composer: null event inserts video and pending YouTube met
     videoAfter: row, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null,
     questions: [], customAnswerDrafts: [], now: NOW,
   });
-  assert.equal(plan.statements.length, 2);
-  assert.strictEqual(plan.statements[0].table, videos);
-  assert.deepEqual(plan.statements[0].value, row);
-  assert.strictEqual(plan.statements[1].table, videoYoutubeMetadata);
-  assert.equal(plan.statements[1].value.sync_status, "pending");
-  assert.equal(plan.statements[1].value.view_count, 0);
-  assert.equal(plan.statements[1].value.updated_at, NOW);
-  assert.deepEqual(plan.expectedChanges, [1, 1]);
+  assert.equal(plan.statements.length, 3);
+  assert.equal(plan.statements[0].action, "assert", "authorization must be first");
+  assert.strictEqual(plan.statements[1].table, videos);
+  assert.deepEqual(plan.statements[1].value, row);
+  assert.strictEqual(plan.statements[2].table, videoYoutubeMetadata);
+  assert.equal(plan.statements[2].value.sync_status, "pending");
+  assert.equal(plan.statements[2].value.view_count, 0);
+  assert.equal(plan.statements[2].value.updated_at, NOW);
+  assert.deepEqual(plan.expectedChanges, [null, 1, 1]);
   assert.deepEqual(plan.audits.map(a => [a.table_name, a.operation, a.strict]),
     [["videos", "CREATE", true], ["video_youtube_metadata", "CREATE", true]]);
-  assert.deepEqual(plan.audits[1].after, plan.statements[1].value);
-  assert.notStrictEqual(plan.audits[1].after, plan.statements[1].value);
-  assert.equal(calls.length, 2, "only required D1 inserts, never executes");
+  assert.deepEqual(plan.audits[1].after, plan.statements[2].value);
+  assert.notStrictEqual(plan.audits[1].after, plan.statements[2].value);
+  assert.equal(calls.length, 3, "authorization assertion and two inserts; never executes");
 });
 
 test("MIG-0651 atomic composer: event and entire question-set assertions MUST precede every INSERT", () => {
@@ -84,16 +93,19 @@ test("MIG-0651 atomic composer: event and entire question-set assertions MUST pr
     }], now: NOW,
   });
   assert.deepEqual(plan.statements.map(s => s.action),
-    ["assert", "assert", "insert", "insert", "insert", "insert"]);
-  assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 1]);
-  assert.deepEqual(plan.statements.slice(2).map(s => s.table),
+    ["assert", "assert", "assert", "insert", "insert", "insert", "insert"]);
+  assert.deepEqual(plan.expectedChanges, [null, null, null, 1, 1, 1, 1]);
+  assert.deepEqual(plan.statements.slice(3).map(s => s.table),
     [videos, videoYoutubeMetadata, videoEvents, videoCustomAnswers]);
-  const statements = plan.statements.slice(0, 2).map(s =>
+  const statements = plan.statements.slice(0, 3).map(s =>
     new SQLiteSyncDialect().sqlToQuery(s.expr));
-  assert.match(statements[0].sql, /events/);
-  assert.match(statements[1].sql, /event_custom_questions/);
-  assert.ok(statements[0].params.includes("event-a"));
+  assert.match(statements[0].sql, /x_user_account_links/);
+  assert.ok(statements[0].params.includes("user-1"));
+  assert.ok(statements[0].params.includes("alice"));
+  assert.match(statements[1].sql, /events/);
+  assert.match(statements[2].sql, /event_custom_questions/);
   assert.ok(statements[1].params.includes("event-a"));
+  assert.ok(statements[2].params.includes("event-a"));
   assert.deepEqual(plan.audits.map(a => [a.table_name, a.operation, a.strict]), [
     ["videos", "CREATE", true],
     ["video_youtube_metadata", "CREATE", true],
@@ -110,8 +122,8 @@ test("MIG-0651 atomic composer: event selected with zero answers still asserts p
     questions: [question()], customAnswerDrafts: [], now: NOW,
   });
   assert.deepEqual(plan.statements.map(s => s.action),
-    ["assert", "assert", "insert", "insert", "insert"]);
-  assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1]);
+    ["assert", "assert", "assert", "insert", "insert", "insert"]);
+  assert.deepEqual(plan.expectedChanges, [null, null, null, 1, 1, 1]);
   assert.equal(plan.audits.length, 3);
 });
 
@@ -160,6 +172,7 @@ test("MIG-0651 atomic composer: actor, selected event, clock and stale answer mi
 test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded video graph", () => {
   for (const eventId of [null, "event-a"]) {
     const sqlite = createSqlite();
+    seedApprovedActiveX(sqlite);
     try {
       if (eventId) {
         insert(sqlite, "events", {
@@ -215,7 +228,7 @@ test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded 
         sqlite.exec("ROLLBACK");
         throw error;
       }
-      assert.equal(statementsExecuted, eventId ? 6 : 2);
+      assert.equal(statementsExecuted, eventId ? 7 : 3);
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 1);
       assert.deepEqual(
         { ...sqlite.prepare("SELECT youtube_video_id, primary_event_id FROM videos").get() },
@@ -238,6 +251,7 @@ test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded 
 test("MIG-0651 atomic composer: real SQLite changed event/question policy aborts without any rows", () => {
   for (const mutation of ["event-closed", "question-deactivated", "new-required"]) {
     const sqlite = createSqlite();
+    seedApprovedActiveX(sqlite);
     try {
       insert(sqlite, "events", {
         id: "event-a", title: "Video event", visibility_status: "public",
@@ -293,13 +307,13 @@ test("MIG-0651 atomic composer: D1 50 query budget uses explicit actual caller-r
     questions: [], customAnswerDrafts: [], now: NOW,
   });
   const noEventBudget = inspectFreeVideoSubmissionAtomicPlanBudget(noEvent, 0);
-  assert.equal(noEventBudget.mutationStatementCount, 2);
+  assert.equal(noEventBudget.mutationStatementCount, 3);
   assert.equal(noEventBudget.mutationAssertionCount, 2);
   assert.equal(noEventBudget.auditEntryCount, undefined, "budget exposes derived query costs, not input row count");
   assert.equal(noEventBudget.auditChunkCount, 1);
   assert.equal(noEventBudget.auditQueryCount, 2);
   assert.equal(noEventBudget.preparationQueryCount, 2);
-  assert.equal(noEventBudget.totalQueryCount, 8);
+  assert.equal(noEventBudget.totalQueryCount, 9);
   assert.equal(noEventBudget.withinLimit, true);
 
   const linked = buildFreeVideoSubmissionAtomicPlan(db, {
@@ -309,15 +323,15 @@ test("MIG-0651 atomic composer: D1 50 query budget uses explicit actual caller-r
       answer_text: "demo", answer_json: null,
     }], now: NOW,
   });
-  const edge = inspectFreeVideoSubmissionAtomicPlanBudget(linked, 36);
-  assert.equal(edge.mutationStatementCount, 6);
+  const edge = inspectFreeVideoSubmissionAtomicPlanBudget(linked, 35);
+  assert.equal(edge.mutationStatementCount, 7);
   assert.equal(edge.mutationAssertionCount, 4);
   assert.equal(edge.auditChunkCount, 1);
   assert.equal(edge.preparationQueryCount, 2);
-  assert.equal(edge.batchQueryCount, 12);
+  assert.equal(edge.batchQueryCount, 13);
   assert.equal(edge.totalQueryCount, 50);
   assert.equal(edge.withinLimit, true);
-  const exceeded = inspectFreeVideoSubmissionAtomicPlanBudget(linked, 37);
+  const exceeded = inspectFreeVideoSubmissionAtomicPlanBudget(linked, 36);
   assert.equal(exceeded.totalQueryCount, 51);
   assert.equal(exceeded.withinLimit, false, "caller must fail closed before D1 batch");
   for (const invalid of [-1, 1.5, Infinity, NaN]) {
@@ -334,6 +348,7 @@ test("MIG-0651 atomic composer: D1 50 query budget uses explicit actual caller-r
 
 test("MIG-0651 atomic composer: concurrent YouTube ID unique collision rolls back the fresh candidate", () => {
   const sqlite = createSqlite();
+  seedApprovedActiveX(sqlite);
   try {
     const drizzleDb = drizzle(async () => ({ rows: [] }));
     const planDb = {
@@ -384,6 +399,7 @@ test("MIG-0651 atomic composer: concurrent YouTube ID unique collision rolls bac
 
 test("MIG-0651 atomic composer: mid-batch metadata failure rolls back the earlier video INSERT", () => {
   const sqlite = createSqlite();
+  seedApprovedActiveX(sqlite);
   try {
     sqlite.exec(`
       CREATE TRIGGER fail_fresh_video_metadata
@@ -399,7 +415,7 @@ test("MIG-0651 atomic composer: mid-batch metadata failure rolls back the earlie
       videoAfter: video(null), actorUserId: "user-1", trustedActiveXId: "alice", eventId: null,
       questions: [], customAnswerDrafts: [], now: NOW,
     });
-    assert.deepEqual(plan.expectedChanges, [1, 1]);
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1]);
     sqlite.exec("BEGIN");
     assert.throws(() => {
       for (const stmt of plan.statements) {
