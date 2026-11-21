@@ -647,3 +647,77 @@ test("CAS status reread returns no row: reject unknown outcome without unsafe re
     }
   }
 });
+
+
+test("Next control-flow exceptions compensate R2 before rethrow or fail closed", async () => {
+  const control = Object.assign(new Error("private framework redirect marker"), {
+    digest: "NEXT_REDIRECT;push;/entry;307;",
+  });
+  for (const rollbackConfirmed of [true, false]) {
+    const calls = [];
+    const run = () => executeVideoVisibilityStatusMutation({
+      db: {}, videoId: "v-1", requestedStatus: "private",
+      transition: transition({ fenceToken: "owned-visibility-token" }),
+      reason: "review", logTag: "manage-video-status",
+    }, host({
+      preCommit: async () => { calls.push("precommit"); },
+      mutate: async () => { calls.push("mutate"); throw control; },
+      rethrowFrameworkControl: error => {
+        calls.push("framework-rethrow");
+        throw error;
+      },
+      compensate: async (_db, details) => {
+        calls.push("compensate");
+        assert.equal(details.fenceToken, "owned-visibility-token");
+        assert.equal(details.allowNonPublicRollback, false);
+      },
+      confirmCompensation: async () => {
+        calls.push("confirm");
+        return rollbackConfirmed;
+      },
+      rereadStatus: async () => { calls.push("unexpected-D1-reread"); return "private"; },
+      log: (level, tag, details) => calls.push(["log", level, tag, details]),
+    }, calls));
+
+    if (rollbackConfirmed) {
+      await assert.rejects(run, error => error === control,
+        "preserve the exact Next control-flow exception after verified cleanup");
+    } else {
+      assert.deepEqual(await run(), {
+        ok: false,
+        message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+        errorCode: "status_unverified", traceId: "trace-1", retryable: false,
+      }, "a stranded R2 block must not cause an unverified redirect");
+    }
+    assert.deepEqual(calls.map(x => Array.isArray(x) ? x[0] : x), [
+      "precommit", "mutate", "framework-rethrow", "compensate", "confirm",
+      ...(rollbackConfirmed ? [] : ["log"]),
+    ], "R2 compensation and persisted readback precede control-flow propagation");
+    assert.ok(!calls.includes("unexpected-D1-reread"));
+    if (!rollbackConfirmed) {
+      assert.deepEqual(calls.at(-1)[3], {
+        traceId: "trace-1", error_code: "visibility_compensation_failed",
+      });
+      assert.doesNotMatch(JSON.stringify(calls), /private framework redirect marker/);
+    }
+  }
+
+  // No R2 fence is possible: preserve CURRENT's immediate rethrow behavior.
+  const calls = [];
+  await assert.rejects(
+    () => executeVideoVisibilityStatusMutation({
+      db: {}, videoId: "v-1", requestedStatus: "public",
+      transition: transition({ fenceToken: null, depublicizedFromPublic: false }),
+      reason: null, logTag: "admin-video-status",
+    }, host({
+      mutate: async () => { calls.push("mutate"); throw control; },
+      rethrowFrameworkControl: error => {
+        calls.push("framework-rethrow");
+        throw error;
+      },
+      compensate: async () => { calls.push("unexpected-compensation"); },
+    }, calls)),
+    error => error === control,
+  );
+  assert.deepEqual(calls, ["mutate", "framework-rethrow"]);
+});
