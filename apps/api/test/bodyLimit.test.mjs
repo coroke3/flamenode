@@ -6,6 +6,9 @@ import {
   XID_ACTION_BODY_LIMITS,
   XID_ICON_UPLOAD_LIMIT_BYTES,
   limitXIdActionBody,
+  VIDEO_ACTION_BODY_LIMITS,
+  VIDEO_SUBMISSION_BODY_LIMIT_BYTES,
+  limitVideoActionBody,
 } from "../src/middleware/bodyLimit.ts";
 
 function testApp(action) {
@@ -106,4 +109,55 @@ test("used request body cannot bypass or crash the preflight clone", async () =>
   assert.equal(response.status, 400);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(await response.json(), { ok: false, reason: "body_unreadable" });
+});
+
+
+function videoBudgetTestApp(action) {
+  const app = new Hono();
+  app.use("/video", limitVideoActionBody(action));
+  app.post("/video", async (c) =>
+    c.json({ ok: true, bytes: (await c.req.arrayBuffer()).byteLength }),
+  );
+  return app;
+}
+
+function sendVideoBudget(app, length, headers = {}) {
+  return app.request("http://localhost/video", {
+    method: "POST", headers, body: new Uint8Array(length),
+  });
+}
+
+test("MIG-0651 D-15-3: all three video mutation actions use the CURRENT 8 MiB byte cap", async () => {
+  assert.deepEqual(Object.keys(VIDEO_ACTION_BODY_LIMITS), ["SA-086", "SA-088", "SA-089"]);
+  assert.equal(VIDEO_SUBMISSION_BODY_LIMIT_BYTES, 8 * 1024 * 1024);
+  for (const action of Object.keys(VIDEO_ACTION_BODY_LIMITS)) {
+    assert.equal(VIDEO_ACTION_BODY_LIMITS[action], VIDEO_SUBMISSION_BODY_LIMIT_BYTES);
+    const app = videoBudgetTestApp(action);
+    const accepted = await sendVideoBudget(app, VIDEO_SUBMISSION_BODY_LIMIT_BYTES);
+    assert.equal(accepted.status, 200, action + ": exactly 8 MiB must pass");
+    assert.deepEqual(await accepted.json(), {
+      ok: true, bytes: VIDEO_SUBMISSION_BODY_LIMIT_BYTES,
+    });
+    const denied = await sendVideoBudget(app, VIDEO_SUBMISSION_BODY_LIMIT_BYTES + 1);
+    assert.equal(denied.status, 413, action + ": exactly 8 MiB +1 must reject");
+    assert.equal(denied.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(await denied.json(), { ok: false, reason: "body_too_large" });
+  }
+});
+
+test("MIG-0651 D-15-3: declared oversized video request and forged zero length fail closed", async () => {
+  const app = videoBudgetTestApp("SA-086");
+  const declared = await sendVideoBudget(app, 1, {
+    "Content-Length": String(VIDEO_SUBMISSION_BODY_LIMIT_BYTES + 1),
+  });
+  assert.equal(declared.status, 413);
+  assert.deepEqual(await declared.json(), { ok: false, reason: "body_too_large" });
+  const forged = await sendVideoBudget(app, VIDEO_SUBMISSION_BODY_LIMIT_BYTES + 1, {
+    "Content-Length": "0",
+  });
+  assert.equal(forged.status, 413);
+  assert.deepEqual(await forged.json(), { ok: false, reason: "body_too_large" });
+  const malformed = await sendVideoBudget(app, 1, { "Content-Length": "0001" });
+  assert.equal(malformed.status, 400);
+  assert.deepEqual(await malformed.json(), { ok: false, reason: "invalid_body_length" });
 });
