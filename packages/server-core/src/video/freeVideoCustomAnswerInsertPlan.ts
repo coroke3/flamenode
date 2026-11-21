@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { eventCustomQuestions, videoCustomAnswers } from "@flamenode/db/schema";
 import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@flamenode/domain/video/atomicLimits";
-import type { SubmissionCustomAnswerDraft } from "@flamenode/domain/video";
+import { validateSubmissionCustomAnswers, type SubmissionCustomAnswerDraft } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 import type { UnslottedVideoAtomicPlan } from "./unslottedEventPlans.ts";
 import {
@@ -82,6 +82,36 @@ export function buildFreeVideoCustomAnswerInsertPlan(
       throw new Error("video_custom_answer_duplicate_question");
     }
     seen.add(draft.question_id);
+  }
+  // Defensive replay is bounded (<=18 questions, <=4 drafts): a caller
+  // forgetting the initial FormData preflight must not skip required fields,
+  // text limits or selected-option checks. Replay also rejects malformed,
+  // noncanonical checkbox JSON and stale/out-of-order draft snapshots.
+  const form = new FormData();
+  for (const draft of drafts) {
+    const key = `custom_answer:${eventId}:${draft.question_key}`;
+    if (draft.answer_text !== null) {
+      form.append(key, draft.answer_text);
+    } else if (draft.answer_json !== null) {
+      let selections: unknown;
+      try {
+        selections = JSON.parse(draft.answer_json);
+      } catch {
+        throw new Error("video_custom_answer_draft_invalid");
+      }
+      if (!Array.isArray(selections) ||
+          selections.length === 0 ||
+          selections.some((item) => typeof item !== "string") ||
+          JSON.stringify(selections) !== draft.answer_json) {
+        throw new Error("video_custom_answer_draft_invalid");
+      }
+      for (const selection of selections as string[]) form.append(key, selection);
+    }
+  }
+  const replay = validateSubmissionCustomAnswers(form, questions);
+  if (!replay.ok ||
+      JSON.stringify(replay.drafts) !== JSON.stringify(drafts)) {
+    throw new Error("video_custom_answer_draft_policy_invalid");
   }
   const rows: (typeof videoCustomAnswers.$inferSelect)[] = drafts.map((draft) => ({
     video_id: videoId,
