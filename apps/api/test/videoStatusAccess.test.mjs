@@ -7,7 +7,7 @@ import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { seed } from "./support/manageSeed.mjs";
 import { createVideoStatusD1 } from "./support/videoStatusD1.mjs";
 import { checkManageVideoStatusAccess, loadManageVideoStatusSnapshot, loadAdminVideoStatusSnapshot } from "../src/routes/videos/videoStatusAccess.ts";
-import { MAX_MANAGE_STATUS_REBUILD_EVENTS, planAdminVideoStatusCommitAssertion, planManageVideoStatusCommitAssertion } from "@flamenode/server-core/video/manageStatusAccess";
+import { MAX_MANAGE_STATUS_REBUILD_EVENTS, planAdminVideoStatusCommitAssertion, planManageVideoStatusCommitAssertion, planUnboundAtomicVideoStatusNotificationInsert } from "@flamenode/server-core/video/manageStatusAccess";
 import { loadTosState } from "../src/middleware/writeOrigin.ts";
 import { evaluateCostGuardWithSettings } from "../src/middleware/costGuard.ts";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
@@ -1645,6 +1645,111 @@ test("MIG-0603: notifiable status facts fit inside existing authorized snapshot 
       "unprivileged caller never executes target/notification projection");
     assert.equal(d1.stats.batches, 0, "read-only proposal cannot write audit/outbox");
     assert.equal(d1.stats.writes, 0, "no D1 writes from proposed snapshot");
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("MIG-0603: unmounted notification DML rechecks recipient and dedupe inside one atomic batch", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const admin = { id: "u_admin", role: "admin" };
+    sqlite.prepare('UPDATE "user" SET is_notification_enabled=1 WHERE id=?')
+      .run("u_plain");
+    const preflight = await loadAdminVideoStatusSnapshot(db, admin, "v1", "public");
+    assert.equal(preflight.ok, true);
+    assert.deepEqual(preflight.notification,
+      { recipientEnabled: true, activeDedupe: false });
+
+    const prepare = (id, nextStatus = "public", more = {}) =>
+      planUnboundAtomicVideoStatusNotificationInsert(db, {
+        videoId: "v1",
+        nextStatus,
+        notificationId: id,
+        payloadJson: '{"text":"exact template payload bytes"}',
+        eventId: "evA",
+        createdAt: 1000,
+        ...more,
+      });
+    const outbox = (id) => sqlite.prepare(
+      'SELECT * FROM "notification_outbox" WHERE id=?',
+    ).get(id);
+    async function attempt(id, status = "public") {
+      const before = d1.stats.statements;
+      await db.batch([preparedStatusTestBatchItem(db, prepare(id, status))]);
+      assert.equal(d1.stats.statements - before, 1,
+        "atomic notification INSERT/SELECT adds one audited-batch statement, no pre-read");
+      return outbox(id);
+    }
+
+    // A stale, optimistic preflight cannot override notification preferences
+    // changed before the actual D1 batch.
+    sqlite.prepare('UPDATE "user" SET is_notification_enabled=0 WHERE id=?')
+      .run("u_plain");
+    assert.equal(await attempt("atomic-off"), undefined,
+      "disabled recipient must not be enqueued even after optimistic preflight");
+    sqlite.prepare('UPDATE "user" SET is_notification_enabled=1 WHERE id=?')
+      .run("u_plain");
+    const one = await attempt("atomic-first");
+    assert.equal(one.recipient_user_id, "u_plain");
+    assert.equal(one.dedupe_key, "video_approved:v1");
+    assert.equal(one.type, "video_approved");
+    assert.equal(one.payload_json, '{"text":"exact template payload bytes"}');
+    assert.equal(one.created_at, 1000);
+    assert.equal(one.event_id, "evA");
+    assert.equal(one.status, "pending");
+
+    // Existing active notification is checked at execution, not at preflight.
+    assert.equal(await attempt("atomic-repeat"), undefined);
+    assert.equal(sqlite.prepare(
+      "SELECT count(*) n FROM notification_outbox WHERE dedupe_key='video_approved:v1'",
+    ).get().n, 1);
+    sqlite.prepare("UPDATE notification_outbox SET status='processing' WHERE id='atomic-first'").run();
+    assert.equal(await attempt("atomic-processing"), undefined);
+    sqlite.prepare("UPDATE notification_outbox SET status='sent' WHERE id='atomic-first'").run();
+    assert.equal(await attempt("atomic-sent"), undefined);
+    sqlite.prepare("UPDATE notification_outbox SET status='failed' WHERE id='atomic-first'").run();
+    assert.ok(await attempt("atomic-retry"),
+      "failed dedupe does not block a new attempt");
+    const voided = await attempt("atomic-voided", "voided");
+    assert.equal(voided.dedupe_key, "video_voided:v1");
+    assert.equal(voided.type, "video_voided");
+    assert.equal(await attempt("atomic-voided-repeat", "voided"), undefined);
+
+    // CURRENT trims the persisted recipient ID, not request data; keep it
+    // inside the same D1 statement, even when a legacy import contains spaces.
+    sqlite.exec("PRAGMA foreign_keys = OFF");
+    sqlite.prepare("UPDATE videos SET submitted_by_user_id=? WHERE id='v1'")
+      .run("  u_plain  ");
+    sqlite.prepare("UPDATE notification_outbox SET status='failed' WHERE id='atomic-voided'").run();
+    assert.equal((await attempt("atomic-padded", "voided")).recipient_user_id, "u_plain");
+    sqlite.prepare("UPDATE videos SET submitted_by_user_id=? WHERE id='v1'")
+      .run("  missing_user  ");
+    assert.equal(await attempt("atomic-missing", "public"), undefined,
+      "a removed recipient must never become an outbox row");
+    sqlite.prepare("UPDATE videos SET submitted_by_user_id='u_plain' WHERE id='v1'").run();
+
+    // The INSERT is transactional, not a best-effort write that can survive
+    // a later failed audit assertion in the same batch.
+    sqlite.prepare("UPDATE notification_outbox SET status='failed' WHERE id='atomic-padded'").run();
+    await assert.rejects(
+      db.batch([
+        prepare("atomic-rolled-back", "voided"),
+        db.run(sql.raw("SELECT json_extract('not-valid-json', '$')")),
+      ].map(stmt => preparedStatusTestBatchItem(db, stmt))),
+      /malformed JSON|not-valid-json/,
+    );
+    assert.equal(outbox("atomic-rolled-back"), undefined,
+      "atomic batch failure must roll back the pending notification");
+    assert.throws(
+      () => prepare("force-not-supported", "public", { forceNotify: true }),
+      /video_status_atomic_notification_requires_normal_validated_input/,
+      "CURRENT forceNotify semantics require a separate Lead-owned decision");
+    assert.ok(d1.stats.maxBinds <= 100, "bounded D1 bind count");
   } finally {
     sqlite.close();
   }
