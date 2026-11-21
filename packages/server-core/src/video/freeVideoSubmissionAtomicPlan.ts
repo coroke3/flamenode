@@ -39,6 +39,18 @@ export function buildFreeVideoSubmissionAtomicPlan(
       videoAfter.submitted_by_user_id !== actorUserId ||
       videoAfter.primary_event_id !== eventId ||
       !videoAfter.creator_x_user_id ||
+      videoAfter.source_type !== "youtube" ||
+      !videoAfter.youtube_video_id ||
+      !/^[A-Za-z0-9_-]{11}$/.test(videoAfter.youtube_video_id) ||
+      videoAfter.visibility_status !== "public" ||
+      videoAfter.scheduling_type !== "manual" ||
+      !Number.isSafeInteger(videoAfter.scheduled_time) ||
+      videoAfter.scheduled_time < 0 ||
+      videoAfter.app_like_count !== 0 ||
+      videoAfter.score !== 0 ||
+      videoAfter.score_updated_at !== null ||
+      !videoAfter.creator_display_name.trim() ||
+      !videoAfter.title.trim() ||
       videoAfter.created_at !== now || videoAfter.updated_at !== now ||
       !Number.isSafeInteger(now) || now < 0) {
     throw new Error("free_video_submission_plan_identity_invalid");
