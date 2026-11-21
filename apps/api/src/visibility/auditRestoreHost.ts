@@ -125,8 +125,10 @@ export function createAuditRestoreHost(c: Context<AppEnv>): AuditRestoreHost {
       write: async (manifest, options) => {
         const bucket = auditManifestBucket(c, "public_visibility_manifest_put_failed");
         if (!bucket) throw new Error("public_visibility_manifest_bucket_missing");
-        const conditional = options != null && Object.prototype.hasOwnProperty.call(options, "ifMatchEtag");
         try {
+          // A malformed options accessor or Proxy trap must not bypass #717
+          // redaction before reaching the R2 CAS provider.
+          const conditional = options != null && Object.prototype.hasOwnProperty.call(options, "ifMatchEtag");
           await putVisibilityManifestWithCas(
             bucket,
             manifest,

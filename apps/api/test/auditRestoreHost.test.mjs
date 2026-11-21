@@ -450,3 +450,32 @@ test("U01 #717 Error.message throwing accessor cannot bypass manifest provider r
   }
   assert.equal(getterReads, 2, "both paths must deliberately inspect but never leak a hostile message");
 });
+
+test("U01 #717 throwing conditional-options getters fail closed before R2 PUT", async () => {
+  const secret = "CONDITIONAL_OPTIONS_PROVIDER_SECRET_0662";
+  const manifest = { schema_version: 1, revision: 0, generated_at: 1, entities: [] };
+  let puts = 0;
+  const current = host({ BUCKET: {
+    put: async () => { puts++; return { etag: "written" }; },
+  } });
+  const fault = () => { throw new Error("provider SQL bind: " + secret, {
+    cause: new Error("Authorization: bearer " + secret),
+  }); };
+  const options = [
+    new Proxy({}, { getOwnPropertyDescriptor: fault }),
+    Object.defineProperty({}, "ifMatchEtag", { enumerable: true, get: fault }),
+    Object.defineProperty({ ifMatchEtag: "old" }, "mutateOnConflict",
+      { enumerable: true, get: fault }),
+  ];
+  for (const poisoned of options) {
+    await assert.rejects(current.manifest.write(manifest, poisoned), (error) => {
+      assert.equal(error.message, "public_visibility_manifest_put_failed");
+      assert.equal(error.cause, undefined);
+      assert.equal(Object.hasOwn(error, "cause"), false);
+      assert.doesNotMatch(String(error.stack), /CONDITIONAL_OPTIONS_PROVIDER_SECRET_0662|Authorization|SQL bind/);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    });
+  }
+  assert.equal(puts, 0, "poisoned options must not cause any R2 mutation");
+});
