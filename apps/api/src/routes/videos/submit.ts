@@ -29,7 +29,7 @@ import type { ServerCoreDb } from "@flamenode/server-core/db";
 import { resolveUnslottedEventIdForNewVideo } from "@flamenode/server-core/video/unslottedEventEligibility";
 import { loadUnionRequiredVideoFields } from "@flamenode/server-core/video/requiredVideoFields";
 import { checkYoutubeVideoDuplicate } from "@flamenode/server-core/video/youtubeDuplicate";
-import { loadGeneralCustomQuestionsForFreeVideo } from "@flamenode/server-core/video/requiredVideoFields";
+import { loadGeneralCustomQuestionsForFreeVideo, type LoadedGeneralCustomQuestion } from "@flamenode/server-core/video/requiredVideoFields";
 
 const BAD_FORM_MESSAGE = "投稿フォームの入力が不正です。";
 
@@ -178,6 +178,7 @@ export async function validateFreeVideoSubmissionReadPreflight(
       youtubeId: string;
       eventId: string | null;
       customAnswerDrafts: SubmissionCustomAnswerDraft[];
+      questionSnapshot: LoadedGeneralCustomQuestion[];
     } }
 > {
   const base = await validateFreeVideoDbReadPreflight(db, input, nowSec);
@@ -186,7 +187,7 @@ export async function validateFreeVideoSubmissionReadPreflight(
     const questions = await loadGeneralCustomQuestionsForFreeVideo(db, base.value.eventId);
     const custom = validateSubmissionCustomAnswers(input.formData, questions);
     if (!custom.ok) return custom;
-    return { ok: true, value: { ...base.value, customAnswerDrafts: custom.drafts } };
+    return { ok: true, value: { ...base.value, customAnswerDrafts: custom.drafts, questionSnapshot: questions } };
   } catch {
     // A read-limit/schema/D1 failure must stop submission before any writes.
     return {
