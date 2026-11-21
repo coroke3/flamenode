@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import { videoCustomAnswers, videoEvents, videoYoutubeMetadata, videos } from "@flamenode/db/schema";
 import * as schema from "@flamenode/db/schema";
+import { validateVideoMemberSubmission } from "@flamenode/domain/video";
 import { buildFreeVideoSubmissionAtomicPlan, buildFreeVideoSubmissionWithRebuildPlan, inspectFreeVideoSubmissionAtomicPlanBudget } from "../src/video/freeVideoSubmissionAtomicPlan.ts";
 import { buildFreeVideoRow } from "../src/video/freeVideoRow.ts";
 import { buildFreeVideoSubmissionWithRebuildPlan as exportedRebuildPlan, inspectFreeVideoSubmissionAtomicPlanBudget as exportedD1Budget } from "@flamenode/server-core/video/unslottedEventPlans";
@@ -899,4 +900,120 @@ test("MIG-0651 U02: queue fault rolls back video, DM, forced ops channel and met
         "atomic abort must remove all prior " + table + " writes");
     }
   } finally { sqlite.close(); }
+});
+
+
+function verifiedMembersForNewVideo() {
+  const form = new FormData();
+  form.set("members_json", JSON.stringify([
+    { name: "New Member", x_user_id: "newcollab", role: "映像", comment: "",
+      chapters: [{ time: "00:24", label: "Beginning", note: "" }] },
+    { name: "Nameless X", x_user_id: "", role: "制作", comment: "", chapters: [] },
+  ]));
+  const parsed = validateVideoMemberSubmission(form, true);
+  assert.equal(parsed.ok, true);
+  return parsed.value;
+}
+
+test("MIG-0651 U02 new-video member/chapter plan is atomic with video/metadata/rebuild queue", async () => {
+  const sqlite = createSqlite();
+  seedApprovedActiveX(sqlite);
+  try {
+    let preReads = 0;
+    const proxy = drizzle(async (query, params, method) => {
+      preReads++;
+      const rows = sqlite.prepare(query).all(...params);
+      return { rows: method === "all" || method === "values" ? rows.map(r => Object.values(r)) : rows };
+    }, { schema });
+    const db = {
+      select: (...args) => proxy.select(...args),
+      insert: (...args) => proxy.insert(...args),
+      run(expr) { return { sqlExpr: expr }; },
+    };
+    const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+      videoAfter: { ...video(), collaboration_type: "collab" },
+      actorUserId: "user-1", trustedActiveXId: "alice",
+      eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+      memberSubmission: verifiedMembersForNewVideo(),
+    });
+    assert.equal(preReads, 2, "member lifecycle resolution uses two reads");
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 2, 1, 13]);
+    assert.equal(plan.audits.length, 5);
+    assert.ok(plan.audits.every(a => a.strict));
+    assert.equal(inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads).withinLimit, true);
+    const dialect = new SQLiteSyncDialect();
+    sqlite.exec("BEGIN");
+    try {
+      for (const [i, stmt] of plan.statements.entries()) {
+        const raw = "sqlExpr" in stmt;
+        const q = raw ? dialect.sqlToQuery(stmt.sqlExpr) : stmt.toSQL();
+        assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
+        const prepared = sqlite.prepare(q.sql);
+        const out = raw && i === 0 ? prepared.get(...q.params) : prepared.run(...q.params);
+        if (plan.expectedChanges[i] !== null) assert.equal(Number(out.changes), plan.expectedChanges[i]);
+      }
+      sqlite.exec("COMMIT");
+    } catch (error) { sqlite.exec("ROLLBACK"); throw error; }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_chapters").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 13);
+    assert.equal(sqlite.prepare("SELECT approval_status FROM x_users WHERE id='newcollab'").get().approval_status, "pending");
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 U02 new-video: rebuild failure rolls back member X, chapter and video inserts", async () => {
+  const sqlite = createSqlite();
+  seedApprovedActiveX(sqlite);
+  try {
+    sqlite.exec("CREATE TRIGGER fail_members_queue BEFORE INSERT ON static_rebuild_queue BEGIN SELECT RAISE(ABORT, 'member-queue-abort'); END;");
+    const proxy = drizzle(async (query, params, method) => {
+      const rows = sqlite.prepare(query).all(...params);
+      return { rows: method === "all" || method === "values" ? rows.map(r => Object.values(r)) : rows };
+    }, { schema });
+    const db = {
+      select: (...args) => proxy.select(...args),
+      insert: (...args) => proxy.insert(...args),
+      run(expr) { return { sqlExpr: expr }; },
+    };
+    const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+      videoAfter: { ...video(), collaboration_type: "collab" },
+      actorUserId: "user-1", trustedActiveXId: "alice",
+      eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+      memberSubmission: verifiedMembersForNewVideo(),
+    });
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 2, 1, 13]);
+    const dialect = new SQLiteSyncDialect();
+    sqlite.exec("BEGIN");
+    assert.throws(() => {
+      for (const [i, stmt] of plan.statements.entries()) {
+        const raw = "sqlExpr" in stmt;
+        const q = raw ? dialect.sqlToQuery(stmt.sqlExpr) : stmt.toSQL();
+        if (raw && i === 0) sqlite.prepare(q.sql).get(...q.params);
+        else sqlite.prepare(q.sql).run(...q.params);
+      }
+    }, /member-queue-abort/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n, 2,
+      "members written before failed Queue UPSERT");
+    sqlite.exec("ROLLBACK");
+    for (const name of ["videos", "video_youtube_metadata", "video_members", "video_chapters", "static_rebuild_queue"]) {
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + name).get().n, 0);
+    }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='newcollab'").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='alice'").get().n, 1);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 U02: missing collab member metadata and noncollab member mutation are both rejected", async () => {
+  const { db } = fixture();
+  await assert.rejects(() => buildFreeVideoSubmissionWithRebuildPlan(db, {
+    videoAfter: { ...video(), collaboration_type: "collab" },
+    actorUserId: "user-1", trustedActiveXId: "alice", eventId: null,
+    now: NOW, questions: [], customAnswerDrafts: [],
+  }), /free_video_collab_members_required/);
+  await assert.rejects(() => buildFreeVideoSubmissionWithRebuildPlan(db, {
+    videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
+    eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+    memberSubmission: verifiedMembersForNewVideo(),
+  }), /free_video_noncollab_members_forbidden/);
 });
