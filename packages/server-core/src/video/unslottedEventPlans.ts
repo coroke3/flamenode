@@ -10,6 +10,8 @@ export { buildFreeVideoCustomAnswerInsertPlan } from "./freeVideoCustomAnswerIns
 export { buildFreeVideoSoftwareInsertPlan } from "./freeVideoSoftwareInsertPlan.ts";
 /** MIG-0651 U02: unmounted CURRENT video_submitted DM outbox plan. */
 export { buildFreeVideoSubmittedNotificationPlan } from "./freeVideoSubmittedNotificationPlan.ts";
+/** MIG-0651 U02: unmounted CURRENT video-registration ops channel outbox. */
+export { buildFreeVideoRegisteredChannelPlan } from "./freeVideoRegisteredChannelPlan.ts";
 export {
   buildFreeVideoSubmissionAtomicPlan,
   buildFreeVideoSubmissionWithRebuildPlan,
