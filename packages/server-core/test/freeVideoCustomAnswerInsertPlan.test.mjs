@@ -134,7 +134,7 @@ test("MIG-0651 custom-answer plan: real SQLite fails closed on concurrent questi
     const set = (col, value) => {
       sqlite.prepare(`UPDATE event_custom_questions SET ${col}=? WHERE id='q-check'`).run(value);
       assert.throws(check, `policy ${col} drift must abort before INSERT`);
-      sqlite.prepare(`UPDATE event_custom_questions SET ${col}=? WHERE id='q-check'`).run(q.source[col]);
+      sqlite.prepare(`UPDATE event_custom_questions SET ${col}=? WHERE id='q-check'`).run(col === "is_active" ? 1 : q.source[col]);
       assert.doesNotThrow(check, `original policy ${col} must pass`);
     };
     set("required", 1);
