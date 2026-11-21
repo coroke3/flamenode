@@ -803,4 +803,38 @@ if (runTestWithTsx(import.meta.url)) {
         `${entityType}: failed compensation leaves the R2 safety block intact`);
     }
   });
+
+  test("SEC-718: successful video audit restore invalidates all bounded related exports", async () => {
+    const formats = ["v5", "legacy"];
+    const windows = [15, 60, 360, 1440];
+    const expected = ["evt-1", "evt-private"].flatMap((eventId) =>
+      formats.flatMap((format) => windows.map((minutes) =>
+        `https://flamenode.internal/public-json/${encodeURIComponent(
+          `public-event-export:9:${encodeURIComponent(eventId)}:${format}:${minutes}`
+        )}`
+      ))
+    );
+    for (const [label, setup, arrange] of [
+      ["normal", seedVideoWithEvents(), arrangeVideo(videoPublicToPrivate)],
+      ["primary-only", (sqlite) => seedVideo(sqlite), arrangeVideo(videoPublicToPrivate)],
+    ]) {
+      const [, actual] = await runScenario(`video_export_${label}`, { setup, arrange });
+      assert.equal(actual.outcome.returned?.ok, true, label);
+      const urls = actual.log.filter((entry) =>
+        entry.op === "cache.delete" && entry.key.includes("public-event-export%3A")
+      ).map((entry) => entry.key);
+      assert.deepEqual(urls, expected, `${label}: complete v5+legacy x4 for both relation and primary IDs`);
+      assert.equal(new Set(urls).size, 16, `${label}: no duplicate deletions`);
+    }
+
+    const [, rollback] = await runScenario("video_export_failed_commit", {
+      setup: seedVideoWithEvents(),
+      arrange: arrangeVideo(videoPublicToPrivate),
+      hooks: { beforeBatch: raceVideo },
+    });
+    assert.equal(rollback.outcome.returned?.ok, false);
+    assert.equal(rollback.log.filter((entry) =>
+      entry.op === "cache.delete" && entry.key.includes("public-event-export%3A")
+    ).length, 0, "D1 rollback cannot evict committed exports");
+  });
 }

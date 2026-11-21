@@ -6781,6 +6781,70 @@
       },
       {
         "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
         "key": "https://flamenode.internal/public-json/videos%2Fvid-1.json"
       },
       {
@@ -7567,6 +7631,70 @@
       },
       {
         "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
         "key": "https://flamenode.internal/public-json/videos%2Fvid-1.json"
       },
       {
@@ -8313,6 +8441,70 @@
       },
       {
         "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
         "key": "https://flamenode.internal/public-json/videos%2Fvid-1.json"
       },
       {
@@ -9056,6 +9248,70 @@
           "requested_at": 1760000000,
           "trace_id": "00000000-0000-4000-8000-000000000021"
         }
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-1%3Alegacy%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Av5%3A1440"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A15"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A60"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A360"
+      },
+      {
+        "op": "cache.delete",
+        "key": "https://flamenode.internal/public-json/public-event-export%3A9%3Aevt-private%3Alegacy%3A1440"
       },
       {
         "op": "cache.delete",

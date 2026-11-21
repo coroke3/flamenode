@@ -459,6 +459,7 @@ export async function restoreAuditLog(
   let visibilityFenceToken: string | null = null;
   let depublicizedFromPublic = false;
   let publicCacheKeys: string[] = [];
+  let videoExportEventIds: string[] = [];
   try {
     if (log.table_name === "events") {
       const previousStatus = String(current?.visibility_status ?? "");
@@ -595,8 +596,14 @@ export async function restoreAuditLog(
         String(current?.primary_event_id ?? "").trim(),
         String(target.primary_event_id ?? "").trim(),
       ]);
-      for (const eventId of eventIds) {
-        if (!eventId) continue;
+      eventIds.delete("");
+      // The 8-target budget also applies when legacy primary-event fallback
+      // and the before/after primary ID add entries outside video_events.
+      if (eventIds.size > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
+        throw new Error("video_status_rebuild_event_limit_exceeded");
+      }
+      videoExportEventIds = [...eventIds];
+      for (const eventId of videoExportEventIds) {
         for (const key of host.publicCacheKeys.eventObjectKeys(eventId)) {
           cacheKeys.add(key);
         }
@@ -721,6 +728,19 @@ export async function restoreAuditLog(
     };
   }
 
+  // Invalidate scheduled exports for every affected video relation/primary
+  // after the D1 commit only. Failed/dry-run restores never evict exports.
+  if (log.table_name === "videos") {
+    for (const eventId of videoExportEventIds) {
+      try {
+        await host.invalidateEventExportCache(eventId);
+      } catch {
+        // Match normal video transition fail-soft behavior without leaking
+        // provider errors, identifiers or cached response contents.
+        console.warn("[audit-restore] event export invalidation failed", "provider_error");
+      }
+    }
+  }
   if (publicCacheKeys.length > 0) {
     await host.deletePublicJsonCaches(publicCacheKeys);
   }
