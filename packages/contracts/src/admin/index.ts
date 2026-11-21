@@ -3,6 +3,7 @@ export * from "./apiEndpoints.ts";
 export * from "./eventGroups.ts";
 export * from "./spreadsheet.ts";
 export * from "./audit.ts";
+export * from "./auditRestore.ts";
 
 export * from "./ops.ts";
 export * from "./termsNotifications.ts";
