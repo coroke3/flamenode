@@ -25,6 +25,25 @@ import {
   readVisibilityManifestObject,
 } from "@flamenode/server-core/visibility/manifestR2";
 
+// #717 defense in depth for this *candidate Hono host only*.
+// R2 and JSON parsing exceptions can contain provider URLs, tokens, or raw
+// response bodies. The shared core currently prints compensation exceptions.
+// Keep only known literal domain codes and reconstruct a fresh Error, never
+// the original exception/stack/cause. The CURRENT/shared-core logger still
+// requires its own owner-scoped fix in PR #679 before release.
+const SAFE_MANIFEST_ERROR_CODES = new Set([
+  "public_visibility_manifest_bucket_missing",
+  "public_visibility_manifest_too_large",
+  "public_visibility_manifest_malformed",
+  "public_visibility_manifest_precondition_failed",
+  "public_visibility_fence_token_mismatch",
+]);
+
+function safeAuditManifestError(error: unknown, fallback: string): Error {
+  const message = error instanceof Error ? error.message : null;
+  return new Error(message && SAFE_MANIFEST_ERROR_CODES.has(message) ? message : fallback);
+}
+
 // Matches CURRENT nextVideoPublicCacheKeyHost. Shared producer keys are
 // imported to avoid silent drift. U04 replaces this provisional list with
 // MIG-0603's reviewed shared host before route activation.
@@ -72,18 +91,26 @@ export function createAuditRestoreHost(c: Context<AppEnv>): AuditRestoreHost {
             etag: null,
           };
         }
-        return readVisibilityManifestObject(bucket);
+        try {
+          return await readVisibilityManifestObject(bucket);
+        } catch (error) {
+          throw safeAuditManifestError(error, "public_visibility_manifest_read_failed");
+        }
       },
       write: async (manifest, options) => {
         const bucket = c.env?.BUCKET;
         if (!bucket) throw new Error("public_visibility_manifest_bucket_missing");
         const conditional = options != null && Object.prototype.hasOwnProperty.call(options, "ifMatchEtag");
-        await putVisibilityManifestWithCas(
-          bucket,
-          manifest,
-          conditional ? options.ifMatchEtag ?? null : undefined,
-          options?.mutateOnConflict,
-        );
+        try {
+          await putVisibilityManifestWithCas(
+            bucket,
+            manifest,
+            conditional ? options.ifMatchEtag ?? null : undefined,
+            options?.mutateOnConflict,
+          );
+        } catch (error) {
+          throw safeAuditManifestError(error, "public_visibility_manifest_put_failed");
+        }
       },
     },
     publicCacheKeys: {
