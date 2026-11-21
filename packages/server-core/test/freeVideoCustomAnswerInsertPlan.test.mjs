@@ -131,6 +131,25 @@ test("MIG-0651 custom-answer plan: a caller cannot bypass required, options, len
   assert.equal(recorded.inserted, null, "invalid input creates no mutation statement");
 });
 
+test("MIG-0651 custom-answer plan: reject mismatched normalized options; allow legacy type fallback", () => {
+  const { db } = fixture();
+  const select = question("q-select", { type: "select", options_json: '["A","B"]' });
+  assert.throws(() => buildFreeVideoCustomAnswerInsertPlan(db, {
+    ...args,
+    questions: [{ ...select, options: ["Z"] }],
+    drafts: [{ ...draft("q-select"), answer_text: "Z" }],
+  }), /video_custom_question_snapshot_invalid/);
+
+  const legacy = question("q-legacy", { type: "unrecognized_legacy_question_type" });
+  const compatible = { ...legacy, type: "textarea" };
+  const result = buildFreeVideoCustomAnswerInsertPlan(db, {
+    ...args, questions: [compatible], drafts: [draft("q-legacy")],
+  });
+  assert.deepEqual(result.expectedChanges, [null, 1]);
+  assert.equal(result.audits.length, 1);
+  assert.equal(result.audits[0].after.answer_text, "test");
+});
+
 test("MIG-0651 custom-answer plan: zero submitted answers still asserts unchanged question set", () => {
   const { db, recorded } = fixture();
   const plan = buildFreeVideoCustomAnswerInsertPlan(db, {
