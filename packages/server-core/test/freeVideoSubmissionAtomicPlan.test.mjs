@@ -178,6 +178,24 @@ test("MIG-0651 atomic composer: actor, selected event, clock and stale answer mi
  * in a rollback-capable local transaction. This is NOT a Cloudflare D1 or an
  * authenticated route integration test; mutateWithAudit is not bypassed.
  */
+test("MIG-0651 atomic composer: both approved owner and manager X links allow batch-time preflight", () => {
+  for (const role of ["owner", "manager"]) {
+    const sqlite = createSqlite();
+    seedApprovedActiveX(sqlite);
+    try {
+      sqlite.prepare("UPDATE x_user_account_links SET link_role=? WHERE x_user_id='alice' AND auth_user_id='user-1'").run(role);
+      const { db } = fixture();
+      const plan = buildFreeVideoSubmissionAtomicPlan(db, {
+        videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
+        eventId: null, questions: [], customAnswerDrafts: [], now: NOW,
+      });
+      const dialect = new SQLiteSyncDialect();
+      const compiled = dialect.sqlToQuery(plan.statements[0].expr);
+      assert.equal(Object.values(sqlite.prepare(compiled.sql).get(...compiled.params))[0], 1,
+        `role ${role} should pass`);
+    } finally { sqlite.close(); }
+  }
+});
 test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded video graph", () => {
   for (const eventId of [null, "event-a"]) {
     const sqlite = createSqlite();
@@ -266,6 +284,7 @@ test("MIG-0651 atomic composer: stale Active X, TOS or account authority aborts 
     revoked: sqlite => sqlite.prepare("UPDATE x_users SET approval_status='rejected' WHERE id='alice'").run(),
     banned: sqlite => sqlite.prepare("UPDATE user SET is_banned=1 WHERE id='user-1'").run(),
     tos_revoked: sqlite => sqlite.prepare("UPDATE user SET is_tos_accepted=0 WHERE id='user-1'").run(),
+    tos_unknown: sqlite => sqlite.prepare("UPDATE user SET is_tos_accepted=NULL WHERE id='user-1'").run(),
     tos_reaccept: sqlite => sqlite.prepare("UPDATE user SET terms_reaccept_required=1 WHERE id='user-1'").run(),
   };
   for (const [name, mutate] of Object.entries(mutations)) {
