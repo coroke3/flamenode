@@ -113,6 +113,7 @@
     "./video/unslottedEventPlans": "./src/video/unslottedEventPlans.ts",
     "./video/requiredVideoFields": "./src/video/requiredVideoFields.ts",
     "./video/freeVideoCustomQuestionRead": "./src/video/freeVideoCustomQuestionRead.ts",
+    "./video/freeVideoCustomAnswerInsertPlan": "./src/video/freeVideoCustomAnswerInsertPlan.ts",
     "./video/freeVideoRebuildTargets": "./src/video/freeVideoRebuildTargets.ts",
     "./video/freeVideoRow": "./src/video/freeVideoRow.ts",
     "./video/freeVideoInsertPlan": "./src/video/freeVideoInsertPlan.ts"
