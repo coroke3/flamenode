@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { videoCustomAnswers } from "@flamenode/db/schema";
+import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import { buildFreeVideoCustomAnswerInsertPlan } from "../src/video/freeVideoCustomAnswerInsertPlan.ts";
 
 const draft = (q) => ({
@@ -99,4 +100,38 @@ test("MIG-0651 custom-answer plan: empty response for eligible event plans no an
     ...args, drafts: [],
   }), { statements: [], expectedChanges: [], audits: [] });
   assert.equal(recorded.run.length, 0);
+});
+
+/** Real migrations + SQLite verify the CAS SQL itself, not just its shape. */
+test("MIG-0651 custom-answer plan: real SQLite rejects disabled, deleted, moved and renamed questions", () => {
+  const sqlite = createSqlite();
+  const { db, recorded } = fixture();
+  try {
+    insert(sqlite, "events", { id: "ev-a", title: "Event A" });
+    insert(sqlite, "events", { id: "ev-b", title: "Event B" });
+    insert(sqlite, "event_custom_questions", {
+      id: "q-check", event_id: "ev-a", question_key: "q-check",
+      label: "Answer", type: "text", is_active: 1,
+    });
+    const plan = buildFreeVideoCustomAnswerInsertPlan(db, {
+      ...args, drafts: [draft("q-check")],
+    });
+    assert.equal(plan.statements.length, 2);
+    const sqlQuery = new SQLiteSyncDialect().sqlToQuery(recorded.run[0]);
+    const check = () => sqlite.prepare(sqlQuery.sql).get(...sqlQuery.params);
+    assert.doesNotThrow(check, "unchanged eligible question must pass");
+    sqlite.prepare("UPDATE event_custom_questions SET is_active=0 WHERE id='q-check'").run();
+    assert.throws(check, "disabled question must reject before video INSERT");
+    sqlite.prepare("UPDATE event_custom_questions SET is_active=1, question_key='renamed' WHERE id='q-check'").run();
+    assert.throws(check, "renamed question must reject");
+    sqlite.prepare("UPDATE event_custom_questions SET question_key='q-check', event_id='ev-b' WHERE id='q-check'").run();
+    assert.throws(check, "moved question must reject");
+    sqlite.prepare("DELETE FROM event_custom_questions WHERE id='q-check'").run();
+    assert.throws(check, "removed question must reject");
+    const count = sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get();
+    assert.equal(count.n, 0, "guard failure did not write answers");
+    assert.equal(recorded.execution, 0, "plan builder never calls D1 batch itself");
+  } finally {
+    sqlite.close();
+  }
 });
