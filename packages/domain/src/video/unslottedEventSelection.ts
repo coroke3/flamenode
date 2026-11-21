@@ -92,11 +92,22 @@ const UNSLOTTED_SINGLE_VALUE_FIELDS = new Set([
  * unlike CURRENT's implicit first/last-wins ambiguity; require parity/Lead
  * acceptance and exact-head CI before enabling it in a route.
  */
+/**
+ * Under the 8 MiB HTTP byte cap a tiny, repeated multipart part can still
+ * amplify CPU and allocations. This conservative candidate bound is NOT a
+ * CURRENT parity guarantee; independent approval is required before mounting.
+ */
+export const MAX_UNSLOTTED_VIDEO_FORM_FIELDS = 1024;
+
 export function validateUniqueUnslottedVideoScalarFields(
   formData: FormData,
 ): { ok: true } | { ok: false; message: string } {
   const seen = new Set<string>();
+  let entryCount = 0;
   for (const [key] of formData) {
+    if (++entryCount > MAX_UNSLOTTED_VIDEO_FORM_FIELDS) {
+      return { ok: false, message: "投稿フォームの入力が不正です。" };
+    }
     if (!UNSLOTTED_SINGLE_VALUE_FIELDS.has(key)) continue;
     if (seen.has(key)) {
       return { ok: false, message: "投稿フォームの入力が不正です。" };

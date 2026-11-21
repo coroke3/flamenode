@@ -5,6 +5,7 @@ import {
   UnslottedEventSyncError,
   MAX_UNSLOTTED_EVENT_SELECTION_CHARS,
   validateUniqueUnslottedVideoScalarFields,
+  MAX_UNSLOTTED_VIDEO_FORM_FIELDS,
   validateFreeVideoMultipartPreflight,
 } from "@flamenode/domain/video";
 import {
@@ -278,4 +279,26 @@ test("MIG-0651 U02: JST scheduled_time is strict and falls back only to trusted 
   form.delete("scheduled_time");
   assert.equal(validateFreeVideoMultipartPreflight(form, preflightContext()).value?.scheduledTime, 1_700_000_000);
   assert.equal(validateFreeVideoMultipartPreflight(form, { ...preflightContext(), nowSec: NaN }).ok, false);
+});
+
+
+test("MIG-0651 U02 S3: cap multipart field count independent of encoded 8MiB body budget", () => {
+  assert.equal(MAX_UNSLOTTED_VIDEO_FORM_FIELDS, 1024);
+  const form = new FormData();
+  for (let i = 0; i < MAX_UNSLOTTED_VIDEO_FORM_FIELDS; i++) {
+    // Dynamic fields are intentionally accepted: only entry count is bounded.
+    form.append("custom_question:" + i, "x");
+  }
+  assert.deepEqual(validateUniqueUnslottedVideoScalarFields(form), { ok: true });
+  form.append("custom_question:overflow", "x");
+  assert.deepEqual(validateUniqueUnslottedVideoScalarFields(form), {
+    ok: false, message: "投稿フォームの入力が不正です。",
+  });
+  form.delete("custom_question:overflow");
+  form.append("icon_mode", "none");
+  assert.equal(validateUniqueUnslottedVideoScalarFields(form).ok, false);
+  form.delete("custom_question:0");
+  assert.equal(validateUniqueUnslottedVideoScalarFields(form).ok, true);
+  form.append("icon_mode", "upload");
+  assert.equal(validateUniqueUnslottedVideoScalarFields(form).ok, false);
 });
