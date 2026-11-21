@@ -633,6 +633,72 @@ if (runUnderRootTsx(import.meta.url)) {
     });
   }
 
+
+  test("SEC #716: D1 wire JSON double-escaping stays under 64KiB", async () => {
+    const w = world();
+    // All fields satisfy their own TEXT limits. SQLite JSON1 serializes 4096
+    // and 2048 U+0001 controls as 6 bytes each, then D1's enclosing JSON
+    // string quotes every backslash AGAIN. Raw SQL bytes ~37KiB, wire >64KiB.
+    const eventTitle = String.fromCharCode(1).repeat(4096);
+    const slotLabel = String.fromCharCode(1).repeat(2048);
+    const a = JSON.stringify({ title: eventTitle });
+    const b = JSON.stringify({ slot_label: slotLabel });
+    assert.ok(Buffer.byteLength(a + b, "utf8") < 58 * 1024,
+      "single-escaping by SQL alone appears to fit the old 60KiB cap");
+    assert.ok(Buffer.byteLength(JSON.stringify(a) + JSON.stringify(b), "utf8") > 64 * 1024,
+      "outer D1 JSON double-escaping crosses the hard S3 transport ceiling");
+    w.sqlite.prepare('UPDATE events SET title = ? WHERE id = ?').run(eventTitle, "ev1");
+    w.sqlite.prepare('UPDATE slots SET slot_label = ? WHERE id = ?').run(slotLabel, "s01");
+
+    let firstReads = 0;
+    const prepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = sql => {
+      const stmt = prepare(sql);
+      if (!sql.includes("AS actor_json") ||
+          !sql.includes("projected_snapshot AS MATERIALIZED")) return stmt;
+      assert.match(sql, /json_quote\(p\."event_json"\)/,
+        "preflight must account for D1 outer JSON string escaping");
+      assert.match(sql, /json_quote\(p\."anchor_json"\)/);
+      const bind = stmt.bind.bind(stmt);
+      stmt.bind = (...values) => {
+        const bound = bind(...values);
+        const first = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await first();
+          firstReads++;
+          assert.equal(row.invalid_snapshot, 1,
+            "reject when D1 wire encoding would exceed 64KiB");
+          for (const name of ["event_json", "anchor_json", "actor_json", "approved_x_json"]) {
+            assert.equal(row[name], null, "no partially usable authorization context");
+          }
+          assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 1024,
+            "SQL must emit a tiny explicit fail-closed response");
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    const initial = state(w);
+    const batchesBefore = w.d1.stats.batches;
+    const readsBefore = w.d1.stats.reads;
+    const thaw = freeze();
+    try {
+      const response = await runHono(w, "u_owner", "reserve", {
+        eventId: "ev1", slot_id: "s01", display_name: "Wire-safe", consecutive_count: 1,
+      });
+      assert.equal(response.status, 503);
+      assert.equal(response.cacheControl, "private, no-store");
+      assert.equal(response.wakes.length, 0);
+      assert.equal(firstReads, 1, "inspect one actual first D1 result");
+      assert.equal(w.d1.stats.batches, batchesBefore, "zero mutation batches");
+      assert.ok(w.d1.stats.reads - readsBefore <= 3);
+      assert.deepEqual(state(w), initial, "zero slot/audit/outbox/queue changes");
+    } finally {
+      thaw();
+    }
+  });
+
   test("SEC #716: JSON escaping inflation is suppressed before a slot array aggregate", async () => {
     const w = world();
     w.sqlite.prepare('UPDATE events SET max_slots_per_video = 20 WHERE id = ?').run("ev1");
