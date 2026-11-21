@@ -248,6 +248,8 @@ if (runUnderRootTsx(import.meta.url)) {
       ["LeadingNul", "\0" + "x".repeat(20)],
       ["EmbeddedNul", "valid\0invalid"],
       ["UnpairedSurrogateAndOverCap", "x".repeat(129) + "\uD800"],
+      ["LoneHighSurrogate", "\uD800"],
+      ["LoneLowSurrogate", "\uDC00"],
     ]) {
       const w = world();
       insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
@@ -362,6 +364,97 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(w.d1.stats.batches - batchBefore, 1);
     assert.equal(w.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = ?')
       .get("u_multi").active_x_user_id, valid);
+  });
+
+  test("SEC-726 / S3: selected identity read preserves the full canonical user row field order", async () => {
+    const w = world();
+    const expected = w.sqlite.prepare('PRAGMA table_info("user")').all().map((r) => r.name);
+    let observed = 0;
+    const oldPrepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = (sql) => {
+      const stmt = oldPrepare(sql);
+      if (!sql.includes("AS invalid_gate_snapshot") ||
+          !sql.includes("AS linked_approval_status")) return stmt;
+      const oldBind = stmt.bind.bind(stmt);
+      stmt.bind = (...args) => {
+        const bound = oldBind(...args);
+        const oldFirst = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await oldFirst();
+          observed++;
+          assert.equal(row?.invalid_gate_snapshot, 0);
+          assert.deepEqual(Object.keys(row).filter((k) => expected.includes(k)), expected,
+            "audit before_json must retain all canonical user columns in the original order");
+          assert.equal(row?.id, "u_owner");
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    const response = await runHono(w, "u_owner", "POST", "/api/xid/active", {
+      x_user_id: "x_owner",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(observed, 1);
+  });
+
+  test("SEC-726 / S3: oversized or wrong-type actor and CostGuard fields fail before the D1 wire and mutation", async () => {
+    const huge = "\u0001".repeat(180_000);
+    for (const [label, mutate, nullColumn] of [
+      ["active x icon", (w) => w.sqlite.prepare(
+        'UPDATE x_users SET icon_url = ? WHERE id = ?').run(huge, "x_owner"),
+        "actor_x_icon_url"],
+      ["CostGuard flags JSON", (w) => w.sqlite.prepare(
+        'UPDATE system_settings SET disabled_features_json = ? WHERE id = ?')
+        .run(huge, "default"), "cg_disabled_features_json"],
+      ["invalid numeric audit config", (w) => w.sqlite.prepare(
+        'UPDATE system_settings SET audit_normal_retention_days = ? WHERE id = ?')
+        .run("not-an-integer", "default"), "cg_audit_normal_retention_days"],
+    ]) {
+      const w = world();
+      mutate(w);
+      const before = snapshot(w);
+      const beforeBatches = w.d1.stats.batches;
+      const beforeReads = w.d1.stats.reads;
+      let inspected = 0;
+      const prepare = w.d1.prepare.bind(w.d1);
+      w.d1.prepare = (sql) => {
+        const stmt = prepare(sql);
+        if (!sql.includes("AS invalid_gate_snapshot") ||
+            !sql.includes("AS linked_approval_status")) return stmt;
+        const bind = stmt.bind.bind(stmt);
+        stmt.bind = (...args) => {
+          const bound = bind(...args);
+          const first = bound.first.bind(bound);
+          bound.first = async () => {
+            const row = await first();
+            inspected++;
+            assert.equal(row?.invalid_gate_snapshot, 1, label);
+            assert.equal(row?.[nullColumn], null,
+              label + " must be NULL before D1 materializes the first row");
+            const json = JSON.stringify(row);
+            assert.ok(Buffer.byteLength(json) < 64 * 1024,
+              label + " stays below first-row D1 response limit");
+            assert.ok(!json.includes(huge.slice(0, 256)),
+              label + " cannot leak the unbounded raw value to JS");
+            return row;
+          };
+          return bound;
+        };
+        return stmt;
+      };
+      const response = await runHono(w, "u_owner", "POST", "/api/xid/active", {
+        x_user_id: "x_owner",
+      });
+      assert.equal(inspected, 1, label);
+      assert.equal(response.status, 503, label);
+      assert.equal(response.result.ok, false, label);
+      assert.equal(w.d1.stats.reads - beforeReads, 2,
+        label + " session + one bounded identity first row, no extra reads");
+      assert.equal(w.d1.stats.batches, beforeBatches, label + " no update/audit batch");
+      assert.deepEqual(snapshot(w), before, label + " no stored state change");
+    }
   });
 
   test("SA-098, SA-102..105 full differential parity vs CURRENT on real migrated schema (3 D1 pre-reads + 1 batch)", async () => {
