@@ -1067,12 +1067,58 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
   const ctx = setup();
   seedEvent(ctx.sqlite, { id: "ev-1", visibility_status: "public", public_api_enabled: 1 });
   seedVideoVisibilityRestore(ctx);
+  // The scheduled export reader must be able to generate a fresh D1 DTO
+  // after rejecting stale Cache API content. The admin mutation fixture has
+  // only the audit tables, so add the empty export relation tables here.
+  // Without these, a correct #636 reader would return 503 on a safe MISS,
+  // and this release acceptance test would wrongly reject the fix.
+  ctx.sqlite.exec(`
+    CREATE TABLE event_staff (
+      id TEXT, event_id TEXT, x_user_id TEXT, display_name TEXT,
+      public_role_label TEXT, is_public INTEGER, created_at INTEGER
+    );
+    CREATE TABLE video_members (
+      video_id TEXT, x_user_id TEXT, name TEXT, role TEXT,
+      order_index INTEGER, is_public_member INTEGER
+    );
+    CREATE TABLE video_softwares (
+      video_id TEXT, software_id TEXT, raw_label TEXT
+    );
+    CREATE TABLE software_catalog (id TEXT, name TEXT);
+    CREATE TABLE video_custom_answers (
+      video_id TEXT, event_id TEXT, question_id TEXT,
+      answer_text TEXT, answer_json TEXT
+    );
+    CREATE TABLE event_custom_questions (
+      id TEXT, event_id TEXT, question_key TEXT, label TEXT,
+      sort_order INTEGER, is_active INTEGER, visibility TEXT
+    );
+    CREATE TABLE video_chapters (
+      id TEXT, video_id TEXT, x_user_id TEXT, chapter_time REAL,
+      chapter_label TEXT, note TEXT, visibility TEXT
+    );
+  `);
+  // Retain an independent public video across the restore. A response that
+  // simply hides *all* videos must not count as a successful privacy fix.
+  const currentVideo = ctx.sqlite.prepare(
+    "SELECT * FROM videos WHERE id = 'vid-restore'",
+  ).get();
+  const visibleVideo = {
+    ...currentVideo, id: "vid-public-control", title: "Unrevoked public video",
+    youtube_video_id: "yt-public-control", creator_x_user_id: "creator-public-control",
+  };
+  const cols = Object.keys(visibleVideo);
+  ctx.sqlite.prepare(
+    "INSERT INTO videos (" + cols.map((col) => '"' + col + '"').join(",") +
+    ") VALUES (" + cols.map(() => "?").join(",") + ")",
+  ).run(...cols.map((col) => visibleVideo[col]));
   const { bucket } = visibilityManifestBucket();
   const previousCache = globalThis.caches;
   const perColo = { writer: new Map(), reader: new Map() };
-  let activeColo = "reader";
+  let activeColo = "writer";
   const deleted = [];
   const readerLookups = [];
+  const pendingCacheWrites = [];
   globalThis.caches = { default: {
     match: async (request) => {
       const url = typeof request === "string" ? request : request.url;
@@ -1091,21 +1137,49 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
       return perColo[activeColo].delete(url);
     },
   } };
-  const now = Math.floor(Date.now() / 1000);
-  const snapshots = [
-    { format: "v5", body: JSON.stringify({
-      schema_version: 5, videos: [{ id: "vid-restore" }],
-    }) },
-    { format: "legacy", body: JSON.stringify([{ video_id: "vid-restore" }]) },
-  ];
+  const snapshots = [{ format: "v5" }, { format: "legacy" }];
   try {
+    // First build actual canonical public exports through the deployed Hono
+    // reader, before the visibility restore. Clone the *real* Cache API
+    // envelopes (including their validation metadata) to the reader colo.
+    // Handcrafted incomplete JSON can be rejected for its wrong shape even
+    // when the reader has no real member-level privacy validation.
     for (const item of snapshots) {
-      const key = eventExportPayloadCacheKey("ev-1", item.format, 15);
-      perColo.reader.set(publicJsonCacheUrl(key), new Response(JSON.stringify({
-        payload: { body: item.body }, stored_at: now - 3,
-      }), { headers: { "Content-Type": "application/json" } }));
+      const response = await deployedApiRouter.fetch(
+        new Request(SITE + "/api/event-endpoints/ev-1?format=" +
+          item.format + "&update=scheduled&refresh=15"),
+        { DB: ctx.db },
+        {
+          waitUntil: (pending) => { pendingCacheWrites.push(pending); },
+          passThroughOnException: () => undefined,
+        },
+      );
+      assert.equal(response.status, 200, item.format + ": pre-restore D1 build must succeed");
+      assert.equal(response.headers.get("X-FlameNode-Cache"), "MISS",
+        item.format + ": initial public DTO comes from fresh D1, not a synthetic cache");
+      const parsed = JSON.parse(await response.text());
+      const ids = item.format === "legacy"
+        ? parsed.map((video) => video.id)
+        : parsed.videos.map((video) => video.id);
+      assert.deepEqual(ids.sort(), ["vid-public-control", "vid-restore"].sort(),
+        item.format + ": both public videos must actually be exported before restore");
     }
-    assert.equal(perColo.reader.size, 2, "both export formats are seeded in the other colo");
+    await Promise.all(pendingCacheWrites);
+    for (const item of snapshots) {
+      const key = publicJsonCacheUrl(eventExportPayloadCacheKey("ev-1", item.format, 15));
+      const canonical = perColo.writer.get(key);
+      assert.ok(canonical, item.format + ": actual D1-generated export must be cached");
+      const envelope = JSON.parse(await canonical.clone().text());
+      assert.equal(envelope.payload?.metadata?.format, item.format,
+        item.format + ": stale fixture must contain canonical export cache metadata");
+      assert.ok(envelope.payload?.body?.includes("vid-restore"),
+        item.format + ": cached body must contain the soon-to-be-revoked video");
+      perColo.reader.set(key, canonical.clone());
+    }
+    assert.equal(perColo.reader.size, 2, "both real export formats are seeded in the other colo");
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT visibility_status FROM videos WHERE id = 'vid-public-control'",
+    ).get().visibility_status, "public");
 
     activeColo = "writer";
     const restored = await ctx.request({
@@ -1171,6 +1245,11 @@ test("T04 #718 separate-colo scheduled export cannot expose a restored private v
       } else {
         assert.ok(Array.isArray(parsed), "legacy must return an actual array DTO");
       }
+      const visibleIds = item.format === "legacy"
+        ? parsed.map((video) => video.id)
+        : parsed.videos.map((video) => video.id);
+      assert.ok(visibleIds.includes("vid-public-control"),
+        item.format + ": a privacy fix must keep the unrelated public video accessible");
       // Inspect *decoded* JSON values: a malicious/stale representation may
       // escape the ID (e.g. vid\\u002drestore) and bypass raw substring checks.
       if (JSON.stringify(parsed).includes("vid-restore")) {
