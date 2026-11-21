@@ -60,6 +60,9 @@ const dryRunAuditHost: AuditRestoreHost = {
 
 // SA-009 updateAuditLogSettingsAction
 auditAdminRoutes.post("/settings", async (c) => {
+  // SA-009 mutates privileged retention policy and returns admin-only outcomes.
+  // Match SA-010/011: prevent HTTP/edge storage on success and error paths.
+  c.header("Cache-Control", "private, no-store");
   const read = await readAdminJsonBody(c.req.raw);
   if (read.kind === "too_large") {
     return c.json<UpdateAuditLogSettingsResult>(
