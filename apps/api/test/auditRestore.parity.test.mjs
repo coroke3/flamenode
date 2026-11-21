@@ -503,7 +503,7 @@ test("T03 #730 authenticated preflight D1 exception returns fixed 500 without SQ
   const originalPrepare = ctx.db.prepare.bind(ctx.db);
   let faulted = false;
   ctx.db.prepare = (sql) => {
-    if (/\\bfrom\\s+["\\x60]?audit_logs["\\x60]?\\b/i.test(sql)) {
+    if (sql.toLowerCase().includes("from") && sql.toLowerCase().includes("audit_logs")) {
       faulted = true;
       throw new Error("Failed query: SELECT * FROM audit_logs WHERE id = ? params: " + marker, {
         cause: new Error("private-provider-origin " + marker),
