@@ -633,12 +633,12 @@ if (runUnderRootTsx(import.meta.url)) {
     });
   }
 
-  test("SEC #716: combined first D1 row over 60KiB is suppressed before D1 transport", async () => {
+  test("SEC #716: JSON escaping inflation is suppressed before a slot array aggregate", async () => {
     const w = world();
     w.sqlite.prepare('UPDATE events SET max_slots_per_video = 20 WHERE id = ?').run("ev1");
-    // Every individual value is within its SQL cap. The aggregate first
-    // snapshot still exceeds 60KiB due to 20 neighboring rows (JSON
-    // escapes control U+0001 to six output bytes per raw byte).
+    // Every individual value is within its SQL cap. The aggregate would
+    // exceed 60KiB; a lazy 20KiB array guard must fire first because JSON
+    // escapes control U+0001 to six output bytes per raw byte.
     for (let i = 1; i <= 20; i++) {
       const id = "s" + String(i).padStart(2, "0");
       w.sqlite.prepare(
@@ -657,11 +657,13 @@ if (runUnderRootTsx(import.meta.url)) {
         bound.first = async () => {
           const row = await first();
           firstReads++;
-          assert.equal(row.invalid_snapshot, 1);
-          assert.equal(row.neighbors_json, null);
-          assert.equal(row.actor_json, null);
-          assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 1024,
-            "large combined result must not leave SQLite into D1");
+          assert.equal(row.invalid_snapshot, 0,
+            "the inner array's own 20KiB preflight should reject first");
+          assert.equal(row.neighbors_json, '[{"__invalid_projection":1}]',
+            "reject before slot JSON array materialization, with explicit sentinel");
+          assert.ok(row.actor_json, "non-sensitive bounded fields remain intact");
+          assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 4096,
+            "large slot group must not leave SQLite into D1");
           return row;
         };
         return bound;
