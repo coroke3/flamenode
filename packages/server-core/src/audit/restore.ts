@@ -553,7 +553,14 @@ export async function restoreAuditLog(
       });
       const queue = await buildAfterVideoStatusChangeQueueBatch(db, {
         videoId: log.target_id,
-        eventIds: eventRows.map((row) => row.event_id),
+        // A restored primary_event_id may not occur in video_events (legacy
+        // video or historical snapshot). Rebuild both old and restored parents
+        // in the same atomic queue batch; the helper deduplicates and enforces
+        // the existing eight-event fanout limit without another D1 read.
+        eventIds: [
+          ...eventRows.map((row) => row.event_id),
+          String(target.primary_event_id ?? "").trim(),
+        ].filter(Boolean),
         creatorXUserId: String(current?.creator_x_user_id ?? "").trim() || null,
         primaryEventId: String(current?.primary_event_id ?? "").trim() || null,
         requestedByUserId: userId,
