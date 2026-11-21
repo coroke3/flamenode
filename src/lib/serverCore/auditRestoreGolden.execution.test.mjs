@@ -836,6 +836,43 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(dryRun.log.filter((entry) => entry.op === "r2.put").length, 0);
   });
 
+  test("SEC-730: adapter mutation-build exceptions never expose SQL/provider data", async () => {
+    const secret = "SEC730_BUILD_SQL_PARAMETER_PRIVATE_CANARY";
+    const adapter = getAdapter("announcements");
+    assert.ok(adapter, "announcements restore adapter is registered");
+    const originalBuild = adapter.buildRestoreMutation;
+    adapter.buildRestoreMutation = () => {
+      const error = new Error(`Failed query: SELECT secret; params: ${secret}`);
+      error.cause = new Error(`upstream provider ${secret}`);
+      error.providerDetails = { headers: { authorization: secret } };
+      throw error;
+    };
+    try {
+      const [, result] = await runScenario("sec730_adapter_build_unknown", {
+        ...withAnn,
+        arrange: arrangeAnn(staleAnn),
+      });
+      assert.equal(result.outcome.returned?.ok, false);
+      assert.equal(result.outcome.returned?.reason_code, "mutation_failed");
+      assert.equal(result.outcome.returned?.message, "復元mutationを作成できません。",
+        "untrusted adapter exceptions must map to a fixed user-facing message");
+      assert.equal(result.audit_restore_runs.length, 1,
+        "failed adapter construction still records an audited failure");
+      assert.equal(result.audit_restore_runs[0].status, "failed");
+      assert.equal(result.log.filter((entry) => entry.op === "batch").length, 0,
+        "an adapter construction failure cannot begin the audited D1 mutation");
+      assert.equal(result.log.filter((entry) => entry.op === "r2.put").length, 0);
+      assert.ok(!JSON.stringify(result.outcome).includes(secret),
+        "HTTP-visible result must never include the private SQL parameter");
+      assert.ok(!JSON.stringify(result.audit_restore_runs).includes(secret),
+        "failed-run audit must store only the safe diagnostic");
+      assert.ok(!JSON.stringify(result.log.filter((entry) => entry.op.startsWith("console."))).includes(secret),
+        "external logs must not contain the provider error or nested metadata");
+    } finally {
+      adapter.buildRestoreMutation = originalBuild;
+    }
+  });
+
   test("SEC-717: event/video restore compensation logs no nested provider canary", async () => {
     const secret = "SEC717_PRIVATE_PROVIDER_CANARY";
     const scenariosWithCompensationFailure = [
