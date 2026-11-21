@@ -78,6 +78,30 @@ if (!runningWithTsx) {
     },
   });
 
+  // A void R2 compensator return is not proof of rollback. Model the manifest
+  // readback explicitly rather than inheriting the host's absent-bucket state.
+  mock.module("@/lib/publicData/visibilityManifestHost", {
+    namedExports: {
+      nextVisibilityManifestHost: {
+        async read() {
+          if (currentHarness.compensationReadbackMode === "read_error") {
+            throw new Error("private R2 provider error");
+          }
+          return {
+            etag: currentHarness.compensationReadbackMode === "missing_etag"
+              ? null
+              : "verified-r2-etag",
+            manifest: {
+              entities: currentHarness.compensationReadbackMode === "still_blocked"
+                ? [{ entity_type: "video", entity_id: "video-1" }]
+                : [],
+            },
+          };
+        },
+      },
+    },
+  });
+
   const { AuditMutationError } = await import("@/lib/audit/mutate.ts");
   const { executeVideoVisibilityStatusMutation } = await import(
     "./videoVisibilityStatusAction.ts"
@@ -104,6 +128,7 @@ if (!runningWithTsx) {
       sqlite,
       mutationMode: "success",
       precommitMode: "success",
+      compensationReadbackMode: "confirmed",
       mutationCalls: 0,
       AuditMutationError,
       db: {
@@ -209,7 +234,7 @@ if (!runningWithTsx) {
     currentHarness.sqlite.close();
   });
 
-  test("visibility precommit failure returns visibility_precommit_failed", async () => {
+  test("visibility precommit failure with confirmed cleanup returns visibility_precommit_failed", async () => {
     currentHarness = createHarness({ visibilityStatus: "public" });
     currentHarness.precommitMode = "fail";
 
@@ -232,4 +257,34 @@ if (!runningWithTsx) {
     assert.equal(currentHarness.mutationCalls, 0);
     currentHarness.sqlite.close();
   });
+
+  for (const mode of ["missing_etag", "still_blocked", "read_error"]) {
+    test(`visibility precommit failure with ${mode} R2 readback returns status_unverified`, async () => {
+      currentHarness = createHarness({ visibilityStatus: "public" });
+      currentHarness.precommitMode = "fail";
+      currentHarness.compensationReadbackMode = mode;
+
+      const result = await executeVideoVisibilityStatusMutation({
+        db: currentHarness.db,
+        videoId: "video-1",
+        requestedStatus: "private",
+        transition: makeTransition([], {
+          depublicizedFromPublic: true,
+          fenceToken: "fence-1",
+        }),
+        reason: null,
+        logTag: "test-video-status",
+      });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.errorCode, "status_unverified");
+      assert.equal(result.retryable, false);
+      assert.equal(
+        result.message,
+        "状態の確認に失敗しました。状態を再取得してから操作してください。",
+      );
+      assert.equal(currentHarness.mutationCalls, 0);
+      currentHarness.sqlite.close();
+    });
+  }
 }
