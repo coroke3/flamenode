@@ -264,6 +264,18 @@ export function filterPublicArtifactPayload<T>(
       );
       return next as T;
     }
+    case "event_slots": {
+      // event_slots usually serves events/<id>/slots.json (slots array),
+      // but the viewer reuses this target type for playlist.v1.json.
+      // Only the playlist has items containing video DTOs. An older,
+      // complete playlist must not re-expose a separately fenced video.
+      if (!Array.isArray(root.items)) return payload;
+      const eventId = typeof root.event_id === "string" ? root.event_id.trim() : "";
+      if (eventId && context?.blockedEventIds.has(eventId)) return null;
+      return withFilteredRows(root, ["items"], (row) =>
+        isPublicVideoRow(row, context),
+      ) as T;
+    }
     case "event_release": {
       const event = root.event;
       if (event != null && !isPublicEventRow(event, context)) return null;
