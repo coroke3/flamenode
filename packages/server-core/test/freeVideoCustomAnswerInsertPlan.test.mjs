@@ -114,7 +114,7 @@ test("MIG-0651 custom-answer plan: a caller cannot bypass required, options, len
   const required = draft("required");
   const cases = [
     { drafts: [], error: /draft_policy_invalid/ },
-    { drafts: [{ ...required, answer_text: "  " }], error: /draft_policy_invalid/ },
+    { drafts: [{ ...required, answer_text: "  " }], error: /draft_invalid/ },
     { drafts: [required, { ...draft("choices"), answer_text: "nope" }], error: /draft_policy_invalid/ },
     { drafts: [required, { ...draft("details"), answer_text: "too-long" }], error: /draft_policy_invalid/ },
     { drafts: [required, { ...draft("multi"), answer_text: null, answer_json: '["X","Z"]' }], error: /draft_policy_invalid/ },
