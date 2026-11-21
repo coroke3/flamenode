@@ -1760,21 +1760,7 @@ test("MIG-0603: unmounted notification DML rechecks recipient and dedupe inside 
       db.batch([
         db.run(sql`UPDATE "videos" SET "visibility_status" = ${"voided"} WHERE "id" = ${"v1"}`),
         prepare("atomic-rolled-back", "voided"),
-        db.run(sql.raw("SELECT json_extract('not-valid-json', '
-    assert.throws(
-      () => prepare("force-not-supported", "public", { forceNotify: true }),
-      /video_status_atomic_notification_requires_normal_validated_input/,
-      "CURRENT forceNotify semantics require a separate Lead-owned decision");
-    assert.throws(
-      () => prepare("same-status-not-supported", "public", { prevStatus: "public" }),
-      /video_status_atomic_notification_requires_normal_validated_input/,
-      "CURRENT never sends a notification on no-op visibility transitions");
-    assert.ok(d1.stats.maxBinds <= 100, "bounded D1 bind count");
-  } finally {
-    sqlite.close();
-  }
-});
-)")),
+        db.run(sql.raw("SELECT json_extract('not-valid-json', '$')")),
       ].map(stmt => preparedStatusTestBatchItem(db, stmt))),
       /malformed JSON|not-valid-json/,
     );
