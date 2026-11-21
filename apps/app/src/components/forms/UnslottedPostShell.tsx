@@ -101,6 +101,11 @@ function UnslottedPostShellForIdentity<
   // Keep success scoped to the selection version that launched it; the new
   // selection's draft must not be cleared by the departed form.
   const selectionRevisionRef = React.useRef(0);
+  // Selection changes, unlike ordinary child edits, invalidate callbacks
+  // belonging to the previously mounted form. Do not rotate this epoch for
+  // individual text/member edits: the change notification port must remain
+  // stable across renders to avoid VideoMembersField effect feedback loops.
+  const formOwnerEpochRef = React.useRef(0);
   // A change event must also refresh the rendered child's success callback.
   // setFormDirty(true) alone stops triggering renders once already dirty.
   const [, refreshSubmitCallback] = React.useReducer((revision: number) => revision + 1, 0);
@@ -121,6 +126,7 @@ function UnslottedPostShellForIdentity<
       lastEligibleEventIdRef.current = selectedEventId;
     } else if (lastEligibleEventIdRef.current === selectedEventId) {
       selectionRevisionRef.current += 1;
+      formOwnerEpochRef.current += 1;
       lastEligibleEventIdRef.current = null;
     }
   }, [affiliation, selectedEventId, selectedEvent]);
@@ -227,6 +233,7 @@ function UnslottedPostShellForIdentity<
     if (next === affiliation || !confirmReset()) return;
     pendingRestoredEventIdRef.current = "";
     selectionRevisionRef.current += 1;
+    formOwnerEpochRef.current += 1;
     videoDraftFlushRef.current();
     setShellDirty(true);
     setAffiliation(next);
@@ -240,6 +247,7 @@ function UnslottedPostShellForIdentity<
     if (eventId === selectedEventId || !confirmReset()) return;
     pendingRestoredEventIdRef.current = "";
     selectionRevisionRef.current += 1;
+    formOwnerEpochRef.current += 1;
     videoDraftFlushRef.current();
     setShellDirty(true);
     setMissingRestoredEvent(false);
@@ -251,6 +259,22 @@ function UnslottedPostShellForIdentity<
     refreshSubmitCallback();
     setFormDirty(true);
   }, [refreshSubmitCallback]);
+  // Memoize by mounted selection, not every draft edit. VideoMembersField
+  // calls its onChange from an effect, so replacing this port on each parent
+  // rerender would retrigger that effect and could create a feedback loop.
+  const selectedEventEligible = Boolean(selectedEvent);
+  const onFormStateChanged = React.useMemo(() => {
+    const expectedEpoch = formOwnerEpochRef.current;
+    const expectedEventId = selectedEventId;
+    const eventAffiliation = affiliation === "event";
+    return () => {
+      if (formOwnerEpochRef.current !== expectedEpoch) return;
+      if (eventAffiliation && !latestEventOptionsRef.current.some(
+        (event) => event.id === expectedEventId
+      )) return;
+      markFormDirty();
+    };
+  }, [affiliation, selectedEventId, selectedEventEligible, markFormDirty]);
   const selectionRevisionAtRender = selectionRevisionRef.current;
 
   return (
@@ -382,16 +406,7 @@ function UnslottedPostShellForIdentity<
             eventOptions: selectedEventOptions,
             canEditEvents: false,
             onDraftFlushReady: handleVideoDraftFlushReady,
-            onFormStateChanged: () => {
-              // CURRENT VideoForm updates members and other controlled fields
-              // without necessarily dispatching a DOM form change. Old
-              // unmounted children cannot invalidate the new selection's work.
-              if (selectionRevisionAtRender !== selectionRevisionRef.current) return;
-              if (selectedEvent && !latestEventOptionsRef.current.some(
-                (event) => event.id === selectedEvent.id
-              )) return;
-              markFormDirty();
-            },
+            onFormStateChanged,
             onSubmitSuccess: () => {
               if (selectionRevisionAtRender !== selectionRevisionRef.current) return;
               // The refreshed choices may revoke the event before the effect

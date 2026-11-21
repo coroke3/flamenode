@@ -1253,3 +1253,47 @@ test("U03a ISSUE-703: stale unmounted programmatic edit callbacks cannot taint a
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: non-DOM change port stays stable across repeated member edits and rejects old event ownership", async () => {
+  dom.window.localStorage.clear();
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const callbacks = [];
+  const renderVideoForm = args => {
+    callbacks.push({ changed: args.onFormStateChanged, success: args.onSubmitSuccess });
+    return renderStub(args);
+  };
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({ renderVideoForm }))));
+    await act(async () => selected(container, "none").click());
+    const firstChange = callbacks.at(-1).changed;
+    const firstSuccess = callbacks.at(-1).success;
+    await act(async () => firstChange());
+    assert.strictEqual(callbacks.at(-1).changed, firstChange,
+      "same-selection rerender must not replace an effect-dependent child callback");
+    const secondSuccess = callbacks.at(-1).success;
+    assert.notStrictEqual(secondSuccess, firstSuccess);
+
+    await act(async () => firstChange());
+    assert.strictEqual(callbacks.at(-1).changed, firstChange,
+      "a second member update through the same callback remains accepted");
+    assert.notStrictEqual(callbacks.at(-1).success, secondSuccess,
+      "every subsequent member change invalidates older in-flight completion");
+
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    const eventCallback = callbacks.at(-1).changed;
+    const eventSuccess = callbacks.at(-1).success;
+    await act(async () => firstChange());
+    assert.strictEqual(callbacks.at(-1).success, eventSuccess,
+      "a detached no-event child cannot report edits to the event-A form");
+    await act(async () => eventCallback());
+    assert.notStrictEqual(callbacks.at(-1).success, eventSuccess,
+      "a live event-A child can report a programmatic update");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
