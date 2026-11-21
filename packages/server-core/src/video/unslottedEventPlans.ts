@@ -6,6 +6,7 @@ import type { ServerCoreDb } from "../db.ts";
 
 /** MIG-0651 unmounted SA-086 answer INSERT candidate. */
 export { buildFreeVideoCustomAnswerInsertPlan } from "./freeVideoCustomAnswerInsertPlan.ts";
+export { buildFreeVideoSubmissionAtomicPlan } from "./freeVideoSubmissionAtomicPlan.ts";
 import { unslottedEventEligibilityWhere } from "./unslottedEventEligibility.ts";
 
 /** Structural parity with CURRENT VideoAtomicWritePlan; caller owns the D1 transaction. */
