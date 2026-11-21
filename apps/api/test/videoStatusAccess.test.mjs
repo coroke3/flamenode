@@ -1668,6 +1668,7 @@ test("MIG-0603: unmounted notification DML rechecks recipient and dedupe inside 
     const prepare = (id, nextStatus = "public", more = {}) =>
       planUnboundAtomicVideoStatusNotificationInsert(db, {
         videoId: "v1",
+        prevStatus: "pending",
         nextStatus,
         notificationId: id,
         payloadJson: '{"text":"exact template payload bytes"}',
@@ -1749,6 +1750,10 @@ test("MIG-0603: unmounted notification DML rechecks recipient and dedupe inside 
       () => prepare("force-not-supported", "public", { forceNotify: true }),
       /video_status_atomic_notification_requires_normal_validated_input/,
       "CURRENT forceNotify semantics require a separate Lead-owned decision");
+    assert.throws(
+      () => prepare("same-status-not-supported", "public", { prevStatus: "public" }),
+      /video_status_atomic_notification_requires_normal_validated_input/,
+      "CURRENT never sends a notification on no-op visibility transitions");
     assert.ok(d1.stats.maxBinds <= 100, "bounded D1 bind count");
   } finally {
     sqlite.close();
