@@ -1434,3 +1434,56 @@ test("U03a ISSUE-703: an abandoned event-options transition cannot revoke the co
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: a delayed previous-affiliation flush registration cannot overwrite the live event form", async () => {
+  dom.window.localStorage.clear();
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const registrations = [];
+  const eventB = { ...eventA, id: "event-B", title: "Event B" };
+  const renderVideoForm = args => {
+    registrations.push({
+      eventIds: args.initial.event_ids,
+      register: args.onDraftFlushReady,
+      changed: args.onFormStateChanged,
+    });
+    return renderStub(args);
+  };
+  let previousFlushes = 0;
+  let currentFlushes = 0;
+  let staleFlushes = 0;
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      eventOptions: [eventA, eventB], renderVideoForm,
+    }))));
+    await act(async () => selected(container, "none").click());
+    const previousRegistration = registrations.at(-1).register;
+    previousRegistration(() => { previousFlushes += 1; return true; });
+
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    assert.deepEqual(registrations.at(-1).eventIds, ["event-A"]);
+    const currentRegistration = registrations.at(-1).register;
+    assert.notStrictEqual(currentRegistration, previousRegistration,
+      "new affiliation/event needs a different registration ownership token");
+    currentRegistration(() => { currentFlushes += 1; return true; });
+
+    // A detached form's delayed effect runs after the new child has registered.
+    // Previously the stable parent registration accepted this stale callback.
+    previousRegistration(() => { staleFlushes += 1; return true; });
+    const liveChanged = registrations.at(-1).changed;
+    await act(async () => liveChanged());
+    assert.strictEqual(registrations.at(-1).register, currentRegistration,
+      "normal live member edits keep the registration port stable");
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-B"));
+    assert.equal(currentFlushes, 1, "the live event-A form is flushed exactly once");
+    assert.equal(staleFlushes, 0, "a detached no-event form must never replace the live flush");
+    assert.equal(previousFlushes, 2, "historical affiliation/event transitions are not changed");
+    assert.equal(container.querySelector('input[name="event_ids"]').value, "event-B");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});

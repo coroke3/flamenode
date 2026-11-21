@@ -210,9 +210,16 @@ function UnslottedPostShellForIdentity<
     if (departing.dirty) departing.flush();
   }, []);
 
-  const handleVideoDraftFlushReady = React.useCallback((flush: () => boolean) => {
-    videoDraftFlushRef.current = flush;
-  }, []);
+  // This registration belongs to one mounted affiliation/event selection.
+  // An async callback from a detached child must not replace the newer form's
+  // draft flush function while the auth user / Active X identity stays the same.
+  const handleVideoDraftFlushReady = React.useMemo(() => {
+    const expectedEpoch = formOwnerEpochRef.current;
+    return (flush: () => boolean) => {
+      if (expectedEpoch !== formOwnerEpochRef.current) return;
+      videoDraftFlushRef.current = flush;
+    };
+  }, [affiliation, selectedEventId, Boolean(selectedEvent)]);
   const handleVideoSubmitSuccess = React.useCallback(() => {
     pendingRestoredEventIdRef.current = "";
     // A successful submit may synchronously navigate/unmount this shell before
