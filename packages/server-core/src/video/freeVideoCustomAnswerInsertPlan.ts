@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { eventCustomQuestions, videoCustomAnswers } from "@flamenode/db/schema";
 import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@flamenode/domain/video/atomicLimits";
-import { validateSubmissionCustomAnswers, type SubmissionCustomAnswerDraft } from "@flamenode/domain/video";
+import { parseSubmissionQuestionOptionsJson, parseSubmissionQuestionType, validateSubmissionCustomAnswers, type SubmissionCustomAnswerDraft } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 import type { UnslottedVideoAtomicPlan } from "./unslottedEventPlans.ts";
 import {
@@ -59,7 +59,10 @@ export function buildFreeVideoCustomAnswerInsertPlan(
         question.source.event_id !== eventId ||
         question.id !== question.source.id ||
         question.question_key !== question.source.question_key ||
-        question.type !== question.source.type ||
+        question.type !== parseSubmissionQuestionType(question.source.type) ||
+        JSON.stringify(question.options) !== JSON.stringify(
+          parseSubmissionQuestionOptionsJson(question.source.options_json),
+        ) ||
         question.label !== question.source.label ||
         Number(question.required) !== question.source.required ||
         question.max_length !== question.source.max_length ||
