@@ -104,6 +104,11 @@ const MAX_X_ID_JSON_BUDGET_BYTES = 12 * 1024;
 const MAX_ACTOR_NAME_BYTES = 512;
 const MAX_ACTOR_USER_ID_BYTES = 128;
 const MAX_ACTOR_DISCORD_ID_BYTES = 128;
+// Staff permission JSON is joined from legacy TEXT: bound both the individual
+// value and the worst-case escaped aggregate BEFORE constructing SQLite JSON1.
+const MAX_STAFF_PRESET_BYTES = 128;
+const MAX_STAFF_CUSTOM_KEYS_BYTES = 2048;
+const MAX_STAFF_JSON_BUDGET_BYTES = 20 * 1024;
 
 function invalidSqlText(expr: string, bytes: number): string {
   return `(${expr} IS NOT NULL AND (
@@ -138,6 +143,13 @@ function invalidArrayIdentity(values: readonly unknown[]): boolean {
   return values.some((value) => typeof value !== "string" ||
     value.includes(String.fromCharCode(0)) ||
     new TextEncoder().encode(value).byteLength > MAX_LEGACY_X_ID_BYTES);
+}
+
+function invalidStaffProjection(values: readonly unknown[]): boolean {
+  // SQL uses a single null sentinel for any oversized or malformed row.
+  // Never evaluate operator capabilities from a truncated staff set.
+  return values.some((value) =>
+    value === null || typeof value !== "object" || Array.isArray(value));
 }
 
 const JST_OFFSET_SEC = 9 * 60 * 60;
@@ -249,10 +261,14 @@ function approvedXJsonSql(userIdParamPlaceholder = "?"): string {
 }
 
 function staffRowsJsonSql(): string {
-  return `(SELECT json_group_array(json_object(
-    'permission_preset', q."permission_preset",
-    'custom_permission_keys_json', q."custom_permission_keys_json"
-  )) FROM (
+  const invalid = [
+    invalidSqlText('q."permission_preset"', MAX_STAFF_PRESET_BYTES),
+    invalidSqlText('q."custom_permission_keys_json"', MAX_STAFF_CUSTOM_KEYS_BYTES),
+  ].join(" OR ");
+  // Scoping the JSON aggregator to a lazy ELSE scalar subquery is necessary:
+  // aggregate functions in the same SELECT are evaluated before CASE. This
+  // makes the first returned D1 row bounded even for corrupt legacy JSON.
+  return `(WITH staff_entries AS MATERIALIZED (
     SELECT es."permission_preset" AS "permission_preset",
            es."custom_permission_keys_json" AS "custom_permission_keys_json"
     FROM "event_staff" es
@@ -260,7 +276,19 @@ function staffRowsJsonSql(): string {
     INNER JOIN "x_users" x ON x."id" = xl."x_user_id"
     WHERE es."event_id" = ? AND xl."auth_user_id" = ? AND x."approval_status" = 'approved'
     LIMIT ${MAX_OPERATOR_STAFF_ROWS + 1}
-  ) q)`;
+  )
+  SELECT CASE WHEN
+    EXISTS (SELECT 1 FROM staff_entries q WHERE ${invalid}) OR
+    (SELECT COALESCE(SUM(
+      6 * COALESCE(length(CAST(q."permission_preset" AS BLOB)), 0) +
+      6 * COALESCE(length(CAST(q."custom_permission_keys_json" AS BLOB)), 0) + 70
+    ), 0) FROM staff_entries q) > ${MAX_STAFF_JSON_BUDGET_BYTES}
+    THEN json_array(NULL)
+    ELSE (SELECT json_group_array(json_object(
+      'permission_preset', q."permission_preset",
+      'custom_permission_keys_json', q."custom_permission_keys_json"
+    )) FROM staff_entries q)
+  END)`;
 }
 
 function neighborConditionSql(alias: string, anchorAlias: string, direction: "forward" | "backward"): string {
@@ -630,6 +658,7 @@ export async function reserveSlotCore(
     snapshot.actor_json?.includes('"__invalid_projection":1') ||
     invalidArrayIdentity(approvedXIds) ||
     invalidArrayIdentity(pendingXIds) ||
+    invalidStaffProjection(staffRows) ||
     approvedXIds.length > MAX_APPROVED_X_IDS ||
     pendingXIds.length > MAX_PENDING_RESERVATION_REQUESTS ||
     staffRows.length > MAX_OPERATOR_STAFF_ROWS
@@ -944,6 +973,7 @@ export async function extendSlotGroupCore(
   const approvedXIds = parseJsonOrThrow<string[]>(snapshot.approved_x_json, []);
   const staffRows = parseJsonOrThrow<StaffPermissionRow[]>(snapshot.staff_json, []);
   if (invalidArrayIdentity(approvedXIds) ||
+      invalidStaffProjection(staffRows) ||
       approvedXIds.length > MAX_APPROVED_X_IDS ||
       staffRows.length > MAX_OPERATOR_STAFF_ROWS) {
     return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
@@ -1127,6 +1157,7 @@ export async function mergeSlotGroupsCore(
   const approvedXIds = parseJsonOrThrow<string[]>(snapshot.approved_x_json, []);
   const staffRows = parseJsonOrThrow<StaffPermissionRow[]>(snapshot.staff_json, []);
   if (invalidArrayIdentity(approvedXIds) ||
+      invalidStaffProjection(staffRows) ||
       approvedXIds.length > MAX_APPROVED_X_IDS ||
       staffRows.length > MAX_OPERATOR_STAFF_ROWS) {
     return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
