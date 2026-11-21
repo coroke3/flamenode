@@ -451,6 +451,39 @@ test("U01 #717 Error.message throwing accessor cannot bypass manifest provider r
   assert.equal(getterReads, 2, "both paths must deliberately inspect but never leak a hostile message");
 });
 
+test("U01 CAS blank or malformed ETag options cannot silently overwrite an R2 fence", async () => {
+  const manifest = { schema_version: 1, revision: 0, generated_at: 1, entities: [] };
+  const existing = { ...manifest, revision: 2, entities: [{
+    entity_type: "event", entity_id: "protected",
+    fence_token: "already-blocked", blocked_at: 1,
+  }] };
+  const encoded = JSON.stringify(existing);
+  let puts = 0;
+  const current = host({ BUCKET: {
+    get: async () => ({
+      etag: "", // malformed/nonstandard R2 object: fail closed at CAS boundary
+      size: Buffer.byteLength(encoded),
+      text: async () => encoded,
+    }),
+    put: async () => { puts++; return { etag: "overwrote-existing-block" }; },
+  } });
+  const loaded = await current.manifest.read();
+  assert.equal(loaded.etag, "", "provider may supply an empty ETag for an existing object");
+  for (const bad of ["", " \t ", 0, false, [], {}]) {
+    await assert.rejects(
+      current.manifest.write(manifest, { ifMatchEtag: bad }),
+      (error) => {
+        assert.equal(error.message, "public_visibility_manifest_precondition_failed");
+        assert.equal(error.cause, undefined);
+        assert.equal(Object.hasOwn(error, "cause"), false);
+        return true;
+      },
+      "malformed ETag must never degrade to unconditional R2 PUT",
+    );
+  }
+  assert.equal(puts, 0, "existing fence must not be overwritten for any invalid condition");
+});
+
 test("U01 #717 throwing conditional-options getters fail closed before R2 PUT", async () => {
   const secret = "CONDITIONAL_OPTIONS_PROVIDER_SECRET_0662";
   const manifest = { schema_version: 1, revision: 0, generated_at: 1, entities: [] };

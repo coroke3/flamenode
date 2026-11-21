@@ -129,10 +129,23 @@ export function createAuditRestoreHost(c: Context<AppEnv>): AuditRestoreHost {
           // A malformed options accessor or Proxy trap must not bypass #717
           // redaction before reaching the R2 CAS provider.
           const conditional = options != null && Object.prototype.hasOwnProperty.call(options, "ifMatchEtag");
+          const ifMatchEtag = conditional ? options.ifMatchEtag ?? null : undefined;
+          // Shared manifestR2 currently treats an empty-string condition as
+          // falsy and would PUT unconditionally, bypassing the existing R2
+          // fence token's compare-and-swap. An observed R2 object must never
+          // be overwritten without a nonblank ETag precondition. Reject
+          // malformed runtime options too (the TypeScript caller is trusted,
+          // but an untrusted binding/provider may return a malformed ETag).
+          if (
+            ifMatchEtag != null &&
+            (typeof ifMatchEtag !== "string" || ifMatchEtag.trim().length === 0)
+          ) {
+            throw new Error("public_visibility_manifest_precondition_failed");
+          }
           await putVisibilityManifestWithCas(
             bucket,
             manifest,
-            conditional ? options.ifMatchEtag ?? null : undefined,
+            ifMatchEtag,
             options?.mutateOnConflict,
           );
         } catch (error) {
