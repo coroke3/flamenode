@@ -1557,3 +1557,81 @@ test("MIG-0603: mismatched admin/global and manage/event scopes fail closed in f
     sqlite.close();
   }
 });
+
+
+test("MIG-0603: notifiable status facts fit inside existing authorized snapshot read", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const manager = { id: "u_mgr", role: "user" };
+    const admin = { id: "u_admin", role: "admin" };
+    const outsider = { id: "u_plain", role: "user" };
+    const enabled = sqlite.prepare(
+      'SELECT is_notification_enabled FROM "user" WHERE id = ?',
+    ).get("u_plain")?.is_notification_enabled !== 0;
+
+    const defaultSnapshot = await loadManageVideoStatusSnapshot(
+      db, manager, "evA", "v1",
+    );
+    assert.equal(defaultSnapshot.ok, true);
+    assert.equal("notification" in defaultSnapshot, false,
+      "default CURRENT-compatible snapshot shape must remain unchanged");
+
+    async function read(status, expected, scope = "manage") {
+      const before = d1.stats.statements;
+      const result = scope === "manage"
+        ? await loadManageVideoStatusSnapshot(db, manager, "evA", "v1", status)
+        : await loadAdminVideoStatusSnapshot(db, admin, "v1", status);
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.notification, expected);
+      assert.equal(result.video.id, "v1", "full-row status/audit CAS still available");
+      assert.deepEqual(result.rebuildEventIds, ["evA"],
+        "notification projection cannot replace or truncate rebuild targets");
+      assert.equal(d1.stats.statements - before, scope === "manage" ? 2 : 1,
+        "permission-first + associated snapshot stays <=2 reads; admin stays at 1");
+    }
+
+    await read("public", { recipientEnabled: enabled, activeDedupe: false });
+    await read("voided", { recipientEnabled: enabled, activeDedupe: false }, "admin");
+
+    // The canonical notification builder suppresses an existing pending,
+    // processing or sent dedupe unless forceNotify=true; failed does not count.
+    const updateNotice = sqlite.prepare(
+      'UPDATE "notification_outbox" SET dedupe_key = ?, status = ? WHERE id = ?',
+    );
+    for (const state of ["pending", "processing", "sent", "failed"]) {
+      updateNotice.run("video_approved:v1", state, "n1");
+      await read("public", {
+        recipientEnabled: enabled,
+        activeDedupe: state !== "failed",
+      });
+      await read("voided", { recipientEnabled: enabled, activeDedupe: false },
+        "admin");
+    }
+    updateNotice.run("video_voided:v1", "processing", "n1");
+    await read("public", { recipientEnabled: enabled, activeDedupe: false });
+    await read("voided", { recipientEnabled: enabled, activeDedupe: true },
+      "admin");
+
+    sqlite.prepare('UPDATE "user" SET is_notification_enabled = 0 WHERE id = ?')
+      .run("u_plain");
+    await read("voided", { recipientEnabled: false, activeDedupe: true });
+    sqlite.prepare('UPDATE "user" SET is_notification_enabled = 1 WHERE id = ?')
+      .run("u_plain");
+    await read("voided", { recipientEnabled: true, activeDedupe: true });
+
+    const deniedAt = d1.stats.statements;
+    assert.deepEqual(
+      await loadManageVideoStatusSnapshot(db, outsider, "evA", "v1", "public"),
+      { ok: false, message: "このイベントの作品審査権限がありません。" },
+      "notification facts must not leak video/recipient state before grant");
+    assert.equal(d1.stats.statements - deniedAt, 1,
+      "unprivileged caller never executes target/notification projection");
+    assert.equal(d1.stats.batches, 0, "read-only proposal cannot write audit/outbox");
+    assert.equal(d1.stats.writes, 0, "no D1 writes from proposed snapshot");
+  } finally {
+    sqlite.close();
+  }
+});
