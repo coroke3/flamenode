@@ -187,18 +187,30 @@ auditRestoreCandidateRoutes.post("/restore", async (c) => {
     );
   }
 
-  const result = await restoreAuditLog(
-    c.get("db"),
-    {
-      auditId: parsed.data.audit_id,
-      userId: c.get("user")!.id,
-      reason: parsed.data.reason,
-      confirmText: parsed.data.confirm_text,
-      forceOverwrite: parsed.data.force_overwrite === 1,
-      dry_run: false,
-    },
-    createAuditRestoreHost(c),
-  );
+  // Shared core may reject an early D1 read before it can produce a domain
+  // RestoreResult. Hono's default onError may log that untrusted provider
+  // exception. Return a static 500 response and never serialize/log its cause.
+  // The candidate remains opt-in only and preserves private/no-store above.
+  let result: Awaited<ReturnType<typeof restoreAuditLog>>;
+  try {
+    result = await restoreAuditLog(
+      c.get("db"),
+      {
+        auditId: parsed.data.audit_id,
+        userId: c.get("user")!.id,
+        reason: parsed.data.reason,
+        confirmText: parsed.data.confirm_text,
+        forceOverwrite: parsed.data.force_overwrite === 1,
+        dry_run: false,
+      },
+      createAuditRestoreHost(c),
+    );
+  } catch {
+    return c.json<AuditRestoreResponse>(
+      { ok: false, message: "復元処理を完了できませんでした。" },
+      500,
+    );
+  }
 
   // #730: mutation_failed may wrap an untrusted D1/Drizzle/provider Error
   // including SQL params or metadata. Preserve internal reason/audit IDs and
