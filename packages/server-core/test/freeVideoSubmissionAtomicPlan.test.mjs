@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+import { drizzle } from "drizzle-orm/sqlite-proxy";
+import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import { videoCustomAnswers, videoEvents, videoYoutubeMetadata, videos } from "@flamenode/db/schema";
 import { buildFreeVideoSubmissionAtomicPlan } from "../src/video/freeVideoSubmissionAtomicPlan.ts";
 import { buildFreeVideoRow } from "../src/video/freeVideoRow.ts";
@@ -132,4 +134,130 @@ test("MIG-0651 atomic composer: actor, selected event, clock and stale answer mi
       answer_text: "bad", answer_json: null,
     }], now: NOW,
   }), /video_custom_answer_draft_invalid/);
+});
+
+/**
+ * Execute the composed statements against *actual migrated D1 SQLite schema*
+ * in a rollback-capable local transaction. This is NOT a Cloudflare D1 or an
+ * authenticated route integration test; mutateWithAudit is not bypassed.
+ */
+test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded video graph", () => {
+  for (const eventId of [null, "event-a"]) {
+    const sqlite = createSqlite();
+    try {
+      if (eventId) {
+        insert(sqlite, "events", {
+          id: eventId, title: "Video event", visibility_status: "public",
+          allow_unslotted_posts: 1,
+        });
+        const q = question();
+        insert(sqlite, "event_custom_questions", { ...q.source, is_active: 1 });
+      }
+      const drizzleDb = drizzle(async () => ({ rows: [] }));
+      const planDb = {
+        run(expr) { return { assertSql: expr }; },
+        insert(table) { return drizzleDb.insert(table); },
+        batch() { throw new Error("plan must never execute Cloudflare D1"); },
+      };
+      const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
+        videoAfter: video(eventId), actorUserId: "user-1", eventId,
+        now: NOW, questions: eventId ? [question()] : [],
+        customAnswerDrafts: eventId ? [{
+          event_id: eventId, question_id: "q:1", question_key: "q:1",
+          answer_text: "demo", answer_json: null,
+        }] : [],
+      });
+      const dialect = new SQLiteSyncDialect();
+      let statementsExecuted = 0;
+      sqlite.exec("BEGIN");
+      try {
+        for (const [index, statement] of plan.statements.entries()) {
+          const isAssertion = "assertSql" in statement;
+          const compiled = isAssertion
+            ? dialect.sqlToQuery(statement.assertSql)
+            : statement.toSQL();
+          const run = sqlite.prepare(compiled.sql);
+          if (isAssertion) {
+            assert.equal(plan.expectedChanges[index], null);
+            assert.doesNotThrow(() => run.get(...compiled.params));
+          } else {
+            const result = run.run(...compiled.params);
+            assert.equal(Number(result.changes), plan.expectedChanges[index]);
+          }
+          statementsExecuted++;
+        }
+        sqlite.exec("COMMIT");
+      } catch (error) {
+        sqlite.exec("ROLLBACK");
+        throw error;
+      }
+      assert.equal(statementsExecuted, eventId ? 6 : 2);
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 1);
+      assert.deepEqual(
+        sqlite.prepare("SELECT youtube_video_id, primary_event_id FROM videos").get(),
+        { youtube_video_id: "dQw4w9WgXcQ", primary_event_id: eventId },
+      );
+      assert.deepEqual(
+        sqlite.prepare("SELECT video_id, sync_status, view_count FROM video_youtube_metadata").get(),
+        { video_id: "v:1", sync_status: "pending", view_count: 0 },
+      );
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_events").get().n, eventId ? 1 : 0);
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, eventId ? 1 : 0);
+      assert.equal(plan.audits.length, eventId ? 4 : 2);
+      assert.ok(plan.audits.every(a => a.strict && a.operation === "CREATE"));
+    } finally {
+      sqlite.close();
+    }
+  }
+});
+
+test("MIG-0651 atomic composer: real SQLite changed event/question policy aborts without any rows", () => {
+  for (const mutation of ["event-closed", "question-deactivated", "new-required"]) {
+    const sqlite = createSqlite();
+    try {
+      insert(sqlite, "events", {
+        id: "event-a", title: "Video event", visibility_status: "public",
+        allow_unslotted_posts: 1,
+      });
+      insert(sqlite, "event_custom_questions", { ...question().source, is_active: 1 });
+      const drizzleDb = drizzle(async () => ({ rows: [] }));
+      const planDb = {
+        run(expr) { return { assertSql: expr }; },
+        insert(table) { return drizzleDb.insert(table); },
+      };
+      const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
+        videoAfter: video("event-a"), actorUserId: "user-1",
+        eventId: "event-a", now: NOW, questions: [question()],
+        customAnswerDrafts: [{
+          event_id: "event-a", question_id: "q:1", question_key: "q:1",
+          answer_text: "demo", answer_json: null,
+        }],
+      });
+      if (mutation === "event-closed") {
+        sqlite.prepare("UPDATE events SET visibility_status='private', allow_unslotted_posts=0 WHERE id='event-a'").run();
+      } else if (mutation === "question-deactivated") {
+        sqlite.prepare("UPDATE event_custom_questions SET is_active=0 WHERE id='q:1'").run();
+      } else {
+        insert(sqlite, "event_custom_questions", {
+          id: "q:2", event_id: "event-a", question_key: "q:2",
+          label: "New required", type: "text", required: 1, is_active: 1,
+        });
+      }
+      const dialect = new SQLiteSyncDialect();
+      sqlite.exec("BEGIN");
+      assert.throws(() => {
+        for (const stmt of plan.statements) {
+          const c = "assertSql" in stmt ? dialect.sqlToQuery(stmt.assertSql) : stmt.toSQL();
+          if ("assertSql" in stmt) sqlite.prepare(c.sql).get(...c.params);
+          else sqlite.prepare(c.sql).run(...c.params);
+        }
+      });
+      sqlite.exec("ROLLBACK");
+      for (const table of ["videos", "video_youtube_metadata", "video_events", "video_custom_answers"]) {
+        assert.equal(sqlite.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n, 0, `${mutation}: ${table}`);
+      }
+    } finally {
+      sqlite.close();
+    }
+  }
 });
