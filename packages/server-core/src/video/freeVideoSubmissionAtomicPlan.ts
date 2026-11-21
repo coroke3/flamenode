@@ -13,6 +13,7 @@ import { buildFreeVideoCustomAnswerInsertPlan } from "./freeVideoCustomAnswerIns
 import { buildStaticRebuildQueueBatch } from "../staticRebuild/enqueue.ts";
 import { buildFreeVideoRebuildTargets } from "./freeVideoRebuildTargets.ts";
 import { buildFreeVideoSoftwareInsertPlan } from "./freeVideoSoftwareInsertPlan.ts";
+import { buildFreeVideoSubmittedNotificationPlan } from "./freeVideoSubmittedNotificationPlan.ts";
 import type { LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
 
 /**
@@ -149,14 +150,16 @@ export function buildFreeVideoSubmissionAtomicPlan(
  * UNMOUNTED SA-086 proposal. Appends the canonical rebuild targets to the
  * same prepared D1 batch as the video INSERT; no DB writes or wake occur.
  * The authenticated caller must still provide the remaining CURRENT atomic
- * member, derived, notification and icon integration. Software rows are
- * included when a normalized/validated usedSoftware field is supplied.
+ * member, derived and icon integration. Software rows and CURRENT-style DM
+ * notification are included only with trusted inputs from the host.
  */
 export async function buildFreeVideoSubmissionWithRebuildPlan(
   db: ServerCoreDb,
   args: Parameters<typeof buildFreeVideoSubmissionAtomicPlan>[1] & {
     /** Canonical parsed videoForm.used_software; omit only for legacy tests. */
     usedSoftware?: string | null;
+    /** Trusted, CURRENT-formatted notification payload. Legacy tests omit it. */
+    submittedNotificationPayload?: Record<string, unknown>;
   },
 ): Promise<UnslottedVideoAtomicPlan> {
   const base = buildFreeVideoSubmissionAtomicPlan(db, args);
@@ -166,6 +169,15 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
     raw: args.usedSoftware ?? null,
     now: args.now,
   });
+  const notification = args.submittedNotificationPayload
+    ? await buildFreeVideoSubmittedNotificationPlan(db, {
+      videoId: args.videoAfter.id,
+      actorUserId: args.actorUserId,
+      eventId: args.eventId,
+      payload: args.submittedNotificationPayload,
+      now: args.now,
+    })
+    : { statements: [], expectedChanges: [], audits: [] };
   const targets = buildFreeVideoRebuildTargets({
     videoId: args.videoAfter.id,
     userId: args.actorUserId,
@@ -179,8 +191,8 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
     throw new Error("free_video_submission_rebuild_plan_incomplete");
   }
   return {
-    statements: [...base.statements, ...software.statements, ...queue.statements],
-    expectedChanges: [...base.expectedChanges, ...software.expectedChanges, ...queue.expectedChanges],
+    statements: [...base.statements, ...software.statements, ...notification.statements, ...queue.statements],
+    expectedChanges: [...base.expectedChanges, ...software.expectedChanges, ...notification.expectedChanges, ...queue.expectedChanges],
     audits: [...base.audits, ...software.audits],
   };
 }
