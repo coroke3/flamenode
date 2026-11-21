@@ -66,6 +66,15 @@ test("MIG-0651 pure custom answers: 4-draft atomic limit is fail-closed", () => 
     ok: false, message: "カスタム質問の回答は最大4件まで保存できます。",
   });
   assert.equal(validateSubmissionCustomAnswers(form, qs.slice(0, 4)).drafts.length, 4);
+  // CURRENT checks all question errors first; count overflow cannot conceal
+  // a later invalid dropdown answer.
+  const invalidLate = input([
+    ...qs.map((x) => [x.question_key, "ok"]),
+    ["later", "wrong"],
+  ]);
+  assert.deepEqual(validateSubmissionCustomAnswers(invalidLate, [
+    ...qs, q("later", { type: "select", options: ["allowed"] }),
+  ]), { ok: false, message: "laterは選択肢から選んでください。" });
 });
 
 test("MIG-0651 pure custom answers: options JSON matches CURRENT clipping, dedup and fallback", () => {
