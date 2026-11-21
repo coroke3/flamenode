@@ -124,8 +124,8 @@ test("MIG-0651 software: unique catalog collision fails whole SQLite transaction
     }, /UNIQUE|constraint/i);
     sqlite.exec("ROLLBACK");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0);
-    assert.deepEqual(sqlite.prepare("SELECT id FROM software_catalog").all(),
-      [{ id: "sw-racer" }]);
+    assert.deepEqual(sqlite.prepare("SELECT id FROM software_catalog").all().map((r) => r.id),
+      ["sw-racer"], "the pre-existing racing catalog remains but uncommitted rows disappear");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_softwares").get().n, 0);
   } finally { sqlite.close(); }
 });
