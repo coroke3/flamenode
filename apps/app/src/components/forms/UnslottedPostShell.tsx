@@ -108,6 +108,21 @@ function UnslottedPostShellForIdentity<
     () => (selectedEvent ? [selectedEvent] : []),
     [selectedEvent],
   );
+  // A refreshed eligibility list may withdraw an event while its submission
+  // is in flight. Invalidate that form's completion generation even if the
+  // user has not changed the selection, so it cannot clear a retained draft.
+  const lastEligibleEventIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (affiliation !== "event" || !selectedEventId) {
+      lastEligibleEventIdRef.current = null;
+    } else if (selectedEvent) {
+      lastEligibleEventIdRef.current = selectedEventId;
+    } else if (lastEligibleEventIdRef.current === selectedEventId) {
+      selectionRevisionRef.current += 1;
+      lastEligibleEventIdRef.current = null;
+    }
+  }, [affiliation, selectedEventId, selectedEvent]);
+
   const activeXKey = draftActiveXSegment(activeXId);
   const authUserId = draftAuthUserId?.trim() ?? "";
   const shellDraftKey = authUserId
@@ -367,6 +382,11 @@ function UnslottedPostShellForIdentity<
             onDraftFlushReady: handleVideoDraftFlushReady,
             onSubmitSuccess: () => {
               if (selectionRevisionAtRender !== selectionRevisionRef.current) return;
+              // The refreshed choices may revoke the event before the effect
+              // advances the generation; fail closed in that render window.
+              if (selectedEvent && !latestEventOptionsRef.current.some(
+                (event) => event.id === selectedEvent.id
+              )) return;
               handleVideoSubmitSuccess();
             },
           })}

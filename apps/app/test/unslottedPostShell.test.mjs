@@ -1114,3 +1114,58 @@ test("U03a ISSUE-703: two consecutive child form changes refresh the latest subm
     dom.window.localStorage.clear();
   }
 });
+
+test("U03a ISSUE-703: removing a submitted event from eligible choices preserves its draft through a late success", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const callbacks = [];
+  const renderVideoForm = args => {
+    callbacks.push(args.onSubmitSuccess);
+    return renderStub(args);
+  };
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({ renderVideoForm }))));
+    await act(async () => selected(container, "event").click());
+    await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), "event-A"));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+    const inFlightSuccess = callbacks.at(-1);
+    assert.equal(typeof inFlightSuccess, "function");
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const retainedDraft = dom.window.localStorage.getItem(key);
+    assert.deepEqual(JSON.parse(retainedDraft).value, {
+      affiliation: "event", selectedEventId: "event-A",
+    });
+
+    // The event becomes unavailable after submission started. The currently
+    // mounted form is withdrawn, but its earlier Promise can still resolve.
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      renderVideoForm, eventOptions: [],
+    }))));
+    assert.equal(container.querySelector("form"), null);
+    await act(async () => inFlightSuccess());
+    assert.equal(dom.window.localStorage.getItem(key), retainedDraft,
+      "late completion after eligibility withdrawal must not clear user work");
+
+    // Returning eligibility must not resurrect that old completion grant.
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({
+      renderVideoForm, eventOptions: [eventA],
+    }))));
+    assert.equal(container.querySelector('input[name="event_ids"]')?.value, "event-A");
+    const freshSuccess = callbacks.at(-1);
+    await act(async () => inFlightSuccess());
+    assert.equal(dom.window.localStorage.getItem(key), retainedDraft,
+      "old completion remains invalid after the event becomes eligible again");
+    await act(async () => freshSuccess());
+    assert.equal(dom.window.localStorage.getItem(key), null,
+      "only the latest eligible form may clear the current shell draft");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
