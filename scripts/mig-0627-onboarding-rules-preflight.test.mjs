@@ -13,7 +13,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const key = "rules/current.json";
   const visibilityKey = "visibility/blocked-entities.v1.json";
 
-  async function request(t, { objects = {}, mode, token = "tok-carol", breakD1 = false, visibilityHeadOverride } = {}) {
+  async function request(t, { objects = {}, mode, token = "tok-carol", breakD1 = false, visibilityGetOverride } = {}) {
     const sqlite = createSqlite();
     seed(sqlite);
     t.after(() => sqlite.close());
@@ -21,8 +21,23 @@ if (runUnderRootTsx(import.meta.url)) {
     const reads = { get: [], head: [] };
     const bucket = fakeBucket(objects);
     const observedBucket = {
-      async get(objectKey) { reads.get.push(objectKey); return bucket.get(objectKey); },
-      async head(objectKey) { reads.head.push(objectKey); return objectKey === visibilityKey && visibilityHeadOverride !== undefined ? visibilityHeadOverride : bucket.head(objectKey); },
+      async get(objectKey) {
+        reads.get.push(objectKey);
+        if (objectKey === visibilityKey && visibilityGetOverride !== undefined) {
+          return visibilityGetOverride;
+        }
+        const object = await bucket.get(objectKey);
+        if (!object) return null;
+        const raw = objects[objectKey];
+        return {
+          ...object,
+          etag: `etag-${objectKey}`,
+          async text() {
+            return typeof raw === "string" ? raw : JSON.stringify(raw);
+          },
+        };
+      },
+      async head(objectKey) { reads.head.push(objectKey); return bucket.head(objectKey); },
     };
     const db = breakD1 ? {
       ...d1,
@@ -98,19 +113,26 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(b.stats.writes, 0);
   });
 
-  test("MIG-0627 U02c PREP T05: enforce mode refuses rules when visibility manifest is missing", async (t) => {
-    const payload = { version_label: "unsafe", body_markdown: "should not render" };
+  test("MIG-0627 U02c T05: enforce mode validates committed manifest body before reading rules", async (t) => {
+    const payload = { version_label: "unsafe", body_markdown: "should not render if the fence is invalid" };
     const a = await request(t, { mode: "enforce", objects: { [key]: payload } });
     assert.equal(a.response.status, 200);
     assert.equal(a.body.rules, null);
-    assert.deepEqual(a.reads.head, [visibilityKey]);
-    assert.deepEqual(a.reads.get, [], "deny before R2 rules read");
+    assert.deepEqual(a.reads, { head: [], get: [visibilityKey] });
     assert.equal(a.stats.writes, 0);
-    const b = await request(t, { mode: "enforce", objects: { [key]: payload, [visibilityKey]: { schema_version: 1 } } });
-    assert.deepEqual(b.reads.head, [visibilityKey]);
-    assert.deepEqual(b.reads.get, [key]);
-    assert.equal(b.body.rules?.versionLabel, "unsafe",
-      "current implementation only checks HEAD: manifest body semantic validation remains a release blocker");
+
+    const b = await request(t, {
+      mode: "enforce", objects: { [key]: payload, [visibilityKey]: { schema_version: 1 } },
+    });
+    assert.equal(b.body.rules, null, "a committed ETag cannot authenticate malformed manifest JSON");
+    assert.deepEqual(b.reads, { head: [], get: [visibilityKey] });
+    assert.equal(b.stats.writes, 0);
+
+    const manifest = { schema_version: 1, revision: 1, generated_at: 1700000000, entities: [] };
+    const c = await request(t, { mode: "enforce", objects: { [key]: payload, [visibilityKey]: manifest } });
+    assert.deepEqual(c.body.rules, { versionLabel: payload.version_label, bodyMarkdown: payload.body_markdown });
+    assert.deepEqual(c.reads, { head: [], get: [visibilityKey, key] });
+    assert.equal(c.stats.writes, 0);
   });
 
   test("MIG-0627 U02c PREP T06: accepted users never read rules or consume R2/D1 fallback", async (t) => {
@@ -122,37 +144,61 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(a.stats.writes, 0);
   });
 
-  test("MIG-0627 U02c PREP T07: zero-byte visibility manifest is rejected with zero rules reads", async (t) => {
+  test("MIG-0627 U02c T07: zero/noninteger visibility manifest size fails closed before rules R2", async (t) => {
     const rules = { version_label: "v3", body_markdown: "# Current terms" };
     const zero = await request(t, {
       mode: "enforce", objects: { [key]: rules, [visibilityKey]: "" },
     });
     assert.equal(zero.response.status, 200);
-    assert.equal(zero.body.rules, null, "0-byte object cannot contain valid manifest JSON");
-    assert.deepEqual(zero.reads, { head: [visibilityKey], get: [] });
+    assert.equal(zero.body.rules, null);
+    assert.deepEqual(zero.reads, { head: [], get: [visibilityKey] });
     assert.equal(zero.stats.writes, 0);
     const fractional = await request(t, {
       mode: "enforce", objects: { [key]: rules },
-      visibilityHeadOverride: { etag: "etag-nonempty", size: 0.5 },
+      visibilityGetOverride: { etag: "etag-nonempty", size: 0.5,
+        async text() { throw new Error("oversize body must not be read"); } },
     });
-    assert.equal(fractional.body.rules, null, "a non-integer HEAD size is not valid");
-    assert.deepEqual(fractional.reads, { head: [visibilityKey], get: [] });
+    assert.equal(fractional.body.rules, null, "non-integral object size cannot authorize public rules");
+    assert.deepEqual(fractional.reads, { head: [], get: [visibilityKey] });
   });
 
-  test("MIG-0627 U02c PREP T08: visibility manifest HEAD enforces the existing 1-MiB boundary", async (t) => {
+  test("MIG-0627 U02c T08: shared 1-MiB visibility reader boundary (S2 CPU budget still pending)", async (t) => {
     const rules = { version_label: "v3", body_markdown: "# Current terms" };
     const max = 1024 * 1024;
+    const base = JSON.stringify({ schema_version: 1, revision: 1, generated_at: 1700000000, entities: [] });
+    const exactJson = base + " ".repeat(max - Buffer.byteLength(base));
+    assert.equal(Buffer.byteLength(exactJson), max);
     const exact = await request(t, {
-      mode: "enforce", objects: { [key]: rules, [visibilityKey]: "x".repeat(max) },
+      mode: "enforce", objects: { [key]: rules, [visibilityKey]: exactJson },
     });
-    assert.equal(exact.body.rules?.versionLabel, "v3",
-      "boundary test is only HEAD size parity, not valid manifest-body verification");
-    assert.deepEqual(exact.reads, { head: [visibilityKey], get: [key] });
+    assert.equal(exact.body.rules?.versionLabel, "v3", "well-formed 1-MiB manifest remains accepted per CURRENT shared reader");
+    assert.deepEqual(exact.reads, { head: [], get: [visibilityKey, key] });
     const oversized = await request(t, {
-      mode: "enforce", objects: { [key]: rules, [visibilityKey]: "x".repeat(max + 1) },
+      mode: "enforce", objects: { [key]: rules, [visibilityKey]: exactJson + " " },
     });
     assert.equal(oversized.body.rules, null);
-    assert.deepEqual(oversized.reads, { head: [visibilityKey], get: [] });
+    assert.deepEqual(oversized.reads, { head: [], get: [visibilityKey] });
     assert.equal(oversized.stats.writes, 0);
+  });
+
+  test("MIG-0627 U02c T09: invalid JSON/entities and uncommitted ETag cannot authorize rules or D1 fallback", async (t) => {
+    const rules = { version_label: "v7", body_markdown: "sensitive-current-text" };
+    const valid = { schema_version: 1, revision: 1, generated_at: 1700000000, entities: [] };
+    const cases = [
+      { objects: { [key]: rules, [visibilityKey]: "{bad-json" } },
+      { objects: { [key]: rules, [visibilityKey]: { ...valid, entities: [{ entity_type: "video", entity_id: "", fence_token: "t", blocked_at: 1 }] } } },
+      { objects: { [key]: rules },
+        visibilityGetOverride: {
+          etag: "", size: Buffer.byteLength(JSON.stringify(valid)),
+          async text() { return JSON.stringify(valid); },
+        } },
+    ];
+    for (const options of cases) {
+      const h = await request(t, { mode: "enforce", ...options });
+      assert.equal(h.response.status, 200);
+      assert.equal(h.body.rules, null, "invalid/uncommitted manifest may not publish R2 or fallback rules");
+      assert.deepEqual(h.reads, { head: [], get: [visibilityKey] });
+      assert.equal(h.stats.writes, 0);
+    }
   });
 }
