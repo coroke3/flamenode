@@ -480,6 +480,158 @@ if (runUnderRootTsx(import.meta.url)) {
     return () => fired;
   }
 
+
+  // SEC #716: inspecting the raw first D1 projection is mandatory. Validating
+  // only the eventual HTTP body misses unbounded SQL JSON materialization.
+  function watchReserveFirstD1Row(w, inspect) {
+    let calls = 0;
+    const prepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = (sql) => {
+      const stmt = prepare(sql);
+      if (!sql.includes("AS actor_json") || !sql.includes("AS approved_x_json")) return stmt;
+      assert.match(sql, /length\(CAST\(q\."x_user_id" AS BLOB\)\)/,
+        "shared approved-X JSON needs full-byte bound before materialization");
+      assert.match(sql, /instr\(u\."active_x_user_id", char\(0\)\)/,
+        "reserve actor must reject an embedded NUL in the selected ID");
+      const bind = stmt.bind.bind(stmt);
+      stmt.bind = (...values) => {
+        const bound = bind(...values);
+        const first = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await first();
+          calls++;
+          assert.ok(row?.actor_json, "inspect the actual SQLite first-D1 snapshot");
+          const bytes = Object.values(row).reduce((n, value) =>
+            n + (typeof value === "string" ? Buffer.byteLength(value, "utf8") : 0), 0);
+          assert.ok(bytes < 64 * 1024, "first D1 row must be bounded before JS parsing");
+          inspect(row);
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    return () => assert.equal(calls, 1, "reserve uses one inspected first D1 snapshot");
+  }
+
+  async function expectMalformedReservationRejected(w, user, inspect) {
+    const watched = watchReserveFirstD1Row(w, inspect);
+    const originalState = state(w);
+    const beforeReads = w.d1.stats.reads;
+    const beforeBatches = w.d1.stats.batches;
+    const response = await runHono(w, user, "reserve", {
+      eventId: "ev1", slot_id: "s01", display_name: "Safe", consecutive_count: 1,
+    });
+    watched();
+    assert.equal(response.status, 503, "invalid SQL projection must fail closed");
+    assert.deepEqual(response.result, {
+      ok: false,
+      message: "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
+    });
+    assert.equal(response.cacheControl, "private, no-store");
+    assert.equal(response.wakes.length, 0);
+    assert.deepEqual(state(w), originalState, "no slots/audit/outbox/queue writes");
+    assert.equal(w.d1.stats.batches, beforeBatches, "reject before any atomic D1 write batch");
+    assert.ok(w.d1.stats.reads - beforeReads <= 3, "S3 three-read budget");
+  }
+
+  for (const [label, bad] of [
+    ["180K after leading NUL", "\u0000" + "x".repeat(180_000)],
+    ["short embedded NUL", "a\u0000b"],
+  ]) {
+    test("SEC #716: selected Active X (" + label + ") is never projected into first D1 JSON", async () => {
+      const w = world();
+      w.sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?')
+        .run(bad, "u_owner");
+      await expectMalformedReservationRejected(w, "u_owner", (raw) => {
+        assert.equal(raw.actor_json, '{"__invalid_projection":1}');
+        assert.equal(raw.actor_json.includes(bad), false);
+      });
+    });
+
+    test("SEC #716: approved linked X (" + label + ") fails closed without auth truncation", async () => {
+      const w = world();
+      insert(w.sqlite, "x_users", { id: bad, x_name: "Legacy", approval_status: "approved" });
+      insert(w.sqlite, "x_user_account_links", {
+        x_user_id: bad, auth_user_id: "u_owner", link_role: "manager", created_at: 1,
+      });
+      await expectMalformedReservationRejected(w, "u_owner", (raw) => {
+        assert.equal(raw.approved_x_json, "[null]", "invalid linked row becomes SQL sentinel");
+        assert.equal(raw.approved_x_json.includes(bad), false);
+      });
+    });
+
+    test("SEC #716: pending requested X (" + label + ") stays a sentinel before normalization", async () => {
+      const w = world();
+      insert(w.sqlite, "x_identity_requests", {
+        id: "bad_pending_request", request_type: "new_link",
+        requested_by_auth_user_id: "u_pend", requested_x_id: bad,
+        status: "pending", requested_at: 200, updated_at: 200,
+      });
+      await expectMalformedReservationRejected(w, "u_pend", (raw) => {
+        const pending = JSON.parse(raw.pending_x_json);
+        assert.ok(pending.includes(null), "do not silently exclude the malformed request");
+        assert.equal(raw.pending_x_json.includes(bad), false);
+      });
+    });
+  }
+
+  test("SEC #716: SQL accepts 128 UTF-8 bytes but rejects 129 without mutation", async () => {
+    for (const [label, id, invalid] of [
+      ["ASCII128", "a".repeat(128), false],
+      ["UTF8-128", "あ".repeat(42) + "ab", false],
+      ["ASCII129", "a".repeat(129), true],
+      ["UTF8-129", "あ".repeat(43), true],
+    ]) {
+      const w = world();
+      assert.equal(Buffer.byteLength(id, "utf8"), invalid ? 129 : 128, label);
+      insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
+      insert(w.sqlite, "x_user_account_links", {
+        x_user_id: id, auth_user_id: "u_owner", link_role: "manager", created_at: 1,
+      });
+      if (invalid) {
+        await expectMalformedReservationRejected(w, "u_owner", raw => {
+          assert.equal(raw.approved_x_json, "[null]");
+        });
+      } else {
+        const watched = watchReserveFirstD1Row(w, raw => {
+          assert.ok(JSON.parse(raw.approved_x_json).includes(id));
+        });
+        const response = await runHono(w, "u_owner", "reserve", {
+          eventId: "ev1", slot_id: "s01", display_name: "Valid " + label, consecutive_count: 1,
+        });
+        watched();
+        assert.equal(response.status, 200, "valid 128-byte linked X retains normal rights");
+        assert.equal(response.wakes.length, 0);
+      }
+    }
+  });
+
+  test("SEC #716: exactly 100 short approved links remain authorized and bounded", async () => {
+    const w = world();
+    let count = w.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM x_user_account_links WHERE auth_user_id = ?",
+    ).get("u_owner").n;
+    assert.ok(count >= 1 && count < 100);
+    for (; count < 100; count++) {
+      const id = "approved_" + String(count);
+      insert(w.sqlite, "x_users", { id, x_name: id, approval_status: "approved" });
+      insert(w.sqlite, "x_user_account_links", {
+        x_user_id: id, auth_user_id: "u_owner", link_role: "manager", created_at: 1,
+      });
+    }
+    const watched = watchReserveFirstD1Row(w, raw => {
+      assert.equal(JSON.parse(raw.approved_x_json).length, 100,
+        "no arbitrary deletion from the authorization set");
+    });
+    const response = await runHono(w, "u_owner", "reserve", {
+      eventId: "ev1", slot_id: "s01", display_name: "Hundred links", consecutive_count: 1,
+    });
+    watched();
+    assert.equal(response.status, 200);
+    assert.equal(response.wakes.length, 0);
+  });
+
   test("T03 & T05: reserve, replay, extend (fwd/back/null-adopt), merge, and release match CURRENT field-by-field with 0 wakes", async () => {
     const { b, outcomes } = await compareSteps([
       // SA-065 reserve 2 slots (s02, s03) by u_owner (approved active X).
