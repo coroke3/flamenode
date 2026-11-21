@@ -794,3 +794,109 @@ test("MIG-0651 U02: queue failure rolls back prepared DM outbox with video and m
     }
   } finally { sqlite.close(); }
 });
+
+test("MIG-0651 U02: both free-video notification routes share the video/Queue transaction while DM honors opt-out", async () => {
+  for (const dmEnabled of [true, false]) {
+    const sqlite = createSqlite();
+    seedApprovedActiveX(sqlite);
+    try {
+      if (!dmEnabled) sqlite.prepare("UPDATE user SET is_notification_enabled=0 WHERE id='user-1'").run();
+      let reads = 0;
+      const proxy = drizzle(async (query, params, method) => {
+        reads += 1;
+        const rows = sqlite.prepare(query).all(...params);
+        return { rows: method === "all" || method === "values" ? rows.map(r => Object.values(r)) : rows };
+      }, { schema });
+      const db = {
+        select: (...args) => proxy.select(...args),
+        insert: (...args) => proxy.insert(...args),
+        run(expr) { return { sqlExpr: expr }; },
+      };
+      const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+        videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
+        eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+        submittedNotificationPayload: { content: "作品登録完了",
+          video_id: "v:1", url: "https://flamenode.example/v:1" },
+        registeredChannelNotification: {
+          payload: { content: "【運営通知】新規作品",
+            video_id: "v:1", url: "https://flamenode.example/v:1" },
+          threadName: "[作品登録] Title / @alice",
+        },
+      });
+      assert.equal(reads, 3, "DM dedupe + user preference and forced ops actor reads");
+      assert.deepEqual(plan.expectedChanges, dmEnabled
+        ? [null, 1, 1, null, null, 13]
+        : [null, 1, 1, null, 13]);
+      assert.equal(plan.audits.length, 2, "notification rows are not fabricated strict audits");
+      assert.equal(inspectFreeVideoSubmissionAtomicPlanBudget(plan, reads).withinLimit, true);
+      const dialect = new SQLiteSyncDialect();
+      sqlite.exec("BEGIN");
+      try {
+        for (const [i, stmt] of plan.statements.entries()) {
+          const raw = "sqlExpr" in stmt;
+          const q = raw ? dialect.sqlToQuery(stmt.sqlExpr) : stmt.toSQL();
+          assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
+          const prepared = sqlite.prepare(q.sql);
+          const result = raw && i === 0 ? prepared.get(...q.params) : prepared.run(...q.params);
+          if (plan.expectedChanges[i] !== null) {
+            assert.equal(Number(result.changes), plan.expectedChanges[i]);
+          }
+        }
+        sqlite.exec("COMMIT");
+      } catch (error) { sqlite.exec("ROLLBACK"); throw error; }
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 1);
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 13);
+      const rows = sqlite.prepare("SELECT type,delivery_route,recipient_user_id FROM notification_outbox ORDER BY type").all();
+      assert.equal(rows.length, dmEnabled ? 2 : 1);
+      assert.equal(rows.filter(r => r.type === "discord_webhook" && r.delivery_route === "channel").length, 1);
+      assert.equal(rows.filter(r => r.type === "video_submitted" && r.delivery_route === "dm").length, dmEnabled ? 1 : 0);
+      assert.ok(rows.every(r => r.recipient_user_id === "user-1"));
+    } finally { sqlite.close(); }
+  }
+});
+
+test("MIG-0651 U02: queue fault rolls back video, DM, forced ops channel and metadata together", async () => {
+  const sqlite = createSqlite();
+  seedApprovedActiveX(sqlite);
+  try {
+    sqlite.exec("CREATE TRIGGER reject_channel_queue BEFORE INSERT ON static_rebuild_queue BEGIN SELECT RAISE(ABORT, 'channel-queue-abort'); END;");
+    const proxy = drizzle(async (query, params, method) => {
+      const rows = sqlite.prepare(query).all(...params);
+      return { rows: method === "all" || method === "values" ? rows.map(r => Object.values(r)) : rows };
+    }, { schema });
+    const db = {
+      select: (...args) => proxy.select(...args),
+      insert: (...args) => proxy.insert(...args),
+      run(expr) { return { sqlExpr: expr }; },
+    };
+    const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+      videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
+      eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+      submittedNotificationPayload: { content: "登録完了",
+        video_id: "v:1", url: "https://flamenode.example/v:1" },
+      registeredChannelNotification: {
+        payload: { content: "運営への登録通知", video_id: "v:1",
+          url: "https://flamenode.example/v:1" },
+        threadName: "[作品登録] Title / @alice",
+      },
+    });
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, null, 13]);
+    const dialect = new SQLiteSyncDialect();
+    sqlite.exec("BEGIN");
+    assert.throws(() => {
+      for (const [i, stmt] of plan.statements.entries()) {
+        const raw = "sqlExpr" in stmt;
+        const q = raw ? dialect.sqlToQuery(stmt.sqlExpr) : stmt.toSQL();
+        if (raw && i === 0) sqlite.prepare(q.sql).get(...q.params);
+        else sqlite.prepare(q.sql).run(...q.params);
+      }
+    }, /channel-queue-abort/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 2,
+      "both notifications were prepared and inserted before intentionally broken queue");
+    sqlite.exec("ROLLBACK");
+    for (const table of ["videos", "video_youtube_metadata", "notification_outbox", "static_rebuild_queue"]) {
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0,
+        "atomic abort must remove all prior " + table + " writes");
+    }
+  } finally { sqlite.close(); }
+});
