@@ -176,6 +176,22 @@ if (runTestWithTsx(import.meta.url)) {
       use("no-fence");
       assert.deepEqual((await loadPublicEventPlaylistR2Only("event-1"))?.items.map((x) => x.id),
         ["vid-a", "vid-hidden", "vid-c"], "public entries remain unchanged");
+      // The playlist normalizer intentionally drops status fields; enforce
+      // must inspect those original R2 fields before returning public DTOs.
+      original.items[1].visibility_status = "private";
+      original.items[2].status = "private";
+      use("no-fence");
+      assert.deepEqual((await loadPublicEventPlaylistR2Only("event-1"))?.items.map((x) => x.id),
+        ["vid-a"], "explicitly nonpublic raw rows cannot bypass filtering via normalization");
+      for (const nonEnforced of ["off", "observe"]) {
+        use("no-fence", nonEnforced);
+        assert.deepEqual((await loadPublicEventPlaylistR2Only("event-1"))?.items.map((x) => x.id),
+          ["vid-a", "vid-hidden", "vid-c"], "non-enforced legacy behavior remains unchanged");
+        assert.deepEqual(reads, [playlistKey], "non-enforced modes do not read manifest");
+      }
+      delete original.items[1].visibility_status;
+      delete original.items[2].status;
+
       // The normalizer's documented cap is 500 items; filtering must retain
       // stable ordering at the boundary and never mutate the source list.
       const originalItems = original.items;
