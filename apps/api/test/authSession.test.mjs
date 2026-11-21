@@ -10,6 +10,7 @@ import {
   MAX_SESSION_COOKIE_CHUNKS,
   MAX_SESSION_TOKEN_LENGTH,
   MAX_SESSION_COOKIE_NAMES,
+  MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS,
   MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES,
 } from "../src/auth/session.ts";
 import {
@@ -275,7 +276,10 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
 
   const token = SESSIONS.valid.sessionToken;
   const opts = { now: BASELINE_NOW_MS };
-  const bound = MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES;
+  const bound = MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS;
+  const byteBound = MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES;
+  assert.equal(bound, 128);
+  assert.equal(byteBound, 512, "128 four-byte Unicode codepoints must remain allowed");
   const projected = [];
   const inspectingD1 = {
     prepare(sql) {
@@ -295,8 +299,8 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
     },
   };
 
-  // The documented 128-byte legacy budget does not silently rewrite valid
-  // identities; this also preserves the normal session's original Active X.
+  // Preserve CURRENT's valid selected identity, including legacy Unicode
+  // values that may be longer than 128 UTF-8 bytes but <=128 codepoints.
   d1.resetQueryCount();
   const normal = await resolveSessionUser(inspectingD1, token, opts);
   assert.equal(normal?.active_x_user_id, USERS.valid.active_x_user_id);
@@ -311,10 +315,30 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
   assert.equal(projected.at(-1).user_active_x_id_invalid, 0);
   assert.equal(d1.getQueryCount(), 1);
 
-  // SQLite length(TEXT) stops at the first NUL; 43 Japanese characters use
-  // 129 UTF-8 bytes despite being only 43 code points. Both must be rejected
-  // by length(CAST(... AS BLOB)) in the actual D1 query.
-  for (const oversized of ["x".repeat(bound + 1), "あ".repeat(43), "\0" + "x".repeat(180_000), "x".repeat(180_000)]) {
+  // Validate CURRENT's full Unicode boundary against real D1 SQLite rows.
+  // 128 Japanese codepoints use 384 UTF-8 bytes; 128 emoji use exactly 512.
+  for (const [label, accepted] of [
+    ["43 Japanese (129 bytes)", "あ".repeat(43)],
+    ["128 Japanese (384 bytes)", "あ".repeat(bound)],
+    ["128 emoji (512 bytes)", "🌀".repeat(bound)],
+  ]) {
+    assert.ok(Array.from(accepted).length <= bound, label);
+    assert.ok(Buffer.byteLength(accepted, "utf8") <= byteBound, label);
+    d1.setActiveX(USERS.valid.id, accepted);
+    projected.length = 0;
+    d1.resetQueryCount();
+    const valid = await resolveSessionUser(inspectingD1, token, opts);
+    assert.equal(valid?.active_x_user_id, accepted, label + " survives session resolution");
+    assert.equal(projected.at(-1).user_active_x_id_invalid, 0, label);
+    assert.equal(d1.getQueryCount(), 1, label);
+  }
+
+  // length(TEXT) counts Unicode codepoints but stops at the first embedded
+  // NUL; the independent NUL/type and CAST(... AS BLOB) checks remain mandatory.
+  for (const oversized of [
+    "x".repeat(bound + 1), "あ".repeat(bound + 1), "🌀".repeat(bound + 1),
+    "\0" + "x".repeat(180_000), "x".repeat(180_000),
+  ]) {
     d1.setActiveX(USERS.valid.id, oversized);
     projected.length = 0;
     d1.resetQueryCount();
