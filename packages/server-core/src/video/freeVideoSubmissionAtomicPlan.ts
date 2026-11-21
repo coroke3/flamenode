@@ -62,11 +62,9 @@ export function buildFreeVideoSubmissionAtomicPlan(
     throw new Error("free_video_submission_plan_identity_invalid");
   }
 
-  // Recheck the trusted actor/Active X link in the SAME D1 transaction as
-  // INSERT. The request's earlier write guard can become stale after a
-  // concurrent Active X switch, unlink, ban or approval revocation.
-  // owner and manager links are both permitted by CURRENT's general video
-  // submission guard; event-owner-only rules are not applied here.
+  // Recheck the authenticated Active X on the SAME D1 batch as creation.
+  // This prevents a concurrent ban, active-X switch, link revocation or
+  // approval downgrade from committing with a stale request-time guard.
   const activeXAssertion = db.run(sql`
     SELECT CASE WHEN EXISTS (
       SELECT 1 FROM ${users}
@@ -79,7 +77,10 @@ export function buildFreeVideoSubmissionAtomicPlan(
         AND ${users.active_x_user_id} = ${trustedActiveXId}
         AND COALESCE(${users.is_banned}, 0) = 0
         AND ${xUsers.approval_status} = 'approved'
-    ) THEN 1 ELSE json_extract('not-valid-json', ' buildUnslottedEventEligibilityAssertionPlan(db, eventId, now);
+    ) THEN 1 ELSE json_extract('not-valid-json', '$') END
+  `);
+  // Pure plan construction can still fail closed. Nothing has been written.
+  const eventAssertion = buildUnslottedEventEligibilityAssertionPlan(db, eventId, now);
   const answerPlan = buildFreeVideoCustomAnswerInsertPlan(db, {
     videoId: videoAfter.id,
     eventId,
@@ -139,11 +140,10 @@ export function buildFreeVideoSubmissionAtomicPlan(
 }
 
 /**
- * SA-086 U02 UNMOUNTED next slice: include the exact CURRENT 13/16 static
- * rebuild targets in the SAME guarded transaction as the video INSERT.
- * The queue builder prepares a bounded single JSON1 UPSERT and performs no
- * D1 read or wake. The future authenticated caller still owns notification,
- * members/software/derived rows, strict audits and post-commit wake.
+ * UNMOUNTED SA-086 proposal. Appends the canonical rebuild targets to the
+ * same prepared D1 batch as the video INSERT; no DB writes or wake occur.
+ * The authenticated caller must still provide the remaining CURRENT atomic
+ * member, derived, software, notification and icon integration.
  */
 export async function buildFreeVideoSubmissionWithRebuildPlan(
   db: ServerCoreDb,
@@ -157,8 +157,6 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
     eventId: args.eventId,
   });
   const queue = await buildStaticRebuildQueueBatch(db, targets);
-  // A new video always invalidates at least its own page. Fail before
-  // execution if the builder silently loses any target.
   if (queue.acceptedTargetCount !== targets.length ||
       queue.statements.length === 0 ||
       queue.statements.length !== queue.expectedChanges.length) {
@@ -168,102 +166,6 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
     statements: [...base.statements, ...queue.statements],
     expectedChanges: [...base.expectedChanges, ...queue.expectedChanges],
     audits: [...base.audits],
-  };
-}
-
-/**
- * U02 unmounted S3 gate: estimate the *same* logical D1 query budget as
- * CURRENT's inspectVideoAtomicWritePlanBudget. The eventual Hono caller must
- * pass its actual number of pre-mutation read queries; silently using the
- * deprecated generic 18-query allowance is not a substitute for measurement.
- *
- * This is intentionally PURE. It neither runs statements nor grants permission
- * to commit. A production caller MUST reject !withinLimit before invoking the
- * guarded mutateWithAudit transaction.
- */
-export function inspectFreeVideoSubmissionAtomicPlanBudget(
-  plan: UnslottedVideoAtomicPlan,
-  callerQueryCount: number,
-): D1AuditMutationBudget {
-  if (!Number.isSafeInteger(callerQueryCount) || callerQueryCount < 0 ||
-      plan.statements.length === 0 ||
-      plan.statements.length !== plan.expectedChanges.length ||
-      plan.audits.length === 0 ||
-      plan.audits.some((audit) => !audit.strict || !audit.actor_user_id)) {
-    throw new Error("free_video_submission_budget_arguments_invalid");
-  }
-  return planD1AuditMutationBudget({
-    mutationStatementCount: plan.statements.length,
-    mutationAssertionCount: plan.expectedChanges.filter((value) => value !== null).length,
-    auditEntryCount: plan.audits.length,
-    distinctActorCount: new Set(plan.audits.map((audit) => audit.actor_user_id)).size,
-    actorXValidationQueryCount: plan.audits.some(
-      (audit) => Boolean(audit.actor_x_user_id?.trim()),
-    ) ? 1 : 0,
-    // No claims about authentication/audit-setting preloading in unmounted U02.
-    preloadedSettings: false,
-    preloadedActorCount: 0,
-    callerQueryCount,
-  });
-}
-) END
-  `);
-
-  // Pure plan construction can still fail closed. Nothing has been written.
-  const eventAssertion = buildUnslottedEventEligibilityAssertionPlan(db, eventId, now);
-  const answerPlan = buildFreeVideoCustomAnswerInsertPlan(db, {
-    videoId: videoAfter.id,
-    eventId,
-    drafts: customAnswerDrafts,
-    questions,
-    actorUserId,
-    now,
-  });
-  if (eventId && (
-    eventAssertion.statements.length !== 1 ||
-    answerPlan.statements.length < 1 ||
-    eventAssertion.expectedChanges[0] !== null ||
-    answerPlan.expectedChanges[0] !== null
-  )) {
-    throw new Error("free_video_submission_assertion_plan_invalid");
-  }
-  const videoInsert = buildFreeVideoInsertPlan(db, videoAfter, actorUserId);
-  const youtubeMetadata = buildFreeVideoYoutubeMetadataInsertPlan(db, {
-    videoId: videoAfter.id, actorUserId, now,
-  });
-  const eventLink = buildUnslottedVideoEventPlan(db, {
-    videoId: videoAfter.id, eventId, actorUserId,
-  });
-  // The answer plan includes one assertion followed by zero/one INSERT.
-  const [questionAssertion, ...answerMutations] = eventId
-    ? answerPlan.statements
-    : [];
-  const answerMutationChanges = eventId
-    ? answerPlan.expectedChanges.slice(1)
-    : [];
-  const statements = [
-    ...eventAssertion.statements,
-    ...(questionAssertion ? [questionAssertion] : []),
-    ...videoInsert.statements,
-    ...youtubeMetadata.statements,
-    ...eventLink.statements,
-    ...answerMutations,
-  ];
-  const expectedChanges = [
-    ...eventAssertion.expectedChanges,
-    ...(questionAssertion ? [null] : []),
-    ...videoInsert.expectedChanges,
-    ...youtubeMetadata.expectedChanges,
-    ...eventLink.expectedChanges,
-    ...answerMutationChanges,
-  ];
-  if (statements.length !== expectedChanges.length) {
-    throw new Error("free_video_submission_plan_length_invalid");
-  }
-  return {
-    statements,
-    expectedChanges,
-    audits: [...videoInsert.audits, ...youtubeMetadata.audits, ...eventLink.audits, ...answerPlan.audits],
   };
 }
 
