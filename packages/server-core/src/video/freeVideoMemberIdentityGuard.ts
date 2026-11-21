@@ -9,6 +9,7 @@ import { isCanonicalXId } from "@flamenode/domain/xid";
  * non-rejected target, or not-found pending placeholders. Valid direct rows
  * conflicting with an alias must fail. A new direct X row may race a pending
  * placeholder ONLY if it resolves to the very same normalized canonical id.
+ * Previously existing direct/alias X records may NOT silently disappear.
  * Rejected/ambiguous/retargeted mappings must abort the complete D1 batch.
  *
  * This statement MUST be executed as a SELECT (not swallowed or omitted) and
@@ -16,11 +17,12 @@ import { isCanonicalXId } from "@flamenode/domain/xid";
  * invalid-json branch raises an error to stop the entire D1 transaction.
  */
 export function buildFreeVideoMemberIdentityGuardSql(
-  identities: readonly { candidate: string; canonical: string }[],
+  identities: readonly { candidate: string; canonical: string; allowAbsent: boolean }[],
 ): SQL {
   if (identities.length < 1 || identities.length > 100 ||
-      identities.some(({ candidate, canonical }) =>
-        !isCanonicalXId(candidate) || !isCanonicalXId(canonical)) ||
+      identities.some(({ candidate, canonical, allowAbsent }) =>
+        !isCanonicalXId(candidate) || !isCanonicalXId(canonical) ||
+        typeof allowAbsent !== "boolean") ||
       new Set(identities.map(row => row.candidate)).size !== identities.length) {
     throw new Error("free_video_member_identity_guard_arguments_invalid");
   }
@@ -28,7 +30,8 @@ export function buildFreeVideoMemberIdentityGuardSql(
   return sql`
     WITH incoming AS (
       SELECT json_extract(value, '$.candidate') AS raw_id,
-             json_extract(value, '$.canonical') AS target_id
+             json_extract(value, '$.canonical') AS target_id,
+             json_extract(value, '$.allowAbsent') AS allow_absent
       FROM json_each(${payload})
     ),
     direct AS (
@@ -67,7 +70,7 @@ export function buildFreeVideoMemberIdentityGuardSql(
       WHERE d.direct_count > 1
          OR (
            a.alias_count = 0 AND NOT (
-             (d.direct_count = 0 AND i.target_id = i.raw_id)
+             (d.direct_count = 0 AND i.target_id = i.raw_id AND i.allow_absent = 1)
              OR (d.direct_count = 1 AND d.matching_direct = 1)
            )
          )
