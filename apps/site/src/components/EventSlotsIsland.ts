@@ -33,6 +33,7 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
   const [now, setNow] = React.useState(builtAt);
   const [phase, setPhase] = React.useState<SlotsLivePhase>("loading");
   const [live, setLive] = React.useState<LiveSlots | null>(null);
+  const [stalePublicNotice, setStalePublicNotice] = React.useState(false);
   React.useEffect(() => {
     const controller = new AbortController();
     // Two 30-second polls can overlap. An older RH-020 response must never
@@ -46,7 +47,12 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
       if (result) {
         setLive(result);
         setPhase("ready");
+        setStalePublicNotice(false);
       } else {
+        // A failed *refresh* preserves the last successfully fetched grid, but
+        // must not imply that these slot names/states were just revalidated.
+        // Initial RH-020 failures keep their existing unavailable notice.
+        setStalePublicNotice(true);
         setPhase((current) => (current === "ready" ? current : "unavailable"));
       }
     };
@@ -96,7 +102,17 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
             ),
           })),
         };
-        return React.createElement(EventSlotsView, { model: viewerModel });
+        return React.createElement(
+          React.Fragment,
+          null,
+          stalePublicNotice && phase === "ready"
+            ? React.createElement("p", {
+                role: "status",
+                className: "notice ev-slots-notice",
+              }, "枠の最新状況を再取得できませんでした。前回取得した枠情報を表示しています。")
+            : null,
+          React.createElement(EventSlotsView, { model: viewerModel }),
+        );
       },
     ),
   );

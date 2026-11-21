@@ -876,6 +876,82 @@ test("MIG-0514 U03a RH-014 outage preserves public grid and denies actions", { s
   await act(async () => root.unmount());
 });
 
+test("MIG-0514 U03b: RH-020 refresh outage shows a stale-data notice without dropping last public grid", { skip: skipUi }, async () => {
+  const detail = detailOf("autumn-collab-2026");
+  const props = { detail, builtAt: NOW };
+  const originalFetch = globalThis.fetch;
+  const originalSetInterval = dom.window.setInterval;
+  const originalClearInterval = dom.window.clearInterval;
+  let publicFail = false;
+  let publicStatus = "reserved";
+  let refresh = null;
+  const timerId = 79_515;
+  dom.window.setInterval = function (callback, delay, ...args) {
+    if (delay === 30_000) {
+      refresh = () => callback(...args);
+      return timerId;
+    }
+    return originalSetInterval.call(this, callback, delay, ...args);
+  };
+  dom.window.clearInterval = function (id) {
+    if (id === timerId) return;
+    return originalClearInterval.call(this, id);
+  };
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/viewer-overlay")) return { ok: false, status: 503 };
+    assert.ok(String(url).startsWith("/api/live/events/"), "only RH-020 public status is refreshed");
+    if (publicFail) return { ok: false, status: 503 };
+    return { ok: true, json: async () => ({ slots: [
+      { id: "s1", status: publicStatus, display_name: "前回の公開枠" },
+      { id: "s2", status: "available" }, { id: "s3", status: "available" },
+      { id: "s4", status: "available" },
+    ] }) };
+  };
+  const container = mount();
+  let root;
+  const notice = "前回取得した枠情報を表示しています";
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(h(EventSlotsIsland, props));
+    });
+    await settle();
+    assert.equal(typeof refresh, "function");
+    assert.equal(container.querySelectorAll(".sl.taken").length, 1);
+    assert.ok(!text(container).includes(notice), "a fresh RH-020 read is not stale");
+    assert.ok(text(container).includes("前回の公開枠"));
+
+    // The second RH-020 read fails. Preserve the cached public grid, but say
+    // explicitly that it is not current. A prior ready phase otherwise hid it.
+    publicFail = true;
+    await act(async () => refresh());
+    await settle();
+    assert.equal(container.querySelectorAll(".sl.taken").length, 1,
+      "a failed refresh retains the most recent public snapshot");
+    assert.ok(text(container).includes("前回の公開枠"));
+    assert.ok(text(container).includes(notice), "refresh failure must be visible");
+    assert.equal([...container.querySelectorAll('[role="status"]')].filter(el =>
+      el.textContent.includes(notice)).length, 1, "only one public stale notice");
+
+    // The next successful read clears the warning and applies fresh state.
+    publicFail = false;
+    publicStatus = "available";
+    await act(async () => refresh());
+    await settle();
+    assert.equal(container.querySelectorAll(".sl.open").length, 4);
+    assert.ok(!text(container).includes(notice), "successful refresh clears the warning");
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0);
+    assert.equal(container.querySelectorAll("button").length, 0,
+      "this read-only U03b unit must not add reservation controls");
+  } finally {
+    if (root) await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+    dom.window.setInterval = originalSetInterval;
+    dom.window.clearInterval = originalClearInterval;
+    container.remove();
+  }
+});
+
 test("MIG-0514 U03b: out-of-order RH-020 refresh cannot roll back newer public slot state", { skip: skipUi }, async () => {
   const detail = detailOf("autumn-collab-2026");
   const props = { detail, builtAt: NOW };
