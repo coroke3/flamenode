@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { videos } from "@flamenode/db/schema";
-import { buildFreeVideoInsertPlan } from "@flamenode/server-core/video/freeVideoInsertPlan";
+import { videos, videoYoutubeMetadata } from "@flamenode/db/schema";
+import { buildFreeVideoInsertPlan, buildFreeVideoYoutubeMetadataInsertPlan } from "@flamenode/server-core/video/freeVideoInsertPlan";
 import { buildFreeVideoRow } from "@flamenode/server-core/video/freeVideoRow";
 
 const args = {
@@ -52,4 +52,54 @@ test("MIG-0651 U02: snapshot is immutable relative to subsequent row mutations; 
   assert.equal(second.audits[0].after.title, "Video");
   assert.notStrictEqual(first.audits, second.audits);
   assert.notStrictEqual(first.statements, second.statements);
+});
+
+test("MIG-0651 U02: new YouTube pending metadata is one prepared INSERT and strict audit", () => {
+  let count = 0;
+  const calls = [];
+  const db = {
+    insert(table) {
+      return {
+        values(row) {
+          count++;
+          calls.push({ table, row });
+          return { sql: "pending-video-youtube-metadata" };
+        },
+      };
+    },
+    batch() { throw new Error("no D1 execution allowed in plan"); },
+  };
+  const plan = buildFreeVideoYoutubeMetadataInsertPlan(db, {
+    videoId: "v:1", actorUserId: "auth-user", now: 1700000000,
+  });
+  assert.equal(count, 1);
+  assert.strictEqual(calls[0].table, videoYoutubeMetadata);
+  assert.deepEqual(calls[0].row, {
+    video_id: "v:1", youtube_video_id: null,
+    youtube_privacy_status: null,
+    youtube_availability_status: null,
+    duration_seconds: null, view_count: 0,
+    synced_at: null, sync_status: "pending",
+    sync_error: null, updated_at: 1700000000,
+  });
+  assert.deepEqual(plan.statements, [{ sql: "pending-video-youtube-metadata" }]);
+  assert.deepEqual(plan.expectedChanges, [1]);
+  assert.deepEqual(plan.audits, [{
+    table_name: "video_youtube_metadata",
+    target_id: "v:1",
+    operation: "CREATE", before: null,
+    after: calls[0].row,
+    actor_user_id: "auth-user",
+    context: "video-save:youtube-metadata",
+    retention_class: "normal",
+    strict: true,
+  }]);
+  assert.notStrictEqual(plan.audits[0].after, calls[0].row);
+  for (const input of [
+    { videoId: "", actorUserId: "auth-user", now: 1700000000 },
+    { videoId: "v:1", actorUserId: "", now: 1700000000 },
+    { videoId: "v:1", actorUserId: "auth-user", now: NaN },
+    { videoId: "v:1", actorUserId: "auth-user", now: -1 },
+  ]) assert.throws(() => buildFreeVideoYoutubeMetadataInsertPlan(db, input), /metadata_plan_invalid/);
+  assert.equal(count, 1, "invalid arguments produce no DB statement");
 });
