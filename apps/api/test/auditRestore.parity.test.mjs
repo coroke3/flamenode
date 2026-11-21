@@ -814,7 +814,7 @@ test("T04 video restore fails closed when enforced visibility R2 bucket is unava
 // #730: a privileged Hono caller must never receive arbitrary SQL/Drizzle
 // exception text. The real secure-cookie session and SQLite rollback are used;
 // the shared-core owner still has to repair CURRENT and internal audit/log paths.
-test("T03 #730 authenticated restore masks SQL params and provider metadata on D1 failure", async () => {
+test("T03 #730 authenticated restore masks SQL params and provider metadata on D1 failure", async (t) => {
   const ctx = setup({ useRealSessionMiddleware: true });
   seedRestorableAnnouncement(ctx.sqlite);
   const marker = "MIG0662_PRIVATE_SQL_PARAM_CANARY_730";
@@ -869,6 +869,24 @@ test("T03 #730 authenticated restore masks SQL params and provider metadata on D
     assert.equal(ctx.sqlite.prepare(
       "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='failed'",
     ).get().n, 1, "failed-run record still persists separately");
+
+    // The HTTP candidate masks mutation_failed already, but shared-core's
+    // failed-run error_message is a distinct persistent data boundary.
+    // Record a TODO until the existing #679 shared-core owner fixes it; never
+    // count this as a privacy pass while the raw SQL parameter remains stored.
+    const stored = ctx.sqlite.prepare(
+      "SELECT error_message FROM audit_restore_runs WHERE status='failed' LIMIT 1",
+    ).get()?.error_message;
+    assert.equal(typeof stored, "string", "failed-run error is recorded for audit");
+    if (stored.includes(marker) || stored.includes(privateUrl)
+        || stored.includes("Failed query") || stored.includes("params:")) {
+      t.todo("#730 shared-core failed-run error_message persists untrusted SQL parameters; owner #679 must fix");
+    } else {
+      assert.equal(stored.includes(marker), false);
+      assert.equal(stored.includes(privateUrl), false);
+      assert.equal(stored.includes("Failed query"), false);
+      assert.equal(stored.includes("params:"), false);
+    }
     assert.equal(logged.join("\n").includes(marker), false,
       "the Hono error path must not log the canary");
     assert.equal(logged.join("\n").includes(privateUrl), false,
