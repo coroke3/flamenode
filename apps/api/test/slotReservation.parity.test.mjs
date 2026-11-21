@@ -757,6 +757,98 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+
+  // SEC #716: reserve alone is insufficient. Release, extend and merge must
+  // reject corrupted group rows without issuing any atomic mutation batch.
+  for (const testCase of [
+    {
+      name: "release",
+      setup: [
+        ["reserve", { eventId: "ev1", slot_id: "s02", display_name: "Owned", consecutive_count: 2 }],
+      ],
+      corrupt: "s03",
+      operation: "release",
+      args: { eventId: "ev1", slot_id: "s02", body: {} },
+      field: "group_json",
+    },
+    {
+      name: "extend",
+      setup: [
+        ["reserve", { eventId: "ev1", slot_id: "s02", display_name: "Owned", consecutive_count: 2 }],
+      ],
+      corrupt: "s03",
+      operation: "extend",
+      args: { eventId: "ev1", slot_id: "s02", direction: "forward" },
+      field: "group_json",
+    },
+    {
+      name: "merge",
+      setup: [
+        ["reserve", { eventId: "ev1", slot_id: "s02", display_name: "Left", consecutive_count: 1 }],
+        ["reserve", { eventId: "ev1", slot_id: "s04", display_name: "Right", consecutive_count: 1 }],
+      ],
+      corrupt: "s04",
+      operation: "merge",
+      args: { eventId: "ev1", gap_slot_id: "s03", display_name: "Merge" },
+      field: "right_group_json",
+    },
+  ]) {
+    test("SEC #716: " + testCase.name + " fails closed before mutation for oversized group member", async () => {
+      const w = world();
+      const thaw = freeze();
+      try {
+        for (const [op, args] of testCase.setup) {
+          const setup = await runHono(w, "u_owner", op, args);
+          assert.equal(setup.status, 200, "setup must establish an authorized reserved group");
+          assert.equal(setup.wakes.length, 0);
+        }
+        const hugeId = "\u0000" + "r".repeat(180_000);
+        const updated = w.sqlite.prepare(
+          'UPDATE slots SET slot_label = ? WHERE id = ?',
+        ).run(hugeId, testCase.corrupt);
+        assert.equal(updated.changes, 1, "fixture corrupts exactly one group member");
+
+        let firstD1Reads = 0;
+        const prepare = w.d1.prepare.bind(w.d1);
+        w.d1.prepare = sql => {
+          const stmt = prepare(sql);
+          if (!sql.includes("AS " + testCase.field) ||
+              !sql.includes("projected_snapshot AS MATERIALIZED")) return stmt;
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...values) => {
+            const bound = bind(...values);
+            const first = bound.first.bind(bound);
+            bound.first = async () => {
+              const row = await first();
+              firstD1Reads++;
+              assert.ok(row?.[testCase.field]?.includes('"__invalid_projection":1'),
+                "group must surface a fixed invalid marker, never omit its bad row");
+              assert.equal(row[testCase.field].includes(hugeId), false);
+              assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024,
+                "raw first D1 row must stay under S3 snapshot budget");
+              return row;
+            };
+            return bound;
+          };
+          return stmt;
+        };
+        const before = state(w);
+        const batchesBefore = w.d1.stats.batches;
+        const readsBefore = w.d1.stats.reads;
+        const rejected = await runHono(w, "u_owner", testCase.operation, testCase.args);
+        assert.equal(firstD1Reads, 1, "inspect exactly one first D1 snapshot");
+        assert.equal(rejected.status, 503, "do not mutate from corrupted authorization group");
+        assert.equal(rejected.cacheControl, "private, no-store");
+        assert.equal(rejected.wakes.length, 0);
+        assert.deepEqual(state(w), before, "no slot, outbox, queue or audit mutation");
+        assert.equal(w.d1.stats.batches, batchesBefore, "no atomic writes");
+        assert.ok(w.d1.stats.reads - readsBefore <= 3, "S3 D1 pre-read bound");
+      } finally {
+        thaw();
+      }
+    });
+  }
+
   test("T03 & T05: reserve, replay, extend (fwd/back/null-adopt), merge, and release match CURRENT field-by-field with 0 wakes", async () => {
     const { b, outcomes } = await compareSteps([
       // SA-065 reserve 2 slots (s02, s03) by u_owner (approved active X).
