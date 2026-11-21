@@ -779,7 +779,9 @@ if (runTestWithTsx(import.meta.url)) {
     const spec = {
       setup: (sqlite) => seedVideo(sqlite),
       arrange: arrangeVideo({
-        beforePatch: { visibility_status: "private", primary_event_id: "evt-private" },
+        beforePatch: {
+          visibility_status: "private", primary_event_id: "evt-private", creator_x_user_id: "x_actor",
+        },
       }),
     };
     const [, result] = await runScenario("sec731_primary_event_fanout", spec);
@@ -797,6 +799,13 @@ if (runTestWithTsx(import.meta.url)) {
       "event_base:evt-1", "event_base:evt-private",
       "event_release:evt-1", "event_release:evt-private",
     ], "old and restored parents are both invalidated, with no unrelated events");
+    assert.deepEqual(result.static_rebuild_queue
+      .filter((row) => row.target_type === "user").map((row) => row.target_id),
+    ["x_actor", "x_creator"],
+    "both restored and previous creators must have user profile rebuilds");
+    assert.equal(result.static_rebuild_queue.filter((row) =>
+      row.target_type === "users_index" && row.target_id === "global").length, 1,
+    "creator transition must not duplicate the global users index target");
     assert.ok(result.manifest_after?.entities?.some((entry) =>
       entry.entity_type === "video" && entry.entity_id === "vid-1"),
     "a successful public-to-private restore preserves the R2 video block");
