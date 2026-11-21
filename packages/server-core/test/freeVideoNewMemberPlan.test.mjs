@@ -216,3 +216,18 @@ test("MIG-0651 new members: in-batch identity CAS rejects post-read X approval r
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,0);
   } finally { sqlite.close(); }
 });
+
+test("MIG-0651 new members: already-resolved X deletion after pre-read aborts before member writes", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite,"x_users",{id:"exists",x_name:"Existing",approval_status:"approved"});
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite,{reads:0}),args(
+      parsedMemberSubmission([{name:"Existing",x_user_id:"exists",chapters:[]}])
+    ));
+    assert.deepEqual(plan.expectedChanges,[null,1]);
+    sqlite.prepare("DELETE FROM x_users WHERE id='exists'").run();
+    assert.throws(() => executePrepared(sqlite,plan), /malformed JSON/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='exists'").get().n,0);
+  } finally { sqlite.close(); }
+});
