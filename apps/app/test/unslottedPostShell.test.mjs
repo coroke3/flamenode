@@ -19,6 +19,7 @@ const { act } = React;
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { UnslottedPostShell } = await import("../.test-dist/apps/app/src/components/forms/UnslottedPostShell.js");
+const { VideoMembersField } = await import("../.test-dist/apps/app/src/components/forms/VideoMembersField.js");
 const { buildFormDraftStorageKey } = await import("../.test-dist/apps/app/src/lib/useFormDraft.js");
 
 const eventA = { id: "event-A", title: "Event A", status_label: "受付中", custom_questions: [] };
@@ -1291,6 +1292,75 @@ test("U03a ISSUE-703: non-DOM change port stays stable across repeated member ed
     await act(async () => eventCallback());
     assert.notStrictEqual(callbacks.at(-1).success, eventSuccess,
       "a live event-A child can report a programmatic update");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.localStorage.clear();
+  }
+});
+
+test("U03a / MIG-0713 integration: actual member reorder has no native change event and preserves newer draft", async () => {
+  dom.window.localStorage.clear();
+  const key = buildFormDraftStorageKey({
+    authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+  });
+  const members = [
+    { name: "Alice", x_user_id: "alice", role: "映像", comment: "", chapters: [] },
+    { name: "Bob", x_user_id: "bob", role: "作画", comment: "", chapters: [] },
+  ];
+  const ports = {
+    searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null }),
+    applyPermissionBatch: async () => ({ ok: false, message: "no permission" }),
+  };
+  const callbacks = [];
+  // Keep the downstream member-field onChange stable exactly as CURRENT
+  // VideoForm.handleMembersChange does, even as the outer shell rerenders.
+  function MemberForm({ input }) {
+    const handleMembersChange = React.useCallback(
+      () => input.onFormStateChanged(), [input.onFormStateChanged],
+    );
+    return React.createElement("form", { "data-form-key": input.formKey },
+      React.createElement(VideoMembersField, {
+        ...ports, initialMembers: members, onChange: handleMembersChange,
+      }));
+  }
+  const renderVideoForm = input => {
+    callbacks.push(input.onSubmitSuccess);
+    return React.createElement(MemberForm, { input });
+  };
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  let nativeChanges = 0;
+  container.addEventListener("change", () => { nativeChanges += 1; });
+  try {
+    await act(async () => root.render(React.createElement(UnslottedPostShell, props({ renderVideoForm }))));
+    await act(async () => selected(container, "none").click());
+    // The affiliation radio change is native. Count subsequent member-only events.
+    const beforeMoveChangeCount = nativeChanges;
+    const oldSuccess = callbacks.at(-1);
+    const getMembers = () => JSON.parse(container.querySelector('input[name="members_json"]').value);
+    assert.deepEqual(getMembers().map(member => member.x_user_id), ["alice", "bob"]);
+    const move = container.querySelector('[aria-label="2人目を上へ移動"]');
+    assert.ok(move, "actual migrated VideoMembersField exposes the reorder action");
+    await act(async () => move.click());
+    assert.equal(nativeChanges, beforeMoveChangeCount,
+      "member reorder is a button-only state update, not a form change event");
+    assert.deepEqual(getMembers().map(member => member.x_user_id), ["bob", "alice"],
+      "actual member component must preserve the reordered form payload");
+    const newSuccess = callbacks.at(-1);
+    assert.notStrictEqual(newSuccess, oldSuccess,
+      "the real member field must notify the shell and invalidate old submit success");
+
+    await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const saved = dom.window.localStorage.getItem(key);
+    assert.ok(saved, "a button-only member edit still keeps the draft available");
+    await act(async () => oldSuccess());
+    assert.equal(dom.window.localStorage.getItem(key), saved,
+      "an in-flight old success cannot clear the new draft after member reorder");
+    await act(async () => newSuccess());
+    assert.equal(dom.window.localStorage.getItem(key), null,
+      "a completion bound to the latest rendered member state can clear the draft");
   } finally {
     await act(async () => root.unmount());
     container.remove();
