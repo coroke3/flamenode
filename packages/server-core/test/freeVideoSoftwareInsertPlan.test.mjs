@@ -4,8 +4,13 @@ import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import * as schema from "@flamenode/db/schema";
 import { buildFreeVideoSoftwareInsertPlan } from "../src/video/freeVideoSoftwareInsertPlan.ts";
+import { buildFreeVideoSoftwareInsertPlan as exportedSoftwarePlan } from "@flamenode/server-core/video/unslottedEventPlans";
 import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@flamenode/domain/video/atomicLimits";
 import { D1_MAX_BIND_PARAMETERS } from "../src/audit/mutateBudget.ts";
+
+test("MIG-0651 software: public server-core entry preserves exact plan implementation", () => {
+  assert.strictEqual(exportedSoftwarePlan, buildFreeVideoSoftwareInsertPlan);
+});
 
 const NOW = 1770000000;
 function liveDb(sqlite, stats) {
