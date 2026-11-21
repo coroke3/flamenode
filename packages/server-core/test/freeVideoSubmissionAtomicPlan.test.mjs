@@ -54,7 +54,7 @@ test("MIG-0651 atomic composer: null event inserts video and pending YouTube met
   const { db, calls } = fixture();
   const row = video();
   const plan = buildFreeVideoSubmissionAtomicPlan(db, {
-    videoAfter: row, actorUserId: "user-1", eventId: null,
+    videoAfter: row, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null,
     questions: [], customAnswerDrafts: [], now: NOW,
   });
   assert.equal(plan.statements.length, 2);
@@ -77,7 +77,7 @@ test("MIG-0651 atomic composer: event and entire question-set assertions MUST pr
   const row = video("event-a");
   const q = question();
   const plan = buildFreeVideoSubmissionAtomicPlan(db, {
-    videoAfter: row, actorUserId: "user-1", eventId: "event-a",
+    videoAfter: row, actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a",
     questions: [q], customAnswerDrafts: [{
       event_id: "event-a", question_id: "q:1", question_key: "q:1",
       answer_text: "ok", answer_json: null,
@@ -106,7 +106,7 @@ test("MIG-0651 atomic composer: event and entire question-set assertions MUST pr
 test("MIG-0651 atomic composer: event selected with zero answers still asserts policy", () => {
   const { db } = fixture();
   const plan = buildFreeVideoSubmissionAtomicPlan(db, {
-    videoAfter: video("event-a"), actorUserId: "user-1", eventId: "event-a",
+    videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a",
     questions: [question()], customAnswerDrafts: [], now: NOW,
   });
   assert.deepEqual(plan.statements.map(s => s.action),
@@ -117,21 +117,24 @@ test("MIG-0651 atomic composer: event selected with zero answers still asserts p
 
 test("MIG-0651 atomic composer: actor, selected event, clock and stale answer mismatch fail closed", () => {
   const samples = [
-    { videoAfter: video(), actorUserId: "other", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: video(), actorUserId: "user-1", eventId: "event-a", questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: video(), actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW+1 },
-    { videoAfter: { ...video(), source_type: "external" }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), youtube_video_id: "short" }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), youtube_video_id: null }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), visibility_status: "private" }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), scheduling_type: "slotted" }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), scheduled_time: null }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), scheduled_time: -1 }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), app_like_count: 1 }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), score: 1 }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), score_updated_at: NOW }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), creator_display_name: "  " }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: { ...video(), title: " " }, actorUserId: "user-1", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: video(), actorUserId: "other", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a", questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW+1 },
+    { videoAfter: { ...video(), source_type: "external" }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), youtube_video_id: "short" }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), youtube_video_id: null }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), visibility_status: "private" }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), scheduling_type: "slotted" }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), scheduled_time: null }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), scheduled_time: -1 }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), app_like_count: 1 }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), score: 1 }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), score_updated_at: NOW }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), creator_display_name: "  " }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), title: " " }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "another-x", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: { ...video(), creator_x_user_id: "imposter" }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
   ];
   for (const sample of samples) {
     const { db, calls } = fixture();
@@ -141,7 +144,7 @@ test("MIG-0651 atomic composer: actor, selected event, clock and stale answer mi
   }
   const { db } = fixture();
   assert.throws(() => buildFreeVideoSubmissionAtomicPlan(db, {
-    videoAfter: video("event-a"), actorUserId: "user-1", eventId: "event-a",
+    videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a",
     questions: [question()], customAnswerDrafts: [{
       event_id: "other", question_id: "q:1", question_key: "q:1",
       answer_text: "bad", answer_json: null,
@@ -173,7 +176,7 @@ test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded 
         batch() { throw new Error("plan must never execute Cloudflare D1"); },
       };
       const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
-        videoAfter: video(eventId), actorUserId: "user-1", eventId,
+        videoAfter: video(eventId), actorUserId: "user-1", trustedActiveXId: "alice", eventId,
         now: NOW, questions: eventId ? [question()] : [],
         customAnswerDrafts: eventId ? [{
           event_id: eventId, question_id: "q:1", question_key: "q:1",
@@ -247,7 +250,7 @@ test("MIG-0651 atomic composer: real SQLite changed event/question policy aborts
         insert(table) { return drizzleDb.insert(table); },
       };
       const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
-        videoAfter: video("event-a"), actorUserId: "user-1",
+        videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice",
         eventId: "event-a", now: NOW, questions: [question()],
         customAnswerDrafts: [{
           event_id: "event-a", question_id: "q:1", question_key: "q:1",
@@ -286,7 +289,7 @@ test("MIG-0651 atomic composer: real SQLite changed event/question policy aborts
 test("MIG-0651 atomic composer: D1 50 query budget uses explicit actual caller-read count", () => {
   const { db } = fixture();
   const noEvent = buildFreeVideoSubmissionAtomicPlan(db, {
-    videoAfter: video(null), actorUserId: "user-1", eventId: null,
+    videoAfter: video(null), actorUserId: "user-1", trustedActiveXId: "alice", eventId: null,
     questions: [], customAnswerDrafts: [], now: NOW,
   });
   const noEventBudget = inspectFreeVideoSubmissionAtomicPlanBudget(noEvent, 0);
@@ -300,7 +303,7 @@ test("MIG-0651 atomic composer: D1 50 query budget uses explicit actual caller-r
   assert.equal(noEventBudget.withinLimit, true);
 
   const linked = buildFreeVideoSubmissionAtomicPlan(db, {
-    videoAfter: video("event-a"), actorUserId: "user-1", eventId: "event-a",
+    videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a",
     questions: [question()], customAnswerDrafts: [{
       event_id: "event-a", question_id: "q:1", question_key: "q:1",
       answer_text: "demo", answer_json: null,
@@ -342,7 +345,7 @@ test("MIG-0651 atomic composer: concurrent YouTube ID unique collision rolls bac
     // same YouTube video ID. The canonical SQLite active unique index must
     // resolve this race even though the read-only duplicate probe already ran.
     const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
-      videoAfter: video(null), actorUserId: "user-1", eventId: null,
+      videoAfter: video(null), actorUserId: "user-1", trustedActiveXId: "alice", eventId: null,
       questions: [], customAnswerDrafts: [], now: NOW,
     });
     insert(sqlite, "videos", {
@@ -393,7 +396,7 @@ test("MIG-0651 atomic composer: mid-batch metadata failure rolls back the earlie
       insert(table) { return drizzleDb.insert(table); },
     };
     const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
-      videoAfter: video(null), actorUserId: "user-1", eventId: null,
+      videoAfter: video(null), actorUserId: "user-1", trustedActiveXId: "alice", eventId: null,
       questions: [], customAnswerDrafts: [], now: NOW,
     });
     assert.deepEqual(plan.expectedChanges, [1, 1]);
