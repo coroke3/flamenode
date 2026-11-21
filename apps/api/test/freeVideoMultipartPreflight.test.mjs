@@ -319,7 +319,7 @@ test("MIG-0651 U02 SQLite: event visibility, end-time, required fields and YouTu
   const sqlite = createSqlite();
   const queries = [];
   const db = drizzle(async (statement, params, method) => {
-    assert.match(statement, /^\\s*(SELECT|WITH)\\b/i, "preflight must be read-only");
+    assert.match(statement, /^\s*(SELECT|WITH)\b/i, "preflight must be read-only");
     queries.push({ statement, params });
     const rows = sqlite.prepare(statement).all(...params).map((row) => Object.values(row));
     return { rows: method === "get" ? rows[0] : rows };
@@ -348,7 +348,7 @@ test("MIG-0651 U02 SQLite: event visibility, end-time, required fields and YouTu
       youtubeId: "dQw4w9WgXcQ", eventId: "event-a",
     } });
     assert.equal(queries.length, 3, "eligible + required + YouTube duplicate");
-    assert.ok(queries.every(({ statement }) => /^\\s*SELECT/i.test(statement)));
+    assert.ok(queries.every(({ statement }) => /^\s*SELECT/i.test(statement)));
 
     // Even an explicitly enabled event is denied if private.
     sqlite.prepare("UPDATE events SET visibility_status='private' WHERE id='event-a'").run();
