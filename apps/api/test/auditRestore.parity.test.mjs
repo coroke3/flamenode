@@ -18,8 +18,34 @@ const ADMIN = {
 };
 const RESTORE = "/api/admin/audit/restore";
 
+// D1 fake read-trace: observe table names only (never SQL bind values or tokens).
+// This is diagnostic evidence for Issue #691, NOT a real Auth.js/workerd profile.
+function readTableLabel(sql) {
+  return /\\bfrom\\s+"?([a-z_][a-z_0-9]*)"?/i.exec(sql)?.[1] ?? "unknown";
+}
+
 function setup({ user = ADMIN, role = "admin", disabled = [], enableRestoreCandidate = true } = {}) {
   const { sqlite, db, stats } = createAdminD1();
+  const readTrace = [];
+  const originalPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    const prepared = originalPrepare(sql);
+    return {
+      bind(...params) {
+        const statement = prepared.bind(...params);
+        const instrumentRead = (method) => (...args) => {
+          readTrace.push({ method, first_from_table: readTableLabel(sql) });
+          return statement[method](...args);
+        };
+        return {
+          ...statement, // Preserve _sql/_params consumed by atomic fake D1 batch().
+          first: instrumentRead("first"),
+          all: instrumentRead("all"),
+          raw: instrumentRead("raw"),
+        };
+      },
+    };
+  };
   seedBase(sqlite, { role });
   if (disabled.length) {
     sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = 'default'")
@@ -40,7 +66,7 @@ function setup({ user = ADMIN, role = "admin", disabled = [], enableRestoreCandi
       body: JSON.stringify(body),
     }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE, ...extraEnv },
   );
-  return { sqlite, db, stats, request };
+  return { sqlite, db, stats, readTrace, request };
 }
 
 function seedRestorableAnnouncement(sqlite, { currentTitle = "Current Title" } = {}) {
@@ -209,7 +235,7 @@ test("T03 no-conflict restore is atomic and gives no second restore", async () =
   assert.equal(state.restored, "restored");
   assert.deepEqual(state.runs, [{ status: "success", reason: "業務上の監査復元" }]);
   assert.ok(state.auditCount >= 2);
-  recordRestoreD1Budget("announcements_success", ctx.stats);
+  recordRestoreD1Budget("announcements_success", ctx.stats, ctx.readTrace);
   const second = await ctx.request(body());
   assert.equal(second.status, 200);
   assert.equal((await second.json()).ok, false);
@@ -346,7 +372,7 @@ test("T04 public event -> private restore commits R2 CAS fence and D1 atomically
     assert.ok(deleted.some((url) => url.includes("public-event-export:9:ev-1:v5:15")));
     assert.ok(deleted.some((url) => url.includes("public-event-export:9:ev-1:legacy:1440")));
     assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'").get().n, 1);
-  recordRestoreD1Budget("events_private_restore_success", ctx.stats);
+  recordRestoreD1Budget("events_private_restore_success", ctx.stats, ctx.readTrace);
   } finally {
     if (previous === undefined) delete globalThis.caches;
     else globalThis.caches = previous;
@@ -366,7 +392,7 @@ test("T04 R2 binding failure prevents an event visibility restore and preserves 
   assert.equal(ctx.sqlite.prepare("SELECT visibility_status FROM events WHERE id='ev-1'").get().visibility_status, "public");
   assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM public_visibility_fences").get().n, 0);
   assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'").get().n, 0);
-  recordRestoreD1Budget("events_missing_r2_fail_closed", ctx.stats);
+  recordRestoreD1Budget("events_missing_r2_fail_closed", ctx.stats, ctx.readTrace);
 });
 
 // MIG-0662 T04 video variant. Keep the test table column names in lockstep
@@ -457,7 +483,7 @@ test("T04 video public->private restore commits D1+R2 CAS and invalidates full p
       "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'",
     ).get().n, 1);
     assert.equal(ctx.stats.batches, 1, "RESTORE mutation, audit and queue must use one atomic D1 batch");
-  recordRestoreD1Budget("videos_private_restore_success", ctx.stats);
+  recordRestoreD1Budget("videos_private_restore_success", ctx.stats, ctx.readTrace);
   } finally {
     if (previous === undefined) delete globalThis.caches;
     else globalThis.caches = previous;
@@ -482,14 +508,18 @@ test("T04 video restore fails closed when enforced visibility R2 bucket is unava
   assert.equal(ctx.sqlite.prepare(
     "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'",
   ).get().n, 0);
-  recordRestoreD1Budget("videos_missing_r2_fail_closed", ctx.stats);
+  recordRestoreD1Budget("videos_missing_r2_fail_closed", ctx.stats, ctx.readTrace);
 });
 
 // The Hono route test injects an in-memory session middleware, not Auth.js.
 // These counts therefore form a *lower bound*, not a production D1 profile.
 // Reports remain observational until the approved S3 <=3 pre-read gate is met.
-function recordRestoreD1Budget(scenario, stats) {
+function recordRestoreD1Budget(scenario, stats, readTrace) {
+  assert.equal(readTrace.length, stats.reads,
+    "trace must account for every fake D1 first/all/raw read");
+  // Bounded, sanitized read order is more actionable than totals alone.
   const record = {
+    read_trace: readTrace.slice(0, 20),
     scenario, mocked_session: true,
     d1_reads: stats.reads, d1_batches: stats.batches,
     s3_max_pre_reads: 3, s3_max_batches: 1,
