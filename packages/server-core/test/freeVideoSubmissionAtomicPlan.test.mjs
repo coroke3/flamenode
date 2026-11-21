@@ -248,6 +248,47 @@ test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded 
   }
 });
 
+test("MIG-0651 atomic composer: stale Active X switch/unlink/revocation/ban aborts before INSERT", () => {
+  // All changes happen AFTER plan construction but BEFORE the same-batch
+  // assertion. A previously valid HTTP preflight never grants write authority.
+  const mutations = {
+    switched: sqlite => sqlite.prepare("UPDATE user SET active_x_user_id='other' WHERE id='user-1'").run(),
+    unlinked: sqlite => sqlite.prepare("DELETE FROM x_user_account_links WHERE x_user_id='alice' AND auth_user_id='user-1'").run(),
+    revoked: sqlite => sqlite.prepare("UPDATE x_users SET approval_status='rejected' WHERE id='alice'").run(),
+    banned: sqlite => sqlite.prepare("UPDATE user SET is_banned=1 WHERE id='user-1'").run(),
+  };
+  for (const [name, mutate] of Object.entries(mutations)) {
+    const sqlite = createSqlite();
+    seedApprovedActiveX(sqlite);
+    try {
+      const drizzleDb = drizzle(async () => ({ rows: [] }));
+      const db = {
+        run(expr) { return { assertSql: expr }; },
+        insert(table) { return drizzleDb.insert(table); },
+        batch() { throw new Error("candidate must not execute D1 outside guard"); },
+      };
+      const plan = buildFreeVideoSubmissionAtomicPlan(db, {
+        videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
+        eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+      });
+      assert.deepEqual(plan.expectedChanges, [null, 1, 1]);
+      mutate(sqlite);
+      const authSql = new SQLiteSyncDialect().sqlToQuery(plan.statements[0].assertSql);
+      sqlite.exec("BEGIN");
+      assert.throws(
+        () => sqlite.prepare(authSql.sql).get(...authSql.params),
+        /malformed JSON/i,
+        `${name}: rejected without attempting video INSERT`,
+      );
+      sqlite.exec("ROLLBACK");
+      for (const table of ["videos", "video_youtube_metadata"]) {
+        assert.equal(sqlite.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n, 0,
+          `${name}: no partial row in ${table}`);
+      }
+    } finally { sqlite.close(); }
+  }
+});
+
 test("MIG-0651 atomic composer: real SQLite changed event/question policy aborts without any rows", () => {
   for (const mutation of ["event-closed", "question-deactivated", "new-required"]) {
     const sqlite = createSqlite();
