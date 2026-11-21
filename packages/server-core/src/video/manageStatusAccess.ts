@@ -126,7 +126,7 @@ function notificationReadProjection(
   return {
     recipientEnabled: sql<number>`CASE WHEN EXISTS (
       SELECT 1 FROM ${users} notification_recipient
-      WHERE notification_recipient."id" = ${videos.submitted_by_user_id}
+      WHERE notification_recipient."id" = trim(${videos.submitted_by_user_id})
         AND (notification_recipient."is_notification_enabled" IS NULL
           OR notification_recipient."is_notification_enabled" <> 0)
     ) THEN 1 ELSE 0 END`,
