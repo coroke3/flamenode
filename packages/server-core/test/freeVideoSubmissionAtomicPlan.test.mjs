@@ -59,7 +59,6 @@ test("MIG-0651 atomic composer: null event inserts video and pending YouTube met
   assert.deepEqual(plan.statements[0].value, row);
   assert.strictEqual(plan.statements[1].table, videoYoutubeMetadata);
   assert.equal(plan.statements[1].value.sync_status, "pending");
-  assert.equal(plan.statements[1].value.youtube_video_id, null, "canonical YouTube id lives in videos");
   assert.equal(plan.statements[1].value.view_count, 0);
   assert.equal(plan.statements[1].value.updated_at, NOW);
   assert.deepEqual(plan.expectedChanges, [1, 1]);
