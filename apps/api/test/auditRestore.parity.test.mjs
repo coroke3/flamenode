@@ -493,6 +493,49 @@ test("T03 confirmation text is mandatory; no accidental restore writes", async (
   }
 });
 
+// #730: a D1 failure during shared-core preflight occurs before the normal
+// mutation_failed Result/failed-run record. The candidate route must not let
+// its provider exception reach Hono's default error logger or HTTP response.
+test("T03 #730 authenticated preflight D1 exception returns fixed 500 without SQL leak", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true });
+  seedRestorableAnnouncement(ctx.sqlite);
+  const marker = "MIG0662_AUDIT_PREFLIGHT_SQL_PARAM_CANARY";
+  const originalPrepare = ctx.db.prepare.bind(ctx.db);
+  let faulted = false;
+  ctx.db.prepare = (sql) => {
+    if (/\\bfrom\\s+["\\x60]?audit_logs["\\x60]?\\b/i.test(sql)) {
+      faulted = true;
+      throw new Error("Failed query: SELECT * FROM audit_logs WHERE id = ? params: " + marker, {
+        cause: new Error("private-provider-origin " + marker),
+      });
+    }
+    return originalPrepare(sql);
+  };
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const logged = [];
+  try {
+    const capture = (...values) => logged.push(values.map(String).join(" "));
+    console.warn = capture;
+    console.error = capture;
+    const response = await ctx.request(body());
+    assert.equal(faulted, true, "real-session Hono route reaches the failing audit preflight");
+    assert.equal(response.status, 500);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "復元処理を完了できませんでした。",
+    });
+    assert.equal(ctx.stats.batches, 0, "a rejected preflight cannot start any D1 batch");
+    assert.equal(changes(ctx.sqlite).row.title, "Current Title");
+    assert.equal(changes(ctx.sqlite).runs.length, 0);
+    assert.equal(logged.join("\\n").includes(marker), false, "no private SQL in error logs");
+    assert.equal(logged.join("\\n").includes("private-provider-origin"), false);
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+});
+
 test("T03 missing audit log matches CURRENT 200 ok:false and no restore row", async () => {
   const ctx = setup();
   const res = await ctx.request({ audit_id: "missing", reason: "test", confirm_text: "RESTORE missing" });
