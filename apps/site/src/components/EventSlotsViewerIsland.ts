@@ -65,6 +65,16 @@ export function parseSlotViewerOverlay(value: unknown): SlotViewerOverlayDto | n
   const row = value as Record<string, unknown>;
   const flags = ["loggedIn", "authUnavailable", "isBanned", "needsTermsAcceptance", "canReserveSlot", "canPost", "operatorOverrideAllowed"] as const;
   if (flags.some((flag) => typeof row[flag] !== "boolean") || !Array.isArray(row.slots)) return null;
+  const parsedSlots = row.slots.map(parseSlot).filter((slot): slot is SlotViewerOverlaySlot => slot !== null);
+  // RH-014 must provide at most one relation per public slot ID. A Map would
+  // otherwise let a later duplicate replace a denied relation with "owned".
+  // Discard all ambiguous rows for that ID, preserving unrelated valid rows.
+  const seenIds = new Set<string>();
+  const ambiguousIds = new Set<string>();
+  for (const slot of parsedSlots) {
+    if (seenIds.has(slot.id)) ambiguousIds.add(slot.id);
+    seenIds.add(slot.id);
+  }
   return {
     loggedIn: row.loggedIn as boolean,
     authUnavailable: row.authUnavailable as boolean,
@@ -75,7 +85,7 @@ export function parseSlotViewerOverlay(value: unknown): SlotViewerOverlayDto | n
     operatorOverrideAllowed: row.operatorOverrideAllowed as boolean,
     viewerXId: nullableString(row.viewerXId),
     viewerXIdNotice: nullableString(row.viewerXIdNotice),
-    slots: row.slots.map(parseSlot).filter((slot): slot is SlotViewerOverlaySlot => slot !== null),
+    slots: parsedSlots.filter((slot) => !ambiguousIds.has(slot.id)),
   };
 }
 

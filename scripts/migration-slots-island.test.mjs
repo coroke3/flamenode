@@ -150,6 +150,36 @@ test("U01 contradictory RH-014 slot actor relation never grants ownership", asyn
     "account_other remains visible as a non-owned relation");
 });
 
+test("U01 duplicate RH-014 slot IDs cannot elevate ownership regardless of response order", async () => {
+  const { parseSlotViewerOverlay, mergeViewerSlotOverlay } =
+    await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const flags = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: false, viewerXId: "active-x", viewerXIdNotice: null,
+  };
+  const denied = { id: "s1", display_name: "foreign-private", viewer_relation: "account_other",
+    is_owned_by_viewer: false, x_user_id: null };
+  const owned = { id: "s1", display_name: "private-owner", viewer_relation: "active",
+    is_owned_by_viewer: true, x_user_id: "active-x" };
+  const sibling = { id: "s2", viewer_relation: "active", is_owned_by_viewer: true };
+  for (const duplicates of [[denied, owned], [owned, denied], [owned, owned]]) {
+    const overlay = parseSlotViewerOverlay({ ...flags, slots: [duplicates[0], sibling, duplicates[1]] });
+    assert.ok(overlay);
+    assert.deepEqual(overlay.slots.map((row) => row.id), ["s2"],
+      "every row for an ambiguous slot ID is discarded; independent slots remain");
+    const merged = mergeViewerSlotOverlay([
+      { id: "s1", display_name: "public-name" }, { id: "s2", display_name: "public-two" },
+    ], overlay, true);
+    assert.equal(merged[0].is_owned_by_viewer, false,
+      "duplicate RH-014 data cannot paint a false owned badge");
+    assert.equal(merged[0].display_name, "public-name",
+      "duplicate RH-014 data cannot override the public name");
+    assert.equal(merged[0].x_user_id, null);
+    assert.equal(merged[1].is_owned_by_viewer, true, "an unrelated valid owner still works");
+  }
+});
+
 test("U01 viewer overlay RH-014 503/404/network error never grants ownership", async () => {
   const { fetchSlotViewerOverlay } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
   for (const status of [404, 503]) {
