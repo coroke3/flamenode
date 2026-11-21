@@ -366,3 +366,50 @@ test("U01 #717 known manifest domain failures retain stable codes without raw st
     return true;
   });
 });
+
+test("U01 #717 R2 binding and guard-mode getter exceptions are sanitized before shared restore", async () => {
+  const secret = "R2_PRIVATE_BINDING_GETTER_CREDENTIAL_0662";
+  const manifest = { schema_version: 1, revision: 0, generated_at: 1, entities: [] };
+  let bucketGets = 0;
+  const bucketEnv = {};
+  Object.defineProperty(bucketEnv, "BUCKET", {
+    get() {
+      bucketGets++;
+      throw new Error("provider R2 binding access: " + secret, {
+        cause: new Error("nested credential: " + secret),
+      });
+    },
+  });
+  const poisonedBucket = host(bucketEnv);
+  for (const [action, expected] of [
+    [() => poisonedBucket.manifest.read(), "public_visibility_manifest_read_failed"],
+    [() => poisonedBucket.manifest.write(manifest, { ifMatchEtag: null }),
+      "public_visibility_manifest_put_failed"],
+  ]) {
+    await assert.rejects(action, (error) => {
+      assert.equal(error.message, expected);
+      assert.equal(Object.hasOwn(error, "cause"), false);
+      assert.equal(error.cause, undefined);
+      assert.doesNotMatch(String(error.stack), /R2_PRIVATE_BINDING_GETTER_CREDENTIAL_0662/);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    });
+  }
+  assert.equal(bucketGets, 2, "both reads and writes independently reject a throwing env binding");
+
+  let modeGets = 0;
+  const guardEnv = {};
+  Object.defineProperty(guardEnv, "PUBLIC_VISIBILITY_GUARD_MODE", {
+    get() {
+      modeGets++;
+      throw new Error("guard-mode binding access: " + secret);
+    },
+  });
+  await assert.rejects(host(guardEnv).manifest.read(), (error) => {
+    assert.equal(error.message, "public_visibility_manifest_read_failed");
+    assert.equal(Object.hasOwn(error, "cause"), false);
+    assert.doesNotMatch(String(error.stack), /R2_PRIVATE_BINDING_GETTER_CREDENTIAL_0662/);
+    return true;
+  });
+  assert.equal(modeGets, 1, "missing bucket guard-mode resolution must not leak provider errors");
+});
