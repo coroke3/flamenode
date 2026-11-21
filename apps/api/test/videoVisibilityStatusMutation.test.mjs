@@ -721,3 +721,70 @@ test("Next control-flow exceptions compensate R2 before rethrow or fail closed",
   );
   assert.deepEqual(calls, ["mutate", "framework-rethrow"]);
 });
+
+
+test("Next control-flow during R2 precommit and compensation failures never hide unverified fences", async () => {
+  const frameworkControl = Object.assign(new Error("private NEXT_NOT_FOUND exception"), {
+    digest: "NEXT_HTTP_ERROR_FALLBACK;404",
+  });
+  for (const [failurePhase, compensation, expectedCalls] of [
+    ["precommit-abort", "throws", ["precommit", "framework-rethrow", "compensate", "log"]],
+    ["post-precommit-D1", "throws", ["precommit", "mutate", "framework-rethrow", "compensate", "log"]],
+    ["post-precommit-D1", "readback-throws", [
+      "precommit", "mutate", "framework-rethrow", "compensate", "confirm", "log",
+    ]],
+  ]) {
+    const calls = [];
+    const result = await executeVideoVisibilityStatusMutation({
+      db: {}, videoId: "v-1", requestedStatus: "private",
+      transition: transition({
+        fenceToken: "owned-fence-token",
+        depublicizedFromPublic: true,
+      }),
+      reason: null, logTag: "manage-video-status",
+    }, host({
+      preCommit: async () => {
+        calls.push("precommit");
+        if (failurePhase === "precommit-abort") throw frameworkControl;
+      },
+      mutate: async () => { calls.push("mutate"); throw frameworkControl; },
+      rethrowFrameworkControl: error => {
+        calls.push("framework-rethrow");
+        throw error;
+      },
+      compensate: async (_db, details) => {
+        calls.push("compensate");
+        assert.equal(details.fenceToken, "owned-fence-token");
+        assert.equal(details.allowNonPublicRollback, false);
+        if (compensation === "throws") {
+          throw new Error("R2 credentials=private-provider-secret");
+        }
+      },
+      confirmCompensation: async () => {
+        calls.push("confirm");
+        throw new Error("R2 readback Authorization:Bearer private-provider-secret");
+      },
+      rereadStatus: async () => {
+        calls.push("unexpected-status-oracle");
+        return "private";
+      },
+      log: (level, tag, details) => calls.push(["log", level, tag, details]),
+    }, calls));
+
+    assert.deepEqual(result, {
+      ok: false,
+      message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+      errorCode: "status_unverified", traceId: "trace-1", retryable: false,
+    }, failurePhase + "/" + compensation + ": no unsafe redirect");
+    assert.deepEqual(calls.map(item => Array.isArray(item) ? item[0] : item),
+      expectedCalls, "compensate exactly once; do not probe D1 after R2 uncertainty");
+    const warning = calls.at(-1);
+    assert.deepEqual(warning.slice(1), [
+      "warn", "[manage-video-status] visibility compensation failed",
+      { traceId: "trace-1", error_code: "visibility_compensation_failed" },
+    ]);
+    assert.doesNotMatch(JSON.stringify({ calls, result }),
+      /private-provider-secret|NEXT_NOT_FOUND|Authorization:Bearer/,
+      "R2 errors and framework control exception must not enter structured logs or responses");
+  }
+});
