@@ -3,6 +3,9 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { events, videoEvents } from "@flamenode/db/schema";
 import type { WriteAuditLogInput } from "../audit/types.ts";
 import type { ServerCoreDb } from "../db.ts";
+
+/** MIG-0651 unmounted SA-086 answer INSERT candidate. */
+export { buildFreeVideoCustomAnswerInsertPlan } from "./freeVideoCustomAnswerInsertPlan.ts";
 import { unslottedEventEligibilityWhere } from "./unslottedEventEligibility.ts";
 
 /** Structural parity with CURRENT VideoAtomicWritePlan; caller owns the D1 transaction. */
