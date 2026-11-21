@@ -17,7 +17,8 @@ const question = (id, changes = {}) => {
   return {
     id: row.id, event_id: row.event_id, question_key: row.question_key,
     label: row.label, type: row.type, required: row.required === 1,
-    options: [], max_length: row.max_length, is_active: true, source: row,
+    options: row.options_json ? JSON.parse(row.options_json) : [],
+    max_length: row.max_length, is_active: true, source: row,
   };
 };
 function fixture() {
@@ -100,6 +101,34 @@ test("MIG-0651 custom-answer plan: policy snapshot assertion precedes single INS
   ]);
   assert.deepEqual(plan.audits[0].after, recorded.inserted[0]);
   assert.notStrictEqual(plan.audits[0].after, recorded.inserted[0]);
+});
+
+test("MIG-0651 custom-answer plan: a caller cannot bypass required, options, length or checkbox checks", () => {
+  const { db, recorded } = fixture();
+  const questions = sorted(
+    question("required", { required: 1, sort_order: 0 }),
+    question("choices", { type: "select", options_json: '["A","B"]', sort_order: 1 }),
+    question("details", { max_length: 3, sort_order: 2 }),
+    question("multi", { type: "checkbox", options_json: '["X","Y"]', sort_order: 3 }),
+  );
+  const required = draft("required");
+  const cases = [
+    { drafts: [], error: /draft_policy_invalid/ },
+    { drafts: [{ ...required, answer_text: "  " }], error: /draft_policy_invalid/ },
+    { drafts: [required, { ...draft("choices"), answer_text: "nope" }], error: /draft_policy_invalid/ },
+    { drafts: [required, { ...draft("details"), answer_text: "too-long" }], error: /draft_policy_invalid/ },
+    { drafts: [required, { ...draft("multi"), answer_text: null, answer_json: '["X","Z"]' }], error: /draft_policy_invalid/ },
+    { drafts: [required, { ...draft("multi"), answer_text: null, answer_json: '["X","X"]' }], error: /draft_policy_invalid/ },
+    { drafts: [required, { ...draft("multi"), answer_text: null, answer_json: '{invalid' }], error: /draft_invalid/ },
+    { drafts: [{ ...draft("multi"), answer_text: null, answer_json: '["X"]' }, required], error: /draft_policy_invalid/ },
+  ];
+  for (const { drafts, error } of cases) {
+    assert.throws(
+      () => buildFreeVideoCustomAnswerInsertPlan(db, { ...args, questions, drafts }),
+      error,
+    );
+  }
+  assert.equal(recorded.inserted, null, "invalid input creates no mutation statement");
 });
 
 test("MIG-0651 custom-answer plan: zero submitted answers still asserts unchanged question set", () => {
