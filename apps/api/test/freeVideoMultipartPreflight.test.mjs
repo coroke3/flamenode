@@ -280,6 +280,16 @@ test("MIG-0651 U02 D1 read: ineligible event fails closed without later reads", 
   assert.deepEqual(reads.map((r) => r.kind), ["eligibility"]);
 });
 
+test("MIG-0651 U02 D1 read: eligibility D1 outage cannot be misreported as event policy denial", async () => {
+  const { db, reads } = readOnlyVideoDb({ fail: "eligibility" });
+  const response = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
+  assert.deepEqual(response, {
+    ok: false,
+    message: "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。",
+  });
+  assert.deepEqual(reads.map((r) => r.kind), ["eligibility"], "no subsequent reads after outage");
+});
+
 test("MIG-0651 U02 D1 read: existing non-voided YouTube video is refused", async () => {
   const { db, reads } = readOnlyVideoDb({ duplicate: true });
   const result = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
