@@ -107,4 +107,94 @@ if (runTestWithTsx(import.meta.url)) {
     }
     delete globalThis.__flamenodeCloudflareContext;
   });
+
+  test("SEC-712 CURRENT: individually blocked playlist videos are hidden without mutating R2", async () => {
+    const { loadPublicEventPlaylistR2Only } = await import("./r2EventPlaylist.ts");
+    const manifestKey = "visibility/blocked-entities.v1.json";
+    const playlistKey = "events/event-1/playlist.v1.json";
+    const original = {
+      schema_version: 1, generated_at: 1700000000,
+      event_id: "event-1", complete: true,
+      items: [
+        { id: "vid-a", title: "Public A", display_name: "A", youtube_video_id: "y-a" },
+        { id: "vid-hidden", title: "SECRET OLD TITLE", display_name: "SECRET OLD AUTHOR", youtube_video_id: "y-hidden" },
+        { id: "vid-c", title: "Public C", display_name: "C", youtube_video_id: "y-c" },
+      ],
+    };
+    const fence = (entity_type, entity_id) => ({
+      entity_type, entity_id, fence_token: "f-720", blocked_at: 1700000000,
+    });
+    let mode = "video-fence";
+    let guard = "enforce";
+    let reads = [];
+    const manifest = (entries, revision = 1) => JSON.stringify({
+      schema_version: 1, revision, generated_at: 1700000000, entities: entries,
+    });
+    const bucket = {
+      async get(key) {
+        reads.push(key);
+        if (key === manifestKey) {
+          const nth = reads.filter((x) => x === manifestKey).length;
+          if (mode === "missing-manifest") return null;
+          if (mode === "invalid-manifest") return {
+            etag: "bad", size: 8, text: async () => "{broken",
+          };
+          const race = mode === "video-race" && nth > 1;
+          const entries = mode === "video-fence" ? [fence("video", "vid-hidden")]
+            : mode === "two-fences" ? [fence("video", "vid-hidden"), fence("video", "vid-c")]
+            : mode === "event-fence" ? [fence("event", "event-1")]
+            : race ? [fence("video", "vid-hidden")] : [];
+          const body = manifest(entries, race ? 2 : 1);
+          return { etag: race ? "after" : "before", size: Buffer.byteLength(body), text: async () => body };
+        }
+        if (key === playlistKey) {
+          return { size: Buffer.byteLength(JSON.stringify(original)), json: async () => structuredClone(original) };
+        }
+        return null;
+      },
+    };
+    const use = (nextMode, nextGuard = "enforce") => {
+      mode = nextMode;
+      guard = nextGuard;
+      reads = [];
+      globalThis.__flamenodeCloudflareContext = {
+        env: { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: guard },
+      };
+    };
+    try {
+      use("video-fence");
+      const filtered = await loadPublicEventPlaylistR2Only("event-1");
+      assert.deepEqual(filtered?.items.map((row) => row.id), ["vid-a", "vid-c"]);
+      assert.equal(filtered?.complete, true);
+      assert.equal(filtered?.eventId, "event-1");
+      assert.ok(!JSON.stringify(filtered).includes("SECRET OLD"));
+      assert.equal(original.items.length, 3, "raw cached R2 payload must not change");
+      assert.deepEqual(reads, [manifestKey, playlistKey, manifestKey], "no extra R2 reads");
+      use("two-fences");
+      assert.deepEqual((await loadPublicEventPlaylistR2Only("event-1"))?.items.map((x) => x.id), ["vid-a"],
+        "caller may hide a playlist with one remaining entry");
+      use("no-fence");
+      assert.deepEqual((await loadPublicEventPlaylistR2Only("event-1"))?.items.map((x) => x.id),
+        ["vid-a", "vid-hidden", "vid-c"], "public entries remain unchanged");
+      use("video-race");
+      assert.equal(await loadPublicEventPlaylistR2Only("event-1"), null,
+        "a video revoked between pre/post manifests must fail closed on changed ETag");
+      assert.deepEqual(reads, [manifestKey, playlistKey, manifestKey]);
+      use("event-fence");
+      assert.equal(await loadPublicEventPlaylistR2Only("event-1"), null);
+      assert.deepEqual(reads, [manifestKey], "parent event block must refuse the playlist GET");
+      for (const failure of ["missing-manifest", "invalid-manifest"]) {
+        use(failure);
+        assert.equal(await loadPublicEventPlaylistR2Only("event-1"), null, failure);
+      }
+      for (const nonEnforced of ["off", "observe"]) {
+        use("video-fence", nonEnforced);
+        assert.deepEqual((await loadPublicEventPlaylistR2Only("event-1"))?.items.map((x) => x.id),
+          ["vid-a", "vid-hidden", "vid-c"], nonEnforced);
+        assert.deepEqual(reads, [playlistKey], "non-enforced mode must not read the manifest");
+      }
+    } finally {
+      delete globalThis.__flamenodeCloudflareContext;
+    }
+  });
 }
