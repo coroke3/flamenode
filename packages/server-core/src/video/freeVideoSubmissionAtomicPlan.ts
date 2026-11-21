@@ -1,6 +1,7 @@
 import { videos } from "@flamenode/db/schema";
 import type { SubmissionCustomAnswerDraft } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
+import { planD1AuditMutationBudget, type D1AuditMutationBudget } from "../audit/mutateBudget.ts";
 import type { UnslottedVideoAtomicPlan } from "./unslottedEventPlans.ts";
 import {
   buildUnslottedEventEligibilityAssertionPlan,
@@ -99,4 +100,40 @@ export function buildFreeVideoSubmissionAtomicPlan(
     expectedChanges,
     audits: [...videoInsert.audits, ...youtubeMetadata.audits, ...eventLink.audits, ...answerPlan.audits],
   };
+}
+
+/**
+ * U02 unmounted S3 gate: estimate the *same* logical D1 query budget as
+ * CURRENT's inspectVideoAtomicWritePlanBudget. The eventual Hono caller must
+ * pass its actual number of pre-mutation read queries; silently using the
+ * deprecated generic 18-query allowance is not a substitute for measurement.
+ *
+ * This is intentionally PURE. It neither runs statements nor grants permission
+ * to commit. A production caller MUST reject !withinLimit before invoking the
+ * guarded mutateWithAudit transaction.
+ */
+export function inspectFreeVideoSubmissionAtomicPlanBudget(
+  plan: UnslottedVideoAtomicPlan,
+  callerQueryCount: number,
+): D1AuditMutationBudget {
+  if (!Number.isSafeInteger(callerQueryCount) || callerQueryCount < 0 ||
+      plan.statements.length === 0 ||
+      plan.statements.length !== plan.expectedChanges.length ||
+      plan.audits.length === 0 ||
+      plan.audits.some((audit) => !audit.strict || !audit.actor_user_id)) {
+    throw new Error("free_video_submission_budget_arguments_invalid");
+  }
+  return planD1AuditMutationBudget({
+    mutationStatementCount: plan.statements.length,
+    mutationAssertionCount: plan.expectedChanges.filter((value) => value !== null).length,
+    auditEntryCount: plan.audits.length,
+    distinctActorCount: new Set(plan.audits.map((audit) => audit.actor_user_id)).size,
+    actorXValidationQueryCount: plan.audits.some(
+      (audit) => Boolean(audit.actor_x_user_id?.trim()),
+    ) ? 1 : 0,
+    // No claims about authentication/audit-setting preloading in unmounted U02.
+    preloadedSettings: false,
+    preloadedActorCount: 0,
+    callerQueryCount,
+  });
 }
