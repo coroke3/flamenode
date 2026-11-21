@@ -807,7 +807,7 @@ test("MIG-0514 U03a read-only viewer notice hydrates privately and never replace
       slots: [{ id: "s1", display_name: "非公開本人枠", is_owned_by_viewer: true,
         viewer_relation: "active", group_key: "private-group", x_user_id: "x-private" }],
     }) };
-    assert.match(String(url), /^\\/api\\/live\\/events\\//);
+    assert.ok(String(url).startsWith("/api/live/events/"), "public slots use RH-020");
     assert.equal(init.credentials, "omit");
     return { ok: true, json: async () => ({ slots: [
       { id: "s1", status: "reserved", display_name: "公開枠の名前" },
