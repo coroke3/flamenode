@@ -1540,8 +1540,31 @@ test("T04 failed D1 audit restore never evicts event/video public or export cach
     { kind: "video", auditId: "video-audit", entityId: "vid-restore", table: "videos" },
   ]) {
     const ctx = setup();
-    if (scenario.kind === "event") seedVisibilityRestore(ctx);
-    else seedVideoVisibilityRestore(ctx);
+    if (scenario.kind === "event") {
+      seedVisibilityRestore(ctx);
+    } else {
+      seedVideoVisibilityRestore(ctx);
+      // A future #731 successful-path fanout fix will add more atomic queue
+      // targets. Failures must roll back both old and restored-side targets.
+      seedEvent(ctx.sqlite, { id: "ev-before", public_api_enabled: 1 });
+      seedEvent(ctx.sqlite, { id: "ev-after", public_api_enabled: 1 });
+      ctx.sqlite.prepare(
+        "UPDATE videos SET primary_event_id = ?, creator_x_user_id = ? WHERE id = ?",
+      ).run("ev-before", "creator-before", "vid-restore");
+      const current = ctx.sqlite.prepare(
+        "SELECT * FROM videos WHERE id = 'vid-restore'",
+      ).get();
+      const target = {
+        ...current, visibility_status: "private",
+        primary_event_id: "ev-after", creator_x_user_id: "creator-after",
+      };
+      ctx.sqlite.prepare(
+        "UPDATE audit_logs SET before_json = ?, after_json = ? WHERE id = 'video-audit'",
+      ).run(JSON.stringify(target), JSON.stringify(current));
+      assert.equal(ctx.sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM video_events",
+      ).get().n, 0, "exercise legacy primary-only fallback during failed D1 commit");
+    }
     const { state, bucket } = visibilityManifestBucket();
     const originalBatch = ctx.db.batch.bind(ctx.db);
     let injected = false;
@@ -1573,6 +1596,15 @@ test("T04 failed D1 audit restore never evicts event/video public or export cach
       assert.equal(ctx.sqlite.prepare(
         `SELECT visibility_status FROM ${scenario.table} WHERE id = ?`,
       ).get(scenario.entityId).visibility_status, "public");
+      if (scenario.kind === "video") {
+        const unchanged = ctx.sqlite.prepare(
+          "SELECT primary_event_id, creator_x_user_id FROM videos WHERE id = 'vid-restore'",
+        ).get();
+        assert.equal(unchanged.primary_event_id, "ev-before",
+          "failed restore cannot commit a new primary event ID");
+        assert.equal(unchanged.creator_x_user_id, "creator-before",
+          "failed restore cannot commit a new creator ID");
+      }
       assert.equal(ctx.sqlite.prepare(
         "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'success'",
       ).get().n, 0);
