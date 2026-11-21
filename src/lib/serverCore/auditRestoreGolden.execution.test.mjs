@@ -217,6 +217,10 @@ if (runTestWithTsx(import.meta.url)) {
     delete: async (request) => {
       const key = typeof request === "string" ? request : request.url;
       log.push({ op: "cache.delete", key });
+      // Inject a provider-shaped failure without serializing the Error into
+      // the harness log. Production code must not log its message or metadata.
+      const injected = behaviour.errorOn?.(key);
+      if (injected) throw injected;
       if (behaviour.failOn?.(key)) throw new Error("cache api unavailable");
       return true;
     },
@@ -836,6 +840,48 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(rollback.log.filter((entry) =>
       entry.op === "cache.delete" && entry.key.includes("public-event-export%3A")
     ).length, 0, "D1 rollback cannot evict committed exports");
+  });
+
+  test("SEC-718: export cache provider failure logs only fixed code and preserves committed video restore", async () => {
+    // Cache API is colo-local and an eviction can fail after an irreversible
+    // D1 restore commit. This regression pins the best-effort boundary and
+    // proves provider exceptions cannot leak nested credentials into logs.
+    const secret = "SEC718_PRIVATE_CACHE_PROVIDER_CANARY";
+    const [, result] = await runScenario("video_export_provider_failure", {
+      setup: seedVideoWithEvents(),
+      arrange: arrangeVideo(videoPublicToPrivate),
+      caches: cacheRecorder({
+        errorOn(key) {
+          if (!key.includes("public-event-export%3A")) return null;
+          const error = new Error(`cache provider failure ${secret}`);
+          error.cause = new Error(`upstream ${secret}`);
+          error.providerDetails = { headers: { authorization: secret } };
+          return error;
+        },
+      }),
+    });
+    assert.equal(result.outcome.returned?.ok, true,
+      "a completed D1 commit must not be falsely reported as rolled back");
+    assert.equal(result.audit_restore_runs.filter((row) => row.status === "success").length, 1);
+    assert.equal(result.videos.find((row) => row.id === "vid-1")?.visibility_status,
+      "private", "the restored private state must be durable");
+    const warnings = result.log.filter((entry) =>
+      entry.op === "console.warn" &&
+      entry.args[0] === "[audit-restore] event export invalidation failed"
+    );
+    assert.equal(warnings.length, 2, "one bounded warning per affected event");
+    for (const warning of warnings) {
+      assert.deepEqual(warning.args,
+        ["[audit-restore] event export invalidation failed", "provider_error"]);
+    }
+    assert.ok(!JSON.stringify(result).includes(secret),
+      "provider message/cause/nested Authorization header must not reach the log or response");
+    assert.ok(result.log.some((entry) =>
+      entry.op === "cache.delete" && entry.key.includes("public-event-export%3A")),
+    "the scheduled export eviction must actually be attempted");
+    assert.ok(result.log.some((entry) =>
+      entry.op === "cache.delete" && !entry.key.includes("public-event-export%3A")),
+    "other public JSON cache evictions must still run");
   });
 
   test("SEC-718: dry-run video restore never invalidates related scheduled exports", async () => {
