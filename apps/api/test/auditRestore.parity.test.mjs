@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { getTableColumns } from "drizzle-orm";
 import { videos } from "@flamenode/db/schema";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
+import { safeAuditRestoreFailureMessage } from "../src/routes/admin/audit.ts";
 import { app as deployedApiRouter } from "../src/app.ts";
 import { restoreAuditLog } from "@flamenode/server-core/audit/restore";
 import {
@@ -23,6 +24,42 @@ const ADMIN = {
 };
 const RESTORE = "/api/admin/audit/restore";
 const SQLITE_AUTH_SESSION_TOKEN = "fixture-only-session-token-not-a-real-credential";
+
+test("T03 #730 mutation-failed HTTP message preserves reviewed codes but rejects provider text", () => {
+  const failed = (message) => ({
+    ok: false, reason_code: "mutation_failed", message,
+  });
+  const safeMessages = [
+    "video_members_set_snapshot_invalid",
+    "video_members_set_target_mismatch",
+    "復元を確定できませんでした。変更はロールバックされました: video_status_rebuild_event_limit_exceeded",
+  ];
+  const generic = "復元を確定できませんでした。変更はロールバックされました。";
+  for (const allowed of safeMessages) {
+    assert.equal(safeAuditRestoreFailureMessage(failed(allowed)), allowed,
+      "Hono retains only the exact, intentionally public shared-core code");
+    assert.equal(safeAuditRestoreFailureMessage(failed(allowed + " params: private")), generic,
+      "a trusted prefix must not permit a secret-bearing suffix");
+  }
+  for (const unsafe of [
+    "Failed query: DELETE FROM audit_logs; params: private-id, private-reason",
+    "https://provider.example/internal?authorization=private",
+    "Error: video_members_set_snapshot_invalid",
+    "video_status_rebuild_event_limit_exceeded",
+    "",
+    undefined,
+  ]) {
+    assert.equal(safeAuditRestoreFailureMessage(failed(unsafe)), generic,
+      "unknown SQL/provider error is never exposed to the caller");
+  }
+  assert.equal(safeAuditRestoreFailureMessage({
+    ok: false, reason_code: "target_conflict", message: "競合が検出されました: title。",
+  }), "競合が検出されました: title。",
+  "known domain conflicts preserve the existing CURRENT action contract");
+  assert.equal(safeAuditRestoreFailureMessage({
+    ok: true, message: "復元しました。",
+  }), "復元しました。", "successful responses remain unchanged");
+});
 
 // D1 fake read-trace: observe table names only (never SQL bind values or tokens).
 // This is diagnostic evidence for Issue #691, NOT a real Auth.js/workerd profile.

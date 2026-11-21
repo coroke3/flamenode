@@ -185,6 +185,31 @@ auditAdminRoutes.post("/dry-run", async (c) => {
   );
 });
 
+// SEC-730 cross-PR parity: the shared restore owner PR #679 preserves only
+// three explicitly reviewed domain diagnostics on mutation_failed. Hono must
+// not erase those safe codes, while continuing to reject untrusted SQL,
+// Drizzle and provider exception messages from the older shared-core build.
+// Exact-string matching is intentional: never match prefixes or substrings.
+const ALLOWED_AUDIT_RESTORE_FAILURE_MESSAGES = new Set([
+  "video_members_set_snapshot_invalid",
+  "video_members_set_target_mismatch",
+  "復元を確定できませんでした。変更はロールバックされました: video_status_rebuild_event_limit_exceeded",
+]);
+const GENERIC_AUDIT_RESTORE_FAILURE_MESSAGE =
+  "復元を確定できませんでした。変更はロールバックされました。";
+
+export function safeAuditRestoreFailureMessage(result: {
+  ok: boolean;
+  reason_code?: string;
+  message?: string;
+}): string | undefined {
+  if (result.ok || result.reason_code !== "mutation_failed") return result.message;
+  return typeof result.message === "string" &&
+    ALLOWED_AUDIT_RESTORE_FAILURE_MESSAGES.has(result.message)
+    ? result.message
+    : GENERIC_AUDIT_RESTORE_FAILURE_MESSAGE;
+}
+
 // MIG-0662 SA-011 remains a candidate, NOT a deployable default route.
 // createAdminRoutes() intentionally does not mount this separate router without
 // an explicit source-level opt-in; the default app.ts route graph cannot execute
@@ -240,14 +265,10 @@ auditRestoreCandidateRoutes.post("/restore", async (c) => {
     );
   }
 
-  // #730: mutation_failed may wrap an untrusted D1/Drizzle/provider Error
-  // including SQL params or metadata. Preserve internal reason/audit IDs and
-  // other intentional validation/conflict messages, but never echo this
-  // arbitrary failure text to the authorized HTTP caller. The shared core's
-  // CURRENT/error-audit sanitization remains a separate owner review gate.
-  const publicMessage = !result.ok && result.reason_code === "mutation_failed"
-    ? "復元を確定できませんでした。変更はロールバックされました。"
-    : result.message;
+  // #730: never echo untrusted provider failure text. Preserve only exact
+  // shared-core-allowlisted domain diagnostics and ordinary known conflicts;
+  // shared CURRENT and integrated PR #679 need separate security review.
+  const publicMessage = safeAuditRestoreFailureMessage(result);
   return c.json<AuditRestoreResponse>(
     {
       ok: result.ok,
