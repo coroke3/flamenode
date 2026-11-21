@@ -20,8 +20,13 @@ const RESTORE = "/api/admin/audit/restore";
 
 // D1 fake read-trace: observe table names only (never SQL bind values or tokens).
 // This is diagnostic evidence for Issue #691, NOT a real Auth.js/workerd profile.
-function readTableLabel(sql) {
-  return /\bfrom\s+"?([a-z_][a-z_0-9]*)"?/i.exec(sql)?.[1] ?? "unknown";
+function readTableLabels(sql) {
+  // A TOS query nests subqueries before its main FROM clause; reporting only
+  // the first FROM would misattribute that read. Enumerate every referenced
+  // FROM/JOIN table instead; this remains a heuristic, not SQL plan analysis.
+  return [...new Set([...sql.matchAll(
+    /\b(?:from|join)\s+"?([a-z_][a-z_0-9]*)"?/gi,
+  )].map((match) => match[1]))].slice(0, 12);
 }
 
 function setup({ user = ADMIN, role = "admin", disabled = [], enableRestoreCandidate = true } = {}) {
@@ -34,7 +39,7 @@ function setup({ user = ADMIN, role = "admin", disabled = [], enableRestoreCandi
       bind(...params) {
         const statement = prepared.bind(...params);
         const instrumentRead = (method) => (...args) => {
-          readTrace.push({ method, first_from_table: readTableLabel(sql) });
+          readTrace.push({ method, referenced_tables: readTableLabels(sql) });
           return statement[method](...args);
         };
         return {
