@@ -3,8 +3,9 @@
  *
  * This is NOT an authenticated or persistence-ready video submission route.
  * Caller MUST run: origin -> session -> writeGuard(CostGuard + approved Active X)
- * -> limitVideoActionBody("SA-086"), then canonical video form parse, and only
- * then invoke this helper with trusted {activeXId,isCollab,nowSec}.
+ * -> limitVideoActionBody("SA-086") before calling this helper with
+ * { activeXId, nowSec } from trusted server state. This helper does the
+ * canonical video schema parse itself, then derives isCollab from that schema.
  *
  * It performs no DB reads, R2 uploads, Queue work, mutations or post-commit
  * wake. Do not mount a POST route until all S3 parity/CPU and Lead gates pass.

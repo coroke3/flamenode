@@ -155,3 +155,27 @@ test("MIG-0651 U02 HTTP: schema-controlled collaboration flag rejects malformed 
   assert.deepEqual(await response.json(), { ok: false, message: "合作メンバーの JSON が不正です。" });
   assert.equal(mutations.count, 0);
 });
+
+
+test("MIG-0651 U02 HTTP: bounded field count is enforced before canonical form parse", async () => {
+  const { app, mutations } = fixture();
+  const path = "http://localhost/api/videos/free";
+  const form = validForm(); // 6 canonical fields.
+  const initial = [...form].length;
+  assert.equal(initial, 6);
+  for (let i = initial; i < 1024; i++) {
+    form.append("custom_question:" + i, "x");
+  }
+  assert.equal([...form].length, 1024);
+  const accepted = await app.request(path, { method: "POST", body: form });
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).ok, true);
+  assert.equal(mutations.count, 1);
+  form.append("custom_question:overflow", "x");
+  const denied = await app.request(path, { method: "POST", body: form });
+  assert.equal(denied.status, 400);
+  assert.deepEqual(await denied.json(), {
+    ok: false, message: "投稿フォームの入力が不正です。",
+  });
+  assert.equal(mutations.count, 1, "rejected form does not execute mock downstream step");
+});
