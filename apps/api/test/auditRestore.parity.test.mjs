@@ -811,6 +811,74 @@ test("T04 video restore fails closed when enforced visibility R2 bucket is unava
   recordRestoreD1Budget("videos_missing_r2_fail_closed", ctx.stats, ctx.readTrace);
 });
 
+// #730: a privileged Hono caller must never receive arbitrary SQL/Drizzle
+// exception text. The real secure-cookie session and SQLite rollback are used;
+// the shared-core owner still has to repair CURRENT and internal audit/log paths.
+test("T03 #730 authenticated restore masks SQL params and provider metadata on D1 failure", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true });
+  seedRestorableAnnouncement(ctx.sqlite);
+  const marker = "MIG0662_PRIVATE_SQL_PARAM_CANARY_730";
+  const privateUrl = "https://private-db.example/internal/" + marker;
+  const originalBatch = ctx.db.batch.bind(ctx.db);
+  let failedMutation = false;
+  ctx.db.batch = async (statements) => {
+    try {
+      return await originalBatch([...statements, {
+        _sql: 'INSERT INTO "__mig_0662_missing_private_fault" ("value") VALUES (?)',
+        _params: [marker],
+      }]);
+    } catch (cause) {
+      failedMutation = true;
+      const error = new Error("Failed query: UPDATE announcements SET body = ? params: " + marker, {
+        cause: new Error("nested-provider-cause:" + marker, { cause }),
+      });
+      error.provider_metadata = { url: privateUrl, request: { marker } };
+      throw error;
+    }
+  };
+
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const logged = [];
+  try {
+    const capture = (...values) => {
+      logged.push(values.map((value) => value instanceof Error
+        ? String(value.stack ?? value.message)
+        : String(value)).join(" "));
+    };
+    console.warn = capture;
+    console.error = capture;
+    const response = await ctx.request(body());
+    assert.equal(response.status, 200, "CURRENT domain failure remains HTTP 200");
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    const result = await response.json();
+    assert.equal(failedMutation, true, "execute a genuinely failing SQLite batch");
+    assert.equal(ctx.stats.batches, 1, "rolled-back D1 mutation is one atomic batch");
+    assert.equal(result.ok, false);
+    assert.equal(result.message, "復元を確定できませんでした。変更はロールバックされました。");
+    assert.ok(result.restore_run_id, "failed-run audit identity is preserved");
+    assert.equal(JSON.stringify(result).includes(marker), false);
+    assert.equal(JSON.stringify(result).includes(privateUrl), false);
+    assert.equal(JSON.stringify(result).includes("Failed query"), false);
+    assert.equal(JSON.stringify(result).includes("params:"), false);
+    assert.equal(changes(ctx.sqlite).row.title, "Current Title",
+      "failure must not persist the attempted restore");
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='success'",
+    ).get().n, 0);
+    assert.equal(ctx.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status='failed'",
+    ).get().n, 1, "failed-run record still persists separately");
+    assert.equal(logged.join("\n").includes(marker), false,
+      "the Hono error path must not log the canary");
+    assert.equal(logged.join("\n").includes(privateUrl), false,
+      "the Hono error path must not log private metadata");
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+});
+
 // D1 and R2 are not one transaction. Inject a D1 batch failure strictly
 // after the manifest CAS write, using the real SQLite-backed Hono route.
 // The CURRENT shared-core policy compensates the R2 fence when D1 remains
