@@ -100,6 +100,9 @@ auditAdminRoutes.post("/settings", async (c) => {
 
 // SA-010 getAuditLogDryRun
 auditAdminRoutes.post("/dry-run", async (c) => {
+  // SA-010 returns full CURRENT/target audit snapshots and conflict diffs.
+  // Never allow shared HTTP/edge caching, including invalid and oversized requests.
+  c.header("Cache-Control", "private, no-store");
   const read = await readAdminJsonBody(c.req.raw);
   if (read.kind === "too_large") {
     return c.json<AuditLogDryRunResult>(
