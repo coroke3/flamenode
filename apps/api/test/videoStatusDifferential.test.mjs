@@ -12,7 +12,11 @@ if (runUnderRootTsx(import.meta.url)) {
       }
       if (specifier === "next/navigation") {
         return {
-          url: "data:text/javascript,export%20function%20unstable_rethrow()%20%7B%7D",
+          url: "data:text/javascript," + encodeURIComponent(
+            "export function unstable_rethrow(error) { " +
+            "if (typeof error?.digest === 'string' && " +
+            "error.digest.startsWith('NEXT_REDIRECT;')) throw error; }",
+          ),
           shortCircuit: true,
         };
       }
@@ -187,7 +191,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // The R2 bucket below implements real CAS precommit on the shared Hono
   // manifest adapter. This is still not a live Cloudflare binding, and does
   // not replace complete CURRENT Action/HTTP/authorization parity.
-  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false, replaceR2FenceOwner = false, enableWake = false, initialStatus = "public", r2Fault = null) {
+  async function executeAuditedStatus(nextStatus, useCurrent, forceStaleCas = false, replaceR2FenceOwner = false, enableWake = false, initialStatus = "public", r2Fault = null, injectedNextControl = null) {
     const sqlite = createSqlite();
     seed(sqlite);
     if (initialStatus !== "public") {
@@ -195,6 +199,15 @@ if (runUnderRootTsx(import.meta.url)) {
         .run(initialStatus, "vid-1");
     }
     const d1 = createVideoStatusD1(sqlite);
+    // Inject at the real D1 batch boundary, after the R2 precommit.
+    // Do not mock the production CURRENT status mutation bridge.
+    let injectedBatchAttempts = 0;
+    if (injectedNextControl) {
+      d1.batch = async () => {
+        injectedBatchAttempts++;
+        throw injectedNextControl;
+      };
+    }
     const db = drizzle(d1, { schema });
     const realNow = Date.now;
     const realRandomUUID = globalThis.crypto.randomUUID;
@@ -324,11 +337,29 @@ if (runUnderRootTsx(import.meta.url)) {
         ...(enableWake ? { notificationWakeSource: "admin", staticRebuildWakeSource: "admin" } : {}),
       };
       // Exercise CURRENT's actual Next mutation bridge rather than Hono twice.
-      const result = useCurrent
-        ? await executeCurrentStatusMutation(mutationInput)
-        : await executeHonoVideoVisibilityStatusMutation(mutationInput, auditedHost);
+      let result;
+      let controlThrown = null;
+      try {
+        result = useCurrent
+          ? await executeCurrentStatusMutation(mutationInput)
+          : await executeHonoVideoVisibilityStatusMutation(mutationInput, auditedHost);
+      } catch (error) {
+        if (!injectedNextControl) throw error;
+        controlThrown = error;
+      }
       await Promise.all(pendingWakePromises);
-      if (r2Fault === "read" || r2Fault === "write" ||
+      if (injectedNextControl) {
+        if (r2Fault === "compensation-rejected") {
+          assert.equal(controlThrown, null,
+            "unconfirmed R2 cleanup must not propagate a redirect");
+          assert.equal(result?.ok, false);
+          assert.equal(result?.errorCode, "status_unverified");
+          assert.equal(result?.retryable, false);
+        } else {
+          assert.equal(controlThrown, injectedNextControl,
+            "CURRENT Next bridge rethrows exact control after verified cleanup");
+        }
+      } else if (r2Fault === "read" || r2Fault === "write" ||
           r2Fault === "read-after-write" ||
           r2Fault === "write-committed-foreign-owner-once") {
         assert.equal(result.ok, false, "persistent R2 errors or lost R2 ownership must stop before D1");
@@ -360,6 +391,10 @@ if (runUnderRootTsx(import.meta.url)) {
       }
       return {
         result,
+        ...(injectedNextControl ? {
+          thrownSameControl: controlThrown === injectedNextControl,
+          injectedBatchAttempts,
+        } : {}),
         events,
         manifest: objects.has(MANIFEST_KEY) ? JSON.parse(objects.get(MANIFEST_KEY).text) : null,
         batches: d1.stats.batches,
@@ -741,6 +776,44 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.deepEqual(result.events.filter((event) => event[0] === "queue.send"), []);
       assert.deepEqual(result.notifications, [], "notification outbox rolled back");
       assert.deepEqual(result.queue, [], "static rebuild outbox rolled back");
+    }
+  });
+
+  test("CURRENT Next bridge defers framework redirect until R2 fence cleanup is verified", async () => {
+    for (const [r2Fault, unverified] of [
+      [null, false],
+      ["compensation-rejected", true],
+    ]) {
+      const control = Object.assign(new Error("private NEXT redirect sentinel"), {
+        digest: "NEXT_REDIRECT;push;/video;307;",
+      });
+      const state = await executeAuditedStatus(
+        "private", true, false, false, false, "public", r2Fault, control,
+      );
+      assert.equal(state.injectedBatchAttempts, 1,
+        "real CURRENT audit pipeline reaches D1 batch only after R2 precommit");
+      assert.equal(state.batches, 0,
+        "injected D1 exception prevents all audited writes from committing");
+      assert.equal(state.video.visibility_status, "public");
+      assert.deepEqual(state.fences, []);
+      assert.deepEqual(state.audits, []);
+      assert.deepEqual(state.notifications, []);
+      assert.deepEqual(state.queue, []);
+      assert.deepEqual(state.events.filter(event => event[0] === "queue.send"), []);
+      assert.equal(state.thrownSameControl, !unverified);
+      if (unverified) {
+        assert.equal(state.result.errorCode, "status_unverified");
+        assert.equal(state.result.retryable, false);
+        assert.equal(state.manifest.entities.length, 1,
+          "unconfirmed rollback leaves R2 public block in place");
+      } else {
+        assert.deepEqual(state.manifest.entities, [],
+          "confirmed rollback removes original R2 video block");
+      }
+      const puts = state.events.filter(event => event[0] === "r2.put");
+      assert.equal(puts[0][2], "create-if-absent");
+      assert.equal(puts.length, unverified ? 10 : 2,
+        "R2 compensation is bounded and token/etag scoped");
     }
   });
 
