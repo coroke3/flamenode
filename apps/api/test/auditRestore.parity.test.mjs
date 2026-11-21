@@ -170,6 +170,54 @@ test("T00 production/default admin router physically excludes unapproved SA-011 
 // SA-009 is already mounted; D1 errors may include private SQL parameters.
 // Unlike CURRENT's raw error.message, the Hono boundary must return a fixed
 // message while preserving 500 and rollback semantics.
+// SA-010 is a default-mounted read: D1 preflight outages must be fixed 500
+// responses, not raw SQL errors recorded by the framework's onError logger.
+test("T00 mounted SA-010 dry-run preflight D1 failure hides SQL/provider exception", async () => {
+  const ctx = setup({ useRealSessionMiddleware: true, enableRestoreCandidate: false });
+  seedRestorableAnnouncement(ctx.sqlite);
+  const marker = "MIG0662_DRYRUN_PRIVATE_SQL_PARAM_CANARY";
+  const originalPrepare = ctx.db.prepare.bind(ctx.db);
+  let faulted = false;
+  ctx.db.prepare = (sql) => {
+    if (sql.toLowerCase().includes("from") && sql.toLowerCase().includes("audit_logs")) {
+      faulted = true;
+      throw new Error("Failed query: SELECT * FROM audit_logs params: " + marker, {
+        cause: new Error("provider-private-endpoint:" + marker),
+      });
+    }
+    return originalPrepare(sql);
+  };
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const logged = [];
+  try {
+    const capture = (...values) => logged.push(values.map(String).join(" "));
+    console.warn = capture;
+    console.error = capture;
+    const response = await ctx.request(
+      { audit_id: "audit-1", reason: "dry-run preflight" },
+      undefined, {}, "/api/admin/audit/dry-run",
+    );
+    assert.equal(faulted, true, "actual audit log D1 read is injected");
+    assert.equal(response.status, 500);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    const result = await response.json();
+    assert.deepEqual(result, {
+      ok: false, message: "事前確認を完了できませんでした。",
+    });
+    assert.equal(JSON.stringify(result).includes(marker), false);
+    assert.equal(JSON.stringify(result).includes("Failed query"), false);
+    assert.equal(ctx.stats.batches, 0);
+    assert.equal(changes(ctx.sqlite).row.title, "Current Title");
+    assert.equal(changes(ctx.sqlite).runs.length, 0);
+    assert.equal(logged.join(" ").includes(marker), false);
+    assert.equal(logged.join(" ").includes("provider-private-endpoint"), false);
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+});
+
 test("T00 mounted SA-009 settings failure never echoes SQL/provider parameters", async () => {
   const ctx = setup({ useRealSessionMiddleware: true, enableRestoreCandidate: false });
   const marker = "MIG0662_SETTINGS_PRIVATE_SQL_PARAM_CANARY";
