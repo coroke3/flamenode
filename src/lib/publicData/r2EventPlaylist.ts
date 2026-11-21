@@ -10,6 +10,7 @@ import {
 } from "./staticEventPlaylistCore.ts";
 import {
   isEntityBlockedInManifest,
+  type PublicVisibilityBlockedEntitiesManifest,
 } from "./publicVisibilityManifestCore.ts";
 import {
   readPublicVisibilityBlockedEntitiesManifest,
@@ -55,6 +56,8 @@ async function readVisibleEventArtifact<T>(args: {
   maxBytes: number;
   objectKey: (eventId: string) => string;
   normalize: (payload: unknown, eventId: string) => T | null;
+  /** Enforce-mode only. Runs after the second manifest read and ETag check. */
+  filterAfterVisibility?: (value: T, manifest: PublicVisibilityBlockedEntitiesManifest) => T | null;
 }): Promise<T | null> {
   const normalizedId = args.eventId.trim();
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(normalizedId)) return null;
@@ -109,6 +112,11 @@ async function readVisibleEventArtifact<T>(args: {
         visibility.etag !== afterVisibility.etag
       ) {
         return null;
+      }
+      // Use the post-read manifest for video-level revocations, not the
+      // potentially stale context from before the artifact GET.
+      if (args.filterAfterVisibility) {
+        return args.filterAfterVisibility(normalized, afterVisibility.manifest);
       }
     }
     return normalized;
@@ -167,6 +175,19 @@ export async function loadPublicEventPlaylistR2Only(
       );
       // partial artifactは「上映順」の正本として使わない。
       return normalized?.complete ? normalized : null;
+    },
+    filterAfterVisibility: (playlist, manifest) => {
+      // An event can remain public after one of its listed videos is
+      // revoked. Do not expose the old R2 playlist's video metadata.
+      // Leave the original cached artifact and other items untouched.
+      const blockedVideos = new Set(
+        manifest.entities
+          .filter((entry) => entry.entity_type === "video")
+          .map((entry) => entry.entity_id),
+      );
+      if (blockedVideos.size === 0) return playlist;
+      const items = playlist.items.filter((item) => !blockedVideos.has(item.id));
+      return items.length === playlist.items.length ? playlist : { ...playlist, items };
     },
   });
 }
