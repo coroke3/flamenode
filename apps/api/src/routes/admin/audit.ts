@@ -30,6 +30,7 @@ import {
   auditPreloaded,
   BODY_TOO_LARGE_MESSAGE,
   readAdminJsonBody,
+  type AdminJsonBody,
 } from "./body.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { onlyMutating } from "../../middleware/writeOrigin.ts";
@@ -58,12 +59,25 @@ const dryRunAuditHost: AuditRestoreHost = {
   loadQueueWakeHost: throwUnused,
 };
 
+// SA-009/010 and opt-in SA-011: a request stream can fail while its body is
+// read (for example a disconnected upload or an injected provider exception).
+// Uncaught failures would reach Hono's default onError logger with an arbitrary
+// Error/cause. Fail closed and never serialize or log the stream exception.
+// A valid but malformed JSON body already returns the same input error.
+async function readAuditJsonBody(request: Request): Promise<AdminJsonBody> {
+  try {
+    return await readAdminJsonBody(request);
+  } catch {
+    return { kind: "invalid" };
+  }
+}
+
 // SA-009 updateAuditLogSettingsAction
 auditAdminRoutes.post("/settings", async (c) => {
   // SA-009 mutates privileged retention policy and returns admin-only outcomes.
   // Match SA-010/011: prevent HTTP/edge storage on success and error paths.
   c.header("Cache-Control", "private, no-store");
-  const read = await readAdminJsonBody(c.req.raw);
+  const read = await readAuditJsonBody(c.req.raw);
   if (read.kind === "too_large") {
     return c.json<UpdateAuditLogSettingsResult>(
       { ok: false, message: BODY_TOO_LARGE_MESSAGE },
@@ -111,7 +125,7 @@ auditAdminRoutes.post("/dry-run", async (c) => {
   // SA-010 returns full CURRENT/target audit snapshots and conflict diffs.
   // Never allow shared HTTP/edge caching, including invalid and oversized requests.
   c.header("Cache-Control", "private, no-store");
-  const read = await readAdminJsonBody(c.req.raw);
+  const read = await readAuditJsonBody(c.req.raw);
   if (read.kind === "too_large") {
     return c.json<AuditLogDryRunResult>(
       { ok: false, message: BODY_TOO_LARGE_MESSAGE },
@@ -184,7 +198,7 @@ auditRestoreCandidateRoutes.post("/restore", async (c) => {
   // Audit restoration may return sensitive snapshots and conflict diffs.
   // Explicitly prevent HTTP/edge caching on 200, 400 and 413 responses.
   c.header("Cache-Control", "private, no-store");
-  const read = await readAdminJsonBody(c.req.raw);
+  const read = await readAuditJsonBody(c.req.raw);
   if (read.kind === "too_large") {
     return c.json<AuditRestoreResponse>(
       { ok: false, message: BODY_TOO_LARGE_MESSAGE }, 413,
