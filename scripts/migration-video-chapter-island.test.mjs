@@ -865,6 +865,217 @@ test("MIG-0518 authorized manager edits only complete private chapter DTOs", asy
 });
 
 
+test("Issue #661: only trusted complete D1 public rows unlock SSG edit/delete", async () => {
+  const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
+  const publicChapters = [
+    { id: "public-own", timeLabel: "0:10", label: "SSG stale title" },
+    { id: "public-foreign", timeLabel: "0:20", label: "Foreign" },
+  ];
+  const overlay = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    isTosAccepted: true, termsReacceptRequired: false,
+    viewerXApproved: true, activeXId: "alice_x", viewerCanEditChapters: false,
+    privateChapters: [],
+    editablePublicChapters: [
+      { id: "public-own", chapter_time: 11, chapter_label: "D1 current title",
+        note: "Preserve this stored note", visibility: "public", viewerCanManage: true },
+      { id: "public-foreign", chapter_time: 20, chapter_label: "No authority",
+        note: "Private-to-editor", visibility: "public", viewerCanManage: false },
+      { id: "not-in-ssg", chapter_time: 40, chapter_label: "Unmatched",
+        note: "Unmatched note", visibility: "public", viewerCanManage: true },
+    ],
+  };
+  const result = chapterManagementForOverlay(publicChapters, overlay, false);
+  assert.equal(result.canBulk, false, "owner is not an event manager");
+  assert.deepEqual(result.editableChapters, [{
+    id: "public-own", chapter_time: "0:11", chapter_label: "D1 current title",
+    note: "Preserve this stored note", visibility: "public", canManage: true,
+  }]);
+  assert.deepEqual(chapterManagementForOverlay(publicChapters, {
+    ...overlay, editablePublicChapters: undefined,
+  }, false).editableChapters, [], "legacy CURRENT or missing edit data cannot grant access");
+  for (const blocked of [
+    { authUnavailable: true }, { isBanned: true }, { viewerXApproved: false },
+    { isTosAccepted: false }, { termsReacceptRequired: true }, { activeXId: null },
+  ]) assert.deepEqual(chapterManagementForOverlay(publicChapters, { ...overlay, ...blocked }, false),
+    { canBulk: false, editableChapters: [] });
+  assert.deepEqual(chapterManagementForOverlay(publicChapters, overlay, true),
+    { canBulk: false, editableChapters: [] }, "loading cannot expose stale edit controls");
+});
+
+test("Issue #661: public chapter PUT preserves the current D1 note and public visibility", async () => {
+  await withChapterDom(async (doc, root) => {
+    const requests = [];
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, method: init.method, body: JSON.parse(init.body) });
+      return { ok: true, status: 200, json: async () => ({ ok: true, chapterId: "public-own" }) };
+    };
+    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
+      videoId: "video-a", activeXId: "approved", canPost: true,
+      chapters: [{
+        id: "public-own", chapter_time: "0:11", chapter_label: "D1 current title",
+        note: "Existing D1 note must survive", visibility: "public", canManage: true,
+      }],
+    })));
+    await clickButton(doc, "編集");
+    assert.equal(doc.querySelector("form textarea").value, "Existing D1 note must survive",
+      "editor must prefill from the private per-viewer DTO, not from incomplete SSG");
+    assert.equal(doc.querySelector("form input[type=checkbox]").checked, true,
+      "editing a public chapter must retain public visibility");
+    await React.act(async () => {
+      doc.querySelector("form").dispatchEvent(
+        new doc.defaultView.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.deepEqual(requests, [{
+      url: "/api/videos/chapters/public-own", method: "PUT",
+      body: {
+        chapter_time: "0:11", chapter_label: "D1 current title",
+        note: "Existing D1 note must survive", visibility: "public",
+      },
+    }], "an untouched edit must not erase note or change visibility");
+  });
+});
+
+test("Issue #661: on-demand edit affordance checks permission without trusting SSG row", async () => {
+  await withChapterDom(async (doc, root) => {
+    const { VideoUtilityDockIsland } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+    const overlay = {
+      loggedIn: true, authUnavailable: false, isBanned: false,
+      isTosAccepted: true, termsReacceptRequired: false,
+      viewerXApproved: true, activeXId: "owner-x", viewerCanEditChapters: false,
+      privateChapters: [{
+        id: "private-visible", chapter_time: 75, chapter_label: "非公開コメント",
+        note: "private note", visibility: "private",
+        author_name: "Alice", author_icon: null, viewerCanManage: true,
+      }],
+      editablePublicChapters: [],
+      likeActive: false, bookmarkActive: false, playlistLabel: "再生リスト", playlistItems: [],
+    };
+    let requested = [];
+    const render = (override = {}) => React.createElement(VideoUtilityDockIsland, {
+      videoId: "vid-pub", currentId: "vid-pub",
+      publicChapters: [{ id: "chapter-after-100", timeLabel: "1:00", label: "後続コメント", kind: "comment" }],
+      overlay, loading: false,
+      onRequestPublicChapterEdit: async (id) => {
+        requested.push(id);
+        return false;
+      },
+      ...override,
+    });
+    await React.act(async () => root.render(render()));
+    const find = () => [...doc.querySelectorAll("button")]
+      .find((button) => button.getAttribute("aria-label") === "後続コメントの編集権限を確認");
+    assert.ok(find(), "a published public chapter can request per-row authorization");
+    assert.equal([...doc.querySelectorAll("button")].some((button) =>
+      button.getAttribute("aria-label") === "非公開コメントの編集権限を確認"), false,
+      "private rows appear in the combined viewer list but never receive a public edit-lookup control");
+    await React.act(async () => { find().click(); });
+    assert.deepEqual(requested, ["chapter-after-100"]);
+    assert.match(doc.body.textContent, /編集権限を確認できませんでした/);
+    await React.act(async () => root.render(render({ loading: true })));
+    assert.equal(find(), undefined, "no check affordance while viewer permissions are loading");
+  });
+});
+
+test("Issue #661: saving another chapter invalidates an outstanding public edit lookup", async () => {
+  await withChapterDom(async (doc, root) => {
+    const { VideoUtilityDockConnected } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
+    const videoId = "issue-661-save-race-" + "public";
+    const ordinaryOverlay = {
+      loggedIn: true, authUnavailable: false, isBanned: false, isTosAccepted: true,
+      termsReacceptRequired: false, viewerXApproved: true, activeXId: "approved-x",
+      viewerCanEditChapters: false, likeActive: false, bookmarkActive: false,
+      playlistLabel: "再生リスト", playlistItems: [],
+      editablePublicChapters: [],
+      privateChapters: [{
+        id: "private-1", chapter_time: 42, chapter_label: "非公開編集",
+        note: "Private existing note", visibility: "private",
+        author_name: "Owner", author_icon: null, viewerCanManage: true,
+      }],
+    };
+    let resolveTarget;
+    const pendingTarget = new Promise((resolve) => { resolveTarget = resolve; });
+    let saves = 0;
+    let reads = 0;
+    globalThis.fetch = async (url, init = {}) => {
+      if (String(url).includes("editChapterId=")) return pendingTarget;
+      if (init.method === "PUT") {
+        saves += 1;
+        return { ok: true, status: 200, json: async () =>
+          ({ ok: true, chapterId: "private-1", pendingPublicReflection: true }) };
+      }
+      reads += 1;
+      return { ok: true, status: 200, json: async () => ordinaryOverlay };
+    };
+    await React.act(async () => root.render(React.createElement(VideoUtilityDockConnected, {
+      videoId, currentId: videoId,
+      publicChapters: [{ id: "public-target", timeLabel: "1:20",
+        label: "公開編集", kind: "comment" }],
+    })));
+    assert.ok(reads >= 1, "normal viewer overlay is fetched");
+    const request = [...doc.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label") === "公開編集の編集権限を確認");
+    assert.ok(request, "public edit lookup control appears after overlay auth");
+    await React.act(async () => { request.click(); });
+    await React.act(async () => {
+      const privateEdit = [...doc.querySelectorAll("button")].find((button) =>
+        button.textContent === "編集");
+      assert.ok(privateEdit, "an existing private chapter can be edited while lookup is pending");
+      privateEdit.click();
+    });
+    assert.equal(doc.querySelector("form textarea").value, "Private existing note");
+    await React.act(async () => {
+      doc.querySelector("form").dispatchEvent(new doc.defaultView.Event("submit", {
+        bubbles: true, cancelable: true,
+      }));
+    });
+    assert.equal(saves, 1, "the private write completed and requested an overlay refresh");
+    await React.act(async () => {
+      resolveTarget({ ok: true, status: 200, json: async () => ({
+        ...ordinaryOverlay, privateChapters: [], editablePublicChapters: [{
+          id: "public-target", chapter_time: 80, chapter_label: "公開編集",
+          note: "Stale public note", visibility: "public", viewerCanManage: true,
+        }],
+      }) });
+    });
+    assert.equal([...doc.querySelectorAll("button")].filter((button) =>
+      button.textContent === "編集").length, 1,
+    "a late public edit grant cannot restore an edit control after a write triggered refresh");
+  });
+});
+
+test("Issue #661: stale successful public edit lookup cannot show an authorized badge after X switch", async () => {
+  await withChapterDom(async (doc, root) => {
+    const { VideoUtilityDockIsland } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+    const base = {
+      loggedIn: true, authUnavailable: false, isBanned: false,
+      isTosAccepted: true, termsReacceptRequired: false,
+      viewerXApproved: true, activeXId: "alice-x",
+      viewerCanEditChapters: false, privateChapters: [], editablePublicChapters: [],
+      likeActive: false, bookmarkActive: false, playlistLabel: "再生リスト", playlistItems: [],
+    };
+    let resolvePending;
+    const lookup = new Promise((resolve) => { resolvePending = resolve; });
+    const render = (overlay) => React.createElement(VideoUtilityDockIsland, {
+      videoId: "vid-pub", currentId: "vid-pub", loading: false, overlay,
+      publicChapters: [{ id: "chapter-target", timeLabel: "1:00", label: "可視コメント", kind: "comment" }],
+      onRequestPublicChapterEdit: () => lookup,
+    });
+    await React.act(async () => root.render(render(base)));
+    const check = [...doc.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label") === "可視コメントの編集権限を確認");
+    assert.ok(check);
+    await React.act(async () => { check.click(); });
+    assert.match(doc.body.textContent, /確認中/);
+    await React.act(async () => root.render(render({ ...base, activeXId: "bob-x" })));
+    await React.act(async () => { resolvePending(true); });
+    assert.doesNotMatch(doc.body.textContent, /下の編集欄から操作できます/,
+      "late approval from the previous X cannot paint an authorized badge");
+    assert.doesNotMatch(doc.body.textContent, /編集権限を確認できませんでした/,
+      "an outdated failure cannot overwrite the new viewer either");
+  });
+});
+
 test("MIG-0518 chapter owner edits own private chapter without admin/bulk access", async () => {
   const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
   const base = {
