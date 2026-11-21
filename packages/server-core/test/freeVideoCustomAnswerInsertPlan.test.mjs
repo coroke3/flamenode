@@ -5,65 +5,77 @@ import { videoCustomAnswers } from "@flamenode/db/schema";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import { buildFreeVideoCustomAnswerInsertPlan } from "../src/video/freeVideoCustomAnswerInsertPlan.ts";
 
-const draft = (q) => ({
-  event_id: "ev-a", question_id: q, question_key: q,
-  answer_text: "test", answer_json: null,
-});
+const args = { videoId: "v:a/b", eventId: "ev-a", actorUserId: "user-a", now: 1700000000 };
+const draft = (q) => ({ event_id: "ev-a", question_id: q, question_key: q, answer_text: "test", answer_json: null });
+const question = (id, changes = {}) => {
+  const row = {
+    id, event_id: "ev-a", question_key: id, label: "Question " + id,
+    type: "text", required: 0, options_json: null,
+    max_length: null, sort_order: 0, visibility: "review",
+    updated_at: 1700000000, ...changes,
+  };
+  return {
+    id: row.id, event_id: row.event_id, question_key: row.question_key,
+    label: row.label, type: row.type, required: row.required === 1,
+    options: [], max_length: row.max_length, is_active: true, source: row,
+  };
+};
 function fixture() {
   const recorded = { run: [], table: null, inserted: null, execution: 0 };
   const db = {
-    run(statement) {
-      recorded.run.push(statement);
-      return { kind: "assertion", sql: statement };
-    },
+    run(statement) { recorded.run.push(statement); return { kind: "assertion", sql: statement }; },
     insert(table) {
       recorded.table = table;
-      return { values(rows) {
-        recorded.inserted = rows;
-        return { kind: "insert" };
-      } };
+      return { values(rows) { recorded.inserted = rows; return { kind: "insert" }; } };
     },
-    batch() {
-      recorded.execution++;
-      throw new Error("planner must not execute");
-    },
+    batch() { recorded.execution++; throw new Error("planner must not execute"); },
   };
   return { db, recorded };
 }
-const args = { videoId: "v:a/b", eventId: "ev-a", actorUserId: "user-a", now: 1700000000 };
+const sorted = (...values) => values.sort((a, b) =>
+  a.source.sort_order - b.source.sort_order ||
+  a.id.localeCompare(b.id, "en"),
+);
 
-test("MIG-0651 custom-answer plan: no selected event is zero-statement, no writes", () => {
+test("MIG-0651 custom-answer plan: unaffiliated zero plan, no stale event answers", () => {
   const { db, recorded } = fixture();
   assert.deepEqual(buildFreeVideoCustomAnswerInsertPlan(db, {
-    ...args, eventId: null, drafts: [],
+    ...args, eventId: null, questions: [], drafts: [],
   }), { statements: [], expectedChanges: [], audits: [] });
-  assert.equal(recorded.run.length, 0);
-  assert.equal(recorded.execution, 0);
   assert.throws(() => buildFreeVideoCustomAnswerInsertPlan(db, {
-    ...args, eventId: null, drafts: [draft("q-1")],
+    ...args, eventId: null, questions: [], drafts: [draft("q-1")],
   }), /video_custom_answer_event_missing/);
+  assert.equal(recorded.execution, 0);
 });
 
-test("MIG-0651 custom-answer plan: validation refuses excessive/duplicated/mismatched drafts", () => {
+test("MIG-0651 custom-answer plan: invalid/duplicate/unrecognized and >4 drafts fail before any D1", () => {
   const { db, recorded } = fixture();
-  const bad = [
-    { drafts: Array.from({ length: 5 }, (_, i) => draft("q" + i)), error: /atomic_limit/ },
+  const qs = sorted(...Array.from({ length: 5 }, (_, i) => question("q" + i)));
+  const cases = [
+    { drafts: qs.map(q => draft(q.id)), error: /atomic_limit/ },
     { drafts: [draft("q1"), draft("q1")], error: /duplicate_question/ },
     { drafts: [{ ...draft("q1"), event_id: "other" }], error: /draft_invalid/ },
-    { drafts: [{ ...draft("q1"), answer_text: "", answer_json: null }], error: /draft_invalid/ },
+    { drafts: [draft("unknown")], error: /draft_invalid/ },
+    { drafts: [{ ...draft("q1"), answer_text: "" }], error: /draft_invalid/ },
     { drafts: [{ ...draft("q1"), answer_json: "[]" }], error: /draft_invalid/ },
   ];
-  for (const { drafts, error } of bad) {
-    assert.throws(() => buildFreeVideoCustomAnswerInsertPlan(db, { ...args, drafts }), error);
+  for (const { drafts, error } of cases) {
+    assert.throws(() => buildFreeVideoCustomAnswerInsertPlan(db, {
+      ...args, questions: qs, drafts,
+    }), error);
   }
   assert.equal(recorded.run.length, 0);
   assert.equal(recorded.inserted, null);
 });
 
-test("MIG-0651 custom-answer plan: batch-time question assertion precedes one INSERT and strict per-row audits", () => {
+test("MIG-0651 custom-answer plan: policy snapshot assertion precedes single INSERT and strict audits", () => {
   const { db, recorded } = fixture();
+  const qs = sorted(question("q:A"), question("q-B", {
+    type: "checkbox", options_json: '["A"]',
+  }));
   const plan = buildFreeVideoCustomAnswerInsertPlan(db, {
-    ...args, drafts: [draft("q:A"), { ...draft("q-B"), answer_text: null, answer_json: '["A"]' }],
+    ...args, questions: qs,
+    drafts: [draft("q:A"), { ...draft("q-B"), answer_text: null, answer_json: '["A"]' }],
   });
   assert.strictEqual(recorded.table, videoCustomAnswers);
   assert.equal(plan.statements.length, 2);
@@ -71,66 +83,80 @@ test("MIG-0651 custom-answer plan: batch-time question assertion precedes one IN
   assert.deepEqual(plan.statements[1], { kind: "insert" });
   assert.deepEqual(plan.expectedChanges, [null, 2]);
   assert.equal(recorded.execution, 0);
-  assert.equal(recorded.inserted.length, 2);
   assert.deepEqual(recorded.inserted[0], {
     video_id: "v:a/b", event_id: "ev-a", question_id: "q:A",
     answer_text: "test", answer_json: null,
     created_at: args.now, updated_at: args.now,
   });
   const query = new SQLiteSyncDialect().sqlToQuery(recorded.run[0]);
-  assert.match(query.sql, /SELECT CASE WHEN/i);
+  assert.match(query.sql, /json_group_array/);
   assert.match(query.sql, /event_custom_questions/);
   assert.match(query.sql, /json_extract\('not-valid-json'/);
   assert.ok(query.params.includes("ev-a"));
-  assert.ok(query.params.includes("q:A"));
-  assert.ok(query.params.includes("q-B"));
-  assert.ok(query.params.includes("stage_permission"));
+  assert.ok(query.params.some(p => typeof p === "string" && p.includes('"q:A"') && p.includes('"q-B"')));
   assert.deepEqual(plan.audits.map(a => [a.table_name, a.operation, a.strict, a.target_id]), [
     ["video_custom_answers", "CREATE", true, "v%3Aa%2Fb:ev-a:q%3AA"],
     ["video_custom_answers", "CREATE", true, "v%3Aa%2Fb:ev-a:q-B"],
   ]);
   assert.deepEqual(plan.audits[0].after, recorded.inserted[0]);
   assert.notStrictEqual(plan.audits[0].after, recorded.inserted[0]);
-  assert.equal(plan.audits[0].actor_user_id, "user-a");
 });
 
-test("MIG-0651 custom-answer plan: empty response for eligible event plans no answer writes", () => {
+test("MIG-0651 custom-answer plan: zero submitted answers still asserts unchanged question set", () => {
   const { db, recorded } = fixture();
-  assert.deepEqual(buildFreeVideoCustomAnswerInsertPlan(db, {
-    ...args, drafts: [],
-  }), { statements: [], expectedChanges: [], audits: [] });
-  assert.equal(recorded.run.length, 0);
+  const plan = buildFreeVideoCustomAnswerInsertPlan(db, {
+    ...args, questions: [], drafts: [],
+  });
+  assert.equal(recorded.run.length, 1);
+  assert.deepEqual(plan.expectedChanges, [null]);
+  assert.equal(plan.audits.length, 0);
+  assert.equal(plan.statements.length, 1);
+  assert.equal(recorded.inserted, null);
 });
 
-/** Real migrations + SQLite verify the CAS SQL itself, not just its shape. */
-test("MIG-0651 custom-answer plan: real SQLite rejects disabled, deleted, moved and renamed questions", () => {
+test("MIG-0651 custom-answer plan: real SQLite fails closed on concurrent question policies", () => {
   const sqlite = createSqlite();
   const { db, recorded } = fixture();
   try {
     insert(sqlite, "events", { id: "ev-a", title: "Event A" });
     insert(sqlite, "events", { id: "ev-b", title: "Event B" });
+    const q = question("q-check");
     insert(sqlite, "event_custom_questions", {
-      id: "q-check", event_id: "ev-a", question_key: "q-check",
-      label: "Answer", type: "text", is_active: 1,
+      ...q.source, is_active: 1,
     });
     const plan = buildFreeVideoCustomAnswerInsertPlan(db, {
-      ...args, drafts: [draft("q-check")],
+      ...args, questions: [q], drafts: [draft("q-check")],
     });
     assert.equal(plan.statements.length, 2);
-    const sqlQuery = new SQLiteSyncDialect().sqlToQuery(recorded.run[0]);
-    const check = () => sqlite.prepare(sqlQuery.sql).get(...sqlQuery.params);
-    assert.doesNotThrow(check, "unchanged eligible question must pass");
-    sqlite.prepare("UPDATE event_custom_questions SET is_active=0 WHERE id='q-check'").run();
-    assert.throws(check, "disabled question must reject before video INSERT");
-    sqlite.prepare("UPDATE event_custom_questions SET is_active=1, question_key='renamed' WHERE id='q-check'").run();
-    assert.throws(check, "renamed question must reject");
-    sqlite.prepare("UPDATE event_custom_questions SET question_key='q-check', event_id='ev-b' WHERE id='q-check'").run();
-    assert.throws(check, "moved question must reject");
+    const query = new SQLiteSyncDialect().sqlToQuery(recorded.run[0]);
+    const check = () => sqlite.prepare(query.sql).get(...query.params);
+    assert.doesNotThrow(check, "unchanged policy must pass");
+    const set = (col, value) => {
+      sqlite.prepare(`UPDATE event_custom_questions SET ${col}=? WHERE id='q-check'`).run(value);
+      assert.throws(check, `policy ${col} drift must abort before INSERT`);
+      sqlite.prepare(`UPDATE event_custom_questions SET ${col}=? WHERE id='q-check'`).run(q.source[col]);
+      assert.doesNotThrow(check, `original policy ${col} must pass`);
+    };
+    set("required", 1);
+    set("options_json", '["different"]');
+    set("max_length", 10);
+    set("type", "textarea");
+    set("visibility", "private");
+    set("updated_at", args.now + 1);
+    set("is_active", 0);
+    set("question_key", "renamed");
+    set("event_id", "ev-b");
+    insert(sqlite, "event_custom_questions", {
+      id: "q-new", event_id: "ev-a", question_key: "q-new",
+      label: "New Required", required: 1, type: "text", is_active: 1,
+    });
+    assert.throws(check, "new required question must abort old submission");
+    sqlite.prepare("DELETE FROM event_custom_questions WHERE id='q-new'").run();
+    assert.doesNotThrow(check, "restoring original set passes");
     sqlite.prepare("DELETE FROM event_custom_questions WHERE id='q-check'").run();
-    assert.throws(check, "removed question must reject");
-    const count = sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get();
-    assert.equal(count.n, 0, "guard failure did not write answers");
-    assert.equal(recorded.execution, 0, "plan builder never calls D1 batch itself");
+    assert.throws(check, "deleted question must fail");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 0);
+    assert.equal(recorded.execution, 0);
   } finally {
     sqlite.close();
   }
