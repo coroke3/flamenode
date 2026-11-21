@@ -65,16 +65,24 @@ export function parseSlotViewerOverlay(value: unknown): SlotViewerOverlayDto | n
   const row = value as Record<string, unknown>;
   const flags = ["loggedIn", "authUnavailable", "isBanned", "needsTermsAcceptance", "canReserveSlot", "canPost", "operatorOverrideAllowed"] as const;
   if (flags.some((flag) => typeof row[flag] !== "boolean") || !Array.isArray(row.slots)) return null;
-  const parsedSlots = row.slots.map(parseSlot).filter((slot): slot is SlotViewerOverlaySlot => slot !== null);
-  // RH-014 must provide at most one relation per public slot ID. A Map would
-  // otherwise let a later duplicate replace a denied relation with "owned".
-  // Discard all ambiguous rows for that ID, preserving unrelated valid rows.
+  // Count IDs from raw rows *before* normalization. Otherwise an invalid
+  // duplicate (e.g. owned=true / relation=none) is discarded and a different
+  // row for the same ID is incorrectly treated as unambiguous.
+  const parsedSlots: SlotViewerOverlaySlot[] = [];
   const seenIds = new Set<string>();
   const ambiguousIds = new Set<string>();
-  for (const slot of parsedSlots) {
-    if (seenIds.has(slot.id)) ambiguousIds.add(slot.id);
-    seenIds.add(slot.id);
+  for (const rawSlot of row.slots) {
+    if (rawSlot && typeof rawSlot === "object" && !Array.isArray(rawSlot)) {
+      const id = (rawSlot as Record<string, unknown>).id;
+      if (typeof id === "string" && id.length > 0) {
+        if (seenIds.has(id)) ambiguousIds.add(id);
+        seenIds.add(id);
+      }
+    }
+    const slot = parseSlot(rawSlot);
+    if (slot) parsedSlots.push(slot);
   }
+  // RH-020 public rows remain authoritative for every ambiguous private ID.
   return {
     loggedIn: row.loggedIn as boolean,
     authUnavailable: row.authUnavailable as boolean,

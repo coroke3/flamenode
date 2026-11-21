@@ -180,6 +180,46 @@ test("U01 duplicate RH-014 slot IDs cannot elevate ownership regardless of respo
   }
 });
 
+test("U01 raw invalid RH-014 duplicate ID is fenced before invalid-row filtering", async () => {
+  const { parseSlotViewerOverlay, mergeViewerSlotOverlay } =
+    await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const flags = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: false, viewerXId: "x", viewerXIdNotice: null,
+  };
+  const owned = { id: "s1", display_name: "private-owner",
+    viewer_relation: "active", is_owned_by_viewer: true, x_user_id: "x" };
+  const goodSibling = { id: "s2", viewer_relation: "active", is_owned_by_viewer: true };
+  const invalidDuplicates = [
+    { id: "s1", viewer_relation: "account_other", is_owned_by_viewer: true },
+    { id: "s1", viewer_relation: "invalid-relation", is_owned_by_viewer: true },
+    { id: "s1", viewer_relation: "active", is_owned_by_viewer: "true" },
+    { id: "s1" },
+  ];
+  for (const bad of invalidDuplicates) {
+    for (const slots of [[owned, bad, goodSibling], [bad, goodSibling, owned]]) {
+      const overlay = parseSlotViewerOverlay({ ...flags, slots });
+      assert.ok(overlay);
+      assert.deepEqual(overlay.slots.map(slot => slot.id), ["s2"],
+        "a malformed same-ID row must invalidate every apparently valid private owner");
+      const merged = mergeViewerSlotOverlay(
+        [{ id: "s1", display_name: "public" }, { id: "s2", display_name: "public-two" }],
+        overlay, true,
+      );
+      assert.equal(merged[0].is_owned_by_viewer, false);
+      assert.equal(merged[0].display_name, "public");
+      assert.equal(merged[0].x_user_id, null);
+      assert.equal(merged[1].is_owned_by_viewer, true);
+    }
+  }
+  const independentMalformed = parseSlotViewerOverlay({
+    ...flags, slots: [owned, { id: "bad", viewer_relation: "garbage" }, goodSibling],
+  });
+  assert.deepEqual(independentMalformed?.slots.map(slot => slot.id), ["s1", "s2"],
+    "an invalid row for an unrelated ID must not revoke valid owners");
+});
+
 test("U01 viewer overlay RH-014 503/404/network error never grants ownership", async () => {
   const { fetchSlotViewerOverlay } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
   for (const status of [404, 503]) {
