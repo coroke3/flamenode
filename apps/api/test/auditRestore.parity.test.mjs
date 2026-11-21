@@ -790,6 +790,60 @@ test("T04 R2 CAS succeeds but D1 batch fails: event/video remain public, compens
   }
 });
 
+// An unsuccessful D1 transaction is not a completed publication change.
+// Neither event nor video restore may trigger the post-commit Cache API deletes
+// just because its preceding R2 visibility CAS succeeded.
+test("T04 failed D1 audit restore never evicts event/video public or export caches", async () => {
+  for (const scenario of [
+    { kind: "event", auditId: "event-audit", entityId: "ev-1", table: "events" },
+    { kind: "video", auditId: "video-audit", entityId: "vid-restore", table: "videos" },
+  ]) {
+    const ctx = setup();
+    if (scenario.kind === "event") seedVisibilityRestore(ctx);
+    else seedVideoVisibilityRestore(ctx);
+    const { state, bucket } = visibilityManifestBucket();
+    const originalBatch = ctx.db.batch.bind(ctx.db);
+    let injected = false;
+    ctx.db.batch = async (statements) => {
+      injected = true;
+      assert.equal(state.puts, 1, "R2 visibility precommit precedes failed D1 batch");
+      return originalBatch([...statements, {
+        _sql: 'INSERT INTO "__mig_0662_fault_missing_table" ("value") VALUES (1)',
+        _params: [],
+      }]);
+    };
+
+    const prior = globalThis.caches;
+    const deletes = [];
+    globalThis.caches = { default: {
+      delete: async (url) => { deletes.push(String(url)); return true; },
+    } };
+    try {
+      const response = await ctx.request({
+        audit_id: scenario.auditId,
+        reason: "失敗時にキャッシュを消さない検証",
+        confirm_text: `RESTORE ${scenario.auditId}`,
+      }, { Origin: SITE }, { BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: "enforce" });
+
+      assert.equal(injected, true);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+      assert.equal((await response.json()).ok, false);
+      assert.equal(ctx.sqlite.prepare(
+        `SELECT visibility_status FROM ${scenario.table} WHERE id = ?`,
+      ).get(scenario.entityId).visibility_status, "public");
+      assert.equal(ctx.sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM audit_restore_runs WHERE status = 'success'",
+      ).get().n, 0);
+      assert.deepEqual(deletes, [],
+        "a rolled-back restore must not invalidate any public JSON or scheduled export cache");
+    } finally {
+      if (prior === undefined) delete globalThis.caches;
+      else globalThis.caches = prior;
+    }
+  }
+});
+
 // A repeatedly lost R2 conditional PUT must never let the audit restore
 // advance to its D1 transaction. Exercise both event/video HTTP paths using
 // an R2 fixture where a different writer wins each conditional PUT race,
