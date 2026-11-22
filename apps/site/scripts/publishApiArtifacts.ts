@@ -11,6 +11,8 @@ const RELEASE_SOURCE_PATTERN = /^snapshot\/event-release\/([A-Za-z0-9_-]{1,128})
 const EVENT_DETAIL_SOURCE_PATTERN = /^snapshot\/event-detail\/([A-Za-z0-9_-]{1,128})\.json$/;
 const MAX_API_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const MAX_API_RELEASE_OBJECTS = 5000;
+// CURRENT rebuildEventsIndex selects the latest 200 non-point public events.
+const MAX_EVENT_INDEX_ROWS = 200;
 const EVENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const MAX_READBACK_RETRIES = 3;
 
@@ -69,7 +71,10 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
         !allowed.has(eventDetailKey(id)) || !allowed.has(eventReleaseKey(id)))) {
     throw new Error("api artifact publish: incomplete event release coverage");
   }
-  const sourceKeys = [EVENT_INDEX_KEY, ...[...releaseIds].sort().map(eventReleaseKey)];
+  // A failed release PUT/readback must never promote an index pointing at it.
+  // This is index-last ordering, not an atomic cross-key transaction: existing
+  // readers can still see a changed release before index promotion.
+  const sourceKeys = [...[...releaseIds].sort().map(eventReleaseKey), EVENT_INDEX_KEY];
   const artifacts = sourceKeys.map((sourceKey) => {
     if (!allowed.has(sourceKey) || blocked.has(sourceKey)) {
       throw new Error("api artifact publish: event artifact is not allowed by build manifest");
@@ -97,11 +102,11 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
   // both failed to build. Compare against the CURRENT events/index.json
   // items, which were generated from the public event IDs for this build.
   let eventIndex: unknown;
-  try { eventIndex = JSON.parse(artifacts[0]!.body); }
+  try { eventIndex = JSON.parse(artifacts[artifacts.length - 1]!.body); }
   catch { throw new Error("api artifact publish: event index JSON is invalid"); }
   const items = eventIndex && typeof eventIndex === "object" &&
     !Array.isArray(eventIndex) ? (eventIndex as { items?: unknown }).items : undefined;
-  if (!Array.isArray(items) || items.length > MAX_API_RELEASE_OBJECTS) {
+  if (!Array.isArray(items) || items.length > MAX_EVENT_INDEX_ROWS) {
     throw new Error("api artifact publish: event index items are invalid or over budget");
   }
   const indexIds = new Set<string>();
@@ -117,8 +122,10 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
     }
     indexIds.add(row.id);
   }
-  if (indexIds.size !== releaseIds.size ||
-      [...indexIds].some((id) => !releaseIds.has(id))) {
+  // CURRENT index filters point/half-bounded events and caps rows at 200,
+  // while the build creates releases for every public event. Extra releases
+  // are valid; every index entry must still have a verified release.
+  if ([...indexIds].some((id) => !releaseIds.has(id))) {
     throw new Error("api artifact publish: event index / release set mismatch");
   }
   return artifacts;
