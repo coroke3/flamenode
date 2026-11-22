@@ -101,7 +101,7 @@ test("MIG-0651 S3: selected event eligibility and required fields use one bounde
   };
   assert.deepEqual(
     await loadEligibleUnslottedVideoRequiredFields(db, "ev-pub", 1_700_000_000),
-    { eventId: "ev-pub", requiredFields: ["music", "credit"] },
+    { eventId: "ev-pub", requiredFields: ["music", "credit"], requiredFieldsSnapshot: '["music","credit","music","unknown"]' },
   );
   assert.equal(reads, 1);
   assert.strictEqual(columns.id, events.id);
@@ -119,7 +119,7 @@ test("MIG-0651 S3: absent or ineligible event preserves no-read and denial behav
     },
   };
   assert.deepEqual(await loadEligibleUnslottedVideoRequiredFields(db, null, 100),
-    { eventId: null, requiredFields: [] });
+    { eventId: null, requiredFields: [], requiredFieldsSnapshot: null });
   assert.equal(reads, 0);
   await assert.rejects(
     loadEligibleUnslottedVideoRequiredFields(db, "ev-private", 100),
