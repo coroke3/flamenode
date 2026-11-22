@@ -85,8 +85,14 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
   // A failed release PUT/readback must never promote an index pointing at it.
   // This is index-last ordering, not an atomic cross-key transaction: existing
   // readers can still see a changed release before index promotion.
+  // Detail snapshots are not PUT by this publisher, but an allowed manifest
+  // key alone cannot prove the expected public detail body exists or is valid.
+  // Validate all detail envelopes before any remote GET/PUT, including events
+  // omitted from CURRENT's period-filtered, 200-row index.
+  const detailKeys = [...expectedPublicIds].sort().map(eventDetailKey);
   const sourceKeys = [...[...releaseIds].sort().map(eventReleaseKey), EVENT_INDEX_KEY];
-  const artifacts = sourceKeys.map((sourceKey) => {
+  const verifiedBodies = new Map<string, string>();
+  for (const sourceKey of [...detailKeys, ...sourceKeys]) {
     if (!allowed.has(sourceKey) || blocked.has(sourceKey)) {
       throw new Error("api artifact publish: event artifact is not allowed by build manifest");
     }
@@ -105,6 +111,10 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
         digest(body) !== snapshot.sha256 || digest(body) !== envelope.sha256) {
       throw new Error("api artifact publish: payload digest or byte budget mismatch");
     }
+    verifiedBodies.set(sourceKey, body);
+  }
+  const artifacts = sourceKeys.map((sourceKey) => {
+    const body = verifiedBodies.get(sourceKey)!;
     const match = RELEASE_SOURCE_PATTERN.exec(sourceKey);
     const key = match ? eventReleaseObjectKey(match[1]!) : "events/index.json";
     return { key, body, sha256: digest(body) };
