@@ -19,6 +19,17 @@ function dbFor(sqlite, stats) {
         "both alias and direct identity scans must reuse JSON1, not 2*N bound IDs");
       assert.match(query, /json_each/i);
       assert.ok(params.every(p => typeof p === "string" && p.length < 32_000));
+      // The real migration 0067 expression indexes are required to make
+      // this single D1 read bounded on a populated resort's member history.
+      // Check the actual SQLite optimizer, not just a source SQL substring.
+      const details = sqlite.prepare("EXPLAIN QUERY PLAN " + query)
+        .all(...params).map(row => String(row.detail));
+      assert.ok(details.some(d => d.includes("x_user_aliases_canonical_norm_alias_idx")),
+        "alias candidate lookup must use migration 0067's normalized index");
+      assert.ok(details.some(d => d.includes("x_users_canonical_norm_id_idx")),
+        "direct X and alias-target lookup must use migration 0067's normalized index");
+      assert.ok(!details.some(d => /SCAN (?:x_user_aliases|x_users)\b/i.test(d)),
+        "one-query canonical X resolution must not full-scan either base table");
     }
     const rows = sqlite.prepare(query).all(...params);
     return { rows: method === "all" || method === "values"
