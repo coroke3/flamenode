@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, runCold, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
 } from "./benchmark-api-cpu.mjs";
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {
@@ -137,7 +137,11 @@ test("judge: noise floor can excuse an over-budget reading but never a PASS", ()
 test("MIG-0639: Node proxy, non-Linux, sim, partial and cold-skip never report formal CPU PASS", () => {
   const warm = WARM_KINDS.flatMap((kind) =>
     Array.from({length: MIN_SAMPLES}, () => ({kind, cpuMs: 0.5, status: 200})));
-  const cold = Array.from({length: MIN_SAMPLES}, () => ({kind:"cold", cpuMs: 10, status: 200}));
+  // Only the synthetic acceptance fixture is truly isolate-first; the real
+  // local post-reload sampler never sets this evidence bit.
+  const cold = Array.from({length: MIN_SAMPLES}, () => ({
+    kind:"cold", cpuMs: 10, status: 200, isFirstIsolateRequest: true,
+  }));
   const getResults = () => [
     {id:"RH-020", runtimeClass:"S2", samples:[...warm,...cold]},
     {id:"BASELINE", runtimeClass:"S2", samples:[...warm,...cold]},
@@ -211,6 +215,45 @@ test("MIG-0639 RH-013: scheduled/realtime warm maximum is budgeted and both mode
   applyBudgetVerdicts(anomalous,{resolutionMs:0});
   assert.equal(anomalous[0].agg.verdict,"STOP_SAMPLES",
     "unexpected cache/body-reuse semantics block acceptance");
+});
+
+test("MIG-0639: post-reload local probes cannot masquerade as isolate-first cold", async () => {
+  const scenarios = [
+    { id:"A", kinds: { normal: () => ({ method:"GET",path:"/a",expect:[200] }) } },
+    { id:"B", kinds: { normal: () => ({ method:"GET",path:"/b",expect:[200] }) } },
+  ];
+  let reloads = 0, probes = 0;
+  const target = {
+    setR2: async () => {},
+    exec: async () => {},
+    record: async () => null,
+    reload: async () => { reloads++; },
+    run: async () => { probes++; return {status:200,cpuMs:1,d1:0,bytes:2}; },
+  };
+  const cold = await runCold(target,scenarios,{coldSamples:MIN_SAMPLES});
+  assert.equal(reloads,MIN_SAMPLES,"one reload currently batches multiple scenarios");
+  assert.equal(probes,2*MIN_SAMPLES);
+  for (const route of scenarios) {
+    const samples = cold.get(route.id);
+    assert.equal(samples.length,MIN_SAMPLES);
+    assert.ok(samples.every(r=>r.isFirstIsolateRequest===false),
+      "ping/script warm-up and shared isolates prevent genuine first-call provenance");
+  }
+  const warm = WARM_KINDS.flatMap(kind => Array.from({length:MIN_SAMPLES},
+    () => ({kind,cpuMs:1,status:200})));
+  const rows = [
+    {id:"A",runtimeClass:"S2",samples:[...warm,...cold.get("A")]},
+    {id:"BASELINE",runtimeClass:"S2",samples:[
+      ...warm,...cold.get("B")]},
+  ];
+  applyBudgetVerdicts(rows,{resolutionMs:0});
+  assert.equal(rows[0].agg.kinds.cold.n,MIN_SAMPLES);
+  assert.equal(rows[0].agg.kinds.cold.verifiedIsolateStarts,0);
+  const opts={mode:"wrangler",d1:"replay",platform:"linux",coldSamples:MIN_SAMPLES,
+    warmup:10,skipCold:false,only:null};
+  const gate=enforceCpuMeasurementEnvironment(rows,opts);
+  assert.deepEqual(gate,{eligible:false,stopReason:"STOP_COLD"});
+  assert.equal(rows[0].agg.verdict,"STOP_COLD");
 });
 
 test("MIG-0639: replay target preserves live workerd CPU profiler quantum", async () => {

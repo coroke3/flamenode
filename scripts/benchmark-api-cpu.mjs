@@ -95,6 +95,10 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
       ...cpu,
       meetsMinSamples: cpu.n >= MIN_SAMPLES,
       unexpectedStatus: rows.filter((r) => r.unexpected).length,
+      // Cold isolate first-request provenance is NOT inferred from a post-reload
+      // label. Only independently verified first-isolate requests qualify.
+      verifiedIsolateStarts: kind === "cold"
+        ? rows.filter((r) => r.isFirstIsolateRequest === true).length : 0,
       maxBytes: rows.reduce((m, r) => Math.max(m, r.bytes ?? 0), 0),
       maxD1Statements: rows.reduce((m, r) => Math.max(m, r.d1 ?? 0), 0),
       // Returned-result proxy; missing counts stay unknown, never become zero.
@@ -185,6 +189,7 @@ export function enforceCpuMeasurementEnvironment(results, {
   else if (warmup < 10) stopReason = "STOP_WARMUP";
   else if (skipCold || coldSamples < MIN_SAMPLES
     || !results.every((r) => r.agg?.kinds?.cold?.n >= MIN_SAMPLES
+      && r.agg.kinds.cold.verifiedIsolateStarts >= MIN_SAMPLES
       && r.agg.kinds.cold.unexpectedStatus === 0)) {
     stopReason = "STOP_COLD";
   }
@@ -253,7 +258,8 @@ export function renderMarkdown(results, { digits, label }) {
       );
     }
   }
-  lines.push("", `Warm-only budget verdict by max (${label}); cold shown separately (never judged):`, "");
+  lines.push("", "Cold provenance: this LOCAL harness records post-reload diagnostics, NOT certified first-isolate requests. Verified cold count is in JSON agg.kinds.cold.verifiedIsolateStarts. ZERO_1102 §5 requires a separately authorized nonproduction Worker/tail measurement.", "");
+  lines.push(`Warm-only budget verdict by max (${label}); cold shown separately (never judged):`, "");
   lines.push(`| scenario | class | budget | warm max (ms) | cold max (ms) | verdict |`, `| --- | --- | --- | ---: | ---: | --- |`);
   for (const r of results) {
     const op = r.runtimeClass === "S4" ? "<=" : "<";
@@ -1802,8 +1808,15 @@ async function runScenario(target, sc, opts, state) {
   return samples;
 }
 
-/** Cold: seed first, reload the isolate, then fire one request per scenario (rotated). */
-async function runCold(target, scenarios, opts) {
+/**
+ * Post-reload diagnostic only: the wrapper's waitBuild() calls /__bench/ping
+ * on the new isolate before every API probe. Default replay additionally calls
+ * /__bench/script before the measured request. One reload also serves many
+ * scenarios. Thus NONE of these requests is independently verified to be the
+ * first request of a fresh isolate. ZERO_1102 §5 requires nonproduction Worker
+ * deployment + wrangler tail cpuTime for authoritative cold evidence.
+ */
+export async function runCold(target, scenarios, opts) {
   const live = scenarios;
   const coldSamples = new Map(live.map((s) => [s.id, []]));
   for (const sc of scenarios) {
@@ -1823,7 +1836,9 @@ async function runCold(target, scenarios, opts) {
     const order = plan.map((_, n) => plan[(n + round) % plan.length]);
     for (const { sc, spec, rec } of order) {
       const r = await target.run(spec, rec);
-      coldSamples.get(sc.id).push({ kind: "cold", cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true });
+      coldSamples.get(sc.id).push({ kind: "cold", isFirstIsolateRequest: false,
+        cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows,
+        unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true });
     }
     process.stderr.write(`cold round ${round + 1}/${opts.coldSamples}\r`);
   }
