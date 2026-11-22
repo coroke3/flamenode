@@ -248,7 +248,7 @@ test("SEC-794: optional icon-map loader degrades under hostile errors and a thro
     assert.equal(unsafeCoercions, 0, "non-string codes are not stringified");
     assert.equal(recorded.length, 4);
     for (const line of recorded) {
-      assert.match(line, /\\(UNKNOWN\\)/);
+      assert.match(line, /\(UNKNOWN\)/);
       assert.doesNotMatch(line, /SEC794_|PRIVATE_PROVIDER|PRIVATE_SQL/);
     }
     console.warn = () => { throw new Error("SEC794_CONSOLE_UNAVAILABLE"); };
