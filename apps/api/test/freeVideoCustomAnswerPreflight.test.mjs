@@ -73,7 +73,7 @@ test("MIG-0651 custom answer HTTP + SQLite: required question fails, valid check
     assert.equal(result.ok, true);
     const { questionSnapshot, ...candidateData } = result.value;
     assert.deepEqual(candidateData, {
-      youtubeId: "dQw4w9WgXcQ", eventId: "ev-a",
+      youtubeId: "dQw4w9WgXcQ", eventId: "ev-a", requiredFieldsSnapshot: null,
       customAnswerDrafts: [
         { event_id: "ev-a", question_id: "reason", question_key: "reason", answer_text: "demo", answer_json: null },
         { event_id: "ev-a", question_id: "choices", question_key: "choices", answer_text: null, answer_json: '["B","A"]' },
