@@ -73,6 +73,24 @@ export function judge(maxMs, budgetMs, { resolutionMs = 0, noiseMs = 0, kind = "
   return "INCONCLUSIVE";
 }
 
+/**
+ * Calibration is a precondition for reporting CPU statistics, not evidence of
+ * meeting a route budget. A 10× synchronous burn must produce a measurable,
+ * strongly increasing profile. If samples are missing or the profiler is
+ * disconnected, do not let a synthetic 0ms measurement become PASS.
+ */
+export function validateCpuProfilerCalibration(rows) {
+  const burn = (iters) => rows.find((r) => r.route === "burn" && r.iters === iters)?.profilerBusyMs;
+  const idle = burn(0);
+  const light = burn(2_000_000);
+  const heavy = burn(20_000_000);
+  if (![idle, light, heavy].every((v) => Number.isFinite(v) && v >= 0)
+    || light < 1 || heavy < 10 || heavy <= light * 2 || heavy <= idle + 10) {
+    throw new Error("CPU profiler calibration failed: synchronous 2M/20M burn was not consistently measurable; route CPU evidence is invalid");
+  }
+  return { idleMs: idle, lightMs: light, heavyMs: heavy };
+}
+
 /** Number of rows delivered to application code; NOT Cloudflare D1 billed rows_read. */
 export function returnedRows(mode, value) {
   if (mode === "first") return value == null ? 0 : 1;
@@ -1715,6 +1733,15 @@ async function createWranglerTarget(plan, opts) {
     calibration.push({ route: "d1-trivial-reads", n, profilerBusyMsMax: Number(Math.max(...runs).toFixed(2)), profilerBusyMsMin: Number(Math.min(...runs).toFixed(2)) });
   }
 
+  // A broken/stalled V8 inspector can report 0ms for every route. Validate
+  // synchronous calibration BEFORE accepting any route CPU measurements.
+  try {
+    validateCpuProfilerCalibration(calibration);
+  } catch (error) {
+    try { ws?.terminate(); } catch { /* already closed */ }
+    await cleanup();
+    throw error;
+  }
   quantumMs = SAMPLING_US / 1000;
   countQuantum = true;
 

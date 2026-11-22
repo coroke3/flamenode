@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, runCold, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, runCold, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
 } from "./benchmark-api-cpu.mjs";
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {
@@ -215,6 +215,31 @@ test("MIG-0639 RH-013: scheduled/realtime warm maximum is budgeted and both mode
   applyBudgetVerdicts(anomalous,{resolutionMs:0});
   assert.equal(anomalous[0].agg.verdict,"STOP_SAMPLES",
     "unexpected cache/body-reuse semantics block acceptance");
+});
+
+test("MIG-0639: invalid V8 profiler calibration must never generate CPU PASS", () => {
+  const fixture = (idle,light,heavy) => [
+    {route:"burn",iters:0,profilerBusyMs:idle},
+    {route:"burn",iters:2_000_000,profilerBusyMs:light},
+    {route:"burn",iters:20_000_000,profilerBusyMs:heavy},
+  ];
+  assert.deepEqual(validateCpuProfilerCalibration(fixture(0.2,20,240)),
+    {idleMs:0.2,lightMs:20,heavyMs:240});
+  for (const rows of [
+    fixture(0,0,0), // an attached inspector returning no samples
+    fixture(0,0,200), // a broken 2M sampling step
+    fixture(0,9,9), // the 10x larger burn does not scale
+    fixture(0,2,9), // profiler cannot reliably resolve even 10ms
+    fixture(150,20,160), // heavy CPU indistinguishable from idle noise
+    fixture(0,NaN,200),
+    fixture(0,2,Infinity),
+    fixture(0,2,-1),
+    fixture(0,20,40), // strict 2× lower bound
+    [],
+  ]) {
+    assert.throws(() => validateCpuProfilerCalibration(rows),
+      /CPU profiler calibration failed/, "unreliable profiler must abort benchmark");
+  }
 });
 
 test("MIG-0639: post-reload local probes cannot masquerade as isolate-first cold", async () => {
