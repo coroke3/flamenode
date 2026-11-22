@@ -1,0 +1,773 @@
+/**
+ * MIG-0638 U01b: Hono admin spreadsheet CRUD write routes (RH-004 PATCH, RH-005 POST, RH-006 DELETE)
+ * under /api/admin/spreadsheet/data.
+ *
+ * CURRENT: app/api/admin/spreadsheet/data/route.ts + src/lib/admin/spreadsheet/{query,routeHandler,guard,errors,staticRebuildPlan}.ts.
+ *
+ * Guard order (matches CURRENT requireSpreadsheetAdminWrite + Hono /api/admin):
+ *   1. originGuardMiddleware (pure, 0 D1) -> 403 invalid_origin / 503 origin_verification_unavailable
+ *   2. spreadsheetEnabledGuard (pure, 0 D1) -> 404 spreadsheet_disabled
+ *   3. sessionMiddleware (1 D1)
+ *   4. writeGuardMiddleware (1 D1 -> 401/403/503, sets actorSnapshotJsonById)
+ *   5. dbMiddleware
+ *   6. costGuardMiddleware("admin_spreadsheet") (1 D1 -> 503, sets auditSettings)
+ *
+ * D-0603-1: static_rebuild_queue rows are committed atomically inside mutateWithAudit's D1 batch,
+ * with zero immediate Queue wakes (background Cron consumes static_rebuild_queue).
+ */
+import { Hono, type Context, type MiddlewareHandler, type Next } from "hono";
+import type { AdminSpreadsheetColumnMeta } from "@flamenode/contracts";
+import { AdminSpreadsheetMutationResponseSchema } from "@flamenode/contracts";
+import {
+  assertAtomicAuditMutationBindLimits,
+  mutateWithAudit,
+  planAtomicAuditMutationBudget,
+  type AtomicAuditMutationInput,
+} from "@flamenode/server-core/audit/mutate";
+import type { ServerCoreDb } from "@flamenode/server-core/db";
+import type { QueueWakeHostLoader } from "@flamenode/server-core/ports";
+import { sql } from "@flamenode/server-core/sql";
+import { buildStaticRebuildQueueBatch } from "@flamenode/server-core/staticRebuild/enqueue";
+import type { EnqueueStaticRebuildInput } from "@flamenode/server-core/staticRebuild/types";
+import { sessionMiddleware } from "../../../auth/session.ts";
+import type { AppEnv } from "../../../env.ts";
+import { costGuardMiddleware } from "../../../middleware/costGuard.ts";
+import { dbMiddleware } from "../../../middleware/db.ts";
+import {
+  onlyMutating,
+  originGuardMiddleware,
+  writeGuardMiddleware,
+} from "../../../middleware/writeOrigin.ts";
+import { auditPreloaded } from "../body.ts";
+import {
+  getSpreadsheetDb,
+  quoteIdent,
+  SPREADSHEET_ERROR,
+  SpreadsheetError,
+} from "./catalog.ts";
+import {
+  buildSpreadsheetTableDefs,
+  isSpreadsheetColumnEditable,
+  isValidSqliteTableName,
+  primaryKeysFromColumns,
+} from "./registry.ts";
+import { SPREADSHEET_COLUMN_ENUMS, SPREADSHEET_SCHEMA_TABLES } from "./schemaCatalog.ts";
+import { readSpreadsheetJsonBody } from "./writeBody.ts";
+import {
+  parseSpreadsheetCrudBody,
+  planSpreadsheetAtomicAuditedCrud,
+  planSpreadsheetGuardedCrud,
+  SPREADSHEET_ATOMIC_MAX_REBUILD_TARGETS,
+  SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+  spreadsheetMutationToBoundSql,
+  type SpreadsheetAuditedSqlPlan,
+  type SpreadsheetCrudMethod,
+  type SpreadsheetForeignKey,
+  type SpreadsheetSqlTableContext,
+} from "./writeValidation.ts";
+
+export const PRIVATE_HEADERS = {
+  "Cache-Control": "private, no-store, no-cache, must-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+} as const;
+
+export const SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT = 256;
+export const SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED =
+  "静的再生成対象が多すぎます。行を分割してください。";
+export const SPREADSHEET_MAX_STATIC_REBUILD_QUEUE_STATEMENTS = 4;
+
+/** D-0603-1: Hono admin routes persist static_rebuild_queue without sending a Queue wake. */
+export const NOOP_WAKE_HOST: QueueWakeHostLoader = async () => ({
+  readEnv: () => null,
+  readWaitUntil: () => null,
+  readKv: () => null,
+});
+
+const WRITE_CACHE_TTL_MS = 30_000;
+const SPREADSHEET_VIDEO_EVENT_LOOKUP_CHUNK_SIZE = 80;
+const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
+
+export interface SpreadsheetWriteTableContext extends SpreadsheetSqlTableContext {
+  columnNames: string[];
+  quotedTable: string;
+}
+
+type WriteContextEntry = {
+  ctx: SpreadsheetWriteTableContext;
+  foreignKeys: readonly SpreadsheetForeignKey[];
+  cachedAt: number;
+};
+
+const writeContextCache = new Map<string, WriteContextEntry>();
+
+export function invalidateSpreadsheetWriteCaches(): void {
+  writeContextCache.clear();
+}
+
+const TABLE_WRITE_COLUMNS_SQL = `SELECT x.name AS name, x.type AS type, x."notnull" AS not_null, x.pk AS pk,
+       x.dflt_value AS dflt_value, x.hidden AS hidden,
+       (SELECT json_group_array(json_object('column', fk."from", 'referencedTable', fk."table", 'referencedColumn', fk."to"))
+        FROM pragma_foreign_key_list(?) AS fk) AS foreign_keys_json
+FROM pragma_table_xinfo(?) AS x
+WHERE EXISTS (
+  SELECT 1 FROM sqlite_master m
+  WHERE m.type = 'table'
+  AND m.name = ?
+  AND m.name NOT LIKE 'sqlite_%'
+  AND substr(m.name, 1, 1) != '_'
+  AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) WHERE pk > 0)
+)
+ORDER BY x.cid`;
+
+type WriteColumnRow = {
+  name: string;
+  type: string | null;
+  not_null: number;
+  pk: number | null;
+  dflt_value: string | null;
+  hidden: number | null;
+  foreign_keys_json: string | null;
+};
+
+export async function resolveSpreadsheetWriteTableContext(
+  db: D1Database,
+  table: string,
+  now = Date.now(),
+): Promise<{
+  ctx: SpreadsheetWriteTableContext;
+  foreignKeys: readonly SpreadsheetForeignKey[];
+  fromCache: boolean;
+}> {
+  const trimmed = table.trim();
+  if (!trimmed || !isValidSqliteTableName(trimmed)) {
+    throw new SpreadsheetError(SPREADSHEET_ERROR.UNKNOWN_TABLE);
+  }
+  const def = buildSpreadsheetTableDefs([trimmed], SPREADSHEET_SCHEMA_TABLES)[0];
+  if (!def) throw new SpreadsheetError(SPREADSHEET_ERROR.UNKNOWN_TABLE);
+
+  const hit = writeContextCache.get(def.table);
+  if (hit && now - hit.cachedAt < WRITE_CACHE_TTL_MS) {
+    return { ctx: hit.ctx, foreignKeys: hit.foreignKeys, fromCache: true };
+  }
+
+  const result = await db
+    .prepare(TABLE_WRITE_COLUMNS_SQL)
+    .bind(def.table, def.table, def.table)
+    .all<WriteColumnRow>();
+  const rows = result.results ?? [];
+  const enumCache = SPREADSHEET_COLUMN_ENUMS;
+  const raw: (AdminSpreadsheetColumnMeta & { pk: number })[] = rows.map((row) => {
+    const enumValues = enumCache[`${def.table}.${row.name}`];
+    return {
+      name: row.name,
+      type: row.type ?? "TEXT",
+      notNull: Boolean(row.not_null),
+      pk: Number(row.pk ?? 0),
+      editable: isSpreadsheetColumnEditable(def, row.name),
+      defaultValue: row.dflt_value ?? null,
+      generated: Number(row.hidden ?? 0) !== 0,
+      enumValues: enumValues ? [...enumValues] : undefined,
+    };
+  });
+  const primaryKeys = primaryKeysFromColumns(raw);
+  if (raw.length === 0 || primaryKeys.length === 0 || raw.some((column) => column.generated)) {
+    throw new SpreadsheetError(SPREADSHEET_ERROR.UNKNOWN_TABLE);
+  }
+
+  let foreignKeys: SpreadsheetForeignKey[] = [];
+  const rawFkJson = rows[0]?.foreign_keys_json;
+  if (typeof rawFkJson === "string" && rawFkJson.trim()) {
+    try {
+      const parsed = JSON.parse(rawFkJson) as unknown;
+      if (Array.isArray(parsed)) {
+        foreignKeys = parsed
+          .filter(
+            (fk): fk is SpreadsheetForeignKey =>
+              Boolean(fk) &&
+              typeof fk === "object" &&
+              typeof (fk as SpreadsheetForeignKey).column === "string" &&
+              (fk as SpreadsheetForeignKey).column.length > 0 &&
+              typeof (fk as SpreadsheetForeignKey).referencedTable === "string" &&
+              (fk as SpreadsheetForeignKey).referencedTable.length > 0 &&
+              typeof (fk as SpreadsheetForeignKey).referencedColumn === "string" &&
+              (fk as SpreadsheetForeignKey).referencedColumn.length > 0,
+          )
+          .map((fk) => ({
+            column: fk.column,
+            referencedTable: fk.referencedTable,
+            referencedColumn: fk.referencedColumn,
+          }));
+      }
+    } catch {
+      throw new Error("invalid_snapshot");
+    }
+  }
+
+  const ctx: SpreadsheetWriteTableContext = {
+    def,
+    columns: raw,
+    columnNames: raw.map((column) => column.name),
+    primaryKeys,
+    quotedTable: quoteIdent(def.table),
+  };
+  const frozenFks = Object.freeze(foreignKeys);
+  writeContextCache.set(def.table, { ctx, foreignKeys: frozenFks, cachedAt: now });
+  return { ctx, foreignKeys: frozenFks, fromCache: false };
+}
+
+function spreadsheetOriginOptions(c: Context<AppEnv>) {
+  return {
+    loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
+    allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
+  };
+}
+
+function isSpreadsheetEnabled(c: Context<AppEnv>): boolean {
+  const v = c.env?.ADMIN_SPREADSHEET_ENABLED?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+async function spreadsheetEnabledGuard(
+  c: Context<AppEnv>,
+  next: Next,
+): Promise<Response | void> {
+  if (!isSpreadsheetEnabled(c)) {
+    return c.json({ error: "spreadsheet_disabled" }, 404, PRIVATE_HEADERS);
+  }
+  await next();
+}
+
+export function applySpreadsheetWriteMiddleware(
+  routes: Hono<AppEnv>,
+  path: string,
+  session?: MiddlewareHandler<AppEnv>,
+): void {
+  routes.use(path, onlyMutating((c, next) => originGuardMiddleware(spreadsheetOriginOptions(c))(c, next)));
+  routes.use(path, onlyMutating(spreadsheetEnabledGuard));
+  routes.use(
+    path,
+    onlyMutating(
+      (session ?? (sessionMiddleware() as unknown as MiddlewareHandler<AppEnv>)) as (
+        c: Context,
+        next: Next,
+      ) => Promise<Response | void>,
+    ),
+  );
+  routes.use(path, onlyMutating((c, next) => writeGuardMiddleware(spreadsheetOriginOptions(c))(c, next)));
+  routes.use(path, onlyMutating(dbMiddleware));
+  routes.use(path, onlyMutating(costGuardMiddleware("admin_spreadsheet")));
+}
+
+function mapSqliteMessage(message: string): string | null {
+  if (/UNIQUE constraint failed/i.test(message)) return "unique_violation";
+  if (/FOREIGN KEY constraint failed/i.test(message)) return "foreign_key_violation";
+  if (/NOT NULL constraint failed/i.test(message)) return "not_null_violation";
+  return null;
+}
+
+const CLIENT_ERROR_CODES_400 = new Set([
+  SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED,
+  "unknown_table",
+  "table_readonly",
+  "column_not_editable",
+  "physical_delete_requires_visibility_status",
+  "unknown_column",
+  "missing_fields",
+  "empty_row",
+  "missing_primary_key",
+  "no_rows",
+  "too_many_rows",
+  "batch_too_large",
+  "duplicate_primary_key",
+  "unsupported_default",
+  "missing_required_column",
+  "value_too_long",
+  "invalid_enum",
+  "invalid_json_value",
+  "invalid_url",
+  "invalid_integer",
+  "invalid_number",
+  "payload_too_large",
+  "invalid_json",
+  "invalid_row",
+  "unique_violation",
+  "foreign_key_violation",
+  "not_null_violation",
+]);
+
+export function spreadsheetWriteFailure(c: Context<AppEnv>, error: unknown): Response {
+  if (error instanceof SpreadsheetError) {
+    return c.json(
+      { error: error.code },
+      error.code === SPREADSHEET_ERROR.DB_UNAVAILABLE ? 503 : 400,
+      PRIVATE_HEADERS,
+    );
+  }
+  const rawMessage = error instanceof Error ? error.message : "";
+  const message = rawMessage ? (mapSqliteMessage(rawMessage) ?? rawMessage) : "";
+
+  if (
+    message.startsWith("unknown_column:") ||
+    message.startsWith("column_not_editable:") ||
+    CLIENT_ERROR_CODES_400.has(message)
+  ) {
+    return c.json({ error: message }, 400, PRIVATE_HEADERS);
+  }
+  if (message === "row_not_found" || message === "spreadsheet_disabled") {
+    return c.json({ error: message }, 404, PRIVATE_HEADERS);
+  }
+  if (message === "preview_required") {
+    return c.json({ error: message }, 409, PRIVATE_HEADERS);
+  }
+  if (message === "preview_unavailable" || message === SPREADSHEET_ERROR.DB_UNAVAILABLE) {
+    return c.json({ error: message }, 503, PRIVATE_HEADERS);
+  }
+
+  console.error("[spreadsheet] WRITE_FAILED", error instanceof Error ? error.message : String(error));
+  return c.json({ error: "internal_error" }, 500, PRIVATE_HEADERS);
+}
+
+export type SpreadsheetStaticRebuildMutation = {
+  table: string;
+  operation: "CREATE" | "UPDATE" | "DELETE";
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  actorUserId: string;
+  eventReleaseEventIds?: readonly string[];
+};
+
+const VIDEO_RANDOM_POOL_FIELDS = [
+  "title",
+  "youtube_video_id",
+  "creator_display_name",
+  "creator_icon_url",
+  "creator_x_user_id",
+  "primary_event_id",
+  "scheduled_time",
+  "visibility_status",
+] as const;
+
+const YOUTUBE_RELATED_STATUS_FIELDS = [
+  "youtube_privacy_status",
+  "youtube_availability_status",
+] as const;
+
+function valueFromMutation(mutation: SpreadsheetStaticRebuildMutation, key: string): string | null {
+  const value = mutation.after?.[key] ?? mutation.before?.[key];
+  if (value == null) return null;
+  const normalized = String(value).trim();
+  return normalized || null;
+}
+
+function valuesFromMutation(mutation: SpreadsheetStaticRebuildMutation, key: string): string[] {
+  return [mutation.before?.[key], mutation.after?.[key]]
+    .map((value) => {
+      if (value == null) return null;
+      const normalized = String(value).trim();
+      return normalized || null;
+    })
+    .filter((value, index, values): value is string => value !== null && values.indexOf(value) === index);
+}
+
+function changed(mutation: SpreadsheetStaticRebuildMutation, fields: readonly string[]): boolean {
+  if (mutation.operation !== "UPDATE") return true;
+  return fields.some((field) => !Object.is(mutation.before?.[field], mutation.after?.[field]));
+}
+
+function addVideoCardGlobalTargets(
+  mutation: SpreadsheetStaticRebuildMutation,
+  add: (
+    mutation: SpreadsheetStaticRebuildMutation,
+    target: Omit<EnqueueStaticRebuildInput, "reason" | "requestedByUserId">,
+  ) => void,
+): void {
+  add(mutation, { targetType: "random_video_pool", targetId: "global", priority: "low" });
+  add(mutation, { targetType: "list_recent", targetId: "global" });
+  add(mutation, { targetType: "list_popular", targetId: "global" });
+  add(mutation, { targetType: "search_index", targetId: "global", priority: "low" });
+  add(mutation, { targetType: "top_recommended", targetId: "global", priority: "low" });
+  add(mutation, { targetType: "top_latest", targetId: "global", priority: "low" });
+  add(mutation, { targetType: "top_nostalgic", targetId: "global", priority: "low" });
+  add(mutation, { targetType: "recommend_core", targetId: "global", priority: "low" });
+}
+
+export function planSpreadsheetStaticRebuildTargets(
+  mutations: readonly SpreadsheetStaticRebuildMutation[],
+): EnqueueStaticRebuildInput[] {
+  const targets = new Map<string, EnqueueStaticRebuildInput>();
+
+  const add = (
+    mutation: SpreadsheetStaticRebuildMutation,
+    target: Omit<EnqueueStaticRebuildInput, "reason" | "requestedByUserId">,
+  ) => {
+    const planned: EnqueueStaticRebuildInput = {
+      ...target,
+      reason: `admin_spreadsheet_${mutation.table}_${mutation.operation.toLowerCase()}`,
+      requestedByUserId: mutation.actorUserId,
+    };
+    targets.set(`${planned.targetType}:${planned.targetId}`, planned);
+  };
+
+  for (const mutation of mutations) {
+    switch (mutation.table) {
+      case "events": {
+        const eventId = valueFromMutation(mutation, "id");
+        if (!eventId) throw new Error("spreadsheet_static_rebuild_target_id_missing:events");
+        add(mutation, { targetType: "event_base", targetId: eventId, priority: "high" });
+        add(mutation, { targetType: "event_slots", targetId: eventId, priority: "high" });
+        add(mutation, { targetType: "event_release", targetId: eventId, priority: "high" });
+        add(mutation, { targetType: "events_index", targetId: "global", priority: "low" });
+        add(mutation, { targetType: "search_index", targetId: "global", priority: "low" });
+        add(mutation, { targetType: "top_events", targetId: "global" });
+        add(mutation, { targetType: "top_stats", targetId: "global" });
+        add(mutation, { targetType: "top_slot_stats", targetId: "global" });
+        break;
+      }
+      case "event_groups": {
+        add(mutation, { targetType: "events_index", targetId: "global", priority: "low" });
+        break;
+      }
+      case "videos": {
+        const videoId = valueFromMutation(mutation, "id");
+        if (!videoId) throw new Error("spreadsheet_static_rebuild_target_id_missing:videos");
+        add(mutation, { targetType: "video", targetId: videoId, priority: "high" });
+        for (const eventId of valuesFromMutation(mutation, "primary_event_id")) {
+          add(mutation, { targetType: "event_base", targetId: eventId, priority: "high" });
+          add(mutation, { targetType: "event_release", targetId: eventId, priority: "high" });
+        }
+        for (const eventId of mutation.eventReleaseEventIds ?? []) {
+          add(mutation, { targetType: "event_base", targetId: eventId, priority: "high" });
+          add(mutation, { targetType: "event_release", targetId: eventId, priority: "high" });
+        }
+        if (changed(mutation, VIDEO_RANDOM_POOL_FIELDS)) {
+          addVideoCardGlobalTargets(mutation, add);
+        }
+        if (changed(mutation, ["visibility_status"])) {
+          add(mutation, { targetType: "youtube_related_blocklist", targetId: "global" });
+          add(mutation, { targetType: "list_recent", targetId: "global" });
+          add(mutation, { targetType: "list_popular", targetId: "global" });
+          add(mutation, { targetType: "search_index", targetId: "global", priority: "low" });
+        }
+        break;
+      }
+      case "video_youtube_metadata": {
+        const videoId = valueFromMutation(mutation, "video_id");
+        if (!videoId) {
+          throw new Error("spreadsheet_static_rebuild_target_id_missing:video_youtube_metadata");
+        }
+        add(mutation, { targetType: "video", targetId: videoId, priority: "high" });
+        if (changed(mutation, YOUTUBE_RELATED_STATUS_FIELDS)) {
+          add(mutation, { targetType: "youtube_related_blocklist", targetId: "global" });
+          add(mutation, { targetType: "random_video_pool", targetId: "global", priority: "low" });
+        }
+        break;
+      }
+      case "video_events": {
+        const videoIds = valuesFromMutation(mutation, "video_id");
+        if (videoIds.length === 0) {
+          throw new Error("spreadsheet_static_rebuild_target_id_missing:video_events");
+        }
+        for (const videoId of videoIds) {
+          add(mutation, { targetType: "video", targetId: videoId, priority: "high" });
+        }
+        const eventIds = valuesFromMutation(mutation, "event_id");
+        for (const eventId of eventIds) {
+          add(mutation, { targetType: "event_base", targetId: eventId, priority: "high" });
+          add(mutation, { targetType: "event_release", targetId: eventId, priority: "high" });
+        }
+        for (const eventId of mutation.eventReleaseEventIds ?? []) {
+          add(mutation, { targetType: "event_base", targetId: eventId, priority: "high" });
+          add(mutation, { targetType: "event_release", targetId: eventId, priority: "high" });
+        }
+        if (eventIds.includes(PVSF_SUMMARY_EVENT_ID)) {
+          addVideoCardGlobalTargets(mutation, add);
+        }
+        add(mutation, { targetType: "random_video_pool", targetId: "global", priority: "low" });
+        break;
+      }
+      case "video_members":
+      case "video_chapters": {
+        const videoId = valueFromMutation(mutation, "video_id");
+        if (!videoId) {
+          throw new Error(`spreadsheet_static_rebuild_target_id_missing:${mutation.table}`);
+        }
+        add(mutation, { targetType: "video", targetId: videoId, priority: "high" });
+        if (mutation.table === "video_members") {
+          add(mutation, { targetType: "users_index", targetId: "global", priority: "low" });
+          for (const eventId of mutation.eventReleaseEventIds ?? []) {
+            add(mutation, { targetType: "event_release", targetId: eventId, priority: "high" });
+          }
+        }
+        break;
+      }
+      case "x_users": {
+        const xUserId = valueFromMutation(mutation, "id");
+        if (!xUserId) throw new Error("spreadsheet_static_rebuild_target_id_missing:x_users");
+        add(mutation, { targetType: "user", targetId: xUserId });
+        add(mutation, { targetType: "users_index", targetId: "global", priority: "low" });
+        break;
+      }
+      default:
+        break;
+    }
+
+    if (targets.size > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+      throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+    }
+  }
+
+  return [...targets.values()];
+}
+
+export async function loadSpreadsheetVideoReleaseEvents(
+  db: D1Database,
+  audits: readonly {
+    table_name: string;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+  }[],
+): Promise<{ eventIdsByVideo: Map<string, string[]>; reads: number }> {
+  const videoIds = [
+    ...new Set(
+      audits
+        .filter(
+          (audit) =>
+            audit.table_name === "video_members" ||
+            audit.table_name === "video_events" ||
+            audit.table_name === "videos",
+        )
+        .flatMap((audit) => {
+          const col = audit.table_name === "videos" ? "id" : "video_id";
+          return [audit.before?.[col], audit.after?.[col]]
+            .map((value) => (value == null ? null : String(value).trim()))
+            .filter((value): value is string => Boolean(value));
+        }),
+    ),
+  ];
+  const eventIdsByVideo = new Map<string, Set<string>>();
+  if (videoIds.length === 0) return { eventIdsByVideo: new Map(), reads: 0 };
+
+  let reads = 0;
+  const linkedEventIds = new Set<string>();
+  for (let offset = 0; offset < videoIds.length; offset += SPREADSHEET_VIDEO_EVENT_LOOKUP_CHUNK_SIZE) {
+    const chunk = videoIds.slice(offset, offset + SPREADSHEET_VIDEO_EVENT_LOOKUP_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    reads += 1;
+    const result = await db
+      .prepare(
+        `SELECT v."id" AS videoId, ve."event_id" AS eventId, v."primary_event_id" AS primaryEventId
+         FROM "videos" v
+         LEFT JOIN "video_events" ve ON ve."video_id" = v."id"
+         WHERE v."id" IN (${placeholders})
+         LIMIT ${SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1}`,
+      )
+      .bind(...chunk)
+      .all<{ videoId: string; eventId: string | null; primaryEventId: string | null }>();
+    const rows = result.results ?? [];
+    if (rows.length > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+      throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+    }
+    for (const row of rows) {
+      const videoId = String(row.videoId ?? "").trim();
+      if (!videoId) continue;
+      const eventIds = eventIdsByVideo.get(videoId) ?? new Set<string>();
+      for (const eventId of [row.eventId, row.primaryEventId]) {
+        const normalized = String(eventId ?? "").trim();
+        if (normalized) {
+          eventIds.add(normalized);
+          linkedEventIds.add(normalized);
+        }
+      }
+      if (linkedEventIds.size > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+        throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+      }
+      eventIdsByVideo.set(videoId, eventIds);
+    }
+  }
+  return {
+    eventIdsByVideo: new Map([...eventIdsByVideo].map(([videoId, eventIds]) => [videoId, [...eventIds]])),
+    reads,
+  };
+}
+
+export function deriveSpreadsheetQueueTargets(
+  audits: readonly {
+    table_name: string;
+    operation: "CREATE" | "UPDATE" | "DELETE";
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    actor_user_id: string;
+  }[],
+  videoReleaseEvents: ReadonlyMap<string, readonly string[]>,
+): EnqueueStaticRebuildInput[] {
+  return planSpreadsheetStaticRebuildTargets(
+    audits.map((audit) => ({
+      table: audit.table_name,
+      operation: audit.operation,
+      before: audit.before,
+      after: audit.after,
+      actorUserId: audit.actor_user_id,
+      eventReleaseEventIds:
+        audit.table_name === "video_members" ||
+        audit.table_name === "video_events" ||
+        audit.table_name === "videos"
+          ? [
+              ...new Set(
+                [
+                  audit.before?.[audit.table_name === "videos" ? "id" : "video_id"],
+                  audit.after?.[audit.table_name === "videos" ? "id" : "video_id"],
+                ]
+                  .map((value) => (value == null ? null : String(value).trim()))
+                  .filter((value): value is string => Boolean(value))
+                  .flatMap((videoId) => videoReleaseEvents.get(videoId) ?? []),
+              ),
+            ]
+          : undefined,
+    })),
+  );
+}
+
+export function countingRawDb(rawDb: D1Database, counter: { reads: number }): D1Database {
+  const wrapExecutable = (stmt: D1PreparedStatement): D1PreparedStatement => ({
+    ...stmt,
+    bind(...values: unknown[]) {
+      return wrapExecutable(stmt.bind(...values));
+    },
+    first: async <T>(colName?: string) => {
+      counter.reads += 1;
+      return colName === undefined ? stmt.first<T>() : stmt.first<T>(colName);
+    },
+    all: async <T>() => {
+      counter.reads += 1;
+      return stmt.all<T>();
+    },
+    run: async <T>() => {
+      counter.reads += 1;
+      return stmt.run<T>();
+    },
+    raw: async <T>(options?: { columnNames?: boolean }) => {
+      counter.reads += 1;
+      return options === undefined ? stmt.raw<T>() : stmt.raw<T>(options);
+    },
+  }) as D1PreparedStatement;
+
+  return {
+    prepare(query: string) {
+      return wrapExecutable(rawDb.prepare(query));
+    },
+    batch: rawDb.batch.bind(rawDb),
+    exec: rawDb.exec?.bind(rawDb),
+    dump: rawDb.dump?.bind(rawDb),
+    withSession: rawDb.withSession?.bind(rawDb),
+  } as D1Database;
+}
+
+async function buildCrudAtomicBatch(
+  db: ServerCoreDb,
+  ctx: SpreadsheetWriteTableContext,
+  plan: SpreadsheetAuditedSqlPlan,
+  options: {
+    authorizedActorId: string;
+    callerQueryCount: number;
+    queueTargets: readonly EnqueueStaticRebuildInput[];
+    preloaded: ReturnType<typeof auditPreloaded>;
+  },
+): Promise<AtomicAuditMutationInput> {
+  if (
+    options.queueTargets.length >= 1 &&
+    options.queueTargets.length <= SPREADSHEET_ATOMIC_MAX_REBUILD_TARGETS
+  ) {
+    return planSpreadsheetAtomicAuditedCrud(db, ctx, plan, options);
+  }
+  const mutation = db.run(spreadsheetMutationToBoundSql(ctx, plan));
+  const queue =
+    options.queueTargets.length > 0
+      ? await buildStaticRebuildQueueBatch(db, [...options.queueTargets])
+      : { statements: [], expectedChanges: [], acceptedTargetCount: 0 };
+  if (queue.statements.length > SPREADSHEET_MAX_STATIC_REBUILD_QUEUE_STATEMENTS) {
+    throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+  }
+  const input: AtomicAuditMutationInput = {
+    mutationStatements: [mutation, ...queue.statements],
+    expectedMutationChanges: [1, ...queue.expectedChanges],
+    audits: [{ ...plan.audit }],
+    callerQueryCount: options.callerQueryCount,
+    preloaded: options.preloaded,
+    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+  };
+  if (!planAtomicAuditMutationBudget(input).withinLimit) {
+    throw new Error("batch_too_large");
+  }
+  assertAtomicAuditMutationBindLimits(db, input);
+  return input;
+}
+
+async function handleCrudWrite(
+  c: Context<AppEnv>,
+  method: SpreadsheetCrudMethod,
+): Promise<Response> {
+  const user = c.get("user");
+  if (!user) return c.json({ ok: false, reason: "unauthenticated" }, 401, PRIVATE_HEADERS);
+
+  try {
+    const rawBody = await readSpreadsheetJsonBody<unknown>(c.req.raw);
+    const crudBody = parseSpreadsheetCrudBody(method, rawBody);
+    const rawDb = getSpreadsheetDb(c.env.DB);
+    const db = c.get("db");
+    const preloaded = auditPreloaded(c);
+
+    // Track exact handler D1 pre-reads in addition to the 3 middleware reads (session, writeGuard, costGuard).
+    const readCounter = { reads: 0 };
+    const countedDb = countingRawDb(rawDb, readCounter);
+    const { ctx, foreignKeys } = await resolveSpreadsheetWriteTableContext(
+      countedDb,
+      crudBody.table,
+    );
+    const plan = await planSpreadsheetGuardedCrud(
+      countedDb,
+      ctx,
+      crudBody,
+      foreignKeys,
+      user.id,
+      SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+    );
+    const { eventIdsByVideo, reads: videoReads } = await loadSpreadsheetVideoReleaseEvents(rawDb, [
+      plan.audit,
+    ]);
+    const queueTargets = deriveSpreadsheetQueueTargets([plan.audit], eventIdsByVideo);
+    const callerQueryCount = 3 + readCounter.reads + videoReads;
+
+    const atomic = await buildCrudAtomicBatch(db, ctx, plan, {
+      authorizedActorId: user.id,
+      callerQueryCount,
+      queueTargets,
+      preloaded,
+    });
+    await mutateWithAudit(db, atomic, NOOP_WAKE_HOST);
+
+    const response = AdminSpreadsheetMutationResponseSchema.parse({
+      ok: true,
+      pendingPublicReflection: queueTargets.length > 0,
+    });
+    return c.json(response, 200, PRIVATE_HEADERS);
+  } catch (error) {
+    return spreadsheetWriteFailure(c, error);
+  }
+}
+
+export function createSpreadsheetWriteRoutes(
+  options: { session?: MiddlewareHandler<AppEnv> } = {},
+): Hono<AppEnv> {
+  const routes = new Hono<AppEnv>();
+  applySpreadsheetWriteMiddleware(routes, "/data", options.session);
+
+  // RH-004 PATCH /api/admin/spreadsheet/data
+  routes.patch("/data", (c) => handleCrudWrite(c, "PATCH"));
+  // RH-005 POST /api/admin/spreadsheet/data
+  routes.post("/data", (c) => handleCrudWrite(c, "POST"));
+  // RH-006 DELETE /api/admin/spreadsheet/data
+  routes.delete("/data", (c) => handleCrudWrite(c, "DELETE"));
+
+  return routes;
+}

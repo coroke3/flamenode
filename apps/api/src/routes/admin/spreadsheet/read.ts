@@ -160,7 +160,7 @@ function failure(c: Context<AppEnv>, error: unknown): Response {
     );
   }
   // Fixed code only: D1 error text can carry SQL and table names (CURRENT returned the raw message).
-  console.error("[spreadsheet] READ_FAILED");
+  console.error("[spreadsheet] READ_FAILED", error instanceof Error ? error.message : String(error));
   return respondError(c, "internal_error", 500);
 }
 
@@ -218,6 +218,7 @@ export function createSpreadsheetReadRoutes(
   routes.get("/export", async (c) => {
     const table = (c.req.query("table") ?? "").trim();
     if (!table) return respondError(c, "unknown_table", 400);
+    const page = normalizePage(Number(c.req.query("page") ?? "1"));
     const format = (c.req.query("format") ?? "csv").toLowerCase();
     const delimiter = format === "tsv" ? "\t" : ",";
     const includeHeader = c.req.query("header") !== "0";
@@ -226,7 +227,8 @@ export function createSpreadsheetReadRoutes(
     try {
       const db = getSpreadsheetDb(c.env.DB);
       const ctx = await resolveSpreadsheetTableContext(db, table);
-      const { hasMore, rawRows } = await queryTableRows(db, ctx, MAX_SPREADSHEET_EXPORT_ROWS);
+      const offset = page > 1 ? (page - 1) * MAX_SPREADSHEET_EXPORT_ROWS : undefined;
+      const { hasMore, rawRows } = await queryTableRows(db, ctx, MAX_SPREADSHEET_EXPORT_ROWS, offset);
       const columnNames = ctx.columns.map((col) => col.name);
       const lines = rawRows.map((row) => {
         const masked = serializeRow(row, ctx.columns);
