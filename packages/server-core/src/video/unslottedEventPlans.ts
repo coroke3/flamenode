@@ -41,6 +41,7 @@ export function buildUnslottedEventEligibilityAssertionPlan(
   db: ServerCoreDb,
   eventId: string | null,
   now: number,
+  requiredFieldsSnapshot?: string | null,
 ): UnslottedVideoAtomicPlan {
   if (!eventId) return emptyUnslottedVideoAtomicPlan();
   return {
@@ -52,6 +53,10 @@ export function buildUnslottedEventEligibilityAssertionPlan(
             FROM ${events}
             WHERE ${events.id} = ${eventId}
               AND ${unslottedEventEligibilityWhere(now)}
+              -- SA-086: bind the exact required-field policy seen by the form.
+              -- Policy changes between preflight and D1 commit must abort
+              -- before any video, audit, member, or notification INSERT.
+              ${requiredFieldsSnapshot === undefined ? sql`` : sql`AND ${events.required_video_fields_json} IS ${requiredFieldsSnapshot}`}
           ) THEN 1
           ELSE json_extract('not-valid-json', '$')
         END
