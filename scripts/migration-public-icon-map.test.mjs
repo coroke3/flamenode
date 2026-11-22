@@ -12,7 +12,7 @@ import {
   projectVideoMemberPresentation,
   projectPublicXIconMap,
 } from "../apps/site/src/lib/publicIconMap.ts";
-import { PUBLIC_X_ICON_MAP_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
+import { PUBLIC_X_ICON_MAP_KEY, SnapshotBuildError } from "../apps/site/src/lib/publicDataLoader.ts";
 import { buildPortfolioHead } from "../apps/site/src/lib/userViews.ts";
 
 const entry = (source, icon_url) => ({ source, icon_url });
@@ -219,4 +219,42 @@ test("T03 (Work Order): buildVideoPages projects member icon/profile and creator
 
   const videoOnly = build(new Map([["hato", entry("video", "https://example.com/v.png")]]));
   assert.equal(videoOnly.creator.profileHref, null, "a video-only entry must not link the creator profile");
+});
+
+
+test("SEC-794: optional icon-map loader degrades under hostile errors and a throwing diagnostic sink", async () => {
+  let codeReads = 0;
+  let unsafeCoercions = 0;
+  const poisoned = new SnapshotBuildError("HASH_MISMATCH", "SEC794_PRIVATE_PROVIDER_MESSAGE");
+  Object.defineProperty(poisoned, "code", {
+    get() { codeReads++; throw new Error("SEC794_POISONED_CODE_GETTER"); },
+  });
+  const malformed = new SnapshotBuildError("HASH_MISMATCH", "SEC794_PRIVATE_DETAILS");
+  Object.defineProperty(malformed, "code", {
+    value: { toString() { unsafeCoercions++; throw new Error("SEC794_STRING_COERCION"); } },
+  });
+  const trap = new Proxy(new Error("SEC794_PRIVATE_PROXY"), {
+    getPrototypeOf() { throw new Error("SEC794_PROXY_TRAP"); },
+  });
+  const originalWarn = console.warn;
+  const recorded = [];
+  try {
+    console.warn = (line) => { recorded.push(String(line)); };
+    for (const failure of [poisoned, malformed, trap, new Error("SEC794_PRIVATE_SQL")]) {
+      const env = new Proxy({}, { get() { throw failure; } });
+      assert.equal((await loadPublicXIconMapForBuild(env)).size, 0);
+    }
+    assert.equal(codeReads, 1, "untrusted code accessor is inspected only under a guarded catch");
+    assert.equal(unsafeCoercions, 0, "non-string codes are not stringified");
+    assert.equal(recorded.length, 4);
+    for (const line of recorded) {
+      assert.match(line, /\\(UNKNOWN\\)/);
+      assert.doesNotMatch(line, /SEC794_|PRIVATE_PROVIDER|PRIVATE_SQL/);
+    }
+    console.warn = () => { throw new Error("SEC794_CONSOLE_UNAVAILABLE"); };
+    assert.equal((await loadPublicXIconMapForBuild(new Proxy({}, { get() { throw poisoned; } }))).size, 0,
+      "logging failures must not abort an optional Astro build");
+  } finally {
+    console.warn = originalWarn;
+  }
 });
