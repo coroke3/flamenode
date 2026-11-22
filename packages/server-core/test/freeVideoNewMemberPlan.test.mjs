@@ -90,6 +90,40 @@ test("MIG-0651 new members: empty noncollab has no read/write/audit", async () =
   assert.deepEqual(plan, { statements: [], expectedChanges: [], audits: [] });
 });
 
+test("MIG-0651 new members: name-only member saves with zero reads, but cannot create orphaned chapters", async () => {
+  const sqlite = createSqlite();
+  try {
+    const plain = parsedMemberSubmission([
+      { name: "Name only", x_user_id: "", chapters: [] },
+    ]);
+    const stats = { reads: 0 };
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(plain));
+    assert.equal(stats.reads, 0, "a member without an X ID needs no resolver query");
+    assert.deepEqual(plan.expectedChanges, [1], "only the member INSERT is prepared");
+    executePrepared(sqlite, plan);
+    const member = sqlite.prepare("SELECT x_user_id, name FROM video_members").get();
+    assert.equal(member.x_user_id, null);
+    assert.equal(member.name, "Name only");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_chapters").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, 0);
+
+    // Defense-in-depth: even a caller forging already-validated member
+    // metadata must be refused before any SELECT or incomplete D1 write plan.
+    const forged = {
+      ...plain,
+      chaptersByIndex: new Map([[0, [{ time_seconds: 12, label: "Chapter", note: "", order_index: 0 }]]]),
+    };
+    const noDb = {
+      select() { throw new Error("unexpected D1 read"); },
+      run() { throw new Error("unexpected D1 statement"); },
+    };
+    await assert.rejects(
+      () => buildFreeVideoNewMemberPlan(noDb, args(forged)),
+      /free_video_new_member_chapter_xid_required/,
+    );
+  } finally { sqlite.close(); }
+});
+
 test("MIG-0651 new members: canonical X alias, pending placeholder, public members and chapters share one SQLite transaction", async () => {
   const sqlite = createSqlite();
   try {
