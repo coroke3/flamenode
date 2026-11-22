@@ -26,8 +26,7 @@ import {
 import type { Context } from "hono";
 import type { AppEnv } from "../../env.ts";
 import type { ServerCoreDb } from "@flamenode/server-core/db";
-import { resolveUnslottedEventIdForNewVideo } from "@flamenode/server-core/video/unslottedEventEligibility";
-import { loadUnionRequiredVideoFields } from "@flamenode/server-core/video/requiredVideoFields";
+import { loadEligibleUnslottedVideoRequiredFields } from "@flamenode/server-core/video/requiredVideoFields";
 import { checkYoutubeVideoDuplicate } from "@flamenode/server-core/video/youtubeDuplicate";
 import { loadGeneralCustomQuestionsForFreeVideo, type LoadedGeneralCustomQuestion } from "@flamenode/server-core/video/requiredVideoFields";
 
@@ -114,9 +113,9 @@ export async function validateFreeVideoDbReadPreflight(
     return { ok: false, message: "YouTube URLを解析できません。" };
   }
 
-  let eventId: string | null;
+  let event: Awaited<ReturnType<typeof loadEligibleUnslottedVideoRequiredFields>>;
   try {
-    eventId = await resolveUnslottedEventIdForNewVideo(db, input.requestedEventId, nowSec);
+    event = await loadEligibleUnslottedVideoRequiredFields(db, input.requestedEventId, nowSec);
   } catch (error) {
     if (error instanceof UnslottedEventSyncError) {
       if (error.code === "unslotted_event_selection_invalid") {
@@ -137,9 +136,9 @@ export async function validateFreeVideoDbReadPreflight(
     };
   }
 
+  const { eventId, requiredFields } = event;
   try {
-    const required = await loadUnionRequiredVideoFields(db, eventId ? [eventId] : []);
-    const missing = firstMissingRequiredVideoField(required, {
+    const missing = firstMissingRequiredVideoField(requiredFields, {
       ...input.videoForm,
       existing_icon_url: null,
     });
