@@ -95,7 +95,7 @@ test("MIG-0651 atomic composer: event and entire question-set assertions MUST pr
   const row = video("event-a");
   const q = question();
   const plan = buildFreeVideoSubmissionAtomicPlan(db, {
-    videoAfter: row, actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a",
+    videoAfter: row, actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a", requiredFieldsSnapshot: null,
     questions: [q], customAnswerDrafts: [{
       event_id: "event-a", question_id: "q:1", question_key: "q:1",
       answer_text: "ok", answer_json: null,
@@ -129,7 +129,7 @@ test("MIG-0651 atomic composer: event and entire question-set assertions MUST pr
 test("MIG-0651 atomic composer: event selected with zero answers still asserts policy", () => {
   const { db } = fixture();
   const plan = buildFreeVideoSubmissionAtomicPlan(db, {
-    videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a",
+    videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a", requiredFieldsSnapshot: null,
     questions: [question()], customAnswerDrafts: [], now: NOW,
   });
   assert.deepEqual(plan.statements.map(s => s.action),
@@ -141,7 +141,7 @@ test("MIG-0651 atomic composer: event selected with zero answers still asserts p
 test("MIG-0651 atomic composer: actor, selected event, clock and stale answer mismatch fail closed", () => {
   const samples = [
     { videoAfter: video(), actorUserId: "other", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
-    { videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a", questions: [], customAnswerDrafts: [], now: NOW },
+    { videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a", requiredFieldsSnapshot: null, questions: [], customAnswerDrafts: [], now: NOW },
     { videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW+1 },
     { videoAfter: { ...video(), source_type: "external" }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
     { videoAfter: { ...video(), youtube_video_id: "short" }, actorUserId: "user-1", trustedActiveXId: "alice", eventId: null, questions: [], customAnswerDrafts: [], now: NOW },
@@ -167,7 +167,7 @@ test("MIG-0651 atomic composer: actor, selected event, clock and stale answer mi
   }
   const { db } = fixture();
   assert.throws(() => buildFreeVideoSubmissionAtomicPlan(db, {
-    videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a",
+    videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a", requiredFieldsSnapshot: null,
     questions: [question()], customAnswerDrafts: [{
       event_id: "other", question_id: "q:1", question_key: "q:1",
       answer_text: "bad", answer_json: null,
@@ -219,6 +219,7 @@ test("MIG-0651 atomic composer: real migrated SQLite persists the exact bounded 
       };
       const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
         videoAfter: video(eventId), actorUserId: "user-1", trustedActiveXId: "alice", eventId,
+        requiredFieldsSnapshot: eventId ? null : undefined,
         now: NOW, questions: eventId ? [question()] : [],
         customAnswerDrafts: eventId ? [{
           event_id: eventId, question_id: "q:1", question_key: "q:1",
@@ -338,7 +339,7 @@ test("MIG-0651 atomic composer: real SQLite changed event/question policy aborts
       };
       const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
         videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice",
-        eventId: "event-a", now: NOW, questions: [question()],
+        eventId: "event-a", requiredFieldsSnapshot: null, now: NOW, questions: [question()],
         customAnswerDrafts: [{
           event_id: "event-a", question_id: "q:1", question_key: "q:1",
           answer_text: "demo", answer_json: null,
@@ -394,7 +395,7 @@ test("MIG-0651 atomic composer: independent D1 50-query and S3 3-pre-read gates"
   assert.equal(noEventBudget.withinLimit, true);
 
   const linked = buildFreeVideoSubmissionAtomicPlan(db, {
-    videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a",
+    videoAfter: video("event-a"), actorUserId: "user-1", trustedActiveXId: "alice", eventId: "event-a", requiredFieldsSnapshot: null,
     questions: [question()], customAnswerDrafts: [{
       event_id: "event-a", question_id: "q:1", question_key: "q:1",
       answer_text: "demo", answer_json: null,
@@ -545,7 +546,7 @@ test("MIG-0651 U02 rebuild queue: real SQLite inserts 13/16 exact targets in the
       };
       const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
         videoAfter: video(eventId), actorUserId: "user-1",
-        trustedActiveXId: "alice", eventId, now: NOW,
+        trustedActiveXId: "alice", eventId, requiredFieldsSnapshot: eventId ? null : undefined, now: NOW,
         questions: [], customAnswerDrafts: [],
       });
       assert.equal(plan.statements.length, eventId ? 7 : 4);
