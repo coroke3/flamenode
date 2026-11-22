@@ -284,10 +284,12 @@ if (runUnderRootTsx(import.meta.url)) {
       // An unrelated still-public video must survive revocation. A handler
       // returning an empty list for every request would otherwise falsely PASS.
       sqlite.exec("INSERT INTO videos (id, title, submitted_by_user_id, creator_display_name, primary_event_id, visibility_status, scheduled_time) VALUES ('safe-public-718', '別件の公開動画', 'submitter', '別制作者', 'export-event', 'public', 1700000140)");
+      sqlite.exec("INSERT INTO event_staff (id, event_id, x_user_id, display_name, is_public, created_at, updated_at) VALUES ('revoked-staff-718', 'export-event', 'x-revoked-718', '失効スタッフ718', 1, 1700000000, 1700000000), ('safe-staff-718', 'export-event', 'x-safe-718', '公開スタッフ718', 1, 1700000000, 1700000000)");
       for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
         for (const format of ["v5", "legacy"]) {
           reset();
           sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+          sqlite.exec("UPDATE event_staff SET is_public=1 WHERE id='revoked-staff-718'");
           const writer = makeColo();
           const reader = makeColo();
           const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
@@ -305,6 +307,13 @@ if (runUnderRootTsx(import.meta.url)) {
             const initialBody = await primed.text();
             assert.match(initialBody, /public-video/);
             assert.match(initialBody, /safe-public-718/, "unrelated public video is included");
+            if (format === "v5") {
+              assert.match(initialBody, /失効スタッフ718/, "revocable staff must appear in initial v5");
+              assert.match(initialBody, /公開スタッフ718/, "unrelated staff must appear in initial v5");
+            } else {
+              assert.doesNotMatch(initialBody, /失効スタッフ718|公開スタッフ718/,
+                "CURRENT legacy format does not include public staff");
+            }
             await Promise.all(globalThis.__eventExport.pending.splice(0));
             assert.equal(colo.rows.has(cacheRequest.url), true, "colo holds the original scheduled payload");
           }
@@ -312,11 +321,14 @@ if (runUnderRootTsx(import.meta.url)) {
           const warm = await request(path);
           assert.equal(warm.headers.get("X-FlameNode-Cache"), "HIT",
             runtime + " " + format + " requires a genuine warm reader-colo cache");
-          assert.match(await warm.text(), /public-video/);
+          const warmBody = await warm.text();
+          assert.match(warmBody, /public-video/);
+          if (format === "v5") assert.match(warmBody, /失効スタッフ718/);
 
           // A separate writer commits the private transition. Its local
           // invalidation does not touch the reader's old Cache API response.
           sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+          sqlite.exec("UPDATE event_staff SET is_public=0 WHERE id='revoked-staff-718'");
           globalThis.caches.default = writer.cache;
           assert.equal(await writer.cache.delete(cacheRequest), true);
           assert.equal(writer.rows.has(cacheRequest.url), false);
@@ -336,6 +348,10 @@ if (runUnderRootTsx(import.meta.url)) {
             "private video metadata must not be disclosed from a stale reader colo");
           assert.match(refreshedBody, /safe-public-718/,
             "unrelated public video remains present after stale cache denial");
+          assert.doesNotMatch(refreshedBody, /失効スタッフ718/,
+            "revoked staff cannot be replayed from another colo's stale response");
+          if (format === "v5") assert.match(refreshedBody, /公開スタッフ718/,
+            "independent public staff must remain in v5 export");
           assert.equal(d1.stats.writes, 0, "GET cannot write D1");
           await Promise.all(globalThis.__eventExport.pending.splice(0));
           const safeWarm = await request(path);
@@ -348,6 +364,7 @@ if (runUnderRootTsx(import.meta.url)) {
       globalThis.caches.default = originalCache;
       sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
       sqlite.exec("DELETE FROM videos WHERE id='safe-public-718'");
+      sqlite.exec("DELETE FROM event_staff WHERE id IN ('revoked-staff-718', 'safe-staff-718')");
       reset();
     }
   });
