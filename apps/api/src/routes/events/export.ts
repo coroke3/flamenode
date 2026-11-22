@@ -180,7 +180,15 @@ eventExportRoutes.get("/:id", async (c) => {
   const body = JSON.stringify(payload);
   if (usePayloadCache) {
     const cached = await readCachedPayload(key, eventId, format, refreshMinutes * 60, host);
-    if (cached !== null && eventExportBodyMatchesFresh(cached, body, format)) return exportResponse(req, cached, format, updateMode, refreshMinutes, "HIT");
+    if (cached !== null) {
+      if (eventExportBodyMatchesFresh(cached, body, format)) {
+        return exportResponse(req, cached, format, updateMode, refreshMinutes, "HIT");
+      }
+      // The former public snapshot may now contain revoked video/staff data.
+      // Discard the stale colo-local copy even if a replacement put fails.
+      // Authorization still comes exclusively from the fresh D1 snapshot.
+      if (host) await deletePublicJsonCacheBestEffort(key, host);
+    }
   }
   if (microCacheKey) {
     const coalesced = isolateMicroCacheGet(microCacheKey);
