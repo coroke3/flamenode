@@ -4,6 +4,8 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 import { planD1AuditMutationBudget } from "../audit/mutateBudget.ts";
+import { parseEventStaffPermissionKeys } from "../../../packages/domain/src/event/staffInput.ts";
+import { canonicalizePermissionKey } from "../../../packages/domain/src/auth/permissions/aliases.ts";
 import {
   assertEventWillRetainOwner,
   assertOwnershipTransferInput,
@@ -384,4 +386,64 @@ test("SEC-800: actual event.members collaborator denial retains CURRENT permissi
     assert.equal(responseMessage(new Error(hostile), fallback), fallback,
       "near-matches and SQL/secret-bearing provider messages stay private");
   }
+});
+
+test("SEC-800: real invalid permission parser preserves only matching input errors", () => {
+  const start = source.indexOf("function expectedInvalidStaffPermissionMessage(");
+  const end = source.indexOf("\nasync function ensureEventManager", start);
+  assert.ok(start >= 0 && end > start, "extract CURRENT input-only permission error helper");
+  const signature = /function expectedInvalidStaffPermissionMessage\(\s*raw: string \| null \| undefined,\s*\): string \| null \{/;
+  const helper = source.slice(start, end).replace(
+    signature, "function expectedInvalidStaffPermissionMessage(raw) {",
+  );
+  assert.doesNotMatch(helper, signature);
+  const expectedMessage = runInNewContext(
+    helper + "\nexpectedInvalidStaffPermissionMessage", { canonicalizePermissionKey },
+  );
+
+  const policyStart = source.indexOf("const STAFF_SAFE_ACTION_MESSAGES = new Set");
+  const policyEnd = source.indexOf("\nfunction staffPreparationError", policyStart);
+  const policy = runInNewContext(
+    source.slice(policyStart, policyEnd)
+      .replace(
+        /function staffSafeActionMessage\(\s*error: unknown,\s*fallback: string,\s*eventId\?: string,\s*explicitAllowed\?: readonly string\[],\s*\): string \{/,
+        "function staffSafeActionMessage(error, fallback, eventId, explicitAllowed) {",
+      )
+      .replace("let message: unknown;", "let message;")
+      + "\nstaffSafeActionMessage",
+    { Error },
+  );
+  const fallback = "入力エラー";
+  const rawInvalid = [
+    "INVALID_STAFF_PERMISSION",
+    "video.basics,INVALID_STAFF_PERMISSION",
+    "videos.title, INVALID_STAFF_PERMISSION ,event.members",
+  ];
+  for (const raw of rawInvalid) {
+    let thrown;
+    try { parseEventStaffPermissionKeys(raw); } catch (error) { thrown = error; }
+    assert.ok(thrown instanceof Error, "canonical domain parser rejects the unknown key");
+    const expected = expectedMessage(raw);
+    assert.equal(expected, thrown.message, "input-derived expected error matches actual parser");
+    assert.equal(policy(thrown, fallback, undefined, [expected]), thrown.message,
+      "legitimate legacy invalid permission key feedback survives");
+    assert.equal(policy(new Error(thrown.message + " SQL params: private-key"),
+      fallback, undefined, [expected]), fallback, "provider text must not be reflected");
+    assert.equal(policy(new Error(thrown.message),
+      fallback, undefined, []), fallback, "without exact input evidence, text stays private");
+  }
+
+  for (const raw of ["video.basics,videos.title", "", "x".repeat(513), "x".repeat(101)]) {
+    if (raw === "" || raw.includes("video.basics")) {
+      assert.doesNotThrow(() => parseEventStaffPermissionKeys(raw));
+    }
+    assert.equal(expectedMessage(raw), null,
+      "unknown oversized or entirely valid input does not create a reflection exception");
+  }
+  const assignmentStart = source.indexOf("let assignment: ReturnType<typeof assignmentFromInput>");
+  const assignmentEnd = source.indexOf("\n  let existing:", assignmentStart);
+  assert.ok(assignmentStart >= 0 && assignmentEnd > assignmentStart);
+  assert.match(source.slice(assignmentStart, assignmentEnd),
+    /expectedInvalidStaffPermissionMessage\(data\.permission_keys\)/,
+    "the exception handler uses only its already validated request payload");
 });
