@@ -5,9 +5,9 @@ import { selectApiArtifacts, publishApiArtifacts } from "./publishApiArtifacts.t
 import { EVENT_INDEX_KEY, eventDetailKey, eventReleaseKey } from "../src/lib/publicDataLoader.ts";
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
-function fixture(ids = ["evt_a", "evt_b"]) {
+function fixture(ids = ["evt_a", "evt_b"], indexedIds = ids) {
   const generation = "test-generation-1";
-  const payloads = new Map([[EVENT_INDEX_KEY, { items: ids.map((id) => ({ id })) }]]);
+  const payloads = new Map([[EVENT_INDEX_KEY, { items: indexedIds.map((id) => ({ id })) }]]);
   for (const id of ids) {
     payloads.set(eventDetailKey(id), { id, public: true });
     payloads.set(eventReleaseKey(id), { event_id: id, released: true });
@@ -81,7 +81,7 @@ test("MIG-0666 T02: missing readback retries at most three times; permanent abse
 test("MIG-0666 T03: envelope, manifest, generation, checksum, visibility and event coverage fail closed", () => {
   const data = fixture();
   assert.deepEqual(selectApiArtifacts(data).map((x) => x.key), [
-    "events/index.json", "events/evt_a/release.v1.json", "events/evt_b/release.v1.json",
+    "events/evt_a/release.v1.json", "events/evt_b/release.v1.json", "events/index.json",
   ]);
   const mutate = (fn) => {
     const copy = structuredClone(data);
@@ -109,6 +109,78 @@ test("MIG-0666 T03: envelope, manifest, generation, checksum, visibility and eve
   changeIndex((index) => index.items.push({ id: "evt_a" }));
   changeIndex((index) => { index.items[0].visibility_status = "private"; });
   changeIndex((index) => { index.items = "not-an-array"; });
+});
+
+test("SEC-708 P1-A: CURRENT 200-row index is a subset of 201 public release objects", async () => {
+  // CURRENT rebuildEventsIndex has LIMIT 200; produceSnapshots creates release
+  // data for every public event. A legitimate extra release must not abort.
+  const ids = Array.from({ length: 201 }, (_, i) => "evt_" + String(i).padStart(3, "0"));
+  const data = fixture(ids, ids.slice(0, 200));
+  const items = selectApiArtifacts(data);
+  assert.equal(items.length, 202, "201 releases plus the capped index");
+  assert.equal(items.at(-1).key, "events/index.json", "promote index last");
+
+  const b = bucket();
+  const report = await publishApiArtifacts(data, b);
+  assert.equal(report.verified, 202);
+  assert.equal(b.writes.at(-1), "events/index.json");
+  assert.equal(JSON.parse(b.rows.get("events/index.json")).items.length, 200);
+  assert.ok(b.rows.has("events/evt_200/release.v1.json"), "extra public release remains available");
+
+  // An index with 201 entries does NOT match CURRENT's capped contract.
+  assert.throws(() => selectApiArtifacts(fixture(ids)), /index items are invalid or over budget/);
+});
+
+test("SEC-708 P1-A: a public half-period event may have a release but no index item", async () => {
+  // CURRENT filters one-sided event periods from the index, yet the producer
+  // selects all public event IDs for release artifacts.
+  const data = fixture(["evt_valid", "evt_half_period"], ["evt_valid"]);
+  assert.deepEqual(selectApiArtifacts(data).map((x) => x.key), [
+    "events/evt_half_period/release.v1.json",
+    "events/evt_valid/release.v1.json",
+    "events/index.json",
+  ]);
+  const b = bucket();
+  const report = await publishApiArtifacts(data, b);
+  assert.equal(report.verified, 3);
+  assert.deepEqual(JSON.parse(b.rows.get("events/index.json")).items, [{ id: "evt_valid" }]);
+  assert.ok(b.rows.has("events/evt_half_period/release.v1.json"));
+});
+
+test("SEC-708 P1-B: release PUT or readback failure does not promote a new index", async () => {
+  for (const failure of ["put", "readback"]) {
+    const b = bucket();
+    await publishApiArtifacts(fixture(["evt_a"]), b);
+    const previousIndex = b.rows.get("events/index.json");
+    const previousWrites = b.writes.length;
+    const newReleaseKey = "events/evt_b/release.v1.json";
+    if (failure === "put") {
+      const originalPut = b.put.bind(b);
+      b.put = async (key, body) => {
+        if (key === newReleaseKey) throw new Error("injected release PUT failure");
+        return originalPut(key, body);
+      };
+    } else {
+      const originalGet = b.get.bind(b);
+      b.get = async (key) => {
+        if (key === newReleaseKey && b.writes.slice(previousWrites).includes(newReleaseKey)) {
+          return null; // injected permanent readback loss after a real PUT
+        }
+        return originalGet(key);
+      };
+    }
+    const expectedError = failure === "put"
+      ? /injected release PUT failure/
+      : /readback integrity failed after 3 retries/;
+    await assert.rejects(publishApiArtifacts(fixture(["evt_a", "evt_b"]), b), expectedError);
+    assert.equal(b.rows.get("events/index.json"), previousIndex, failure + ": old public index preserved");
+    assert.ok(!b.writes.slice(previousWrites).includes("events/index.json"),
+      failure + ": no new index PUT before all releases verify");
+    if (failure === "readback") {
+      assert.equal(b.writes.filter((key) => key === newReleaseKey).length, 4,
+        "retry cap must also hold for an unverified new release");
+    }
+  }
 });
 
 test("MIG-0666: remote oversized object is refused without any write", async () => {
