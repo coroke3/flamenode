@@ -221,31 +221,34 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
       queue.statements.length !== queue.expectedChanges.length) {
     throw new Error("free_video_submission_rebuild_plan_incomplete");
   }
-  // The member canonical-X CAS is a pre-commit security invariant, not a
-  // member write. The standalone member plan places it before member inserts,
-  // but appending that plan after the base video INSERT would still run the
-  // guard too late. Keep all base auth/event/question assertions, then the
-  // member guard, BEFORE any video/metadata/member/outbox/Queue mutation.
+  // Both member canonical-X and software alias/name CAS predicates are
+  // pre-commit invariants, NOT mutations. Standalone plans place guards ahead
+  // of their own writes; the full composer must hoist every one of them in
+  // front of the *first* base video INSERT or a stale resolution could be
+  // detected too late. Keep auth/event/question assertions first.
   const firstBaseWrite = base.expectedChanges.findIndex((changes) => changes !== null);
   if (firstBaseWrite < 1) {
     throw new Error("free_video_submission_assertion_order_invalid");
   }
   const memberGuardCount = member.expectedChanges[0] === null ? 1 : 0;
+  const softwareGuardCount = software.expectedChanges[0] === null ? 1 : 0;
   return {
     statements: [
       ...base.statements.slice(0, firstBaseWrite),
       ...member.statements.slice(0, memberGuardCount),
+      ...software.statements.slice(0, softwareGuardCount),
       ...base.statements.slice(firstBaseWrite),
       ...member.statements.slice(memberGuardCount),
-      ...software.statements, ...notification.statements,
+      ...software.statements.slice(softwareGuardCount), ...notification.statements,
       ...channelNotification.statements, ...queue.statements,
     ],
     expectedChanges: [
       ...base.expectedChanges.slice(0, firstBaseWrite),
       ...member.expectedChanges.slice(0, memberGuardCount),
+      ...software.expectedChanges.slice(0, softwareGuardCount),
       ...base.expectedChanges.slice(firstBaseWrite),
       ...member.expectedChanges.slice(memberGuardCount),
-      ...software.expectedChanges, ...notification.expectedChanges,
+      ...software.expectedChanges.slice(softwareGuardCount), ...notification.expectedChanges,
       ...channelNotification.expectedChanges, ...queue.expectedChanges,
     ],
     audits: [...base.audits, ...member.audits, ...software.audits],
