@@ -525,7 +525,7 @@ if (runTestWithTsx(import.meta.url)) {
                 return {
                   QUEUE_DISPATCH_ENABLED: "1",
                   NOTIFICATION_WAKE_QUEUE: { send: async (message) => {
-                    if (mode === "send_reject") throw new Error("Queue send " + secret);
+                    if (mode === "send_reject") throw Object.assign(new Error("Queue send " + secret), { name: secret });
                     sends.push(message.kind);
                   } },
                   STATIC_REBUILD_WAKE_QUEUE: { send: async (message) => sends.push(message.kind) },
@@ -581,7 +581,7 @@ if (runTestWithTsx(import.meta.url)) {
             ]
           : mode === "send_reject"
             ? [
-                [JSON.stringify({ service: "queue-wake", result: "send_failed", kind: "notification_available", error_name: "Error" })],
+                [JSON.stringify({ service: "queue-wake", result: "send_failed", kind: "notification_available" })],
                 [JSON.stringify({ service: "queue-wake", result: "last_failure_record_skipped", kind: "notification_available", reason: "send_failed" })],
               ]
           : mode === "notification_preflight"
@@ -589,9 +589,9 @@ if (runTestWithTsx(import.meta.url)) {
             : mode === "static_preflight"
               ? [["[audit-mutate] static rebuild wake failed", "provider_error"]]
               : [];
-      // SEC-738 independently hardens the shared Queue helper: flag getters
-      // then fail closed locally instead of throwing up to mutateWithAudit.
-      // Both versions must preserve the same already-committed D1/audit rows.
+      // This PR is stacked on SEC-738/742 (#739). Post-merge only sanitized
+      // fail-closed warnings are acceptable: never downgrade to the old host
+      // exception diagnostics or expose provider-controlled Error.name.
       const softFlagKinds = mode === "downstream"
         ? ["notification_available", "static_rebuild_available"]
         : mode === "notification_preflight"
@@ -604,29 +604,13 @@ if (runTestWithTsx(import.meta.url)) {
         [JSON.stringify({ service: "queue-wake", result: "last_failure_record_skipped", kind, reason: "feature_flags_unavailable" })],
       ]);
       if (softFlagKinds.length > 0) {
-        assert.ok(
-          JSON.stringify(warnings) === JSON.stringify(expectedWarnings) ||
-          JSON.stringify(warnings) === JSON.stringify(softFlagWarnings),
-          name + ": only exact legacy or SEC-738 fail-closed warning codes are allowed",
-        );
-      } else if (mode === "send_reject") {
-        // SEC-742 / PR #739 removes the untrusted provider error_name from
-        // Queue diagnostics. This audit boundary runs on both the old main
-        // and the independently owned hardened Queue helper without
-        // changing any transaction/commit semantics. Keep the shapes exact;
-        // #739's own regression requires that only the sanitized shape ships.
-        const sanitizedWarnings = [
-          [JSON.stringify({ service: "queue-wake", result: "send_failed", kind: "notification_available" })],
-          [JSON.stringify({ service: "queue-wake", result: "last_failure_record_skipped", kind: "notification_available", reason: "send_failed" })],
-        ];
-        assert.ok(
-          JSON.stringify(warnings) === JSON.stringify(expectedWarnings) ||
-          JSON.stringify(warnings) === JSON.stringify(sanitizedWarnings),
-          name + ": only exact pre-SEC-742 or sanitized Queue diagnostics are allowed",
-        );
+        assert.deepEqual(warnings, softFlagWarnings,
+          name + ": only SEC-738 sanitized fail-closed warnings are allowed");
       } else {
-        assert.deepEqual(warnings, expectedWarnings, name + ": fixed warning codes only");
+        assert.deepEqual(warnings, expectedWarnings, name + ": fixed-only warnings including SEC-742 send failures");
       }
+      assert.ok(!JSON.stringify(warnings).includes(secret),
+        name + ": a provider-controlled Error.name/message must never reach diagnostic logs");
       assert.equal(downstreamReads, mode === "downstream" ? 2
         : mode === "notification_preflight" || mode === "static_preflight" ? 3 : 0,
         name + ": independent notification/static wake attempts");
