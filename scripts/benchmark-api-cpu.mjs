@@ -30,7 +30,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 // ---------------------------------------------------------------- pure logic
 export const BUDGETS_MS = Object.freeze({ S2: 7, S3: 8, S4: 2 });
-export const KINDS = Object.freeze(["normal", "limit", "invalid", "cold"]);
+export const WARM_KINDS = Object.freeze(["normal", "limit", "invalid"]);
+export const KINDS = Object.freeze([...WARM_KINDS, "cold"]);
+export const QUIET_BASELINE_MAX_MS = 4;
 export const MIN_SAMPLES = 50;
 
 /** Nearest-rank percentile over an ascending-sorted array. */
@@ -55,7 +57,7 @@ export function summarize(values) {
 /**
  * Budget verdict from the MAX only (p50/p95/p99 never decide).
  *  - resolutionMs: clock/sampler granularity; the measured max may under-read by this much.
- *  - noiseMs: the max a zero-work route (BASELINE) produced in the same run. Noise only
+ *  - noiseMs: the WARM-only max of BASELINE in the same run. Cold startup CPU is excluded. Noise only
  *    INFLATES a reading, so it can excuse an over-budget reading but never a passing one.
  *  - PASS         max + resolution is below the budget.
  *  - FAIL         even after subtracting the noise floor, max is at/over the budget.
@@ -107,16 +109,49 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
       d1PerQueryRowsBySample: rows.map((r) => r.d1PerQueryRows ?? null),
     };
   }
-  const maxima = Object.values(kinds).map((k) => k.max).filter((v) => v != null);
-  const overallMax = maxima.length ? Math.max(...maxima) : null;
+  // ZERO_1102 §3 judges warm requests only; cold starts remain diagnostic data.
+  const warmMaxima = WARM_KINDS.map((kind) => kinds[kind].max).filter((v) => v != null);
+  const overallMax = warmMaxima.length ? Math.max(...warmMaxima) : null;
+  const coldMax = kinds.cold.max;
   return {
     runtimeClass,
     budgetMs: budget,
     kinds,
-    overallMax,
+    overallMax, // Warm-only maximum; used for the S2/S3/S4 budget verdict.
+    coldMax,    // Separately reported, never used as warm noise or budget max.
     noiseMs,
     verdict: judge(overallMax, budget, { resolutionMs, noiseMs, kind: budgetKind }),
   };
+}
+
+/**
+ * Apply the run-level acceptance gate after all samples are collected.
+ * A quiet BASELINE is mandatory: warm max < 4ms, with >= 50 valid samples in
+ * each warm kind. Cold startup never changes the warm noise or budget verdict.
+ * This is local evidence only, not Cloudflare production CPU accounting.
+ */
+export function applyBudgetVerdicts(results, { resolutionMs }) {
+  const baseline = results.find((r) => r.id === "BASELINE");
+  const baseAgg = baseline ? aggregate(baseline.samples, { runtimeClass: "S2", resolutionMs }) : null;
+  const noiseFloorMs = baseAgg?.overallMax ?? null;
+  const baselineColdMaxMs = baseAgg?.coldMax ?? null;
+  const quietBaseline = noiseFloorMs !== null && noiseFloorMs < QUIET_BASELINE_MAX_MS
+    && WARM_KINDS.every((kind) => baseAgg.kinds[kind].meetsMinSamples && baseAgg.kinds[kind].unexpectedStatus === 0);
+
+  for (const r of results) {
+    r.agg = aggregate(r.samples, {
+      runtimeClass: r.runtimeClass, resolutionMs, noiseMs: noiseFloorMs ?? 0,
+    });
+    if (r.id === "BASELINE") {
+      r.agg.verdict = "NOISE_FLOOR";
+    } else if (!quietBaseline) {
+      r.agg.verdict = "STOP_BASELINE";
+    } else if (!WARM_KINDS.every((kind) => r.agg.kinds[kind].meetsMinSamples
+      && r.agg.kinds[kind].unexpectedStatus === 0)) {
+      r.agg.verdict = "STOP_SAMPLES";
+    }
+  }
+  return { noiseFloorMs, baselineColdMaxMs, quietBaseline };
 }
 
 export function parseArgs(argv) {
@@ -172,11 +207,11 @@ export function renderMarkdown(results, { digits, label }) {
       );
     }
   }
-  lines.push("", `Budget verdict by max (${label}):`, "");
-  lines.push(`| scenario | class | budget | overall max (ms) | verdict |`, `| --- | --- | --- | ---: | --- |`);
+  lines.push("", `Warm-only budget verdict by max (${label}); cold shown separately (never judged):`, "");
+  lines.push(`| scenario | class | budget | warm max (ms) | cold max (ms) | verdict |`, `| --- | --- | --- | ---: | ---: | --- |`);
   for (const r of results) {
     const op = r.runtimeClass === "S4" ? "<=" : "<";
-    lines.push(`| ${r.id} ${r.title} | ${r.runtimeClass} | ${op} ${r.agg.budgetMs}ms | ${formatMs(r.agg.overallMax, digits)} | ${r.agg.verdict} |`);
+    lines.push(`| ${r.id} ${r.title} | ${r.runtimeClass} | ${op} ${r.agg.budgetMs}ms | ${formatMs(r.agg.overallMax, digits)} | ${formatMs(r.agg.coldMax, digits)} | ${r.agg.verdict} |`);
   }
   return lines.join("\n");
 }
@@ -1665,6 +1700,7 @@ export async function main(argv) {
   else target = createReplayTarget(await createInprocTarget(plan), await createWranglerTarget(plan, opts));
   const startedAt = new Date().toISOString();
   const results = [];
+  let baselineEvidence = null;
   try {
     const state = { tagSeq: 0 };
     for (const sc of scenarios) {
@@ -1676,14 +1712,7 @@ export async function main(argv) {
       const cold = await runCold(target, scenarios, opts);
       for (const r of results) r.samples.push(...cold.get(r.id));
     }
-    const resolutionMs = target.resolutionMs;
-    const base = results.find((r) => r.id === "BASELINE");
-    const baseAgg = base ? aggregate(base.samples, { runtimeClass: "S2", resolutionMs }) : null;
-    const noiseMs = baseAgg?.overallMax ?? 0;
-    for (const r of results) {
-      r.agg = aggregate(r.samples, { runtimeClass: r.runtimeClass, resolutionMs, noiseMs });
-      if (r.id === "BASELINE") r.agg.verdict = "NOISE_FLOOR";
-    }
+    baselineEvidence = applyBudgetVerdicts(results, { resolutionMs: target.resolutionMs });
   } finally {
     try { await target.close(); } catch (e) { console.error(`warning: target close failed: ${e.message}`); }
   }
@@ -1696,7 +1725,10 @@ export async function main(argv) {
     commit: spawnSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).stdout.trim(),
     samplesPerKind: opts.samples, coldSamples: target.supportsCold && !opts.skipCold ? opts.coldSamples : 0, warmupDiscarded: opts.warmup,
     resolutionMs: target.resolutionMs,
-    noiseFloorMs: results.find((r) => r.id === "BASELINE")?.agg.overallMax ?? null,
+    noiseFloorMs: baselineEvidence?.noiseFloorMs ?? null, // Warm-only BASELINE, not cold-inclusive.
+    baselineColdMaxMs: baselineEvidence?.baselineColdMaxMs ?? null,
+    quietBaseline: baselineEvidence?.quietBaseline ?? false,
+    requiredWarmBaselineUnderMs: QUIET_BASELINE_MAX_MS,
     clockCalibration: target.calibration ?? null,
   };
   const md = renderMarkdown(results, { digits: target.digits, label: target.name === "inproc" ? "Node proxy, not workerd" : "local workerd, 1ms clock" });

@@ -5,19 +5,21 @@
 > Source of truth: `scripts/benchmark-api-cpu.mjs`, `docs/migration/ZERO_1102.md` section 3 and 5
 > Production mutation: none (no deploy, no Route, no `--remote`, no Cloudflare account call)
 
-**Every number in this file is a LOCAL measurement. None is a production value.** ZERO_1102 section 3 already states that local workerd values are not production values.
+> **2026-11-22 P1 #732 correctness gate (PR #456; CI pending):** Historical rows and verdicts below predate the warm/cold separation and are NOT valid S2/S3 acceptance. The former `aggregate.overallMax` and `noiseFloorMs` included cold starts, which could mask warm budget failures. Current code judges the maximum of normal/limit/invalid only, reports cold separately, and blocks acceptance unless warm BASELINE max is strictly below 4ms with >=50 valid samples per warm kind. No qualifying Linux workerd run is asserted here.\n\n**Every number in this file is a LOCAL measurement. None is a production value.** ZERO_1102 section 3 already states that local workerd values are not production values.
 
 ## 1. What is judged
 
 Budgets are judged by the **maximum**, not p95 (ZERO_1102 section 3): S2 read `< 7ms`, S3 mutation `< 8ms`, S4 session resolution `<= 2ms` (inside S2/S3). p50/p95/p99 are recorded and never decide pass or fail.
 
-The harness gives one of these verdicts per method, from the max over all four input kinds:
+The harness gives one of these verdicts per method from the maximum of the three **warm** kinds (normal/limit/invalid); cold start is recorded separately, never included in noise or the S2/S3/S4 budget verdict. A warm BASELINE maximum >=4ms (strict), missing baseline or inadequate warm samples produces STOP, not PASS:
 
 | verdict | rule |
 | --- | --- |
 | PASS | `max + clock resolution` is below the budget |
-| FAIL | `max - noise floor` is at or above the budget (noise floor = max of a zero-work `BASELINE` route in the same run; noise can only inflate a reading) |
-| INCONCLUSIVE | over budget but within the noise floor, or too close to the budget for the clock |
+| FAIL | `max - noise floor` is at or above the budget (noise floor = **warm-only** max of a zero-work `BASELINE` route in the same run; noise can only inflate a reading) |
+| INCONCLUSIVE | over budget but within the warm noise floor, or too close to the budget for the clock |
+| STOP_BASELINE | no qualified warm BASELINE (<4ms, >=50 samples/kind, no unexpected warm status) |
+| STOP_SAMPLES | one or more route warm kinds has <50 samples or unexpected HTTP statuses |
 
 ## 2. Input kinds (ZERO_1102 section 5), 50 samples each (10 warm-up requests discarded)
 

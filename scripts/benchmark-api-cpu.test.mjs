@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, ROUTE_INVENTORY, SEED, aggregate, buildPendingScenarios, buildScenarios, createInprocTarget, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, buildPendingScenarios, buildScenarios, createInprocTarget, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
 } from "./benchmark-api-cpu.mjs";
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {
@@ -106,6 +106,65 @@ test("judge: noise floor can excuse an over-budget reading but never a PASS", ()
   assert.equal(judge(9, 7, { noiseMs: 5 }), "INCONCLUSIVE");
   assert.equal(judge(9, 7, { noiseMs: 1 }), "FAIL");
   assert.equal(judge(3, 7, { noiseMs: 5 }), "PASS");
+});
+
+test("Issue #732: cold baseline never masks a warm over-budget failure", () => {
+  const warm = (ms) => WARM_KINDS.flatMap((kind) =>
+    Array.from({ length: MIN_SAMPLES }, () => ({ kind, cpuMs: ms, status: 200 })));
+  const baseline = [...warm(1), ...Array.from({ length: MIN_SAMPLES }, () => ({
+    kind: "cold", cpuMs: 80, status: 200,
+  }))];
+  const routeWarm = warm(12);
+  const routeCold = [...routeWarm, ...Array.from({ length: MIN_SAMPLES }, () => ({
+    kind: "cold", cpuMs: 2, status: 200,
+  }))];
+  const withCold = [
+    { id: "S2-ROUTE", runtimeClass: "S2", samples: routeCold },
+    { id: "BASELINE", runtimeClass: "S2", samples: baseline },
+  ];
+  const withoutCold = [
+    { id: "S2-ROUTE", runtimeClass: "S2", samples: routeWarm },
+    { id: "BASELINE", runtimeClass: "S2", samples: warm(1) },
+  ];
+  const a = applyBudgetVerdicts(withCold, { resolutionMs: 0 });
+  const b = applyBudgetVerdicts(withoutCold, { resolutionMs: 0 });
+  assert.equal(QUIET_BASELINE_MAX_MS, 4);
+  assert.deepEqual([a.noiseFloorMs, a.baselineColdMaxMs, a.quietBaseline], [1, 80, true]);
+  assert.deepEqual([b.noiseFloorMs, b.baselineColdMaxMs, b.quietBaseline], [1, null, true]);
+  assert.equal(withCold[0].agg.overallMax, 12);
+  assert.equal(withCold[0].agg.coldMax, 2);
+  assert.equal(withCold[0].agg.noiseMs, 1);
+  assert.equal(withCold[0].agg.verdict, "FAIL", "12 - warm noise 1 >= S2 budget 7");
+  assert.equal(withoutCold[0].agg.verdict, "FAIL", "--skip-cold must not change warm verdict");
+  assert.equal(withCold[1].agg.verdict, "NOISE_FLOOR");
+  assert.equal(judge(12, 7, { noiseMs: 80 }), "INCONCLUSIVE",
+    "reproduce the former masked failure with cold-inclusive noise");
+});
+
+test("Issue #732: cold CPU has no role in warm pass or strict quiet-host STOP", () => {
+  const warm = (ms) => WARM_KINDS.flatMap((kind) =>
+    Array.from({ length: MIN_SAMPLES }, () => ({ kind, cpuMs: ms, status: 200 })));
+  const ready = [
+    { id: "S2-ROUTE", runtimeClass: "S2", samples: [...warm(2), { kind: "cold", cpuMs: 1000 }] },
+    { id: "BASELINE", runtimeClass: "S2", samples: [...warm(1), { kind: "cold", cpuMs: 80 }] },
+  ];
+  applyBudgetVerdicts(ready, { resolutionMs: 0 });
+  assert.equal(ready[0].agg.verdict, "PASS", "high cold CPU must not fail warm budget");
+  assert.equal(ready[0].agg.overallMax, 2);
+  assert.equal(ready[0].agg.coldMax, 1000);
+  const badBaseline = [
+    { id: "S2-ROUTE", runtimeClass: "S2", samples: warm(2) },
+    { id: "BASELINE", runtimeClass: "S2", samples: warm(4) },
+  ];
+  const blocked = applyBudgetVerdicts(badBaseline, { resolutionMs: 0 });
+  assert.equal(blocked.quietBaseline, false, "warm baseline must be strictly below 4ms");
+  assert.equal(badBaseline[0].agg.verdict, "STOP_BASELINE");
+  const insufficient = [
+    { id: "S2-ROUTE", runtimeClass: "S2", samples: warm(2).slice(0, 2) },
+    { id: "BASELINE", runtimeClass: "S2", samples: warm(1) },
+  ];
+  applyBudgetVerdicts(insufficient, { resolutionMs: 0 });
+  assert.equal(insufficient[0].agg.verdict, "STOP_SAMPLES", "each warm kind requires 50 samples");
 });
 
 test("aggregate reports per-kind stats, sample-count adequacy and unexpected statuses", () => {
