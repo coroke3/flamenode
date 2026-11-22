@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, buildPendingScenarios, buildScenarios, createInprocTarget, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
 } from "./benchmark-api-cpu.mjs";
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {
@@ -132,6 +132,50 @@ test("judge: noise floor can excuse an over-budget reading but never a PASS", ()
   assert.equal(judge(9, 7, { noiseMs: 5 }), "INCONCLUSIVE");
   assert.equal(judge(9, 7, { noiseMs: 1 }), "FAIL");
   assert.equal(judge(3, 7, { noiseMs: 5 }), "PASS");
+});
+
+test("MIG-0639: Node proxy, non-Linux, sim, partial and cold-skip never report formal CPU PASS", () => {
+  const warm = WARM_KINDS.flatMap((kind) =>
+    Array.from({length: MIN_SAMPLES}, () => ({kind, cpuMs: 0.5, status: 200})));
+  const cold = Array.from({length: MIN_SAMPLES}, () => ({kind:"cold", cpuMs: 10, status: 200}));
+  const getResults = () => [
+    {id:"RH-020", runtimeClass:"S2", samples:[...warm,...cold]},
+    {id:"BASELINE", runtimeClass:"S2", samples:[...warm,...cold]},
+  ];
+  const accepted = {mode:"wrangler", d1:"replay", platform:"linux", only:null,
+    skipCold:false, coldSamples:MIN_SAMPLES, warmup:10};
+  const matrix = [
+    [{...accepted, mode:"inproc"}, "STOP_PROXY"],
+    [{...accepted, platform:"win32"}, "STOP_PLATFORM"],
+    [{...accepted, d1:"sim"}, "STOP_D1_SIM"],
+    [{...accepted, only:["RH-020"]}, "STOP_PARTIAL"],
+    [{...accepted, skipCold:true}, "STOP_COLD"],
+    [{...accepted, coldSamples:49}, "STOP_COLD"],
+    [{...accepted, warmup:0}, "STOP_WARMUP"],
+  ];
+  for (const [opts, reason] of matrix) {
+    const rows = getResults();
+    applyBudgetVerdicts(rows, {resolutionMs:0});
+    assert.equal(rows[0].agg.verdict,"PASS","control samples pass warm math");
+    const gate = enforceCpuMeasurementEnvironment(rows, opts);
+    assert.deepEqual(gate,{eligible:false,stopReason:reason});
+    assert.equal(rows[0].agg.verdict,reason);
+    assert.equal(rows[1].agg.verdict,"NOISE_FLOOR");
+  }
+  const full = getResults();
+  applyBudgetVerdicts(full, {resolutionMs:0});
+  assert.deepEqual(enforceCpuMeasurementEnvironment(full,accepted),
+    {eligible:true,stopReason:null});
+  assert.equal(full[0].agg.verdict,"PASS");
+  // A qualifying platform flag alone cannot hide missing or anomalous cold samples.
+  full[0].agg.kinds.cold.n=MIN_SAMPLES-1;
+  assert.equal(enforceCpuMeasurementEnvironment(full,accepted).stopReason,"STOP_COLD");
+  const baselineFail=getResults();
+  baselineFail[1].samples=WARM_KINDS.flatMap((kind) =>
+    Array.from({length:MIN_SAMPLES},()=>({kind,cpuMs:4,status:200}))).concat(cold);
+  applyBudgetVerdicts(baselineFail,{resolutionMs:0});
+  enforceCpuMeasurementEnvironment(baselineFail,{...accepted,mode:"inproc"});
+  assert.equal(baselineFail[0].agg.verdict,"STOP_BASELINE","preserve stricter baseline STOP");
 });
 
 test("Issue #732: cold baseline never masks a warm over-budget failure", () => {

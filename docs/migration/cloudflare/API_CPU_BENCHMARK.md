@@ -7,6 +7,8 @@
 
 > **2026-11-22 P1 #732 correctness gate (PR #456; CI pending):** Historical rows and verdicts below predate the warm/cold separation and are NOT valid S2/S3 acceptance. The former `aggregate.overallMax` and `noiseFloorMs` included cold starts, which could mask warm budget failures. Current code judges the maximum of normal/limit/invalid only, reports cold separately, and blocks acceptance unless warm BASELINE max is strictly below 4ms with >=50 valid samples per warm kind. No qualifying Linux workerd run is asserted here.
 
+**MIG-0639 acceptance-environment guard (2026-11-22):** A benchmark run cannot claim S2/S3/S4 CPU PASS from `--mode inproc` (Node wall proxy), Windows/non-Linux workerd, `--d1 sim`, a `--only` subset, a warmup below 10, or missing/insufficient/invalid cold samples (50 per route). These now receive `STOP_PROXY`, `STOP_PLATFORM`, `STOP_D1_SIM`, `STOP_PARTIAL`, `STOP_WARMUP`, or `STOP_COLD` instead of a budget PASS. Warm/cold pure arithmetic and the stricter warm BASELINE `STOP_BASELINE` / warm `STOP_SAMPLES` logic remain unchanged. JSON records `measurementEnvironmentEligible` and `measurementEnvironmentStopReason`. A Linux workerd verdict is still **LOCAL**, not production acceptance, and independent review/Lead gates still apply.
+
 **Every number in this file is a LOCAL measurement. None is a production value.** ZERO_1102 section 3 already states that local workerd values are not production values.
 
 ## 1. What is judged

@@ -154,6 +154,38 @@ export function applyBudgetVerdicts(results, { resolutionMs }) {
   return { noiseFloorMs, baselineColdMaxMs, quietBaseline };
 }
 
+/**
+ * Prevent a valid proxy/partial run from being misreported as API CPU acceptance.
+ * Linux workerd with local D1/R2 replay and complete cold coverage is necessary
+ * for MIG-0639 U02; it is never a substitute for actual production telemetry.
+ * This is intentionally separate from pure judge()/aggregate() unit math.
+ */
+export function enforceCpuMeasurementEnvironment(results, {
+  mode, d1, platform, only = null, skipCold = false, coldSamples = 0, warmup = 0,
+}) {
+  let stopReason = null;
+  if (mode !== "wrangler") stopReason = "STOP_PROXY";
+  else if (platform !== "linux") stopReason = "STOP_PLATFORM";
+  else if (d1 !== "replay") stopReason = "STOP_D1_SIM";
+  else if (only != null) stopReason = "STOP_PARTIAL";
+  else if (warmup < 10) stopReason = "STOP_WARMUP";
+  else if (skipCold || coldSamples < MIN_SAMPLES
+    || !results.every((r) => r.agg?.kinds?.cold?.n >= MIN_SAMPLES
+      && r.agg.kinds.cold.unexpectedStatus === 0)) {
+    stopReason = "STOP_COLD";
+  }
+  if (stopReason) {
+    for (const r of results) {
+      if (r.id === "BASELINE") continue;
+      // Keep the more specific baseline/sample STOP, never convert a STOP to PASS.
+      if (r.agg.verdict !== "STOP_BASELINE" && r.agg.verdict !== "STOP_SAMPLES") {
+        r.agg.verdict = stopReason;
+      }
+    }
+  }
+  return { eligible: stopReason === null, stopReason };
+}
+
 export function parseArgs(argv) {
   const out = {
     mode: "wrangler", samples: MIN_SAMPLES, coldSamples: MIN_SAMPLES, warmup: 10,
@@ -1818,6 +1850,7 @@ export async function main(argv) {
   const startedAt = new Date().toISOString();
   const results = [];
   let baselineEvidence = null;
+  let environmentEvidence = null;
   try {
     const state = { tagSeq: 0 };
     for (const sc of scenarios) {
@@ -1830,6 +1863,7 @@ export async function main(argv) {
       for (const r of results) r.samples.push(...cold.get(r.id));
     }
     baselineEvidence = applyBudgetVerdicts(results, { resolutionMs: target.resolutionMs });
+    environmentEvidence = enforceCpuMeasurementEnvironment(results, { ...opts, platform: process.platform });
   } finally {
     try { await target.close(); } catch (e) { console.error(`warning: target close failed: ${e.message}`); }
   }
@@ -1845,6 +1879,8 @@ export async function main(argv) {
     noiseFloorMs: baselineEvidence?.noiseFloorMs ?? null, // Warm-only BASELINE, not cold-inclusive.
     baselineColdMaxMs: baselineEvidence?.baselineColdMaxMs ?? null,
     quietBaseline: baselineEvidence?.quietBaseline ?? false,
+    measurementEnvironmentEligible: environmentEvidence?.eligible ?? false,
+    measurementEnvironmentStopReason: environmentEvidence?.stopReason ?? null,
     requiredWarmBaselineUnderMs: QUIET_BASELINE_MAX_MS,
     clockCalibration: target.calibration ?? null,
   };
