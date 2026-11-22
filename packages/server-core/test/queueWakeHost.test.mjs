@@ -52,6 +52,87 @@ test("wake is skipped when the host flags dispatch off or has no env", async () 
   assert.deepEqual(noEnv, { sent: false, reason: "dispatch_disabled" });
 });
 
+test("SEC-738: poisoned host feature-flag accessor fails closed with sanitized KV telemetry", async () => {
+  const secret = "SEC738_PROVIDER_SECRET_DO_NOT_LOG";
+  const sent = [];
+  const pending = [];
+  const writes = [];
+  const warned = [];
+  const sentKinds = new Set();
+  const poisoned = Object.defineProperty({
+    ...enabled,
+    NOTIFICATION_WAKE_QUEUE: { send: async (message) => { sent.push(message); } },
+  }, "QUEUE_DISPATCH_ENABLED", {
+    get() { throw new Error(secret); },
+  });
+  const host = makeHost({
+    env: poisoned,
+    waitUntil: (promise) => pending.push(promise),
+    kv: { put: async (key, value, options) => writes.push({ key, value, options }) },
+  });
+  const originalWarn = console.warn;
+  console.warn = (...args) => warned.push(args);
+  let result;
+  try {
+    result = await sendQueueWakeBestEffort(
+      { kind: "notification_available", source: "web", sentKinds },
+      host,
+    );
+    await Promise.all(pending);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(result, { sent: false, reason: "feature_flags_unavailable" });
+  assert.equal(sent.length, 0, "no Queue message after an unreliable flag read");
+  assert.equal(sentKinds.size, 0, "failed flags must not reserve a wake kind");
+  assert.equal(pending.length, 1, "failure telemetry must remain within Worker lifetime");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].key, "queue_wake:last_failure:notification_available");
+  assert.equal(JSON.parse(writes[0].value).reason, "feature_flags_unavailable");
+  assert.equal(writes[0].options.expirationTtl, 7 * 24 * 60 * 60);
+  assert.deepEqual(warned, [[JSON.stringify({
+    service: "queue-wake", result: "feature_flags_unavailable",
+    kind: "notification_available",
+  })]]);
+  assert.ok(!JSON.stringify({ result, warned, writes }).includes(secret),
+    "provider error details must never appear in results, logs, or KV diagnostics");
+});
+
+test("SEC-738: explicitly supplied Proxy flags fail closed without touching a healthy binding", async () => {
+  const secret = "SEC738_EXPLICIT_FLAGS_SECRET";
+  const sends = [];
+  const warned = [];
+  const sentKinds = new Set();
+  const host = makeHost({
+    env: { ...enabled, STATIC_REBUILD_WAKE_QUEUE: { send: async (m) => sends.push(m) } },
+  });
+  const envFlags = new Proxy({ ...enabled }, {
+    get(target, prop, receiver) {
+      if (prop === "QUEUE_CONTINUATION_ENABLED") throw new TypeError(secret);
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  const originalWarn = console.warn;
+  console.warn = (...args) => warned.push(args);
+  let result;
+  try {
+    result = await sendQueueWakeBestEffort(
+      { kind: "static_rebuild_available", source: "admin", envFlags, sentKinds },
+      host,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(result, { sent: false, reason: "feature_flags_unavailable" });
+  assert.equal(sends.length, 0);
+  assert.equal(sentKinds.size, 0);
+  assert.deepEqual(warned, [
+    [JSON.stringify({ service: "queue-wake", result: "feature_flags_unavailable", kind: "static_rebuild_available" })],
+    [JSON.stringify({ service: "queue-wake", result: "last_failure_record_skipped", kind: "static_rebuild_available", reason: "feature_flags_unavailable" })],
+  ]);
+  assert.ok(!JSON.stringify({ result, warned }).includes(secret));
+});
+
 test("a missing binding records last failure in the host KV through waitUntil", async () => {
   const puts = [];
   const pending = [];
