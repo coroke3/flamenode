@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { notificationOutbox, users } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "../db.ts";
 import { generateId } from "../id.ts";
@@ -9,8 +9,9 @@ import type { UnslottedVideoAtomicPlan } from "./unslottedEventPlans.ts";
  * The authenticated host supplies the fully formatted CURRENT payload,
  * because public URLs depend on host configuration, not server-core.
  * This builder never sends a DM, mutates D1 or wakes a worker.
- * Caller must include the returned INSERT in the same audited D1 transaction
- * as the video and enqueue wake only AFTER commit.
+ * The recipient opt-out and active dedupe are checked in a single conditional
+ * INSERT inside the audited video transaction (zero pre-batch D1 reads).
+ * A Queue wake may be scheduled only AFTER the D1 commit.
  */
 export async function buildFreeVideoSubmittedNotificationPlan(
   db: ServerCoreDb,
@@ -49,46 +50,34 @@ export async function buildFreeVideoSubmittedNotificationPlan(
   }
 
   const dedupeKey = `video_submitted:${videoId}`;
-  // S3: inspect recipient preference and active-dedupe in ONE bounded D1
-  // SELECT. Two sequential pre-reads would violate the 3-read S3 ceiling once
-  // session/writeGuard and audit metadata are included. The partial UNIQUE
-  // index and ON CONFLICT DO NOTHING still resolve an in-flight duplicate.
-  const recipient = (await db.select({
-    id: users.id,
-    enabled: users.is_notification_enabled,
-    activeDedupe: sql<number>`EXISTS (
-      SELECT 1 FROM ${notificationOutbox}
-      WHERE ${notificationOutbox.dedupe_key} = ${dedupeKey}
-        AND ${inArray(notificationOutbox.status, ["pending", "processing", "sent"])}
-    )`.as("active_dedupe"),
-  }).from(users).where(eq(users.id, actorUserId)).limit(1))[0];
-  if (!recipient?.id || recipient.enabled === 0 || recipient.activeDedupe !== 0) {
-    return { statements: [], expectedChanges: [], audits: [] };
-  }
-  const row: typeof notificationOutbox.$inferSelect = {
-    id: generateId(),
-    recipient_user_id: recipient.id,
-    type: "video_submitted",
-    payload_json: payloadJson,
-    delivery_route: "dm",
-    correlation_id: null,
-    status: "pending",
-    attempt_count: 0,
-    processing_started_at: null,
-    lease_token: null,
-    lease_expires_at: null,
-    next_attempt_at: null,
-    last_error: null,
-    processed_at: null,
-    event_id: eventId,
-    dedupe_key: dedupeKey,
-    created_at: now,
-  };
-  // CURRENT uses conflict-ignore for the active-dedupe unique index;
-  // a concurrent identical notification does not fail video creation.
-  return {
-    statements: [db.insert(notificationOutbox).values(row).onConflictDoNothing()],
-    expectedChanges: [null],
-    audits: [],
-  };
+  // Resolve the receiver, their current DM opt-out and the active-dedupe
+  // predicate inside the SAME D1 batch as the video INSERT. The old builder
+  // spent one separate pre-batch SELECT, which is costly under the S3 3-read
+  // ceiling and could become stale before the transaction.
+  //
+  // Always retain this prepared conditional statement, even if the recipient
+  // does not exist or opted out. The status is re-evaluated at commit time.
+  // The unique partial index plus conflict-ignore retains CURRENT idempotency.
+  const stmt = db.run(sql`
+    INSERT INTO notification_outbox (
+      id, recipient_user_id, type, payload_json, delivery_route,
+      correlation_id, status, attempt_count, processing_started_at,
+      lease_token, lease_expires_at, next_attempt_at, last_error, processed_at,
+      event_id, dedupe_key, created_at
+    )
+    SELECT
+      ${generateId()}, ${users.id}, ${"video_submitted"}, ${payloadJson}, ${"dm"},
+      NULL, ${"pending"}, ${0}, NULL, NULL, NULL, NULL, NULL, NULL,
+      ${eventId}, ${dedupeKey}, ${now}
+    FROM ${users}
+    WHERE ${users.id} = ${actorUserId}
+      AND COALESCE(${users.is_notification_enabled}, 1) <> 0
+      AND NOT EXISTS (
+        SELECT 1 FROM ${notificationOutbox}
+        WHERE ${notificationOutbox.dedupe_key} = ${dedupeKey}
+          AND ${inArray(notificationOutbox.status, ["pending", "processing", "sent"])}
+      )
+    ON CONFLICT DO NOTHING
+  `);
+  return { statements: [stmt], expectedChanges: [null], audits: [] };
 }
