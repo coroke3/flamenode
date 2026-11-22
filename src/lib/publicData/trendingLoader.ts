@@ -82,6 +82,15 @@ export async function loadStaticTrending(
       if (!etag?.trim()) throw new Error("trending_visibility_manifest_missing");
       data = filterStaticTrendingByVisibilityFence(data, (entityType, entityId) =>
         isEntityBlockedInManifest(manifest, entityType, entityId));
+      // A video/event can be depublicized while this request is filtering a
+      // previously cached ranking. Compare the committed R2 generation after
+      // filtering, just as the CURRENT event playlist reader does. A change,
+      // disappearance or read failure is not evidence the candidate is safe.
+      // Fail closed rather than returning items verified against an old fence.
+      const after = await readPublicVisibilityBlockedEntitiesManifest();
+      if (!after.etag?.trim() || after.etag !== etag) {
+        throw new Error("trending_visibility_manifest_changed");
+      }
     } catch {
       // A missing/invalid visibility manifest in enforce mode is not proof of
       // public eligibility. Fail closed without reflecting provider details.
