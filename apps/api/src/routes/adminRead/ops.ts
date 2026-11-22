@@ -44,7 +44,10 @@ const YOUTUBE_SYNC_STALE_SECONDS = 14 * 24 * 60 * 60;
 const MAX_OPS_LIST_BYTES = 48 * 1024;
 /** S2 bounds the entire serialized HTTP body, not just queue rows. */
 const MAX_OPS_HTTP_BYTES = 64 * 1024;
-const MAX_BACKFILL_SUMMARY_ERROR_BYTES = 1024;
+/** Limit UTF-16 input lengths before JSON.stringify of untrusted D1/KV payloads (ZERO_1102 §4). */
+const MAX_OPS_KV_STATE_CODE_UNITS = 4096;
+const MAX_OPS_ROW_TEXT_CODE_UNITS = 8192;
+const MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS = 1024;
 const OMITTED_BACKFILL_ERROR = "長いエラー詳細は応答サイズ上限のため省略しました。";
 const utf8Encoder = new TextEncoder();
 /** Serialized size in UTF-8 bytes (not UTF-16 units). Lists apply it to every row, the first included. */
@@ -378,6 +381,7 @@ function backfillKindFromReason(reason: string): StaticBackfillKind | null {
 }
 
 adminOpsRoutes.get("/static-builds", async (c) => {
+  let oversizedKvState = false;
   const [queue, aggregates, backfillState, sharedInputs] = await Promise.all([
     c.env.DB.prepare(
       "SELECT id, status, target_type, target_id, reason, priority, attempt_count, updated_at, error " +
@@ -403,6 +407,12 @@ adminOpsRoutes.get("/static-builds", async (c) => {
     (async () => {
       try {
         const raw = await c.env.KV?.get(STATIC_BACKFILL_KV_KEY);
+        if (raw && raw.length > MAX_OPS_KV_STATE_CODE_UNITS) {
+          // This is a persisted continuation token. Do not parse or truncate it,
+          // then accidentally offer a different token to the Ops resume action.
+          oversizedKvState = true;
+          return createEmptyStaticBackfillState();
+        }
         return raw ? parseStaticBackfillState(JSON.parse(raw)) : createEmptyStaticBackfillState();
       } catch {
         return createEmptyStaticBackfillState();
@@ -420,6 +430,10 @@ adminOpsRoutes.get("/static-builds", async (c) => {
       }),
     ),
   ]);
+
+  if (oversizedKvState) {
+    return c.json({ error: "unavailable" }, 503);
+  }
 
   const counts = { pending: 0, processing: 0, failed: 0, dead_letter: 0, done: 0 };
   let operationMode = resolveOperationMode(null);
@@ -443,26 +457,24 @@ adminOpsRoutes.get("/static-builds", async (c) => {
       if (row.b === "failed" || row.b === "dead_letter") backfillQueue[kind].failed += count;
     }
   }
+  let truncated = false;
   for (const row of aggregates.results) {
     if (row.kind !== "bf_fail") continue;
     const kind = backfillKindFromReason(String(row.a ?? ""));
     if (!kind || backfillQueue[kind].lastError || !row.b) continue;
-    backfillQueue[kind].lastError = row.b;
+    // Prevent a giant provider diagnostic from being stringified or sent in
+    // the admin response. Keep ordinary error messages intact.
+    if (row.b.length > MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS) {
+      backfillQueue[kind].lastError = OMITTED_BACKFILL_ERROR;
+      truncated = true;
+    } else {
+      backfillQueue[kind].lastError = row.b;
+    }
   }
 
-  // ZERO_1102 S2: response <= 64 KiB (the queue rows carry error text).
-  const rows: AdminStaticBuildsResponse["rows"] = [];
-  let used = 0;
-  let truncated = false;
-  for (const row of queue.results) {
-    const size = utf8Size(row);
-    if (used + size > MAX_OPS_LIST_BYTES) {
-      truncated = true;
-      break;
-    }
-    used += size;
-    rows.push(row);
-  }
+  // Budget the complete JSON envelope FIRST, before adding the row list.
+  // This avoids O(rows²) serialization and never serializes an oversized
+  // persisted KV cursor or provider error to check whether it was oversized.
   const body: AdminStaticBuildsResponse = {
     operationMode,
     maxItemsPerRun: STATIC_REBUILD_ITEMS_PER_RUN,
@@ -471,28 +483,33 @@ adminOpsRoutes.get("/static-builds", async (c) => {
     backfillQueue,
     sharedInputs,
     truncated,
-    rows,
+    rows: [],
   };
-  // Queue rows have their own 48 KiB budget, but backfill failure summaries
-  // and persisted KV cursors are also part of the same 64 KiB S2 response.
-  if (utf8Size(body) > MAX_OPS_HTTP_BYTES) {
-    for (const kind of STATIC_BACKFILL_KINDS) {
-      const error = body.backfillQueue[kind].lastError;
-      if (error && utf8Size(error) > MAX_BACKFILL_SUMMARY_ERROR_BYTES) {
-        body.backfillQueue[kind].lastError = OMITTED_BACKFILL_ERROR;
-        body.truncated = true;
-      }
-    }
-    // Preserve the newest rows and retain normal-sized diagnostic summaries.
-    while (body.rows.length > 0 && utf8Size(body) > MAX_OPS_HTTP_BYTES) {
-      body.rows.pop();
+  const headerBytes = utf8Size(body);
+  if (headerBytes > MAX_OPS_HTTP_BYTES) {
+    // A continuation cursor is actionable; never shorten it to fit an HTTP body.
+    return c.json({ error: "unavailable" }, 503);
+  }
+  const availableRowBytes = Math.min(MAX_OPS_LIST_BYTES, MAX_OPS_HTTP_BYTES - headerBytes);
+  let used = 0;
+  for (const row of queue.results) {
+    // A single D1 string can exceed the entire S2 JSON serialization limit.
+    // Count input code units before JSON.stringify (control chars may expand
+    // to 6 escaped ASCII bytes per UTF-16 unit).
+    const textUnits = Object.values(row).reduce(
+      (sum, value) => sum + (typeof value === "string" ? value.length : 0), 0,
+    );
+    if (textUnits > MAX_OPS_ROW_TEXT_CODE_UNITS) {
       body.truncated = true;
+      break;
     }
-    if (utf8Size(body) > MAX_OPS_HTTP_BYTES) {
-      // A persisted cursor is a resume token, NOT display-only text. Never
-      // shorten it into a different token that the Ops UI could submit.
-      return c.json({ error: "unavailable" }, 503);
+    const size = utf8Size(row) + (body.rows.length === 0 ? 0 : 1);
+    if (used + size > availableRowBytes) {
+      body.truncated = true;
+      break;
     }
+    used += size;
+    body.rows.push(row);
   }
   return c.json(body);
 });

@@ -1134,6 +1134,14 @@ if (runUnderRootTsx(import.meta.url)) {
       sqlite.prepare("DELETE FROM static_rebuild_queue WHERE id = ?").run("sec799-backfill");
     }
 
+    const safeCursor = "あ".repeat(1_000);
+    const normal = await call("/api/admin-read/ops/static-builds", ADMIN, { env: env(safeCursor) });
+    assert.equal(normal.status, 200, "legitimate persisted cursor is preserved exactly");
+    assert.equal(normal.body.backfillState.runs.video_v2.cursor, safeCursor);
+    assert.ok(bodyBytes(normal) <= 64 * 1024);
+    assert.equal(normal.stats.statements, 3);
+    assert.equal(normal.stats.writes, 0);
+
     const unsafeCursor = "あ".repeat(30_000);
     const rejected = await call("/api/admin-read/ops/static-builds", ADMIN, { env: env(unsafeCursor) });
     assert.equal(rejected.status, 503, "never shorten a resume cursor into a different actionable token");
