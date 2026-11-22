@@ -20,6 +20,21 @@ async function captureWarnings(run) {
   return warnings;
 }
 
+async function withThrowingWarnSink(run) {
+  const original = console.warn;
+  const attemptedWarnings = [];
+  console.warn = (...args) => {
+    attemptedWarnings.push(args);
+    throw new Error("sink unavailable");
+  };
+  try {
+    await run();
+  } finally {
+    console.warn = original;
+  }
+  return attemptedWarnings;
+}
+
 test.beforeEach(() => {
   resetQueueWakeFailureRecordStateForTests();
   resetQueueWakeWarningStateForTests();
@@ -149,4 +164,112 @@ test("SEC-740: real missing-binding and failed-send wake never reject on broken 
   assert.ok(events.some((event) => event.result === "binding_missing"));
   assert.ok(events.some((event) => event.result === "send_failed"));
   assert.ok(!JSON.stringify(warnings).includes("DIAGNOSTIC_KV_GETTER_SECRET"));
+});
+
+test("SEC-740: throwing console.warn on missing or poisoned kv.put resolves cleanly and preserves TTL/coalescing", async () => {
+  const secret = "SEC740_SINK_POISONED_GETTER_SECRET";
+  const poisonedKv = Object.defineProperty({}, "put", {
+    get() {
+      throw Object.assign(new Error("getter:" + secret, { cause: new Error(secret) }), { name: secret });
+    },
+  });
+  const writes = [];
+  const healthyKv = {
+    async put(key, value, options) {
+      assert.equal(this, healthyKv);
+      writes.push({ key, value: JSON.parse(value), options });
+    },
+  };
+
+  const originalWarn = console.warn;
+  const attemptedWarnings = await withThrowingWarnSink(async () => {
+    await assert.doesNotReject(() =>
+      recordQueueWakeFailureBestEffortCore("queue-wake", {
+        kind: "notification_available",
+        reason: "binding_missing",
+        kv: null,
+      })
+    );
+    await assert.doesNotReject(() =>
+      recordQueueWakeFailureBestEffortCore("queue-wake", {
+        kind: "static_rebuild_available",
+        reason: "send_failed",
+        kv: poisonedKv,
+      })
+    );
+    for (let i = 0; i < 2; i += 1) {
+      await assert.doesNotReject(() =>
+        recordQueueWakeFailureBestEffortCore("queue-wake", {
+          kind: "notification_available",
+          reason: "binding_missing",
+          kv: healthyKv,
+        })
+      );
+    }
+  });
+
+  assert.equal(console.warn, originalWarn);
+  assert.deepEqual(attemptedWarnings.map(([value]) => JSON.parse(value)), [
+    { service: "queue-wake", result: "last_failure_record_skipped", kind: "notification_available", reason: "binding_missing" },
+    { service: "queue-wake", result: "last_failure_record_skipped", kind: "static_rebuild_available", reason: "send_failed" },
+  ]);
+  assert.ok(!JSON.stringify(attemptedWarnings).includes(secret));
+  assert.equal(writes.length, 1, "same-key, same-reason KV writes remain coalesced");
+  assert.equal(writes[0].key, "queue_wake:last_failure:notification_available");
+  assert.equal(writes[0].value.reason, "binding_missing");
+  assert.deepEqual(writes[0].options, { expirationTtl: QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS });
+});
+
+test("SEC-740: throwing console.warn on rejecting kv.put resolves cleanly, omits provider error fields, and keeps TTL/coalescing", async () => {
+  const secret = "SEC740_SINK_REJECT_PROVIDER_SECRET";
+  let rejectCalls = 0;
+  const rejection = Object.assign(new Error("put failed: " + secret, { cause: new Error(secret) }), {
+    name: secret,
+  });
+  const failingKv = {
+    async put() {
+      rejectCalls += 1;
+      throw rejection;
+    },
+  };
+  const writes = [];
+  const healthyKv = {
+    async put(key, value, options) {
+      assert.equal(this, healthyKv);
+      writes.push({ key, value: JSON.parse(value), options });
+    },
+  };
+
+  const originalWarn = console.warn;
+  const attemptedWarnings = await withThrowingWarnSink(async () => {
+    for (let i = 0; i < 2; i += 1) {
+      await assert.doesNotReject(() =>
+        recordQueueWakeFailureBestEffortCore("queue-wake", {
+          kind: "notification_available",
+          reason: "send_failed",
+          kv: failingKv,
+        })
+      );
+    }
+    for (let i = 0; i < 2; i += 1) {
+      await assert.doesNotReject(() =>
+        recordQueueWakeFailureBestEffortCore("queue-wake", {
+          kind: "static_rebuild_available",
+          reason: "binding_missing",
+          kv: healthyKv,
+        })
+      );
+    }
+  });
+
+  assert.equal(console.warn, originalWarn);
+  assert.equal(rejectCalls, 1, "rejecting KV failure attempt is still coalesced");
+  assert.deepEqual(attemptedWarnings.map(([value]) => JSON.parse(value)), [
+    { service: "queue-wake", result: "last_failure_record_failed", kind: "notification_available", reason: "send_failed" },
+  ]);
+  assert.ok(!JSON.stringify(attemptedWarnings).includes(secret));
+  assert.equal(writes.length, 1, "healthy KV write remains coalesced");
+  assert.equal(writes[0].key, "queue_wake:last_failure:static_rebuild_available");
+  assert.equal(writes[0].value.reason, "binding_missing");
+  assert.deepEqual(writes[0].options, { expirationTtl: QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS });
 });
