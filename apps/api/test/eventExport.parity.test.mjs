@@ -230,6 +230,9 @@ if (runUnderRootTsx(import.meta.url)) {
       };
     };
     try {
+      // An unrelated still-public video must survive revocation. A handler
+      // returning an empty list for every request would otherwise falsely PASS.
+      sqlite.exec("INSERT INTO videos (id, title, submitted_by_user_id, creator_display_name, primary_event_id, visibility_status, scheduled_time) VALUES ('safe-public-718', '継続公開作品', 'submitter', '別制作者', 'export-event', 'public', 1700000140)");
       for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
         for (const format of ["v5", "legacy"]) {
           reset();
@@ -248,7 +251,9 @@ if (runUnderRootTsx(import.meta.url)) {
             const primed = await request(path);
             assert.equal(primed.status, 200, runtime + " " + format);
             assert.equal(primed.headers.get("X-FlameNode-Cache"), "MISS");
-            assert.match(await primed.text(), /public-video/);
+            const initialBody = await primed.text();
+            assert.match(initialBody, /public-video/);
+            assert.match(initialBody, /safe-public-718/, "unrelated public video is included");
             await Promise.all(globalThis.__eventExport.pending.splice(0));
             assert.equal(colo.rows.has(cacheRequest.url), true, "colo holds the original scheduled payload");
           }
@@ -275,8 +280,11 @@ if (runUnderRootTsx(import.meta.url)) {
           assert.equal(after.headers.get("X-FlameNode-Cache"), "MISS",
             "stale remote-colo HIT cannot be used after video revocation");
           assert.equal(after.headers.get("Cache-Control"), "no-store");
-          assert.doesNotMatch(await after.text(), /public-video|公開作品/,
+          const refreshedBody = await after.text();
+          assert.doesNotMatch(refreshedBody, /public-video|公開作品/,
             "private video metadata must not be disclosed from a stale reader colo");
+          assert.match(refreshedBody, /safe-public-718/,
+            "unrelated public video remains present after stale cache denial");
           assert.equal(d1.stats.writes, 0, "GET cannot write D1");
           await Promise.all(globalThis.__eventExport.pending.splice(0));
           const safeWarm = await request(path);
@@ -288,6 +296,7 @@ if (runUnderRootTsx(import.meta.url)) {
     } finally {
       globalThis.caches.default = originalCache;
       sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      sqlite.exec("DELETE FROM videos WHERE id='safe-public-718'");
       reset();
     }
   });
