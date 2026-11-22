@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { events } from "@flamenode/db/schema";
+import { UnslottedEventSyncError } from "@flamenode/domain/video";
+import { unslottedEventEligibilityWhere } from "@flamenode/server-core/video/unslottedEventEligibility";
 import {
   loadUnionRequiredVideoFields,
+  loadEligibleUnslottedVideoRequiredFields,
 } from "@flamenode/server-core/video/requiredVideoFields";
 import {
   loadUnionRequiredVideoFields as legacyLoad,
@@ -65,4 +68,63 @@ test("MIG-0651 U02: malformed JSON is ignored without hiding D1 failures", async
   const err = new Error("D1 unavailable");
   const failDb = { select: () => { throw err; } };
   await assert.rejects(loadUnionRequiredVideoFields(failDb, ["ev"]), e => e === err);
+});
+
+test("MIG-0651 S3: selected event eligibility and required fields use one bounded D1 query", async () => {
+  let reads = 0;
+  let predicate;
+  let columns;
+  const db = {
+    select(selected) {
+      columns = selected;
+      reads++;
+      return {
+        from(table) {
+          assert.strictEqual(table, events);
+          return {
+            where(where) {
+              predicate = where;
+              return {
+                limit: async (n) => {
+                  assert.equal(n, 1);
+                  return [{
+                    id: "ev-pub",
+                    required_video_fields_json: '["music","credit","music","unknown"]',
+                  }];
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  assert.deepEqual(
+    await loadEligibleUnslottedVideoRequiredFields(db, "ev-pub", 1_700_000_000),
+    { eventId: "ev-pub", requiredFields: ["music", "credit"] },
+  );
+  assert.equal(reads, 1);
+  assert.strictEqual(columns.id, events.id);
+  assert.strictEqual(columns.required_video_fields_json, events.required_video_fields_json);
+  assert.deepEqual(dialect.sqlToQuery(predicate),
+    dialect.sqlToQuery(and(eq(events.id, "ev-pub"), unslottedEventEligibilityWhere(1_700_000_000))));
+});
+
+test("MIG-0651 S3: absent or ineligible event preserves no-read and denial behavior", async () => {
+  let reads = 0;
+  const db = {
+    select() {
+      reads++;
+      return { from: () => ({ where: () => ({ limit: async () => [] }) }) };
+    },
+  };
+  assert.deepEqual(await loadEligibleUnslottedVideoRequiredFields(db, null, 100),
+    { eventId: null, requiredFields: [] });
+  assert.equal(reads, 0);
+  await assert.rejects(
+    loadEligibleUnslottedVideoRequiredFields(db, "ev-private", 100),
+    (error) => error instanceof UnslottedEventSyncError &&
+      error.code === "unslotted_event_not_allowed",
+  );
+  assert.equal(reads, 1);
 });
