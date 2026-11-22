@@ -39,9 +39,12 @@ The provider currently enables `allowDangerousEmailAccountLinking` because parti
 
 ## Discord account linking safety
 
-`linkDiscordAccountAtomically` is the canonical adapter boundary.
+`linkDiscordAccountAtomically` is the canonical adapter boundary:
 
-It guarantees:
+- **CURRENT runtime:** `src/lib/auth/accountLinkAdapter.ts` (`accountRowWithoutTokens`, `linkDiscordAccountAtomically`)
+- **Hono / `@auth/core` target runtime (`MIG-0803`, unmounted until `MIG-0805`):** `apps/api/src/auth/authjs.ts` (`accountRowWithoutTokens`, `linkDiscordAccountAtomically`, `wrapAdapterOperation`, `logSafeAuthError`)
+
+Both runtimes guarantee:
 
 - only provider `discord` is accepted;
 - provider account ID conflict with another Auth User is rejected;

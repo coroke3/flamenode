@@ -110,10 +110,10 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 BLOCKED on owner steps 1–3 and the non-production B-new measurement (code remainder merged in #465: render path removed, DELETE + tracker close only, Cron recovery; #326 merged, migration 0066 applied to production)) | PASSED (owner approval 2026-10-23, with deferrals) |
-| 5 | Public migration | PARTIALLY_READY (2026-10-30: MIG-0501 / 0502 / 0503 / 0504 / 0505 / 0506 / 0509 / 0510 / 0511 / 0512 / 0513 / 0517 / 0518 / 0519 DONE (MIG-0518 PR#468 merged 2026-11-09; MIG-0509 PR#469 integrated 2026-11-02, merge pending human approval; MIG-0501 PR#429, MIG-0506 PR#431, MIG-0519 PR#447, MIG-0510 PR#450 merged 2026-11-01; MIG-0513 PR#452 builder-complete 2026-11-01, merge pending human approval); MIG-0507, 0514..0516 READY (0514..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (2026-11-10: 43 DONE — MIG-0601 / MIG-0608 / MIG-0611 / MIG-0602 / MIG-0612 / MIG-0613 / MIG-0614 / MIG-0615 / MIG-0616 / MIG-0617 / MIG-0618 / MIG-0619 / MIG-0620 / MIG-0621 / MIG-0622 / MIG-0623 / MIG-0624 / MIG-0625 / MIG-0628 / MIG-0629 / MIG-0630 / MIG-0631 / MIG-0632 / MIG-0633 / MIG-0634 / MIG-0635 / MIG-0637 / MIG-0640 / MIG-0641 / MIG-0643 / MIG-0646 / MIG-0647 / MIG-0648 / MIG-0649 / MIG-0655 / MIG-0658 / MIG-0659 / MIG-0660 / MIG-0661 / MIG-0663 / MIG-0664 / MIG-0609 / MIG-0642; 17 READY (incl. MIG-0627, dependency MIG-0509 DONE); MIG-0604 / MIG-0606 / MIG-0662 / MIG-0607 BLOCKED. MIG-0643 merged #480; MIG-0660 deep health core in PR#438; MIG-0659 X ID request APIs in PR#460; MIG-0642 terms / editable fields / notification admin writes in PR#461; MIG-0655 template/playlist writes in PR#476; production cutover not authorized) | CLOSED |
-| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-11-06: MIG-0701, MIG-0707, MIG-0712, MIG-0713, MIG-0719, MIG-0726, MIG-0734 DONE (#470); 2026-11-08: MIG-0718 DONE (#420); 2026-11-09: MIG-0710 DONE (#439); 2026-11-10: MIG-0711 DONE (#433); MIG-0708, 0709, 0714, 0715, 0720..0725, 0727..0730, 0731..0733, 0735..0737 READY; MIG-0702..0706, 0716, 0717 BLOCKED; Ops /manage production cutover NOT STARTED) | CLOSED |
-| 8 | Auth | IN_PROGRESS (MIG-0801 / MIG-0807 DONE (MIG-0807 Hono session/write guard review, PR#444; SEC-0807-01 fixed in #445) / MIG-0802 READY (non-production PoC, D-14-5)) | CLOSED |
+| 5 | Public migration | PARTIALLY_READY (2026-10-30: MIG-0501 / 0502 / 0503 / 0504 / 0505 / 0506 / 0509 / 0510 / 0511 / 0512 / 0513 / 0515 / 0517 / 0518 / 0519 DONE (MIG-0515 DONE (2026-11-21, PR #446); MIG-0518 PR#468 merged 2026-11-09; MIG-0509 PR#469 integrated 2026-11-02, merge pending human approval; MIG-0501 PR#429, MIG-0506 PR#431, MIG-0519 PR#447, MIG-0510 PR#450 merged 2026-11-01; MIG-0513 PR#452 builder-complete 2026-11-01, merge pending human approval); MIG-0507, 0514, 0516 READY (0514 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (2026-11-18: 45 DONE — MIG-0601 / MIG-0608 / MIG-0611 / MIG-0602 / MIG-0612 / MIG-0613 / MIG-0614 / MIG-0615 / MIG-0616 / MIG-0617 / MIG-0618 / MIG-0619 / MIG-0620 / MIG-0621 / MIG-0622 / MIG-0623 / MIG-0624 / MIG-0625 / MIG-0628 / MIG-0629 / MIG-0630 / MIG-0631 / MIG-0632 / MIG-0633 / MIG-0634 / MIG-0635 / MIG-0636 / MIG-0637 / MIG-0640 / MIG-0641 / MIG-0643 / MIG-0646 / MIG-0647 / MIG-0648 / MIG-0649 / MIG-0653 / MIG-0655 / MIG-0658 / MIG-0659 / MIG-0660 / MIG-0661 / MIG-0663 / MIG-0664 / MIG-0609 / MIG-0642; 15 READY (incl. MIG-0627, dependency MIG-0509 DONE); MIG-0604 / MIG-0606 / MIG-0662 / MIG-0607 BLOCKED. MIG-0643 merged #480; MIG-0660 deep health core in PR#438; MIG-0659 X ID request APIs in PR#460; MIG-0642 terms / editable fields / notification admin writes in PR#461; MIG-0655 template/playlist writes in PR#476; MIG-0653 event group APIs in PR#491; MIG-0636 Personal X/Active X APIs in PR#475; production cutover not authorized) | CLOSED |
+| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-11-06: MIG-0701, MIG-0707, MIG-0712, MIG-0713, MIG-0719, MIG-0726, MIG-0734 DONE (#470); 2026-11-08: MIG-0718 DONE (#420); 2026-11-09: MIG-0710 DONE (#439); 2026-11-10: MIG-0711 DONE (#433); 2026-11-18: MIG-0727 DONE (PR #502), MIG-0738 DONE (PR #687), MIG-0728 DONE (PR #493); 2026-11-21: MIG-0708 DONE (PR #486); MIG-0702, 0709, 0714, 0715, 0720..0725, 0729, 0730, 0731..0733, 0735..0737 READY; MIG-0703..0706, 0716, 0717 BLOCKED; Ops /manage production cutover NOT STARTED) | CLOSED |
+| 8 | Auth | IN_PROGRESS (MIG-0801 / MIG-0802 (non-production PoC, D-14-5, PR#471) / MIG-0803 (Discord/account-linking parity, PR#688) / MIG-0807 DONE (MIG-0807 Hono session/write guard review, PR#444; SEC-0807-01 fixed in #445); MIG-0804 READY; MIG-0805..0806 BLOCKED; production cutover NOT STARTED) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
 
 ---
@@ -295,7 +295,7 @@ Validation:
 | MIG-0512 | public gateway: HTML 404/503 + Retry-After, entity sub-page fence, build-file allowlist | DONE | MIG-0405, MIG-0619 |
 | MIG-0513 | `/[id]` like / bookmark Island on the SA-087 API (merge gate MIG-0640, D-16) | DONE | MIG-0407, MIG-0634 |
 | MIG-0514 | `/event/[id]/slots` viewer panel + reservation Island (merge gate MIG-0657, D-16) | READY | MIG-0407 |
-| MIG-0515 | header Active X switch on the SA-098 API (merge gate MIG-0636, D-16) | READY | MIG-0407 |
+| MIG-0515 | header Active X switch on the SA-098 API (merge gate MIG-0636, D-16) | DONE | MIG-0407 |
 | MIG-0516 | public build request mark in the static rebuild enqueue batch (MIG-0509 U05) | READY | MIG-0409 |
 | MIG-0517 | GA4 sync input from D1 instead of R2 `list/recent.json` (MIG-0509 U06) | DONE | MIG-0409 |
 | MIG-0518 | `/[id]` chapter composer + comments + `?playlist=` dock Islands, viewer-overlay client | DONE | MIG-0407, MIG-0634 |
@@ -313,6 +313,8 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 2026-11-01 統合（MIG-0609、PR #455）: 背景 Worker 3 本（content-jobs / fast-jobs / sync-jobs）の LOCAL CPU 測定を DONE にした。`scripts/benchmark-background-cpu.mjs` が表の 12 job + queue consumer 3 つ（各 normal / limit / invalid / cold x 50）と cron の idle 3 本を、実 job 関数を直接呼ぶ named fixture で測り、結果は `cloudflare/BACKGROUND_CPU.md`（Linux、Xeon 2.1GHz x4、node v22.23.4、wrangler 4.118.0）に host・サンプル数・noise・G18 日替わり top の固定 seed/日付 hash（`6073f44d…cc3d`）とともに記録した。この統合で新たに依存が満たされて READY になる task は MIG-0610（唯一の依存が MIG-0609）。測定は local D1 simulator の CPU を含む上限値（trivial read 1 回が約 3.9 ms）で、BASELINE max が 5.8〜8.1 ms あるため全 job が 8 ms 超（score-recalc のみ INCONCLUSIVE）になり、Work Order の `floor(7ms / 1件 max)` はすべて 0 になる。これは cap の推奨ではない。Decision adopted by owner authorization 2026-11-01: 測定は simulator 込みの上限値として記録し、D1 replay での再測定は MIG-0610 の新 unit T00（PHASE_6_SPEC に追加済み）にする。MIG-0610 は T00 の表で定数を下げること（MIG-0609 の cap 列は使わない）。`workers/**` と各 `wrangler.toml` は変更していない。最終 Head の独立レビューと人間の merge 承認は PR #455 で待つ。
 
 2026-11-02 統合（MIG-0726、PR #459）: Ops の Admin の枠（OpsGate 内の guard・sidebar・CostGuardBanner source=admin）、`/admin` ダッシュボード、権限シミュレーター、互換 redirect 5 本を DONE にした。merge gate の MIG-0707 と MIG-0661 は main で DONE（MIG-0661 は #419）。banner は MIG-0661 の `{mode, reason}` schema に置き換え済みで、暫定 contract は残っていない（D-16-1 の 5）。この統合で新たに依存が満たされて READY になる task は無い（MIG-0727..0737 は元から READY、MIG-0721 は MIG-0719 / MIG-0652 待ち、MIG-0705 の Final audit は他の Admin 画面 task が未 DONE のため BLOCKED のまま）。builder は Sonnet、最終 Head の独立レビュー（Opus または他 agent / 人間）と人間の merge 承認は PR #459 で待つ。owner 決定は work-items/MIG-0726.md に記録: spreadsheet nav は既定 off の注入 flag、PublicHeader / PublicFooter は FIX-0701-1 まで注入 slot（null）、CostGuardBanner は `apps/ops/src/components/layout/CostGuardBanner.tsx` を MIG-0726 が先に持ち、MIG-0719 が public source を足す。
+
+2026-11-21 統合（MIG-0515、PR #446）: 公開ヘッダー `SiteHeader.ts` の Active X 切替を `@flamenode/contracts`（`SetActiveXBodySchema` / `XIdWriteResultSchema`）準拠の SA-098 クライアント（`apps/site/src/lib/activeX.ts` / `guardRedirect.ts`）へ接続し `DONE` とした。Source HEAD `1915335e72fe29b5f6f858cc3501d5a16221879e` は exact-HEAD CI（[Actions #44767993233](https://github.com/coroke3/flamenode/actions/runs/44767993233) `SUCCESS`）、独立 Neon レビュー（[comment](https://github.com/coroke3/flamenode/pull/446#issuecomment-7044115971), `APPROVE`）、および 390x844 / 1440x900 headless Chrome 実ブラウザパリティ検証を通過済み。`MIG-0508`（Phase 5 Gate）は他タスク未完のため `BLOCKED` のまま、D-04 本番 Active X ルート切替は別途承認待ちで未実施。
 
 公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 
@@ -356,7 +358,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0633 | event ownership / permission resolver core (D-10) | DONE | MIG-0613, MIG-0617 |
 | MIG-0634 | public video list + viewer overlay read APIs (RH-031, RH-032) | DONE | MIG-0602, MIG-0614, MIG-0631 |
 | MIG-0635 | Admin read APIs part C (videos/[id], members, users/[id]/edit) | DONE | MIG-0624, MIG-0625 |
-| MIG-0636 | Personal X / Active X APIs (SA-098..105) | READY | MIG-0602 |
+| MIG-0636 | Personal X / Active X APIs (SA-098..105) | DONE | MIG-0602 |
 | MIG-0637 | admin ops writes A: cost guard + user admin (SA-016..020, SA-077..081) | DONE | MIG-0602 |
 | MIG-0638 | admin spreadsheet writes / import (RH-004..008) | READY | MIG-0602, MIG-0631 |
 | MIG-0639 | API CPU benchmark part A: endpoints already on main, Linux host (D-12 / MIG-0631 T17 verdicts) | READY | MIG-0602, MIG-0611, MIG-0617, MIG-0623, MIG-0624, MIG-0625, MIG-0630, MIG-0631 |
@@ -373,7 +375,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0650 | video collaborators / members APIs (SA-082..085) | READY | MIG-0602, MIG-0633 |
 | MIG-0651 | video submit / update APIs (SA-086, SA-088, SA-089) | READY | MIG-0602, MIG-0633 |
 | MIG-0652 | event create / update / delete / rename APIs (SA-021..024) | READY | MIG-0602, MIG-0305, MIG-0633 |
-| MIG-0653 | event group APIs (SA-025..030) | READY | MIG-0602, MIG-0305, MIG-0633 |
+| MIG-0653 | event group APIs (SA-025..030) | DONE | MIG-0602, MIG-0305, MIG-0633 |
 | MIG-0654 | event staff / owner transfer APIs (SA-031..034) | DONE | MIG-0602, MIG-0305, MIG-0633 |
 | MIG-0655 | event template save/list + YouTube playlist settings APIs (SA-035, SA-037..039) | DONE | MIG-0602, MIG-0305, MIG-0633 |
 | MIG-0656 | slot admin APIs (SA-056..064) | READY | MIG-0602, MIG-0305, MIG-0633 |
@@ -397,6 +399,10 @@ MIG-0617 は DONE（2026-10-25 統合）: PR #395 を owner が squash merge（`
 
 MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。（履歴: MIG-0802 は当初 MIG-0607 に依存していたが、D-14-5（2026-10-25）で現行の依存は MIG-0801, MIG-0608。非本番 PoC だけで、本番 cutover は MIG-0805。）
 
+2026-11-18 MIG-0653 merge-time integration (PR #491): Admin event-group APIs (`SA-025..030`, `GET /api/admin/event-groups/event-options`, `POST /`, `PATCH /:id`, `DELETE /:id`, `POST /:id/events`, `DELETE /:id/events/:eventId`) を `DONE` とした。Source HEAD `9e8b7dd1520eea23e6ca71de2be1a80522e80490` は両必須 CI ([Actions #44233477686](https://github.com/coroke3/flamenode/actions/runs/44233477686): `migration-contract` SUCCESS / `migration-workspaces` SUCCESS) と独立 Argon レビュー ([comment](https://github.com/coroke3/flamenode/pull/491#issuecomment-6971969192), `APPROVE`) を通過済み。`MIG-0728` の merge gate (`MIG-0653`) は今回満たされた（`MIG-0728` は既に `READY`）。`MIG-0604`（`MIG-0652`, `MIG-0656`, `MIG-0657`, `MIG-0639` 等待ち）および `MIG-0607`（Phase 6 Gate）は他依存未完のため `BLOCKED` のまま、Linux 実機 `workerd` CPU 計測（S2 <7ms / S3 <8ms）は引き続き `MIG-0606` で実施する。本番 Worker Route / Remote D1 / R2 / Queue / secret 変更なし。
+
+2026-11-18 MIG-0636 merge-time integration (PR #475): Personal X / Active X APIs (`SA-098`, `SA-102..105` — `POST /api/xid/active`, `PATCH /api/xid/:xUserId/profile`, `DELETE /api/xid/:xUserId`, `PUT /api/xid/:xUserId/icon`, `POST /api/xid/:xUserId/icon/upload`) を `DONE` とした。Source HEAD `c4cb9140ab4bec53a7855b0fc0bed2aa2170728e` は両必須 CI ([Actions #44259016108](https://github.com/coroke3/flamenode/actions/runs/44259016108): `migration-contract` SUCCESS / `migration-workspaces` SUCCESS) と独立 Argon レビュー ([comment](https://github.com/coroke3/flamenode/pull/475#issuecomment-6972143619), `APPROVE`) を通過済み。`MIG-0515` および `MIG-0708` の merge gate (`MIG-0636`) は今回満たされた（両タスクとも既に `READY`）。`MIG-0605` は引き続き `READY`、`MIG-0607`（Phase 6 Gate）は他依存未完のため `BLOCKED` のまま、Linux 実機 `workerd` CPU 計測（S3 <8ms）は引き続き `MIG-0606` で実施する。本番 Worker Route / Remote D1 / R2 / Queue / secret 変更なし。
+
 ## Phase 7 — Private SPA
 
 > タスク別詳細仕様書: [`PHASE_7_SPEC.md`](PHASE_7_SPEC.md)（Private SPA 詳細仕様）
@@ -405,19 +411,19 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0701 | dashboard read-only | DONE | MIG-0102, MIG-0601, MIG-0608, MIG-0611 |
-| MIG-0702 | dashboard mutations (Final audit; units split to MIG-0708..0710, D-16) | BLOCKED | MIG-0708..MIG-0710 |
+| MIG-0702 | dashboard mutations (Final audit; units split to MIG-0708..0710, D-16) | READY | MIG-0708..MIG-0710 |
 | MIG-0703 | entry (Final audit; units split to MIG-0711..0717, D-16) | BLOCKED | MIG-0711, MIG-0715..MIG-0717 |
 | MIG-0704 | manage (Final audit; screens split to MIG-0719..0725, D-17) | BLOCKED | MIG-0719..MIG-0725 |
 | MIG-0705 | admin (Final audit; screens split to MIG-0726..0737, D-17) | BLOCKED | MIG-0726..MIG-0737 |
 | MIG-0707 | Ops SPA scaffold: `apps/ops` package, build, guard, `_headers` (MIG-0704 U01) | DONE | MIG-0102, MIG-0608, MIG-0624, MIG-0625 |
-| MIG-0708 | Personal settings: Active X / X profile / icon / delete forms (SA-098, SA-102..105; merge gate MIG-0636) | READY | MIG-0611 |
+| MIG-0708 | Personal settings: Active X / X profile / icon / delete forms (SA-098, SA-102..105; merge gate MIG-0636) | DONE | MIG-0611 |
 | MIG-0709 | Personal settings + onboarding: X link / merge request, cancel, merge-revert forms (SA-099..101; merge gate MIG-0659) | DONE | MIG-0611 |
 | MIG-0710 | `/onboarding` terms agree form + onboarding-complete POST (SA-076; merge gate MIG-0641) | DONE | MIG-0611 |
 | MIG-0711 | `/entry` index screen (read-only, Discord login via the Auth.js HTTP flow) | DONE | MIG-0611, MIG-0623 |
 | MIG-0712 | Personal SPA video form part A: sub-fields port (custom questions, social links, icon picker, description preview, channel picker) | DONE | MIG-0623, MIG-0630 |
 | MIG-0713 | Personal SPA video form part B: `VideoMembersField` port with injected search / permission adapters | DONE | MIG-0623, MIG-0630 |
-| MIG-0714 | Personal SPA video form part C: `VideoForm` + `UnslottedPostForm` port with injected submit adapter | BLOCKED | MIG-0712, MIG-0713, MIG-0738 |
-| MIG-0738 | Personal SPA video form helper modules + `ErrorCallout` + `PublicReflectionDelayNotice` (ex MIG-0714 U01) | READY | MIG-0701, MIG-0713 |
+| MIG-0714 | Personal SPA video form part C: `VideoForm` + `UnslottedPostForm` port with injected submit adapter | READY | MIG-0712, MIG-0713, MIG-0738 |
+| MIG-0738 | Personal SPA video form helper modules + `ErrorCallout` + `PublicReflectionDelayNotice` (ex MIG-0714 U01) | DONE | MIG-0701, MIG-0713 |
 | MIG-0715 | `/dashboard/edit/:id/permissions` screen (SA-082..084; merge gate MIG-0650) | READY | MIG-0630 |
 | MIG-0716 | `/entry/slotted` + `/entry/unslotted` screens (SA-086, SA-088; merge gate MIG-0651, MIG-0648, MIG-0650) | BLOCKED | MIG-0714 |
 | MIG-0717 | `/dashboard/edit/:id` screen (SA-089; merge gate MIG-0651, MIG-0648, MIG-0650) | BLOCKED | MIG-0714 |
@@ -430,8 +436,8 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0724 | `/manage/events/:id/videos` + video detail (SA-040..042; merge gate MIG-0707, MIG-0719, MIG-0603) | READY | MIG-0624, MIG-0630 |
 | MIG-0725 | `/manage/events/:id/youtube-playlist`, `/manage/notifications`, `/manage/x-link-requests` (SA-038/039, 090/091; merge gate MIG-0707, MIG-0719, MIG-0655, MIG-0605) | READY | MIG-0624 |
 | MIG-0726 | Ops Admin shell (guard, sidebar, banner), `/admin`, permission simulator, 5 compat redirects (merge gate MIG-0707, MIG-0661) | DONE | MIG-0625 |
-| MIG-0727 | `/admin/announcements` x3, `/admin/api-endpoints`, `/admin/rules` x3 (SA-004..008, 051..055; merge gate MIG-0707, MIG-0726, MIG-0642) | READY | MIG-0602, MIG-0625 |
-| MIG-0728 | `/admin/event-groups` x3, `/admin/events`, `/admin/events/templates` (SA-025..030, 036; merge gate MIG-0707, MIG-0726, MIG-0653) | READY | MIG-0625 |
+| MIG-0727 | `/admin/announcements` x3, `/admin/api-endpoints`, `/admin/rules` x3 (SA-004..008, 051..055; merge gate MIG-0707, MIG-0726, MIG-0642) | DONE | MIG-0602, MIG-0625 |
+| MIG-0728 | `/admin/event-groups` x3, `/admin/events`, `/admin/events/templates` (SA-025..030, 036; merge gate MIG-0707, MIG-0726, MIG-0653) | DONE | MIG-0625 |
 | MIG-0729 | `/admin/videos`, `/admin/videos/:id` (SA-001..003, 043; merge gate MIG-0707, MIG-0726, MIG-0603) | READY | MIG-0625, MIG-0635 |
 | MIG-0730 | `/admin/videos/:id/members` (SA-085; `VideoMembersField` to `packages/ui`; merge gate MIG-0707, MIG-0726, MIG-0650, MIG-0648) | READY | MIG-0635, MIG-0713 |
 | MIG-0731 | `/admin/users` x3, `/admin/moderation` (SA-044, 049, 077..081; merge gate MIG-0707, MIG-0726, MIG-0637, MIG-0642, MIG-0603) | READY | MIG-0625, MIG-0635 |
@@ -449,6 +455,14 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 
 2026-11-12 MIG-0709 merge-time integration (PR #477, squash `54bbbba444242b2b40c65b72917cc4c2ffe10b04`): Personal SPA `/dashboard/settings` and `/onboarding` X ID link/merge request, cancel, and merge-revert forms (`SA-099..101`) landed on `main` using the merged `MIG-0710` `send()` write transport and `MIG-0659` `XIdRequestResultSchema`. Source HEAD `0a46adee9d9715f6ca1cf4eba102a4e267c9c0ef` passed both mandatory CI jobs in [Actions 43232893392](https://github.com/coroke3/flamenode/actions/runs/43232893392) and received [independent-agent APPROVE](https://github.com/coroke3/flamenode/pull/477#issuecomment-6825940997). `MIG-0702` remains `BLOCKED` on `MIG-0708`. No deployment, Worker Routes, remote data or secrets are changed.
 
+2026-11-18 MIG-0727 merge-time integration (PR #502): Ops `/admin/announcements` x3, `/admin/api-endpoints`, and `/admin/rules` x3 (`SA-004..008`, `SA-051..055`, `SA-108/109`) landed in `apps/ops` router under `OpsGate`. Source HEAD `7bfb0f7d0713eb1c97b863add5ed788ef59b7afb` passed both mandatory CI jobs in [Actions 44233720166](https://github.com/coroke3/flamenode/actions/runs/44233720166) and received [independent-agent APPROVE](https://github.com/coroke3/flamenode/pull/502#issuecomment-6968899616). `MIG-0705` remains `BLOCKED` on remaining admin tasks (`MIG-0728..0733`, `MIG-0736..0737`). No deployment, Worker Routes, remote data or secrets are changed.
+
+2026-11-18 MIG-0738 merge-time integration (PR #687): Personal SPA video form pure helper modules (12 modules in `apps/app/src/lib/`) + `ErrorCallout` + `PublicReflectionDelayNotice` + 57 parity/SSR/hygiene tests (`apps/app/test/videoFormHelpers.test.mjs`) を `DONE` とした。Source HEAD `fea52b4f8f4f3bcbb6691f3d4f1aadbfb41dff3f` は両必須 CI ([Actions #44260891687](https://github.com/coroke3/flamenode/actions/runs/44260891687): `migration-contract` SUCCESS / `migration-workspaces` SUCCESS) と独立 Argon レビュー ([comment](https://github.com/coroke3/flamenode/pull/687#issuecomment-6972374921), `APPROVE`) を通過済み。`MIG-0714` の依存（`MIG-0712`, `MIG-0713`, `MIG-0738`）が揃ったため `MIG-0714` を `READY` へ更新（`MIG-0716` / `MIG-0717` は引き続き `MIG-0714` 待ち `BLOCKED`）。未マウント部品のみのため、本番 Worker Route / Remote D1 / R2 / Queue / secret 変更なし。
+
+2026-11-18 MIG-0728 merge-time integration (PR #493): Ops `/admin/event-groups` x3, `/admin/events`, and `/admin/events/templates` (`SA-025..030`, `SA-036`) landed in `apps/ops/src/routes/router.tsx` under `adminFrame` (`OpsGate`). Source HEAD `c30442d675192199b7e2dfd601755cd82f7f3b1d` passed both mandatory CI jobs ([Actions #44263192695](https://github.com/coroke3/flamenode/actions/runs/44263192695): `migration-contract` SUCCESS / `migration-workspaces` SUCCESS) and independent Argon review ([comment](https://github.com/coroke3/flamenode/pull/493#issuecomment-6979936551), `APPROVE`). `MIG-0705` remains `BLOCKED` on `MIG-0729..0733, MIG-0736..0737`. No deployment, Worker Routes, remote data or secrets are changed.
+
+2026-11-21 MIG-0708 merge-time integration (PR #486): Personal SPA `/dashboard/settings` Active X / X profile / icon / delete forms (`SA-098`, `SA-102..105`, `SetActiveXButton`, `XIdCompactProfileForm`, `XIdIconPicker` + `SquareIconEditor`, `DeleteXIdForm` + `ConfirmDialog`, canonical `@flamenode/contracts` `xid.ts`) integrated as `DONE`. Source HEAD `80961ea10d669aba9756042a5bc7cc12aecff603` passed both mandatory CI jobs ([Actions #44770387702](https://github.com/coroke3/flamenode/actions/runs/44770387702): `migration-contract` SUCCESS / `migration-workspaces` SUCCESS), 358/358 `@flamenode/app` tests, `390x844` / `1440x900` headless Chrome verification, and independent Neon review ([comment](https://github.com/coroke3/flamenode/pull/486#issuecomment-7044413713), `APPROVE`). `MIG-0702` is now `READY` (`MIG-0703..0706, 0716, 0717` remain `BLOCKED`). No production cutover, Worker Route, D1, R2, Queue, or secret changes occurred.
+
 ## Phase 8 — Auth
 
 > タスク別詳細仕様書: [`PHASE_8_9_SPEC.md`](PHASE_8_9_SPEC.md)（Auth 移行詳細仕様）
@@ -456,14 +470,18 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0801 | Auth baseline fixtures/tests | DONE | MIG-0008 |
-| MIG-0802 | Web Standard/Auth integration PoC | READY | MIG-0801, MIG-0608 |
-| MIG-0803 | Discord/account-linking parity | BLOCKED | MIG-0802 |
-| MIG-0804 | CPU/security review (Auth.js part; Hono session part is MIG-0807) | BLOCKED | MIG-0803, MIG-0807 |
+| MIG-0802 | Web Standard/Auth integration PoC | DONE | MIG-0801, MIG-0608 |
+| MIG-0803 | Discord/account-linking parity | DONE | MIG-0802 |
+| MIG-0804 | CPU/security review (Auth.js part; Hono session part is MIG-0807) | READY | MIG-0803, MIG-0807 |
 | MIG-0805 | production cutover proposal | BLOCKED | MIG-0804, MIG-0628 |
 | MIG-0806 | Phase 8 Gate | BLOCKED | MIG-0805 |
 | MIG-0807 | security review of the existing Hono session + write guard (MIG-0804 U02 part, no Auth.js) | DONE | MIG-0602, MIG-0608 |
 
 MIG-0805 requires explicit user approval before production action.
+
+2026-11-18 MIG-0802 merge-time integration (PR #471): `MIG-0802` non-production Web Standard/Auth PoC (`U01`–`U04`, `@auth/core@0.41.3` + `@auth/drizzle-adapter@1.11.3`, shared `server-core` auth config/redirect, unmounted Hono session/CSRF/signout + `/auth/complete` + `SA-107` `returnTo` parity) integrated on `main`; `MIG-0803` is now `READY` (`MIG-0804..0806` remain `BLOCKED`). Verified source HEAD `a12b28f60885abaca0a1246f0c4be449f7f529fe` passed both CI jobs in [Actions 44231205825](https://github.com/coroke3/flamenode/actions/runs/44231205825) and received [independent Carbon APPROVE](https://github.com/coroke3/flamenode/pull/471#issuecomment-6968377127). Discord/account-linking parity remains separated for `MIG-0803` (`linkAccount` fail-closed `AUTH_ATOMIC_LINK_PORT_PENDING`) and production route/secret cutover remains separated for `MIG-0805`; `apps/api/src/app.ts` and production auth routing remain untouched.
+
+2026-11-18 MIG-0803 merge-time integration (PR #688): `MIG-0803` Discord/account-linking parity (`accountRowWithoutTokens`, `linkDiscordAccountAtomically` CAS + audit + idempotent concurrent replay + post-commit deduped welcome/ops notifications, `logSafeAuthError`, `wrapAdapterOperation`, `T01`–`T03` parity) integrated; `MIG-0804` is now `READY` (`MIG-0805` and `MIG-0806` remain `BLOCKED`). Source HEAD `37b1d446361b4bc841e82b9382e4cb1f42c076f2` passed `migration-contract` in [Actions #44314935535](https://github.com/coroke3/flamenode/actions/runs/44314935535) (`migration-workspaces` was cancelled/superseded by serial integration push) and received [independent Argon APPROVE](https://github.com/coroke3/flamenode/pull/688#issuecomment-6980186048); full two-job CI (`migration-contract` + `migration-workspaces`) is verified on the final integrated HEAD. `apps/api/src/app.ts` and production auth routing remain untouched.
 
 ## Phase 9 — Next/OpenNext retirement
 
