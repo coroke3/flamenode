@@ -13,6 +13,12 @@ const NOW = 1770000000;
 function dbFor(sqlite, stats) {
   const proxy = drizzle(async (query, params, method) => {
     stats.reads++;
+    if (/UNION ALL/i.test(query)) {
+      assert.equal(params.length, 2,
+        "both alias and direct identity scans must reuse JSON1, not 2*N bound IDs");
+      assert.match(query, /json_each/i);
+      assert.ok(params.every(p => typeof p === "string" && p.length < 32_000));
+    }
     const rows = sqlite.prepare(query).all(...params);
     return { rows: method === "all" || method === "values"
       ? rows.map(row => Object.values(row)) : rows };
@@ -132,6 +138,32 @@ test("MIG-0651 new members: rejected alias and duplicate canonical IDs fail befo
       /free_video_new_member_duplicate_canonical_id/,
     );
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n, 0);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 new members: direct approved + conflicting alias rejects, rejected merged direct can follow valid alias", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "x_users", { id: "canonical", x_name: "Canonical", approval_status: "approved" });
+    insert(sqlite, "x_users", { id: "oldhandle", x_name: "Old", approval_status: "approved" });
+    insert(sqlite, "x_user_aliases", { x_user_id: "canonical", alias_x_id: "oldhandle" });
+    const submission = parsedMemberSubmission([
+      { name: "Member", x_user_id: "oldhandle", chapters: [] },
+    ]);
+    const stats = { reads: 0 };
+    await assert.rejects(
+      () => buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(submission)),
+      /free_video_new_member_identity_unresolvable/,
+      "live direct X identity must not silently transfer to a different alias target",
+    );
+    assert.equal(stats.reads, 1, "even collision detection uses only one D1 read");
+    sqlite.prepare("UPDATE x_users SET approval_status='rejected' WHERE id='oldhandle'").run();
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(submission));
+    assert.equal(stats.reads, 2, "one additional D1 read on the second attempt");
+    assert.deepEqual(plan.expectedChanges, [null, 1]);
+    assert.equal(plan.audits[0].after.rows[0].x_user_id, "canonical");
+    executePrepared(sqlite, plan);
+    assert.equal(sqlite.prepare("SELECT x_user_id FROM video_members").get().x_user_id, "canonical");
   } finally { sqlite.close(); }
 });
 
