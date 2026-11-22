@@ -530,7 +530,15 @@ export function buildEventExportPayload(
         id: video.id,
         title: video.title,
         status: "public" as const,
-        primary_event_id: video.primary_event_id,
+        // The primary ID is public metadata only if it passed the same
+        // visibility-filtered event_ids boundary as other event relations.
+        // A public video can be linked to this public event while retaining
+        // a private/disabled primary_event_id from another event.
+        // Do not serialize that hidden event identifier.
+        primary_event_id:
+          video.primary_event_id && video.event_ids.includes(video.primary_event_id)
+            ? video.primary_event_id
+            : null,
         event_ids: video.event_ids,
         collaboration_type: video.collaboration_type,
         participant_scope:
