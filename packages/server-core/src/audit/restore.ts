@@ -665,6 +665,28 @@ export async function restoreAuditLog(
       }
     }
 
+    // The atomic D1 batch may be committed before mutateWithAudit asks for
+    // its optional post-commit Queue wake host. If that lazy loader rejects,
+    // it must not be mistaken for a failed D1 commit: compensating the R2
+    // visibility fence at that point could unprotect already-private rows.
+    // The durable static_rebuild_queue rows are still committed and can be
+    // picked up by the normal recovery path even without this wake signal.
+    const loadQueueWakeHostBestEffort = async () => {
+      try {
+        return await host.loadQueueWakeHost();
+      } catch {
+        // Provider/module errors may include credentials, env values or paths.
+        // A safe disabled host preserves the audited commit and emits only a
+        // fixed diagnostic without reflecting Error or nested cause.
+        console.warn("[audit-restore] queue wake host unavailable", "provider_error");
+        return {
+          readEnv: () => null,
+          readWaitUntil: () => null,
+          readKv: () => null,
+        };
+      }
+    };
+
     await mutateWithAudit(db, {
       mutationStatements: restoreStatements,
       expectedMutationChanges:
@@ -699,7 +721,7 @@ export async function restoreAuditLog(
         db.run(assertChanges(1)),
       ],
       staticRebuildWakeSource: visibilityEntity ? "admin" : undefined,
-    }, host.loadQueueWakeHost);
+    }, loadQueueWakeHostBestEffort);
   } catch (error) {
     // Never reflect an arbitrary SQL/provider exception into the HTTP body.
     const message = publicRestoreMutationFailureMessage(error);
