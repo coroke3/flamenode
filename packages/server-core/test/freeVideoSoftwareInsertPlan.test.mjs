@@ -79,7 +79,7 @@ test("MIG-0651 software: migrated SQLite resolves active alias before catalog na
       "name search must use the existing normalized catalog index");
     assert.ok(planner.some(detail => detail.includes("software_aliases_global_alias_uniq")),
       "alias search must use the existing normalized alias index");
-    assert.ok(!planner.some(detail => /\\bSCAN\\s+software_catalog\\b/.test(detail)),
+    assert.ok(!planner.some(detail => detail.startsWith("SCAN software_catalog")),
       "the one-query optimization must NOT scan every catalog row");
     assert.deepEqual(plan.expectedChanges, [1, 3], "one new catalog and three unique links");
     assert.deepEqual(plan.audits.map((a) => [a.table_name, a.operation, a.strict]), [
