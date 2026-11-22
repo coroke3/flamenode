@@ -649,16 +649,16 @@ test("MIG-0651 U02: new software catalog + links and static queue commit togethe
       eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
       usedSoftware: "Fresh Tool",
     });
-    assert.equal(preReads, 2, "bounded alias and active catalog pre-reads");
+    assert.equal(preReads, 1, "alias+catalog matching uses one bounded JOIN pre-read");
     assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 1, 13]);
     assert.equal(plan.audits.length, 4, "video, metadata, catalog and link each strictly audited");
     assert.ok(plan.audits.every(a => a.strict));
     const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads);
     assert.equal(budget.d1WithinLimit, true);
-    assert.equal(budget.s3PreBatchReadCount, 4, "two catalog reads plus two audit preparation reads");
-    assert.equal(budget.s3WithinLimit, false,
-      "this unmounted software case must NOT claim S3 acceptance");
-    assert.equal(budget.withinLimit, false);
+    assert.equal(budget.s3PreBatchReadCount, 3, "one software JOIN plus two audit preparation reads");
+    assert.equal(budget.s3WithinLimit, true);
+    assert.equal(budget.withinLimit, true,
+      "this isolated unmounted software candidate meets the S3 pre-read budget");
     sqlite.exec("BEGIN");
     try {
       const dialect = new SQLiteSyncDialect();
