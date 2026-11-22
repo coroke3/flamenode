@@ -36,6 +36,8 @@ export function buildFreeVideoSubmissionAtomicPlan(
     /** Trusted Active X from the authenticated write guard, never request data. */
     trustedActiveXId: string;
     eventId: string | null;
+    /** Exact D1 JSON snapshot from the trusted SA-086 event read, not a form value. */
+    requiredFieldsSnapshot?: string | null;
     now: number;
     /** Trusted, D1-loaded full question set; not submitted FormData. */
     questions: readonly LoadedGeneralCustomQuestion[];
@@ -66,6 +68,13 @@ export function buildFreeVideoSubmissionAtomicPlan(
     throw new Error("free_video_submission_plan_identity_invalid");
   }
 
+  // An event-linked video must carry the actual D1 policy observed before
+  // input validation. Missing snapshots are not evidence that no fields
+  // were required. A changed policy must fail within the atomic batch.
+  if (eventId && args.requiredFieldsSnapshot === undefined) {
+    throw new Error("free_video_required_fields_snapshot_missing");
+  }
+
   // Recheck the authenticated Active X on the SAME D1 batch as creation.
   // This prevents a concurrent ban, active-X switch, link revocation or
   // approval downgrade from committing with a stale request-time guard.
@@ -89,7 +98,9 @@ export function buildFreeVideoSubmissionAtomicPlan(
     ) THEN 1 ELSE json_extract('not-valid-json', '$') END
   `);
   // Pure plan construction can still fail closed. Nothing has been written.
-  const eventAssertion = buildUnslottedEventEligibilityAssertionPlan(db, eventId, now);
+  const eventAssertion = buildUnslottedEventEligibilityAssertionPlan(
+    db, eventId, now, args.requiredFieldsSnapshot,
+  );
   const answerPlan = buildFreeVideoCustomAnswerInsertPlan(db, {
     videoId: videoAfter.id,
     eventId,
