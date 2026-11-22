@@ -369,6 +369,94 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("SEC-575: staff-only cross-colo revocation rejects a stale HIT without changing video visibility", async () => {
+    // Independent negative control: the SEC-718 scenario revokes video AND
+    // staff at the same time. A broken staff check could therefore appear
+    // correct simply because the video change forces a cache MISS.
+    // Keep the public video completely unchanged for this privacy regression.
+    const previousCache = globalThis.caches.default;
+    const makeColo = () => {
+      const stored = new Map();
+      return {
+        stored,
+        cache: {
+          async match(request) { return stored.get(request.url)?.clone(); },
+          async put(request, response) { stored.set(request.url, response.clone()); },
+          async delete(request) { return stored.delete(request.url); },
+        },
+      };
+    };
+    try {
+      sqlite.exec("INSERT INTO event_staff (id, event_id, x_user_id, display_name, is_public, created_at, updated_at) VALUES ('revoked-staff-only-575', 'export-event', 'x-revoked-only-575', '単独失効スタッフ575', 1, 1700000000, 1700000000), ('safe-staff-only-575', 'export-event', 'x-safe-only-575', '継続公開スタッフ575', 1, 1700000000, 1700000000)");
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        reset();
+        sqlite.exec("UPDATE events SET public_api_enabled=1, visibility_status='public' WHERE id='export-event'");
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+        sqlite.exec("UPDATE event_staff SET is_public=1 WHERE id='revoked-staff-only-575'");
+        const writer = makeColo();
+        const reader = makeColo();
+        const path = "export-event?format=v5&update=scheduled&refresh=1440";
+        const key = "public-event-export:9:export-event:v5:1440";
+        const cacheRequest = new Request(
+          "https://flamenode.internal/public-json/" + encodeURIComponent(key),
+        );
+        for (const colo of [writer, reader]) {
+          globalThis.caches.default = colo.cache;
+          const seeded = await request(path);
+          assert.equal(seeded.status, 200, runtime + " initial response");
+          assert.equal(seeded.headers.get("X-FlameNode-Cache"), "MISS");
+          const initial = await seeded.text();
+          assert.match(initial, /public-video/, "public video must remain visible");
+          assert.match(initial, /単独失効スタッフ575/, "staff to revoke is initially public");
+          assert.match(initial, /継続公開スタッフ575/, "unrelated staff is initially public");
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+          assert.equal(colo.stored.has(cacheRequest.url), true, "each colo must hold a real cached body");
+        }
+        globalThis.caches.default = reader.cache;
+        const hit = await request(path);
+        assert.equal(hit.headers.get("X-FlameNode-Cache"), "HIT",
+          runtime + " requires a real warm reader-colo cache HIT");
+        assert.match(await hit.text(), /単独失効スタッフ575/);
+
+        // Only staff visibility changes. The video row and event updated_at
+        // stay untouched, so a video-only cache fence cannot pass this test.
+        sqlite.exec("UPDATE event_staff SET is_public=0 WHERE id='revoked-staff-only-575'");
+        globalThis.caches.default = writer.cache;
+        assert.equal(await writer.cache.delete(cacheRequest), true);
+        assert.equal(writer.stored.has(cacheRequest.url), false);
+        assert.equal(reader.stored.has(cacheRequest.url), true,
+          "writer-side invalidation must not wipe reader-colo cache");
+        assert.match(await reader.stored.get(cacheRequest.url).clone().text(), /単独失効スタッフ575/,
+          "stale reader cache must demonstrably retain revoked staff");
+
+        globalThis.caches.default = reader.cache;
+        const fresh = await request(path);
+        assert.equal(fresh.status, 200);
+        assert.equal(fresh.headers.get("X-FlameNode-Cache"), "MISS",
+          runtime + " must reject staff-only stale cache without a video change");
+        assert.equal(fresh.headers.get("Cache-Control"), "no-store");
+        const safeBody = await fresh.text();
+        assert.doesNotMatch(safeBody, /単独失効スタッフ575/,
+          "revoked staff must never be returned from the unchanged-video cache");
+        assert.match(safeBody, /継続公開スタッフ575/,
+          "unrelated still-public staff must not be discarded");
+        assert.match(safeBody, /public-video/,
+          "unchanged public video must remain visible");
+        assert.equal(d1.stats.writes, 0, "event export GET must not modify D1");
+        await Promise.all(globalThis.__eventExport.pending.splice(0));
+        const safeHit = await request(path);
+        assert.equal(safeHit.headers.get("X-FlameNode-Cache"), "HIT");
+        const safeHitBody = await safeHit.text();
+        assert.match(safeHitBody, /継続公開スタッフ575|public-video/);
+        assert.doesNotMatch(safeHitBody, /単独失効スタッフ575/);
+      }
+    } finally {
+      globalThis.caches.default = previousCache;
+      sqlite.exec("DELETE FROM event_staff WHERE id IN ('revoked-staff-only-575', 'safe-staff-only-575')");
+      reset();
+    }
+  });
+
   test("SEC-575: スタッフ公開フラグ解除とイベント再公開後に旧キャッシュを再配信しない", async () => {
     for (const request of [current, hono]) {
       for (const format of ["v5", "legacy"]) {
