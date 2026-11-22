@@ -121,6 +121,17 @@ function staffPreparationError(error: unknown): StaffActionResult {
   };
 }
 
+// The domain parser embeds only the rejected key from the validated form.
+// Recompute the exact expected message from that form, not from provider errors.
+function expectedInvalidStaffPermissionMessage(
+  raw: string | null | undefined,
+): string | null {
+  if (!raw || raw.length > 512) return null;
+  const invalid = raw.split(",").map((key) => key.trim())
+    .find((key) => key && !canonicalizePermissionKey(key));
+  return invalid && invalid.length <= 100 ? `不正な権限キーです: ${invalid}` : null;
+}
+
 async function ensureEventManager(eventId: string): Promise<
   | { ok: true; userId: string; role: string | null; db: DB }
   | { ok: false; result: StaffActionResult }
@@ -398,7 +409,13 @@ export async function upsertEventStaffMember(
     unstable_rethrow(error);
     return {
       ok: false,
-      message: staffSafeActionMessage(error, "入力エラー"),
+      message: staffSafeActionMessage(
+        error, "入力エラー", undefined,
+        (() => {
+          const expected = expectedInvalidStaffPermissionMessage(data.permission_keys);
+          return expected ? [expected] : undefined;
+        })(),
+      ),
     };
   }
 
