@@ -174,3 +174,90 @@ test("mutateWithAudit rejects a wake source without a host loader before touchin
     (error) => error instanceof AuditMutationError && /host loader/.test(error.message),
   );
 });
+
+
+async function captureQueueWakeWarnings(run) {
+  const before = console.warn;
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try {
+    return { value: await run(), warnings };
+  } finally {
+    console.warn = before;
+  }
+}
+
+test("SEC-742: synchronous provider send throw uses fixed-only diagnostic without exposing Error.name/cause", async () => {
+  const secret = "SEC742_SYNC_PROVIDER_SECRET";
+  const providerError = Object.assign(new Error("message:" + secret, {
+    cause: new Error("cause:" + secret),
+  }), { name: secret });
+  const sentKinds = new Set();
+  const { value, warnings } = await captureQueueWakeWarnings(() =>
+    sendQueueWakeBestEffort({
+      kind: "notification_available",
+      source: "web",
+      sentKinds,
+      queue: { send() { throw providerError; } },
+    }, makeHost({ env: enabled })),
+  );
+  assert.deepEqual(value, { sent: false, reason: "send_failed" });
+  assert.equal(sentKinds.size, 0);
+  assert.deepEqual(warnings.map(([entry]) => JSON.parse(entry)), [
+    { service: "queue-wake", result: "send_failed", kind: "notification_available" },
+    { service: "queue-wake", result: "last_failure_record_skipped", kind: "notification_available", reason: "send_failed" },
+  ]);
+  assert.ok(!JSON.stringify(warnings).includes(secret));
+});
+
+test("SEC-742: async provider rejection stays in waitUntil lifetime and releases duplicate kind without leaking Error.name", async () => {
+  const secret = "SEC742_ASYNC_PROVIDER_SECRET";
+  const providerError = Object.assign(new Error("message:" + secret, {
+    cause: new Error("cause:" + secret),
+  }), { name: secret });
+  const pending = [];
+  const sentKinds = new Set();
+  const { value, warnings } = await captureQueueWakeWarnings(async () => {
+    const result = await sendQueueWakeBestEffort({
+      kind: "static_rebuild_available",
+      source: "admin",
+      sentKinds,
+      queue: { async send() { throw providerError; } },
+    }, makeHost({
+      env: enabled,
+      waitUntil: (promise) => pending.push(promise),
+    }));
+    assert.deepEqual(result, { sent: true, reason: "async_pending" });
+    assert.equal(pending.length, 1);
+    await Promise.all(pending);
+    return result;
+  });
+  assert.deepEqual(value, { sent: true, reason: "async_pending" });
+  assert.equal(sentKinds.size, 0, "failed wake must release the preflight marker");
+  assert.deepEqual(warnings.map(([entry]) => JSON.parse(entry)), [
+    { service: "queue-wake", result: "send_failed", kind: "static_rebuild_available" },
+    { service: "queue-wake", result: "last_failure_record_skipped", kind: "static_rebuild_available", reason: "send_failed" },
+  ]);
+  assert.ok(!JSON.stringify(warnings).includes(secret));
+});
+
+test("SEC-742: poisoned Error.name accessor cannot reject best-effort send path", async () => {
+  const secret = "SEC742_THROWING_NAME_GETTER";
+  const providerError = new Error("message:" + secret, { cause: new Error(secret) });
+  Object.defineProperty(providerError, "name", {
+    get() { throw new Error("name-getter:" + secret); },
+  });
+  const { value, warnings } = await captureQueueWakeWarnings(() =>
+    sendQueueWakeBestEffort({
+      kind: "youtube_sync_pending",
+      source: "sync",
+      queue: { send() { return Promise.reject(providerError); } },
+    }, makeHost({ env: enabled })),
+  );
+  assert.deepEqual(value, { sent: false, reason: "send_failed" });
+  assert.deepEqual(warnings.map(([entry]) => JSON.parse(entry)), [
+    { service: "queue-wake", result: "send_failed", kind: "youtube_sync_pending" },
+    { service: "queue-wake", result: "last_failure_record_skipped", kind: "youtube_sync_pending", reason: "send_failed" },
+  ]);
+  assert.ok(!JSON.stringify(warnings).includes(secret));
+});
