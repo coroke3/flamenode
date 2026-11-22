@@ -84,7 +84,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const edgeCache = {
     async match(request) { const r = map.get(request.url); return r?.clone(); },
     async put(request, response) { map.set(request.url, response.clone()); },
-    async delete(request) { return map.delete(request.url); },
+    async delete(request) { return map.delete(typeof request === "string" ? request : request.url); },
   };
   globalThis.caches = { default: edgeCache };
   globalThis.__eventExport = { db: proxyDb, pending: [], dbError: false, failVideoRelationRead: false, relationReadFaults: 0 };
@@ -512,6 +512,51 @@ if (runUnderRootTsx(import.meta.url)) {
     } finally {
       globalThis.caches.default = previousCache;
       sqlite.exec("DELETE FROM event_staff WHERE id IN ('revoked-staff-only-575', 'safe-staff-only-575')");
+      reset();
+    }
+  });
+
+  test("SEC-575: stale scheduled origin body is evicted even when replacement Cache.put fails", async () => {
+    // The D1-derived response can reject a revoked video without deleting the
+    // previous Cache API entry. Simulate a best-effort cache write failure to
+    // prove that a rejected sensitive entry is itself removed, not merely
+    // overwritten. Cloudflare Cache API accepts either Request or URL string.
+    const originalPut = edgeCache.put;
+    try {
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        for (const format of ["v5", "legacy"]) {
+          reset();
+          sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+          const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+          const key = `public-event-export:9:export-event:${format}:1440`;
+          const cacheUrl = "https://flamenode.internal/public-json/" + encodeURIComponent(key);
+          const first = await request(path);
+          assert.equal(first.status, 200, runtime + " " + format);
+          assert.equal(first.headers.get("X-FlameNode-Cache"), "MISS");
+          assert.match(await first.text(), /public-video/);
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+          assert.equal(map.has(cacheUrl), true, "test must start from a real cached body");
+          assert.equal((await request(path)).headers.get("X-FlameNode-Cache"), "HIT");
+
+          sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+          // A rejected put must not serve as an excuse to keep the old
+          // private-transition body at rest in the reader colo.
+          edgeCache.put = async () => { throw new Error("simulated-cache-put-unavailable"); };
+          const safe = await request(path);
+          assert.equal(safe.status, 200);
+          assert.equal(safe.headers.get("X-FlameNode-Cache"), "MISS");
+          assert.equal(safe.headers.get("Cache-Control"), "no-store");
+          assert.doesNotMatch(await safe.text(), /public-video|公開作品/);
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+          assert.equal(map.has(cacheUrl), false,
+            runtime + " " + format + " must erase the stale colo-local cache even if put fails");
+          assert.equal(d1.stats.writes, 0, "Cache.delete must not write D1");
+          edgeCache.put = originalPut;
+        }
+      }
+    } finally {
+      edgeCache.put = originalPut;
+      sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
       reset();
     }
   });
