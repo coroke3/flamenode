@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { inspect } from "node:util";
 import { test } from "node:test";
 import { runUnderRootTsx } from "./support/personalHarness.mjs";
 import { createFakeBucket, createFakeKv, createSqlite, createD1, insert } from "./support/publicEventsHarness.mjs";
@@ -1269,6 +1270,8 @@ if (runUnderRootTsx(import.meta.url)) {
     // Provider errors can embed bound SQL parameters, credentials or a nested
     // cause. Test both the first (identity) and second (private data) queries.
     const privateCanary = "RH031_PRIVATE_PROVIDER_ERROR_SECRET_20261122";
+    assert.ok(inspect(new Error(privateCanary)).includes(privateCanary),
+      "test sink must expose Error.message if provider exceptions are logged");
     for (const [caseName, marker, expectedLoggedIn] of [
       ["first D1 projection", "'approved_x_ids'", false],
       ["second D1 projection", "AS chapters_json", true],
@@ -1289,7 +1292,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const captured = [];
       const originalError = console.error;
       console.error = (...args) => captured.push(args.map((arg) =>
-        typeof arg === "string" ? arg : JSON.stringify(arg)).join(" "));
+        inspect(arg, { depth: 6 })).join(" "));
       let response;
       try {
         response = await app.request("/api/videos/vid-pub/viewer-overlay", {
