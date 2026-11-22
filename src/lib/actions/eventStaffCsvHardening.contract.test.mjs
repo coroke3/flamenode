@@ -145,10 +145,12 @@ test("SEC-800: only fixed domain messages and matching user-owned confirmations 
   const end = source.indexOf("\nfunction staffPreparationError", start);
   assert.ok(start >= 0 && end > start, "extract the production whitelist without transcribing it");
   const functionSignature = /function staffSafeActionMessage\(\s*error: unknown,\s*fallback: string,\s*eventId\?: string,\s*explicitAllowed\?: readonly string\[],\s*\): string \{/;
-  const policySource = source.slice(start, end).replace(
-    functionSignature,
-    "function staffSafeActionMessage(error, fallback, eventId, explicitAllowed) {",
-  );
+  const policySource = source.slice(start, end)
+    .replace(
+      functionSignature,
+      "function staffSafeActionMessage(error, fallback, eventId, explicitAllowed) {",
+    )
+    .replace("let message: unknown;", "let message;");
   assert.doesNotMatch(policySource, functionSignature, "signature was made executable in node:vm");
   const { policy, makeError } = runInNewContext(
     policySource + "\n({ policy: staffSafeActionMessage, makeError: (message) => new Error(message) })",
