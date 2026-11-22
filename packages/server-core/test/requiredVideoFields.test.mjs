@@ -90,6 +90,7 @@ test("MIG-0651 S3: selected event eligibility and required fields use one bounde
                   return [{
                     id: "ev-pub",
                     required_video_fields_json: '["music","credit","music","unknown"]',
+                    youtube_duplicate: 1,
                   }];
                 },
               };
@@ -100,12 +101,18 @@ test("MIG-0651 S3: selected event eligibility and required fields use one bounde
     },
   };
   assert.deepEqual(
-    await loadEligibleUnslottedVideoRequiredFields(db, "ev-pub", 1_700_000_000),
-    { eventId: "ev-pub", requiredFields: ["music", "credit"], requiredFieldsSnapshot: '["music","credit","music","unknown"]' },
+    await loadEligibleUnslottedVideoRequiredFields(db, "ev-pub", 1_700_000_000, "dQw4w9WgXcQ"),
+    { eventId: "ev-pub", requiredFields: ["music", "credit"], requiredFieldsSnapshot: '["music","credit","music","unknown"]', youtubeDuplicate: true },
   );
   assert.equal(reads, 1);
   assert.strictEqual(columns.id, events.id);
   assert.strictEqual(columns.required_video_fields_json, events.required_video_fields_json);
+  const duplicateProjection = dialect.sqlToQuery(columns.youtube_duplicate);
+  assert.match(duplicateProjection.sql, /EXISTS/i);
+  assert.match(duplicateProjection.sql, /youtube_video_id/);
+  assert.match(duplicateProjection.sql, /visibility_status/);
+  assert.ok(duplicateProjection.params.includes("dQw4w9WgXcQ"));
+  assert.ok(duplicateProjection.params.includes("voided"));
   assert.deepEqual(dialect.sqlToQuery(predicate),
     dialect.sqlToQuery(and(eq(events.id, "ev-pub"), unslottedEventEligibilityWhere(1_700_000_000))));
 });
@@ -118,11 +125,11 @@ test("MIG-0651 S3: absent or ineligible event preserves no-read and denial behav
       return { from: () => ({ where: () => ({ limit: async () => [] }) }) };
     },
   };
-  assert.deepEqual(await loadEligibleUnslottedVideoRequiredFields(db, null, 100),
-    { eventId: null, requiredFields: [], requiredFieldsSnapshot: null });
+  assert.deepEqual(await loadEligibleUnslottedVideoRequiredFields(db, null, 100, "dQw4w9WgXcQ"),
+    { eventId: null, requiredFields: [], requiredFieldsSnapshot: null, youtubeDuplicate: null });
   assert.equal(reads, 0);
   await assert.rejects(
-    loadEligibleUnslottedVideoRequiredFields(db, "ev-private", 100),
+    loadEligibleUnslottedVideoRequiredFields(db, "ev-private", 100, "dQw4w9WgXcQ"),
     (error) => error instanceof UnslottedEventSyncError &&
       error.code === "unslotted_event_not_allowed",
   );
