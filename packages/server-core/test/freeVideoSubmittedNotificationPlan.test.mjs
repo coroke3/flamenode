@@ -58,7 +58,7 @@ test("MIG-0651 notification: full migrated SQLite queues one video_submitted DM,
     const stats = { reads: 0 };
     const db = dbFor(sqlite, stats);
     const plan = await buildFreeVideoSubmittedNotificationPlan(db, args({ eventId: "event-a" }));
-    assert.equal(stats.reads, 2, "one active-dedupe plus one recipient preference read");
+    assert.equal(stats.reads, 1, "active dedupe and recipient preference share one D1 SELECT");
     assert.deepEqual(plan.expectedChanges, [null]);
     assert.equal(plan.statements.length, 1);
     assert.equal(plan.audits.length, 0, "CURRENT notification does not create strict video audit entries");
@@ -89,7 +89,7 @@ test("MIG-0651 notification: disabled recipient produces no outbox write", async
     insert(sqlite, "user", { id: "user-1", is_notification_enabled: 0 });
     const stats = { reads: 0 };
     const plan = await buildFreeVideoSubmittedNotificationPlan(dbFor(sqlite, stats), args());
-    assert.equal(stats.reads, 2);
+    assert.equal(stats.reads, 1);
     assert.deepEqual(plan, { statements: [], expectedChanges: [], audits: [] });
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
   } finally { sqlite.close(); }
@@ -113,7 +113,32 @@ test("MIG-0651 notification: existing and racing active-dedupe notification stay
       "the canonical partial unique index allows exactly one active notification");
     const after = await buildFreeVideoSubmittedNotificationPlan(db, args());
     assert.deepEqual(after, { statements: [], expectedChanges: [], audits: [] });
-    assert.equal(stats.reads, 3, "pre-existing dedupe must short circuit recipient lookup");
+    assert.equal(stats.reads, 2, "one joined preflight read per attempt, even with active dedupe");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 1);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 notification: active dedupe short-circuits absent recipient without a second D1 query", async () => {
+  const sqlite = createSqlite();
+  try {
+    const stats = { reads: 0 };
+    const noUser = await buildFreeVideoSubmittedNotificationPlan(dbFor(sqlite, stats), args());
+    assert.deepEqual(noUser, { statements: [], expectedChanges: [], audits: [] });
+    assert.equal(stats.reads, 1);
+
+    insert(sqlite, "user", { id: "user-1", is_notification_enabled: 1 });
+    for (const status of ["processing", "sent"]) {
+      insert(sqlite, "notification_outbox", {
+        id: "old-" + status, recipient_user_id: "user-1",
+        type: "video_submitted", payload_json: JSON.stringify(payload()),
+        status, dedupe_key: "video_submitted:v-test",
+        created_at: NOW, delivery_route: "dm",
+      });
+      const plan = await buildFreeVideoSubmittedNotificationPlan(dbFor(sqlite, stats), args());
+      assert.deepEqual(plan, { statements: [], expectedChanges: [], audits: [] },
+        status + " is an active dedupe state");
+      sqlite.prepare("DELETE FROM notification_outbox WHERE id=?").run("old-" + status);
+    }
+    assert.equal(stats.reads, 3, "one read for absent user + one per active dedupe state");
   } finally { sqlite.close(); }
 });
