@@ -8,7 +8,7 @@
  */
 import type { VideoDetailData } from "@flamenode/ui";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
-import { buildPublicVideoViewModelFromStatic } from "../../../../src/lib/publicData/publicVideoDetailViewModel.ts";
+import { buildPublicVideoViewModelFromStatic, filterPublicVideoDetailEvents } from "../../../../src/lib/publicData/publicVideoDetailViewModel.ts";
 import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/staticVideoDetailCore.ts";
 import { computeEventStatus, eventStatusLabel, isAcceptingEntries } from "../../../../src/lib/utils/eventStatusCore.ts";
 import { formatChapterTime } from "../../../../src/lib/utils/chapterTime.ts";
@@ -70,13 +70,25 @@ export function buildVideoPages(
   now: number = Math.floor(Date.now() / 1000),
   iconMap: ReadonlyMap<string, PublicXIconEntry> = new Map(),
   relatedAllowedIds: ReadonlySet<string> | null = null,
+  allowedEventIds: ReadonlySet<string> | null = null,
 ): VideoPage[] {
-  const detail = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0]);
-  if (!detail || detail.video.visibility_status !== "public") throw new VideoPageBuildError(key);
+  const normalized = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0]);
+  if (!normalized || normalized.video.visibility_status !== "public") throw new VideoPageBuildError(key);
   // Reject a valid-digest snapshot whose entity ID disagrees with its manifest-authorized key.
   // Otherwise an allowed object could publish a page under a different route (including its alias).
   const snapshotId = /^snapshot\/video-detail\/([A-Za-z0-9_-]{1,64})\.json$/.exec(key)?.[1];
-  if (snapshotId && detail.video.id !== snapshotId) throw new VideoPageBuildError(key);
+  if (snapshotId && normalized.video.id !== snapshotId) throw new VideoPageBuildError(key);
+  // CURRENT fences stale event IDs before projecting the public video page.
+  // A public video snapshot does not authorize a withdrawn event title or link.
+  const deniedEventIds = allowedEventIds
+    ? new Set(
+        [...normalized.eventIds, ...normalized.publicEvents.map((event) => event.id)]
+          .filter((id) => !allowedEventIds.has(id)),
+      )
+    : null;
+  const detail = deniedEventIds
+    ? filterPublicVideoDetailEvents(normalized, deniedEventIds)
+    : normalized;
   // A digest-valid snapshot can still contain stale related cards. A related
   // video must have its own currently manifest-allowed (and not blocked) public
   // detail snapshot, otherwise do not publish its title or creator on this page.
@@ -200,13 +212,13 @@ export function buildVideoPages(
  * CURRENT's optional R2 event-base lookup is represented by a verified event-detail build snapshot.
  * Never expose a playlist for a mismatched or non-public event, even when its envelope is allowed.
  */
-function publicEventPlaylistId(payload: unknown, expectedId: string): string | null {
+function publicEventDetail(payload: unknown, expectedId: string): { playlistId: string | null } | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const event = (payload as { event?: unknown }).event;
   if (!event || typeof event !== "object" || Array.isArray(event)) return null;
   const row = event as Record<string, unknown>;
   if (row.id !== expectedId || row.visibility_status !== "public") return null;
-  return extractYoutubePlaylistId(typeof row.youtube_playlist_id === "string" ? row.youtube_playlist_id : null);
+  return { playlistId: extractYoutubePlaylistId(typeof row.youtube_playlist_id === "string" ? row.youtube_playlist_id : null) };
 }
 
 export async function loadVideoPagesForBuild(
@@ -223,9 +235,39 @@ export async function loadVideoPagesForBuild(
         key.slice("snapshot/video-detail/".length, -".json".length)))
     : null;
   const pages: VideoPage[] = [];
-  const playlistIds = new Map<string, string | null>();
+  // Cache only the authorization outcome and playlist ID, not entire event payloads.
+  // The same verified detail authorizes visible event labels and optional playlists.
+  const eventDetails = new Map<string, { playlistId: string | null } | null>();
+  const loadAuthorizedEvent = async (eventId: string): Promise<void> => {
+    if (eventDetails.has(eventId)) return;
+    let eventPayload: unknown = null;
+    if (!access) {
+      eventPayload = FIXTURE_EVENT_DETAIL_PAYLOADS[eventId] ?? null;
+    } else {
+      const key = eventDetailKey(eventId);
+      const manifest = access.options.manifest!;
+      if (manifest.allowedKeys.includes(key) && !manifest.blockedKeys.includes(key)) {
+        try {
+          eventPayload = await loadEventPayloadSnapshot(access.source, key, access.options);
+        } catch (error) {
+          // An absent/withdrawn target loses its event label and playlist.
+          // A corrupt digest, generation or encoding is a build failure.
+          if (!(error instanceof SnapshotBuildError && (error.code === "SNAPSHOT_MISSING" || error.code === "NOT_PUBLIC"))) {
+            throw error;
+          }
+        }
+      }
+    }
+    eventDetails.set(eventId, publicEventDetail(eventPayload, eventId));
+  };
   const buildWithPlaylist = async (payload: unknown, key: string): Promise<void> => {
-    const built = buildVideoPages(payload, key, now, iconMap, relatedAllowedIds);
+    const normalized = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0]);
+    const references = normalized
+      ? [...new Set([...normalized.eventIds, ...normalized.publicEvents.map((event) => event.id)])]
+      : [];
+    await Promise.all(references.map(loadAuthorizedEvent));
+    const allowedEventIds = new Set(references.filter((id) => eventDetails.get(id) !== null));
+    const built = buildVideoPages(payload, key, now, iconMap, relatedAllowedIds, allowedEventIds);
     const eventId = built[0]?.data.primaryEvent?.id;
     // Normalize for rendering, but never let the generic string/number coercers
     // turn arrays or objects into a valid authorization key or future timestamp.
@@ -261,28 +303,7 @@ export async function loadVideoPagesForBuild(
       return;
     }
 
-    if (!playlistIds.has(eventId)) {
-      let eventPayload: unknown = null;
-      if (!access) {
-        eventPayload = FIXTURE_EVENT_DETAIL_PAYLOADS[eventId] ?? null;
-      } else {
-        const eventKey = eventDetailKey(eventId);
-        const manifest = access.options.manifest!;
-        // A missing or explicitly blocked event is an optional absent link, not a build failure.
-        if (manifest.allowedKeys.includes(eventKey) && !manifest.blockedKeys.includes(eventKey)) {
-          try {
-            // Digest/generation/shape errors still fail the build; absent or withdrawn events hide the link.
-            eventPayload = await loadEventPayloadSnapshot(access.source, eventKey, access.options);
-          } catch (error) {
-            if (!(error instanceof SnapshotBuildError && (error.code === "SNAPSHOT_MISSING" || error.code === "NOT_PUBLIC"))) {
-              throw error;
-            }
-          }
-        }
-      }
-      playlistIds.set(eventId, publicEventPlaylistId(eventPayload, eventId));
-    }
-    const playlistId = playlistIds.get(eventId);
+    const playlistId = eventDetails.get(eventId)?.playlistId ?? null;
     if (!playlistId) {
       pages.push(...built);
       return;
