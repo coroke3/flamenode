@@ -54,8 +54,9 @@ function isSessionSafeSelectedXId(value: string): boolean {
 /**
  * SEC-716/726 S3 first-row budget: validate every user and guard/actor
  * projection *in SQLite*, before D1 serializes the first() JSON object.
- * The caps total < 10KiB of raw TEXT; even worst-case JSON control escapes
- * (6 bytes per input byte), numeric columns and field keys stay under 64KiB.
+ * The caps total ~10.1KiB (10,343B) of raw TEXT; even worst-case JSON control
+ * escapes (6 bytes per input byte: 62,058B), numeric columns and field keys
+ * stay strictly under D1's 64KiB (65,536B) first-row limit.
  *
  * A malformed/oversized legacy value is projected as NULL AND flagged for
  * private HTTP 503. Never truncate a value and then mutate/audit a different
@@ -71,12 +72,26 @@ const XID_USER_NUMBER_COLUMNS = [
   'terms_reaccept_required', 'is_banned', 'is_notification_enabled',
   'onboarding_completed_at', 'last_guild_check', 'created_at',
 ] as const;
+const EXTRA_TEXT_CAPS = {
+  actorXName: 768,
+  actorXIconUrl: 2048,
+  operationMode: 32,
+  // SA-019 (costGuardCommands.ts#MAX_DISABLED_FEATURES = 100) persists all 43
+  // WRITE_FEATURE_KEYS as 924B compact JSON (42 non-xid_links keys = 912B);
+  // 2048B covers every valid configuration + future growth while keeping the
+  // worst-case 6x-escaped first-row projection strictly below 64KiB.
+  disabledFeaturesJson: 2048,
+  // SA-018 (costGuardCommands.ts#MAX_OVERRIDE_FEATURES = 8; 8 longest keys = 218B)
+  // fits well inside 512B while offsetting the disabled_features_json headroom.
+  costGuardExceptionFeaturesJson: 512,
+  linkedApprovalStatus: 32,
+} as const;
 const XID_EXTRA_TEXT_COLUMNS = [
-  ['active_x."x_name"', 768],
-  ['active_x."icon_url"', 2048],
-  ['settings."operation_mode"', 32],
-  ['settings."disabled_features_json"', 768],
-  ['settings."cost_guard_exception_features_json"', 768],
+  ['active_x."x_name"', EXTRA_TEXT_CAPS.actorXName],
+  ['active_x."icon_url"', EXTRA_TEXT_CAPS.actorXIconUrl],
+  ['settings."operation_mode"', EXTRA_TEXT_CAPS.operationMode],
+  ['settings."disabled_features_json"', EXTRA_TEXT_CAPS.disabledFeaturesJson],
+  ['settings."cost_guard_exception_features_json"', EXTRA_TEXT_CAPS.costGuardExceptionFeaturesJson],
 ] as const;
 const XID_EXTRA_NUMBER_COLUMNS = [
   'settings."cost_guard_exception_until"',
@@ -229,20 +244,20 @@ async function loadSelectedIdentity(
       CASE WHEN ${XID_INVALID_SNAPSHOT_SQL} THEN 1 ELSE 0 END AS invalid_gate_snapshot,
       ${XID_USER_SQL_PROJECTION},
       ${TERMS_REACCEPT_REQUIRED_CASE_SQL} AS derived_terms_reaccept_required,
-      ${guardedTextExpr('active_x."x_name"', 768)} AS actor_x_name,
-      ${guardedTextExpr('active_x."icon_url"', 2048)} AS actor_x_icon_url,
+      ${guardedTextExpr('active_x."x_name"', EXTRA_TEXT_CAPS.actorXName)} AS actor_x_name,
+      ${guardedTextExpr('active_x."icon_url"', EXTRA_TEXT_CAPS.actorXIconUrl)} AS actor_x_icon_url,
       settings.id AS cg_settings_id,
-      ${guardedTextExpr('settings."operation_mode"', 32)} AS cg_operation_mode,
-      ${guardedTextExpr('settings."disabled_features_json"', 768)} AS cg_disabled_features_json,
+      ${guardedTextExpr('settings."operation_mode"', EXTRA_TEXT_CAPS.operationMode)} AS cg_operation_mode,
+      ${guardedTextExpr('settings."disabled_features_json"', EXTRA_TEXT_CAPS.disabledFeaturesJson)} AS cg_disabled_features_json,
       ${guardedNumericExpr('settings."cost_guard_exception_until"')} AS cg_cost_guard_exception_until,
-      ${guardedTextExpr('settings."cost_guard_exception_features_json"', 768)} AS cg_cost_guard_exception_features_json,
+      ${guardedTextExpr('settings."cost_guard_exception_features_json"', EXTRA_TEXT_CAPS.costGuardExceptionFeaturesJson)} AS cg_cost_guard_exception_features_json,
       ${guardedNumericExpr('settings."audit_normal_retention_days"')} AS cg_audit_normal_retention_days,
       ${guardedNumericExpr('settings."audit_restorable_retention_days"')} AS cg_audit_restorable_retention_days,
       ${guardedNumericExpr('settings."audit_long_retention_days"')} AS cg_audit_long_retention_days,
       ${guardedNumericExpr('settings."audit_max_payload_bytes"')} AS cg_audit_max_payload_bytes,
       ${guardedNumericExpr('settings."audit_compact_after_days"')} AS cg_audit_compact_after_days,
       (SELECT canonical_id FROM bounded_resolved) AS resolved_x_user_id,
-      (SELECT ${guardedTextExpr('x."approval_status"', 32)}
+      (SELECT ${guardedTextExpr('x."approval_status"', EXTRA_TEXT_CAPS.linkedApprovalStatus)}
        FROM x_user_account_links l
        INNER JOIN x_users x ON x.id = l.x_user_id
        CROSS JOIN bounded_resolved r

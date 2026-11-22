@@ -34,6 +34,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const { QUEUE_BINDING_NAMES, QUEUE_FEATURE_FLAG_NAMES } = await import(
     "../../../packages/server-core/src/queues/wakeBudget.ts"
   );
+  const { WRITE_FEATURE_KEYS } = await import("@flamenode/domain/admin");
   const { XIdWriteResultSchema } = await import("@flamenode/contracts");
   process.env.NEXT_PUBLIC_SITE_URL = SITE;
 
@@ -454,6 +455,68 @@ if (runUnderRootTsx(import.meta.url)) {
         label + " session + one bounded identity first row, no extra reads");
       assert.equal(w.d1.stats.batches, beforeBatches, label + " no update/audit batch");
       assert.deepEqual(snapshot(w), before, label + " no stored state change");
+    }
+  });
+
+  test("SEC-726 / S3: valid SA-019 full WRITE_FEATURE_KEYS JSON (>768B) and SA-018 xid_links override remain permitted", async () => {
+    const nonXidDisabledJson = JSON.stringify(WRITE_FEATURE_KEYS.filter((k) => k !== "xid_links"));
+    const allDisabledJson = JSON.stringify(WRITE_FEATURE_KEYS);
+    assert.ok(Buffer.byteLength(nonXidDisabledJson) > 768,
+      "42 non-xid_links WRITE_FEATURE_KEYS must exceed the old 768-byte cap");
+    assert.ok(Buffer.byteLength(allDisabledJson) > 768,
+      "all 43 WRITE_FEATURE_KEYS must exceed the old 768-byte cap");
+
+    // (a) 42 non-xid_links features disabled (912B): xid_links remains enabled -> 200 OK
+    {
+      const w = world();
+      w.sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = 'default'")
+        .run(nonXidDisabledJson);
+      const thaw = freeze(900);
+      let res;
+      try {
+        res = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: "x_free" });
+      } finally {
+        thaw();
+      }
+      assert.equal(res.status, 200);
+      assert.equal(res.result.ok, true);
+      assert.equal(w.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = ?')
+        .get("u_multi").active_x_user_id, "x_free");
+    }
+
+    // (b) All 43 features disabled (924B): without override -> 503 cost_guard_blocked (never db_unavailable);
+    //     with active SA-018 ["xid_links"] override -> 200 OK
+    {
+      const w = world();
+      w.sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = 'default'")
+        .run(allDisabledJson);
+      const before = snapshot(w);
+      const thaw1 = freeze(910);
+      let blocked;
+      try {
+        blocked = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: "x_free" });
+      } finally {
+        thaw1();
+      }
+      assert.equal(blocked.status, 503);
+      assert.equal(blocked.result.ok, false);
+      assert.equal(blocked.result.reason, "cost_guard_blocked");
+      assert.deepEqual(snapshot(w), before, "full CostGuard lockdown must not mutate");
+
+      w.sqlite.prepare(
+        "UPDATE system_settings SET cost_guard_exception_until = ?, cost_guard_exception_features_json = ? WHERE id = 'default'",
+      ).run(1_800_000_900, JSON.stringify(["xid_links"]));
+      const thaw2 = freeze(920);
+      let allowed;
+      try {
+        allowed = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: "x_free" });
+      } finally {
+        thaw2();
+      }
+      assert.equal(allowed.status, 200);
+      assert.equal(allowed.result.ok, true);
+      assert.equal(w.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = ?')
+        .get("u_multi").active_x_user_id, "x_free");
     }
   });
 
