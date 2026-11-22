@@ -476,6 +476,7 @@ if (runTestWithTsx(import.meta.url)) {
       ["notification_async_reject", { notificationWakeSource: "web" }, "async"],
       ["both_sync_throw", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "sync"],
       ["both_downstream_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "downstream"],
+      ["both_queue_send_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "send_reject"],
       ["both_notification_preflight_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "notification_preflight"],
       ["both_static_preflight_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "static_preflight"],
       ["both_healthy", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "healthy"],
@@ -486,6 +487,7 @@ if (runTestWithTsx(import.meta.url)) {
       const sends = [];
       const warnings = [];
       const originalWarn = console.warn;
+      if (mode === "send_reject") resetQueueWakeWarningStateForTests();
       console.warn = (...args) => warnings.push(args);
       let actual;
       try {
@@ -522,7 +524,10 @@ if (runTestWithTsx(import.meta.url)) {
                 }
                 return {
                   QUEUE_DISPATCH_ENABLED: "1",
-                  NOTIFICATION_WAKE_QUEUE: { send: async (message) => sends.push(message.kind) },
+                  NOTIFICATION_WAKE_QUEUE: { send: async (message) => {
+                    if (mode === "send_reject") throw new Error("Queue send " + secret);
+                    sends.push(message.kind);
+                  } },
                   STATIC_REBUILD_WAKE_QUEUE: { send: async (message) => sends.push(message.kind) },
                 };
               },
@@ -574,6 +579,11 @@ if (runTestWithTsx(import.meta.url)) {
               ["[audit-mutate] notification wake failed", "provider_error"],
               ["[audit-mutate] static rebuild wake failed", "provider_error"],
             ]
+          : mode === "send_reject"
+            ? [
+                [JSON.stringify({ service: "queue-wake", result: "send_failed", kind: "notification_available", error_name: "Error" })],
+                [JSON.stringify({ service: "queue-wake", result: "last_failure_record_skipped", kind: "notification_available", reason: "send_failed" })],
+              ]
           : mode === "notification_preflight"
             ? [["[audit-mutate] notification wake failed", "provider_error"]]
             : mode === "static_preflight"
@@ -585,7 +595,7 @@ if (runTestWithTsx(import.meta.url)) {
         name + ": independent notification/static wake attempts");
       assert.deepEqual(sends, mode === "healthy"
         ? ["notification_available", "static_rebuild_available"]
-        : mode === "notification_preflight" ? ["static_rebuild_available"]
+        : mode === "send_reject" || mode === "notification_preflight" ? ["static_rebuild_available"]
         : mode === "static_preflight" ? ["notification_available"] : [],
         name + ": one failed kind cannot skip the independent healthy kind");
       assert.ok(!JSON.stringify({ outcome: actual.outcome, warnings }).includes(secret),
