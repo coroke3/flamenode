@@ -989,7 +989,9 @@ test("MIG-0651 U02 new-video member/chapter plan is atomic with video/metadata/r
         const q = raw ? dialect.sqlToQuery(stmt.sqlExpr) : stmt.toSQL();
         assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
         const prepared = sqlite.prepare(q.sql);
-        const out = raw && i === 0 ? prepared.get(...q.params) : prepared.run(...q.params);
+        const out = raw && i < 2 ? prepared.get(...q.params) : prepared.run(...q.params);
+        if (raw && i < 2) assert.equal(Object.values(out)[0], 1,
+          "both security predicates must be executed and true before video writes");
         if (plan.expectedChanges[i] !== null) assert.equal(Number(out.changes), plan.expectedChanges[i]);
       }
       sqlite.exec("COMMIT");
@@ -1036,7 +1038,7 @@ test("MIG-0651 U02 new-video: normalized X collision after pre-read aborts compl
           const q = "sqlExpr" in stmt
             ? dialect.sqlToQuery(stmt.sqlExpr)
             : stmt.toSQL();
-          if ("sqlExpr" in stmt && i === 0) sqlite.prepare(q.sql).get(...q.params);
+          if ("sqlExpr" in stmt && i < 2) sqlite.prepare(q.sql).get(...q.params);
           else sqlite.prepare(q.sql).run(...q.params);
         }
       }, /malformed JSON/, "the member identity assertion must reject normalized PK collision");
@@ -1087,7 +1089,7 @@ test("MIG-0651 U02 new-video: rebuild failure rolls back member X, chapter and v
       for (const [i, stmt] of plan.statements.entries()) {
         const raw = "sqlExpr" in stmt;
         const q = raw ? dialect.sqlToQuery(stmt.sqlExpr) : stmt.toSQL();
-        if (raw && i === 0) sqlite.prepare(q.sql).get(...q.params);
+        if (raw && i < 2) sqlite.prepare(q.sql).get(...q.params);
         else sqlite.prepare(q.sql).run(...q.params);
       }
     }, /member-queue-abort/);
