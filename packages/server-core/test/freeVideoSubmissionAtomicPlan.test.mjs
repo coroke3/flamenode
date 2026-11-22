@@ -527,8 +527,17 @@ test("MIG-0651 U02: stale archived YouTube duplicate aborts the atomic plan, voi
         id: "v:previous", submitted_by_user_id: "user-2",
         creator_display_name: "Previous", title: "Prior upload",
         youtube_video_id: "dQw4w9WgXcQ",
-        visibility_status: previousStatus,
+        visibility_status: "public",
       });
+      // Migration 0045 rejects archived on INSERT but permits an existing
+      // video's legacy state through UPDATE. Seed a valid row, then simulate
+      // the status transition that occurred after request-time preflight.
+      if (previousStatus !== "public") {
+        sqlite.prepare("UPDATE videos SET visibility_status=? WHERE id='v:previous'")
+          .run(previousStatus);
+      }
+      assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v:previous'").get()?.visibility_status,
+        previousStatus);
       const dialect = new SQLiteSyncDialect();
       const guard = dialect.sqlToQuery(plan.statements[0].assertSql);
       assert.match(guard.sql, /NOT EXISTS/);
