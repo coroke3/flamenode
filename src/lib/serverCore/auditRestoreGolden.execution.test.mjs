@@ -48,6 +48,11 @@ if (runTestWithTsx(import.meta.url)) {
   const { eq } = await import("drizzle-orm");
   const schema = await import("../db/schema.ts");
   const { restoreAuditLog } = await import("../audit/restore.ts");
+  const { restoreAuditLog: restoreAuditLogCore } = await import("@flamenode/server-core/audit/restore");
+  const { nextVisibilityManifestHost } = await import("../publicData/visibilityManifestHost.ts");
+  const { nextVideoPublicCacheKeyHost } = await import("../video/videoVisibilityTransition.ts");
+  const { deletePublicJsonCaches } = await import("../publicData/publicCache.ts");
+  const { invalidateEventExportCache } = await import("../api/eventExportCache.ts");
   const { getAdapter } = await import("../audit/adapters.ts");
   const manifestCore = await import("../publicData/publicVisibilityManifestCore.ts");
   const isolate = await import("../publicData/publicCacheIsolate.ts");
@@ -229,7 +234,7 @@ if (runTestWithTsx(import.meta.url)) {
   });
 
   async function runScenario(name, spec) {
-    const { setup, arrange, options = {}, bucket: bucketSpec, caches: cachesOption, hooks = {}, env = {} } = spec;
+    const { setup, arrange, options = {}, bucket: bucketSpec, caches: cachesOption, hooks = {}, env = {}, postCommitFailure } = spec;
     const sqlite = new DatabaseSync(":memory:");
     for (const migration of migrations) sqlite.exec(migration);
     seed(sqlite);
@@ -295,17 +300,38 @@ if (runTestWithTsx(import.meta.url)) {
       // arrange reads rows through drizzle to build snapshots; its reads are not part of the golden.
       await arrange?.({ db, sqlite });
       log.length = 0;
-      outcome = {
-        returned: printable(
-          await restoreAuditLog(db, {
-            auditId: "aud-1",
-            userId: "u-actor",
-            reason: "restore because",
-            confirmText: "RESTORE aud-1",
-            ...options,
-          }),
-        ),
+      const restoreOptions = {
+        auditId: "aud-1",
+        userId: "u-actor",
+        reason: "restore because",
+        confirmText: "RESTORE aud-1",
+        ...options,
       };
+      // Only the post-commit failure scenario injects a rejecting core host.
+      // Ordinary Golden runs continue using the unmodified CURRENT bridge.
+      const postCommitHost = postCommitFailure ? {
+        manifest: nextVisibilityManifestHost,
+        publicCacheKeys: nextVideoPublicCacheKeyHost,
+        deletePublicJsonCaches: async (keys) => {
+          log.push({ op: "postcommit.publicJson", count: keys.length });
+          if (postCommitFailure.publicJson) {
+            throw new Error("private Cache API provider " + postCommitFailure.canary);
+          }
+          await deletePublicJsonCaches(keys);
+        },
+        invalidateEventExportCache: async (eventId) => {
+          log.push({ op: "postcommit.eventExport", eventId });
+          if (postCommitFailure.eventExport) {
+            throw new Error("private scheduled export provider " + postCommitFailure.canary);
+          }
+          await invalidateEventExportCache(eventId);
+        },
+        loadQueueWakeHost: async () => (await import("../serverCore/nextPorts.ts")).nextQueueWakeHost,
+      } : null;
+      const restored = postCommitHost
+        ? await restoreAuditLogCore(db, restoreOptions, postCommitHost)
+        : await restoreAuditLog(db, restoreOptions);
+      outcome = { returned: printable(restored) };
     } catch (error) {
       outcome = { threw: String(error?.message ?? error) };
     } finally {
@@ -1221,6 +1247,50 @@ if (runTestWithTsx(import.meta.url)) {
     assert.ok(result.log.some((entry) =>
       entry.op === "cache.delete" && !entry.key.includes("public-event-export%3A")),
     "other public JSON cache evictions must still run");
+  });
+
+  test("SEC-718: rejecting post-commit cache host never masks committed event/video restore", async () => {
+    const canary = "SEC718_POSTCOMMIT_PROVIDER_PRIVATE_CANARY";
+    const scenarios = [
+      ["event", {
+        arrange: arrangeEvent("evt-1", { beforePatch: { visibility_status: "private" } }),
+      }, ["publicJson", "eventExport"]],
+      ["video", {
+        setup: seedVideoWithEvents(),
+        arrange: arrangeVideo(videoPublicToPrivate),
+      }, ["eventExport", "eventExport", "publicJson"]],
+    ];
+    for (const [entity, spec, expectedOrder] of scenarios) {
+      const [, actual] = await runScenario("postcommit_rejection_" + entity, {
+        ...spec,
+        postCommitFailure: { publicJson: true, eventExport: true, canary },
+      });
+      assert.equal(actual.outcome.returned?.ok, true,
+        entity + ": an already committed restore must report success");
+      assert.equal(actual.audit_restore_runs.filter((row) => row.status === "success").length, 1);
+      assert.equal(actual.audit_restore_runs.filter((row) => row.status === "failed").length, 0);
+      assert.equal(actual.log.filter((entry) => entry.op === "batch").length, 1,
+        "only the original audited D1 batch may execute");
+      const hostCalls = actual.log.filter((entry) => entry.op.startsWith("postcommit."));
+      assert.deepEqual(hostCalls.map((entry) =>
+        entry.op === "postcommit.publicJson" ? "publicJson" : "eventExport"
+      ), expectedOrder, entity + ": all independent postcommit cache operations are attempted");
+      const warnings = actual.log.filter((entry) => entry.op === "console.warn" &&
+        (entry.args[0] === "[audit-restore] public cache invalidation failed" ||
+          entry.args[0] === "[audit-restore] event export invalidation failed"));
+      assert.deepEqual(warnings.map((entry) => entry.args), expectedOrder.map((kind) => [
+        kind === "publicJson"
+          ? "[audit-restore] public cache invalidation failed"
+          : "[audit-restore] event export invalidation failed",
+        "provider_error",
+      ]), entity + ": provider failures produce fixed-code warnings only");
+      assert.ok(!JSON.stringify(actual.outcome).includes(canary));
+      assert.ok(!JSON.stringify(actual.log.filter((entry) =>
+        entry.op.startsWith("console."))).includes(canary),
+      entity + ": provider details cannot reach application logs");
+      assert.equal(actual.log.filter((entry) => entry.op === "cache.delete").length, 0,
+        "the rejecting provider did not pretend a cache entry was deleted");
+    }
   });
 
   test("SEC-718: dry-run video restore never invalidates related scheduled exports", async () => {
