@@ -58,24 +58,63 @@ async function listStaleDetailTargets(
   failedSince: number,
 ): Promise<StaticRebuildEnqueueTarget[]> {
   const placeholders = DETAIL_TARGET_TYPES.map(() => "?").join(", ");
+  // A legacy event compositor may be 60+ days old while its mandatory base or
+  // slots section is absent. Enqueuing only the event will fail repeatedly;
+  // rebuild the missing producer instead, which queues the composer follow-up.
+  // Check active/failed cooldown for the *selected producer*, not the already
+  // failed composer, so a recent event failure cannot block its prerequisite.
+  // This remains one bounded D1 SELECT and at most one target per stale detail.
   const result = await env.DB.prepare(
-    `SELECT a.target_type AS target_type, a.target_id AS target_id
+    `WITH stale_details AS (
+       SELECT
+         CASE
+           WHEN a.target_type = 'event'
+             AND EXISTS (
+               SELECT 1 FROM events AS e
+                WHERE e.id = a.target_id AND e.visibility_status = 'public'
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM static_artifacts AS section
+                WHERE section.target_type = 'event_base'
+                  AND section.target_id = a.target_id
+                  AND section.deleted_at IS NULL
+             )
+             THEN 'event_base'
+           WHEN a.target_type = 'event'
+             AND EXISTS (
+               SELECT 1 FROM events AS e
+                WHERE e.id = a.target_id AND e.visibility_status = 'public'
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM static_artifacts AS section
+                WHERE section.target_type = 'event_slots'
+                  AND section.target_id = a.target_id
+                  AND section.deleted_at IS NULL
+             )
+             THEN 'event_slots'
+           ELSE a.target_type
+         END AS refresh_type,
+         a.target_id,
+         MIN(a.generated_at) AS oldest_generated_at
        FROM static_artifacts AS a
       WHERE a.deleted_at IS NULL
         AND a.target_type IN (${placeholders})
       GROUP BY a.target_type, a.target_id
      HAVING MIN(a.generated_at) < ?
-        AND NOT EXISTS (
-          SELECT 1 FROM static_rebuild_queue AS q
-           WHERE q.target_type = a.target_type
-             AND q.target_id = a.target_id
-             AND (
-               q.status IN ('pending', 'processing')
-               OR (q.status = 'failed' AND q.updated_at > ?)
-             )
-        )
-      ORDER BY MIN(a.generated_at) ASC
-      LIMIT ?`,
+    )
+    SELECT stale.refresh_type AS target_type, stale.target_id AS target_id
+      FROM stale_details AS stale
+     WHERE NOT EXISTS (
+       SELECT 1 FROM static_rebuild_queue AS q
+        WHERE q.target_type = stale.refresh_type
+          AND q.target_id = stale.target_id
+          AND (
+            q.status IN ('pending', 'processing')
+            OR (q.status = 'failed' AND q.updated_at > ?)
+          )
+     )
+     ORDER BY stale.oldest_generated_at ASC
+     LIMIT ?`,
   )
     .bind(
       ...DETAIL_TARGET_TYPES,
