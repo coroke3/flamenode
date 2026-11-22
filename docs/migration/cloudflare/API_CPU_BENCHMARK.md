@@ -7,6 +7,8 @@
 
 > **2026-11-22 P1 #732 correctness gate (PR #456; CI pending):** Historical rows and verdicts below predate the warm/cold separation and are NOT valid S2/S3 acceptance. The former `aggregate.overallMax` and `noiseFloorMs` included cold starts, which could mask warm budget failures. Current code judges the maximum of normal/limit/invalid only, reports cold separately, and blocks acceptance unless warm BASELINE max is strictly below 4ms with >=50 valid samples per warm kind. No qualifying Linux workerd run is asserted here.
 
+**MIG-0639 RH-013 named warm mode acceptance (2026-11-22):** The RH-013 500-video × 100-member `scheduled-warm` HIT and `realtime-warm` micro-cache probe are distinct **warm** paths, not cold startup data. Their p50/p95/p99/max are reported and **their maxima now participate in the S2 max CPU budget**, with at least 50 valid samples per named warm mode required; missing, short or anomalous extra warm modes yield `STOP_SAMPLES`. Only `cold` is excluded from the warm CPU budget and warm BASELINE noise. This closes a false-PASS gap where `normal/limit/invalid` could pass despite RH-013's actual named warm path exceeding 7ms. Evidence requires an actual admissible Linux workerd run; synthetic regression is not a performance result.
+
 **MIG-0639 acceptance-environment guard (2026-11-22):** A benchmark run cannot claim S2/S3/S4 CPU PASS from `--mode inproc` (Node wall proxy), Windows/non-Linux workerd, `--d1 sim`, a `--only` subset, a warmup below 10, or missing/insufficient/invalid cold samples (50 per route). These now receive `STOP_PROXY`, `STOP_PLATFORM`, `STOP_D1_SIM`, `STOP_PARTIAL`, `STOP_WARMUP`, or `STOP_COLD` instead of a budget PASS. Warm/cold pure arithmetic and the stricter warm BASELINE `STOP_BASELINE` / warm `STOP_SAMPLES` logic remain unchanged. JSON records `measurementEnvironmentEligible` and `measurementEnvironmentStopReason`. A Linux workerd verdict is still **LOCAL**, not production acceptance, and independent review/Lead gates still apply.
 
 **Every number in this file is a LOCAL measurement. None is a production value.** ZERO_1102 section 3 already states that local workerd values are not production values.
@@ -15,7 +17,7 @@
 
 Budgets are judged by the **maximum**, not p95 (ZERO_1102 section 3): S2 read `< 7ms`, S3 mutation `< 8ms`, S4 session resolution `<= 2ms` (inside S2/S3). p50/p95/p99 are recorded and never decide pass or fail.
 
-The harness gives one of these verdicts per method from the maximum of the three **warm** kinds (normal/limit/invalid); cold start is recorded separately, never included in noise or the S2/S3/S4 budget verdict. A warm BASELINE maximum >=4ms (strict), missing baseline or inadequate warm samples produces STOP, not PASS:
+The harness gives one of these verdicts per method from the maximum of **all measured warm kinds** (normal/limit/invalid and any explicitly named warm path such as RH-013 scheduled-warm/realtime-warm); cold start is recorded separately, never included in noise or the S2/S3/S4 budget verdict. A warm BASELINE maximum >=4ms (strict), missing baseline or inadequate warm samples produces STOP, not PASS:
 
 | verdict | rule |
 | --- | --- |

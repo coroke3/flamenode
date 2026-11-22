@@ -178,6 +178,41 @@ test("MIG-0639: Node proxy, non-Linux, sim, partial and cold-skip never report f
   assert.equal(baselineFail[0].agg.verdict,"STOP_BASELINE","preserve stricter baseline STOP");
 });
 
+test("MIG-0639 RH-013: scheduled/realtime warm maximum is budgeted and both modes are required", () => {
+  const rows = (ms, kind) => Array.from({ length: MIN_SAMPLES },
+    () => ({ kind, cpuMs: ms, status: 200 }));
+  const baseline = WARM_KINDS.flatMap(kind => rows(1,kind)).concat(rows(300,"cold"));
+  const standard = WARM_KINDS.flatMap(kind => rows(2,kind));
+  const extra = [
+    ...rows(12,"scheduled-warm"), ...rows(3,"realtime-warm"), ...rows(400,"cold"),
+  ];
+  const mk = (samples) => [
+    {id:"RH-013",runtimeClass:"S2",expectedWarmKinds:["scheduled-warm","realtime-warm"],samples},
+    {id:"BASELINE",runtimeClass:"S2",samples:baseline},
+  ];
+  const full = mk([...standard,...extra]);
+  const gate = applyBudgetVerdicts(full,{resolutionMs:0});
+  assert.equal(gate.noiseFloorMs,1,"cold 300ms cannot contaminate warm baseline");
+  assert.equal(full[0].agg.overallMax,12,"scheduled-warm over budget must enter warm maximum");
+  assert.equal(full[0].agg.coldMax,400,"cold remains separately diagnostic");
+  assert.equal(full[0].agg.verdict,"FAIL","12ms-1ms warm noise exceeds S2 <7ms");
+  assert.equal(full[0].agg.kinds["realtime-warm"].n,MIN_SAMPLES);
+  assert.match(renderMarkdown(full,{digits:1,label:"RH-013 test"}),/\| RH-013.*\| 12\.0 \| 400\.0 \| FAIL \|/);
+  const missing = mk([...standard,...rows(12,"scheduled-warm"),...rows(400,"cold")]);
+  applyBudgetVerdicts(missing,{resolutionMs:0});
+  assert.equal(missing[0].agg.verdict,"STOP_SAMPLES",
+    "a missing named warm mode must not yield PASS/FAIL acceptance");
+  const incomplete = mk([...standard,...rows(2,"scheduled-warm").slice(1),...rows(2,"realtime-warm")]);
+  applyBudgetVerdicts(incomplete,{resolutionMs:0});
+  assert.equal(incomplete[0].agg.verdict,"STOP_SAMPLES",
+    "49 valid special-warm samples cannot qualify");
+  const anomalous = mk([...standard,...rows(2,"scheduled-warm"),
+    ...rows(2,"realtime-warm").map((sample,i) => ({...sample,unexpected:i===0}))]);
+  applyBudgetVerdicts(anomalous,{resolutionMs:0});
+  assert.equal(anomalous[0].agg.verdict,"STOP_SAMPLES",
+    "unexpected cache/body-reuse semantics block acceptance");
+});
+
 test("Issue #732: cold baseline never masks a warm over-budget failure", () => {
   const warm = (ms) => WARM_KINDS.flatMap((kind) =>
     Array.from({ length: MIN_SAMPLES }, () => ({ kind, cpuMs: ms, status: 200 })));

@@ -109,8 +109,12 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
       d1PerQueryRowsBySample: rows.map((r) => r.d1PerQueryRows ?? null),
     };
   }
-  // ZERO_1102 §3 judges warm requests only; cold starts remain diagnostic data.
-  const warmMaxima = WARM_KINDS.map((kind) => kinds[kind].max).filter((v) => v != null);
+  // ZERO_1102 §3 judges every warm request path, including RH-013's named
+  // scheduled-warm/realtime-warm modes. Only cold isolate starts are diagnostic.
+  const warmMaxima = Object.entries(kinds)
+    .filter(([kind]) => kind !== "cold")
+    .map(([, row]) => row.max)
+    .filter((max) => max != null);
   const overallMax = warmMaxima.length ? Math.max(...warmMaxima) : null;
   const coldMax = kinds.cold.max;
   return {
@@ -146,8 +150,12 @@ export function applyBudgetVerdicts(results, { resolutionMs }) {
       r.agg.verdict = "NOISE_FLOOR";
     } else if (!quietBaseline) {
       r.agg.verdict = "STOP_BASELINE";
-    } else if (!WARM_KINDS.every((kind) => r.agg.kinds[kind].meetsMinSamples
-      && r.agg.kinds[kind].unexpectedStatus === 0)) {
+    } else if (![...new Set([
+      ...WARM_KINDS, ...(r.expectedWarmKinds ?? []),
+      ...Object.keys(r.agg.kinds).filter((kind) => kind !== "cold"),
+    ])].every((kind) => r.agg.kinds[kind]?.meetsMinSamples
+      && r.agg.kinds[kind]?.unexpectedStatus === 0)) {
+      // Missing/unhealthy RH-013 special warm mode must NEVER become a PASS.
       r.agg.verdict = "STOP_SAMPLES";
     }
   }
@@ -1856,7 +1864,10 @@ export async function main(argv) {
     for (const sc of scenarios) {
       process.stderr.write(`measuring ${sc.id} ...\n`);
       const samples = await runScenario(target, sc, opts, state);
-      results.push({ id: sc.id, title: sc.title, runtimeClass: sc.runtimeClass, samples });
+      results.push({
+        id: sc.id, title: sc.title, runtimeClass: sc.runtimeClass, samples,
+        expectedWarmKinds: Object.keys(sc.warmModes ?? {}),
+      });
     }
     if (target.supportsCold && !opts.skipCold) {
       const cold = await runCold(target, scenarios, opts);
