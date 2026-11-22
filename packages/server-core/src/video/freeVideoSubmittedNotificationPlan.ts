@@ -25,13 +25,33 @@ export async function buildFreeVideoSubmittedNotificationPlan(
   },
 ): Promise<UnslottedVideoAtomicPlan> {
   const { videoId, actorUserId, eventId, payload, now } = args;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("free_video_submitted_notification_invalid");
+  }
+  // Freeze the actual scalar values before JSON.stringify invokes any
+  // toJSON()/getter hook. Re-reading these after serialization could compare
+  // two *mutated* values rather than the fields originally validated.
+  let checkedVideoId: unknown;
+  let checkedContent: unknown;
+  let checkedUrl: unknown;
+  let checkedEventId: unknown;
+  try {
+    checkedVideoId = payload.video_id;
+    checkedContent = payload.content;
+    checkedUrl = payload.url;
+    checkedEventId = payload.event_id;
+  } catch {
+    throw new Error("free_video_submitted_notification_invalid");
+  }
   if (!videoId?.trim() || !actorUserId?.trim() ||
       !Number.isSafeInteger(now) || now < 0 ||
       (eventId !== null && !eventId?.trim()) ||
-      !payload || typeof payload !== "object" || Array.isArray(payload) ||
-      payload.video_id !== videoId ||
-      typeof payload.content !== "string" ||
-      payload.content.length === 0 || payload.content.length > 2000) {
+      checkedVideoId !== videoId ||
+      typeof checkedContent !== "string" ||
+      checkedContent.length === 0 || checkedContent.length > 2000 ||
+      typeof checkedUrl !== "string" ||
+      !/^https?:\/\//.test(checkedUrl) ||
+      (checkedEventId !== undefined && checkedEventId !== eventId)) {
     throw new Error("free_video_submitted_notification_invalid");
   }
   let payloadJson: string;
@@ -62,11 +82,11 @@ export async function buildFreeVideoSubmittedNotificationPlan(
   }
   if (serialized.video_id !== videoId ||
       typeof serialized.content !== "string" ||
-      serialized.content !== payload.content ||
+      serialized.content !== checkedContent ||
       typeof serialized.url !== "string" ||
-      serialized.url !== payload.url ||
+      serialized.url !== checkedUrl ||
       !/^https?:\/\//.test(serialized.url) ||
-      serialized.event_id !== payload.event_id ||
+      serialized.event_id !== checkedEventId ||
       (serialized.event_id !== undefined && serialized.event_id !== eventId)) {
     throw new Error("free_video_submitted_notification_invalid");
   }
