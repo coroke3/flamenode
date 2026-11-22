@@ -107,16 +107,35 @@ export async function sendQueueWakeBestEffort(
   options: SendQueueWakeOptions,
   host: QueueWakeHost,
 ): Promise<{ sent: boolean; reason?: string }> {
-  const flags = resolveQueueFeatureFlags(
-    options.envFlags ??
-      (() => {
-        try {
-          return host.readEnv();
-        } catch {
-          return null;
-        }
-      })(),
-  );
+  // Some host/runtime shims expose env flags through accessors or Proxies.
+  // Even if readEnv() returned, evaluating a getter can throw. Fail closed
+  // without turning an already committed business write into an error.
+  let flags: ReturnType<typeof resolveQueueFeatureFlags>;
+  try {
+    flags = resolveQueueFeatureFlags(
+      options.envFlags ??
+        (() => {
+          try {
+            return host.readEnv();
+          } catch {
+            return null;
+          }
+        })(),
+    );
+  } catch {
+    // Never include the original provider error (which may contain credentials).
+    warnOnce(`wake_flags_unavailable:${options.kind}`, {
+      service: "queue-wake",
+      result: "feature_flags_unavailable",
+      kind: options.kind,
+    });
+    await persistFailureWithinWorkerLifetime(
+      options,
+      "feature_flags_unavailable",
+      host,
+    );
+    return { sent: false, reason: "feature_flags_unavailable" };
+  }
 
   if (!flags.dispatchEnabled) {
     return { sent: false, reason: "dispatch_disabled" };
