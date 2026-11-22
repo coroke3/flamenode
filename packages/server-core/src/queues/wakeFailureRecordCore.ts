@@ -48,8 +48,20 @@ export async function recordQueueWakeFailureBestEffortCore(
   },
 ): Promise<void> {
   const kv = input.kv;
+  // Even probing a Worker KV binding can throw when a host shim exposes a
+  // poisoned accessor/Proxy. This is diagnostics only, never part of the
+  // committed mutation's success contract.
+  let put: Pick<KvPort, "put">["put"] | null = null;
+  try {
+    if (kv) {
+      const candidate = kv.put;
+      if (typeof candidate === "function") put = candidate;
+    }
+  } catch {
+    // No provider Error object, name or cause may be logged from this path.
+  }
 
-  if (!kv || typeof kv.put !== "function") {
+  if (!kv || !put) {
     console.warn(
       JSON.stringify({
         service,
@@ -80,17 +92,20 @@ export async function recordQueueWakeFailureBestEffortCore(
   });
 
   try {
-    await kv.put(queueWakeLastFailureKvKey(input.kind), serializeQueueWakeLastFailure(input.reason), {
+    // Invoke the already validated function; do not read the dynamic getter
+    // a second time, and preserve method receivers required by real KV shims.
+    await put.call(kv, queueWakeLastFailureKvKey(input.kind), serializeQueueWakeLastFailure(input.reason), {
       expirationTtl: QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS,
     });
-  } catch (error) {
+  } catch {
+    // Error.name is not a trusted enum: a provider can put arbitrary secret
+    // text in it. Report only fixed status and the caller's bounded reason.
     console.warn(
       JSON.stringify({
         service,
         result: "last_failure_record_failed",
         kind: input.kind,
         reason: input.reason,
-        error_name: error instanceof Error ? error.name : undefined,
       }),
     );
   }
