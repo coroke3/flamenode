@@ -213,6 +213,53 @@ if (runUnderRootTsx(import.meta.url)) {
     reset();
   });
 
+  test("SEC-575: disabling public_api_enabled rejects cached export and re-enabled event never restores revoked video", async () => {
+    // A scheduled Cache API HIT must never bypass the event-level public API
+    // opt-out. Re-enabling an event must also re-check video visibility rather
+    // than replay a payload written before that event's opt-out.
+    try {
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        for (const format of ["v5", "legacy"]) {
+          reset();
+          sqlite.exec("UPDATE events SET public_api_enabled=1, visibility_status='public' WHERE id='export-event'");
+          sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+          const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+          const first = await request(path);
+          assert.equal(first.status, 200, runtime + " " + format);
+          assert.equal(first.headers.get("X-FlameNode-Cache"), "MISS");
+          assert.match(await first.text(), /public-video/);
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+          assert.equal((await request(path)).headers.get("X-FlameNode-Cache"), "HIT",
+            "test requires a genuinely populated scheduled Cache API entry");
+
+          // Deliberately retain the origin cached response while disabling the
+          // API, so the denial cannot be explained by cache invalidation.
+          sqlite.exec("UPDATE events SET public_api_enabled=0 WHERE id='export-event'");
+          const denied = await request(path);
+          assert.equal(denied.status, 404, runtime + " " + format + " API opt-out");
+          assert.equal(await denied.text(), '{"error":"not_found"}');
+          assert.equal(denied.headers.get("X-FlameNode-Cache"), null);
+
+          // The old cache still contains the public video. Restore the API
+          // only after that video becomes private; no stale row may reappear.
+          sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+          sqlite.exec("UPDATE events SET public_api_enabled=1 WHERE id='export-event'");
+          const restored = await request(path);
+          assert.equal(restored.status, 200, runtime + " " + format);
+          assert.equal(restored.headers.get("X-FlameNode-Cache"), "MISS");
+          assert.equal(restored.headers.get("Cache-Control"), "no-store");
+          assert.doesNotMatch(await restored.text(), /public-video|公開作品/);
+          assert.equal(d1.stats.writes, 0, "event export GET is D1 read-only");
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+        }
+      }
+    } finally {
+      sqlite.exec("UPDATE events SET public_api_enabled=1, visibility_status='public' WHERE id='export-event'");
+      sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      reset();
+    }
+  });
+
   test("SEC-718: writer-colo deletion does not invalidate a reader-colo cached video (CURRENT/Hono, v5/legacy)", async () => {
     // Cloudflare Cache API entries are colo-local. A successful writer-side
     // delete must not be mistaken for a global invalidation of another colo.
