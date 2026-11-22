@@ -111,8 +111,8 @@ test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body f
     // Both public event references have current verified detail snapshots.
     // Without these, the SSG must no longer trust the old video's event labels.
     events: [
-      ["ev1", { event: { id: "ev1", visibility_status: "public" } }],
-      ["ev2", { event: { id: "ev2", visibility_status: "public" } }],
+      ["ev1", { event: { id: "ev1", title: "イベント1", visibility_status: "public" } }],
+      ["ev2", { event: { id: "ev2", title: "イベント2", visibility_status: "public" } }],
     ],
   });
   try {
@@ -224,7 +224,7 @@ test("snapshot env: a partly set env fails the build instead of falling back to 
 });
 
 const playlistEvent = (visibility = "public", playlistId = "PLabcdefghijklmnop", id = "ev1") => ({
-  event: { id, visibility_status: visibility, youtube_playlist_id: playlistId },
+  event: { id, title: `イベント${id}`, visibility_status: visibility, youtube_playlist_id: playlistId },
 });
 const playlistLinks = (r) => [...dom(r, "AAAAAAAAA01/index.html").querySelectorAll('main a[href^="https://www.youtube.com/playlist?list="]')]
   .map((a) => a.getAttribute("href"));
@@ -295,6 +295,9 @@ test("T09 privacy: a stale video cannot publish a withdrawn event title, icon or
     }],
     ["event detail ID mismatch", {
       events: [["ev1", playlistEvent("public", "PLabcdefghijklmnop", "another-event")], allowed],
+    }],
+    ["invalid public event shape", {
+      events: [["ev1", { event: { id: "ev1", visibility_status: "public" } }], allowed],
     }],
   ];
   for (const [label, settings] of scenarios) {

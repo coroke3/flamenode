@@ -217,7 +217,7 @@ function publicEventDetail(payload: unknown, expectedId: string): { playlistId: 
   const event = (payload as { event?: unknown }).event;
   if (!event || typeof event !== "object" || Array.isArray(event)) return null;
   const row = event as Record<string, unknown>;
-  if (row.id !== expectedId || row.visibility_status !== "public") return null;
+  if (row.id !== expectedId || row.visibility_status !== "public" || typeof row.title !== "string" || !row.title.trim()) return null;
   return { playlistId: extractYoutubePlaylistId(typeof row.youtube_playlist_id === "string" ? row.youtube_playlist_id : null) };
 }
 
@@ -234,6 +234,8 @@ export async function loadVideoPagesForBuild(
     ? new Set(videoDetailKeys(access.options.manifest!).map((key) =>
         key.slice("snapshot/video-detail/".length, -".json".length)))
     : null;
+  const eventAllowedKeys = access ? new Set(access.options.manifest!.allowedKeys) : null;
+  const eventBlockedKeys = access ? new Set(access.options.manifest!.blockedKeys) : null;
   const pages: VideoPage[] = [];
   // Cache only the authorization outcome and playlist ID, not entire event payloads.
   // The same verified detail authorizes visible event labels and optional playlists.
@@ -245,8 +247,7 @@ export async function loadVideoPagesForBuild(
       eventPayload = FIXTURE_EVENT_DETAIL_PAYLOADS[eventId] ?? null;
     } else {
       const key = eventDetailKey(eventId);
-      const manifest = access.options.manifest!;
-      if (manifest.allowedKeys.includes(key) && !manifest.blockedKeys.includes(key)) {
+      if (eventAllowedKeys?.has(key) && !eventBlockedKeys?.has(key)) {
         try {
           eventPayload = await loadEventPayloadSnapshot(access.source, key, access.options);
         } catch (error) {
@@ -265,8 +266,9 @@ export async function loadVideoPagesForBuild(
     const references = normalized
       ? [...new Set([...normalized.eventIds, ...normalized.publicEvents.map((event) => event.id)])]
       : [];
-    await Promise.all(references.map(loadAuthorizedEvent));
-    const allowedEventIds = new Set(references.filter((id) => eventDetails.get(id) !== null));
+    // Keep peak memory bounded: never parse many large event-detail envelopes concurrently.
+    for (const eventId of references) await loadAuthorizedEvent(eventId);
+    const allowedEventIds = new Set(references.filter((id) => Boolean(eventDetails.get(id))));
     const built = buildVideoPages(payload, key, now, iconMap, relatedAllowedIds, allowedEventIds);
     const eventId = built[0]?.data.primaryEvent?.id;
     // Normalize for rendering, but never let the generic string/number coercers
