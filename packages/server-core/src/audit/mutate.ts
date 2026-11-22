@@ -253,6 +253,16 @@ type D1BatchRuntime = ServerCoreDb & {
   };
 };
 
+function warnPostCommitWakeFailure(message: string): void {
+  try {
+    // Never log arbitrary provider/import errors or nested credentials,
+    // and never let a failing diagnostic sink abort a committed D1 mutation.
+    console.warn(message, "provider_error");
+  } catch {
+    // Diagnostics must never abort remaining post-commit wake attempts.
+  }
+}
+
 function getStatementBindCount(
   db: ServerCoreDb,
   statement: BatchItem<"sqlite">,
@@ -480,24 +490,47 @@ export async function mutateWithAudit(
   }
 
   await db.batch(batchItems as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
+  // From here on D1 is committed. Even if a lazy module import / Queue host
+  // throws, returning an error would misreport the durable mutation as rolled
+  // back. The committed outbox/static queue can be recovered without a wake.
   const wakeSentKinds =
     input.wakeSentKinds ??
     (input.notificationWakeSource || input.staticRebuildWakeSource
       ? new Set<QueueWakeKind>()
       : undefined);
-  if (input.notificationWakeSource) {
-    await wakeNotificationQueueAfterCommit(
-      input.notificationWakeSource,
-      { sentKinds: wakeSentKinds },
-      await loadWakeHost!(),
-    );
-  }
-  if (input.staticRebuildWakeSource) {
-    await wakeStaticRebuildQueueAfterCommit(
-      input.staticRebuildWakeSource,
-      { sentKinds: wakeSentKinds },
-      await loadWakeHost!(),
-    );
+  if (input.notificationWakeSource || input.staticRebuildWakeSource) {
+    let wakeHost: Awaited<ReturnType<QueueWakeHostLoader>> | null = null;
+    try {
+      // Resolve once when both kinds are requested, keeping a shared host and
+      // the same per-request sentKinds duplicate suppression.
+      wakeHost = await loadWakeHost!();
+    } catch {
+      warnPostCommitWakeFailure("[audit-mutate] post-commit wake host unavailable");
+    }
+    if (wakeHost) {
+      if (input.notificationWakeSource) {
+        try {
+          await wakeNotificationQueueAfterCommit(
+            input.notificationWakeSource,
+            { sentKinds: wakeSentKinds },
+            wakeHost,
+          );
+        } catch {
+          warnPostCommitWakeFailure("[audit-mutate] notification wake failed");
+        }
+      }
+      if (input.staticRebuildWakeSource) {
+        try {
+          await wakeStaticRebuildQueueAfterCommit(
+            input.staticRebuildWakeSource,
+            { sentKinds: wakeSentKinds },
+            wakeHost,
+          );
+        } catch {
+          warnPostCommitWakeFailure("[audit-mutate] static rebuild wake failed");
+        }
+      }
+    }
   }
   return entries.map((entry) => entry.id);
 }
