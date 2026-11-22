@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { sql } from "drizzle-orm";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { events, videoEvents } from "@flamenode/db/schema";
+import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import {
   buildUnslottedEventEligibilityAssertionPlan,
   buildUnslottedVideoEventPlan,
@@ -55,6 +56,40 @@ test("MIG-0651: eligibility assertion reuses same SQL predicate, bind parameters
   assert.equal(actual.params.includes("event' OR 1=1"), true);
   assert.equal(actual.sql.includes("OR 1=1"), false);
   assert.match(actual.sql, /json_extract\('not-valid-json'/);
+});
+
+test("MIG-0651 SA-086 S3: exact required-field snapshot is asserted in the same D1 event guard", () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "events", {
+      id: "ev-cas", title: "Event", visibility_status: "public",
+      allow_unslotted_posts: 1,
+      required_video_fields_json: '["music"]',
+    });
+    const db = { run: (sqlExpr) => ({ sqlExpr }) };
+    const plan = buildUnslottedEventEligibilityAssertionPlan(
+      db, "ev-cas", 100, '["music"]',
+    );
+    assert.equal(plan.statements.length, 1, "no extra batch statement");
+    assert.deepEqual(plan.expectedChanges, [null]);
+    const compiled = dialect.sqlToQuery(plan.statements[0].sqlExpr);
+    assert.ok(compiled.params.includes('["music"]'), "policy is bound, not interpolated");
+    assert.equal(Object.values(sqlite.prepare(compiled.sql).get(...compiled.params))[0], 1);
+
+    sqlite.prepare("UPDATE events SET required_video_fields_json=? WHERE id=?")
+      .run('["credit"]', "ev-cas");
+    assert.throws(() => sqlite.prepare(compiled.sql).get(...compiled.params),
+      /malformed JSON/i, "new required field between preflight and write must abort");
+
+    sqlite.prepare("UPDATE events SET required_video_fields_json=NULL WHERE id=?").run("ev-cas");
+    const nullPolicy = buildUnslottedEventEligibilityAssertionPlan(db, "ev-cas", 100, null);
+    const nullCompiled = dialect.sqlToQuery(nullPolicy.statements[0].sqlExpr);
+    assert.equal(Object.values(sqlite.prepare(nullCompiled.sql).get(...nullCompiled.params))[0], 1);
+    assert.throws(() => sqlite.prepare(compiled.sql).get(...compiled.params),
+      /malformed JSON/i, "NULL and previous non-NULL policy are not equal");
+  } finally {
+    sqlite.close();
+  }
 });
 
 test("MIG-0651: video-event linkage is one batch INSERT plus strict CREATE audit", () => {
