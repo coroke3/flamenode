@@ -61,7 +61,9 @@ test("MIG-0651 custom answer HTTP + SQLite: required question fails, valid check
     let response = await send(app, form());
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { ok: false, message: "reasonを入力してください。" });
-    assert.equal(statements.length, 2, "eligible event+required+YouTube duplicate and custom definitions: two read-only SELECTs");
+    assert.equal(statements.length, 1, "eligible event, required fields, nonvoided YouTube duplicate and ordered custom questions share one SELECT");
+    assert.match(statements[0].sql, /json_group_array/i, "bounded question policy must be projected from same event read");
+    assert.match(statements[0].sql, /event_custom_questions/i);
     const data = form();
     data.set("custom_answer:ev-a:reason", "  demo  ");
     data.append("custom_answer:ev-a:choices", "B");
@@ -79,6 +81,7 @@ test("MIG-0651 custom answer HTTP + SQLite: required question fails, valid check
         { event_id: "ev-a", question_id: "choices", question_key: "choices", answer_text: null, answer_json: '["B","A"]' },
       ],
     });
+    assert.equal(statements.length, 2, "each full event preflight uses one D1 SELECT");
     assert.deepEqual(questionSnapshot.map(q => q.id), ["reason", "choices"]);
     assert.equal(questionSnapshot[1].source.options_json, '["A","B"]');
     assert.equal(questionSnapshot[0].source.required, 1);
