@@ -61,7 +61,7 @@ test("MIG-0651 custom answer HTTP + SQLite: required question fails, valid check
     let response = await send(app, form());
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { ok: false, message: "reasonを入力してください。" });
-    assert.deepEqual(statements.length, 4, "eligibility/required/duplicate/custom definition, all read-only");
+    assert.equal(statements.length, 3, "eligible-event+required, YouTube duplicate, custom definitions: three read-only SELECTs");
     const data = form();
     data.set("custom_answer:ev-a:reason", "  demo  ");
     data.append("custom_answer:ev-a:choices", "B");
