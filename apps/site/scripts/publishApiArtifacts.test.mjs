@@ -14,6 +14,7 @@ function fixture(ids = ["evt_a", "evt_b"], indexedIds = ids) {
     payloads.set(eventReleaseKey(id), { event_id: id, released: true });
   }
   return {
+    publicEventIds: [...ids],
     manifest: {
       schemaVersion: 1, generation, allowedKeys: [...payloads.keys()].sort(), blockedKeys: [],
     },
@@ -110,6 +111,46 @@ test("MIG-0666 T03: envelope, manifest, generation, checksum, visibility and eve
   changeIndex((index) => index.items.push({ id: "evt_a" }));
   changeIndex((index) => { index.items[0].visibility_status = "private"; });
   changeIndex((index) => { index.items = "not-an-array"; });
+});
+
+
+test("SEC-747: an off-index public event missing BOTH snapshots aborts before any R2 IO", async () => {
+  for (const { ids, indexed, omitted } of [
+    { ids: ["evt_indexed", "evt_half_period"], indexed: ["evt_indexed"], omitted: "evt_half_period" },
+    { ids: Array.from({ length: 201 }, (_, i) => "evt_" + String(i).padStart(3, "0")),
+      indexed: Array.from({ length: 200 }, (_, i) => "evt_" + String(i).padStart(3, "0")),
+      omitted: "evt_200" },
+  ]) {
+    const data = fixture(ids, indexed);
+    const omittedKeys = new Set([eventDetailKey(omitted), eventReleaseKey(omitted)]);
+    data.manifest.allowedKeys = data.manifest.allowedKeys.filter((key) => !omittedKeys.has(key));
+    data.snapshots = data.snapshots.filter((snapshot) => !omittedKeys.has(snapshot.key));
+    assert.throws(() => selectApiArtifacts(data), /incomplete event release coverage/,
+      "source-inventory check must detect a pair omitted from the self-reported manifest");
+    let reads = 0, writes = 0;
+    const b = bucket();
+    b.get = async () => { reads += 1; return null; };
+    b.put = async () => { writes += 1; };
+    await assert.rejects(publishApiArtifacts(data, b), /incomplete event release coverage/);
+    assert.equal(reads, 0, "fail closed before even a remote comparison");
+    assert.equal(writes, 0, "never partially publish an incomplete event source set");
+  }
+});
+
+test("SEC-747: missing, duplicate and malformed public event inventories are rejected", () => {
+  const cases = [
+    (data) => { delete data.publicEventIds; },
+    (data) => { data.publicEventIds.push("evt_a"); },
+    (data) => { data.publicEventIds.push("evt/unsafe"); },
+    (data) => { data.publicEventIds = []; },
+    (data) => { data.publicEventIds = ["evt_a", "evt_c"]; },
+  ];
+  for (const change of cases) {
+    const data = fixture();
+    change(data);
+    assert.throws(() => selectApiArtifacts(data),
+      /invalid public event inventory|incomplete event release coverage/);
+  }
 });
 
 test("SEC-708 P1-A: CURRENT 200-row index is a subset of 201 public release objects", async () => {
