@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { selectApiArtifacts, publishApiArtifacts } from "./publishApiArtifacts.ts";
 import { EVENT_INDEX_KEY, eventDetailKey, eventReleaseKey } from "../src/lib/publicDataLoader.ts";
-import { EVENT_ID_PATTERN as PRODUCER_EVENT_ID_PATTERN } from "./produceSnapshots.ts";
+import { EVENT_ID_PATTERN as PRODUCER_EVENT_ID_PATTERN, verifiedPublicEventIds } from "./produceSnapshots.ts";
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 function fixture(ids = ["evt_a", "evt_b"], indexedIds = ids) {
@@ -14,6 +14,7 @@ function fixture(ids = ["evt_a", "evt_b"], indexedIds = ids) {
     payloads.set(eventReleaseKey(id), { event_id: id, released: true });
   }
   return {
+    publicEventIds: [...ids],
     manifest: {
       schemaVersion: 1, generation, allowedKeys: [...payloads.keys()].sort(), blockedKeys: [],
     },
@@ -110,6 +111,67 @@ test("MIG-0666 T03: envelope, manifest, generation, checksum, visibility and eve
   changeIndex((index) => index.items.push({ id: "evt_a" }));
   changeIndex((index) => { index.items[0].visibility_status = "private"; });
   changeIndex((index) => { index.items = "not-an-array"; });
+});
+
+
+test("SEC-747: an off-index public event missing BOTH snapshots aborts before any R2 IO", async () => {
+  for (const { ids, indexed, omitted } of [
+    { ids: ["evt_indexed", "evt_half_period"], indexed: ["evt_indexed"], omitted: "evt_half_period" },
+    { ids: Array.from({ length: 201 }, (_, i) => "evt_" + String(i).padStart(3, "0")),
+      indexed: Array.from({ length: 200 }, (_, i) => "evt_" + String(i).padStart(3, "0")),
+      omitted: "evt_200" },
+  ]) {
+    const data = fixture(ids, indexed);
+    const omittedKeys = new Set([eventDetailKey(omitted), eventReleaseKey(omitted)]);
+    data.manifest.allowedKeys = data.manifest.allowedKeys.filter((key) => !omittedKeys.has(key));
+    data.snapshots = data.snapshots.filter((snapshot) => !omittedKeys.has(snapshot.key));
+    assert.throws(() => selectApiArtifacts(data), /incomplete event release coverage/,
+      "source-inventory check must detect a pair omitted from the self-reported manifest");
+    let reads = 0, writes = 0;
+    const b = bucket();
+    b.get = async () => { reads += 1; return null; };
+    b.put = async () => { writes += 1; };
+    await assert.rejects(publishApiArtifacts(data, b), /incomplete event release coverage/);
+    assert.equal(reads, 0, "fail closed before even a remote comparison");
+    assert.equal(writes, 0, "never partially publish an incomplete event source set");
+  }
+});
+
+test("SEC-747: producer public ID inventory rejects unsafe or missing IDs without filtering", () => {
+  assert.deepEqual(verifiedPublicEventIds([{ id: "_legacy" }, { id: "-legacy" }]), ["_legacy", "-legacy"]);
+  for (const invalid of ["evt/unsafe", "evt.dot", "", null, 0, undefined]) {
+    assert.throws(() => verifiedPublicEventIds([{ id: "evt_ok" }, { id: invalid }]),
+      /invalid public event ID/, "reject " + String(invalid));
+  }
+  const validMax = Array.from({ length: 5000 }, (_, i) => ({ id: "evt_" + i }));
+  assert.equal(verifiedPublicEventIds(validMax).length, 5000);
+  assert.throws(() => verifiedPublicEventIds([...validMax, { id: "evt_extra" }]),
+    /inventory exceeds 5000 rows/);
+});
+
+test("SEC-747: more than 5000 expected public events fail before publication", async () => {
+  const data = fixture();
+  data.publicEventIds = Array.from({ length: 5001 }, (_, i) => "evt_" + String(i));
+  assert.throws(() => selectApiArtifacts(data), /invalid public event inventory/);
+  const b = bucket();
+  await assert.rejects(publishApiArtifacts(data, b), /invalid public event inventory/);
+  assert.equal(b.writes.length, 0);
+});
+
+test("SEC-747: missing, duplicate and malformed public event inventories are rejected", () => {
+  const cases = [
+    (data) => { delete data.publicEventIds; },
+    (data) => { data.publicEventIds.push("evt_a"); },
+    (data) => { data.publicEventIds.push("evt/unsafe"); },
+    (data) => { data.publicEventIds = []; },
+    (data) => { data.publicEventIds = ["evt_a", "evt_c"]; },
+  ];
+  for (const change of cases) {
+    const data = fixture();
+    change(data);
+    assert.throws(() => selectApiArtifacts(data),
+      /invalid public event inventory|incomplete event release coverage/);
+  }
 });
 
 test("SEC-708 P1-A: CURRENT 200-row index is a subset of 201 public release objects", async () => {
