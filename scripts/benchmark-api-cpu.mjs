@@ -1149,8 +1149,6 @@ export const SEED = (adminToken) => [
   { sql: `INSERT OR REPLACE INTO slots (id, event_id, start_time, status) VALUES ('bench-slot', 'bench-evt', 1000, 'available')`, params: [] },
   { sql: `INSERT OR REPLACE INTO x_users (id, x_name, approval_status) VALUES ('bench-x', 'Bench X', 'approved')`, params: [] },
   { sql: `INSERT OR REPLACE INTO x_user_account_links (x_user_id, auth_user_id, link_role) VALUES ('bench-x', 'bench-admin', 'owner')`, params: [] },
-  { sql: `INSERT OR REPLACE INTO x_users (id, x_name, approval_status, icon_url) VALUES ('bench_x', 'Bench Canonical', 'approved', '/api/media/xicons/bench_x/old.png')`, params: [] },
-  { sql: `INSERT OR REPLACE INTO x_user_account_links (x_user_id, auth_user_id, link_role) VALUES ('bench_x', 'bench-admin', 'owner')`, params: [] },
   { sql: `UPDATE "user" SET active_x_user_id = 'bench-x' WHERE id = 'bench-admin'`, params: [] },
   { sql: `INSERT OR REPLACE INTO event_groups (id, name, slug) VALUES ('bench-group', 'Bench group', 'bench-group')`, params: [] },
   { sql: `INSERT OR REPLACE INTO announcements (id, title, body, severity, is_published, target_audience, created_by_user_id, created_at, updated_at) VALUES ('bench-ann', 'Bench', 'Bench', 'info', 1, 'all', 'bench-admin', 10, 10)`, params: [] },

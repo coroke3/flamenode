@@ -356,6 +356,28 @@ test("MIG-0639: 11 newly mounted SA-025..030/098/102..105 routes have genuine bo
   assert.equal(scenarios.get("SA-105").kinds.invalid(0,"qa").expect[0],400);
 });
 
+// Exercise the REAL mounted Hono handlers against migrated SQLite and an isolated
+// per-route DB. A mere inventory declaration or known HTTP denial is NOT CPU evidence.
+for (const id of ["SA-025","SA-026","SA-027","SA-028","SA-029","SA-030",
+                  "SA-098","SA-102","SA-103","SA-104","SA-105"]) {
+  test(`MIG-0639 ${id}: genuine handler normal/limit/invalid responses on local migrated D1`, async () => {
+    const scenario = buildScenarios({adminToken:"benchmark"}).find(s => s.id === id);
+    assert.ok(scenario);
+    const target = await createInprocTarget({adminToken:"benchmark"});
+    try {
+      for (const kind of ["normal","limit","invalid"]) {
+        const spec = scenario.kinds[kind](1, `smoke_${id}_${kind}`);
+        if (spec.setup) await target.exec(spec.setup);
+        const actual = await target.run(spec);
+        assert.ok(spec.expect.includes(actual.status),
+          `${id}/${kind}: real handler HTTP ${actual.status}, expected ${JSON.stringify(spec.expect)}`);
+      }
+    } finally {
+      await target.close();
+    }
+  });
+}
+
 test("MIG-0639 SA-045..048, SA-049, SA-051..055, SA-099..101: all newly mounted write routes have seeded local probes", () => {
   const scenarios = new Map(buildScenarios({ adminToken: "t" }).map((s) => [s.id, s]));
   const ids = ["SA-045", "SA-046", "SA-047", "SA-048", "SA-049", "SA-051", "SA-052", "SA-053", "SA-054", "SA-055", "SA-099", "SA-100", "SA-101"];
