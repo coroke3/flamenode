@@ -744,13 +744,15 @@ test("MIG-0651 U02: CURRENT-style video_submitted DM, video and rebuild queue sh
       submittedNotificationPayload: { content: "投稿を受け付けました",
         video_id: "v:1", url: "https://flamenode.example/v:1" },
     });
-    assert.equal(stats.reads, 2, "one active dedupe read and one recipient preference read");
+    assert.equal(stats.reads, 1, "DM active dedupe and preference share one bounded pre-read");
     assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 13]);
     assert.equal(plan.audits.length, 2, "notification does not duplicate strict video audit");
     const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, stats.reads);
     assert.equal(budget.d1WithinLimit, true);
-    assert.equal(budget.s3PreBatchReadCount, 4);
-    assert.equal(budget.withinLimit, false, "DM preflight + audit reads exceed S3");
+    assert.equal(budget.s3PreBatchReadCount, 3);
+    assert.equal(budget.s3WithinLimit, true);
+    assert.equal(budget.withinLimit, true,
+      "DM-only candidate now satisfies three reads including unpreloaded audit");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
@@ -848,15 +850,15 @@ test("MIG-0651 U02: both free-video notification routes share the video/Queue tr
           threadName: "[作品登録] Title / @alice",
         },
       });
-      assert.equal(reads, 3, "DM dedupe + user preference and forced ops actor reads");
+      assert.equal(reads, 2, "DM merged preflight + forced ops actor = two bounded reads");
       assert.deepEqual(plan.expectedChanges, dmEnabled
         ? [null, 1, 1, null, null, 13]
         : [null, 1, 1, null, 13]);
       assert.equal(plan.audits.length, 2, "notification rows are not fabricated strict audits");
       const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, reads);
       assert.equal(budget.d1WithinLimit, true);
-      assert.equal(budget.s3PreBatchReadCount, 5);
-      assert.equal(budget.withinLimit, false, "ops + DM preflight + audit reads exceed S3");
+      assert.equal(budget.s3PreBatchReadCount, 4);
+      assert.equal(budget.withinLimit, false, "DM + forced ops + audit reads still exceed S3");
       const dialect = new SQLiteSyncDialect();
       sqlite.exec("BEGIN");
       try {
