@@ -59,7 +59,7 @@ function createFixture() {
     sqlite
       .prepare("INSERT INTO static_artifacts VALUES (?, ?, ?, ?, 'h', 1, NULL, ?, ?)")
       .run(`${type}:${id}:${key}`, type, id, key, generatedAt, deletedAt);
-  const queue = () => sqlite.prepare("SELECT target_type, target_id, reason, priority FROM static_rebuild_queue ORDER BY target_type, target_id").all();
+  const queue = () => sqlite.prepare("SELECT target_type, target_id, reason, priority, status FROM static_rebuild_queue ORDER BY target_type, target_id").all();
   return { sqlite, env: { DB, R2 }, uploaded, heads, track, queue };
 }
 
@@ -220,6 +220,7 @@ test("SEC-533: producer cooldown and active protection are checked on selected t
   insert.run("q1", "event_slots", "slots-failed", "failed", NOW - 3600, NOW - 3600);
   insert.run("q2", "event_slots", "slots-active", "processing", NOW - 300, NOW - 300);
   insert.run("q3", "event", "event-failed", "failed", NOW - 3600, NOW - 3600);
+  insert.run("q4", "event", "healthy-event", "failed", NOW - 3600, NOW - 3600);
   // The same event-type failed history must not suppress a different slots producer.
   assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 1);
   const pending = f.queue().filter((x) => x.reason === STALE_ARTIFACT_REFRESH_REASON);
@@ -241,5 +242,7 @@ test("SEC-533: missing event sections share the existing 100-detail-target cap",
   assert.ok(queued.every((x) => x.target_type === "event_slots" && x.priority === "low"));
   assert.ok(queued.some((x) => x.target_id === "evt0000"));
   assert.ok(!queued.some((x) => x.target_id === `evt${String(total - 1).padStart(4, "0")}`));
-  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 0, "remaining stale targets can still be queued next sweep");
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 25,
+    "next sweep enqueues the remaining unclaimed targets");
+  assert.equal(f.queue().length, total);
 });
