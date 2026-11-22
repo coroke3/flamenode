@@ -637,6 +637,10 @@ test("MIG-0651 U02: new software catalog + links and static queue commit togethe
     assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 1, 13]);
     assert.equal(plan.audits.length, 4, "video, metadata, catalog and link each strictly audited");
     assert.ok(plan.audits.every(a => a.strict));
+    assert.equal(plan.expectedChanges.findIndex(n => n !== null), 2,
+      "Active-X and canonical member CAS must precede the video INSERT");
+    assert.match(new SQLiteSyncDialect().sqlToQuery(plan.statements[1].sqlExpr).sql,
+      /WITH incoming/i, "member CAS occupies the final pre-write assertion position");
     assert.equal(inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads).withinLimit, true);
     sqlite.exec("BEGIN");
     try {
@@ -937,7 +941,7 @@ test("MIG-0651 U02 new-video member/chapter plan is atomic with video/metadata/r
       memberSubmission: verifiedMembersForNewVideo(),
     });
     assert.equal(preReads, 2, "member lifecycle resolution uses two reads");
-    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 1, 2, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13]);
     assert.equal(plan.audits.length, 5);
     assert.ok(plan.audits.every(a => a.strict));
     assert.equal(inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads).withinLimit, true);
@@ -982,7 +986,7 @@ test("MIG-0651 U02 new-video: normalized X collision after pre-read aborts compl
       eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
       memberSubmission: verifiedMembersForNewVideo(),
     });
-    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 1, 2, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13]);
     // A concurrent writer creates a differently spelled but canonically identical
     // X ID. SQLite's exact PK conflict handling alone would silently duplicate it.
     insert(sqlite, "x_users", {
@@ -1000,6 +1004,8 @@ test("MIG-0651 U02 new-video: normalized X collision after pre-read aborts compl
           else sqlite.prepare(q.sql).run(...q.params);
         }
       }, /malformed JSON/, "the member identity assertion must reject normalized PK collision");
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0,
+        "a stale member identity must be rejected BEFORE the first video write");
     } finally {
       sqlite.exec("ROLLBACK");
     }
@@ -1038,7 +1044,7 @@ test("MIG-0651 U02 new-video: rebuild failure rolls back member X, chapter and v
       eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
       memberSubmission: verifiedMembersForNewVideo(),
     });
-    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 1, 2, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13]);
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
     assert.throws(() => {
