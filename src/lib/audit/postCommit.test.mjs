@@ -26,8 +26,22 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(warnings[0]?.retryable, true);
   });
 
-  test("SEC-736: failed slotted YouTube wake cannot suppress subsequent post-commit work", async () => {
+  test("SEC-736: an actual YouTube Queue host flags error cannot suppress later post-commit work", async () => {
+    const { sendYoutubeSyncPendingWakeBestEffort } = await import(
+      "@flamenode/server-core/queues/youtubeSyncWake"
+    );
     const executed = [];
+    // Queue wake is nominally best-effort, but a provider getter may throw
+    // while resolving feature flags. This is a real core call, not a mocked throw.
+    const queueHost = {
+      readEnv: () => Object.defineProperty({}, "QUEUE_DISPATCH_ENABLED", {
+        get() {
+          throw new Error("Queue host flag accessor unavailable");
+        },
+      }),
+      readWaitUntil: () => null,
+      readKv: () => null,
+    };
     const warnings = await runPostCommitBestEffort(
       { flow: "submit_slot_video", traceId: "ft_sec736" },
       [
@@ -35,7 +49,7 @@ if (runTestWithTsx(import.meta.url)) {
           name: "youtube_sync_wake",
           run: async () => {
             executed.push("youtube_sync_wake");
-            throw new Error("Queue host unavailable");
+            await sendYoutubeSyncPendingWakeBestEffort("web", new Set(), queueHost);
           },
         },
         { name: "revalidate", run: async () => { executed.push("revalidate"); } },
