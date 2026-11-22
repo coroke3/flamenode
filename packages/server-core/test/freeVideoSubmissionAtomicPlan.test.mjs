@@ -451,7 +451,7 @@ test("MIG-0651 atomic composer: independent D1 50-query and S3 3-pre-read gates"
   }, 0), /budget_arguments_invalid/);
 });
 
-test("MIG-0651 atomic composer: concurrent YouTube ID unique collision rolls back the fresh candidate", () => {
+test("MIG-0651 atomic composer: concurrent public YouTube duplicate is denied by same-batch guard", () => {
   const sqlite = createSqlite();
   seedApprovedActiveX(sqlite);
   try {
@@ -486,7 +486,7 @@ test("MIG-0651 atomic composer: concurrent YouTube ID unique collision rolls bac
         if ("assertSql" in statement) sqlite.prepare(compiled.sql).get(...compiled.params);
         else sqlite.prepare(compiled.sql).run(...compiled.params);
       }
-    }, /UNIQUE|constraint/i);
+    }, /malformed JSON/i);
     sqlite.exec("ROLLBACK");
     assert.deepEqual(
       sqlite.prepare("SELECT id FROM videos ORDER BY id").all().map(({ id }) => id),
@@ -499,6 +499,71 @@ test("MIG-0651 atomic composer: concurrent YouTube ID unique collision rolls bac
     assert.equal(plan.audits.length, 2, "audit metadata remains prepared, never written");
   } finally {
     sqlite.close();
+  }
+});
+
+test("MIG-0651 U02: stale archived YouTube duplicate aborts the atomic plan, voided remains reusable", () => {
+  // The existing active-video UNIQUE index excludes archived rows. A parallel
+  // request may change the duplicate set AFTER the HTTP preflight; checking
+  // solely the index would permit an archived duplicate and a false CREATE audit.
+  for (const previousStatus of ["public", "archived", "voided"]) {
+    const sqlite = createSqlite();
+    seedApprovedActiveX(sqlite);
+    try {
+      const drizzleDb = drizzle(async () => ({ rows: [] }));
+      const planDb = {
+        run(expr) { return { assertSql: expr }; },
+        insert(table) { return drizzleDb.insert(table); },
+        batch() { throw new Error("unmounted candidate must never execute D1"); },
+      };
+      // Build when the YouTube ID is available, then simulate a competing
+      // video being committed before this plan enters its D1 transaction.
+      const plan = buildFreeVideoSubmissionAtomicPlan(planDb, {
+        videoAfter: video(null), actorUserId: "user-1",
+        trustedActiveXId: "alice", eventId: null,
+        questions: [], customAnswerDrafts: [], now: NOW,
+      });
+      insert(sqlite, "videos", {
+        id: "v:previous", submitted_by_user_id: "user-2",
+        creator_display_name: "Previous", title: "Prior upload",
+        youtube_video_id: "dQw4w9WgXcQ",
+        visibility_status: previousStatus,
+      });
+      const dialect = new SQLiteSyncDialect();
+      const guard = dialect.sqlToQuery(plan.statements[0].assertSql);
+      assert.match(guard.sql, /NOT EXISTS/);
+      assert.match(guard.sql, /youtube_video_id/);
+      assert.ok(guard.params.includes("dQw4w9WgXcQ"));
+      const runPlan = () => {
+        for (const statement of plan.statements) {
+          const compiled = "assertSql" in statement
+            ? dialect.sqlToQuery(statement.assertSql)
+            : statement.toSQL();
+          if ("assertSql" in statement) sqlite.prepare(compiled.sql).get(...compiled.params);
+          else sqlite.prepare(compiled.sql).run(...compiled.params);
+        }
+      };
+      sqlite.exec("BEGIN");
+      try {
+        if (previousStatus === "voided") {
+          assert.doesNotThrow(runPlan, "voided videos may reuse a YouTube ID");
+          assert.equal(sqlite.prepare("SELECT count(*) AS n FROM videos").get().n, 2);
+          assert.equal(sqlite.prepare("SELECT count(*) AS n FROM video_youtube_metadata").get().n, 1);
+        } else {
+          assert.throws(runPlan, /malformed JSON/i,
+            "public and archived videos must block a stale duplicate before INSERT");
+          assert.equal(sqlite.prepare("SELECT count(*) AS n FROM videos").get().n, 1);
+          assert.equal(sqlite.prepare("SELECT count(*) AS n FROM video_youtube_metadata").get().n, 0);
+        }
+      } finally {
+        sqlite.exec("ROLLBACK");
+      }
+      assert.deepEqual(
+        sqlite.prepare("SELECT id FROM videos ORDER BY id").all().map(row => row.id),
+        ["v:previous"], "no partial video survives a failed or rolled-back plan",
+      );
+      assert.equal(plan.audits.length, 2, "audit metadata remains prepared, never written");
+    } finally { sqlite.close(); }
   }
 });
 
