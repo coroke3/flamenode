@@ -1153,13 +1153,44 @@ if (runUnderRootTsx(import.meta.url)) {
       sqlite.prepare("DELETE FROM static_rebuild_queue WHERE id = ?").run("sec799-backfill");
     }
 
-    const safeCursor = "あ".repeat(1_000);
+    // The mutation endpoint only accepts 128 UTF-16 code units of cursor.
+    const safeCursor = "あ".repeat(128);
     const normal = await call("/api/admin-read/ops/static-builds", ADMIN, { env: env(safeCursor) });
-    assert.equal(normal.status, 200, "legitimate persisted cursor is preserved exactly");
+    assert.equal(normal.status, 200, "a 128-code-unit mutation-valid cursor must survive unchanged");
     assert.equal(normal.body.backfillState.runs.video_v2.cursor, safeCursor);
     assert.ok(bodyBytes(normal) <= 64 * 1024);
     assert.equal(normal.stats.statements, 3);
     assert.equal(normal.stats.writes, 0);
+
+    // The canonical mutation reader allows up to 64 KiB of raw persisted KV
+    // state. Three escaped error strings can exceed 4096 raw characters even
+    // with short, valid cursors: do not reject those legitimate checkpoints.
+    const escaped = '"'.repeat(1000);
+    const validLargeState = JSON.stringify({
+      schema_version: 1, updated_at: 7,
+      runs: Object.fromEntries(["video_v2", "user_profile", "event_crew"].map(
+        (kind) => [kind, { status: "running", phase: "items", cursor: "c-ok", last_error: escaped }],
+      )),
+    });
+    assert.ok(validLargeState.length > 4096, "fixture must exceed the former arbitrary cap");
+    assert.ok(new TextEncoder().encode(validLargeState).length <= 64 * 1024);
+    const largeValid = await call("/api/admin-read/ops/static-builds", ADMIN, {
+      env: { KV: { async get() { return validLargeState; } }, BUCKET: { async head() { return null; } } },
+    });
+    assert.equal(largeValid.status, 200, "valid KV under 64 KiB must not be lost");
+    assert.equal(largeValid.body.backfillState.runs.video_v2.cursor, "c-ok");
+    assert.equal(largeValid.body.backfillState.runs.user_profile.last_error, escaped);
+    assert.ok(bodyBytes(largeValid) <= 64 * 1024);
+    assert.equal(largeValid.stats.statements, 3);
+    assert.equal(largeValid.stats.writes, 0);
+
+    const rejected128 = await call("/api/admin-read/ops/static-builds", ADMIN, {
+      env: env("あ".repeat(129)),
+    });
+    assert.equal(rejected128.status, 503, "a stored cursor rejected by POST must not be returned as resumable");
+    assert.deepEqual(rejected128.body, { error: "unavailable" });
+    assert.equal(rejected128.stats.statements, 3);
+    assert.equal(rejected128.stats.writes, 0);
 
     const unsafeCursor = "あ".repeat(30_000);
     const rejected = await call("/api/admin-read/ops/static-builds", ADMIN, { env: env(unsafeCursor) });

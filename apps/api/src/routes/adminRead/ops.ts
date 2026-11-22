@@ -45,7 +45,10 @@ const MAX_OPS_LIST_BYTES = 48 * 1024;
 /** S2 bounds the entire serialized HTTP body, not just queue rows. */
 const MAX_OPS_HTTP_BYTES = 64 * 1024;
 /** Limit UTF-16 input lengths before JSON.stringify of untrusted D1/KV payloads (ZERO_1102 §4). */
-const MAX_OPS_KV_STATE_CODE_UNITS = 4096;
+// Match the canonical backfill mutation reader's 64 KiB pre-parse KV limit.
+const MAX_OPS_KV_STATE_BYTES = 64 * 1024;
+// Mutation cursor validation is 128 UTF-16 code units, also for persisted KV.
+const MAX_OPS_BACKFILL_CURSOR_CODE_UNITS = 128;
 const MAX_OPS_ROW_TEXT_CODE_UNITS = 8192;
 const MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS = 1024;
 const OMITTED_BACKFILL_ERROR = "長いエラー詳細は応答サイズ上限のため省略しました。";
@@ -407,13 +410,24 @@ adminOpsRoutes.get("/static-builds", async (c) => {
     (async () => {
       try {
         const raw = await c.env.KV?.get(STATIC_BACKFILL_KV_KEY);
-        if (raw && raw.length > MAX_OPS_KV_STATE_CODE_UNITS) {
-          // This is a persisted continuation token. Do not parse or truncate it,
-          // then accidentally offer a different token to the Ops resume action.
+        if (raw && (
+          raw.length > MAX_OPS_KV_STATE_BYTES ||
+          utf8Encoder.encode(raw).byteLength > MAX_OPS_KV_STATE_BYTES
+        )) {
+          // Reject oversize stored state BEFORE JSON.parse, as the S3 writer does.
           oversizedKvState = true;
           return createEmptyStaticBackfillState();
         }
-        return raw ? parseStaticBackfillState(JSON.parse(raw)) : createEmptyStaticBackfillState();
+        const state = raw ? parseStaticBackfillState(JSON.parse(raw)) : createEmptyStaticBackfillState();
+        if (STATIC_BACKFILL_KINDS.some(
+          (kind) => (state.runs[kind].cursor?.length ?? 0) > MAX_OPS_BACKFILL_CURSOR_CODE_UNITS,
+        )) {
+          // A resume token rejected by POST must never be offered as a working
+          // continuation token by GET. Do not shorten or silently replace it.
+          oversizedKvState = true;
+          return createEmptyStaticBackfillState();
+        }
+        return state;
       } catch {
         return createEmptyStaticBackfillState();
       }
