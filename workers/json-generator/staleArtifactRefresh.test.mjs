@@ -258,8 +258,8 @@ test("SEC-533: nonpublic or missing event rows must never bootstrap section prod
   const f = createFixture();
   for (const [id, visibility] of [
     ["private-event", "private"],
-    ["unlisted-event", "unlisted"],
-    ["deleted-event", "deleted"],
+    ["draft-event", "draft"],
+    ["archived-event", "archived"],
   ]) {
     f.event(id, visibility);
     f.track("event", id, `events/${id}.json`, OLD);
@@ -271,10 +271,10 @@ test("SEC-533: nonpublic or missing event rows must never bootstrap section prod
   assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 5);
   const queued = f.queue();
   assert.deepEqual(queued.map((q) => `${q.target_type}:${q.target_id}`), [
-    "event:deleted-event",
+    "event:archived-event",
     "event:orphan-event",
     "event:private-event",
-    "event:unlisted-event",
+    "event:draft-event",
     "event_base:public-event",
   ]);
   assert.equal(queued.filter((q) => q.target_type === "event_base" || q.target_type === "event_slots").length, 1,
