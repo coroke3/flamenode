@@ -883,15 +883,15 @@ test("MIG-0651 U02: CURRENT-style video_submitted DM, video and rebuild queue sh
       submittedNotificationPayload: { content: "投稿を受け付けました",
         video_id: "v:1", url: "https://flamenode.example/v:1" },
     });
-    assert.equal(stats.reads, 1, "DM active dedupe and preference share one bounded pre-read");
+    assert.equal(stats.reads, 0, "DM and opt-out checks run inside D1 batch without a pre-read");
     assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 13]);
     assert.equal(plan.audits.length, 2, "notification does not duplicate strict video audit");
     const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, stats.reads);
     assert.equal(budget.d1WithinLimit, true);
-    assert.equal(budget.s3PreBatchReadCount, 3);
+    assert.equal(budget.s3PreBatchReadCount, 2);
     assert.equal(budget.s3WithinLimit, true);
     assert.equal(budget.withinLimit, true,
-      "DM-only candidate now satisfies three reads including unpreloaded audit");
+      "DM-only candidate has two unpreloaded audit reads, no notification read");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
@@ -989,17 +989,16 @@ test("MIG-0651 U02: both free-video notification routes share the video/Queue tr
           threadName: "[作品登録] Title / @alice",
         },
       });
-      assert.equal(reads, 1, "DM preflight is one SELECT; forced ops recipient resolves in the batch INSERT");
-      assert.deepEqual(plan.expectedChanges, dmEnabled
-        ? [null, 1, 1, null, null, 13]
-        : [null, 1, 1, null, 13]);
+      assert.equal(reads, 0, "DM and ops recipient checks run inside the same batch");
+      assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, null, 13],
+        "opted-out DM remains a prepared conditional no-change INSERT");
       assert.equal(plan.audits.length, 2, "notification rows are not fabricated strict audits");
       const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, reads);
       assert.equal(budget.d1WithinLimit, true);
-      assert.equal(budget.s3PreBatchReadCount, 3);
+      assert.equal(budget.s3PreBatchReadCount, 2);
       assert.equal(budget.s3WithinLimit, true);
       assert.equal(budget.withinLimit, true,
-        "DM + forced ops candidate now has one preflight read plus two unpreloaded audit reads");
+        "DM and ops have no pre-batch SELECT, only two audit reads remain");
       const dialect = new SQLiteSyncDialect();
       sqlite.exec("BEGIN");
       try {
@@ -1242,14 +1241,14 @@ test("MIG-0651 U02 new-video: rebuild failure rolls back member X, chapter and v
   } finally { sqlite.close(); }
 });
 
-test("MIG-0651 U02: real composed member/software/DM combinations fail closed on S3 read budget", async () => {
+test("MIG-0651 U02: composed member/software/DM budget reflects batch-time DM checking", async () => {
   const cases = [
     { label: "software + DM", collab: false, usedSoftware: "New Tool",
-      callerReads: 2, totalPreReads: 4 },
+      callerReads: 1, totalPreReads: 3, s3WithinLimit: true },
     { label: "members + DM", collab: true, usedSoftware: null,
-      callerReads: 3, totalPreReads: 5 },
+      callerReads: 2, totalPreReads: 4, s3WithinLimit: false },
     { label: "members + software + DM", collab: true, usedSoftware: "New Tool",
-      callerReads: 4, totalPreReads: 6 },
+      callerReads: 3, totalPreReads: 5, s3WithinLimit: false },
   ];
   for (const scenario of cases) {
     const sqlite = createSqlite();
@@ -1286,9 +1285,9 @@ test("MIG-0651 U02: real composed member/software/DM combinations fail closed on
       assert.equal(budget.preparationQueryCount, 2, "audit metadata is not proven preloaded");
       assert.equal(budget.s3PreBatchReadCount, scenario.totalPreReads,
         scenario.label + " total request-side pre-batch reads");
-      assert.equal(budget.s3WithinLimit, false);
-      assert.equal(budget.withinLimit, false,
-        scenario.label + " MUST NOT be authorized by a successful D1-only budget");
+      assert.equal(budget.s3WithinLimit, scenario.s3WithinLimit);
+      assert.equal(budget.withinLimit, scenario.s3WithinLimit,
+        scenario.label + " must pass both D1 and S3 read budget gates");
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0);
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
     } finally { sqlite.close(); }
