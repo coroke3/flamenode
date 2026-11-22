@@ -21,13 +21,16 @@ const encoder = new TextEncoder();
 
 // Only the unmounted SA-086 member path uses a 1-read compound query.
 // The shared request resolver and the domain's canonical decision are untouched.
-const MEMBER_X_RESOLUTION_CHUNK_SIZE = 80;
+// The validated submission has at most 100 members, and JSON1 binds two
+// arrays regardless of cardinality. Do not split 81..100 IDs into a second
+// pre-batch D1 read; that would breach the S3 three-read budget.
+const MEMBER_X_RESOLUTION_CHUNK_SIZE = MAX_VIDEO_MEMBERS;
 function normalizedMemberXIdSql(column: SQLWrapper) {
   return sql`lower(trim(ltrim(trim(${column}), '@')))`;
 }
 function memberCandidatesWhere(column: SQLWrapper, candidates: readonly string[]) {
   // One JSON1 bind per UNION arm (two total), rather than 2*N binds:
-  // D1 permits at most 100 parameters per statement even for 80 X IDs.
+  // D1 permits at most 100 parameters per statement even for 100 X IDs.
   return sql`${normalizedMemberXIdSql(column)} IN (
     SELECT value FROM json_each(${JSON.stringify(candidates)})
   )`;
@@ -113,7 +116,7 @@ function chunkChapterRows(rows: readonly (typeof videoChapters.$inferSelect)[]) 
  * CURRENT's canonical X resolution, pending X placeholder, public member-set
  * audit and member chapter summary. All writes are PREPARED, never executed.
  * The caller must include the statements in the same audited D1 batch AFTER
- * the new video row, and count one unioned read per 80 X IDs.
+ * the new video row, and count one unioned read per 100 X IDs.
  *
  * It is not an update/edit member algorithm. A same-batch SQL assertion now
  * rejects alias/approval remaps between pre-read and commit; full Worker CPU
