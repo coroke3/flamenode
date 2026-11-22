@@ -646,10 +646,16 @@ export function countingRawDb(rawDb: D1Database, counter: { reads: number }): D1
       counter.reads += 1;
       return stmt.run<T>();
     },
-    raw: async <T>(options?: { columnNames?: boolean }) => {
+    raw: ((options?: { columnNames?: boolean }) => {
       counter.reads += 1;
-      return options === undefined ? stmt.raw<T>() : stmt.raw<T>(options);
-    },
+      if (options?.columnNames === true) {
+        return stmt.raw({ columnNames: true });
+      }
+      if (options) {
+        return stmt.raw({ columnNames: false });
+      }
+      return stmt.raw();
+    }) as D1PreparedStatement["raw"],
   }) as D1PreparedStatement;
 
   return {
