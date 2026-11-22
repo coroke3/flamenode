@@ -70,13 +70,21 @@ async function listStaleDetailTargets(
        HAVING MIN(a.generated_at) < ?
      ), required_target AS (
        SELECT CASE
-                WHEN s.original_type = 'event' AND NOT EXISTS (
+                WHEN s.original_type = 'event' AND EXISTS (
+                  SELECT 1 FROM events AS e
+                   WHERE e.id = s.target_id
+                     AND e.visibility_status = 'public'
+                ) AND NOT EXISTS (
                   SELECT 1 FROM static_artifacts AS section
                    WHERE section.target_type = 'event_base'
                      AND section.target_id = s.target_id
                      AND section.deleted_at IS NULL
                 ) THEN 'event_base'
-                WHEN s.original_type = 'event' AND NOT EXISTS (
+                WHEN s.original_type = 'event' AND EXISTS (
+                  SELECT 1 FROM events AS e
+                   WHERE e.id = s.target_id
+                     AND e.visibility_status = 'public'
+                ) AND NOT EXISTS (
                   SELECT 1 FROM static_artifacts AS section
                    WHERE section.target_type = 'event_slots'
                      AND section.target_id = s.target_id
