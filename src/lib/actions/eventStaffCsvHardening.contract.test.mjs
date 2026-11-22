@@ -139,3 +139,75 @@ test("SEC-800: preparation read failure logs fixed code without inspecting provi
     "Next.js navigation control flow must still propagate before diagnostics");
   assert.equal(loggedAfterRethrow, false);
 });
+
+test("SEC-800: only fixed domain messages and matching user-owned confirmations reach staff actions", () => {
+  const start = source.indexOf("const STAFF_SAFE_ACTION_MESSAGES = new Set");
+  const end = source.indexOf("\nfunction staffPreparationError", start);
+  assert.ok(start >= 0 && end > start, "extract the production whitelist without transcribing it");
+  const functionSignature = /function staffSafeActionMessage\(\s*error: unknown,\s*fallback: string,\s*eventId\?: string,\s*explicitAllowed\?: readonly string\[],\s*\): string \{/;
+  const policySource = source.slice(start, end).replace(
+    functionSignature,
+    "function staffSafeActionMessage(error, fallback, eventId, explicitAllowed) {",
+  );
+  assert.doesNotMatch(policySource, functionSignature, "signature was made executable in node:vm");
+  const { policy, makeError } = runInNewContext(
+    policySource + "\n({ policy: staffSafeActionMessage, makeError: (message) => new Error(message) })",
+  );
+  const fallback = "スタッフを保存できません。";
+  const publicDomainMessages = [
+    "このイベントには同じ X ID のスタッフが既に登録されています。",
+    "イベントには最低1人の代表者が必要です。先に別のスタッフへ代表権限を移譲してください。",
+    "代表権限を付与できるのはイベント代表者または管理者だけです。",
+    "X ID確認権限は site admin 専用です。",
+    "自分自身のスタッフ権限は一括更新できません。個別の確認付き操作を使用してください。",
+  ];
+  for (const allowed of publicDomainMessages) {
+    assert.equal(policy(makeError(allowed), fallback), allowed,
+      "existing intended domain UX is preserved");
+  }
+
+  const canary = "SEC800_SQL_PARAMS_secret_user_id_abc123";
+  for (const unsafe of [
+    "Failed query: UPDATE event_staff; params: " + canary,
+    canary,
+    publicDomainMessages[0] + " " + canary,
+    "SQLITE_CONSTRAINT " + canary,
+    "A".repeat(260),
+  ]) {
+    assert.equal(policy(makeError(unsafe), fallback), fallback,
+      "unrecognized provider error body must never reach the response");
+  }
+  assert.equal(policy({ message: canary }, fallback), fallback);
+  const getterTrap = makeError(canary);
+  Object.defineProperty(getterTrap, "message", { get() { throw Error(canary); } });
+  assert.equal(policy(getterTrap, fallback), fallback,
+    "poisoned Error.message must not replace the user-visible failure");
+  const protoTrap = new Proxy(makeError(canary), {
+    getPrototypeOf() { throw Error(canary); },
+  });
+  assert.equal(policy(protoTrap, fallback), fallback,
+    "poisoned instanceof checks must also fail closed");
+
+  for (const action of ["SELF CHANGE", "REMOVE SELF", "TRANSFER"]) {
+    const expected = `確認のため「${action} event_123」と入力してください。`;
+    assert.equal(policy(makeError(expected), fallback, "event_123"), expected);
+    assert.equal(policy(makeError(expected), fallback, "event_456"), fallback);
+    assert.equal(policy(makeError(expected + canary), fallback, "event_123"), fallback);
+  }
+  const csv = "17行目: X IDが不正です";
+  assert.equal(policy(makeError(csv), "CSV入力エラーです。", undefined, [csv]), csv);
+  assert.equal(policy(makeError(csv), "CSV入力エラーです。", undefined, []), "CSV入力エラーです。");
+  assert.equal(policy(makeError("some failure " + canary), fallback, "event_123"), fallback);
+});
+
+test("SEC-800: all staff catch paths use the bounded allowlist, never raw provider message", () => {
+  assert.doesNotMatch(source, /message:\s*error instanceof Error\s*\?\s*error\.message/,
+    "no action may directly reflect untrusted Error.message to staff results");
+  const invocationCount = (source.match(/message: staffSafeActionMessage\(error,/g) ?? []).length;
+  assert.equal(invocationCount, 8,
+    "manager permission, assignment, owner grant, write, CSV input/write, remove, transfer");
+  assert.match(source, /data\.rows\.flatMap\(\(row\) => \[/,
+    "CSV row-specific errors must be compared against validated source line numbers");
+  assert.match(source, /staffSafeActionMessage\(error, "代表者を移譲できません。", data\.event_id\)/,
+    "event-confirmation copy remains available only for the matching event");
+});
