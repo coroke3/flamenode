@@ -490,6 +490,9 @@ if (runTestWithTsx(import.meta.url)) {
             // A Queue wake host is loaded *after* the transaction was committed.
             assert.equal(sqlite.prepare("SELECT title FROM announcements WHERE id = 'ann-1'").get()?.title, "Hello v2");
             assert.equal(sqlite.prepare("SELECT count(*) AS n FROM audit_logs").get()?.n, 1);
+            assert.equal(sqlite.prepare("SELECT count(*) AS n FROM static_rebuild_queue WHERE id = 'sec734-rebuild'").get()?.n,
+              sources.staticRebuildWakeSource ? 1 : 0,
+              "the queued rebuild row is durably committed before a wake is attempted");
             if (mode === "sync") throw new Error("Queue import " + secret);
             if (mode === "async") return Promise.reject(new Error("Queue module " + secret));
             return {
@@ -510,21 +513,29 @@ if (runTestWithTsx(import.meta.url)) {
               readKv: () => null,
             };
           };
+          const statements = [
+            db.run(sql`UPDATE announcements SET title = ${"Hello v2"}, updated_at = ${2000} WHERE id = ${"ann-1"} AND updated_at = ${1000}`),
+          ];
+          if (sources.staticRebuildWakeSource) {
+            statements.push(db.run(sql`INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, status, priority, attempt_count, created_at, updated_at)
+              VALUES (${"sec734-rebuild"}, ${"announcements"}, ${"all"}, ${"sec734_postcommit"}, ${"pending"}, ${"normal"}, ${0}, ${1000}, ${1000})`));
+          }
           const ids = await mutateWithAudit(db, {
-            mutationStatements: [
-              db.run(sql`UPDATE announcements SET title = ${"Hello v2"}, updated_at = ${2000} WHERE id = ${"ann-1"} AND updated_at = ${1000}`),
-            ],
-            expectedMutationChanges: 1,
+            mutationStatements: statements,
+            expectedMutationChanges: statements.map(() => 1),
             audits: [announcementAudit()],
             ...sources,
           }, hostLoader);
+          const queued = sqlite.prepare("SELECT count(*) AS n FROM static_rebuild_queue WHERE id = 'sec734-rebuild'").get()?.n;
           log.push({ op: "test.committed", name });
-          return ids;
+          return { ids, queued };
         });
       } finally {
         console.warn = originalWarn;
       }
-      assert.ok(Array.isArray(actual.outcome.returned) && actual.outcome.returned.length === 1, name);
+      assert.ok(Array.isArray(actual.outcome.returned?.ids) && actual.outcome.returned.ids.length === 1, name);
+      assert.equal(actual.outcome.returned.queued, sources.staticRebuildWakeSource ? 1 : 0,
+        name + ": committed rebuild work is not lost if Queue wake fails");
       assert.equal(actual.outcome.threw, undefined, name + ": committed D1 must not report a failure");
       assert.equal(actual.announcements.find((r) => r.id === "ann-1")?.title, "Hello v2", name);
       assert.equal(actual.audit_logs.length, 1, name + ": exactly one durable audit");
