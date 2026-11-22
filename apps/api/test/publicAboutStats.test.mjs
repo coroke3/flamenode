@@ -82,3 +82,35 @@ test("GET /api/public/about-stats returns 200 with normalized stats", async () =
     },
   });
 });
+
+test("SEC-754: R2 provider diagnostics cannot leak names or turn unavailable into a 500", async () => {
+  const providerError = new Error("SEC754_PROVIDER_SECRET");
+  Object.defineProperty(providerError, "name", {
+    get() { throw new Error("SEC754_THROWING_NAME_GETTER"); },
+  });
+  const env = {
+    BUCKET: {
+      async get() { throw providerError; },
+    },
+  };
+  const originalWarn = console.warn;
+  const warnings = [];
+  const assertUnavailable = async () => {
+    const res = await app.request("/api/public/about-stats", { method: "GET" }, env);
+    assert.equal(res.status, 503);
+    assert.equal(res.headers.get("Cache-Control"), "no-store");
+    assert.equal(res.headers.get("Retry-After"), "30");
+    assert.equal(res.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.deepEqual(await res.json(), { stats: null });
+  };
+  try {
+    console.warn = (...args) => { warnings.push(args.join(" ")); };
+    await assertUnavailable();
+    assert.deepEqual(warnings, ["[about-stats] compact R2 stats read failed"]);
+    assert.ok(!warnings.join(" ").includes("SEC754_PROVIDER_SECRET"));
+    console.warn = () => { throw new Error("SEC754_LOG_SINK_SECRET"); };
+    await assertUnavailable();
+  } finally {
+    console.warn = originalWarn;
+  }
+});

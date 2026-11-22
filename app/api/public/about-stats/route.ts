@@ -99,10 +99,14 @@ export async function GET(req: Request): Promise<Response> {
     }
 
     return response;
-  } catch (error) {
-    console.warn("[about-stats] compact R2 stats read failed", {
-      error: error instanceof Error ? error.name : "unknown",
-    });
+  } catch {
+    // R2/provider exceptions and diagnostic sinks are untrusted. A failed log
+    // must never replace the stable no-store 503 response with a thrown error.
+    try {
+      console.warn("[about-stats] compact R2 stats read failed");
+    } catch {
+      // Best-effort diagnostics only.
+    }
     return unavailable();
   }
 }
