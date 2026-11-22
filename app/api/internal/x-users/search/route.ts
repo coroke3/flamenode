@@ -25,6 +25,21 @@ const UNAVAILABLE_HEADERS = {
   "Retry-After": "3",
 } as const;
 
+type SuggestionsDiagnostic =
+  | "R2_BINDING_UNAVAILABLE"
+  | "SUGGESTIONS_UNAVAILABLE"
+  | "SUGGESTIONS_LOOKUP_FAILED";
+
+/** Never let diagnostic output expose provider exceptions or replace a private 503. */
+function logSuggestionsDiagnostic(code: SuggestionsDiagnostic, level: "warn" | "error" = "warn"): void {
+  try {
+    if (level === "error") console.error(`[x-users-search] ${code}`);
+    else console.warn(`[x-users-search] ${code}`);
+  } catch {
+    // Logging must not turn a handled R2/binding failure into an unhandled response.
+  }
+}
+
 function compactSearchChars(value: string): string {
   return value.replace(/[^\p{L}\p{N}_]/gu, "");
 }
@@ -196,10 +211,15 @@ export async function GET(request: Request): Promise<Response> {
     let bucket: Pick<R2Bucket, "get">;
     try {
       bucket = getEnv().BUCKET;
-    } catch (error) {
-      console.warn("[x-users-search] bucket binding unavailable", {
-        error: error instanceof Error ? error.name : "unknown",
-      });
+    } catch {
+      logSuggestionsDiagnostic("R2_BINDING_UNAVAILABLE");
+      return NextResponse.json(
+        { error: "suggestions_unavailable" },
+        { status: 503, headers: UNAVAILABLE_HEADERS },
+      );
+    }
+    if (!bucket) {
+      logSuggestionsDiagnostic("R2_BINDING_UNAVAILABLE");
       return NextResponse.json(
         { error: "suggestions_unavailable" },
         { status: 503, headers: UNAVAILABLE_HEADERS },
@@ -247,10 +267,7 @@ export async function GET(request: Request): Promise<Response> {
       loadMemberSuggestionsIndexFromBucket(bucket),
     );
     if (!loaded.ok) {
-      console.warn("[x-users-search] suggestions unavailable", {
-        v2_reason: v2.ok ? "compatibility_fallback" : v2.reason,
-        v1_reason: loaded.reason,
-      });
+      logSuggestionsDiagnostic("SUGGESTIONS_UNAVAILABLE");
       return NextResponse.json(
         { error: "suggestions_unavailable" },
         { status: 503, headers: UNAVAILABLE_HEADERS },
@@ -265,8 +282,8 @@ export async function GET(request: Request): Promise<Response> {
       onlyApproved,
       source: "v1",
     }).response;
-  } catch (error) {
-    console.error("[x-users-search] suggestion lookup failed", error);
+  } catch {
+    logSuggestionsDiagnostic("SUGGESTIONS_LOOKUP_FAILED", "error");
     return NextResponse.json(
       { error: "suggestions_unavailable" },
       { status: 503, headers: UNAVAILABLE_HEADERS },
