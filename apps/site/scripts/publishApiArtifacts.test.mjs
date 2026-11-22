@@ -137,6 +137,15 @@ test("SEC-747: an off-index public event missing BOTH snapshots aborts before an
   }
 });
 
+test("SEC-747: more than 5000 expected public events fail before publication", async () => {
+  const data = fixture();
+  data.publicEventIds = Array.from({ length: 5001 }, (_, i) => "evt_" + String(i));
+  assert.throws(() => selectApiArtifacts(data), /invalid public event inventory/);
+  const b = bucket();
+  await assert.rejects(publishApiArtifacts(data, b), /invalid public event inventory/);
+  assert.equal(b.writes.length, 0);
+});
+
 test("SEC-747: missing, duplicate and malformed public event inventories are rejected", () => {
   const cases = [
     (data) => { delete data.publicEventIds; },
