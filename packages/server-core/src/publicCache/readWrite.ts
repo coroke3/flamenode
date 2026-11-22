@@ -106,6 +106,10 @@ export async function deletePublicJsonCacheBestEffort(key: string, host: PublicJ
   try {
     await host.cache.delete(jsonCacheRequest(key));
   } catch {
-    console.warn("[public-cache] cache_api_delete_failed");
+    try {
+      console.warn("[public-cache] cache_api_delete_failed");
+    } catch {
+      // Diagnostic sinks are best-effort; never reject cache invalidation.
+    }
   }
 }
