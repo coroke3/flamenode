@@ -65,7 +65,7 @@ test("MIG-0651 ops notification: real migrated SQLite persists forced channel ev
       eventId: "event-a", payload: payload("event-a"),
       threadName: "[作品登録] @everyone\nTitle / @here",
     }));
-    assert.equal(stats.reads, 1, "force channel only reads actor row, never DM notification preference");
+    assert.equal(stats.reads, 0, "forced recipient is resolved by the eventual atomic INSERT, not a standalone read");
     assert.deepEqual(plan.expectedChanges, [null]);
     assert.equal(plan.audits.length, 0);
     assert.equal(plan.statements.length, 1);
@@ -96,7 +96,7 @@ test("MIG-0651 ops notification: missing actor still leaves CURRENT-compatible N
   try {
     const stats = { reads: 0 };
     const plan = await buildFreeVideoRegisteredChannelPlan(dbFor(sqlite, stats), args());
-    assert.equal(stats.reads, 1);
+    assert.equal(stats.reads, 0);
     assert.equal(plan.statements.length, 1);
     const q = plan.statements[0].toSQL();
     assert.equal(sqlite.prepare(q.sql).run(...q.params).changes, 1);
@@ -113,7 +113,7 @@ test("MIG-0651 ops notification: CURRENT force channel race uses partial-unique 
     const stats = { reads: 0 };
     const db = dbFor(sqlite, stats);
     const plan = await buildFreeVideoRegisteredChannelPlan(db, args());
-    assert.equal(stats.reads, 1);
+    assert.equal(stats.reads, 0);
     insert(sqlite, "notification_outbox", {
       id: "other-channel", recipient_user_id: "user-1",
       type: "discord_webhook", delivery_route: "channel",
@@ -123,5 +123,22 @@ test("MIG-0651 ops notification: CURRENT force channel race uses partial-unique 
     const q = plan.statements[0].toSQL();
     assert.equal(sqlite.prepare(q.sql).run(...q.params).changes, 0);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 1);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 ops notification: deleting actor after plan preserves NULL forced-recipient semantics", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "user", { id: "user-1", is_notification_enabled: 1 });
+    const stats = { reads: 0 };
+    const plan = await buildFreeVideoRegisteredChannelPlan(dbFor(sqlite, stats), args());
+    assert.equal(stats.reads, 0, "no pre-batch D1 read to race with user deletion");
+    sqlite.prepare("DELETE FROM user WHERE id='user-1'").run();
+    const q = plan.statements[0].toSQL();
+    assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
+    assert.equal(sqlite.prepare(q.sql).run(...q.params).changes, 1);
+    assert.deepEqual(sqlite.prepare("SELECT recipient_user_id,delivery_route FROM notification_outbox")
+      .all().map(row => ({recipient_user_id: row.recipient_user_id, delivery_route: row.delivery_route})),
+      [{ recipient_user_id: null, delivery_route: "channel" }]);
   } finally { sqlite.close(); }
 });
