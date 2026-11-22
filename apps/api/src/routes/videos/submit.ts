@@ -26,9 +26,8 @@ import {
 import type { Context } from "hono";
 import type { AppEnv } from "../../env.ts";
 import type { ServerCoreDb } from "@flamenode/server-core/db";
-import { loadEligibleUnslottedVideoRequiredFields } from "@flamenode/server-core/video/requiredVideoFields";
+import { loadEligibleUnslottedVideoRequiredFields, decodeGeneralCustomQuestionPolicyProjection, type LoadedGeneralCustomQuestion } from "@flamenode/server-core/video/requiredVideoFields";
 import { checkYoutubeVideoDuplicate } from "@flamenode/server-core/video/youtubeDuplicate";
-import { loadGeneralCustomQuestionsForFreeVideo, type LoadedGeneralCustomQuestion } from "@flamenode/server-core/video/requiredVideoFields";
 
 const BAD_FORM_MESSAGE = "投稿フォームの入力が不正です。";
 
@@ -101,9 +100,10 @@ export async function validateFreeVideoDbReadPreflight(
     "requestedEventId" | "videoForm"
   >,
   nowSec: number,
+  includeQuestionPolicy = false,
 ): Promise<
   | { ok: false; message: string }
-  | { ok: true; value: { youtubeId: string; eventId: string | null; requiredFieldsSnapshot: string | null } }
+  | { ok: true; value: { youtubeId: string; eventId: string | null; requiredFieldsSnapshot: string | null; questionPolicyJson?: string } }
 > {
   if (!Number.isSafeInteger(nowSec) || nowSec < 0) {
     return { ok: false, message: BAD_FORM_MESSAGE };
@@ -115,7 +115,7 @@ export async function validateFreeVideoDbReadPreflight(
 
   let event: Awaited<ReturnType<typeof loadEligibleUnslottedVideoRequiredFields>>;
   try {
-    event = await loadEligibleUnslottedVideoRequiredFields(db, input.requestedEventId, nowSec, youtubeId);
+    event = await loadEligibleUnslottedVideoRequiredFields(db, input.requestedEventId, nowSec, youtubeId, includeQuestionPolicy);
   } catch (error) {
     if (error instanceof UnslottedEventSyncError) {
       if (error.code === "unslotted_event_selection_invalid") {
@@ -161,7 +161,10 @@ export async function validateFreeVideoDbReadPreflight(
       message: "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。",
     };
   }
-  return { ok: true, value: { youtubeId, eventId, requiredFieldsSnapshot: event.requiredFieldsSnapshot } };
+  return { ok: true, value: {
+    youtubeId, eventId, requiredFieldsSnapshot: event.requiredFieldsSnapshot,
+    ...(includeQuestionPolicy ? { questionPolicyJson: event.questionPolicyJson } : {}),
+  } };
 }
 
 
@@ -186,13 +189,22 @@ export async function validateFreeVideoSubmissionReadPreflight(
       questionSnapshot: LoadedGeneralCustomQuestion[];
     } }
 > {
-  const base = await validateFreeVideoDbReadPreflight(db, input, nowSec);
+  const base = await validateFreeVideoDbReadPreflight(db, input, nowSec, true);
   if (!base.ok) return base;
   try {
-    const questions = await loadGeneralCustomQuestionsForFreeVideo(db, base.value.eventId);
+    // The complete ordered policy came from the same trusted D1 event SELECT
+    // as eligibility, required fields, and YouTube duplication. The decoder
+    // preserves the 18-row bound and CURRENT question ordering/normalization.
+    const { questionPolicyJson, ...validated } = base.value;
+    if (typeof questionPolicyJson !== "string") {
+      throw new Error("video_custom_question_projection_missing");
+    }
+    const questions = validated.eventId
+      ? decodeGeneralCustomQuestionPolicyProjection(questionPolicyJson, validated.eventId)
+      : [];
     const custom = validateSubmissionCustomAnswers(input.formData, questions);
     if (!custom.ok) return custom;
-    return { ok: true, value: { ...base.value, customAnswerDrafts: custom.drafts, questionSnapshot: questions } };
+    return { ok: true, value: { ...validated, customAnswerDrafts: custom.drafts, questionSnapshot: questions } };
   } catch {
     // A read-limit/schema/D1 failure must stop submission before any writes.
     return {
