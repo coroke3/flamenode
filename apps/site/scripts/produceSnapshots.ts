@@ -47,6 +47,16 @@ import { DEFAULT_R2_BUILD_BUCKET, readR2Json } from "./readR2Object.ts";
 export const EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const ID_LIST_LIMIT = 5000;
+/** Fail closed before indexing/generating if source public rows exceed cap or have unsafe IDs. */
+export function verifiedPublicEventIds(rows: readonly Record<string, unknown>[]): string[] {
+  if (rows.length > ID_LIST_LIMIT) throw new Error("snapshot producer: public event inventory exceeds 5000 rows");
+  return rows.map((row) => {
+    if (typeof row.id !== "string" || !EVENT_ID_PATTERN.test(row.id)) {
+      throw new Error("snapshot producer: invalid public event ID");
+    }
+    return row.id;
+  });
+}
 /** `snapshot/video-detail/ID.json` (MIG-0507): CURRENT `videos/ID.json`. */
 const videoDetailKey = (id: string): string => `snapshot/video-detail/${id}.json`;
 import { normalizeTopStatsSection, TOP_STATS_OBJECT_KEY } from "../../../src/lib/publicData/staticTopSectionsCore.ts";
@@ -398,11 +408,7 @@ async function produceSnapshotsExclusive(input: ProduceInput): Promise<ProduceRe
     // off-index public event from our supposedly complete release inventory.
     const publicEventRows = await allRows(evDb,
       `SELECT id FROM events WHERE visibility_status = 'public' ORDER BY id ASC LIMIT ?`, ID_LIST_LIMIT + 1);
-    if (publicEventRows.length > ID_LIST_LIMIT) {
-      throw new Error("snapshot producer: public event inventory exceeds 5000 rows");
-    }
-    const eventIds = publicEventRows
-      .map((row) => String(row.id)).filter((id) => EVENT_ID_PATTERN.test(id));
+    const eventIds = verifiedPublicEventIds(publicEventRows);
     await rebuildTarget(evEnv as never, "events_index", "global");
     for (const id of eventIds) {
       for (const target of ["event_base", "event_slots", "event_release", "event"]) await rebuildTarget(evEnv as never, target, id);
