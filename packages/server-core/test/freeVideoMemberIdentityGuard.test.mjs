@@ -42,6 +42,22 @@ test("MIG-0651 identity CAS: not-found placeholder remains valid, same-canonical
   } finally { db.close(); }
 });
 
+test("MIG-0651 identity CAS: normalization-only collision cannot create a second canonical X", () => {
+  const db = createSqlite();
+  try {
+    const rows = identity("existing", "existing", true);
+    assertGuard(db, rows, true, "genuine no-row placeholder is permitted");
+    for (const id of ["EXISTING", "@existing"]) {
+      insert(db, "x_users", {id, x_name:"Previously created", approval_status:"approved"});
+      assertGuard(db, rows, false,
+        "preflight-not-found must reject a case/@-variant direct PK");
+      db.prepare("DELETE FROM x_users WHERE id=?").run(id);
+    }
+    insert(db, "x_users", {id:"existing", x_name:"Exact canonical", approval_status:"approved"});
+    assertGuard(db, rows, true, "the exact PK is safely handled by ON CONFLICT");
+  } finally { db.close(); }
+});
+
 test("MIG-0651 identity CAS: stable alias, rejected direct shadow and valid target allowed", () => {
   const db = createSqlite();
   try {
