@@ -315,3 +315,73 @@ test("SEC-800: actual shared-domain ownership errors retain intended staff UI me
   assert.doesNotThrow(() => assertOwnershipTransferInput(transfer),
     "correct transfer remains allowed by the shared domain");
 });
+
+test("SEC-800: actual event.members collaborator denial retains CURRENT permission message", async () => {
+  // Execute the canonical shared-core authorization function rather than
+  // constructing a guessed message. Only the D1-dependent resolver is mocked.
+  const authSource = readFileSync(
+    fileURLToPath(new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url)),
+    "utf8",
+  );
+  const start = authSource.indexOf("export async function assertCanEditEvent(");
+  const end = authSource.indexOf("\nexport async function loadVideoEventIdsForAccessContext", start);
+  assert.ok(start >= 0 && end > start, "read the real shared authorization function");
+  const authSignature =
+    /export async function assertCanEditEvent\([\s\S]*?\): Promise<string \| null> \{/;
+  const declaration = authSource.slice(start, end).replace(
+    authSignature,
+    "async function assertCanEditEvent(db, user, eventId, requiredKey) {",
+  );
+  assert.doesNotMatch(declaration, authSignature,
+    "the actual authorization function must be executable in the fixture");
+  const authorize = runInNewContext(declaration + "\nassertCanEditEvent", {
+    Error,
+    resolveEventEditAuthorization: async () => ({
+      allowed: false,
+      actorXUserId: null,
+    }),
+  });
+
+  const staffGuardStart = source.indexOf("async function ensureEventManager(");
+  const staffGuardEnd = source.indexOf("\nfunction revalidateEventStaffPaths", staffGuardStart);
+  assert.ok(staffGuardStart >= 0 && staffGuardEnd > staffGuardStart);
+  const staffGuard = source.slice(staffGuardStart, staffGuardEnd);
+  assert.match(staffGuard, /await assertCanEditEvent\([\s\S]*?"event\.members"/,
+    "this staff action must still pass the exact permission key");
+  assert.match(staffGuard, /staffSafeActionMessage\(error, "権限がありません。"\)/,
+    "guard catch must use the safe response helper");
+
+  const policyStart = source.indexOf("const STAFF_SAFE_ACTION_MESSAGES = new Set");
+  const policyEnd = source.indexOf("\nfunction staffPreparationError", policyStart);
+  assert.ok(policyStart >= 0 && policyEnd > policyStart);
+  const safePolicy = source.slice(policyStart, policyEnd)
+    .replace(
+      /function staffSafeActionMessage\(\s*error: unknown,\s*fallback: string,\s*eventId\?: string,\s*explicitAllowed\?: readonly string\[],\s*\): string \{/,
+      "function staffSafeActionMessage(error, fallback, eventId, explicitAllowed) {",
+    )
+    .replace("let message: unknown;", "let message;");
+  const responseMessage = runInNewContext(
+    safePolicy + "\nstaffSafeActionMessage", { Error },
+  );
+
+  let denial;
+  try {
+    await authorize({}, { id: "collaborator", role: null }, "event_123", "event.members");
+  } catch (error) {
+    denial = error;
+  }
+  const exact = "権限が不足しています (event.members)";
+  assert.ok(denial instanceof Error, "shared core must deny insufficient permissions");
+  assert.equal(denial.message, exact, "shared auth remains the CURRENT source of truth");
+  const fallback = "権限がありません。";
+  assert.equal(responseMessage(denial, fallback), exact,
+    "staff action must preserve the genuine fixed permission denial message");
+  for (const hostile of [
+    exact + " SQL params: sec800_token_secret",
+    "権限が不足しています (event.slots)",
+    "SQLITE_ERROR: " + exact,
+  ]) {
+    assert.equal(responseMessage(new Error(hostile), fallback), fallback,
+      "near-matches and SQL/secret-bearing provider messages stay private");
+  }
+});
