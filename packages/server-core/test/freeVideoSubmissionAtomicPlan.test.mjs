@@ -650,9 +650,13 @@ test("MIG-0651 U02: new software catalog + links and static queue commit togethe
       usedSoftware: "Fresh Tool",
     });
     assert.equal(preReads, 1, "alias+catalog matching uses one bounded JOIN pre-read");
-    assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 1, 13]);
     assert.equal(plan.audits.length, 4, "video, metadata, catalog and link each strictly audited");
     assert.ok(plan.audits.every(a => a.strict));
+    assert.equal(plan.expectedChanges.findIndex(c => c !== null), 2,
+      "Active-X and software selection CAS must both run before video INSERT");
+    assert.match(new SQLiteSyncDialect().sqlToQuery(plan.statements[1].sqlExpr).sql,
+      /WITH incoming/i, "software selection is the second pre-write assertion");
     const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads);
     assert.equal(budget.d1WithinLimit, true);
     assert.equal(budget.s3PreBatchReadCount, 3, "one software JOIN plus two audit preparation reads");
@@ -700,7 +704,7 @@ test("MIG-0651 U02: failing rebuild queue rolls back fresh software/catalog/vide
       videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
       eventId: null, now: NOW, questions: [], customAnswerDrafts: [], usedSoftware: "Fresh Tool",
     });
-    assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 1, 13]);
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
     assert.throws(() => {
@@ -720,6 +724,51 @@ test("MIG-0651 U02: failing rebuild queue rolls back fresh software/catalog/vide
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0,
         "queue failure must roll back " + table);
     }
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 U02: software catalog arrival after pre-read fails before first video write", async () => {
+  const sqlite = createSqlite();
+  seedApprovedActiveX(sqlite);
+  try {
+    const proxy = drizzle(async (query, params, method) => {
+      const rows = sqlite.prepare(query).all(...params);
+      return { rows: method === "all" || method === "values"
+        ? rows.map(r => Object.values(r)) : rows };
+    }, { schema });
+    const db = {
+      select: (...args) => proxy.select(...args),
+      insert: (...args) => proxy.insert(...args),
+      run(expr) { return { sqlExpr: expr }; },
+    };
+    const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+      videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
+      eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+      usedSoftware: "New Racing Tool",
+    });
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 1, 13]);
+    insert(sqlite, "software_catalog", {
+      id: "raced-software", name: "New Racing Tool", normalized_name: "new racing tool",
+      is_active: 1, usage_count: 0, created_at: NOW, updated_at: NOW,
+    });
+    const dialect = new SQLiteSyncDialect();
+    sqlite.exec("BEGIN");
+    try {
+      assert.throws(() => {
+        for (const stmt of plan.statements) {
+          const raw = "sqlExpr" in stmt;
+          const q = raw ? dialect.sqlToQuery(stmt.sqlExpr) : stmt.toSQL();
+          if (raw) sqlite.prepare(q.sql).get(...q.params);
+          else sqlite.prepare(q.sql).run(...q.params);
+        }
+      }, /malformed JSON/, "stale software CREATE audit and link must be rejected by CAS");
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0,
+        "software CAS must precede first video INSERT, not merely software INSERT");
+    } finally { sqlite.exec("ROLLBACK"); }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_softwares").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT id FROM software_catalog").get().id, "raced-software");
   } finally { sqlite.close(); }
 });
 
