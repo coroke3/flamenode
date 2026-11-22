@@ -245,7 +245,7 @@ test("MIG-0651 U02 D1 read: no event uses exactly one bounded YouTube duplicate 
   const { db, reads } = readOnlyVideoDb();
   const result = await validateFreeVideoDbReadPreflight(db, dbCandidate(form), authenticated().nowSec);
   assert.deepEqual(result, {
-    ok: true, value: { eventId: null, youtubeId: "dQw4w9WgXcQ" },
+    ok: true, value: { eventId: null, youtubeId: "dQw4w9WgXcQ", requiredFieldsSnapshot: null },
   });
   assert.deepEqual(reads.map((r) => r.kind), ["youtube"]);
   assert.ok(reads[0].sql.params.includes("dQw4w9WgXcQ"));
@@ -266,7 +266,7 @@ test("MIG-0651 U02 D1 read: eligible event and required fields share one read be
   form.set("music", "Song");
   const permitted = await validateFreeVideoDbReadPreflight(db, dbCandidate(form), authenticated().nowSec);
   assert.deepEqual(permitted, { ok: true, value: {
-    eventId: "event-a", youtubeId: "dQw4w9WgXcQ",
+    eventId: "event-a", youtubeId: "dQw4w9WgXcQ", requiredFieldsSnapshot: '["music"]',
   } });
   assert.deepEqual(reads.map((r) => r.kind).slice(1),
     ["eligible_required", "youtube"]);
@@ -357,7 +357,7 @@ test("MIG-0651 U02 SQLite: event visibility, end-time, required fields and YouTu
     queries.length = 0;
     result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
     assert.deepEqual(result, { ok: true, value: {
-      youtubeId: "dQw4w9WgXcQ", eventId: "event-a",
+      youtubeId: "dQw4w9WgXcQ", eventId: "event-a", requiredFieldsSnapshot: '["music"]',
     } });
     assert.equal(queries.length, 2, "eligible required-fields row + YouTube duplicate");
     assert.ok(queries.every(({ statement }) => /^\s*SELECT/i.test(statement)));
