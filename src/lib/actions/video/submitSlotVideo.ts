@@ -429,6 +429,8 @@ async function submitSlotVideoCore(
       };
 
   let staticRebuildEnqueued = false;
+  // Keep wake deduplication across the committed D1 batch and later best-effort YouTube wake.
+  const wakeSentKinds = new Set<QueueWakeKind>();
   try {
     const plan = emptyVideoAtomicWritePlan();
     plan.statements.push(
@@ -652,15 +654,11 @@ async function submitSlotVideoCore(
     staticRebuildEnqueued = queue.statements.length > 0;
     plan.statements.push(...queue.statements);
     plan.expectedChanges.push(...queue.expectedChanges);
-    const wakeSentKinds = new Set<QueueWakeKind>();
     await executeVideoAtomicWritePlan(db, plan, {
       notificationWakeSource,
       staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
       wakeSentKinds,
     });
-    if (youtubeFieldPresent && submittedYoutubeId) {
-      await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
-    }
   } catch (error) {
     unstable_rethrow(error);
     await rollbackUploadedVideoIcon(iconResolved.value.uploadedKey);
@@ -675,6 +673,15 @@ async function submitSlotVideoCore(
   await runPostCommitBestEffort(
     { flow: "submit_slot_video", traceId },
     [
+      // A wake failure cannot enter the D1 failure catch or remove an icon now referenced by the committed video.
+      ...(youtubeFieldPresent && submittedYoutubeId
+        ? [{
+            name: "youtube_sync_wake",
+            run: async () => {
+              await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
+            },
+          }]
+        : []),
       {
         name: "revalidate",
         run: async () => {
