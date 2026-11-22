@@ -54,6 +54,12 @@ test("MIG-0651 software: migrated SQLite resolves active alias before catalog na
     insert(sqlite, "software_aliases", {
       software_id: "sw_blender", alias: "B3D", normalized_alias: "b3d",
     });
+    // One submitted value matches both a direct name and a different alias.
+    // CURRENT's alias-first rule must keep using sw_blender.
+    insert(sqlite, "software_catalog", {
+      id: "sw_b3d_shadow", name: "B3D", normalized_name: "b3d",
+      is_active: 1, is_verified: 1, usage_count: 0, created_at: NOW, updated_at: NOW,
+    });
     insert(sqlite, "videos", {
       id: "v-software", submitted_by_user_id: "u", creator_display_name: "Example",
       title: "Example", youtube_video_id: "dQw4w9WgXcQ", visibility_status: "public",
@@ -64,7 +70,7 @@ test("MIG-0651 software: migrated SQLite resolves active alias before catalog na
       videoId: "v-software", actorUserId: "u",
       raw: "B3D, Blender, After Effects, New Tool", now: NOW,
     });
-    assert.equal(stats.reads, 3, "alias, direct and alias target catalog each use one bounded read");
+    assert.equal(stats.reads, 1, "alias and direct names resolve in one bounded JOIN read");
     assert.deepEqual(plan.expectedChanges, [1, 3], "one new catalog and three unique links");
     assert.deepEqual(plan.audits.map((a) => [a.table_name, a.operation, a.strict]), [
       ["software_catalog", "CREATE", true],
@@ -95,6 +101,30 @@ test("MIG-0651 software: migrated SQLite resolves active alias before catalog na
     assert.equal(sqlite.prepare(
       "SELECT COUNT(*) AS count FROM software_catalog WHERE normalized_name='new tool'",
     ).get().count, 1);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 software: inactive alias target is ignored by one-query lookup", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "software_catalog", {
+      id: "sw_inactive", name: "Retired Studio", normalized_name: "retired studio",
+      is_active: 0, usage_count: 0, created_at: NOW, updated_at: NOW,
+    });
+    insert(sqlite, "software_aliases", {
+      software_id: "sw_inactive", alias: "Fresh Alias", normalized_alias: "freshalias",
+    });
+    const stats = { reads: 0 };
+    const plan = await buildFreeVideoSoftwareInsertPlan(liveDb(sqlite, stats), {
+      videoId: "v-new", actorUserId: "u", raw: "Fresh Alias", now: NOW,
+    });
+    assert.equal(stats.reads, 1, "inactive alias must not trigger a follow-up query");
+    assert.deepEqual(plan.expectedChanges, [1, 1],
+      "unknown active software name creates its own catalog row");
+    assert.equal(plan.audits[0].after.normalized_name, "fresh alias");
+    assert.notEqual(plan.audits[1].after.software_id, "sw_inactive");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_softwares").get().n, 0,
+      "pure builder must not write anything");
   } finally { sqlite.close(); }
 });
 
