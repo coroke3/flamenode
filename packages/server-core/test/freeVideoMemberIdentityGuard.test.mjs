@@ -31,12 +31,13 @@ test("MIG-0651 identity CAS: invalid/duplicate inputs are rejected without D1", 
   }
 });
 
-test("MIG-0651 identity CAS: not-found placeholder remains valid, same-canonical arrival valid, rejection aborts", () => {
+test("MIG-0651 identity CAS: not-found placeholder stays valid only while absent", () => {
   const db = createSqlite();
   try {
     assertGuard(db, identity("newone", "newone", true), true);
     insert(db, "x_users", {id:"newone",x_name:"New",approval_status:"approved"});
-    assertGuard(db, identity("newone", "newone", true), true);
+    assertGuard(db, identity("newone", "newone", true), false,
+      "exact-PK race must not substitute an approved profile for the audited pending INSERT");
     db.prepare("UPDATE x_users SET approval_status='rejected' WHERE id='newone'").run();
     assertGuard(db, identity("newone", "newone", true), false);
   } finally { db.close(); }
@@ -54,7 +55,19 @@ test("MIG-0651 identity CAS: normalization-only collision cannot create a second
       db.prepare("DELETE FROM x_users WHERE id=?").run(id);
     }
     insert(db, "x_users", {id:"existing", x_name:"Exact canonical", approval_status:"approved"});
-    assertGuard(db, rows, true, "the exact PK is safely handled by ON CONFLICT");
+    assertGuard(db, rows, false, "even exact PK races invalidate the strict pending CREATE audit");
+  } finally { db.close(); }
+});
+
+test("MIG-0651 identity CAS: alias appearance after placeholder pre-read must fail even for same target", () => {
+  const db = createSqlite();
+  try {
+    const newRow = identity("fresh", "fresh", true);
+    assertGuard(db, newRow, true);
+    insert(db, "x_users", {id:"fresh",x_name:"New",approval_status:"pending"});
+    insert(db, "x_user_aliases", {alias_x_id:"fresh",x_user_id:"fresh"});
+    assertGuard(db, newRow, false,
+      "a brand-new alias is a change to the not-found snapshot and cannot pass the batch CAS");
   } finally { db.close(); }
 });
 
