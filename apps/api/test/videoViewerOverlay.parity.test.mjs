@@ -1265,6 +1265,58 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(await emptyIdRes.json(), { error: "invalid_video_id" });
   });
 
+  test("RH-031: D1 provider exceptions are redacted without changing degraded HTTP semantics", async () => {
+    // Provider errors can embed bound SQL parameters, credentials or a nested
+    // cause. Test both the first (identity) and second (private data) queries.
+    const privateCanary = "RH031_PRIVATE_PROVIDER_ERROR_SECRET_20261122";
+    for (const [caseName, marker, expectedLoggedIn] of [
+      ["first D1 projection", "'approved_x_ids'", false],
+      ["second D1 projection", "AS chapters_json", true],
+    ]) {
+      const { env, d1 } = setupTestEnv();
+      const originalPrepare = env.DB.prepare.bind(env.DB);
+      let injected = 0;
+      env.DB.prepare = (sql) => {
+        if (String(sql).includes(marker)) {
+          injected += 1;
+          throw new Error("D1 statement leaked " + privateCanary, {
+            cause: new Error("nested provider credentials: " + privateCanary),
+          });
+        }
+        return originalPrepare(sql);
+      };
+
+      const captured = [];
+      const originalError = console.error;
+      console.error = (...args) => captured.push(args.map((arg) =>
+        typeof arg === "string" ? arg : JSON.stringify(arg)).join(" "));
+      let response;
+      try {
+        response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+          headers: { cookie: "authjs.session-token=tok-alice" },
+        }, env);
+      } finally {
+        console.error = originalError;
+      }
+
+      assert.equal(injected, 1, caseName + ": test must hit the actual route SQL");
+      assert.equal(response.status, 200, caseName + ": CURRENT degraded status");
+      assert.equal(response.headers.get("Cache-Control"),
+        "private, no-store, no-cache, must-revalidate");
+      const body = await response.json();
+      assert.equal(VideoViewerOverlayResponseSchema.safeParse(body).success, true);
+      assert.equal(body.loggedIn, expectedLoggedIn);
+      assert.equal(body.authUnavailable, true);
+      assert.equal(body.viewerCanEditChapters, false);
+      assert.deepEqual(body.privateChapters, []);
+      assert.ok(d1.stats.statements <= 3, caseName + ": never add a D1 read");
+      assert.ok(captured.some((line) => line.includes("[video-viewer-overlay]") &&
+        line.includes("provider_error")), caseName + ": emit fixed diagnostics");
+      assert.ok(!captured.join("\n").includes(privateCanary),
+        caseName + ": no provider error/cause in logs");
+    }
+  });
+
   test("Issue #709: valid 300K-char playlist never serializes an oversized viewer DTO", async () => {
     const { env, bucket, d1 } = setupTestEnv();
     const hugeTitle = "Very long valid public title ".repeat(12_000);
