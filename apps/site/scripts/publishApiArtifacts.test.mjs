@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { selectApiArtifacts, publishApiArtifacts } from "./publishApiArtifacts.ts";
 import { EVENT_INDEX_KEY, eventDetailKey, eventReleaseKey } from "../src/lib/publicDataLoader.ts";
-import { EVENT_ID_PATTERN as PRODUCER_EVENT_ID_PATTERN } from "./produceSnapshots.ts";
+import { EVENT_ID_PATTERN as PRODUCER_EVENT_ID_PATTERN, verifiedPublicEventIds } from "./produceSnapshots.ts";
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 function fixture(ids = ["evt_a", "evt_b"], indexedIds = ids) {
@@ -135,6 +135,18 @@ test("SEC-747: an off-index public event missing BOTH snapshots aborts before an
     assert.equal(reads, 0, "fail closed before even a remote comparison");
     assert.equal(writes, 0, "never partially publish an incomplete event source set");
   }
+});
+
+test("SEC-747: producer public ID inventory rejects unsafe or missing IDs without filtering", () => {
+  assert.deepEqual(verifiedPublicEventIds([{ id: "_legacy" }, { id: "-legacy" }]), ["_legacy", "-legacy"]);
+  for (const invalid of ["evt/unsafe", "evt.dot", "", null, 0, undefined]) {
+    assert.throws(() => verifiedPublicEventIds([{ id: "evt_ok" }, { id: invalid }]),
+      /invalid public event ID/, "reject " + String(invalid));
+  }
+  const validMax = Array.from({ length: 5000 }, (_, i) => ({ id: "evt_" + i }));
+  assert.equal(verifiedPublicEventIds(validMax).length, 5000);
+  assert.throws(() => verifiedPublicEventIds([...validMax, { id: "evt_extra" }]),
+    /inventory exceeds 5000 rows/);
 });
 
 test("SEC-747: more than 5000 expected public events fail before publication", async () => {
