@@ -42,6 +42,10 @@ const MAX_YOUTUBE_SYNC_ROWS = 100;
 const YOUTUBE_SYNC_STALE_SECONDS = 14 * 24 * 60 * 60;
 /** ZERO_1102 S2: keep each list response under 64 KiB (payloads / errors are the large columns). */
 const MAX_OPS_LIST_BYTES = 48 * 1024;
+/** S2 bounds the entire serialized HTTP body, not just queue rows. */
+const MAX_OPS_HTTP_BYTES = 64 * 1024;
+const MAX_BACKFILL_SUMMARY_ERROR_BYTES = 1024;
+const OMITTED_BACKFILL_ERROR = "長いエラー詳細は応答サイズ上限のため省略しました。";
 const utf8Encoder = new TextEncoder();
 /** Serialized size in UTF-8 bytes (not UTF-16 units). Lists apply it to every row, the first included. */
 function utf8Size(value: unknown): number {
@@ -469,6 +473,27 @@ adminOpsRoutes.get("/static-builds", async (c) => {
     truncated,
     rows,
   };
+  // Queue rows have their own 48 KiB budget, but backfill failure summaries
+  // and persisted KV cursors are also part of the same 64 KiB S2 response.
+  if (utf8Size(body) > MAX_OPS_HTTP_BYTES) {
+    for (const kind of STATIC_BACKFILL_KINDS) {
+      const error = body.backfillQueue[kind].lastError;
+      if (error && utf8Size(error) > MAX_BACKFILL_SUMMARY_ERROR_BYTES) {
+        body.backfillQueue[kind].lastError = OMITTED_BACKFILL_ERROR;
+        body.truncated = true;
+      }
+    }
+    // Preserve the newest rows and retain normal-sized diagnostic summaries.
+    while (body.rows.length > 0 && utf8Size(body) > MAX_OPS_HTTP_BYTES) {
+      body.rows.pop();
+      body.truncated = true;
+    }
+    if (utf8Size(body) > MAX_OPS_HTTP_BYTES) {
+      // A persisted cursor is a resume token, NOT display-only text. Never
+      // shorten it into a different token that the Ops UI could submit.
+      return c.json({ error: "unavailable" }, 503);
+    }
+  }
   return c.json(body);
 });
 

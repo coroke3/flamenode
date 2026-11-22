@@ -1098,6 +1098,53 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual((await fetchPage(stateJson, undefined)).sharedInputs.map((s) => s.objectState), ["unavailable", "unavailable", "unavailable", "unavailable"]);
   });
 
+  test("SEC-799: backfill failure summary and persisted cursor cannot bypass the 64 KiB response budget", async () => {
+    const hugeError = "あ".repeat(24_000); // 72,000 UTF-8 bytes, regardless of row-list truncation
+    const kv = (cursor) => ({
+      async get() {
+        return JSON.stringify({
+          schema_version: 1,
+          updated_at: 7,
+          runs: { video_v2: { status: "running", phase: "items", cursor } },
+        });
+      },
+    });
+    const env = (cursor) => ({
+      KV: kv(cursor),
+      BUCKET: { async head() { return null; } },
+    });
+    const bodyBytes = (response) => new TextEncoder().encode(response.text).length;
+    ins("static_rebuild_queue", {
+      id: "sec799-backfill", target_type: "video", target_id: "sec799-target",
+      status: "failed", priority: "normal", reason: "backfill_video_v2_799",
+      attempt_count: 1, created_at: T0, updated_at: 4_100_000_000, error: hugeError,
+    });
+    try {
+      const failed = await call("/api/admin-read/ops/static-builds", ADMIN, { env: env("cursor-ok") });
+      assert.equal(failed.status, 200, failed.text.slice(0, 200));
+      assert.ok(bodyBytes(failed) <= 64 * 1024, "the FULL DTO must fit S2, not only rows");
+      assert.equal(failed.body.truncated, true, "diagnostic omission must be signalled");
+      assert.equal(failed.body.backfillState.runs.video_v2.cursor, "cursor-ok");
+      assert.match(failed.body.backfillQueue.video_v2.lastError, /省略/);
+      assert.doesNotMatch(failed.text, /あ{100}/, "raw oversized provider diagnostic must not leak");
+      assert.equal(failed.stats.statements, 3, "session + 2 D1 reads");
+      assert.equal(failed.stats.writes, 0);
+      assert.equal(failed.headers.get("cache-control"), "private, no-store");
+    } finally {
+      sqlite.prepare("DELETE FROM static_rebuild_queue WHERE id = ?").run("sec799-backfill");
+    }
+
+    const unsafeCursor = "あ".repeat(30_000);
+    const rejected = await call("/api/admin-read/ops/static-builds", ADMIN, { env: env(unsafeCursor) });
+    assert.equal(rejected.status, 503, "never shorten a resume cursor into a different actionable token");
+    assert.deepEqual(rejected.body, { error: "unavailable" });
+    assert.ok(bodyBytes(rejected) <= 64 * 1024);
+    assert.equal(rejected.headers.get("cache-control"), "private, no-store");
+    assert.equal(rejected.stats.statements, 3);
+    assert.equal(rejected.stats.writes, 0);
+    assert.doesNotMatch(rejected.text, /あ{100}/);
+  });
+
   test("T02 health (operational view) equals CURRENT and deep diagnostics are allowlisted per check", async () => {
     const { runOperationalHealthChecks } = await import("../../../src/lib/admin/healthChecks.ts");
     ins("x_identity_requests", { id: "xs1", request_type: "merge", status: "pending", requested_by_auth_user_id: "u_alice", source_x_user_id: "alice_x", target_x_user_id: "alice_y", requested_at: nowS - 9 * 86400, updated_at: nowS });
