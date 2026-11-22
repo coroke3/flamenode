@@ -1,8 +1,10 @@
-// MIG-0644 U01: transport and inventory contract only.
-// This file does NOT claim Hono/D1 mutation parity; U02 will add real handler tests.
+// MIG-0644 U01 + U02/U03: transport/inventory contracts AND full SQLite + mounted Hono
+// differential parity (SA-092..097, SA-110) against real CURRENT xid-merge-admin.ts.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { createSqlite, insert, runUnderRootTsx } from "./support/personalHarness.mjs";
+import { seed } from "./support/adminReadSeed.mjs";
 import {
   AdminXIdMergeCreateBodySchema,
   AdminXIdMergeDecisionBodySchema,
@@ -10,7 +12,589 @@ import {
   AdminXIdMergeResultSchema,
 } from "../../../packages/contracts/src/admin/xidMerges.ts";
 
-test("U01: create schema uses the two CURRENT FormData keys", () => {
+if (runUnderRootTsx(import.meta.url)) {
+  const { registerHooks } = await import("node:module");
+  const STUBS = {
+    "server-only": "export {}",
+    "next/cache": "export function revalidatePath(p) { globalThis.__mig0644Cur?.revalidated.push(p); }",
+    "next/navigation": "export function unstable_rethrow() {}",
+    "@opennextjs/cloudflare": `
+      export function getCloudflareContext() {
+        return { ctx: { waitUntil(p) { globalThis.__mig0644Cur?.waitUntils.push(p); } } };
+      }
+    `,
+    "@/lib/cloudflare": `
+      export function getEnv() {
+        const s = globalThis.__mig0644Cur;
+        if (!s) throw new Error("getEnv outside CURRENT parity case");
+        return s.env;
+      }
+    `,
+    "@/lib/serverCore/nextPorts": `
+      export const nextQueueWakeHost = {
+        readEnv: () => globalThis.__mig0644Cur?.env ?? null,
+        readWaitUntil: () => (p) => globalThis.__mig0644Cur?.waitUntils.push(p),
+        readKv: () => globalThis.__mig0644Cur?.env?.KV ?? null,
+      };
+    `,
+    "@/lib/auth/writeGuard": `
+      import { evaluateWriteIdentity } from "@flamenode/domain/admin";
+      export async function requireAdminWrite(feature) {
+        const s = globalThis.__mig0644Cur;
+        if (!s) throw new Error("requireAdminWrite outside CURRENT parity case");
+        if (!s.user) return { ok: false, message: "ログインが必要です。" };
+        const userRow = s.sqlite.prepare('SELECT is_tos_accepted, accepted_terms_version_id FROM "user" WHERE id = ?').get(s.user.id);
+        const major = s.sqlite.prepare("SELECT id, published_at FROM terms_versions WHERE severity = 'major' AND published_at IS NOT NULL ORDER BY published_at DESC, updated_at DESC LIMIT 1").get();
+        let reaccept = 0;
+        if (userRow?.is_tos_accepted === 1 && major?.published_at != null) {
+          const ok = s.sqlite.prepare('SELECT 1 FROM "user" u WHERE u.id = ? AND (EXISTS (SELECT 1 FROM terms_versions t WHERE t.id = u.accepted_terms_version_id AND t.published_at IS NOT NULL AND (t.id = ? OR t.published_at > ?)) OR EXISTS (SELECT 1 FROM user_tos_consents c INNER JOIN terms_versions ct ON ct.id = c.terms_version_id WHERE c.user_id = u.id AND ct.published_at IS NOT NULL AND (ct.id = ? OR ct.published_at > ?)))').get(s.user.id, major.id, major.published_at, major.id, major.published_at);
+          if (!ok) reaccept = 1;
+        }
+        const identity = evaluateWriteIdentity({ role: s.user.role, is_banned: s.user.is_banned, is_tos_accepted: userRow?.is_tos_accepted ?? 0, terms_reaccept_required: reaccept }, "admin");
+        if (identity) return { ok: false, message: identity };
+        const settings = s.sqlite.prepare("SELECT operation_mode, disabled_features_json FROM system_settings WHERE id = 'default'").get();
+        if (!settings || settings.operation_mode === "maintenance" || settings.operation_mode === "static_only") {
+          return { ok: false, message: "maintenance_mode" };
+        }
+        const disabled = settings.disabled_features_json ? JSON.parse(settings.disabled_features_json) : [];
+        if (Array.isArray(disabled) && disabled.includes(feature)) {
+          return { ok: false, message: "cost_guard_blocked" };
+        }
+        return { ok: true, db: s.db, user: s.user, activeXId: s.user.active_x_user_id ?? null, approvedXIds: [], hasPendingXRequest: false };
+      }
+    `,
+  };
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (Object.prototype.hasOwnProperty.call(STUBS, specifier)) {
+        return { url: `data:text/javascript,${encodeURIComponent(STUBS[specifier])}`, shortCircuit: true };
+      }
+      return nextResolve(specifier, context);
+    },
+  });
+
+  const { drizzle } = await import("drizzle-orm/d1");
+  const schema = await import("../../../src/lib/db/schema.ts");
+  const current = await import("../../../src/lib/actions/xid-merge-admin.ts");
+  const { app } = await import("../src/app.ts");
+
+  const SITE = "https://app.flamenode.example";
+  const AUTH_SECRET = "test-auth-secret-mig-0644";
+  const READ_RE = /^\s*(SELECT|WITH|PRAGMA)\b/i;
+
+  function createAtomicD1(sqlite) {
+    const stats = { statements: 0, reads: 0, writes: 0, batches: 0, maxBinds: 0 };
+    function execSync(sqlText, params, inBatch = false) {
+      if (!inBatch) {
+        if (READ_RE.test(sqlText)) stats.reads += 1;
+        else stats.writes += 1;
+      }
+      stats.statements += 1;
+      stats.maxBinds = Math.max(stats.maxBinds, params.length);
+      const results = sqlite.prepare(sqlText).all(...params).map((row) => ({ ...row }));
+      return { results, success: true, meta: {} };
+    }
+    function statement(sqlText, params) {
+      const self = {
+        bind(...values) {
+          return statement(sqlText, values);
+        },
+        async all() {
+          return execSync(sqlText, params);
+        },
+        async first() {
+          return execSync(sqlText, params).results[0] ?? null;
+        },
+        async run() {
+          return execSync(sqlText, params);
+        },
+        async raw() {
+          stats.reads += 1;
+          stats.statements += 1;
+          stats.maxBinds = Math.max(stats.maxBinds, params.length);
+          const prepared = sqlite.prepare(sqlText);
+          prepared.setReturnArrays(true);
+          try {
+            return prepared.all(...params).map((row) => [...row]);
+          } finally {
+            prepared.setReturnArrays(false);
+          }
+        },
+      };
+      self.__sql = sqlText;
+      self.__params = params;
+      return self;
+    }
+    return {
+      stats,
+      prepare: (sqlText) => statement(sqlText, []),
+      async batch(statements) {
+        stats.batches += 1;
+        sqlite.exec("BEGIN");
+        try {
+          const out = statements.map((s) => execSync(s.__sql, s.__params, true));
+          sqlite.exec("COMMIT");
+          return out;
+        } catch (error) {
+          sqlite.exec("ROLLBACK");
+          throw error;
+        }
+      },
+    };
+  }
+
+  function createMemoryBucket() {
+    const store = new Map();
+    let version = 0;
+    return {
+      store,
+      async get(key) {
+        const entry = store.get(key);
+        if (!entry) return null;
+        return {
+          etag: entry.etag,
+          text: async () => entry.text,
+          json: async () => JSON.parse(entry.text),
+        };
+      },
+      async head(key) {
+        const entry = store.get(key);
+        return entry ? { etag: entry.etag, size: entry.text.length } : null;
+      },
+      async put(key, value, options) {
+        const existing = store.get(key);
+        if (options?.onlyIf?.etagMatches !== undefined && existing?.etag !== options.onlyIf.etagMatches) {
+          throw new Error("R2 etag mismatch");
+        }
+        if (options?.onlyIf?.etagDoesNotMatch === "*" && existing) {
+          throw new Error("R2 object already exists");
+        }
+        version += 1;
+        const text = typeof value === "string" ? value : new TextDecoder().decode(value);
+        const etag = `"etag-${version}"`;
+        store.set(key, { text, etag });
+        return { etag };
+      },
+    };
+  }
+
+  function createSide() {
+    const sqlite = createSqlite();
+    seed(sqlite);
+    const d1 = createAtomicD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const bucket = createMemoryBucket();
+    const kv = new Map();
+    const queueWakes = [];
+    const env = {
+      DB: d1,
+      BUCKET: bucket,
+      KV: {
+        get: async (k) => kv.get(k) ?? null,
+        put: async (k, v) => { kv.set(k, v); },
+        delete: async (k) => { kv.delete(k); },
+      },
+      NEXT_PUBLIC_SITE_URL: SITE,
+      AUTH_SECRET,
+      QUEUE_DISPATCH_ENABLED: "1",
+      STATIC_REBUILD_WAKE_QUEUE: {
+        send: async (msg) => { queueWakes.push(msg); },
+      },
+    };
+    return { sqlite, d1, db, bucket, env, queueWakes, revalidated: [], waitUntils: [] };
+  }
+
+  async function runCurrentAction(side, actionFn, formFields, userId = "u_root") {
+    const user = userId
+      ? side.sqlite.prepare('SELECT id, role, is_banned, active_x_user_id FROM "user" WHERE id = ?').get(userId)
+      : null;
+    globalThis.__mig0644Cur = { ...side, user };
+    try {
+      const fd = new FormData();
+      for (const [key, val] of Object.entries(formFields)) {
+        if (val !== undefined && val !== null) fd.set(key, String(val));
+      }
+      const res = await actionFn(fd);
+      await Promise.allSettled(side.waitUntils);
+      side.waitUntils.length = 0;
+      return res;
+    } finally {
+      delete globalThis.__mig0644Cur;
+    }
+  }
+
+  async function callHono(side, path, body, { token = "root", headers = { Origin: SITE }, envOverride } = {}) {
+    const hasBody = body !== undefined;
+    const res = await app.request(
+      `${SITE}/api/admin/x-id-merges${path}`,
+      {
+        method: "POST",
+        headers: {
+          ...(token ? { cookie: `__Secure-authjs.session-token=tok-${token}` } : {}),
+          ...(hasBody ? { "content-type": "application/json" } : {}),
+          ...headers,
+        },
+        body: hasBody ? (typeof body === "string" ? body : JSON.stringify(body)) : undefined,
+      },
+      envOverride ?? side.env,
+    );
+    return { status: res.status, headers: res.headers, body: await res.json() };
+  }
+
+  function seedMergeScenario(sqlite, { source = "src_x", target = "tgt_x", rowCount = 1 } = {}) {
+    const NOW = Math.floor(Date.now() / 1000);
+    insert(sqlite, "x_users", { id: source, x_name: "Source X", approval_status: "approved" });
+    insert(sqlite, "x_users", { id: target, x_name: "Target X", approval_status: "approved" });
+    insert(sqlite, "user", {
+      id: "u_holder",
+      name: "Holder",
+      email: "holder@example.test",
+      role: "user",
+      discord_id: "d_holder",
+      is_tos_accepted: 1,
+      active_x_user_id: `@${source}`,
+      created_at: NOW,
+    });
+    insert(sqlite, "x_user_account_links", {
+      x_user_id: source,
+      auth_user_id: "u_holder",
+      link_role: "owner",
+      created_at: NOW,
+      updated_at: NOW,
+    });
+    insert(sqlite, "x_user_aliases", { x_user_id: source, alias_x_id: "old_src_alias" });
+    insert(sqlite, "videos", {
+      id: "v-mrg-1",
+      title: "Merge Video",
+      submitted_by_user_id: "u_holder",
+      creator_display_name: "Source X",
+      creator_x_user_id: source,
+      youtube_video_id: "yt-mrg-1",
+      visibility_status: "public",
+      created_at: NOW,
+    });
+    insert(sqlite, "video_members", {
+      id: "vm-mrg-1",
+      video_id: "v-mrg-1",
+      name: "Src",
+      role: "Editor",
+      x_user_id: source,
+      is_public_member: 1,
+      order_index: 0,
+      can_edit: 1,
+    });
+    insert(sqlite, "video_chapters", {
+      id: "vc-mrg-1",
+      video_id: "v-mrg-1",
+      chapter_time: 12,
+      chapter_label: "Intro",
+      note: "",
+      x_user_id: source,
+      created_at: NOW,
+      updated_at: NOW,
+    });
+    insert(sqlite, "slots", {
+      id: "slot-mrg-1",
+      event_id: "a-open",
+      sort_order: 10,
+      slot_label: "Merge Slot",
+      status: "submitted",
+      x_user_id: source,
+      reserved_x_id_snapshot: `@${source}`,
+      video_id: "v-mrg-1",
+    });
+    insert(sqlite, "slot_reservation_groups", {
+      id: "srg-mrg-1",
+      event_id: "a-open",
+      x_user_id: source,
+      reserved_by_auth_user_id: "u_holder",
+      display_name: "Src Group",
+      created_at: NOW,
+      updated_at: NOW,
+      version: 1,
+    });
+    insert(sqlite, "video_moderation_cases", {
+      id: "vmc-mrg-1",
+      video_id: "v-mrg-1",
+      case_type: "duplicate",
+      status: "open",
+      related_x_user_id: source,
+      created_at: NOW,
+      attempt_count: 0,
+    });
+    insert(sqlite, "video_interactions", {
+      video_id: "v-mrg-1",
+      x_user_id: source,
+      interaction_type: "like",
+      created_at: NOW,
+    });
+    // Event staff + optional >100 bulk references across events/slots to test #376.
+    for (let i = 0; i < rowCount; i += 1) {
+      const eventId = `ev-mrg-${i}`;
+      insert(sqlite, "events", { id: eventId, title: `Merge Event ${i}`, visibility_status: "private" });
+      insert(sqlite, "event_staff", {
+        id: `es-src-${i}`,
+        event_id: eventId,
+        x_user_id: source,
+        display_name: "Src",
+        permission_preset: "owner",
+        is_public: 1,
+        created_at: NOW,
+        updated_at: NOW,
+      });
+      if (i > 0) {
+        insert(sqlite, "event_staff", {
+          id: `es-tgt-${i}`,
+          event_id: eventId,
+          x_user_id: target,
+          display_name: "Tgt",
+          permission_preset: "staff",
+          is_public: 1,
+          created_at: NOW,
+          updated_at: NOW,
+        });
+      }
+    }
+    return { NOW };
+  }
+
+  test("MIG-0644 T01 & T02: full lifecycle (create -> approve -> execute -> revert) matches CURRENT field-for-field with wake=0", async () => {
+    const cur = createSide();
+    const hon = createSide();
+    const { NOW } = seedMergeScenario(cur.sqlite);
+    seedMergeScenario(hon.sqlite);
+
+    // 1. SA-092 createXIdMergeRequest (check S3 D1 read budget: 4 pre-reads + 1 batch)
+    const curCreate = await runCurrentAction(cur, current.createXIdMergeRequest, {
+      from_x_user_id: "@src_x",
+      to_x_user_id: "tgt_x",
+    });
+    const d1BeforeCreate = { ...hon.d1.stats };
+    const honCreate = await callHono(hon, "", { from_x_user_id: "@src_x", to_x_user_id: "tgt_x" });
+    assert.equal(curCreate.ok, true);
+    assert.equal(honCreate.status, 200);
+    assert.equal(honCreate.headers.get("cache-control"), "private, no-store");
+    assert.equal(honCreate.body.ok, true);
+    assert.equal(honCreate.body.message, curCreate.message);
+    // 4 pre-reads (session+writeGuard+costGuard+1 IN lookup) + 1 loadApprovedActorXPairs in mutateWithAudit when active_x_user_id is set
+    assert.equal(hon.d1.stats.reads - d1BeforeCreate.reads, 5);
+    assert.equal(hon.d1.stats.batches - d1BeforeCreate.batches, 1);
+
+    // Also verify reject path on a second request (SA-094).
+    const curRejCreate = await runCurrentAction(cur, current.createXIdMergeRequest, {
+      from_x_user_id: "src_x",
+      to_x_user_id: "tgt_x",
+    });
+    const honRejCreate = await callHono(hon, "", { from_x_user_id: "src_x", to_x_user_id: "tgt_x" });
+    const curRej = await runCurrentAction(cur, current.rejectXIdMergeRequest, { id: curRejCreate.id });
+    const honRej = await callHono(hon, `/${honRejCreate.body.id}/reject`, {});
+    assert.equal(curRej.ok, true);
+    assert.equal(honRej.status, 200);
+    assert.equal(honRej.body.message, curRej.message);
+
+    // 2. SA-093 approveXIdMergeRequest (4 pre-reads + 1 batch, empty body allowed)
+    const curApp = await runCurrentAction(cur, current.approveXIdMergeRequest, { id: curCreate.id });
+    const d1BeforeApp = { ...hon.d1.stats };
+    const honApp = await callHono(hon, `/${honCreate.body.id}/approve`);
+    assert.equal(curApp.ok, true);
+    assert.equal(honApp.status, 200);
+    assert.equal(honApp.body.message, curApp.message);
+    assert.equal(hon.d1.stats.reads - d1BeforeApp.reads, 5);
+    assert.equal(hon.d1.stats.batches - d1BeforeApp.batches, 1);
+
+    // 3. SA-096 executeXIdMergeRequest (check R2 fence, D1 tables, audit_logs, static_rebuild_queue, wake=0)
+    const curExec = await runCurrentAction(cur, current.executeXIdMergeRequest, {
+      id: curCreate.id,
+      confirm: "MERGE",
+    });
+    const honExec = await callHono(hon, `/${honCreate.body.id}/execute`, { confirm: "MERGE" });
+    assert.equal(curExec.ok, true, curExec.message);
+    assert.equal(honExec.status, 200, JSON.stringify(honExec.body));
+    assert.equal(honExec.body.ok, true);
+    assert.equal(honExec.body.message, curExec.message);
+
+    // Attribution moved from src_x -> tgt_x in both DBs; src_x rejected + alias recorded.
+    for (const side of [cur, hon]) {
+      assert.equal(side.sqlite.prepare("SELECT approval_status FROM x_users WHERE id = 'src_x'").get().approval_status, "rejected");
+      assert.equal(side.sqlite.prepare("SELECT creator_x_user_id FROM videos WHERE id = 'v-mrg-1'").get().creator_x_user_id, "tgt_x");
+      assert.equal(side.sqlite.prepare("SELECT x_user_id FROM video_members WHERE id = 'vm-mrg-1'").get().x_user_id, "tgt_x");
+      assert.equal(side.sqlite.prepare("SELECT x_user_id FROM video_chapters WHERE id = 'vc-mrg-1'").get().x_user_id, "tgt_x");
+      assert.equal(side.sqlite.prepare("SELECT x_user_id, reserved_x_id_snapshot FROM slots WHERE id = 'slot-mrg-1'").get().x_user_id, "tgt_x");
+      assert.equal(side.sqlite.prepare("SELECT x_user_id FROM slot_reservation_groups WHERE id = 'srg-mrg-1'").get().x_user_id, "tgt_x");
+      assert.equal(side.sqlite.prepare("SELECT related_x_user_id FROM video_moderation_cases WHERE id = 'vmc-mrg-1'").get().related_x_user_id, "tgt_x");
+      assert.equal(side.sqlite.prepare("SELECT x_user_id FROM video_interactions WHERE video_id = 'v-mrg-1'").get().x_user_id, "tgt_x");
+      assert.equal(side.sqlite.prepare("SELECT x_user_id FROM event_staff WHERE id = 'es-src-0'").get().x_user_id, "tgt_x");
+      assert.equal(side.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = \'u_holder\'').get().active_x_user_id, "tgt_x");
+      assert.ok(side.sqlite.prepare("SELECT 1 FROM x_user_aliases WHERE x_user_id = 'tgt_x' AND alias_x_id = 'src_x'").get());
+    }
+    // D-0603-1: queue rows identical; Hono sends 0 wakes while CURRENT sent >= 1.
+    const queueSql = "SELECT target_type, target_id, reason, status, requested_by_user_id FROM static_rebuild_queue ORDER BY target_type, target_id";
+    assert.deepEqual(hon.sqlite.prepare(queueSql).all(), cur.sqlite.prepare(queueSql).all());
+    assert.equal(hon.queueWakes.length, 0, "D-0603-1: Hono must not wake Queue");
+    assert.ok(cur.queueWakes.length >= 1);
+
+    // R2 manifest parity (src_x marked non-public in visibility manifest).
+    assert.ok(hon.bucket.store.size > 0);
+    assert.equal(hon.bucket.store.size, cur.bucket.store.size);
+
+    // Audit field-level parity (ignore random id / timestamp seconds).
+    const auditSql = "SELECT table_name, target_id, operation, actor_user_id, actor_x_user_id, retention_class, context FROM audit_logs ORDER BY rowid ASC";
+    const stripReqId = (rows) =>
+      rows.map((r) => ({
+        ...r,
+        target_id: r.table_name === "x_identity_requests" ? "<req>" : r.target_id,
+      }));
+    assert.deepEqual(stripReqId(hon.sqlite.prepare(auditSql).all()), stripReqId(cur.sqlite.prepare(auditSql).all()));
+
+    // 4. SA-095 rejectXIdMergeRevert + SA-097 approveXIdMergeRevert (attribution restored!)
+    const seedReverts = (side, parentId) => {
+      insert(side.sqlite, "x_identity_requests", {
+        id: "rev-rej",
+        request_type: "revert_merge",
+        requested_by_auth_user_id: "u_root",
+        parent_request_id: parentId,
+        revert_deadline_at: NOW + 3600,
+        status: "pending",
+        requested_at: NOW,
+        updated_at: NOW,
+      });
+      insert(side.sqlite, "x_identity_requests", {
+        id: "rev-ok",
+        request_type: "revert_merge",
+        requested_by_auth_user_id: "u_root",
+        parent_request_id: parentId,
+        revert_deadline_at: NOW + 3600,
+        status: "pending",
+        requested_at: NOW,
+        updated_at: NOW,
+      });
+    };
+    seedReverts(cur, curCreate.id);
+    seedReverts(hon, honCreate.body.id);
+
+    const curRevRej = await runCurrentAction(cur, current.rejectXIdMergeRevert, { id: "rev-rej" });
+    const honRevRej = await callHono(hon, "/reverts/rev-rej/reject", {});
+    assert.equal(curRevRej.ok, true);
+    assert.equal(honRevRej.status, 200);
+    assert.equal(honRevRej.body.message, curRevRej.message);
+
+    const curRev = await runCurrentAction(cur, current.approveXIdMergeRevert, {
+      id: "rev-ok",
+      confirm: "REVERT",
+    });
+    const d1BeforeRev = { ...hon.d1.stats };
+    const honRev = await callHono(hon, "/reverts/rev-ok/approve", { confirm: "REVERT" });
+    assert.equal(curRev.ok, true, curRev.message);
+    assert.equal(honRev.status, 200, JSON.stringify(honRev.body));
+    assert.equal(honRev.body.message, curRev.message);
+    assert.equal(hon.d1.stats.batches - d1BeforeRev.batches, 1);
+
+    for (const side of [cur, hon]) {
+      assert.equal(side.sqlite.prepare("SELECT approval_status FROM x_users WHERE id = 'src_x'").get().approval_status, "approved");
+      assert.equal(side.sqlite.prepare("SELECT creator_x_user_id FROM videos WHERE id = 'v-mrg-1'").get().creator_x_user_id, "src_x");
+      assert.equal(side.sqlite.prepare("SELECT x_user_id FROM video_members WHERE id = 'vm-mrg-1'").get().x_user_id, "src_x");
+      assert.equal(side.sqlite.prepare("SELECT x_user_id FROM event_staff WHERE id = 'es-src-0'").get().x_user_id, "src_x");
+      assert.equal(side.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = \'u_holder\'').get().active_x_user_id, "@src_x");
+    }
+    assert.equal(hon.queueWakes.length, 0);
+  });
+
+  test("MIG-0644 T03: guards reject non-admin, anonymous, cross-origin, CostGuard stop, and bad confirm with 0 writes", async () => {
+    const side = createSide();
+    seedMergeScenario(side.sqlite);
+    const NOW = Math.floor(Date.now() / 1000);
+    insert(side.sqlite, "x_identity_requests", {
+      id: "req-pending",
+      request_type: "merge",
+      requested_by_auth_user_id: "u_root",
+      source_x_user_id: "src_x",
+      target_x_user_id: "tgt_x",
+      status: "approved",
+      requested_at: NOW,
+      updated_at: NOW,
+    });
+
+    const beforeWrites = () => ({
+      writes: side.d1.stats.writes,
+      batches: side.d1.stats.batches,
+      audits: side.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,
+    });
+    const baseline = beforeWrites();
+
+    // 1. Cross-origin -> 403 invalid_origin, 0 D1 reads/writes
+    const r0 = side.d1.stats.reads;
+    const badOrigin = await callHono(side, "", { from_x_user_id: "src_x", to_x_user_id: "tgt_x" }, {
+      headers: { Origin: "https://evil.invalid" },
+    });
+    assert.equal(badOrigin.status, 403);
+    assert.equal(side.d1.stats.reads, r0);
+
+    // 2. Anonymous -> 401; non-admin / moderator / banned -> 403
+    assert.equal((await callHono(side, "", { from_x_user_id: "src_x", to_x_user_id: "tgt_x" }, { token: null })).status, 401);
+    for (const tok of ["alice", "bob", "badmin"]) {
+      const r = await callHono(side, "/req-pending/execute", { confirm: "MERGE" }, { token: tok });
+      assert.equal(r.status, 403, `token ${tok} must be denied`);
+    }
+
+    // 3. CostGuard maintenance -> 503
+    side.sqlite.prepare("UPDATE system_settings SET operation_mode = 'maintenance' WHERE id = 'default'").run();
+    const maint = await callHono(side, "", { from_x_user_id: "src_x", to_x_user_id: "tgt_x" });
+    assert.equal(maint.status, 503);
+    side.sqlite.prepare("UPDATE system_settings SET operation_mode = 'normal' WHERE id = 'default'").run();
+
+    // 4. Missing/wrong confirm -> 400 matching CURRENT domain message
+    const badConfirm = await callHono(side, "/req-pending/execute", { confirm: "NOPE" });
+    assert.equal(badConfirm.status, 400);
+    assert.deepEqual(badConfirm.body, { ok: false, message: "確認文字列 MERGE が必要です。" });
+
+    // 5. Missing BUCKET on public fence transition fails closed with 503 and 0 D1 writes
+    const noBucket = await callHono(
+      side,
+      "/req-pending/execute",
+      { confirm: "MERGE" },
+      { envOverride: { ...side.env, BUCKET: undefined } },
+    );
+    assert.equal(noBucket.status, 503);
+    assert.equal(noBucket.body.ok, false);
+
+    assert.deepEqual(beforeWrites(), baseline, "rejected requests must perform 0 DB writes");
+  });
+
+  test("MIG-0644 T04: #376 regression merging >100 X references succeeds without SQL bind limit failure", async () => {
+    const side = createSide();
+    // 115 event_staff rows (with 114 promoted target owners > 100 bind ceiling) across 15 events? Wait: 115 events * 3 = 345 targets > 100 queue target limit!
+    // Instead: seed 115 video_chapters + 20 slots on 2 videos / 1 event -> >135 X references within 100 static_rebuild target limit!
+    const { NOW } = seedMergeScenario(side.sqlite);
+    for (let i = 0; i < 120; i += 1) {
+      insert(side.sqlite, "video_chapters", {
+        id: `vc-bulk-${i}`,
+        video_id: "v-mrg-1",
+        chapter_time: 100 + i,
+        chapter_label: `Chapter ${i}`,
+        note: "",
+        x_user_id: "src_x",
+        created_at: NOW,
+        updated_at: NOW,
+      });
+    }
+    const created = await callHono(side, "", { from_x_user_id: "src_x", to_x_user_id: "tgt_x" });
+    assert.equal(created.status, 200);
+    const approved = await callHono(side, `/${created.body.id}/approve`, {});
+    assert.equal(approved.status, 200);
+    const executed = await callHono(side, `/${created.body.id}/execute`, { confirm: "MERGE" });
+    assert.equal(executed.status, 200, JSON.stringify(executed.body));
+    assert.equal(executed.body.ok, true);
+    assert.equal(
+      side.sqlite.prepare("SELECT COUNT(*) AS n FROM video_chapters WHERE x_user_id = 'tgt_x'").get().n,
+      121,
+    );
+    assert.equal(
+      side.sqlite.prepare("SELECT COUNT(*) AS n FROM video_chapters WHERE x_user_id = 'src_x'").get().n,
+      0,
+    );
+  });
+} else {
+  test("U01: create schema uses the two CURRENT FormData keys", () => {
   assert.deepEqual(
     AdminXIdMergeCreateBodySchema.parse({
       from_x_user_id: "@source",
@@ -139,7 +723,8 @@ test("U01: nested JSON payloads never become legacy FormData scalars", () => {
   }
   // CURRENT stringifies scalar FormData values after the authorization gate.
   // A valid transport scalar must reach domain validation unmodified.
-  for (const scalar of [null, "", " ", false, 0]) {
-    assert.deepEqual(AdminXIdMergeConfirmBodySchema.parse({ confirm: scalar }), { confirm: scalar });
-  }
-});
+    for (const scalar of [null, "", " ", false, 0]) {
+      assert.deepEqual(AdminXIdMergeConfirmBodySchema.parse({ confirm: scalar }), { confirm: scalar });
+    }
+  });
+}
