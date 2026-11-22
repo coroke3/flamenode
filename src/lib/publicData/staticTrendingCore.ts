@@ -44,6 +44,23 @@ export interface StaticTrendingData {
   items: TrendingItem[];
 }
 
+/**
+ * Request-time visibility guard for an R2/Cache API ranking. The writer's old
+ * snapshot may predate a video/event depublication. This function never
+ * mutates the cached object; callers must provide a validated current fence.
+ * This is a fence filter, not a guarantee of D1 visibility freshness.
+ */
+export function filterStaticTrendingByVisibilityFence(
+  data: StaticTrendingData,
+  isBlocked: (entityType: "video" | "event", entityId: string) => boolean,
+): StaticTrendingData {
+  const items = data.items.filter((item) =>
+    !isBlocked("video", item.id) &&
+    !(item.primary_event_id && isBlocked("event", item.primary_event_id)),
+  );
+  return items.length === data.items.length ? data : { ...data, items };
+}
+
 export interface StaticTrendingStaleMeta {
   stale: boolean;
   ageSeconds: number | null;
