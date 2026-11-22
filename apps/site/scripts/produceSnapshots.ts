@@ -42,7 +42,9 @@ import { mirrorTables } from "./mirrorTables.ts";
 import { D1_HTTP_ENV, MAX_D1_HTTP_STATEMENTS_OVERRIDE, isReadOnlyStatement, openD1HttpReader } from "./readPublicData.ts";
 import { DEFAULT_R2_BUILD_BUCKET, readR2Json } from "./readR2Object.ts";
 
-const EVENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
+// Keep legacy route-safe IDs (including a leading '_' or '-') while
+// rejecting path separators; CURRENT eventForm permits either prefix.
+export const EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const ID_LIST_LIMIT = 5000;
 /** `snapshot/video-detail/ID.json` (MIG-0507): CURRENT `videos/ID.json`. */
