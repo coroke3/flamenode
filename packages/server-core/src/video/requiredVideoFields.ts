@@ -1,5 +1,5 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { events } from "@flamenode/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { events, videos } from "@flamenode/db/schema";
 import {
   unionRequiredVideoFields,
   UnslottedEventSyncError,
@@ -38,12 +38,21 @@ export async function loadEligibleUnslottedVideoRequiredFields(
   db: ServerCoreDb,
   eventId: string | null,
   nowSec: number,
-): Promise<{ eventId: string | null; requiredFields: OptionalRequiredVideoField[]; requiredFieldsSnapshot: string | null }> {
-  if (!eventId) return { eventId: null, requiredFields: [], requiredFieldsSnapshot: null };
+  youtubeId: string,
+): Promise<{ eventId: string | null; requiredFields: OptionalRequiredVideoField[]; requiredFieldsSnapshot: string | null; youtubeDuplicate: boolean | null }> {
+  if (!eventId) return { eventId: null, requiredFields: [], requiredFieldsSnapshot: null, youtubeDuplicate: null };
   const row = (
     await db.select({
       id: events.id,
       required_video_fields_json: events.required_video_fields_json,
+      // Use the exact CURRENT duplicate predicate as a correlated scalar
+      // projection. One bounded D1 SELECT now checks the eligible event,
+      // required-field snapshot AND non-voided YouTube duplication together.
+      youtube_duplicate: sql<number>`EXISTS (
+        SELECT 1 FROM ${videos}
+        WHERE ${videos.youtube_video_id} = ${youtubeId}
+          AND ${videos.visibility_status} <> ${"voided"}
+      )`,
     }).from(events).where(
       and(eq(events.id, eventId), unslottedEventEligibilityWhere(nowSec))!,
     ).limit(1)
@@ -53,5 +62,6 @@ export async function loadEligibleUnslottedVideoRequiredFields(
     eventId: row.id,
     requiredFields: unionRequiredVideoFields([row.required_video_fields_json]),
     requiredFieldsSnapshot: row.required_video_fields_json,
+    youtubeDuplicate: row.youtube_duplicate === 1,
   };
 }
