@@ -102,6 +102,12 @@ async function listStaleDetailTargets(
       ORDER BY r.oldest_generated_at ASC
       LIMIT ?`,
   )
+    .bind(
+      ...DETAIL_TARGET_TYPES,
+      cutoff,
+      failedSince,
+      STALE_ARTIFACT_REFRESH_MAX_TARGETS,
+    )
     .all<{ target_type: string; target_id: string }>();
   return (result.results ?? []).map((row) => ({
     targetType: String(row.target_type),
