@@ -144,6 +144,22 @@ test("MIG-0651 new members: pending X placeholder race preserves existing canoni
   } finally { sqlite.close(); }
 });
 
+test("MIG-0651 new members: normalized existing X blocks duplicate placeholder PK after pre-read", async () => {
+  const sqlite = createSqlite();
+  try {
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, {reads:0}), args(
+      parsedMemberSubmission([{name:"Member",x_user_id:"racingx",chapters:[]}])
+    ));
+    assert.deepEqual(plan.expectedChanges, [null,1,1]);
+    insert(sqlite, "x_users", {id:"RACINGX", x_name:"Original", approval_status:"approved"});
+    assert.throws(() => executePrepared(sqlite,plan), /malformed JSON/,
+      "a normalized but different existing PK must fail before placeholder INSERT");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,0);
+    assert.deepEqual(sqlite.prepare("SELECT id,x_name FROM x_users").all(),
+      [{id:"RACINGX",x_name:"Original"}], "neither duplicate X row nor member row may persist");
+  } finally { sqlite.close(); }
+});
+
 test("MIG-0651 new members: 80 validated members use two identity reads and two JSON1 write statements", async () => {
   const sqlite = createSqlite();
   try {
