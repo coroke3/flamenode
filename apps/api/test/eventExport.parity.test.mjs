@@ -447,7 +447,8 @@ if (runUnderRootTsx(import.meta.url)) {
         const safeHit = await request(path);
         assert.equal(safeHit.headers.get("X-FlameNode-Cache"), "HIT");
         const safeHitBody = await safeHit.text();
-        assert.match(safeHitBody, /継続公開スタッフ575|public-video/);
+        assert.match(safeHitBody, /継続公開スタッフ575/, "still-public staff survives a later cache HIT");
+        assert.match(safeHitBody, /public-video/, "unchanged public video survives a later cache HIT");
         assert.doesNotMatch(safeHitBody, /単独失効スタッフ575/);
       }
     } finally {
