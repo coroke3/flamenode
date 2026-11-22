@@ -74,6 +74,34 @@ test("MIG-0651 notification: invalid, foreign or oversized trusted payload fails
     /free_video_submitted_notification_invalid/);
 });
 
+
+test("MIG-0651 notification: serialized notification payload must match prevalidated host fields", async () => {
+  const noDb = {
+    select() { throw Error("no D1 reads"); },
+    run() { throw Error("no D1 preparation"); },
+  };
+  const cases = [
+    { ...payload(), toJSON() { return null; } },
+    { ...payload(), toJSON() { return undefined; } },
+    { ...payload(), toJSON() { return { ...payload(), video_id: "foreign-video" }; } },
+    { ...payload(), toJSON() { return { ...payload(), url: "https://other.example/foreign" }; } },
+    { ...payload(), toJSON() { return { ...payload(), content: "different notification" }; } },
+    { ...payload(), toJSON() { return { ...payload(), event_id: "unrelated-event" }; } },
+    { ...payload(), toJSON() { return { ...payload(), video_id: "v-test", content: null }; } },
+  ];
+  for (const supplied of cases) {
+    await assert.rejects(
+      () => buildFreeVideoSubmittedNotificationPlan(noDb, args({ payload: supplied })),
+      /free_video_submitted_notification_invalid/,
+      "a toJSON hook cannot bypass validated video/URL/content/event metadata",
+    );
+  }
+  const matching = { ...payload(), toJSON() { return { ...payload() }; } };
+  const accepted = await createPlan({ payload: matching });
+  assert.equal(accepted.statements.length, 1,
+    "a hook preserving all trusted fields remains compatible");
+});
+
 test("MIG-0651 notification: migrated SQLite commits one pending DM with no pre-batch read", async () => {
   const sqlite = createSqlite();
   try {
