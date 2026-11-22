@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import * as schema from "@flamenode/db/schema";
 import { validateVideoMemberSubmission } from "@flamenode/domain/video";
+import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import { buildFreeVideoNewMemberPlan } from "../src/video/freeVideoNewMemberPlan.ts";
 import { buildFreeVideoNewMemberPlan as publicBuilder } from "@flamenode/server-core/video/unslottedEventPlans";
@@ -202,27 +203,33 @@ test("MIG-0651 new members: normalized existing X blocks duplicate placeholder P
   } finally { sqlite.close(); }
 });
 
-test("MIG-0651 new members: 80 validated members use one identity read and two JSON1 write statements", async () => {
-  const sqlite = createSqlite();
-  try {
-    const many = Array.from({length:80},(_,i)=>({
-      name:"Member "+i,x_user_id:"newid"+i,chapters:[]
-    }));
-    const stats={reads:0};
-    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite,stats),args(parsedMemberSubmission(many)));
-    assert.equal(stats.reads,1);
-    assert.deepEqual(plan.expectedChanges,[null,80,80]);
-    assert.equal(plan.statements.length,3);
-    const dialect=new SQLiteSyncDialect();
-    for(const statement of plan.statements) {
-      const q=dialect.sqlToQuery(statement.sqlExpr);
-      assert.ok(q.params.length<=D1_MAX_BIND_PARAMETERS);
-      assert.ok(new TextEncoder().encode(q.params.at(-1)).byteLength<1_000_000);
-    }
-    executePrepared(sqlite,plan);
-    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n,80);
-    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,80);
-  } finally { sqlite.close(); }
+test("MIG-0651 new members: 80, 81 and 100 canonical candidates use one bounded JSON1 SELECT", async () => {
+  assert.equal(MAX_VIDEO_MEMBERS, 100);
+  // Crossing the old 80-person chunk edge must not spend a second D1 read.
+  for (const count of [80, 81, MAX_VIDEO_MEMBERS]) {
+    const sqlite = createSqlite();
+    try {
+      const many = Array.from({ length: count }, (_, i) => ({
+        name: "Member " + i, x_user_id: "newid" + i, chapters: [],
+      }));
+      const stats = { reads: 0 };
+      const plan = await buildFreeVideoNewMemberPlan(
+        dbFor(sqlite, stats), args(parsedMemberSubmission(many)),
+      );
+      assert.equal(stats.reads, 1, count + " members must resolve in one D1 SELECT");
+      assert.deepEqual(plan.expectedChanges, [null, count, count]);
+      assert.equal(plan.statements.length, 3);
+      const dialect = new SQLiteSyncDialect();
+      for (const statement of plan.statements) {
+        const q = dialect.sqlToQuery(statement.sqlExpr);
+        assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
+        assert.ok(new TextEncoder().encode(q.params.at(-1)).byteLength < 1_000_000);
+      }
+      executePrepared(sqlite, plan);
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, count);
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n, count);
+    } finally { sqlite.close(); }
+  }
 });
 
 test("MIG-0651 new members: invalid chapter index, blank row and too-many members fail before D1 reads", async () => {
