@@ -38,8 +38,8 @@ export async function loadEligibleUnslottedVideoRequiredFields(
   db: ServerCoreDb,
   eventId: string | null,
   nowSec: number,
-): Promise<{ eventId: string | null; requiredFields: OptionalRequiredVideoField[] }> {
-  if (!eventId) return { eventId: null, requiredFields: [] };
+): Promise<{ eventId: string | null; requiredFields: OptionalRequiredVideoField[]; requiredFieldsSnapshot: string | null }> {
+  if (!eventId) return { eventId: null, requiredFields: [], requiredFieldsSnapshot: null };
   const row = (
     await db.select({
       id: events.id,
@@ -52,5 +52,6 @@ export async function loadEligibleUnslottedVideoRequiredFields(
   return {
     eventId: row.id,
     requiredFields: unionRequiredVideoFields([row.required_video_fields_json]),
+    requiredFieldsSnapshot: row.required_video_fields_json,
   };
 }
