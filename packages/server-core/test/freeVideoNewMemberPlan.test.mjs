@@ -155,7 +155,7 @@ test("MIG-0651 new members: normalized existing X blocks duplicate placeholder P
     assert.throws(() => executePrepared(sqlite,plan), /malformed JSON/,
       "a normalized but different existing PK must fail before placeholder INSERT");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,0);
-    assert.deepEqual(sqlite.prepare("SELECT id,x_name FROM x_users").all(),
+    assert.deepEqual(sqlite.prepare("SELECT id,x_name FROM x_users").all().map(row => ({id:row.id,x_name:row.x_name})),
       [{id:"RACINGX",x_name:"Original"}], "neither duplicate X row nor member row may persist");
   } finally { sqlite.close(); }
 });
