@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { notificationOutbox, users } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "../db.ts";
 import { generateId } from "../id.ts";
@@ -45,13 +45,18 @@ export async function buildFreeVideoRegisteredChannelPlan(
   };
   // The existing core validator mirrors CURRENT type, content and 8KiB limits.
   assertValidWebhookPayload("discord_webhook", normalizedPayload);
-  const recipient = (await db.select({ id: users.id })
-    .from(users).where(eq(users.id, actorUserId)).limit(1))[0];
-  // CURRENT force=true intentionally allows a channel row with NULL recipient,
-  // and bypasses the user notification-enabled preference (ops audit is forced).
-  const row: typeof notificationOutbox.$inferSelect = {
+  // CURRENT force=true allows a NULL recipient and ignores DM preferences.
+  // Resolve the existing user *inside the eventual audited INSERT*, not in a
+  // standalone D1 read. This saves one scarce S3 pre-batch SELECT and is
+  // race-safe if an actor disappears between plan creation and the write.
+  const recipientAtWrite = sql<string | null>`(
+    SELECT ${users.id} FROM ${users} WHERE ${users.id} = ${actorUserId} LIMIT 1
+  )`;
+  const row: Omit<typeof notificationOutbox.$inferSelect, "recipient_user_id"> & {
+    recipient_user_id: SQL;
+  } = {
     id: generateId(),
-    recipient_user_id: recipient?.id ?? null,
+    recipient_user_id: recipientAtWrite,
     type: "discord_webhook",
     payload_json: JSON.stringify(normalizedPayload),
     delivery_route: "channel",
