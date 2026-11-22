@@ -115,7 +115,7 @@ export async function validateFreeVideoDbReadPreflight(
 
   let event: Awaited<ReturnType<typeof loadEligibleUnslottedVideoRequiredFields>>;
   try {
-    event = await loadEligibleUnslottedVideoRequiredFields(db, input.requestedEventId, nowSec);
+    event = await loadEligibleUnslottedVideoRequiredFields(db, input.requestedEventId, nowSec, youtubeId);
   } catch (error) {
     if (error instanceof UnslottedEventSyncError) {
       if (error.code === "unslotted_event_selection_invalid") {
@@ -146,7 +146,12 @@ export async function validateFreeVideoDbReadPreflight(
       return { ok: false, message: missingRequiredVideoFieldMessage(missing) };
     }
 
-    if (await checkYoutubeVideoDuplicate(db, youtubeId)) {
+    // Linked submissions get the exact same non-voided duplicate predicate
+    // from the eligible-event SELECT. Unlinked submissions keep one lookup.
+    const duplicate = eventId
+      ? event.youtubeDuplicate
+      : await checkYoutubeVideoDuplicate(db, youtubeId);
+    if (duplicate) {
       return { ok: false, message: "このYouTube動画は既に登録されています。" };
     }
   } catch {
