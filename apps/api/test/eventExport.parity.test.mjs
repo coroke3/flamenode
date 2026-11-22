@@ -224,6 +224,8 @@ if (runUnderRootTsx(import.meta.url)) {
           sqlite.exec("UPDATE events SET public_api_enabled=1, visibility_status='public' WHERE id='export-event'");
           sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
           const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+          const cacheKey = `public-event-export:9:export-event:${format}:1440`;
+          const cacheUrl = "https://flamenode.internal/public-json/" + encodeURIComponent(cacheKey);
           const first = await request(path);
           assert.equal(first.status, 200, runtime + " " + format);
           assert.equal(first.headers.get("X-FlameNode-Cache"), "MISS");
@@ -239,6 +241,8 @@ if (runUnderRootTsx(import.meta.url)) {
           assert.equal(denied.status, 404, runtime + " " + format + " API opt-out");
           assert.equal(await denied.text(), '{"error":"not_found"}');
           assert.equal(denied.headers.get("X-FlameNode-Cache"), null);
+          assert.equal(map.has(cacheUrl), true,
+            "opt-out 404 must be proven against a retained stale origin Cache API entry");
 
           // The old cache still contains the public video. Restore the API
           // only after that video becomes private; no stale row may reappear.
