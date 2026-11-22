@@ -283,10 +283,15 @@ export async function restoreAuditLog(
     payloadExceeded,
   });
   if (!capability.restorable) {
+    // A database-derived, unregistered table name is not an authorized
+    // diagnostic. Never echo it to callers or persisted failure records.
+    const publicMessage = capability.reasonCode === RestoreFailureReason.adapterMissing
+      ? "復元アダプターが見つかりません。"
+      : capability.message;
     if (dry_run) {
       return {
         ok: false,
-        message: capability.message,
+        message: publicMessage,
         reason_code: capability.reasonCode,
         restore_status: capability.status,
       };
@@ -304,7 +309,7 @@ export async function restoreAuditLog(
           userId,
           reason,
           reasonCode: capability.reasonCode,
-          message: capability.message,
+          message: publicMessage,
           now,
         })
       : await persistFailedRestoreRun({
@@ -313,13 +318,13 @@ export async function restoreAuditLog(
           userId,
           reason,
           reasonCode: capability.reasonCode,
-          message: capability.message,
+          message: publicMessage,
           now,
         });
 
     return {
       ok: false,
-      message: capability.message,
+      message: publicMessage,
       reason_code: capability.reasonCode,
       restore_status: capability.status,
       restore_run_id: runId,
