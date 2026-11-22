@@ -367,6 +367,10 @@ Build-time U01/U02 publishes only `events/index.json` and `events/<id>/release.v
 | Every API artifact changes, readback succeeds | 23 | 720 | 16,560 | 2.07% |
 | Every artifact changes, every write requires 3 readback retry PUTs | 23 | 720 | 66,240 | 8.28% |
 | Stress: every 15 minutes, every artifact changes, 3 retries each | 23 | 2,880 | 264,960 | 33.12% |
+| Hypothetical 201 public events, hourly, all change, no retries | 202 | 720 | 145,440 | 18.18% |
+| Hypothetical 201 public events, 15-minute cadence, all change, 3 retries each | 202 | 2,880 | 2,327,040 | 290.88% — exceeds target |
+
+For `N` public release artifacts, the API publisher attempts `N + 1` objects (releases plus the one capped index); the worst-case Class A PUT count is `(N + 1) × builds_per_month × (1 + retry_PUTs)`. The 200-row index cap does **not** cap public release objects or their Class A costs. The 201-event rows are synthetic capacity stress tests, not live event counts or billing measurements. At 15-minute cadence and the allowed three retries, this API family alone would exceed the project target; the publisher must remain nonproduction until an authorized design measures effective change rates and caps or budgets total writers.
 
 This estimate uses the project budget **80% of R2's 1,000,000 Class A operations/month = 800,000**. The 15-minute all-retry stress scenario leaves **535,040 operations** for all *other* R2 writers, including the separate detail HTML pipeline. Therefore this API sub-budget **does not demonstrate that total project Class A usage is below 800,000**: the detail-page worst case below is already above budget independently. Future event count/build cadence must be recomputed and actual Class A writes monitored before any authorized production R2 publication. The build's default invocation remains dry-run/no R2 publication, and `--publish-api-artifacts` requires an explicitly injected bucket; production write credentials and live R2 mutations remain STOP.
 
