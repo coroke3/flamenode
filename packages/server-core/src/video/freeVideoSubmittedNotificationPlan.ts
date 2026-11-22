@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { notificationOutbox, users } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "../db.ts";
 import { generateId } from "../id.ts";
@@ -49,17 +49,20 @@ export async function buildFreeVideoSubmittedNotificationPlan(
   }
 
   const dedupeKey = `video_submitted:${videoId}`;
-  const active = await db.select({ id: notificationOutbox.id })
-    .from(notificationOutbox)
-    .where(and(eq(notificationOutbox.dedupe_key, dedupeKey),
-      inArray(notificationOutbox.status, ["pending", "processing", "sent"]))!)
-    .limit(1);
-  if (active.length) return { statements: [], expectedChanges: [], audits: [] };
-
+  // S3: inspect recipient preference and active-dedupe in ONE bounded D1
+  // SELECT. Two sequential pre-reads would violate the 3-read S3 ceiling once
+  // session/writeGuard and audit metadata are included. The partial UNIQUE
+  // index and ON CONFLICT DO NOTHING still resolve an in-flight duplicate.
   const recipient = (await db.select({
-    id: users.id, enabled: users.is_notification_enabled,
+    id: users.id,
+    enabled: users.is_notification_enabled,
+    activeDedupe: sql<number>`EXISTS (
+      SELECT 1 FROM ${notificationOutbox}
+      WHERE ${notificationOutbox.dedupe_key} = ${dedupeKey}
+        AND ${inArray(notificationOutbox.status, ["pending", "processing", "sent"])}
+    )`.as("active_dedupe"),
   }).from(users).where(eq(users.id, actorUserId)).limit(1))[0];
-  if (!recipient?.id || recipient.enabled === 0) {
+  if (!recipient?.id || recipient.enabled === 0 || recipient.activeDedupe !== 0) {
     return { statements: [], expectedChanges: [], audits: [] };
   }
   const row: typeof notificationOutbox.$inferSelect = {
