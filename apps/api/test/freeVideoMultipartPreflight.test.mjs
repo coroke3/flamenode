@@ -365,6 +365,13 @@ test("MIG-0651 U02 SQLite: event visibility, end-time, required fields and YouTu
     } });
     assert.equal(queries.length, 1, "eligible fields and nonvoided YouTube duplicate share one SELECT");
     assert.ok(queries.every(({ statement }) => /^\s*SELECT/i.test(statement)));
+    // Prove the combined EXISTS predicate uses the migrated generic YouTube ID
+    // lookup index; the partial UNIQUE index cannot cover archived rows.
+    const indexDetails = sqlite.prepare("EXPLAIN QUERY PLAN " + queries[0].statement)
+      .all(...queries[0].params).map((row) => String(row.detail));
+    assert.ok(indexDetails.some((detail) =>
+      /SEARCH (?:\w+\.)?videos USING (?:COVERING )?INDEX videos_youtube_id_idx\b/i.test(detail)),
+    "correlated duplicate EXISTS must use the migrated videos_youtube_id_idx: " + indexDetails.join("; "));
 
     // Even an explicitly enabled event is denied if private.
     sqlite.prepare("UPDATE events SET visibility_status='private' WHERE id='event-a'").run();
@@ -393,6 +400,13 @@ test("MIG-0651 U02 SQLite: event visibility, end-time, required fields and YouTu
     });
     result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
     assert.deepEqual(result, { ok: false, message: "このYouTube動画は既に登録されています。" });
+    // CURRENT rejects archived records too, even though the partial active
+    // UNIQUE index excludes archived videos. Only voided bypasses the read.
+    sqlite.prepare("UPDATE videos SET visibility_status='archived' WHERE id='existing-video'").run();
+    queries.length = 0;
+    result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
+    assert.deepEqual(result, { ok: false, message: "このYouTube動画は既に登録されています。" });
+    assert.equal(queries.length, 1, "archived duplicate uses one indexed event SELECT");
     sqlite.prepare("UPDATE videos SET visibility_status='voided' WHERE id='existing-video'").run();
     result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
     assert.equal(result.ok, true, "voided record does not prevent CURRENT duplicate predicate");
