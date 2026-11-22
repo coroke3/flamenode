@@ -102,8 +102,8 @@ test("SEC-800: preparation read failure logs fixed code without inspecting provi
   // Exercise the exact production function body while replacing only its
   // TypeScript signature and Next.js-only navigation rethrow dependency.
   const start = source.indexOf("function staffPreparationError(error: unknown): StaffActionResult");
-  const end = source.indexOf("\nasync function ensureEventManager", start);
-  assert.ok(start >= 0 && end > start, "isolate the real CURRENT failure handler");
+  const end = source.indexOf("\n// The domain parser embeds only", start);
+  assert.ok(start >= 0 && end > start, "isolate only the real CURRENT failure handler");
   const declaration = source.slice(start, end).replace(
     "function staffPreparationError(error: unknown): StaffActionResult",
     "function staffPreparationError(error)",
@@ -214,7 +214,7 @@ test("SEC-800: only fixed domain messages and matching user-owned confirmations 
 test("SEC-800: all staff catch paths use the bounded allowlist, never raw provider message", () => {
   assert.doesNotMatch(source, /message:\s*error instanceof Error\s*\?\s*error\.message/,
     "no action may directly reflect untrusted Error.message to staff results");
-  const invocationCount = (source.match(/message: staffSafeActionMessage\(error,/g) ?? []).length;
+  const invocationCount = (source.match(/message:\\s*staffSafeActionMessage\\(\\s*error,/g) ?? []).length;
   assert.equal(invocationCount, 8,
     "manager permission, assignment, owner grant, write, CSV input/write, remove, transfer");
   assert.match(source, /data\.rows\.flatMap\(\(row\) => \[/,
