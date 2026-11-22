@@ -36,6 +36,10 @@ export function buildFreeVideoMemberIdentityGuardSql(
     ),
     direct AS (
       SELECT i.raw_id, COUNT(d.id) AS direct_count,
+        -- An absent-at-preflight placeholder INSERT uses the exact canonical PK.
+        -- A newly appeared @/case-variant direct row must not be shadowed by
+        -- a second PK that normalizes to the same X ID.
+        SUM(CASE WHEN d.id = i.target_id THEN 1 ELSE 0 END) AS exact_direct,
         SUM(CASE WHEN d.id IS NOT NULL
           AND COALESCE(d.approval_status, '') IN ('pending','approved','imported')
           AND lower(trim(ltrim(trim(d.id), '@'))) = i.target_id
@@ -68,6 +72,7 @@ export function buildFreeVideoMemberIdentityGuardSql(
       JOIN direct d ON d.raw_id = i.raw_id
       JOIN aliases a ON a.raw_id = i.raw_id
       WHERE d.direct_count > 1
+         OR (i.allow_absent = 1 AND d.direct_count > 0 AND d.exact_direct <> 1)
          OR (
            a.alias_count = 0 AND NOT (
              (d.direct_count = 0 AND i.target_id = i.raw_id AND i.allow_absent = 1)
