@@ -207,9 +207,19 @@ test("MIG-0639: Node proxy, non-Linux, sim, partial and cold-skip never report f
   assert.deepEqual(enforceCpuMeasurementEnvironment(full,accepted),
     {eligible:true,stopReason:null});
   assert.equal(full[0].agg.verdict,"PASS");
-  // A qualifying platform flag alone cannot hide missing or anomalous cold samples.
-  full[0].agg.kinds.cold.n=MIN_SAMPLES-1;
-  assert.equal(enforceCpuMeasurementEnvironment(full,accepted).stopReason,"STOP_COLD");
+  // A qualifying platform flag alone cannot hide missing or anomalous cold
+  // samples. Remove a REAL cold observation and re-aggregate: mutating only
+  // agg.kinds.cold.n would leave the new meetsMinSamples gate unchanged.
+  const removedColdAt = full[0].samples.findIndex((sample) => sample.kind === "cold");
+  assert.ok(removedColdAt >= 0);
+  full[0].samples.splice(removedColdAt, 1);
+  applyBudgetVerdicts(full, {resolutionMs:0});
+  assert.equal(full[0].agg.kinds.cold.n,MIN_SAMPLES-1);
+  assert.equal(full[0].agg.kinds.cold.meetsMinSamples,false);
+  assert.equal(full[0].agg.kinds.cold.verifiedIsolateStarts,MIN_SAMPLES-1);
+  assert.deepEqual(enforceCpuMeasurementEnvironment(full,accepted),
+    {eligible:false,stopReason:"STOP_COLD"});
+  assert.equal(full[0].agg.verdict,"STOP_COLD");
   const baselineFail=getResults();
   baselineFail[1].samples=WARM_KINDS.flatMap((kind) =>
     Array.from({length:MIN_SAMPLES},()=>({kind,cpuMs:4,status:200}))).concat(cold);
