@@ -96,10 +96,9 @@ export function buildFreeVideoSubmissionAtomicPlan(
         AND COALESCE(${users.terms_reaccept_required}, 0) <> 1
         AND ${xUsers.approval_status} = 'approved'
     )
-    // CURRENT rejects an existing YouTube ID unless that video is voided.
-    // The request-time read can become stale before D1 batch execution; the
-    // active-only unique index does NOT protect against archived duplicates.
-    // Recheck under the same atomic batch without another pre-batch D1 query.
+    -- CURRENT rejects a YouTube ID used by any non-voided video.
+    -- Recheck in this atomic batch: active-only uniqueness does not cover
+    -- archived videos, and request-time duplicate reads can be stale.
     AND NOT EXISTS (
       SELECT 1 FROM ${videos}
       WHERE ${videos.youtube_video_id} = ${videoAfter.youtube_video_id}
