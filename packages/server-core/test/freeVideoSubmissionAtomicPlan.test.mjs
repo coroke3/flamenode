@@ -850,15 +850,17 @@ test("MIG-0651 U02: both free-video notification routes share the video/Queue tr
           threadName: "[作品登録] Title / @alice",
         },
       });
-      assert.equal(reads, 2, "DM merged preflight + forced ops actor = two bounded reads");
+      assert.equal(reads, 1, "DM preflight is one SELECT; forced ops recipient resolves in the batch INSERT");
       assert.deepEqual(plan.expectedChanges, dmEnabled
         ? [null, 1, 1, null, null, 13]
         : [null, 1, 1, null, 13]);
       assert.equal(plan.audits.length, 2, "notification rows are not fabricated strict audits");
       const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, reads);
       assert.equal(budget.d1WithinLimit, true);
-      assert.equal(budget.s3PreBatchReadCount, 4);
-      assert.equal(budget.withinLimit, false, "DM + forced ops + audit reads still exceed S3");
+      assert.equal(budget.s3PreBatchReadCount, 3);
+      assert.equal(budget.s3WithinLimit, true);
+      assert.equal(budget.withinLimit, true,
+        "DM + forced ops candidate now has one preflight read plus two unpreloaded audit reads");
       const dialect = new SQLiteSyncDialect();
       sqlite.exec("BEGIN");
       try {
