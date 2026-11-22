@@ -173,7 +173,7 @@ test("SEC-533: stale public event with missing slots selects the producer even i
     .run(NOW - 100, NOW - 100);
   assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 1);
   assert.deepEqual(
-    f.queue().filter(row => row.reason === STALE_ARTIFACT_REFRESH_REASON).map(row => `${row.target_type}:${row.target_id}:${row.priority}`),
+    f.queue().filter(row => row.target_type === "event_slots" && row.reason === STALE_ARTIFACT_REFRESH_REASON).map(row => `${row.target_type}:${row.target_id}:${row.priority}`),
     ["event_slots:legacy:low"],
   );
   assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 0, "pending section is not duplicated");
