@@ -367,6 +367,8 @@ adminOpsRoutes.get("/integrity/:checkId", dbMiddleware, async (c) => {
 // the object state (head) is returned and the SPA shows the rest as "not evaluated" until MIG-0627.
 const MAX_STATIC_QUEUE_ROWS = 80;
 const MAX_BACKFILL_FAILURE_ROWS = 20;
+/** 3 recognized kinds × 4 actionable queue states; aggregate result has at most 12 rows. */
+const MAX_BACKFILL_COUNT_ROWS = 12;
 /** CURRENT src/lib/operationMode/policy.ts STATIC_REBUILD_ITEMS_PER_RUN (json-generator runs 1 target per run). */
 const STATIC_REBUILD_ITEMS_PER_RUN = 1;
 const SHARED_INPUT_OBJECTS = [
@@ -393,8 +395,21 @@ adminOpsRoutes.get("/static-builds", async (c) => {
       .bind(MAX_OPS_ROW_TEXT_CODE_UNITS + 1, MAX_STATIC_QUEUE_ROWS)
       .all<AdminStaticBuildsResponse["rows"][number]>(),
     c.env.DB.prepare(
-      `SELECT 'bf_count' AS kind, reason AS a, status AS b, COUNT(*) AS n
-         FROM static_rebuild_queue WHERE reason LIKE 'backfill_%' GROUP BY reason, status
+      `SELECT 'bf_count' AS kind, a, b, n FROM (
+         SELECT CASE
+           WHEN reason = 'backfill_video_v2' OR reason GLOB 'backfill_video_v2_*' THEN 'backfill_video_v2'
+           WHEN reason = 'backfill_user_profile' OR reason GLOB 'backfill_user_profile_*' THEN 'backfill_user_profile'
+           WHEN reason = 'backfill_event_crew' OR reason GLOB 'backfill_event_crew_*' THEN 'backfill_event_crew'
+         END AS a, status AS b, COUNT(*) AS n
+         FROM static_rebuild_queue
+         WHERE status IN ('pending', 'processing', 'failed', 'dead_letter')
+           AND (
+             reason = 'backfill_video_v2' OR reason GLOB 'backfill_video_v2_*'
+             OR reason = 'backfill_user_profile' OR reason GLOB 'backfill_user_profile_*'
+             OR reason = 'backfill_event_crew' OR reason GLOB 'backfill_event_crew_*'
+           )
+         GROUP BY a, b
+         LIMIT ?)
        UNION ALL
        SELECT 'bf_fail' AS kind, reason AS a, error AS b, NULL AS n FROM (
          SELECT reason, substr(error, 1, ?) AS error FROM static_rebuild_queue
@@ -405,7 +420,7 @@ adminOpsRoutes.get("/static-builds", async (c) => {
        UNION ALL
        SELECT 'mode' AS kind, operation_mode AS a, NULL AS b, NULL AS n FROM (SELECT operation_mode FROM system_settings LIMIT 1)`,
     )
-      .bind(MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS + 1, MAX_BACKFILL_FAILURE_ROWS)
+      .bind(MAX_BACKFILL_COUNT_ROWS, MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS + 1, MAX_BACKFILL_FAILURE_ROWS)
       .all<{ kind: string; a: string | null; b: string | null; n: number | null }>(),
     (async () => {
       try {
@@ -510,7 +525,7 @@ adminOpsRoutes.get("/static-builds", async (c) => {
     // A single D1 string can exceed the entire S2 JSON serialization limit.
     // Count input code units before JSON.stringify (control chars may expand
     // to 6 escaped ASCII bytes per UTF-16 unit).
-    const textUnits = Object.values(row).reduce(
+    const textUnits = Object.values(row).reduce<number>(
       (sum, value) => sum + (typeof value === "string" ? value.length : 0), 0,
     );
     if (textUnits > MAX_OPS_ROW_TEXT_CODE_UNITS) {

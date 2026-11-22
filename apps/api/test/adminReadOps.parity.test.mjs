@@ -1098,6 +1098,51 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual((await fetchPage(stateJson, undefined)).sharedInputs.map((s) => s.objectState), ["unavailable", "unavailable", "unavailable", "unavailable"]);
   });
 
+  test("SEC-799: many backfill reasons aggregate to bounded kind/status counts", async () => {
+    const env = { KV: { async get() { return null; } }, BUCKET: { async head() { return null; } } };
+    const before = await call("/api/admin-read/ops/static-builds", ADMIN, { env });
+    assert.equal(before.status, 200);
+    // The previous GROUP BY reason,status returned 150+ distinct rows.
+    for (let i = 0; i < 150; i += 1) {
+      ins("static_rebuild_queue", {
+        id: `sec799-group-${i}`, target_type: "video",
+        target_id: `sec799-group-target-${i}`,
+        status: i < 110 ? "pending" : "failed", priority: "normal",
+        reason: `backfill_video_v2_${i}`, attempt_count: 1,
+        created_at: T0 - 50, updated_at: T0 - 50,
+      });
+    }
+    // LIKE '_' is a wildcard; this is *not* a JS-recognized prefix.
+    ins("static_rebuild_queue", {
+      id: "sec799-group-invalid", target_type: "video",
+      target_id: "sec799-group-invalid-target", status: "pending",
+      priority: "normal", reason: "backfillXvideo_v2_0",
+      attempt_count: 1, created_at: T0 - 50, updated_at: T0 - 50,
+    });
+    try {
+      const aggregateSql = [];
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare.bind(d1);
+      d1.prepare = (sql) => {
+        if (sql.includes("'bf_count' AS kind")) aggregateSql.push(sql);
+        return prepare(sql);
+      };
+      const result = await call("/api/admin-read/ops/static-builds", ADMIN, { env, d1 });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.backfillQueue.video_v2.pending, before.body.backfillQueue.video_v2.pending + 110);
+      assert.equal(result.body.backfillQueue.video_v2.failed, before.body.backfillQueue.video_v2.failed + 40);
+      assert.equal(result.body.backfillQueue.user_profile.pending, before.body.backfillQueue.user_profile.pending);
+      assert.ok(aggregateSql.length === 1 && aggregateSql[0].includes("GROUP BY a, b") &&
+        aggregateSql[0].includes("LIMIT ?"), "aggregate kind/status groups must have a fixed D1 row bound");
+      assert.equal(result.stats.statements, 3, "session and two D1 reads");
+      assert.equal(result.stats.writes, 0);
+      assert.ok(new TextEncoder().encode(result.text).length <= 64 * 1024);
+      assert.equal(result.headers.get("cache-control"), "private, no-store");
+    } finally {
+      sqlite.exec("DELETE FROM static_rebuild_queue WHERE id LIKE 'sec799-group-%'");
+    }
+  });
+
   test("SEC-799: backfill failure summary and persisted cursor cannot bypass the 64 KiB response budget", async () => {
     const hugeError = "あ".repeat(24_000); // 72,000 UTF-8 bytes, regardless of row-list truncation
     // The D1 boundary itself must not transfer an unlimited diagnostic
