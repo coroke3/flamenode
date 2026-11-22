@@ -26,9 +26,11 @@ function normalizedMemberXIdSql(column: SQLWrapper) {
   return sql`lower(trim(ltrim(trim(${column}), '@')))`;
 }
 function memberCandidatesWhere(column: SQLWrapper, candidates: readonly string[]) {
-  return sql`${normalizedMemberXIdSql(column)} IN (${sql.join(
-    candidates.map((candidate) => sql`${candidate}`), sql`, `,
-  )})`;
+  // One JSON1 bind per UNION arm (two total), rather than 2*N binds:
+  // D1 permits at most 100 parameters per statement even for 80 X IDs.
+  return sql`${normalizedMemberXIdSql(column)} IN (
+    SELECT value FROM json_each(${JSON.stringify(candidates)})
+  )`;
 }
 async function resolveFreeVideoMemberXResolutions(
   db: ServerCoreDb,
