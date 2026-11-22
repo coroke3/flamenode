@@ -139,7 +139,13 @@ export function applyBudgetVerdicts(results, { resolutionMs }) {
   const baseAgg = baseline ? aggregate(baseline.samples, { runtimeClass: "S2", resolutionMs }) : null;
   const noiseFloorMs = baseAgg?.overallMax ?? null;
   const baselineColdMaxMs = baseAgg?.coldMax ?? null;
-  const quietBaseline = noiseFloorMs !== null && noiseFloorMs < QUIET_BASELINE_MAX_MS
+  // A V8 sampling profiler may under-read by one clock quantum. A warm
+  // BASELINE of 3.5ms with a 0.5ms quantum does NOT prove strict <4ms.
+  const baselineUpperBoundMs = noiseFloorMs !== null
+    && Number.isFinite(resolutionMs) && resolutionMs >= 0
+    ? noiseFloorMs + resolutionMs : null;
+  const quietBaseline = baselineUpperBoundMs !== null
+    && baselineUpperBoundMs < QUIET_BASELINE_MAX_MS
     && WARM_KINDS.every((kind) => baseAgg.kinds[kind].meetsMinSamples && baseAgg.kinds[kind].unexpectedStatus === 0);
 
   for (const r of results) {
@@ -159,7 +165,7 @@ export function applyBudgetVerdicts(results, { resolutionMs }) {
       r.agg.verdict = "STOP_SAMPLES";
     }
   }
-  return { noiseFloorMs, baselineColdMaxMs, quietBaseline };
+  return { noiseFloorMs, baselineColdMaxMs, baselineUpperBoundMs, quietBaseline };
 }
 
 /**
@@ -1889,6 +1895,7 @@ export async function main(argv) {
     resolutionMs: target.resolutionMs,
     noiseFloorMs: baselineEvidence?.noiseFloorMs ?? null, // Warm-only BASELINE, not cold-inclusive.
     baselineColdMaxMs: baselineEvidence?.baselineColdMaxMs ?? null,
+    baselineUpperBoundMs: baselineEvidence?.baselineUpperBoundMs ?? null,
     quietBaseline: baselineEvidence?.quietBaseline ?? false,
     measurementEnvironmentEligible: environmentEvidence?.eligible ?? false,
     measurementEnvironmentStopReason: environmentEvidence?.stopReason ?? null,

@@ -213,6 +213,31 @@ test("MIG-0639 RH-013: scheduled/realtime warm maximum is budgeted and both mode
     "unexpected cache/body-reuse semantics block acceptance");
 });
 
+test("MIG-0639: strict quiet BASELINE includes profiler sampling resolution", () => {
+  const warm = (ms) => WARM_KINDS.flatMap(kind =>
+    Array.from({length:MIN_SAMPLES}, () => ({kind,cpuMs:ms,status:200})));
+  const run = (baselineMs) => [
+    {id:"RH-020",runtimeClass:"S2",samples:warm(2)},
+    {id:"BASELINE",runtimeClass:"S2",samples:warm(baselineMs)},
+  ];
+  const atBoundary = run(3.5);
+  const gate = applyBudgetVerdicts(atBoundary,{resolutionMs:0.5});
+  assert.equal(gate.noiseFloorMs,3.5);
+  assert.equal(gate.baselineUpperBoundMs,4);
+  assert.equal(gate.quietBaseline,false,"3.5+0.5 equals 4ms: cannot prove <4");
+  assert.equal(atBoundary[0].agg.verdict,"STOP_BASELINE");
+  const safe = run(3.4);
+  const accepted = applyBudgetVerdicts(safe,{resolutionMs:0.5});
+  assert.ok(Math.abs(accepted.baselineUpperBoundMs-3.9)<1e-9);
+  assert.equal(accepted.quietBaseline,true);
+  assert.equal(safe[0].agg.verdict,"PASS");
+  const invalid = run(1);
+  const rejected = applyBudgetVerdicts(invalid,{resolutionMs:Number.NaN});
+  assert.equal(rejected.baselineUpperBoundMs,null);
+  assert.equal(rejected.quietBaseline,false);
+  assert.equal(invalid[0].agg.verdict,"STOP_BASELINE");
+});
+
 test("Issue #732: cold baseline never masks a warm over-budget failure", () => {
   const warm = (ms) => WARM_KINDS.flatMap((kind) =>
     Array.from({ length: MIN_SAMPLES }, () => ({ kind, cpuMs: ms, status: 200 })));
