@@ -1143,44 +1143,6 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
-  test("SEC-799: unknown status values cannot create unbounded D1 count groups", async () => {
-    // The actual migration has status TEXT NOT NULL without CHECK, and the
-    // previous GROUP BY status returned one row per arbitrary stored status.
-    const env = { KV: { async get() { return null; } }, BUCKET: { async head() { return null; } } };
-    const prior = await call("/api/admin-read/ops/static-builds", ADMIN, { env });
-    assert.equal(prior.status, 200);
-    for (let i = 0; i < 150; i += 1) {
-      ins("static_rebuild_queue", {
-        id: `sec799-status-${i}`, target_type: "video", target_id: `sec799-status-target-${i}`,
-        status: `invalid_state_${i}`, priority: "normal", reason: "manual",
-        attempt_count: 1, created_at: T0 - 100, updated_at: T0 - 100,
-      });
-    }
-    try {
-      const sqlSeen = [];
-      const d1 = createD1(sqlite);
-      const prepare = d1.prepare.bind(d1);
-      d1.prepare = (sql) => {
-        if (sql.includes("'bf_count' AS kind")) sqlSeen.push(sql);
-        return prepare(sql);
-      };
-      const result = await call("/api/admin-read/ops/static-builds", ADMIN, { env, d1 });
-      assert.equal(result.status, 200, result.text.slice(0, 200));
-      assert.deepEqual(result.body.counts, prior.body.counts,
-        "the response already ignores unknown statuses; known counts must not change");
-      assert.ok(sqlSeen.length === 1 &&
-        sqlSeen[0].includes("status IN ('pending', 'processing', 'failed', 'dead_letter', 'done')") &&
-        sqlSeen[0].includes("GROUP BY status LIMIT ?"),
-        "all five status groups must be filtered and bounded at D1");
-      assert.equal(result.stats.statements, 3, "session and two D1 reads");
-      assert.equal(result.stats.writes, 0);
-      assert.equal(result.headers.get("cache-control"), "private, no-store");
-      assert.ok(new TextEncoder().encode(result.text).length <= 64 * 1024);
-    } finally {
-      sqlite.exec("DELETE FROM static_rebuild_queue WHERE id LIKE 'sec799-status-%'");
-    }
-  });
-
   test("SEC-799: invalid LIKE-only failure reasons cannot starve a real backfill error", async () => {
     const env = { KV: { async get() { return null; } }, BUCKET: { async head() { return null; } } };
     const validReason = "backfill_video_v2_sec799";

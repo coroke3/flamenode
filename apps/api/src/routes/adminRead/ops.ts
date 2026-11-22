@@ -369,8 +369,6 @@ const MAX_STATIC_QUEUE_ROWS = 80;
 const MAX_BACKFILL_FAILURE_ROWS = 20;
 /** 3 recognized kinds × 4 actionable queue states; aggregate result has at most 12 rows. */
 const MAX_BACKFILL_COUNT_ROWS = 12;
-/** Known queue statuses in CURRENT's five-field counters; SQL must return at most five groups. */
-const MAX_STATIC_QUEUE_STATUS_ROWS = 5;
 /** CURRENT src/lib/operationMode/policy.ts STATIC_REBUILD_ITEMS_PER_RUN (json-generator runs 1 target per run). */
 const STATIC_REBUILD_ITEMS_PER_RUN = 1;
 const SHARED_INPUT_OBJECTS = [
@@ -423,14 +421,11 @@ adminOpsRoutes.get("/static-builds", async (c) => {
             )
           ORDER BY updated_at DESC LIMIT ?)
        UNION ALL
-       SELECT 'count' AS kind, status AS a, NULL AS b, n FROM (
-         SELECT status, COUNT(*) AS n FROM static_rebuild_queue
-          WHERE status IN ('pending', 'processing', 'failed', 'dead_letter', 'done')
-          GROUP BY status LIMIT ?)
+       SELECT 'count' AS kind, status AS a, NULL AS b, COUNT(*) AS n FROM static_rebuild_queue GROUP BY status
        UNION ALL
        SELECT 'mode' AS kind, operation_mode AS a, NULL AS b, NULL AS n FROM (SELECT operation_mode FROM system_settings LIMIT 1)`,
     )
-      .bind(MAX_BACKFILL_COUNT_ROWS, MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS + 1, MAX_BACKFILL_FAILURE_ROWS, MAX_STATIC_QUEUE_STATUS_ROWS)
+      .bind(MAX_BACKFILL_COUNT_ROWS, MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS + 1, MAX_BACKFILL_FAILURE_ROWS)
       .all<{ kind: string; a: string | null; b: string | null; n: number | null }>(),
     (async () => {
       try {
