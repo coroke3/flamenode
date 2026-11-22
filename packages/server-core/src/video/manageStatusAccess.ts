@@ -8,7 +8,7 @@
  */
 import { and, eq, inArray, sql, type SQLWrapper } from "drizzle-orm";
 import { eventStaff, events, notificationOutbox, sessions, systemSettings, users, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
-import { staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
+import { expandPermissionAliases, staffRowHasPermissionKey } from "@flamenode/domain/auth/permissions/resolver";
 import { WRITE_FEATURE_KEYS, type WriteFeatureKey } from "@flamenode/domain/admin";
 import { EVENT_STAFF_PRESETS, getPresetPermissions } from "@flamenode/domain/auth/permissions/presets";
 import { assertCondition } from "../audit/mutate.ts";
@@ -18,6 +18,13 @@ import type { ServerCoreDb } from "../db.ts";
 // Defend against unbounded joined fan-out in D1. Exceeding this limit is
 // an explicit fail-closed condition, never a partial-grant decision.
 export const MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT = 256;
+// Cap SQLite JSON1 work on legacy custom grants before any parse. The complete
+// canonical 20-key permission array fits within 1KiB. Oversize values cause
+// an explicit 503 via the caller, never permission from a partial snapshot.
+// Return only booleans to JS, not the imported arbitrary-length JSON string.
+export const MAX_MANAGE_STATUS_CUSTOM_PERMISSION_JSON_BYTES = 1024;
+const VIDEO_STATUS_PERMISSION_KEYS_JSON =
+  JSON.stringify(expandPermissionAliases("video.status"));
 // Keep in sync with MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS in staticRebuild/hooks.
 // This module deliberately does NOT import the much larger queue/planner chain.
 export const MAX_MANAGE_STATUS_REBUILD_EVENTS = 8;
@@ -295,10 +302,38 @@ async function hasManageVideoStatusGrant(
   eventId: string,
 ): Promise<boolean> {
   if (user.role === "admin") return true;
+  // Resolve only the canonical requested permission in SQLite JSON1, without
+  // ever returning potentially huge legacy custom_permission_keys_json rows.
+  // CASE ordering prevents parsing malformed or oversize JSON. For 'video.status',
+  // canonical aliases are drawn from the exact shared JS permission resolver.
+  const customStatusAllowed = sql<number>`CASE
+    WHEN ${eventStaff.permission_preset} <> 'custom'
+      OR ${eventStaff.custom_permission_keys_json} IS NULL
+      OR length(CAST(${eventStaff.custom_permission_keys_json} AS BLOB)) >
+        ${MAX_MANAGE_STATUS_CUSTOM_PERMISSION_JSON_BYTES}
+      THEN 0
+    WHEN json_valid(${eventStaff.custom_permission_keys_json}) <> 1 THEN 0
+    WHEN json_type(${eventStaff.custom_permission_keys_json}) <> 'array' THEN 0
+    WHEN EXISTS (
+      SELECT 1 FROM json_each(${eventStaff.custom_permission_keys_json}) custom_key
+      WHERE custom_key.type = 'text'
+        AND custom_key.value IN (
+          SELECT value FROM json_each(${VIDEO_STATUS_PERMISSION_KEYS_JSON})
+        )
+    ) THEN 1
+    ELSE 0
+  END`;
   const approvedStaff = await db
     .select({
       permission_preset: eventStaff.permission_preset,
-      custom_permission_keys_json: eventStaff.custom_permission_keys_json,
+      // Detect an oversized custom grant in the same bounded read: fail the
+      // *entire* authorization, even if another row has the required preset.
+      oversized_custom: sql<number>`CASE WHEN
+        ${eventStaff.permission_preset} = 'custom'
+        AND length(CAST(${eventStaff.custom_permission_keys_json} AS BLOB)) >
+          ${MAX_MANAGE_STATUS_CUSTOM_PERMISSION_JSON_BYTES}
+        THEN 1 ELSE 0 END`,
+      custom_status_allowed: customStatusAllowed,
     })
     .from(eventStaff)
     .innerJoin(
@@ -320,7 +355,17 @@ async function hasManageVideoStatusGrant(
     // with a private fixed 503, without leaking a target-video association.
     throw new Error("manage_video_status_staff_read_limit_exceeded");
   }
-  return approvedStaff.some((row) => staffRowHasPermissionKey(row, "video.status"));
+  if (approvedStaff.some((row) => row.oversized_custom === 1)) {
+    // A large legacy grant must never turn into an accidental allow, nor
+    // leak anything about the requested video via a later association read.
+    throw new Error("manage_video_status_staff_json_limit_exceeded");
+  }
+  return approvedStaff.some((row) =>
+    row.permission_preset === "custom"
+      ? row.custom_status_allowed === 1
+      : staffRowHasPermissionKey(
+          { permission_preset: row.permission_preset }, "video.status",
+        ));
 }
 
 /**
