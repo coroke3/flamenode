@@ -775,10 +775,23 @@ export async function restoreAuditLog(
     }
   }
   if (publicCacheKeys.length > 0) {
-    await host.deletePublicJsonCaches(publicCacheKeys);
+    try {
+      await host.deletePublicJsonCaches(publicCacheKeys);
+    } catch {
+      // The D1 transaction already succeeded. A Cache API/provider failure
+      // must neither turn the committed restore into a false HTTP failure nor
+      // serialize potentially sensitive provider errors into application logs.
+      console.warn("[audit-restore] public cache invalidation failed", "provider_error");
+    }
   }
   if (log.table_name === "events") {
-    await host.invalidateEventExportCache(log.target_id);
+    try {
+      await host.invalidateEventExportCache(log.target_id);
+    } catch {
+      // Keep parity with video post-commit export invalidation: report the
+      // committed result, and emit only a fixed, credential-free diagnostic.
+      console.warn("[audit-restore] event export invalidation failed", "provider_error");
+    }
   }
 
   return { ok: true, message: "復元が完了しました。", restore_run_id: restoreRunId };
