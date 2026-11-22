@@ -114,6 +114,45 @@ test("MIG-0666 T03: envelope, manifest, generation, checksum, visibility and eve
 });
 
 
+test("SEC-752: manifest-listed off-index public detail requires an authentic unblocked snapshot before R2 IO", async () => {
+  const id = "evt_half_period";
+  const detailKey = eventDetailKey(id);
+  const cases = [
+    ["missing snapshot", (data) => { data.snapshots = data.snapshots.filter((s) => s.key !== detailKey); }],
+    ["invalid envelope JSON", (data) => { data.snapshots.find((s) => s.key === detailKey).json = "{bad"; }],
+    ["private envelope", (data) => {
+      const s = data.snapshots.find((s) => s.key === detailKey);
+      const envelope = JSON.parse(s.json);
+      envelope.visibility = "private";
+      s.json = JSON.stringify(envelope);
+    }],
+    ["wrong build generation", (data) => {
+      const s = data.snapshots.find((s) => s.key === detailKey);
+      const envelope = JSON.parse(s.json);
+      envelope.generation = "other-generation";
+      s.json = JSON.stringify(envelope);
+    }],
+    ["corrupt payload checksum", (data) => {
+      data.snapshots.find((s) => s.key === detailKey).sha256 = "0".repeat(64);
+    }],
+    ["manifest blocks public detail", (data) => { data.manifest.blockedKeys.push(detailKey); }],
+  ];
+  for (const [label, mutate] of cases) {
+    // The public half-period event is absent from the index but its detail
+    // remains listed in the manifest (including when the actual body is gone).
+    const data = fixture(["evt_listed", id], ["evt_listed"]);
+    mutate(data);
+    assert.throws(() => selectApiArtifacts(data), /api artifact publish:/, label);
+    const b = bucket();
+    let reads = 0, writes = 0;
+    b.get = async () => { reads++; return null; };
+    b.put = async () => { writes++; };
+    await assert.rejects(publishApiArtifacts(data, b), /api artifact publish:/, label);
+    assert.equal(reads, 0, label + ": reject before remote GET");
+    assert.equal(writes, 0, label + ": reject before remote PUT");
+  }
+});
+
 test("SEC-747: an off-index public event missing BOTH snapshots aborts before any R2 IO", async () => {
   for (const { ids, indexed, omitted } of [
     { ids: ["evt_indexed", "evt_half_period"], indexed: ["evt_indexed"], omitted: "evt_half_period" },
