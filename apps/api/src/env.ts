@@ -21,8 +21,6 @@ export type Bindings = {
   ADMIN_SPREADSHEET_ENABLED?: string;
   /** MIG-0605 U02: optional page size (clamped to the S2 row cap). */
   ADMIN_SPREADSHEET_PAGE_SIZE?: string;
-  /** MIG-0638 U02: HMAC-SHA256 signing secret for spreadsheet import preview tokens. */
-  SPREADSHEET_IMPORT_PREVIEW_SECRET?: string;
 };
 
 export type Variables = {

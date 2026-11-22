@@ -229,7 +229,7 @@ async function handleImportPost(c: Context<AppEnv>): Promise<Response> {
     }
 
     const secret = requireSpreadsheetImportPreviewSecret(
-      c.env.SPREADSHEET_IMPORT_PREVIEW_SECRET,
+      (c.env as { SPREADSHEET_IMPORT_PREVIEW_SECRET?: string }).SPREADSHEET_IMPORT_PREVIEW_SECRET,
     );
     const previewBinding = await buildSpreadsheetImportPreviewBinding({
       operatorUserId: user.id,
