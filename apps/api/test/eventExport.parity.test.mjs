@@ -34,8 +34,8 @@ if (runUnderRootTsx(import.meta.url)) {
   const { app } = await import("../src/app.ts");
   const { GET: currentGet } = await import("../../../app/api/event-endpoints/[id]/route.ts");
   const { clearPublicApiRateLimitForTests } = await import("@flamenode/server-core/publicData/publicApi");
-  const { resetIsolateMicroCacheForTests } = await import("../src/routes/live/microCache.ts");
-  const { resetIsolateMicroCacheForTests: resetCurrentMicroCache } = await import("../../../src/lib/api/isolateMicroCache.ts");
+  const { resetIsolateMicroCacheForTests, isolateMicroCacheGet: honoMicroCacheGet } = await import("../src/routes/live/microCache.ts");
+  const { resetIsolateMicroCacheForTests: resetCurrentMicroCache, isolateMicroCacheGet: currentMicroCacheGet } = await import("../../../src/lib/api/isolateMicroCache.ts");
   const { resetPublicJsonIsolateCacheForTests } = await import("../../../src/lib/publicData/publicCacheIsolate.ts");
 
   const sqlite = createSqlite();
@@ -454,6 +454,63 @@ if (runUnderRootTsx(import.meta.url)) {
     } finally {
       globalThis.caches.default = previousCache;
       sqlite.exec("DELETE FROM event_staff WHERE id IN ('revoked-staff-only-575', 'safe-staff-only-575')");
+      reset();
+    }
+  });
+
+  test("SEC-575: staff-only realtime isolate cache cannot replay revoked staff when event timestamp is unchanged", async () => {
+    // Scheduled Cache API and realtime isolate cache are independent paths.
+    // Test staff-only revocation without any video or event-row change, and
+    // directly prove that the isolate still holds the pre-revocation string.
+    try {
+      sqlite.exec("INSERT INTO event_staff (id, event_id, x_user_id, display_name, is_public, created_at, updated_at) VALUES ('staff-realtime-revoke-575', 'export-event', 'x-rt-revoke-575', 'リアルタイム失効スタッフ575', 1, 1700000000, 1700000000), ('staff-realtime-safe-575', 'export-event', 'x-rt-safe-575', 'リアルタイム継続公開575', 1, 1700000000, 1700000000)");
+      for (const [runtime, request, microGet] of [
+        ["CURRENT", current, currentMicroCacheGet],
+        ["Hono", hono, honoMicroCacheGet],
+      ]) {
+        reset();
+        sqlite.exec("UPDATE events SET public_api_enabled=1, visibility_status='public' WHERE id='export-event'");
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+        sqlite.exec("UPDATE event_staff SET is_public=1 WHERE id='staff-realtime-revoke-575'");
+        const updatedAt = sqlite.prepare("SELECT updated_at FROM events WHERE id='export-event'").get().updated_at;
+        const cacheKey = `export:export-event:v5:${updatedAt}`;
+        const path = "export-event?format=v5&update=realtime";
+        const initial = await request(path);
+        assert.equal(initial.status, 200, runtime);
+        assert.equal(initial.headers.get("X-FlameNode-Cache"), "BYPASS");
+        assert.equal(initial.headers.get("Cache-Control"), "no-store");
+        const firstBody = await initial.text();
+        assert.match(firstBody, /リアルタイム失効スタッフ575/);
+        assert.match(firstBody, /リアルタイム継続公開575/);
+        assert.match(firstBody, /public-video/);
+        assert.match(microGet(cacheKey), /リアルタイム失効スタッフ575/,
+          runtime + " isolate must actually hold the old private-transition candidate");
+
+        // Only the staff public flag changes: no video transition and no
+        // event.updated_at bump to invalidate the old isolate cache key.
+        sqlite.exec("UPDATE event_staff SET is_public=0 WHERE id='staff-realtime-revoke-575'");
+        assert.equal(sqlite.prepare("SELECT updated_at FROM events WHERE id='export-event'").get().updated_at, updatedAt);
+        assert.match(microGet(cacheKey), /リアルタイム失効スタッフ575/,
+          "revoked staff must still exist in isolate cache before the read");
+
+        const after = await request(path);
+        assert.equal(after.status, 200, runtime);
+        assert.equal(after.headers.get("X-FlameNode-Cache"), "BYPASS");
+        assert.equal(after.headers.get("Cache-Control"), "no-store");
+        const body = await after.text();
+        assert.doesNotMatch(body, /リアルタイム失効スタッフ575/,
+          "cached realtime staff must not bypass fresh relation authorization");
+        assert.match(body, /リアルタイム継続公開575/,
+          "unaffected public staff remains available");
+        assert.match(body, /public-video/,
+          "unchanged public video must not be removed to force a fake PASS");
+        assert.doesNotMatch(microGet(cacheKey), /リアルタイム失効スタッフ575/,
+          "stale isolate entry must be replaced by a newly validated body");
+        assert.match(microGet(cacheKey), /リアルタイム継続公開575/);
+        assert.equal(d1.stats.writes, 0, "GET remains read-only against D1");
+      }
+    } finally {
+      sqlite.exec("DELETE FROM event_staff WHERE id IN ('staff-realtime-revoke-575','staff-realtime-safe-575')");
       reset();
     }
   });
