@@ -319,16 +319,23 @@ export async function GET(
       format,
       refreshMinutes * 60,
     );
-    return cached === null || !eventExportBodyMatchesFresh(cached, freshBody, format)
-      ? null
-      : exportResponse(
-          req,
-          cached,
-          format,
-          updateMode,
-          refreshMinutes,
-          "HIT",
-        );
+    if (cached === null) return null;
+    if (!eventExportBodyMatchesFresh(cached, freshBody, format)) {
+      // A previously public video/staff member can now be private. Fresh D1
+      // has already rejected that body, so best-effort delete the known-stale
+      // per-colo entry even if a subsequent Cache.put is unavailable.
+      // This is cache hygiene, never a substitute for fresh authorization.
+      await deletePublicJsonCaches([payloadCacheKey]);
+      return null;
+    }
+    return exportResponse(
+      req,
+      cached,
+      format,
+      updateMode,
+      refreshMinutes,
+      "HIT",
+    );
   };
 
   // Cache APIのpositive cacheを公開認可の正本にしない。payload HIT前にも必ずD1を確認する。
