@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { selectApiArtifacts, publishApiArtifacts } from "./publishApiArtifacts.ts";
 import { EVENT_INDEX_KEY, eventDetailKey, eventReleaseKey } from "../src/lib/publicDataLoader.ts";
+import { EVENT_ID_PATTERN as PRODUCER_EVENT_ID_PATTERN } from "./produceSnapshots.ts";
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 function fixture(ids = ["evt_a", "evt_b"], indexedIds = ids) {
@@ -181,6 +182,28 @@ test("SEC-708 P1-B: release PUT or readback failure does not promote a new index
         "retry cap must also hold for an unverified new release");
     }
   }
+});
+
+test("SEC-708: leading underscore/hyphen legacy event IDs survive producer and publisher", async () => {
+  // CURRENT eventForm EVENT_ID_PATTERN accepts these path-safe prefixes.
+  // The producer must not silently omit their release while its index includes them.
+  const ids = ["_legacy_event", "-legacy-event"];
+  for (const id of ids) {
+    assert.equal(PRODUCER_EVENT_ID_PATTERN.test(id), true, id + ": producer must enumerate");
+  }
+  for (const bad of ["", "evt/escape", "../escape", "evt\\escape", "evt.dot"]) {
+    assert.equal(PRODUCER_EVENT_ID_PATTERN.test(bad), false, bad + ": deny unsafe key");
+  }
+  const data = fixture(ids);
+  const targets = selectApiArtifacts(data);
+  assert.equal(targets.length, 3);
+  const b = bucket();
+  const report = await publishApiArtifacts(data, b);
+  assert.equal(report.verified, 3);
+  for (const id of ids) {
+    assert.ok(b.rows.has("events/" + id + "/release.v1.json"), id + ": release remains reachable");
+  }
+  assert.deepEqual(JSON.parse(b.rows.get("events/index.json")).items, ids.map(id => ({ id })));
 });
 
 test("MIG-0666: remote oversized object is refused without any write", async () => {
