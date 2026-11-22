@@ -99,7 +99,7 @@ test("SEC-743: missing Worker Queue and poisoned diagnostic KV cannot reject rec
   assert.equal(result, false);
   assert.deepEqual(values.map(([value]) => JSON.parse(value)), [
     { service: "queue-wake-worker", result: "binding_missing", kind: "youtube_sync_pending" },
-    { service: "queue-wake-worker", result: "failure_record_unavailable", kind: "youtube_sync_pending" },
+    { service: "queue-wake-worker", result: "last_failure_record_skipped", kind: "youtube_sync_pending", reason: "binding_missing" },
   ]);
   assert.ok(!JSON.stringify(values).includes(secret));
 });
@@ -155,7 +155,32 @@ test("SEC-743: rejected delayed Queue send with poisoned diagnostic KV remains n
   assert.equal(sentKinds.size, 0);
   assert.deepEqual(values.map(([value]) => JSON.parse(value)), [
     { service: "queue-wake-worker", result: "send_failed", kind: "static_rebuild_available" },
-    { service: "queue-wake-worker", result: "failure_record_unavailable", kind: "static_rebuild_available" },
+    { service: "queue-wake-worker", result: "last_failure_record_skipped", kind: "static_rebuild_available", reason: "send_failed" },
   ]);
   assert.ok(!JSON.stringify(values).includes(secret));
+});
+
+test("SEC-743/#740: rejected diagnostic KV put cannot leak provider Error.name/message/cause", async () => {
+  const secret = "SEC743_REJECTED_KV_PUT_SECRET";
+  const providerError = Object.assign(
+    new Error("provider message " + secret, { cause: new Error("nested " + secret) }),
+    { name: secret },
+  );
+  let puts = 0;
+  const { result, values } = await collectQueueWarnings(() =>
+    sendWorkerQueueWakeBestEffort({
+      queue: null,
+      kind: "youtube_playlist_sync",
+      source: "recovery",
+      envFlags: { QUEUE_DISPATCH_ENABLED: "1" },
+      kv: { async put() { puts += 1; throw providerError; } },
+    }),
+  );
+  assert.equal(result, false, "optional failure-record write must never reject Worker recovery");
+  assert.equal(puts, 1, "real KV rejection path must execute");
+  assert.deepEqual(values.map(([value]) => JSON.parse(value)), [
+    { service: "queue-wake-worker", result: "binding_missing", kind: "youtube_playlist_sync" },
+    { service: "queue-wake-worker", result: "last_failure_record_failed", kind: "youtube_playlist_sync", reason: "binding_missing" },
+  ]);
+  assert.ok(!JSON.stringify(values).includes(secret), "no nested provider detail may reach logs");
 });
