@@ -6,6 +6,7 @@ import {
   resetQueueWakeFailureRecordStateForTests,
 } from "@flamenode/server-core/queues/wakeFailureRecordCore";
 import { recordQueueWakeFailureBestEffort } from "@flamenode/server-core/queues/wakeFailureRecord";
+import { sendQueueWakeBestEffort, resetQueueWakeWarningStateForTests } from "@flamenode/server-core/queues/sendQueueWakeBestEffort";
 
 async function captureWarnings(run) {
   const original = console.warn;
@@ -19,7 +20,10 @@ async function captureWarnings(run) {
   return warnings;
 }
 
-test.beforeEach(() => resetQueueWakeFailureRecordStateForTests());
+test.beforeEach(() => {
+  resetQueueWakeFailureRecordStateForTests();
+  resetQueueWakeWarningStateForTests();
+});
 
 test("SEC-740: poisoned KV put getter is a skipped diagnostic, never a rejected business wake", async () => {
   const secret = "SEC740_PROVIDER_ACCESSOR_SECRET";
@@ -104,4 +108,45 @@ test("SEC-740: legitimate getter is read exactly once, bound receiver works, TTL
   assert.equal(writes[0].key, "queue_wake:last_failure:notification_available");
   assert.equal(writes[0].value.reason, "binding_missing");
   assert.deepEqual(writes[0].options, { expirationTtl: QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS });
+});
+
+test("SEC-740: real missing-binding and failed-send wake never reject on broken diagnostic KV", async () => {
+  let getterCalls = 0;
+  const poisonedKv = Object.defineProperty({}, "put", {
+    get() {
+      getterCalls += 1;
+      throw new Error("DIAGNOSTIC_KV_GETTER_SECRET");
+    },
+  });
+  const readKv = () => poisonedKv;
+  const warnings = await captureWarnings(async () => {
+    const missing = await sendQueueWakeBestEffort(
+      { kind: "notification_available", source: "web" },
+      {
+        readEnv: () => ({ QUEUE_DISPATCH_ENABLED: "1" }),
+        readWaitUntil: () => null,
+        readKv,
+      },
+    );
+    assert.deepEqual(missing, { sent: false, reason: "binding_missing" });
+
+    const failed = await sendQueueWakeBestEffort(
+      { kind: "static_rebuild_available", source: "web" },
+      {
+        readEnv: () => ({
+          QUEUE_DISPATCH_ENABLED: "1",
+          STATIC_REBUILD_WAKE_QUEUE: { send: async () => { throw new Error("queue is down"); } },
+        }),
+        readWaitUntil: () => null,
+        readKv,
+      },
+    );
+    assert.deepEqual(failed, { sent: false, reason: "send_failed" });
+  });
+  const events = warnings.map(([value]) => JSON.parse(value));
+  assert.equal(getterCalls, 2, "one diagnostic KV read per failed wake");
+  assert.equal(events.filter((event) => event.result === "last_failure_record_skipped").length, 2);
+  assert.ok(events.some((event) => event.result === "binding_missing"));
+  assert.ok(events.some((event) => event.result === "send_failed"));
+  assert.ok(!JSON.stringify(warnings).includes("DIAGNOSTIC_KV_GETTER_SECRET"));
 });
