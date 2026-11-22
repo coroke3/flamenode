@@ -42,6 +42,10 @@ if (runTestWithTsx(import.meta.url)) {
       readWaitUntil: () => null,
       readKv: () => null,
     };
+    // The shared Queue helper is hardened independently in SEC-738. On an
+    // old main it throws; after SEC-738 it returns a fail-closed result.
+    // The slotted-video post-commit boundary must be safe under either order.
+    let wakeOutcome;
     const warnings = await runPostCommitBestEffort(
       { flow: "submit_slot_video", traceId: "ft_sec736" },
       [
@@ -49,7 +53,7 @@ if (runTestWithTsx(import.meta.url)) {
           name: "youtube_sync_wake",
           run: async () => {
             executed.push("youtube_sync_wake");
-            await sendYoutubeSyncPendingWakeBestEffort("web", new Set(), queueHost);
+            wakeOutcome = await sendYoutubeSyncPendingWakeBestEffort("web", new Set(), queueHost);
           },
         },
         { name: "revalidate", run: async () => { executed.push("revalidate"); } },
@@ -57,9 +61,16 @@ if (runTestWithTsx(import.meta.url)) {
       ],
     );
     assert.deepEqual(executed, ["youtube_sync_wake", "revalidate", "icon_orphan_cleanup"]);
-    assert.deepEqual(warnings.map(({ name, error_code, retryable }) => ({
-      name, error_code, retryable,
-    })), [{ name: "youtube_sync_wake", error_code: "Error", retryable: false }]);
+    if (wakeOutcome?.sent === false && wakeOutcome.reason === "feature_flags_unavailable") {
+      // SEC-738 fail-closed Queue helper must not fabricate a postcommit failure.
+      assert.deepEqual(warnings, []);
+    } else {
+      // Before SEC-738, the real Queue helper can throw on an env getter.
+      assert.equal(wakeOutcome, undefined);
+      assert.deepEqual(warnings.map(({ name, error_code, retryable }) => ({
+        name, error_code, retryable,
+      })), [{ name: "youtube_sync_wake", error_code: "Error", retryable: false }]);
+    }
   });
 
   test("runPostCommitBestEffort returns empty warnings when all tasks succeed", async () => {
