@@ -34,17 +34,23 @@ if (runUnderRootTsx(import.meta.url)) {
   const { app } = await import("../src/app.ts");
   const { GET: currentGet } = await import("../../../app/api/event-endpoints/[id]/route.ts");
   const { clearPublicApiRateLimitForTests } = await import("@flamenode/server-core/publicData/publicApi");
-  const { resetIsolateMicroCacheForTests } = await import("../src/routes/live/microCache.ts");
-  const { resetIsolateMicroCacheForTests: resetCurrentMicroCache } = await import("../../../src/lib/api/isolateMicroCache.ts");
+  const { resetIsolateMicroCacheForTests, isolateMicroCacheGet: honoMicroCacheGet } = await import("../src/routes/live/microCache.ts");
+  const { resetIsolateMicroCacheForTests: resetCurrentMicroCache, isolateMicroCacheGet: currentMicroCacheGet } = await import("../../../src/lib/api/isolateMicroCache.ts");
   const { resetPublicJsonIsolateCacheForTests } = await import("../../../src/lib/publicData/publicCacheIsolate.ts");
 
   const sqlite = createSqlite();
   // Real Cloudflare D1 implements .raw() for Drizzle's typed select() reads.
   // Keep the test's in-memory D1 faithful without mutating the shared harness.
   const baseD1 = createD1(sqlite);
+  const isVideoRelationRead = (query) => /\bfrom\s+["\x27]?videos\b/i.test(query);
+  const injectedRelationError = () => {
+    globalThis.__eventExport.relationReadFaults += 1;
+    throw new Error("private-SQL-params-575-must-not-be-returned");
+  };
   const d1 = {
     ...baseD1,
     prepare(query) {
+      if (globalThis.__eventExport?.failVideoRelationRead && isVideoRelationRead(query)) injectedRelationError();
       const original = baseD1.prepare(query);
       return {
         ...original,
@@ -70,6 +76,7 @@ if (runUnderRootTsx(import.meta.url)) {
   };
   const proxyDb = drizzle(async (query, values, method) => {
     if (globalThis.__eventExport.dbError) throw new Error("database_error");
+    if (globalThis.__eventExport.failVideoRelationRead && isVideoRelationRead(query)) injectedRelationError();
     const rows = sqlite.prepare(query).all(...values);
     return { rows: method === "all" || method === "values" ? rows.map(row => Object.values(row)) : rows };
   }, { schema });
@@ -77,10 +84,10 @@ if (runUnderRootTsx(import.meta.url)) {
   const edgeCache = {
     async match(request) { const r = map.get(request.url); return r?.clone(); },
     async put(request, response) { map.set(request.url, response.clone()); },
-    async delete(request) { return map.delete(request.url); },
+    async delete(request) { return map.delete(typeof request === "string" ? request : request.url); },
   };
   globalThis.caches = { default: edgeCache };
-  globalThis.__eventExport = { db: proxyDb, pending: [], dbError: false };
+  globalThis.__eventExport = { db: proxyDb, pending: [], dbError: false, failVideoRelationRead: false, relationReadFaults: 0 };
   const clock = Date.now;
   Date.now = () => 1700000200000;
   sqlite.exec(`
@@ -98,6 +105,8 @@ if (runUnderRootTsx(import.meta.url)) {
     map.clear();
     globalThis.__eventExport.pending = [];
     globalThis.__eventExport.dbError = false;
+    globalThis.__eventExport.failVideoRelationRead = false;
+    globalThis.__eventExport.relationReadFaults = 0;
     d1.stats.statements = 0;
     d1.stats.writes = 0;
     clearPublicApiRateLimitForTests();
@@ -146,6 +155,55 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.doesNotMatch(b.body, /private-video|submitted_by_user_id/);
     }
   });
+  test("SEC-575: hidden primary event id must not leak from public video linked to another public event", async () => {
+    // Even when a public video belongs to the exported public event via
+    // video_events, its primary_event_id may still point to a private event.
+    // event_ids is visibility-filtered; primary_event_id must be as well.
+    try {
+      sqlite.exec(`
+        INSERT INTO videos (id, title, submitted_by_user_id, creator_display_name,
+          primary_event_id, visibility_status, scheduled_time)
+        VALUES ('shared-primary-575', '別イベントの共有公開作品575', 'submitter', '制作者',
+          'hidden-event', 'public', 1700000130);
+        INSERT INTO video_events (video_id, event_id)
+        VALUES ('shared-primary-575', 'export-event');
+      `);
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        for (const updateMode of ["scheduled", "realtime"]) {
+          for (const format of ["v5", "legacy"]) {
+            reset();
+            const path = `export-event?format=${format}&update=${updateMode}&refresh=1440`;
+            const response = await request(path);
+            assert.equal(response.status, 200, runtime + " " + updateMode + " " + format);
+            assert.equal(response.headers.get("Cache-Control"), "no-store");
+            const body = await response.text();
+            assert.doesNotMatch(body, /hidden-event|非公開イベント/,
+              "the private primary event identifier must never be included");
+            assert.match(body, /別イベントの共有公開作品575/,
+              "the public video itself must remain visible");
+            if (format === "v5") {
+              const parsed = JSON.parse(body);
+              const shared = parsed.videos.find((v) => v.id === "shared-primary-575");
+              assert.ok(shared, "shared video remains in the public export");
+              assert.deepEqual(shared.event_ids, ["export-event"],
+                "visibility-filtered relation IDs still include the public target");
+              assert.equal(shared.primary_event_id, null,
+                "an event ID not proven public cannot be emitted as primary");
+              assert.equal(parsed.videos.find((v) => v.id === "public-video")?.primary_event_id,
+                "export-event", "valid public primary IDs must not be removed");
+            }
+            assert.equal(d1.stats.writes, 0, "export reads remain read-only");
+            await Promise.all(globalThis.__eventExport.pending.splice(0));
+          }
+        }
+      }
+    } finally {
+      sqlite.exec("DELETE FROM video_events WHERE video_id='shared-primary-575'");
+      sqlite.exec("DELETE FROM videos WHERE id='shared-primary-575'");
+      reset();
+    }
+  });
+
   test("T02: format / update / refresh invalid values and 404 status parity", async () => {
     for (const path of [
       "export-event?format=foo", "export-event?update=now",
@@ -188,6 +246,454 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(currentDenied.status, 404, "CURRENT fresh D1 gate denies cached private event");
     sqlite.exec("UPDATE events SET visibility_status='public' WHERE id='export-event'");
   });
+  test("SEC-575: scheduled/realtimeのキャッシュHITでも非公開化作品を再配信しない", async () => {
+    const paths = [
+      "export-event?format=v5&update=scheduled&refresh=1440",
+      "export-event?format=legacy&update=scheduled&refresh=1440",
+      "export-event?format=v5&update=realtime",
+      "export-event?format=legacy&update=realtime",
+    ];
+    for (const request of [current, hono]) {
+      for (const path of paths) {
+        reset();
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+        const first = await request(path);
+        assert.equal(first.status, 200);
+        assert.match(await first.text(), /public-video/);
+        await Promise.all(globalThis.__eventExport.pending);
+        sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+        const revoked = await request(path);
+        assert.equal(revoked.status, 200);
+        assert.doesNotMatch(await revoked.text(), /public-video|公開作品/, path);
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      }
+    }
+    reset();
+  });
+
+  test("SEC-575: disabling public_api_enabled rejects cached export and re-enabled event never restores revoked video", async () => {
+    // A scheduled Cache API HIT must never bypass the event-level public API
+    // opt-out. Re-enabling an event must also re-check video visibility rather
+    // than replay a payload written before that event's opt-out.
+    try {
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        for (const format of ["v5", "legacy"]) {
+          reset();
+          sqlite.exec("UPDATE events SET public_api_enabled=1, visibility_status='public' WHERE id='export-event'");
+          sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+          const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+          const cacheKey = `public-event-export:9:export-event:${format}:1440`;
+          const cacheUrl = "https://flamenode.internal/public-json/" + encodeURIComponent(cacheKey);
+          const first = await request(path);
+          assert.equal(first.status, 200, runtime + " " + format);
+          assert.equal(first.headers.get("X-FlameNode-Cache"), "MISS");
+          assert.match(await first.text(), /public-video/);
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+          assert.equal((await request(path)).headers.get("X-FlameNode-Cache"), "HIT",
+            "test requires a genuinely populated scheduled Cache API entry");
+
+          // Deliberately retain the origin cached response while disabling the
+          // API, so the denial cannot be explained by cache invalidation.
+          sqlite.exec("UPDATE events SET public_api_enabled=0 WHERE id='export-event'");
+          const denied = await request(path);
+          assert.equal(denied.status, 404, runtime + " " + format + " API opt-out");
+          assert.equal(await denied.text(), '{"error":"not_found"}');
+          assert.equal(denied.headers.get("X-FlameNode-Cache"), null);
+          assert.equal(map.has(cacheUrl), true,
+            "opt-out 404 must be proven against a retained stale origin Cache API entry");
+
+          // The old cache still contains the public video. Restore the API
+          // only after that video becomes private; no stale row may reappear.
+          sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+          sqlite.exec("UPDATE events SET public_api_enabled=1 WHERE id='export-event'");
+          const restored = await request(path);
+          assert.equal(restored.status, 200, runtime + " " + format);
+          assert.equal(restored.headers.get("X-FlameNode-Cache"), "MISS");
+          assert.equal(restored.headers.get("Cache-Control"), "no-store");
+          assert.doesNotMatch(await restored.text(), /public-video|公開作品/);
+          assert.equal(d1.stats.writes, 0, "event export GET is D1 read-only");
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+        }
+      }
+    } finally {
+      sqlite.exec("UPDATE events SET public_api_enabled=1, visibility_status='public' WHERE id='export-event'");
+      sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      reset();
+    }
+  });
+
+  test("SEC-718: writer-colo deletion does not invalidate a reader-colo cached video (CURRENT/Hono, v5/legacy)", async () => {
+    // Cloudflare Cache API entries are colo-local. A successful writer-side
+    // delete must not be mistaken for a global invalidation of another colo.
+    // Use independent fake Cache stores against the same real SQLite D1.
+    const originalCache = globalThis.caches.default;
+    const makeColo = () => {
+      const rows = new Map();
+      return {
+        rows,
+        cache: {
+          async match(request) { return rows.get(request.url)?.clone(); },
+          async put(request, response) { rows.set(request.url, response.clone()); },
+          async delete(request) { return rows.delete(request.url); },
+        },
+      };
+    };
+    try {
+      // An unrelated still-public video must survive revocation. A handler
+      // returning an empty list for every request would otherwise falsely PASS.
+      sqlite.exec("INSERT INTO videos (id, title, submitted_by_user_id, creator_display_name, primary_event_id, visibility_status, scheduled_time) VALUES ('safe-public-718', '別件の公開動画', 'submitter', '別制作者', 'export-event', 'public', 1700000140)");
+      sqlite.exec("INSERT INTO event_staff (id, event_id, x_user_id, display_name, is_public, created_at, updated_at) VALUES ('revoked-staff-718', 'export-event', 'x-revoked-718', '失効スタッフ718', 1, 1700000000, 1700000000), ('safe-staff-718', 'export-event', 'x-safe-718', '公開スタッフ718', 1, 1700000000, 1700000000)");
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        for (const format of ["v5", "legacy"]) {
+          reset();
+          sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+          sqlite.exec("UPDATE event_staff SET is_public=1 WHERE id='revoked-staff-718'");
+          const writer = makeColo();
+          const reader = makeColo();
+          const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+          const key = `public-event-export:9:export-event:${format}:1440`;
+          const cacheRequest = new Request(
+            "https://flamenode.internal/public-json/" + encodeURIComponent(key),
+          );
+
+          // Both colos separately cache the initially public video.
+          for (const colo of [writer, reader]) {
+            globalThis.caches.default = colo.cache;
+            const primed = await request(path);
+            assert.equal(primed.status, 200, runtime + " " + format);
+            assert.equal(primed.headers.get("X-FlameNode-Cache"), "MISS");
+            const initialBody = await primed.text();
+            assert.match(initialBody, /public-video/);
+            assert.match(initialBody, /safe-public-718/, "unrelated public video is included");
+            if (format === "v5") {
+              assert.match(initialBody, /失効スタッフ718/, "revocable staff must appear in initial v5");
+              assert.match(initialBody, /公開スタッフ718/, "unrelated staff must appear in initial v5");
+            } else {
+              assert.doesNotMatch(initialBody, /失効スタッフ718|公開スタッフ718/,
+                "CURRENT legacy format does not include public staff");
+            }
+            await Promise.all(globalThis.__eventExport.pending.splice(0));
+            assert.equal(colo.rows.has(cacheRequest.url), true, "colo holds the original scheduled payload");
+          }
+          globalThis.caches.default = reader.cache;
+          const warm = await request(path);
+          assert.equal(warm.headers.get("X-FlameNode-Cache"), "HIT",
+            runtime + " " + format + " requires a genuine warm reader-colo cache");
+          const warmBody = await warm.text();
+          assert.match(warmBody, /public-video/);
+          if (format === "v5") assert.match(warmBody, /失効スタッフ718/);
+
+          // A separate writer commits the private transition. Its local
+          // invalidation does not touch the reader's old Cache API response.
+          sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+          sqlite.exec("UPDATE event_staff SET is_public=0 WHERE id='revoked-staff-718'");
+          globalThis.caches.default = writer.cache;
+          assert.equal(await writer.cache.delete(cacheRequest), true);
+          assert.equal(writer.rows.has(cacheRequest.url), false);
+          assert.equal(reader.rows.has(cacheRequest.url), true,
+            "reader colo must still contain the stale, previously-public response");
+
+          // The real reader must check fresh D1 visibility, refuse stale HIT
+          // and produce a public-only replacement for each legacy/v5 format.
+          globalThis.caches.default = reader.cache;
+          const after = await request(path);
+          assert.equal(after.status, 200, runtime + " " + format);
+          assert.equal(after.headers.get("X-FlameNode-Cache"), "MISS",
+            "stale remote-colo HIT cannot be used after video revocation");
+          assert.equal(after.headers.get("Cache-Control"), "no-store");
+          const refreshedBody = await after.text();
+          assert.doesNotMatch(refreshedBody, /public-video|公開作品/,
+            "private video metadata must not be disclosed from a stale reader colo");
+          assert.match(refreshedBody, /safe-public-718/,
+            "unrelated public video remains present after stale cache denial");
+          assert.doesNotMatch(refreshedBody, /失効スタッフ718/,
+            "revoked staff cannot be replayed from another colo's stale response");
+          if (format === "v5") assert.match(refreshedBody, /公開スタッフ718/,
+            "independent public staff must remain in v5 export");
+          assert.equal(d1.stats.writes, 0, "GET cannot write D1");
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+          const safeWarm = await request(path);
+          assert.equal(safeWarm.headers.get("X-FlameNode-Cache"), "HIT",
+            "safe replacement can still be cached after revocation");
+          assert.doesNotMatch(await safeWarm.text(), /public-video|公開作品/);
+        }
+      }
+    } finally {
+      globalThis.caches.default = originalCache;
+      sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      sqlite.exec("DELETE FROM videos WHERE id='safe-public-718'");
+      sqlite.exec("DELETE FROM event_staff WHERE id IN ('revoked-staff-718', 'safe-staff-718')");
+      reset();
+    }
+  });
+
+  test("SEC-575: staff-only cross-colo revocation rejects a stale HIT without changing video visibility", async () => {
+    // Independent negative control: the SEC-718 scenario revokes video AND
+    // staff at the same time. A broken staff check could therefore appear
+    // correct simply because the video change forces a cache MISS.
+    // Keep the public video completely unchanged for this privacy regression.
+    const previousCache = globalThis.caches.default;
+    const makeColo = () => {
+      const stored = new Map();
+      return {
+        stored,
+        cache: {
+          async match(request) { return stored.get(request.url)?.clone(); },
+          async put(request, response) { stored.set(request.url, response.clone()); },
+          async delete(request) { return stored.delete(request.url); },
+        },
+      };
+    };
+    try {
+      sqlite.exec("INSERT INTO event_staff (id, event_id, x_user_id, display_name, is_public, created_at, updated_at) VALUES ('revoked-staff-only-575', 'export-event', 'x-revoked-only-575', '単独失効スタッフ575', 1, 1700000000, 1700000000), ('safe-staff-only-575', 'export-event', 'x-safe-only-575', '継続公開スタッフ575', 1, 1700000000, 1700000000)");
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        reset();
+        sqlite.exec("UPDATE events SET public_api_enabled=1, visibility_status='public' WHERE id='export-event'");
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+        sqlite.exec("UPDATE event_staff SET is_public=1 WHERE id='revoked-staff-only-575'");
+        const writer = makeColo();
+        const reader = makeColo();
+        const path = "export-event?format=v5&update=scheduled&refresh=1440";
+        const key = "public-event-export:9:export-event:v5:1440";
+        const cacheRequest = new Request(
+          "https://flamenode.internal/public-json/" + encodeURIComponent(key),
+        );
+        for (const colo of [writer, reader]) {
+          globalThis.caches.default = colo.cache;
+          const seeded = await request(path);
+          assert.equal(seeded.status, 200, runtime + " initial response");
+          assert.equal(seeded.headers.get("X-FlameNode-Cache"), "MISS");
+          const initial = await seeded.text();
+          assert.match(initial, /public-video/, "public video must remain visible");
+          assert.match(initial, /単独失効スタッフ575/, "staff to revoke is initially public");
+          assert.match(initial, /継続公開スタッフ575/, "unrelated staff is initially public");
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+          assert.equal(colo.stored.has(cacheRequest.url), true, "each colo must hold a real cached body");
+        }
+        globalThis.caches.default = reader.cache;
+        const hit = await request(path);
+        assert.equal(hit.headers.get("X-FlameNode-Cache"), "HIT",
+          runtime + " requires a real warm reader-colo cache HIT");
+        assert.match(await hit.text(), /単独失効スタッフ575/);
+
+        // Only staff visibility changes. The video row and event updated_at
+        // stay untouched, so a video-only cache fence cannot pass this test.
+        sqlite.exec("UPDATE event_staff SET is_public=0 WHERE id='revoked-staff-only-575'");
+        globalThis.caches.default = writer.cache;
+        assert.equal(await writer.cache.delete(cacheRequest), true);
+        assert.equal(writer.stored.has(cacheRequest.url), false);
+        assert.equal(reader.stored.has(cacheRequest.url), true,
+          "writer-side invalidation must not wipe reader-colo cache");
+        assert.match(await reader.stored.get(cacheRequest.url).clone().text(), /単独失効スタッフ575/,
+          "stale reader cache must demonstrably retain revoked staff");
+
+        globalThis.caches.default = reader.cache;
+        const fresh = await request(path);
+        assert.equal(fresh.status, 200);
+        assert.equal(fresh.headers.get("X-FlameNode-Cache"), "MISS",
+          runtime + " must reject staff-only stale cache without a video change");
+        assert.equal(fresh.headers.get("Cache-Control"), "no-store");
+        const safeBody = await fresh.text();
+        assert.doesNotMatch(safeBody, /単独失効スタッフ575/,
+          "revoked staff must never be returned from the unchanged-video cache");
+        assert.match(safeBody, /継続公開スタッフ575/,
+          "unrelated still-public staff must not be discarded");
+        assert.match(safeBody, /public-video/,
+          "unchanged public video must remain visible");
+        assert.equal(d1.stats.writes, 0, "event export GET must not modify D1");
+        await Promise.all(globalThis.__eventExport.pending.splice(0));
+        const safeHit = await request(path);
+        assert.equal(safeHit.headers.get("X-FlameNode-Cache"), "HIT");
+        const safeHitBody = await safeHit.text();
+        assert.match(safeHitBody, /継続公開スタッフ575/, "still-public staff survives a later cache HIT");
+        assert.match(safeHitBody, /public-video/, "unchanged public video survives a later cache HIT");
+        assert.doesNotMatch(safeHitBody, /単独失効スタッフ575/);
+      }
+    } finally {
+      globalThis.caches.default = previousCache;
+      sqlite.exec("DELETE FROM event_staff WHERE id IN ('revoked-staff-only-575', 'safe-staff-only-575')");
+      reset();
+    }
+  });
+
+  test("SEC-575: stale scheduled origin body is evicted even when replacement Cache.put fails", async () => {
+    // The D1-derived response can reject a revoked video without deleting the
+    // previous Cache API entry. Simulate a best-effort cache write failure to
+    // prove that a rejected sensitive entry is itself removed, not merely
+    // overwritten. Cloudflare Cache API accepts either Request or URL string.
+    const originalPut = edgeCache.put;
+    try {
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        for (const format of ["v5", "legacy"]) {
+          reset();
+          sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+          const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+          const key = `public-event-export:9:export-event:${format}:1440`;
+          const cacheUrl = "https://flamenode.internal/public-json/" + encodeURIComponent(key);
+          const first = await request(path);
+          assert.equal(first.status, 200, runtime + " " + format);
+          assert.equal(first.headers.get("X-FlameNode-Cache"), "MISS");
+          assert.match(await first.text(), /public-video/);
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+          assert.equal(map.has(cacheUrl), true, "test must start from a real cached body");
+          assert.equal((await request(path)).headers.get("X-FlameNode-Cache"), "HIT");
+
+          sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+          // A rejected put must not serve as an excuse to keep the old
+          // private-transition body at rest in the reader colo.
+          edgeCache.put = async () => { throw new Error("simulated-cache-put-unavailable"); };
+          const safe = await request(path);
+          assert.equal(safe.status, 200);
+          assert.equal(safe.headers.get("X-FlameNode-Cache"), "MISS");
+          assert.equal(safe.headers.get("Cache-Control"), "no-store");
+          assert.doesNotMatch(await safe.text(), /public-video|公開作品/);
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+          assert.equal(map.has(cacheUrl), false,
+            runtime + " " + format + " must erase the stale colo-local cache even if put fails");
+          assert.equal(d1.stats.writes, 0, "Cache.delete must not write D1");
+          edgeCache.put = originalPut;
+        }
+      }
+    } finally {
+      edgeCache.put = originalPut;
+      sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      reset();
+    }
+  });
+
+  test("SEC-575: cached export fails closed when the post-gate video D1 read throws", async () => {
+    // A live scheduled Cache API HIT cannot become a fallback when D1 video
+    // visibility cannot be checked, even if the event gate itself succeeded.
+    // Inject the failure only on SELECT ... FROM videos, not on events.
+    for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+      for (const format of ["v5", "legacy"]) {
+        reset();
+        const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+        const key = `public-event-export:9:export-event:${format}:1440`;
+        const cacheUrl = "https://flamenode.internal/public-json/" + encodeURIComponent(key);
+        const primed = await request(path);
+        assert.equal(primed.status, 200, runtime + " " + format);
+        assert.equal(primed.headers.get("X-FlameNode-Cache"), "MISS");
+        assert.match(await primed.text(), /public-video/);
+        await Promise.all(globalThis.__eventExport.pending.splice(0));
+        assert.equal(map.has(cacheUrl), true, "a real scheduled body must be cached");
+        const warm = await request(path);
+        assert.equal(warm.headers.get("X-FlameNode-Cache"), "HIT");
+        assert.match(await warm.text(), /public-video/);
+
+        globalThis.__eventExport.failVideoRelationRead = true;
+        try {
+          const denied = await request(path);
+          assert.equal(denied.status, 503, runtime + " " + format);
+          assert.equal(denied.headers.get("Cache-Control"), "no-store");
+          const text = await denied.text();
+          assert.equal(text, '{"error":"database_unavailable"}');
+          assert.doesNotMatch(text, /public-video|公開作品|private-SQL-params-575/,
+            "neither cached video data nor internal D1 parameters may leak");
+          assert.ok(globalThis.__eventExport.relationReadFaults >= 1,
+            "the error must arise after the event gate on a video relation SELECT");
+          assert.equal(map.has(cacheUrl), true,
+            "the old cached response is retained, but must not be used as a fallback");
+          assert.equal(d1.stats.writes, 0, "fail-closed GET performs zero D1 writes");
+        } finally {
+          globalThis.__eventExport.failVideoRelationRead = false;
+        }
+        const recovered = await request(path);
+        assert.equal(recovered.status, 200);
+        assert.equal(recovered.headers.get("X-FlameNode-Cache"), "HIT",
+          "a healthy D1 read can reuse an unchanged cached snapshot");
+        assert.match(await recovered.text(), /public-video/);
+      }
+    }
+    reset();
+  });
+
+  test("SEC-575: staff-only realtime isolate cache cannot replay revoked staff when event timestamp is unchanged", async () => {
+    // Scheduled Cache API and realtime isolate cache are independent paths.
+    // Test staff-only revocation without any video or event-row change, and
+    // directly prove that the isolate still holds the pre-revocation string.
+    try {
+      sqlite.exec("INSERT INTO event_staff (id, event_id, x_user_id, display_name, is_public, created_at, updated_at) VALUES ('staff-realtime-revoke-575', 'export-event', 'x-rt-revoke-575', 'リアルタイム失効スタッフ575', 1, 1700000000, 1700000000), ('staff-realtime-safe-575', 'export-event', 'x-rt-safe-575', 'リアルタイム継続公開575', 1, 1700000000, 1700000000)");
+      for (const [runtime, request, microGet] of [
+        ["CURRENT", current, currentMicroCacheGet],
+        ["Hono", hono, honoMicroCacheGet],
+      ]) {
+        reset();
+        sqlite.exec("UPDATE events SET public_api_enabled=1, visibility_status='public' WHERE id='export-event'");
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+        sqlite.exec("UPDATE event_staff SET is_public=1 WHERE id='staff-realtime-revoke-575'");
+        const updatedAt = sqlite.prepare("SELECT updated_at FROM events WHERE id='export-event'").get().updated_at;
+        const cacheKey = `export:export-event:v5:${updatedAt}`;
+        const path = "export-event?format=v5&update=realtime";
+        const initial = await request(path);
+        assert.equal(initial.status, 200, runtime);
+        assert.equal(initial.headers.get("X-FlameNode-Cache"), "BYPASS");
+        assert.equal(initial.headers.get("Cache-Control"), "no-store");
+        const firstBody = await initial.text();
+        assert.match(firstBody, /リアルタイム失効スタッフ575/);
+        assert.match(firstBody, /リアルタイム継続公開575/);
+        assert.match(firstBody, /public-video/);
+        assert.match(microGet(cacheKey), /リアルタイム失効スタッフ575/,
+          runtime + " isolate must actually hold the old private-transition candidate");
+
+        // Only the staff public flag changes: no video transition and no
+        // event.updated_at bump to invalidate the old isolate cache key.
+        sqlite.exec("UPDATE event_staff SET is_public=0 WHERE id='staff-realtime-revoke-575'");
+        assert.equal(sqlite.prepare("SELECT updated_at FROM events WHERE id='export-event'").get().updated_at, updatedAt);
+        assert.match(microGet(cacheKey), /リアルタイム失効スタッフ575/,
+          "revoked staff must still exist in isolate cache before the read");
+
+        const after = await request(path);
+        assert.equal(after.status, 200, runtime);
+        assert.equal(after.headers.get("X-FlameNode-Cache"), "BYPASS");
+        assert.equal(after.headers.get("Cache-Control"), "no-store");
+        const body = await after.text();
+        assert.doesNotMatch(body, /リアルタイム失効スタッフ575/,
+          "cached realtime staff must not bypass fresh relation authorization");
+        assert.match(body, /リアルタイム継続公開575/,
+          "unaffected public staff remains available");
+        assert.match(body, /public-video/,
+          "unchanged public video must not be removed to force a fake PASS");
+        assert.doesNotMatch(microGet(cacheKey), /リアルタイム失効スタッフ575/,
+          "stale isolate entry must be replaced by a newly validated body");
+        assert.match(microGet(cacheKey), /リアルタイム継続公開575/);
+        assert.equal(d1.stats.writes, 0, "GET remains read-only against D1");
+      }
+    } finally {
+      sqlite.exec("DELETE FROM event_staff WHERE id IN ('staff-realtime-revoke-575','staff-realtime-safe-575')");
+      reset();
+    }
+  });
+
+  test("SEC-575: スタッフ公開フラグ解除とイベント再公開後に旧キャッシュを再配信しない", async () => {
+    for (const request of [current, hono]) {
+      for (const format of ["v5", "legacy"]) {
+        reset();
+        sqlite.exec("INSERT OR REPLACE INTO event_staff (id, event_id, x_user_id, display_name, is_public, created_at, updated_at) VALUES ('staff-575', 'export-event', 'x-staff-575', '機密スタッフ', 1, 1700000000, 1700000000)");
+        const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+        const first = await request(path);
+        assert.equal(first.status, 200);
+        const firstBody = await first.text();
+        if (format === "v5") {
+          assert.match(firstBody, /機密スタッフ/);
+        } else {
+          assert.doesNotMatch(firstBody, /機密スタッフ/, "legacy export has no staff field");
+        }
+        await Promise.all(globalThis.__eventExport.pending);
+        sqlite.exec("UPDATE event_staff SET is_public=0 WHERE id='staff-575'");
+        const revoked = await request(path);
+        assert.equal(revoked.status, 200);
+        assert.doesNotMatch(await revoked.text(), /機密スタッフ/);
+        sqlite.exec("UPDATE events SET visibility_status='private' WHERE id='export-event'");
+        assert.equal((await request(path)).status, 404);
+        sqlite.exec("UPDATE events SET visibility_status='public' WHERE id='export-event'");
+        assert.doesNotMatch(await (await request(path)).text(), /機密スタッフ/);
+        sqlite.exec("DELETE FROM event_staff WHERE id='staff-575'");
+      }
+    }
+    reset();
+  });
+
   test("T04: corrupt legacy cache is evicted; MISS regenerates from D1", async () => {
     reset();
     const key = "public-event-export:9:export-event:legacy:60";
@@ -271,6 +777,53 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(failureBody, /secret-D1-provider-detail/);
     assert.equal(d1.stats.writes, 0);
   });
+  test("SEC-575: v5 scheduledキャッシュは生成時刻が変わってもCURRENT/HonoでHITする", async () => {
+    const path = "export-event?format=v5&update=scheduled&refresh=1440";
+    for (const request of [current, hono]) {
+      reset();
+      Date.now = () => 1700000200000;
+      try {
+        const first = await normalized(await request(path));
+        assert.equal(first.status, 200);
+        assert.equal(first.headers["X-FlameNode-Cache"], "MISS");
+        await Promise.all(globalThis.__eventExport.pending);
+        Date.now = () => 1700000320000;
+        const next = await normalized(await request(path));
+        assert.equal(next.status, 200);
+        assert.equal(next.headers["X-FlameNode-Cache"], "HIT");
+        assert.equal(next.body, first.body, "cached generated_at provenance must not change on HIT");
+        assert.equal(next.headers.ETag, first.headers.ETag);
+        assert.equal(d1.stats.writes, 0);
+      } finally {
+        Date.now = () => 1700000200000;
+      }
+    }
+    reset();
+  });
+  test("SEC-575: v5 realtime micro-cache can reuse a snapshot after 2 seconds, but never revoked data", async () => {
+    const path = "export-event?format=v5&update=realtime";
+    for (const request of [current, hono]) {
+      reset();
+      Date.now = () => 1700000200000;
+      try {
+        const first = await normalized(await request(path));
+        assert.equal(first.status, 200);
+        Date.now = () => 1700000202000;
+        const next = await normalized(await request(path));
+        assert.equal(next.status, 200);
+        assert.equal(next.body, first.body, "micro-cache must reuse the original v5 body across generated_at drift");
+        sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+        const revoked = await normalized(await request(path));
+        assert.equal(revoked.status, 200);
+        assert.doesNotMatch(revoked.body, /public-video|公開作品/);
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      } finally {
+        Date.now = () => 1700000200000;
+      }
+    }
+    reset();
+  });
+
   test("T07: Cache API HIT is gated and keeps status/ETag/refresh headers", async () => {
     reset();
     const path = "export-event?format=v5&update=scheduled&refresh=1440";

@@ -33,8 +33,21 @@ test("event exportのCache API HITはmetadataを信用せずDTO検証を必ず�
 
 test("scheduled exportはCache API HITでもD1公開可否確認を先に維持する", () => {
   const authIndex = route.indexOf("prefetchedEvent = await loadEventExportEvent");
-  const cacheIndex = route.indexOf("const response = await cachedResponse()");
-  assert.ok(authIndex >= 0 && cacheIndex > authIndex);
+  const snapshotIndex = route.indexOf("snapshot = await loadEventExportSnapshot(");
+  const serializationIndex = route.indexOf("body = JSON.stringify(payload)");
+  const cacheIndex = route.indexOf("const response = await cachedResponse(body)");
+  assert.ok(authIndex >= 0 && snapshotIndex > authIndex &&
+    serializationIndex > snapshotIndex && cacheIndex > serializationIndex,
+    "scheduled cache reuse must follow the fresh D1 relation snapshot and public DTO");
+  // On a freshness mismatch the old origin Cache API body must be evicted
+  // before a freshly-authorized response, not only overwritten opportunistically.
+  const nullGuard = route.indexOf("if (cached === null) return null;");
+  const mismatchGuard = route.indexOf("if (!eventExportBodyMatchesFresh(cached, freshBody, format))");
+  const evictionIndex = route.indexOf("await deletePublicJsonCaches([payloadCacheKey])", mismatchGuard);
+  const returnHitIndex = route.indexOf("return exportResponse(", mismatchGuard);
+  assert.ok(nullGuard >= 0 && mismatchGuard > nullGuard &&
+    evictionIndex > mismatchGuard && returnHitIndex > evictionIndex,
+    "only a fresh D1-equivalent body can be returned as HIT; stale entries are deleted");
 });
 
 test("web WorkerはSmart Placementを有効化し静的assetはWorkerを迂回する", () => {
