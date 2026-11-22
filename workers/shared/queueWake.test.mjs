@@ -184,3 +184,25 @@ test("SEC-743/#740: rejected diagnostic KV put cannot leak provider Error.name/m
   ]);
   assert.ok(!JSON.stringify(values).includes(secret), "no nested provider detail may reach logs");
 });
+
+test("SEC-743/#740: non-function diagnostic KV accessor is skipped without leaking its value", async () => {
+  const secret = "SEC743_NONFUNCTION_KV_ACCESSOR_SECRET";
+  const kv = Object.defineProperty({}, "put", {
+    get() { return secret; },
+  });
+  const { result, values } = await collectQueueWarnings(() =>
+    sendWorkerQueueWakeBestEffort({
+      queue: null,
+      kind: "notification_available",
+      source: "recovery",
+      envFlags: { QUEUE_DISPATCH_ENABLED: "1" },
+      kv,
+    }),
+  );
+  assert.equal(result, false);
+  assert.deepEqual(values.map(([entry]) => JSON.parse(entry)), [
+    { service: "queue-wake-worker", result: "binding_missing", kind: "notification_available" },
+    { service: "queue-wake-worker", result: "last_failure_record_skipped", kind: "notification_available", reason: "binding_missing" },
+  ]);
+  assert.ok(!JSON.stringify(values).includes(secret));
+});
