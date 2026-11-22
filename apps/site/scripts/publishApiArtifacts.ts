@@ -13,7 +13,8 @@ const MAX_API_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const MAX_API_RELEASE_OBJECTS = 5000;
 // CURRENT rebuildEventsIndex selects the latest 200 non-point public events.
 const MAX_EVENT_INDEX_ROWS = 200;
-const EVENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+// Same path-safe legacy ID set as the build producer (leading _/- valid).
+const EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_READBACK_RETRIES = 3;
 
 export interface ApiArtifactBucket {
