@@ -496,6 +496,9 @@ if (runTestWithTsx(import.meta.url)) {
             assert.equal(sqlite.prepare("SELECT count(*) AS n FROM static_rebuild_queue WHERE id = 'sec734-rebuild'").get()?.n,
               sources.staticRebuildWakeSource ? 1 : 0,
               "the queued rebuild row is durably committed before a wake is attempted");
+            assert.equal(sqlite.prepare("SELECT count(*) AS n FROM notification_outbox WHERE id = 'sec734-notice' AND status = 'pending'").get()?.n,
+              sources.notificationWakeSource ? 1 : 0,
+              "the pending notification outbox row is committed before a wake is attempted");
             if (mode === "sync") throw new Error("Queue import " + secret);
             if (mode === "async") return Promise.reject(new Error("Queue module " + secret));
             return {
@@ -523,6 +526,10 @@ if (runTestWithTsx(import.meta.url)) {
             statements.push(db.run(sql`INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, status, priority, attempt_count, created_at, updated_at)
               VALUES (${"sec734-rebuild"}, ${"announcements"}, ${"all"}, ${"sec734_postcommit"}, ${"pending"}, ${"normal"}, ${0}, ${1000}, ${1000})`));
           }
+          if (sources.notificationWakeSource) {
+            statements.push(db.run(sql`INSERT INTO notification_outbox (id, recipient_user_id, type, payload_json, status, created_at)
+              VALUES (${"sec734-notice"}, ${"actor-1"}, ${"event_update"}, ${"{}"}, ${"pending"}, ${1000})`));
+          }
           const ids = await mutateWithAuditCore(db, {
             mutationStatements: statements,
             expectedMutationChanges: statements.map(() => 1),
@@ -530,8 +537,9 @@ if (runTestWithTsx(import.meta.url)) {
             ...sources,
           }, hostLoader);
           const queued = sqlite.prepare("SELECT count(*) AS n FROM static_rebuild_queue WHERE id = 'sec734-rebuild'").get()?.n;
+          const notified = sqlite.prepare("SELECT count(*) AS n FROM notification_outbox WHERE id = 'sec734-notice' AND status = 'pending'").get()?.n;
           log.push({ op: "test.committed", name });
-          return { ids, queued };
+          return { ids, queued, notified };
         });
       } finally {
         console.warn = originalWarn;
@@ -539,6 +547,8 @@ if (runTestWithTsx(import.meta.url)) {
       assert.ok(Array.isArray(actual.outcome.returned?.ids) && actual.outcome.returned.ids.length === 1, name);
       assert.equal(actual.outcome.returned.queued, sources.staticRebuildWakeSource ? 1 : 0,
         name + ": committed rebuild work is not lost if Queue wake fails");
+      assert.equal(actual.outcome.returned.notified, sources.notificationWakeSource ? 1 : 0,
+        name + ": pending notification outbox work is not lost if Queue wake fails");
       assert.equal(actual.outcome.threw, undefined, name + ": committed D1 must not report a failure");
       assert.equal(actual.announcements.find((r) => r.id === "ann-1")?.title, "Hello v2", name);
       assert.equal(actual.audit_logs.length, 1, name + ": exactly one durable audit");
