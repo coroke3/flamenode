@@ -189,13 +189,14 @@ export async function sendQueueWakeBestEffort(
     () => {
       options.sentKinds?.add(options.kind);
     },
-    async (error: unknown) => {
+    async () => {
       sendFailed = true;
+      // Queue provider Error.name/message/cause are not a trusted enum.
+      // Do not serialize any part of the thrown object to diagnostics.
       warnOnce(`wake_send_failed:${options.kind}`, {
         service: "queue-wake",
         result: "send_failed",
         kind: options.kind,
-        error_name: error instanceof Error ? error.name : undefined,
       });
       // このPromise自体が下でawaitまたはwaitUntil登録されるため、失敗telemetryも
       // 同じlifetimeへ含める。response後に投げ捨てられるfloating Promiseを作らない。
