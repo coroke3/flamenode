@@ -589,7 +589,29 @@ if (runTestWithTsx(import.meta.url)) {
             : mode === "static_preflight"
               ? [["[audit-mutate] static rebuild wake failed", "provider_error"]]
               : [];
-      assert.deepEqual(warnings, expectedWarnings, name + ": fixed warning codes only");
+      // SEC-738 independently hardens the shared Queue helper: flag getters
+      // then fail closed locally instead of throwing up to mutateWithAudit.
+      // Both versions must preserve the same already-committed D1/audit rows.
+      const softFlagKinds = mode === "downstream"
+        ? ["notification_available", "static_rebuild_available"]
+        : mode === "notification_preflight"
+          ? ["notification_available"]
+          : mode === "static_preflight"
+            ? ["static_rebuild_available"]
+            : [];
+      const softFlagWarnings = softFlagKinds.flatMap((kind) => [
+        [JSON.stringify({ service: "queue-wake", result: "feature_flags_unavailable", kind })],
+        [JSON.stringify({ service: "queue-wake", result: "last_failure_record_skipped", kind, reason: "feature_flags_unavailable" })],
+      ]);
+      if (softFlagKinds.length > 0) {
+        assert.ok(
+          JSON.stringify(warnings) === JSON.stringify(expectedWarnings) ||
+          JSON.stringify(warnings) === JSON.stringify(softFlagWarnings),
+          name + ": only exact legacy or SEC-738 fail-closed warning codes are allowed",
+        );
+      } else {
+        assert.deepEqual(warnings, expectedWarnings, name + ": fixed warning codes only");
+      }
       assert.equal(downstreamReads, mode === "downstream" ? 2
         : mode === "notification_preflight" || mode === "static_preflight" ? 3 : 0,
         name + ": independent notification/static wake attempts");
