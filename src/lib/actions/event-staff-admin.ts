@@ -407,14 +407,11 @@ export async function upsertEventStaffMember(
     );
   } catch (error) {
     unstable_rethrow(error);
+    const expected = expectedInvalidStaffPermissionMessage(data.permission_keys);
     return {
       ok: false,
       message: staffSafeActionMessage(
-        error, "入力エラー", undefined,
-        (() => {
-          const expected = expectedInvalidStaffPermissionMessage(data.permission_keys);
-          return expected ? [expected] : undefined;
-        })(),
+        error, "入力エラー", undefined, expected ? [expected] : undefined,
       ),
     };
   }
