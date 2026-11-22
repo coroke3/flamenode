@@ -253,6 +253,11 @@ const MAIN_HONO_METHODS = new Set([
   "GET /api/manage/events/:id/videos/:videoId", "GET /api/manage/events/:id/videos", "GET /api/manage/events/:id/youtube-playlist",
   "POST /api/manage/events/:id/youtube-playlist/sync", "PUT /api/manage/events/:id/youtube-playlist", "GET /api/manage/events/:id/audience",
   "GET /api/manage/events/:id", "GET /api/manage/notifications", "GET /api/manage/x-link-requests", "GET /api/manage",
+  "GET /api/admin/event-groups/event-options", "POST /api/admin/event-groups",
+  "PATCH /api/admin/event-groups/:id", "DELETE /api/admin/event-groups/:id",
+  "DELETE /api/admin/event-groups/:id/events/:eventId", "POST /api/admin/event-groups/:id/events",
+  "POST /api/xid/active", "PATCH /api/xid/:xUserId/profile", "DELETE /api/xid/:xUserId",
+  "PUT /api/xid/:xUserId/icon", "POST /api/xid/:xUserId/icon/upload",
   "POST /api/xid/requests", "POST /api/xid/requests/:id/cancel", "POST /api/xid/merge-revert-requests",
   "PUT /api/admin/permissions/editable-fields", "POST /api/admin/terms",
   "PATCH /api/admin/terms/:id", "POST /api/admin/terms/:id/publish",
@@ -312,7 +317,7 @@ test("MIG-0639 T01: every main Hono method has exactly one scenario (named or in
   assert.equal(new Set(titles).size, titles.length, "no method has two scenarios");
   assert.deepEqual([...MAIN_HONO_METHODS].filter((m) => !titles.includes(m)), [], "methods without a scenario");
   assert.deepEqual(titles.filter((t) => !MAIN_HONO_METHODS.has(t)), [], "scenarios for methods that are not mounted");
-  assert.equal(MAIN_HONO_METHODS.size, 142);
+  assert.equal(MAIN_HONO_METHODS.size, 153);
 });
 
 test("MIG-0639 T01: the method list equals the routes mounted in apps/api/src/app.ts", async () => {
@@ -320,6 +325,35 @@ test("MIG-0639 T01: the method list equals the routes mounted in apps/api/src/ap
   const mounted = new Set(app.routes.filter((r) => r.method !== "ALL").map((r) => `${r.method} ${r.path}`));
   assert.deepEqual([...MAIN_HONO_METHODS].filter((m) => !mounted.has(m)), [], "listed but no longer mounted");
   assert.deepEqual([...mounted].filter((m) => !MAIN_HONO_METHODS.has(m)), [], "mounted but not benchmarked (add a scenario)");
+});
+
+test("MIG-0639: 11 newly mounted SA-025..030/098/102..105 routes have genuine bounded fixtures", async () => {
+  const scenarios = new Map(buildScenarios({ adminToken: "bench" }).map(s => [s.id, s]));
+  const ids = ["SA-025","SA-026","SA-027","SA-028","SA-029","SA-030","SA-098","SA-102","SA-103","SA-104","SA-105"];
+  for (const id of ids) {
+    const s = scenarios.get(id);
+    assert.ok(s, id + " missing");
+    assert.deepEqual(Object.keys(s.kinds), ["normal","limit","invalid"], id);
+    assert.equal(s.kinds.normal(0,"qa").expect[0], 200, id);
+  }
+  const created = scenarios.get("SA-026").kinds.normal(0,"qa");
+  assert.equal(JSON.parse(created.body).visibility_status,"private");
+  assert.equal(JSON.parse(scenarios.get("SA-026").kinds.limit(0,"qa").body).name.length,120);
+  assert.equal(JSON.parse(scenarios.get("SA-029").kinds.limit(0,"qa").body).eventIds.length,80);
+  assert.equal(scenarios.get("SA-030").kinds.normal(0,"qa").setup.length,2);
+  assert.equal(scenarios.get("SA-025").kinds.normal(0,"qa").path.includes("groupId=bench-group"),true);
+  assert.equal(JSON.parse(scenarios.get("SA-102").kinds.limit(0,"qa").body).profile_text.length,2000);
+  for(const id of ["SA-102","SA-103","SA-104","SA-105"]) {
+    const s=scenarios.get(id).kinds.normal(0,"qa");
+    assert.match(s.path,/\/api\/xid\/bench_x/);
+    assert.ok(s.setup.some(row=>row.sql.includes("x_user_account_links")),id+" must seed real linked X");
+  }
+  const upload=scenarios.get("SA-105").kinds.normal(0,"qa");
+  assert.ok(upload.body instanceof FormData);
+  assert.equal(upload.headers["content-type"],undefined);
+  assert.equal(upload.body.get("x_user_id"),"bench_x");
+  assert.ok(upload.body.get("icon_file") instanceof File);
+  assert.equal(scenarios.get("SA-105").kinds.invalid(0,"qa").expect[0],400);
 });
 
 test("MIG-0639 SA-045..048, SA-049, SA-051..055, SA-099..101: all newly mounted write routes have seeded local probes", () => {

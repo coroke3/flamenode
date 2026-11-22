@@ -604,6 +604,35 @@ const benchYoutubeSetup = (kind,i,tag) => [
   { sql:"DELETE FROM video_youtube_metadata WHERE video_id = ?",params:[benchYoutubeId(kind,i,tag)] },
 ];
 
+
+/** MIG-0639: independent, real-handler input fixtures for SA-025..030 and SA-098/102..105.
+ * A private event group avoids unrelated public R2 fencing during the write CPU
+ * measurement; its membership is rebuilt before each sample. No live data.
+ */
+const BENCH_X_CANON = "bench_x";
+const groupIdFor = (tag, i) => "g-" + String(tag).toLowerCase().replace(/[^a-z0-9]/g, "").slice(-32) + "-" + i;
+const groupReset = () => [
+  { sql: "INSERT OR REPLACE INTO event_groups (id,name,slug,group_type,visibility_status,sort_order,created_at,updated_at) VALUES ('bench-group','Bench group','bench-group','series','private',0,10,20)", params: [] },
+];
+const groupMemberReset = () => [
+  ...groupReset(),
+  { sql: "INSERT OR REPLACE INTO event_group_events (event_group_id,event_id,relation_type,created_at,updated_at) VALUES ('bench-group','bench-evt','member',10,20)", params: [] },
+];
+const groupLimitEvents = () => numberedRows(80,
+  "INSERT OR REPLACE INTO events (id,title,event_type,visibility_status,start_time,end_time,created_at,updated_at,public_api_enabled) SELECT 'bevg-' || n,'Limit event ' || n,'event','public',1000,2000,10,20,0 FROM seq", []);
+const groupAddSetup = (kind) => [...groupReset(), ...(kind === "limit" ? [groupLimitEvents()] : [])];
+const xidCanonicalReset = () => [
+  { sql: "INSERT OR IGNORE INTO x_users (id,x_name,approval_status,icon_url) VALUES ('bench_x','Benchmark X','approved','/api/media/xicons/bench_x/old.png')", params: [] },
+  { sql: "INSERT OR IGNORE INTO x_user_account_links (x_user_id,auth_user_id,link_role) VALUES ('bench_x','bench-admin','owner')", params: [] },
+];
+const xidActiveReset = () => [...xidCanonicalReset(),
+  { sql: "UPDATE \"user\" SET active_x_user_id='bench-x' WHERE id='bench-admin'", params: [] },
+];
+const xidIconReset = () => [...xidCanonicalReset(),
+  { sql: "UPDATE x_users SET icon_url='/api/media/xicons/bench_x/old.png' WHERE id='bench_x'", params: [] },
+  { sql: "UPDATE videos SET creator_x_user_id='bench_x', creator_icon_url='/api/media/xicons/bench_x/new.png', created_at=1000, visibility_status='public' WHERE id='bench-vid'", params: [] },
+];
+
 export const ROUTE_INVENTORY = [
   // [id, method, path, access, options]
   ["MIG-0661", "GET", "/api/operation-mode/banner", "p"],
@@ -744,6 +773,35 @@ export const ROUTE_INVENTORY = [
   ["RH-025", "GET", "/api/media/slot-submission-icon/:slotId", "p"],
   ["RH-023", "GET", "/api/media/*", "p"],
   ["RH-019", "GET", "/api/internal/x-users/search", "s"],
+
+  // MIG-0653 SA-025..030: actual bounded candidate read and audited private-group mutations.
+  ["SA-025", "GET", "/api/admin/event-groups/event-options", "a", {
+    nq:"?groupId=bench-group", lq:"?groupId=bench-group&q=" + "x".repeat(64),
+    setup:(kind) => kind === "limit" ? [groupLimitEvents()] : [],
+  }],
+  ["SA-026", "POST", "/api/admin/event-groups", "w"],
+  ["SA-027", "PATCH", "/api/admin/event-groups/:id", "w", {setup:groupReset}],
+  ["SA-028", "DELETE", "/api/admin/event-groups/:id", "w", {
+    setup:groupReset, params:(kind) => kind === "invalid" ? {id:"e".repeat(129)} : {},
+  }],
+  ["SA-030", "DELETE", "/api/admin/event-groups/:id/events/:eventId", "w", {
+    setup:groupMemberReset, params:(kind) => ({eventId:"bench-evt",...(kind === "invalid" ? {id:"e".repeat(129)} : {})}),
+  }],
+  ["SA-029", "POST", "/api/admin/event-groups/:id/events", "w", {setup:groupAddSetup}],
+  // MIG-0636 SA-098/102..105: canonical linked X handles, genuine audited write paths.
+  ["SA-098", "POST", "/api/xid/active", "w", {setup:xidActiveReset}],
+  ["SA-102", "PATCH", "/api/xid/:xUserId/profile", "w", {
+    params:()=>({xUserId:BENCH_X_CANON}), setup:xidCanonicalReset,
+  }],
+  ["SA-103", "DELETE", "/api/xid/:xUserId", "w", {
+    params:()=>({xUserId:BENCH_X_CANON}), setup:xidActiveReset,
+  }],
+  ["SA-104", "PUT", "/api/xid/:xUserId/icon", "w", {
+    params:()=>({xUserId:BENCH_X_CANON}), setup:xidIconReset,
+  }],
+  ["SA-105", "POST", "/api/xid/:xUserId/icon/upload", "w", {
+    params:()=>({xUserId:BENCH_X_CANON}), setup:xidCanonicalReset, multipartIcon:true,
+  }],
 ];
 
 function routeParam(pattern, name) {
@@ -789,6 +847,29 @@ const publicEventRows = (count) => numberedRows(
 const REASON = (k) => (k === "limit" ? "r".repeat(500) : "bench");
 /** Request bodies for the write inventory. `limit` fills the bounded text fields to their caps. */
 const WRITE_BODIES = {
+
+  "POST /api/admin/event-groups": (k,i,tag) => ({
+    id:groupIdFor(tag,i), name:k === "limit" ? "N".repeat(120) : "Benchmark group",
+    slug:groupIdFor(tag,i), description:k === "limit" ? "d".repeat(2000) : "Benchmark",
+    group_type:"series", visibility_status:"private", sort_order:k === "limit" ? 9999 : 0,
+  }),
+  "PATCH /api/admin/event-groups/:id": (k,i,tag) => ({
+    id:"bench-group", base_updated_at:20, name:k === "limit" ? "N".repeat(120) : "Bench updated " + tag + i,
+    slug:"bench-group", description:k === "limit" ? "d".repeat(2000) : "updated",
+    group_type:"series", visibility_status:"private", sort_order:k === "limit" ? 9999 : 0,
+  }),
+  "POST /api/admin/event-groups/:id/events": (kind) => ({
+    eventIds:kind === "limit" ? Array.from({length:80},(_,i)=>"bevg-"+(i+1)) : ["bench-evt"],
+  }),
+  "POST /api/xid/active": () => ({x_user_id:BENCH_X_CANON}),
+  "PATCH /api/xid/:xUserId/profile": (k,i,tag) => ({
+    x_user_id:BENCH_X_CANON, x_name:k === "limit" ? "N".repeat(80) : "Updated " + tag + i,
+    profile_text:k === "limit" ? "p".repeat(2000) : "Benchmark profile",
+    portfolio_contact:"benchmark@example.com", youtube_channel_url:"https://example.com/",
+    other_social_links:"[]",
+  }),
+  "DELETE /api/xid/:xUserId": () => ({x_user_id:BENCH_X_CANON,confirm:"DELETE " + BENCH_X_CANON}),
+  "PUT /api/xid/:xUserId/icon": () => ({x_user_id:BENCH_X_CANON,icon_url:"/api/media/xicons/bench_x/new.png"}),
   "POST /api/manage/events/:id/owner-transfer": () => ({
     from_staff_id:"bench-from",to_staff_id:"bench-to-staff",reason:"benchmark transfer",
     confirm_text:"TRANSFER bench-evt",self_confirm_text:"SELF CHANGE bench-evt",
@@ -884,9 +965,17 @@ export function buildRouteScenarios() {
       let body;
       if (writes) {
         headers.origin = kind === "invalid" && opts.invalidOrigin ? "https://evil.invalid" : SITE_URL;
-        headers["content-type"] = "application/json";
-        if (kind === "invalid") body = "{}";
-        else { const b = WRITE_BODIES[key]?.(kind, i, tag); body = b === undefined ? undefined : json(b); }
+        if (opts.multipartIcon && kind !== "invalid") {
+          // Actual multipart upload: no manual content-type (Request sets its boundary).
+          const form = new FormData();
+          form.append("x_user_id", BENCH_X_CANON);
+          form.append("icon_file", new File([BENCH_PNG], "bench.png", { type: "image/png" }));
+          body = form;
+        } else {
+          headers["content-type"] = "application/json";
+          if (kind === "invalid") body = "{}";
+          else { const b = WRITE_BODIES[key]?.(kind, i, tag); body = b === undefined ? undefined : json(b); }
+        }
       }
       const dyn = opts.params?.(kind, i, tag) ?? {};
       const setup = kind === "invalid" ? undefined : opts.setup?.(kind, i, tag);
@@ -903,6 +992,18 @@ export function buildRouteScenarios() {
 // Statuses a healthy run must return, pinned from an in-process probe of the main-branch app on the shared
 // fixture (MIG-0639). A different status means the fixture or the route changed and the CPU number is void.
 const ROUTE_EXPECT = {
+
+  "GET /api/admin/event-groups/event-options": {normal:[200],limit:[200],invalid:[401]},
+  "POST /api/admin/event-groups": {normal:[200],limit:[200],invalid:[400]},
+  "PATCH /api/admin/event-groups/:id": {normal:[200],limit:[200],invalid:[400]},
+  "DELETE /api/admin/event-groups/:id": {normal:[200],limit:[200],invalid:[400]},
+  "DELETE /api/admin/event-groups/:id/events/:eventId": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/admin/event-groups/:id/events": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/xid/active": {normal:[200],limit:[200],invalid:[400]},
+  "PATCH /api/xid/:xUserId/profile": {normal:[200],limit:[200],invalid:[400]},
+  "DELETE /api/xid/:xUserId": {normal:[200],limit:[200],invalid:[400]},
+  "PUT /api/xid/:xUserId/icon": {normal:[200],limit:[200],invalid:[400]},
+  "POST /api/xid/:xUserId/icon/upload": {normal:[200],limit:[200],invalid:[400]},
   "POST /api/manage/events/:id/owner-transfer": {normal:[200],limit:[200],invalid:[400]},
   "POST /api/manage/events/:id/staff/csv": {normal:[200],limit:[200],invalid:[400]},
   "POST /api/manage/events/:id/staff": {normal:[200],limit:[200],invalid:[400]},
@@ -1048,6 +1149,8 @@ export const SEED = (adminToken) => [
   { sql: `INSERT OR REPLACE INTO slots (id, event_id, start_time, status) VALUES ('bench-slot', 'bench-evt', 1000, 'available')`, params: [] },
   { sql: `INSERT OR REPLACE INTO x_users (id, x_name, approval_status) VALUES ('bench-x', 'Bench X', 'approved')`, params: [] },
   { sql: `INSERT OR REPLACE INTO x_user_account_links (x_user_id, auth_user_id, link_role) VALUES ('bench-x', 'bench-admin', 'owner')`, params: [] },
+  { sql: `INSERT OR REPLACE INTO x_users (id, x_name, approval_status, icon_url) VALUES ('bench_x', 'Bench Canonical', 'approved', '/api/media/xicons/bench_x/old.png')`, params: [] },
+  { sql: `INSERT OR REPLACE INTO x_user_account_links (x_user_id, auth_user_id, link_role) VALUES ('bench_x', 'bench-admin', 'owner')`, params: [] },
   { sql: `UPDATE "user" SET active_x_user_id = 'bench-x' WHERE id = 'bench-admin'`, params: [] },
   { sql: `INSERT OR REPLACE INTO event_groups (id, name, slug) VALUES ('bench-group', 'Bench group', 'bench-group')`, params: [] },
   { sql: `INSERT OR REPLACE INTO announcements (id, title, body, severity, is_published, target_audience, created_by_user_id, created_at, updated_at) VALUES ('bench-ann', 'Bench', 'Bench', 'info', 1, 'all', 'bench-admin', 10, 10)`, params: [] },
@@ -1121,6 +1224,14 @@ export async function createInprocTarget(plan) {
   };
   const r2Objects = new Map();
   const bucket = {
+    put: async (key, value) => {
+      r2Objects.set(key, Buffer.from(value).toString("base64"));
+      return keep({ etag: BENCH_ETAG });
+    },
+    delete: async (key) => {
+      r2Objects.delete(key);
+      return keep({ deleted: true });
+    },
     get: async (key) => {
       const body = r2Objects.get(key);
       if (body == null) return keep(null);
@@ -1254,7 +1365,11 @@ function replayEnv(env, script) {
         return result;
       },
     },
-    BUCKET: { get: async () => { const v = next(); return v && { size: v.size, etag: v.etag, json: async () => JSON.parse(v.text), text: async () => v.text, body: null }; } },
+    BUCKET: {
+      get: async () => { const v = next(); return v && { size: v.size, etag: v.etag, json: async () => JSON.parse(v.text), text: async () => v.text, body: null }; },
+      put: async () => next(),
+      delete: async () => next(),
+    },
   }, () => ({ statements: k, ...rows.totals() })];
 }
 
