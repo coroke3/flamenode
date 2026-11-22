@@ -155,6 +155,55 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.doesNotMatch(b.body, /private-video|submitted_by_user_id/);
     }
   });
+  test("SEC-575: hidden primary event id must not leak from public video linked to another public event", async () => {
+    // Even when a public video belongs to the exported public event via
+    // video_events, its primary_event_id may still point to a private event.
+    // event_ids is visibility-filtered; primary_event_id must be as well.
+    try {
+      sqlite.exec(`
+        INSERT INTO videos (id, title, submitted_by_user_id, creator_display_name,
+          primary_event_id, visibility_status, scheduled_time)
+        VALUES ('shared-primary-575', '別イベントの共有公開作品575', 'submitter', '制作者',
+          'hidden-event', 'public', 1700000130);
+        INSERT INTO video_events (video_id, event_id)
+        VALUES ('shared-primary-575', 'export-event');
+      `);
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        for (const updateMode of ["scheduled", "realtime"]) {
+          for (const format of ["v5", "legacy"]) {
+            reset();
+            const path = `export-event?format=${format}&update=${updateMode}&refresh=1440`;
+            const response = await request(path);
+            assert.equal(response.status, 200, runtime + " " + updateMode + " " + format);
+            assert.equal(response.headers.get("Cache-Control"), "no-store");
+            const body = await response.text();
+            assert.doesNotMatch(body, /hidden-event|非公開イベント/,
+              "the private primary event identifier must never be included");
+            assert.match(body, /別イベントの共有公開作品575/,
+              "the public video itself must remain visible");
+            if (format === "v5") {
+              const parsed = JSON.parse(body);
+              const shared = parsed.videos.find((v) => v.id === "shared-primary-575");
+              assert.ok(shared, "shared video remains in the public export");
+              assert.deepEqual(shared.event_ids, ["export-event"],
+                "visibility-filtered relation IDs still include the public target");
+              assert.equal(shared.primary_event_id, null,
+                "an event ID not proven public cannot be emitted as primary");
+              assert.equal(parsed.videos.find((v) => v.id === "public-video")?.primary_event_id,
+                "export-event", "valid public primary IDs must not be removed");
+            }
+            assert.equal(d1.stats.writes, 0, "export reads remain read-only");
+            await Promise.all(globalThis.__eventExport.pending.splice(0));
+          }
+        }
+      }
+    } finally {
+      sqlite.exec("DELETE FROM video_events WHERE video_id='shared-primary-575'");
+      sqlite.exec("DELETE FROM videos WHERE id='shared-primary-575'");
+      reset();
+    }
+  });
+
   test("T02: format / update / refresh invalid values and 404 status parity", async () => {
     for (const path of [
       "export-event?format=foo", "export-event?update=now",
