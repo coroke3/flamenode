@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseVideoMemberInputs, normalizeMemberChapters, parseMemberChapterTime, MAX_MEMBERS_JSON_BYTES } from "@flamenode/domain/video";
+import { parseVideoMemberInputs, normalizeMemberChapters, parseMemberChapterTime, validateVideoMemberSubmission, MAX_MEMBERS_JSON_BYTES } from "@flamenode/domain/video";
 import {
   parseVideoMemberInputs as legacyParse,
   normalizeMemberChapters as legacyNormalize,
@@ -93,6 +93,30 @@ test("MIG-0651: unnamed row with nonblank malformed X ID must not disappear sile
   ]), true);
   assert.equal(withId.ok, true);
   if (withId.ok) assert.deepEqual(withId.members.map(x => [x.name, x.x_user_id]), [["@valid_x", "valid_x"]]);
+});
+
+test("MIG-0651: name-only collaborator remains valid, but managed chapters require an X identity", () => {
+  const member = { name: "Name only", x_user_id: "", role: "Editor", comment: "", chapters: [] };
+  assert.deepEqual(normalizeMemberChapters(member, 0), { ok: true, chapters: [] },
+    "plain name-only collaborator must remain a valid public video member");
+  const chaptered = { ...member, chapters: [{ time: "01:10", label: "Intro", note: "" }] };
+  const normalized = normalizeMemberChapters(chaptered, 0);
+  assert.equal(normalized.ok, false);
+  assert.match(normalized.message, /X ID/);
+  const form = new FormData();
+  form.set("members_json", JSON.stringify([chaptered]));
+  const invalid = validateVideoMemberSubmission(form, true);
+  assert.equal(invalid.ok, false, "CURRENT and Hono share this early validation failure");
+  assert.match(invalid.message, /X ID/);
+  // The input is not an optional member when it has a name, and dropping the
+  // chapter silently would violate user-visible submission semantics.
+  const permitted = parseVideoMemberInputs(JSON.stringify([chaptered]), true);
+  assert.equal(permitted.ok, true, "schema and member parser remain backward compatible");
+  const noChapters = new FormData();
+  noChapters.set("members_json", JSON.stringify([member]));
+  const accepted = validateVideoMemberSubmission(noChapters, true);
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.value.members[0].x_user_id, "");
 });
 
 test("MIG-0651: chapter times preserve strict mm:ss format and fallback label", () => {
