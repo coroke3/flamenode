@@ -302,8 +302,10 @@ test("SEC-800: actual shared-domain ownership errors retain intended staff UI me
     assert.equal(error.message, message, "CURRENT domain message has not changed");
     assert.equal(policy(error, fallback, eventId), message,
       "exact shared-domain error must retain its approved UI wording");
-    assert.equal(policy(error, fallback, "other_event"), fallback,
-      "a confirmation for a different event must fail closed",);
+    const isEventConfirmation = message.startsWith("確認のため「");
+    assert.equal(policy(error, fallback, "other_event"),
+      isEventConfirmation ? fallback : message,
+      "only event-specific confirmation messages depend on the event identity");
   }
 
   assert.doesNotThrow(() => assertSelfChangeConfirmation({
