@@ -41,6 +41,9 @@ if (runTestWithTsx(import.meta.url)) {
   const { drizzle } = await import("drizzle-orm/d1");
   const schema = await import("../db/schema.ts");
   const { mutateWithAudit } = await import("./mutate.ts");
+  // Fault-injection tests must bypass the Next compatibility bridge, whose
+  // two-argument signature intentionally owns its Queue host loader.
+  const { mutateWithAudit: mutateWithAuditCore } = await import("@flamenode/server-core/audit/mutate");
   const { expectedRowCondition } = await import("./expectedRowCondition.ts");
   const { prepareAuditLogEntries, writeAuditLog } = await import("./logger.ts");
   const { resetQueueWakeWarningStateForTests } = await import(
@@ -520,7 +523,7 @@ if (runTestWithTsx(import.meta.url)) {
             statements.push(db.run(sql`INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, status, priority, attempt_count, created_at, updated_at)
               VALUES (${"sec734-rebuild"}, ${"announcements"}, ${"all"}, ${"sec734_postcommit"}, ${"pending"}, ${"normal"}, ${0}, ${1000}, ${1000})`));
           }
-          const ids = await mutateWithAudit(db, {
+          const ids = await mutateWithAuditCore(db, {
             mutationStatements: statements,
             expectedMutationChanges: statements.map(() => 1),
             audits: [announcementAudit()],
@@ -569,7 +572,7 @@ if (runTestWithTsx(import.meta.url)) {
     let actual;
     try {
       [, actual] = await runScenario("sec734_precommit_failed", ({ db }) =>
-        mutateWithAudit(db, {
+        mutateWithAuditCore(db, {
           mutationStatements: [
             db.run(sql`UPDATE announcements SET title = ${"Unexpected"} WHERE id = ${"ann-1"} AND updated_at = ${999}`),
           ],
