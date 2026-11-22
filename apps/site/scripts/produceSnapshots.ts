@@ -394,7 +394,14 @@ async function produceSnapshotsExclusive(input: ProduceInput): Promise<ProduceRe
       evEnv = captured.env;
       evObjects = captured.objects;
     }
-    const eventIds = (await allRows(evDb, `SELECT id FROM events WHERE visibility_status = 'public' ORDER BY id ASC LIMIT ?`, ID_LIST_LIMIT))
+    // Read one row past the cap: LIMIT 5000 alone would silently omit an
+    // off-index public event from our supposedly complete release inventory.
+    const publicEventRows = await allRows(evDb,
+      `SELECT id FROM events WHERE visibility_status = 'public' ORDER BY id ASC LIMIT ?`, ID_LIST_LIMIT + 1);
+    if (publicEventRows.length > ID_LIST_LIMIT) {
+      throw new Error("snapshot producer: public event inventory exceeds 5000 rows");
+    }
+    const eventIds = publicEventRows
       .map((row) => String(row.id)).filter((id) => EVENT_ID_PATTERN.test(id));
     await rebuildTarget(evEnv as never, "events_index", "global");
     for (const id of eventIds) {
