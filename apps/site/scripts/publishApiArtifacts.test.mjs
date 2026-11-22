@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { selectApiArtifacts, publishApiArtifacts } from "./publishApiArtifacts.ts";
 import { EVENT_INDEX_KEY, eventDetailKey, eventReleaseKey } from "../src/lib/publicDataLoader.ts";
-import { EVENT_ID_PATTERN as PRODUCER_EVENT_ID_PATTERN, verifiedPublicEventIds } from "./produceSnapshots.ts";
+import { EVENT_ID_PATTERN as PRODUCER_EVENT_ID_PATTERN, MAX_SNAPSHOT_BYTES, verifiedPublicEventIds } from "./produceSnapshots.ts";
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 function fixture(ids = ["evt_a", "evt_b"], indexedIds = ids) {
@@ -113,6 +113,151 @@ test("MIG-0666 T03: envelope, manifest, generation, checksum, visibility and eve
   changeIndex((index) => { index.items = "not-an-array"; });
 });
 
+
+test("SEC-752: manifest-listed off-index public detail requires an authentic unblocked snapshot before R2 IO", async () => {
+  const id = "evt_half_period";
+  const detailKey = eventDetailKey(id);
+  const cases = [
+    ["missing snapshot", (data) => { data.snapshots = data.snapshots.filter((s) => s.key !== detailKey); }],
+    ["invalid envelope JSON", (data) => { data.snapshots.find((s) => s.key === detailKey).json = "{bad"; }],
+    ["private envelope", (data) => {
+      const s = data.snapshots.find((s) => s.key === detailKey);
+      const envelope = JSON.parse(s.json);
+      envelope.visibility = "private";
+      s.json = JSON.stringify(envelope);
+    }],
+    ["wrong build generation", (data) => {
+      const s = data.snapshots.find((s) => s.key === detailKey);
+      const envelope = JSON.parse(s.json);
+      envelope.generation = "other-generation";
+      s.json = JSON.stringify(envelope);
+    }],
+    ["corrupt payload checksum", (data) => {
+      data.snapshots.find((s) => s.key === detailKey).sha256 = "0".repeat(64);
+    }],
+    ["manifest blocks public detail", (data) => { data.manifest.blockedKeys.push(detailKey); }],
+  ];
+  for (const [label, mutate] of cases) {
+    // The public half-period event is absent from the index but its detail
+    // remains listed in the manifest (including when the actual body is gone).
+    const data = fixture(["evt_listed", id], ["evt_listed"]);
+    mutate(data);
+    assert.throws(() => selectApiArtifacts(data), /api artifact publish:/, label);
+    const b = bucket();
+    let reads = 0, writes = 0;
+    b.get = async () => { reads++; return null; };
+    b.put = async () => { writes++; };
+    await assert.rejects(publishApiArtifacts(data, b), /api artifact publish:/, label);
+    assert.equal(reads, 0, label + ": reject before remote GET");
+    assert.equal(writes, 0, label + ": reject before remote PUT");
+  }
+});
+
+test("SEC-752: oversized or non-string off-index detail envelope aborts before JSON.parse and R2 IO", async () => {
+  const id = "evt_half_period";
+  const detailKey = eventDetailKey(id);
+  const makeEnvelopeWithUnused = (unused) => {
+    const data = fixture(["evt_listed", id], ["evt_listed"]);
+    const s = data.snapshots.find((item) => item.key === detailKey);
+    const envelope = JSON.parse(s.json);
+    envelope.unused = unused;
+    s.json = JSON.stringify(envelope);
+    return { data, snapshot: s };
+  };
+
+  // Valid tiny payload + valid digests, but oversized unused envelope property.
+  const oversized = makeEnvelopeWithUnused("x".repeat(MAX_SNAPSHOT_BYTES));
+  assert.ok(Buffer.byteLength(oversized.snapshot.json, "utf8") > MAX_SNAPSHOT_BYTES);
+  const originalParse = JSON.parse;
+  let parseCalls = 0;
+  JSON.parse = (...args) => { parseCalls += 1; return originalParse(...args); };
+  try {
+    assert.throws(() => selectApiArtifacts(oversized.data), /snapshot envelope exceeds byte budget/);
+    assert.equal(parseCalls, 0, "oversized envelope must fail before JSON.parse");
+    const b = bucket();
+    let reads = 0, writes = 0;
+    b.get = async () => { reads += 1; return null; };
+    b.put = async () => { writes += 1; };
+    await assert.rejects(publishApiArtifacts(oversized.data, b), /snapshot envelope exceeds byte budget/);
+    assert.equal(parseCalls, 0, "publish must also reject before JSON.parse");
+    assert.equal(reads, 0, "oversized envelope must abort before remote GET");
+    assert.equal(writes, 0, "oversized envelope must abort before remote PUT");
+
+    // Wrong-type snapshot.json must fail before JSON.parse and remote IO.
+    for (const invalidJson of [null, { schemaVersion: 1 }, 123]) {
+      const nonString = fixture(["evt_listed", id], ["evt_listed"]);
+      nonString.snapshots.find((item) => item.key === detailKey).json = invalidJson;
+      parseCalls = 0;
+      assert.throws(() => selectApiArtifacts(nonString), /invalid snapshot envelope/);
+      assert.equal(parseCalls, 0, "non-string snapshot.json must fail before JSON.parse");
+      await assert.rejects(publishApiArtifacts(nonString, b), /invalid snapshot envelope/);
+      assert.equal(parseCalls, 0);
+      assert.equal(reads, 0);
+      assert.equal(writes, 0);
+    }
+  } finally {
+    JSON.parse = originalParse;
+  }
+
+  // Exact UTF-8 boundary: MAX_SNAPSHOT_BYTES passes; +1 UTF-8 byte (even when string.length <= MAX_SNAPSHOT_BYTES) fails before JSON.parse.
+  const base = makeEnvelopeWithUnused("");
+  const baseBytes = Buffer.byteLength(base.snapshot.json, "utf8");
+  const exactPad = "a".repeat(MAX_SNAPSHOT_BYTES - baseBytes);
+  const exact = makeEnvelopeWithUnused(exactPad);
+  assert.equal(Buffer.byteLength(exact.snapshot.json, "utf8"), MAX_SNAPSHOT_BYTES);
+  assert.equal(selectApiArtifacts(exact.data).length, 3);
+
+  const utf8OverByOne = makeEnvelopeWithUnused(exactPad.slice(0, -1) + "é");
+  assert.equal(utf8OverByOne.snapshot.json.length, MAX_SNAPSHOT_BYTES);
+  assert.equal(Buffer.byteLength(utf8OverByOne.snapshot.json, "utf8"), MAX_SNAPSHOT_BYTES + 1);
+  parseCalls = 0;
+  JSON.parse = (...args) => { parseCalls += 1; return originalParse(...args); };
+  try {
+    assert.throws(() => selectApiArtifacts(utf8OverByOne.data), /snapshot envelope exceeds byte budget/);
+    assert.equal(parseCalls, 0, "UTF-8 byte budget must fail before JSON.parse");
+  } finally {
+    JSON.parse = originalParse;
+  }
+});
+
+test("SEC-752: verified detail bodies are excluded from published artifacts and byte accounting", async () => {
+  const ids = Array.from({ length: 201 }, (_, i) => "evt_" + String(i).padStart(3, "0"));
+  const data = fixture(ids, ids.slice(0, 200));
+  const detailPadding = "DETAIL_ONLY_BODY_" + "d".repeat(32 * 1024);
+  let totalDetailBytes = 0;
+  for (const id of ids) {
+    const key = eventDetailKey(id);
+    const snapshot = data.snapshots.find((item) => item.key === key);
+    const payload = { id, public: true, detailOnlyText: detailPadding };
+    const body = JSON.stringify(payload);
+    totalDetailBytes += Buffer.byteLength(body, "utf8");
+    snapshot.sha256 = sha(body);
+    snapshot.json = JSON.stringify({
+      schemaVersion: 1,
+      generation: data.manifest.generation,
+      key,
+      visibility: "public",
+      sha256: snapshot.sha256,
+      payload,
+    });
+  }
+
+  const artifacts = selectApiArtifacts(data);
+  assert.equal(artifacts.length, 202, "201 releases plus index only; no detail artifacts");
+  assert.ok(artifacts.every((item) => !item.key.includes("detail") && !item.body.includes("DETAIL_ONLY_BODY_")));
+  const expectedPublishedBytes = artifacts.reduce((n, item) => n + Buffer.byteLength(item.body, "utf8"), 0);
+  assert.ok(totalDetailBytes > 6 * 1024 * 1024);
+  assert.ok(expectedPublishedBytes < 64 * 1024);
+
+  const b = bucket();
+  const report = await publishApiArtifacts(data, b);
+  assert.equal(report.artifacts, 202);
+  assert.equal(report.puts, 202);
+  assert.equal(report.verified, 202);
+  assert.equal(report.bytes, expectedPublishedBytes, "report.bytes counts published releases+index only");
+  assert.equal(b.rows.size, 202);
+  assert.ok([...b.rows.keys()].every((key) => !key.includes("detail")));
+});
 
 test("SEC-747: an off-index public event missing BOTH snapshots aborts before any R2 IO", async () => {
   for (const { ids, indexed, omitted } of [
