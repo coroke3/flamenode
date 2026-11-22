@@ -63,8 +63,15 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
               const value = r2Objects.get(key);
               if (value == null) return null;
               return {
+                // Real R2 exposes json() to static snapshots and text()/etag
+                // to the separate visibility-manifest reader.
+                etag: key === "visibility/blocked-entities.v1.json" ? "manifest-test-etag" : undefined,
+                size: Buffer.byteLength(JSON.stringify(value)),
                 async json() {
                   return value;
+                },
+                async text() {
+                  return JSON.stringify(value);
                 },
               };
             },
@@ -204,6 +211,60 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
     assert.equal(updated.status, "fresh");
     assert.deepEqual(updated.value?.items, []);
     assert.equal(cacheWrites.length, 1);
+  });
+
+  test("Issue #653: enforced trending reader filters fresh Cache API entries against a current R2 visibility fence", async () => {
+    resetHarness();
+    const previousMode = process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+    process.env.PUBLIC_VISIBILITY_GUARD_MODE = "enforce";
+    const now = 1_700_000_000;
+    const row = (id, eventId = null) => ({
+      id, title: id === "v-private" ? "revoked private title" : "Visible",
+      youtube_video_id: "yt-" + id, display_name: "Creator",
+      icon_url: null, primary_event_id: eventId,
+      primary_event_title: eventId ? "event secret" : null,
+      scheduled_time: now - 100, status: "public",
+      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+    });
+    const old = {
+      schema_version: 1, generated_at: now - 120,
+      items: [row("v-private"), row("v-withdrawn-event", "e-private"), row("v-ok")],
+    };
+    const manifestKey = "visibility/blocked-entities.v1.json";
+    const manifest = {
+      schema_version: 1, revision: 2, generated_at: now,
+      entities: [
+        { entity_type: "video", entity_id: "v-private", fence_token: "f-1", blocked_at: now },
+        { entity_type: "event", entity_id: "e-private", fence_token: "f-2", blocked_at: now },
+      ],
+    };
+    cacheStore.set(TRENDING_OBJECT_KEY, { payload: old, stored_at: now - 60 });
+    r2Objects.set(manifestKey, manifest);
+    const { loadStaticTrending } = await import("./trendingLoader.ts");
+    try {
+      const filtered = await loadStaticTrending(now);
+      assert.equal(filtered.state, "ready");
+      assert.deepEqual(filtered.data?.items.map((item) => item.id), ["v-ok"]);
+      assert.equal(filtered.data?.generatedAt, now - 120);
+      assert.equal(cacheWrites.length, 0, "no extra R2 writer/cached overwrite on read");
+      assert.deepEqual(cacheStore.get(TRENDING_OBJECT_KEY).payload, old,
+        "cached original remains untouched");
+
+      // With a full cache hit but no trustworthy manifest, enforce cannot
+      // treat embedded "public" status as proof of CURRENT visibility.
+      r2Objects.delete(manifestKey);
+      const unavailable = await loadStaticTrending(now);
+      assert.equal(unavailable.state, "unavailable");
+      assert.equal(unavailable.data, null);
+
+      r2Objects.set(manifestKey, { ...manifest, schema_version: 999 });
+      const malformed = await loadStaticTrending(now);
+      assert.equal(malformed.state, "unavailable");
+      assert.equal(malformed.data, null);
+    } finally {
+      if (previousMode === undefined) delete process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+      else process.env.PUBLIC_VISIBILITY_GUARD_MODE = previousMode;
+    }
   });
 
   test("loadStaticJsonFreshStaleUnavailable prefers newer R2 over fresh cache", async () => {
