@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+
 import { isEntityBlockedInManifest } from "./publicVisibilityManifestCore";
 import {
   loadPublicVisibilityBlockedEntitiesManifest,
@@ -35,6 +37,25 @@ function normalizeTrendingPayload(value: unknown, nowSec: number): StaticTrendin
 // 壊れた巨大artifactをpublic requestでJSON parseしない。
 const TRENDING_MAX_OBJECT_BYTES = 1024 * 1024;
 
+/**
+ * Read the actual OpenNext request's Worker var, not process.env alone.
+ * A Worker-level "enforce" must not silently inherit the Node "observe"
+ * default when the two runtime configuration sources differ.
+ */
+function resolveTrendingGuardMode(): ReturnType<typeof resolvePublicVisibilityGuardModeFromEnv> {
+  try {
+    const env = getCloudflareContext().env as unknown as {
+      PUBLIC_VISIBILITY_GUARD_MODE?: string;
+    };
+    return resolvePublicVisibilityGuardModeFromEnv({
+      PUBLIC_VISIBILITY_GUARD_MODE: env?.PUBLIC_VISIBILITY_GUARD_MODE,
+    });
+  } catch {
+    // Build/local invocations without an OpenNext request context.
+    return resolvePublicVisibilityGuardModeFromEnv();
+  }
+}
+
 /** R2 `analytics/trending.json` のみ読み取る。D1 fallback なし。 */
 export async function loadStaticTrending(
   nowSec = Math.floor(Date.now() / 1000),
@@ -49,7 +70,7 @@ export async function loadStaticTrending(
     nowSec,
   });
   let data = loaded.value;
-  if (data && resolvePublicVisibilityGuardModeFromEnv() === "enforce") {
+  if (data && resolveTrendingGuardMode() === "enforce") {
     try {
       // Cache-first and 3h stale fallback can replay an R2 snapshot produced
       // before a video or its linked event was depublicized. Never trust only

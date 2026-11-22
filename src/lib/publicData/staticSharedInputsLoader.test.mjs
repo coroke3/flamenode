@@ -42,7 +42,9 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
       }
       if (specifier === "@opennextjs/cloudflare") {
         return {
-          url: "data:text/javascript,export%20function%20getCloudflareContext()%7Breturn%20%7B%7D%7D",
+          url: "data:text/javascript," + encodeURIComponent(
+            "export function getCloudflareContext(){return {env:{PUBLIC_VISIBILITY_GUARD_MODE:globalThis.__trendingWorkerVisibilityModeForTests}}}"
+          ),
           shortCircuit: true,
         };
       }
@@ -51,6 +53,7 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
   });
 
   let r2Objects = new Map();
+  globalThis.__trendingWorkerVisibilityModeForTests = undefined;
   const cacheStore = new Map();
   const cacheWrites = [];
 
@@ -148,6 +151,7 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
   }
 
   function resetHarness() {
+    globalThis.__trendingWorkerVisibilityModeForTests = undefined;
     r2Objects = new Map();
     cacheStore.clear();
     cacheWrites.length = 0;
@@ -264,6 +268,62 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
     } finally {
       if (previousMode === undefined) delete process.env.PUBLIC_VISIBILITY_GUARD_MODE;
       else process.env.PUBLIC_VISIBILITY_GUARD_MODE = previousMode;
+    }
+  });
+
+  test("Issue #653: Worker guard binding overrides divergent process.env in cached ranking", async () => {
+    resetHarness();
+    const previous = process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+    const now = 1_700_000_000;
+    const revoked = {
+      id: "v-revoked", title: "previously-public-title",
+      youtube_video_id: "yt-revoked", display_name: "creator",
+      icon_url: null, primary_event_id: null, primary_event_title: null,
+      scheduled_time: now - 100, status: "public",
+      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+    };
+    const old = { schema_version: 1, generated_at: now - 120, items: [revoked] };
+    const manifestKey = "visibility/blocked-entities.v1.json";
+    const manifest = {
+      schema_version: 1, revision: 1, generated_at: now,
+      entities: [{
+        entity_type: "video", entity_id: "v-revoked",
+        fence_token: "f-1", blocked_at: now,
+      }],
+    };
+    cacheStore.set(TRENDING_OBJECT_KEY, { payload: old, stored_at: now - 60 });
+    r2Objects.set(manifestKey, manifest);
+    const { loadStaticTrending } = await import("./trendingLoader.ts");
+    try {
+      process.env.PUBLIC_VISIBILITY_GUARD_MODE = "observe";
+      globalThis.__trendingWorkerVisibilityModeForTests = "enforce";
+      const enforced = await loadStaticTrending(now);
+      assert.equal(enforced.state, "empty",
+        "Worker enforce must not silently fall back to process.env observe");
+      assert.deepEqual(enforced.data?.items, []);
+
+      globalThis.__trendingWorkerVisibilityModeForTests = "off";
+      process.env.PUBLIC_VISIBILITY_GUARD_MODE = "enforce";
+      const explicitlyOff = await loadStaticTrending(now);
+      assert.deepEqual(explicitlyOff.data?.items.map((x) => x.id), ["v-revoked"],
+        "explicit Worker off overrides mismatched process.env, preserving opt-out");
+
+      globalThis.__trendingWorkerVisibilityModeForTests = undefined;
+      const localFallback = await loadStaticTrending(now);
+      assert.deepEqual(localFallback.data?.items, [],
+        "without a Worker var, retain existing process.env fallback");
+
+      globalThis.__trendingWorkerVisibilityModeForTests = "enforce";
+      process.env.PUBLIC_VISIBILITY_GUARD_MODE = "observe";
+      r2Objects.delete(manifestKey);
+      const missing = await loadStaticTrending(now);
+      assert.equal(missing.state, "unavailable",
+        "enforced Worker must fail closed when R2 manifest is unavailable");
+      assert.equal(missing.data, null);
+    } finally {
+      globalThis.__trendingWorkerVisibilityModeForTests = undefined;
+      if (previous === undefined) delete process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+      else process.env.PUBLIC_VISIBILITY_GUARD_MODE = previous;
     }
   });
 
