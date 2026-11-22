@@ -476,6 +476,8 @@ if (runTestWithTsx(import.meta.url)) {
       ["notification_async_reject", { notificationWakeSource: "web" }, "async"],
       ["both_sync_throw", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "sync"],
       ["both_downstream_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "downstream"],
+      ["both_notification_preflight_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "notification_preflight"],
+      ["both_static_preflight_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "static_preflight"],
       ["both_healthy", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "healthy"],
     ];
     for (const [name, sources, mode] of cases) {
@@ -503,11 +505,20 @@ if (runTestWithTsx(import.meta.url)) {
             if (mode === "async") return Promise.reject(new Error("Queue module " + secret));
             return {
               readEnv: () => {
-                if (mode === "downstream") {
+                if (mode === "downstream" ||
+                    mode === "notification_preflight" ||
+                    mode === "static_preflight") {
                   downstreamReads += 1;
-                  return new Proxy({}, {
-                    get() { throw new Error("Queue flags " + secret); },
-                  });
+                  // The first kind must never stop the second kind from
+                  // attempting its own wake after an atomic D1 commit.
+                  const shouldReject = mode === "downstream" ||
+                    (mode === "notification_preflight" && downstreamReads === 1) ||
+                    (mode === "static_preflight" && downstreamReads === 3);
+                  if (shouldReject) {
+                    return new Proxy({}, {
+                      get() { throw new Error("Queue flags " + secret); },
+                    });
+                  }
                 }
                 return {
                   QUEUE_DISPATCH_ENABLED: "1",
@@ -563,12 +574,20 @@ if (runTestWithTsx(import.meta.url)) {
               ["[audit-mutate] notification wake failed", "provider_error"],
               ["[audit-mutate] static rebuild wake failed", "provider_error"],
             ]
-          : [];
+          : mode === "notification_preflight"
+            ? [["[audit-mutate] notification wake failed", "provider_error"]]
+            : mode === "static_preflight"
+              ? [["[audit-mutate] static rebuild wake failed", "provider_error"]]
+              : [];
       assert.deepEqual(warnings, expectedWarnings, name + ": fixed warning codes only");
-      assert.equal(downstreamReads, mode === "downstream" ? 2 : 0,
+      assert.equal(downstreamReads, mode === "downstream" ? 2
+        : mode === "notification_preflight" || mode === "static_preflight" ? 3 : 0,
         name + ": independent notification/static wake attempts");
       assert.deepEqual(sends, mode === "healthy"
-        ? ["notification_available", "static_rebuild_available"] : []);
+        ? ["notification_available", "static_rebuild_available"]
+        : mode === "notification_preflight" ? ["static_rebuild_available"]
+        : mode === "static_preflight" ? ["notification_available"] : [],
+        name + ": one failed kind cannot skip the independent healthy kind");
       assert.ok(!JSON.stringify({ outcome: actual.outcome, warnings }).includes(secret),
         name + ": provider error, cause and credentials are never reflected");
     }
