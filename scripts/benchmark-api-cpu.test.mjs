@@ -481,8 +481,15 @@ test("MIG-0639: inventory specs are well formed (session, origin, JSON body, fai
       if (access === "w") {
         assert.equal(spec.headers.origin, kind === "invalid" && row[4]?.invalidOrigin ? "https://evil.invalid" : "https://bench.flamenode.invalid", `${sc.id}/${kind} sends the configured origin`);
         assert.ok(spec.headers.cookie, `${sc.id}/${kind} carries a session`);
-        assert.equal(spec.headers["content-type"], "application/json");
-        if (spec.body !== undefined) JSON.parse(spec.body);
+        if (spec.body instanceof FormData) {
+          // The Request must supply a matching multipart boundary itself.
+          assert.equal(spec.headers["content-type"], undefined, `${sc.id}/${kind}: never hardcode a multipart boundary`);
+          assert.equal(spec.body.get("x_user_id"), "bench_x", `${sc.id}/${kind}: genuine linked-X upload`);
+          assert.ok(spec.body.get("icon_file") instanceof File, `${sc.id}/${kind}: real file part`);
+        } else {
+          assert.equal(spec.headers["content-type"], "application/json");
+          if (spec.body !== undefined) JSON.parse(spec.body);
+        }
       }
       if (access === "s" || access === "a") {
         assert.equal(Boolean(spec.headers.cookie), kind !== "invalid", `${sc.id}/${kind} session only on normal/limit`);

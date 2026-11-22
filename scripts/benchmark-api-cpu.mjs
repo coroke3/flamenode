@@ -794,6 +794,8 @@ export const ROUTE_INVENTORY = [
   ["SA-098", "POST", "/api/xid/active", "w", {setup:xidActiveReset}],
   ["SA-102", "PATCH", "/api/xid/:xUserId/profile", "w", {
     params:()=>({xUserId:BENCH_X_CANON}), setup:xidCanonicalReset,
+    // Empty JSON is an allowed no-op profile patch; reject invalid Origin instead.
+    invalidOrigin:true,
   }],
   ["SA-103", "DELETE", "/api/xid/:xUserId", "w", {
     params:()=>({xUserId:BENCH_X_CANON}), setup:xidActiveReset,
@@ -1002,7 +1004,7 @@ const ROUTE_EXPECT = {
   "DELETE /api/admin/event-groups/:id/events/:eventId": {normal:[200],limit:[200],invalid:[400]},
   "POST /api/admin/event-groups/:id/events": {normal:[200],limit:[200],invalid:[400]},
   "POST /api/xid/active": {normal:[200],limit:[200],invalid:[400]},
-  "PATCH /api/xid/:xUserId/profile": {normal:[200],limit:[200],invalid:[400]},
+  "PATCH /api/xid/:xUserId/profile": {normal:[200],limit:[200],invalid:[403]},
   "DELETE /api/xid/:xUserId": {normal:[200],limit:[200],invalid:[400]},
   "PUT /api/xid/:xUserId/icon": {normal:[200],limit:[200],invalid:[400]},
   "POST /api/xid/:xUserId/icon/upload": {normal:[200],limit:[200],invalid:[400]},
