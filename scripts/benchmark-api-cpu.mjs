@@ -1832,9 +1832,13 @@ async function runCold(target, scenarios, opts) {
 }
 
 /** Replay: setup/record on the in-process sqlite, measure on workerd with D1/R2 stubbed. */
-function createReplayTarget(inproc, wr) {
+export function createReplayTarget(inproc, wr) {
   return {
     ...wr,
+    // Object spread evaluates a getter into a fixed value. The V8 sampling
+    // quantum can grow from 0.1ms to several ms while requests run; keep the
+    // *live* workerd resolution so warm BASELINE and budget checks fail closed.
+    get resolutionMs() { return wr.resolutionMs; },
     cpuSource: wr.cpuSource.replace("local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)", "D1/R2 stubbed with results recorded from an in-process node:sqlite run (--d1 replay): CPU = app code in workerd; local D1/R2 simulator and real D1 round-trip excluded"),
     exec: inproc.exec,
     setR2: inproc.setR2,

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
 } from "./benchmark-api-cpu.mjs";
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {
@@ -211,6 +211,45 @@ test("MIG-0639 RH-013: scheduled/realtime warm maximum is budgeted and both mode
   applyBudgetVerdicts(anomalous,{resolutionMs:0});
   assert.equal(anomalous[0].agg.verdict,"STOP_SAMPLES",
     "unexpected cache/body-reuse semantics block acceptance");
+});
+
+test("MIG-0639: replay target preserves live workerd CPU profiler quantum", async () => {
+  let quantumMs = 0.1;
+  let closedWr = false;
+  let closedInproc = false;
+  const wr = {
+    name: "wrangler",
+    get resolutionMs() { return quantumMs; },
+    cpuSource: "V8 profiler local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)",
+    close: async () => { closedWr = true; },
+    run: async () => ({ cpuMs: 6 }),
+  };
+  const inproc = {
+    exec: async () => {},
+    setR2: async () => {},
+    recordForReplay: async () => ({ script: [] }),
+    close: async () => { closedInproc = true; },
+  };
+  const replay = createReplayTarget(inproc, wr);
+  assert.equal(replay.resolutionMs, 0.1, "startup resolution is the initial quantum");
+  assert.match(replay.cpuSource, /--d1 replay/);
+  quantumMs = 2.5; // Later requests reveal a coarse 2.5ms sampler tick.
+  assert.equal(replay.resolutionMs, 2.5, "spread must not freeze the getter at 0.1ms");
+  assert.equal(judge(6, 7, { resolutionMs: replay.resolutionMs }), "INCONCLUSIVE",
+    "6ms with 2.5ms uncertainty cannot claim a strict <7ms S2 PASS");
+  const warm = (ms) => WARM_KINDS.flatMap(kind =>
+    Array.from({ length: MIN_SAMPLES }, () => ({ kind, cpuMs: ms, status: 200 })));
+  const samples = [
+    { id: "RH-020", runtimeClass: "S2", samples: warm(2) },
+    { id: "BASELINE", runtimeClass: "S2", samples: warm(2) },
+  ];
+  const gate = applyBudgetVerdicts(samples, { resolutionMs: replay.resolutionMs });
+  assert.equal(gate.baselineUpperBoundMs, 4.5);
+  assert.equal(gate.quietBaseline, false, "baseline 2+2.5 cannot prove strict <4ms");
+  assert.equal(samples[0].agg.verdict, "STOP_BASELINE");
+  await replay.close();
+  assert.equal(closedWr, true);
+  assert.equal(closedInproc, true);
 });
 
 test("MIG-0639: strict quiet BASELINE includes profiler sampling resolution", () => {
