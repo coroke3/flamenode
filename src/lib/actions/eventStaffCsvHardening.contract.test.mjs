@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 import { planD1AuditMutationBudget } from "../audit/mutateBudget.ts";
 
@@ -86,4 +87,55 @@ test("staff CSV matches legacy X spellings without rewriting stored rows", () =>
   assert.match(helper, /if \(exact\) return exact/);
   assert.match(helper, /parseCanonicalXId\(row\.x_user_id\) === xUserId/);
   assert.match(helper, /matches\.length > 1/);
+});
+
+test("SEC-800: preparation read failure logs fixed code without inspecting provider error", () => {
+  // Exercise the exact production function body while replacing only its
+  // TypeScript signature and Next.js-only navigation rethrow dependency.
+  const start = source.indexOf("function staffPreparationError(error: unknown): StaffActionResult");
+  const end = source.indexOf("\nasync function ensureEventManager", start);
+  assert.ok(start >= 0 && end > start, "isolate the real CURRENT failure handler");
+  const declaration = source.slice(start, end).replace(
+    "function staffPreparationError(error: unknown): StaffActionResult",
+    "function staffPreparationError(error)",
+  );
+  const execute = (log, rethrow = () => {}) => runInNewContext(
+    declaration + "\nstaffPreparationError",
+    { console: { error: log }, unstable_rethrow: rethrow },
+  );
+
+  const secret = "SEC800_PRIVATE_PROVIDER_QUERY_AND_PARAMS";
+  const hostileError = new Proxy(new Error(secret), {
+    get(target, key) {
+      if (["message", "name", "stack", "cause"].includes(String(key))) {
+        throw new Error("provider error getter must not run");
+      }
+      return Reflect.get(target, key);
+    },
+  });
+  const diagnostics = [];
+  const result = execute((...args) => { diagnostics.push(args); })(hostileError);
+  assert.equal(result.ok, false);
+  assert.equal(result.message,
+    "スタッフ情報の取得に失敗しました。再読み込みして、もう一度お試しください。");
+  assert.deepEqual(diagnostics, [["[event-staff] PREPARATION_READ_FAILED"]]);
+  assert.doesNotMatch(JSON.stringify(diagnostics), /SEC800_PRIVATE|params|provider error getter/);
+
+  let attempted = 0;
+  const brokenLogger = execute(() => { attempted += 1; throw new Error(secret); });
+  const preserved = brokenLogger(hostileError);
+  assert.equal(attempted, 1, "a failed diagnostic sink must not be retried");
+  assert.equal(preserved.ok, false);
+  assert.equal(preserved.message, result.message,
+    "broken logger must not replace the normal sanitized action failure");
+
+  const navigationSentinel = { digest: "NEXT_REDIRECT" };
+  let loggedAfterRethrow = false;
+  const redirected = execute(
+    () => { loggedAfterRethrow = true; },
+    () => { throw navigationSentinel; },
+  );
+  assert.throws(() => redirected(navigationSentinel), (error) => error === navigationSentinel,
+    "Next.js navigation control flow must still propagate before diagnostics");
+  assert.equal(loggedAfterRethrow, false);
 });
