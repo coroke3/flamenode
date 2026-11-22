@@ -10,7 +10,7 @@ import { unslottedEventEligibilityWhere } from "./unslottedEventEligibility.ts";
 import { MAX_VIDEO_CUSTOM_QUESTIONS_READ } from "./freeVideoCustomQuestionRead.ts";
 
 /** MIG-0651 unmounted SA-086 general-question read candidate. */
-export { loadGeneralCustomQuestionsForFreeVideo, type LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
+export { loadGeneralCustomQuestionsForFreeVideo, decodeGeneralCustomQuestionPolicyProjection, type LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
 
 /** SA-086/088/089: reads the union of required fields across linked events. */
 export async function loadUnionRequiredVideoFields(
