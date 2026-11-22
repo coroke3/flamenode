@@ -252,14 +252,15 @@ test("MIG-0651 U02 D1 read: no event uses exactly one bounded YouTube duplicate 
   assert.ok(reads[0].sql.params.includes("voided"));
 });
 
-test("MIG-0651 U02 D1 read: eligible event is checked before required fields and duplicate", async () => {
+test("MIG-0651 U02 D1 read: eligible event and required fields share one read before duplicate", async () => {
   const { db, reads } = readOnlyVideoDb({ required: ["music"] });
   const missing = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
   assert.deepEqual(missing, { ok: false, message: "「使用楽曲」は必須です。" });
   assert.deepEqual(reads.map((r) => r.kind), ["eligible_required"]);
   assert.ok(reads[0].sql.params.includes("event-a"));
   assert.ok(reads[0].sql.params.includes(authenticated().nowSec));
-  assert.ok(reads[0].sql.params.includes("event-a"));
+  assert.equal(reads[0].sql.params.filter((v) => v === "event-a").length, 1,
+    "event is bound once in the eligibility-and-required-fields projection");
 
   const form = validForm();
   form.set("music", "Song");
