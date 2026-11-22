@@ -261,3 +261,71 @@ test("SEC-742: poisoned Error.name accessor cannot reject best-effort send path"
   ]);
   assert.ok(!JSON.stringify(warnings).includes(secret));
 });
+
+test("SEC-738: throwing console.warn sink cannot escape poisoned feature-flag fail-closed path", async () => {
+  const sent = [];
+  const pending = [];
+  const writes = [];
+  const sentKinds = new Set();
+  const poisoned = Object.defineProperty({
+    ...enabled,
+    NOTIFICATION_WAKE_QUEUE: { send: async (message) => { sent.push(message); } },
+  }, "QUEUE_DISPATCH_ENABLED", {
+    get() { throw new Error("flag-getter-boom"); },
+  });
+  const host = makeHost({
+    env: poisoned,
+    waitUntil: (promise) => pending.push(promise),
+    kv: { put: async (key, value, options) => writes.push({ key, value, options }) },
+  });
+  const originalWarn = console.warn;
+  console.warn = () => { throw new Error("sink unavailable"); };
+  let result;
+  try {
+    result = await sendQueueWakeBestEffort(
+      { kind: "notification_available", source: "web", sentKinds },
+      host,
+    );
+    await Promise.all(pending);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(result, { sent: false, reason: "feature_flags_unavailable" });
+  assert.equal(sent.length, 0);
+  assert.equal(sentKinds.size, 0);
+  assert.equal(pending.length, 1);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].key, "queue_wake:last_failure:notification_available");
+  assert.equal(JSON.parse(writes[0].value).reason, "feature_flags_unavailable");
+});
+
+test("SEC-742: throwing console.warn sink preserves sentKinds cleanup and KV failure telemetry on rejecting send", async () => {
+  const pending = [];
+  const writes = [];
+  const sentKinds = new Set();
+  const host = makeHost({
+    env: enabled,
+    waitUntil: (promise) => pending.push(promise),
+    kv: { put: async (key, value, options) => writes.push({ key, value, options }) },
+  });
+  const originalWarn = console.warn;
+  console.warn = () => { throw new Error("sink unavailable"); };
+  let result;
+  try {
+    result = await sendQueueWakeBestEffort({
+      kind: "static_rebuild_available",
+      source: "admin",
+      sentKinds,
+      queue: { async send() { throw new Error("queue down"); } },
+    }, host);
+    await Promise.all(pending);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(result, { sent: true, reason: "async_pending" });
+  assert.equal(pending.length, 1);
+  assert.equal(sentKinds.size, 0, "waitUntil trackedPromise must still clean up sentKinds");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].key, "queue_wake:last_failure:static_rebuild_available");
+  assert.equal(JSON.parse(writes[0].value).reason, "send_failed");
+});

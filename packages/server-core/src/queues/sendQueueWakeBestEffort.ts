@@ -36,7 +36,11 @@ const missingBindingWarned = new Set<string>();
 function warnOnce(key: string, payload: Record<string, unknown>): void {
   if (missingBindingWarned.has(key)) return;
   missingBindingWarned.add(key);
-  console.warn(JSON.stringify(payload));
+  try {
+    console.warn(JSON.stringify(payload));
+  } catch {
+    // Diagnostic sink failures must never escape a best-effort wake path.
+  }
 }
 
 function resolveQueueFromEnv(
