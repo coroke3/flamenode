@@ -466,6 +466,122 @@ if (runTestWithTsx(import.meta.url)) {
     ],
   ];
 
+  test("SEC-734: a rejecting Queue host cannot turn an already committed D1 batch into failure", async () => {
+    const secret = "SEC734_PRIVATE_QUEUE_HOST_CANARY";
+    const cases = [
+      ["static_sync_throw", { staticRebuildWakeSource: "admin" }, "sync"],
+      ["notification_async_reject", { notificationWakeSource: "web" }, "async"],
+      ["both_sync_throw", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "sync"],
+      ["both_downstream_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "downstream"],
+      ["both_healthy", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "healthy"],
+    ];
+    for (const [name, sources, mode] of cases) {
+      let hostLoads = 0;
+      let downstreamReads = 0;
+      const sends = [];
+      const warnings = [];
+      const originalWarn = console.warn;
+      console.warn = (...args) => warnings.push(args);
+      let actual;
+      try {
+        [, actual] = await runScenario("sec734_" + name, async ({ db, sqlite, log }) => {
+          const hostLoader = () => {
+            hostLoads += 1;
+            // A Queue wake host is loaded *after* the transaction was committed.
+            assert.equal(sqlite.prepare("SELECT title FROM announcements WHERE id = 'ann-1'").get()?.title, "Hello v2");
+            assert.equal(sqlite.prepare("SELECT count(*) AS n FROM audit_logs").get()?.n, 1);
+            if (mode === "sync") throw new Error("Queue import " + secret);
+            if (mode === "async") return Promise.reject(new Error("Queue module " + secret));
+            return {
+              readEnv: () => {
+                if (mode === "downstream") {
+                  downstreamReads += 1;
+                  return new Proxy({}, {
+                    get() { throw new Error("Queue flags " + secret); },
+                  });
+                }
+                return {
+                  QUEUE_DISPATCH_ENABLED: "1",
+                  NOTIFICATION_WAKE_QUEUE: { send: async (message) => sends.push(message.kind) },
+                  STATIC_REBUILD_WAKE_QUEUE: { send: async (message) => sends.push(message.kind) },
+                };
+              },
+              readWaitUntil: () => null,
+              readKv: () => null,
+            };
+          };
+          const ids = await mutateWithAudit(db, {
+            mutationStatements: [
+              db.run(sql`UPDATE announcements SET title = ${"Hello v2"}, updated_at = ${2000} WHERE id = ${"ann-1"} AND updated_at = ${1000}`),
+            ],
+            expectedMutationChanges: 1,
+            audits: [announcementAudit()],
+            ...sources,
+          }, hostLoader);
+          log.push({ op: "test.committed", name });
+          return ids;
+        });
+      } finally {
+        console.warn = originalWarn;
+      }
+      assert.ok(Array.isArray(actual.outcome.returned) && actual.outcome.returned.length === 1, name);
+      assert.equal(actual.outcome.threw, undefined, name + ": committed D1 must not report a failure");
+      assert.equal(actual.announcements.find((r) => r.id === "ann-1")?.title, "Hello v2", name);
+      assert.equal(actual.audit_logs.length, 1, name + ": exactly one durable audit");
+      assert.deepEqual(actual.log.filter((r) => r.op === "batch.commit").map((r) => r.op), ["batch.commit"]);
+      assert.equal(actual.log.filter((r) => r.op === "batch.rollback").length, 0);
+      assert.equal(actual.log.filter((r) => r.op === "test.committed").length, 1);
+      assert.equal(hostLoads, 1, name + ": the host is resolved once for both wake kinds");
+      const expectedWarnings = mode === "sync" || mode === "async"
+        ? [["[audit-mutate] post-commit wake host unavailable", "provider_error"]]
+        : mode === "downstream"
+          ? [
+              ["[audit-mutate] notification wake failed", "provider_error"],
+              ["[audit-mutate] static rebuild wake failed", "provider_error"],
+            ]
+          : [];
+      assert.deepEqual(warnings, expectedWarnings, name + ": fixed warning codes only");
+      assert.equal(downstreamReads, mode === "downstream" ? 2 : 0,
+        name + ": independent notification/static wake attempts");
+      assert.deepEqual(sends, mode === "healthy"
+        ? ["notification_available", "static_rebuild_available"] : []);
+      assert.ok(!JSON.stringify({ outcome: actual.outcome, warnings }).includes(secret),
+        name + ": provider error, cause and credentials are never reflected");
+    }
+  });
+
+  test("SEC-734: failed D1 CAS still rejects without loading a Queue host", async () => {
+    let hostLoads = 0;
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    let actual;
+    try {
+      [, actual] = await runScenario("sec734_precommit_failed", ({ db }) =>
+        mutateWithAudit(db, {
+          mutationStatements: [
+            db.run(sql`UPDATE announcements SET title = ${"Unexpected"} WHERE id = ${"ann-1"} AND updated_at = ${999}`),
+          ],
+          expectedMutationChanges: 1,
+          audits: [announcementAudit()],
+          notificationWakeSource: "web",
+          staticRebuildWakeSource: "admin",
+        }, () => {
+          hostLoads += 1;
+          throw new Error("precommit host loader must not run");
+        }),
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+    assert.ok(actual.outcome.threw, "a failed D1 CAS is a real failure");
+    assert.equal(actual.announcements.find((r) => r.id === "ann-1")?.title, "Hello");
+    assert.equal(actual.audit_logs.length, 0, "failed D1 CAS must roll back audit");
+    assert.equal(actual.log.filter((r) => r.op === "batch.rollback").length, 1);
+    assert.equal(hostLoads, 0, "precommit failure must never attempt a Queue wake");
+    assert.deepEqual(warnings, [], "no postcommit warning on a real precommit failure");
+  });
+
   test("golden: mutateWithAudit / logger / queue wake observable behaviour", async () => {
     const actual = {};
     for (const [name, body, options] of scenarios) {
