@@ -253,6 +253,16 @@ type D1BatchRuntime = ServerCoreDb & {
   };
 };
 
+function warnPostCommitWakeFailure(message: string): void {
+  try {
+    // Never log arbitrary provider/import errors or nested credentials,
+    // and never let a failing diagnostic sink abort a committed D1 mutation.
+    console.warn(message, "provider_error");
+  } catch {
+    // Diagnostics must never abort remaining post-commit wake attempts.
+  }
+}
+
 function getStatementBindCount(
   db: ServerCoreDb,
   statement: BatchItem<"sqlite">,
@@ -495,8 +505,7 @@ export async function mutateWithAudit(
       // the same per-request sentKinds duplicate suppression.
       wakeHost = await loadWakeHost!();
     } catch {
-      // Never log arbitrary provider/import errors or nested credentials.
-      console.warn("[audit-mutate] post-commit wake host unavailable", "provider_error");
+      warnPostCommitWakeFailure("[audit-mutate] post-commit wake host unavailable");
     }
     if (wakeHost) {
       if (input.notificationWakeSource) {
@@ -507,7 +516,7 @@ export async function mutateWithAudit(
             wakeHost,
           );
         } catch {
-          console.warn("[audit-mutate] notification wake failed", "provider_error");
+          warnPostCommitWakeFailure("[audit-mutate] notification wake failed");
         }
       }
       if (input.staticRebuildWakeSource) {
@@ -518,7 +527,7 @@ export async function mutateWithAudit(
             wakeHost,
           );
         } catch {
-          console.warn("[audit-mutate] static rebuild wake failed", "provider_error");
+          warnPostCommitWakeFailure("[audit-mutate] static rebuild wake failed");
         }
       }
     }
