@@ -42,9 +42,15 @@ if (runUnderRootTsx(import.meta.url)) {
   // Real Cloudflare D1 implements .raw() for Drizzle's typed select() reads.
   // Keep the test's in-memory D1 faithful without mutating the shared harness.
   const baseD1 = createD1(sqlite);
+  const isVideoRelationRead = (query) => /\bfrom\s+["\x27]?videos\b/i.test(query);
+  const injectedRelationError = () => {
+    globalThis.__eventExport.relationReadFaults += 1;
+    throw new Error("private-SQL-params-575-must-not-be-returned");
+  };
   const d1 = {
     ...baseD1,
     prepare(query) {
+      if (globalThis.__eventExport?.failVideoRelationRead && isVideoRelationRead(query)) injectedRelationError();
       const original = baseD1.prepare(query);
       return {
         ...original,
@@ -70,6 +76,7 @@ if (runUnderRootTsx(import.meta.url)) {
   };
   const proxyDb = drizzle(async (query, values, method) => {
     if (globalThis.__eventExport.dbError) throw new Error("database_error");
+    if (globalThis.__eventExport.failVideoRelationRead && isVideoRelationRead(query)) injectedRelationError();
     const rows = sqlite.prepare(query).all(...values);
     return { rows: method === "all" || method === "values" ? rows.map(row => Object.values(row)) : rows };
   }, { schema });
@@ -80,7 +87,7 @@ if (runUnderRootTsx(import.meta.url)) {
     async delete(request) { return map.delete(request.url); },
   };
   globalThis.caches = { default: edgeCache };
-  globalThis.__eventExport = { db: proxyDb, pending: [], dbError: false };
+  globalThis.__eventExport = { db: proxyDb, pending: [], dbError: false, failVideoRelationRead: false, relationReadFaults: 0 };
   const clock = Date.now;
   Date.now = () => 1700000200000;
   sqlite.exec(`
@@ -98,6 +105,8 @@ if (runUnderRootTsx(import.meta.url)) {
     map.clear();
     globalThis.__eventExport.pending = [];
     globalThis.__eventExport.dbError = false;
+    globalThis.__eventExport.failVideoRelationRead = false;
+    globalThis.__eventExport.relationReadFaults = 0;
     d1.stats.statements = 0;
     d1.stats.writes = 0;
     clearPublicApiRateLimitForTests();
@@ -456,6 +465,53 @@ if (runUnderRootTsx(import.meta.url)) {
       sqlite.exec("DELETE FROM event_staff WHERE id IN ('revoked-staff-only-575', 'safe-staff-only-575')");
       reset();
     }
+  });
+
+  test("SEC-575: cached export fails closed when the post-gate video D1 read throws", async () => {
+    // A live scheduled Cache API HIT cannot become a fallback when D1 video
+    // visibility cannot be checked, even if the event gate itself succeeded.
+    // Inject the failure only on SELECT ... FROM videos, not on events.
+    for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+      for (const format of ["v5", "legacy"]) {
+        reset();
+        const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+        const key = `public-event-export:9:export-event:${format}:1440`;
+        const cacheUrl = "https://flamenode.internal/public-json/" + encodeURIComponent(key);
+        const primed = await request(path);
+        assert.equal(primed.status, 200, runtime + " " + format);
+        assert.equal(primed.headers.get("X-FlameNode-Cache"), "MISS");
+        assert.match(await primed.text(), /public-video/);
+        await Promise.all(globalThis.__eventExport.pending.splice(0));
+        assert.equal(map.has(cacheUrl), true, "a real scheduled body must be cached");
+        const warm = await request(path);
+        assert.equal(warm.headers.get("X-FlameNode-Cache"), "HIT");
+        assert.match(await warm.text(), /public-video/);
+
+        globalThis.__eventExport.failVideoRelationRead = true;
+        try {
+          const denied = await request(path);
+          assert.equal(denied.status, 503, runtime + " " + format);
+          assert.equal(denied.headers.get("Cache-Control"), "no-store");
+          const text = await denied.text();
+          assert.equal(text, '{"error":"database_unavailable"}');
+          assert.doesNotMatch(text, /public-video|公開作品|private-SQL-params-575/,
+            "neither cached video data nor internal D1 parameters may leak");
+          assert.ok(globalThis.__eventExport.relationReadFaults >= 1,
+            "the error must arise after the event gate on a video relation SELECT");
+          assert.equal(map.has(cacheUrl), true,
+            "the old cached response is retained, but must not be used as a fallback");
+          assert.equal(d1.stats.writes, 0, "fail-closed GET performs zero D1 writes");
+        } finally {
+          globalThis.__eventExport.failVideoRelationRead = false;
+        }
+        const recovered = await request(path);
+        assert.equal(recovered.status, 200);
+        assert.equal(recovered.headers.get("X-FlameNode-Cache"), "HIT",
+          "a healthy D1 read can reuse an unchanged cached snapshot");
+        assert.match(await recovered.text(), /public-video/);
+      }
+    }
+    reset();
   });
 
   test("SEC-575: staff-only realtime isolate cache cannot replay revoked staff when event timestamp is unchanged", async () => {
