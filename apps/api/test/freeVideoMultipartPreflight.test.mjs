@@ -205,7 +205,9 @@ function readOnlyVideoDb({ eligible = true, required = [], duplicate = false, fa
     delete: () => { throw new Error("read preflight must never DELETE"); },
     select(columns) {
       const kind = columns.id === videos.id ? "youtube" :
-        columns.id === events.id ? "eligibility" : "required";
+        columns.id === events.id && columns.required_video_fields_json === events.required_video_fields_json
+          ? "eligible_required" : "unknown";
+      assert.notEqual(kind, "unknown", "event policy and required fields must share one SELECT");
       return {
         from(table) {
           assert.equal(table, kind === "youtube" ? videos : events);
@@ -214,8 +216,7 @@ function readOnlyVideoDb({ eligible = true, required = [], duplicate = false, fa
               const sql = dialect.sqlToQuery(query);
               reads.push({ kind, sql });
               const rows = kind === "youtube" ? (duplicate ? [{ id: "v-existing" }] : []) :
-                kind === "eligibility" ? (eligible ? [{ id: "event-a" }] : []) :
-                [{ required_video_fields_json: JSON.stringify(required) }];
+                (eligible ? [{ id: "event-a", required_video_fields_json: JSON.stringify(required) }] : []);
               const result = () => {
                 if (fail === kind) throw new Error("D1 connection detail (must not leak)");
                 return rows;
@@ -255,10 +256,10 @@ test("MIG-0651 U02 D1 read: eligible event is checked before required fields and
   const { db, reads } = readOnlyVideoDb({ required: ["music"] });
   const missing = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
   assert.deepEqual(missing, { ok: false, message: "「使用楽曲」は必須です。" });
-  assert.deepEqual(reads.map((r) => r.kind), ["eligibility", "required"]);
+  assert.deepEqual(reads.map((r) => r.kind), ["eligible_required"]);
   assert.ok(reads[0].sql.params.includes("event-a"));
   assert.ok(reads[0].sql.params.includes(authenticated().nowSec));
-  assert.ok(reads[1].sql.params.includes("event-a"));
+  assert.ok(reads[0].sql.params.includes("event-a"));
 
   const form = validForm();
   form.set("music", "Song");
@@ -266,8 +267,8 @@ test("MIG-0651 U02 D1 read: eligible event is checked before required fields and
   assert.deepEqual(permitted, { ok: true, value: {
     eventId: "event-a", youtubeId: "dQw4w9WgXcQ",
   } });
-  assert.deepEqual(reads.map((r) => r.kind).slice(2),
-    ["eligibility", "required", "youtube"]);
+  assert.deepEqual(reads.map((r) => r.kind).slice(1),
+    ["eligible_required", "youtube"]);
 });
 
 test("MIG-0651 U02 D1 read: ineligible event fails closed without later reads", async () => {
@@ -277,24 +278,24 @@ test("MIG-0651 U02 D1 read: ineligible event fails closed without later reads", 
     ok: false,
     message: "選択したイベントは枠なし投稿を受け付けていません。公開状態・終了日時・イベント設定を確認してください。",
   });
-  assert.deepEqual(reads.map((r) => r.kind), ["eligibility"]);
+  assert.deepEqual(reads.map((r) => r.kind), ["eligible_required"]);
 });
 
 test("MIG-0651 U02 D1 read: eligibility D1 outage cannot be misreported as event policy denial", async () => {
-  const { db, reads } = readOnlyVideoDb({ fail: "eligibility" });
+  const { db, reads } = readOnlyVideoDb({ fail: "eligible_required" });
   const response = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
   assert.deepEqual(response, {
     ok: false,
     message: "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。",
   });
-  assert.deepEqual(reads.map((r) => r.kind), ["eligibility"], "no subsequent reads after outage");
+  assert.deepEqual(reads.map((r) => r.kind), ["eligible_required"], "no subsequent reads after outage");
 });
 
 test("MIG-0651 U02 D1 read: existing non-voided YouTube video is refused", async () => {
   const { db, reads } = readOnlyVideoDb({ duplicate: true });
   const result = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
   assert.deepEqual(result, { ok: false, message: "このYouTube動画は既に登録されています。" });
-  assert.deepEqual(reads.map((r) => r.kind), ["eligibility", "required", "youtube"]);
+  assert.deepEqual(reads.map((r) => r.kind), ["eligible_required", "youtube"]);
 });
 
 test("MIG-0651 U02 D1 read: invalid clock and YouTube ID cause zero reads", async () => {
@@ -311,7 +312,7 @@ test("MIG-0651 U02 D1 read: invalid clock and YouTube ID cause zero reads", asyn
 });
 
 test("MIG-0651 U02 D1 read: D1 failures do not leak internal messages or allow writes", async () => {
-  for (const kind of ["required", "youtube"]) {
+  for (const kind of ["eligible_required", "youtube"]) {
     const { db, reads } = readOnlyVideoDb({ fail: kind });
     const result = await validateFreeVideoDbReadPreflight(db, dbCandidate(), authenticated().nowSec);
     assert.deepEqual(result, {
@@ -350,14 +351,14 @@ test("MIG-0651 U02 SQLite: event visibility, end-time, required fields and YouTu
     // Active public event is eligible, but its event-specific field is required.
     let result = await validateFreeVideoDbReadPreflight(db, good, now);
     assert.deepEqual(result, { ok: false, message: "「使用楽曲」は必須です。" });
-    assert.equal(queries.length, 2, "eligibility and required-fields are two SELECTs");
+    assert.equal(queries.length, 1, "eligible event and required fields share one SELECT");
 
     queries.length = 0;
     result = await validateFreeVideoDbReadPreflight(db, withMusic, now);
     assert.deepEqual(result, { ok: true, value: {
       youtubeId: "dQw4w9WgXcQ", eventId: "event-a",
     } });
-    assert.equal(queries.length, 3, "eligible + required + YouTube duplicate");
+    assert.equal(queries.length, 2, "eligible required-fields row + YouTube duplicate");
     assert.ok(queries.every(({ statement }) => /^\s*SELECT/i.test(statement)));
 
     // Even an explicitly enabled event is denied if private.
