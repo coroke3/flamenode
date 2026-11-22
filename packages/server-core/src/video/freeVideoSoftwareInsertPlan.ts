@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { softwareAliases, softwareCatalog, videoSoftwares } from "@flamenode/db/schema";
 import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@flamenode/domain/video/atomicLimits";
 import { normalizeSoftwareCatalogName, normalizeSoftwareKey, normalizeSoftwareLabels } from "@flamenode/domain/software/labels";
@@ -32,23 +32,32 @@ export async function buildFreeVideoSoftwareInsertPlan(
 
   const aliasKeys = labels.map(normalizeSoftwareKey);
   const names = labels.map(normalizeSoftwareCatalogName);
-  const aliases = await db.select().from(softwareAliases)
-    .where(inArray(softwareAliases.normalized_alias, aliasKeys));
-  const direct = await db.select().from(softwareCatalog)
-    .where(and(eq(softwareCatalog.is_active, 1),
-      inArray(softwareCatalog.normalized_name, names))!);
-  const aliasTargetIds = [...new Set(aliases.map((row) => row.software_id))];
-  const byAlias = aliasTargetIds.length === 0 ? []
-    : await db.select().from(softwareCatalog)
-      .where(and(eq(softwareCatalog.is_active, 1),
-        inArray(softwareCatalog.id, aliasTargetIds))!);
-  const catalogs = [...direct, ...byAlias.filter((row) =>
-    !direct.some((candidate) => candidate.id === row.id))];
-  const activeCatalogIds = new Set(catalogs.map((row) => row.id));
-  const aliasByKey = new Map(aliases
-    .filter((row) => activeCatalogIds.has(row.software_id))
-    .map((row) => [row.normalized_alias, row.software_id]));
-  const catalogByName = new Map(catalogs.map((row) => [row.normalized_name, row.id]));
+  // S3: one bounded SELECT resolves direct names and active alias targets.
+  // In the canonical schema normalized aliases and names are each globally
+  // unique. With <=4 submitted labels, this LEFT JOIN produces <=8 rows and
+  // avoids the old 2/3 separate D1 pre-reads. Alias-first wins even when the
+  // same input is also an existing direct catalog name.
+  const matching = await db.select({
+    softwareId: softwareCatalog.id,
+    normalizedName: softwareCatalog.normalized_name,
+    normalizedAlias: softwareAliases.normalized_alias,
+  }).from(softwareCatalog)
+    .leftJoin(softwareAliases, and(
+      eq(softwareAliases.software_id, softwareCatalog.id),
+      inArray(softwareAliases.normalized_alias, aliasKeys),
+    ))
+    .where(and(
+      eq(softwareCatalog.is_active, 1),
+      or(
+        inArray(softwareCatalog.normalized_name, names),
+        isNotNull(softwareAliases.normalized_alias),
+      ),
+    ));
+  const aliasByKey = new Map(matching
+    .filter((row) => row.normalizedAlias !== null)
+    .map((row) => [row.normalizedAlias!, row.softwareId]));
+  const catalogByName = new Map(matching.map((row) =>
+    [row.normalizedName, row.softwareId]));
   const newCatalogs: (typeof softwareCatalog.$inferSelect)[] = [];
   const links: (typeof videoSoftwares.$inferSelect)[] = [];
   const seen = new Set<string>();
