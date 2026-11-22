@@ -1,9 +1,16 @@
 import "server-only";
 
+import { isEntityBlockedInManifest } from "./publicVisibilityManifestCore";
+import {
+  loadPublicVisibilityBlockedEntitiesManifest,
+  resolvePublicVisibilityGuardModeFromEnv,
+} from "./publicVisibilityManifest";
+
 import { PUBLIC_JSON_CACHE_TTL_SEC } from "./publicJsonCacheTtl";
 import { loadStaticJsonFreshStaleUnavailable } from "./staticSharedInputsLoader";
 import {
   normalizeStaticTrending,
+  filterStaticTrendingByVisibilityFence,
   resolveStaticTrendingStaleMeta,
   TRENDING_OBJECT_KEY,
   TRENDING_STALE_MAX_AGE_SEC,
@@ -41,7 +48,21 @@ export async function loadStaticTrending(
     cacheMode: "cache_first",
     nowSec,
   });
-  const data = loaded.value;
+  let data = loaded.value;
+  if (data && resolvePublicVisibilityGuardModeFromEnv() === "enforce") {
+    try {
+      // Cache-first and 3h stale fallback can replay an R2 snapshot produced
+      // before a video or its linked event was depublicized. Never trust only
+      // the artifact's embedded "public" status when enforcement is enabled.
+      const manifest = await loadPublicVisibilityBlockedEntitiesManifest();
+      data = filterStaticTrendingByVisibilityFence(data, (entityType, entityId) =>
+        isEntityBlockedInManifest(manifest, entityType, entityId));
+    } catch {
+      // A missing/invalid visibility manifest in enforce mode is not proof of
+      // public eligibility. Fail closed without reflecting provider details.
+      data = null;
+    }
+  }
   const staleMeta = resolveStaticTrendingStaleMeta(
     data?.generatedAt ?? null,
     nowSec,
