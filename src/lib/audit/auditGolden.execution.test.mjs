@@ -609,6 +609,21 @@ if (runTestWithTsx(import.meta.url)) {
           JSON.stringify(warnings) === JSON.stringify(softFlagWarnings),
           name + ": only exact legacy or SEC-738 fail-closed warning codes are allowed",
         );
+      } else if (mode === "send_reject") {
+        // SEC-742 / PR #739 removes the untrusted provider error_name from
+        // Queue diagnostics. This audit boundary runs on both the old main
+        // and the independently owned hardened Queue helper without
+        // changing any transaction/commit semantics. Keep the shapes exact;
+        // #739's own regression requires that only the sanitized shape ships.
+        const sanitizedWarnings = [
+          [JSON.stringify({ service: "queue-wake", result: "send_failed", kind: "notification_available" })],
+          [JSON.stringify({ service: "queue-wake", result: "last_failure_record_skipped", kind: "notification_available", reason: "send_failed" })],
+        ];
+        assert.ok(
+          JSON.stringify(warnings) === JSON.stringify(expectedWarnings) ||
+          JSON.stringify(warnings) === JSON.stringify(sanitizedWarnings),
+          name + ": only exact pre-SEC-742 or sanitized Queue diagnostics are allowed",
+        );
       } else {
         assert.deepEqual(warnings, expectedWarnings, name + ": fixed warning codes only");
       }
