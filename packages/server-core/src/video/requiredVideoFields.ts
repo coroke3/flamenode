@@ -90,11 +90,16 @@ export async function loadEligibleUnslottedVideoRequiredFields(
     ).limit(1)
   )[0];
   if (!row) throw new UnslottedEventSyncError("unslotted_event_not_allowed");
+  // Requested policy snapshots must be present and typed; do not silently
+  // treat an unavailable projection as an empty question policy.
+  if (includeQuestionPolicy && typeof row.question_policy_json !== "string") {
+    throw new Error("video_custom_question_projection_unavailable");
+  }
   return {
     eventId: row.id,
     requiredFields: unionRequiredVideoFields([row.required_video_fields_json]),
     requiredFieldsSnapshot: row.required_video_fields_json,
     youtubeDuplicate: row.youtube_duplicate === 1,
-    ...(includeQuestionPolicy ? { questionPolicyJson: row.question_policy_json } : {}),
+    ...(includeQuestionPolicy ? { questionPolicyJson: row.question_policy_json as string } : {}),
   };
 }
