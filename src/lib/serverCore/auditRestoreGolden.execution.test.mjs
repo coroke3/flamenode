@@ -960,6 +960,43 @@ if (runTestWithTsx(import.meta.url)) {
       "failed restore must not evict any public event export");
   });
 
+  test("SEC-730: unregistered audit table data never reaches HTTP or failed-run diagnostics", async () => {
+    const secret = "SEC730_UNTRUSTED_AUDIT_TABLE_PRIVATE_CANARY";
+    for (const dry_run of [true, false]) {
+      const [, actual] = await runScenario(`sec730_unknown_table_${dry_run ? "dry" : "write"}`, {
+        arrange: ({ sqlite }) => addAudit(sqlite, {
+          table_name: `unregistered_${secret}`,
+          target_id: "ann-1",
+          before: { id: "ann-1", title: "Before" },
+          after: { id: "ann-1", title: "After" },
+        }),
+        options: { dry_run },
+      });
+      const returned = actual.outcome.returned;
+      assert.equal(returned?.ok, false, "unknown table cannot be restored");
+      assert.equal(returned?.reason_code, "adapter_missing");
+      assert.equal(returned?.message, "復元アダプターが見つかりません。",
+        "never include a database-sourced table name in a response");
+      assert.ok(!JSON.stringify(returned).includes(secret));
+      assert.ok(!JSON.stringify(actual.log.filter((entry) =>
+        entry.op.startsWith("console."))).includes(secret),
+      "console output must not echo the table name");
+      if (dry_run) {
+        assert.equal(actual.audit_restore_runs.length, 0, "dry-run writes no failed-run audit");
+        assert.equal(actual.log.filter((entry) => entry.op === "batch").length, 0);
+        assert.equal(actual.audit_logs[0].restore_unavailable_message, null);
+      } else {
+        assert.equal(actual.audit_restore_runs.length, 1);
+        assert.equal(actual.audit_restore_runs[0].status, "failed");
+        assert.ok(!JSON.stringify(actual.audit_restore_runs).includes(secret),
+          "persisted failure diagnostics must not include the untrusted table name");
+        assert.equal(actual.audit_logs[0].restore_unavailable_reason_code, "adapter_missing");
+        assert.equal(actual.audit_logs[0].restore_unavailable_message, "復元アダプターが見つかりません。");
+        assert.equal(actual.announcements.length, 0, "no target mutation for an unknown table");
+      }
+    }
+  });
+
   test("SEC-730: adapter mutation-build exceptions never expose SQL/provider data", async () => {
     const secret = "SEC730_BUILD_SQL_PARAMETER_PRIVATE_CANARY";
     const adapter = getAdapter("announcements");
