@@ -166,6 +166,12 @@ export async function buildFreeVideoNewMemberPlan(
     if (!Array.isArray(chapters) || chapters.length > MAX_MEMBER_CHAPTERS) {
       throw new Error("free_video_new_member_chapter_count_invalid");
     }
+    // The D1 video_chapters.x_user_id column is NOT NULL. A name-only
+    // collaborator can appear on the video, but cannot own managed chapters.
+    // Defense in depth if a caller bypasses the shared form validator.
+    if (chapters.length > 0 && !xid) {
+      throw new Error("free_video_new_member_chapter_xid_required");
+    }
     for (const chapter of chapters) {
       if (!Number.isFinite(chapter.time_seconds) ||
           !Number.isSafeInteger(chapter.time_seconds) || chapter.time_seconds < 0 ||
