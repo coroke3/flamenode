@@ -103,7 +103,8 @@ export function buildFreeVideoSubmissionAtomicPlan(
       SELECT 1 FROM ${videos}
       WHERE ${videos.youtube_video_id} = ${videoAfter.youtube_video_id}
         AND ${videos.visibility_status} <> 'voided'
-    ) THEN 1 ELSE json_extract('not-valid-json', '
+    ) THEN 1 ELSE json_extract('not-valid-json', '$') END
+  `);
   // Pure plan construction can still fail closed. Nothing has been written.
   const eventAssertion = buildUnslottedEventEligibilityAssertionPlan(
     db, eventId, now, args.requiredFieldsSnapshot,
