@@ -174,8 +174,10 @@ test("U02b Worker dashboard shows CURRENT cron, queue, pipelines, artifacts and 
   assert.equal(dom.querySelectorAll("table").length, 3);
   assert.equal(dom.querySelectorAll('button[type="button"]').length, 1);
   assert.ok(dom.querySelector('a[href="/admin/health"]'));
-  assert.ok(dom.querySelectorAll('a[href="/admin/youtube-sync"]').length >= 2,
-    "current worker/pipeline destinations are retained");
+  const dynamicDetailCount = snapshot.jobs.length + snapshot.pipelines.length;
+  const baselineSyncLinks = dom.querySelectorAll('a[href="/admin/youtube-sync"]').length;
+  assert.equal(baselineSyncLinks, dynamicDetailCount + 1,
+    "two dynamic action links plus the independent static YouTube queue link are retained");
   for (const unsafeHref of [
     "javascript:alert(1)", "https://attacker.invalid/steal",
     "//attacker.invalid/steal", "/admin/../manage",
@@ -195,8 +197,11 @@ test("U02b Worker dashboard shows CURRENT cron, queue, pipelines, artifacts and 
     const links = [...new JSDOM(poisoned).window.document.querySelectorAll("a")];
     assert.equal(links.some((anchor) => anchor.getAttribute("href") === unsafeHref), false,
       "unsafe destination must not become a link: " + unsafeHref);
-    assert.equal(links.filter((anchor) => anchor.getAttribute("href") === "/admin/youtube-sync").length, 0,
-      "invalid worker destinations do not silently fall back to an unrelated route");
+    assert.equal(
+      links.filter((anchor) => anchor.getAttribute("href") === "/admin/youtube-sync").length,
+      baselineSyncLinks - dynamicDetailCount,
+      "invalid worker and pipeline links are removed but the trusted static queue link remains",
+    );
   }
 });
 
