@@ -16,8 +16,6 @@
  * raw SQL or provider exceptions.
  */
 import { Hono, type Context } from "hono";
-import { eq, inArray } from "drizzle-orm";
-import { xIdentityRequests, xUsers } from "@flamenode/db/schema";
 import {
   AdminXIdMergeConfirmBodySchema,
   AdminXIdMergeCreateBodySchema,
@@ -35,6 +33,7 @@ import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { generateId } from "@flamenode/server-core/id";
 import type { QueueWakeHostLoader } from "@flamenode/server-core/ports";
 import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "@flamenode/server-core/publicData/publicXUser";
+import { sql } from "@flamenode/server-core/sql";
 import {
   putVisibilityManifestWithCas,
   readVisibilityManifestObject,
@@ -45,6 +44,7 @@ import {
   restoreApprovedXIdMergeRevertRequest,
   type XIdMergeHost,
 } from "@flamenode/server-core/xid/merge";
+import type { MergeRequestRow } from "@flamenode/server-core/xid/mergeCore";
 import type { AppEnv } from "../../env.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { onlyMutating } from "../../middleware/writeOrigin.ts";
@@ -175,6 +175,26 @@ async function parseJsonBody<T>(
   return { ok: true, data: parsed.data };
 }
 
+const X_IDENTITY_REQUEST_SELECT_SQL = `SELECT
+  id, request_type, requested_by_auth_user_id, requested_x_id,
+  source_x_user_id, target_x_user_id, parent_request_id,
+  restore_snapshot_json, revert_deadline_at, status,
+  decision_reason, decided_by_auth_user_id, decided_at,
+  slot_bind_status, slot_bind_attempt_count, slot_bind_updated_at,
+  requested_at, updated_at
+FROM x_identity_requests WHERE id = ? LIMIT 1`;
+
+async function loadXIdentityRequest(
+  rawDb: D1Database,
+  id: string,
+): Promise<MergeRequestRow | null> {
+  const row = await rawDb
+    .prepare(X_IDENTITY_REQUEST_SELECT_SQL)
+    .bind(id)
+    .first<MergeRequestRow>();
+  return row ?? null;
+}
+
 async function handleRequestDecision(
   c: Context<AppEnv>,
   requestType: "merge" | "revert_merge",
@@ -186,14 +206,7 @@ async function handleRequestDecision(
   const id = (c.req.param("id") ?? "").trim();
   if (!id) return fail(c, 400, "申請 ID が必要です。");
 
-  const db = c.get("db");
-  const current = (
-    await db
-      .select()
-      .from(xIdentityRequests)
-      .where(eq(xIdentityRequests.id, id))
-      .limit(1)
-  )[0];
+  const current = await loadXIdentityRequest(c.env.DB, id);
   if (!current || current.request_type !== requestType) {
     return fail(c, 404, "対象の申請が見つかりません。");
   }
@@ -201,6 +214,7 @@ async function handleRequestDecision(
     return fail(c, 409, `status=${current.status} は変更できません。`);
   }
 
+  const db = c.get("db");
   const { authUserId, actorXUserId } = actorContext(c);
   const now = Math.floor(Date.now() / 1000);
   const decisionFields = buildXIdentityDecisionFields({
@@ -213,14 +227,16 @@ async function handleRequestDecision(
   try {
     await mutateWithAudit(db, {
       mutationStatements: [
-        db
-          .update(xIdentityRequests)
-          .set({
-            status,
-            updated_at: now,
-            ...decisionFields,
-          })
-          .where(expectedRowCondition({ expectedCurrent: current })),
+        db.run(sql`
+          UPDATE x_identity_requests
+          SET status = ${status},
+              updated_at = ${now},
+              decided_by_auth_user_id = ${decisionFields.decided_by_auth_user_id},
+              decision_reason = ${decisionFields.decision_reason},
+              decided_at = ${decisionFields.decided_at}
+          WHERE id = ${id}
+            AND ${expectedRowCondition({ expectedCurrent: { ...current } })}
+        `),
       ],
       expectedMutationChanges: [1],
       preloaded: auditPreloaded(c),
@@ -288,13 +304,11 @@ adminXIdMergeRoutes.post("/", async (c) => {
   });
   if (shapeError) return fail(c, 400, shapeError);
 
-  const db = c.get("db");
-  const existingRows = await db
-    .select({ id: xUsers.id })
-    .from(xUsers)
-    .where(inArray(xUsers.id, [sourceXUserId, targetXUserId]))
-    .limit(2);
-  const existingIds = new Set(existingRows.map((row) => row.id));
+  const existingResult = await c.env.DB
+    .prepare("SELECT id FROM x_users WHERE id IN (?, ?) LIMIT 2")
+    .bind(sourceXUserId, targetXUserId)
+    .all<{ id: string }>();
+  const existingIds = new Set((existingResult.results ?? []).map((row) => row.id));
   if (!existingIds.has(sourceXUserId)) {
     return fail(c, 404, `統合元 @${sourceXUserId} が見つかりません。`);
   }
@@ -302,6 +316,7 @@ adminXIdMergeRoutes.post("/", async (c) => {
     return fail(c, 404, `統合先 @${targetXUserId} が見つかりません。`);
   }
 
+  const db = c.get("db");
   const { authUserId, actorXUserId } = actorContext(c);
   const now = Math.floor(Date.now() / 1000);
   const id = generateId("xmerge");
@@ -322,7 +337,21 @@ adminXIdMergeRoutes.post("/", async (c) => {
 
   try {
     await mutateWithAudit(db, {
-      mutationStatements: [db.insert(xIdentityRequests).values(row)],
+      mutationStatements: [
+        db.run(sql`
+          INSERT INTO x_identity_requests (
+            id, request_type, requested_by_auth_user_id, requested_x_id,
+            source_x_user_id, target_x_user_id, parent_request_id,
+            restore_snapshot_json, revert_deadline_at, status,
+            requested_at, updated_at
+          ) VALUES (
+            ${row.id}, ${row.request_type}, ${row.requested_by_auth_user_id}, ${row.requested_x_id},
+            ${row.source_x_user_id}, ${row.target_x_user_id}, ${row.parent_request_id},
+            ${row.restore_snapshot_json}, ${row.revert_deadline_at}, ${row.status},
+            ${row.requested_at}, ${row.updated_at}
+          )
+        `),
+      ],
       expectedMutationChanges: [1],
       preloaded: auditPreloaded(c),
       callerQueryCount: 4,
@@ -359,14 +388,7 @@ adminXIdMergeRoutes.post("/reverts/:id/approve", async (c) => {
   if (!id) return fail(c, 400, "申請 ID が必要です。");
   if (confirm !== "REVERT") return fail(c, 400, "確認文字列 REVERT が必要です。");
 
-  const db = c.get("db");
-  const request = (
-    await db
-      .select()
-      .from(xIdentityRequests)
-      .where(eq(xIdentityRequests.id, id))
-      .limit(1)
-  )[0];
+  const request = await loadXIdentityRequest(c.env.DB, id);
   if (!request || request.request_type !== "revert_merge") {
     return fail(c, 404, "差し戻し申請が見つかりません。");
   }
@@ -383,17 +405,13 @@ adminXIdMergeRoutes.post("/reverts/:id/approve", async (c) => {
     return fail(c, 400, "統合の差し戻し期限を過ぎています。");
   }
 
-  const parentRequest = (
-    await db
-      .select()
-      .from(xIdentityRequests)
-      .where(eq(xIdentityRequests.id, request.parent_request_id!))
-      .limit(1)
-  )[0];
+  const parentRequest = await loadXIdentityRequest(c.env.DB, request.parent_request_id!);
   if (!parentRequest) return fail(c, 404, "親統合申請が見つかりません。");
   if (!parentRequest.restore_snapshot_json) {
     return fail(c, 400, "親統合申請に差し戻し用snapshotがありません。");
   }
+
+  const db = c.get("db");
 
   const { authUserId } = actorContext(c);
   try {
@@ -442,14 +460,7 @@ adminXIdMergeRoutes.post("/:id/execute", async (c) => {
   if (!id) return fail(c, 400, "申請 ID が必要です。");
   if (confirm !== "MERGE") return fail(c, 400, "確認文字列 MERGE が必要です。");
 
-  const db = c.get("db");
-  const request = (
-    await db
-      .select()
-      .from(xIdentityRequests)
-      .where(eq(xIdentityRequests.id, id))
-      .limit(1)
-  )[0];
+  const request = await loadXIdentityRequest(c.env.DB, id);
   if (!request || request.request_type !== "merge") {
     return fail(c, 404, "統合申請が見つかりません。");
   }
@@ -461,6 +472,7 @@ adminXIdMergeRoutes.post("/:id/execute", async (c) => {
   });
   if (shapeError) return fail(c, 400, shapeError);
 
+  const db = c.get("db");
   const { authUserId } = actorContext(c);
   try {
     const result = await executeApprovedXIdMergeRequest(
