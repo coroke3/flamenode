@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
+import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import * as schema from "@flamenode/db/schema";
 import { buildFreeVideoSoftwareInsertPlan } from "../src/video/freeVideoSoftwareInsertPlan.ts";
@@ -14,7 +15,7 @@ test("MIG-0651 software: public server-core entry preserves exact plan implement
 
 const NOW = 1770000000;
 function liveDb(sqlite, stats) {
-  return drizzle(async (query, values, method) => {
+  const db = drizzle(async (query, values, method) => {
     stats.reads += 1;
     stats.lastSql = query;
     stats.lastValues = values;
@@ -22,6 +23,25 @@ function liveDb(sqlite, stats) {
     return { rows: method === "all" || method === "values"
       ? rows.map((row) => Object.values(row)) : rows };
   }, { schema });
+  // db.run(sql) is not an eager D1 read: the returned assertion is prepared
+  // and must be executed by the future single audited batch.
+  return {
+    select: (...args) => db.select(...args),
+    insert: (...args) => db.insert(...args),
+    run(expr) { return { sqlExpr: expr }; },
+  };
+}
+const dialect = new SQLiteSyncDialect();
+function compiled(statement) {
+  return "sqlExpr" in statement
+    ? dialect.sqlToQuery(statement.sqlExpr) : statement.toSQL();
+}
+function executeGuard(sqlite, plan) {
+  assert.equal(plan.expectedChanges[0], null, "first statement must be policy CAS");
+  const q = compiled(plan.statements[0]);
+  assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
+  const result = sqlite.prepare(q.sql).get(...q.params);
+  assert.equal(Object.values(result)[0], 1, "current software selection matches preflight");
 }
 
 test("MIG-0651 software: empty input has no read/write; >4 labels fail before D1", async () => {
@@ -81,7 +101,7 @@ test("MIG-0651 software: migrated SQLite resolves active alias before catalog na
       "alias search must use the existing normalized alias index");
     assert.ok(!planner.some(detail => detail.startsWith("SCAN software_catalog")),
       "the one-query optimization must NOT scan every catalog row");
-    assert.deepEqual(plan.expectedChanges, [1, 3], "one new catalog and three unique links");
+    assert.deepEqual(plan.expectedChanges, [null, 1, 3], "CAS, one new catalog, three unique links");
     assert.deepEqual(plan.audits.map((a) => [a.table_name, a.operation, a.strict]), [
       ["software_catalog", "CREATE", true],
       ["video_softwares", "CREATE", true],
@@ -93,10 +113,15 @@ test("MIG-0651 software: migrated SQLite resolves active alias before catalog na
     sqlite.exec("BEGIN");
     try {
       for (const [i, stmt] of plan.statements.entries()) {
-        const q = stmt.toSQL();
+        const q = compiled(stmt);
         assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
-        const result = sqlite.prepare(q.sql).run(...q.params);
-        assert.equal(Number(result.changes), plan.expectedChanges[i]);
+        if (plan.expectedChanges[i] === null) {
+          const result = sqlite.prepare(q.sql).get(...q.params);
+          assert.equal(Object.values(result)[0], 1);
+        } else {
+          const result = sqlite.prepare(q.sql).run(...q.params);
+          assert.equal(Number(result.changes), plan.expectedChanges[i]);
+        }
       }
       sqlite.exec("COMMIT");
     } catch (error) { sqlite.exec("ROLLBACK"); throw error; }
@@ -129,12 +154,72 @@ test("MIG-0651 software: inactive alias target is ignored by one-query lookup", 
       videoId: "v-new", actorUserId: "u", raw: "Fresh Alias", now: NOW,
     });
     assert.equal(stats.reads, 1, "inactive alias must not trigger a follow-up query");
-    assert.deepEqual(plan.expectedChanges, [1, 1],
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1],
       "unknown active software name creates its own catalog row");
     assert.equal(plan.audits[0].after.normalized_name, "fresh alias");
     assert.notEqual(plan.audits[1].after.software_id, "sw_inactive");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_softwares").get().n, 0,
       "pure builder must not write anything");
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 software: in-batch CAS prevents alias retarget after bounded pre-read", async () => {
+  const sqlite = createSqlite();
+  try {
+    for (const id of ["original", "other"]) {
+      insert(sqlite, "software_catalog", {
+        id, name: id, normalized_name: id, is_active: 1, is_verified: 0,
+        usage_count: 0, created_at: NOW, updated_at: NOW,
+      });
+    }
+    insert(sqlite, "software_aliases", {
+      software_id: "original", alias: "Best Editor", normalized_alias: "besteditor",
+    });
+    const stats = { reads: 0 };
+    const plan = await buildFreeVideoSoftwareInsertPlan(liveDb(sqlite, stats), {
+      videoId: "v", actorUserId: "u", raw: "Best Editor", now: NOW,
+    });
+    assert.equal(stats.reads, 1);
+    assert.deepEqual(plan.expectedChanges, [null, 1]);
+    assert.equal(plan.audits[0].after.software_id, "original");
+    executeGuard(sqlite, plan);
+    sqlite.prepare("UPDATE software_aliases SET software_id='other' WHERE normalized_alias='besteditor'").run();
+    assert.throws(() => executeGuard(sqlite, plan), /malformed JSON/,
+      "stale pre-read must not link to original after alias retarget");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_softwares").get().n, 0);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 software: in-batch CAS rejects active catalog deactivation and fresh-name arrival", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "software_catalog", {
+      id: "old", name: "Old", normalized_name: "old", is_active: 1,
+      usage_count: 0, created_at: NOW, updated_at: NOW,
+    });
+    const stats = { reads: 0 };
+    const db = liveDb(sqlite, stats);
+    const oldPlan = await buildFreeVideoSoftwareInsertPlan(db, {
+      videoId: "v", actorUserId: "u", raw: "Old", now: NOW,
+    });
+    assert.deepEqual(oldPlan.expectedChanges, [null, 1]);
+    executeGuard(sqlite, oldPlan);
+    sqlite.prepare("UPDATE software_catalog SET is_active=0 WHERE id='old'").run();
+    assert.throws(() => executeGuard(sqlite, oldPlan), /malformed JSON/,
+      "deactivated catalog cannot be silently used from stale snapshot");
+
+    const freshPlan = await buildFreeVideoSoftwareInsertPlan(db, {
+      videoId: "v", actorUserId: "u", raw: "Fresh", now: NOW,
+    });
+    assert.deepEqual(freshPlan.expectedChanges, [null, 1, 1]);
+    executeGuard(sqlite, freshPlan);
+    insert(sqlite, "software_catalog", {
+      id: "racer", name: "Fresh", normalized_name: "fresh", is_active: 1,
+      usage_count: 0, created_at: NOW, updated_at: NOW,
+    });
+    assert.throws(() => executeGuard(sqlite, freshPlan), /malformed JSON/,
+      "fresh direct catalog name must not invalidate a pending CREATE audit");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_softwares").get().n, 0);
   } finally { sqlite.close(); }
 });
 
@@ -146,7 +231,7 @@ test("MIG-0651 software: unique catalog collision fails whole SQLite transaction
     const plan = await buildFreeVideoSoftwareInsertPlan(db, {
       videoId: "v-new", actorUserId: "u", raw: "Collision Tool", now: NOW,
     });
-    assert.deepEqual(plan.expectedChanges, [1, 1]);
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1]);
     insert(sqlite, "software_catalog", {
       id: "sw-racer", name: "Collision Tool", normalized_name: "collision tool",
       is_active: 1, is_verified: 0, usage_count: 0, created_at: NOW, updated_at: NOW,
@@ -158,10 +243,12 @@ test("MIG-0651 software: unique catalog collision fails whole SQLite transaction
     });
     assert.throws(() => {
       for (const stmt of plan.statements) {
-        const q = stmt.toSQL();
-        sqlite.prepare(q.sql).run(...q.params);
+        const q = compiled(stmt);
+        if ("sqlExpr" in stmt) sqlite.prepare(q.sql).get(...q.params);
+        else sqlite.prepare(q.sql).run(...q.params);
       }
-    }, /UNIQUE|constraint/i);
+    }, /malformed JSON|UNIQUE|constraint/i,
+    "new catalog name collision must fail the entire write batch");
     sqlite.exec("ROLLBACK");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0);
     assert.deepEqual(sqlite.prepare("SELECT id FROM software_catalog").all().map((r) => r.id),
