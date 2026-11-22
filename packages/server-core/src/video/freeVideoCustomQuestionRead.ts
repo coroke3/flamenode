@@ -39,6 +39,64 @@ export function serializeGeneralCustomQuestionPolicy(
     q.visibility, q.updated_at,
   ]));
 }
+
+/**
+ * Decode the ordered JSON projection from the single SA-086 event SELECT.
+ * Its tuple columns, ordering and row cap match the ordinary D1 loader and
+ * the batch-time policy assertion. Fail closed on malformed/foreign rows;
+ * this is never a client-supplied snapshot.
+ */
+export function decodeGeneralCustomQuestionPolicyProjection(
+  json: string,
+  expectedEventId: string,
+): LoadedGeneralCustomQuestion[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("video_custom_question_projection_invalid");
+  }
+  if (!Array.isArray(parsed) || parsed.length > MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
+    throw new Error("video_custom_question_projection_limit_or_shape_invalid");
+  }
+  const seen = new Set<string>();
+  return parsed.map((tuple: unknown) => {
+    if (!Array.isArray(tuple) || tuple.length !== 11) {
+      throw new Error("video_custom_question_projection_invalid");
+    }
+    const [id, eventId, key, label, type, required, optionsJson, maxLength,
+      sortOrder, visibility, updatedAt] = tuple;
+    if (typeof id !== "string" || !id || seen.has(id) ||
+        eventId !== expectedEventId ||
+        typeof key !== "string" || typeof label !== "string" ||
+        typeof type !== "string" || (required !== 0 && required !== 1) ||
+        (optionsJson !== null && typeof optionsJson !== "string") ||
+        (maxLength !== null && (!Number.isSafeInteger(maxLength) || maxLength < 0)) ||
+        !Number.isSafeInteger(sortOrder) || typeof visibility !== "string" ||
+        !Number.isSafeInteger(updatedAt)) {
+      throw new Error("video_custom_question_projection_invalid");
+    }
+    seen.add(id);
+    const source: GeneralCustomQuestionPolicySnapshot = {
+      id, event_id: eventId, question_key: key, label, type, required,
+      options_json: optionsJson, max_length: maxLength,
+      sort_order: sortOrder, visibility, updated_at: updatedAt,
+    };
+    return {
+      id,
+      event_id: eventId,
+      question_key: key,
+      label,
+      type: parseSubmissionQuestionType(type),
+      required: required === 1,
+      options: parseSubmissionQuestionOptionsJson(optionsJson),
+      max_length: maxLength,
+      is_active: true,
+      source,
+    };
+  });
+}
+
 const STAGE_KEY = "stage_permission";
 const STAGE_PREFIX = "stage_permission_";
 
