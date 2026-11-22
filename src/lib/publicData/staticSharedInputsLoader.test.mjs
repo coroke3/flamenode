@@ -53,6 +53,8 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
   });
 
   let r2Objects = new Map();
+  let manifestReads = 0;
+  let afterManifestGet = null;
   globalThis.__trendingWorkerVisibilityModeForTests = undefined;
   const cacheStore = new Map();
   const cacheWrites = [];
@@ -64,11 +66,19 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
           BUCKET: {
             async get(key) {
               const value = r2Objects.get(key);
+              // Snapshot the old value, then allow a concurrent visibility
+              // mutation before the next R2 GET (the returned ETag must track
+              // the bytes, never a constant from the mock).
+              if (key === "visibility/blocked-entities.v1.json") {
+                manifestReads += 1;
+                afterManifestGet?.(manifestReads);
+              }
               if (value == null) return null;
               return {
                 // Real R2 exposes json() to static snapshots and text()/etag
                 // to the separate visibility-manifest reader.
-                etag: key === "visibility/blocked-entities.v1.json" ? "manifest-test-etag" : undefined,
+                etag: key === "visibility/blocked-entities.v1.json"
+                  ? "manifest-test-etag-" + value.revision : undefined,
                 size: Buffer.byteLength(JSON.stringify(value)),
                 async json() {
                   return value;
@@ -153,6 +163,8 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
   function resetHarness() {
     globalThis.__trendingWorkerVisibilityModeForTests = undefined;
     r2Objects = new Map();
+    manifestReads = 0;
+    afterManifestGet = null;
     cacheStore.clear();
     cacheWrites.length = 0;
     resetPublicJsonIsolateCacheForTests();
@@ -266,6 +278,78 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
       assert.equal(malformed.state, "unavailable");
       assert.equal(malformed.data, null);
     } finally {
+      if (previousMode === undefined) delete process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+      else process.env.PUBLIC_VISIBILITY_GUARD_MODE = previousMode;
+    }
+  });
+
+  test("Issue #653: in-flight R2 fence revision change rejects previously cached ranking", async () => {
+    resetHarness();
+    const previousMode = process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+    process.env.PUBLIC_VISIBILITY_GUARD_MODE = "observe";
+    globalThis.__trendingWorkerVisibilityModeForTests = "enforce";
+    const now = 1_700_000_000;
+    const old = {
+      schema_version: 1, generated_at: now - 120,
+      items: [{
+        id: "v-now-private", title: "previously public private title",
+        youtube_video_id: "yt-now-private", display_name: "creator",
+        icon_url: null, primary_event_id: null, primary_event_title: null,
+        scheduled_time: now - 100, status: "public",
+        views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+      }],
+    };
+    const key = "visibility/blocked-entities.v1.json";
+    const before = { schema_version: 1, revision: 1, generated_at: now, entities: [] };
+    const revoked = {
+      schema_version: 1, revision: 2, generated_at: now,
+      entities: [{
+        entity_type: "video", entity_id: "v-now-private",
+        fence_token: "revocation", blocked_at: now,
+      }],
+    };
+    cacheStore.set(TRENDING_OBJECT_KEY, { payload: old, stored_at: now - 60 });
+    r2Objects.set(key, before);
+    const { loadStaticTrending } = await import("./trendingLoader.ts");
+    try {
+      afterManifestGet = (count) => {
+        if (count === 1) r2Objects.set(key, revoked);
+      };
+      const raced = await loadStaticTrending(now);
+      assert.equal(manifestReads, 2,
+        "must check the manifest ETag both before and after filtering");
+      assert.equal(raced.state, "unavailable");
+      assert.equal(raced.data, null,
+        "the first manifest's public verdict must not escape after revocation");
+      assert.deepEqual(cacheStore.get(TRENDING_OBJECT_KEY).payload, old,
+        "reader must never mutate cached bytes");
+
+      afterManifestGet = null;
+      const stableRevoked = await loadStaticTrending(now);
+      assert.equal(manifestReads, 4);
+      assert.equal(stableRevoked.state, "empty");
+      assert.deepEqual(stableRevoked.data?.items, [],
+        "stable revoked manifest still returns the safe filtered result");
+
+      r2Objects.set(key, before);
+      afterManifestGet = (count) => {
+        if (count === 5) r2Objects.delete(key);
+      };
+      const vanished = await loadStaticTrending(now);
+      assert.equal(manifestReads, 6);
+      assert.equal(vanished.state, "unavailable",
+        "manifest disappearing between reads cannot authorize stale ranking");
+      assert.equal(vanished.data, null);
+
+      afterManifestGet = null;
+      r2Objects.set(key, before);
+      const stablePublic = await loadStaticTrending(now);
+      assert.equal(manifestReads, 8);
+      assert.deepEqual(stablePublic.data?.items.map((row) => row.id), ["v-now-private"],
+        "unchanged committed generation still passes the existing public contract");
+    } finally {
+      afterManifestGet = null;
+      globalThis.__trendingWorkerVisibilityModeForTests = undefined;
       if (previousMode === undefined) delete process.env.PUBLIC_VISIBILITY_GUARD_MODE;
       else process.env.PUBLIC_VISIBILITY_GUARD_MODE = previousMode;
     }
