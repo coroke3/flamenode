@@ -17,6 +17,7 @@ const FRESH = NOW - 1000;
 function createFixture() {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(`
+    CREATE TABLE events (id TEXT PRIMARY KEY NOT NULL, visibility_status TEXT NOT NULL);
     CREATE TABLE static_artifacts (
       id TEXT PRIMARY KEY NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
       object_key TEXT NOT NULL, content_hash TEXT NOT NULL, schema_version INTEGER NOT NULL,
@@ -59,8 +60,9 @@ function createFixture() {
     sqlite
       .prepare("INSERT INTO static_artifacts VALUES (?, ?, ?, ?, 'h', 1, NULL, ?, ?)")
       .run(`${type}:${id}:${key}`, type, id, key, generatedAt, deletedAt);
+  const event = (id, visibility = "public") => sqlite.prepare("INSERT INTO events VALUES (?, ?)").run(id, visibility);
   const queue = () => sqlite.prepare("SELECT target_type, target_id, reason, priority, status FROM static_rebuild_queue ORDER BY target_type, target_id").all();
-  return { sqlite, env: { DB, R2 }, uploaded, heads, track, queue };
+  return { sqlite, env: { DB, R2 }, uploaded, heads, track, event, queue };
 }
 
 test("期限超過のvideo/event detailだけを低優先度でenqueueし、新しい行・削除済み・queue active行は除く", async () => {
@@ -70,6 +72,7 @@ test("期限超過のvideo/event detailだけを低優先度でenqueueし、新�
   f.track("video", "mixed", "videos/mixed-a.json", OLD);
   f.track("video", "mixed", "videos/mixed-b.json", FRESH);
   f.track("event", "oldev", "events/oldev.json", OLD);
+  f.event("oldev");
   f.track("event_base", "oldev", "events/oldev/base.v1.json", FRESH);
   f.track("event_slots", "oldev", "events/oldev/slots.v1.json", FRESH);
   f.track("video", "deleted", "videos/deleted.json", OLD, NOW);
@@ -164,6 +167,7 @@ test("failed / active の target は sweep から除外する", async () => {
 test("SEC-533: stale event with no slots tracker enqueues producer despite a recently failed composer", async () => {
   const f = createFixture();
   f.track("event", "ev1", "events/ev1.json", OLD);
+  f.event("ev1");
   f.track("event_base", "ev1", "events/ev1/base.v1.json", FRESH);
   f.sqlite.prepare(
     "INSERT INTO static_rebuild_queue VALUES ('old-composer','event','ev1','artifact_slo_refresh','low','failed',4,?,?)",
@@ -189,6 +193,7 @@ test("SEC-533: stale event with no slots tracker enqueues producer despite a rec
 test("SEC-533: missing base is repaired before slots, and event after both tracked sections", async () => {
   const f = createFixture();
   f.track("event", "both-missing", "events/both-missing.json", OLD);
+  f.event("both-missing");
 
   assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 1);
   assert.deepEqual(f.queue().map((x) => `${x.target_type}:${x.target_id}`), ["event_base:both-missing"]);
@@ -209,6 +214,7 @@ test("SEC-533: producer cooldown and active protection are checked on selected t
   const f = createFixture();
   for (const id of ["slots-failed", "slots-active", "event-failed", "healthy-event"]) {
     f.track("event", id, `events/${id}.json`, OLD);
+    f.event(id);
     f.track("event_base", id, `events/${id}/base.v1.json`, FRESH);
     if (id === "healthy-event") {
       f.track("event_slots", id, `events/${id}/slots.v1.json`, FRESH);
@@ -234,6 +240,7 @@ test("SEC-533: missing event sections share the existing 100-detail-target cap",
   for (let i = 0; i < total; i++) {
     const id = `evt${String(i).padStart(4, "0")}`;
     f.track("event", id, `events/${id}.json`, OLD - (total - i));
+    f.event(id);
     f.track("event_base", id, `events/${id}/base.v1.json`, FRESH);
   }
   assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), STALE_ARTIFACT_REFRESH_MAX_TARGETS);
@@ -245,4 +252,31 @@ test("SEC-533: missing event sections share the existing 100-detail-target cap",
   assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 25,
     "next sweep enqueues the remaining unclaimed targets");
   assert.equal(f.queue().length, total);
+});
+
+test("SEC-533: nonpublic or missing event rows must never bootstrap section producers", async () => {
+  const f = createFixture();
+  for (const [id, visibility] of [
+    ["private-event", "private"],
+    ["unlisted-event", "unlisted"],
+    ["deleted-event", "deleted"],
+  ]) {
+    f.event(id, visibility);
+    f.track("event", id, `events/${id}.json`, OLD);
+  }
+  f.track("event", "orphan-event", "events/orphan-event.json", OLD);
+  // A real public event remains eligible for missing section repair.
+  f.event("public-event", "public");
+  f.track("event", "public-event", "events/public-event.json", OLD);
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 5);
+  const queued = f.queue();
+  assert.deepEqual(queued.map((q) => `${q.target_type}:${q.target_id}`), [
+    "event:deleted-event",
+    "event:orphan-event",
+    "event:private-event",
+    "event:unlisted-event",
+    "event_base:public-event",
+  ]);
+  assert.equal(queued.filter((q) => q.target_type === "event_base" || q.target_type === "event_slots").length, 1,
+    "section producers must be limited to currently public event IDs");
 });
