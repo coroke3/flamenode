@@ -1,11 +1,11 @@
-import { sql } from "drizzle-orm";
-import { videoChapters } from "@flamenode/db/schema";
+import { sql, type SQLWrapper } from "drizzle-orm";
+import { alias, unionAll } from "drizzle-orm/sqlite-core";
+import { videoChapters, xUserAliases, xUsers } from "@flamenode/db/schema";
 import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
 import type { ValidatedMemberSubmission } from "@flamenode/domain/video";
-import { isCanonicalXId, normalizeXId } from "@flamenode/domain/xid";
+import { decideCanonicalXUserResolution, isCanonicalXId, normalizeXId, type CanonicalXUserResolution } from "@flamenode/domain/xid";
 import type { ServerCoreDb } from "../db.ts";
 import { generateId } from "../id.ts";
-import { resolveCanonicalXUserResolutions } from "../xid/requestIdentity.ts";
 import {
   buildVideoMemberBulkInsertSql,
   buildVideoMemberSetSnapshot,
@@ -18,6 +18,69 @@ const MAX_CHAPTER_ROW_JSON_BYTES = 1_000_000;
 const MAX_CHAPTER_JSON_BINDS = 90;
 const MAX_MEMBER_CHAPTERS = 30;
 const encoder = new TextEncoder();
+
+// Only the unmounted SA-086 member path uses a 1-read compound query.
+// The shared request resolver and the domain's canonical decision are untouched.
+const MEMBER_X_RESOLUTION_CHUNK_SIZE = 80;
+function normalizedMemberXIdSql(column: SQLWrapper) {
+  return sql`lower(trim(ltrim(trim(${column}), '@')))`;
+}
+function memberCandidatesWhere(column: SQLWrapper, candidates: readonly string[]) {
+  return sql`${normalizedMemberXIdSql(column)} IN (${sql.join(
+    candidates.map((candidate) => sql`${candidate}`), sql`, `,
+  )})`;
+}
+async function resolveFreeVideoMemberXResolutions(
+  db: ServerCoreDb,
+  candidates: readonly string[],
+): Promise<Map<string, CanonicalXUserResolution>> {
+  const result = new Map<string, CanonicalXUserResolution>();
+  for (let offset = 0; offset < candidates.length; offset += MEMBER_X_RESOLUTION_CHUNK_SIZE) {
+    const chunk = candidates.slice(offset, offset + MEMBER_X_RESOLUTION_CHUNK_SIZE);
+    const aliasTarget = alias(xUsers, "member_canonical_alias_target");
+    // Preserve duplicate rows, rejected status, and missing alias targets;
+    // the unchanged domain resolver applies the same fail-closed policy.
+    const rows = await unionAll(
+      db.select({
+        row_kind: sql<string>`'alias'`.as("row_kind"),
+        alias_x_id: sql<string | null>`${xUserAliases.alias_x_id}`.as("alias_x_id"),
+        target_x_user_id: sql<string | null>`${aliasTarget.id}`.as("target_x_user_id"),
+        target_approval_status: sql<string | null>`${aliasTarget.approval_status}`.as("target_approval_status"),
+        id: sql<string | null>`NULL`.as("id"),
+        approval_status: sql<string | null>`NULL`.as("approval_status"),
+      }).from(xUserAliases).leftJoin(
+        aliasTarget,
+        sql`${normalizedMemberXIdSql(aliasTarget.id)} = ${normalizedMemberXIdSql(xUserAliases.x_user_id)}`,
+      ).where(memberCandidatesWhere(xUserAliases.alias_x_id, chunk)),
+      db.select({
+        row_kind: sql<string>`'direct'`.as("row_kind"),
+        alias_x_id: sql<string | null>`NULL`.as("alias_x_id"),
+        target_x_user_id: sql<string | null>`NULL`.as("target_x_user_id"),
+        target_approval_status: sql<string | null>`NULL`.as("target_approval_status"),
+        id: sql<string | null>`${xUsers.id}`.as("id"),
+        approval_status: sql<string | null>`${xUsers.approval_status}`.as("approval_status"),
+      }).from(xUsers).where(memberCandidatesWhere(xUsers.id, chunk)),
+    );
+    if (rows.some((row) =>
+      (row.row_kind !== "alias" && row.row_kind !== "direct") ||
+      (row.row_kind === "direct" && !row.id))) {
+      throw new Error("free_video_new_member_identity_result_invalid");
+    }
+    const aliases = rows.filter((row) => row.row_kind === "alias").map((row) => ({
+      alias_x_id: row.alias_x_id,
+      target_x_user_id: row.target_x_user_id,
+      target_approval_status: row.target_approval_status,
+    }));
+    const directRows = rows.filter((row) => row.row_kind === "direct").map((row) => ({
+      id: row.id!,
+      approval_status: row.approval_status,
+    }));
+    for (const candidate of chunk) {
+      result.set(candidate, decideCanonicalXUserResolution({ candidate, aliases, directRows }));
+    }
+  }
+  return result;
+}
 
 function chunkChapterRows(rows: readonly (typeof videoChapters.$inferSelect)[]) {
   const chunks: (typeof videoChapters.$inferSelect)[][] = [];
@@ -48,7 +111,7 @@ function chunkChapterRows(rows: readonly (typeof videoChapters.$inferSelect)[]) 
  * CURRENT's canonical X resolution, pending X placeholder, public member-set
  * audit and member chapter summary. All writes are PREPARED, never executed.
  * The caller must include the statements in the same audited D1 batch AFTER
- * the new video row, and count the resolver's actual 2 reads per 80 X IDs.
+ * the new video row, and count one unioned read per 80 X IDs.
  *
  * It is not an update/edit member algorithm. A same-batch SQL assertion now
  * rejects alias/approval remaps between pre-read and commit; full Worker CPU
@@ -114,7 +177,7 @@ export async function buildFreeVideoNewMemberPlan(
   }
 
   // CURRENT lifecycle resolver covers direct, alias, ambiguous and rejected.
-  const canonical = await resolveCanonicalXUserResolutions(db, [...candidates]);
+  const canonical = await resolveFreeVideoMemberXResolutions(db, [...candidates]);
   const seenCanonical = new Set<string>();
   const newXUsers: Array<{
     id: string; x_name: string; icon_url: null; profile_text: null;
