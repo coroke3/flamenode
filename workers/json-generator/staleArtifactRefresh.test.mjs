@@ -272,9 +272,9 @@ test("SEC-533: nonpublic or missing event rows must never bootstrap section prod
   const queued = f.queue();
   assert.deepEqual(queued.map((q) => `${q.target_type}:${q.target_id}`), [
     "event:archived-event",
+    "event:draft-event",
     "event:orphan-event",
     "event:private-event",
-    "event:draft-event",
     "event_base:public-event",
   ]);
   assert.equal(queued.filter((q) => q.target_type === "event_base" || q.target_type === "event_slots").length, 1,
