@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   normalizeStaticTrending,
+  filterStaticTrendingByVisibilityFence,
   resolveStaticTrendingStaleMeta,
   TRENDING_STALE_MAX_AGE_SEC,
   TRENDING_TOO_OLD_FOR_HOME_SEC,
@@ -23,6 +24,35 @@ const sampleItem = {
   views_7d: 25,
   views_30d: 40,
 };
+
+test("Issue #653: visibility fence removes revoked video and revoked linked event cards without cache mutation", () => {
+  const now = 1_700_000_000;
+  const payload = normalizeStaticTrending({
+    schema_version: 1, generated_at: now, items: [
+      { ...sampleItem, id: "v-revoked", title: "private-video-secret" },
+      { ...sampleItem, id: "v-event", title: "hidden-event-title",
+        primary_event_id: "e-revoked", primary_event_title: "private event name" },
+      { ...sampleItem, id: "v-public", title: "public video",
+        primary_event_id: "e-public" },
+    ],
+  }, now);
+  assert.ok(payload);
+  const original = JSON.stringify(payload);
+  const calls = [];
+  const result = filterStaticTrendingByVisibilityFence(payload, (entity, id) => {
+    calls.push(entity + ":" + id);
+    return (entity === "video" && id === "v-revoked") ||
+      (entity === "event" && id === "e-revoked");
+  });
+  assert.deepEqual(result.items.map((item) => item.id), ["v-public"]);
+  assert.equal(result.generatedAt, payload.generatedAt, "stale age must remain unchanged");
+  assert.equal(JSON.stringify(payload), original, "R2/Cache payload is never mutated");
+  assert.ok(calls.includes("video:v-revoked"));
+  assert.ok(calls.includes("event:e-revoked"));
+  assert.ok(calls.includes("event:e-public"));
+  const noBlocked = filterStaticTrendingByVisibilityFence(payload, () => false);
+  assert.equal(noBlocked, payload, "no allocations on fully public fast path");
+});
 
 test("normalizeStaticTrending: valid payload を正規化する", () => {
   const data = normalizeStaticTrending({
