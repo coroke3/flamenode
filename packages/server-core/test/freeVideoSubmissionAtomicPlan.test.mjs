@@ -90,6 +90,16 @@ test("MIG-0651 atomic composer: null event inserts video and pending YouTube met
   assert.equal(calls.length, 3, "authorization assertion and two inserts; never executes");
 });
 
+test("MIG-0651 SA-086: linked event without a D1 required-field snapshot never prepares mutations", () => {
+  const { db, calls } = fixture();
+  assert.throws(() => buildFreeVideoSubmissionAtomicPlan(db, {
+    videoAfter: video("event-a"), actorUserId: "user-1",
+    trustedActiveXId: "alice", eventId: "event-a",
+    questions: [], customAnswerDrafts: [], now: NOW,
+  }), /free_video_required_fields_snapshot_missing/);
+  assert.equal(calls.length, 0, "no statement prepared without the trusted policy snapshot");
+});
+
 test("MIG-0651 atomic composer: event and entire question-set assertions MUST precede every INSERT", () => {
   const { db } = fixture();
   const row = video("event-a");
