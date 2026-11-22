@@ -273,8 +273,10 @@ export async function handlePageRenderQueue(
     try {
       outcomes.push(await processPageRender(parsed, env, lookup));
       message.ack?.();
-    } catch (error) {
-      outcomes.push({ action: "retry", reason: error instanceof Error ? error.message : "error" });
+    } catch {
+      // Provider errors may have throwing getters or contain secrets. A failed
+      // diagnostic must never prevent the Queue retry after a D1/R2/KV failure.
+      outcomes.push({ action: "retry", reason: "processing_failed" });
       message.retry?.();
     }
   }
