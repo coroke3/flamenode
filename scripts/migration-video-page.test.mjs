@@ -107,7 +107,14 @@ test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body f
     },
     top: { related_videos: [], related_reserve: [], related_random_reserve: [] },
   })]);
-  const r = build([["vid1", mainPayload], ...related]);
+  const r = build([["vid1", mainPayload], ...related], {
+    // Both public event references have current verified detail snapshots.
+    // Without these, the SSG must no longer trust the old video's event labels.
+    events: [
+      ["ev1", { event: { id: "ev1", visibility_status: "public" } }],
+      ["ev2", { event: { id: "ev2", visibility_status: "public" } }],
+    ],
+  });
   try {
     assert.equal(r.error, null, r.error ?? "");
     const doc = dom(r, "AAAAAAAAA01/index.html");
@@ -261,6 +268,52 @@ test("T09: missing, non-public, mismatched and invalid event playlist never leak
     try {
       assert.equal(r.error, null, `${label}: ${r.error ?? ""}`);
       assert.deepEqual(playlistLinks(r), [], label);
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09 privacy: a stale video cannot publish a withdrawn event title, icon or link", { skip: skipUi }, () => {
+  const stale = payload({ video: { scheduled_time: NOW + 7 * D } });
+  stale.public_events[0].title = "PRIVATE_EVENT_CANARY";
+  stale.public_events[0].icon_url = "https://example.com/private-event-icon-canary.png";
+  stale.public_events[1].title = "ALLOWED_EVENT_CANARY";
+  const allowed = ["ev2", playlistEvent("public", null, "ev2")];
+  const scenarios = [
+    ["blocked manifest key", {
+      events: [["ev1", playlistEvent()], allowed],
+      blocked: ["snapshot/event-detail/ev1.json"],
+    }],
+    ["not in public allowlist", { events: [allowed] }],
+    ["allowed manifest key with missing body", {
+      events: [allowed],
+      manifestOnlyEventIds: ["ev1"],
+    }],
+    ["non-public event detail", {
+      events: [["ev1", playlistEvent("private")], allowed],
+    }],
+    ["event detail ID mismatch", {
+      events: [["ev1", playlistEvent("public", "PLabcdefghijklmnop", "another-event")], allowed],
+    }],
+  ];
+  for (const [label, settings] of scenarios) {
+    const r = build([["vid1", stale]], settings);
+    try {
+      assert.equal(r.error, null, `${label}: ${r.error ?? ""}`);
+      for (const file of ["AAAAAAAAA01/index.html", "vid1/index.html"]) {
+        const doc = dom(r, file);
+        const markup = doc.body.innerHTML;
+        assert.doesNotMatch(markup, /PRIVATE_EVENT_CANARY|private-event-icon-canary/, label);
+        assert.equal(doc.querySelector('a[href="/event/ev1"]'), null, label);
+        assert.ok(doc.querySelector('a[href="/event/ev2"]'), `${label}: surviving public event remains linked`);
+        assert.match(doc.querySelector("main").textContent, /ALLOWED_EVENT_CANARY/, label);
+        assert.equal(
+          doc.querySelector('main a[href^="https://www.youtube.com/playlist?list="]'),
+          null,
+          `${label}: a fallback display event cannot inherit the withdrawn primary playlist`,
+        );
+      }
     } finally {
       clean(r);
     }
