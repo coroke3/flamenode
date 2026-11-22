@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { drizzle } from "drizzle-orm/sqlite-proxy";
-import * as schema from "@flamenode/db/schema";
+import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
 import { buildFreeVideoSubmittedNotificationPlan } from "../src/video/freeVideoSubmittedNotificationPlan.ts";
 import { buildFreeVideoSubmittedNotificationPlan as publicPlan } from "@flamenode/server-core/video/unslottedEventPlans";
@@ -12,30 +11,54 @@ const payload = () => ({
   content: "【FlameNode】作品を受け付けました",
   video_id: "v-test", url: "https://flamenode.example/v-test",
 });
-function dbFor(sqlite, stats) {
-  return drizzle(async (query, params, method) => {
-    stats.reads += 1;
-    const rows = sqlite.prepare(query).all(...params);
-    return { rows: method === "all" || method === "values"
-      ? rows.map((row) => Object.values(row)) : rows };
-  }, { schema });
-}
 function args(overrides = {}) {
   return { videoId: "v-test", actorUserId: "user-1", eventId: null,
     payload: payload(), now: NOW, ...overrides };
 }
+function planDb() {
+  const state = { reads: 0, writes: 0, prepared: 0 };
+  return {
+    state,
+    db: {
+      select() { state.reads++; throw new Error("the plan must not pre-read D1"); },
+      insert() { state.writes++; throw new Error("the plan must not execute INSERT"); },
+      run(expr) { state.prepared++; return { sqlExpr: expr }; },
+    },
+  };
+}
+const dialect = new SQLiteSyncDialect();
+function compiled(plan) {
+  assert.deepEqual(plan.expectedChanges, [null]);
+  assert.equal(plan.statements.length, 1);
+  assert.deepEqual(plan.audits, []);
+  const stmt = plan.statements[0];
+  assert.ok("sqlExpr" in stmt, "the same-batch INSERT must remain unexecuted");
+  const q = dialect.sqlToQuery(stmt.sqlExpr);
+  assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
+  assert.match(q.sql, /^\s*INSERT INTO notification_outbox\s*\(/i);
+  assert.match(q.sql, /ON CONFLICT DO NOTHING/i);
+  return q;
+}
+function execute(sqlite, plan) {
+  const q = compiled(plan);
+  return sqlite.prepare(q.sql).run(...q.params).changes;
+}
+async function createPlan(overrides = {}) {
+  const { state, db } = planDb();
+  const plan = await buildFreeVideoSubmittedNotificationPlan(db, args(overrides));
+  assert.deepEqual({ reads: state.reads, writes: state.writes, prepared: state.prepared },
+    { reads: 0, writes: 0, prepared: 1 }, "zero pre-batch D1 work; one deferred statement");
+  return plan;
+}
 
-test("MIG-0651 notification: public core entry resolves exact implementation", () => {
+test("MIG-0651 notification: public core entry is identical", () => {
   assert.strictEqual(publicPlan, buildFreeVideoSubmittedNotificationPlan);
 });
 
-test("MIG-0651 notification: invalid, foreign or oversized trusted payload fails before any D1 work", async () => {
-  const noDb = { select() { throw Error("must not read"); }, insert() { throw Error("must not write"); } };
+test("MIG-0651 notification: invalid, foreign or oversized trusted payload fails before D1 work", async () => {
+  const noDb = { select() { throw Error("no D1 reads"); }, run() { throw Error("no D1 prepare"); } };
   for (const bad of [
-    { videoId: "" },
-    { actorUserId: "" },
-    { eventId: "" },
-    { now: -1 },
+    { videoId: "" }, { actorUserId: "" }, { eventId: "" }, { now: -1 },
     { payload: { ...payload(), video_id: "another-video" } },
     { payload: { ...payload(), content: "x".repeat(2001) } },
     { payload: { ...payload(), url: "//evil.example" } },
@@ -51,22 +74,13 @@ test("MIG-0651 notification: invalid, foreign or oversized trusted payload fails
     /free_video_submitted_notification_invalid/);
 });
 
-test("MIG-0651 notification: full migrated SQLite queues one video_submitted DM, no send", async () => {
+test("MIG-0651 notification: migrated SQLite commits one pending DM with no pre-batch read", async () => {
   const sqlite = createSqlite();
   try {
     insert(sqlite, "user", { id: "user-1", is_notification_enabled: 1 });
-    const stats = { reads: 0 };
-    const db = dbFor(sqlite, stats);
-    const plan = await buildFreeVideoSubmittedNotificationPlan(db, args({ eventId: "event-a" }));
-    assert.equal(stats.reads, 1, "active dedupe and recipient preference share one D1 SELECT");
-    assert.deepEqual(plan.expectedChanges, [null]);
-    assert.equal(plan.statements.length, 1);
-    assert.equal(plan.audits.length, 0, "CURRENT notification does not create strict video audit entries");
-    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0,
-      "the candidate must not execute prepared INSERTs");
-    const q = plan.statements[0].toSQL();
-    assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
-    assert.equal(sqlite.prepare(q.sql).run(...q.params).changes, 1);
+    const plan = await createPlan({ eventId: "event-a" });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
+    assert.equal(execute(sqlite, plan), 1);
     const row = sqlite.prepare("SELECT * FROM notification_outbox").get();
     assert.equal(row.type, "video_submitted");
     assert.equal(row.delivery_route, "dm");
@@ -83,62 +97,82 @@ test("MIG-0651 notification: full migrated SQLite queues one video_submitted DM,
   } finally { sqlite.close(); }
 });
 
-test("MIG-0651 notification: disabled recipient produces no outbox write", async () => {
+test("MIG-0651 notification: current opt-out and absent user never enqueue DM", async () => {
   const sqlite = createSqlite();
   try {
+    const noUser = await createPlan();
+    assert.equal(execute(sqlite, noUser), 0);
     insert(sqlite, "user", { id: "user-1", is_notification_enabled: 0 });
-    const stats = { reads: 0 };
-    const plan = await buildFreeVideoSubmittedNotificationPlan(dbFor(sqlite, stats), args());
-    assert.equal(stats.reads, 1);
-    assert.deepEqual(plan, { statements: [], expectedChanges: [], audits: [] });
+    const disabled = await createPlan();
+    assert.equal(execute(sqlite, disabled), 0);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
   } finally { sqlite.close(); }
 });
 
-test("MIG-0651 notification: existing and racing active-dedupe notification stay idempotent", async () => {
+test("MIG-0651 notification: opt-out is rechecked inside batch, not stale preflight", async () => {
   const sqlite = createSqlite();
   try {
     insert(sqlite, "user", { id: "user-1", is_notification_enabled: 1 });
-    const stats = { reads: 0 };
-    const db = dbFor(sqlite, stats);
-    const pending = await buildFreeVideoSubmittedNotificationPlan(db, args());
-    assert.equal(pending.statements.length, 1);
+    const prepared = await createPlan();
+    sqlite.prepare("UPDATE user SET is_notification_enabled=0 WHERE id='user-1'").run();
+    assert.equal(execute(sqlite, prepared), 0,
+      "recipient opt-out between plan creation and batch must suppress DM");
+    sqlite.prepare("UPDATE user SET is_notification_enabled=1 WHERE id='user-1'").run();
+    assert.equal(execute(sqlite, prepared), 1,
+      "an enabled recipient is evaluated at the actual atomic write");
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 notification: pending, processing and sent dedupe; failed is reusable", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "user", { id: "user-1", is_notification_enabled: 1 });
+    for (const status of ["pending", "processing", "sent", "failed"]) {
+      insert(sqlite, "notification_outbox", {
+        id: "existing-" + status, recipient_user_id: "user-1",
+        type: "video_submitted", delivery_route: "dm",
+        payload_json: JSON.stringify(payload()), status,
+        dedupe_key: "video_submitted:v-test", created_at: NOW,
+      });
+      const plan = await createPlan();
+      assert.equal(execute(sqlite, plan), status === "failed" ? 1 : 0,
+        status + " must preserve CURRENT active-dedupe predicate");
+      sqlite.prepare("DELETE FROM notification_outbox").run();
+    }
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 notification: race after prepare is deduped without an extra SELECT", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "user", { id: "user-1", is_notification_enabled: 1 });
+    const prepared = await createPlan();
     insert(sqlite, "notification_outbox", {
-      id: "racing-id", recipient_user_id: "user-1", type: "video_submitted",
+      id: "racing-id", recipient_user_id: "user-1",
+      type: "video_submitted", delivery_route: "dm",
       payload_json: JSON.stringify(payload()), status: "pending",
-      dedupe_key: "video_submitted:v-test", created_at: NOW, delivery_route: "dm",
+      dedupe_key: "video_submitted:v-test", created_at: NOW,
     });
-    const q = pending.statements[0].toSQL();
-    assert.equal(sqlite.prepare(q.sql).run(...q.params).changes, 0,
-      "the canonical partial unique index allows exactly one active notification");
-    const after = await buildFreeVideoSubmittedNotificationPlan(db, args());
-    assert.deepEqual(after, { statements: [], expectedChanges: [], audits: [] });
-    assert.equal(stats.reads, 2, "one joined preflight read per attempt, even with active dedupe");
+    assert.equal(execute(sqlite, prepared), 0);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 1);
   } finally { sqlite.close(); }
 });
 
-test("MIG-0651 notification: active dedupe short-circuits absent recipient without a second D1 query", async () => {
+test("MIG-0651 notification: the video + DM outbox are rolled back together", async () => {
   const sqlite = createSqlite();
   try {
-    const stats = { reads: 0 };
-    const noUser = await buildFreeVideoSubmittedNotificationPlan(dbFor(sqlite, stats), args());
-    assert.deepEqual(noUser, { statements: [], expectedChanges: [], audits: [] });
-    assert.equal(stats.reads, 1);
-
     insert(sqlite, "user", { id: "user-1", is_notification_enabled: 1 });
-    for (const status of ["processing", "sent"]) {
-      insert(sqlite, "notification_outbox", {
-        id: "old-" + status, recipient_user_id: "user-1",
-        type: "video_submitted", payload_json: JSON.stringify(payload()),
-        status, dedupe_key: "video_submitted:v-test",
-        created_at: NOW, delivery_route: "dm",
+    const plan = await createPlan();
+    sqlite.exec("BEGIN");
+    try {
+      insert(sqlite, "videos", {
+        id: "v-test", submitted_by_user_id: "user-1",
+        creator_display_name: "Test", title: "Video", youtube_video_id: "dQw4w9WgXcQ",
+        visibility_status: "public",
       });
-      const plan = await buildFreeVideoSubmittedNotificationPlan(dbFor(sqlite, stats), args());
-      assert.deepEqual(plan, { statements: [], expectedChanges: [], audits: [] },
-        status + " is an active dedupe state");
-      sqlite.prepare("DELETE FROM notification_outbox WHERE id=?").run("old-" + status);
-    }
-    assert.equal(stats.reads, 3, "one read for absent user + one per active dedupe state");
+      assert.equal(execute(sqlite, plan), 1);
+    } finally { sqlite.exec("ROLLBACK"); }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos WHERE id='v-test'").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
   } finally { sqlite.close(); }
 });
