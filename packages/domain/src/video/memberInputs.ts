@@ -144,6 +144,12 @@ export function normalizeMemberChapters(
   const fallbackLabel =
     member.role || member.name || (member.x_user_id ? `@${member.x_user_id}` : `メンバー${memberIndex + 1}`);
   const chapters: ParsedMemberChapter[] = [];
+  // video_chapters.x_user_id is NOT NULL in the real D1 schema. The member
+  // itself may be name-only, but a managed chapter needs an X identity.
+  // Reject at the shared CURRENT/Hono form boundary, before any D1 writes.
+  if ((member.chapters?.length ?? 0) > 0 && !normalizeXId(member.x_user_id)) {
+    return { ok: false, message: `${member.name || "メンバー"} のチャプターには X ID が必要です。` };
+  }
 
   for (const [order, ch] of (member.chapters ?? []).entries()) {
     const sec = parseMemberChapterTime(ch.time);
