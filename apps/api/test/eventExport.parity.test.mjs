@@ -213,6 +213,85 @@ if (runUnderRootTsx(import.meta.url)) {
     reset();
   });
 
+  test("SEC-718: writer-colo deletion does not invalidate a reader-colo cached video (CURRENT/Hono, v5/legacy)", async () => {
+    // Cloudflare Cache API entries are colo-local. A successful writer-side
+    // delete must not be mistaken for a global invalidation of another colo.
+    // Use independent fake Cache stores against the same real SQLite D1.
+    const originalCache = globalThis.caches.default;
+    const makeColo = () => {
+      const rows = new Map();
+      return {
+        rows,
+        cache: {
+          async match(request) { return rows.get(request.url)?.clone(); },
+          async put(request, response) { rows.set(request.url, response.clone()); },
+          async delete(request) { return rows.delete(request.url); },
+        },
+      };
+    };
+    try {
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        for (const format of ["v5", "legacy"]) {
+          reset();
+          sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+          const writer = makeColo();
+          const reader = makeColo();
+          const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+          const key = `public-event-export:9:export-event:${format}:1440`;
+          const cacheRequest = new Request(
+            "https://flamenode.internal/public-json/" + encodeURIComponent(key),
+          );
+
+          // Both colos separately cache the initially public video.
+          for (const colo of [writer, reader]) {
+            globalThis.caches.default = colo.cache;
+            const primed = await request(path);
+            assert.equal(primed.status, 200, runtime + " " + format);
+            assert.equal(primed.headers.get("X-FlameNode-Cache"), "MISS");
+            assert.match(await primed.text(), /public-video/);
+            await Promise.all(globalThis.__eventExport.pending.splice(0));
+            assert.equal(colo.rows.has(cacheRequest.url), true, "colo holds the original scheduled payload");
+          }
+          globalThis.caches.default = reader.cache;
+          const warm = await request(path);
+          assert.equal(warm.headers.get("X-FlameNode-Cache"), "HIT",
+            runtime + " " + format + " requires a genuine warm reader-colo cache");
+          assert.match(await warm.text(), /public-video/);
+
+          // A separate writer commits the private transition. Its local
+          // invalidation does not touch the reader's old Cache API response.
+          sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+          globalThis.caches.default = writer.cache;
+          assert.equal(await writer.cache.delete(cacheRequest), true);
+          assert.equal(writer.rows.has(cacheRequest.url), false);
+          assert.equal(reader.rows.has(cacheRequest.url), true,
+            "reader colo must still contain the stale, previously-public response");
+
+          // The real reader must check fresh D1 visibility, refuse stale HIT
+          // and produce a public-only replacement for each legacy/v5 format.
+          globalThis.caches.default = reader.cache;
+          const after = await request(path);
+          assert.equal(after.status, 200, runtime + " " + format);
+          assert.equal(after.headers.get("X-FlameNode-Cache"), "MISS",
+            "stale remote-colo HIT cannot be used after video revocation");
+          assert.equal(after.headers.get("Cache-Control"), "no-store");
+          assert.doesNotMatch(await after.text(), /public-video|公開作品/,
+            "private video metadata must not be disclosed from a stale reader colo");
+          assert.equal(d1.stats.writes, 0, "GET cannot write D1");
+          await Promise.all(globalThis.__eventExport.pending.splice(0));
+          const safeWarm = await request(path);
+          assert.equal(safeWarm.headers.get("X-FlameNode-Cache"), "HIT",
+            "safe replacement can still be cached after revocation");
+          assert.doesNotMatch(await safeWarm.text(), /public-video|公開作品/);
+        }
+      }
+    } finally {
+      globalThis.caches.default = originalCache;
+      sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      reset();
+    }
+  });
+
   test("SEC-575: スタッフ公開フラグ解除とイベント再公開後に旧キャッシュを再配信しない", async () => {
     for (const request of [current, hono]) {
       for (const format of ["v5", "legacy"]) {
