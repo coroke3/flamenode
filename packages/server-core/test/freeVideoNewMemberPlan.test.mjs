@@ -45,10 +45,17 @@ function executePrepared(sqlite, plan) {
           assert.ok(new TextEncoder().encode(v).byteLength < 2_000_000);
         }
       }
-      const result = sqlite.prepare(q.sql).run(...q.params);
-      if (plan.expectedChanges[index] !== null) {
-        assert.equal(result.changes, plan.expectedChanges[index],
-          "statement " + index + " should have exact changes");
+      // Canonical-X CAS is a read assertion; executing it with run() can
+      // skip stepping the SELECT and silently miss an identity race.
+      if (index === 0 && plan.expectedChanges[index] === null) {
+        const predicate = sqlite.prepare(q.sql).get(...q.params);
+        assert.equal(Object.values(predicate)[0], 1, "canonical-X CAS must return true");
+      } else {
+        const result = sqlite.prepare(q.sql).run(...q.params);
+        if (plan.expectedChanges[index] !== null) {
+          assert.equal(result.changes, plan.expectedChanges[index],
+            "statement " + index + " should have exact changes");
+        }
       }
     }
     sqlite.exec("COMMIT");
@@ -128,19 +135,22 @@ test("MIG-0651 new members: rejected alias and duplicate canonical IDs fail befo
   } finally { sqlite.close(); }
 });
 
-test("MIG-0651 new members: pending X placeholder race preserves existing canonical row", async () => {
+test("MIG-0651 new members: exact-PK race aborts instead of creating false pending-profile audit", async () => {
   const sqlite = createSqlite();
   try {
     const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, {reads:0}), args(parsedMemberSubmission([
       { name: "Member", x_user_id: "racingx", chapters: [] },
     ])));
     assert.deepEqual(plan.expectedChanges, [null,1,1]);
+    assert.equal(plan.audits[0].after.rows[0].approval_status, "pending",
+      "this is an assertion of a newly created pending profile, not an UPSERT");
     insert(sqlite, "x_users", { id: "racingx", x_name: "Current Name", approval_status: "approved" });
-    executePrepared(sqlite, plan);
+    assert.throws(() => executePrepared(sqlite, plan), /malformed JSON/,
+      "otherwise strict audit would falsely claim a pending profile was created");
     const row = sqlite.prepare("SELECT x_name,approval_status FROM x_users WHERE id='racingx'").get();
     assert.equal(row.x_name, "Current Name");
     assert.equal(row.approval_status, "approved");
-    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n, 0);
   } finally { sqlite.close(); }
 });
 
