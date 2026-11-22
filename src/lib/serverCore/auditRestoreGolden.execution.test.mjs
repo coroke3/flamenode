@@ -986,6 +986,70 @@ if (runTestWithTsx(import.meta.url)) {
       "failed restore must not evict any public event export");
   });
 
+  test("SEC-733: Free-tier 50 Cache API call ceiling leaves unpurged exports after a valid 8-event restore", async () => {
+    // Characterization only: the origin cache is colo-local, and this fake
+    // provider enforces the documented Workers Free 50-call ceiling. A
+    // successfully committed D1 restore is not proof of cache invalidation.
+    const freeCacheCalls = 50;
+    const canary = "SEC733_CACHE_PROVIDER_PRIVATE_CANARY";
+    let calls = 0;
+    let accepted = 0;
+    const setup = (sqlite) => {
+      seedVideo(sqlite);
+      insertRow(sqlite, "video_events", { video_id: "vid-1", event_id: "evt-1" });
+      for (let i = 1; i < 7; i += 1) {
+        const eventId = `evt-extra-${i}`;
+        insertRow(sqlite, "events", {
+          id: eventId, title: `Extra ${i}`, visibility_status: "public",
+          created_at: 1000, updated_at: 1000,
+        });
+        insertRow(sqlite, "video_events", { video_id: "vid-1", event_id: eventId });
+      }
+    };
+    const [, actual] = await runScenario("sec733_free_cache_ceiling", {
+      setup,
+      arrange: arrangeVideo({
+        beforePatch: { visibility_status: "private", primary_event_id: "evt-private" },
+      }),
+      caches: (log) => ({
+        delete: async (request) => {
+          const key = typeof request === "string" ? request : request.url;
+          log.push({ op: "cache.delete", key });
+          calls += 1;
+          if (calls > freeCacheCalls) {
+            throw new Error(`Cache API call limit: ${canary}`);
+          }
+          accepted += 1;
+          return true;
+        },
+        match: async () => undefined,
+        put: async () => undefined,
+      }),
+    });
+    const exportDeletes = actual.log.filter((entry) =>
+      entry.op === "cache.delete" && entry.key.includes("public-event-export%3A"));
+    assert.equal(actual.outcome.returned?.ok, true, "D1 restore must not be falsely rolled back");
+    assert.equal(actual.audit_restore_runs.filter((row) => row.status === "success").length, 1);
+    assert.equal(actual.log.filter((entry) => entry.op === "batch").length, 1);
+    assert.equal(exportDeletes.length, 64,
+      "eight event parents require v5+legacy x four scheduled export invalidations");
+    assert.ok(calls > freeCacheCalls, "public JSON invalidation adds to 64 export deletes");
+    assert.equal(accepted, freeCacheCalls, "the fake provider only accepts the first 50 calls");
+    const warnings = actual.log.filter((entry) =>
+      entry.op === "console.warn" && entry.args[0] === "[public-cache] cache_api_delete_failed");
+    assert.equal(warnings.length, calls - freeCacheCalls,
+      "every rejected invalidation is reported with a fixed non-sensitive warning");
+    assert.ok(warnings.every((entry) =>
+      entry.args.length === 1 && entry.args[0] === "[public-cache] cache_api_delete_failed"));
+    assert.ok(!JSON.stringify(actual.outcome).includes(canary));
+    assert.ok(!JSON.stringify(actual.log.filter((entry) =>
+      entry.op.startsWith("console."))).includes(canary),
+      "provider errors must not be reflected to logs");
+    // The test intentionally demonstrates the unresolved danger: 14 scheduled
+    // exports plus further public JSON caches may survive a successful D1
+    // commit. Do not close #733 or #718 on the strength of this regression.
+  });
+
   test("SEC-730: unregistered audit table data never reaches HTTP or failed-run diagnostics", async () => {
     const secret = "SEC730_UNTRUSTED_AUDIT_TABLE_PRIVATE_CANARY";
     for (const dry_run of [true, false]) {
