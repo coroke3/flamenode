@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { softwareAliases, softwareCatalog, videoSoftwares } from "@flamenode/db/schema";
 import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@flamenode/domain/video/atomicLimits";
 import { normalizeSoftwareCatalogName, normalizeSoftwareKey, normalizeSoftwareLabels } from "@flamenode/domain/software/labels";
@@ -33,10 +33,12 @@ export async function buildFreeVideoSoftwareInsertPlan(
   const aliasKeys = labels.map(normalizeSoftwareKey);
   const names = labels.map(normalizeSoftwareCatalogName);
   // S3: one bounded SELECT resolves direct names and active alias targets.
-  // In the canonical schema normalized aliases and names are each globally
-  // unique. With <=4 submitted labels, this LEFT JOIN produces <=8 rows and
-  // avoids the old 2/3 separate D1 pre-reads. Alias-first wins even when the
-  // same input is also an existing direct catalog name.
+  // Putting the joined alias's nullable column in an outer OR forces a full
+  // scan of software_catalog (confirmed via SQLite EXPLAIN QUERY PLAN).
+  // Instead filter catalog IDs through the indexed software_aliases subquery:
+  // SQLite can use MULTI-INDEX OR on normalized_name and catalog PK.
+  // Names and aliases are globally unique, so <=4 labels bound the result.
+  // Alias-first wins even if the input is also a direct catalog name.
   const matching = await db.select({
     softwareId: softwareCatalog.id,
     normalizedName: softwareCatalog.normalized_name,
@@ -50,7 +52,11 @@ export async function buildFreeVideoSoftwareInsertPlan(
       eq(softwareCatalog.is_active, 1),
       or(
         inArray(softwareCatalog.normalized_name, names),
-        isNotNull(softwareAliases.normalized_alias),
+        inArray(softwareCatalog.id, db.select({
+          software_id: softwareAliases.software_id,
+        }).from(softwareAliases).where(
+          inArray(softwareAliases.normalized_alias, aliasKeys),
+        )),
       ),
     ));
   const aliasByKey = new Map(matching
