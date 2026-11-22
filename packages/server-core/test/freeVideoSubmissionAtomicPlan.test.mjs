@@ -1104,6 +1104,59 @@ test("MIG-0651 U02 new-video: rebuild failure rolls back member X, chapter and v
   } finally { sqlite.close(); }
 });
 
+test("MIG-0651 U02: real composed member/software/DM combinations fail closed on S3 read budget", async () => {
+  const cases = [
+    { label: "software + DM", collab: false, usedSoftware: "New Tool",
+      callerReads: 2, totalPreReads: 4 },
+    { label: "members + DM", collab: true, usedSoftware: null,
+      callerReads: 3, totalPreReads: 5 },
+    { label: "members + software + DM", collab: true, usedSoftware: "New Tool",
+      callerReads: 4, totalPreReads: 6 },
+  ];
+  for (const scenario of cases) {
+    const sqlite = createSqlite();
+    seedApprovedActiveX(sqlite);
+    try {
+      let reads = 0;
+      const proxy = drizzle(async (query, params, method) => {
+        reads += 1;
+        const rows = sqlite.prepare(query).all(...params);
+        return { rows: method === "all" || method === "values"
+          ? rows.map(r => Object.values(r)) : rows };
+      }, { schema });
+      const db = {
+        select: (...args) => proxy.select(...args),
+        insert: (...args) => proxy.insert(...args),
+        run(expr) { return { sqlExpr: expr }; },
+      };
+      const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+        videoAfter: {
+          ...video(), collaboration_type: scenario.collab ? "collab" : "individual",
+        },
+        actorUserId: "user-1", trustedActiveXId: "alice",
+        eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+        usedSoftware: scenario.usedSoftware,
+        ...(scenario.collab ? {memberSubmission: verifiedMembersForNewVideo()} : {}),
+        submittedNotificationPayload: {
+          content: "投稿を受け付けました",
+          video_id: "v:1", url: "https://flamenode.example/v:1",
+        },
+      });
+      assert.equal(reads, scenario.callerReads, scenario.label + " actual D1 preparation reads");
+      const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, reads);
+      assert.equal(budget.d1WithinLimit, true, scenario.label + " fits the logical 50-query D1 cap");
+      assert.equal(budget.preparationQueryCount, 2, "audit metadata is not proven preloaded");
+      assert.equal(budget.s3PreBatchReadCount, scenario.totalPreReads,
+        scenario.label + " total request-side pre-batch reads");
+      assert.equal(budget.s3WithinLimit, false);
+      assert.equal(budget.withinLimit, false,
+        scenario.label + " MUST NOT be authorized by a successful D1-only budget");
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0);
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
+    } finally { sqlite.close(); }
+  }
+});
+
 test("MIG-0651 U02: missing collab member metadata and noncollab member mutation are both rejected", async () => {
   const { db } = fixture();
   await assert.rejects(() => buildFreeVideoSubmissionWithRebuildPlan(db, {
