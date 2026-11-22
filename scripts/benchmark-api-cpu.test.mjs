@@ -493,7 +493,8 @@ test("markdown rendering is stable and labels the verdict basis", () => {
   const results = [{ id: "X", title: "t", runtimeClass: "S2", agg: aggregate(samples, { runtimeClass: "S2", resolutionMs: 0.1 }) }];
   const a = renderMarkdown(results, { digits: 2, label: "unit test" });
   assert.equal(a, renderMarkdown(results, { digits: 2, label: "unit test" }));
-  assert.match(a, /Budget verdict by max \(unit test\)/);
+  assert.match(a, /Warm-only budget verdict by max \(unit test\)/);
+  assert.match(a, /\| scenario \| class \| budget \| warm max \(ms\) \| cold max \(ms\) \| verdict \|/);
   assert.match(a, /\| X t \| S2 \| normal \| 50 \|/);
 });
 
