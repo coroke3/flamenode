@@ -128,6 +128,8 @@ export interface ProduceReport {
 export interface ProduceResult {
   snapshots: ProducedSnapshot[];
   manifest: SnapshotManifest;
+  /** Bounded inventory from the public-event source query, independent of index filtering and successful snapshots. */
+  publicEventIds: string[];
   /** CURRENT `rules/current.json` as is (`FLAMENODE_RULES_SNAPSHOT_FILE` reads it), null when D1 has no rules. */
   rules: unknown | null;
   report: ProduceReport;
@@ -478,6 +480,7 @@ async function produceSnapshotsExclusive(input: ProduceInput): Promise<ProduceRe
     return {
       snapshots: out,
       manifest,
+      publicEventIds: eventIds,
       rules,
       report: {
         generation: input.generation,
