@@ -49,7 +49,13 @@ export interface StaffActionResult extends PendingPublicReflection {
 
 function staffPreparationError(error: unknown): StaffActionResult {
   unstable_rethrow(error);
-  console.error("[event-staff] preparation read failed", error);
+  // A Drizzle/D1 provider error may contain SQL, bind params, IDs or token data.
+  // Logging must not inspect the exception or prevent the fixed UI failure.
+  try {
+    console.error("[event-staff] PREPARATION_READ_FAILED");
+  } catch {
+    // Diagnostic sinks are best-effort; preserve the original action result.
+  }
   return {
     ok: false,
     message: "スタッフ情報の取得に失敗しました。再読み込みして、もう一度お試しください。",
