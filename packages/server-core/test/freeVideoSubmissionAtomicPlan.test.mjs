@@ -373,7 +373,7 @@ test("MIG-0651 atomic composer: real SQLite changed event/question policy aborts
   }
 });
 
-test("MIG-0651 atomic composer: D1 50 query budget uses explicit actual caller-read count", () => {
+test("MIG-0651 atomic composer: independent D1 50-query and S3 3-pre-read gates", () => {
   const { db } = fixture();
   const noEvent = buildFreeVideoSubmissionAtomicPlan(db, {
     videoAfter: video(null), actorUserId: "user-1", trustedActiveXId: "alice", eventId: null,
@@ -387,6 +387,10 @@ test("MIG-0651 atomic composer: D1 50 query budget uses explicit actual caller-r
   assert.equal(noEventBudget.auditQueryCount, 2);
   assert.equal(noEventBudget.preparationQueryCount, 2);
   assert.equal(noEventBudget.totalQueryCount, 9);
+  assert.equal(noEventBudget.d1WithinLimit, true);
+  assert.equal(noEventBudget.s3PreBatchReadCount, 2);
+  assert.equal(noEventBudget.s3PreBatchReadLimit, 3);
+  assert.equal(noEventBudget.s3WithinLimit, true);
   assert.equal(noEventBudget.withinLimit, true);
 
   const linked = buildFreeVideoSubmissionAtomicPlan(db, {
@@ -403,9 +407,21 @@ test("MIG-0651 atomic composer: D1 50 query budget uses explicit actual caller-r
   assert.equal(edge.preparationQueryCount, 2);
   assert.equal(edge.batchQueryCount, 13);
   assert.equal(edge.totalQueryCount, 50);
-  assert.equal(edge.withinLimit, true);
+  assert.equal(edge.d1WithinLimit, true, "50-query D1 budget passes at its exact edge");
+  assert.equal(edge.s3PreBatchReadCount, 37);
+  assert.equal(edge.s3WithinLimit, false, "35 + 2 pre-batch reads exceed S3");
+  assert.equal(edge.withinLimit, false, "a D1-only green must NOT authorize an S3 write");
+  const s3Edge = inspectFreeVideoSubmissionAtomicPlanBudget(linked, 1);
+  assert.equal(s3Edge.s3PreBatchReadCount, 3);
+  assert.equal(s3Edge.s3WithinLimit, true);
+  assert.equal(s3Edge.withinLimit, true);
+  const s3Exceeded = inspectFreeVideoSubmissionAtomicPlanBudget(linked, 2);
+  assert.equal(s3Exceeded.s3PreBatchReadCount, 4);
+  assert.equal(s3Exceeded.d1WithinLimit, true);
+  assert.equal(s3Exceeded.withinLimit, false);
   const exceeded = inspectFreeVideoSubmissionAtomicPlanBudget(linked, 36);
   assert.equal(exceeded.totalQueryCount, 51);
+  assert.equal(exceeded.d1WithinLimit, false);
   assert.equal(exceeded.withinLimit, false, "caller must fail closed before D1 batch");
   for (const invalid of [-1, 1.5, Infinity, NaN]) {
     assert.throws(() => inspectFreeVideoSubmissionAtomicPlanBudget(linked, invalid),
@@ -637,11 +653,12 @@ test("MIG-0651 U02: new software catalog + links and static queue commit togethe
     assert.deepEqual(plan.expectedChanges, [null, 1, 1, 1, 1, 13]);
     assert.equal(plan.audits.length, 4, "video, metadata, catalog and link each strictly audited");
     assert.ok(plan.audits.every(a => a.strict));
-    assert.equal(plan.expectedChanges.findIndex(n => n !== null), 2,
-      "Active-X and canonical member CAS must precede the video INSERT");
-    assert.match(new SQLiteSyncDialect().sqlToQuery(plan.statements[1].sqlExpr).sql,
-      /WITH incoming/i, "member CAS occupies the final pre-write assertion position");
-    assert.equal(inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads).withinLimit, true);
+    const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads);
+    assert.equal(budget.d1WithinLimit, true);
+    assert.equal(budget.s3PreBatchReadCount, 4, "two catalog reads plus two audit preparation reads");
+    assert.equal(budget.s3WithinLimit, false,
+      "this unmounted software case must NOT claim S3 acceptance");
+    assert.equal(budget.withinLimit, false);
     sqlite.exec("BEGIN");
     try {
       const dialect = new SQLiteSyncDialect();
@@ -730,7 +747,10 @@ test("MIG-0651 U02: CURRENT-style video_submitted DM, video and rebuild queue sh
     assert.equal(stats.reads, 2, "one active dedupe read and one recipient preference read");
     assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 13]);
     assert.equal(plan.audits.length, 2, "notification does not duplicate strict video audit");
-    assert.equal(inspectFreeVideoSubmissionAtomicPlanBudget(plan, stats.reads).withinLimit, true);
+    const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, stats.reads);
+    assert.equal(budget.d1WithinLimit, true);
+    assert.equal(budget.s3PreBatchReadCount, 4);
+    assert.equal(budget.withinLimit, false, "DM preflight + audit reads exceed S3");
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
@@ -833,7 +853,10 @@ test("MIG-0651 U02: both free-video notification routes share the video/Queue tr
         ? [null, 1, 1, null, null, 13]
         : [null, 1, 1, null, 13]);
       assert.equal(plan.audits.length, 2, "notification rows are not fabricated strict audits");
-      assert.equal(inspectFreeVideoSubmissionAtomicPlanBudget(plan, reads).withinLimit, true);
+      const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, reads);
+      assert.equal(budget.d1WithinLimit, true);
+      assert.equal(budget.s3PreBatchReadCount, 5);
+      assert.equal(budget.withinLimit, false, "ops + DM preflight + audit reads exceed S3");
       const dialect = new SQLiteSyncDialect();
       sqlite.exec("BEGIN");
       try {
@@ -944,7 +967,16 @@ test("MIG-0651 U02 new-video member/chapter plan is atomic with video/metadata/r
     assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13]);
     assert.equal(plan.audits.length, 5);
     assert.ok(plan.audits.every(a => a.strict));
-    assert.equal(inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads).withinLimit, true);
+    assert.equal(plan.expectedChanges.findIndex(n => n !== null), 2,
+      "both Active-X and member CAS must precede the video INSERT");
+    assert.match(new SQLiteSyncDialect().sqlToQuery(plan.statements[1].sqlExpr).sql,
+      /WITH incoming/i, "member CAS occupies the final pre-write assertion position");
+    const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads);
+    assert.equal(budget.d1WithinLimit, true);
+    assert.equal(budget.s3PreBatchReadCount, 4);
+    assert.equal(budget.withinLimit, false,
+      "two member reads plus two unpreloaded audit reads violate S3");
+
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
     try {
