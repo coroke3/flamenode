@@ -25,7 +25,15 @@ test("scheduled payload cache HIT前にもD1の公開可否とpayload境界を�
   const cacheHit = route.indexOf("const response = await cachedResponse(body)");
   assert.ok(d1Gate >= 0 && snapshot > d1Gate && freshBody > snapshot && cacheHit > freshBody,
     "scheduled cached output may only be reused after the fresh D1 relation snapshot and public DTO");
-  assert.match(route, /cached === null \|\| !eventExportBodyMatchesFresh\(cached, freshBody, format\)/);
+  // Fresh DTO mismatch is a strict MISS and must also evict the now-stale
+  // origin Cache API body; a failed replacement put must not retain it.
+  const nullGuard = route.indexOf("if (cached === null) return null;");
+  const mismatchGuard = route.indexOf("if (!eventExportBodyMatchesFresh(cached, freshBody, format))");
+  const staleEviction = route.indexOf("await deletePublicJsonCaches([payloadCacheKey])", mismatchGuard);
+  const cacheHitResponse = route.indexOf("return exportResponse(", mismatchGuard);
+  assert.ok(nullGuard >= 0 && mismatchGuard > nullGuard &&
+    staleEviction > mismatchGuard && cacheHitResponse > staleEviction,
+    "a stale scheduled body must be rejected and deleted before an authorized HIT");
   assert.doesNotMatch(route, /kv\.get\(accessKey\)/);
   assert.doesNotMatch(route, /kv\.put\(accessKey/);
   assert.match(route, /event\.public_api_enabled === 1/);
