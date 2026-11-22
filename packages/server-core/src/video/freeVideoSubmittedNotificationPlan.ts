@@ -40,12 +40,34 @@ export async function buildFreeVideoSubmittedNotificationPlan(
   } catch {
     throw new Error("free_video_submitted_notification_invalid");
   }
+  if (typeof payloadJson !== "string") {
+    throw new Error("free_video_submitted_notification_invalid");
+  }
   if (new TextEncoder().encode(payloadJson).byteLength > 8192) {
     throw new Error("free_video_submitted_notification_payload_too_large");
   }
-  if (typeof payload.url !== "string" ||
-      !/^https?:\/\//.test(payload.url) ||
-      (payload.event_id !== undefined && payload.event_id !== eventId)) {
+  // JSON.stringify may invoke an inherited or own toJSON() hook. Validate
+  // the actual persisted JSON, not only the host object's pre-serialization
+  // properties: otherwise an in-process object can silently replace the
+  // video ID, URL, content or event after the earlier trusted-input checks.
+  let serialized: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(payloadJson);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("invalid serialized payload");
+    }
+    serialized = parsed as Record<string, unknown>;
+  } catch {
+    throw new Error("free_video_submitted_notification_invalid");
+  }
+  if (serialized.video_id !== videoId ||
+      typeof serialized.content !== "string" ||
+      serialized.content !== payload.content ||
+      typeof serialized.url !== "string" ||
+      serialized.url !== payload.url ||
+      !/^https?:\/\//.test(serialized.url) ||
+      serialized.event_id !== payload.event_id ||
+      (serialized.event_id !== undefined && serialized.event_id !== eventId)) {
     throw new Error("free_video_submitted_notification_invalid");
   }
 
