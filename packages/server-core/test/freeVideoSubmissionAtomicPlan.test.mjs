@@ -1105,7 +1105,7 @@ test("MIG-0651 U02 new-video member/chapter plan is atomic with video/metadata/r
       eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
       memberSubmission: verifiedMembersForNewVideo(),
     });
-    assert.equal(preReads, 2, "member lifecycle resolution uses two reads");
+    assert.equal(preReads, 1, "member alias and direct rows resolve in one D1 SELECT");
     assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13]);
     assert.equal(plan.audits.length, 5);
     assert.ok(plan.audits.every(a => a.strict));
@@ -1115,9 +1115,9 @@ test("MIG-0651 U02 new-video member/chapter plan is atomic with video/metadata/r
       /WITH incoming/i, "member CAS occupies the final pre-write assertion position");
     const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, preReads);
     assert.equal(budget.d1WithinLimit, true);
-    assert.equal(budget.s3PreBatchReadCount, 4);
-    assert.equal(budget.withinLimit, false,
-      "two member reads plus two unpreloaded audit reads violate S3");
+    assert.equal(budget.s3PreBatchReadCount, 3);
+    assert.equal(budget.withinLimit, true,
+      "one member read plus two unpreloaded audit reads fits the candidate S3 ceiling");
 
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
@@ -1241,14 +1241,14 @@ test("MIG-0651 U02 new-video: rebuild failure rolls back member X, chapter and v
   } finally { sqlite.close(); }
 });
 
-test("MIG-0651 U02: composed member/software/DM budget reflects batch-time DM checking", async () => {
+test("MIG-0651 U02: composed member/software/DM budget reflects one-read X resolution and in-batch DM", async () => {
   const cases = [
     { label: "software + DM", collab: false, usedSoftware: "New Tool",
       callerReads: 1, totalPreReads: 3, s3WithinLimit: true },
     { label: "members + DM", collab: true, usedSoftware: null,
-      callerReads: 2, totalPreReads: 4, s3WithinLimit: false },
+      callerReads: 1, totalPreReads: 3, s3WithinLimit: true },
     { label: "members + software + DM", collab: true, usedSoftware: "New Tool",
-      callerReads: 3, totalPreReads: 5, s3WithinLimit: false },
+      callerReads: 2, totalPreReads: 4, s3WithinLimit: false },
   ];
   for (const scenario of cases) {
     const sqlite = createSqlite();
