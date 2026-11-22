@@ -413,7 +413,12 @@ adminOpsRoutes.get("/static-builds", async (c) => {
        UNION ALL
        SELECT 'bf_fail' AS kind, reason AS a, error AS b, NULL AS n FROM (
          SELECT reason, substr(error, 1, ?) AS error FROM static_rebuild_queue
-          WHERE reason LIKE 'backfill_%' AND status IN ('failed', 'dead_letter')
+          WHERE status IN ('failed', 'dead_letter')
+            AND (
+              reason = 'backfill_video_v2' OR reason GLOB 'backfill_video_v2_*'
+              OR reason = 'backfill_user_profile' OR reason GLOB 'backfill_user_profile_*'
+              OR reason = 'backfill_event_crew' OR reason GLOB 'backfill_event_crew_*'
+            )
           ORDER BY updated_at DESC LIMIT ?)
        UNION ALL
        SELECT 'count' AS kind, status AS a, NULL AS b, COUNT(*) AS n FROM static_rebuild_queue GROUP BY status

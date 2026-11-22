@@ -1143,6 +1143,51 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("SEC-799: invalid LIKE-only failure reasons cannot starve a real backfill error", async () => {
+    const env = { KV: { async get() { return null; } }, BUCKET: { async head() { return null; } } };
+    const validReason = "backfill_video_v2_sec799";
+    const validError = "recognized-video-v2-failure";
+    ins("static_rebuild_queue", {
+      id: "sec799-shadow-valid", target_type: "video", target_id: "sec799-shadow-valid-target",
+      status: "failed", priority: "normal", attempt_count: 1, reason: validReason,
+      created_at: T0, updated_at: 4_000_000_000, error: validError,
+    });
+    // SQL LIKE 'backfill_%' treats '_' as any one character. The 25 newer
+    // invalid failures previously occupied all 20 bounded summary rows,
+    // so the valid failure above was never shown by the Ops dashboard.
+    for (let i = 0; i < 25; i += 1) {
+      ins("static_rebuild_queue", {
+        id: `sec799-shadow-invalid-${i}`, target_type: "video",
+        target_id: `sec799-shadow-invalid-target-${i}`,
+        status: "failed", priority: "normal", attempt_count: 1,
+        reason: `backfillXvideo_v2_${i}`,
+        created_at: T0, updated_at: 4_100_000_000 + i, error: "not-a-backfill-failure",
+      });
+    }
+    try {
+      const prepared = [];
+      const d1 = createD1(sqlite);
+      const originalPrepare = d1.prepare.bind(d1);
+      d1.prepare = (sql) => {
+        if (sql.includes("'bf_fail' AS kind")) prepared.push(sql);
+        return originalPrepare(sql);
+      };
+      const result = await call("/api/admin-read/ops/static-builds", ADMIN, { env, d1 });
+      assert.equal(result.status, 200, result.text.slice(0, 200));
+      assert.equal(result.body.backfillQueue.video_v2.lastError, validError);
+      assert.ok(prepared.length === 1 && prepared[0].includes("reason GLOB 'backfill_video_v2_*'"),
+        "the failure query must use the same exact reason contract as the bounded count query");
+      assert.ok(!prepared[0].includes("reason LIKE 'backfill_%'"),
+        "LIKE wildcards must not admit non-backfill reasons into the 20-row failure budget");
+      assert.equal(result.stats.statements, 3, "session plus two D1 reads");
+      assert.equal(result.stats.writes, 0);
+      assert.equal(result.headers.get("cache-control"), "private, no-store");
+      assert.ok(new TextEncoder().encode(result.text).length <= 64 * 1024);
+    } finally {
+      sqlite.exec("DELETE FROM static_rebuild_queue WHERE id LIKE 'sec799-shadow-%'");
+    }
+  });
+
   test("SEC-799: backfill failure summary and persisted cursor cannot bypass the 64 KiB response budget", async () => {
     const hugeError = "あ".repeat(24_000); // 72,000 UTF-8 bytes, regardless of row-list truncation
     // The D1 boundary itself must not transfer an unlimited diagnostic
