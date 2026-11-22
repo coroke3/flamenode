@@ -16,6 +16,7 @@ const FRESH = NOW - 1000;
 function createFixture() {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(`
+    CREATE TABLE events (id TEXT PRIMARY KEY NOT NULL, visibility_status TEXT NOT NULL);
     CREATE TABLE static_artifacts (
       id TEXT PRIMARY KEY NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
       object_key TEXT NOT NULL, content_hash TEXT NOT NULL, schema_version INTEGER NOT NULL,
@@ -59,7 +60,8 @@ function createFixture() {
       .prepare("INSERT INTO static_artifacts VALUES (?, ?, ?, ?, 'h', 1, NULL, ?, ?)")
       .run(`${type}:${id}:${key}`, type, id, key, generatedAt, deletedAt);
   const queue = () => sqlite.prepare("SELECT target_type, target_id, reason, priority FROM static_rebuild_queue ORDER BY target_type, target_id").all();
-  return { sqlite, env: { DB, R2 }, uploaded, heads, track, queue };
+  const event = (id, visibility = "public") => sqlite.prepare("INSERT INTO events VALUES (?, ?)").run(id, visibility);
+  return { sqlite, env: { DB, R2 }, uploaded, heads, track, queue, event };
 }
 
 test("期限超過のvideo/event detailだけを低優先度でenqueueし、新しい行・削除済み・queue active行は除く", async () => {
@@ -69,6 +71,10 @@ test("期限超過のvideo/event detailだけを低優先度でenqueueし、新�
   f.track("video", "mixed", "videos/mixed-a.json", OLD);
   f.track("video", "mixed", "videos/mixed-b.json", FRESH);
   f.track("event", "oldev", "events/oldev.json", OLD);
+  f.event("oldev");
+  // A fully tracked event still refreshes its composer normally.
+  f.track("event_base", "oldev", "events/oldev/base.v1.json", FRESH);
+  f.track("event_slots", "oldev", "events/oldev/slots.v1.json", FRESH);
   f.track("video", "deleted", "videos/deleted.json", OLD, NOW);
   f.track("video", "active", "videos/active.json", OLD);
   f.track("user", "u1", "users/u1.json", OLD);
@@ -155,4 +161,52 @@ test("failed / active の target は sweep から除外する", async () => {
     f.queue().filter((row) => row.reason === STALE_ARTIFACT_REFRESH_REASON).map((row) => `${row.target_type}:${row.target_id}`),
     ["list_recent:global", "top:global", "video:okv", "video:oldfailv"],
   );
+});
+
+test("SEC-533: stale public event with missing slots selects the producer even if the composer recently failed", async () => {
+  const f = createFixture();
+  f.event("legacy");
+  f.track("event", "legacy", "events/legacy.json", OLD);
+  f.track("event_base", "legacy", "events/legacy/base.v1.json", FRESH);
+  // A 7-day failed-composer cooldown must not mask a missing section.
+  f.sqlite.prepare("INSERT INTO static_rebuild_queue VALUES ('failed-event','event','legacy','artifact_slo_refresh','low','failed',4,?,?)")
+    .run(NOW - 100, NOW - 100);
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 1);
+  assert.deepEqual(
+    f.queue().filter(row => row.reason === STALE_ARTIFACT_REFRESH_REASON).map(row => `${row.target_type}:${row.target_id}:${row.priority}`),
+    ["event_slots:legacy:low"],
+  );
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 0, "pending section is not duplicated");
+});
+
+test("SEC-533: two missing event prerequisites are selected base-first, then slots", async () => {
+  const f = createFixture();
+  f.event("legacy-both");
+  f.track("event", "legacy-both", "events/legacy-both.json", OLD);
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 1);
+  assert.equal(f.queue()[0].target_type, "event_base");
+  // Simulate only the durable tracking/queue outcome of a successful base producer.
+  f.track("event_base", "legacy-both", "events/legacy-both/base.v1.json", FRESH);
+  f.sqlite.prepare("UPDATE static_rebuild_queue SET status = 'done' WHERE target_type = 'event_base'").run();
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 1);
+  assert.deepEqual(f.queue().map(row => row.target_type), ["event_base", "event_slots"]);
+});
+
+test("SEC-533: private events keep their original stale composer cleanup path", async () => {
+  const f = createFixture();
+  f.event("private-event", "private");
+  f.track("event", "private-event", "events/private-event.json", OLD);
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 1);
+  assert.equal(f.queue()[0].target_type, "event");
+});
+
+test("SEC-533: a recently failed prerequisite is not retried beyond the existing seven-day policy", async () => {
+  const f = createFixture();
+  f.event("legacy-failed-slots");
+  f.track("event", "legacy-failed-slots", "events/legacy-failed-slots.json", OLD);
+  f.track("event_base", "legacy-failed-slots", "events/legacy-failed-slots/base.v1.json", FRESH);
+  f.sqlite.prepare("INSERT INTO static_rebuild_queue VALUES ('failed-slot','event_slots','legacy-failed-slots','artifact_slo_refresh','low','failed',4,?,?)")
+    .run(NOW - 100, NOW - 100);
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 0);
+  assert.equal(f.queue().length, 1);
 });
