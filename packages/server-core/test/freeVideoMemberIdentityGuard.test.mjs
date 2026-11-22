@@ -6,14 +6,14 @@ import { buildFreeVideoMemberIdentityGuardSql } from "../src/video/freeVideoMemb
 import { D1_MAX_BIND_PARAMETERS } from "../src/audit/mutateBudget.ts";
 
 const dialect = new SQLiteSyncDialect();
-function assertGuard(sqlite, entries, allowed) {
+function assertGuard(sqlite, entries, allowed, message) {
   const statement = dialect.sqlToQuery(buildFreeVideoMemberIdentityGuardSql(entries));
   assert.ok(statement.params.length <= D1_MAX_BIND_PARAMETERS);
   if (allowed) {
     const result = sqlite.prepare(statement.sql).get(...statement.params);
-    assert.equal(Object.values(result)[0], 1);
+    assert.equal(Object.values(result)[0], 1, message);
   } else {
-    assert.throws(() => sqlite.prepare(statement.sql).get(...statement.params), /malformed JSON/);
+    assert.throws(() => sqlite.prepare(statement.sql).get(...statement.params), /malformed JSON/, message);
   }
 }
 function identity(candidate, canonical = candidate, allowAbsent = false) {
