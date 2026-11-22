@@ -292,6 +292,95 @@ test("MIG-0603: joined event status privilege is bounded at 256 rows and fails c
   }
 });
 
+test("MIG-0603: custom permission JSON stays byte-bounded without probing a denied target", async () => {
+  const sqlite = createSqlite();
+  try {
+    seed(sqlite);
+    const d1 = createVideoStatusD1(sqlite);
+    const db = drizzle(d1, { schema });
+    const custom = { id: "u_custom", role: "user" };
+    const update = sqlite.prepare(
+      "UPDATE event_staff SET custom_permission_keys_json=? " +
+      "WHERE event_id='evA' AND x_user_id='custom_x'",
+    );
+    const deny = { ok: false, message: "このイベントの作品審査権限がありません。" };
+    async function expectSmall(json, expected, tag) {
+      update.run(json);
+      const canonical = await canEditEvent(db, custom, "evA", "video.status");
+      assert.equal(canonical, expected, "CURRENT authority: " + tag);
+      const before = d1.stats.statements;
+      const got = await checkManageVideoStatusAccess(db, custom, "evA", "v1");
+      assert.deepEqual(got, expected ? { ok: true } : deny, tag);
+      assert.equal(d1.stats.statements - before, expected ? 2 : 1,
+        "one bounded privilege read and target only after grant: " + tag);
+    }
+    // All 20 canonical keys fit inside 1KiB, and the shared alias normalizer
+    // only recognizes an exact 'video.status', not the older 'videos.title'.
+    const allKeys = [
+      "event.basic", "event.publish", "event.slots", "event.members",
+      "event.questions", "event.review", "event.notifications",
+      "event.public_api", "event.static_rebuild", "xid.link_requests",
+      "video.basics", "video.descriptions", "video.credits", "video.members",
+      "video.member_chapters", "video.status", "video.primary_event",
+      "video.youtube_id", "video.identity", "video.permissions",
+    ];
+    const canonicalJson = JSON.stringify(allKeys);
+    assert.ok(Buffer.byteLength(canonicalJson, "utf8") < 1024);
+    await expectSmall(canonicalJson, true, "full known canonical permission set");
+    await expectSmall('["video.status", "videos.title"]', true, "one exact key + unrelated alias");
+    await expectSmall('["videos.title"]', false, "unrelated legacy alias cannot grant status");
+    await expectSmall('["video.status\\u0000"]', false, "escaped NUL in string is not an exact grant");
+    await expectSmall('[1, true, {"key":"video.status"}]', false, "non-string JSON array entries");
+    await expectSmall('"video.status"', false, "top-level scalar is not a permission array");
+    await expectSmall("['video.status']", false, "JSON5 single-quoted input fails strict JSON");
+    await expectSmall('["video.status",', false, "malformed array is deny-only");
+    await expectSmall(null, false, "missing custom permission set");
+    // Maximum accepted legacy JSON includes an authorized exact key. The
+    // rest is bounded noise and cannot change the shared resolver's decision.
+    const empty = JSON.stringify(["video.status", ""]);
+    const exact = JSON.stringify(["video.status", "x".repeat(1024 - Buffer.byteLength(empty, "utf8"))]);
+    assert.equal(Buffer.byteLength(exact, "utf8"), 1024);
+    await expectSmall(exact, true, "exact 1KiB cap is inclusive");
+
+    // Huge JSON is not brought into JS to parse or authorized using a
+    // prefix. It fails closed even if there is a separate valid preset grant.
+    update.run(JSON.stringify(["video.status", "x".repeat(16 * 1024)]));
+    const start = d1.stats.statements;
+    await assert.rejects(
+      checkManageVideoStatusAccess(db, custom, "evA", "v1"),
+      /manage_video_status_staff_json_limit_exceeded/,
+      "oversize valid JSON cannot reach the target association",
+    );
+    assert.equal(d1.stats.statements - start, 1);
+    update.run(JSON.stringify(["動画".repeat(700)]));
+    await assert.rejects(
+      checkManageVideoStatusAccess(db, custom, "evA", "v1"),
+      /manage_video_status_staff_json_limit_exceeded/,
+      "multi-byte JSON must be bounded by UTF-8 bytes, not JS code units",
+    );
+
+    insert(sqlite, "x_users", { id: "custom_backup_x", x_name: "custom backup", approval_status: "approved" });
+    insert(sqlite, "x_user_account_links", {
+      x_user_id: "custom_backup_x", auth_user_id: "u_custom", link_role: "manager",
+    });
+    insert(sqlite, "event_staff", {
+      id: "st-custom-backup", event_id: "evA", x_user_id: "custom_backup_x",
+      display_name: "Backup", permission_preset: "owner",
+    });
+    sqlite.exec("DROP TABLE video_events");
+    await assert.rejects(
+      checkManageVideoStatusAccess(db, custom, "evA", "foreign-video"),
+      /manage_video_status_staff_json_limit_exceeded/,
+      "oversize custom grant must abort before target read despite another valid grant",
+    );
+    assert.ok(d1.stats.maxBinds <= 100, "bounded JSON1 grant uses few D1 parameters");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(d1.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("MIG-0603: an orphaned video_events link is not an authorized status target", async () => {
   const sqlite = createSqlite();
   try {
