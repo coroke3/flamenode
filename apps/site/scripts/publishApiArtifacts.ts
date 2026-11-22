@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { EVENT_INDEX_KEY, eventDetailKey, eventReleaseKey } from "../src/lib/publicDataLoader.ts";
 import { eventReleaseObjectKey } from "../../../src/lib/publicData/staticEventDetailCore.ts";
-import type { ProduceResult, ProducedSnapshot } from "./produceSnapshots.ts";
+import { MAX_SNAPSHOT_BYTES, type ProduceResult, type ProducedSnapshot } from "./produceSnapshots.ts";
 
 const RELEASE_SOURCE_PATTERN = /^snapshot\/event-release\/([A-Za-z0-9_-]{1,128})\.json$/;
 const EVENT_DETAIL_SOURCE_PATTERN = /^snapshot\/event-detail\/([A-Za-z0-9_-]{1,128})\.json$/;
@@ -91,6 +91,7 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
   // omitted from CURRENT's period-filtered, 200-row index.
   const detailKeys = [...expectedPublicIds].sort().map(eventDetailKey);
   const sourceKeys = [...[...releaseIds].sort().map(eventReleaseKey), EVENT_INDEX_KEY];
+  const publishedSourceKeys = new Set(sourceKeys);
   const verifiedBodies = new Map<string, string>();
   for (const sourceKey of [...detailKeys, ...sourceKeys]) {
     if (!allowed.has(sourceKey) || blocked.has(sourceKey)) {
@@ -98,6 +99,12 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
     }
     const snapshot = sources.get(sourceKey);
     if (!snapshot) throw new Error("api artifact publish: manifest-listed snapshot missing");
+    if (typeof snapshot.json !== "string") {
+      throw new Error("api artifact publish: invalid snapshot envelope");
+    }
+    if (Buffer.byteLength(snapshot.json, "utf8") > MAX_SNAPSHOT_BYTES) {
+      throw new Error("api artifact publish: snapshot envelope exceeds byte budget");
+    }
     let envelope: any;
     try { envelope = JSON.parse(snapshot.json); }
     catch { throw new Error("api artifact publish: invalid snapshot envelope"); }
@@ -111,7 +118,9 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
         digest(body) !== snapshot.sha256 || digest(body) !== envelope.sha256) {
       throw new Error("api artifact publish: payload digest or byte budget mismatch");
     }
-    verifiedBodies.set(sourceKey, body);
+    if (publishedSourceKeys.has(sourceKey)) {
+      verifiedBodies.set(sourceKey, body);
+    }
   }
   const artifacts = sourceKeys.map((sourceKey) => {
     const body = verifiedBodies.get(sourceKey)!;
