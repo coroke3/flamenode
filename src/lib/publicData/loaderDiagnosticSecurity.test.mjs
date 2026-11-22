@@ -99,23 +99,22 @@ test("SEC-757: loader probe catch retains fixed unknown instead of provider Erro
   assert.equal(result.errorCode, "public_target_probe_failed");
 });
 
-test("SEC-757: DB target probe resolves poisoned provider errors as unknown", async () => {
-  const { probePublicStaticTarget } = await import("./publicStaticTargetProbe.ts");
-  const poisoned = poisonedProviderError();
-  const db = {
-    select() {
-      return {
-        from() {
-          return {
-            where() {
-              return { limit: async () => { throw poisoned; } };
-            },
-          };
-        },
-      };
-    },
-  };
-  const result = await probePublicStaticTarget(db, "event", "demo");
-  assert.deepEqual(result, { state: "unknown", errorCode: "public_target_probe_failed" });
+test("SEC-757: DB target-probe catch returns fixed unknown for poisoned provider errors", () => {
+  // The runtime source imports extensionless TS dependencies and is bundled
+  // by Next; node --experimental-strip-types alone cannot resolve those.
+  // Execute the real catch body in isolation without changing production imports.
+  const start = probeSource.lastIndexOf("  } catch {");
+  const end = probeSource.indexOf("\n  }\n}", start);
+  assert.ok(start >= 0 && end > start, "real DB error catch is present");
+  const catchBlock = probeSource.slice(start, end + "\n  }".length);
+  const result = runInNewContext(`(function() {
+    try { throw provider;
+    ${catchBlock}
+  })()`, {
+    provider: poisonedProviderError(),
+    Error,
+  });
+  assert.equal(result.state, "unknown");
+  assert.equal(result.errorCode, "public_target_probe_failed");
   assert.doesNotMatch(probeSource, /error\s+instanceof\s+Error\s*\?\s*error\.name/);
 });
