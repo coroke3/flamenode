@@ -99,8 +99,10 @@ test("R2 HEAD/GET中のabortをcleanup/rebuild継続へ握り潰さない", () =
 test("v2生成失敗はmanifest無効化に成功した場合だけlegacy fallback成功扱いにする", () => {
   assert.match(source, /invalidateUsersIndexV2Manifest/);
   assert.match(source, /deleteStaticArtifacts\([\s\S]*?\[USERS_INDEX_V2_MANIFEST_OBJECT_KEY\]/);
-  assert.match(source, /result: "legacy_fallback"/);
-  assert.match(source, /result: "manifest_invalidation_failed"/);
+  // Diagnostics now use an exception-safe fixed-code helper. The executable
+  // SEC-771 fake-R2 tests assert actual fallback/throw and logger behavior.
+  assert.match(source, /emitUsersIndexV2Diagnostic\("legacy_fallback"\)/);
+  assert.match(source, /emitUsersIndexV2Diagnostic\("manifest_invalidation_failed", \{\}, "error"\)/);
   assert.match(source, /throw error/);
 });
 
