@@ -135,3 +135,25 @@ test("MIG-0651 S3: absent or ineligible event preserves no-read and denial behav
   );
   assert.equal(reads, 1);
 });
+
+test("MIG-0651 SA-086: missing combined question projection is a hard D1 preflight error", async () => {
+  const db = {
+    select: () => ({
+      from: () => ({
+        where: () => ({ limit: async () => [{
+          id: "ev-pub", required_video_fields_json: null, youtube_duplicate: 0,
+          // No question_policy_json: do NOT infer empty questions.
+        }] }),
+      }),
+    }),
+  };
+  await assert.rejects(
+    loadEligibleUnslottedVideoRequiredFields(db, "ev-pub", 100, "dQw4w9WgXcQ", true),
+    /video_custom_question_projection_unavailable/,
+  );
+  const basic = await loadEligibleUnslottedVideoRequiredFields(
+    db, "ev-pub", 100, "dQw4w9WgXcQ",
+  );
+  assert.equal(basic.eventId, "ev-pub", "the basic preflight need not select the question set");
+  assert.equal("questionPolicyJson" in basic, false);
+});
