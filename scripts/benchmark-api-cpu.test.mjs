@@ -353,6 +353,7 @@ test("MIG-0639: 11 newly mounted SA-025..030/098/102..105 routes have genuine bo
   assert.equal(upload.headers["content-type"],undefined);
   assert.equal(upload.body.get("x_user_id"),"bench_x");
   assert.ok(upload.body.get("icon_file") instanceof File);
+  assert.ok(upload.body.get("icon_file").size >= 100, "valid 64x64 PNG fixture, not the 1x1 media stub");
   assert.equal(scenarios.get("SA-105").kinds.invalid(0,"qa").expect[0],400);
 });
 

@@ -228,6 +228,8 @@ const STATS_KEY = "top/sections/stats.v1.json";
 const BENCH_ETAG = "bench-etag";
 // Bench-only upstream image stub: media proxy scenarios must never reach the network.
 const BENCH_PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+// SA-105 validates both dimensions >=64px: the generic 1x1 media stub is deliberately NOT a valid icon.
+const BENCH_ICON_PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAUUlEQVR42u3PMQ0AMAgAMJhv5OAFWVPBQdI6aFZPXPbiOAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAYF9H5y5AmrFkgYHAAAAAElFTkSuQmCC"), (c) => c.charCodeAt(0));
 const benchFetchStub = async () => new Response(BENCH_PNG, { headers: { "content-type": "image/png" } });
 const MAX_STATS_BYTES = 64 * 1024;
 
@@ -969,7 +971,7 @@ export function buildRouteScenarios() {
           // Actual multipart upload: no manual content-type (Request sets its boundary).
           const form = new FormData();
           form.append("x_user_id", BENCH_X_CANON);
-          form.append("icon_file", new File([BENCH_PNG], "bench.png", { type: "image/png" }));
+          form.append("icon_file", new File([BENCH_ICON_PNG], "bench.png", { type: "image/png" }));
           body = form;
         } else {
           headers["content-type"] = "application/json";
