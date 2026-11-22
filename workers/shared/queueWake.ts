@@ -79,7 +79,11 @@ async function recordWakeFailureSafely(
 function warnOnce(key: string, payload: Record<string, unknown>): void {
   if (missingWarned.has(key)) return;
   missingWarned.add(key);
-  console.warn(JSON.stringify(payload));
+  try {
+    console.warn(JSON.stringify(payload));
+  } catch {
+    // Diagnostic sink failures must never escape a best-effort wake path.
+  }
 }
 
 export function extractValidatedWakeFromBatch(

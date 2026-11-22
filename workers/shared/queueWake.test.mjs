@@ -185,6 +185,20 @@ test("SEC-743/#740: rejected diagnostic KV put cannot leak provider Error.name/m
   assert.ok(!JSON.stringify(values).includes(secret), "no nested provider detail may reach logs");
 });
 
+async function withThrowingWarnSink(run) {
+  const original = console.warn;
+  const attempted = [];
+  console.warn = (...items) => {
+    attempted.push(items);
+    throw new Error("sink unavailable");
+  };
+  try {
+    return { result: await run(), attempted };
+  } finally {
+    console.warn = original;
+  }
+}
+
 test("SEC-743/#740: non-function diagnostic KV accessor is skipped without leaking its value", async () => {
   const secret = "SEC743_NONFUNCTION_KV_ACCESSOR_SECRET";
   const kv = Object.defineProperty({}, "put", {
@@ -205,4 +219,110 @@ test("SEC-743/#740: non-function diagnostic KV accessor is skipped without leaki
     { service: "queue-wake-worker", result: "last_failure_record_skipped", kind: "notification_available", reason: "binding_missing" },
   ]);
   assert.ok(!JSON.stringify(values).includes(secret));
+});
+
+test("SEC-743: throwing console.warn on flags-getter failure resolves false, preserves KV/sentKinds and leaks no secrets", async () => {
+  const secret = "SEC743_WARN_SINK_FLAGS_SECRET";
+  let sends = 0;
+  const sentKinds = new Set();
+  const writes = [];
+  const envFlags = new Proxy({}, {
+    get() {
+      throw Object.assign(new Error("provider " + secret, { cause: new Error(secret) }), { name: secret });
+    },
+  });
+  const originalWarn = console.warn;
+  const { result, attempted } = await withThrowingWarnSink(() =>
+    sendWorkerQueueWakeBestEffort({
+      queue: { send: async () => { sends += 1; } },
+      kind: "notification_available",
+      source: "continuation",
+      envFlags,
+      sentKinds,
+      kv: { put: async (key, payload) => writes.push({ key, value: JSON.parse(payload) }) },
+    }),
+  );
+  assert.equal(console.warn, originalWarn);
+  assert.equal(result, false);
+  assert.equal(sends, 0);
+  assert.equal(sentKinds.size, 0);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].key, "queue_wake:last_failure:notification_available");
+  assert.equal(writes[0].value.reason, "feature_flags_unavailable");
+  assert.deepEqual(attempted.map(([value]) => JSON.parse(value)), [
+    { service: "queue-wake-worker", result: "feature_flags_unavailable", kind: "notification_available" },
+  ]);
+  assert.ok(!JSON.stringify(attempted).includes(secret));
+});
+
+test("SEC-743: throwing console.warn on Queue rejection and missing KV diagnostic resolves false without leaking secrets", async () => {
+  const secret = "SEC743_WARN_SINK_SEND_SECRET";
+  const providerError = Object.assign(
+    new Error("provider " + secret, { cause: new Error("nested " + secret) }),
+    { name: secret },
+  );
+  const sentKinds = new Set();
+  const writes = [];
+  let rejectedSendCalls = 0;
+  let passedDelay;
+  const originalWarn = console.warn;
+
+  const { result, attempted } = await withThrowingWarnSink(async () => {
+    const sendRejectMissingKv = await sendWorkerQueueWakeBestEffort({
+      queue: {
+        send: async (_msg, opts) => {
+          rejectedSendCalls += 1;
+          passedDelay = opts?.delaySeconds;
+          throw providerError;
+        },
+      },
+      kind: "youtube_sync_pending",
+      source: "continuation",
+      delaySeconds: 15,
+      envFlags: { QUEUE_DISPATCH_ENABLED: "1", QUEUE_CONTINUATION_ENABLED: "1" },
+      sentKinds,
+      kv: null,
+    });
+    const sendRejectHealthyKv = await sendWorkerQueueWakeBestEffort({
+      queue: {
+        send: async () => {
+          rejectedSendCalls += 1;
+          throw providerError;
+        },
+      },
+      kind: "youtube_playlist_sync",
+      source: "recovery",
+      envFlags: { QUEUE_DISPATCH_ENABLED: "1" },
+      sentKinds,
+      kv: { put: async (key, payload) => writes.push({ key, value: JSON.parse(payload) }) },
+    });
+    const missingBindingMissingKv = await sendWorkerQueueWakeBestEffort({
+      queue: null,
+      kind: "static_rebuild_available",
+      source: "recovery",
+      envFlags: { QUEUE_DISPATCH_ENABLED: "1" },
+      sentKinds,
+      kv: null,
+    });
+    return { sendRejectMissingKv, sendRejectHealthyKv, missingBindingMissingKv };
+  });
+
+  assert.equal(console.warn, originalWarn);
+  assert.equal(result.sendRejectMissingKv, false);
+  assert.equal(result.sendRejectHealthyKv, false);
+  assert.equal(result.missingBindingMissingKv, false);
+  assert.equal(rejectedSendCalls, 2);
+  assert.equal(passedDelay, 15);
+  assert.equal(sentKinds.size, 0, "failed wakes must release sentKinds markers");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].key, "queue_wake:last_failure:youtube_playlist_sync");
+  assert.equal(writes[0].value.reason, "send_failed");
+  assert.deepEqual(attempted.map(([value]) => JSON.parse(value)), [
+    { service: "queue-wake-worker", result: "send_failed", kind: "youtube_sync_pending" },
+    { service: "queue-wake-worker", result: "last_failure_record_skipped", kind: "youtube_sync_pending", reason: "send_failed" },
+    { service: "queue-wake-worker", result: "send_failed", kind: "youtube_playlist_sync" },
+    { service: "queue-wake-worker", result: "binding_missing", kind: "static_rebuild_available" },
+    { service: "queue-wake-worker", result: "last_failure_record_skipped", kind: "static_rebuild_available", reason: "binding_missing" },
+  ]);
+  assert.ok(!JSON.stringify(attempted).includes(secret));
 });
