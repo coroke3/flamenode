@@ -96,6 +96,25 @@ test("MIG-0651 notification: serialized notification payload must match prevalid
       "a toJSON hook cannot bypass validated video/URL/content/event metadata",
     );
   }
+  // A hook can mutate the original host object during serialization.
+  // Compare with the captured pre-serialization scalars, not mutated getters.
+  const mutableContent = payload();
+  mutableContent.toJSON = function() {
+    this.content = "modified after the initial check";
+    return { ...this };
+  };
+  const mutableUrl = payload();
+  mutableUrl.toJSON = function() {
+    this.url = "https://other.example/after-check";
+    return { ...this };
+  };
+  for (const supplied of [mutableContent, mutableUrl]) {
+    await assert.rejects(
+      () => buildFreeVideoSubmittedNotificationPlan(noDb, args({ payload: supplied })),
+      /free_video_submitted_notification_invalid/,
+      "mutating toJSON must not change accepted payload after preflight",
+    );
+  }
   const matching = { ...payload(), toJSON() { return { ...payload() }; } };
   const accepted = await createPlan({ payload: matching });
   assert.equal(accepted.statements.length, 1,
