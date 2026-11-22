@@ -333,7 +333,7 @@ test("MIG-0651 atomic composer: stale Active X, TOS or account authority aborts 
 });
 
 test("MIG-0651 atomic composer: real SQLite changed event/question policy aborts without any rows", () => {
-  for (const mutation of ["event-closed", "question-deactivated", "new-required"]) {
+  for (const mutation of ["event-closed", "question-deactivated", "new-required", "required-fields-change"]) {
     const sqlite = createSqlite();
     seedApprovedActiveX(sqlite);
     try {
@@ -359,6 +359,11 @@ test("MIG-0651 atomic composer: real SQLite changed event/question policy aborts
         sqlite.prepare("UPDATE events SET visibility_status='private', allow_unslotted_posts=0 WHERE id='event-a'").run();
       } else if (mutation === "question-deactivated") {
         sqlite.prepare("UPDATE event_custom_questions SET is_active=0 WHERE id='q:1'").run();
+      } else if (mutation === "required-fields-change") {
+        // Preflight accepted a video without music; a concurrent event edit
+        // requires it before the batch. The event CAS must deny every INSERT.
+        sqlite.prepare("UPDATE events SET required_video_fields_json=? WHERE id=?")
+          .run('["music"]', "event-a");
       } else {
         insert(sqlite, "event_custom_questions", {
           id: "q:2", event_id: "event-a", question_key: "q:2",
