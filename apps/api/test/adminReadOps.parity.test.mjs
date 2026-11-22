@@ -1100,6 +1100,8 @@ if (runUnderRootTsx(import.meta.url)) {
 
   test("SEC-799: backfill failure summary and persisted cursor cannot bypass the 64 KiB response budget", async () => {
     const hugeError = "あ".repeat(24_000); // 72,000 UTF-8 bytes, regardless of row-list truncation
+    // The D1 boundary itself must not transfer an unlimited diagnostic
+    // before the later HTTP/JSON size check runs.
     const kv = (cursor) => ({
       async get() {
         return JSON.stringify({
@@ -1120,7 +1122,24 @@ if (runUnderRootTsx(import.meta.url)) {
       attempt_count: 1, created_at: T0, updated_at: 4_100_000_000, error: hugeError,
     });
     try {
-      const failed = await call("/api/admin-read/ops/static-builds", ADMIN, { env: env("cursor-ok") });
+      const seenSql = [];
+      const boundedDb = createD1(sqlite);
+      const originalPrepare = boundedDb.prepare.bind(boundedDb);
+      boundedDb.prepare = (sql) => {
+        if (sql.includes("FROM static_rebuild_queue")) seenSql.push(sql);
+        return originalPrepare(sql);
+      };
+      const failed = await call("/api/admin-read/ops/static-builds", ADMIN, {
+        d1: boundedDb, env: env("cursor-ok"),
+      });
+      assert.ok(
+        seenSql.some((sql) => /substr\(error, 1, \?\) AS error FROM static_rebuild_queue ORDER BY/.test(sql)),
+        "queue rows must be truncated by the SQL reader before entering JS",
+      );
+      assert.ok(
+        seenSql.some((sql) => /SELECT reason, substr\(error, 1, \?\) AS error FROM static_rebuild_queue/.test(sql)),
+        "backfill summary errors must be truncated by the SQL reader before entering JS",
+      );
       assert.equal(failed.status, 200, failed.text.slice(0, 200));
       assert.ok(bodyBytes(failed) <= 64 * 1024, "the FULL DTO must fit S2, not only rows");
       assert.equal(failed.body.truncated, true, "diagnostic omission must be signalled");

@@ -384,17 +384,17 @@ adminOpsRoutes.get("/static-builds", async (c) => {
   let oversizedKvState = false;
   const [queue, aggregates, backfillState, sharedInputs] = await Promise.all([
     c.env.DB.prepare(
-      "SELECT id, status, target_type, target_id, reason, priority, attempt_count, updated_at, error " +
-        "FROM static_rebuild_queue ORDER BY updated_at DESC LIMIT ?",
+      "SELECT id, status, target_type, target_id, reason, priority, attempt_count, updated_at, " +
+        "substr(error, 1, ?) AS error FROM static_rebuild_queue ORDER BY updated_at DESC LIMIT ?",
     )
-      .bind(MAX_STATIC_QUEUE_ROWS)
+      .bind(MAX_OPS_ROW_TEXT_CODE_UNITS + 1, MAX_STATIC_QUEUE_ROWS)
       .all<AdminStaticBuildsResponse["rows"][number]>(),
     c.env.DB.prepare(
       `SELECT 'bf_count' AS kind, reason AS a, status AS b, COUNT(*) AS n
          FROM static_rebuild_queue WHERE reason LIKE 'backfill_%' GROUP BY reason, status
        UNION ALL
        SELECT 'bf_fail' AS kind, reason AS a, error AS b, NULL AS n FROM (
-         SELECT reason, error FROM static_rebuild_queue
+         SELECT reason, substr(error, 1, ?) AS error FROM static_rebuild_queue
           WHERE reason LIKE 'backfill_%' AND status IN ('failed', 'dead_letter')
           ORDER BY updated_at DESC LIMIT ?)
        UNION ALL
@@ -402,7 +402,7 @@ adminOpsRoutes.get("/static-builds", async (c) => {
        UNION ALL
        SELECT 'mode' AS kind, operation_mode AS a, NULL AS b, NULL AS n FROM (SELECT operation_mode FROM system_settings LIMIT 1)`,
     )
-      .bind(MAX_BACKFILL_FAILURE_ROWS)
+      .bind(MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS + 1, MAX_BACKFILL_FAILURE_ROWS)
       .all<{ kind: string; a: string | null; b: string | null; n: number | null }>(),
     (async () => {
       try {
