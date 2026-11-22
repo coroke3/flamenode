@@ -187,6 +187,10 @@ export async function buildFreeVideoNewMemberPlan(
     expectedChanges.push(null);
   }
   if (newXUsers.length) {
+    // The same-batch identity CAS requires a genuinely absent profile.
+    // Never hide a concurrent exact-ID insertion with ON CONFLICT: that would
+    // cause strict CREATE audit snapshots to describe a profile we did not
+    // actually create (including false pending approval status).
     const payload = JSON.stringify(newXUsers);
     statements.push(db.run(sql`
       INSERT INTO x_users (
@@ -200,7 +204,6 @@ export async function buildFreeVideoNewMemberPlan(
         json_extract(value,'$.approval_status')
       FROM json_each(${payload})
       WHERE 1=1
-      ON CONFLICT(id) DO UPDATE SET id=excluded.id
     `));
     expectedChanges.push(newXUsers.length);
     audits.push({
