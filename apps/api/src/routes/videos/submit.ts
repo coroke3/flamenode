@@ -103,7 +103,7 @@ export async function validateFreeVideoDbReadPreflight(
   nowSec: number,
 ): Promise<
   | { ok: false; message: string }
-  | { ok: true; value: { youtubeId: string; eventId: string | null } }
+  | { ok: true; value: { youtubeId: string; eventId: string | null; requiredFieldsSnapshot: string | null } }
 > {
   if (!Number.isSafeInteger(nowSec) || nowSec < 0) {
     return { ok: false, message: BAD_FORM_MESSAGE };
@@ -156,7 +156,7 @@ export async function validateFreeVideoDbReadPreflight(
       message: "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。",
     };
   }
-  return { ok: true, value: { youtubeId, eventId } };
+  return { ok: true, value: { youtubeId, eventId, requiredFieldsSnapshot: event.requiredFieldsSnapshot } };
 }
 
 
@@ -176,6 +176,7 @@ export async function validateFreeVideoSubmissionReadPreflight(
   | { ok: true; value: {
       youtubeId: string;
       eventId: string | null;
+      requiredFieldsSnapshot: string | null;
       customAnswerDrafts: SubmissionCustomAnswerDraft[];
       questionSnapshot: LoadedGeneralCustomQuestion[];
     } }
