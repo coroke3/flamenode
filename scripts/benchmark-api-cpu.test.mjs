@@ -36,6 +36,32 @@ test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query s
   assert.match(md, /\| 1\/3\/4\/8 \|/);
 });
 
+test("MIG-0639 SA-105: replay recording captures real multipart upload and R2 cleanup results", async () => {
+  const plan = { adminToken: "t" };
+  const scenario = buildScenarios(plan).find((candidate) => candidate.id === "SA-105");
+  assert.ok(scenario, "X icon upload must be mounted and measured");
+  const target = await createInprocTarget(plan);
+  try {
+    const spec = scenario.kinds.normal(0, "replay-icon");
+    assert.ok(spec.body instanceof FormData, "upload requires a real multipart request");
+    assert.equal(spec.headers["content-type"], undefined, "Request adds the multipart boundary");
+    if (spec.setup) await target.exec(spec.setup);
+    const recorded = await target.recordForReplay(spec);
+    assert.equal(recorded.status, 200, "real Hono upload must commit before it can be replayed");
+    assert.ok(recorded.script.length > 0, "workerd replay must capture all external results");
+    const puts = recorded.script.filter((value) =>
+      value && typeof value === "object" && value.etag === "bench-etag" && !Object.hasOwn(value, "text"));
+    const deletes = recorded.script.filter((value) =>
+      value && typeof value === "object" && value.deleted === true);
+    assert.equal(puts.length, 2, "staging and final R2 puts must be in the recorded script");
+    assert.ok(deletes.length >= 1, "post-commit staging cleanup must be replayable");
+    assert.ok(recorded.d1 > 0, "real upload must execute D1 authorization and audit");
+    assert.equal(recorded.d1PerQueryRows.reduce((sum, n) => sum + n, 0), recorded.d1RowsReturned);
+  } finally {
+    await target.close();
+  }
+});
+
 test("local migrated D1 records per-query result rows and carries them into replay fixtures", async () => {
   const plan = { adminToken: "t" };
   const scenario = buildScenarios(plan).find((candidate) => candidate.id === "RH-020");
