@@ -14,6 +14,9 @@ import { isCanonicalXId } from "@flamenode/domain/xid";
  * Previously existing direct/alias X records may NOT silently disappear.
  * Rejected/ambiguous/retargeted mappings must abort the complete D1 batch.
  *
+ * Request CPU requires expression indexes matching lower(trim(ltrim(trim(...),
+ * '@'))) exactly; migration 0067 adds them to x_users and x_user_aliases.
+ * Without that additive D1 migration, member X CAS may scan whole tables.
  * This statement MUST be executed as a SELECT (not swallowed or omitted) and
  * placed before any x_users/video_members/video_chapters mutation. SQLite's
  * invalid-json branch raises an error to stop the entire D1 transaction.

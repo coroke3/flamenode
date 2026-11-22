@@ -143,3 +143,48 @@ test("MIG-0651 identity CAS: 100 handles occupy one D1 bind and detect one stale
     assertGuard(db, entries, false);
   } finally { db.close(); }
 });
+
+test("MIG-0651 identity CAS: 100 mixed handles use normalized expression indexes instead of scans", () => {
+  const db = createSqlite();
+  try {
+    // createSqlite() applies migrations in version order, including 0067.
+    for (let i = 0; i < 400; i++) {
+      insert(db, "x_users", {
+        id: "user" + i, x_name: "User " + i, approval_status: "approved",
+      });
+    }
+    for (let i = 0; i < 40; i++) {
+      insert(db, "x_user_aliases", {
+        x_user_id: "user" + i, alias_x_id: "old" + i,
+      });
+    }
+    const entries = [
+      ...Array.from({length: 40}, (_, i) => ({
+        candidate: "user" + i, canonical: "user" + i, allowAbsent: false,
+      })),
+      ...Array.from({length: 40}, (_, i) => ({
+        candidate: "old" + i, canonical: "user" + i, allowAbsent: false,
+      })),
+      ...Array.from({length: 20}, (_, i) => ({
+        candidate: "new" + i, canonical: "new" + i, allowAbsent: true,
+      })),
+    ];
+    const compiled = dialect.sqlToQuery(buildFreeVideoMemberIdentityGuardSql(entries));
+    assert.equal(compiled.params.length, 1, "100 inputs stay inside one D1 JSON bind");
+    const details = db.prepare("EXPLAIN QUERY PLAN " + compiled.sql)
+      .all(...compiled.params).map(row => row.detail);
+    assert.ok(details.some(row => row.includes("SEARCH d USING INDEX x_users_canonical_norm_id_idx")),
+      "direct X lookup must use canonical normalization expression index");
+    assert.ok(details.some(row => row.includes("SEARCH a USING INDEX x_user_aliases_canonical_norm_alias_idx")),
+      "alias lookup must use normalized alias expression index");
+    assert.ok(details.some(row => row.includes("SEARCH target USING INDEX x_users_canonical_norm_id_idx")),
+      "alias target resolution must also use canonical X index");
+    assert.ok(!details.some(row => row.startsWith("SCAN d") ||
+      row.startsWith("SCAN a") || row.startsWith("SCAN target")),
+      "identity lookup cannot scan each persistent table once per input");
+    assertGuard(db, entries, true);
+    db.prepare("UPDATE x_user_aliases SET x_user_id='user41' WHERE alias_x_id='old18'").run();
+    assertGuard(db, entries, false, "retarget after preflight still aborts");
+  } finally { db.close(); }
+});
+
