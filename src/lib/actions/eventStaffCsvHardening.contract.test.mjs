@@ -4,6 +4,13 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 import { planD1AuditMutationBudget } from "../audit/mutateBudget.ts";
+import {
+  assertEventWillRetainOwner,
+  assertOwnershipTransferInput,
+  assertSelfChangeConfirmation,
+  validateEventStaffSubject,
+  validateEventStaffUniqueness,
+} from "../../../packages/domain/src/event/ownership.ts";
 
 const source = readFileSync(
   fileURLToPath(new URL("./event-staff-admin.ts", import.meta.url)),
@@ -212,4 +219,97 @@ test("SEC-800: all staff catch paths use the bounded allowlist, never raw provid
     "CSV row-specific errors must be compared against validated source line numbers");
   assert.match(source, /staffSafeActionMessage\(error, "代表者を移譲できません。", data\.event_id\)/,
     "event-confirmation copy remains available only for the matching event");
+});
+
+test("SEC-800: actual shared-domain ownership errors retain intended staff UI messages", () => {
+  // Execute the production allowlist against errors thrown by the real
+  // shared-domain functions, rather than only copied literal messages.
+  const start = source.indexOf("const STAFF_SAFE_ACTION_MESSAGES = new Set");
+  const end = source.indexOf("\nfunction staffPreparationError", start);
+  assert.ok(start >= 0 && end > start);
+  const policySource = source.slice(start, end)
+    .replace(
+      /function staffSafeActionMessage\(\s*error: unknown,\s*fallback: string,\s*eventId\?: string,\s*explicitAllowed\?: readonly string\[],\s*\): string \{/,
+      "function staffSafeActionMessage(error, fallback, eventId, explicitAllowed) {",
+    )
+    .replace("let message: unknown;", "let message;");
+  // Use the host Error constructor so the real domain Error instances
+  // satisfy instanceof in the isolated policy without an artificial wrapper.
+  const policy = runInNewContext(
+    policySource + "\nstaffSafeActionMessage",
+    { Error },
+  );
+  const fallback = "スタッフを保存できません。";
+  const eventId = "event_123";
+  const from = {
+    id: "staff_owner",
+    event_id: eventId,
+    x_user_id: "creator",
+    permission_preset: "owner",
+  };
+  const to = {
+    id: "staff_manager",
+    event_id: eventId,
+    x_user_id: "editor",
+    permission_preset: "manager",
+  };
+  const transfer = {
+    eventId, from, to,
+    confirmText: `TRANSFER ${eventId}`,
+    reason: "権限移譲のため",
+  };
+  const cases = [
+    { call: () => validateEventStaffSubject({ xUserId: "bad id!" }),
+      message: "イベントスタッフには X ID が必要です。" },
+    { call: () => validateEventStaffUniqueness({
+        rows: [from], candidate: { id: "another", event_id: eventId, x_user_id: from.x_user_id },
+      }),
+      message: "このイベントには同じ X ID のスタッフが既に登録されています。" },
+    { call: () => assertEventWillRetainOwner({
+        owners: [from], target: from, nextPreset: "manager",
+      }),
+      message: "イベントには最低1人の代表者が必要です。先に別のスタッフへ代表権限を移譲してください。" },
+    { call: () => assertSelfChangeConfirmation({
+        eventId, isSelfTarget: true, removesMembership: false, losesMemberPermission: true,
+        confirmText: null, reason: "",
+      }),
+      message: "自分の権限を変更する理由を入力してください。" },
+    { call: () => assertSelfChangeConfirmation({
+        eventId, isSelfTarget: true, removesMembership: false, losesMemberPermission: true,
+        confirmText: "", reason: "理由",
+      }),
+      message: `確認のため「SELF CHANGE ${eventId}」と入力してください。` },
+    { call: () => assertSelfChangeConfirmation({
+        eventId, isSelfTarget: true, removesMembership: true, losesMemberPermission: true,
+        confirmText: "", reason: "理由",
+      }),
+      message: `確認のため「REMOVE SELF ${eventId}」と入力してください。` },
+    { call: () => assertOwnershipTransferInput({ ...transfer, reason: "" }),
+      message: "代表権限の移譲理由を入力してください。" },
+    { call: () => assertOwnershipTransferInput({ ...transfer, confirmText: "" }),
+      message: `確認のため「TRANSFER ${eventId}」と入力してください。` },
+    { call: () => assertOwnershipTransferInput({ ...transfer, from: null }),
+      message: "移譲元は現在の代表者である必要があります。" },
+    { call: () => assertOwnershipTransferInput({ ...transfer, to: null }),
+      message: "移譲先は同じイベントに登録済みのスタッフを選択してください。" },
+    { call: () => assertOwnershipTransferInput({ ...transfer, to: from }),
+      message: "移譲元と移譲先に同じスタッフは指定できません。" },
+  ];
+  for (const { call, message } of cases) {
+    let error;
+    try { call(); } catch (caught) { error = caught; }
+    assert.ok(error instanceof Error, "shared domain actually throws");
+    assert.equal(error.message, message, "CURRENT domain message has not changed");
+    assert.equal(policy(error, fallback, eventId), message,
+      "exact shared-domain error must retain its approved UI wording");
+    assert.equal(policy(error, fallback, "other_event"), fallback,
+      "a confirmation for a different event must fail closed",);
+  }
+
+  assert.doesNotThrow(() => assertSelfChangeConfirmation({
+    eventId, isSelfTarget: false, removesMembership: true,
+    losesMemberPermission: true, confirmText: null, reason: null,
+  }), "non-self operation must not suddenly require a confirmation");
+  assert.doesNotThrow(() => assertOwnershipTransferInput(transfer),
+    "correct transfer remains allowed by the shared domain");
 });
