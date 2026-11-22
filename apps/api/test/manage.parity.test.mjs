@@ -478,20 +478,81 @@ if (runUnderRootTsx(import.meta.url)) {
 
   // ---------------- staff ----------------
   test("T-staff: staff page equals CURRENT for every user and event", async () => {
-    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
-      for (const eventId of ["evA", "evB", "evC", "evD", "evNull", "evTie1", "evTie2", "missingEvent", "nope"]) {
-        const r = await call(`/api/manage/events/${eventId}/staff`, `tok-${name}`);
-        const ref = await refStaff(name, eventId);
-        if (ref === 404) {
-          assert.equal(r.status, 404, `${name} ${eventId}`);
-          assert.equal(r.headers.get("cache-control"), "private, no-store");
-          continue;
+    // Both CURRENT and Hono sign internal profile icons in 60-second buckets.
+    // Calling them sequentially against the wall clock can cross that bucket:
+    // identical behavior then produces different exp/sig values. Freeze the
+    // clock for this isolated comparison, without discarding signature parity.
+    const realDateNow = Date.now;
+    const frozenNow = Math.floor(realDateNow() / 60_000) * 60_000 + 30_000;
+    Date.now = () => frozenNow;
+    try {
+      for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+        for (const eventId of ["evA", "evB", "evC", "evD", "evNull", "evTie1", "evTie2", "missingEvent", "nope"]) {
+          const r = await call(`/api/manage/events/${eventId}/staff`, `tok-${name}`);
+          const ref = await refStaff(name, eventId);
+          if (ref === 404) {
+            assert.equal(r.status, 404, `${name} ${eventId}`);
+            assert.equal(r.headers.get("cache-control"), "private, no-store");
+            continue;
+          }
+          assert.equal(r.status, 200, `${name} ${eventId}`);
+          assert.deepEqual(r.body, canon(ref), `${name} ${eventId}`);
+          record("staff", r);
         }
-        assert.equal(r.status, 200, `${name} ${eventId}`);
-        assert.deepEqual(r.body, canon(ref), `${name} ${eventId}`);
-        record("staff", r);
       }
+    } finally {
+      Date.now = realDateNow;
     }
+  });
+
+
+  test("Issue #681: CURRENT and Hono staff icon signatures match on both sides of a 60s boundary", async () => {
+    const { resolveManageXIconUrl: honoIconUrl } = await import("../src/routes/manage/icon.ts");
+    const input = {
+      iconUrl: "/api/media/xicons/mgr.png",
+      approvalStatus: "approved",
+      authSecret: "test-secret",
+    };
+    const before = 1_800_000_059;
+    const sameBucket = before - 1;
+    const after = before + 1;
+    const currentSameBucket = await resolveManageXIconUrl({
+      ...input, options: { now: sameBucket },
+    });
+    const honoSameBucket = await honoIconUrl({ ...input, now: sameBucket });
+    const currentBefore = await resolveManageXIconUrl({
+      ...input, options: { now: before },
+    });
+    const honoBefore = await honoIconUrl({ ...input, now: before });
+    const currentAfter = await resolveManageXIconUrl({
+      ...input, options: { now: after },
+    });
+    const honoAfter = await honoIconUrl({ ...input, now: after });
+
+    assert.equal(currentSameBucket, honoSameBucket, "CURRENT/Hono parity earlier in the same bucket");
+    assert.equal(currentSameBucket, currentBefore, "CURRENT signs identically within a minute");
+    assert.equal(honoSameBucket, honoBefore, "Hono signs identically within a minute");
+    assert.equal(currentBefore, honoBefore, "signature and expiry parity before boundary");
+    assert.equal(currentAfter, honoAfter, "signature and expiry parity after boundary");
+    assert.notEqual(currentBefore, currentAfter, "a new minute bucket intentionally rotates the signature");
+    for (const [url, now] of [[currentSameBucket, sameBucket], [currentBefore, before], [currentAfter, after]]) {
+      assert.ok(url);
+      const signed = new URL(url, "https://x.test");
+      assert.equal(
+        await verifyManageXIconSignatureInput({
+          key: "xicons/mgr.png",
+          expiresAt: Number(signed.searchParams.get("exp")),
+          signature: signed.searchParams.get("sig"),
+          secret: "test-secret",
+          now,
+        }),
+        true,
+        "signed URL must still authenticate against CURRENT verifier",
+      );
+    }
+    const expiryBefore = Number(new URL(currentBefore, "https://x.test").searchParams.get("exp"));
+    const expiryAfter = Number(new URL(currentAfter, "https://x.test").searchParams.get("exp"));
+    assert.equal(expiryAfter - expiryBefore, 60, "bucket boundary advances expiry exactly one minute");
   });
 
   test("T-staff: owner-0 event, read-only reviewers, icon rules", async () => {
@@ -973,24 +1034,77 @@ if (runUnderRootTsx(import.meta.url)) {
   }
 
   test("T-xlink: x-link-requests (enrichment, legacy ids, video icon fallback, signing) equals CURRENT; only xid reviewers and admins", async () => {
-    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
-      const r = await call("/api/manage/x-link-requests", `tok-${name}`);
-      const ref = await refXLinks(name);
-      if (ref === 404) {
-        assert.equal(r.status, 404, name);
-        continue;
+    // #728: CURRENT and Hono sign x-icons in 60-second buckets. Sequential
+    // HTTP/reference calls can cross a real clock boundary and differ by one
+    // minute even when the full signed exp/sig contract is identical. Use a
+    // fixed interior of a minute for this comparison; unlike normalizing URLs,
+    // this still asserts the *entire* signature and expiration are equal.
+    // The staff test above separately verifies real t=59/60 signature rotation.
+    const realDateNow = Date.now;
+    const frozenNow = Math.floor(realDateNow() / 60_000) * 60_000 + 30_000;
+    Date.now = () => frozenNow;
+    try {
+      for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+        const r = await call("/api/manage/x-link-requests", `tok-${name}`);
+        const ref = await refXLinks(name);
+        if (ref === 404) {
+          assert.equal(r.status, 404, name);
+          continue;
+        }
+        assert.equal(r.status, 200, name);
+        assert.deepEqual(r.body, canon(ref), name);
+        record("xlink", r);
       }
-      assert.equal(r.status, 200, name);
-      assert.deepEqual(r.body, canon(ref), name);
-      record("xlink", r);
+      const body = (await call("/api/manage/x-link-requests", "tok-admin")).body;
+      assert.equal(body.rows.length, 100, "pending list is capped at 100 (PENDING_LIMIT)");
+      assert.ok(body.rows.every((row) => row.request_type === "new_link" || row.request_type === "existing_link"));
+      assert.equal((await call("/api/manage/x-link-requests", "tok-owner")).status, 404);
+      assert.equal((await call("/api/manage/x-link-requests", "tok-plain")).status, 403);
+      const stats0 = (await call("/api/manage/x-link-requests", "tok-custom")).stats;
+      assert.equal(stats0.statements, 3);
+    } finally {
+      Date.now = realDateNow;
     }
-    const body = (await call("/api/manage/x-link-requests", "tok-admin")).body;
-    assert.equal(body.rows.length, 100, "pending list is capped at 100 (PENDING_LIMIT)");
-    assert.ok(body.rows.every((row) => row.request_type === "new_link" || row.request_type === "existing_link"));
-    assert.equal((await call("/api/manage/x-link-requests", "tok-owner")).status, 404);
-    assert.equal((await call("/api/manage/x-link-requests", "tok-plain")).status, 403);
-    const stats0 = (await call("/api/manage/x-link-requests", "tok-custom")).stats;
-    assert.equal(stats0.statements, 3);
+  });
+
+  test("Issue #728: X-link signed-icon parity across the 59/60-second boundary", async () => {
+    // Compare the *complete* payload and HMAC, not a normalized URL. The
+    // existing T-xlink comparison freezes one clock bucket; this separate
+    // regression proves that real signature rotation still occurs across it.
+    const realDateNow = Date.now;
+    const bucketStart = Math.floor(realDateNow() / 60_000) * 60_000;
+    const urls = [];
+    try {
+      for (const frozenNow of [bucketStart + 59_000, bucketStart + 60_000]) {
+        Date.now = () => frozenNow;
+        const r = await call("/api/manage/x-link-requests", "tok-admin");
+        assert.equal(r.status, 200);
+        const ref = await refXLinks("admin");
+        assert.deepEqual(r.body, canon(ref), "CURRENT/Hono full signed URL parity");
+        // manageSeed: xr3 targets approved req_i (internal xicons/i.png).
+        // xr9 targets req_c (empty icon) and is intentionally NOT signed.
+        const signedIcon = r.body.rows.find((row) =>
+          row.id === "xr3" && row.target_icon_url?.startsWith("/api/media/manage-x-icon/"));
+        assert.ok(signedIcon, "the signed target icon fixture must be present");
+        const url = new URL(signedIcon.target_icon_url, "https://x.test");
+        const expiresAt = Number(url.searchParams.get("exp"));
+        const signature = url.searchParams.get("sig");
+        assert.ok(signature, "signed icon URL retains an HMAC signature");
+        assert.equal(await verifyManageXIconSignatureInput({
+          key: "xicons/i.png", expiresAt, signature,
+          secret: "test-secret", now: Math.floor(frozenNow / 1000),
+        }), true, "CURRENT verifier must accept the Hono URL's signature");
+        urls.push(url);
+      }
+    } finally {
+      Date.now = realDateNow;
+    }
+    assert.equal(
+      Number(urls[1].searchParams.get("exp")) - Number(urls[0].searchParams.get("exp")),
+      60, "the expiry advances exactly one minute at a 59/60-second boundary",
+    );
+    assert.notEqual(urls[0].searchParams.get("sig"), urls[1].searchParams.get("sig"),
+      "the signed HMAC must rotate at the minute boundary");
   });
 
   test("T-overview: event overview equals CURRENT for every user, event and notification filter", async () => {

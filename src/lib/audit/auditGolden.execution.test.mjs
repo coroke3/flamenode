@@ -41,6 +41,9 @@ if (runTestWithTsx(import.meta.url)) {
   const { drizzle } = await import("drizzle-orm/d1");
   const schema = await import("../db/schema.ts");
   const { mutateWithAudit } = await import("./mutate.ts");
+  // Fault-injection tests must bypass the Next compatibility bridge, whose
+  // two-argument signature intentionally owns its Queue host loader.
+  const { mutateWithAudit: mutateWithAuditCore } = await import("@flamenode/server-core/audit/mutate");
   const { expectedRowCondition } = await import("./expectedRowCondition.ts");
   const { prepareAuditLogEntries, writeAuditLog } = await import("./logger.ts");
   const { resetQueueWakeWarningStateForTests } = await import(
@@ -465,6 +468,275 @@ if (runTestWithTsx(import.meta.url)) {
       },
     ],
   ];
+
+  test("SEC-734: a rejecting Queue host cannot turn an already committed D1 batch into failure", async () => {
+    const secret = "SEC734_PRIVATE_QUEUE_HOST_CANARY";
+    const cases = [
+      ["static_sync_throw", { staticRebuildWakeSource: "admin" }, "sync"],
+      ["notification_async_reject", { notificationWakeSource: "web" }, "async"],
+      ["both_sync_throw", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "sync"],
+      ["both_downstream_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "downstream"],
+      ["both_queue_send_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "send_reject"],
+      ["both_notification_preflight_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "notification_preflight"],
+      ["both_static_preflight_reject", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "static_preflight"],
+      ["both_healthy", { notificationWakeSource: "web", staticRebuildWakeSource: "admin" }, "healthy"],
+    ];
+    for (const [name, sources, mode] of cases) {
+      let hostLoads = 0;
+      let downstreamReads = 0;
+      const sends = [];
+      const warnings = [];
+      const originalWarn = console.warn;
+      if (mode === "send_reject") resetQueueWakeWarningStateForTests();
+      console.warn = (...args) => warnings.push(args);
+      let actual;
+      try {
+        [, actual] = await runScenario("sec734_" + name, async ({ db, sqlite, log }) => {
+          const hostLoader = () => {
+            hostLoads += 1;
+            // A Queue wake host is loaded *after* the transaction was committed.
+            assert.equal(sqlite.prepare("SELECT title FROM announcements WHERE id = 'ann-1'").get()?.title, "Hello v2");
+            assert.equal(sqlite.prepare("SELECT count(*) AS n FROM audit_logs").get()?.n, 1);
+            assert.equal(sqlite.prepare("SELECT count(*) AS n FROM static_rebuild_queue WHERE id = 'sec734-rebuild'").get()?.n,
+              sources.staticRebuildWakeSource ? 1 : 0,
+              "the queued rebuild row is durably committed before a wake is attempted");
+            assert.equal(sqlite.prepare("SELECT count(*) AS n FROM notification_outbox WHERE id = 'sec734-notice' AND status = 'pending'").get()?.n,
+              sources.notificationWakeSource ? 1 : 0,
+              "the pending notification outbox row is committed before a wake is attempted");
+            if (mode === "sync") throw new Error("Queue import " + secret);
+            if (mode === "async") return Promise.reject(new Error("Queue module " + secret));
+            return {
+              readEnv: () => {
+                if (mode === "downstream" ||
+                    mode === "notification_preflight" ||
+                    mode === "static_preflight") {
+                  downstreamReads += 1;
+                  // The first kind must never stop the second kind from
+                  // attempting its own wake after an atomic D1 commit.
+                  const shouldReject = mode === "downstream" ||
+                    (mode === "notification_preflight" && downstreamReads === 1) ||
+                    (mode === "static_preflight" && downstreamReads === 3);
+                  if (shouldReject) {
+                    return new Proxy({}, {
+                      get() { throw new Error("Queue flags " + secret); },
+                    });
+                  }
+                }
+                return {
+                  QUEUE_DISPATCH_ENABLED: "1",
+                  NOTIFICATION_WAKE_QUEUE: { send: async (message) => {
+                    if (mode === "send_reject") throw Object.assign(new Error("Queue send " + secret), { name: secret });
+                    sends.push(message.kind);
+                  } },
+                  STATIC_REBUILD_WAKE_QUEUE: { send: async (message) => sends.push(message.kind) },
+                };
+              },
+              readWaitUntil: () => null,
+              readKv: () => null,
+            };
+          };
+          const statements = [
+            db.run(sql`UPDATE announcements SET title = ${"Hello v2"}, updated_at = ${2000} WHERE id = ${"ann-1"} AND updated_at = ${1000}`),
+          ];
+          if (sources.staticRebuildWakeSource) {
+            statements.push(db.run(sql`INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, status, priority, attempt_count, created_at, updated_at)
+              VALUES (${"sec734-rebuild"}, ${"announcements"}, ${"all"}, ${"sec734_postcommit"}, ${"pending"}, ${"normal"}, ${0}, ${1000}, ${1000})`));
+          }
+          if (sources.notificationWakeSource) {
+            statements.push(db.run(sql`INSERT INTO notification_outbox (id, recipient_user_id, type, payload_json, status, created_at)
+              VALUES (${"sec734-notice"}, ${"actor-1"}, ${"event_update"}, ${"{}"}, ${"pending"}, ${1000})`));
+          }
+          const ids = await mutateWithAuditCore(db, {
+            mutationStatements: statements,
+            expectedMutationChanges: statements.map(() => 1),
+            audits: [announcementAudit()],
+            ...sources,
+          }, hostLoader);
+          const queued = sqlite.prepare("SELECT count(*) AS n FROM static_rebuild_queue WHERE id = 'sec734-rebuild'").get()?.n;
+          const notified = sqlite.prepare("SELECT count(*) AS n FROM notification_outbox WHERE id = 'sec734-notice' AND status = 'pending'").get()?.n;
+          log.push({ op: "test.committed", name });
+          return { ids, queued, notified };
+        });
+      } finally {
+        console.warn = originalWarn;
+      }
+      assert.ok(Array.isArray(actual.outcome.returned?.ids) && actual.outcome.returned.ids.length === 1, name);
+      assert.equal(actual.outcome.returned.queued, sources.staticRebuildWakeSource ? 1 : 0,
+        name + ": committed rebuild work is not lost if Queue wake fails");
+      assert.equal(actual.outcome.returned.notified, sources.notificationWakeSource ? 1 : 0,
+        name + ": pending notification outbox work is not lost if Queue wake fails");
+      assert.equal(actual.outcome.threw, undefined, name + ": committed D1 must not report a failure");
+      assert.equal(actual.announcements.find((r) => r.id === "ann-1")?.title, "Hello v2", name);
+      assert.equal(actual.audit_logs.length, 1, name + ": exactly one durable audit");
+      assert.deepEqual(actual.log.filter((r) => r.op === "batch.commit").map((r) => r.op), ["batch.commit"]);
+      assert.equal(actual.log.filter((r) => r.op === "batch.rollback").length, 0);
+      assert.equal(actual.log.filter((r) => r.op === "test.committed").length, 1);
+      assert.equal(hostLoads, 1, name + ": the host is resolved once for both wake kinds");
+      const softFlagKinds = mode === "downstream"
+        ? ["notification_available", "static_rebuild_available"]
+        : mode === "notification_preflight"
+          ? ["notification_available"]
+          : mode === "static_preflight"
+            ? ["static_rebuild_available"]
+            : [];
+      const expectedWarnings = softFlagKinds.length > 0
+        ? softFlagKinds.flatMap((kind) => [
+            [JSON.stringify({ service: "queue-wake", result: "feature_flags_unavailable", kind })],
+            [JSON.stringify({ service: "queue-wake", result: "last_failure_record_skipped", kind, reason: "feature_flags_unavailable" })],
+          ])
+        : mode === "sync" || mode === "async"
+          ? [["[audit-mutate] post-commit wake host unavailable", "provider_error"]]
+          : mode === "send_reject"
+            ? [
+                [JSON.stringify({ service: "queue-wake", result: "send_failed", kind: "notification_available" })],
+                [JSON.stringify({ service: "queue-wake", result: "last_failure_record_skipped", kind: "notification_available", reason: "send_failed" })],
+              ]
+            : [];
+      assert.deepEqual(warnings, expectedWarnings, name + ": fixed-only warnings including SEC-738/742 fail-soft diagnostics");
+      assert.ok(!JSON.stringify(warnings).includes(secret),
+        name + ": a provider-controlled Error.name/message must never reach diagnostic logs");
+      assert.equal(downstreamReads, mode === "downstream" ? 2
+        : mode === "notification_preflight" || mode === "static_preflight" ? 3 : 0,
+        name + ": independent notification/static wake attempts");
+      assert.deepEqual(sends, mode === "healthy"
+        ? ["notification_available", "static_rebuild_available"]
+        : mode === "send_reject" || mode === "notification_preflight" ? ["static_rebuild_available"]
+        : mode === "static_preflight" ? ["notification_available"] : [],
+        name + ": one failed kind cannot skip the independent healthy kind");
+      assert.ok(!JSON.stringify({ outcome: actual.outcome, warnings }).includes(secret),
+        name + ": provider error, cause and credentials are never reflected");
+    }
+  });
+
+  test("SEC-734: throwing console.warn sink cannot escape post-commit wake failures or skip second wake", async () => {
+    const cases = [
+      ["loadWakeHost_throws", "host_throw", 1, []],
+      ["first_wake_throws_second_still_runs", "first_wake_throw", 1, ["static_rebuild_available"]],
+      ["second_wake_throws_after_first_succeeds", "second_wake_throw", 1, ["notification_available"]],
+      ["first_wake_send_rejects_second_still_runs", "send_reject", 2, ["static_rebuild_available"]],
+    ];
+    for (const [name, mode, expectedWarnAttempts, expectedSends] of cases) {
+      let hostLoads = 0;
+      let warnAttempts = 0;
+      const sends = [];
+      const originalWarn = console.warn;
+      resetQueueWakeWarningStateForTests();
+      console.warn = () => {
+        warnAttempts += 1;
+        throw new Error("sink unavailable");
+      };
+      let actual;
+      try {
+        [, actual] = await runScenario("sec734_sink_" + name, async ({ db, sqlite, log }) => {
+          const hostLoader = () => {
+            hostLoads += 1;
+            if (mode === "host_throw") {
+              throw new Error("Queue host unavailable");
+            }
+            return {
+              readEnv: () => ({
+                QUEUE_DISPATCH_ENABLED: "1",
+                NOTIFICATION_WAKE_QUEUE: {
+                  send: async (message) => {
+                    if (mode === "send_reject") throw new Error("notification queue down");
+                    sends.push(message.kind);
+                  },
+                },
+                STATIC_REBUILD_WAKE_QUEUE: {
+                  send: async (message) => sends.push(message.kind),
+                },
+              }),
+              readWaitUntil: () => null,
+              readKv: () => null,
+            };
+          };
+          const wakeSentKinds = mode === "first_wake_throw" || mode === "second_wake_throw"
+            ? new Proxy(new Set(), {
+                get(target, prop) {
+                  if (prop === "has") {
+                    return (kind) => {
+                      if (
+                        (mode === "first_wake_throw" && kind === "notification_available") ||
+                        (mode === "second_wake_throw" && kind === "static_rebuild_available")
+                      ) {
+                        throw new Error("wakeSentKinds poisoned for " + kind);
+                      }
+                      return target.has(kind);
+                    };
+                  }
+                  const value = Reflect.get(target, prop, target);
+                  return typeof value === "function" ? value.bind(target) : value;
+                },
+              })
+            : undefined;
+          const statements = [
+            db.run(sql`UPDATE announcements SET title = ${"Hello v2"}, updated_at = ${2000} WHERE id = ${"ann-1"} AND updated_at = ${1000}`),
+            db.run(sql`INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, status, priority, attempt_count, created_at, updated_at)
+              VALUES (${"sec734-sink-rebuild"}, ${"announcements"}, ${"all"}, ${"sec734_sink"}, ${"pending"}, ${"normal"}, ${0}, ${1000}, ${1000})`),
+            db.run(sql`INSERT INTO notification_outbox (id, recipient_user_id, type, payload_json, status, created_at)
+              VALUES (${"sec734-sink-notice"}, ${"actor-1"}, ${"event_update"}, ${"{}"}, ${"pending"}, ${1000})`),
+          ];
+          const ids = await mutateWithAuditCore(db, {
+            mutationStatements: statements,
+            expectedMutationChanges: statements.map(() => 1),
+            audits: [announcementAudit()],
+            notificationWakeSource: "web",
+            staticRebuildWakeSource: "admin",
+            wakeSentKinds,
+          }, hostLoader);
+          const queued = sqlite.prepare("SELECT count(*) AS n FROM static_rebuild_queue WHERE id = 'sec734-sink-rebuild'").get()?.n;
+          const notified = sqlite.prepare("SELECT count(*) AS n FROM notification_outbox WHERE id = 'sec734-sink-notice' AND status = 'pending'").get()?.n;
+          log.push({ op: "test.committed", name });
+          return { ids, queued, notified };
+        });
+      } finally {
+        console.warn = originalWarn;
+      }
+      assert.ok(Array.isArray(actual.outcome.returned?.ids) && actual.outcome.returned.ids.length === 1, name);
+      assert.equal(actual.outcome.returned.queued, 1, name + ": committed rebuild row preserved");
+      assert.equal(actual.outcome.returned.notified, 1, name + ": committed notification row preserved");
+      assert.equal(actual.outcome.threw, undefined, name + ": throwing console.warn sink must not fail committed D1");
+      assert.equal(actual.announcements.find((r) => r.id === "ann-1")?.title, "Hello v2", name);
+      assert.equal(actual.audit_logs.length, 1, name + ": durable audit row preserved");
+      assert.deepEqual(actual.log.filter((r) => r.op === "batch.commit").map((r) => r.op), ["batch.commit"]);
+      assert.equal(actual.log.filter((r) => r.op === "batch.rollback").length, 0);
+      assert.equal(hostLoads, 1, name);
+      assert.equal(warnAttempts, expectedWarnAttempts, name + ": diagnostic sink was invoked and threw");
+      assert.deepEqual(sends, expectedSends, name + ": second independent wake continues even when console.warn throws");
+    }
+  });
+
+  test("SEC-734: failed D1 CAS still rejects without loading a Queue host", async () => {
+    let hostLoads = 0;
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    let actual;
+    try {
+      [, actual] = await runScenario("sec734_precommit_failed", ({ db }) =>
+        mutateWithAuditCore(db, {
+          mutationStatements: [
+            db.run(sql`UPDATE announcements SET title = ${"Unexpected"} WHERE id = ${"ann-1"} AND updated_at = ${999}`),
+          ],
+          expectedMutationChanges: 1,
+          audits: [announcementAudit()],
+          notificationWakeSource: "web",
+          staticRebuildWakeSource: "admin",
+        }, () => {
+          hostLoads += 1;
+          throw new Error("precommit host loader must not run");
+        }),
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+    assert.ok(actual.outcome.threw, "a failed D1 CAS is a real failure");
+    assert.equal(actual.announcements.find((r) => r.id === "ann-1")?.title, "Hello");
+    assert.equal(actual.audit_logs.length, 0, "failed D1 CAS must roll back audit");
+    assert.equal(actual.log.filter((r) => r.op === "batch.rollback").length, 1);
+    assert.equal(hostLoads, 0, "precommit failure must never attempt a Queue wake");
+    assert.deepEqual(warnings, [], "no postcommit warning on a real precommit failure");
+  });
 
   test("golden: mutateWithAudit / logger / queue wake observable behaviour", async () => {
     const actual = {};

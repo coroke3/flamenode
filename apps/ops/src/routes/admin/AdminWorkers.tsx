@@ -54,6 +54,17 @@ const PLATFORM_LIMITS = [
   { label: "YouTube Data API", value: "10,000 units / day" },
 ] as const;
 
+// DTO validation checks structure, not URL safety. These are the fixed
+// internal destinations actually produced by the Worker monitoring backend.
+const ALLOWED_MONITOR_DETAIL_HREFS = new Set([
+  "/admin/notifications", "/admin/static-builds", "/admin/youtube-sync",
+]);
+function MonitorDetailLink({ href, label }: { href: string; label: "詳細" | "管理" }): React.ReactElement {
+  return ALLOWED_MONITOR_DETAIL_HREFS.has(href)
+    ? <Link href={href} className="fn-btn fn-btn-ghost fn-btn-sm">{label}</Link>
+    : <span className="fn-muted fn-text-sm">—</span>;
+}
+
 function badgeClass(level: MonitorLevel): string {
   if (level === "critical") return "fn-badge-danger";
   if (level === "warn" || level === "running") return "fn-badge-warning";
@@ -288,7 +299,7 @@ function WorkerRow({ job }: { job: WorkerJobStatus }): React.ReactElement {
       <td><span className={`fn-badge ${badgeClass(job.level)}`}>{levelLabel(job.level)}</span></td>
       <TimeCell value={job.lastStartedAt} /><TimeCell value={job.lastSucceededAt} /><TimeCell value={job.lastFailedAt} /><TimeCell value={job.nextExpectedAt} />
       <td style={{ maxWidth: 240, wordBreak: "break-word", fontSize: 12 }}>{job.lastErrorCode ?? "—"}</td>
-      <td><Link href={job.detailHref} className="fn-btn fn-btn-ghost fn-btn-sm">詳細</Link></td>
+      <td><MonitorDetailLink href={job.detailHref} label="詳細" /></td>
     </tr>
   );
 }
@@ -320,7 +331,7 @@ function PipelineRow({ pipeline }: { pipeline: PipelineSnapshot }): React.ReactE
     <tr>
       <td style={{ fontWeight: 700 }}>{pipeline.label}</td><td><span className={`fn-badge ${badgeClass(pipeline.level)}`}>{levelLabel(pipeline.level)}</span></td>
       <td>{formatCount(pipeline.backlog)}</td><td>{formatCount(pipeline.capacityPerDay)}</td><td>{durationLabel(pipeline.estimatedDrainMinutes)}</td>
-      <td className="fn-muted fn-text-sm">{pipeline.note}</td><td><Link href={pipeline.detailHref} className="fn-btn fn-btn-ghost fn-btn-sm">管理</Link></td>
+      <td className="fn-muted fn-text-sm">{pipeline.note}</td><td><MonitorDetailLink href={pipeline.detailHref} label="管理" /></td>
     </tr>
   );
 }

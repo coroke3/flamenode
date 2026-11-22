@@ -174,6 +174,30 @@ test("U02b Worker dashboard shows CURRENT cron, queue, pipelines, artifacts and 
   assert.equal(dom.querySelectorAll("table").length, 3);
   assert.equal(dom.querySelectorAll('button[type="button"]').length, 1);
   assert.ok(dom.querySelector('a[href="/admin/health"]'));
+  assert.ok(dom.querySelectorAll('a[href="/admin/youtube-sync"]').length >= 2,
+    "current worker/pipeline destinations are retained");
+  for (const unsafeHref of [
+    "javascript:alert(1)", "https://attacker.invalid/steal",
+    "//attacker.invalid/steal", "/admin/../manage",
+    "/admin/youtube-sync?redirect=https://attacker.invalid",
+  ]) {
+    const poisoned = render(h(AdminWorkersView, {
+      data: { status: "ok", data: {
+        snapshot: {
+          ...snapshot,
+          jobs: snapshot.jobs.map((job) => ({ ...job, detailHref: unsafeHref })),
+          pipelines: snapshot.pipelines.map((pipeline) => ({ ...pipeline, detailHref: unsafeHref })),
+        },
+        error: null,
+      } },
+      onRefresh: () => {},
+    }), "/admin/workers");
+    const links = [...new JSDOM(poisoned).window.document.querySelectorAll("a")];
+    assert.equal(links.some((anchor) => anchor.getAttribute("href") === unsafeHref), false,
+      "unsafe destination must not become a link: " + unsafeHref);
+    assert.equal(links.filter((anchor) => anchor.getAttribute("href") === "/admin/youtube-sync").length, 0,
+      "invalid worker destinations do not silently fall back to an unrelated route");
+  }
 });
 
 test("U02b Worker dashboard does not expose stale snapshot on denied, failed or empty read", () => {
