@@ -1,8 +1,10 @@
 -- Migration: 0067_x_user_canonical_lookup_indexes.sql
 -- Date: 2026-11-22
--- Type: additive; requires independent schema review and nonproduction D1 verification
+-- Type: additive
+-- Review gate: independent DB schema and nonproduction D1 verification required
 -- Summary: index the *exact* canonical resolver and in-batch CAS normalization
--- Data loss: none; no data rewrite or uniqueness assumption on legacy aliases
+-- Data loss: none
+-- Data rewrite: none; no uniqueness assumption on legacy aliases
 -- Rollback: DROP INDEX IF EXISTS x_user_aliases_canonical_norm_alias_idx;
 --           DROP INDEX IF EXISTS x_users_canonical_norm_id_idx;
 -- Change log: docs/database/change-log.d/0067_x_user_canonical_lookup_indexes.md
