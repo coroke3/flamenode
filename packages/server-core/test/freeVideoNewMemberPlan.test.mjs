@@ -85,7 +85,7 @@ test("MIG-0651 new members: canonical X alias, pending placeholder, public membe
     ]);
     const stats = { reads: 0 };
     const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(submission));
-    assert.equal(stats.reads, 2, "same CURRENT resolver: one aliases and one direct X read");
+    assert.equal(stats.reads, 1, "alias and direct X resolutions share one indexed UNION ALL read");
     assert.deepEqual(plan.expectedChanges, [null, 1, 2, 1]);
     assert.deepEqual(plan.audits.map(a => [a.table_name,a.operation,a.strict]), [
       ["x_users_member_batch", "MERGE", true],
@@ -170,7 +170,7 @@ test("MIG-0651 new members: normalized existing X blocks duplicate placeholder P
   } finally { sqlite.close(); }
 });
 
-test("MIG-0651 new members: 80 validated members use two identity reads and two JSON1 write statements", async () => {
+test("MIG-0651 new members: 80 validated members use one identity read and two JSON1 write statements", async () => {
   const sqlite = createSqlite();
   try {
     const many = Array.from({length:80},(_,i)=>({
@@ -178,7 +178,7 @@ test("MIG-0651 new members: 80 validated members use two identity reads and two 
     }));
     const stats={reads:0};
     const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite,stats),args(parsedMemberSubmission(many)));
-    assert.equal(stats.reads,2);
+    assert.equal(stats.reads,1);
     assert.deepEqual(plan.expectedChanges,[null,80,80]);
     assert.equal(plan.statements.length,3);
     const dialect=new SQLiteSyncDialect();
@@ -218,7 +218,7 @@ test("MIG-0651 new members: in-batch identity CAS rejects stale alias retarget b
       {name:"Candidate",x_user_id:"futurealias",chapters:[]},
     ]);
     const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite,stats),args(submission));
-    assert.equal(stats.reads,2);
+    assert.equal(stats.reads,1);
     assert.deepEqual(plan.expectedChanges,[null,1,1]);
     insert(sqlite,"x_users",{id:"otherowner",x_name:"Other",approval_status:"approved"});
     insert(sqlite,"x_user_aliases",{alias_x_id:"futurealias",x_user_id:"otherowner"});
