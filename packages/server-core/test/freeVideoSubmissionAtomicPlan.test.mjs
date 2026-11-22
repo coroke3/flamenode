@@ -962,6 +962,62 @@ test("MIG-0651 U02 new-video member/chapter plan is atomic with video/metadata/r
   } finally { sqlite.close(); }
 });
 
+test("MIG-0651 U02 new-video: normalized X collision after pre-read aborts complete video graph", async () => {
+  const sqlite = createSqlite();
+  seedApprovedActiveX(sqlite);
+  try {
+    const proxy = drizzle(async (query, params, method) => {
+      const rows = sqlite.prepare(query).all(...params);
+      return { rows: method === "all" || method === "values" ? rows.map(r => Object.values(r)) : rows };
+    }, { schema });
+    const db = {
+      select: (...args) => proxy.select(...args),
+      insert: (...args) => proxy.insert(...args),
+      run(expr) { return { sqlExpr: expr }; },
+    };
+    // Prepare from a snapshot where 'newcollab' does not exist.
+    const plan = await buildFreeVideoSubmissionWithRebuildPlan(db, {
+      videoAfter: { ...video(), collaboration_type: "collab" },
+      actorUserId: "user-1", trustedActiveXId: "alice",
+      eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
+      memberSubmission: verifiedMembersForNewVideo(),
+    });
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 1, 2, 1, 13]);
+    // A concurrent writer creates a differently spelled but canonically identical
+    // X ID. SQLite's exact PK conflict handling alone would silently duplicate it.
+    insert(sqlite, "x_users", {
+      id: "NEWCOLLAB", x_name: "Already approved", approval_status: "approved",
+    });
+    const dialect = new SQLiteSyncDialect();
+    sqlite.exec("BEGIN");
+    try {
+      assert.throws(() => {
+        for (const [i, stmt] of plan.statements.entries()) {
+          const q = "sqlExpr" in stmt
+            ? dialect.sqlToQuery(stmt.sqlExpr)
+            : stmt.toSQL();
+          if ("sqlExpr" in stmt && i === 0) sqlite.prepare(q.sql).get(...q.params);
+          else sqlite.prepare(q.sql).run(...q.params);
+        }
+      }, /malformed JSON/, "the member identity assertion must reject normalized PK collision");
+    } finally {
+      sqlite.exec("ROLLBACK");
+    }
+    for (const table of [
+      "videos", "video_youtube_metadata", "video_members",
+      "video_chapters", "static_rebuild_queue",
+    ]) {
+      assert.equal(sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0,
+        table + " must have no rows after atomic abort");
+    }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='newcollab'").get().n, 0);
+    assert.deepEqual(sqlite.prepare("SELECT id,x_name FROM x_users WHERE id='NEWCOLLAB'").all()
+      .map(row => ({id: row.id, x_name: row.x_name})),
+      [{id:"NEWCOLLAB", x_name:"Already approved"}],
+      "the concurrent X profile must survive unchanged");
+  } finally { sqlite.close(); }
+});
+
 test("MIG-0651 U02 new-video: rebuild failure rolls back member X, chapter and video inserts", async () => {
   const sqlite = createSqlite();
   seedApprovedActiveX(sqlite);
