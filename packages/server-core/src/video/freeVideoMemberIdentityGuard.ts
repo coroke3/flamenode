@@ -36,55 +36,49 @@ export function buildFreeVideoMemberIdentityGuardSql(
              json_extract(value, '$.allowAbsent') AS allow_absent
       FROM json_each(${payload})
     ),
-    direct AS (
-      SELECT i.raw_id, COUNT(d.id) AS direct_count,
-        SUM(CASE WHEN d.id IS NOT NULL
-          AND COALESCE(d.approval_status, '') IN ('pending','approved','imported')
-          AND lower(trim(ltrim(trim(d.id), '@'))) = i.target_id
-          THEN 1 ELSE 0 END) AS matching_direct,
-        SUM(CASE WHEN d.id IS NOT NULL
-          AND COALESCE(d.approval_status, '') IN ('pending','approved','imported')
-          AND lower(trim(ltrim(trim(d.id), '@'))) <> i.target_id
-          THEN 1 ELSE 0 END) AS different_direct
+    -- Each normalized identity is probed through the matching expression
+    -- index. Avoid joining two separately grouped CTEs through unindexed
+    -- raw_id columns: for 100 members that join caused cubic comparisons.
+    metrics AS MATERIALIZED (
+      SELECT i.raw_id, i.target_id, i.allow_absent,
+        (SELECT COUNT(*) FROM x_users d
+         WHERE lower(trim(ltrim(trim(d.id), '@'))) = i.raw_id
+        ) AS direct_count,
+        (SELECT COUNT(*) FROM x_users d
+         WHERE lower(trim(ltrim(trim(d.id), '@'))) = i.raw_id
+           AND COALESCE(d.approval_status, '') IN ('pending','approved','imported')
+           AND lower(trim(ltrim(trim(d.id), '@'))) = i.target_id
+        ) AS matching_direct,
+        (SELECT COUNT(*) FROM x_users d
+         WHERE lower(trim(ltrim(trim(d.id), '@'))) = i.raw_id
+           AND COALESCE(d.approval_status, '') IN ('pending','approved','imported')
+           AND lower(trim(ltrim(trim(d.id), '@'))) <> i.target_id
+        ) AS different_direct,
+        (SELECT COUNT(*) FROM x_user_aliases a
+         WHERE lower(trim(ltrim(trim(a.alias_x_id), '@'))) = i.raw_id
+        ) AS alias_count,
+        (SELECT COUNT(*) FROM x_user_aliases a
+         LEFT JOIN x_users target
+           ON lower(trim(ltrim(trim(target.id), '@'))) =
+              lower(trim(ltrim(trim(a.x_user_id), '@')))
+         WHERE lower(trim(ltrim(trim(a.alias_x_id), '@'))) = i.raw_id
+           AND (target.id IS NULL
+             OR COALESCE(target.approval_status, '') NOT IN ('pending','approved','imported')
+             OR lower(trim(ltrim(trim(target.id), '@'))) <> i.target_id)
+        ) AS bad_alias_count
       FROM incoming i
-      LEFT JOIN x_users d ON lower(trim(ltrim(trim(d.id), '@'))) = i.raw_id
-      GROUP BY i.raw_id
-    ),
-    aliases AS (
-      SELECT i.raw_id, COUNT(a.alias_x_id) AS alias_count,
-        SUM(CASE WHEN a.alias_x_id IS NOT NULL AND (
-          target.id IS NULL
-          OR COALESCE(target.approval_status, '') NOT IN ('pending','approved','imported')
-          OR lower(trim(ltrim(trim(target.id), '@'))) <> i.target_id
-        ) THEN 1 ELSE 0 END) AS bad_alias_count
-      FROM incoming i
-      LEFT JOIN x_user_aliases a
-        ON lower(trim(ltrim(trim(a.alias_x_id), '@'))) = i.raw_id
-      LEFT JOIN x_users target
-        ON lower(trim(ltrim(trim(target.id), '@'))) =
-           lower(trim(ltrim(trim(a.x_user_id), '@')))
-      GROUP BY i.raw_id
     )
     SELECT CASE WHEN NOT EXISTS (
-      SELECT 1 FROM incoming i
-      JOIN direct d ON d.raw_id = i.raw_id
-      JOIN aliases a ON a.raw_id = i.raw_id
-      WHERE d.direct_count > 1
-         -- Fresh pending placeholder audit is truthful ONLY if *nothing*
-         -- appeared under this normalized handle after the read snapshot.
-         OR (i.allow_absent = 1 AND (d.direct_count > 0 OR a.alias_count > 0))
-         OR (
-           a.alias_count = 0 AND NOT (
-             (d.direct_count = 0 AND i.target_id = i.raw_id AND i.allow_absent = 1)
-             OR (d.direct_count = 1 AND d.matching_direct = 1)
-           )
-         )
-         OR (
-           a.alias_count > 0 AND (
-             a.bad_alias_count > 0 OR d.different_direct > 0
-           )
-         )
-    )
-    THEN 1 ELSE json_extract('not-valid-json', '$') END
+      SELECT 1 FROM metrics m
+      WHERE m.direct_count > 1
+         OR (m.allow_absent = 1 AND (m.direct_count > 0 OR m.alias_count > 0))
+         OR (m.alias_count = 0 AND NOT (
+           (m.direct_count = 0 AND m.target_id = m.raw_id AND m.allow_absent = 1)
+           OR (m.direct_count = 1 AND m.matching_direct = 1)
+         ))
+         OR (m.alias_count > 0 AND (
+           m.bad_alias_count > 0 OR m.different_direct > 0
+         ))
+    ) THEN 1 ELSE json_extract('not-valid-json', '$') END
   `;
 }
