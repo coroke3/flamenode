@@ -326,7 +326,15 @@ if (runTestWithTsx(import.meta.url)) {
           }
           await invalidateEventExportCache(eventId);
         },
-        loadQueueWakeHost: async () => (await import("../serverCore/nextPorts.ts")).nextQueueWakeHost,
+        loadQueueWakeHost: async () => {
+          if (postCommitFailure.wakeHost) {
+            log.push({ op: "postcommit.wakeHost" });
+            const error = new Error("private Queue loader " + postCommitFailure.canary);
+            error.cause = new Error("nested Queue credential " + postCommitFailure.canary);
+            throw error;
+          }
+          return (await import("../serverCore/nextPorts.ts")).nextQueueWakeHost;
+        },
       } : null;
       const restored = postCommitHost
         ? await restoreAuditLogCore(db, restoreOptions, postCommitHost)
@@ -1311,6 +1319,60 @@ if (runTestWithTsx(import.meta.url)) {
     assert.ok(result.log.some((entry) =>
       entry.op === "cache.delete" && !entry.key.includes("public-event-export%3A")),
     "other public JSON cache evictions must still run");
+  });
+
+  test("SEC-717: post-commit Queue host loader rejection cannot compensate a committed visibility fence", async () => {
+    const canary = "SEC717_PRIVATE_WAKE_HOST_CANARY";
+    for (const [entity, spec] of [
+      ["event", {
+        arrange: arrangeEvent("evt-1", { beforePatch: { visibility_status: "private" } }),
+      }],
+      ["video", {
+        setup: seedVideoWithEvents(),
+        arrange: arrangeVideo(videoPublicToPrivate),
+      }],
+    ]) {
+      const [, actual] = await runScenario("sec717_committed_wake_host_" + entity, {
+        ...spec,
+        postCommitFailure: { wakeHost: true, canary },
+      });
+      assert.equal(actual.outcome.threw, undefined,
+        entity + ": a post-commit Queue loader error must not reject HTTP");
+      assert.equal(actual.outcome.returned?.ok, true,
+        entity + ": the audited D1 restore has already committed");
+      assert.equal(actual.outcome.returned?.message, "復元が完了しました。");
+      assert.equal(actual.audit_restore_runs.filter((row) => row.status === "success").length, 1);
+      assert.equal(actual.audit_restore_runs.filter((row) => row.status === "failed").length, 0,
+        entity + ": do not persist a fabricated failed run");
+      assert.equal(actual.log.filter((entry) => entry.op === "batch").length, 1,
+        "no second D1 mutation or compensation transaction may follow the commit");
+      assert.equal(actual.log.filter((entry) => entry.op === "postcommit.wakeHost").length, 1);
+      assert.ok(actual.static_rebuild_queue.length > 0,
+        entity + ": committed rebuild work survives the missed wake signal");
+      assert.equal(
+        (entity === "event" ? actual.events : actual.videos)
+          .find((row) => row.id === (entity === "event" ? "evt-1" : "vid-1"))
+          ?.visibility_status,
+        "private",
+        entity + ": the committed private visibility state must survive",
+      );
+      assert.ok(actual.manifest_after?.entities?.some((entry) =>
+        entry.entity_type === entity &&
+          entry.entity_id === (entity === "event" ? "evt-1" : "vid-1")
+      ), entity + ": do not lift the R2 visibility block after a committed D1 batch");
+      const warnings = actual.log.filter((entry) => entry.op === "console.warn" &&
+        entry.args[0] === "[audit-restore] queue wake host unavailable");
+      assert.deepEqual(warnings.map((entry) => entry.args), [
+        ["[audit-restore] queue wake host unavailable", "provider_error"],
+      ], entity + ": only a fixed non-sensitive Queue host warning is emitted");
+      assert.ok(!JSON.stringify(actual.outcome).includes(canary));
+      assert.ok(!JSON.stringify(actual.log.filter((entry) =>
+        entry.op.startsWith("console."))).includes(canary),
+        entity + ": no nested provider information can reach application logs");
+      assert.equal(actual.log.filter((entry) => entry.op === "console.warn" &&
+        entry.args[0] === "[audit-restore] visibility compensation failed").length, 0,
+        "a committed restore must never enter D1 failure compensation");
+    }
   });
 
   test("SEC-718: rejecting post-commit cache host never masks committed event/video restore", async () => {
