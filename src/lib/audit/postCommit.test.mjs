@@ -26,51 +26,63 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(warnings[0]?.retryable, true);
   });
 
-  test("SEC-736: an actual YouTube Queue host flags error cannot suppress later post-commit work", async () => {
+  test("SEC-736/738: hardened YouTube wake logs fixed-only diagnostics and continues post-commit work", async () => {
     const { sendYoutubeSyncPendingWakeBestEffort } = await import(
       "@flamenode/server-core/queues/youtubeSyncWake"
     );
+    const { resetQueueWakeWarningStateForTests } = await import(
+      "@flamenode/server-core/queues/sendQueueWakeBestEffort"
+    );
+    const { resetQueueWakeFailureRecordStateForTests } = await import(
+      "@flamenode/server-core/queues/wakeFailureRecord"
+    );
+    resetQueueWakeWarningStateForTests();
+    resetQueueWakeFailureRecordStateForTests();
+    const secret = "SEC736_PROVIDER_FLAG_GETTER_SECRET";
     const executed = [];
-    // Queue wake is nominally best-effort, but a provider getter may throw
-    // while resolving feature flags. This is a real core call, not a mocked throw.
+    const sentKinds = new Set();
     const queueHost = {
       readEnv: () => Object.defineProperty({}, "QUEUE_DISPATCH_ENABLED", {
-        get() {
-          throw new Error("Queue host flag accessor unavailable");
-        },
+        get() { throw new Error("host getter:" + secret); },
       }),
       readWaitUntil: () => null,
       readKv: () => null,
     };
-    // The shared Queue helper is hardened independently in SEC-738. On an
-    // old main it throws; after SEC-738 it returns a fail-closed result.
-    // The slotted-video post-commit boundary must be safe under either order.
+    const diagnosticLines = [];
+    const originalWarn = console.warn;
     let wakeOutcome;
-    const warnings = await runPostCommitBestEffort(
-      { flow: "submit_slot_video", traceId: "ft_sec736" },
-      [
-        {
-          name: "youtube_sync_wake",
-          run: async () => {
-            executed.push("youtube_sync_wake");
-            wakeOutcome = await sendYoutubeSyncPendingWakeBestEffort("web", new Set(), queueHost);
+    let warnings;
+    try {
+      console.warn = (...args) => diagnosticLines.push(args);
+      warnings = await runPostCommitBestEffort(
+        { flow: "submit_slot_video", traceId: "ft_sec736" },
+        [
+          {
+            name: "youtube_sync_wake",
+            run: async () => {
+              executed.push("youtube_sync_wake");
+              wakeOutcome = await sendYoutubeSyncPendingWakeBestEffort("web", sentKinds, queueHost);
+            },
           },
-        },
-        { name: "revalidate", run: async () => { executed.push("revalidate"); } },
-        { name: "icon_orphan_cleanup", run: async () => { executed.push("icon_orphan_cleanup"); } },
-      ],
-    );
-    assert.deepEqual(executed, ["youtube_sync_wake", "revalidate", "icon_orphan_cleanup"]);
-    if (wakeOutcome?.sent === false && wakeOutcome.reason === "feature_flags_unavailable") {
-      // SEC-738 fail-closed Queue helper must not fabricate a postcommit failure.
-      assert.deepEqual(warnings, []);
-    } else {
-      // Before SEC-738, the real Queue helper can throw on an env getter.
-      assert.equal(wakeOutcome, undefined);
-      assert.deepEqual(warnings.map(({ name, error_code, retryable }) => ({
-        name, error_code, retryable,
-      })), [{ name: "youtube_sync_wake", error_code: "Error", retryable: false }]);
+          { name: "revalidate", run: async () => { executed.push("revalidate"); } },
+          { name: "icon_orphan_cleanup", run: async () => { executed.push("icon_orphan_cleanup"); } },
+        ],
+      );
+    } finally {
+      console.warn = originalWarn;
     }
+    // This PR is stacked on the hardened shared Queue helper in #739. Do not
+    // permit the old thrown-host fallback or provider-controlled Error.name.
+    assert.deepEqual(wakeOutcome, { sent: false, reason: "feature_flags_unavailable" });
+    assert.deepEqual(warnings, [], "a fail-closed Queue wake is not a postcommit task exception");
+    assert.deepEqual(executed, ["youtube_sync_wake", "revalidate", "icon_orphan_cleanup"]);
+    assert.equal(sentKinds.size, 0);
+    assert.deepEqual(diagnosticLines.map(([line]) => JSON.parse(line)), [
+      { service: "queue-wake", result: "feature_flags_unavailable", kind: "youtube_sync_pending" },
+      { service: "queue-wake", result: "last_failure_record_skipped", kind: "youtube_sync_pending", reason: "feature_flags_unavailable" },
+    ]);
+    assert.ok(!JSON.stringify({ diagnosticLines, wakeOutcome, warnings }).includes(secret),
+      "host-provided exceptions must never appear in Queue or postcommit logs");
   });
 
   test("runPostCommitBestEffort returns empty warnings when all tasks succeed", async () => {
