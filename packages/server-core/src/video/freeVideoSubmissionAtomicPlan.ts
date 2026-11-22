@@ -262,10 +262,21 @@ export async function buildFreeVideoSubmissionWithRebuildPlan(
  * to commit. A production caller MUST reject !withinLimit before invoking the
  * guarded mutateWithAudit transaction.
  */
+/** ZERO_1102 S3: all pre-batch reads, including audit preparation, fit 3. */
+export const FREE_VIDEO_S3_MAX_PREBATCH_READS = 3;
+
+export type FreeVideoSubmissionAtomicPlanBudget = D1AuditMutationBudget & {
+  /** D1's 50-query limit and S3's 3-pre-read limit are independent gates. */
+  d1WithinLimit: boolean;
+  s3PreBatchReadCount: number;
+  s3PreBatchReadLimit: number;
+  s3WithinLimit: boolean;
+};
+
 export function inspectFreeVideoSubmissionAtomicPlanBudget(
   plan: UnslottedVideoAtomicPlan,
   callerQueryCount: number,
-): D1AuditMutationBudget {
+): FreeVideoSubmissionAtomicPlanBudget {
   if (!Number.isSafeInteger(callerQueryCount) || callerQueryCount < 0 ||
       plan.statements.length === 0 ||
       plan.statements.length !== plan.expectedChanges.length ||
@@ -273,7 +284,7 @@ export function inspectFreeVideoSubmissionAtomicPlanBudget(
       plan.audits.some((audit) => !audit.strict || !audit.actor_user_id)) {
     throw new Error("free_video_submission_budget_arguments_invalid");
   }
-  return planD1AuditMutationBudget({
+  const budget = planD1AuditMutationBudget({
     mutationStatementCount: plan.statements.length,
     mutationAssertionCount: plan.expectedChanges.filter((value) => value !== null).length,
     auditEntryCount: plan.audits.length,
@@ -286,4 +297,19 @@ export function inspectFreeVideoSubmissionAtomicPlanBudget(
     preloadedActorCount: 0,
     callerQueryCount,
   });
+  // S3 is NOT satisfied merely because totalQueryCount <= 50. The auth
+  // session, write guard, candidate read preflights, and audit preparation
+  // happen BEFORE the one atomic batch, and must total at most three D1 reads.
+  // In this unmounted candidate audit settings/actor snapshots are not
+  // credited as preloaded; a future caller must prove any preload credits.
+  const s3PreBatchReadCount = budget.callerQueryCount + budget.preparationQueryCount;
+  const s3WithinLimit = s3PreBatchReadCount <= FREE_VIDEO_S3_MAX_PREBATCH_READS;
+  return {
+    ...budget,
+    d1WithinLimit: budget.withinLimit,
+    s3PreBatchReadCount,
+    s3PreBatchReadLimit: FREE_VIDEO_S3_MAX_PREBATCH_READS,
+    s3WithinLimit,
+    withinLimit: budget.withinLimit && s3WithinLimit,
+  };
 }
