@@ -4,7 +4,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 import { isEntityBlockedInManifest } from "./publicVisibilityManifestCore";
 import {
-  loadPublicVisibilityBlockedEntitiesManifest,
+  readPublicVisibilityBlockedEntitiesManifest,
   resolvePublicVisibilityGuardModeFromEnv,
 } from "./publicVisibilityManifest";
 
@@ -75,7 +75,11 @@ export async function loadStaticTrending(
       // Cache-first and 3h stale fallback can replay an R2 snapshot produced
       // before a video or its linked event was depublicized. Never trust only
       // the artifact's embedded "public" status when enforcement is enabled.
-      const manifest = await loadPublicVisibilityBlockedEntitiesManifest();
+      const { manifest, etag } = await readPublicVisibilityBlockedEntitiesManifest();
+      // The shared cached loader applies its missing-object check using
+      // process.env. Worker mode may differ; check the committed R2 object's
+      // ETag here so an empty bootstrap manifest cannot authorize stale cards.
+      if (!etag?.trim()) throw new Error("trending_visibility_manifest_missing");
       data = filterStaticTrendingByVisibilityFence(data, (entityType, entityId) =>
         isEntityBlockedInManifest(manifest, entityType, entityId));
     } catch {
