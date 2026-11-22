@@ -232,7 +232,7 @@ if (runUnderRootTsx(import.meta.url)) {
     try {
       // An unrelated still-public video must survive revocation. A handler
       // returning an empty list for every request would otherwise falsely PASS.
-      sqlite.exec("INSERT INTO videos (id, title, submitted_by_user_id, creator_display_name, primary_event_id, visibility_status, scheduled_time) VALUES ('safe-public-718', '継続公開作品', 'submitter', '別制作者', 'export-event', 'public', 1700000140)");
+      sqlite.exec("INSERT INTO videos (id, title, submitted_by_user_id, creator_display_name, primary_event_id, visibility_status, scheduled_time) VALUES ('safe-public-718', '別件の公開動画', 'submitter', '別制作者', 'export-event', 'public', 1700000140)");
       for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
         for (const format of ["v5", "legacy"]) {
           reset();
