@@ -79,11 +79,16 @@ test("submitSlotVideo は同期対象イベント全体のステージ回答項�
   );
 });
 
-test("submitSlotVideo はステージ項目の読取失敗を保存前に返す", () => {
+test("submitSlotVideo はステージ項目の読取失敗を固定コードで記録し保存前に返す", () => {
   assert.match(
     source,
-    /try\s*\{\s*stageFields = await getStagePermissionFieldsForEvents\(db, syncedEventIds\)[\s\S]*?stage permission fields read rejected/,
+    /try\s*\{\s*stageFields = await getStagePermissionFieldsForEvents\(db, syncedEventIds\)[\s\S]*?\} catch \{\s*warnSlotSubmissionFailure\("stage_permission_fields_unavailable"\);\s*return \{ ok: false, message: "ステージ許諾項目を読み込めませんでした。" \};/,
   );
+  const readIndex = source.indexOf("stageFields = await getStagePermissionFieldsForEvents(db, syncedEventIds)");
+  const failureReturn = source.indexOf('warnSlotSubmissionFailure("stage_permission_fields_unavailable")', readIndex);
+  const atomicPlan = source.indexOf("const plan = emptyVideoAtomicWritePlan();", failureReturn);
+  assert.ok(readIndex >= 0 && failureReturn > readIndex && atomicPlan > failureReturn,
+    "ステージ項目取得失敗はD1原子的保存より前に安全な結果を返す");
 });
 
 test("submitSlotVideo は parseVideoForm の youtubeRequired: false とイベント必須項目検証を維持する", () => {
