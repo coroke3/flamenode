@@ -255,8 +255,9 @@ export function createVideoViewerOverlayRoutes(
         guardModeRaw: c.env.PUBLIC_VISIBILITY_GUARD_MODE,
         targetEntityId: rawId,
       });
-    } catch (error) {
-      console.error("[video-viewer-overlay] snapshot read error", { rawId, error });
+    } catch {
+      // Raw provider exceptions may contain internal paths, SQL values or credentials.
+      console.error("[video-viewer-overlay] snapshot read failed", "provider_error");
       return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
     }
 
@@ -372,8 +373,9 @@ SELECT
         row1 = await c.env.DB.prepare(stmt1Sql)
           .bind(viewer.id, rawId, rawId, viewer.id)
           .first<{ video_json: string | null; user_json: string | null }>();
-      } catch (error) {
-        console.error("[video-viewer-overlay] viewer read failed", { rawId, error });
+      } catch {
+        // Do not forward bound SQL parameters or nested provider exceptions to logs.
+        console.error("[video-viewer-overlay] viewer read failed", "provider_error");
         return authUnavailable();
       }
       // CURRENT: a session whose user row is gone is signed out.
@@ -629,8 +631,9 @@ SELECT
       // exceed S2's 64KiB limit, fail closed instead of truncating any note,
       // returning a partially usable editor, or serializing an oversized body.
       return boundedOverlayResponse(c, result);
-    } catch (error) {
-      console.error("[video-viewer-overlay] db read failed", { rawId, error });
+    } catch {
+      // The degraded response is intentionally stable regardless of provider detail.
+      console.error("[video-viewer-overlay] db read failed", "provider_error");
       if (!degraded) return authUnavailable();
       // CURRENT: the viewer is known, the overlay read failed.
       return boundedOverlayResponse(c, {
