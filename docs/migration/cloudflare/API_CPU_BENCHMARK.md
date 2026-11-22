@@ -5,7 +5,9 @@
 > Source of truth: `scripts/benchmark-api-cpu.mjs`, `docs/migration/ZERO_1102.md` section 3 and 5
 > Production mutation: none (no deploy, no Route, no `--remote`, no Cloudflare account call)
 
-> **2026-11-22 P1 #732 correctness gate (PR #456; CI pending):** Historical rows and verdicts below predate the warm/cold separation and are NOT valid S2/S3 acceptance. The former `aggregate.overallMax` and `noiseFloorMs` included cold starts, which could mask warm budget failures. Current code judges the maximum of normal/limit/invalid only, reports cold separately, and blocks acceptance unless warm BASELINE max is strictly below 4ms with >=50 valid samples per warm kind. No qualifying Linux workerd run is asserted here.\n\n**Every number in this file is a LOCAL measurement. None is a production value.** ZERO_1102 section 3 already states that local workerd values are not production values.
+> **2026-11-22 P1 #732 correctness gate (PR #456; CI pending):** Historical rows and verdicts below predate the warm/cold separation and are NOT valid S2/S3 acceptance. The former `aggregate.overallMax` and `noiseFloorMs` included cold starts, which could mask warm budget failures. Current code judges the maximum of normal/limit/invalid only, reports cold separately, and blocks acceptance unless warm BASELINE max is strictly below 4ms with >=50 valid samples per warm kind. No qualifying Linux workerd run is asserted here.
+
+**Every number in this file is a LOCAL measurement. None is a production value.** ZERO_1102 section 3 already states that local workerd values are not production values.
 
 ## 1. What is judged
 
