@@ -43,7 +43,9 @@ export function percentile(sorted, p) {
 }
 
 export function summarize(values) {
-  const sorted = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  // CPU durations cannot be negative. Invalid readings are tracked by
+  // aggregate() and must never be silently accepted as enough samples.
+  const sorted = values.filter((v) => Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
   if (sorted.length === 0) return { n: 0, p50: null, p95: null, p99: null, max: null };
   return {
     n: sorted.length,
@@ -65,7 +67,9 @@ export function summarize(values) {
  * kind "lt" = strictly below (S2/S3), "le" = at most (S4).
  */
 export function judge(maxMs, budgetMs, { resolutionMs = 0, noiseMs = 0, kind = "lt" } = {}) {
-  if (maxMs == null) return "NOT_MEASURED";
+  // A malformed CPU measurement, clock, or baseline must never be a PASS.
+  if (![maxMs, budgetMs, resolutionMs, noiseMs].every((n) =>
+    Number.isFinite(n) && n >= 0)) return "NOT_MEASURED";
   const upper = maxMs + resolutionMs;
   if (kind === "le" ? upper <= budgetMs : upper < budgetMs) return "PASS";
   const net = maxMs - noiseMs;
@@ -109,9 +113,14 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
   for (const kind of [...new Set([...KINDS, ...samples.map((s) => s.kind)])]) {
     const rows = samples.filter((s) => s.kind === kind);
     const cpu = summarize(rows.map((r) => r.cpuMs));
+    // 50 good samples + 1 NaN/negative sample is NOT 50 trustworthy
+    // observations. Preserve all invalid readings in a reviewable count.
+    const invalidCpuSamples = rows.filter((r) =>
+      !Number.isFinite(r.cpuMs) || r.cpuMs < 0).length;
     kinds[kind] = {
       ...cpu,
-      meetsMinSamples: cpu.n >= MIN_SAMPLES,
+      invalidCpuSamples,
+      meetsMinSamples: cpu.n >= MIN_SAMPLES && invalidCpuSamples === 0,
       unexpectedStatus: rows.filter((r) => r.unexpected).length,
       // Cold isolate first-request provenance is NOT inferred from a post-reload
       // label. Only independently verified first-isolate requests qualify.
@@ -206,7 +215,7 @@ export function enforceCpuMeasurementEnvironment(results, {
   else if (only != null) stopReason = "STOP_PARTIAL";
   else if (warmup < 10) stopReason = "STOP_WARMUP";
   else if (skipCold || coldSamples < MIN_SAMPLES
-    || !results.every((r) => r.agg?.kinds?.cold?.n >= MIN_SAMPLES
+    || !results.every((r) => r.agg?.kinds?.cold?.meetsMinSamples === true
       && r.agg.kinds.cold.verifiedIsolateStarts >= MIN_SAMPLES
       && r.agg.kinds.cold.unexpectedStatus === 0)) {
     stopReason = "STOP_COLD";

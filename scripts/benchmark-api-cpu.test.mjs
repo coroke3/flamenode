@@ -103,6 +103,42 @@ test("summarize sorts, drops non-finite values and reports max", () => {
   assert.deepEqual(summarize([]), { n: 0, p50: null, p95: null, p99: null, max: null });
 });
 
+test("MIG-0639: malformed per-request CPU cannot be admitted with 50 valid rows", () => {
+  const ok = WARM_KINDS.flatMap(kind =>
+    Array.from({length:MIN_SAMPLES}, () => ({kind,cpuMs:1,status:200})));
+  const baseline = {id:"BASELINE",runtimeClass:"S2",samples:ok};
+  for (const bad of [-1,Number.NaN,Number.POSITIVE_INFINITY,undefined]) {
+    const samples = [...ok,{kind:"normal",cpuMs:bad,status:200}];
+    const rows = [{id:"RH-020",runtimeClass:"S2",samples},baseline];
+    applyBudgetVerdicts(rows,{resolutionMs:0});
+    assert.equal(rows[0].agg.kinds.normal.n,MIN_SAMPLES);
+    assert.equal(rows[0].agg.kinds.normal.invalidCpuSamples,1);
+    assert.equal(rows[0].agg.kinds.normal.meetsMinSamples,false);
+    assert.equal(rows[0].agg.verdict,"STOP_SAMPLES");
+  }
+  assert.equal(judge(-1,7),"NOT_MEASURED");
+  assert.equal(judge(Number.NaN,7),"NOT_MEASURED");
+  assert.equal(judge(1,7,{resolutionMs:-0.1}),"NOT_MEASURED");
+  assert.equal(judge(1,7,{noiseMs:Number.NaN}),"NOT_MEASURED");
+  assert.deepEqual(summarize([-1,Number.NaN,2]),{n:1,p50:2,p95:2,p99:2,max:2});
+  const cold = Array.from({length:MIN_SAMPLES}, () => ({
+    kind:"cold",cpuMs:1,status:200,isFirstIsolateRequest:true,
+  }));
+  const badCold = [...cold,{kind:"cold",cpuMs:Number.NaN,isFirstIsolateRequest:true}];
+  const accepted = [
+    {id:"RH-020",runtimeClass:"S2",samples:[...ok,...badCold]},
+    {id:"BASELINE",runtimeClass:"S2",samples:[...ok,...cold]},
+  ];
+  applyBudgetVerdicts(accepted,{resolutionMs:0});
+  const gate = enforceCpuMeasurementEnvironment(accepted,{
+    mode:"wrangler",d1:"replay",platform:"linux",only:null,
+    skipCold:false,coldSamples:MIN_SAMPLES,warmup:10,
+  });
+  assert.equal(gate.stopReason,"STOP_COLD",
+    "even 50 certified cold observations cannot hide one malformed cold CPU row");
+  assert.equal(accepted[0].agg.verdict,"STOP_COLD");
+});
+
 test("one heavy sample fails the budget even when p95 is far below it", () => {
   const samples = [
     ...Array.from({ length: 99 }, () => ({ kind: "normal", cpuMs: 1 })),
