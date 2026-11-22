@@ -7,8 +7,10 @@ import { isCanonicalXId } from "@flamenode/domain/xid";
  *
  * Mirrors the canonical resolver: raw X handles can be direct, aliases to one
  * non-rejected target, or not-found pending placeholders. Valid direct rows
- * conflicting with an alias must fail. A new direct X row may race a pending
- * placeholder ONLY if it resolves to the very same normalized canonical id.
+ * conflicting with an alias must fail. A previously absent X placeholder
+ * may be inserted ONLY while both the direct row and alias remain absent.
+ * Even an exact-PK concurrent arrival must abort: accepting its existing
+ * profile would make our CREATE audit claim an invented pending profile.
  * Previously existing direct/alias X records may NOT silently disappear.
  * Rejected/ambiguous/retargeted mappings must abort the complete D1 batch.
  *
@@ -36,10 +38,6 @@ export function buildFreeVideoMemberIdentityGuardSql(
     ),
     direct AS (
       SELECT i.raw_id, COUNT(d.id) AS direct_count,
-        -- An absent-at-preflight placeholder INSERT uses the exact canonical PK.
-        -- A newly appeared @/case-variant direct row must not be shadowed by
-        -- a second PK that normalizes to the same X ID.
-        SUM(CASE WHEN d.id = i.target_id THEN 1 ELSE 0 END) AS exact_direct,
         SUM(CASE WHEN d.id IS NOT NULL
           AND COALESCE(d.approval_status, '') IN ('pending','approved','imported')
           AND lower(trim(ltrim(trim(d.id), '@'))) = i.target_id
@@ -72,7 +70,9 @@ export function buildFreeVideoMemberIdentityGuardSql(
       JOIN direct d ON d.raw_id = i.raw_id
       JOIN aliases a ON a.raw_id = i.raw_id
       WHERE d.direct_count > 1
-         OR (i.allow_absent = 1 AND d.direct_count > 0 AND d.exact_direct <> 1)
+         -- Fresh pending placeholder audit is truthful ONLY if *nothing*
+         -- appeared under this normalized handle after the read snapshot.
+         OR (i.allow_absent = 1 AND (d.direct_count > 0 OR a.alias_count > 0))
          OR (
            a.alias_count = 0 AND NOT (
              (d.direct_count = 0 AND i.target_id = i.raw_id AND i.allow_absent = 1)
