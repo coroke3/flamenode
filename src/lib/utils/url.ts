@@ -16,6 +16,8 @@ export function normalizeHttpUrl(
   // turning a misleading pasted URL into a different destination.
   if (/[\t\n\r\\]/.test(s)) return null;
   const maxLength = options.maxLength ?? 500;
+  // Non-finite limits bypass numeric comparisons and silently disable the cap.
+  if (!Number.isSafeInteger(maxLength) || maxLength < 0) return null;
   if (s.length > maxLength) return null;
 
   try {
