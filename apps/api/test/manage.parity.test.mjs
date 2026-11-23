@@ -59,6 +59,40 @@ if (runUnderRootTsx(import.meta.url)) {
     return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : null, stats: d1.stats, bytes: Buffer.byteLength(text) };
   }
 
+
+  // Simulate only the first notification-inclusive D1 read failing, while
+  // keeping a real migrated node:sqlite DB and every subsequent statement.
+  function firstNotificationReadFault(sqlite, failure) {
+    const backing = createD1(sqlite);
+    let faults = 0;
+    let retryProbes = 0;
+    return {
+      ...backing,
+      get faults() { return faults; },
+      get retryProbes() { return retryProbes; },
+      prepare(sql) {
+        const original = backing.prepare(sql);
+        return {
+          ...original,
+          bind(...values) {
+            const bound = original.bind(...values);
+            return {
+              ...bound,
+              async first() {
+                if (sql.includes("pragma_table_info('notification_outbox')")) retryProbes++;
+                if (faults === 0 && sql.includes("FROM notification_outbox")) {
+                  faults++;
+                  throw failure;
+                }
+                return bound.first();
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
   // ---------- CURRENT reference loaders ----------
   async function refSnapshot(name) {
     const id = `u_${name}`;
@@ -500,6 +534,68 @@ if (runUnderRootTsx(import.meta.url)) {
     } finally {
       console.warn = previousWarn;
       old.close();
+    }
+  });
+
+
+  test("SEC-811: healthy notification schema and an initial transient D1 fault never return a misleading dashboard 200", async () => {
+    const local = createSqlite();
+    seed(local);
+    const d1 = firstNotificationReadFault(local, new Error("synthetic temporary provider failure"));
+    try {
+      const r = await call("/api/manage", "tok-owner", { d1 });
+      assert.equal(d1.faults, 1);
+      assert.equal(d1.retryProbes, 1, "schema verification shares the retry SELECT");
+      assert.equal(r.status, 503);
+      assert.equal(r.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(r.body, { error: "unavailable" });
+      assert.equal(d1.stats.writes, 0);
+    } finally {
+      local.close();
+    }
+  });
+
+  test("SEC-811: healthy notification schema and a hostile provider error never return a misleading event-overview 200", async () => {
+    const local = createSqlite();
+    seed(local);
+    const providerError = new Error("private SQL and params must not be printed");
+    Object.defineProperty(providerError, "message", {
+      configurable: true,
+      get() { throw new Error("SECRET_GETTER_MUST_NOT_RUN"); },
+    });
+    const d1 = firstNotificationReadFault(local, providerError);
+    const previousError = console.error;
+    const messages = [];
+    console.error = (...args) => { messages.push(args); };
+    try {
+      const r = await call("/api/manage/events/evA", "tok-owner", { d1 });
+      assert.equal(d1.faults, 1);
+      assert.equal(d1.retryProbes, 1);
+      assert.equal(r.status, 503);
+      assert.equal(r.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(r.body, { error: "unavailable" });
+      assert.deepEqual(messages, [["[manage] READ_FAILED"]], "no untrusted exception details in logs");
+      assert.equal(d1.stats.writes, 0);
+    } finally {
+      console.error = previousError;
+      local.close();
+    }
+  });
+
+  test("SEC-811: completely missing notification_outbox is not misreported as old event_id-only schema", async () => {
+    for (const route of ["/api/manage", "/api/manage/events/evA"]) {
+      const local = createSqlite();
+      seed(local);
+      local.exec("DROP TABLE notification_outbox");
+      try {
+        const r = await call(route, "tok-owner", { sqlite: local });
+        assert.equal(r.status, 503, route);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(r.body, { error: "unavailable" });
+        assert.equal(r.stats.writes, 0);
+      } finally {
+        local.close();
+      }
     }
   });
 

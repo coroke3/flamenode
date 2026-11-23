@@ -4,6 +4,7 @@ import type { AppEnv } from "../../env.ts";
 import { parseJsonColumn, resolveActiveXUserId } from "../personal/context.ts";
 import { loadManageSnapshot, manageGate } from "./access.ts";
 import { jsonObject, type ManageLinkedX } from "./events.ts";
+import { LEGACY_NOTIFICATION_EVENT_ID_SQL } from "./notificationLegacySchema.ts";
 import {
   categorizeNotificationType,
   notificationRowsPiece,
@@ -46,6 +47,7 @@ interface Sections {
   notif_counts: string | null;
   notifications: string | null;
   linked: string | null;
+  legacy_notification_schema?: number | null;
 }
 
 export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
@@ -129,6 +131,11 @@ export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
         MAX_LINKED_X,
       ),
     ];
+    // Only a failed notification-inclusive read needs to prove that the old
+    // schema truly lacks event_id; no extra statement on the healthy path.
+    if (!withNotifications) {
+      columns.push(`${LEGACY_NOTIFICATION_EVENT_ID_SQL} AS legacy_notification_schema`);
+    }
     return db.prepare(`SELECT ${columns.join(", ")}`).bind(...params).first<Sections>();
   };
 
@@ -140,13 +147,17 @@ export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
     parseJsonColumn(sections?.notif_counts, []);
     parseJsonColumn(sections?.notifications, []);
   } catch {
+    const fallback = await read(false);
+    if (fallback?.legacy_notification_schema !== 1) {
+      throw new Error("manage_notification_schema_not_legacy");
+    }
     try {
       console.warn("[manage] notification_outbox.event_id unavailable");
     } catch {
-      // Diagnostic sinks are best-effort; preserve the legacy-schema fallback.
+      // Logging is optional after the true missing-column state is proven.
     }
     notificationSchemaMissing = true;
-    sections = await read(false);
+    sections = fallback;
   }
   if (!sections?.event) return c.json({ error: "Not Found" }, 404);
 
