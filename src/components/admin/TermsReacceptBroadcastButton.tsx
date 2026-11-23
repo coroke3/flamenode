@@ -27,6 +27,13 @@ export function TermsReacceptBroadcastButton({
     `FlameNode の利用規約が更新されました。\n次回投稿前に /rules から内容を確認し、再同意してください。\nversion: ${versionLabel}`,
   );
 
+  // Each dismissal invalidates TERMS approval, without discarding batch progress.
+  function closeDialog(): void {
+    if (busy) return;
+    setOpen(false);
+    setConfirmText("");
+  }
+
   const onSubmit = () => {
     setMessage(null);
     setWarning(null);
@@ -64,7 +71,7 @@ export function TermsReacceptBroadcastButton({
         <div
           role="presentation"
           onClick={(event) => {
-            if (event.target === event.currentTarget && !busy) setOpen(false);
+            if (event.target === event.currentTarget) closeDialog();
           }}
           style={{
             position: "fixed",
@@ -190,10 +197,7 @@ export function TermsReacceptBroadcastButton({
               <button
                 type="button"
                 className="fn-btn fn-btn-ghost fn-btn-sm"
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmText("");
-                }}
+                onClick={closeDialog}
                 disabled={busy}
               >
                 閉じる
