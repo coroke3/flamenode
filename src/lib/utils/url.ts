@@ -12,9 +12,9 @@ export function normalizeHttpUrl(
 ): string | null {
   const s = String(raw ?? "").trim();
   if (!s) return null;
-  // WHATWG URL silently removes embedded TAB/LF/CR. Reject them instead of
+  // WHATWG URL strips TAB/LF/CR and rewrites backslashes as slashes. Reject them instead of
   // turning a misleading pasted URL into a different destination.
-  if (/[\t\n\r]/.test(s)) return null;
+  if (/[\t\n\r\\]/.test(s)) return null;
   const maxLength = options.maxLength ?? 500;
   if (s.length > maxLength) return null;
 
