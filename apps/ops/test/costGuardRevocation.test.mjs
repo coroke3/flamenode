@@ -218,7 +218,13 @@ test("SEC-814: a 403 with a stalled or invalid body quarantines private data rat
       api, onNavigate: path => destinations.push(path),
     })));
     assert.match(dom.window.document.body.textContent, /PRIVATE_AUDIT_ACTOR/);
-    await clickMode(dom);
+    await React.act(async () => {
+      const action = button(dom, "モードを更新");
+      assert.ok(action);
+      action.click();
+      // React.act does not advance wall-clock timers by itself.
+      await new Promise(resolve => setTimeout(resolve, 375));
+    });
     assert.equal(writes, 1);
     assert.equal(reads, 1, "an unreadable 403 must not automatically infer the permission state");
     assert.deepEqual(destinations, [], "unknown 403 must not invent a forbidden redirect");
