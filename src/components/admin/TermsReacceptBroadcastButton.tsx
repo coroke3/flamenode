@@ -18,6 +18,7 @@ export function TermsReacceptBroadcastButton({
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [busy, startTransition] = React.useTransition();
+  const busyRef = React.useRef(false);
   const [cursor, setCursor] = React.useState("");
   const [confirmText, setConfirmText] = React.useState("");
   const [message, setMessage] = React.useState<string | null>(null);
@@ -29,12 +30,15 @@ export function TermsReacceptBroadcastButton({
 
   // Each dismissal invalidates TERMS approval, without discarding batch progress.
   function closeDialog(): void {
-    if (busy) return;
+    if (busyRef.current || busy) return;
     setOpen(false);
     setConfirmText("");
   }
 
   const onSubmit = () => {
+    // A synchronous latch also covers two clicks before useTransition commits busy.
+    if (busyRef.current || busy || confirmText !== "TERMS" || !content.trim()) return;
+    busyRef.current = true;
     setMessage(null);
     setWarning(null);
     const fd = new FormData();
@@ -43,16 +47,22 @@ export function TermsReacceptBroadcastButton({
     fd.set("confirm", confirmText);
     fd.set("content", content);
     startTransition(async () => {
-      const result = await broadcastTermsReaccept(fd);
-      if (result.ok) {
-        setMessage(result.message ?? "OK");
-        setWarning(result.warning ?? null);
-        setEnqueuedTotal((value) => value + (result.enqueued ?? 0));
-        if (result.cursor != null) setCursor(result.cursor);
-        router.refresh();
-        return;
+      try {
+        const result = await broadcastTermsReaccept(fd);
+        if (result.ok) {
+          setMessage(result.message ?? "OK");
+          setWarning(result.warning ?? null);
+          setEnqueuedTotal((value) => value + (result.enqueued ?? 0));
+          if (result.cursor != null) setCursor(result.cursor);
+          router.refresh();
+          return;
+        }
+        setMessage(result.message ?? "失敗しました。");
+      } catch {
+        setMessage("失敗しました。");
+      } finally {
+        busyRef.current = false;
       }
-      setMessage(result.message ?? "失敗しました。");
     });
   };
 
