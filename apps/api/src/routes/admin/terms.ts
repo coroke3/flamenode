@@ -128,7 +128,7 @@ function casUpdate(c: Context<AppEnv>, before: TermsRow, patch: Record<string, u
  */
 function logTermsMutationFailure(): void {
   try {
-    logTermsMutationFailure();
+    console.error("[rules] atomic mutation failed");
   } catch {
     // Best-effort diagnostics; the caller still sends its fixed failure result.
   }
