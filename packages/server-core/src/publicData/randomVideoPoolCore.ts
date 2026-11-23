@@ -31,8 +31,12 @@ export const EMPTY_RANDOM_VIDEO_POOL: RandomVideoPool = {
 function isValidNullableUnixInput(value: unknown): boolean {
   if (value == null || value === "") return true;
   if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value !== "string" || value.trim() === "") return false;
-  return Number.isFinite(Number(value));
+  if (typeof value !== "string") return false;
+  const normalized = value.trim();
+  if (!/^[+-]?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?$/i.test(normalized)) {
+    return false;
+  }
+  return Number.isFinite(Number(normalized));
 }
 
 function normalizeRelatedItem(value: unknown): StaticRelatedVideo | null {
