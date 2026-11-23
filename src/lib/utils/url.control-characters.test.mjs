@@ -4,6 +4,12 @@ import { normalizeHttpUrl } from "#utils/url";
 
 test("URL sanitizer rejects embedded WHATWG-stripped control characters", () => {
   for (const input of [
+    "\nhttps://example.com/path",
+    "https://example.com/path\n",
+    "\rhttps://example.com/path",
+    "https://example.com/path\r",
+    "\thttps://example.com/path",
+    "https://example.com/path\t",
     "https://exa\nmple.com/path",
     "https://exa\rmple.com/path",
     "https://exa\tmple.com/path",
