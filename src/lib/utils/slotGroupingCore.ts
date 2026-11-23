@@ -65,6 +65,11 @@ function normalizeGapSec(gapSec: number): number {
   return Number.isFinite(gapSec) && gapSec >= 0 ? gapSec : 15 * 60;
 }
 
+// Treat malformed provider timestamps as untimed without mutating source rows.
+function finiteStartTime(value: number | null | undefined): number | null {
+  return value != null && Number.isFinite(value) ? value : null;
+}
+
 export function sortSlotsChronologically<
   T extends {
     id?: string | null;
@@ -74,12 +79,8 @@ export function sortSlotsChronologically<
 >(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
     // Malformed timestamps must not bypass the order/id tie-breaker via NaN.
-    const aStart = a.start_time != null && Number.isFinite(a.start_time)
-      ? a.start_time
-      : null;
-    const bStart = b.start_time != null && Number.isFinite(b.start_time)
-      ? b.start_time
-      : null;
+    const aStart = finiteStartTime(a.start_time);
+    const bStart = finiteStartTime(b.start_time);
     const aTimed = aStart !== null;
     const bTimed = bStart !== null;
     if (aTimed !== bTimed) return aTimed ? -1 : 1;
@@ -129,9 +130,9 @@ export function buildSlotParts<
       parts.push({
         index: parts.length + 1,
         rows: current,
-        start_time: current[0]?.start_time ?? null,
-        last_start_time: current.at(-1)?.start_time ?? null,
-        is_timeless: current[0]?.start_time == null,
+        start_time: finiteStartTime(current[0]?.start_time),
+        last_start_time: finiteStartTime(current.at(-1)?.start_time),
+        is_timeless: finiteStartTime(current[0]?.start_time) === null,
       });
       current = [];
     }
@@ -141,9 +142,9 @@ export function buildSlotParts<
     parts.push({
       index: parts.length + 1,
       rows: current,
-      start_time: current[0]?.start_time ?? null,
-      last_start_time: current.at(-1)?.start_time ?? null,
-      is_timeless: current[0]?.start_time == null,
+      start_time: finiteStartTime(current[0]?.start_time),
+      last_start_time: finiteStartTime(current.at(-1)?.start_time),
+      is_timeless: finiteStartTime(current[0]?.start_time) === null,
     });
   }
   return parts;
