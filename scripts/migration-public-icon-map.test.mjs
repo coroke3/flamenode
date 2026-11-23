@@ -45,7 +45,11 @@ test("T01: registered and none priorities are preserved, public index fills vide
   assert.deepEqual(result.entries.video_a, entry("registered", "https://example.com/new-video.png"));
   assert.deepEqual(result.entries.video_missing, entry("none", "https://example.com/fallback.png"));
   assert.deepEqual(result.entries.new_user, entry("none", null));
-  assert.deepEqual(projectPublicXIconMap(primary, null), primary);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(projectPublicXIconMap(primary, null))),
+    primary,
+    "external JSON payload remains identical even with a prototype-free internal dictionary",
+  );
   assert.equal(projectPublicXIconMap(null, null), null);
   const fromIndex = projectPublicXIconMap(null, index);
   assert.equal(fromIndex.generated_at, 200);
