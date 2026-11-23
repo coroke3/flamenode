@@ -139,26 +139,41 @@ export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
     return db.prepare(`SELECT ${columns.join(", ")}`).bind(...params).first<Sections>();
   };
 
-  let sections: Sections | null;
+  let sections: Sections | null = null;
   let notificationSchemaMissing = false;
+  let firstReadFailed = false;
+  let notificationJsonInvalid = false;
   try {
     sections = await read(true);
-    // oversize / malformed notification JSON degrades like a failed notification read (CURRENT try/catch)
-    parseJsonColumn(sections?.notif_counts, []);
-    parseJsonColumn(sections?.notifications, []);
   } catch {
+    firstReadFailed = true;
+  }
+  if (!firstReadFailed) {
+    // CURRENT degrades only malformed/oversized notification JSON, not errors
+    // from the other fused D1 sections or an untrusted provider exception.
+    try {
+      parseJsonColumn(sections?.notif_counts, []);
+      parseJsonColumn(sections?.notifications, []);
+    } catch {
+      notificationJsonInvalid = true;
+    }
+  }
+  if (firstReadFailed || notificationJsonInvalid) {
     const fallback = await read(false);
-    if (fallback?.legacy_notification_schema !== 1) {
+    if (firstReadFailed && fallback?.legacy_notification_schema !== 1) {
       throw new Error("manage_notification_schema_not_legacy");
     }
     try {
-      console.warn("[manage] notification_outbox.event_id unavailable");
+      console.warn(notificationJsonInvalid
+        ? "[manage] notification_json_invalid"
+        : "[manage] notification_outbox.event_id unavailable");
     } catch {
-      // Logging is optional after the true missing-column state is proven.
+      // Logging is best effort; preserve established notification-only fallback.
     }
     notificationSchemaMissing = true;
     sections = fallback;
   }
+
   if (!sections?.event) return c.json({ error: "Not Found" }, 404);
 
   const slotCounts: Record<string, number> = {};

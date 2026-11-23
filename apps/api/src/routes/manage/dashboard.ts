@@ -21,12 +21,19 @@ export const manageDashboardRoutes = new Hono<AppEnv>().get("/", async (c) => {
 
   let data: ManageData;
   let notificationSchemaMissing = false;
+  let initial: ManageData | null = null;
   try {
-    data = await loadManageData(db, user, snapshot, { inbox: true, notifications: true, linked: true });
+    initial = await loadManageData(db, user, snapshot, {
+      inbox: true, notifications: true, linked: true,
+      reportNotificationJsonInvalid: true,
+    });
   } catch {
-    // Keep the schema probe inside the existing fallback SELECT: the healthy
-    // path stays at the same D1 statement count and a transient D1 error never
-    // masquerades as a missing legacy notification column.
+    // The first fused D1 read (or a non-notification JSON section) failed.
+    // Do not assume this means the old notification event_id column is absent.
+  }
+  if (initial && !initial.notificationJsonInvalid) {
+    data = initial;
+  } else {
     const fallback = await loadManageData(db, user, snapshot, {
       inbox: true,
       linked: true,
@@ -37,13 +44,17 @@ export const manageDashboardRoutes = new Hono<AppEnv>().get("/", async (c) => {
         },
       },
     });
-    if (!isLegacyNotificationSchema(fallback.extra.legacyNotificationSchema)) {
+    // A malformed notification JSON section is an established CURRENT
+    // 200/degraded case; only database failures need the schema proof.
+    if (!initial && !isLegacyNotificationSchema(fallback.extra.legacyNotificationSchema)) {
       throw new Error("manage_notification_schema_not_legacy");
     }
     try {
-      console.warn("[manage] notification_outbox.event_id unavailable");
+      console.warn(initial
+        ? "[manage] notification_json_invalid"
+        : "[manage] notification_outbox.event_id unavailable");
     } catch {
-      // Logging is optional after the true missing-column state is proven.
+      // Diagnostic sinks cannot break a confirmed degraded response.
     }
     notificationSchemaMissing = true;
     data = fallback;

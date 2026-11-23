@@ -599,6 +599,98 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+
+  function corruptFirstNotificationJson(sqlite, column, invalid) {
+    const base = createD1(sqlite);
+    let corrupted = 0;
+    return {
+      ...base,
+      get corrupted() { return corrupted; },
+      prepare(sql) {
+        const original = base.prepare(sql);
+        return {
+          ...original,
+          bind(...values) {
+            const bound = original.bind(...values);
+            return {
+              ...bound,
+              async first() {
+                const row = await bound.first();
+                if (!corrupted && sql.includes("FROM notification_outbox") &&
+                    row && Object.prototype.hasOwnProperty.call(row, column)) {
+                  corrupted++;
+                  return { ...row, [column]: invalid };
+                }
+                return row;
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
+  test("SEC-811: CURRENT notification-only malformed/oversized JSON still degrades 200 without hiding events", async () => {
+    const cases = [
+      ["/api/manage", "notifications", "{bad-json"],
+      ["/api/manage/events/evA", "notif_counts", "{bad-json"],
+      ["/api/manage/events/evA", "notifications", "x".repeat(65_537)],
+    ];
+    for (const [path, column, invalid] of cases) {
+      const local = createSqlite();
+      seed(local);
+      const d1 = corruptFirstNotificationJson(local, column, invalid);
+      const previousWarn = console.warn;
+      const warnings = [];
+      console.warn = (message) => { warnings.push(message); };
+      try {
+        const r = await call(path, "tok-owner", { d1 });
+        assert.equal(d1.corrupted, 1, path + " corruption injected into a real SQL result");
+        assert.equal(r.status, 200, path + " must preserve CURRENT notification-only degradation");
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.equal(r.body.notificationSchemaMissing, true);
+        assert.deepEqual(r.body.notifications, []);
+        assert.ok(path === "/api/manage" ? r.body.events.length > 0 && r.body.inbox.length > 0 :
+          r.body.event.id === "evA" && r.body.notifCounts.all === 0);
+        assert.deepEqual(warnings, ["[manage] notification_json_invalid"]);
+        assert.equal(d1.stats.writes, 0);
+        assert.ok(d1.stats.statements <= 4);
+      } finally {
+        console.warn = previousWarn;
+        local.close();
+      }
+    }
+  });
+
+  test("SEC-811: synchronous D1 prepare exception against a current schema also fails closed", async () => {
+    for (const path of ["/api/manage", "/api/manage/events/evA"]) {
+      const local = createSqlite();
+      seed(local);
+      const backing = createD1(local);
+      let rejected = 0;
+      const d1 = {
+        ...backing,
+        prepare(sql) {
+          if (!rejected && sql.includes("FROM notification_outbox")) {
+            rejected++;
+            throw new Error("SYNTHETIC_SYNC_D1_PREPARE_FAILURE");
+          }
+          return backing.prepare(sql);
+        },
+      };
+      try {
+        const r = await call(path, "tok-owner", { d1 });
+        assert.equal(rejected, 1);
+        assert.equal(r.status, 503);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(r.body, { error: "unavailable" });
+        assert.equal(d1.stats.writes, 0);
+      } finally {
+        local.close();
+      }
+    }
+  });
+
   // ---------------- staff ----------------
   test("T-staff: staff page equals CURRENT for every user and event", async () => {
     // Both CURRENT and Hono sign internal profile icons in 60-second buckets.
