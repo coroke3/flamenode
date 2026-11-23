@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   normalizeTrimmedString,
   normalizeNullableUnix,
+  normalizeNumericUnix,
   normalizeCount,
 } from "../src/publicData/normalize.ts";
 
@@ -59,8 +60,18 @@ test("publicData normalize helpers handle null and edge cases", () => {
     assert.equal(normalizeNullableUnix(malformed), null, String(malformed));
   }
 
+  assert.equal(normalizeNumericUnix("1700000000"), 1700000000);
+  assert.equal(normalizeNumericUnix(1700000000), 1700000000);
+  assert.equal(normalizeNumericUnix(" 1700000000 "), 1700000000);
+  assert.equal(normalizeNumericUnix("   "), null);
+  for (const malformed of [true, false, [], [10], {}, { valueOf: () => 10 }]) {
+    assert.equal(normalizeNumericUnix(malformed), null, String(malformed));
+  }
+
   assert.equal(normalizeCount("10"), 10);
   assert.equal(normalizeCount("-1"), null);
+  assert.equal(normalizeCount("   "), null);
+  assert.equal(normalizeCount(true), null);
   assert.equal(normalizeCount(null), 0);
   assert.equal(normalizeCount(undefined), null);
 });
