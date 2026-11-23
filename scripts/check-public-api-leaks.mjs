@@ -110,24 +110,33 @@ function fetchWithTimeout(url) {
   });
 }
 
+/** Diagnostic output is best-effort; return the failure verdict even with a broken log sink. */
+function logProbeFailure(message) {
+  try {
+    console.error(message);
+  } catch {
+    // A failed logger must not change the CI probe failure classification.
+  }
+}
+
 export async function checkEndpoint(url, fetchPage = fetchWithTimeout) {
   let response;
   try {
     response = await fetchPage(url);
   } catch {
     // Provider exceptions can expose credentials or have throwing message getters.
-    console.error(`[fetch error] ${url}: network_error`);
+    logProbeFailure(`[fetch error] ${url}: network_error`);
     return { kind: "fetch_error" };
   }
   if (!response.ok) {
-    console.error(`[HTTP ${response.status}] ${url}`);
+    logProbeFailure(`[HTTP ${response.status}] ${url}`);
     return { kind: "http_error" };
   }
   try {
     const json = await response.json();
     return { kind: "ok", violations: findForbiddenPublicKeys(json) };
   } catch {
-    console.error(`[invalid json] ${url}: malformed_json`);
+    logProbeFailure(`[invalid json] ${url}: malformed_json`);
     return { kind: "invalid_json" };
   }
 }
@@ -192,7 +201,7 @@ async function runLiveCheck(baseUrl) {
   if (detail.kind === "ok") {
     endpoints.push(detail.endpoint);
   } else if (detail.kind === "fetch_error") {
-    console.error(`[fetch error] ${detail.url}: network_error`);
+    logProbeFailure(`[fetch error] ${detail.url}: network_error`);
     exitCode = 2;
   } else if (detail.kind === "http_error") {
     console.error(`[HTTP ${detail.status}] ${detail.url}`);
