@@ -37,6 +37,10 @@ function normalizeString(value: unknown): string | null {
 
 function normalizeUnix(value: unknown): number | null {
   if (value == null) return null;
+  if (
+    typeof value !== "number" &&
+    (typeof value !== "string" || !value.trim())
+  ) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -61,7 +65,8 @@ export function normalizeStaticEventPlaylist(
   payload: StaticEventPlaylistPayload,
   expectedEventId?: string,
 ): StaticEventPlaylist | null {
-  if (Number(payload.schema_version) !== EVENT_PLAYLIST_SCHEMA_VERSION) return null;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  if (payload.schema_version !== EVENT_PLAYLIST_SCHEMA_VERSION) return null;
   const eventId = normalizeString(payload.event_id);
   if (!eventId || (expectedEventId && eventId !== expectedEventId)) return null;
   if (!Array.isArray(payload.items)) return null;
