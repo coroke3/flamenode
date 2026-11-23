@@ -61,9 +61,15 @@ export function createEmptyStaticBackfillState(): StaticBackfillState {
   };
 }
 
-function normalizeCount(value: unknown): number {
+function normalizeFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
   const numberValue = Number(value);
-  return Number.isFinite(numberValue)
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function normalizeCount(value: unknown): number {
+  const numberValue = normalizeFiniteNumber(value);
+  return numberValue !== null
     ? Math.max(0, Math.floor(numberValue))
     : 0;
 }
@@ -97,7 +103,7 @@ function normalizeRun(value: unknown): StaticBackfillRunState {
       ? row.last_error.trim().slice(0, 1000)
       : null;
 
-  const lastRunAt = Number(row.last_run_at);
+  const lastRunAt = normalizeFiniteNumber(row.last_run_at);
 
   return {
     cursor,
@@ -107,12 +113,12 @@ function normalizeRun(value: unknown): StaticBackfillRunState {
     scanned: normalizeCount(row.scanned),
     enqueued: normalizeCount(row.enqueued),
     last_error: lastError,
-    last_run_at: Number.isFinite(lastRunAt) ? Math.floor(lastRunAt) : null,
+    last_run_at: lastRunAt === null ? null : Math.floor(lastRunAt),
   };
 }
 
 export function parseStaticBackfillState(value: unknown): StaticBackfillState {
-  if (!value || typeof value !== "object") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return createEmptyStaticBackfillState();
   }
 
@@ -123,19 +129,20 @@ export function parseStaticBackfillState(value: unknown): StaticBackfillState {
   };
 
   if (
-    Number(payload.schema_version) !== 1 ||
+    payload.schema_version !== 1 ||
     !payload.runs ||
-    typeof payload.runs !== "object"
+    typeof payload.runs !== "object" ||
+    Array.isArray(payload.runs)
   ) {
     return createEmptyStaticBackfillState();
   }
 
   const runs = payload.runs as Record<string, unknown>;
-  const updatedAt = Number(payload.updated_at);
+  const updatedAt = normalizeFiniteNumber(payload.updated_at);
 
   return {
     schema_version: 1,
-    updated_at: Number.isFinite(updatedAt) ? Math.floor(updatedAt) : null,
+    updated_at: updatedAt === null ? null : Math.floor(updatedAt),
     runs: {
       video_v2: normalizeRun(runs.video_v2),
       user_profile: normalizeRun(runs.user_profile),
