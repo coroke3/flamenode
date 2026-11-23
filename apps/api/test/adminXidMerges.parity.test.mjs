@@ -490,6 +490,11 @@ if (runUnderRootTsx(import.meta.url)) {
     });
     const d1BeforeRev = { ...hon.d1.stats };
     const honRev = await callHono(hon, "/reverts/rev-ok/approve", { confirm: "REVERT" });
+    const honRevPreReads = hon.d1.stats.reads - d1BeforeRev.reads;
+    // Baseline instrumentation for SA-097 S3 review; preserve observed count in CI logs.
+    // This deliberately does not weaken or redefine the <=3 pre-read acceptance gate.
+    console.log("[MIG-0644] SA-097 D1 pre-read baseline:", honRevPreReads);
+    assert.ok(Number.isInteger(honRevPreReads) && honRevPreReads >= 0);
     assert.equal(curRev.ok, true, curRev.message);
     assert.equal(honRev.status, 200, JSON.stringify(honRev.body));
     assert.equal(honRev.body.message, curRev.message);
