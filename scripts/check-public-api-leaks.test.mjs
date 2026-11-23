@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { discoverVideoDetailEndpoint } from "./check-public-api-leaks.mjs";
+import { checkEndpoint, discoverVideoDetailEndpoint } from "./check-public-api-leaks.mjs";
 
 const origin = "https://example.test";
 const listUrl = `${origin}/api/videos?limit=1`;
@@ -36,7 +36,7 @@ test("discovery transport errors are surfaced separately", async () => {
     await discoverVideoDetailEndpoint(origin, async () => {
       throw new Error("network unavailable");
     }),
-    { kind: "fetch_error", url: listUrl, message: "network unavailable" },
+    { kind: "fetch_error", url: listUrl },
   );
 });
 
@@ -63,5 +63,52 @@ test("malformed JSON and invalid list shapes fail closed", async () => {
       await discoverVideoDetailEndpoint(origin, async () => response),
       { kind: "invalid_json", url: listUrl },
     );
+  }
+});
+
+
+test("poisoned discovery provider messages never escape or change the fail-closed verdict", async () => {
+  const poisoned = new Error("provider-secret=private");
+  Object.defineProperty(poisoned, "message", {
+    get() { throw new Error("message getter must never be read"); },
+  });
+  for (const failure of [
+    new Error("provider-secret=private"),
+    poisoned,
+    {
+      get name() { throw new Error("name getter must never be read"); },
+      get message() { throw new Error("message getter must never be read"); },
+      toString() { throw new Error("String(error) must never be called"); },
+    },
+  ]) {
+    const result = await discoverVideoDetailEndpoint(origin, async () => { throw failure; });
+    assert.deepEqual(result, { kind: "fetch_error", url: listUrl });
+    assert.doesNotMatch(JSON.stringify(result), /provider-secret|message getter|name getter/);
+  }
+});
+
+test("live leak probe never logs provider errors or poisoned JSON decoder details", async () => {
+  const original = console.error;
+  const lines = [];
+  console.error = (...args) => { lines.push(args); };
+  try {
+    const poisoned = new Error("provider-secret=private");
+    Object.defineProperty(poisoned, "message", {
+      get() { throw new Error("poisoned decoder getter"); },
+    });
+    const transport = await checkEndpoint(listUrl, async () => { throw poisoned; });
+    assert.deepEqual(transport, { kind: "fetch_error" });
+    const invalid = await checkEndpoint(listUrl, async () => ({
+      ok: true,
+      async json() { throw poisoned; },
+    }));
+    assert.deepEqual(invalid, { kind: "invalid_json" });
+    assert.deepEqual(lines, [
+      ["[fetch error] " + listUrl + ": network_error"],
+      ["[invalid json] " + listUrl + ": malformed_json"],
+    ]);
+    assert.doesNotMatch(JSON.stringify(lines), /provider-secret|poisoned decoder getter/);
+  } finally {
+    console.error = original;
   }
 });
