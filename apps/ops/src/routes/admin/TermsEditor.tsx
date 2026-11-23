@@ -14,6 +14,23 @@ import { ConfirmDialog } from "../../components/shared/ConfirmDialog.js";
 import { DEFAULT_TERMS_MARKDOWN, DEFAULT_TERMS_VERSION_LABEL } from "./defaultTerms.js";
 
 type Api = ReturnType<typeof createAdminTermsApi>;
+
+/** A denied write immediately unmounts all editable terms state, even if an earlier read later resolves. */
+function useTermsWriteRevocation(fetchFn?: OpsFetch): { api: Api; revoked: boolean } {
+  const [revoked, setRevoked] = React.useState(false);
+  const revokedRef = React.useRef(false);
+  const onAuthorizationFailure = React.useCallback((reason: "anonymous" | "forbidden") => {
+    if (revokedRef.current) return;
+    revokedRef.current = true;
+    setRevoked(true);
+    window.location.assign(reason === "anonymous" ? "/entry" : "/dashboard");
+  }, []);
+  const api = React.useMemo(
+    () => createAdminTermsApi(fetchFn, onAuthorizationFailure),
+    [fetchFn, onAuthorizationFailure],
+  );
+  return { api, revoked };
+}
 type Detail = AdminRuleDetailResponse["item"];
 export type TermsInitial = {
   id?: string;
@@ -135,7 +152,8 @@ export function AdminRuleCreatePage({ initial = DEFAULT_CREATE_INITIAL, fetchFn 
   fetchFn?: OpsFetch;
 } = {}): React.ReactElement {
   const navigate = useNavigate();
-  const api = createAdminTermsApi(fetchFn);
+  const { api, revoked } = useTermsWriteRevocation(fetchFn);
+  if (revoked) return <p role="status">規約編集へのアクセスが終了しました。</p>;
   return <section className="fn-page" aria-label="新規利用規約バージョン">
     <header className="fn-page-head"><h1 className="fn-page-title">新規利用規約バージョン</h1>
       <p>下書きとして保存し、編集ページから公開してください。major リリースで公開すると全ユーザーに再同意を要求します。</p>
@@ -150,13 +168,14 @@ export function AdminRuleEditPage({ fetchFn }: { fetchFn?: OpsFetch } = {}): Rea
   const { id = "" } = useParams();
   const [refreshKey, refresh] = React.useReducer(n => n + 1, 0);
   const [notice, setNotice] = React.useState<string | null>(null);
-  const api = createAdminTermsApi(fetchFn);
+  const { api, revoked } = useTermsWriteRevocation(fetchFn);
   const result = useApiResult(signal => readAdminRuleDetail(id, fetchFn, signal), "admin-rule-edit:" + id, refreshKey);
   const redirect = result.status === "loading" ? null : adminReadRedirect(result);
   React.useEffect(() => {
     if (redirect) window.location.assign(redirect);
   }, [redirect]);
 
+  if (revoked) return <p role="status">規約編集へのアクセスが終了しました。</p>;
   if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden") {
     return <p role="status">読み込み中…</p>;
   }
