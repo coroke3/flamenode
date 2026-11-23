@@ -54,8 +54,18 @@ async function bounded403Body(response: Response): Promise<{ reply: Response; ac
   const parsed = await Promise.race([parsing, deadline]);
   if (timeout !== undefined) clearTimeout(timeout);
   const value = parsed.kind === "json" ? parsed.value : null;
-  if (value === null || typeof value !== "object" || Array.isArray(value) ||
-      typeof (value as Record<string, unknown>).ok !== "boolean") {
+  const known403Reasons = new Set([
+    "forbidden", "banned", "unauthenticated",
+    "maintenance_mode", "cost_guard_blocked", "invalid_origin",
+    "tos_required", "tos_reaccept_required",
+    "active_x_required", "active_x_rejected", "active_x_not_approved",
+  ]);
+  const body = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : null;
+  // Only a recognized, negative write-guard result may preserve CURRENT's
+  // inline 403 message or take an explicit auth redirect.
+  if (!body || body.ok !== false || typeof body.reason !== "string" ||
+      !known403Reasons.has(body.reason)) {
     return {
       reply: new Response('{"ok":false}', { status: 403, headers: { "content-type": "application/json" } }),
       accessUnknown: true,
