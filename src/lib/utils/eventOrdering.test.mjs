@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { compareEventsByUpcomingPriority as compareCurrent } from "./eventOrdering.ts";
 import { compareEventsByUpcomingPriority as compareManage } from "../../../apps/api/src/routes/manage/eventOrder.ts";
+import { compareSidebarRows } from "../../../apps/api/src/routes/manage/eventOrder.ts";
+import { readFileSync } from "node:fs";
 import { compareEventsByUpcomingPriority as compareEntry } from "../../../apps/api/src/routes/personal/entry/eventStatus.ts";
 
 const comparators = [
@@ -57,5 +59,38 @@ test("legacy finite/null timestamp ordering retains parity across consumers", ()
   for (const [surface, compare] of comparators) {
     const ordered = [...events].sort((a, b) => compare(a, b, 100)).map((x) => x.id);
     assert.deepEqual(ordered, expected, surface);
+  }
+});
+
+test("manage sidebar descending comparator ignores invalid start and creation times", () => {
+  const badStart = { id: "a", start_time: NaN, created_at: 1 };
+  const goodStart = { id: "b", start_time: 100, created_at: 1 };
+  assert.equal(compareSidebarRows(badStart, goodStart), 1);
+  assert.equal(compareSidebarRows(goodStart, badStart), -1);
+
+  const badCreated = { id: "a", start_time: null, created_at: NaN };
+  const goodCreated = { id: "b", start_time: null, created_at: 10 };
+  assert.equal(compareSidebarRows(badCreated, goodCreated), 1);
+  assert.equal(compareSidebarRows(goodCreated, badCreated), -1);
+
+  const infiniteStart = { id: "a", start_time: Infinity, created_at: 99 };
+  assert.equal(compareSidebarRows(infiniteStart, goodStart), 1);
+  assert.equal(compareSidebarRows(goodStart, infiniteStart), -1);
+  assert.equal(
+    compareSidebarRows(
+      { id: "b", start_time: null, created_at: null },
+      { id: "a", start_time: null, created_at: null },
+    ),
+    -1,
+    "same missing timestamps retain SQLite id DESC tie-break",
+  );
+});
+
+test("CURRENT and Hono sidebar comparators both normalize non-finite timestamps", () => {
+  const currentSource = readFileSync(new URL("../manage/navigationEvents.ts", import.meta.url), "utf8");
+  assert.match(currentSource, /function finiteSidebarTimestamp\(/);
+  for (const key of ["start_time", "created_at"]) {
+    assert.ok(currentSource.includes("finiteSidebarTimestamp(left." + key + ")"));
+    assert.ok(currentSource.includes("finiteSidebarTimestamp(right." + key + ")"));
   }
 });
