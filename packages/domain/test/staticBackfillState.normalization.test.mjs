@@ -15,6 +15,16 @@ test("static backfill state requires the literal numeric schema version", () => 
   }
 });
 
+test("static backfill run status is not coerced from arrays or objects", () => {
+  for (const status of [["running"], {}, true, 1]) {
+    const state = parseStaticBackfillState({
+      schema_version: 1,
+      runs: { video_v2: { status } },
+    });
+    assert.equal(state.runs.video_v2.status, "idle", JSON.stringify(status));
+  }
+});
+
 test("static backfill counters reject booleans, arrays, objects and blank strings", () => {
   const invalidValues = [true, false, [], [5], {}, " ", "not-a-number"];
   for (const invalid of invalidValues) {
