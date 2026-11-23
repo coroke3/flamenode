@@ -83,7 +83,7 @@ export function compareEventsByUpcomingPriority<T extends EventStatusInput & { i
 }
 
 /** Sidebar order: start_time DESC, created_at DESC, id DESC with NULLs last (SQLite DESC). */
-export // SQLite DESC places NULL after finite values. Invalid non-finite provider
+// SQLite DESC places NULL after finite values. Invalid non-finite provider
 // timestamps must follow the same path so the comparator stays antisymmetric.
 function finiteSidebarTimestamp(value: number | null | undefined): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -91,7 +91,7 @@ function finiteSidebarTimestamp(value: number | null | undefined): number {
     : Number.NEGATIVE_INFINITY;
 }
 
-function compareSidebarRows(
+export function compareSidebarRows(
   left: { id: string; start_time: number | null; created_at: number | null },
   right: { id: string; start_time: number | null; created_at: number | null },
 ): number {
