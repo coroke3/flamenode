@@ -63,6 +63,7 @@ export function normalizeStaticEventPlaylist(
   payload: StaticEventPlaylistPayload,
   expectedEventId?: string,
 ): StaticEventPlaylist | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   if (payload.schema_version !== EVENT_PLAYLIST_SCHEMA_VERSION) return null;
   const eventId = normalizeString(payload.event_id);
   if (!eventId || (expectedEventId && eventId !== expectedEventId)) return null;
