@@ -33,7 +33,7 @@ function isValidNullableUnixInput(value: unknown): boolean {
   if (typeof value === "number") return Number.isFinite(value);
   if (typeof value !== "string") return false;
   const normalized = value.trim();
-  if (!/^[+-]?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?$/i.test(normalized)) {
+  if (!/^[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(normalized)) {
     return false;
   }
   return Number.isFinite(Number(normalized));
