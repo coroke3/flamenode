@@ -27,6 +27,7 @@ function normalizeFiniteNumericValue(value: unknown): number | null {
 }
 
 export function normalizeNullableUnix(value: unknown): number | null {
+  if (value == null || value === "") return null;
   const normalized = normalizeFiniteNumericValue(value);
   if (normalized == null) return null;
   const unix = Math.floor(normalized);
@@ -43,6 +44,9 @@ export function normalizeUnixDate(value: unknown): Date | null {
 }
 
 export function normalizeNumericUnix(value: unknown): number | null {
+  // Preserve legacy null/empty defaults (Number(null) and Number("") were 0)
+  // while rejecting other non-string/non-number coercions.
+  if (value === null || value === "") return 0;
   const normalized = normalizeFiniteNumericValue(value);
   return normalized == null ? null : Math.floor(normalized);
 }
