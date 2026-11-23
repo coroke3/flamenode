@@ -85,10 +85,10 @@ export function sortSlotsChronologically<
     if (aTimed !== bTimed) return aTimed ? -1 : 1;
     const startDiff = (aStart ?? 0) - (bStart ?? 0);
     if (startDiff !== 0) return startDiff;
-    const aOrder = Number.isSafeInteger(a.sort_order)
+    const aOrder = a.sort_order != null && Number.isSafeInteger(a.sort_order)
       ? a.sort_order
       : 0;
-    const bOrder = Number.isSafeInteger(b.sort_order)
+    const bOrder = b.sort_order != null && Number.isSafeInteger(b.sort_order)
       ? b.sort_order
       : 0;
     const orderDiff = aOrder - bOrder;
@@ -106,6 +106,8 @@ export function areSlotsInSamePart<
   }
   if (prev.start_time == null && next.start_time == null) {
     return (
+      prev.sort_order != null &&
+      next.sort_order != null &&
       Number.isSafeInteger(prev.sort_order) &&
       Number.isSafeInteger(next.sort_order) &&
       next.sort_order === prev.sort_order + 1
