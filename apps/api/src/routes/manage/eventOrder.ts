@@ -34,12 +34,21 @@ export function isAcceptingEntries(ev: EventStatusInput, now: number = nowSecond
   return true;
 }
 
+// Provider and legacy event timestamps can be non-finite at runtime even
+// when TS callers declare numbers. Ignore them before performing a sort.
+function firstFiniteTime(...times: Array<number | null | undefined>): number | null {
+  for (const time of times) {
+    if (typeof time === "number" && Number.isFinite(time)) return time;
+  }
+  return null;
+}
+
 function eventStart(ev: EventStatusInput): number {
-  return ev.start_time ?? ev.end_time ?? Number.POSITIVE_INFINITY;
+  return firstFiniteTime(ev.start_time, ev.end_time) ?? Number.POSITIVE_INFINITY;
 }
 
 function eventRecentTime(ev: EventStatusInput): number {
-  return ev.end_time ?? ev.start_time ?? ev.entry_end_time ?? ev.entry_start_time ?? 0;
+  return firstFiniteTime(ev.end_time, ev.start_time, ev.entry_end_time, ev.entry_start_time) ?? 0;
 }
 
 function priorityGroup(ev: EventStatusInput, now: number): number {
