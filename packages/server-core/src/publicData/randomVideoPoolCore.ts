@@ -28,13 +28,20 @@ export const EMPTY_RANDOM_VIDEO_POOL: RandomVideoPool = {
   items: [],
 };
 
+function isValidNullableUnixInput(value: unknown): boolean {
+  if (value == null || value === "") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "string" || value.trim() === "") return false;
+  return Number.isFinite(Number(value));
+}
+
 function normalizeRelatedItem(value: unknown): StaticRelatedVideo | null {
-  if (!value || typeof value !== "object") return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const id = normalizeTrimmedString(row.id);
   const title = normalizeTrimmedString(row.title);
   const displayName = normalizeTrimmedString(row.display_name);
-  if (!id || !title || !displayName) return null;
+  if (!id || !title || !displayName || !isValidNullableUnixInput(row.scheduled_time)) return null;
   return {
     id,
     title,
