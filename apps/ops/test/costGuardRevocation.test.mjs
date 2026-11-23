@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as React from "react";
 import { JSDOM } from "jsdom";
+import { MemoryRouter } from "react-router-dom";
 import { createAdminCostGuardApi } from "../.test-dist/apps/ops/src/api/adminCostGuard.js";
 import { AdminCostGuard } from "../.test-dist/apps/ops/src/routes/admin/AdminCostGuard.js";
 
@@ -82,9 +83,9 @@ test("SEC-814: POST 403 forbidden immediately hides private Cost Guard data and 
       }),
       read: async () => { reads++; return { status: "ok", data: settings }; },
     };
-    await React.act(async () => root.render(React.createElement(AdminCostGuard, {
+    await React.act(async () => root.render(React.createElement(MemoryRouter, null, React.createElement(AdminCostGuard, {
       api, onNavigate: (path) => routes.push(path),
-    })));
+    }))));
     assert.match(dom.window.document.body.textContent, /PRIVATE_AUDIT_ACTOR/);
     const staleButton = button(dom, "モードを更新");
     await clickMode(dom);
@@ -109,9 +110,9 @@ test("SEC-814: POST 401 clears the Cost Guard page and chooses fixed /entry", as
       ...createAdminCostGuardApi(async () => response(401, { ok: false, reason: "forbidden" })),
       read: async () => ({ status: "ok", data: settings }),
     };
-    await React.act(async () => root.render(React.createElement(AdminCostGuard, {
+    await React.act(async () => root.render(React.createElement(MemoryRouter, null, React.createElement(AdminCostGuard, {
       api, onNavigate: (path) => routes.push(path),
-    })));
+    }))));
     await clickMode(dom);
     assert.deepEqual(routes, ["/entry"], "the page must navigate once; individual forms must not navigate again");
     assert.doesNotMatch(dom.window.document.body.textContent, /PRIVATE_AUDIT_ACTOR|変更履歴/);
@@ -126,9 +127,9 @@ test("SEC-814: maintenance_mode 403 stays an inline error; settings and controls
         response(403, { ok: false, reason: "maintenance_mode", message: "メンテナンス中です。" })),
       read: async () => ({ status: "ok", data: settings }),
     };
-    await React.act(async () => root.render(React.createElement(AdminCostGuard, {
+    await React.act(async () => root.render(React.createElement(MemoryRouter, null, React.createElement(AdminCostGuard, {
       api, onNavigate: (path) => routes.push(path),
-    })));
+    }))));
     await clickMode(dom);
     assert.deepEqual(routes, []);
     assert.ok(button(dom, "モードを更新"));
@@ -154,9 +155,9 @@ test("SEC-814: an already-started successful POST cannot republish after a secon
         return { ok: false, forbidden: true, message: "管理権限がありません。" };
       },
     };
-    await React.act(async () => root.render(React.createElement(AdminCostGuard, {
+    await React.act(async () => root.render(React.createElement(MemoryRouter, null, React.createElement(AdminCostGuard, {
       api, onNavigate: (path) => routes.push(path),
-    })));
+    }))));
     const modeButton = button(dom, "モードを更新");
     // Begin a mutation, but hold its result while the sibling form denies access.
     await React.act(async () => modeButton.click());
@@ -214,9 +215,9 @@ test("SEC-814: a 403 with a stalled or invalid body quarantines private data rat
         return reads === 1 ? { status: "ok", data: settings } : { status: "forbidden" };
       },
     };
-    await React.act(async () => root.render(React.createElement(AdminCostGuard, {
+    await React.act(async () => root.render(React.createElement(MemoryRouter, null, React.createElement(AdminCostGuard, {
       api, onNavigate: path => destinations.push(path),
-    })));
+    }))));
     assert.match(dom.window.document.body.textContent, /PRIVATE_AUDIT_ACTOR/);
     await React.act(async () => {
       const action = button(dom, "モードを更新");
