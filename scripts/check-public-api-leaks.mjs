@@ -110,14 +110,13 @@ function fetchWithTimeout(url) {
   });
 }
 
-async function checkEndpoint(url) {
+export async function checkEndpoint(url, fetchPage = fetchWithTimeout) {
   let response;
   try {
-    response = await fetchWithTimeout(url);
-  } catch (error) {
-    console.error(
-      `[fetch error] ${url}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    response = await fetchPage(url);
+  } catch {
+    // Provider exceptions can expose credentials or have throwing message getters.
+    console.error(`[fetch error] ${url}: network_error`);
     return { kind: "fetch_error" };
   }
   if (!response.ok) {
@@ -127,10 +126,8 @@ async function checkEndpoint(url) {
   try {
     const json = await response.json();
     return { kind: "ok", violations: findForbiddenPublicKeys(json) };
-  } catch (error) {
-    console.error(
-      `[invalid json] ${url}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+  } catch {
+    console.error(`[invalid json] ${url}: malformed_json`);
     return { kind: "invalid_json" };
   }
 }
@@ -144,12 +141,8 @@ export async function discoverVideoDetailEndpoint(baseUrl, fetchPage = fetchWith
   let response;
   try {
     response = await fetchPage(url);
-  } catch (error) {
-    return {
-      kind: "fetch_error",
-      url,
-      message: error instanceof Error ? error.message : String(error),
-    };
+  } catch {
+    return { kind: "fetch_error", url };
   }
   if (!response.ok) {
     return { kind: "http_error", url, status: response.status };
@@ -199,7 +192,7 @@ async function runLiveCheck(baseUrl) {
   if (detail.kind === "ok") {
     endpoints.push(detail.endpoint);
   } else if (detail.kind === "fetch_error") {
-    console.error(`[fetch error] ${detail.url}: ${detail.message}`);
+    console.error(`[fetch error] ${detail.url}: network_error`);
     exitCode = 2;
   } else if (detail.kind === "http_error") {
     console.error(`[HTTP ${detail.status}] ${detail.url}`);
