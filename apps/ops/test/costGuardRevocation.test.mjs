@@ -195,6 +195,11 @@ test("SEC-814: a 403 with a stalled or invalid body quarantines private data rat
   assert.ok(Date.now() - began < 1500, "unsettled 403 JSON must have a bounded deadline");
   const malformed = createAdminCostGuardApi(async () => new Response("not-json", { status: 403 }));
   assert.equal((await malformed.setMode("normal", "security test")).accessUnknown, true);
+  for (const payload of [{ok:false,reason:"unknown_guard"},{ok:true,reason:"forbidden"},{ok:false}]) {
+    const unknown = createAdminCostGuardApi(async () => response(403, payload));
+    assert.equal((await unknown.setMode("normal", "security test")).accessUnknown, true,
+      "an unrecognized 403 body must not leave old private data usable");
+  }
 
   await mounted(async (dom, root) => {
     let reads = 0, writes = 0;
