@@ -91,7 +91,8 @@ function isJpegSofMarker(marker: number): boolean {
 }
 
 function parseJpeg(bytes: Uint8Array): { width: number; height: number; animated: boolean } | null {
-  // A SOF header is insufficient: do not accept truncated JPEG files.
+  // SOF dimensions and a terminal EOI are not enough: a JPEG must also have
+  // a bounded SOS header followed by at least one entropy-coded scan byte.
   if (
     bytes.length < 4 ||
     bytes[0] !== 0xff ||
@@ -101,39 +102,84 @@ function parseJpeg(bytes: Uint8Array): { width: number; height: number; animated
   ) return null;
 
   let offset = 2;
-  while (offset + 1 < bytes.length) {
-    if (bytes[offset] !== 0xff) {
-      offset += 1;
-      continue;
-    }
+  let width: number | null = null;
+  let height: number | null = null;
+  let hasScan = false;
 
-    const marker = bytes[offset + 1];
-    if (marker === 0xd9) break;
-    if (marker === 0x00) {
-      offset += 2;
-      continue;
+  while (offset + 1 < bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+    if (offset >= bytes.length) return null;
+    const marker = bytes[offset++];
+
+    if (marker === 0xd9) {
+      return offset === bytes.length && hasScan && width !== null && height !== null
+        ? { width, height, animated: false }
+        : null;
     }
+    // Restart markers only belong to scan data; SOI cannot repeat.
+    if (marker === 0xd8 || marker === 0x00 || (marker >= 0xd0 && marker <= 0xd7)) {
+      return null;
+    }
+    if (marker === 0x01) continue; // TEM is a standalone marker.
+
+    if (offset + 1 >= bytes.length) return null;
+    const segmentLength = (bytes[offset] << 8) | bytes[offset + 1];
+    if (segmentLength < 2 || segmentLength > bytes.length - 2 - offset) return null;
 
     if (isJpegSofMarker(marker)) {
-      if (offset + 9 >= bytes.length) return null;
-      const segmentLength = (bytes[offset + 2] << 8) | bytes[offset + 3];
-      const componentCount = bytes[offset + 9];
-      // SOF: length, precision, height, width, count, and three bytes/component.
+      // SOF length = 8-byte base + three bytes per component.
+      const componentCount = bytes[offset + 7];
       if (
         componentCount === 0 ||
-        segmentLength !== 8 + 3 * componentCount ||
-        offset + 2 + segmentLength > bytes.length - 2
+        segmentLength !== 8 + 3 * componentCount
       ) return null;
-      const height = (bytes[offset + 5] << 8) | bytes[offset + 6];
-      const width = (bytes[offset + 7] << 8) | bytes[offset + 8];
-      if (!isValidDimension(width) || !isValidDimension(height)) return null;
-      return { width, height, animated: false };
+      const nextHeight = (bytes[offset + 3] << 8) | bytes[offset + 4];
+      const nextWidth = (bytes[offset + 5] << 8) | bytes[offset + 6];
+      if (!isValidDimension(nextWidth) || !isValidDimension(nextHeight)) return null;
+      width = nextWidth;
+      height = nextHeight;
     }
 
-    if (offset + 3 >= bytes.length) break;
-    const segmentLength = (bytes[offset + 2] << 8) | bytes[offset + 3];
-    if (segmentLength < 2 || offset + 2 + segmentLength > bytes.length - 2) return null;
-    offset += 2 + segmentLength;
+    if (marker === 0xda) {
+      const components = bytes[offset + 2];
+      if (
+        width === null ||
+        height === null ||
+        components === 0 ||
+        segmentLength !== 6 + 2 * components
+      ) return null;
+
+      let scanOffset = offset + segmentLength;
+      let hasEntropyByte = false;
+      while (scanOffset < bytes.length - 2) {
+        if (bytes[scanOffset] !== 0xff) {
+          hasEntropyByte = true;
+          scanOffset += 1;
+          continue;
+        }
+        let next = scanOffset + 1;
+        while (next < bytes.length && bytes[next] === 0xff) next += 1;
+        if (next >= bytes.length) return null;
+        if (bytes[next] === 0x00) {
+          // JPEG byte stuffing: FF 00 represents one entropy byte.
+          hasEntropyByte = true;
+          scanOffset = next + 1;
+          continue;
+        }
+        if (bytes[next] >= 0xd0 && bytes[next] <= 0xd7) {
+          scanOffset = next + 1; // RST marker within an entropy scan.
+          continue;
+        }
+        break; // EOI or the next segment/SOS of a progressive JPEG.
+      }
+      if (!hasEntropyByte) return null;
+      hasScan = true;
+      offset = scanOffset;
+      continue;
+    }
+
+    offset += segmentLength;
   }
 
   return null;

@@ -39,7 +39,9 @@ function buildJpeg({ width = 64, height = 64 } = {}) {
   bytes.push(...new TextEncoder().encode("JFIF\0"), 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00);
   bytes.push(0xff, 0xc0, 0x00, 0x0b, 0x08);
   bytes.push((height >> 8) & 0xff, height & 0xff, (width >> 8) & 0xff, width & 0xff);
-  bytes.push(0x01, 0x01, 0x11, 0x00, 0xff, 0xd9);
+  bytes.push(0x01, 0x01, 0x11, 0x00);
+  // SOS for one component, followed by a synthetic nonempty entropy byte.
+  bytes.push(0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0x2a, 0xff, 0xd9);
   return new Uint8Array(bytes);
 }
 
@@ -184,6 +186,30 @@ test("inspectSupportedImageUpload detects animated PNG and WebP", () => {
   assert.equal(inspectSupportedImageUpload(animatedWebp.buffer)?.animated, true);
 });
 
+
+
+test("JPEG requires an SOS segment and nonempty entropy-coded scan", () => {
+  const valid = buildJpeg({ width: 128, height: 96 });
+  const sos = valid.findIndex((value, index) => value === 0xff && valid[index + 1] === 0xda);
+  assert.ok(sos >= 0);
+  const noSos = new Uint8Array([...valid.subarray(0, sos), 0xff, 0xd9]);
+  const noEntropy = new Uint8Array([...valid.subarray(0, -3), 0xff, 0xd9]);
+  const earlyEoi = new Uint8Array([...valid.subarray(0, -2), 0xff, 0xd9, 0xff, 0xd9]);
+  const wrongSos = valid.slice();
+  wrongSos[sos + 3] = 0x06;
+  for (const [name, bytes] of [
+    ["SOF + EOI only", noSos],
+    ["SOS without entropy", noEntropy],
+    ["EOI before final EOI", earlyEoi],
+    ["malformed SOS length", wrongSos],
+  ]) {
+    assert.equal(inspectSupportedImageUpload(bytes.buffer), null, name);
+    assert.equal(validateIconImageUpload({ buffer: bytes.buffer }).ok, false, name);
+  }
+  // A stuffed FF entropy byte must not be misinterpreted as a marker.
+  const stuffed = new Uint8Array([...valid.subarray(0, -3), 0xff, 0x00, 0xff, 0xd9]);
+  assert.equal(inspectSupportedImageUpload(stuffed.buffer)?.width, 128);
+});
 
 test("JPEG inspector rejects missing EOI, trailing data, and invalid SOF length", () => {
   const valid = buildJpeg({ width: 128, height: 96 });
