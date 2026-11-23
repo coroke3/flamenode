@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkEndpoint, discoverVideoDetailEndpoint } from "./check-public-api-leaks.mjs";
+import { checkEndpoint, discoverVideoDetailEndpoint, runLiveCheck } from "./check-public-api-leaks.mjs";
 
 const origin = "https://example.test";
 const listUrl = `${origin}/api/videos?limit=1`;
@@ -130,5 +130,84 @@ test("unavailable diagnostics never turn rejected live probes into success or th
     assert.deepEqual(failedJson, { kind: "invalid_json" });
   } finally {
     console.error = original;
+  }
+});
+
+
+test("complete live probe retains all endpoint checks and exit 3 for malformed discovery despite a broken logger", async () => {
+  const originalError = console.error;
+  const originalLog = console.log;
+  const successLogs = [];
+  console.error = () => { throw new Error("diagnostic sink is down"); };
+  console.log = (...args) => { successLogs.push(args); };
+  try {
+    for (const discoveryResponse of [
+      new Response(null, { status: 503 }),
+      new Response("{invalid-json", { headers: { "Content-Type": "application/json" } }),
+    ]) {
+      const seen = [];
+      const exits = [];
+      await runLiveCheck(origin, async (url) => {
+        seen.push(url);
+        if (url === listUrl) return discoveryResponse;
+        if (url.endsWith("page=1")) return new Response("{bad");
+        return Response.json({ ok: true });
+      }, (code) => exits.push(code));
+      assert.deepEqual(exits, [3]);
+      assert.equal(seen.length, 5, "discovery plus four API probes must run, even when diagnostics throw");
+      assert.equal(seen[0], listUrl);
+    }
+    assert.deepEqual(successLogs, [], "a failed live probe must not emit the success banner");
+  } finally {
+    console.error = originalError;
+    console.log = originalLog;
+  }
+});
+
+test("complete live probe detects forbidden public keys when diagnostic logger throws", async () => {
+  const originalError = console.error;
+  const originalLog = console.log;
+  const successLogs = [];
+  let calls = 0;
+  console.error = () => { throw new Error("log unavailable"); };
+  console.log = (...args) => { successLogs.push(args); };
+  try {
+    const exits = [];
+    await runLiveCheck(origin, async (url) => {
+      calls += 1;
+      if (url === listUrl) return Response.json({ items: [], total: 0, page: 1, limit: 1 });
+      return Response.json({ email: "private.example" });
+    }, (code) => exits.push(code));
+    assert.equal(calls, 5);
+    assert.deepEqual(exits, [1], "forbidden public keys retain exit code 1");
+    assert.deepEqual(successLogs, []);
+  } finally {
+    console.error = originalError;
+    console.log = originalLog;
+  }
+});
+
+test("complete live probe retains the valid empty-list success behavior", async () => {
+  const originalError = console.error;
+  const originalLog = console.log;
+  const successLogs = [];
+  let calls = 0;
+  console.error = () => { throw new Error("unused log unavailable"); };
+  console.log = (...args) => { successLogs.push(args); };
+  try {
+    const exits = [];
+    await runLiveCheck(origin, async (url) => {
+      calls += 1;
+      if (url === listUrl) return Response.json({ items: [], total: 0, page: 1, limit: 1 });
+      return Response.json({ items: [] });
+    }, (code) => exits.push(code));
+    assert.equal(calls, 5);
+    assert.deepEqual(exits, []);
+    assert.deepEqual(successLogs, [
+      ["[check:public-api-leaks] OK: live public API responses contain no forbidden keys."],
+    ]);
+  } finally {
+    console.error = originalError;
+    console.log = originalLog;
   }
 });
