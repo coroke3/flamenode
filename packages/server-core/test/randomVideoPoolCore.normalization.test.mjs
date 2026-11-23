@@ -76,3 +76,35 @@ test("random video pool retains valid empty pools and their generation key", () 
   assert.equal(normalized.generationKey, "generation-a");
   assert.deepEqual(normalized.items, []);
 });
+
+test("random video pool rejects coerced item scheduled_time values", () => {
+  for (const scheduledTime of [true, false, [], [1_728_000_000], {}, " ", "Infinity", "1e309"]) {
+    assert.equal(
+      normalizeRandomVideoPool(payload({
+        items: [{
+          id: "video-a",
+          title: "Video A",
+          display_name: "Creator",
+          scheduled_time: scheduledTime,
+        }],
+      })),
+      null,
+      String(scheduledTime),
+    );
+  }
+});
+
+test("random video pool preserves nullable and primitive numeric item timestamps", () => {
+  for (const scheduledTime of [null, 0, 1_728_000_000, "1728000000"]) {
+    const normalized = normalizeRandomVideoPool(payload({
+      items: [{
+        id: "video-a",
+        title: "Video A",
+        display_name: "Creator",
+        scheduled_time: scheduledTime,
+      }],
+    }));
+    assert.ok(normalized);
+    assert.equal(normalized.items[0].scheduled_time, scheduledTime == null ? null : Number(scheduledTime));
+  }
+});
