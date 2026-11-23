@@ -258,3 +258,38 @@ test("SEC-794: optional icon-map loader degrades under hostile errors and a thro
     console.warn = originalWarn;
   }
 });
+
+
+test("SEC: Astro users-index supplement preserves __proto__ and constructor X IDs and icon precedence", () => {
+  const fromIndex = projectPublicXIconMap(null, {
+    generated_at: 200,
+    items: [
+      user("__proto__", "https://example.test/user.png"),
+      user("constructor", null),
+    ],
+  });
+  assert.ok(fromIndex);
+  assert.equal(Object.getPrototypeOf(fromIndex.entries), null);
+  assert.equal(Object.hasOwn(fromIndex.entries, "__proto__"), true);
+  assert.deepEqual(fromIndex.entries.__proto__, entry("registered", "https://example.test/user.png"));
+  assert.equal(Object.hasOwn(fromIndex.entries, "constructor"), true);
+  assert.deepEqual(fromIndex.entries.constructor, entry("none", null));
+
+  const primary = JSON.parse(
+    '{"schema_version":1,"generated_at":100,"entries":{' +
+    '"__proto__":{"icon_url":"https://example.test/primary.png","source":"registered"},' +
+    '"constructor":{"icon_url":"https://example.test/video.png","source":"video"}}}',
+  );
+  const projected = projectPublicXIconMap(primary, {
+    generated_at: 200,
+    items: [user("__proto__", "https://example.test/override.png"), user("constructor", null)],
+  });
+  assert.ok(projected);
+  assert.deepEqual(projected.entries.__proto__, entry("registered", "https://example.test/primary.png"),
+    "registered source must have precedence over a supplemental users-index row");
+  assert.deepEqual(projected.entries.constructor, entry("none", "https://example.test/video.png"),
+    "video-only source gains a public profile but retains the existing icon");
+  assert.deepEqual(Object.keys(projected.entries).sort(), ["__proto__", "constructor"]);
+  assert.equal(Object.getPrototypeOf(projected.entries), null);
+  assert.match(JSON.stringify(projected), /"__proto__"/);
+});
