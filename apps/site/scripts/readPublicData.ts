@@ -363,6 +363,9 @@ const READ_ONLY_SQL = /^\s*(SELECT|WITH)\b/i;
 // extension function entry points that can have side effects when enabled.
 // This reader executes fixed SELECTs.
 const FORBIDDEN_SQL_WORD = /\b(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX|ANALYZE|LOAD_EXTENSION|WRITEFILE)\b/i;
+// SQLite's optional eval() extension can execute DML inside an outer SELECT.
+// Reject calls (including comment-separated/quoted spellings), but not harmless identifiers.
+const FORBIDDEN_SQL_EXEC_CALL = /\beval\s*\(/i;
 
 /** Return true when a quoted SQL identifier is immediately invoked as a function. */
 function followedBySqlCall(source: string, from: number): boolean {
@@ -422,7 +425,7 @@ function executableSqlOnly(source: string): string | null {
       // Preserve only a dangerous quoted identifier when it is called;
       // quoted column names and harmless string literals stay masked.
       const quotedName = source.slice(identifierStart, i - 1);
-      const forbiddenCall = char !== "'" && /^(?:load_extension|writefile)$/i.test(quotedName)
+      const forbiddenCall = char !== "'" && /^(?:load_extension|writefile|eval)$/i.test(quotedName)
         && followedBySqlCall(source, i);
       code += forbiddenCall ? ` ${quotedName} ` : " ";
       continue;
@@ -440,7 +443,9 @@ export function isReadOnlyStatement(sql: string): boolean {
   if (!executable || !READ_ONLY_SQL.test(executable)) return false;
   // A single optional terminal semicolon is allowed; comments/literals were masked.
   const withoutFinalSemicolon = executable.endsWith(";") ? executable.slice(0, -1) : executable;
-  return !withoutFinalSemicolon.includes(";") && !FORBIDDEN_SQL_WORD.test(withoutFinalSemicolon);
+  return !withoutFinalSemicolon.includes(";")
+    && !FORBIDDEN_SQL_WORD.test(withoutFinalSemicolon)
+    && !FORBIDDEN_SQL_EXEC_CALL.test(withoutFinalSemicolon);
 }
 
 export function openD1HttpReader(options: {
