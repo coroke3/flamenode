@@ -38,14 +38,15 @@ export function TermsReacceptBroadcastButton({
   const onSubmit = () => {
     // A synchronous latch also covers two clicks before useTransition commits busy.
     if (busyRef.current || busy || confirmText !== "TERMS" || !content.trim()) return;
-    busyRef.current = true;
-    setMessage(null);
-    setWarning(null);
     const fd = new FormData();
     fd.set("terms_id", termsId);
     fd.set("cursor", String(cursor));
     fd.set("confirm", confirmText);
     fd.set("content", content);
+    // Claim the lock only after synchronous request preparation has succeeded.
+    busyRef.current = true;
+    setMessage(null);
+    setWarning(null);
     startTransition(async () => {
       try {
         const result = await broadcastTermsReaccept(fd);
