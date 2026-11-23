@@ -184,10 +184,11 @@ export async function discoverVideoDetailEndpoint(baseUrl, fetchPage = fetchWith
   };
 }
 
-async function runLiveCheck(baseUrl) {
+export async function runLiveCheck(baseUrl, fetchPage = fetchWithTimeout, onExit = (code) => process.exit(code)) {
   if (!/^https?:\/\//i.test(baseUrl ?? "")) {
-    console.error("Usage: node scripts/check-public-api-leaks.mjs --live <baseUrl>");
-    process.exit(3);
+    logProbeFailure("Usage: node scripts/check-public-api-leaks.mjs --live <baseUrl>");
+    onExit(3);
+    return;
   }
   const normalized = baseUrl.replace(/\/+$/, "");
   const endpoints = [
@@ -196,7 +197,7 @@ async function runLiveCheck(baseUrl) {
     `${normalized}/api/events?limit=5`,
     `${normalized}/api/software/suggestions?limit=5`,
   ];
-  const detail = await discoverVideoDetailEndpoint(normalized);
+  const detail = await discoverVideoDetailEndpoint(normalized, fetchPage);
   let exitCode = 0;
   if (detail.kind === "ok") {
     endpoints.push(detail.endpoint);
@@ -204,15 +205,15 @@ async function runLiveCheck(baseUrl) {
     logProbeFailure(`[fetch error] ${detail.url}: network_error`);
     exitCode = 2;
   } else if (detail.kind === "http_error") {
-    console.error(`[HTTP ${detail.status}] ${detail.url}`);
+    logProbeFailure(`[HTTP ${detail.status}] ${detail.url}`);
     exitCode = 3;
   } else if (detail.kind === "invalid_json") {
-    console.error(`[invalid json] ${detail.url}: expected items array with a valid video id`);
+    logProbeFailure(`[invalid json] ${detail.url}: expected items array with a valid video id`);
     exitCode = 3;
   }
 
   for (const url of endpoints) {
-    const result = await checkEndpoint(url);
+    const result = await checkEndpoint(url, fetchPage);
     if (result.kind === "fetch_error") {
       exitCode = Math.max(exitCode, 2);
       continue;
@@ -224,13 +225,16 @@ async function runLiveCheck(baseUrl) {
     if (result.violations.length > 0) {
       exitCode = Math.max(exitCode, 1);
       for (const violation of result.violations) {
-        console.error(
+        logProbeFailure(
           `[check:public-api-leaks] forbidden key "${violation.key}" at ${violation.path}`,
         );
       }
     }
   }
-  if (exitCode !== 0) process.exit(exitCode);
+  if (exitCode !== 0) {
+    onExit(exitCode);
+    return;
+  }
   console.log(
     "[check:public-api-leaks] OK: live public API responses contain no forbidden keys.",
   );
