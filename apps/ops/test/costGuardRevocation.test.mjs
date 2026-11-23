@@ -81,6 +81,31 @@ test("SEC-814: only confirmed identity denials revoke; ordinary 403 guard messag
     { ok: false, message: "一時的なDB障害" }, "HTTP 503 is not an authoritative 403 revocation");
 });
 
+test("SEC-814: all five Cost Guard mutation routes classify an actual 403 forbidden", async () => {
+  const paths = [];
+  const api = createAdminCostGuardApi(async path => {
+    paths.push(path);
+    return response(403, { ok: false, reason: "forbidden", message: "access revoked" });
+  });
+  const actions = [
+    () => api.setMode("economy", "reason"),
+    () => api.setMaintenance(true, "reason"),
+    () => api.setOverride("reason", "OVERRIDE", ["edit_video"]),
+    () => api.clearOverride("reason", "CLEAR"),
+    () => api.setDisabled("reason", "APPLY", ["edit_video"], "[]"),
+  ];
+  for (const write of actions) {
+    assert.deepEqual(await write(), { ok: false, forbidden: true, message: "access revoked" });
+  }
+  assert.deepEqual(paths, [
+    "/api/admin/cost-guard/mode",
+    "/api/admin/cost-guard/maintenance",
+    "/api/admin/cost-guard/override",
+    "/api/admin/cost-guard/override/clear",
+    "/api/admin/cost-guard/disabled-features",
+  ]);
+});
+
 test("SEC-814: shared notification writes keep their original D-17-3 result contract", async () => {
   const notifications = createAdminNotificationsApi(async () =>
     response(403, { ok: false, reason: "forbidden", message: "既存の通知操作は拒否されました。" }));
