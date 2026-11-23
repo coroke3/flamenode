@@ -11,7 +11,7 @@ import {
 import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 import { send, type OpsWriteResult } from "./write.js";
 
-export type AdminWriteResult = { ok: boolean; message?: string; anonymous?: boolean };
+export type AdminWriteResult = { ok: boolean; message?: string; anonymous?: boolean; forbidden?: boolean };
 export type AdminOpsBody = { ok: boolean; message?: string; reason?: string };
 type BodySchema = { safeParse: (value: unknown) => { success: boolean; data?: unknown } };
 
@@ -24,6 +24,12 @@ export function toWriteResult(result: OpsWriteResult<AdminOpsBody>): AdminWriteR
     // for API compatibility without exposing private mutation controls.
     if (!ok && reason === "unauthenticated") {
       return { ok: false, message: typeof message === "string" ? message : "ログインしてください。", anonymous: true };
+    }
+    // These fixed Hono identity denials revoke admin access. Other HTTP 403
+    // reasons (maintenance_mode, cost_guard_blocked, invalid_origin, etc.)
+    // must retain their CURRENT in-form error behavior.
+    if (!ok && (reason === "forbidden" || reason === "banned")) {
+      return { ok: false, message: typeof message === "string" ? message : "この操作を実行する権限がありません。", forbidden: true };
     }
     return { ok, ...(typeof message === "string" ? { message } : {}) };
   }
