@@ -243,6 +243,8 @@ if (runUnderRootTsx(import.meta.url)) {
 
   test("MIG-0644: forged zero Content-Length does not bypass JSON validation", async () => {
     const side = createSide();
+    const writesBefore = side.d1.stats.writes;
+    const batchesBefore = side.d1.stats.batches;
     const response = await callHono(side, "/missing/reject", "{malformed", {
       headers: { Origin: SITE, "content-length": "0" },
     });
@@ -267,6 +269,9 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(oversized.status, 413, JSON.stringify(oversized.body));
     assert.equal(oversized.body.message, "リクエストが大きすぎます。");
     assert.equal(oversized.headers.get("cache-control"), "private, no-store");
+    assert.equal(side.d1.stats.writes, writesBefore, "invalid requests must not write D1");
+    assert.equal(side.d1.stats.batches, batchesBefore, "invalid requests must not open a D1 mutation batch");
+    assert.deepEqual(side.queueWakes, [], "invalid requests must not wake the queue");
 
     // A valid JSON stream with the same forged header must still be parsed;
     // the nonexistent request ID is then rejected by the domain lookup.
