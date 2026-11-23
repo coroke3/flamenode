@@ -301,3 +301,70 @@ test("SEC-802: GET 401/403 and ordinary 503 never mount privileged controls", as
     }, destination => redirects.push(destination));
   }
 });
+
+/** SEC-802 independent reviewer follow-up: the response to the second GET can
+ * arrive after a successful write refresh and a later write 401/403. Its
+ * private payload must never resurrect a revoked admin session.
+ */
+test("SEC-802: delayed GET after a revoked POST cannot republish private diagnostics", async () => {
+  for (const deniedStatus of [401, 403]) {
+    let getCount = 0;
+    let postCount = 0;
+    const navigations = [];
+    let finishOldGet;
+    const oldGet = new Promise(resolve => { finishOldGet = resolve; });
+    const latePrivateData = {
+      ...staticBuildsFixture,
+      backfillQueue: {
+        ...staticBuildsFixture.backfillQueue,
+        video_v2: {
+          ...staticBuildsFixture.backfillQueue.video_v2,
+          lastError: "SEC802_LATE_GET_PRIVATE_CANARY",
+        },
+      },
+    };
+    await renderStaticBuildsWithFetch(async (url, init) => {
+      if (init?.method === "GET") {
+        assert.equal(url, "/api/admin-read/ops/static-builds");
+        getCount++;
+        if (getCount === 1) return response(200, staticBuildsFixture);
+        if (getCount === 2) return oldGet;
+        assert.fail("revocation must not start an extra privileged GET");
+      }
+      assert.equal(init?.method, "POST");
+      postCount++;
+      if (postCount === 1) return response(200, { ok: true });
+      if (postCount === 2) {
+        return response(deniedStatus, { ok: true, redirect: "https://evil.example" });
+      }
+      assert.fail("revocation must not send another privileged POST");
+    }, async (container, win) => {
+      assert.match(container.textContent, /SEC802_PRIVATE_BACKFILL_DIAGNOSTIC/);
+      const button = [...container.querySelectorAll("button")]
+        .find(node => node.textContent.includes("関連動画の共有JSONを再生成キュー投入"));
+      assert.ok(button);
+      const click = () => button.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+      await React.act(async () => { click(); });
+      assert.equal(postCount, 1);
+      assert.equal(getCount, 2, "successful POST started a second, pending GET");
+      assert.equal(navigations.length, 0);
+      await React.act(async () => { click(); });
+      assert.equal(postCount, 2);
+      assert.deepEqual(navigations, [deniedStatus === 401 ? "/entry" : "/dashboard"]);
+      assert.match(container.textContent, /管理画面へのアクセスが終了しました/);
+      assert.equal(container.querySelectorAll("button").length, 0);
+      await React.act(async () => {
+        finishOldGet(response(200, latePrivateData));
+      });
+      assert.equal(getCount, 2);
+      assert.equal(postCount, 2);
+      assert.deepEqual(navigations, [deniedStatus === 401 ? "/entry" : "/dashboard"]);
+      assert.match(container.textContent, /管理画面へのアクセスが終了しました/);
+      assert.doesNotMatch(container.textContent, /SEC802_LATE_GET_PRIVATE_CANARY/);
+      assert.doesNotMatch(container.textContent, /SEC802_PRIVATE_BACKFILL_DIAGNOSTIC/);
+      assert.equal(container.querySelectorAll("button").length, 0);
+      await React.act(async () => { click(); });
+      assert.equal(postCount, 2, "a removed repair action cannot issue a third write");
+    }, destination => navigations.push(destination));
+  }
+});
