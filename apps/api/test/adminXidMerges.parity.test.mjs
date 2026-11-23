@@ -259,6 +259,15 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(create.body.message, "入力エラー");
     assert.equal(create.headers.get("cache-control"), "private, no-store");
 
+    // A forged zero must not bypass the actual 64 KiB stream limit either.
+    const oversized = await callHono(side, "/", JSON.stringify({
+      from_x_user_id: "a".repeat(65536),
+      to_x_user_id: "target",
+    }), { headers: { Origin: SITE, "content-length": "0" } });
+    assert.equal(oversized.status, 413, JSON.stringify(oversized.body));
+    assert.equal(oversized.body.message, "リクエストが大きすぎます。");
+    assert.equal(oversized.headers.get("cache-control"), "private, no-store");
+
     // A valid JSON stream with the same forged header must still be parsed;
     // the nonexistent request ID is then rejected by the domain lookup.
     const valid = await callHono(side, "/missing/reject", "{}", {
