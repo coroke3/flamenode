@@ -87,7 +87,14 @@ function isJpegSofMarker(marker: number): boolean {
 }
 
 function parseJpeg(bytes: Uint8Array): { width: number; height: number; animated: boolean } | null {
-  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  // A SOF header is insufficient: do not accept truncated JPEG files.
+  if (
+    bytes.length < 4 ||
+    bytes[0] !== 0xff ||
+    bytes[1] !== 0xd8 ||
+    bytes[bytes.length - 2] !== 0xff ||
+    bytes[bytes.length - 1] !== 0xd9
+  ) return null;
 
   let offset = 2;
   while (offset + 1 < bytes.length) {
@@ -105,6 +112,14 @@ function parseJpeg(bytes: Uint8Array): { width: number; height: number; animated
 
     if (isJpegSofMarker(marker)) {
       if (offset + 9 >= bytes.length) return null;
+      const segmentLength = (bytes[offset + 2] << 8) | bytes[offset + 3];
+      const componentCount = bytes[offset + 9];
+      // SOF: length, precision, height, width, count, and three bytes/component.
+      if (
+        componentCount === 0 ||
+        segmentLength !== 8 + 3 * componentCount ||
+        offset + 2 + segmentLength > bytes.length - 2
+      ) return null;
       const height = (bytes[offset + 5] << 8) | bytes[offset + 6];
       const width = (bytes[offset + 7] << 8) | bytes[offset + 8];
       if (!isValidDimension(width) || !isValidDimension(height)) return null;
@@ -113,7 +128,7 @@ function parseJpeg(bytes: Uint8Array): { width: number; height: number; animated
 
     if (offset + 3 >= bytes.length) break;
     const segmentLength = (bytes[offset + 2] << 8) | bytes[offset + 3];
-    if (segmentLength < 2) return null;
+    if (segmentLength < 2 || offset + 2 + segmentLength > bytes.length - 2) return null;
     offset += 2 + segmentLength;
   }
 
@@ -149,6 +164,7 @@ function parseWebp(bytes: Uint8Array): { width: number; height: number; animated
 
   let offset = 12;
   let animated = false;
+  let hasImagePayload = false;
   let width: number | null = null;
   let height: number | null = null;
 
@@ -180,17 +196,26 @@ function parseWebp(bytes: Uint8Array): { width: number; height: number; animated
       if (!dimensions) return null;
       width = dimensions.width;
       height = dimensions.height;
+      hasImagePayload = true;
     } else if (chunkType === "VP8L") {
       const dimensions = parseVp8lDimensions(chunkData);
       if (!dimensions) return null;
       width = dimensions.width;
       height = dimensions.height;
+      hasImagePayload = true;
+    } else if (chunkType === "ANMF") {
+      // Animated frames use the VP8X canvas; they are never valid static icons.
+      if (chunkSize < 16) return null;
+      animated = true;
+      hasImagePayload = true;
     }
 
     offset += 8 + chunkSize + (chunkSize % 2);
+    if (offset > bytes.length) return null;
   }
 
-  if (width === null || height === null) return null;
+  // VP8X only declares a canvas; RIFF chunks must contain image frames.
+  if (offset !== bytes.length || !hasImagePayload || width === null || height === null) return null;
   return { width, height, animated };
 }
 

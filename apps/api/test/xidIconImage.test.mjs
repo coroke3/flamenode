@@ -186,6 +186,38 @@ test("inspectSupportedImageUpload detects animated PNG and WebP", () => {
   assert.equal(inspectSupportedImageUpload(animatedWebp.buffer)?.animated, true);
 });
 
+
+test("JPEG inspector rejects missing EOI, trailing data, and invalid SOF length", () => {
+  const valid = buildJpeg({ width: 128, height: 96 });
+  const noEoi = valid.slice(0, -2);
+  const trailing = new Uint8Array([...valid, 0]);
+  const badSof = valid.slice();
+  const sof = badSof.findIndex((value, index) => value === 0xff && badSof[index + 1] === 0xc0);
+  assert.ok(sof >= 0);
+  badSof[sof + 3] = 0x08; // one component needs a SOF length of 11, not 8.
+  for (const [name, bytes] of [["no EOI", noEoi], ["trailing byte", trailing], ["short SOF", badSof]]) {
+    assert.equal(inspectSupportedImageUpload(bytes.buffer), null, name);
+    assert.equal(validateIconImageUpload({ buffer: bytes.buffer }).ok, false, name);
+  }
+});
+
+test("WebP inspector rejects VP8X-only canvas and missing chunk padding", () => {
+  const vp8x = new Uint8Array(10);
+  vp8x[4] = 63;
+  vp8x[7] = 63;
+  const headerBody = [];
+  pushWebpChunk(headerBody, "VP8X", vp8x);
+  const headerOnly = wrapWebpRiff(headerBody);
+
+  const frameBody = [];
+  pushWebpChunk(frameBody, "VP8L", new Uint8Array([0x2f, 63, 0, 0, 0]));
+  const missingPadding = wrapWebpRiff(frameBody.slice(0, -1));
+  for (const [name, bytes] of [["canvas only", headerOnly], ["no final padding", missingPadding]]) {
+    assert.equal(inspectSupportedImageUpload(bytes.buffer), null, name);
+    assert.equal(validateIconImageUpload({ buffer: bytes.buffer }).ok, false, name);
+  }
+});
+
 test("inspectSupportedImageUpload rejects GIF and SVG signatures", () => {
   const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
   assert.equal(inspectSupportedImageUpload(gif.buffer), null);
