@@ -90,8 +90,31 @@ export function AdminRulesPage({ fetchFn }: { fetchFn?: OpsFetch }): React.React
   React.useEffect(() => {
     if (redirect) window.location.assign(redirect);
   }, [redirect]);
-  const broadcastApi = React.useMemo(() => createAdminTermsApi(fetchFn), [fetchFn]);
+  // A rejected privileged broadcast write invalidates this entire admin view.
+  // Read caching alone cannot revoke an already-visible modal or its cursor.
+  const [writeRevoked, setWriteRevoked] = React.useState(false);
+  const writeRevokedRef = React.useRef(false);
+  const onDeniedWrite = React.useCallback((status: 401 | 403) => {
+    if (writeRevokedRef.current) return;
+    writeRevokedRef.current = true;
+    setWriteRevoked(true);
+    // Never follow a server-supplied redirect; only these same-origin paths.
+    window.location.assign(status === 401 ? "/entry" : "/dashboard");
+  }, []);
+  const broadcastApi = React.useMemo(() => {
+    // Check authorization at the Response boundary, before the shared writer
+    // attempts to parse an optional, potentially stalled 403 JSON body.
+    const guardedFetch: OpsFetch = async (path, init) => {
+      const response = await (fetchFn ?? fetch)(path, init);
+      if (response.status === 401 || response.status === 403) {
+        onDeniedWrite(response.status);
+      }
+      return response;
+    };
+    return createAdminTermsApi(guardedFetch);
+  }, [fetchFn, onDeniedWrite]);
 
+  if (writeRevoked) return <p role="status">規約管理へのアクセスが終了しました。</p>;
   if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden") {
     return <p role="status">読み込み中…</p>;
   }
