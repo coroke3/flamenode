@@ -11,8 +11,9 @@ export function normalizeHttpUrl(
   options: { maxLength?: number } = {},
 ): string | null {
   const original = String(raw ?? "");
-  // Validate the untrimmed value: trim() would hide leading/trailing CR, LF and TAB.
-  if (/[\t\n\r\\]/.test(original)) return null;
+  // WHATWG URL silently strips leading/trailing C0 controls (including NUL),
+  // while trim() also hides CR/LF/TAB. Reject control characters before either step.
+  if (/[\x00-\x1f\x7f\\]/.test(original)) return null;
   const s = original.trim();
   if (!s) return null;
   const maxLength = options.maxLength ?? 500;
