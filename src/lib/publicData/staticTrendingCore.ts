@@ -78,6 +78,10 @@ function normalizeTrendingItem(value: unknown): TrendingItem | null {
   }
 
   if (row.status != null && row.status !== "public") return null;
+  // Stale/malformed snapshots can contain contradictory visibility metadata.
+  // Preserve legacy public snapshots with absent/null markers, but never
+  // project an explicitly private or draft row into the public trending list.
+  if (row.visibility_status != null && row.visibility_status !== "public") return null;
 
   const rank =
     row.rank !== undefined && row.rank !== null
