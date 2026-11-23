@@ -181,3 +181,50 @@ test("SEC-814: an already-started successful POST cannot republish after a secon
     assert.deepEqual(routes, ["/dashboard"]);
   });
 });
+
+test("SEC-814: a 403 with a stalled or invalid body quarantines private data rather than guessing a redirect", async () => {
+  const stalled = createAdminCostGuardApi(async () => ({
+    status: 403, ok: false, json: () => new Promise(() => {}),
+  }));
+  const began = Date.now();
+  const result = await stalled.setMode("normal", "security test");
+  assert.deepEqual(result, {
+    ok: false, accessUnknown: true,
+    message: "管理権限を確認できません。再読み込みしてください。",
+  });
+  assert.ok(Date.now() - began < 1500, "unsettled 403 JSON must have a bounded deadline");
+  const malformed = createAdminCostGuardApi(async () => new Response("not-json", { status: 403 }));
+  assert.equal((await malformed.setMode("normal", "security test")).accessUnknown, true);
+
+  await mounted(async (dom, root) => {
+    let reads = 0, writes = 0;
+    const destinations = [];
+    const api = {
+      ...createAdminCostGuardApi(async () => {
+        writes++;
+        return { status: 403, ok: false, json: () => new Promise(() => {}) };
+      }),
+      read: async () => {
+        reads++;
+        return reads === 1 ? { status: "ok", data: settings } : { status: "forbidden" };
+      },
+    };
+    await React.act(async () => root.render(React.createElement(AdminCostGuard, {
+      api, onNavigate: path => destinations.push(path),
+    })));
+    assert.match(dom.window.document.body.textContent, /PRIVATE_AUDIT_ACTOR/);
+    await clickMode(dom);
+    assert.equal(writes, 1);
+    assert.equal(reads, 1, "an unreadable 403 must not automatically infer the permission state");
+    assert.deepEqual(destinations, [], "unknown 403 must not invent a forbidden redirect");
+    assert.doesNotMatch(dom.window.document.body.textContent, /PRIVATE_AUDIT_ACTOR|変更履歴/);
+    assert.equal(button(dom, "モードを更新"), undefined);
+    const retry = button(dom, "権限を再確認");
+    assert.ok(retry, "only the explicit authoritative recheck can restore admin controls");
+    await React.act(async () => retry.click());
+    assert.equal(reads, 2);
+    assert.deepEqual(destinations, ["/dashboard"]);
+    assert.equal(button(dom, "モードを更新"), undefined);
+    assert.equal(writes, 1);
+  });
+});
