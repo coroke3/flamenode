@@ -146,8 +146,12 @@ export function AdminCostGuardView({ data, api, onSuccess }: {
 }
 
 const defaultApi = createAdminCostGuardApi();
+const defaultNavigate = (path: string) => window.location.assign(path);
 
-export function AdminCostGuard({ api = defaultApi }: { api?: AdminCostGuardApi }): React.ReactElement {
+export function AdminCostGuard({ api = defaultApi, onNavigate = defaultNavigate }: {
+  api?: AdminCostGuardApi;
+  onNavigate?: (path: string) => void;
+}): React.ReactElement {
   const [refresh, setRefresh] = React.useState(0);
   // The successful write's message must outlive the fail-closed reload below, which
   // unmounts the forms (CURRENT router.refresh() kept the client message).
@@ -189,8 +193,8 @@ export function AdminCostGuard({ api = defaultApi }: { api?: AdminCostGuardApi }
   const state = useApiResult((signal) => api.read(signal), "admin-cost-guard:" + refresh);
   const redirect = revokedPath ?? (state.status === "loading" ? null : adminReadRedirect(state));
   React.useEffect(() => {
-    if (redirect) window.location.assign(redirect);
-  }, [redirect]);
+    if (redirect) onNavigate(redirect);
+  }, [redirect, onNavigate]);
 
   if (revokedRef.current || state.status === "loading" || state.status === "anonymous" || state.status === "forbidden") {
     return <div role="status" aria-busy="true">読み込み中...</div>;
