@@ -57,6 +57,31 @@ const REVERT_FAILURE = "X ID統合を安全に差し戻せませんでした。"
 const VISIBILITY_BUCKET_UNAVAILABLE = "X ID統合の公開境界を更新できませんでした。";
 const PREFLIGHT_FAILED = "管理操作を処理できませんでした。再度お試しください。";
 
+/**
+ * Diagnostics are best-effort. A broken console sink must never replace the
+ * fixed HTTP failure response after an atomic mutation or visibility failure.
+ */
+function logMergeDiagnostic(message: string): void {
+  try {
+    console.error(message);
+  } catch {
+    // Keep the response contract authoritative when diagnostics are unavailable.
+  }
+}
+
+/** Host/provider errors may be proxies or expose throwing accessors. */
+function knownMergeDomainErrorMessage(cause: unknown): string | null {
+  try {
+    if (!(cause instanceof Error)) return null;
+    const message: unknown = cause.message;
+    return typeof message === "string" && KNOWN_MERGE_DOMAIN_ERRORS.has(message)
+      ? message
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 const KNOWN_MERGE_DOMAIN_ERRORS = new Set([
   "承認済みの統合申請だけを実行できます。",
   "統合元または統合先のX名義がありません。",
@@ -257,7 +282,7 @@ async function handleRequestDecision(
       ],
     });
   } catch {
-    console.error("[MIG-0644] setRequestStatus atomic mutation failed");
+    logMergeDiagnostic("[MIG-0644] setRequestStatus atomic mutation failed");
     return fail(c, 409, ATOMIC_FAILURE);
   }
 
@@ -274,13 +299,21 @@ function mapMergeExecutionFailure(
   cause: unknown,
   fallbackMessage: string,
 ): Response {
-  if (cause instanceof VisibilityBucketUnavailableError) {
+  let visibilityUnavailable = false;
+  try {
+    visibilityUnavailable = cause instanceof VisibilityBucketUnavailableError;
+  } catch {
+    // Untrusted Proxy traps are treated as unknown provider failures.
+  }
+  if (visibilityUnavailable) {
     return fail(c, 503, VISIBILITY_BUCKET_UNAVAILABLE, id);
   }
-  if (cause instanceof Error && KNOWN_MERGE_DOMAIN_ERRORS.has(cause.message)) {
-    return fail(c, 409, cause.message, id);
+
+  const knownMessage = knownMergeDomainErrorMessage(cause);
+  if (knownMessage !== null) {
+    return fail(c, 409, knownMessage, id);
   }
-  console.error("[MIG-0644] xid merge operation failed");
+  logMergeDiagnostic("[MIG-0644] xid merge operation failed");
   return fail(c, 409, fallbackMessage, id);
 }
 
@@ -371,7 +404,7 @@ adminXIdMergeRoutes.post("/", async (c) => {
       ],
     });
   } catch {
-    console.error("[MIG-0644] createXIdMergeRequest atomic mutation failed");
+    logMergeDiagnostic("[MIG-0644] createXIdMergeRequest atomic mutation failed");
     return fail(c, 409, ATOMIC_FAILURE);
   }
 

@@ -499,6 +499,116 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(hon.queueWakes.length, 0);
   });
 
+  test("SEC: hostile diagnostics cannot replace fixed X merge failure responses", async () => {
+    const side = createSide();
+    seedMergeScenario(side.sqlite);
+    const originalConsoleError = console.error;
+    console.error = () => {
+      throw new Error("diagnostic sink failure must not escape");
+    };
+
+    try {
+      // SA-092: a failed atomic batch still returns the fixed 409 when logging throws.
+      const originalBatch = side.d1.batch;
+      side.d1.batch = async () => {
+        throw new Error("private database failure");
+      };
+      const beforeCreateCount = side.sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM x_identity_requests",
+      ).get().n;
+      const createFailure = await callHono(side, "", {
+        from_x_user_id: "src_x",
+        to_x_user_id: "tgt_x",
+      });
+      assert.equal(createFailure.status, 409);
+      assert.deepEqual(createFailure.body, {
+        ok: false,
+        message: "更新が競合したか、監査記録に失敗しました。再読み込みしてお試しください。",
+      });
+      assert.equal(
+        side.sqlite.prepare("SELECT COUNT(*) AS n FROM x_identity_requests").get().n,
+        beforeCreateCount,
+      );
+      side.d1.batch = originalBatch;
+
+      // SA-093: the decision path has the same fixed-response guarantee.
+      const created = await callHono(side, "", {
+        from_x_user_id: "src_x",
+        to_x_user_id: "tgt_x",
+      });
+      assert.equal(created.status, 200);
+      side.d1.batch = async () => {
+        throw new Error("private decision batch failure");
+      };
+      const approveFailure = await callHono(side, `/${created.body.id}/approve`, {});
+      assert.equal(approveFailure.status, 409);
+      assert.deepEqual(approveFailure.body, {
+        ok: false,
+        message: "更新が競合したか、監査記録に失敗しました。再読み込みしてお試しください。",
+      });
+      assert.equal(
+        side.sqlite.prepare("SELECT status FROM x_identity_requests WHERE id = ?").get(created.body.id).status,
+        "pending",
+      );
+      side.d1.batch = originalBatch;
+
+      const approved = await callHono(side, `/${created.body.id}/approve`, {});
+      assert.equal(approved.status, 200);
+
+      // SA-096: an Error with a throwing message getter is classified as unknown.
+      const errorWithThrowingMessage = new Error("must not be read");
+      Object.defineProperty(errorWithThrowingMessage, "message", {
+        configurable: true,
+        get() {
+          throw new Error("message getter failure");
+        },
+      });
+      const writesBeforeGetterFailure = side.d1.stats.writes;
+      const batchesBeforeGetterFailure = side.d1.stats.batches;
+      side.bucket.get = async () => {
+        throw errorWithThrowingMessage;
+      };
+      const getterFailure = await callHono(
+        side,
+        `/${created.body.id}/execute`,
+        { confirm: "MERGE" },
+      );
+      assert.equal(getterFailure.status, 409);
+      assert.deepEqual(getterFailure.body, {
+        ok: false,
+        id: created.body.id,
+        message: "X ID統合を安全に確定できませんでした。",
+      });
+      assert.equal(side.d1.stats.writes, writesBeforeGetterFailure);
+      assert.equal(side.d1.stats.batches, batchesBeforeGetterFailure);
+
+      // A Proxy getPrototypeOf trap must likewise be treated as an unknown failure.
+      side.bucket.get = async () => {
+        throw new Proxy({}, {
+          getPrototypeOf() {
+            throw new Error("hostile getPrototypeOf trap");
+          },
+        });
+      };
+      const proxyFailure = await callHono(
+        side,
+        `/${created.body.id}/execute`,
+        { confirm: "MERGE" },
+      );
+      assert.equal(proxyFailure.status, 409);
+      assert.deepEqual(proxyFailure.body, {
+        ok: false,
+        id: created.body.id,
+        message: "X ID統合を安全に確定できませんでした。",
+      });
+      assert.equal(side.d1.stats.writes, writesBeforeGetterFailure);
+      assert.equal(side.d1.stats.batches, batchesBeforeGetterFailure);
+      assert.equal(side.queueWakes.length, 0);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
   test("MIG-0644 T03: guards reject non-admin, anonymous, cross-origin, CostGuard stop, and bad confirm with 0 writes", async () => {
     const side = createSide();
     seedMergeScenario(side.sqlite);
