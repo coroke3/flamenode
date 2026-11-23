@@ -284,3 +284,46 @@ test("SEC-814: a 403 with a stalled or invalid body quarantines private data rat
     assert.equal(writes, 1);
   });
 });
+
+test("SEC-814: an authorized GET started before a delayed forbidden write cannot remount private data", async () => {
+  await mounted(async (dom, root) => {
+    let reads = 0;
+    let resolveRead, resolveForbidden;
+    const destinations = [];
+    const api = {
+      ...createAdminCostGuardApi(async () => response(200, { ok: true })),
+      read: async () => {
+        reads++;
+        if (reads === 1) return { status: "ok", data: settings };
+        return new Promise(resolve => { resolveRead = resolve; });
+      },
+      setMode: async () => ({ ok: true, message: "mode saved" }),
+      clearOverride: async () => new Promise(resolve => { resolveForbidden = resolve; }),
+    };
+    await React.act(async () => root.render(React.createElement(MemoryRouter, null, React.createElement(AdminCostGuard, {
+      api, onNavigate: path => destinations.push(path),
+    }))));
+    assert.match(dom.window.document.body.textContent, /PRIVATE_AUDIT_ACTOR/);
+    const reason = dom.window.document.querySelector('input[aria-label="override理由"]');
+    const confirm = dom.window.document.querySelector('input[aria-label="確認文字列"]');
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+    await React.act(async () => {
+      setter.call(reason, "audit reason"); reason.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      setter.call(confirm, "CLEAR"); confirm.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await React.act(async () => button(dom, "即時解除").click());
+    assert.equal(typeof resolveForbidden, "function", "a confirmed callback is pending");
+    await React.act(async () => button(dom, "モードを更新").click());
+    assert.equal(reads, 2, "a successful sibling write starts a fresh admin read");
+    assert.equal(typeof resolveRead, "function");
+    // A late 403 write result revokes while an earlier successful GET is pending.
+    await React.act(async () => resolveForbidden({ ok: false, forbidden: true, message: "denied" }));
+    assert.deepEqual(destinations, ["/dashboard"]);
+    await React.act(async () => resolveRead({ status: "ok", data: {
+      ...settings, history: [{ ...settings.history[0], actor_user_id: "LATE_PRIVATE_DATA" }],
+    } }));
+    assert.equal(button(dom, "モードを更新"), undefined);
+    assert.doesNotMatch(dom.window.document.body.textContent, /LATE_PRIVATE_DATA|PRIVATE_AUDIT_ACTOR|変更履歴/);
+    assert.deepEqual(destinations, ["/dashboard"]);
+  });
+});
