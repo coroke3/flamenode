@@ -20,9 +20,16 @@ type InteractionKind = "like" | "bookmark";
 type RequestedState = boolean | "toggle";
 
 function isVideoInteractionAuthUniqueConstraintError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  if (!/UNIQUE constraint failed/i.test(message)) return false;
-  return /video_interactions_auth/i.test(message);
+  // D1/provider exceptions are untrusted. A throwing message getter or
+  // coercion must not replace the stable mutation failure with a new error.
+  try {
+    const message = err instanceof Error ? err.message : String(err);
+    return typeof message === "string" &&
+      /UNIQUE constraint failed/i.test(message) &&
+      /video_interactions_auth/i.test(message);
+  } catch {
+    return false;
+  }
 }
 
 async function revalidateVideoInteractionPaths(
@@ -232,7 +239,13 @@ async function mutateVideoInteraction(
       await revalidateVideoInteractionPaths(target.youtube_video_id, videoId);
       return { ok: true, active, videoId };
     }
-    console.warn("[video-interaction] atomic mutation rejected", error);
+    // Diagnostics are best effort; do not expose raw provider errors or let
+    // a broken logger replace the action's fixed failure result.
+    try {
+      console.warn("[video-interaction] atomic mutation rejected");
+    } catch {
+      // The mutation already failed; return the fixed error below.
+    }
     return {
       ok: false,
       message: "操作が競合したか、保存に失敗しました。再読み込みして再試行してください。",
