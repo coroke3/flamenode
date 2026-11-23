@@ -1771,6 +1771,8 @@ Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fix
 | `app/(auth)/dashboard/**` | HELPER | MIG-0701 | dashboard CSS | NOT_STARTED |
 | `app/(auth)/entry/**` | HELPER | MIG-0703 | entry CSS | NOT_STARTED |
 | `app/(auth)/onboarding/**` | HELPER | MIG-0701 | onboarding forms/CSS (reads: MIG-0611) | NOT_STARTED |
+| `src/components/admin/TermsReacceptBroadcastButton.tsx` | HELPER | CURRENT admin rules reaccept broadcast modal; backdrop dismissal must disarm TERMS while preserving cursor and enqueue state | MIG-0727 | SAME (CURRENT Next retained until Ops cutover; TARGET separately owned by PR#851) | RETAINED | PR#852 SHA=fc0e441065df5b80d023a038c07421912e09783e TEST=node --test --experimental-strip-types src/components/admin/termsReacceptDismissal.contract.test.mjs CI=https://github.com/coroke3/flamenode/pull/852/checks (exact HEAD CI and non-writer review pending) |
+| `src/components/admin/termsReacceptDismissal.contract.test.mjs` | TEST | CURRENT Next modal backdrop/Close confirmation reset source contract (not a DOM/browser test) | MIG-0727 | SAME (CURRENT only; no TARGET ownership) | RETAINED | PR#852 SHA=19b1c2aa2fad05ab1237a3eee763f4268c0225f3 TEST=node --test --experimental-strip-types src/components/admin/termsReacceptDismissal.contract.test.mjs CI=https://github.com/coroke3/flamenode/pull/852/checks (exact HEAD CI and non-writer review pending) |
 | `src/components/admin/**` | HELPER | MIG-0705 | admin components move to apps/ops | NOT_STARTED |
 | `src/components/auth/**` | HELPER | MIG-0802 | sign-out button (Auth.js) | NOT_STARTED |
 | `src/components/event/**` | HELPER | MIG-0502 | event components to @flamenode/ui / apps/site | NOT_STARTED |
