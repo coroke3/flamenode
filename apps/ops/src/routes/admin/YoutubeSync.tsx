@@ -14,6 +14,13 @@ const CHECKS = [["failed", "失敗のみ"], ["stale", "14日以上未同期"], [
 function formatTimestamp(value: number | null): string {
   return value == null ? "—" : new Date(value * 1000).toLocaleString("ja-JP");
 }
+/** A denied admin response cannot supply an untrusted redirect destination. */
+export function youtubeSyncRevokedDestination(status: string): "/entry" | "/dashboard" | null {
+  if (status === "anonymous") return "/entry";
+  if (status === "forbidden") return "/dashboard";
+  return null;
+}
+
 export function YoutubeSync(): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const query = params.toString();
@@ -22,26 +29,53 @@ export function YoutubeSync(): React.ReactElement {
   const [refresh, setRefresh] = React.useState(0);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const busyRef = React.useRef(false);
+  // Revocation outlives in-flight reads and writes; a late GET cannot republish
+  // private metadata after an authoritative GET or POST 401/403.
+  const accessRevokedRef = React.useRef(false);
+  const [revokedTo, setRevokedTo] = React.useState<"/entry" | "/dashboard" | null>(null);
+  React.useEffect(() => {
+    if (revokedTo) window.location.assign(revokedTo);
+  }, [revokedTo]);
   React.useEffect(() => {
     const controller = new AbortController();
     setData(null);
     void readYoutubeSync(query ? "?" + query : "", undefined, controller.signal).then(result => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || accessRevokedRef.current) return;
+      const destination = youtubeSyncRevokedDestination(result.status);
+      if (destination) {
+        accessRevokedRef.current = true;
+        setData(null);
+        setError(null);
+        setRevokedTo(destination);
+        return;
+      }
       if (result.status === "ok") { setData(result.data); setError(null); }
-      else setError(result.status === "anonymous" ? "再ログインが必要です。" : "同期状態を取得できませんでした。");
+      else setError("同期状態を取得できませんでした。");
     });
     return () => controller.abort();
   }, [query, refresh]);
   async function resync(videoId: string): Promise<void> {
-    if (busyRef.current) return;
+    if (busyRef.current || accessRevokedRef.current) return;
     busyRef.current = true;
     setBusyId(videoId);
     try {
       const result = await postAdminOp("youtube-sync/videos/" + encodeURIComponent(videoId) + "/resync", {});
-      if (result.status !== "ok") setError(result.status === "anonymous" ? "再ログインが必要です。" : "再同期を予約できませんでした。状態を確認してください。");
+      if (accessRevokedRef.current) return;
+      const destination = youtubeSyncRevokedDestination(result.status);
+      if (destination) {
+        accessRevokedRef.current = true;
+        setData(null);
+        setError(null);
+        setRevokedTo(destination);
+        return;
+      }
+      if (result.status !== "ok") setError("再同期を予約できませんでした。状態を確認してください。");
       else setRefresh(value => value + 1);
     } finally { busyRef.current = false; setBusyId(null); }
   }
+  // Unmount all previously authorized metadata and resync actions before
+  // the effect-driven same-origin redirect. 503 remains a normal error.
+  if (revokedTo) return <section role="alert">YouTube同期管理画面へのアクセスが終了しました。</section>;
   return <div className="fn-public-container fn-page">
     <header className="fn-page-head"><h1>YouTubeメタデータ同期状態</h1>
       <p>video_youtube_metadataと作品情報を照合し、同期失敗・未同期・YouTube IDなしを確認します。</p></header>
