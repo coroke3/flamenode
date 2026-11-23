@@ -36,11 +36,13 @@ test("private event descending recent-time order ignores malformed timestamps", 
 test("infinite dates sort after finite upcoming events and all surfaces agree", () => {
   const invalid = { id: "a", visibility_status: "public", start_time: Infinity, end_time: Infinity };
   const valid = { id: "b", visibility_status: "public", start_time: 200, end_time: 200 };
-  const negative = { id: "c", visibility_status: "public", start_time: -Infinity, end_time: Infinity };
+  const negative = { id: "c", visibility_status: "public", start_time: -Infinity, end_time: 300 };
+  const active = { id: "d", visibility_status: "public", start_time: 50, end_time: 300 };
   for (const [surface, compare] of comparators) {
     assert.equal(compare(invalid, valid, 100), 1, surface);
     assert.equal(compare(valid, invalid, 100), -1, surface);
-    assert.equal(compare(negative, valid, 100), 1, surface);
+    assert.equal(compare(negative, active, 100), 1, surface);
+    assert.equal(compare(active, negative, 100), -1, surface);
   }
 });
 
