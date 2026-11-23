@@ -29,6 +29,18 @@ test("URL sanitizer rejects embedded WHATWG-stripped control characters", () => 
   }
 });
 
+test("URL sanitizer rejects every C0 control and DEL at URL boundaries", () => {
+  for (const codePoint of [...Array(32).keys(), 0x7f]) {
+    const control = String.fromCharCode(codePoint);
+    for (const input of [
+      control + "https://example.com/path",
+      "https://example.com/path" + control,
+    ]) {
+      assert.equal(normalizeHttpUrl(input), null, `U+${codePoint.toString(16).padStart(4, "0")}`);
+    }
+  }
+});
+
 test("URL sanitizer preserves legitimate trimmed HTTP URLs", () => {
   assert.equal(normalizeHttpUrl(" https://example.com/path "), "https://example.com/path");
   assert.equal(normalizeHttpUrl("http://example.com"), "http://example.com/");
