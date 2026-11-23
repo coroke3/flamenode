@@ -4,6 +4,7 @@ import * as React from "react";
 import { JSDOM } from "jsdom";
 import { MemoryRouter } from "react-router-dom";
 import { createAdminCostGuardApi } from "../.test-dist/apps/ops/src/api/adminCostGuard.js";
+import { createAdminNotificationsApi } from "../.test-dist/apps/ops/src/api/adminNotifications.js";
 import { AdminCostGuard } from "../.test-dist/apps/ops/src/routes/admin/AdminCostGuard.js";
 
 const response = (status, data) =>
@@ -74,6 +75,14 @@ test("SEC-814: only confirmed identity denials revoke; ordinary 403 guard messag
   const anonymous = createAdminCostGuardApi(async () => response(401, { ok: false, reason: "forbidden" }));
   assert.deepEqual(await anonymous.setMode("normal", "audit"),
     { ok: false, anonymous: true, message: "ログインしてください。" }, "HTTP 401 takes priority over 403-shaped data");
+});
+
+test("SEC-814: shared notification writes keep their original D-17-3 result contract", async () => {
+  const notifications = createAdminNotificationsApi(async () =>
+    response(403, { ok: false, reason: "forbidden", message: "既存の通知操作は拒否されました。" }));
+  assert.deepEqual(await notifications.retry("safe-id"),
+    { ok: false, message: "既存の通知操作は拒否されました。" },
+    "Cost Guard's new revocation flag must not leak into other callers of postAdminBody");
 });
 
 test("SEC-814: POST 403 forbidden immediately hides private Cost Guard data and every action", async () => {
