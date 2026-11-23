@@ -10,6 +10,13 @@ const TARGETS = ["top", "top_recommended", "top_latest", "top_nostalgic", "top_e
   "users_index", "list_recent", "list_popular", "search_index", "recommend_core", "recommend", "rules",
   "youtube_related_blocklist", "random_video_pool", "member_suggestions"] as const;
 
+/** Never treat an admin authorization rejection as a retryable application error. */
+export function staticBuildsRevokedDestination(status: string): "/entry" | "/dashboard" | null {
+  if (status === "anonymous") return "/entry";
+  if (status === "forbidden") return "/dashboard";
+  return null;
+}
+
 export function StaticBuilds(): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const [data, setData] = React.useState<AdminStaticBuildsResponse | null>(null);
@@ -17,22 +24,42 @@ export function StaticBuilds(): React.ReactElement {
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
   const [refreshId, setRefreshId] = React.useState(0);
+  const [revokedTo, setRevokedTo] = React.useState<"/entry" | "/dashboard" | null>(null);
+  // A response from an older in-flight GET must never re-mount private state.
+  const accessRevokedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (revokedTo) window.location.assign(revokedTo);
+  }, [revokedTo]);
   React.useEffect(() => {
     const controller = new AbortController();
     void readStaticBuilds(undefined, controller.signal).then(result => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || accessRevokedRef.current) return;
+      const destination = staticBuildsRevokedDestination(result.status);
+      if (destination) {
+        accessRevokedRef.current = true;
+        setData(null);
+        setRevokedTo(destination);
+        return;
+      }
       if (result.status === "ok") { setData(result.data); setLoadError(null); }
       else { setData(null); setLoadError(result.status === "anonymous" ? "再ログインが必要です。" : "取得できませんでした。"); }
     });
     return () => controller.abort();
   }, [refreshId]);
   async function mutate(path: string, payload: Record<string, string>, carryQuery = false): Promise<void> {
-    if (busyRef.current) return;
+    if (busyRef.current || accessRevokedRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setLoadError(null);
     try {
       const result = await postAdminOp(path, payload);
+      const destination = staticBuildsRevokedDestination(result.status);
+      if (destination) {
+        accessRevokedRef.current = true;
+        setData(null);
+        setRevokedTo(destination);
+        return;
+      }
       if (result.status !== "ok" && result.status !== "outcome") {
         setLoadError(result.status === "anonymous" ? "再ログインが必要です。" : "操作できませんでした。更新後に状態を確認してください。");
         return;
@@ -59,6 +86,9 @@ export function StaticBuilds(): React.ReactElement {
     failed: "修復操作に失敗しました。ログとdeep healthを確認してください。",
   };
   const stateFailed = query.get("backfill_state_persisted") === "0";
+  // Hide all previously loaded queue diagnostics and privileged repair controls
+  // before the fixed internal navigation effect runs.
+  if (revokedTo) return <section role="alert">管理画面へのアクセスが終了しました。</section>;
   return <div className="fn-public-container fn-page">
     <header className="fn-page-head"><h1>静的JSON再生成</h1>
       <p>編集駆動のR2公開用JSONキュー。Next.jsのビルドとは別です。</p></header>
