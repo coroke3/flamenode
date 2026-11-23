@@ -21,7 +21,7 @@ function decodeHtmlEntities(text: string): string {
 
 function stripHtmlTags(fragment: string): string {
   return decodeHtmlEntities(
-    fragment.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, ""),
+    fragment.replace(/<br\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, ""),
   ).replace(/\u00a0/g, " ");
 }
 
@@ -43,6 +43,28 @@ function parseHtmlTableRegex(html: string): string[][] {
   return rows.filter((r) => !(r.length === 1 && r[0] === ""));
 }
 
+/**
+ * textContent omits <br> separators. Preserve explicit in-cell line breaks
+ * without relying on innerText/layout in DOMParser-created documents.
+ */
+function readDomCellText(cell: Element): string {
+  const pieces: string[] = [];
+  const append = (node: Node): void => {
+    if (node.nodeType === 3) {
+      pieces.push(node.nodeValue ?? "");
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    if ((node as Element).tagName.toLowerCase() === "br") {
+      pieces.push("\n");
+      return;
+    }
+    for (const child of Array.from(node.childNodes)) append(child);
+  };
+  for (const child of Array.from(cell.childNodes)) append(child);
+  return pieces.join("").replace(/\u00a0/g, " ");
+}
+
 /** Excel / Sheets が付与する HTML 表をパース */
 export function parseHtmlClipboardTable(html: string): string[][] {
   if (!html.trim()) return [];
@@ -55,8 +77,7 @@ export function parseHtmlClipboardTable(html: string): string[][] {
         const rows: string[][] = [];
         for (const tr of table.querySelectorAll("tr")) {
           const cells = [...tr.querySelectorAll("td, th")].map((el) => {
-            const t = el.textContent ?? "";
-            return t.replace(/\u00a0/g, " ");
+            return readDomCellText(el);
           });
           if (cells.length > 0) rows.push(cells);
         }
