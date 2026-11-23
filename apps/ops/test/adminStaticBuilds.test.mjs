@@ -200,7 +200,7 @@ const staticBuildsFixture = (() => {
   };
 })();
 
-async function renderStaticBuildsWithFetch(fetchFn, exercise) {
+async function renderStaticBuildsWithFetch(fetchFn, exercise, onRevokedNavigate) {
   const { JSDOM, VirtualConsole } = await import("jsdom");
   const { createRoot } = await import("react-dom/client");
   const dom = new JSDOM("<div id='app'></div>", {
@@ -219,7 +219,8 @@ async function renderStaticBuildsWithFetch(fetchFn, exercise) {
   const root = createRoot(container);
   try {
     await React.act(async () => {
-      root.render(React.createElement(MemoryRouter, null, React.createElement(StaticBuilds)));
+      root.render(React.createElement(MemoryRouter, null,
+        React.createElement(StaticBuilds, { onRevokedNavigate })));
     });
     await exercise(container, dom.window);
   } finally {
@@ -251,6 +252,7 @@ test("SEC-802: fixed internal revocation destinations and unrelated failures rem
 test("SEC-802: authenticated diagnostics and every repair action unmount after write 401 or 403", async () => {
   for (const status of [401, 403]) {
     let postCount = 0;
+    const redirects = [];
     await renderStaticBuildsWithFetch(async (url, init) => {
       if (init?.method === "GET") {
         assert.equal(url, "/api/admin-read/ops/static-builds");
@@ -269,17 +271,20 @@ test("SEC-802: authenticated diagnostics and every repair action unmount after w
         button.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
       });
       assert.equal(postCount, 1);
+      assert.deepEqual(redirects, [status === 401 ? "/entry" : "/dashboard"],
+        "the effect invokes exactly one fixed internal redirect");
       assert.match(container.textContent, /管理画面へのアクセスが終了しました/);
       assert.doesNotMatch(container.textContent, /SEC802_PRIVATE_BACKFILL_DIAGNOSTIC/);
       assert.doesNotMatch(container.textContent, /先頭から再実行/);
       assert.equal(container.querySelectorAll("button").length, 0,
         "no stale privileged action is left mounted");
-    });
+    }, destination => redirects.push(destination));
   }
 });
 
 test("SEC-802: GET 401/403 and ordinary 503 never mount privileged controls", async () => {
   for (const status of [401, 403, 503]) {
+    const redirects = [];
     await renderStaticBuildsWithFetch(async () => response(status,
       { ok: true, redirect: "https://evil.example", ...staticBuildsFixture }),
     async (container) => {
@@ -291,6 +296,8 @@ test("SEC-802: GET 401/403 and ordinary 503 never mount privileged controls", as
       assert.doesNotMatch(container.textContent, /SEC802_PRIVATE_BACKFILL_DIAGNOSTIC/);
       assert.doesNotMatch(container.textContent, /先頭から再実行/);
       assert.equal(container.querySelectorAll("button").length, 0);
-    });
+      assert.deepEqual(redirects, status === 503 ? [] :
+        [status === 401 ? "/entry" : "/dashboard"]);
+    }, destination => redirects.push(destination));
   }
 });
