@@ -93,14 +93,20 @@ export async function postAdminBody(
     return toWriteResult(await send<AdminOpsBody>(fetchFn, "POST", path, body));
   }
   let accessUnknown = false;
+  let authoritativeHttpStatus: number | null = null;
   const boundedFetch: OpsFetch = async (url, init) => {
     const response = await fetchFn(url, init);
+    authoritativeHttpStatus = response.status;
     if (response.status !== 403) return response;
     const bounded = await bounded403Body(response);
     accessUnknown = bounded.accessUnknown;
     return bounded.reply;
   };
-  const outcome = toWriteResult(await send<AdminOpsBody>(boundedFetch, "POST", path, body), true);
+  // D-17-3 send() deliberately hides HTTP status. Capture the *actual* status
+  // before optional 403 JSON parsing: a 503 with a misleading forbidden reason
+  // is not an authorization revocation and must not navigate away.
+  const outcome = toWriteResult(await send<AdminOpsBody>(boundedFetch, "POST", path, body),
+    authoritativeHttpStatus === 403);
   // The fixed-page retry checks the authoritative admin read before restoring
   // any private DTO. Do not classify an unparseable 403 as "forbidden".
   return accessUnknown
