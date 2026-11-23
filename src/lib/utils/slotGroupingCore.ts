@@ -73,12 +73,25 @@ export function sortSlotsChronologically<
   },
 >(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
-    const aTimed = a.start_time != null;
-    const bTimed = b.start_time != null;
+    // Malformed timestamps must not bypass the order/id tie-breaker via NaN.
+    const aStart = a.start_time != null && Number.isFinite(a.start_time)
+      ? a.start_time
+      : null;
+    const bStart = b.start_time != null && Number.isFinite(b.start_time)
+      ? b.start_time
+      : null;
+    const aTimed = aStart !== null;
+    const bTimed = bStart !== null;
     if (aTimed !== bTimed) return aTimed ? -1 : 1;
-    const startDiff = (a.start_time ?? 0) - (b.start_time ?? 0);
+    const startDiff = (aStart ?? 0) - (bStart ?? 0);
     if (startDiff !== 0) return startDiff;
-    const orderDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    const aOrder = a.sort_order != null && Number.isFinite(a.sort_order)
+      ? a.sort_order
+      : 0;
+    const bOrder = b.sort_order != null && Number.isFinite(b.sort_order)
+      ? b.sort_order
+      : 0;
+    const orderDiff = aOrder - bOrder;
     return orderDiff || (a.id ?? "").localeCompare(b.id ?? "");
   });
 }
