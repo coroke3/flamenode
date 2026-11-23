@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   areSlotsInSamePart,
+  buildSlotParts,
   sortSlotsChronologically,
 } from "./slotGroupingCore.ts";
 
@@ -117,4 +118,37 @@ test("unsafe sort positions fall back to stable ids", () => {
     "b",
     "z",
   ]);
+});
+
+test("non-finite part metadata is timeless while original slot rows remain unchanged", async () => {
+  const { formatSlotPartLabel } = await import("./slotGrouping.ts");
+  for (const invalid of [NaN, Infinity, -Infinity]) {
+    const input = [{ id: "bad", start_time: invalid, sort_order: 0 }];
+    const [part] = buildSlotParts(input);
+    assert.ok(part);
+    assert.equal(part.start_time, null);
+    assert.equal(part.last_start_time, null);
+    assert.equal(part.is_timeless, true);
+    assert.equal(Object.is(part.rows[0].start_time, invalid), true);
+    assert.equal(formatSlotPartLabel(part), "時間なし枠");
+  }
+});
+
+test("both part flush paths preserve valid epoch-zero metadata and normalize invalid tails", () => {
+  const rows = [
+    { id: "epoch", start_time: 0, sort_order: 0 },
+    { id: "epoch-later", start_time: 60, sort_order: 1 },
+    { id: "invalid", start_time: NaN, sort_order: 2 },
+  ];
+  const parts = buildSlotParts(rows);
+  assert.equal(parts.length, 2);
+  assert.deepEqual(
+    parts.map(({ index, start_time, last_start_time, is_timeless }) => ({
+      index, start_time, last_start_time, is_timeless,
+    })),
+    [
+      { index: 1, start_time: 0, last_start_time: 60, is_timeless: false },
+      { index: 2, start_time: null, last_start_time: null, is_timeless: true },
+    ],
+  );
 });
