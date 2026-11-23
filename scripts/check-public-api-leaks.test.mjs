@@ -112,3 +112,23 @@ test("live leak probe never logs provider errors or poisoned JSON decoder detail
     console.error = original;
   }
 });
+
+
+test("unavailable diagnostics never turn rejected live probes into success or throw", async () => {
+  const original = console.error;
+  console.error = () => { throw new Error("logger unavailable"); };
+  try {
+    const failedNetwork = await checkEndpoint(listUrl, async () => { throw new Error("network failed"); });
+    assert.deepEqual(failedNetwork, { kind: "fetch_error" });
+
+    const failedHttp = await checkEndpoint(listUrl, async () => new Response(null, { status: 503 }));
+    assert.deepEqual(failedHttp, { kind: "http_error" });
+
+    const failedJson = await checkEndpoint(listUrl, async () => new Response("{bad", {
+      headers: { "Content-Type": "application/json" },
+    }));
+    assert.deepEqual(failedJson, { kind: "invalid_json" });
+  } finally {
+    console.error = original;
+  }
+});
