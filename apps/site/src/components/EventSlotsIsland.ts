@@ -154,5 +154,6 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
           },
         )
       : React.createElement(EventSlotsView, { model }),
-  );
-};
+  );}
+
+export default EventSlotsIsland;
