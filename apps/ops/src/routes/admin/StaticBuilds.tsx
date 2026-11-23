@@ -17,7 +17,15 @@ export function staticBuildsRevokedDestination(status: string): "/entry" | "/das
   return null;
 }
 
-export function StaticBuilds(): React.ReactElement {
+/** The real router uses location.assign; injection permits verifying navigation
+ * calls without relying on jsdom's intentionally unimplemented navigation. */
+function navigateStaticBuildsRevoked(destination: "/entry" | "/dashboard"): void {
+  window.location.assign(destination);
+}
+
+export function StaticBuilds({ onRevokedNavigate = navigateStaticBuildsRevoked }: {
+  onRevokedNavigate?: (destination: "/entry" | "/dashboard") => void;
+} = {}): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const [data, setData] = React.useState<AdminStaticBuildsResponse | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -28,8 +36,8 @@ export function StaticBuilds(): React.ReactElement {
   // A response from an older in-flight GET must never re-mount private state.
   const accessRevokedRef = React.useRef(false);
   React.useEffect(() => {
-    if (revokedTo) window.location.assign(revokedTo);
-  }, [revokedTo]);
+    if (revokedTo) onRevokedNavigate(revokedTo);
+  }, [revokedTo, onRevokedNavigate]);
   React.useEffect(() => {
     const controller = new AbortController();
     void readStaticBuilds(undefined, controller.signal).then(result => {
