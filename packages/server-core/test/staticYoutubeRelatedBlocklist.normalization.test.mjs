@@ -71,3 +71,11 @@ test("related blocklist preserves valid producer output and numeric-string times
   assert.equal(legacyString.generatedAt, 1_729_000_000);
   assert.equal(legacyString.reasons.get("video_a"), "private");
 });
+
+test("related blocklist accepts a valid empty blocked index", () => {
+  const normalized = normalizeYoutubeRelatedBlocklist(payload({ blocked: {} }));
+  assert.ok(normalized);
+  assert.equal(normalized.generatedAt, 1_729_000_000);
+  assert.deepEqual(normalized.blockedIds, new Set());
+  assert.deepEqual(normalized.reasons, new Map());
+});
