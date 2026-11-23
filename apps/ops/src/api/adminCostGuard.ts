@@ -16,7 +16,7 @@ export type AdminOpsBody = { ok: boolean; message?: string; reason?: string };
 type BodySchema = { safeParse: (value: unknown) => { success: boolean; data?: unknown } };
 
 /** Maps a D-17-3 send() result to the `{ok, message}` shape CURRENT's server actions returned. */
-export function toWriteResult(result: OpsWriteResult<AdminOpsBody>): AdminWriteResult {
+export function toWriteResult(result: OpsWriteResult<AdminOpsBody>, detectRevocation = false): AdminWriteResult {
   if (result.status === "ok") {
     const { ok, message, reason } = result.data;
     // D-17-3 send() handles HTTP 401 before JSON parsing. For non-401
@@ -28,7 +28,7 @@ export function toWriteResult(result: OpsWriteResult<AdminOpsBody>): AdminWriteR
     // These fixed Hono identity denials revoke admin access. Other HTTP 403
     // reasons (maintenance_mode, cost_guard_blocked, invalid_origin, etc.)
     // must retain their CURRENT in-form error behavior.
-    if (!ok && (reason === "forbidden" || reason === "banned")) {
+    if (detectRevocation && !ok && (reason === "forbidden" || reason === "banned")) {
       return { ok: false, message: typeof message === "string" ? message : "この操作を実行する権限がありません。", forbidden: true };
     }
     return { ok, ...(typeof message === "string" ? { message } : {}) };
@@ -79,12 +79,18 @@ async function bounded403Body(response: Response): Promise<{ reply: Response; ac
 
 export async function postAdminBody(
   fetchFn: OpsFetch, path: string, schema: BodySchema | null, raw?: object,
+  options: { detectRevocation?: boolean } = {},
 ): Promise<AdminWriteResult> {
   let body: object | undefined;
   if (schema) {
     const checked = schema.safeParse(raw);
     if (!checked.success) return { ok: false, message: "入力内容が不正です。" };
     body = checked.data as object;
+  }
+  // Notification management also uses this transport. Preserve its existing
+  // D-17-3 result semantics; only Cost Guard opts into the new auth latch.
+  if (!options.detectRevocation) {
+    return toWriteResult(await send<AdminOpsBody>(fetchFn, "POST", path, body));
   }
   let accessUnknown = false;
   const boundedFetch: OpsFetch = async (url, init) => {
@@ -94,7 +100,7 @@ export async function postAdminBody(
     accessUnknown = bounded.accessUnknown;
     return bounded.reply;
   };
-  const outcome = toWriteResult(await send<AdminOpsBody>(boundedFetch, "POST", path, body));
+  const outcome = toWriteResult(await send<AdminOpsBody>(boundedFetch, "POST", path, body), true);
   // The fixed-page retry checks the authoritative admin read before restoring
   // any private DTO. Do not classify an unparseable 403 as "forbidden".
   return accessUnknown
@@ -112,7 +118,8 @@ export async function fetchAdminCostGuard(
 }
 
 export function createAdminCostGuardApi(fetchFn: OpsFetch = (url, init) => fetch(url, init)) {
-  const post = (path: string, schema: BodySchema, raw: object) => postAdminBody(fetchFn, path, schema, raw);
+  const post = (path: string, schema: BodySchema, raw: object) =>
+    postAdminBody(fetchFn, path, schema, raw, { detectRevocation: true });
   return {
     read: (signal?: AbortSignal) => fetchAdminCostGuard(fetchFn, signal),
     setMode: (mode: string, reason: string) =>
