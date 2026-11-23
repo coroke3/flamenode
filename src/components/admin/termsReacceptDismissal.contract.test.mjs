@@ -42,3 +42,23 @@ test("CURRENT reaccept send keeps explicit TERMS, busy and content guards", () =
   assert.match(source, /fd\.set\("cursor", String\(cursor\)\)/);
   assert.match(source, /router\.refresh\(\)/);
 });
+
+test("CURRENT reaccept enqueue uses synchronous single-flight guard and releases on failure", () => {
+  const ref = source.match(/const busyRef = React\.useRef\(false\);/);
+  assert.ok(ref, "useTransition busy alone does not guard reentrant event handlers");
+  const handler = source.match(
+    /const onSubmit = \(\) => \{([\s\S]*?)\n  \};/,
+  )?.[1];
+  assert.ok(handler);
+  assert.match(
+    handler,
+    /if \(busyRef\.current \|\| busy \|\| confirmText !== "TERMS" \|\| !content\.trim\(\)\) return;/,
+  );
+  const latch = handler.indexOf("busyRef.current = true;");
+  const transition = handler.indexOf("startTransition(async () => {");
+  assert.ok(latch >= 0 && transition > latch, "claim latch before scheduling transition");
+  assert.match(handler, /try \{[\s\S]*await broadcastTermsReaccept\(fd\);/);
+  assert.match(handler, /catch \{[\s\S]*setMessage\("失敗しました。"\);/);
+  assert.match(handler, /finally \{\s*busyRef\.current = false;\s*\}/);
+  assert.match(source, /function closeDialog\(\): void \{\s*if \(busyRef\.current \|\| busy\) return;/);
+});
