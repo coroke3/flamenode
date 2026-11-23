@@ -16,7 +16,7 @@ test("CURRENT reaccept modal dismissal disarms one-time TERMS confirmation", () 
   assert.ok(handler, "both dismissal controls must share closeDialog");
   assert.match(handler, /if \(busy\) return;/);
   assert.match(handler, /setOpen\(false\);/);
-  assert.match(handler, /setConfirmText\(" "\.trim\(\)\);|setConfirmText\(""\);/);
+  assert.match(handler, /setConfirmText\\(""\\);/);
   assert.doesNotMatch(handler, /setCursor\(|setContent\(|setEnqueuedTotal\(/);
 
   const backdrop = source.match(
