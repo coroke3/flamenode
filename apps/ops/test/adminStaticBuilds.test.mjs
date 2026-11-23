@@ -368,3 +368,50 @@ test("SEC-802: delayed GET after a revoked POST cannot republish private diagnos
     }, destination => navigations.push(destination));
   }
 });
+
+test("SEC-802: GET 403 headers revoke before a stalled error body is read", async () => {
+  let getCount = 0;
+  let postCount = 0;
+  let blockedJsonCalls = 0;
+  const navigations = [];
+  // Deliberately never resolves: an optional 403 body is not an auth gate.
+  const neverJson = new Promise(() => {});
+  await renderStaticBuildsWithFetch(async (url, init) => {
+    if (init?.method === "GET") {
+      assert.equal(url, "/api/admin-read/ops/static-builds");
+      getCount++;
+      if (getCount === 1) return response(200, staticBuildsFixture);
+      if (getCount === 2) return {
+        status: 403,
+        json: () => { blockedJsonCalls++; return neverJson; },
+      };
+      assert.fail("no GET after permission revocation");
+    }
+    assert.equal(init?.method, "POST");
+    postCount++;
+    if (postCount === 1) return response(200, { ok: true });
+    assert.fail("no POST after permission revocation");
+  }, async (container, win) => {
+    assert.match(container.textContent, /SEC802_PRIVATE_BACKFILL_DIAGNOSTIC/);
+    const button = [...container.querySelectorAll("button")]
+      .find(node => node.textContent.includes("関連動画の共有JSONを再生成キュー投入"));
+    assert.ok(button);
+    await React.act(async () => {
+      button.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+    });
+    assert.equal(postCount, 1);
+    assert.equal(getCount, 2, "successful write triggered a new GET");
+    assert.equal(blockedJsonCalls, 1,
+      "shared adapter is still blocked parsing the 403 optional body");
+    assert.deepEqual(navigations, ["/dashboard"],
+      "headers alone triggered the fixed internal destination");
+    assert.match(container.textContent, /管理画面へのアクセスが終了しました/);
+    assert.doesNotMatch(container.textContent, /SEC802_PRIVATE_BACKFILL_DIAGNOSTIC/);
+    assert.equal(container.querySelectorAll("button").length, 0);
+    await React.act(async () => {
+      button.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+    });
+    assert.equal(postCount, 1, "revoked controls must not send another write");
+    assert.deepEqual(navigations, ["/dashboard"]);
+  }, target => navigations.push(target));
+});
