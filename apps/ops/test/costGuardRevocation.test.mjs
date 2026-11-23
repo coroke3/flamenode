@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as React from "react";
 import { JSDOM } from "jsdom";
-import { createRoot } from "react-dom/client";
 import { createAdminCostGuardApi } from "../.test-dist/apps/ops/src/api/adminCostGuard.js";
 import { AdminCostGuard } from "../.test-dist/apps/ops/src/routes/admin/AdminCostGuard.js";
 
@@ -29,6 +28,7 @@ async function mounted(run) {
     });
   }
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const { createRoot } = await import("react-dom/client");
   const root = createRoot(dom.window.document.getElementById("root"));
   try {
     await run(dom, root);
