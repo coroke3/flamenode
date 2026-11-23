@@ -61,15 +61,33 @@ export function createEmptyStaticBackfillState(): StaticBackfillState {
   };
 }
 
+function parseFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function normalizeCount(value: unknown): number {
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue)
-    ? Math.max(0, Math.floor(numberValue))
-    : 0;
+  // Keep the historical null/empty -> 0 fallback, but do not coerce JSON
+  // booleans, arrays or objects into apparently valid progress counts.
+  if (value == null || value === "") return 0;
+  const numberValue = parseFiniteNumber(value);
+  return numberValue == null
+    ? 0
+    : Math.max(0, Math.floor(numberValue));
+}
+
+function normalizeNullableTimestamp(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const numberValue = parseFiniteNumber(value);
+  return numberValue == null ? null : Math.floor(numberValue);
 }
 
 function normalizeRun(value: unknown): StaticBackfillRunState {
-  if (!value || typeof value !== "object") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return emptyRun();
   }
 
@@ -97,8 +115,6 @@ function normalizeRun(value: unknown): StaticBackfillRunState {
       ? row.last_error.trim().slice(0, 1000)
       : null;
 
-  const lastRunAt = Number(row.last_run_at);
-
   return {
     cursor,
     phase,
@@ -107,12 +123,12 @@ function normalizeRun(value: unknown): StaticBackfillRunState {
     scanned: normalizeCount(row.scanned),
     enqueued: normalizeCount(row.enqueued),
     last_error: lastError,
-    last_run_at: Number.isFinite(lastRunAt) ? Math.floor(lastRunAt) : null,
+    last_run_at: normalizeNullableTimestamp(row.last_run_at),
   };
 }
 
 export function parseStaticBackfillState(value: unknown): StaticBackfillState {
-  if (!value || typeof value !== "object") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return createEmptyStaticBackfillState();
   }
 
@@ -123,19 +139,19 @@ export function parseStaticBackfillState(value: unknown): StaticBackfillState {
   };
 
   if (
-    Number(payload.schema_version) !== 1 ||
+    payload.schema_version !== 1 ||
     !payload.runs ||
-    typeof payload.runs !== "object"
+    typeof payload.runs !== "object" ||
+    Array.isArray(payload.runs)
   ) {
     return createEmptyStaticBackfillState();
   }
 
   const runs = payload.runs as Record<string, unknown>;
-  const updatedAt = Number(payload.updated_at);
 
   return {
     schema_version: 1,
-    updated_at: Number.isFinite(updatedAt) ? Math.floor(updatedAt) : null,
+    updated_at: normalizeNullableTimestamp(payload.updated_at),
     runs: {
       video_v2: normalizeRun(runs.video_v2),
       user_profile: normalizeRun(runs.user_profile),
