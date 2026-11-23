@@ -159,6 +159,42 @@ test("normalizeStaticTrending: public 以外の status は除外", () => {
   assert.deepEqual(data.items, []);
 });
 
+test("normalizeStaticTrending: contradictory private visibility metadata is never projected publicly", () => {
+  const payload = {
+    schema_version: 1,
+    generated_at: 100,
+    items: [
+      { ...sampleItem, id: "visibility-private", status: "public", visibility_status: "private" },
+      { ...sampleItem, id: "status-private", status: "private", visibility_status: "public" },
+      { ...sampleItem, id: "visibility-draft", status: "public", visibility_status: "draft" },
+    ],
+  };
+
+  const data = normalizeStaticTrending(payload);
+  assert.ok(data);
+  assert.deepEqual(data.items, []);
+});
+
+test("normalizeStaticTrending: legacy snapshots with missing or null visibility markers remain compatible", () => {
+  const data = normalizeStaticTrending({
+    schema_version: 1,
+    generated_at: 100,
+    items: [
+      { ...sampleItem, id: "legacy-missing", status: undefined, visibility_status: undefined },
+      { ...sampleItem, id: "legacy-null", status: null, visibility_status: null },
+      { ...sampleItem, id: "explicit-public", status: "public", visibility_status: "public" },
+    ],
+  });
+
+  assert.ok(data);
+  assert.deepEqual(data.items.map((item) => item.id), [
+    "legacy-missing",
+    "legacy-null",
+    "explicit-public",
+  ]);
+  assert.deepEqual(data.items.map((item) => item.views_7d), [25, 25, 25]);
+});
+
 test("resolveStaticTrendingStaleMeta: 3時間超で stale、24時間超で tooOldForHome", () => {
   const generatedAt = 1_000_000;
   const fresh = resolveStaticTrendingStaleMeta(
