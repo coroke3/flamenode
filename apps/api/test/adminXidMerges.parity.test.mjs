@@ -248,6 +248,16 @@ if (runUnderRootTsx(import.meta.url)) {
     });
     assert.equal(response.status, 400, JSON.stringify(response.body));
     assert.equal(response.body.message, "入力エラー");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+
+    // The same malformed stream must fail for the create endpoint, too;
+    // a forged zero header cannot turn it into a valid empty payload.
+    const create = await callHono(side, "/", "{malformed", {
+      headers: { Origin: SITE, "content-length": "0" },
+    });
+    assert.equal(create.status, 400, JSON.stringify(create.body));
+    assert.equal(create.body.message, "入力エラー");
+    assert.equal(create.headers.get("cache-control"), "no-store");
 
     // A valid JSON stream with the same forged header must still be parsed;
     // the nonexistent request ID is then rejected by the domain lookup.
