@@ -241,6 +241,15 @@ if (runUnderRootTsx(import.meta.url)) {
     return { status: res.status, headers: res.headers, body: await res.json() };
   }
 
+  test("MIG-0644: forged zero Content-Length does not bypass JSON validation", async () => {
+    const side = createSide();
+    const response = await callHono(side, "/missing/reject", "{malformed", {
+      headers: { Origin: SITE, "content-length": "0" },
+    });
+    assert.equal(response.status, 400, JSON.stringify(response.body));
+    assert.equal(response.body.message, "入力エラー");
+  });
+
   function seedMergeScenario(sqlite, { source = "src_x", target = "tgt_x", rowCount = 1 } = {}) {
     const NOW = Math.floor(Date.now() / 1000);
     insert(sqlite, "x_users", { id: source, x_name: "Source X", approval_status: "approved" });
