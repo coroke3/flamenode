@@ -61,3 +61,60 @@ test("non-finite timestamps never pass slot adjacency checks", () => {
     );
   }
 });
+
+test("untimed slot adjacency rejects non-finite and unsafe sort positions", () => {
+  assert.equal(
+    areSlotsInSamePart(
+      { start_time: null, sort_order: -1 },
+      { start_time: null, sort_order: 0 },
+    ),
+    true,
+  );
+  for (const [previousOrder, nextOrder] of [
+    [Infinity, Infinity],
+    [-Infinity, -Infinity],
+    [NaN, NaN],
+    [2 ** 53, 2 ** 53],
+    [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1],
+    [Number.MIN_SAFE_INTEGER - 1, Number.MIN_SAFE_INTEGER],
+    [1.5, 2.5],
+  ]) {
+    assert.equal(
+      areSlotsInSamePart(
+        { start_time: null, sort_order: previousOrder },
+        { start_time: null, sort_order: nextOrder },
+      ),
+      false,
+      `invalid order pair: ${previousOrder} -> ${nextOrder}`,
+    );
+  }
+  assert.equal(
+    areSlotsInSamePart(
+      { start_time: null, sort_order: null },
+      { start_time: null, sort_order: 1 },
+    ),
+    false,
+  );
+});
+
+test("untimed slots with corrupt sort positions do not form the same part", async () => {
+  const { buildSlotParts } = await import("./slotGroupingCore.ts");
+  const parts = buildSlotParts([
+    { id: "invalid-a", start_time: null, sort_order: Infinity },
+    { id: "invalid-b", start_time: null, sort_order: Infinity },
+  ]);
+  assert.equal(parts.length, 2);
+});
+
+test("unsafe sort positions fall back to stable ids", () => {
+  const slots = [
+    { id: "z", start_time: null, sort_order: Number.MAX_SAFE_INTEGER + 1 },
+    { id: "a", start_time: null, sort_order: null },
+    { id: "b", start_time: null, sort_order: 0 },
+  ];
+  assert.deepEqual(sortSlotsChronologically(slots).map((s) => s.id), [
+    "a",
+    "b",
+    "z",
+  ]);
+});
