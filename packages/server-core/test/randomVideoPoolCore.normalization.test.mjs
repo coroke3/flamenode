@@ -77,20 +77,18 @@ test("random video pool retains valid empty pools and their generation key", () 
   assert.deepEqual(normalized.items, []);
 });
 
-test("random video pool rejects coerced item scheduled_time values", () => {
+test("random video pool drops malformed item scheduled_time values without poisoning valid pool metadata", () => {
   for (const scheduledTime of [true, false, [], [1_728_000_000], {}, " ", "0x64", "0b10", "Infinity", "1e309"]) {
-    assert.equal(
-      normalizeRandomVideoPool(payload({
-        items: [{
-          id: "video-a",
-          title: "Video A",
-          display_name: "Creator",
-          scheduled_time: scheduledTime,
-        }],
-      })),
-      null,
-      String(scheduledTime),
-    );
+    const normalized = normalizeRandomVideoPool(payload({
+      items: [{
+        id: "video-a",
+        title: "Video A",
+        display_name: "Creator",
+        scheduled_time: scheduledTime,
+      }],
+    }));
+    assert.ok(normalized, String(scheduledTime));
+    assert.deepEqual(normalized.items, [], String(scheduledTime));
   }
 });
 
