@@ -10,6 +10,9 @@ test("URL sanitizer rejects embedded WHATWG-stripped control characters", () => 
     "https://example.com/a\nb",
     "https://example.com/a\rb",
     "https://example.com/a\tb",
+    "https://example.com\\@evil.com",
+    "https://example.com/a\\b",
+    "https:\\example.com",
   ]) {
     assert.equal(normalizeHttpUrl(input), null, JSON.stringify(input));
   }
