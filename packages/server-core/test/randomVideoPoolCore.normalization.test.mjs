@@ -78,7 +78,7 @@ test("random video pool retains valid empty pools and their generation key", () 
 });
 
 test("random video pool rejects coerced item scheduled_time values", () => {
-  for (const scheduledTime of [true, false, [], [1_728_000_000], {}, " ", "Infinity", "1e309"]) {
+  for (const scheduledTime of [true, false, [], [1_728_000_000], {}, " ", "0x64", "0b10", "Infinity", "1e309"]) {
     assert.equal(
       normalizeRandomVideoPool(payload({
         items: [{
