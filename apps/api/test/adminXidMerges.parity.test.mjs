@@ -407,7 +407,13 @@ if (runUnderRootTsx(import.meta.url)) {
       id: curCreate.id,
       confirm: "MERGE",
     });
+    const d1BeforeExec = { ...hon.d1.stats };
     const honExec = await callHono(hon, `/${honCreate.body.id}/execute`, { confirm: "MERGE" });
+    const honExecPreReads = hon.d1.stats.reads - d1BeforeExec.reads;
+    // Baseline measurement for S3 gate #724. This records the current cost;
+    // it is not an acceptance assertion (the limit remains <=3).
+    assert.equal(honExecPreReads, 18, "SA-096 current mounted path read baseline");
+    assert.equal(hon.d1.stats.batches - d1BeforeExec.batches, 1);
     assert.equal(curExec.ok, true, curExec.message);
     assert.equal(honExec.status, 200, JSON.stringify(honExec.body));
     assert.equal(honExec.body.ok, true);
