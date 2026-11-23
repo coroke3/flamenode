@@ -3,6 +3,7 @@ import test from "node:test";
 import * as React from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AdminRulesPage } from "../.test-dist/apps/ops/src/routes/admin/Rules.js";
+import { JSDOM, VirtualConsole } from "jsdom";
 
 const CANARY = "PRIVATE_RULE_VERSION_CANARY";
 const rules = {
@@ -19,25 +20,27 @@ const reply = (status, payload) => new Response(JSON.stringify(payload), {
   status, headers: { "content-type": "application/json" },
 });
 
+// React DOM's input event support is detected when react-dom/client first loads.
+// Install a single complete JSDOM global before importing that module, exactly
+// as the existing admin-terms-editor DOM tests do. Swapping documents after the
+// module is loaded makes React select a legacy attachEvent path and silently
+// ignores controlled input changes in Node.
+const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+  url: "https://flamenode.test/admin/rules",
+  virtualConsole: new VirtualConsole(),
+});
+for (const key of [
+  "window", "document", "navigator", "Element", "HTMLElement",
+  "HTMLInputElement", "Node", "FormData", "Event", "MouseEvent",
+]) {
+  Object.defineProperty(globalThis, key, { configurable: true, value: dom.window[key] });
+}
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const { createRoot } = await import("react-dom/client");
+
 async function withRulesPage(fetchFn, exercise) {
-  const { JSDOM, VirtualConsole } = await import("jsdom");
-  const { createRoot } = await import("react-dom/client");
-  const dom = new JSDOM("<div id='root'></div>", {
-    url: "https://flamenode.test/admin/rules",
-    virtualConsole: new VirtualConsole(),
-  });
-  const saved = new Map();
-  for (const [name, value] of [
-    ["window", dom.window],
-    ["document", dom.window.document],
-    ["navigator", dom.window.navigator],
-    ["FormData", dom.window.FormData],
-    ["IS_REACT_ACT_ENVIRONMENT", true],
-  ]) {
-    saved.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
-    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-  }
-  const target = dom.window.document.querySelector("#root");
+  const target = document.createElement("div");
+  document.body.append(target);
   const root = createRoot(target);
   try {
     await React.act(async () => {
@@ -48,11 +51,7 @@ async function withRulesPage(fetchFn, exercise) {
     await exercise(target, dom.window);
   } finally {
     await React.act(async () => root.unmount());
-    for (const [name, descriptor] of saved) {
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-      else delete globalThis[name];
-    }
-    dom.window.close();
+    target.remove();
   }
 }
 
