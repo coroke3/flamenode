@@ -8,6 +8,7 @@ import {
 } from "../src/health/deepHealth.ts";
 import { REQUIRED_RUNTIME_TABLE_COUNT } from "../src/health/schemaContract.ts";
 import { PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY as MANIFEST_KEY } from "../src/visibility/manifestCore.ts";
+import { RECOMMEND_CORE_OBJECT_KEY } from "../src/publicData/staticRecommendCore.ts";
 
 const poisonMessage = (marker) => {
   const error = new Error("initial");
@@ -106,7 +107,7 @@ function makeHealthyEnv(visibility) {
         }
         // The recommend-core artifact is bootstrap-optional; the rest must be
         // validated normally so this really exercises runDeepHealthChecks.
-        if (key.includes("recommend-core")) return null;
+        if (key === RECOMMEND_CORE_OBJECT_KEY) return null;
         return { async text() { return JSON.stringify(artifact(key, now)); } };
       },
     },
