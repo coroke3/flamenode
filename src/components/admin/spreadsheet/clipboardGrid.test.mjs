@@ -60,3 +60,43 @@ test("HTML clipboard fallback does not double-decode escaped entities", () => {
     ["&#128640;", "&#x1F680;", "&lt;", "&amp;", "🚀"],
   ]);
 });
+
+test("HTML clipboard fallback preserves HTML cell line breaks, including attributed br tags", () => {
+  const html = '<table><tr><td>first<br>second</td><td>A<br class="line-break" />B</td></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(html), [["first\nsecond", "A\nB"]]);
+  assert.deepEqual(parseClipboardContent("", html), [["first\nsecond", "A\nB"]]);
+});
+
+test("HTML clipboard DOMParser path preserves br text separators inside nested formatting", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  const text = (nodeValue) => ({ nodeType: 3, nodeValue });
+  const element = (tagName, childNodes) => ({ nodeType: 1, tagName, childNodes });
+  const cell = element("TD", [
+    text("first"),
+    element("BR", []),
+    element("STRONG", [text("second\u00a0line")]),
+  ]);
+  try {
+    Object.defineProperty(globalThis, "DOMParser", {
+      configurable: true,
+      value: class DOMParserStub {
+        parseFromString() {
+          return {
+            querySelector: (selector) => selector === "table" ? {
+              querySelectorAll: (name) => name === "tr" ? [{
+                querySelectorAll: (cells) => cells === "td, th" ? [cell] : [],
+              }] : [],
+            } : null,
+          };
+        }
+      },
+    });
+    assert.deepEqual(
+      parseHtmlClipboardTable("<table><tr><td>first<br><strong>second&nbsp;line</strong></td></tr></table>"),
+      [["first\nsecond line"]],
+    );
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
