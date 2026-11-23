@@ -15,6 +15,10 @@ import { DEFAULT_TERMS_MARKDOWN, DEFAULT_TERMS_VERSION_LABEL } from "./defaultTe
 
 type Api = ReturnType<typeof createAdminTermsApi>;
 
+export function termsWriteRevocationDestination(reason: "anonymous" | "forbidden"): "/entry" | "/dashboard" {
+  return reason === "anonymous" ? "/entry" : "/dashboard";
+}
+
 /** A denied write immediately unmounts all editable terms state, even if an earlier read later resolves. */
 function useTermsWriteRevocation(fetchFn?: OpsFetch): { api: Api; revoked: boolean } {
   const [revoked, setRevoked] = React.useState(false);
@@ -23,7 +27,7 @@ function useTermsWriteRevocation(fetchFn?: OpsFetch): { api: Api; revoked: boole
     if (revokedRef.current) return;
     revokedRef.current = true;
     setRevoked(true);
-    window.location.assign(reason === "anonymous" ? "/entry" : "/dashboard");
+    window.location.assign(termsWriteRevocationDestination(reason));
   }, []);
   const api = React.useMemo(
     () => createAdminTermsApi(fetchFn, onAuthorizationFailure),
