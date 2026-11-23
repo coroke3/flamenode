@@ -10,11 +10,11 @@ export function normalizeHttpUrl(
   raw: string | null | undefined,
   options: { maxLength?: number } = {},
 ): string | null {
-  const s = String(raw ?? "").trim();
+  const original = String(raw ?? "");
+  // Validate the untrimmed value: trim() would hide leading/trailing CR, LF and TAB.
+  if (/[\t\n\r\\]/.test(original)) return null;
+  const s = original.trim();
   if (!s) return null;
-  // WHATWG URL strips TAB/LF/CR and rewrites backslashes as slashes. Reject them instead of
-  // turning a misleading pasted URL into a different destination.
-  if (/[\t\n\r\\]/.test(s)) return null;
   const maxLength = options.maxLength ?? 500;
   // Non-finite limits bypass numeric comparisons and silently disable the cap.
   if (!Number.isSafeInteger(maxLength) || maxLength < 0) return null;
