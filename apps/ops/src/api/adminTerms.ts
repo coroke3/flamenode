@@ -25,10 +25,18 @@ async function request(
   body?: object,
   onAuthorizationFailure?: AuthorizationFailureHandler,
 ): Promise<AdminTermsNotificationsResult> {
-  const result = await send<AdminTermsNotificationsResult>(fetchFn, method, path, body);
-  if (result.status === "anonymous" || result.status === "forbidden") {
-    onAuthorizationFailure?.(result.status);
-    return reject(result.status === "anonymous" ? "ログインしてください。" : "権限がありません。");
+  // The shared writer currently has no "forbidden" status. Observe the
+  // HTTP 403 before it parses the optional JSON body so the view can revoke
+  // privileged state even when that body is malformed or stalled.
+  const guardedFetch: OpsFetch = async (url, init) => {
+    const response = await fetchFn(url, init);
+    if (response.status === 403) onAuthorizationFailure?.("forbidden");
+    return response;
+  };
+  const result = await send<AdminTermsNotificationsResult>(guardedFetch, method, path, body);
+  if (result.status === "anonymous") {
+    onAuthorizationFailure?.("anonymous");
+    return reject("ログインしてください。");
   }
   if (result.status !== "ok") return reject(UNAVAILABLE);
   const parsed = AdminTermsNotificationsResultSchema.safeParse(result.data);
