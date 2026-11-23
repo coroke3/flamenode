@@ -75,6 +75,10 @@ test("SEC-814: only confirmed identity denials revoke; ordinary 403 guard messag
   const anonymous = createAdminCostGuardApi(async () => response(401, { ok: false, reason: "forbidden" }));
   assert.deepEqual(await anonymous.setMode("normal", "audit"),
     { ok: false, anonymous: true, message: "ログインしてください。" }, "HTTP 401 takes priority over 403-shaped data");
+  const failedProvider = createAdminCostGuardApi(async () =>
+    response(503, { ok: false, reason: "forbidden", message: "一時的なDB障害" }));
+  assert.deepEqual(await failedProvider.setMode("normal", "audit"),
+    { ok: false, message: "一時的なDB障害" }, "HTTP 503 is not an authoritative 403 revocation");
 });
 
 test("SEC-814: shared notification writes keep their original D-17-3 result contract", async () => {
