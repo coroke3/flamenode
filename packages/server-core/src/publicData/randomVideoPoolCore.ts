@@ -47,17 +47,28 @@ function normalizeRelatedItem(value: unknown): StaticRelatedVideo | null {
   };
 }
 
+function isValidGeneratedAtInput(value: unknown): boolean {
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "string") return false;
+  const normalized = value.trim();
+  if (!/^[+-]?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?$/i.test(normalized)) {
+    return false;
+  }
+  return Number.isFinite(Number(normalized));
+}
+
 export function normalizeRandomVideoPool(
   value: unknown,
 ): RandomVideoPool | null {
-  if (!value || typeof value !== "object") return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const payload = value as {
     schema_version?: unknown;
     generated_at?: unknown;
     generation_key?: unknown;
     items?: unknown;
   };
-  if (Number(payload.schema_version) !== 1) return null;
+  if (payload.schema_version !== RANDOM_VIDEO_POOL_SCHEMA_VERSION) return null;
+  if (!isValidGeneratedAtInput(payload.generated_at)) return null;
   if (!Array.isArray(payload.items)) return null;
 
   const seen = new Set<string>();
