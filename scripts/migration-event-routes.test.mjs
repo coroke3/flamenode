@@ -1092,7 +1092,7 @@ test("MIG-0514 U03b: RH-020 refresh outage shows a stale-data notice without dro
   }
 });
 
-test("MIG-0514 U03b: RH-020 recovery after first-load failure revalidates RH-014", { skip: skipUi }, async () => {
+test("MIG-0514 U03b: RH-014 mounts only after the first successful RH-020 baseline", { skip: skipUi }, async () => {
   const detail = detailOf("autumn-collab-2026");
   const props = { detail, builtAt: NOW };
   const oldFetch = globalThis.fetch;
@@ -1102,7 +1102,6 @@ test("MIG-0514 U03b: RH-020 recovery after first-load failure revalidates RH-014
   let poll = null;
   let publicCalls = 0;
   let privateCalls = 0;
-  const newPrivate = [];
   dom.window.setInterval = function (fn, delay, ...args) {
     if (delay === 30_000) {
       poll = () => fn(...args);
@@ -1124,10 +1123,7 @@ test("MIG-0514 U03b: RH-020 recovery after first-load failure revalidates RH-014
   globalThis.fetch = (url) => {
     if (String(url).endsWith("/viewer-overlay")) {
       privateCalls++;
-      if (privateCalls === 1) return Promise.resolve({
-        ok: true, json: async () => overlay(true),
-      });
-      return new Promise(resolve => newPrivate.push(resolve));
+      return Promise.resolve({ ok: true, json: async () => overlay(false) });
     }
     publicCalls++;
     if (publicCalls === 1) return Promise.resolve({ ok: false, status: 503 });
@@ -1146,24 +1142,19 @@ test("MIG-0514 U03b: RH-020 recovery after first-load failure revalidates RH-014
       root.render(h(EventSlotsIsland, props));
     });
     await settle();
-    assert.equal(privateCalls, 1, "initial RH-014 may load while RH-020 fails");
-    assert.equal(container.querySelectorAll(".sl.mine").length, 0,
-      "initial unavailable public grid must not display an owned badge");
+    assert.equal(privateCalls, 0,
+      "RH-014 must not start while the first RH-020 read is unavailable");
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0);
     assert.ok(text(container).includes("枠の最新状況を取得できませんでした。"));
 
     await act(async () => poll());
-    assert.equal(privateCalls, 2,
-      "first successful RH-020 following 503 must invalidate initial RH-014");
-    assert.equal(newPrivate.length, 1);
-    assert.ok(text(container).includes("別利用者の公開予約"));
-    assert.equal(container.querySelectorAll(".sl.mine").length, 0,
-      "recovered public reservation must not reuse stale private ownership");
-    await act(async () => newPrivate.shift()({
-      ok: true, json: async () => overlay(false),
-    }));
     await settle();
+    assert.equal(privateCalls, 1,
+      "the first successful RH-020 response mounts exactly one RH-014 read");
+    assert.ok(text(container).includes("別利用者の公開予約"));
     assert.equal(container.querySelectorAll(".sl.taken").length, 1);
-    assert.equal(container.querySelectorAll(".sl.mine").length, 0);
+    assert.equal(container.querySelectorAll(".sl.mine").length, 0,
+      "ownership is based on an RH-014 response started after the public baseline");
     assert.equal(container.querySelectorAll("button").length, 0);
   } finally {
     if (root) await act(async () => root.unmount());
