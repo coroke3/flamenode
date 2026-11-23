@@ -387,7 +387,12 @@ if (runUnderRootTsx(import.meta.url)) {
     });
     const honRejCreate = await callHono(hon, "", { from_x_user_id: "src_x", to_x_user_id: "tgt_x" });
     const curRej = await runCurrentAction(cur, current.rejectXIdMergeRequest, { id: curRejCreate.id });
+    const d1BeforeReject = { ...hon.d1.stats };
     const honRej = await callHono(hon, `/${honRejCreate.body.id}/reject`, {});
+    const honRejectPreReads = hon.d1.stats.reads - d1BeforeReject.reads;
+    console.log("[MIG-0644] SA-094 D1 pre-read baseline:", honRejectPreReads);
+    assert.ok(Number.isInteger(honRejectPreReads) && honRejectPreReads >= 0);
+    assert.equal(hon.d1.stats.batches - d1BeforeReject.batches, 1);
     assert.equal(curRej.ok, true);
     assert.equal(honRej.status, 200);
     assert.equal(honRej.body.message, curRej.message);
@@ -479,7 +484,12 @@ if (runUnderRootTsx(import.meta.url)) {
     seedReverts(hon, honCreate.body.id);
 
     const curRevRej = await runCurrentAction(cur, current.rejectXIdMergeRevert, { id: "rev-rej" });
+    const d1BeforeRevertReject = { ...hon.d1.stats };
     const honRevRej = await callHono(hon, "/reverts/rev-rej/reject", {});
+    const honRevertRejectPreReads = hon.d1.stats.reads - d1BeforeRevertReject.reads;
+    console.log("[MIG-0644] SA-095 D1 pre-read baseline:", honRevertRejectPreReads);
+    assert.ok(Number.isInteger(honRevertRejectPreReads) && honRevertRejectPreReads >= 0);
+    assert.equal(hon.d1.stats.batches - d1BeforeRevertReject.batches, 1);
     assert.equal(curRevRej.ok, true);
     assert.equal(honRevRej.status, 200);
     assert.equal(honRevRej.body.message, curRevRej.message);
