@@ -92,7 +92,7 @@ function normalizeRun(value: unknown): StaticBackfillRunState {
   }
 
   const row = value as Record<string, unknown>;
-  const rawStatus = String(row.status ?? "");
+  const rawStatus = typeof row.status === "string" ? row.status : "";
   const phase: StaticBackfillRunPhase =
     row.phase === "shared_inputs"
       ? "shared_inputs"
