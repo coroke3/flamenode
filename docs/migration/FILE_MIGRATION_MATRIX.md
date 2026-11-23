@@ -1806,6 +1806,8 @@ Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fix
 | `src/lib/notifications/**` | HELPER | MIG-0614 | notification batch core (existing exact rows win) | NOT_STARTED |
 | `src/lib/observability/**` | HELPER | MIG-0501 | publicRequestMetrics/flowTrace (G08) | NOT_STARTED |
 | `src/lib/operationMode/**` | HELPER | MIG-0619 | maintenance mode (existing exact rows win) | NOT_STARTED |
+| `src/lib/publicData/staticTrendingCore.ts` | HELPER | MIG-0505 security follow-up: reject explicitly nonpublic visibility metadata in public trending projection; legacy missing/null markers remain compatible | SAME (CURRENT + public snapshot consumers) | RETAINED | PR#860 SHA=a059f6c05a9fd9e5e36220366eda4873f1283bb5 TEST=src/lib/publicData/staticTrendingCore.test.mjs (private/draft conflict rejection; missing/null/public compatibility; exact-head CI pending) |
+| `src/lib/publicData/staticTrendingCore.test.mjs` | TEST | MIG-0505 security follow-up regression for contradictory trending visibility metadata | SAME | RETAINED | PR#860 SHA=5288e314d8a16483c7de9eabedbb553678e8630a TEST=node --test --experimental-strip-types src/lib/publicData/staticTrendingCore.test.mjs (exact-head CI pending) |
 | `src/lib/publicData/**` | HELPER | MIG-0509 | public data loaders become build-time snapshots (existing exact rows win) | NOT_STARTED |
 | `src/lib/queues/**` | HELPER | MIG-0614 | static rebuild enqueue core | NOT_STARTED |
 | `src/lib/slots/**` | HELPER | MIG-0305 | slot domain (existing exact rows win) | NOT_STARTED |
