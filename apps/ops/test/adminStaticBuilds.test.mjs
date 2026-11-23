@@ -6,6 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { YoutubeSync } from "../.test-dist/apps/ops/src/routes/admin/YoutubeSync.js";
 import { YoutubePlaylists } from "../.test-dist/apps/ops/src/routes/admin/YoutubePlaylists.js";
 import { StaticRebuildQueuePanel, staticRebuildAdminHref } from "../.test-dist/apps/ops/src/routes/admin/StaticRebuildQueuePanel.js";
+import { StaticBuilds, staticBuildsRevokedDestination } from "../.test-dist/apps/ops/src/routes/admin/StaticBuilds.js";
+import { readStaticBuilds } from "../.test-dist/apps/ops/src/api/adminStaticBuilds.js";
 import { readFile } from "node:fs/promises";
 import { postAdminOp, mutationResultQuery, canContinueBackfill, readYoutubeSync, readYoutubePlaylists, readYoutubeQuota, getAdminOps, youtubeSyncFilterParams } from "../.test-dist/apps/ops/src/api/adminStaticBuilds.js";
 
@@ -174,5 +176,121 @@ test("MIG-0735 U03 router: static-builds and youtube routes are registered in ro
   }
   for (const component of ["StaticBuilds", "YoutubeSync", "YoutubePlaylists", "YoutubeQuota"]) {
     assert.match(routerSource, new RegExp(`element={<${component} \\/>}`));
+  }
+});
+
+
+/** SEC-802: execute the actual mounted component with a fake authorized GET,
+ * then revoke authorization on POST; do not merely assert a status classifier.
+ */
+const staticBuildsFixture = (() => {
+  const run = {
+    cursor: null, phase: "items", status: "idle", total: 0, scanned: 0,
+    enqueued: 0, last_error: null, last_run_at: null,
+  };
+  const queue = { pending: 0, processing: 0, failed: 1,
+    lastError: "SEC802_PRIVATE_BACKFILL_DIAGNOSTIC" };
+  return {
+    operationMode: "normal", maxItemsPerRun: 12,
+    counts: { pending: 0, processing: 0, failed: 1, dead_letter: 0, done: 0 },
+    backfillState: { schema_version: 1, updated_at: null,
+      runs: { video_v2: run, user_profile: run, event_crew: run } },
+    backfillQueue: { video_v2: queue, user_profile: queue, event_crew: queue },
+    sharedInputs: [], truncated: false, rows: [],
+  };
+})();
+
+async function renderStaticBuildsWithFetch(fetchFn, exercise) {
+  const { JSDOM, VirtualConsole } = await import("jsdom");
+  const { createRoot } = await import("react-dom/client");
+  const dom = new JSDOM("<div id='app'></div>", {
+    url: "https://example.test/admin/static-builds",
+    virtualConsole: new VirtualConsole(), // jsdom intentionally does not navigate.
+  });
+  const priorWindow = globalThis.window;
+  const priorDocument = globalThis.document;
+  const priorFetch = globalThis.fetch;
+  const priorAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.fetch = fetchFn;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = dom.window.document.querySelector("#app");
+  const root = createRoot(container);
+  try {
+    await React.act(async () => {
+      root.render(React.createElement(MemoryRouter, null, React.createElement(StaticBuilds)));
+    });
+    await exercise(container, dom.window);
+  } finally {
+    await React.act(async () => root.unmount());
+    globalThis.window = priorWindow;
+    globalThis.document = priorDocument;
+    globalThis.fetch = priorFetch;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = priorAct;
+    dom.window.close();
+  }
+}
+
+test("SEC-802: fixed internal revocation destinations and unrelated failures remain distinct", async () => {
+  assert.equal(staticBuildsRevokedDestination("anonymous"), "/entry");
+  assert.equal(staticBuildsRevokedDestination("forbidden"), "/dashboard");
+  for (const status of ["ok", "outcome", "unavailable", "notFound", "unsupported", "loading"]) {
+    assert.equal(staticBuildsRevokedDestination(status), null);
+  }
+  for (const status of [401, 403]) {
+    const denied = await readStaticBuilds(async () => response(status, {
+      ok: true, redirect: "https://evil.example", operationMode: "normal",
+    }));
+    assert.equal(denied.status, status === 401 ? "anonymous" : "forbidden");
+    assert.equal(staticBuildsRevokedDestination(denied.status),
+      status === 401 ? "/entry" : "/dashboard");
+  }
+});
+
+test("SEC-802: authenticated diagnostics and every repair action unmount after write 401 or 403", async () => {
+  for (const status of [401, 403]) {
+    let postCount = 0;
+    await renderStaticBuildsWithFetch(async (url, init) => {
+      if (init?.method === "GET") {
+        assert.equal(url, "/api/admin-read/ops/static-builds");
+        return response(200, staticBuildsFixture);
+      }
+      assert.equal(init?.method, "POST");
+      postCount++;
+      return response(status, { ok: true, redirect: "https://evil.example" });
+    }, async (container, win) => {
+      assert.match(container.textContent, /SEC802_PRIVATE_BACKFILL_DIAGNOSTIC/);
+      assert.match(container.textContent, /先頭から再実行/);
+      const button = [...container.querySelectorAll("button")]
+        .find(node => node.textContent.includes("関連動画の共有JSONを再生成キュー投入"));
+      assert.ok(button, "authorized button exists before revocation");
+      await React.act(async () => {
+        button.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+      });
+      assert.equal(postCount, 1);
+      assert.match(container.textContent, /管理画面へのアクセスが終了しました/);
+      assert.doesNotMatch(container.textContent, /SEC802_PRIVATE_BACKFILL_DIAGNOSTIC/);
+      assert.doesNotMatch(container.textContent, /先頭から再実行/);
+      assert.equal(container.querySelectorAll("button").length, 0,
+        "no stale privileged action is left mounted");
+    });
+  }
+});
+
+test("SEC-802: GET 401/403 and ordinary 503 never mount privileged controls", async () => {
+  for (const status of [401, 403, 503]) {
+    await renderStaticBuildsWithFetch(async () => response(status,
+      { ok: true, redirect: "https://evil.example", ...staticBuildsFixture }),
+    async (container) => {
+      if (status === 503) {
+        assert.match(container.textContent, /取得できませんでした/);
+      } else {
+        assert.match(container.textContent, /管理画面へのアクセスが終了しました/);
+      }
+      assert.doesNotMatch(container.textContent, /SEC802_PRIVATE_BACKFILL_DIAGNOSTIC/);
+      assert.doesNotMatch(container.textContent, /先頭から再実行/);
+      assert.equal(container.querySelectorAll("button").length, 0);
+    });
   }
 });
