@@ -177,8 +177,9 @@ async function parseJsonBody<T>(
   schema: { safeParse: (v: unknown) => { success: true; data: T } | { success: false } },
   options: { optional?: boolean } = {},
 ): Promise<{ ok: true; data: T } | { ok: false; response: Response }> {
-  const hasEmptyBody =
-    c.req.raw.body === null || c.req.header("content-length") === "0";
+  // Content-Length is caller-supplied metadata: a forged zero must not skip
+  // validation of an actual request stream.
+  const hasEmptyBody = c.req.raw.body === null;
   if (options.optional && hasEmptyBody) {
     const emptyParsed = schema.safeParse({});
     if (emptyParsed.success) {
