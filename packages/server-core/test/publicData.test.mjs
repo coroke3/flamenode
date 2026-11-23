@@ -49,8 +49,15 @@ test("publicData normalize helpers handle null and edge cases", () => {
   assert.equal(normalizeTrimmedString(null), null);
 
   assert.equal(normalizeNullableUnix("1700000000"), 1700000000);
+  assert.equal(normalizeNullableUnix(" 1700000000 "), 1700000000);
+  assert.equal(normalizeNullableUnix(1700000000), 1700000000);
   assert.equal(normalizeNullableUnix(""), null);
+  assert.equal(normalizeNullableUnix("   "), null);
   assert.equal(normalizeNullableUnix(null), null);
+  assert.equal(normalizeNullableUnix(undefined), null);
+  for (const malformed of [true, false, [], [1700000000], {}, { valueOf: () => 1700000000 }]) {
+    assert.equal(normalizeNullableUnix(malformed), null, String(malformed));
+  }
 
   assert.equal(normalizeCount("10"), 10);
   assert.equal(normalizeCount("-1"), null);
