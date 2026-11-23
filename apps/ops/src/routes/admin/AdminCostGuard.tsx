@@ -160,6 +160,8 @@ export function AdminCostGuard({ api = defaultApi, onNavigate = defaultNavigate 
   // read data again even if a previously started GET later resolves successfully.
   const revokedRef = React.useRef<"/entry" | "/dashboard" | null>(null);
   const [revokedPath, setRevokedPath] = React.useState<"/entry" | "/dashboard" | null>(null);
+  const recheckRef = React.useRef(false);
+  const [recheckNeeded, setRecheckNeeded] = React.useState(false);
   const revoke = React.useCallback((path: "/entry" | "/dashboard") => {
     if (revokedRef.current) return;
     revokedRef.current = path;
@@ -170,14 +172,19 @@ export function AdminCostGuard({ api = defaultApi, onNavigate = defaultNavigate 
   // A late successful write must never refresh/publish admin data after revocation.
   const guardedApi = React.useMemo<AdminCostGuardApi>(() => {
     const call = async (write: () => Promise<AdminWriteResult>): Promise<AdminWriteResult> => {
-      if (revokedRef.current) return { ok: false };
+      if (revokedRef.current || recheckRef.current) return { ok: false };
       const result = await write();
+      if (result.accessUnknown) {
+        recheckRef.current = true;
+        setRecheckNeeded(true);
+        return { ok: false };
+      }
       if (result.anonymous || result.forbidden) {
         revoke(result.anonymous ? "/entry" : "/dashboard");
         // Navigation is handled by this page exactly once, not by each form.
         return { ok: false };
       }
-      return revokedRef.current ? { ok: false } : result;
+      return revokedRef.current || recheckRef.current ? { ok: false } : result;
     };
     return {
       ...api,
@@ -199,6 +206,21 @@ export function AdminCostGuard({ api = defaultApi, onNavigate = defaultNavigate 
   if (revokedRef.current || state.status === "loading" || state.status === "anonymous" || state.status === "forbidden") {
     return <div role="status" aria-busy="true">読み込み中...</div>;
   }
+  if (recheckRef.current || recheckNeeded) {
+    return (
+      <div role="alert" className="fn-alert fn-alert--danger" style={{ marginTop: 20 }}>
+        管理権限を確認できません。安全のため管理情報と操作を非表示にしました。{" "}
+        <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => {
+          // The changed read identity renders LOADING before any old DTO can
+          // become visible, even for a single render. Writes stay unavailable
+          // until a new authoritative read succeeds.
+          setRefresh((v) => v + 1);
+          recheckRef.current = false;
+          setRecheckNeeded(false);
+        }}>権限を再確認</button>
+      </div>
+    );
+  }
   if (state.status !== "ok") {
     // Fail closed: without a read there is no CAS token, so no write form is rendered.
     return (
@@ -212,7 +234,7 @@ export function AdminCostGuard({ api = defaultApi, onNavigate = defaultNavigate 
     <>
       {notice ? <p role="status" style={{ marginTop: 12, fontSize: 12 }}>{notice}</p> : null}
       <AdminCostGuardView data={state.data} api={guardedApi} onSuccess={(message) => {
-        if (revokedRef.current) return;
+        if (revokedRef.current || recheckRef.current) return;
         setNotice(message ?? null);
         setRefresh((v) => v + 1);
       }} />
