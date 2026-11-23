@@ -40,7 +40,22 @@ export function StaticBuilds({ onRevokedNavigate = navigateStaticBuildsRevoked }
   }, [revokedTo, onRevokedNavigate]);
   React.useEffect(() => {
     const controller = new AbortController();
-    void readStaticBuilds(undefined, controller.signal).then(result => {
+    // HTTP 401/403 headers are authoritative. The shared read adapter may
+    // await an optional 403 JSON error body indefinitely; unmount private
+    // diagnostics immediately when headers arrive, without waiting for it.
+    void readStaticBuilds(async (path, init) => {
+      const response = await fetch(path, init);
+      if (!controller.signal.aborted && !accessRevokedRef.current) {
+        const destination = response.status === 401 ? "/entry"
+          : response.status === 403 ? "/dashboard" : null;
+        if (destination) {
+          accessRevokedRef.current = true;
+          setData(null);
+          setRevokedTo(destination);
+        }
+      }
+      return response;
+    }, controller.signal).then(result => {
       if (controller.signal.aborted || accessRevokedRef.current) return;
       const destination = staticBuildsRevokedDestination(result.status);
       if (destination) {
