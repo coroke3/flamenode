@@ -25,3 +25,10 @@ test("URL sanitizer preserves legitimate trimmed HTTP URLs", () => {
   assert.equal(normalizeHttpUrl("https://user:pass@example.com"), null);
   assert.equal(normalizeHttpUrl("https://example.com", { maxLength: 8 }), null);
 });
+
+test("URL sanitizer never disables maxLength for invalid numeric limits", () => {
+  for (const maxLength of [NaN, Infinity, -Infinity, -1, 0.5]) {
+    assert.equal(normalizeHttpUrl("https://example.com/", { maxLength }), null, String(maxLength));
+  }
+  assert.equal(normalizeHttpUrl("https://example.com/", { maxLength: 20 }), "https://example.com/");
+});
