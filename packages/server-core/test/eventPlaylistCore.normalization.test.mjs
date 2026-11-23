@@ -24,6 +24,12 @@ function payload(overrides = {}) {
   };
 }
 
+test("event playlist rejects non-object top-level payloads without throwing", () => {
+  for (const value of [null, undefined, "x", 1, true, [], ["playlist"]]) {
+    assert.equal(normalizeStaticEventPlaylist(value), null, String(value));
+  }
+});
+
 test("event playlist requires the producer's literal numeric schema version", () => {
   for (const schemaVersion of ["1", true, false, [], [1], {}, " "]) {
     assert.equal(
