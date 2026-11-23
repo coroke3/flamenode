@@ -20,9 +20,18 @@ export function normalizeCoercedString(value: unknown): string | null {
 }
 
 export function normalizeNullableUnix(value: unknown): number | null {
-  if (value == null || value === "") return null;
+  if (value == null) return null;
 
-  const normalized = Number(value);
+  // R2 JSON timestamps may be numbers or numeric strings. Do not coerce
+  // booleans, arrays, objects, or whitespace-only strings into 0/1.
+  let normalized: number;
+  if (typeof value === "number") {
+    normalized = value;
+  } else if (typeof value === "string" && value.trim() !== "") {
+    normalized = Number(value.trim());
+  } else {
+    return null;
+  }
   if (!Number.isFinite(normalized)) return null;
   const unix = Math.floor(normalized);
   const ms = unix * 1000;
