@@ -112,46 +112,47 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
     [detail, viewerRefreshEpoch],
   );
   return React.createElement(
-    IslandWrapper, null,
-    React.createElement(
-      EventSlotsViewerIsland,
-      {
-        eventId: detail.event.id,
-        baseSlots: publicSlotIds,
-        accepting: isAcceptingEntries(detail.event, now),
-        eventStatus: computeEventStatus(detail.event, now),
-      },
-      (viewer) => {
-        // U03b1 is visual-only: RH-020 remains the public name/status authority.
-        // Reveal ownership only after a current, valid RH-014 session overlay;
-        // never label an RH-020 "available" slot as owned, even if the viewer
-        // response is stale. No private X ID/name or mutation control is rendered.
-        const owned = new Set(
-          viewer.canManageOwnSlots && !stalePublicNotice && phase === "ready"
-            ? viewer.slots.filter((slot) => slot.is_owned_by_viewer).map((slot) => slot.id)
-            : [],
-        );
-        const viewerModel: EventSlotsViewModel = owned.size === 0 ? model : {
-          ...model,
-          days: model.days.map((day) => ({
-            ...day,
-            blocks: day.blocks.map((block) =>
-              block.kind === "slot" && block.state === "taken" && owned.has(block.id)
-                ? { ...block, ownedByViewer: true }
-                : block,
-            ),
-          })),
-        };
-        // The public view owns the .ev-scope styles and visible slot grid;
-        // keep its stale-refresh notice *inside* that root, not as an
-        // unstyled sibling of EventSlotsView.
-        const displayedModel: EventSlotsViewModel = stalePublicNotice && phase === "ready"
-          ? { ...viewerModel, stalePublicNotice: true }
-          : viewerModel;
-        return React.createElement(EventSlotsView, { model: displayedModel });
-      },
-    ),
+    IslandWrapper,
+    null,
+    phase === "ready"
+      ? React.createElement(
+          EventSlotsViewerIsland,
+          {
+            eventId: detail.event.id,
+            baseSlots: publicSlotIds,
+            accepting: isAcceptingEntries(detail.event, now),
+            eventStatus: computeEventStatus(detail.event, now),
+          },
+          (viewer) => {
+            // RH-014 may only annotate a public slot snapshot that has already
+            // succeeded. Mounting this child after RH-020 reaches ready makes
+            // the first private read causally follow the public baseline.
+            // A private response that arrived before the first RH-020 result
+            // can therefore never label a reassigned reservation as "mine".
+            const owned = new Set(
+              viewer.canManageOwnSlots && !stalePublicNotice
+                ? viewer.slots.filter((slot) => slot.is_owned_by_viewer).map((slot) => slot.id)
+                : [],
+            );
+            const viewerModel: EventSlotsViewModel = owned.size === 0 ? model : {
+              ...model,
+              days: model.days.map((day) => ({
+                ...day,
+                blocks: day.blocks.map((block) =>
+                  block.kind === "slot" && block.state === "taken" && owned.has(block.id)
+                    ? { ...block, ownedByViewer: true }
+                    : block,
+                ),
+              })),
+            };
+            // The public view owns the .ev-scope styles and visible slot grid;
+            // keep its stale-refresh notice inside that root.
+            const displayedModel: EventSlotsViewModel = stalePublicNotice
+              ? { ...viewerModel, stalePublicNotice: true }
+              : viewerModel;
+            return React.createElement(EventSlotsView, { model: displayedModel });
+          },
+        )
+      : React.createElement(EventSlotsView, { model }),
   );
-}
-
-export default EventSlotsIsland;
+};
