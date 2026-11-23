@@ -2,7 +2,7 @@
 import * as React from "react";
 import type { AdminCostGuardResponse } from "@flamenode/contracts";
 import { adminReadRedirect } from "../../api/adminTop.js";
-import { createAdminCostGuardApi, type AdminCostGuardApi } from "../../api/adminCostGuard.js";
+import { createAdminCostGuardApi, type AdminCostGuardApi, type AdminWriteResult } from "../../api/adminCostGuard.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { FnTable } from "../../components/shared/FnTable.js";
 import { OpsLink as Link } from "../../components/shared/OpsLink.js";
@@ -152,15 +152,47 @@ export function AdminCostGuard({ api = defaultApi }: { api?: AdminCostGuardApi }
   // The successful write's message must outlive the fail-closed reload below, which
   // unmounts the forms (CURRENT router.refresh() kept the client message).
   const [notice, setNotice] = React.useState<string | null>(null);
+  // A confirmed write-side identity denial is sticky: do not render private
+  // read data again even if a previously started GET later resolves successfully.
+  const revokedRef = React.useRef<"/entry" | "/dashboard" | null>(null);
+  const [revokedPath, setRevokedPath] = React.useState<"/entry" | "/dashboard" | null>(null);
+  const revoke = React.useCallback((path: "/entry" | "/dashboard") => {
+    if (revokedRef.current) return;
+    revokedRef.current = path;
+    setNotice(null);
+    setRevokedPath(path);
+  }, []);
+  // Keep the five form components unchanged: the page owns the auth boundary.
+  // A late successful write must never refresh/publish admin data after revocation.
+  const guardedApi = React.useMemo<AdminCostGuardApi>(() => {
+    const call = async (write: () => Promise<AdminWriteResult>): Promise<AdminWriteResult> => {
+      if (revokedRef.current) return { ok: false };
+      const result = await write();
+      if (result.anonymous || result.forbidden) {
+        revoke(result.anonymous ? "/entry" : "/dashboard");
+        // Navigation is handled by this page exactly once, not by each form.
+        return { ok: false };
+      }
+      return revokedRef.current ? { ok: false } : result;
+    };
+    return {
+      ...api,
+      setMode: (mode, reason) => call(() => api.setMode(mode, reason)),
+      setMaintenance: (enabled, reason) => call(() => api.setMaintenance(enabled, reason)),
+      setOverride: (reason, confirm, features) => call(() => api.setOverride(reason, confirm, features)),
+      clearOverride: (reason, confirm) => call(() => api.clearOverride(reason, confirm)),
+      setDisabled: (reason, confirm, features, expected) => call(() => api.setDisabled(reason, confirm, features, expected)),
+    };
+  }, [api, revoke]);
   // A failed refresh must never leave privileged controls enabled with stale settings.
   // Treat each refresh as a new read identity instead of retaining last-known data.
   const state = useApiResult((signal) => api.read(signal), "admin-cost-guard:" + refresh);
-  const redirect = state.status === "loading" ? null : adminReadRedirect(state);
+  const redirect = revokedPath ?? (state.status === "loading" ? null : adminReadRedirect(state));
   React.useEffect(() => {
     if (redirect) window.location.assign(redirect);
   }, [redirect]);
 
-  if (state.status === "loading" || state.status === "anonymous" || state.status === "forbidden") {
+  if (revokedRef.current || state.status === "loading" || state.status === "anonymous" || state.status === "forbidden") {
     return <div role="status" aria-busy="true">読み込み中...</div>;
   }
   if (state.status !== "ok") {
@@ -175,7 +207,11 @@ export function AdminCostGuard({ api = defaultApi }: { api?: AdminCostGuardApi }
   return (
     <>
       {notice ? <p role="status" style={{ marginTop: 12, fontSize: 12 }}>{notice}</p> : null}
-      <AdminCostGuardView data={state.data} api={api} onSuccess={(message) => { setNotice(message ?? null); setRefresh((v) => v + 1); }} />
+      <AdminCostGuardView data={state.data} api={guardedApi} onSuccess={(message) => {
+        if (revokedRef.current) return;
+        setNotice(message ?? null);
+        setRefresh((v) => v + 1);
+      }} />
     </>
   );
 }
