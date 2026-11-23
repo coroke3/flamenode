@@ -264,7 +264,11 @@ async function loadPublicXIconMapV1(
   });
   if (!indexResult.value) return primary;
 
-  const entries = { ...(primary?.entries ?? {}) };
+  // X handles such as __proto__ are valid keys; never inherit Object.prototype.
+  const entries: PublicXIconMapPayload["entries"] = Object.assign(
+    Object.create(null),
+    primary?.entries ?? {},
+  );
   for (const user of indexResult.value.items) {
     const xId = normalizeXId(user.x_id);
     if (!xId) continue;
