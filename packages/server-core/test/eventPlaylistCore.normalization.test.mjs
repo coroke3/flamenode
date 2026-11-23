@@ -40,6 +40,25 @@ test("event playlist requires the producer's literal numeric schema version", ()
   }
 });
 
+test("event playlist rejects non-finite timestamps instead of treating them as null", () => {
+  for (const generatedAt of [Infinity, -Infinity, NaN, "Infinity", "1e309"]) {
+    assert.equal(
+      normalizeStaticEventPlaylist(payload({ generated_at: generatedAt })),
+      null,
+      String(generatedAt),
+    );
+  }
+  for (const scheduledTime of [Infinity, NaN, "Infinity", "1e309"]) {
+    assert.equal(
+      normalizeStaticEventPlaylist(payload({
+        items: [{ ...payload().items[0], scheduled_time: scheduledTime }],
+      })),
+      null,
+      String(scheduledTime),
+    );
+  }
+});
+
 test("event playlist generated_at rejects booleans, arrays, objects and blank strings", () => {
   for (const generatedAt of [true, false, [], [1_729_000_000], {}, " "]) {
     assert.equal(
