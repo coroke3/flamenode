@@ -30,3 +30,16 @@ test("youtube related blocklist retains allowed reasons and ignores invalid entr
   const result = normalizeYoutubeRelatedBlocklist({ ...valid, blocked: { " ": "private", good: "private", bad: "unexpected" } });
   assert.deepEqual([...result?.blockedIds ?? []], ["good"]);
 });
+
+test("youtube related blocklist preserves empty and filtered reason semantics", () => {
+  const empty = normalizeYoutubeRelatedBlocklist({ ...valid, blocked: {} });
+  assert.equal(empty?.blockedIds.size, 0);
+  assert.equal(empty?.reasons.size, 0);
+  const filtered = normalizeYoutubeRelatedBlocklist({ ...valid, blocked: { a: "private", b: null, c: 1, d: "missing_or_private" } });
+  assert.deepEqual([...filtered?.reasons.entries() ?? []], [["a", "private"], ["d", "missing_or_private"]]);
+});
+
+test("youtube related blocklist floors positive finite timestamps", () => {
+  assert.equal(normalizeYoutubeRelatedBlocklist({ ...valid, generated_at: 10.9 })?.generatedAt, 10);
+  assert.equal(normalizeYoutubeRelatedBlocklist({ ...valid, generated_at: " 10.9 " })?.generatedAt, 10);
+});
