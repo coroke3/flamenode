@@ -58,7 +58,7 @@ if (runUnderRootTsx(import.meta.url)) {
       audits: w.sqlite.prepare("SELECT * FROM audit_logs ORDER BY id").all(),
     };
   }
-  async function current(w, user, videoId, kind) {
+  async function current(w, user, videoId, kind, warn = () => {}) {
     const row = w.sqlite.prepare("SELECT id, name, role, active_x_user_id FROM user WHERE id = ?").get(user);
     const wakes = [];
     globalThis.__wakeEnv = () => ({
@@ -79,7 +79,7 @@ if (runUnderRootTsx(import.meta.url)) {
     form.set("video_id", videoId);
     form.set("kind", kind);
     const original = { warn: console.warn, log: console.log, info: console.info };
-    console.warn = () => {}; console.log = () => {}; console.info = () => {};
+    console.warn = warn; console.log = () => {}; console.info = () => {};
     try {
       const result = await toggleVideoInteraction(form);
       return { result: JSON.parse(JSON.stringify(result)), wakes: wakes.length };
@@ -202,6 +202,50 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(expected.wakes, 1);
     assert.equal(b.d1.stats.batches, 1);
     assert.equal(b.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+  });
+
+  test("SEC-820: malformed provider errors and a throwing warning sink cannot mask CURRENT/Hono write failures", async () => {
+    const errors = [
+      (() => {
+        const err = new Error("SEC820_PROVIDER_SECRET");
+        Object.defineProperty(err, "message", {
+          get() { throw new Error("SEC820_UNTRUSTED_MESSAGE_GETTER"); },
+        });
+        Object.defineProperty(err, "name", {
+          get() { throw new Error("SEC820_UNTRUSTED_NAME_GETTER"); },
+        });
+        return err;
+      })(),
+      {
+        [Symbol.toPrimitive]() { throw new Error("SEC820_UNTRUSTED_COERCION"); },
+        toString() { throw new Error("SEC820_UNTRUSTED_TOSTRING"); },
+      },
+    ];
+    const conflict = "操作が競合したか、保存に失敗しました。再読み込みして再試行してください。";
+    for (const poison of errors) {
+      const nextWorld = world();
+      const before = state(nextWorld);
+      nextWorld.d1.batch = async () => { throw poison; };
+      const calls = [];
+      const next = await current(nextWorld, "u_owner", "v_pub", "bookmark", (...args) => {
+        calls.push(args);
+        throw new Error("SEC820_UNAVAILABLE_LOG_SINK");
+      });
+      assert.deepEqual(next.result, { ok: false, message: conflict },
+        "CURRENT must return the existing stable action error");
+      assert.equal(next.wakes, 0);
+      assert.deepEqual(calls, [["[video-interaction] atomic mutation rejected"]],
+        "diagnostics must neither reveal provider details nor alter the result");
+      assert.deepEqual(state(nextWorld), before, "failed atomic batch must not mutate the database");
+
+      const honoWorld = world();
+      const honoBefore = state(honoWorld);
+      honoWorld.d1.batch = async () => { throw poison; };
+      const hono = await target(honoWorld, "u_owner", "v_pub", "bookmark");
+      assert.equal(hono.status, 409, "Hono must not turn a failed conflict classification into HTTP 500");
+      assert.deepEqual(hono.result, { ok: false, message: conflict });
+      assert.deepEqual(state(honoWorld), honoBefore, "Hono failed batch must leave data unchanged");
+    }
   });
 
   test("contract is strict on kind and preserves original action result fields", () => {
