@@ -11,7 +11,7 @@ import {
 import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 import { send, type OpsWriteResult } from "./write.js";
 
-export type AdminWriteResult = { ok: boolean; message?: string; anonymous?: boolean; forbidden?: boolean };
+export type AdminWriteResult = { ok: boolean; message?: string; anonymous?: boolean; forbidden?: boolean; accessUnknown?: boolean };
 export type AdminOpsBody = { ok: boolean; message?: string; reason?: string };
 type BodySchema = { safeParse: (value: unknown) => { success: boolean; data?: unknown } };
 
@@ -37,6 +37,34 @@ export function toWriteResult(result: OpsWriteResult<AdminOpsBody>): AdminWriteR
   return { ok: false, message: "通信エラーが発生しました。" };
 }
 
+// A 403 may be an ordinary Cost Guard denial, so the status alone does not
+// authorize redirecting to /dashboard. However an unreadable/stalled 403 body
+// cannot leave privileged settings visible indefinitely.
+export const COST_GUARD_403_BODY_DEADLINE_MS = 250;
+async function bounded403Body(response: Response): Promise<{ reply: Response; accessUnknown: boolean }> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<{ kind: "timeout" }>((resolve) => {
+    timeout = setTimeout(() => resolve({ kind: "timeout" }), COST_GUARD_403_BODY_DEADLINE_MS);
+  });
+  const parsing: Promise<{ kind: "json"; value: unknown } | { kind: "invalid" }> =
+    Promise.resolve().then(() => response.json()).then(
+      (value: unknown) => ({ kind: "json", value }),
+      () => ({ kind: "invalid" }),
+    );
+  const parsed = await Promise.race([parsing, deadline]);
+  if (timeout !== undefined) clearTimeout(timeout);
+  if (parsed.kind !== "json") {
+    return {
+      reply: new Response('{"ok":false}', { status: 403, headers: { "content-type": "application/json" } }),
+      accessUnknown: true,
+    };
+  }
+  return {
+    reply: new Response(JSON.stringify(parsed.value), { status: 403, headers: { "content-type": "application/json" } }),
+    accessUnknown: false,
+  };
+}
+
 export async function postAdminBody(
   fetchFn: OpsFetch, path: string, schema: BodySchema | null, raw?: object,
 ): Promise<AdminWriteResult> {
@@ -46,7 +74,20 @@ export async function postAdminBody(
     if (!checked.success) return { ok: false, message: "入力内容が不正です。" };
     body = checked.data as object;
   }
-  return toWriteResult(await send<AdminOpsBody>(fetchFn, "POST", path, body));
+  let accessUnknown = false;
+  const boundedFetch: OpsFetch = async (url, init) => {
+    const response = await fetchFn(url, init);
+    if (response.status !== 403) return response;
+    const bounded = await bounded403Body(response);
+    accessUnknown = bounded.accessUnknown;
+    return bounded.reply;
+  };
+  const outcome = toWriteResult(await send<AdminOpsBody>(boundedFetch, "POST", path, body));
+  // The fixed-page retry checks the authoritative admin read before restoring
+  // any private DTO. Do not classify an unparseable 403 as "forbidden".
+  return accessUnknown
+    ? { ok: false, accessUnknown: true, message: "管理権限を確認できません。再読み込みしてください。" }
+    : outcome;
 }
 
 export async function fetchAdminCostGuard(
