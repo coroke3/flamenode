@@ -65,7 +65,13 @@ export function normalizePublicVideoCard(value: unknown): StaticVideoCardData | 
   const base = normalizeStaticVideoCardBase(value);
   if (!base) return null;
   const row = value as Record<string, unknown>;
-  if (!isPublicVideoListable(row.status ?? row.visibility_status)) return null;
+  // Both fields are public visibility markers in legacy/current snapshots. An
+  // explicitly revoked alias must never be overridden by a public sibling.
+  if (
+    (row.status != null && !isPublicVideoListable(row.status)) ||
+    (row.visibility_status != null && !isPublicVideoListable(row.visibility_status)) ||
+    !isPublicVideoListable(row.status ?? row.visibility_status)
+  ) return null;
   return {
     ...base,
     creator_x_user_id: normalizePresentString(row.creator_x_user_id),
