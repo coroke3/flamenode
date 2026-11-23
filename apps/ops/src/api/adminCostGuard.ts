@@ -48,8 +48,8 @@ async function bounded403Body(response: Response): Promise<{ reply: Response; ac
   });
   const parsing: Promise<{ kind: "json"; value: unknown } | { kind: "invalid" }> =
     Promise.resolve().then(() => response.json()).then(
-      (value: unknown) => ({ kind: "json", value }),
-      () => ({ kind: "invalid" }),
+      (value: unknown) => ({ kind: "json" as const, value }),
+      () => ({ kind: "invalid" as const }),
     );
   const parsed = await Promise.race([parsing, deadline]);
   if (timeout !== undefined) clearTimeout(timeout);
