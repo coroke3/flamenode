@@ -19,20 +19,16 @@ export function normalizeCoercedString(value: unknown): string | null {
   return String(value);
 }
 
-export function normalizeNullableUnix(value: unknown): number | null {
-  if (value == null) return null;
+function normalizeFiniteNumericValue(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const normalized = Number(value.trim());
+  return Number.isFinite(normalized) ? normalized : null;
+}
 
-  // R2 JSON timestamps may be numbers or numeric strings. Do not coerce
-  // booleans, arrays, objects, or whitespace-only strings into 0/1.
-  let normalized: number;
-  if (typeof value === "number") {
-    normalized = value;
-  } else if (typeof value === "string" && value.trim() !== "") {
-    normalized = Number(value.trim());
-  } else {
-    return null;
-  }
-  if (!Number.isFinite(normalized)) return null;
+export function normalizeNullableUnix(value: unknown): number | null {
+  const normalized = normalizeFiniteNumericValue(value);
+  if (normalized == null) return null;
   const unix = Math.floor(normalized);
   const ms = unix * 1000;
   if (!Number.isFinite(ms) || Math.abs(unix) > 8.64e12) return null;
@@ -47,12 +43,8 @@ export function normalizeUnixDate(value: unknown): Date | null {
 }
 
 export function normalizeNumericUnix(value: unknown): number | null {
-  const normalized =
-    typeof value === "number" ? value : Number(value);
-
-  return Number.isFinite(normalized)
-    ? Math.floor(normalized)
-    : null;
+  const normalized = normalizeFiniteNumericValue(value);
+  return normalized == null ? null : Math.floor(normalized);
 }
 
 export function normalizeCount(value: unknown): number | null {
