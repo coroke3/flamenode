@@ -20,7 +20,7 @@ async function mounted(run) {
   const dom = new JSDOM("<!doctype html><div id='root'></div>", {
     url: "https://flamenode.test/admin/cost-guard",
   });
-  const keys = ["window", "document", "Node", "Element", "HTMLElement", "navigator"];
+  const keys = ["window", "document", "Node", "Element", "HTMLElement", "navigator", "ResizeObserver"];
   const prior = new Map(keys.map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
   const previousAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
   for (const key of keys) {
@@ -28,6 +28,12 @@ async function mounted(run) {
       configurable: true, writable: true, value: dom.window[key],
     });
   }
+  // jsdom does not implement this browser layout observer; the UI only needs
+  // its non-visual observe/disconnect lifecycle in these mounted tests.
+  globalThis.ResizeObserver = class {
+    observe() {}
+    disconnect() {}
+  };
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const { createRoot } = await import("react-dom/client");
   const root = createRoot(dom.window.document.getElementById("root"));
