@@ -158,7 +158,10 @@ test("SEC-816: stalled 403 body removes payloads, rechecks access, and only fres
     };
     await render(root, api, routes);
     assert.equal(shown(dom), true);
-    await React.act(async () => button(dom, "再試行").click());
+    await React.act(async () => {
+      button(dom, "再試行").click();
+      await new Promise(resolve => setTimeout(resolve, 320));
+    });
     assert.equal(reads, 2, "unknown 403 must issue a new authoritative GET");
     assert.equal(shown(dom), false, "stalled body cannot leave payloads mounted");
     assert.equal(button(dom, "再試行"), undefined);
@@ -182,7 +185,10 @@ test("SEC-816: stalled 403 revalidation forbidden never restores delayed private
       },
     };
     await render(root, api, routes);
-    await React.act(async () => button(dom, "再試行").click());
+    await React.act(async () => {
+      button(dom, "再試行").click();
+      await new Promise(resolve => setTimeout(resolve, 320));
+    });
     assert.deepEqual(routes, ["/dashboard"]);
     assert.equal(shown(dom), false);
     assert.equal(button(dom, "強制再送"), undefined);
