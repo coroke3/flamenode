@@ -43,6 +43,9 @@ async function withYoutubeSync(fetchFn, exercise) {
   for (const [key, value] of [
     ["window", dom.window], ["document", dom.window.document],
     ["navigator", dom.window.navigator], ["fetch", fetchFn],
+    // Node's undici FormData cannot serialize a jsdom HTMLFormElement.
+    // The mounted filter form must use the browser-compatible constructor.
+    ["FormData", dom.window.FormData],
     ["IS_REACT_ACT_ENVIRONMENT", true],
   ]) {
     previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
