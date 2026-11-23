@@ -105,19 +105,31 @@ test("SEC broadcast: 401 and 403 write responses immediately clear all private r
   }
 });
 
-test("SEC broadcast: an unrelated HTTP 503 leaves the modal and draft retryable", async () => {
+test("SEC broadcast: 503 retains draft, and retry successfully enqueues without losing cursor", async () => {
   let writes = 0;
+  const requests = [];
   await withRulesPage(async (_path, init) => {
     if (init?.method === "GET") return reply(200, rules);
     writes++;
-    return reply(503, { ok: false, message: "try again" });
+    requests.push(JSON.parse(init.body));
+    if (writes === 1) return reply(503, { ok: false, message: "try again" });
+    return reply(200, { ok: true, enqueued: 1, cursor: "next-user", message: "success" });
   }, async (target, win) => {
     const submit = await openConfirmedBroadcast(target, win);
     await React.act(async () => submit.click());
     assert.equal(writes, 1);
-    assert.ok(target.querySelector('[role="alertdialog"]'));
+    const modal = target.querySelector('[role="alertdialog"]');
+    assert.ok(modal, "503 must keep the modal visible for retry");
     assert.match(target.textContent, /PRIVATE_RULE_VERSION_CANARY/);
     assert.doesNotMatch(target.textContent, /規約管理へのアクセスが終了しました/);
+    assert.equal(submit.disabled, false, "503 must release the pending write lock");
+    await React.act(async () => submit.click());
+    assert.equal(writes, 2, "retry must reach the backend");
+    assert.equal(requests[0].confirm, "TERMS");
+    assert.deepEqual(requests[1], requests[0], "retry must preserve content and cursor");
+    assert.ok(target.querySelector('[role="alertdialog"]'), "success must not spuriously revoke authorization");
+    assert.match(target.textContent, /合計 enqueued: 1/);
+    assert.equal(modal.querySelectorAll("input")[0].value, "next-user");
   });
 });
 
