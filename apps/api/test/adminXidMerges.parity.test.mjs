@@ -248,6 +248,18 @@ if (runUnderRootTsx(import.meta.url)) {
     });
     assert.equal(response.status, 400, JSON.stringify(response.body));
     assert.equal(response.body.message, "入力エラー");
+
+    // A valid JSON stream with the same forged header must still be parsed;
+    // the nonexistent request ID is then rejected by the domain lookup.
+    const valid = await callHono(side, "/missing/reject", "{}", {
+      headers: { Origin: SITE, "content-length": "0" },
+    });
+    assert.equal(valid.status, 404, JSON.stringify(valid.body));
+    assert.equal(valid.body.message, "対象の申請が見つかりません。");
+
+    // The optional decision body remains optional when no stream exists.
+    const absent = await callHono(side, "/missing/reject", undefined);
+    assert.equal(absent.status, 404, JSON.stringify(absent.body));
   });
 
   function seedMergeScenario(sqlite, { source = "src_x", target = "tgt_x", rowCount = 1 } = {}) {
