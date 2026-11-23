@@ -53,14 +53,16 @@ async function bounded403Body(response: Response): Promise<{ reply: Response; ac
     );
   const parsed = await Promise.race([parsing, deadline]);
   if (timeout !== undefined) clearTimeout(timeout);
-  if (parsed.kind !== "json") {
+  const value = parsed.kind === "json" ? parsed.value : null;
+  if (value === null || typeof value !== "object" || Array.isArray(value) ||
+      typeof (value as Record<string, unknown>).ok !== "boolean") {
     return {
       reply: new Response('{"ok":false}', { status: 403, headers: { "content-type": "application/json" } }),
       accessUnknown: true,
     };
   }
   return {
-    reply: new Response(JSON.stringify(parsed.value), { status: 403, headers: { "content-type": "application/json" } }),
+    reply: new Response(JSON.stringify(value), { status: 403, headers: { "content-type": "application/json" } }),
     accessUnknown: false,
   };
 }
