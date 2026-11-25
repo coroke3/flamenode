@@ -41,14 +41,24 @@ export async function loadEligibleUnslottedVideoRequiredFields(
   nowSec: number,
   youtubeId: string,
   includeQuestionPolicy = false,
-): Promise<{ eventId: string | null; requiredFields: OptionalRequiredVideoField[]; requiredFieldsSnapshot: string | null; youtubeDuplicate: boolean | null; questionPolicyJson?: string }> {
+  includeEventTitle = false,
+): Promise<{
+  eventId: string | null;
+  requiredFields: OptionalRequiredVideoField[];
+  requiredFieldsSnapshot: string | null;
+  youtubeDuplicate: boolean | null;
+  questionPolicyJson?: string;
+  eventTitle?: string | null;
+}> {
   if (!eventId) return {
     eventId: null, requiredFields: [], requiredFieldsSnapshot: null, youtubeDuplicate: null,
     ...(includeQuestionPolicy ? { questionPolicyJson: "[]" } : {}),
+    ...(includeEventTitle ? { eventTitle: null } : {}),
   };
   const row = (
     await db.select({
       id: events.id,
+      ...(includeEventTitle ? { title: events.title } : {}),
       required_video_fields_json: events.required_video_fields_json,
       // Use the exact CURRENT duplicate predicate as a correlated scalar
       // projection. One bounded D1 SELECT now checks the eligible event,
@@ -101,5 +111,6 @@ export async function loadEligibleUnslottedVideoRequiredFields(
     requiredFieldsSnapshot: row.required_video_fields_json,
     youtubeDuplicate: row.youtube_duplicate === 1,
     ...(includeQuestionPolicy ? { questionPolicyJson: row.question_policy_json as string } : {}),
+    ...(includeEventTitle ? { eventTitle: typeof row.title === "string" ? row.title : null } : {}),
   };
 }
