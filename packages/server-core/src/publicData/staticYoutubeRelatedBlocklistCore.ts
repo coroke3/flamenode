@@ -29,14 +29,18 @@ export const EMPTY_YOUTUBE_RELATED_BLOCKLIST: YoutubeRelatedBlocklist = {
 export function normalizeYoutubeRelatedBlocklist(
   value: unknown,
 ): YoutubeRelatedBlocklist | null {
-  if (!value || typeof value !== "object") return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const payload = value as {
     schema_version?: unknown;
     generated_at?: unknown;
     blocked?: unknown;
   };
-  if (Number(payload.schema_version) !== 1) return null;
-  if (!payload.blocked || typeof payload.blocked !== "object") return null;
+  if (payload.schema_version !== YOUTUBE_RELATED_BLOCKLIST_SCHEMA_VERSION) return null;
+  if (
+    !payload.blocked ||
+    typeof payload.blocked !== "object" ||
+    Array.isArray(payload.blocked)
+  ) return null;
 
   const reasons = new Map<string, YoutubeRelatedBlockReason>();
   for (const [rawId, rawReason] of Object.entries(
@@ -50,7 +54,12 @@ export function normalizeYoutubeRelatedBlocklist(
     reasons.set(id, rawReason);
   }
 
-  const generated = Number(payload.generated_at);
+  const rawGeneratedAt = payload.generated_at;
+  if (
+    (typeof rawGeneratedAt !== "number" && typeof rawGeneratedAt !== "string") ||
+    (typeof rawGeneratedAt === "string" && rawGeneratedAt.trim() === "")
+  ) return null;
+  const generated = Number(rawGeneratedAt);
   if (!Number.isFinite(generated) || generated <= 0) {
     return null;
   }
