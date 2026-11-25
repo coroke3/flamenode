@@ -254,7 +254,7 @@ if (runUnderRootTsx(import.meta.url)) {
 
     // The same malformed stream must fail for the create endpoint, too;
     // a forged zero header cannot turn it into a valid empty payload.
-    const create = await callHono(side, "/", "{malformed", {
+    const create = await callHono(side, "", "{malformed", {
       headers: { Origin: SITE, "content-length": "0" },
     });
     assert.equal(create.status, 400, JSON.stringify(create.body));
@@ -262,7 +262,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(create.headers.get("cache-control"), "private, no-store");
 
     // A forged zero must not bypass the actual 64 KiB stream limit either.
-    const oversized = await callHono(side, "/", JSON.stringify({
+    const oversized = await callHono(side, "", JSON.stringify({
       from_x_user_id: "a".repeat(65536),
       to_x_user_id: "target",
     }), { headers: { Origin: SITE, "content-length": "0" } });
