@@ -36,7 +36,11 @@ const missingBindingWarned = new Set<string>();
 function warnOnce(key: string, payload: Record<string, unknown>): void {
   if (missingBindingWarned.has(key)) return;
   missingBindingWarned.add(key);
-  console.warn(JSON.stringify(payload));
+  try {
+    console.warn(JSON.stringify(payload));
+  } catch {
+    // Diagnostic sink failures must never escape a best-effort wake path.
+  }
 }
 
 function resolveQueueFromEnv(
@@ -107,16 +111,35 @@ export async function sendQueueWakeBestEffort(
   options: SendQueueWakeOptions,
   host: QueueWakeHost,
 ): Promise<{ sent: boolean; reason?: string }> {
-  const flags = resolveQueueFeatureFlags(
-    options.envFlags ??
-      (() => {
-        try {
-          return host.readEnv();
-        } catch {
-          return null;
-        }
-      })(),
-  );
+  // Some host/runtime shims expose env flags through accessors or Proxies.
+  // Even if readEnv() returned, evaluating a getter can throw. Fail closed
+  // without turning an already committed business write into an error.
+  let flags: ReturnType<typeof resolveQueueFeatureFlags>;
+  try {
+    flags = resolveQueueFeatureFlags(
+      options.envFlags ??
+        (() => {
+          try {
+            return host.readEnv();
+          } catch {
+            return null;
+          }
+        })(),
+    );
+  } catch {
+    // Never include the original provider error (which may contain credentials).
+    warnOnce(`wake_flags_unavailable:${options.kind}`, {
+      service: "queue-wake",
+      result: "feature_flags_unavailable",
+      kind: options.kind,
+    });
+    await persistFailureWithinWorkerLifetime(
+      options,
+      "feature_flags_unavailable",
+      host,
+    );
+    return { sent: false, reason: "feature_flags_unavailable" };
+  }
 
   if (!flags.dispatchEnabled) {
     return { sent: false, reason: "dispatch_disabled" };
@@ -170,13 +193,14 @@ export async function sendQueueWakeBestEffort(
     () => {
       options.sentKinds?.add(options.kind);
     },
-    async (error: unknown) => {
+    async () => {
       sendFailed = true;
+      // Queue provider Error.name/message/cause are not a trusted enum.
+      // Do not serialize any part of the thrown object to diagnostics.
       warnOnce(`wake_send_failed:${options.kind}`, {
         service: "queue-wake",
         result: "send_failed",
         kind: options.kind,
-        error_name: error instanceof Error ? error.name : undefined,
       });
       // このPromise自体が下でawaitまたはwaitUntil登録されるため、失敗telemetryも
       // 同じlifetimeへ含める。response後に投げ捨てられるfloating Promiseを作らない。
