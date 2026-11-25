@@ -17,6 +17,7 @@ if (runTestWithTsx(import.meta.url)) {
   });
 
   const {
+    isPublicEntityVisibilityBlocked,
     readPublicVisibilityBlockedEntitiesManifest,
     writePublicVisibilityBlockedEntitiesManifest,
   } =
@@ -185,5 +186,90 @@ if (runTestWithTsx(import.meta.url)) {
       saved.entities.map((entry) => entry.entity_id).sort(),
       ["event-a", "event-b"],
     );
+  });
+
+  test("SEC-807: observe mode still returns a bootstrap manifest when the warning sink throws", async () => {
+    const previousMode = process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+    const previousWarn = console.warn;
+    const messages = [];
+    process.env.PUBLIC_VISIBILITY_GUARD_MODE = "observe";
+    console.warn = (message) => {
+      messages.push(message);
+      throw new Error("SEC807_DIAGNOSTIC_SINK_FAILED");
+    };
+    try {
+      const result = await readPublicVisibilityBlockedEntitiesManifest(null);
+      assert.equal(result.etag, null);
+      assert.deepEqual(result.manifest.entities, []);
+      assert.equal(result.manifest.schema_version, 1);
+      assert.deepEqual(messages.map(JSON.parse), [{
+        service: "public-visibility-guard",
+        mode: "observe",
+        result: "manifest_bucket_missing",
+      }]);
+    } finally {
+      console.warn = previousWarn;
+      if (previousMode === undefined) delete process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+      else process.env.PUBLIC_VISIBILITY_GUARD_MODE = previousMode;
+    }
+  });
+
+  test("SEC-807: observe blocked-item diagnostic failure never rejects or enforces; enforce still blocks", async () => {
+    const previousWarn = console.warn;
+    const messages = [];
+    const manifest = {
+      schema_version: 1,
+      revision: 1,
+      generated_at: 100,
+      entities: [{
+        entity_type: "video", entity_id: "sec807-video",
+        fence_token: "sec807-fence", blocked_at: 100,
+      }],
+    };
+    console.warn = (message) => {
+      messages.push(message);
+      throw new Error("SEC807_DIAGNOSTIC_SINK_FAILED");
+    };
+    try {
+      assert.equal(await isPublicEntityVisibilityBlocked({
+        entityType: "video", entityId: "sec807-video",
+        guardMode: "observe", manifest,
+      }), false);
+      assert.deepEqual(messages.map(JSON.parse), [{
+        service: "public-visibility-guard",
+        mode: "observe",
+        entity_type: "video",
+        entity_id: "sec807-video",
+        result: "blocked_observe",
+      }]);
+      assert.equal(await isPublicEntityVisibilityBlocked({
+        entityType: "video", entityId: "sec807-video",
+        guardMode: "enforce", manifest,
+      }), true, "enforcement must not be relaxed by the observe-mode fix");
+      assert.equal(await isPublicEntityVisibilityBlocked({
+        entityType: "video", entityId: "sec807-video",
+        guardMode: "off", manifest,
+      }), false);
+      assert.equal(messages.length, 1, "only the observe path should log");
+    } finally {
+      console.warn = previousWarn;
+    }
+  });
+
+  test("SEC-807: enforce missing bucket remains fail closed with an unavailable logger", async () => {
+    const previousMode = process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+    const previousWarn = console.warn;
+    process.env.PUBLIC_VISIBILITY_GUARD_MODE = "enforce";
+    console.warn = () => { throw new Error("SEC807_DIAGNOSTIC_SINK_FAILED"); };
+    try {
+      await assert.rejects(
+        () => readPublicVisibilityBlockedEntitiesManifest(null),
+        /public_visibility_manifest_bucket_missing/,
+      );
+    } finally {
+      console.warn = previousWarn;
+      if (previousMode === undefined) delete process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+      else process.env.PUBLIC_VISIBILITY_GUARD_MODE = previousMode;
+    }
   });
 }
