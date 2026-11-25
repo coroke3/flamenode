@@ -51,9 +51,10 @@ function fixture({ role = "admin", includeContext = true, targetError = false, t
   return { request, stats: () => ({ invoked, prematureDb }) };
 }
 
-test("MIG-0650 U03e Hono admin SA-085 remains absent from the live videos router", async () => {
+test("MIG-0650 U03 Hono admin SA-085 is mounted in the live videos router", async () => {
   const router = await readFile(new URL("../src/routes/videos/index.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(router, /adminMembers\.ts|createVideoAdminMembersPreflightRoutes/);
+  assert.match(router, /adminMembers\.ts/);
+  assert.match(router, /createVideoAdminMembersRoutes/);
 });
 
 test("MIG-0650 U03e missing guard context and non-admin actor fail before body/DB", async () => {

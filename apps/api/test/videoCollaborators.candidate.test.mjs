@@ -5,6 +5,7 @@ import { createVideoCollaboratorRoutes, createDefaultVideoCollaboratorHost } fro
 
 const videoId = "v1";
 const route = "/v1/collaborators";
+const targetRoute = "/v1/collaborators/alice";
 const jsonHeaders = { "content-type": "application/json" };
 const canonicalBatch = {
   video_id: videoId,
@@ -53,19 +54,19 @@ function fixture({ guardState = true } = {}) {
   };
 }
 
-test("MIG-0650 candidate is explicitly unmounted in the active videos router", async () => {
+test("MIG-0650 U02 collaborator routes are mounted in the active videos router", async () => {
   const source = await readFile(
     new URL("../src/routes/videos/index.ts", import.meta.url),
     "utf8",
   );
-  assert.doesNotMatch(source, /collaborators\.ts/);
-  assert.doesNotMatch(source, /createVideoCollaboratorRoutes/);
+  assert.match(source, /collaborators\.ts/);
+  assert.match(source, /createVideoCollaboratorRoutes/);
 });
 
 test("SA-082 invalid upsert is rejected before D1 or Queue wake", async () => {
   const f = fixture();
-  const res = await f.request("POST", route, {
-    video_id: videoId, x_user_id: "http://evil.invalid/",
+  const res = await f.request("PUT", "/v1/collaborators/bad-x-id", {
+    video_id: videoId,
     display_name: "Invalid", can_edit: "1",
   });
   assert.equal(res.status, 400);
@@ -76,7 +77,7 @@ test("SA-082 invalid upsert is rejected before D1 or Queue wake", async () => {
 
 test("SA-082 path and submitted video IDs must match", async () => {
   const f = fixture();
-  const res = await f.request("POST", route, {
+  const res = await f.request("PUT", targetRoute, {
     video_id: "other-video", x_user_id: "@alice", display_name: "Alice",
   });
   assert.equal(res.status, 400);
@@ -86,21 +87,26 @@ test("SA-082 path and submitted video IDs must match", async () => {
 
 test("SA-083 delete rejects oversized video ID before D1", async () => {
   const f = fixture();
-  const res = await f.request("DELETE", "/" + "v".repeat(65) + "/collaborators", {
+  const res = await f.request("DELETE", "/" + "v".repeat(65) + "/collaborators/alice", {
     x_user_id: "alice",
   });
   assert.equal(res.status, 400);
   assert.deepEqual(f.stats(), { guarded: 1, wakeCalls: 0, prematureReads: 0 });
 });
 
-test("SA-083 delete rejects missing or malformed X identities before D1", async () => {
+test("SA-083 delete rejects malformed X identities or mismatched body before D1", async () => {
   const f = fixture();
-  for (const bad of [{}, { x_user_id: "../admin" }, { x_user_id: "a".repeat(33) }]) {
-    const res = await f.request("DELETE", route, bad);
+  for (const [path, body] of [
+    ["/v1/collaborators/%20", undefined],
+    ["/v1/collaborators/bad-id", undefined],
+    ["/v1/collaborators/" + "a".repeat(33), undefined],
+    [targetRoute, { x_user_id: "bob" }],
+  ]) {
+    const res = await f.request("DELETE", path, body);
     assert.equal(res.status, 400);
-    assert.match((await res.json()).message, /X ID/);
+    assert.equal((await res.json()).ok, false);
   }
-  assert.deepEqual(f.stats(), { guarded: 3, wakeCalls: 0, prematureReads: 0 });
+  assert.deepEqual(f.stats(), { guarded: 4, wakeCalls: 0, prematureReads: 0 });
 });
 
 test("SA-084 rejects empty, 101-row and malformed batches before D1", async () => {
@@ -132,7 +138,7 @@ test("all endpoints limit body bytes even without Content-Length honesty", async
   const f = fixture();
   const huge = JSON.stringify({ video_id: videoId, extra: "x".repeat(66000) });
   for (const [method, path] of [
-    ["POST", route], ["DELETE", route], ["POST", route + "/batch"],
+    ["PUT", targetRoute], ["DELETE", targetRoute], ["POST", route + "/batch"],
   ]) {
     const res = await f.request(method, path, huge);
     assert.equal(res.status, 413);
@@ -320,10 +326,10 @@ test("SA-084 production write stack rejects anonymous and maintenance requests",
 test("SA-082/083 fail closed before any D1 access when guard omitted CostGuard/audit preloads", async () => {
   const f = fixture({ guardState: "missingPreload" });
   const requests = [
-    ["POST", route, {
+    ["PUT", targetRoute, {
       video_id: videoId, x_user_id: "@alice", display_name: "Alice", can_edit: "1",
     }],
-    ["DELETE", route, { video_id: videoId, x_user_id: "@alice" }],
+    ["DELETE", targetRoute, { video_id: videoId, x_user_id: "@alice" }],
   ];
   for (const [method, path, body] of requests) {
     const res = await f.request(method, path, body);
@@ -363,8 +369,8 @@ test("SA-084 Queue host-load rejection after commit does not turn durable succes
 test("SA-082/083 actual SQLite grant, revoke, repeat: strict audit + durable queue only on changes", async () => {
   const s = integration();
   try {
-    const path = "/api/videos/v_pub/collaborators";
-    const first = await s.send("POST", path, {
+    const itemPath = "/api/videos/v_pub/collaborators/x_other";
+    const first = await s.send("PUT", itemPath, {
       video_id: "v_pub", edit_privilege_mode: "admin",
       x_user_id: "@x_other", display_name: "Other",
       can_edit: "1", notify: "0",
@@ -379,17 +385,15 @@ test("SA-082/083 actual SQLite grant, revoke, repeat: strict audit + durable que
     assert.equal(s.count("audit_logs"), 1);
     assert.equal(s.d1.stats.batches, 1);
 
-    const second = await s.send("DELETE", path, {
-      video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "@x_other",
-    });
+    const second = await s.send("DELETE", itemPath + "?edit_privilege_mode=admin", undefined);
     assert.equal(second.status, 200, await second.clone().text());
     assert.equal((await second.json()).ok, true);
     assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM video_members WHERE video_id=? AND x_user_id=?").get("v_pub", "x_other").n, 0);
     assert.equal(s.count("audit_logs"), 2, "revoke must be audited atomically");
     assert.equal(s.d1.stats.batches, 2);
 
-    const repeat = await s.send("DELETE", path, {
-      video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_other",
+    const repeat = await s.send("DELETE", itemPath, {
+      video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "@x_other",
     });
     assert.equal(repeat.status, 200, await repeat.clone().text());
     assert.equal((await repeat.json()).ok, true);
@@ -406,11 +410,11 @@ test("SA-082/083/084 deny an unauthorized user before mutation/audit/queue", asy
   try {
     const path = "/api/videos/v_pub/collaborators";
     const attempts = [
-      ["POST", path, {
+      ["PUT", path + "/x_staff", {
         video_id: "v_pub", edit_privilege_mode: "admin",
         x_user_id: "x_staff", display_name: "Staff", can_edit: "1",
       }],
-      ["DELETE", path, {
+      ["DELETE", path + "/x_staff", {
         video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_staff",
       }],
       ["POST", path + "/batch", {
@@ -440,11 +444,11 @@ test("SA-082/083/084 edit_video CostGuard rejects disabled feature before permis
     s.sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
       .run(JSON.stringify(["edit_video"]));
     const attempts = [
-      ["POST", "/api/videos/v_pub/collaborators", {
+      ["PUT", "/api/videos/v_pub/collaborators/x_other", {
         video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_other",
         display_name: "Other", can_edit: "1",
       }],
-      ["DELETE", "/api/videos/v_pub/collaborators", {
+      ["DELETE", "/api/videos/v_pub/collaborators/x_other", {
         video_id: "v_pub", edit_privilege_mode: "admin", x_user_id: "x_other",
       }],
       ["POST", "/api/videos/v_pub/collaborators/batch", {
@@ -469,7 +473,7 @@ test("SA-082/083/084 edit_video CostGuard rejects disabled feature before permis
 });
 
 
-test("SA-084 notify=true commits a DM outbox + static queue then sends exactly two wake-only messages", async () => {
+test("SA-084 notify=true commits a DM outbox + static queue with zero request-time Queue wake (D-0603-1)", async () => {
   const s = integration({ queueEnabled: true });
   try {
     const res = await s.send("POST", "/api/videos/v_pub/collaborators/batch", {
@@ -492,19 +496,11 @@ test("SA-084 notify=true commits a DM outbox + static queue then sends exactly t
       ["u_other", "video_edit_permission_granted", "pending"],
     );
     assert.deepEqual(
-      s.queueMessages.map((msg) => [msg.kind, msg.source]).sort(),
-      [
-        ["notification_available", "manage"],
-        ["static_rebuild_available", "manage"],
-      ],
-      "messages are doorbells only; no business payload reaches Queue",
+      s.queueMessages,
+      [],
+      "Hono routes omit request-time Queue wakes (D-0603-1); outbox/queue rows remain durable in D1",
     );
-    for (const msg of s.queueMessages) {
-      assert.equal(msg.version, 1);
-      assert.equal(msg.video_id, undefined);
-      assert.equal(msg.recipient_user_id, undefined);
-    }
-    assert.equal(s.wakeLoads(), 2);
+    assert.equal(s.wakeLoads(), 1);
   } finally {
     s.sqlite.close();
   }

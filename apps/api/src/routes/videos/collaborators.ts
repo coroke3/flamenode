@@ -1,20 +1,26 @@
 /**
- * MIG-0650 U02 candidate: SA-082/083/084 Hono collaborator permission writes.
+ * MIG-0650 U02: SA-082/083/084 Hono collaborator permission writes.
  *
- * Intentionally UNMOUNTED until a separate owner integrates the video router,
- * current writeGuard(edit_video) / session / origin / CostGuard are verified,
- * and the host supplies the after-commit Queue wake port. No handler in this
- * module can be reached just by importing it.
+ * Mounted on /api/videos via createVideosRoutes:
+ *   PUT    /api/videos/:videoId/collaborators/:xUserId  SA-082
+ *   DELETE /api/videos/:videoId/collaborators/:xUserId  SA-083
+ *   POST   /api/videos/:videoId/collaborators/batch     SA-084
  *
- * The host must supply the complete guard stack and a request-scoped wake
- * loader; this code never obtains elevated authorization on its own.
+ * Guard: origin -> session -> writeGuard (requiredRole: null, TOS) ->
+ * CostGuard("edit_video") -> Drizzle, matching CURRENT writeGuard({ feature: "edit_video" }).
+ * D-0603-1 / D-13-41: permission rows, notification_outbox rows,
+ * static_rebuild_queue rows, and strict audit share one atomic D1 batch, while
+ * request-time Queue wake dispatch is omitted on Hono (`NOOP_WAKE_HOST`, wake=0;
+ * DOCUMENTED DIFFERENCE D-0603-1).
  */
+import type { VideoCollabResult } from "@flamenode/contracts";
 import {
   parseVideoCollaboratorDeleteInput,
   permissionBatchSchema,
   upsertSchema,
   type CollaboratorPermissionIntent,
 } from "@flamenode/domain/video";
+import { normalizeXId } from "@flamenode/domain/xid";
 import { validateNotificationPayload } from "@flamenode/domain/notifications/payload";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { generateId } from "@flamenode/server-core/id";
@@ -41,7 +47,7 @@ import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../ad
 
 type Ctx = Context<AppEnv>;
 type AuthorizedVideo = NonNullable<Awaited<ReturnType<typeof loadAuthorizedPermissionVideo>>>;
-type Result = { ok: boolean; videoId?: string; message?: string; granted?: string[]; revoked?: string[]; unchanged?: number };
+type Result = VideoCollabResult;
 type Status = 200 | 400 | 403 | 404 | 413 | 500 | 503;
 type WriteInput = {
   videoId: string;
@@ -98,29 +104,12 @@ export function createDefaultVideoCollaboratorHost(
       };
       return run(0);
     },
-    loadWakeHost: async (c) => ({
-      readEnv: () => {
-        try {
-          return c.env as unknown as Readonly<Record<string, unknown>>;
-        } catch {
-          return null;
-        }
-      },
-      readWaitUntil: () => {
-        try {
-          const ctx = c.executionCtx;
-          return ctx.waitUntil.bind(ctx);
-        } catch {
-          return null;
-        }
-      },
-      readKv: () => {
-        try {
-          return c.env.KV ?? null;
-        } catch {
-          return null;
-        }
-      },
+    // D-0603-1 / D-13-41: Hono routes persist outbox/queue rows in the D1 batch
+    // and omit request-time Queue wake dispatch (wake=0).
+    loadWakeHost: async () => ({
+      readEnv: () => null,
+      readWaitUntil: () => null,
+      readKv: () => null,
     }),
   };
 }
@@ -313,22 +302,31 @@ async function parseBody(c: Ctx) {
 }
 
 /**
- * Unmounted route candidates:
- *   POST   /:videoId/collaborators         SA-082
- *   DELETE /:videoId/collaborators         SA-083
- *   POST   /:videoId/collaborators/batch   SA-084
- *
- * Hono-side Guard / CostGuard / Queue port / HTTP integration and live D1
- * parity must be independently reviewed before the owner mounts this router.
+ * Mounted SA-082..084 collaborator permission routes:
+ *   PUT    /:videoId/collaborators/:xUserId  SA-082
+ *   DELETE /:videoId/collaborators/:xUserId  SA-083
+ *   POST   /:videoId/collaborators/batch     SA-084
  */
 export function createVideoCollaboratorRoutes(host: VideoCollaboratorHost): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
-  routes.post("/:videoId/collaborators", host.writeGuard, async (c) => {
+  routes.put("/:videoId/collaborators/:xUserId", host.writeGuard, async (c) => {
     const body = await parseBody(c);
     if (!body.ok) return body.response;
     const videoId = c.req.param("videoId");
+    const pathXUserId = c.req.param("xUserId");
     if (!videoIdMatches(body.value, videoId)) return failure(c, 400, "video_id が一致しません。");
-    const parsed = upsertSchema.safeParse({ ...body.value, video_id: videoId });
+    if (
+      body.value.x_user_id !== undefined &&
+      (typeof body.value.x_user_id !== "string" ||
+        normalizeXId(body.value.x_user_id) !== normalizeXId(pathXUserId))
+    ) {
+      return failure(c, 400, "x_user_id が一致しません。");
+    }
+    const parsed = upsertSchema.safeParse({
+      ...body.value,
+      video_id: videoId,
+      x_user_id: pathXUserId,
+    });
     if (!parsed.success) return failure(c, 400, parsed.error.issues[0]?.message ?? "入力エラー");
 
     const actor = c.get("user");
@@ -360,13 +358,25 @@ export function createVideoCollaboratorRoutes(host: VideoCollaboratorHost): Hono
       return failure(c, 500, "合作権限の読込・更新に失敗しました。");
     }
   });
-  routes.delete("/:videoId/collaborators", host.writeGuard, async (c) => {
-    const body = await parseBody(c);
-    if (!body.ok) return body.response;
+  routes.delete("/:videoId/collaborators/:xUserId", host.writeGuard, async (c) => {
+    let bodyValue: Record<string, unknown> = {};
+    if (c.req.raw.body !== null) {
+      const body = await parseBody(c);
+      if (!body.ok) return body.response;
+      bodyValue = body.value;
+    }
     const videoId = c.req.param("videoId");
-    if (!videoIdMatches(body.value, videoId)) return failure(c, 400, "video_id が一致しません。");
+    const pathXUserId = c.req.param("xUserId");
+    if (!videoIdMatches(bodyValue, videoId)) return failure(c, 400, "video_id が一致しません。");
+    if (
+      bodyValue.x_user_id !== undefined &&
+      (typeof bodyValue.x_user_id !== "string" ||
+        normalizeXId(bodyValue.x_user_id) !== normalizeXId(pathXUserId))
+    ) {
+      return failure(c, 400, "x_user_id が一致しません。");
+    }
     const parsed = parseVideoCollaboratorDeleteInput({
-      video_id: videoId, x_user_id: body.value.x_user_id,
+      video_id: videoId, x_user_id: pathXUserId,
     });
     if (!parsed.ok) return failure(c, 400, parsed.message);
     const actor = c.get("user");
@@ -375,9 +385,12 @@ export function createVideoCollaboratorRoutes(host: VideoCollaboratorHost): Hono
       return failure(c, 503, "書込認証を確認できませんでした。");
     }
     try {
+      const privilegeMode =
+        typeof bodyValue.edit_privilege_mode === "string"
+          ? bodyValue.edit_privilege_mode
+          : (c.req.query("edit_privilege_mode") ?? "");
       const video = await loadAuthorizedPermissionVideo(
-        db, { id: actor.id, role: actor.role ?? null }, parsed.videoId,
-        typeof body.value.edit_privilege_mode === "string" ? body.value.edit_privilege_mode : "",
+        db, { id: actor.id, role: actor.role ?? null }, parsed.videoId, privilegeMode,
       );
       if (!video) return failure(c, 404, "対象作品が見つからない、または権限がありません。");
       const subject = await resolvePermissionSubjectXUserId(db, parsed.xUserId, null);

@@ -29,13 +29,13 @@ export const upsertSchema = z.object({
   user_id: z.string().trim().max(128).optional().nullable(),
   display_name: z.string().trim().min(1).max(80),
   can_edit: z
-    .union([z.literal("1"), z.literal("0"), z.literal("true"), z.literal("false")])
+    .union([z.boolean(), z.literal("1"), z.literal("0"), z.literal("true"), z.literal("false")])
     .optional()
-    .transform((value) => value === "1" || value === "true" || value === undefined),
+    .transform((value) => value === true || value === "1" || value === "true" || value === undefined),
   notify: z
-    .union([z.literal("1"), z.literal("0")])
+    .union([z.boolean(), z.literal("1"), z.literal("0"), z.literal("true"), z.literal("false")])
     .optional()
-    .transform((value) => value === "1"),
+    .transform((value) => value === true || value === "1" || value === "true"),
 });
 
 const permissionIntentSchema = z.object({

@@ -13,6 +13,8 @@ import { dbMiddleware } from "../../middleware/db.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { createChapterRoutes } from "./chapters.ts";
+import { createDefaultVideoAdminMembersHost, createVideoAdminMembersRoutes } from "./adminMembers.ts";
+import { createDefaultVideoCollaboratorHost, createVideoCollaboratorRoutes } from "./collaborators.ts";
 import { createVideoInteractionRoutes } from "./interaction.ts";
 import { videoDetailRoutes } from "./detail.ts";
 import { videoListRoutes } from "./list.ts";
@@ -71,6 +73,8 @@ export function createVideosRoutes(
   videos.route("/", videoDetailRoutes);
   videos.route("/", createChapterRoutes(videoWriteStack(options.session)));
   videos.route("/", createVideoInteractionRoutes(videoWriteStack(options.session, "like_or_bookmark")));
+  videos.route("/", createVideoCollaboratorRoutes(createDefaultVideoCollaboratorHost({ session: options.session })));
+  videos.route("/", createVideoAdminMembersRoutes(createDefaultVideoAdminMembersHost({ session: options.session })));
   return videos;
 }
 

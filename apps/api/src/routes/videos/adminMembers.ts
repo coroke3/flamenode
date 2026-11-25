@@ -1,12 +1,18 @@
 /**
- * MIG-0650 U03cr: UNMOUNTED SA-085 admin-members PUT candidate.
+ * MIG-0650 U03: SA-085 admin-members PUT route mounted on /api/videos.
  *
- * The default production-facing factory remains PREVIEW/DISABLED and returns
- * HTTP 501 even for a valid request. An explicitly opted-in isolated test host
- * exercises authenticated CAS + strict audit + static rebuild Queue in SQLite;
- * it is NOT mounted in createVideosRoutes, has not passed exact-HEAD CI or
- * workerd payload/CPU parity, and must never be used as a live writer.
+ * Route: PUT /api/videos/:videoId/members
+ * Guard: origin -> session -> admin identity/TOS -> CostGuard("edit_video") ->
+ * metered SELECT-only Drizzle facade -> sealed read meter -> atomic write
+ * (`executeAdminMemberAtomicCandidate`).
+ *
+ * Body limit: `MAX_ADMIN_VIDEO_MEMBERS_JSON_BODY_BYTES` (256 KiB, vs CURRENT
+ * Next `serverActions.bodySizeLimit` 8 MiB; HTTP 413 above 256 KiB).
+ * D-0603-1 / D-13-41: static_rebuild_queue rows and strict audit share one
+ * atomic D1 batch, while request-time Queue wake dispatch is omitted on Hono
+ * (`NOOP_WAKE_HOST`, wake=0; DOCUMENTED DIFFERENCE D-0603-1).
  */
+import type { VideoAdminMembersResult } from "@flamenode/contracts";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { readAdminVideoCollabFlag, mergeVideoRebuildEventIds } from "@flamenode/domain/video";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@flamenode/server-core/staticRebuild/hooks";
@@ -83,13 +89,14 @@ export function createDefaultVideoAdminMembersPreflightHost(
   options: {
     session?: MiddlewareHandler<AppEnv>;
     enableCanonicalDryRun?: boolean;
-    /** For isolated SQLite integration only, never passed by the live router. */
+    /** Defaults to true when dry-run is not enabled; pass false to test HTTP 501 fallback. */
     enableAtomicCandidateWrite?: boolean;
   } = {},
 ): VideoAdminMembersPreflightHost {
   if (options.enableCanonicalDryRun && options.enableAtomicCandidateWrite) {
     throw new RangeError("video_admin_member_candidate_conflicting_execution_modes");
   }
+  const useAtomicWrite = options.enableAtomicCandidateWrite ?? !options.enableCanonicalDryRun;
   const originOptions = (c: Ctx) => ({
     loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
     allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
@@ -192,7 +199,7 @@ export function createDefaultVideoAdminMembersPreflightHost(
         // Deliberately discard the sealed plan: no Hono writer/Queue wake.
       },
     } : {}),
-    ...(options.enableAtomicCandidateWrite ? {
+    ...(useAtomicWrite ? {
       commitCanonicalPlan: async (c: Ctx, input: {
         videoId: string;
         target: AdminVideoMemberTarget;
@@ -239,28 +246,21 @@ export function createDefaultVideoAdminMembersPreflightHost(
         if (!atomic) {
           return { committed: false, pendingPublicReflection: false };
         }
-        // Only this explicitly enabled unmounted adapter may obtain the raw
-        // provider, AFTER its read facade was sealed and the batch validated.
+        // Only this explicitly enabled adapter may obtain the raw provider,
+        // AFTER its read facade was sealed and the batch validated.
         const binding = requestWriteBindings.get(c);
         if (!binding) {
           throw new RangeError("video_admin_member_candidate_binding_not_authorized");
         }
         const writeDb = createAdminMemberAtomicWriteDb(binding);
+        // D-0603-1 / D-13-41: Hono persists static_rebuild_queue rows inside
+        // the atomic D1 batch and omits request-time Queue wake (NOOP_WAKE_HOST).
         const saved = await executeAdminMemberAtomicCandidate(
           writeDb, executionInput,
           async () => ({
-            readEnv: () => {
-              try { return c.env as unknown as Readonly<Record<string, unknown>>; }
-              catch { return null; }
-            },
-            readWaitUntil: () => {
-              try { const ctx = c.executionCtx; return ctx.waitUntil.bind(ctx); }
-              catch { return null; }
-            },
-            readKv: () => {
-              try { return c.env.KV ?? null; }
-              catch { return null; }
-            },
+            readEnv: () => null,
+            readWaitUntil: () => null,
+            readKv: () => null,
           }),
           { rebindReadOnlyPlan: true },
         );
@@ -326,10 +326,21 @@ export function createDefaultVideoAdminMembersPreflightHost(
 
 function reject(c: Ctx, status: 400 | 403 | 404 | 413 | 501 | 503, message: string): Response {
   c.header("Cache-Control", "private, no-store");
-  return c.json({ ok: false, message }, status);
+  return c.json<VideoAdminMembersResult>({ ok: false, message }, status);
 }
 
-/** NOT mounted in createVideosRoutes. No D1 mutation or Queue wake exists. */
+function isBudgetExceededError(cause: unknown): boolean {
+  try {
+    return cause instanceof RangeError && (
+      cause.message === "video_admin_member_atomic_execution_budget_exceeded" ||
+      cause.message === "video_admin_member_atomic_assembly_budget_exceeded"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Mounted SA-085 admin-members route (`PUT /:videoId/members`). */
 export function createVideoAdminMembersPreflightRoutes(
   host: VideoAdminMembersPreflightHost,
 ): Hono<AppEnv> {
@@ -456,7 +467,7 @@ export function createVideoAdminMembersPreflightRoutes(
           videoId, target, validated: members.value,
           isCollab, eventIds: rebuildEventIds,
         });
-        return c.json({
+        return c.json<VideoAdminMembersResult>({
           ok: true,
           message: saved.committed
             ? "参加者設定を保存しました。"
@@ -466,13 +477,17 @@ export function createVideoAdminMembersPreflightRoutes(
           ...(target.primary_event_id ? { eventId: target.primary_event_id } : {}),
           ...(saved.pendingPublicReflection ? { pendingPublicReflection: true } : {}),
         }, 200);
-      } catch {
+      } catch (cause) {
+        if (isBudgetExceededError(cause)) {
+          return reject(c, 400, "参加者設定が一度に処理できる上限を超えています。入力内容を確認してください。");
+        }
         return reject(c, 503, "参加者設定の保存に失敗しました。最新状態を確認して再試行してください。");
       }
     }
-    // Default behavior remains HTTP 501: there is still NO live route mount
-    // or approved CURRENT >20 MiB input / workerd performance policy.
     return reject(c, 501, "参加者設定の保存APIは移行準備中です。");
   });
   return routes;
 }
+
+export const createDefaultVideoAdminMembersHost = createDefaultVideoAdminMembersPreflightHost;
+export const createVideoAdminMembersRoutes = createVideoAdminMembersPreflightRoutes;
