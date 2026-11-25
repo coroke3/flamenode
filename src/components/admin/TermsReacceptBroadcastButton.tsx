@@ -18,6 +18,7 @@ export function TermsReacceptBroadcastButton({
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [busy, startTransition] = React.useTransition();
+  const busyRef = React.useRef(false);
   const [cursor, setCursor] = React.useState("");
   const [confirmText, setConfirmText] = React.useState("");
   const [message, setMessage] = React.useState<string | null>(null);
@@ -27,25 +28,42 @@ export function TermsReacceptBroadcastButton({
     `FlameNode の利用規約が更新されました。\n次回投稿前に /rules から内容を確認し、再同意してください。\nversion: ${versionLabel}`,
   );
 
+  // Each dismissal invalidates TERMS approval, without discarding batch progress.
+  function closeDialog(): void {
+    if (busyRef.current || busy) return;
+    setOpen(false);
+    setConfirmText("");
+  }
+
   const onSubmit = () => {
-    setMessage(null);
-    setWarning(null);
+    // A synchronous latch also covers two clicks before useTransition commits busy.
+    if (busyRef.current || busy || confirmText !== "TERMS" || !content.trim()) return;
     const fd = new FormData();
     fd.set("terms_id", termsId);
     fd.set("cursor", String(cursor));
     fd.set("confirm", confirmText);
     fd.set("content", content);
+    // Claim the lock only after synchronous request preparation has succeeded.
+    busyRef.current = true;
+    setMessage(null);
+    setWarning(null);
     startTransition(async () => {
-      const result = await broadcastTermsReaccept(fd);
-      if (result.ok) {
-        setMessage(result.message ?? "OK");
-        setWarning(result.warning ?? null);
-        setEnqueuedTotal((value) => value + (result.enqueued ?? 0));
-        if (result.cursor != null) setCursor(result.cursor);
-        router.refresh();
-        return;
+      try {
+        const result = await broadcastTermsReaccept(fd);
+        if (result.ok) {
+          setMessage(result.message ?? "OK");
+          setWarning(result.warning ?? null);
+          setEnqueuedTotal((value) => value + (result.enqueued ?? 0));
+          if (result.cursor != null) setCursor(result.cursor);
+          router.refresh();
+          return;
+        }
+        setMessage(result.message ?? "失敗しました。");
+      } catch {
+        setMessage("失敗しました。");
+      } finally {
+        busyRef.current = false;
       }
-      setMessage(result.message ?? "失敗しました。");
     });
   };
 
@@ -64,7 +82,7 @@ export function TermsReacceptBroadcastButton({
         <div
           role="presentation"
           onClick={(event) => {
-            if (event.target === event.currentTarget && !busy) setOpen(false);
+            if (event.target === event.currentTarget) closeDialog();
           }}
           style={{
             position: "fixed",
@@ -190,10 +208,7 @@ export function TermsReacceptBroadcastButton({
               <button
                 type="button"
                 className="fn-btn fn-btn-ghost fn-btn-sm"
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmText("");
-                }}
+                onClick={closeDialog}
                 disabled={busy}
               >
                 閉じる
