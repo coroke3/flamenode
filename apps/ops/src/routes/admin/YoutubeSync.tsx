@@ -2,6 +2,7 @@ import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { AdminYoutubeSyncResponse } from "@flamenode/contracts";
 import { postAdminOp, readYoutubeSync, youtubeSyncFilterParams } from "../../api/adminStaticBuilds.js";
+import type { OpsFetch } from "../../api/read.js";
 import { AdminVideoManagementTabs } from "../../components/admin/AdminVideoManagementTabs.js";
 
 const FILTERS = [
@@ -32,21 +33,44 @@ export function YoutubeSync(): React.ReactElement {
   // Revocation outlives in-flight reads and writes; a late GET cannot republish
   // private metadata after an authoritative GET or POST 401/403.
   const accessRevokedRef = React.useRef(false);
+  const mountedRef = React.useRef(true);
   const [revokedTo, setRevokedTo] = React.useState<"/entry" | "/dashboard" | null>(null);
+  function revokeAccess(destination: "/entry" | "/dashboard"): void {
+    if (accessRevokedRef.current) return;
+    accessRevokedRef.current = true;
+    if (!mountedRef.current) return;
+    setData(null);
+    setError(null);
+    setRevokedTo(destination);
+  }
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   React.useEffect(() => {
     if (revokedTo) window.location.assign(revokedTo);
   }, [revokedTo]);
   React.useEffect(() => {
+    if (accessRevokedRef.current) return;
     const controller = new AbortController();
     setData(null);
-    void readYoutubeSync(query ? "?" + query : "", undefined, controller.signal).then(result => {
+    // Latch 401/403 as soon as response headers arrive so an optional stalled
+    // error body cannot delay revocation or allow an abort/re-query to clear it.
+    const headerObservingFetch: OpsFetch = async (path, init) => {
+      const response = await fetch(path, init);
+      if (mountedRef.current) {
+        if (response.status === 401) revokeAccess("/entry");
+        else if (response.status === 403) revokeAccess("/dashboard");
+      }
+      return response;
+    };
+    void readYoutubeSync(query ? "?" + query : "", headerObservingFetch, controller.signal).then(result => {
       if (controller.signal.aborted || accessRevokedRef.current) return;
       const destination = youtubeSyncRevokedDestination(result.status);
       if (destination) {
-        accessRevokedRef.current = true;
-        setData(null);
-        setError(null);
-        setRevokedTo(destination);
+        revokeAccess(destination);
         return;
       }
       if (result.status === "ok") { setData(result.data); setError(null); }
@@ -63,10 +87,7 @@ export function YoutubeSync(): React.ReactElement {
       if (accessRevokedRef.current) return;
       const destination = youtubeSyncRevokedDestination(result.status);
       if (destination) {
-        accessRevokedRef.current = true;
-        setData(null);
-        setError(null);
-        setRevokedTo(destination);
+        revokeAccess(destination);
         return;
       }
       if (result.status !== "ok") setError("再同期を予約できませんでした。状態を確認してください。");

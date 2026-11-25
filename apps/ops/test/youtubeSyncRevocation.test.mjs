@@ -158,3 +158,97 @@ test("SEC-804: a stale successful GET cannot republish data after POST revocatio
     assert.equal(postCount, 1);
   });
 });
+
+test("SEC-804: 200 -> 403 with never-settling body revokes on headers and blocks later data or POST", async () => {
+  const inFlightPost = deferred();
+  let getCount = 0;
+  let postCount = 0;
+  let stalled403JsonCalls = 0;
+  await withYoutubeSync(async (_url, init) => {
+    if (init.method === "GET") {
+      getCount += 1;
+      if (getCount === 1) return reply(200, fixture);
+      if (getCount === 2) {
+        return {
+          status: 403,
+          json() {
+            stalled403JsonCalls += 1;
+            return new Promise(() => {});
+          },
+        };
+      }
+      return reply(200, fixture);
+    }
+    assert.equal(init.method, "POST");
+    postCount += 1;
+    return inFlightPost.promise;
+  }, async (container, win) => {
+    assert.match(container.textContent, /SEC804_PRIVATE_METADATA_CANARY/);
+    const button = resyncButton(container);
+    assert.ok(button);
+    await React.act(async () => {
+      button.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+    });
+    assert.equal(postCount, 1);
+
+    const select = container.querySelector('select[name="sync_status"]');
+    select.value = "failed";
+    const form = select.closest("form");
+    const begin = Date.now();
+    await React.act(async () => {
+      form.dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(getCount, 2);
+    assert.equal(stalled403JsonCalls, 1);
+    assert.ok(Date.now() - begin < 200, "header-level revocation must not wait for optional body deadline");
+    assert.match(container.textContent, /YouTube同期管理画面へのアクセスが終了しました/);
+    assert.doesNotMatch(container.textContent, /SEC804_PRIVATE_METADATA_CANARY|SEC804_PRIVATE_CREATOR_CANARY/);
+    assert.equal(resyncButton(container), undefined);
+    assert.equal(container.querySelectorAll("button").length, 0);
+
+    // Resolving an earlier in-flight POST 200 cannot trigger refresh/GET #3 or republish data.
+    await React.act(async () => inFlightPost.resolve(reply(200, { ok: true })));
+    assert.equal(getCount, 2);
+    assert.doesNotMatch(container.textContent, /SEC804_PRIVATE_METADATA_CANARY/);
+    assert.equal(resyncButton(container), undefined);
+
+    // Even attempting to trigger the old detached button must never issue another POST.
+    await React.act(async () => {
+      button.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+    });
+    assert.equal(postCount, 1);
+    assert.equal(getCount, 2);
+  });
+});
+
+test("SEC-804: 200 -> 503 remains non-revoking and allows subsequent GET recovery", async () => {
+  let getCount = 0;
+  await withYoutubeSync(async (_url, init) => {
+    assert.equal(init.method, "GET");
+    getCount += 1;
+    if (getCount === 2) return reply(503, { error: "temporarily unavailable" });
+    return reply(200, fixture);
+  }, async (container, win) => {
+    assert.match(container.textContent, /SEC804_PRIVATE_METADATA_CANARY/);
+    const select = container.querySelector('select[name="sync_status"]');
+    select.value = "failed";
+    const form = select.closest("form");
+    await React.act(async () => {
+      form.dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(getCount, 2);
+    assert.match(container.textContent, /同期状態を取得できませんでした/);
+    assert.doesNotMatch(container.textContent, /アクセスが終了しました/);
+    assert.doesNotMatch(container.textContent, /SEC804_PRIVATE_METADATA_CANARY/);
+
+    // Subsequent GET 200 succeeds because 503 did not latch permanent revocation.
+    const nextSelect = container.querySelector('select[name="sync_status"]');
+    nextSelect.value = "synced";
+    await React.act(async () => {
+      nextSelect.closest("form").dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(getCount, 3);
+    assert.match(container.textContent, /SEC804_PRIVATE_METADATA_CANARY/);
+    assert.ok(resyncButton(container));
+  });
+});
