@@ -40,9 +40,7 @@ export class DeepHealthCheckError extends Error {
   readonly key: string;
 
   constructor(reason: DeepHealthFailureReason, key: string, cause: unknown) {
-    super(cause instanceof Error ? cause.message : `deep health failed: ${reason}`, {
-      cause,
-    });
+    super(`deep health failed: ${reason}`, { cause });
     this.name = "DeepHealthCheckError";
     this.reason = reason;
     this.key = key;
@@ -61,7 +59,16 @@ const DEEP_HEALTH_REASON_KEYS: ReadonlySet<string> = new Set([
  * 先頭に置くと key としてログ・応答へ漏れる。
  */
 export function classifyArtifactSloError(error: unknown): DeepHealthCheckError {
-  const message = error instanceof Error ? error.message : "";
+  // Diagnostic provider exceptions can expose a throwing message accessor.
+  // Only use short text to match fixed artifact SLO prefixes; never require
+  // an untrusted getter to succeed before producing the safe health response.
+  let message = "";
+  try {
+    if (error instanceof Error) {
+      const value: unknown = error.message;
+      if (typeof value === "string") message = value.slice(0, 512);
+    }
+  } catch { /* Treat a hostile diagnostic getter as an unknown SLO failure. */ }
   const detail = /^(video|event) detail /.exec(message);
   const missing = /^static artifact (?:missing|too large|malformed): (.+)$/.exec(
     message,
@@ -86,13 +93,18 @@ export function classifyArtifactSloError(error: unknown): DeepHealthCheckError {
  */
 export function buildDeepHealthFailureResponse(error: unknown): Response {
   const known = error instanceof DeepHealthCheckError ? error : null;
-  console.error(
-    JSON.stringify({
-      service: "deep-health",
-      code: "deep_health_failed",
-      ...(known ? { reason: known.reason, key: known.key } : {}),
-    }),
-  );
+  try {
+    console.error(
+      JSON.stringify({
+        service: "deep-health",
+        code: "deep_health_failed",
+        ...(known ? { reason: known.reason, key: known.key } : {}),
+      }),
+    );
+  } catch {
+    // The status and Cache-Control of a failed health check are authoritative;
+    // an observability sink may never replace the fixed 503 failure response.
+  }
   return Response.json(
     {
       ok: false,
@@ -274,20 +286,25 @@ async function checkPublicVisibilityManifestHealth(
 
   const reportDegraded = (
     reason: string,
-    error?: unknown,
+    _error?: unknown,
     stuckFenceCandidateCount = 0,
   ) => {
-    console.warn(
-      JSON.stringify({
-        service: "deep-health",
-        check: "public_visibility",
-        mode: guardMode,
-        status: "degraded",
-        reason,
-        stuck_fence_candidate_count: stuckFenceCandidateCount || undefined,
-        error: error instanceof Error ? error.message : undefined,
-      }),
-    );
+    try {
+      console.warn(
+        JSON.stringify({
+          service: "deep-health",
+          check: "public_visibility",
+          mode: guardMode,
+          status: "degraded",
+          reason,
+          stuck_fence_candidate_count: stuckFenceCandidateCount || undefined,
+          // Provider exception objects and message getters are untrusted and
+          // may contain secrets or throw. Only fixed diagnostic codes are safe.
+        }),
+      );
+    } catch {
+      // Keep the observe/enforce degraded result even if the logger fails.
+    }
     return {
       status: "degraded" as const,
       blocksOverallHealth: guardMode === "enforce",
