@@ -34,7 +34,6 @@ import {
   type VideoFormData,
 } from "@flamenode/domain/video";
 import { validateActiveXSnapshot } from "@flamenode/domain/xid";
-import { videos, xUsers } from "@flamenode/db/schema";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import type { ServerCoreDb } from "@flamenode/server-core/db";
 import { generateId } from "@flamenode/server-core/id";
@@ -46,7 +45,6 @@ import {
   escapeDiscordMention,
   type DiscordBlock,
 } from "@flamenode/server-core/notifications/discordText";
-import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { buildFreeVideoRow } from "@flamenode/server-core/video/freeVideoRow";
 import {
   decodeGeneralCustomQuestionPolicyProjection,
@@ -381,50 +379,42 @@ async function validateFreeVideoSubmissionReadInternal(
 }
 
 async function loadAllowedXMediaIcons(
-  db: ServerCoreDb,
+  rawD1: D1Database,
   activeXId: string,
 ): Promise<{ candidates: string[]; queryCount: number }> {
+  const row = await rawD1
+    .prepare(
+      `SELECT
+         (SELECT icon_url FROM x_users WHERE id = ? LIMIT 1) AS x_icon,
+         (SELECT json_group_array(q.icon_url) FROM (
+           SELECT creator_icon_url AS icon_url FROM videos
+           WHERE creator_x_user_id = ? AND creator_icon_url IS NOT NULL AND visibility_status = 'public'
+           ORDER BY created_at DESC
+           LIMIT ${MAX_ICON_CANDIDATES * 2}
+         ) q) AS video_icons_json`,
+    )
+    .bind(activeXId, activeXId)
+    .first<{ x_icon: string | null; video_icons_json: string | null }>();
+
   const candidates: string[] = [];
   const seen = new Set<string>();
-  const xRow = (
-    await db
-      .select({ icon_url: xUsers.icon_url })
-      .from(xUsers)
-      .where(eq(xUsers.id, activeXId))
-      .limit(1)
-  )[0];
-  if (xRow?.icon_url) {
-    candidates.push(xRow.icon_url);
-    seen.add(xRow.icon_url);
-  }
-  if (candidates.length >= MAX_ICON_CANDIDATES) {
-    return { candidates, queryCount: 1 };
-  }
-  const videoRows = await db
-    .select({ icon_url: videos.creator_icon_url })
-    .from(videos)
-    .where(
-      and(
-        eq(videos.creator_x_user_id, activeXId),
-        isNotNull(videos.creator_icon_url),
-        eq(videos.visibility_status, "public"),
-      )!,
-    )
-    .orderBy(desc(videos.created_at))
-    .limit(MAX_ICON_CANDIDATES * 2);
-  for (const row of videoRows) {
-    if (row.icon_url && !seen.has(row.icon_url)) {
-      candidates.push(row.icon_url);
-      seen.add(row.icon_url);
-      if (candidates.length >= MAX_ICON_CANDIDATES) break;
+  const push = (url: unknown) => {
+    if (typeof url !== "string" || !url || seen.has(url) || candidates.length >= MAX_ICON_CANDIDATES) return;
+    seen.add(url);
+    candidates.push(url);
+  };
+  push(row?.x_icon);
+  if (row?.video_icons_json) {
+    const parsed: unknown = JSON.parse(row.video_icons_json);
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) push(item);
     }
   }
-  return { candidates, queryCount: 2 };
+  return { candidates, queryCount: 1 };
 }
 
 async function resolveHonoVideoCreatorIcon(args: {
   c: Context<AppEnv>;
-  db: ServerCoreDb;
   formData: FormData;
   parsed: Pick<VideoFormData, "icon_mode" | "icon_url">;
   activeXId: string;
@@ -450,9 +440,18 @@ async function resolveHonoVideoCreatorIcon(args: {
       return { ok: false, status: 400, message: "アイコン URL が不正です。" };
     }
     if (iconUrl.startsWith("/api/media/")) {
+      let rawD1: D1Database | undefined;
+      try {
+        rawD1 = args.c.env?.DB;
+      } catch {
+        return { ok: false, status: 503, message: UNEXPECTED_SUBMIT_ERROR_MESSAGE };
+      }
+      if (!rawD1) {
+        return { ok: false, status: 503, message: UNEXPECTED_SUBMIT_ERROR_MESSAGE };
+      }
       let allowed: { candidates: string[]; queryCount: number };
       try {
-        allowed = await loadAllowedXMediaIcons(args.db, args.activeXId);
+        allowed = await loadAllowedXMediaIcons(rawD1, args.activeXId);
       } catch {
         return { ok: false, status: 503, message: UNEXPECTED_SUBMIT_ERROR_MESSAGE };
       }
@@ -749,7 +748,6 @@ export function createFreeVideoSubmitRoutes(
     const videoId = generateId("v");
     const iconResolved = await resolveHonoVideoCreatorIcon({
       c,
-      db,
       formData,
       parsed: videoForm,
       activeXId: activeX,
