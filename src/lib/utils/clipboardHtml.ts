@@ -72,6 +72,12 @@ function parseHtmlTableRegex(html: string): string[][] {
       // Nested or unbalanced tables cannot be flattened safely.
       if (row !== null || inTable === !closing) return [];
       inTable = !closing;
+      // Match DOMParser's first-table boundary. Discard preceding orphan
+      // rows and ignore everything after the first complete table (even
+      // when it is empty). Preserve standalone row fragments only if no
+      // explicit table was encountered, as supported by the legacy fallback.
+      if (closing) break;
+      rows.length = 0;
     } else if (name === "tr") {
       if (!closing) {
         if (row !== null) return [];

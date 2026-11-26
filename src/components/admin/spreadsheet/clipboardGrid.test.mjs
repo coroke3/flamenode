@@ -272,3 +272,28 @@ test("HTML clipboard DOMParser exception retains the bounded fallback", () => {
     else delete globalThis.DOMParser;
   }
 });
+
+test("HTML clipboard fallback uses only the first explicit table", () => {
+  const first = '<table><tr><td>A</td></tr></table>';
+  const ghost = '<tr><td>GHOST</td><td>ROW</td></tr>';
+  for (const html of [first + '<table>' + ghost + '</table>', ghost + first, first + ghost]) {
+    assert.deepEqual(parseHtmlClipboardTable(html), [["A"]]);
+    assert.deepEqual(parseClipboardContent("A", html), [["A"]]);
+    assert.equal(looksLikeTabularClipboard("A", html), false);
+  }
+  const blank = '<table><tr><td> </td></tr></table>' + '<table>' + ghost + '</table>';
+  assert.deepEqual(parseHtmlClipboardTable(blank), []);
+  assert.deepEqual(parseClipboardContent("KEEP", blank), [["KEEP"]]);
+  assert.equal(looksLikeTabularClipboard("KEEP", blank), false);
+});
+
+test("HTML clipboard fallback preserves supported standalone row fragments and first-table cell breaks", () => {
+  const fragment = '<tr><td>A<br>B</td><td>C</td></tr>';
+  assert.deepEqual(parseHtmlClipboardTable(fragment), [["A\nB", "C"]]);
+  assert.deepEqual(parseClipboardContent("", fragment), [["A\nB", "C"]]);
+  assert.equal(looksLikeTabularClipboard("", fragment), true);
+  const html = '<table>' + fragment + '</table><table><tr><td>extra</td></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(html), [["A\nB", "C"]]);
+  assert.deepEqual(parseClipboardContent("", html), [["A\nB", "C"]]);
+  assert.equal(looksLikeTabularClipboard("", html), true);
+});
