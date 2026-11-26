@@ -1803,6 +1803,9 @@
 
 | `src/components/admin/TermsReacceptBroadcastButton.tsx` | HELPER | CURRENT admin rules reaccept broadcast modal; backdrop dismissal disarms TERMS; synchronous busyRef blocks duplicate enqueue and preserves cursor | MIG-0727 | SAME (CURRENT Next retained until Ops cutover; TARGET separately owned by PR#851) | RETAINED | PR#852 SHA=28673c304714efceaed7db70fe00adf86dee1391 TEST=node --test --experimental-strip-types src/components/admin/termsReacceptDismissal.contract.test.mjs CI=https://github.com/coroke3/flamenode/pull/852/checks (exact HEAD CI and non-writer review pending) |
 | `src/components/admin/termsReacceptDismissal.contract.test.mjs` | TEST | CURRENT Next modal backdrop/Close confirmation reset and synchronous latch source contract (not a DOM/browser test) | MIG-0727 | SAME (CURRENT only; no TARGET ownership) | RETAINED | PR#852 SHA=a3b2c9bf4f538fc3ca72b1aea01682d818aa8229 TEST=node --test --experimental-strip-types src/components/admin/termsReacceptDismissal.contract.test.mjs CI=https://github.com/coroke3/flamenode/pull/852/checks (exact HEAD CI and non-writer review pending) |
+| `packages/server-core/src/xid/linkRequestReview.ts` | TARGET_SKELETON | SA-091 rejection CAS and audited mutation plan, D-19-1 shared service extraction | MIG-0605 | SAME (new file) | NOT_STARTED | D-19-1 approved U05x-B |
+| `packages/server-core/test/xidLinkRequestReview.test.mjs` | TEST | SA-091 rejection plan SQL and audit/notification parity | MIG-0605 | SAME (new file) | NOT_STARTED | D-19-1 approved U05x-B |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
