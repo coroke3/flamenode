@@ -117,6 +117,55 @@ test("U02 malformed JSON, missing boolean ok and inconsistent HTTP status fail c
   await assert.rejects(extendSlot("e", "s", { direction: "forward" }, throwingFetcher), SyntaxError);
 });
 
+const slotMutationCalls = [
+  ["SA-065", fetcher => reserveSlot("e", "s", { display_name: "制作者", consecutive_count: 2 }, fetcher)],
+  ["SA-066", fetcher => releaseSlot("e", "s", fetcher)],
+  ["SA-067", fetcher => extendSlot("e", "s", { direction: "forward" }, fetcher)],
+  ["SA-068", fetcher => mergeSlotGroup("e", { gap_slot_id: "s", display_name: "制作者" }, fetcher)],
+];
+
+test("U03d SA-065..068 preserve complete success and guard/race DTOs through real Response JSON", async () => {
+  const success = { ok: true, slotId: "s", slotCount: 2, groupSize: 2, pendingPublicReflection: true };
+  const cases = [
+    [200, success],
+    [200, { ...success, pendingPublicReflection: false }],
+    [401, { ok: false, reason: "unauthenticated", message: "ログインが必要です。" }],
+    [403, { ok: false, reason: "tos_required", message: "利用規約への同意が必要です。" }],
+    [409, { ok: false, message: "先に確保されました" }],
+  ];
+  for (const [id, mutate] of slotMutationCalls) {
+    for (const [status, payload] of cases) {
+      let requests = 0;
+      const result = await mutate(async () => {
+        requests++;
+        return Response.json(payload, { status });
+      });
+      assert.deepEqual(result, payload, `${id} HTTP ${status}: preserve exact DTO`);
+      assert.equal(requests, 1, `${id}: never retry a mutation`);
+    }
+  }
+});
+
+test("U03d SA-065..068 reject undecodable or contradictory HTTP results without retry", async () => {
+  const cases = [
+    [() => new Response("<html>unavailable</html>", { status: 503 }), SyntaxError],
+    [() => new Response(null, { status: 204 }), SyntaxError],
+    [() => Response.json({ ok: "true" }), TypeError],
+    [() => Response.json({ ok: true, slotId: "s", slotCount: 1, groupSize: 1 }, { status: 503 }), TypeError],
+    [() => { throw new TypeError("network failure"); }, TypeError],
+  ];
+  for (const [id, mutate] of slotMutationCalls) {
+    for (const [respond, error] of cases) {
+      let requests = 0;
+      await assert.rejects(mutate(async () => {
+        requests++;
+        return respond();
+      }), error, id);
+      assert.equal(requests, 1, `${id}: ambiguous commit outcome must not auto-retry`);
+    }
+  }
+});
+
 test("U01 RH-014 invalid privilege flags and malformed JSON fail closed", async () => {
   const { parseSlotViewerOverlay, unavailableSlotViewerOverlay, fetchSlotViewerOverlay } =
     await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
