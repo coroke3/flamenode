@@ -69,6 +69,7 @@ export function AdminSpreadsheetEditableGrid({
   const [busy, setBusy] = React.useState(false);
   const [history, setHistory] = React.useState<History>({ key: "", undo: [], redo: [] });
   const tableRef = React.useRef<HTMLTableElement>(null);
+  const focusedGridElement = React.useRef<HTMLElement | null>(null);
   const displayedPage = React.useRef(data);
   displayedPage.current = data;
   const inFlight = React.useRef<AbortController | null>(null);
@@ -102,6 +103,8 @@ export function AdminSpreadsheetEditableGrid({
   // Keep drafts intact until CURRENT blur-save is ported; header selection does not commit or discard edits.
   const canSelectHeaders = !identityChanged && currentSelection === null && rows.length > 0 && columns.length > 0;
   const canFind = canUseFind();
+  const visibleAnchor = boundCellToPage(anchorCell);
+  const visibleFocus = boundCellToPage(focusedCell);
   const insertColumns = columns.filter(c => !c.generated && (c.pk > 0 || c.editable));
 
   React.useEffect(() => {
@@ -135,6 +138,26 @@ export function AdminSpreadsheetEditableGrid({
     if (!currentSelection || !selectionConflict || currentSelection.invalidated || draft?.id !== currentSelection.id) return;
     setCellEdit({ ...draft, invalidated: true });
   }, [currentSelection, selectionConflict]);
+
+  // Reconcile after every commit: a column key replacement can remove the focused TD without changing dimensions.
+  React.useLayoutEffect(() => {
+    if (identityChanged) {
+      focusedGridElement.current = null;
+      return;
+    }
+    if (anchorCell.row !== visibleAnchor.row || anchorCell.col !== visibleAnchor.col) setAnchorCell(visibleAnchor);
+    if (focusedCell.row !== visibleFocus.row || focusedCell.col !== visibleFocus.col) setFocusedCell(visibleFocus);
+    const previousFocus = focusedGridElement.current;
+    if (!previousFocus || previousFocus.isConnected) return;
+    // Consume even when an external control owns focus, so a later blur cannot revive this removed cell.
+    focusedGridElement.current = null;
+    const table = tableRef.current;
+    if (!table || table.ownerDocument.activeElement !== table.ownerDocument.body) return;
+    const cell = table.querySelector<HTMLTableCellElement>(
+      '[data-grid-cell="' + visibleFocus.row + ":" + visibleFocus.col + '"]',
+    );
+    (cell ?? table).focus();
+  });
 
   React.useEffect(() => {
     if (!findHint) return;
@@ -284,7 +307,7 @@ export function AdminSpreadsheetEditableGrid({
 
   async function copyRange(): Promise<void> {
     if (identityChanged || rows.length === 0 || columns.length === 0) return;
-    const text = copySpreadsheetSelection(rows, columns, anchorCell, focusedCell);
+    const text = copySpreadsheetSelection(rows, columns, visibleAnchor, visibleFocus);
     if (!text) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
@@ -314,7 +337,7 @@ export function AdminSpreadsheetEditableGrid({
     return true;
   }
 
-  function boundedFindCell(position: GridCell): GridCell {
+  function boundCellToPage(position: GridCell): GridCell {
     return {
       row: Math.max(0, Math.min(rows.length - 1, position.row)),
       col: Math.max(0, Math.min(columns.length - 1, position.col)),
@@ -323,8 +346,8 @@ export function AdminSpreadsheetEditableGrid({
 
   function findNext(): void {
     if (!canUseFind()) return;
-    const from = boundedFindCell(focusedCell);
-    setAnchorCell(boundedFindCell(anchorCell));
+    const from = boundCellToPage(focusedCell);
+    setAnchorCell(boundCellToPage(anchorCell));
     setFocusedCell(from);
     if (!findQuery.trim() || rows.length === 0 || columns.length === 0) {
       setFindHint("見つかりません");
@@ -353,8 +376,8 @@ export function AdminSpreadsheetEditableGrid({
   function closeFind(): void {
     if (!canUseFind()) return;
     setFindOpen(false);
-    setAnchorCell(boundedFindCell(anchorCell));
-    if (rows.length > 0 && columns.length > 0) focusGridCell(boundedFindCell(focusedCell));
+    setAnchorCell(boundCellToPage(anchorCell));
+    if (rows.length > 0 && columns.length > 0) focusGridCell(boundCellToPage(focusedCell));
     else {
       setFocusedCell({ row: 0, col: 0 });
       tableRef.current?.focus();
@@ -492,6 +515,15 @@ export function AdminSpreadsheetEditableGrid({
       ) : null}
       <div style={{ overflowX: "auto" }}>
         <table ref={tableRef} tabIndex={rows.length === 0 || columns.length === 0 ? 0 : -1}
+          onFocusCapture={event => {
+            const target = event.target;
+            focusedGridElement.current = target instanceof HTMLElement && target.tagName === "TD" &&
+              target.hasAttribute("data-grid-cell") ? target : null;
+          }}
+          onBlurCapture={() => {
+            // Explicit blur of a connected cell gives up ownership; removal-triggered blur is handled after commit.
+            if (focusedGridElement.current?.isConnected) focusedGridElement.current = null;
+          }}
           onKeyDown={event => { if (event.target === event.currentTarget) openFind(event); }}>
           <thead><tr>
             <th scope="col" data-grid-all-header="" aria-label="全セルを選択" title="クリックで全選択"
@@ -537,11 +569,11 @@ export function AdminSpreadsheetEditableGrid({
                   <td key={c.name} data-grid-cell={`${ri}:${columns.indexOf(c)}`}
                     data-find-match={findHit || undefined}
                     style={{ background: findHit ? "color-mix(in srgb, #fbbc04 35%, var(--sheet-bg, var(--bg-base, #fff)))" : undefined }}
-                    tabIndex={focusedCell.row === ri && focusedCell.col === columns.indexOf(c) ? 0 : -1}
-                    aria-selected={!identityChanged && ri >= Math.min(anchorCell.row, focusedCell.row) &&
-                      ri <= Math.max(anchorCell.row, focusedCell.row) &&
-                      columns.indexOf(c) >= Math.min(anchorCell.col, focusedCell.col) &&
-                      columns.indexOf(c) <= Math.max(anchorCell.col, focusedCell.col)}
+                    tabIndex={visibleFocus.row === ri && visibleFocus.col === columns.indexOf(c) ? 0 : -1}
+                    aria-selected={!identityChanged && ri >= Math.min(visibleAnchor.row, visibleFocus.row) &&
+                      ri <= Math.max(visibleAnchor.row, visibleFocus.row) &&
+                      columns.indexOf(c) >= Math.min(visibleAnchor.col, visibleFocus.col) &&
+                      columns.indexOf(c) <= Math.max(visibleAnchor.col, visibleFocus.col)}
                     onClick={(event) => {
                       if (event.target !== event.currentTarget) return;
                       const pos = { row: ri, col: columns.indexOf(c) };

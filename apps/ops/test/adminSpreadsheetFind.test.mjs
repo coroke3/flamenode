@@ -691,3 +691,235 @@ test("MIG-0737 U01 Find: its 3500ms hint expires without deleting a mutation rec
     assert.equal(refreshes, 1);
   } finally { await ui.cleanup(); clock.restore(); }
 });
+
+function gridTabEntries(ui) {
+  const table = ui.host.querySelector("table");
+  const cells = [...ui.host.querySelectorAll("[data-grid-cell]")]
+    .filter(node => node.tabIndex === 0).map(node => node.dataset.gridCell);
+  return table.tabIndex === 0 ? ["table", ...cells] : cells;
+}
+
+for (const scenario of [
+  { name: "rows", next: { ...data, rows: data.rows.slice(0, 2) }, end: "1:2", modifiers: { ctrlKey: true } },
+  { name: "columns", next: { ...data, columns: columns.slice(0, 2) }, end: "2:1", modifiers: { metaKey: true } },
+  { name: "both dimensions", next: { ...data, rows: data.rows.slice(0, 2), columns: columns.slice(0, 2) }, end: "1:1", modifiers: { ctrlKey: true } },
+]) {
+  test(`MIG-0737 U01 Find shrink: closed Find restores keyboard access after ${scenario.name} remove the focused cell`, async () => {
+    const ui = await mount();
+    try {
+      const input = await openFind(ui, "2:2");
+      await inputValue(input, "Beta");
+      await press(input, "Escape");
+      const removed = cell(ui, "2:2");
+      assert.equal(document.activeElement === removed, true);
+      await ui.render({ data: scenario.next });
+      assert.equal(removed.isConnected, false);
+      assert.deepEqual(gridTabEntries(ui), [scenario.end], "render itself must restore one data-cell Tab entry");
+      const target = cell(ui, scenario.end);
+      assert.equal(document.activeElement === target, true, "detached focus must be rescued before another key");
+      assert.equal(ui.host.querySelector('input[type="search"]') === null, true);
+      assert.deepEqual(matches(ui), ["1:1"]);
+      assert.equal((await press(document.activeElement, "f", scenario.modifiers)).defaultPrevented, true);
+      assert.equal(search(ui).value, "Beta");
+      assert.equal(document.activeElement === search(ui), true);
+      assertNoFindEffects(ui);
+    } finally { await ui.cleanup(); }
+  });
+}
+
+for (const dimension of ["rows", "columns"]) {
+  test(`MIG-0737 U01 Find shrink: empty ${dimension} rescue removed-cell focus to the table and recover one cell entry`, async () => {
+    const ui = await mount();
+    try {
+      const input = await openFind(ui, "2:2");
+      await inputValue(input, "Beta");
+      await press(input, "Escape");
+      const removed = cell(ui, "2:2");
+      const table = ui.host.querySelector("table");
+      assert.equal(document.activeElement === removed, true);
+      await ui.render({ data: { ...data, [dimension]: [] } });
+      assert.equal(removed.isConnected, false);
+      assert.deepEqual(gridTabEntries(ui), ["table"]);
+      assert.equal(document.activeElement === table, true);
+      assert.equal((await press(document.activeElement, "f", { metaKey: true })).defaultPrevented, true);
+      assert.equal(search(ui).value, "Beta");
+      await press(search(ui), "Escape");
+      assert.equal(document.activeElement === table, true);
+      await ui.render({ data });
+      const entries = gridTabEntries(ui);
+      assert.equal(entries.length, 1);
+      assert.notEqual(entries[0], "table");
+      assert.deepEqual(matches(ui), ["1:1"]);
+      // JSDOM has no native Tab traversal; inspect the entry, then use the cell it exposes.
+      const target = cell(ui, entries[0]);
+      await React.act(async () => target.focus());
+      assert.equal((await press(document.activeElement, "f", { ctrlKey: true })).defaultPrevented, true);
+      assert.equal(search(ui).value, "Beta");
+      assertNoFindEffects(ui);
+    } finally { await ui.cleanup(); }
+  });
+}
+
+for (const owner of ["search input", "Next button", "editing toolbar"]) {
+  test(`MIG-0737 U01 Find shrink: open Find preserves ${owner} focus while bounding the grid Tab entry`, async () => {
+    const ui = await mount({ allowMutations: true });
+    try {
+      const input = await openFind(ui, "2:2");
+      await inputValue(input, "Beta");
+      const target = owner === "search input" ? input
+        : owner === "Next button" ? button(ui, "次へ") : button(ui, "行を追加");
+      await React.act(async () => target.focus());
+      assert.equal(document.activeElement === target, true);
+      const removed = cell(ui, "2:2");
+      await ui.render({ data: { ...data, rows: data.rows.slice(0, 2), columns: columns.slice(0, 2) } });
+      assert.equal(removed.isConnected, false);
+      assert.deepEqual(gridTabEntries(ui), ["1:1"]);
+      assert.equal(document.activeElement === target, true, "dimension repair must not steal external focus");
+      assert.equal(search(ui) === input, true);
+      assert.equal(input.value, "Beta");
+      assert.deepEqual(matches(ui), ["1:1"]);
+      assertNoFindEffects(ui);
+    } finally { await ui.cleanup(); }
+  });
+}
+
+test("MIG-0737 U01 Find shrink: a cell deliberately blurred before replacement does not reclaim body focus", async () => {
+  const ui = await mount();
+  try {
+    const input = await openFind(ui, "2:2");
+    await inputValue(input, "Beta");
+    await press(input, "Escape");
+    const removed = cell(ui, "2:2");
+    await React.act(async () => removed.blur());
+    assert.equal(document.activeElement === document.body, true);
+    await ui.render({ data: { ...data, rows: data.rows.slice(0, 2), columns: columns.slice(0, 2) } });
+    assert.equal(removed.isConnected, false);
+    assert.deepEqual(gridTabEntries(ui), ["1:1"]);
+    assert.equal(document.activeElement === document.body, true, "body was focused before the cell was removed");
+    assert.deepEqual(matches(ui), ["1:1"]);
+    assertNoFindEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 Find shrink: unrelated dimension removal retains the live draft, snapshot and Find fence", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    const input = await openFind(ui, "2:2");
+    await inputValue(input, "Beta");
+    await click(ui, "1行 title を編集");
+    const editor = cell(ui, "0:1").querySelector('input[type="text"]');
+    assert.ok(editor);
+    await inputValue(editor, "Uncommitted original-row draft");
+    await ui.render({ data: { ...data, rows: data.rows.slice(0, 2), columns: columns.slice(0, 2) } });
+    assert.equal(cell(ui, "0:1").querySelector('input[type="text"]') === editor, true);
+    assert.equal(editor.value, "Uncommitted original-row draft");
+    assert.equal(document.activeElement === editor, true);
+    assert.deepEqual(gridTabEntries(ui), ["0:1"]);
+    assert.equal(search(ui) === input, true);
+    assert.equal(input.value, "Beta");
+    assert.equal(input.disabled, true);
+    assert.equal(button(ui, "次へ").disabled, true);
+    assert.equal(button(ui, "閉じる").disabled, true);
+    assert.equal(button(ui, "セルを保存").disabled, false, "unchanged original target must retain its eligible draft");
+    await press(input, "Enter");
+    assert.equal((await press(cell(ui, "0:1"), "f", { ctrlKey: true })).defaultPrevented, false);
+    assert.equal(document.activeElement === editor, true);
+    assert.deepEqual(selected(ui), ["0:1"]);
+    assert.deepEqual(matches(ui), ["1:1"]);
+    assertNoFindEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 Find shrink: pending Undo retains its guard and history while removed grid focus is repaired", async () => {
+  const pending = deferred();
+  const requests = [];
+  let refreshes = 0;
+  const ui = await mount({ allowMutations: true,
+    fetchFn: async (_path, init) => { requests.push(init); return requests.length === 1 ? writeOk() : pending.promise; },
+    onRefresh: () => { refreshes++; },
+  });
+  try {
+    await click(ui, "1行 title を編集");
+    await inputValue(cell(ui, "0:1").querySelector('input[type="text"]'), "Changed");
+    await click(ui, "セルを保存");
+    await flush();
+    assert.match(statusText(ui), /保存しました/);
+    const input = await openFind(ui, "2:2");
+    await inputValue(input, "Beta");
+    await press(input, "Escape");
+    const removed = cell(ui, "2:2");
+    await press(removed, "z", { ctrlKey: true });
+    assert.equal(requests.length, 2);
+    assert.equal(refreshes, 1);
+    assert.equal(document.activeElement === removed, true);
+    await ui.render({ data: { ...data, rows: data.rows.slice(0, 2), columns: columns.slice(0, 2) } });
+    assert.equal(removed.isConnected, false);
+    assert.deepEqual(gridTabEntries(ui), ["1:1"]);
+    const target = cell(ui, "1:1");
+    assert.equal(document.activeElement === target, true);
+    assert.equal((await press(target, "f", { ctrlKey: true })).defaultPrevented, false);
+    assert.equal(ui.host.querySelector('input[type="search"]') === null, true);
+    assert.deepEqual(matches(ui), ["1:1"]);
+    assert.equal(requests.length, 2);
+    await React.act(async () => pending.resolve(writeOk()));
+    await flush();
+    assert.match(statusText(ui), /保存しました/);
+    assert.equal(button(ui, "やり直す").disabled, false, "dimension repair must preserve the completed Undo history");
+    assert.equal((await press(target, "f", { metaKey: true })).defaultPrevented, true);
+    assert.equal(search(ui).value, "Beta");
+    assert.deepEqual(requests.map(init => JSON.parse(init.body).value), ["Changed", "Alpha"]);
+    assert.equal(refreshes, 2);
+    assert.deepEqual(ui.effects.copied, []);
+  } finally { pending.resolve(writeOk()); await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 Find shrink: a same-count column-key replacement rescues the detached focused cell", async () => {
+  const ui = await mount();
+  try {
+    const input = await openFind(ui, "2:2");
+    await inputValue(input, "Beta");
+    await press(input, "Escape");
+    const removed = cell(ui, "2:2");
+    assert.equal(document.activeElement === removed, true);
+    await ui.render({ data: {
+      ...data,
+      columns: [columns[0], columns[1], { ...columns[2], name: "description" }],
+      rows: data.rows.map(row => ({ ...row, description: row.note })),
+    } });
+    assert.equal(removed.isConnected, false);
+    assert.deepEqual(gridTabEntries(ui), ["2:2"]);
+    const replacement = cell(ui, "2:2");
+    assert.equal(document.activeElement === replacement, true);
+    assert.deepEqual(matches(ui), ["1:1"]);
+    assert.equal((await press(document.activeElement, "f", { ctrlKey: true })).defaultPrevented, true);
+    assert.equal(search(ui).value, "Beta");
+    assertNoFindEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 Find shrink: external focus followed by body focus cannot revive a stale removed-cell target", async () => {
+  const ui = await mount();
+  const external = document.createElement("button");
+  external.textContent = "External control";
+  document.body.append(external);
+  try {
+    const input = await openFind(ui, "2:2");
+    await inputValue(input, "Beta");
+    await press(input, "Escape");
+    const removed = cell(ui, "2:2");
+    await React.act(async () => external.focus());
+    assert.equal(document.activeElement === external, true);
+    const shrunk = { ...data, rows: data.rows.slice(0, 2), columns: columns.slice(0, 2) };
+    await ui.render({ data: shrunk });
+    assert.equal(removed.isConnected, false);
+    assert.equal(document.activeElement === external, true);
+    assert.deepEqual(gridTabEntries(ui), ["1:1"]);
+    await React.act(async () => external.blur());
+    assert.equal(document.activeElement === document.body, true);
+    await ui.render({ data: { ...shrunk, rows: shrunk.rows.map(row => ({ ...row })) } });
+    assert.equal(document.activeElement === document.body, true, "a consumed removal must never steal focus later");
+    assert.deepEqual(gridTabEntries(ui), ["1:1"]);
+    assert.deepEqual(matches(ui), ["1:1"]);
+    assertNoFindEffects(ui);
+  } finally { await ui.cleanup(); external.remove(); }
+});
