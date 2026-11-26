@@ -58,6 +58,16 @@ export function extractPublicMediaKeyFromUrl(url: string | null | undefined): st
   return key;
 }
 
+function logIconCleanupFailure(tag: string): void {
+  try {
+    // Never serialize provider errors or let a broken diagnostic sink reject
+    // best-effort cleanup after the canonical D1 write has committed.
+    console.error(tag);
+  } catch {
+    // Logging is best effort.
+  }
+}
+
 async function isIconUrlReferenced(
   db: Pick<D1Database, "prepare">,
   mediaUrl: string,
@@ -69,8 +79,8 @@ async function isIconUrlReferenced(
       .bind(mediaUrl, objectKey)
       .first<{ referenced: number }>();
     return row?.referenced === 1;
-  } catch (error) {
-    console.error("[icon-orphan-cleanup] reference check failed", error);
+  } catch {
+    logIconCleanupFailure("[icon-orphan-cleanup] reference check failed");
     return null;
   }
 }
@@ -98,7 +108,7 @@ export async function tryDeleteUnreferencedIcon(
 
   try {
     await bucket.delete(objectKey);
-  } catch (error) {
-    console.error(cleanupFailureLogTag(objectKey), error);
+  } catch {
+    logIconCleanupFailure(cleanupFailureLogTag(objectKey));
   }
 }
