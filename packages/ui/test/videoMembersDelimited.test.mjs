@@ -57,3 +57,25 @@ test("detectDelimiter: multiline fields and escaped quotes stay inside the first
   assert.equal(detectDelimiter("\n \nname,role\nBob,admin"), ",");
   assert.equal(detectDelimiter("\n \nname\trole\nBob\tadmin"), "\t");
 });
+
+for (const delimiter of [",", "\t"]) {
+  test("MIG-0730: CURRENT CR/LF/CRLF member records and bounded quoted cells " + JSON.stringify(delimiter), () => {
+    const expected = [["name", "notes"], ["Alice", "line\rinside"], ["Bob", 'say "yes"']];
+    const records = [
+      expected[0].join(delimiter),
+      ["Alice", '"line\rinside"'].join(delimiter),
+      ["Bob", '"say ""yes"""'].join(delimiter),
+    ];
+    for (const separator of ["\r", "\n", "\r\n"]) {
+      const text = "\uFEFF" + records.join(separator) + separator;
+      assert.equal(detectDelimiter(text), delimiter);
+      assert.deepEqual(parseDelimited(text, delimiter), expected);
+      for (const maxRows of [0, 1, 2, 3, 4]) {
+        assert.deepEqual(parseDelimited(text, delimiter, { maxRows }), expected.slice(0, maxRows));
+      }
+      assert.deepEqual(parseDelimited(serializeDelimited(expected, delimiter), delimiter), expected);
+    }
+    const mixed = records[0] + "\r" + records[1] + "\r\n" + records[2] + "\n";
+    assert.deepEqual(parseDelimited(mixed, delimiter), expected);
+  });
+}

@@ -6,6 +6,7 @@ import "./styles/fonts.css";
 import "./styles/video-card.css";
 import "./styles/dashboard.css";
 import "./styles/settings.css";
+import "./styles/xid-settings.css";
 import "./styles/onboarding.css";
 import "./styles/entry.css";
 import "./styles/xid-requests.css";

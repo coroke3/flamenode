@@ -308,11 +308,11 @@ Phase 6 共通契約のとおり。
 
 ### MIG-0605: user/X/admin APIs（ユーザー・X・管理 API）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — READY（MIG-0633 は DONE（#402）。2026-10-25 に残りを MIG-0636 / 0637 / 0638 へ分けた（D-13-56）。D-15-7 で D-03 fan-out dry-run を MIG-0658 へ分割。本 task に残るのは SA-090/091、D-04 checkpoint、U07、Final audit）。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0605
+- **Readiness:** NEEDS_REFINEMENT — READY（MIG-0633 は DONE（#402）。2026-10-25 に残りを MIG-0636 / 0637 / 0638 へ分けた（D-13-56）。D-15-7 で D-03 fan-out dry-run を MIG-0658 へ分割。D-19-1（Option A）で SA-090/091 用の server-core 抽出と `xid-admin.ts` bridge を本 task の Owned paths に含め、PR #524 の U05x-B block を解除済み）。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0605
 - **Recipe:** R-API, R-EVIDENCE
 - **Runtime:** S3, N
-- **Depends on:** MIG-0602, MIG-0306, MIG-0633 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-13-56, D-13-57, D-15-7
-- **Verified against:** `a1b910b4` (2026-10-25)
+- **Depends on:** MIG-0602, MIG-0306, MIG-0633 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-13-56, D-13-57, D-15-7, D-19-1, D-19-2
+- **Verified against:** `61463174f` (2026-11-18)
 #### Source snapshot
 | CURRENT | ID | 担当 |
 | --- | --- | --- |
@@ -323,15 +323,15 @@ Phase 6 共通契約のとおり。
 | terms, Active X, profile, link request | SA-074..076, SA-098..105 | MIG-0636（SA-098..105）、MIG-0641（SA-074..076、D-14-9） |
 | cost guard, notifications, permissions, rules, static rebuild, user admin, youtube sync, visibility repair, X merge admin | SA-016..020, SA-045..055, SA-069..073, SA-077..081, SA-092..097, SA-106, SA-110 | MIG-0637（SA-016..020 / 077..081）、MIG-0642（SA-045..049 / 051..055）、MIG-0643（SA-050 / 069..073 / 106）、MIG-0644（SA-092..097 / 110）（D-14-10） |
 | moderation case | SA-043/044 | MIG-0603 U02b（D-13-40） |
-| X link request review | SA-090/091 | **本 task U05x**（`src/lib/actions/xid-admin.ts`、権限 `canManageXIdLinkRequests` = `src/lib/auth/ownership.ts:174-217`、MIG-0633 の core） |
-- 解消済み: B-1（`writeGuardMiddleware` の `requiredRole`、`writeOrigin.ts:151,170`）、B-2（#392）、B-3 / B-6 の「`apps/api` は src/lib を import できない」は `publicApi` / `publicDto` / `artifactVisibility` が server-core に移った（#398、`packages/server-core/src/publicData/`）ので MIG-0638 で解ける。
+| X link request review | SA-090/091 | **本 task U05x**（`src/lib/actions/xid-admin.ts` の approve/reject 実行部を `+packages/server-core/src/xid/linkRequestReview.ts` へ抽出し、CURRENT 側は互換 bridge として委譲。権限 `canManageXIdLinkRequests` = `packages/server-core/src/auth/ownership.ts`、MIG-0633 の core） |
+- 解消済み: B-1（`writeGuardMiddleware` の `requiredRole`、`writeOrigin.ts:151,170`）、B-2（#392）、B-3 / B-6 の「`apps/api` は src/lib を import できない」は `publicApi` / `publicDto` / `artifactVisibility` が server-core に移った（#398、`packages/server-core/src/publicData/`）ので MIG-0638 で解ける。U05x-B scope gate は D-19-1（Option A）で解消済み。
 - 公開画面の `src/components/user/useActiveXSwitcher.ts:5`（SA-098）と `app/(public)/rules/page.tsx:3,95`（SA-075）は MIG-0636。
 #### Owned paths
-- 新規: `+apps/api/src/routes/xid/linkRequests.ts`, `+packages/contracts/src/xidLinkRequest.ts`, `+apps/api/test/xidLinkRequests.parity.test.mjs`, `+docs/migration/D04_CUTOVER_CHECKPOINT.md`
-- 変更: `apps/api/src/app.ts`（mount 1 行）, `docs/migration/API_MATRIX.md`, `docs/migration/route-handlers/README.md`（U07 の担当列）
-- 触らない: `src/lib/actions/**`, `app/api/**`、子 task（MIG-0636〜0638）の owned paths
+- 新規: `+apps/api/src/routes/xid/linkRequests.ts`, `+packages/contracts/src/xidLinkRequest.ts`, `+packages/server-core/src/xid/linkRequestReview.ts`, `+packages/server-core/test/xidLinkRequestReview.test.mjs`, `+apps/api/test/xidLinkRequests.parity.test.mjs`, `+docs/migration/D04_CUTOVER_CHECKPOINT.md`
+- 変更: `apps/api/src/app.ts`（mount 1 行）, `apps/api/src/env.ts`（`xidLinkRequestActorXUserId` 変数。`#475` の `xidSelected` と両方残す、D-19-2）, `packages/contracts/src/admin/index.ts`（export 1 行）, `packages/server-core/package.json`（`./xid/linkRequestReview` 1 行）, `src/lib/actions/xid-admin.ts`（SA-090/091 server-core 委譲 bridge のみ。他 export・予約紐付け・署名ルール不変）, `docs/migration/API_MATRIX.md`, `docs/migration/FILE_MIGRATION_MATRIX.md`, `docs/migration/route-handlers/README.md`（U07 の担当列）, `docs/migration/work-items/MIG-0605.md`
+- 触らない: `app/api/**`、他 action ファイル（`src/lib/actions/**` のうち `xid-admin.ts` 以外）、子 task（MIG-0636〜0638 / 0641〜0648）の owned paths
 #### Micro-units
-- **U05x SA-090/091**: `POST /api/xid/link-requests/:requestId/approve`, `/reject`。guard は `writeGuardMiddleware({ requiredRole: null, activeX: { feature: "xid_links" } })`（CURRENT `xid-admin.ts:78`）+ core の `resolveXIdLinkRequestAuthorization`（監査の `actor_x_user_id` もそこから）。
+- **U05x SA-090/091**: `POST /api/xid/link-requests/:requestId/approve`, `/reject`。guard は `writeGuardMiddleware({ requiredRole: null, activeX: { feature: "xid_links" } })`（CURRENT `xid-admin.ts:78`）+ core の `resolveXIdLinkRequestAuthorization`（監査の `actor_x_user_id` もそこから）。D-19-1（Option A）により、`src/lib/actions/xid-admin.ts` の SA-090/091 承認・却下 CAS / alias / link / 予約紐付け / 通知 / audit / static rebuild plan を `packages/server-core/src/xid/linkRequestReview.ts` へ狭く抽出し、CURRENT `xid-admin.ts` と Hono `linkRequests.ts` が同じ service を呼ぶ（`apps/api` は薄い HTTP adapter に留め、D-10 境界チェックを通す）。
 - **U05d**: MIG-0658 へ分割（D-15-7）。U05e の checkpoint は MIG-0658 の出力を参照する。
 - **U05e D-04 checkpoint**: 一括 cutover の手順と停止点を `D04_CUTOVER_CHECKPOINT.md` に書く。実行は owner の別承認。
 - **U07 coverage**: RH-001〜033 の全メソッドに担当 MIG（RH-010/011 は Phase 8）があることを表にする。SA-107〜110 の行（SA-107 = MIG-0703 / MIG-0802、SA-108/109 = MIG-0602 の型付き API へ写す、SA-110 = MIG-0637）。
@@ -478,11 +478,11 @@ PRをrevert（script と文書だけ）。
 - **Readiness:** NEEDS_REFINEMENT — 最初に T00（D1 replay 再測定）を実施し、その表で予算を超えた job ごとに micro-unit を作ってから。各 unit は「定数を T00 の表の値に変える + R-JOB の5種の test」の形なので、値が決まれば small に渡せる（MIG-0609 の表は simulator 込みの上限値で、そのままは使えない）
 - **Recipe:** R-JOB
 - **Runtime:** B
-- **Depends on:** MIG-0609 / **Decisions:** D-09 DECIDED
-- **Verified against:** `6a39035` (2026-11-01、T00 / Owned paths / Commands は PR #455 のレビューで更新。job の定数と行番号は `96f20dc` 時点なので着手時に `rg -n` で引き直す)
+- **Depends on:** MIG-0609 / **Decisions:** D-09 DECIDED, D-19-5
+- **Verified against:** `61463174f` (2026-11-18、Cron entry 行番号と `createCronWorker.ts` を再確認。`scripts/benchmark-background-cpu.test.mjs` U02 drift guard の `read()` は Windows で `C:\C:\` になる既存パス結合があるため Linux host で実行・修正要)
 #### Source snapshot
-- 上限と入口は MIG-0609 の Source snapshot の表。測定値は `cloudflare/BACKGROUND_CPU.md`（MIG-0609 が作る）。
-- Cron の入口: `workers/content-jobs/index.ts:111`、`workers/fast-jobs/index.ts:114`、`workers/sync-jobs/index.ts:170`。CURRENT は1回の Cron の中で複数の job を順に動かす。
+- 上限と入口は MIG-0609 の Source snapshot の表。測定値は `cloudflare/BACKGROUND_CPU.md`（MIG-0609 が作成）。
+- Cron の入口: `workers/shared/createCronWorker.ts:118-156`（`scheduled` :128）、`workers/content-jobs/index.ts:558-566`（`...cronWorker` + `queue`）、`workers/fast-jobs/index.ts:326-335`（`scheduled: cronWorker.scheduled` + `queue`）、`workers/sync-jobs/index.ts:658-668`（`scheduled: cronWorker.scheduled` + `queue`）。CURRENT は1回の Cron の中で複数の job を順に動かす。
 - 仕事の正本は D1 の行、Queue は doorbell だけ（`background-jobs/README.md` の最重要原則）。
 #### Owned paths
 - 変更: T00 用に `scripts/benchmark-background-cpu.mjs` と `scripts/benchmark-background-cpu.test.mjs`（MIG-0609 が作成。`--d1 replay` を足す。`scripts/benchmark-api-cpu.mjs` は MIG-0606 の所有なので変更せず、replay の仕組みは読んで同じ形で実装する）、`docs/migration/cloudflare/BACKGROUND_CPU.md`（T00 の表と分割後の測定値）、MIG-0609 の表で予算を超えた job の file と、その test（unit ごとに PR 本文で file を列挙する）、`workers/*/wrangler.toml` の `max_batch_size`
@@ -1283,47 +1283,46 @@ PRをrevert（bridge なので revert で戻る）。
 
 ### MIG-0627: R2 artifact の読み手を build 時 snapshot に置き換える（MIG-0907 の前提）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0509 と MIG-0649 の後。棚卸し（旧 U01）は D-14-13 で MIG-0649 に分割したので、その表と CI 検査を入力にする
+- **Readiness:** NEEDS_REFINEMENT — READY（MIG-0509 と MIG-0649 は DONE。D-19-4 で D-13-52 shared-input diagnostics を MIG-0665 へ、build 時 API artifact 差分 PUT と完全性検査を MIG-0666 へ分離したため、本 task は実行時 R2 artifact 読み手の置換と `R2_ARTIFACT_CONSUMERS.md` の完了管理に集中する）
 - **Recipe:** R-REMOVE
 - **Runtime:** B
-- **Depends on:** MIG-0509, MIG-0649 / **Decisions:** D-09 DECIDED, D-14-13
-- **Verified against:** `c5a62b4d` (2026-10-23)
+- **Depends on:** MIG-0509, MIG-0649 / **Decisions:** D-09 DECIDED, D-14-13, D-19-4
+- **Verified against:** `61463174f` (2026-11-18)
 #### Source snapshot
-- G14 R2 artifact の producer（`workers/json-generator`）と consumer: RH-019 member-suggestions artifact、RH-026 `top` / `sections` / `stats.v1`、RH-028 event-base、`sitemapSources` の index、`ga-analytics` の `list/recent.json`、MIG-0611 の `rules/current.json`。
-- MIG-0907 T02 は「R2 artifact は書かれない」とするが、生き残る Hono / worker の読み手が何に置き換わるかを書く task が無い（GA4 だけは `PHASE_4_5_SPEC.md` の MIG-0509 が扱う）。
-- MIG-0631 の Hono 読み手 2 件（2026-10-24、MIG-0631 Q2 で Fable が決定）: RH-015 static_only の `events/index.json`、RH-012 の `events/<id>/release.v1.json`。両者とも GET は D1 / Queue / `public_build_state` に書かない（MIG-0631 L3）。MIG-0907 の後、欠けた artifact を作り直すのは build だけ（`apps/site/scripts/produceSnapshots.ts` が build ごとに全 public event の release と events index を D1 から作り直す）。
+- G14 R2 artifact の producer（`workers/json-generator`）と consumer（`R2_ARTIFACT_CONSUMERS.md`、MIG-0649 で棚卸し済み。CI 検査 `npm run check:r2-artifact-consumers`: 67 references / 40 key patterns / 114 dynamic instances）:
+  - 残存 Hono consumer: `apps/api/src/routes/publicAboutStats.ts`（RH-026 `top/sections/stats.v1.json`）、`apps/api/src/routes/personal/onboarding.ts`（`rules/current.json`）、`apps/api/src/routes/videos/list.ts`（RH-031 `search-index-postings.v1/*`）、`apps/api/src/routes/videos/viewerOverlay.ts`（`events/<id>/playlist.v1.json`）、`apps/api/src/routes/public/eventStaff.ts`（RH-028 `events/<id>/base.v1.json`）、`apps/api/src/routes/events/publicList.ts` / `publicRelease.ts`（`events/index.json` / `events/<id>/release.v1.json`、build 側配信は MIG-0666 と協調）。
+  - CURRENT / Worker 残存 consumer: `src/lib/publicData/sitemapSources.ts`、`workers/ga-analytics`（MIG-0509 対象外分）。
+- `/admin/static-builds` の shared-input diagnostics（D-13-52）は MIG-0665 へ、build 時 API artifact 差分 PUT・完全性検査（旧 U04/U05）は MIG-0666 へ分割（D-19-4）。
 - `visibility/blocked-entities.v1.json` は残す側（producer は server-core `visibility/eventTransition.ts` などの S3 経路で、json-generator ではない）。
 #### Owned paths
-- 新規: なし（`R2_ARTIFACT_CONSUMERS.md` は MIG-0649 が作る。本 task は更新する）
-- 変更: 読み手の file（棚卸しで確定。1 PR は1系統）。build の artifact publish と完全性検査の file（U04 / U05 で確定）
+- 新規: なし（`R2_ARTIFACT_CONSUMERS.md` は既存。本 task は更新する）
+- 変更: 読み手の file（1 PR につき1消費系統）、`docs/migration/R2_ARTIFACT_CONSUMERS.md`、`docs/migration/FILE_MIGRATION_MATRIX.md`
 #### Micro-units
-- **U01 inventory**: MIG-0649 へ分割（D-14-13）。
-- **U02 replace**: 読み手を1系統ずつ build 時 snapshot へ。DTO は変えない。
-- **U03 gate**: MIG-0907 の U01 が参照できる状態（読み手0件）を確認。
-- **U04 API artifact publish**: API が読む artifact（MIG-0631 の 2 種）を build が同じ key / schema で R2 へ差分 PUT する（変わった object だけ）。PUT 件数を build log に出し、`BUILD_TIME_DATA.md` §6 に月間 Class A の見積りを書く（無料枠の 80% 以下）。build が R2 に書くのは runtime の書き込みではないので、`ZERO_1102.md` §4.7「request 時に書かない」とも MIG-0907 T02 とも矛盾しない。
-- **U05 build 内の完全性検査**: snapshot の public event id と R2 の release key を照合する。欠けは最大 3 回再試行し、残れば build を失敗にする。
+- **U01 inventory**: MIG-0649 へ分割（DONE）。
+- **U02 replace**: Hono / Worker / sitemap の残存 R2 artifact 読み手を build 時 snapshot 等へ1系統ずつ置換。DTO は変えない。
+- **U03 gate**: MIG-0907 の U01 が参照できる状態（対象読み手の置換・`R2_ARTIFACT_CONSUMERS.md` 更新、`check:r2-artifact-consumers` 通過）を確認。
+- **U04 API artifact publish / U05 integrity**: MIG-0666 へ分割（D-19-4）。
+- **shared-input diagnostics（D-13-52）**: MIG-0665 へ分割（D-19-4）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | `rg` で R2 get key | producer 一覧に無い読み手が0件 |
+| T01 | `npm run check:r2-artifact-consumers` | retired 対象の本番実行時読み手が0件、ledger とコードの差異なし |
 | T02 | 置き換え後の各読み手 | 置き換え前と同じ DTO |
 | T03 | snapshot 欠落 | CURRENT と同じ劣化 |
-| T04 | 非本番で release の artifact key を削除 → RH-012 → build publish → RH-012 | 削除後は 503、publish 後は 200。PUT 件数 = 欠けた数 |
 #### Commands
 ```bash
 npm run test:unit
 npm run typecheck
+npm run check:r2-artifact-consumers
 npm run check:project-docs
 ```
 #### Ledger updates
-`R2_ARTIFACT_CONSUMERS.md`（MIG-0649 が作成）の置き換え先の列を「置き換え済み」に更新。
+`R2_ARTIFACT_CONSUMERS.md` の置き換え先の列を「置き換え済み」に更新（削除した動的呼び出し行も同期）。`FILE_MIGRATION_MATRIX.md` を更新。
 #### DONE checklist
-- [ ] 全 artifact に置き換え先がある
-- [ ] MIG-0907 が依存として参照できる
-- [ ] `/admin/static-builds` の shared-input diagnostics（`src/lib/admin/staticSharedInputDiagnostics.ts:52` `loadStaticSharedInputDiagnostics`）が build 時 snapshot を読む形になり、MIG-0626 の read endpoint が R2 の head 以外を返せる（MIG-0626 から移管、D-13-52）
+- [ ] 全 runtime consumer 対象 artifact に置き換え先・完了記録がある
+- [ ] `MIG-0627` 単体で `check:r2-artifact-consumers` と DTO parity が PASS（U04/U05 は MIG-0666、D-13-52 は MIG-0665 で追跡し、MIG-0907 が 3 task すべてを依存にする）
 #### STOP
 - 本番 R2 の書き込みや削除が必要になったら止める（明示承認事項）。
-- build 用の R2 write credential が要ると分かったら止める（secret。Yugo の承認事項）。
 - artifact の DTO を変える必要が出たら止める。
 #### Rollback
 PRをrevert。
@@ -3006,24 +3005,26 @@ Phase 6 共通契約のとおり。
 
 ### MIG-0662: admin 監査 restore の API（SA-011、D-17-9）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0603 の後（D-17-9: SA-011 の HTTP API の担当が無かった。restore の host は MIG-0603 U02a の可視性 host と公開 cache key を使う。実装は Sonnet、review は Opus）
+- **Readiness:** NEEDS_REFINEMENT — READY（D-19-3 / D-16-1 契約先行: MIG-0616 と MIG-0629 は DONE。MIG-0603 は Merge gate に移し、`auditRestoreHost.ts` に server-core の `visibility/manifestR2.ts` / `fenceStore.ts` / `publicCache/*` を使った暫定 adapter を置いて先行実装・独立レビューを進められる。U04 で MIG-0603 の共有 host へ差し替えてから merge する。高リスク領域のため実装は Sonnet / lead、review は別上位 agent / Opus）
 - **Recipe:** R-API
 - **Runtime:** S3
-- **Depends on:** MIG-0603, MIG-0616, MIG-0629 / **Decisions:** D-10 DECIDED, D-13-41, D-13-54, D-16-1, D-17-4, D-17-9
-- **Verified against:** `08e7e8c` (2026-10-27)
+- **Depends on:** MIG-0616, MIG-0629 / **Decisions:** D-10 DECIDED, D-13-41, D-13-54, D-16-1, D-17-4, D-17-9, D-19-3
+- **Merge gate:** MIG-0603 が DONE（D-16-1, D-19-3。共有 `videoTransitionHost.ts` / `publicCacheKeys.ts` への差し替え後、両方とも独立レビュー済みで merge）
+- **Verified against:** `61463174f` (2026-11-18)
 #### Source snapshot
 - CURRENT: `src/lib/actions/audit-admin.ts:142-171` `restoreAuditLogAction`（schema `restoreSchema` :125-130: `audit_id` 1 字以上、`reason` 1〜500 字、`confirm_text` 任意、`force_overwrite` 0 / 1 既定 0。`restoreAuditLog(db, {auditId, userId, reason, confirmText, forceOverwrite, dry_run: false})`、結果 `{ok, message, restore_run_id, diff}`）。`requireAdmin()` の guard。
 - core: `packages/server-core/src/audit/restore.ts`（MIG-0616、`restoreAuditLog(db, options, host: AuditRestoreHost)`）。host は `manifest`（`VisibilityFenceHost`）、`publicCacheKeys`（`VideoPublicCacheKeyHost`）、`deletePublicJsonCaches`、`invalidateEventExportCache`、`loadQueueWakeHost`。
 - 手本: `apps/api/src/routes/admin/audit.ts`（147 行、MIG-0629）。`/dry-run`（:99-146）は全 method が throw する host で dry run を呼ぶ（D-13-54）。guard は `onlyMutating(costGuardMiddleware("admin_permissions"))`（:36）、body は `readAdminJsonBody`、413 / 400 の形。
-- host の部品: MIG-0603 U02a の `apps/api/src/visibility/videoTransitionHost.ts`（manifest の read / CAS put を `c.env.BUCKET` に）と `apps/api/src/visibility/publicCacheKeys.ts`（D-13-42 の定数）、`packages/server-core/src/publicCache/eventExportKeys.ts`、core `publicCache/delete.ts#deletePublicJsonCaches`。Queue wake は D-13-41 で何もしない（`apps/api` に Queue binding が無い）。
+- host の部品（main に存在）: `packages/server-core/src/visibility/{manifestR2,fenceStore,manifestCore,manifestHost}.ts`、`packages/server-core/src/publicCache/{delete,eventExportKeys}.ts`、D-13-42 の定数（U01 では `auditRestoreHost.ts` に `// MIG-0662 / D-16-1 provisional until MIG-0603 (#523) merges` を付けて server-core helper で組む）。MIG-0603 DONE 後に `apps/api/src/visibility/videoTransitionHost.ts` と `apps/api/src/visibility/publicCacheKeys.ts` の共有 helper に置換する（U04）。Queue wake は D-13-41 で何もしない（`apps/api` に Queue binding が無い）。
 #### Owned paths
 - 新規: `+apps/api/src/visibility/auditRestoreHost.ts`, `+packages/contracts/src/admin/auditRestore.ts`, `+apps/api/test/auditRestore.parity.test.mjs`
-- 変更: `apps/api/src/routes/admin/audit.ts`（`POST /restore` を足す）, `packages/contracts/src/admin/index.ts`（export 1 行）, `docs/migration/API_MATRIX.md`
-- 触らない: `src/lib/actions/**`, `packages/server-core/src/audit/restore.ts`, `apps/api/src/visibility/videoTransitionHost.ts`（MIG-0603 の所有。import だけ）
+- 変更: `apps/api/src/routes/admin/audit.ts`（`POST /restore` を足す）, `packages/contracts/src/admin/index.ts`（export 1 行。`#524/#522/#491` との barrel 衝突は merge 同期で両方残す）, `docs/migration/API_MATRIX.md`, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `src/lib/actions/**`, `packages/server-core/src/audit/restore.ts`
 #### Micro-units
-- **U01 host**: `auditRestoreHost.ts` に `createAuditRestoreHost(c): AuditRestoreHost`。`manifest` は MIG-0603 の video host と同じ値、`publicCacheKeys` は `publicCacheKeys.ts`、`deletePublicJsonCaches` は core、`invalidateEventExportCache` は `eventExportKeys.ts` の key を `caches.default` から消す、`loadQueueWakeHost` は wake 0 の host（D-13-41）。
+- **U01 host**: `auditRestoreHost.ts` に `createAuditRestoreHost(c): AuditRestoreHost`（`// D-16-1 provisional` で server-core の manifest/cache helper を使う。`invalidateEventExportCache` は `eventExportKeys.ts` の key を `caches.default` から削除、`loadQueueWakeHost` は wake 0 の host）。
 - **U02 route**: `POST /api/admin/audit/restore`（D-17-4）。body は `{ audit_id, reason, confirm_text?, force_overwrite? }`（CURRENT の FormData の key、D-16-1 の 2）、schema は CURRENT `restoreSchema` と同じ制約。応答は `{ ok, message?, restore_run_id?, diff? }` を 200（CURRENT と同じく失敗も `ok:false` の 200。413 / 400 は `/dry-run` と同じ）。
 - **U03 parity**: CURRENT の action と Hono route に同じ fixture（restorable の log、確認文字列違い、競合で `force_overwrite` 0 / 1、restore 済み）を通し、結果と D1 の差分（`audit_restore_runs`・対象 table）が一致。
+- **U04 merge 直前**（D-16-1, D-19-3）: MIG-0603 DONE 後、`auditRestoreHost.ts` の暫定表現を MIG-0603 の `videoTransitionHost.ts` と `publicCacheKeys.ts` へ置き換える。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -3043,7 +3044,8 @@ npm run check:project-docs
 #### Ledger updates
 `API_MATRIX.md` の SA-011 に Hono endpoint。`FILE_MIGRATION_MATRIX.md` に新規 file。
 #### DONE checklist
-- [ ] U01〜U03 が DONE、T01〜T05 が PASS
+- [ ] U01〜U04 が DONE、T01〜T05 が PASS
+- [ ] MIG-0603 が DONE で、暫定の manifest/cache adapter が残っていない（D-19-3）
 - [ ] restore が独立レビュー（security / data integrity）を通っている
 #### STOP
 - `restore.ts`（core）を変える必要が出たら止める（MIG-0616 の所有）。
@@ -3134,6 +3136,100 @@ npm run typecheck
 - `canAccessManage` の計算や degraded の条件を変える必要が出たら止める（RH-001 の CURRENT parity を壊す。D-17-14 は field の追加だけ）。
 #### Rollback
 PR を revert（追加 field だけ。読み手は MIG-0707 だけで、reason が無ければ fail closed）。
+
+### MIG-0665: `/admin/static-builds` shared-input diagnostics の build 時 snapshot 連携（D-13-52、ex MIG-0627）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0626 PR #505 が `apps/api/src/routes/adminRead/ops.ts` と `packages/contracts/src/adminReadOps.ts` を編集中のため、MIG-0626 DONE 後に着手する。MIG-0509 は DONE）
+- **Recipe:** R-API, R-BUILD
+- **Runtime:** S2, N
+- **Depends on:** MIG-0626, MIG-0509 / **Decisions:** D-09 DECIDED, D-13-52, D-19-4
+- **Verified against:** `61463174f` (2026-11-18)
+#### Source snapshot
+- CURRENT: `src/lib/admin/staticSharedInputDiagnostics.ts:52` `loadStaticSharedInputDiagnostics()` は 4 つの共有 JSON（`youtube_related_blocklist`, `random_video_pool`, `pickup_creators`, `top_slot_stats`）について R2 `head`（`objectState`）に加え `loadStatus` / `generatedAt` / `itemCount` を返す。
+- Hono read: `apps/api/src/routes/adminRead/ops.ts:338-365`（S2 制約で大きい JSON 体を runtime に GET/parse しないよう `head()` と `objectState` のみ実装）、契約 `packages/contracts/src/adminReadOps.ts:462-470`（`sharedInputs` DTO に `loadStatus / generatedAt / itemCount` 未追加）。
+- Ops SPA UI: `apps/ops/src/routes/admin/StaticBuilds.tsx:71-78`（MIG-0735 で移植済み。現在は `load: — / generated_at: — / 件数: —` と暫定注記を表示）。
+- build producer: `apps/site/scripts/produceSnapshots.ts:359-400`（`top_stats`, `youtube_related_blocklist`, `random_video_pool` を build 内で生成）。
+#### Owned paths
+- 新規: `+apps/api/test/adminStaticSharedInputs.parity.test.mjs`
+- 変更: `apps/api/src/routes/adminRead/ops.ts`, `packages/contracts/src/adminReadOps.ts`, `apps/ops/src/routes/admin/StaticBuilds.tsx`, `apps/ops/test/adminStaticBuilds.test.mjs`, `apps/site/scripts/produceSnapshots.ts`, `docs/migration/API_MATRIX.md`, `docs/migration/ROUTE_MATRIX.md`（Admin 45 担当表 `/admin/static-builds` 行）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `workers/json-generator/**`, `src/lib/admin/staticSharedInputDiagnostics.ts`（Phase 9 まで維持）, D1 runtime write 経路
+#### Micro-units
+- **U01 metadata**: `apps/api` が S2 予算（JSON 全体読込 0、64 KiB 以下）内で `loadStatus` / `generatedAt` / `itemCount` を返せるよう、軽量 metadata（R2 metadata/small summary artifact または snapshot manifest metadata）の経路を設計・接続する。
+- **U02 api+contracts**: `packages/contracts/src/adminReadOps.ts` と `apps/api/src/routes/adminRead/ops.ts` を更新し、CURRENT `loadStaticSharedInputDiagnostics` と同じ意味の診断項目を返す（欠損・破損時は CURRENT と同じ `loadStatus` に縮退）。
+- **U03 ui+parity**: `apps/ops/src/routes/admin/StaticBuilds.tsx:71-78` の `—` プレースホルダと `MIG-0627` 注記を実データ表示へ更新し parity test を追加。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 4 種の共有入力が正常存在 | `objectState`, `loadStatus`, `generatedAt`, `itemCount` が CURRENT と一致 |
+| T02 | 未生成・破損・R2 障害 | CURRENT と同じ degraded 状態、500 にならない |
+| T03 | S2 予算 | `static-builds` GET の D1 statement 3 以内・大 JSON 本体 parse 0 回 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/contracts
+npm run build --workspace=@flamenode/api
+npm run build --workspace=@flamenode/ops
+node --test --experimental-strip-types apps/api/test/adminStaticSharedInputs.parity.test.mjs
+npm run test --workspace=@flamenode/api
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`ROUTE_MATRIX.md` Admin 45 担当表の `/admin/static-builds` diagnostics 注記と `API_MATRIX.md` / `FILE_MIGRATION_MATRIX.md` を更新。
+#### DONE checklist
+- [ ] `loadStatus` / `generatedAt` / `itemCount` が S2 予算内で返り `StaticBuilds.tsx` の `—` が解消
+- [ ] MIG-0626 の D1/S2 制約を壊さない
+#### STOP
+- `apps/api` で 2–16 MiB の共有 JSON 本体を runtime `JSON.parse` する必要が見えたら止める（ZERO_1102 S2 違反）。
+#### Rollback
+PR を revert（診断 metadata 表示前の `objectState` のみ表示に戻る）。
+
+### MIG-0666: build 時 API artifact 差分 PUT と完全性検査（`events/index.json` / `events/<id>/release.v1.json`、ex MIG-0627 U04/U05）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（MIG-0509 は DONE。in-memory / test bucket で差分 PUT と再試行検査を実装でき、Open PR との file 競合 0 件。実 Cloudflare R2 write token 作成・本番 R2 書き込みは STOP で人間承認を待つ）
+- **Recipe:** R-BUILD
+- **Runtime:** N
+- **Depends on:** MIG-0509 / **Decisions:** D-09 DECIDED, D-11 DECIDED, D-19-4
+- **Verified against:** `61463174f` (2026-11-18)
+#### Source snapshot
+- MIG-0631 の API 読み手（`apps/api/src/routes/events/publicList.ts`、`apps/api/src/routes/events/publicRelease.ts`）は、GET 時に D1・Queue・`public_build_state` へ書かず R2 の `events/index.json` と `events/<id>/release.v1.json`（`eventReleaseObjectKey(id)`）を読む。
+- `apps/site/scripts/produceSnapshots.ts:393-398,444-448` が既に build 内で `events/index.json` と全公開 event の `events/<id>/release.v1.json` を CURRENT `rebuildTarget` で生成している（DTO 変更不要）。
+- 予算基準: `docs/migration/static-delivery/BUILD_TIME_DATA.md` §6（22 public events 基準、Class A 無料枠 1M/月・目標 80% 以下 = 800k/月）。
+- static audit: `npm run check:r2-artifact-consumers`（`scripts/check-r2-artifact-consumers.mjs`、`R2_ARTIFACT_CONSUMERS.md`）で新規の R2 write helper・key 参照を管理する。
+#### Owned paths
+- 新規: `+apps/site/scripts/publishApiArtifacts.ts`, `+apps/site/scripts/publishApiArtifacts.test.mjs`
+- 変更: `apps/site/scripts/buildPublicSite.ts`（CLI option 接続、明示 flag 無し時は既存 dry-run/skip 維持）, `apps/site/scripts/produceSnapshots.ts`（必要なら API artifact payload export）, `scripts/check-r2-artifact-consumers.mjs`（新 R2 helper 名登録時）, `docs/migration/R2_ARTIFACT_CONSUMERS.md`, `docs/migration/static-delivery/BUILD_TIME_DATA.md`（§6 API artifact Class A 月間見積り追記）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `workers/json-generator/**`, `apps/api/src/routes/events/*`, 本番 Cloudflare R2 / tokens / secrets
+#### Micro-units
+- **U01 diff-put**: `produceSnapshots` が作った `events/index.json` と各 `events/<id>/release.v1.json` について、既存の key / schema のまま注入された R2 bucket / REST client に対して sha256 / content 比較による差分 PUT（内容が同一の object は PUT しない）を実装し、PUT 件数・skip 件数を build log JSON に出力する。DTO は変更しない。
+- **U02 integrity**: build 内の `manifest.allowedKeys` / `eventIds` と公開先 R2 `events/<id>/release.v1.json` の存在・hash 整合を照合し、欠落時は最大 3 回まで再 PUT を再試行し、なお欠落が残る場合は build を fail closed で失敗させる。
+- **U03 docs+estimate**: `BUILD_TIME_DATA.md` §6 に API artifact 差分 PUT の月間 Class A 見積り（無料枠の 80% 以下）を追記し、`R2_ARTIFACT_CONSUMERS.md` と `check:r2-artifact-consumers` が整合することを確認する。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 初回・一部欠落・全一致の再実行 | 初回は全件 PUT、全一致なら PUT 0 件、欠落時は欠落件数のみ PUT |
+| T02 | `events/<id>/release.v1.json` 欠落と再試行 | 最大 3 回再試行で回復、3 回失敗し残存すれば build error |
+| T03 | 生成 JSON の schema | CURRENT `rebuildTarget`（`events/index.json`, `events/<id>/release.v1.json`）と同一 DTO |
+| T04 | R2 ledger check | `npm run check:r2-artifact-consumers` が PASS |
+#### Commands
+```bash
+node --test --experimental-strip-types apps/site/scripts/publishApiArtifacts.test.mjs
+node --test --experimental-strip-types apps/site/scripts/readPublicData.test.mjs
+npm run check:r2-artifact-consumers
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`BUILD_TIME_DATA.md` §6 の Class A 見積り追記、`R2_ARTIFACT_CONSUMERS.md`、`FILE_MIGRATION_MATRIX.md` を更新。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T04 が PASS
+- [ ] `BUILD_TIME_DATA.md` §6 に月間 Class A 無料枠 80% 以下の見積りがある
+- [ ] 実 R2 write credential 設定・本番 R2 書き込みを行っていない
+#### STOP
+- 本番 R2 の書き込み・削除、または build 用 R2 write credential 作成が必要になったら止める（明示承認事項）。
+- artifact の DTO を変える必要が出たら止める。
+#### Rollback
+PR を revert（既存の local snapshot build 経路へ戻り、実 R2 書き込み経路は未有効化）。
 
 ### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
 - **Model:** lead

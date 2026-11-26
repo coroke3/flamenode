@@ -388,8 +388,12 @@ videoListRoutes.get("/", async (c) => {
           limit,
         );
       }
-    } catch (error) {
-      console.error("[public-videos] static list load failed", error);
+    } catch {
+      try {
+        console.error("[public-videos] static list load failed");
+      } catch {
+        // Diagnostics must not replace the fixed availability response.
+      }
       return publicServiceUnavailableResponse("database_unavailable");
     }
   }
