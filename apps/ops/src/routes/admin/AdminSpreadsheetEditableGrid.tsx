@@ -11,7 +11,10 @@ import {
 /** MIG-0737 U01: isolated RH-004/005/006 edit surface. NOT ROUTED until backend merge gates. */
 type Change = { table: string; page: number; pk: Record<string, string>; column: string; before: string | null; after: string | null };
 type History = { key: string; undo: Change[]; redo: Change[] };
-type CellSelection = { rowIndex: number; column: string; value: string; key: string };
+type CellSelection = {
+  rowIndex: number; column: string; value: string; key: string;
+  pk: Record<string, string>; before: string | null; invalidated?: boolean;
+};
 const HISTORY_LIMIT = 100;
 
 function cellValue(raw: unknown): string {
@@ -76,6 +79,19 @@ export function AdminSpreadsheetEditableGrid({
   const canMutate = editable && !identityChanged && !busy && inFlight.current == null;
   const safeHistory = !identityChanged && history.key === key ? history : { key, undo: [], redo: [] };
   const currentSelection = !identityChanged && selection?.key === key ? selection : null;
+  const selectedRow = currentSelection ? rows[currentSelection.rowIndex] : undefined;
+  const selectedColumn = currentSelection ? columns.find(c => c.name === currentSelection.column) : undefined;
+  const selectedPk = selectedRow ? primaryKey(selectedRow, primaryKeys) : null;
+  // A page refresh must never move a draft to another row, or silently
+  // overwrite a newer value. RH-004 has no expected-value wire field.
+  const selectionConflict = currentSelection !== null && (
+    currentSelection.invalidated === true || !editable ||
+    !selectedColumn || !selectedColumn.editable || selectedColumn.pk !== 0 || selectedColumn.generated === true ||
+    !selectedRow || !selectedPk ||
+    Object.keys(currentSelection.pk).length !== primaryKeys.length ||
+    primaryKeys.some(name => !Object.hasOwn(currentSelection.pk, name) || selectedPk[name] !== currentSelection.pk[name]) ||
+    (selectedRow[selectedColumn.name] == null ? null : cellValue(selectedRow[selectedColumn.name])) !== currentSelection.before
+  );
   // Keep drafts intact until CURRENT blur-save is ported; header selection does not commit or discard edits.
   const canSelectHeaders = !identityChanged && currentSelection === null && rows.length > 0 && columns.length > 0;
   const insertColumns = columns.filter(c => !c.generated && (c.pk > 0 || c.editable));
@@ -102,6 +118,25 @@ export function AdminSpreadsheetEditableGrid({
     }
     return () => inFlight.current?.abort();
   }, [fetchFn, def.table, page, allowMutations]);
+
+  // Latch an observed conflicting committed snapshot; a later A→B→A
+  // refresh must not revive a draft whose target was already invalidated.
+  React.useEffect(() => {
+    if (!currentSelection || !selectionConflict || currentSelection.invalidated) return;
+    setSelection(previous => previous && previous.pk === currentSelection.pk
+      ? { ...previous, invalidated: true } : previous);
+  }, [currentSelection, selectionConflict]);
+
+  function beginEdit(rowIndex: number, column: (typeof columns)[number]): boolean {
+    if (!canMutate || selectionConflict || !column.editable || column.pk !== 0 || column.generated) return false;
+    const row = rows[rowIndex];
+    const pk = row ? primaryKey(row, primaryKeys) : null;
+    if (!row || !pk) return false;
+    const value = cellValue(row[column.name]);
+    setSelection({ rowIndex, column: column.name, value, key, pk,
+      before: row[column.name] == null ? null : value });
+    return true;
+  }
 
   function isCurrent(): boolean {
     const v = contextRef.current;
@@ -143,21 +178,15 @@ export function AdminSpreadsheetEditableGrid({
   }
 
   async function saveCell(): Promise<void> {
-    if (!currentSelection || !canMutate) return;
-    const column = columns.find(c => c.name === currentSelection.column);
-    const row = rows[currentSelection.rowIndex];
-    if (!column || !row || !column.editable || column.pk > 0 || column.generated) return;
-    const pk = primaryKey(row, primaryKeys);
-    if (!pk) { setNotice("主キーが不足しているため編集できません。"); return; }
-    const oldText = cellValue(row[column.name]);
-    const before = row[column.name] == null ? null : oldText;
+    if (!currentSelection || !canMutate || selectionConflict) return;
+    const { pk, before, column } = currentSelection;
     const after = currentSelection.value === "" ? null : currentSelection.value;
     if (before === after) { setSelection(null); return; }
     const ok = await runMutation(signal => patchSpreadsheetCell(fetchFn, {
-      table: def.table, primaryKey: pk, column: column.name, value: after,
+      table: def.table, primaryKey: pk, column, value: after,
     }, signal));
     if (!ok) return;
-    const entry: Change = { table: def.table, page, pk, column: column.name, before, after };
+    const entry: Change = { table: def.table, page, pk, column, before, after };
     setHistory(state => {
       const prev = state.key === key ? state.undo : [];
       return { key, undo: [...prev, entry].slice(-HISTORY_LIMIT), redo: [] };
@@ -244,12 +273,7 @@ export function AdminSpreadsheetEditableGrid({
     }
     if (event.key === "Enter" && canMutate && !event.ctrlKey && !event.metaKey) {
       const column = columns[colIndex];
-      const row = rows[rowIndex];
-      if (column && row && column.editable && column.pk === 0 && !column.generated &&
-          primaryKey(row, primaryKeys) !== null) {
-        event.preventDefault();
-        setSelection({ rowIndex, column: column.name, value: cellValue(row[column.name]), key });
-      }
+      if (column && beginEdit(rowIndex, column)) event.preventDefault();
       return;
     }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -319,7 +343,14 @@ export function AdminSpreadsheetEditableGrid({
       ) : null}
       <p>矢印キーで移動、Shift＋矢印で範囲選択、Ctrl/Cmd＋Aで全体選択、Shift＋Spaceで行選択、Ctrl/Cmd＋Spaceで列選択、Ctrl/Cmd＋CでTSVコピー、Enterで編集できます。</p>
       <p>見出しのクリックで全体・行・列を選択し、Shift＋行・列見出しで現在の始点から範囲を広げられます。</p>
-      {currentSelection ? <p>見出しで選択する前に、セルを保存するかキャンセルしてください。</p> : null}
+      {currentSelection && selectionConflict && !busy ? (
+        <div role="alert">
+          <p>編集中の行または列の状態が変更されました。編集を破棄して最新の内容を確認してください。</p>
+          <button type="button" onClick={() => setSelection(null)}>編集を破棄</button>
+        </div>
+      ) : currentSelection && !selectionConflict ? (
+        <p>見出しで選択する前に、セルを保存するかキャンセルしてください。</p>
+      ) : null}
       <div style={{ overflowX: "auto" }}>
         <table ref={tableRef}>
           <thead><tr>
@@ -360,7 +391,7 @@ export function AdminSpreadsheetEditableGrid({
                 const value = cellValue(row[c.name]);
                 const canEdit = editable && c.editable && c.pk === 0 && !c.generated &&
                   primaryKey(row, primaryKeys) !== null;
-                const editing = currentSelection?.rowIndex === ri && currentSelection?.column === c.name;
+                const editing = !selectionConflict && currentSelection?.rowIndex === ri && currentSelection?.column === c.name;
                 return (
                   <td key={c.name} data-grid-cell={`${ri}:${columns.indexOf(c)}`}
                     tabIndex={focusedCell.row === ri && focusedCell.col === columns.indexOf(c) ? 0 : -1}
@@ -377,14 +408,18 @@ export function AdminSpreadsheetEditableGrid({
                     onKeyDown={(event) => handleGridKey(event, ri, columns.indexOf(c))}>{editing ? (
                     <label>{c.name} を編集
                       <input type="text" disabled={!canMutate} value={currentSelection?.value ?? ""}
-                        onChange={e => setSelection({ rowIndex: ri, column: c.name, value: e.target.value, key })} />
+                        onChange={e => {
+                          const nextValue = e.target.value;
+                          setSelection(previous => previous && !previous.invalidated && previous.pk === currentSelection?.pk
+                            ? { ...previous, value: nextValue } : previous);
+                        }} />
                       <button type="button" disabled={!canMutate} onClick={() => void saveCell()}>セルを保存</button>
                       <button type="button" disabled={busy} onClick={() => setSelection(null)}>キャンセル</button>
                     </label>
                   ) : (
                     <>{value}{canEdit ? (
-                      <button type="button" disabled={!canMutate} aria-label={String(ri + 1) + "行 " + c.name + " を編集"}
-                        onClick={() => setSelection({ rowIndex: ri, column: c.name, value, key })}>編集</button>
+                      <button type="button" disabled={!canMutate || selectionConflict} aria-label={String(ri + 1) + "行 " + c.name + " を編集"}
+                        onClick={() => beginEdit(ri, c)}>編集</button>
                     ) : null}</>
                   )}</td>
                 );

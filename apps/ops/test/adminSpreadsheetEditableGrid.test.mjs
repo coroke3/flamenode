@@ -191,3 +191,83 @@ test("MIG-0737 U01: changing table/page/transport immediately fences previous un
     assert.equal(ui.host.querySelectorAll("input").length, 0);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0737 U01: a changed same-page edit snapshot cannot retarget or revive a draft", async () => {
+  const rows = [{ id: "v1", title: "original", secret: "••••" }, { id: "v2", title: "other" }];
+  const original = fixture("videos", "editable", 1, rows);
+  const composite = {
+    ...original,
+    columns: [...columns, { name: "part", type: "TEXT", editable: false, pk: 2, notNull: true }],
+    primaryKeys: ["id", "part"],
+    rows: rows.map(row => ({ ...row, part: "a" })),
+  };
+  const cases = [
+    ["reordered", original, { ...original, rows: [...rows].reverse() }],
+    ["removed", original, { ...original, rows: [rows[1]] }],
+    ["replacement", original, { ...original, rows: [{ ...rows[0], id: "v3" }, rows[1]] }],
+    ["original value changed", original, { ...original, rows: [{ ...rows[0], title: "new server value" }, rows[1]] }],
+    ["column no longer editable", original, { ...original, columns: columns.map(c => c.name === "title" ? { ...c, editable: false } : c) }],
+    ["column now generated", original, { ...original, columns: columns.map(c => c.name === "title" ? { ...c, generated: true } : c) }],
+    ["table readonly", original, { ...original, def: { ...original.def, mode: "readonly" } }],
+    ["composite part replaced", composite, { ...composite, rows: [{ ...composite.rows[0], part: "b" }, composite.rows[1]] }],
+    ["composite part missing", composite, { ...composite, rows: [{ ...composite.rows[0], part: null }, composite.rows[1]] }],
+    ["primary key schema changed", composite, { ...composite, primaryKeys: ["id"] }],
+  ];
+  for (const [label, initial, changed] of cases) {
+    const sent = [];
+    let refreshes = 0;
+    const props = { data: initial, allowMutations: true, onRefresh: () => { refreshes++; },
+      fetchFn: async (_, init) => { sent.push(JSON.parse(init.body)); return json(200, { ok: true }); } };
+    const ui = await mount(props);
+    try {
+      await click(ui, "1行 title を編集");
+      await input(ui, "title を編集", "draft");
+      await ui.render({ ...props, data: changed });
+      assert.match(ui.host.querySelector('[role="alert"]')?.textContent ?? "", /状態が変更されました/, label);
+      assert.equal(ui.host.querySelectorAll('input').length, 0, label + " must not display draft on replacement row");
+      assert.equal([...ui.host.querySelectorAll('button')].some(b => b.textContent === "セルを保存"), false, label);
+      assert.equal(sent.length, 0, label);
+      assert.equal(refreshes, 0, label);
+      await ui.render(props);
+      assert.ok(ui.host.querySelector('[role="alert"]'), label + " must remain invalidated");
+      assert.equal(ui.host.querySelectorAll('input').length, 0, label);
+      assert.equal(ui.host.querySelector('button[aria-label="1行 title を編集"]').disabled, true, label);
+      assert.equal([...ui.host.querySelectorAll('button')].find(b => b.textContent === "元に戻す").disabled, true);
+      await click(ui, "編集を破棄");
+      assert.equal(ui.host.querySelector('[role="alert"]'), null);
+      await click(ui, "1行 title を編集");
+      await input(ui, "title を編集", "fresh");
+      await click(ui, "セルを保存");
+      assert.deepEqual(sent, [{ table: "videos", primaryKey: initial.primaryKeys.length === 2
+        ? { id: "v1", part: "a" } : { id: "v1" }, column: "title", value: "fresh" }], label);
+      assert.equal(refreshes, 1);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01: keyboard edit retains original PK and value through unchanged target refresh", async () => {
+  const original = fixture("videos", "editable", 1, [{ id: "v1", title: "before", secret: "masked" }]);
+  const sent = [];
+  const props = { data: original, allowMutations: true, onRefresh: () => {},
+    fetchFn: async (_, init) => { sent.push(JSON.parse(init.body)); return json(200, { ok: true }); } };
+  const ui = await mount(props);
+  try {
+    const cell = ui.host.querySelector('[data-grid-cell="0:1"]');
+    assert.ok(cell);
+    await React.act(async () => {
+      cell.focus();
+      cell.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    await flush();
+    await input(ui, "title を編集", "draft");
+    await ui.render({ ...props, data: { ...original, rows: [{ ...original.rows[0], secret: "updated unrelated value" }] } });
+    assert.equal(ui.host.querySelector('[role="alert"]'), null);
+    assert.equal(ui.host.querySelector('input').value, "draft");
+    await click(ui, "セルを保存");
+    await click(ui, "元に戻す");
+    assert.deepEqual(sent, [
+      { table: "videos", primaryKey: { id: "v1" }, column: "title", value: "draft" },
+      { table: "videos", primaryKey: { id: "v1" }, column: "title", value: "before" },
+    ]);
+  } finally { await ui.cleanup(); }
+});
