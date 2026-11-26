@@ -60,6 +60,9 @@ export function AdminSpreadsheetEditableGrid({
   const nextEditId = React.useRef(0);
   const [anchorCell, setAnchorCell] = React.useState<GridCell>({ row: 0, col: 0 });
   const [focusedCell, setFocusedCell] = React.useState<GridCell>({ row: 0, col: 0 });
+  const [findOpen, setFindOpen] = React.useState(false);
+  const [findQuery, setFindQuery] = React.useState("");
+  const [findHint, setFindHint] = React.useState<string | null>(null);
   const [insertOpen, setInsertOpen] = React.useState(false);
   const [insertDraft, setInsertDraft] = React.useState<Record<string, string>>({});
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -98,6 +101,7 @@ export function AdminSpreadsheetEditableGrid({
   );
   // Keep drafts intact until CURRENT blur-save is ported; header selection does not commit or discard edits.
   const canSelectHeaders = !identityChanged && currentSelection === null && rows.length > 0 && columns.length > 0;
+  const canFind = canUseFind();
   const insertColumns = columns.filter(c => !c.generated && (c.pk > 0 || c.editable));
 
   React.useEffect(() => {
@@ -113,8 +117,10 @@ export function AdminSpreadsheetEditableGrid({
       setCellEdit(null);
       setAnchorCell({ row: 0, col: 0 });
       setFocusedCell({ row: 0, col: 0 });
+      setFindOpen(false);
+      setFindQuery("");
       // CURRENT returns keyboard focus to the reset grid after a context replacement.
-      tableRef.current?.querySelector<HTMLTableCellElement>('[data-grid-cell="0:0"]')?.focus();
+      (tableRef.current?.querySelector<HTMLTableCellElement>('[data-grid-cell="0:0"]') ?? tableRef.current)?.focus();
       setInsertOpen(false);
       setInsertDraft({});
       setBusy(false);
@@ -129,6 +135,12 @@ export function AdminSpreadsheetEditableGrid({
     if (!currentSelection || !selectionConflict || currentSelection.invalidated || draft?.id !== currentSelection.id) return;
     setCellEdit({ ...draft, invalidated: true });
   }, [currentSelection, selectionConflict]);
+
+  React.useEffect(() => {
+    if (!findHint) return;
+    const timer = window.setTimeout(() => setFindHint(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [findHint]);
 
   function setCellEdit(next: CellSelection | null): void {
     liveSelection.current = next;
@@ -289,6 +301,66 @@ export function AdminSpreadsheetEditableGrid({
     tableRef.current?.querySelector<HTMLTableCellElement>(`[data-grid-cell="${focus.row}:${focus.col}"]`)?.focus();
   }
 
+  function canUseFind(): boolean {
+    // Keep the existing draft fence until CURRENT blur-save is ported. Ordinary saves are not historyBusy.
+    return !identityChanged && isCurrent() && liveSelection.current === null &&
+      !(inFlight.current !== null && historyInFlight.current === inFlight.current);
+  }
+
+  function openFind(event: React.KeyboardEvent<HTMLElement>): boolean {
+    if (!(event.ctrlKey || event.metaKey) || event.key !== "f" || !canUseFind()) return false;
+    event.preventDefault();
+    setFindOpen(true);
+    return true;
+  }
+
+  function boundedFindCell(position: GridCell): GridCell {
+    return {
+      row: Math.max(0, Math.min(rows.length - 1, position.row)),
+      col: Math.max(0, Math.min(columns.length - 1, position.col)),
+    };
+  }
+
+  function findNext(): void {
+    if (!canUseFind()) return;
+    const from = boundedFindCell(focusedCell);
+    setAnchorCell(boundedFindCell(anchorCell));
+    setFocusedCell(from);
+    if (!findQuery.trim() || rows.length === 0 || columns.length === 0) {
+      setFindHint("見つかりません");
+      return;
+    }
+    const origin = from.row * columns.length + from.col;
+    const count = rows.length * columns.length;
+    const query = findQuery.toLowerCase();
+    // CURRENT scans after the focused endpoint, wraps once, and excludes that endpoint even after wrapping.
+    for (let step = 1; step < count; step++) {
+      const index = (origin + step) % count;
+      const position = { row: Math.floor(index / columns.length), col: index % columns.length };
+      if (!cellValue(rows[position.row][columns[position.col].name]).toLowerCase().includes(query)) continue;
+      setAnchorCell(position);
+      setFocusedCell(position);
+      // Next preserves the search input/button's DOM focus while revealing the selected cell.
+      tableRef.current?.querySelector<HTMLTableCellElement>(
+        '[data-grid-cell="' + position.row + ":" + position.col + '"]',
+      )?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      if (index < origin) setFindHint("先頭から検索");
+      return;
+    }
+    setFindHint("見つかりません");
+  }
+
+  function closeFind(): void {
+    if (!canUseFind()) return;
+    setFindOpen(false);
+    setAnchorCell(boundedFindCell(anchorCell));
+    if (rows.length > 0 && columns.length > 0) focusGridCell(boundedFindCell(focusedCell));
+    else {
+      setFocusedCell({ row: 0, col: 0 });
+      tableRef.current?.focus();
+    }
+  }
+
   // Keep shortcut precedence in one dispatcher: Shift+Space wins over Ctrl/Cmd+Space.
   function handleGridKey(
     event: React.KeyboardEvent<HTMLTableCellElement>,
@@ -297,6 +369,7 @@ export function AdminSpreadsheetEditableGrid({
   ): void {
     // Inputs/buttons own their own shortcuts and text-selection semantics.
     if (event.target !== event.currentTarget) return;
+    if (openFind(event)) return;
     const shortcut = event.ctrlKey || event.metaKey;
     const selectAll = shortcut && event.key === "a";
     const selectRow = event.key === " " && event.shiftKey;
@@ -371,6 +444,21 @@ export function AdminSpreadsheetEditableGrid({
     <section aria-label="管理スプレッドシート編集">
       <p>{editable ? "編集可能な列のみ変更できます。主キー列は変更できません。" : "読み取り専用（編集は無効です）。"}</p>
       {notice ? <p role="status">{notice}</p> : null}
+      {!identityChanged && findHint ? <p role="status">{findHint}</p> : null}
+      {findOpen && !identityChanged ? (
+        <div role="search" aria-label="ページ内検索">
+          <label>検索
+            <input type="search" autoFocus value={findQuery} disabled={!canFind}
+              onChange={event => { if (canUseFind()) setFindQuery(event.target.value); }}
+              onKeyDown={event => {
+                if (event.key === "Enter") findNext();
+                if (event.key === "Escape") closeFind();
+              }} />
+          </label>
+          <button type="button" disabled={!canFind} onClick={findNext}>次へ</button>
+          <button type="button" disabled={!canFind} onClick={closeFind}>閉じる</button>
+        </div>
+      ) : null}
       <div role="toolbar" aria-label="編集操作">
         <button type="button" disabled={!canMutate || safeHistory.undo.length === 0}
           onClick={() => void replay("undo")}>元に戻す</button>
@@ -393,6 +481,7 @@ export function AdminSpreadsheetEditableGrid({
       <p>矢印キーで移動、Shift＋矢印で範囲選択、Ctrl/Cmd＋Aで全体選択、Shift＋Spaceで行選択、Ctrl/Cmd＋Spaceで列選択、Ctrl/Cmd＋CでTSVコピー、Enterで編集できます。</p>
       <p>見出しのクリックで全体・行・列を選択し、Shift＋行・列見出しで現在の始点から範囲を広げられます。</p>
       <p>編集中はEnterで確定して下へ、Tabで確定して右へ、Shift＋Tabで確定して左へ移動できます。Escapeでキャンセルできます。</p>
+      <p>Ctrl/Cmd＋Fで現在のページ内を検索できます。</p>
       {currentSelection && selectionConflict && !busy ? (
         <div role="alert">
           <p>編集中の行または列の状態が変更されました。編集を破棄して最新の内容を確認してください。</p>
@@ -402,7 +491,8 @@ export function AdminSpreadsheetEditableGrid({
         <p>見出しで選択する前に、セルを保存するかキャンセルしてください。</p>
       ) : null}
       <div style={{ overflowX: "auto" }}>
-        <table ref={tableRef}>
+        <table ref={tableRef} tabIndex={rows.length === 0 || columns.length === 0 ? 0 : -1}
+          onKeyDown={event => { if (event.target === event.currentTarget) openFind(event); }}>
           <thead><tr>
             <th scope="col" data-grid-all-header="" aria-label="全セルを選択" title="クリックで全選択"
               aria-disabled={!canSelectHeaders} style={{ userSelect: "none" }}
@@ -439,11 +529,14 @@ export function AdminSpreadsheetEditableGrid({
                   }}>{(page - 1) * Math.max(1, limit) + ri + 1}</th>
                 {columns.map(c => {
                 const value = cellValue(row[c.name]);
+                const findHit = !identityChanged && findQuery !== "" && value.toLowerCase().includes(findQuery.toLowerCase());
                 const canEdit = editable && c.editable && c.pk === 0 && !c.generated &&
                   primaryKey(row, primaryKeys) !== null;
                 const editing = !selectionConflict && currentSelection?.rowIndex === ri && currentSelection?.column === c.name;
                 return (
                   <td key={c.name} data-grid-cell={`${ri}:${columns.indexOf(c)}`}
+                    data-find-match={findHit || undefined}
+                    style={{ background: findHit ? "color-mix(in srgb, #fbbc04 35%, var(--sheet-bg, var(--bg-base, #fff)))" : undefined }}
                     tabIndex={focusedCell.row === ri && focusedCell.col === columns.indexOf(c) ? 0 : -1}
                     aria-selected={!identityChanged && ri >= Math.min(anchorCell.row, focusedCell.row) &&
                       ri <= Math.max(anchorCell.row, focusedCell.row) &&
