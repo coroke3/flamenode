@@ -346,3 +346,55 @@ test("HTML clipboard fallback after a DOMParser exception still declines malform
     else delete globalThis.DOMParser;
   }
 });
+
+test("HTML clipboard fallback declines ambiguous declaration and processing instruction boundaries", () => {
+  const ghost = '<table><tr><td>GHOST</td><td>ROW</td></tr></table>';
+  const fixtures = [
+    '<!bogus ' + ghost,
+    '<?xml ' + ghost,
+    '<![CDATA[' + ghost + ']]>',
+    '<table><tr><td>A<!bogus </td><td>GHOST</td></tr></table>',
+    '<table><tr><td>A<?xml </td><td>GHOST</td></tr></table>',
+    '<tr><td>GHOST</td><td>ROW</td></tr><!unfinished',
+    '<tr><td>GHOST</td><td>ROW</td></tr><?unfinished',
+    '<tr><td>GHOST</td><td>ROW</td></tr><!-- unfinished >',
+  ];
+  for (const html of fixtures) {
+    assert.deepEqual(parseHtmlClipboardTable(html), [], html);
+    assert.deepEqual(parseClipboardContent("KEEP", html), [["KEEP"]], html);
+    assert.deepEqual(parseClipboardContent("", html), [], html);
+    assert.equal(looksLikeTabularClipboard("KEEP", html), false, html);
+  }
+});
+
+test("HTML clipboard fallback retains simple declarations, escaped text and the complete first table", () => {
+  const table = '<table><tr><td>A<br>B</td><td>&lt;!bogus &lt;?xml</td></tr></table>';
+  const expected = [["A\nB", "<!bogus <?xml"]];
+  for (const html of [table, '<!DOCTYPE html>' + table, '<!bogus ok>' + table,
+    '<?xml version="1.0"?>' + table, '<!-- <!bogus <table> -->' + table,
+    table + '<!bogus <table>', table + '<?unfinished']) {
+    assert.deepEqual(parseHtmlClipboardTable(html), expected, html);
+    assert.deepEqual(parseClipboardContent("", html), expected, html);
+    assert.equal(looksLikeTabularClipboard("", html), true, html);
+  }
+  const simple = '<table><tr><td>A<!bogus ok>B<?xml ok>C<br>D</td><td>E</td></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(simple), [["ABC\nD", "E"]]);
+});
+
+test("HTML clipboard fallback declines ambiguous declarations after a DOMParser exception", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  try {
+    Object.defineProperty(globalThis, "DOMParser", {
+      configurable: true,
+      value: class DOMParserStub {
+        parseFromString() { throw new Error("parser unavailable"); }
+      },
+    });
+    const html = '<?xml <table><tr><td>GHOST</td><td>ROW</td></tr></table>';
+    assert.deepEqual(parseClipboardContent("KEEP", html), [["KEEP"]]);
+    assert.equal(looksLikeTabularClipboard("KEEP", html), false);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});

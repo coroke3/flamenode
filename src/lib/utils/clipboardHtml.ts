@@ -21,7 +21,7 @@ function decodeHtmlEntities(text: string): string {
 
 function stripHtmlTags(fragment: string): string {
   // Keep explicit BR separators separate from text whitespace trimming.
-  const parts = fragment.split(/(<!--[\s\S]*?-->|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>)/gi);
+  const parts = fragment.split(/(<!--[\s\S]*?-->|<!(?!--)[^<>]*>|<\?[^<>]*>|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>)/gi);
   const lines = [""];
   for (const [index, part] of parts.entries()) {
     if (index % 2 === 0) lines[lines.length - 1] += part;
@@ -37,15 +37,17 @@ function stripHtmlTags(fragment: string): string {
 function parseHtmlTableRegex(html: string): string[][] {
   // Use the same quote/comment-aware tokens as cell text extraction. Never
   // search raw attributes or comments for row/cell delimiters.
-  const tokens = /<!--[\s\S]*?-->|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
+  const tokens = /<!--[\s\S]*?-->|<!(?!--)[^<>]*>|<\?[^<>]*>|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
   const rows: string[][] = [];
   let inTable = false;
   let row: string[] | null = null;
   let cell: { name: string; start: number } | null = null;
   let rawHeader: string | null = null;
-  // matchAll can skip an unterminated comment or quoted tag and resume at
-  // a nested-looking token. Refuse such gaps instead of inventing cells.
-  const unmatchedMarkup = /<(?:!--|\/?[a-z])/i;
+  // Simple declarations and processing instructions end at the first >.
+  // If one contains another <, or is unfinished, matchAll must not resume
+  // at an apparent row/cell token inside it. Decline that ambiguous HTML.
+  // The comment alternative above remains separate from declarations.
+  const unmatchedMarkup = /<(?:[!?]|\/?[a-z])/i;
   let scannedThrough = 0;
   let completeTable = false;
   for (const match of html.matchAll(tokens)) {
