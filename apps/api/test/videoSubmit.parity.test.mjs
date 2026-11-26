@@ -690,7 +690,8 @@ if (runUnderRootTsx(import.meta.url)) {
     const cleanupMarker = "video_icon_orphan_cleanup_failed";
     const unrelatedKey = "video-icons/x_other/v_unrelated/keep.png";
     for (const failure of ["duplicate", "audit-abort"]) {
-      for (const throwSink of [false, true]) {
+      for (const cleanup of ["deleted", "delete-rejected", "delete-and-log-rejected"]) {
+        const label = failure + "/" + cleanup;
         const w = seedWorld();
         const wakes = [];
         const logs = [];
@@ -723,27 +724,31 @@ if (runUnderRootTsx(import.meta.url)) {
           }
           return origBatch(statements);
         };
-        w.bucket.delete = async (key) => {
-          w.bucket.deletes.push(key);
-          throw new Error("SYNTHETIC_R2_DELETE_FAILURE");
-        };
+        // Keep the real fixture deletion for the successful baseline.
+        if (cleanup !== "deleted") {
+          w.bucket.delete = async (key) => {
+            w.bucket.deletes.push(key);
+            throw new Error("SYNTHETIC_R2_DELETE_FAILURE");
+          };
+        }
         console.error = (...args) => {
           logs.push(args);
-          if (throwSink) throw new Error("SYNTHETIC_DIAGNOSTIC_FAILURE");
+          if (cleanup === "delete-and-log-rejected") throw new Error("SYNTHETIC_DIAGNOSTIC_FAILURE");
         };
         try {
           const fd = baseForm();
           fd.set("icon_mode", "upload");
           fd.set("icon_file", new File([buildPng()], "icon.png", { type: "image/png" }));
           const res = await submitApp(w.d1, "u_owner", w.bucket, wakes)(fd);
-          assert.equal(res.status, 409, failure + "/" + throwSink);
+          assert.equal(res.status, 409, label);
           assert.equal(res.headers.get("cache-control"), "private, no-store");
+          // A concurrent duplicate trips the leading atomic batch assertion,
+          // not the UNIQUE classifier. T02 separately pins the preflight
+          // duplicate-specific response. Neither cleanup outcome changes 409.
           assert.deepEqual(await res.json(), {
             ok: false,
-            message: failure === "duplicate"
-              ? "このYouTube動画は既に登録されています。"
-              : "イベント設定が変更されたか、保存内容が競合しました。入力内容を確認して再試行してください。",
-          });
+            message: "イベント設定が変更されたか、保存内容が競合しました。入力内容を確認して再試行してください。",
+          }, label);
           assert.equal(attemptedBatches, 1, "do not replay a failed mutation");
           assert.equal(w.d1.stats.batches, 1);
           assert.ok(w.d1.stats.batchStatements > 1);
@@ -753,10 +758,16 @@ if (runUnderRootTsx(import.meta.url)) {
           const uploadedKey = w.bucket.puts[0].key;
           assert.match(uploadedKey, /^video-icons\/x_owner\/v_/);
           assert.deepEqual(w.bucket.deletes, [uploadedKey], "one attempt for only the new icon");
-          assert.equal(w.bucket.objects.size, 2, "failed deletion leaves an orphan, not successful compensation");
-          assert.ok(w.bucket.objects.has(uploadedKey));
+          if (cleanup === "deleted") {
+            assert.equal(w.bucket.objects.size, 1, "successful compensation removes only the new icon");
+            assert.equal(w.bucket.objects.has(uploadedKey), false);
+            assert.deepEqual(logs, []);
+          } else {
+            assert.equal(w.bucket.objects.size, 2, "failed deletion leaves an orphan, not successful compensation");
+            assert.ok(w.bucket.objects.has(uploadedKey));
+            assert.deepEqual(logs, [[cleanupMarker]]);
+          }
           assert.equal(w.bucket.objects.get(unrelatedKey), unrelated);
-          assert.deepEqual(logs, [[cleanupMarker]]);
         } finally {
           console.error = originalError;
           w.sqlite.close();
