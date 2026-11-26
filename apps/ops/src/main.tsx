@@ -4,6 +4,7 @@ import "./styles/fonts.css";
 import "./styles/shared.css";
 import "./styles/admin-shell.css";
 import "./styles/manage-shell.css";
+import "@flamenode/ui/styles/video-members.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App.js";

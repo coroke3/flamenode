@@ -1,0 +1,507 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { applyAdminVideoMemberPermissionBatch } from "../.test-dist/apps/ops/src/api/adminVideoMemberPermissions.js";
+
+const input = (overrides = {}) => ({
+  videoId: "video-1", notify: true,
+  intents: [{ x_user_id: "@ALICE", display_name: " Alice ", intent: "on" }],
+  ...overrides,
+});
+const json = (body, status = 200) => new Response(JSON.stringify(body), {
+  status, headers: { "content-type": "application/json" },
+});
+
+test("MIG-0730 U02f: POST exact candidate SA-084 endpoint with canonical X ID and auth-safe no-store", async () => {
+  const calls = [];
+  const fetchFn = async (path, init) => {
+    calls.push({ path, init });
+    return json({ ok: true, videoId: "video-1", message: "saved" });
+  };
+  const saved = await applyAdminVideoMemberPermissionBatch(input({ edit_privilege_mode: "admin" }), fetchFn);
+  assert.deepEqual(saved, { ok: true, message: "saved" });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/api/videos/video-1/collaborators/batch");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.credentials, "same-origin");
+  assert.equal(calls[0].init.cache, "no-store");
+  assert.deepEqual(calls[0].init.headers, {
+    accept: "application/json", "content-type": "application/json",
+  });
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    video_id: "video-1", edit_privilege_mode: "admin", notify: true,
+    intents: [{ x_user_id: "alice", display_name: "Alice", intent: "on" }],
+  });
+});
+
+test("MIG-0730 U02f: exactly 100 intents are permitted, 101 are blocked pre-network", async () => {
+  let calls = 0;
+  const fetchFn = async () => { calls++; return json({ ok: true, videoId: "video-1" }); };
+  const hundred = Array.from({ length: 100 }, (_, n) => ({
+    x_user_id: "member_" + n, display_name: "Member", intent: n % 2 ? "off" : "on",
+  }));
+  assert.equal((await applyAdminVideoMemberPermissionBatch(input({ intents: hundred }), fetchFn)).ok, true);
+  assert.equal(calls, 1);
+  const over = await applyAdminVideoMemberPermissionBatch(input({
+    intents: [...hundred, { x_user_id: "member_100", display_name: "Member", intent: "on" }],
+  }), fetchFn);
+  assert.equal(over.ok, false);
+  assert.equal(calls, 1);
+});
+
+test("MIG-0730 U02f: reject duplicate canonical X handles and invalid inputs before HTTP", async () => {
+  let calls = 0;
+  const fetchFn = async () => { calls++; return json({ ok: true }); };
+  const bad = [
+    input({ intents: [] }),
+    input({ intents: [
+      { x_user_id: "@ALICE", display_name: "Alice", intent: "on" },
+      { x_user_id: "alice", display_name: "Alice 2", intent: "off" },
+    ] }),
+    input({ intents: [{ x_user_id: "x".repeat(21), display_name: "X", intent: "on" }] }),
+    input({ intents: [{ x_user_id: "Alice/Admin", display_name: "A", intent: "on" }] }),
+    input({ intents: [{ x_user_id: "alice", display_name: " ", intent: "on" }] }),
+    input({ intents: [{ x_user_id: "alice", display_name: "x".repeat(81), intent: "on" }] }),
+    input({ intents: [{ x_user_id: "alice", display_name: "A", intent: "toggle" }] }),
+    input({ intents: [null] }),
+    input({ notify: false }),
+    input({ edit_privilege_mode: "superuser" }),
+    input({ videoId: "" }),
+    input({ videoId: "../other" }),
+    input({ videoId: "v\\child" }),
+    input({ videoId: " leading" }),
+    input({ videoId: "trailing " }),
+    input({ videoId: "other\0id" }),
+    input({ videoId: "\uD800" }),
+    input({ videoId: "a".repeat(65) }),
+  ];
+  for (const payload of bad) {
+    const response = await applyAdminVideoMemberPermissionBatch(payload, fetchFn);
+    assert.equal(response.ok, false);
+  }
+  assert.equal(calls, 0);
+});
+
+test("MIG-0730 U02f: 401/403/404/503/invalid success never claim committed", async () => {
+  let calls = 0;
+  for (const status of [401, 403, 404, 405, 413, 503]) {
+    const response = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+      calls++;
+      return json({ ok: true, message: "unauthorized hidden" }, status);
+    });
+    assert.deepEqual(response, status === 401
+      ? { ok: false, reason: "unauthenticated", message: "再ログインが必要です。" }
+      : { ok: false, message: "権限変更を確認できませんでした。状態を再取得してください。" });
+  }
+  for (const response of [
+    json({ ok: false, message: "secret" }),
+    json({ ok: "true", message: "secret" }),
+    json({ ok: true, message: 42 }),
+    json({ ok: true, message: "x".repeat(301) }),
+    new Response("<html>not-json</html>", { status: 200 }),
+  ]) {
+    const result = await applyAdminVideoMemberPermissionBatch(input(), async () => { calls++; return response; });
+    assert.equal(result.ok, false);
+    assert.doesNotMatch(result.message ?? "", /secret/);
+  }
+  assert.equal(calls, 11);
+});
+
+test("MIG-0730 U02f: ambiguous network failure is not automatically retried", async () => {
+  let calls = 0;
+  const response = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+    calls++;
+    throw new Error("Provider INTERNAL SECRET");
+  });
+  assert.equal(calls, 1);
+  assert.equal(response.ok, false);
+  assert.doesNotMatch(response.message ?? "", /Provider|SECRET/);
+});
+
+test("MIG-0730 U02f: candidate is neither route-registered nor injected to the editor", async () => {
+  const [router, editor, adapter] = await Promise.all([
+    readFile(new URL("../src/routes/router.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/routes/admin/AdminVideoMembersEditorPreview.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/api/adminVideoMemberPermissions.ts", import.meta.url), "utf8"),
+  ]);
+  assert.doesNotMatch(router, /adminVideoMemberPermissions|AdminVideoMembersEditorPreview/);
+  assert.doesNotMatch(editor, /adminVideoMemberPermissions|applyAdminVideoMemberPermissionBatch/);
+  assert.match(adapter, /MIG-0650/);
+  assert.match(adapter, /never|Never/i);
+});
+
+test("MIG-0730 U02l: permission batch preserves encoded safe video path and authoritative body ID", async () => {
+  const requests = [];
+  const data = input({ videoId: "video with space" });
+  const result = await applyAdminVideoMemberPermissionBatch(data, async (path, init) => {
+    requests.push({ path, init });
+    return json({ ok: true, videoId: "video with space" });
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].path, "/api/videos/video%20with%20space/collaborators/batch");
+  assert.equal(JSON.parse(requests[0].init.body).video_id, "video with space");
+});
+
+test("MIG-0730 U02bi: SA-084 must bind success to the requested video before local permission UI changes", async () => {
+  let requests = 0;
+  const invalidReceipts = [
+    { ok: true },
+    { ok: true, videoId: null },
+    { ok: true, videoId: "" },
+    { ok: true, videoId: "other-video", message: "wrong target" },
+    { ok: true, videoId: 123 },
+    { ok: "true", videoId: "video-1" },
+  ];
+  for (const receipt of invalidReceipts) {
+    const result = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+      requests++;
+      return json(receipt);
+    });
+    assert.deepEqual(result, {
+      ok: false,
+      message: "権限変更を確認できませんでした。状態を再取得してください。",
+    });
+    assert.doesNotMatch(result.message, /wrong target/);
+  }
+  assert.equal(requests, invalidReceipts.length, "ambiguous replies do not trigger retries");
+
+  const valid = await applyAdminVideoMemberPermissionBatch(input(), async (path) => {
+    requests++;
+    assert.equal(path, "/api/videos/video-1/collaborators/batch");
+    return json({ ok: true, videoId: "video-1", message: "verified" });
+  });
+  assert.deepEqual(valid, { ok: true, message: "verified" });
+  assert.equal(requests, invalidReceipts.length + 1);
+});
+
+test("MIG-0730 U02bj: same-video permission POST remains single-flight across client callers", async () => {
+  for (const outcome of ["success", "ambiguous_failure"]) {
+    const videoId = "video-" + outcome;
+    const requests = [];
+    let settle, fail;
+    const pending = new Promise((resolve, reject) => {
+      settle = resolve; fail = reject;
+    });
+    const fetchFn = (path, init) => {
+      requests.push({ path, init });
+      if (path.includes(videoId)) return pending;
+      return Promise.resolve(json({ ok: true, videoId: "independent-video" }));
+    };
+    const original = input({ videoId });
+    const first = applyAdminVideoMemberPermissionBatch(original, fetchFn);
+    assert.equal(requests.length, 1, "the first call must acquire the in-tab latch before awaiting");
+    const duplicate = await applyAdminVideoMemberPermissionBatch(original, fetchFn);
+    assert.deepEqual(duplicate, {
+      ok: false,
+      message: "この作品の権限変更は処理中です。結果を確認してから操作してください。",
+    });
+    assert.equal(requests.length, 1, "the second same-video call must not issue a POST");
+
+    const unrelated = await applyAdminVideoMemberPermissionBatch(
+      input({ videoId: "independent-video" }), fetchFn,
+    );
+    assert.deepEqual(unrelated, { ok: true }, "a different video is not blocked");
+    assert.equal(requests.length, 2);
+    if (outcome === "success") {
+      settle(json({ ok: true, videoId }));
+    } else {
+      fail(new Error("write may have committed before transport failed"));
+    }
+    const firstResult = await first;
+    assert.equal(firstResult.ok, outcome === "success");
+    assert.equal(requests.length, 2, "an ambiguous result must not automatically retry");
+
+    // Only a new explicit submission, after the previous request settled, may POST.
+    const next = await applyAdminVideoMemberPermissionBatch(original, async (path) => {
+      requests.push({ path });
+      return json({ ok: true, videoId });
+    });
+    assert.deepEqual(next, { ok: true });
+    assert.equal(requests.length, 3);
+  }
+});
+
+test("MIG-0730 U02bk: mutable input cannot retarget SA-084 receipt or leak in-flight video lock", async () => {
+  for (const receiptVideoId of ["original", "mutated"]) {
+    const originalId = "video-u02bk-" + receiptVideoId;
+    const mutatedId = "video-u02bk-other-" + receiptVideoId;
+    const payload = input({ videoId: originalId });
+    const requests = [];
+    let respond;
+    const waiting = new Promise(resolve => { respond = resolve; });
+    const first = applyAdminVideoMemberPermissionBatch(payload, (path, init) => {
+      requests.push({ path, init });
+      return waiting;
+    });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].path, "/api/videos/" + originalId + "/collaborators/batch");
+    assert.equal(JSON.parse(requests[0].init.body).video_id, originalId);
+
+    // Simulate a navigation/state update that reuses the caller's object.
+    payload.videoId = mutatedId;
+    const sameTarget = await applyAdminVideoMemberPermissionBatch(
+      input({ videoId: originalId }), async () => {
+        requests.push("unexpected same-target write");
+        return json({ ok: true, videoId: originalId });
+      },
+    );
+    assert.equal(sameTarget.ok, false, "the original video remains locked");
+    assert.match(sameTarget.message, /処理中/);
+    assert.equal(requests.length, 1);
+
+    const otherTarget = await applyAdminVideoMemberPermissionBatch(
+      input({ videoId: mutatedId }), async (path) => {
+        requests.push({ path });
+        return json({ ok: true, videoId: mutatedId });
+      },
+    );
+    assert.deepEqual(otherTarget, { ok: true }, "changing the caller object does not lock another video");
+    assert.equal(requests.length, 2);
+
+    respond(json({ ok: true, videoId: receiptVideoId === "original" ? originalId : mutatedId }));
+    const firstResult = await first;
+    assert.equal(firstResult.ok, receiptVideoId === "original",
+      "the final response must be compared against the original request, not the mutated object");
+    assert.equal(requests.length, 2, "no ambiguous write is automatically replayed");
+
+    const afterSettle = await applyAdminVideoMemberPermissionBatch(
+      input({ videoId: originalId }), async path => {
+        requests.push({ path });
+        return json({ ok: true, videoId: originalId });
+      },
+    );
+    assert.deepEqual(afterSettle, { ok: true },
+      "finally must release the original lock, not the mutated input ID");
+    assert.equal(requests.length, 3);
+  }
+});
+
+test("MIG-0730 U02co: hostile permission DTO getters and proxies reject before SA-084 HTTP", async () => {
+  const top = input();
+  Object.defineProperty(top, "videoId", {
+    get() { throw Error("PRIVATE_VIDEO_ID"); },
+  });
+  const array = input();
+  Object.defineProperty(array, "intents", {
+    get() { throw Error("PRIVATE_INTENTS"); },
+  });
+  const row = input();
+  Object.defineProperty(row.intents[0], "x_user_id", {
+    get() { throw Error("PRIVATE_X_USER"); },
+  });
+  const revoked = Proxy.revocable(input(), {});
+  revoked.revoke();
+
+  let posts = 0;
+  const fetchFn = async () => {
+    posts++;
+    return json({ ok: true, videoId: "video-1" });
+  };
+  for (const invalid of [top, array, row, revoked.proxy]) {
+    assert.deepEqual(
+      await applyAdminVideoMemberPermissionBatch(invalid, fetchFn),
+      { ok: false, message: "権限変更の入力に誤りがあります。" },
+    );
+  }
+  assert.equal(posts, 0, "forged permission accessors never result in a write");
+  assert.deepEqual(await applyAdminVideoMemberPermissionBatch(input(), fetchFn), { ok: true });
+  assert.equal(posts, 1, "canonical permissions still submit exactly once");
+});
+
+test("MIG-0730 U02ct: stateful permission getters are read once and bound to the validated POST", async () => {
+  const seen = { videoId: 0, mode: 0, notify: 0, intents: 0, xid: 0, name: 0, intent: 0 };
+  const row = {};
+  Object.defineProperties(row, {
+    x_user_id: { get() { seen.xid++; return seen.xid === 1 ? "@ALICE" : "@BOB"; } },
+    display_name: { get() { seen.name++; return seen.name === 1 ? " Alice " : "PRIVATE_REPLACEMENT"; } },
+    intent: { get() { seen.intent++; return seen.intent === 1 ? "on" : "superuser"; } },
+  });
+  const permission = {};
+  Object.defineProperties(permission, {
+    videoId: { get() { seen.videoId++; return seen.videoId === 1 ? "video-1" : "other-video"; } },
+    edit_privilege_mode: { get() { seen.mode++; return seen.mode === 1 ? "admin" : "event"; } },
+    notify: { get() { seen.notify++; return seen.notify === 1 ? true : false; } },
+    intents: { get() {
+      seen.intents++;
+      return seen.intents === 1 ? [row] : Array.from({ length: 101 }, (_, i) =>
+        ({ x_user_id: "other_" + i, display_name: "OTHER", intent: "off" }));
+    } },
+  });
+
+  const requests = [];
+  const actual = await applyAdminVideoMemberPermissionBatch(permission, async (path, init) => {
+    requests.push({ path, body: JSON.parse(init.body) });
+    return json({ ok: true, videoId: "video-1" });
+  });
+  assert.deepEqual(actual, { ok: true });
+  assert.equal(requests.length, 1, "one canonical POST only");
+  assert.equal(requests[0].path, "/api/videos/video-1/collaborators/batch");
+  assert.deepEqual(requests[0].body, {
+    video_id: "video-1", edit_privilege_mode: "admin", notify: true,
+    intents: [{ x_user_id: "alice", display_name: "Alice", intent: "on" }],
+  });
+  assert.deepEqual(seen, {
+    videoId: 1, mode: 1, notify: 1, intents: 1,
+    xid: 1, name: 1, intent: 1,
+  }, "no source getter may change value between validation and serialization");
+});
+
+test("MIG-0730 U02ct: permission batch does not trust custom array iteration", async () => {
+  const intents = [{ x_user_id: "alice", display_name: "Alice", intent: "on" }];
+  intents[Symbol.iterator] = function* () {
+    yield { x_user_id: "other", display_name: "OTHER", intent: "off" };
+    throw new Error("PRIVATE_ITERATOR");
+  };
+  let requests = 0;
+  const got = await applyAdminVideoMemberPermissionBatch(input({ intents }), async (_, init) => {
+    requests++;
+    assert.deepEqual(JSON.parse(init.body).intents, [
+      { x_user_id: "alice", display_name: "Alice", intent: "on" },
+    ], "only bounded indexed values, not custom iterator output, are accepted");
+    return json({ ok: true, videoId: "video-1" });
+  });
+  assert.deepEqual(got, { ok: true });
+  assert.equal(requests, 1);
+});
+ 
+test("MIG-0730 U02cx: SA-084 injected HTTP receipt fields are validated once", async () => {
+  const reads = { ok: 0, videoId: 0, message: 0 };
+  const receipt = {};
+  Object.defineProperties(receipt, {
+    ok: { get() { reads.ok++; return reads.ok === 1 ? true : false; } },
+    videoId: { get() { reads.videoId++; return reads.videoId === 1 ? "video-1" : "WRONG_VIDEO"; } },
+    message: { get() { reads.message++; return reads.message === 1 ? "saved" : "PRIVATE_MESSAGE"; } },
+  });
+  let calls = 0;
+  const got = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+    calls++;
+    return { status: 200, json: async () => receipt };
+  });
+  assert.deepEqual(got, { ok: true, message: "saved" });
+  assert.deepEqual(reads, { ok: 1, videoId: 1, message: 1 });
+  assert.equal(calls, 1);
+  assert.doesNotMatch(got.message, /PRIVATE_MESSAGE/);
+
+  const broken = { ok: true, videoId: "video-1" };
+  Object.defineProperty(broken, "message", { get() { throw Error("PRIVATE_PROVIDER"); } });
+  const invalid = await applyAdminVideoMemberPermissionBatch(input(), async () => ({
+    status: 200, json: async () => broken,
+  }));
+  assert.equal(invalid.ok, false);
+  assert.doesNotMatch(invalid.message, /PRIVATE_PROVIDER/);
+});
+
+test("MIG-0730 U02cx: SA-084 cannot turn a rejected receipt into verified success", async () => {
+  let reads = 0;
+  const receipt = { videoId: "video-1" };
+  Object.defineProperty(receipt, "ok", {
+    get() { reads++; return reads === 1 ? false : true; },
+  });
+  const got = await applyAdminVideoMemberPermissionBatch(input(), async () => ({
+    status: 200, json: async () => receipt,
+  }));
+  assert.deepEqual(got, { ok: false, message: "権限変更を確認できませんでした。状態を再取得してください。" });
+  assert.equal(reads, 1);
+});
+
+test("MIG-0730 U02dj: backend SA-084 committed and authorized no-op receipts match the Ops client contract", async () => {
+  // Mirrors two success shapes emitted by MIG-0650 PR #473's UNMOUNTED
+  // collaborators.ts: write path returns authorized videoId + grant summary,
+  // and no-op terminal path adds the same authorized videoId to its result.
+  const successPaths = [
+    { ok: true, videoId: "video-1", message: "権限を更新しました",
+      granted: ["Alice"], revoked: [], unchanged: 0 },
+    { ok: true, videoId: "video-1", message: "変更はありません",
+      granted: [], revoked: [], unchanged: 1 },
+    { ok: true, videoId: "video-1", granted: [], revoked: [], unchanged: 1 },
+  ];
+  let posts = 0;
+  for (const receipt of successPaths) {
+    const actual = await applyAdminVideoMemberPermissionBatch(input(), async (path, init) => {
+      posts++;
+      assert.equal(path, "/api/videos/video-1/collaborators/batch");
+      assert.equal(JSON.parse(init.body).video_id, "video-1");
+      return json(receipt);
+    });
+    assert.deepEqual(actual, {
+      ok: true,
+      ...(receipt.message ? { message: receipt.message } : {}),
+    }, "client only accepts the authorized success receipt and safe message");
+  }
+  assert.equal(posts, successPaths.length);
+
+  for (const receipt of [
+    { ok: true, videoId: "other", granted: ["Alice"] },
+    { ok: true, granted: ["Alice"] },
+    { ok: false, videoId: "video-1", message: "internal details" },
+  ]) {
+    const actual = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+      posts++;
+      return json(receipt);
+    });
+    assert.equal(actual.ok, false, "cross-target, unbound or failed receipt never confirms write");
+    assert.doesNotMatch(actual.message ?? "", /internal details/);
+  }
+  assert.equal(posts, successPaths.length + 3, "no implicit retry after any receipt");
+});
+
+test("MIG-0730 U02du: SA-084 HTTP 401 is authoritative without decoding or replay", async () => {
+  let requests = 0;
+  let reads = 0;
+  const bodies = [
+    { ok: true, videoId: "video-1", message: "FORGED_SUCCESS" },
+    { ok: false, reason: "forbidden", message: "PRIVATE_PROVIDER" },
+    { ok: false, reason: "unauthenticated" },
+    null,
+    new Error("PRIVATE_JSON_FAILURE"),
+  ];
+  for (const body of bodies) {
+    const result = await applyAdminVideoMemberPermissionBatch(input(), async (path, init) => {
+      requests++;
+      assert.equal(path, "/api/videos/video-1/collaborators/batch");
+      assert.equal(init.method, "POST");
+      return { status: 401, json: async () => {
+        reads++;
+        if (body instanceof Error) throw body;
+        return body;
+      } };
+    });
+    assert.deepEqual(result, { ok: false, reason: "unauthenticated", message: "再ログインが必要です。" });
+  }
+  assert.equal(requests, bodies.length);
+  assert.equal(reads, 0, "HTTP 401 must not decode the body");
+
+  // Only a new explicit action may submit after the 401 settles.
+  const later = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+    requests++;
+    return json({ ok: true, videoId: "video-1" });
+  });
+  assert.deepEqual(later, { ok: true });
+  assert.equal(requests, bodies.length + 1);
+});
+
+test("MIG-0730 U02du: SA-084 reason is derived only from the captured HTTP status", async () => {
+  const failure = { ok: false, message: "権限変更を確認できませんでした。状態を再取得してください。" };
+  let requests = 0;
+  for (const status of [403, 409, 503, 200]) {
+    const result = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+      requests++;
+      return json({ ok: false, reason: "unauthenticated", message: "PRIVATE_PROVIDER" }, status);
+    });
+    assert.deepEqual(result, failure);
+  }
+  let statusReads = 0;
+  let bodyReads = 0;
+  const result = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+    requests++;
+    return {
+      get status() { statusReads++; return statusReads === 1 ? 403 : 401; },
+      async json() { bodyReads++; throw Error("PRIVATE_BODY"); },
+    };
+  });
+  assert.deepEqual(result, failure);
+  assert.equal(statusReads, 1);
+  assert.equal(bodyReads, 0);
+  assert.equal(requests, 5);
+});
