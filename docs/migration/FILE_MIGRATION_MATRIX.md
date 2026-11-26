@@ -1610,6 +1610,8 @@
 | `apps/ops/src/lib/useUnsavedChangesGuard.ts` | HELPER | MIG-0721 U01a nonproduction browser navigation guard | MIG-0721 | SAME (new; copied CURRENT; EventForm consumer not yet ported) | IN_PROGRESS | PR#515 SHA=d382e8e09a6c6f998c4b0d57cac4a39ebed6e136 TEST=apps/ops/test/eventFormDraft.test.mjs (CI-pending) |
 | `apps/ops/test/eventFormDraft.test.mjs` | TEST | MIG-0721 U01a CURRENT parity and draft/browser behavior | MIG-0721 | SAME (new; 4 cases) | IN_PROGRESS | PR#515 SHA=d382e8e09a6c6f998c4b0d57cac4a39ebed6e136 TEST=CI-pending |
 | `apps/ops/test/eventFormDraftValues.test.mjs` | TEST | CURRENT draft serializer parity / repeated input / file filtering U01b-1 | MIG-0721 | SAME (new; four regressions) | IN_PROGRESS | PR#515 SHA=6bbf93e705f46387f714b38a9c646e206b3d159e TEST=CI-pending |
+| `apps/ops/src/lib/event/youtubeDescriptionTemplate.ts` | HELPER | MIG-0721 U01b-3 CURRENT deterministic YouTube description renderer for unmounted EventForm editor | MIG-0721 | SAME (source `src/lib/event/youtubeDescriptionTemplate.ts`; future YoutubeDescriptionTemplateEditor) | IN_PROGRESS | PR#515 SHA=af1d59e4559b331cab64649949892105983fbf77 TEST=apps/ops/test/eventYoutubeDescriptionTemplate.test.mjs (20 cases authored; final-head CI pending) |
+| `apps/ops/test/eventYoutubeDescriptionTemplate.test.mjs` | TEST | MIG-0721 U01b-3 CURRENT renderer regressions and exact source-body parity | MIG-0721 | SAME (new Ops regression test; 19 CURRENT cases + 1 parity) | IN_PROGRESS | PR#515 SHA=af1d59e4559b331cab64649949892105983fbf77 TEST=npm run test --workspace=@flamenode/ops CI=pending |
 
 ## Future files requiring source/target registration
 
