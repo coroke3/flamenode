@@ -42,7 +42,28 @@ function parseHtmlTableRegex(html: string): string[][] {
   let inTable = false;
   let row: string[] | null = null;
   let cell: { name: string; start: number } | null = null;
+  let rawHeader: string | null = null;
   for (const match of html.matchAll(tokens)) {
+    // The fallback is not an HTML5 parser. Do not interpret inert/raw-text
+    // contents as rows. Allow simple style/title wrappers outside tables,
+    // but decline markup inside them or other unsupported parsing contexts.
+    const header = /^<(\/?)(style|title)(?=[\s/>])/i.exec(match[0]);
+    if (rawHeader !== null) {
+      if (header?.[1] === "/" && header[2].toLowerCase() === rawHeader) {
+        rawHeader = null;
+        continue;
+      }
+      // Excel can wrap CSS in an HTML-style comment. Reject comments that
+      // could conceal the raw-text closing tag from this simple tokenizer.
+      if (match[0].startsWith("<!--") && !/<\/(?:style|title)(?=[\s/>])/i.test(match[0])) continue;
+      return [];
+    }
+    if (header) {
+      if (header[1] || inTable || row !== null) return [];
+      rawHeader = header[2].toLowerCase();
+      continue;
+    }
+    if (/^<\/?(?:template|script|textarea|xmp|iframe|noembed|noframes|noscript|plaintext)(?=[\s/>])/i.test(match[0])) return [];
     const structure = /^<(\/?)(table|tr|td|th)(?=[\s/>])/i.exec(match[0]);
     if (!structure) continue;
     const closing = structure[1] === "/";
@@ -69,7 +90,7 @@ function parseHtmlTableRegex(html: string): string[][] {
       cell = null;
     }
   }
-  if (inTable || row !== null || cell !== null) return [];
+  if (rawHeader !== null || inTable || row !== null || cell !== null) return [];
   return rows.filter((r) => !(r.length === 1 && r[0].trim() === ""));
 }
 
@@ -116,8 +137,10 @@ export function parseHtmlClipboardTable(html: string): string[][] {
         const filtered = rows.filter(
           (r) => !(r.length === 1 && r[0].trim() === ""),
         );
-        if (filtered.length > 0) return filtered;
+        return filtered;
       }
+      // A successful DOM parse is authoritative, including an empty result.
+      return [];
     } catch {
       /* regex へ */
     }
