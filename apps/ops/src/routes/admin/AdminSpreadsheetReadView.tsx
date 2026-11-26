@@ -5,6 +5,7 @@ import {
   loadSpreadsheetCatalog,
   loadSpreadsheetExport,
   loadSpreadsheetPage,
+  type SpreadsheetReadResult,
 } from "../../api/adminSpreadsheet.js";
 import { AdminSpreadsheetDisabled } from "./AdminSpreadsheetDisabled.js";
 import { AdminSpreadsheetEditableGrid } from "./AdminSpreadsheetEditableGrid.js";
@@ -79,16 +80,31 @@ export function AdminSpreadsheetReadView({
     committedPageContext.current === pageContext && pageReadRef.current === controller &&
     !controller.signal.aborted, [pageContext]);
 
+  const commitPageRead = React.useCallback((
+    controller: AbortController,
+    result: SpreadsheetReadResult<AdminSpreadsheetPageResponse>,
+  ): boolean => {
+    if (!isCurrentPageRead(controller)) return false;
+    if (result.status === "anonymous" || result.status === "forbidden" || result.status === "disabled") {
+      // A current denial ends pending browser delivery; stale reads and transient failures do not.
+      exportRef.current?.abort();
+      exportRef.current = null;
+      setExportBusy(false);
+      setExportMessage(null);
+    }
+    setRows(result.status === "ok"
+      ? { status: "ready", data: result.data }
+      : { status: result.status });
+    return true;
+  }, [isCurrentPageRead]);
+
   async function refreshAfterMutation(): Promise<void> {
     const controller = beginPageRead();
     if (!controller) return;
     try {
       const result = await loadSpreadsheetPage(pageContext.fetchFn, pageContext.selectedTable,
         pageContext.page, controller.signal);
-      if (!isCurrentPageRead(controller)) return;
-      setRows(result.status === "ok"
-        ? { status: "ready", data: result.data }
-        : { status: result.status });
+      if (!commitPageRead(controller, result)) return;
       if (result.status !== "ok") throw new Error("spreadsheet_reload_failed");
     } finally {
       if (pageReadRef.current === controller) pageReadRef.current = null;
@@ -225,10 +241,7 @@ export function AdminSpreadsheetReadView({
     setRows({ status: "loading" });
     void loadSpreadsheetPage(pageContext.fetchFn, pageContext.selectedTable, pageContext.page,
       controller.signal).then((result) => {
-      if (!isCurrentPageRead(controller)) return;
-      setRows(result.status === "ok"
-        ? { status: "ready", data: result.data }
-        : { status: result.status });
+      commitPageRead(controller, result);
     }).finally(() => {
       if (pageReadRef.current === controller) pageReadRef.current = null;
     });
@@ -236,7 +249,7 @@ export function AdminSpreadsheetReadView({
       controller.abort();
       if (pageReadRef.current === controller) pageReadRef.current = null;
     };
-  }, [pageContext, beginPageRead, isCurrentPageRead]);
+  }, [pageContext, beginPageRead, commitPageRead]);
 
   // Render-time origin verification prevents even a transient old-session paint
   // before the effect can clear state on a changed fetch function or URL selection.

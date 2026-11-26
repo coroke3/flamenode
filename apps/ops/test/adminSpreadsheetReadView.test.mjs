@@ -723,3 +723,270 @@ test("MIG-0737 U01: stale explicit reload cannot overwrite newer table rows", as
     } finally { await ui.cleanup(); }
   }
 });
+
+const pageDenials = [
+  { name: "anonymous", status: 401, body: { error: "unauthenticated" } },
+  { name: "forbidden", status: 403, body: { reason: "admin_required" } },
+  { name: "disabled", status: 404, body: { error: "spreadsheet_disabled" } },
+];
+
+for (const denial of pageDenials) {
+  for (const [label, format] of [
+    ["CSV ダウンロード", "csv"], ["TSV ダウンロード", "tsv"], ["コピー (CSV)", "csv"],
+  ]) {
+    test("MIG-0737 U01 export denial: current " + denial.name + " reload fences pending " + label, async () => {
+      const observed = observeExports();
+      const pending = deferred();
+      let reads = 0;
+      let signal;
+      const fn = async (path, init) => {
+        assert.equal(init.method, "GET");
+        if (path.includes("/tables")) return json(200, catalog);
+        if (path.includes("/data")) return ++reads === 1
+          ? json(200, page("videos", 1)) : json(denial.status, denial.body);
+        signal = init.signal;
+        return pending.promise;
+      };
+      const ui = await mount(fn, "videos");
+      try {
+        await React.act(async () => exportButton(ui.host, label).click());
+        await React.act(async () => exportButton(ui.host, "再読込").click());
+        await flush();
+        assert.equal(ui.host.querySelector("table") === null, true);
+        const abortedAtDenial = signal.aborted;
+        await React.act(async () => pending.resolve(exportResponse(format)));
+        await flush();
+        assert.deepEqual(observed.effects, { created: [], downloaded: [], revoked: [], copied: [], fallback: [] });
+        assert.equal(abortedAtDenial, true);
+        assert.doesNotMatch(ui.host.textContent, /ダウンロードしました|コピーしました|エクスポートに失敗/);
+        if (denial.name !== "disabled") assert.equal(exportButton(ui.host, label).disabled, false);
+        assert.equal(reads, 2);
+      } finally {
+        await ui.cleanup();
+        observed.restore();
+      }
+    });
+  }
+}
+
+for (const phase of ["blob", "text"]) {
+  test("MIG-0737 U01 export denial: pending " + phase + " conversion cannot deliver after a denial", async () => {
+    const observed = observeExports();
+    const pending = deferred();
+    let reads = 0;
+    let started = false;
+    let signal;
+    const fn = async (path, init) => {
+      assert.equal(init.method, "GET");
+      if (path.includes("/tables")) return json(200, catalog);
+      if (path.includes("/data")) return ++reads === 1
+        ? json(200, page("videos", 1)) : json(403, { reason: "admin_required" });
+      signal = init.signal;
+      const response = exportResponse();
+      if (phase === "blob") {
+        response.blob = () => { started = true; return pending.promise; };
+      } else {
+        const blob = new Blob(["private export"], { type: "text/csv" });
+        blob.text = () => { started = true; return pending.promise; };
+        response.blob = async () => blob;
+      }
+      return response;
+    };
+    const ui = await mount(fn, "videos");
+    try {
+      await React.act(async () => exportButton(ui.host, phase === "blob" ? "CSV ダウンロード" : "コピー (CSV)").click());
+      await flush();
+      assert.equal(started, true);
+      await React.act(async () => exportButton(ui.host, "再読込").click());
+      await flush();
+      await React.act(async () => pending.resolve(phase === "blob"
+        ? new Blob(["private export"], { type: "text/csv" }) : "private export"));
+      await flush();
+      assert.deepEqual(observed.effects, { created: [], downloaded: [], revoked: [], copied: [], fallback: [] });
+      assert.equal(signal.aborted, true);
+      assert.equal(exportButton(ui.host).disabled, false);
+    } finally {
+      await ui.cleanup();
+      observed.restore();
+    }
+  });
+}
+
+for (const phase of ["response", "clipboard"]) {
+  for (const outcome of ["resolve", "reject"]) {
+    test("MIG-0737 U01 export denial: old " + phase + " " + outcome + " preserves an authorized replacement export", async () => {
+      const observed = observeExports();
+      const oldOperation = deferred();
+      const newExport = deferred();
+      let reads = 0;
+      let exports = 0;
+      const signals = [];
+      if (phase === "clipboard") {
+        observed.clipboard.writeText = (body) => {
+          observed.effects.copied.push(body);
+          return oldOperation.promise;
+        };
+      }
+      const fn = async (path, init) => {
+        assert.equal(init.method, "GET");
+        if (path.includes("/tables")) return json(200, catalog);
+        if (path.includes("/data")) return ++reads === 2
+          ? json(403, { reason: "admin_required" }) : json(200, page("videos", 1));
+        signals.push(init.signal);
+        return ++exports === 1
+          ? phase === "response" ? oldOperation.promise : exportResponse()
+          : newExport.promise;
+      };
+      const ui = await mount(fn, "videos");
+      try {
+        await React.act(async () => exportButton(ui.host, phase === "response" ? "CSV ダウンロード" : "コピー (CSV)").click());
+        await flush();
+        if (phase === "clipboard") assert.equal(observed.effects.copied.length, 1, "OS clipboard request is already dispatched");
+        await React.act(async () => exportButton(ui.host, "再読込").click());
+        await flush();
+        assert.match(ui.host.textContent, /管理者権限が必要/);
+        assert.equal(signals[0].aborted, true);
+        await React.act(async () => exportButton(ui.host, "再読込").click());
+        await flush();
+        assert.equal(reads, 3);
+        assert.match(ui.host.textContent, /<unsafe>/);
+        assert.equal(exportButton(ui.host).disabled, false);
+        await React.act(async () => exportButton(ui.host).click());
+        assert.equal(exports, 2);
+        await React.act(async () => oldOperation[outcome](outcome === "reject"
+          ? new Error("old operation failed") : phase === "response" ? exportResponse() : undefined));
+        await flush();
+        assert.deepEqual(observed.effects.downloaded, []);
+        assert.deepEqual(observed.effects.fallback, []);
+        assert.equal(document.querySelectorAll("textarea").length, 0);
+        assert.doesNotMatch(ui.host.textContent, /ダウンロードしました|コピーしました|コピーに失敗|エクスポートに失敗/);
+        assert.equal(signals[1].aborted, false);
+        assert.equal(exportButton(ui.host).disabled, true, "old finally cannot release the replacement");
+        await React.act(async () => newExport.resolve(exportResponse("csv", "authorized recovery")));
+        await flush();
+        assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+        assert.equal(await observed.effects.created[0].text(), "authorized recovery");
+        assert.equal(observed.effects.revoked.length, 1);
+        assert.equal(observed.effects.copied.length, phase === "clipboard" ? 1 : 0);
+        assert.equal(exportButton(ui.host).disabled, false);
+      } finally {
+        await ui.cleanup();
+        observed.restore();
+      }
+    });
+  }
+}
+
+for (const result of [
+  { name: "successful reload", status: 200, body: page("videos", 1) },
+  { name: "transient 503", status: 503, body: { error: "unavailable" } },
+  { name: "unknown-table 404", status: 404, body: { error: "table_not_found" } },
+  { name: "unsupported 501", status: 501, body: {} },
+]) {
+  test("MIG-0737 U01 export denial: " + result.name + " preserves a table-wide export", async () => {
+    const observed = observeExports();
+    const pending = deferred();
+    let reads = 0;
+    let signal;
+    const fn = async (path, init) => {
+      assert.equal(init.method, "GET");
+      if (path.includes("/tables")) return json(200, catalog);
+      if (path.includes("/data")) return ++reads === 1
+        ? json(200, page("videos", 1)) : json(result.status, result.body);
+      signal = init.signal;
+      return pending.promise;
+    };
+    const ui = await mount(fn, "videos");
+    try {
+      await React.act(async () => exportButton(ui.host).click());
+      await React.act(async () => exportButton(ui.host, "再読込").click());
+      await flush();
+      assert.equal(signal.aborted, false);
+      assert.equal(exportButton(ui.host).disabled, true);
+      await React.act(async () => pending.resolve(exportResponse()));
+      await flush();
+      assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+      assert.equal(observed.effects.revoked.length, 1);
+      assert.equal(exportButton(ui.host).disabled, false);
+      assert.equal(reads, 2);
+    } finally {
+      await ui.cleanup();
+      observed.restore();
+    }
+  });
+}
+
+test("MIG-0737 U01 export denial: an obsolete reload denial cannot cancel a newer A-to-B-to-A export", async () => {
+  const observed = observeExports();
+  const oldRead = deferred();
+  const currentExport = deferred();
+  let videoReads = 0;
+  let oldReadSignal;
+  let exportSignal;
+  const fn = async (path, init) => {
+    assert.equal(init.method, "GET");
+    if (path.includes("/tables")) return json(200, catalog);
+    const name = new URL(path, "https://flamenode.test").searchParams.get("table");
+    if (path.includes("/data")) {
+      if (name === "videos" && ++videoReads === 2) {
+        oldReadSignal = init.signal;
+        return oldRead.promise;
+      }
+      return json(200, page(name, 1));
+    }
+    exportSignal = init.signal;
+    return currentExport.promise;
+  };
+  const ui = await mount(fn, "videos");
+  try {
+    await React.act(async () => exportButton(ui.host, "再読込").click());
+    await flush();
+    const select = async (label) => {
+      const button = [...ui.host.querySelectorAll("nav button")].find(b => b.textContent.includes(label));
+      assert.ok(button);
+      await React.act(async () => button.click());
+      await flush();
+    };
+    await select("イベント");
+    await select("動画");
+    await React.act(async () => exportButton(ui.host).click());
+    assert.equal(oldReadSignal.aborted, true);
+    await React.act(async () => oldRead.resolve(json(403, { reason: "admin_required" })));
+    await flush();
+    assert.equal(exportSignal.aborted, false);
+    assert.equal(exportButton(ui.host).disabled, true);
+    assert.doesNotMatch(ui.host.textContent, /管理者権限が必要/);
+    await React.act(async () => currentExport.resolve(exportResponse()));
+    await flush();
+    assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+  } finally {
+    await ui.cleanup();
+    observed.restore();
+  }
+});
+
+test("MIG-0737 U01 export denial: a current denial clears an already completed export receipt", async () => {
+  const observed = observeExports();
+  let reads = 0;
+  const fn = async (path, init) => {
+    assert.equal(init.method, "GET");
+    if (path.includes("/tables")) return json(200, catalog);
+    if (path.includes("/data")) return ++reads === 1
+      ? json(200, page("videos", 1)) : json(401, {});
+    return exportResponse();
+  };
+  const ui = await mount(fn, "videos");
+  try {
+    await React.act(async () => exportButton(ui.host).click());
+    await flush();
+    assert.match(ui.host.textContent, /CSV をダウンロードしました/);
+    await React.act(async () => exportButton(ui.host, "再読込").click());
+    await flush();
+    assert.match(ui.host.textContent, /ログインが必要/);
+    assert.doesNotMatch(ui.host.textContent, /ダウンロードしました/);
+    assert.deepEqual(observed.effects.downloaded, ["videos.csv"], "completed download cannot be recalled");
+  } finally {
+    await ui.cleanup();
+    observed.restore();
+  }
+});

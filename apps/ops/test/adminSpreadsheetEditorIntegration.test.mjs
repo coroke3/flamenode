@@ -213,3 +213,61 @@ test("MIG-0737 U01: reselecting the ready editable table preserves the live cell
       "ready editable grid must not expose a reload that would discard the draft");
   } finally { await ui.cleanup(); }
 });
+
+for (const denial of [
+  { name: "anonymous", status: 401, body: {} },
+  { name: "forbidden", status: 403, body: { reason: "admin_required" } },
+  { name: "disabled", status: 404, body: { error: "spreadsheet_disabled" } },
+]) {
+  test("MIG-0737 U01 export denial: post-mutation " + denial.name + " GET fences pending delivery without replay", async () => {
+    const requests = [];
+    let resolveExport;
+    const pendingExport = new Promise(resolve => { resolveExport = resolve; });
+    let reads = 0;
+    let signal;
+    const oldCreate = URL.createObjectURL;
+    const oldRevoke = URL.revokeObjectURL;
+    const oldClick = dom.window.HTMLAnchorElement.prototype.click;
+    const delivered = [];
+    URL.createObjectURL = () => "blob:pending-export";
+    URL.revokeObjectURL = () => {};
+    dom.window.HTMLAnchorElement.prototype.click = function () { delivered.push(this.download); };
+    const fn = async (path, init) => {
+      requests.push({ path, method: init.method, body: init.body ? JSON.parse(init.body) : null });
+      if (path.includes("/tables")) return json(200, catalog);
+      if (path.includes("/export")) { signal = init.signal; return pendingExport; }
+      if (init.method === "PATCH") return json(200, { ok: true });
+      return ++reads === 1 ? json(200, page("videos")) : json(denial.status, denial.body);
+    };
+    const ui = await mount({ fetchFn: fn, initialTable: "videos", enableMutations: true });
+    try {
+      await click(ui, "CSV ダウンロード");
+      await click(ui, "1行 title を編集");
+      const input = ui.host.querySelector("label input[type=text]");
+      assert.ok(input);
+      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+      await React.act(async () => {
+        setter.call(input, "after");
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      });
+      await click(ui, "セルを保存");
+      assert.equal(ui.host.querySelector("table") === null, true);
+      await React.act(async () => resolveExport(new Response("old export", {
+        headers: { "content-type": "text/csv" },
+      })));
+      await flush();
+      assert.deepEqual(delivered, []);
+      assert.equal(signal.aborted, true);
+      assert.deepEqual(requests.filter(x => x.method === "PATCH").map(x => x.body), [
+        { table: "videos", primaryKey: { id: "v1" }, column: "title", value: "after" },
+      ]);
+      assert.equal(reads, 2);
+      assert.doesNotMatch(ui.host.textContent, /ダウンロードしました/);
+    } finally {
+      await ui.cleanup();
+      URL.createObjectURL = oldCreate;
+      URL.revokeObjectURL = oldRevoke;
+      dom.window.HTMLAnchorElement.prototype.click = oldClick;
+    }
+  });
+}
