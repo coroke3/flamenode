@@ -1838,7 +1838,9 @@ async function verifyReceiptAuthorityRotation(Field, scenario) {
       await previewPermissionTsv(target, tsv);
       const reopened = target.querySelector('[role="alertdialog"]');
       assert.ok(reopened, "fresh authority confirmation must open");
-      assert.equal(reopened.querySelector('[role="status"]'), null,
+      const staleStatus = reopened.querySelector('[role="status"]');
+      const staleReceipt = staleStatus === null ? null : (staleStatus.textContent ?? "").slice(0, 300);
+      assert.equal(staleReceipt, null,
         "a previous authority receipt must not reappear before the new write");
       assert.doesNotMatch(reopened.textContent, /STALE_PRIVATE_RECEIPT|編集権限の反映結果を確認できませんでした/);
       assert.equal(buttonNamed(target, "変更を反映").disabled, false);
@@ -1913,8 +1915,8 @@ test("MIG-0730 U02dx: mounted negative control detects removal of post-snapshot 
         if (scenario === "throwing message getter") {
           assert.match(error.message, /^a previous authority receipt must not reappear before the new write/);
           assert.equal(error.expected, null);
-          assert.equal(error.actual?.getAttribute("role"), "status");
-          assert.match(error.actual.textContent, /編集権限の反映結果を確認できませんでした/);
+          assert.equal(typeof error.actual, "string");
+          assert.match(error.actual, /編集権限の反映結果を確認できませんでした/);
         } else {
           assert.ok(error.message.startsWith(scenario + " must only apply current-authority permission success"),
             error.message);
