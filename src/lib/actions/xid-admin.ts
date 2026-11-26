@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
+import { planXIdAliasApproval, planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -808,40 +808,15 @@ async function approveXIdLinkRequestOnce(
           : `@${submittedXUserId} の既存aliasまたは正本が不整合のため、別名を安全に追加できません。`,
       };
     }
-    const alias = { x_user_id: targetXUserId, alias_x_id: submittedXUserId };
-    // The read above is advisory only. This conditional INSERT is the actual
-    // race-safe integrity gate: a new canonical row or any normalized alias
-    // inserted concurrently makes changes()=0 and rolls back the whole batch.
-    statements.push(db.run(sql`
-      INSERT INTO x_user_aliases (x_user_id, alias_x_id)
-      SELECT ${targetXUserId}, ${submittedXUserId}
-      WHERE EXISTS (
-        SELECT 1 FROM x_users
-        WHERE id = ${targetXUserId}
-          AND approval_status = 'approved'
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM x_users
-        WHERE lower(trim(ltrim(trim(id), '@'))) = lower(${submittedXUserId})
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM x_user_aliases
-        WHERE lower(trim(ltrim(trim(alias_x_id), '@'))) = lower(${submittedXUserId})
-      )
-    `));
-    expected.push(1);
-    audits.push({
-      table_name: "x_user_aliases",
-      target_id: `${targetXUserId}:${submittedXUserId}`,
-      operation: "CREATE",
-      before: null,
-      after: alias,
-      actor_user_id: operatorAuthUserId,
-      actor_x_user_id: operatorActorXUserId,
-      reason: "X名義の別名申請を承認",
-      context: "x-identity-request",
-      retention_class: "long_audit",
+    const aliasPlan = planXIdAliasApproval(db, {
+      targetXUserId,
+      submittedXUserId,
+      actorUserId: operatorAuthUserId,
+      actorXUserId: operatorActorXUserId,
     });
+    statements.push(aliasPlan.statement);
+    expected.push(aliasPlan.expectedChanges);
+    audits.push(aliasPlan.audit);
     notificationXUserId = targetXUserId;
   } else {
     if (!submittedXUserId) return { ok: false, message: "申請 X ID がありません。" };

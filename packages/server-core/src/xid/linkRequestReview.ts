@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { xIdentityRequests } from "@flamenode/db/schema";
 import { buildXIdentityDecisionFields } from "@flamenode/domain/xid";
@@ -61,5 +61,58 @@ export function planXIdLinkRejection(
       context: "x-identity-request",
       retention_class: "long_audit",
     }],
+  };
+}
+
+/**
+ * SA-090 alias approval: assemble the CURRENT conditional insert and its
+ * audit entry. Host authorization, canonical/linked identity reads and the
+ * surrounding pending-request CAS remain in the host transaction.
+ * A zero-row insert must abort the atomic batch; this helper never executes it.
+ */
+export function planXIdAliasApproval(
+  db: ServerCoreDb,
+  input: {
+    targetXUserId: string;
+    submittedXUserId: string;
+    actorUserId: string;
+    actorXUserId: string | null;
+  },
+) {
+  const { targetXUserId, submittedXUserId, actorUserId, actorXUserId } = input;
+  const alias = { x_user_id: targetXUserId, alias_x_id: submittedXUserId };
+  // The host's preceding reads are advisory. This exact conditional INSERT
+  // rejects a concurrent canonical/alias collision or loss of target approval.
+  return {
+    statement: db.run(sql`
+      INSERT INTO x_user_aliases (x_user_id, alias_x_id)
+      SELECT ${targetXUserId}, ${submittedXUserId}
+      WHERE EXISTS (
+        SELECT 1 FROM x_users
+        WHERE id = ${targetXUserId}
+          AND approval_status = 'approved'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM x_users
+        WHERE lower(trim(ltrim(trim(id), '@'))) = lower(${submittedXUserId})
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM x_user_aliases
+        WHERE lower(trim(ltrim(trim(alias_x_id), '@'))) = lower(${submittedXUserId})
+      )
+    `),
+    expectedChanges: 1 as const,
+    audit: {
+      table_name: "x_user_aliases",
+      target_id: `${targetXUserId}:${submittedXUserId}`,
+      operation: "CREATE",
+      before: null,
+      after: alias,
+      actor_user_id: actorUserId,
+      actor_x_user_id: actorXUserId,
+      reason: "X名義の別名申請を承認",
+      context: "x-identity-request",
+      retention_class: "long_audit",
+    } satisfies AtomicAuditMutationInput["audits"][number],
   };
 }
