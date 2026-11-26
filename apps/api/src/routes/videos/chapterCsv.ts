@@ -48,16 +48,13 @@ function parseCommaDelimited(input: string): string[][] {
       i += 1;
       continue;
     }
-    if (ch === "\r") {
-      i += 1;
-      continue;
-    }
-    if (ch === "\n") {
+    if (ch === "\r" || ch === "\n") {
       cur.push(field);
       pushRow();
       cur = [];
       field = "";
-      i += 1;
+      // Treat CRLF as a single separator; bare CR also ends a record.
+      i += ch === "\r" && text[i + 1] === "\n" ? 2 : 1;
       continue;
     }
     field += ch;

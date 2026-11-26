@@ -65,7 +65,7 @@ test("SEC-terms: write-revocation redirects are fixed same-origin paths", () => 
 });
 
 test("SEC-terms: editing a draft redacts private terms and all write controls on 401/403", async () => {
-  for (const status of [401, 403]) {
+  for (const [status, reason] of [[401, "unauthenticated"], [403, "forbidden"], [403, "banned"]]) {
     let writes = 0;
     await withTermsPage(async (path, init) => {
       if (init?.method === "GET") {
@@ -75,7 +75,7 @@ test("SEC-terms: editing a draft redacts private terms and all write controls on
       writes += 1;
       assert.equal(init.method, "PATCH");
       assert.equal(path, "/api/admin/terms/tv1");
-      return reply(status, { ok: false, message: "denied", redirect: "https://evil.example" });
+      return reply(status, { ok: false, reason, message: "denied", redirect: "https://evil.example" });
     }, "edit", async (container, win) => {
       assert.equal(container.querySelector('textarea[name="body_markdown"]')?.value,
         "# PRIVATE_TERMS_CANARY");
@@ -99,7 +99,7 @@ test("SEC-terms: create draft controls also unmount after denied POST", async ()
   await withTermsPage(async (_path, init) => {
     assert.equal(init.method, "POST");
     writes += 1;
-    return reply(403, { ok: false, message: "forbidden" });
+    return reply(403, { ok: false, reason: "forbidden", message: "forbidden" });
   }, "create", async (container, win) => {
     const form = container.querySelector('form[aria-label="規約の新規作成"]');
     assert.ok(form);
@@ -116,7 +116,7 @@ test("SEC-terms: ordinary 503 write failure preserves draft for retry", async ()
   await withTermsPage(async (_path, init) =>
     init?.method === "GET"
       ? reply(200, { item: detail })
-      : reply(503, { ok: false, message: "temporary unavailable" }),
+      : reply(503, { ok: false, reason: "forbidden", message: "temporary unavailable" }),
   "edit", async (container, win) => {
     const form = container.querySelector('form[aria-label="規約の編集"]');
     assert.ok(form);
@@ -128,4 +128,32 @@ test("SEC-terms: ordinary 503 write failure preserves draft for retry", async ()
       "# PRIVATE_TERMS_CANARY");
     assert.doesNotMatch(container.textContent, /規約編集へのアクセスが終了しました/);
   });
+});
+
+test("SEC-terms: invalid-origin 403 preserves edit form and reports inline failure", async () => {
+  await withTermsPage(async (_path, init) =>
+    init?.method === "GET" ? reply(200, { item: detail }) :
+      reply(403, { ok: false, reason: "invalid_origin", message: "inline denial" }),
+  "edit", async (container, win) => {
+    const form = container.querySelector('form[aria-label="規約の編集"]');
+    await React.act(async () => form.dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true })));
+    assert.equal(container.querySelector('textarea[name="body_markdown"]')?.value, "# PRIVATE_TERMS_CANARY");
+    assert.match(container.textContent, /inline denial/);
+    assert.equal(container.querySelector('button[type="submit"]').disabled, false);
+  });
+});
+
+test("SEC-terms: unknown 403 quarantines both edit and create forms", async () => {
+  for (const page of ["edit", "create"]) {
+    await withTermsPage(async (_path, init) =>
+      init?.method === "GET" ? reply(200, { item: detail }) : reply(403, { ok: false, reason: "unknown" }),
+    page, async (container, win) => {
+      const form = container.querySelector("form");
+      await React.act(async () => form.dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true })));
+      assert.match(container.textContent, /管理権限を確認できません/);
+      assert.equal(container.querySelectorAll("form, textarea, input, button").length, 0);
+      assert.doesNotMatch(container.textContent, /PRIVATE_TERMS_CANARY|CREATE_CANARY/);
+      assert.equal(container.querySelector("a").getAttribute("href"), "/admin/rules");
+    });
+  }
 });

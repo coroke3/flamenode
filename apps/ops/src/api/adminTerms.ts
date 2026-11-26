@@ -14,7 +14,7 @@ const defaultFetch: OpsFetch = (path, init) => fetch(path, init);
 const BASE = "/api/admin/terms";
 const UNAVAILABLE = "管理操作を処理できませんでした。再度お試しください。";
 type Rejected = { ok: false; message: string };
-type AuthorizationFailure = "anonymous" | "forbidden";
+type AuthorizationFailure = "anonymous" | "forbidden" | "unknown";
 type AuthorizationFailureHandler = (reason: AuthorizationFailure) => void;
 const reject = (message: string): Rejected => ({ ok: false, message });
 
@@ -25,13 +25,38 @@ async function request(
   body?: object,
   onAuthorizationFailure?: AuthorizationFailureHandler,
 ): Promise<AdminTermsNotificationsResult> {
-  // The shared writer currently has no "forbidden" status. Observe the
-  // HTTP 403 before it parses the optional JSON body so the view can revoke
-  // privileged state even when that body is malformed or stalled.
+  // Only opted-in editors classify 403 here. Other consumers (including the
+  // rules broadcast wrapper) keep their own authorization handling.
   const guardedFetch: OpsFetch = async (url, init) => {
     const response = await fetchFn(url, init);
-    if (response.status === 403) onAuthorizationFailure?.("forbidden");
-    return response;
+    if (response.status !== 403 || !onAuthorizationFailure) return response;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<null>(resolve => {
+      timeout = setTimeout(() => resolve(null), 250);
+    });
+    const payload: unknown = await Promise.race([
+      Promise.resolve().then(() => response.json()).catch(() => null),
+      deadline,
+    ]);
+    if (timeout !== undefined) clearTimeout(timeout);
+    const parsed = payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload as Record<string, unknown> : null;
+    const reason = parsed?.ok === false ? parsed.reason : null;
+    if (reason === "unauthenticated") onAuthorizationFailure("anonymous");
+    else if (reason === "forbidden" || reason === "banned") onAuthorizationFailure("forbidden");
+    else if (typeof reason !== "string" || ![
+      "invalid_origin", "maintenance_mode", "cost_guard_blocked",
+      "tos_required", "tos_reaccept_required", "active_x_required",
+      "active_x_rejected", "active_x_not_approved",
+    ].includes(reason)) {
+      onAuthorizationFailure("unknown");
+      return new Response(JSON.stringify({ ok: false, message: "管理権限を確認できません。再読み込みしてください。" }), {
+        status: 403, headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify(parsed), {
+      status: 403, headers: { "content-type": "application/json" },
+    });
   };
   const result = await send<AdminTermsNotificationsResult>(guardedFetch, method, path, body);
   if (result.status === "anonymous") {

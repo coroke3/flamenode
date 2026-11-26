@@ -140,7 +140,11 @@ export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
     parseJsonColumn(sections?.notif_counts, []);
     parseJsonColumn(sections?.notifications, []);
   } catch {
-    console.warn("[manage] notification_outbox.event_id unavailable");
+    try {
+      console.warn("[manage] notification_outbox.event_id unavailable");
+    } catch {
+      // Diagnostic sinks are best-effort; preserve the legacy-schema fallback.
+    }
     notificationSchemaMissing = true;
     sections = await read(false);
   }
