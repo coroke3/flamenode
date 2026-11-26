@@ -549,7 +549,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(page2.text.split("\n").length, 1 + 32, "131 total rows - 99 = 32 remaining rows");
     assert.equal(honoD1.stats.reads - beforePage2, 2, "S2 warm cache: session + export");
 
-    // F-5: failure() logs the error message to console.error while keeping response body fixed
+    // F-5: failure() logs a fixed diagnostic without provider details.
     const logs = [];
     const origError = console.error;
     console.error = (...args) => logs.push(args.join(" "));
@@ -567,9 +567,66 @@ if (runUnderRootTsx(import.meta.url)) {
       const errRes = await callHono("GET", "/data?table=x_users", undefined, { headers: {} });
       assert.equal(errRes.status, 500);
       assert.deepEqual(errRes.body, { error: "internal_error" });
-      assert.ok(logs.some((line) => line.includes("[spreadsheet] READ_FAILED") && line.includes("x_users")));
+      assert.deepEqual(logs, ["[spreadsheet] READ_FAILED"]);
     } finally {
       console.error = origError;
+    }
+  });
+
+  test("MIG-0638 F-5: GET data/export provider faults preserve fixed no-store responses and diagnostics", async () => {
+    resetAllCaches();
+    const { honoD1, callHono } = createFixture();
+    const paths = ["/data?table=software_catalog", "/export?table=software_catalog&page=2"];
+    const options = { headers: {} };
+    for (const path of paths) {
+      assert.equal((await callHono("GET", path, undefined, options)).status, 200);
+    }
+    const originalPrepare = honoD1.prepare;
+    const originalError = console.error;
+    const canary = "MIG0638_READ_PROVIDER_CANARY";
+    const faults = [
+      new Error("provider params: " + canary),
+      Object.defineProperty(new Error(), "message", { get() { throw new Error(canary); } }),
+      new Proxy({}, { getPrototypeOf() { throw new Error(canary); } }),
+      { toString() { throw new Error(canary); } },
+    ];
+    const before = { ...honoD1.stats };
+    const logs = [];
+    let injected = 0;
+    try {
+      console.error = (...args) => logs.push(args);
+      for (const fault of faults) {
+        honoD1.prepare = (sql) => {
+          if (sql.startsWith('SELECT * FROM "software_catalog" ORDER BY ')) {
+            injected++;
+            throw fault;
+          }
+          return originalPrepare(sql);
+        };
+        for (const path of paths) {
+          const result = await callHono("GET", path, undefined, options);
+          assert.equal(result.status, 500);
+          assert.deepEqual(result.body, { error: "internal_error" });
+          assert.match(result.headers.get("cache-control"), /private.*no-store/);
+        }
+      }
+      assert.equal(injected, faults.length * paths.length);
+      assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] READ_FAILED"]));
+      console.error = () => { throw new Error(canary); };
+      for (const path of paths) {
+        const result = await callHono("GET", path, undefined, options);
+        assert.equal(result.status, 500);
+        assert.deepEqual(result.body, { error: "internal_error" });
+      }
+      assert.equal(injected, (faults.length + 1) * paths.length);
+    } finally {
+      honoD1.prepare = originalPrepare;
+      console.error = originalError;
+    }
+    assert.equal(honoD1.stats.batches, before.batches);
+    assert.equal(honoD1.stats.writes, before.writes);
+    for (const path of paths) {
+      assert.equal((await callHono("GET", path, undefined, options)).status, 200);
     }
   });
 

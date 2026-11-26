@@ -152,15 +152,21 @@ function cellText(value: unknown): string {
 }
 
 function failure(c: Context<AppEnv>, error: unknown): Response {
-  if (error instanceof SpreadsheetError) {
-    return respondError(
-      c,
-      error.code,
-      error.code === SPREADSHEET_ERROR.DB_UNAVAILABLE ? 503 : 400,
-    );
+  try {
+    if (error instanceof SpreadsheetError) {
+      const code = error.code;
+      if (code === SPREADSHEET_ERROR.DB_UNAVAILABLE) return respondError(c, code, 503);
+      if (code === SPREADSHEET_ERROR.UNKNOWN_TABLE) return respondError(c, code, 400);
+    }
+  } catch {
+    // A provider error may have throwing accessors or proxy traps.
   }
-  // Fixed code only: D1 error text can carry SQL and table names (CURRENT returned the raw message).
-  console.error("[spreadsheet] READ_FAILED", error instanceof Error ? error.message : String(error));
+  // D1 errors can contain SQL, bound parameters and table names.
+  try {
+    console.error("[spreadsheet] READ_FAILED");
+  } catch {
+    // Diagnostic failures must not replace the stable response.
+  }
   return respondError(c, "internal_error", 500);
 }
 
