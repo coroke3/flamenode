@@ -217,6 +217,10 @@ test("MIG-0737 U01: reselecting the ready editable table preserves the live cell
 for (const denial of [
   { name: "anonymous", status: 401, body: {} },
   { name: "forbidden", status: 403, body: { reason: "admin_required" } },
+  { name: "raw-403-empty", status: 403, response: () => new Response(null, { status: 403 }) },
+  { name: "raw-403-html", status: 403, response: () => new Response("<html>denied</html>", { status: 403 }) },
+  { name: "raw-403-null", status: 403, body: null },
+  { name: "raw-403-array", status: 403, body: [] },
   { name: "disabled", status: 404, body: { error: "spreadsheet_disabled" } },
 ]) {
   test("MIG-0737 U01 export denial: post-mutation " + denial.name + " GET fences pending delivery without replay", async () => {
@@ -237,7 +241,7 @@ for (const denial of [
       if (path.includes("/tables")) return json(200, catalog);
       if (path.includes("/export")) { signal = init.signal; return pendingExport; }
       if (init.method === "PATCH") return json(200, { ok: true });
-      return ++reads === 1 ? json(200, page("videos")) : json(denial.status, denial.body);
+      return ++reads === 1 ? json(200, page("videos")) : (denial.response?.() ?? json(denial.status, denial.body));
     };
     const ui = await mount({ fetchFn: fn, initialTable: "videos", enableMutations: true });
     try {
@@ -252,6 +256,7 @@ for (const denial of [
       });
       await click(ui, "セルを保存");
       assert.equal(ui.host.querySelector("table") === null, true);
+      if (denial.status === 403) assert.match(ui.host.textContent, /管理者権限が必要です/);
       await React.act(async () => resolveExport(new Response("old export", {
         headers: { "content-type": "text/csv" },
       })));

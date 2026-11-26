@@ -727,6 +727,10 @@ test("MIG-0737 U01: stale explicit reload cannot overwrite newer table rows", as
 const pageDenials = [
   { name: "anonymous", status: 401, body: { error: "unauthenticated" } },
   { name: "forbidden", status: 403, body: { reason: "admin_required" } },
+  { name: "raw-403-empty", status: 403, response: () => new Response(null, { status: 403 }) },
+  { name: "raw-403-html", status: 403, response: () => new Response("<html>denied</html>", { status: 403 }) },
+  { name: "raw-403-null", status: 403, body: null },
+  { name: "raw-403-array", status: 403, body: [] },
   { name: "disabled", status: 404, body: { error: "spreadsheet_disabled" } },
 ];
 
@@ -743,7 +747,7 @@ for (const denial of pageDenials) {
         assert.equal(init.method, "GET");
         if (path.includes("/tables")) return json(200, catalog);
         if (path.includes("/data")) return ++reads === 1
-          ? json(200, page("videos", 1)) : json(denial.status, denial.body);
+          ? json(200, page("videos", 1)) : (denial.response?.() ?? json(denial.status, denial.body));
         signal = init.signal;
         return pending.promise;
       };
@@ -753,6 +757,7 @@ for (const denial of pageDenials) {
         await React.act(async () => exportButton(ui.host, "再読込").click());
         await flush();
         assert.equal(ui.host.querySelector("table") === null, true);
+        if (denial.status === 403) assert.match(ui.host.textContent, /管理者権限が必要です/);
         const abortedAtDenial = signal.aborted;
         await React.act(async () => pending.resolve(exportResponse(format)));
         await flush();

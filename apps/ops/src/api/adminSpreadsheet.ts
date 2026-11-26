@@ -5,7 +5,7 @@ import {
   type AdminSpreadsheetTablesResponse,
 } from "@flamenode/contracts";
 import type { ZodType } from "zod";
-import type { OpsFetch, OpsResult } from "./read.js";
+import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 
 /** MIG-0737 U01: CURRENT RH-003/009 paths; the feature-disabled 404 is distinct from an unknown table. */
 export type SpreadsheetReadResult<T> = OpsResult<T> | { status: "disabled" };
@@ -38,16 +38,10 @@ async function getSpreadsheetJson<T>(
     }
     if (response.status === 501) return { status: "unsupported" };
     if (response.status === 403) {
-      const error: unknown = await response.json();
-      if (signal?.aborted || !error || typeof error !== "object" || Array.isArray(error)) {
-        return { status: "unavailable" };
-      }
-      const data = error as Record<string, unknown>;
-      return {
-        status: "forbidden",
-        ...(typeof data.reason === "string" ? { reason: data.reason } : {}),
-        ...(typeof data.redirect === "string" ? { redirect: data.redirect } : {}),
-      };
+      // Reuse the bounded, allowlisted Ops denial parser on this already
+      // fetched response. Optional metadata must not turn a 403 into a
+      // transient failure and leave an earlier export lease alive.
+      return getJson<T>(async () => response, path, signal);
     }
     if (response.status !== 200) return { status: "unavailable" };
     const body: unknown = await response.json();

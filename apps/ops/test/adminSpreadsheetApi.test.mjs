@@ -179,3 +179,51 @@ test("MIG-0737 U01 RH-007 abort or offline fails closed", async () => {
   assert.deepEqual(await loadSpreadsheetExport(async () =>
     new Response("test", { headers: { "content-type": "text/csv" } }), "", "csv"), { status: "unavailable" });
 });
+
+test("MIG-0737 U01: HTTP 403 remains forbidden without optional metadata", async () => {
+  const responses = [
+    () => new Response(null, { status: 403 }),
+    () => new Response("<html>denied</html>", { status: 403 }),
+    () => new Response("{", { status: 403 }),
+    () => json(403, null),
+    () => json(403, []),
+    () => json(403, "denied"),
+    () => ({ status: 403, json() { throw Error("body unavailable"); } }),
+  ];
+  for (const makeResponse of responses) {
+    for (const load of [loadSpreadsheetCatalog,
+      fetchFn => loadSpreadsheetPage(fetchFn, "videos", 1)]) {
+      let calls = 0;
+      const result = await load(async () => { calls++; return makeResponse(); });
+      assert.deepEqual(result, { status: "forbidden" });
+      assert.equal(calls, 1, "no duplicate HTTP request for metadata");
+    }
+  }
+});
+
+test("MIG-0737 U01: 403 metadata uses the shared Ops redirect allowlist", async () => {
+  for (const redirect of ["https://example.invalid/", "//example.invalid/", "/admin/users"]) {
+    assert.deepEqual(await loadSpreadsheetPage(async () =>
+      json(403, { reason: "admin_required", redirect }), "videos", 1),
+    { status: "forbidden", reason: "admin_required" });
+  }
+});
+
+test("MIG-0737 U01: stalled optional 403 body does not block denial", { timeout: 3000 }, async () => {
+  let bodyReads = 0;
+  const result = await loadSpreadsheetPage(async () => ({
+    status: 403,
+    json() { bodyReads++; return new Promise(() => {}); },
+  }), "videos", 1);
+  assert.deepEqual(result, { status: "forbidden" });
+  assert.equal(bodyReads, 1);
+});
+
+test("MIG-0737 U01: abort during optional 403 metadata read is not a current denial", async () => {
+  const controller = new AbortController();
+  const result = await loadSpreadsheetPage(async () => ({
+    status: 403,
+    json() { controller.abort(); return Promise.resolve({ reason: "admin_required" }); },
+  }), "videos", 1, controller.signal);
+  assert.deepEqual(result, { status: "unavailable" });
+});
