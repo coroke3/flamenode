@@ -78,3 +78,12 @@ test("recommend core preserves valid empty pools", () => {
   assert.equal(normalized.latest.length, 0);
   assert.equal(normalized.underrated.length, 0);
 });
+
+test("recommend core requires positive date-representable normalized generation seconds", () => {
+  for (const generated_at of [0.5, "0.5", 1e308, "1e308", 8_640_000_000_001, "8640000000001"]) {
+    assert.equal(normalizeRecommendCore(payload({ generated_at })), null, String(generated_at));
+  }
+  for (const [generated_at, expected] of [[1, 1], ["1.5", 1], [8_640_000_000_000, 8_640_000_000_000], ["8640000000000", 8_640_000_000_000]]) {
+    assert.equal(normalizeRecommendCore(payload({ generated_at }))?.generatedAt, expected);
+  }
+});

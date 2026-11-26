@@ -31,6 +31,14 @@ export function TermsReacceptBroadcastButton({
     `FlameNode の利用規約が更新されました。\n次回投稿前に /rules から内容を確認し、再同意してください。\nversion: ${versionLabel}`,
   );
 
+  // Closing the confirmation, including via its backdrop, invalidates the
+  // one-time TERMS acknowledgement. Keep content/cursor for deliberate retry.
+  function closeDialog(): void {
+    if (busyRef.current) return;
+    setOpen(false);
+    setConfirmText("");
+  }
+
   async function onSubmit(): Promise<void> {
     if (busyRef.current || confirmText !== "TERMS" || !content.trim()) return;
     busyRef.current = true;
@@ -71,7 +79,7 @@ export function TermsReacceptBroadcastButton({
         <div
           role="presentation"
           onClick={(event) => {
-            if (event.target === event.currentTarget && !busy) setOpen(false);
+            if (event.target === event.currentTarget) closeDialog();
           }}
           style={{
             position: "fixed",
@@ -199,10 +207,7 @@ export function TermsReacceptBroadcastButton({
               <button
                 type="button"
                 className="fn-btn fn-btn-ghost fn-btn-sm"
-                onClick={() => {
-                  setOpen(false);
-                  setConfirmText("");
-                }}
+                onClick={closeDialog}
                 disabled={busy}
               >
                 閉じる

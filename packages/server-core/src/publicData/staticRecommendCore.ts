@@ -1,6 +1,7 @@
 import type { StaticVideoCardData as VideoCardData } from "./videoCardCore.ts";
 import {
   normalizeCount,
+  normalizeNullableUnix,
   normalizeNumericUnix as normalizeUnix,
   normalizePresentString as normalizeNullableString,
   normalizePresentString as normalizeString,
@@ -42,7 +43,8 @@ export function normalizeRecommendCore(value: unknown): StaticRecommendCoreData 
   if (!Array.isArray(payload.recommended) || !Array.isArray(payload.latest)) return null;
   if (!Array.isArray(payload.underrated)) return null;
   if (!isValidGeneratedAtInput(payload.generated_at)) return null;
-  const generatedAt = normalizeUnix(payload.generated_at);
+  // Validate the floored timestamp against the shared Date-representable bounds.
+  const generatedAt = normalizeNullableUnix(payload.generated_at);
   if (generatedAt == null || generatedAt <= 0) return null;
   return {
     generatedAt,
