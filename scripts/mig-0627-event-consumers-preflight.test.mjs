@@ -153,17 +153,20 @@ if (runUnderRootTsx(import.meta.url)) {
   // Use the actual merged MIG-0666 publisher and envelope builder, not a
   // hand-written R2 body. The shared in-memory bucket is an injected test
   // binding only; no deployment, atomic generation pointer or live R2 proof.
-  function handoffFixture() {
-    const generation = "mig-0627-u02e-handoff";
+  function handoffFixture({
+    generation = "mig-0627-u02e-handoff",
+    eventTitle = "Public Event",
+    videoId = "video-public",
+  } = {}) {
     const event = {
-      id: "evt-public", title: "Public Event", visibility_status: "public",
+      id: "evt-public", title: eventTitle, visibility_status: "public",
       start_time: 1700002000, end_time: 1700003000,
     };
     const index = { generated_at: 1700000000, items: [event], group_sections: [] };
     const release = {
       schema_version: 1, generated_at: 1700000000, event,
       videos: [{
-        id: "video-public", title: "Public Video", visibility_status: "public",
+        id: videoId, title: "Public Video", visibility_status: "public",
         collaboration_type: "individual", creator_display_name: "Creator", members: [],
       }],
       total: 1,
@@ -285,4 +288,108 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(h.d1.stats.statements, 0);
     assert.equal(h.d1.stats.writes, 0);
   });
+
+  // These are build fault-injection / existing reader characterization tests.
+  // Index-last is not atomic across objects; do not treat green TAP as a
+  // release or visibility-cutover guarantee.
+  test("MIG-0627 U02e PREP T09: failed release readback never promotes index and a retry recovers", async (t) => {
+    const h = harness(t, { FORCE_STATIC_ONLY: "1" });
+    const previous = handoffFixture();
+    const next = handoffFixture({
+      generation: "mig-0627-u02e-next",
+      eventTitle: "Updated Public Event",
+      videoId: "video-next",
+    });
+    const p = publisherBinding(h);
+    await publishApiArtifacts(previous.result, p.bucket);
+    p.reads.length = 0;
+    p.writes.length = 0;
+
+    // Simulate a provider acknowledging the release PUT but leaving the
+    // previous object readable. The actual publisher must exhaust its bounded
+    // readback retries and never even compare the new index.
+    const droppedReleaseWrites = {
+      get: p.bucket.get,
+      async put(key) {
+        p.writes.push(key);
+        assert.equal(key, releaseKey);
+      },
+    };
+    await assert.rejects(
+      publishApiArtifacts(next.result, droppedReleaseWrites),
+      /readback integrity failed after 3 retries/,
+    );
+    assert.deepEqual(p.writes, Array(4).fill(releaseKey));
+    assert.deepEqual(p.reads, Array(5).fill(releaseKey));
+    assert.deepEqual(await (await h.storage.get(indexKey)).json(), previous.index);
+    assert.deepEqual(await (await h.storage.get(releaseKey)).json(), previous.release);
+    assert.equal(h.d1.stats.statements, 0);
+    assert.equal(h.d1.stats.writes, 0);
+
+    p.reads.length = 0;
+    p.writes.length = 0;
+    const recovered = await publishApiArtifacts(next.result, p.bucket);
+    assert.deepEqual({ puts: recovered.puts, skipped: recovered.skipped, retries: recovered.retries, verified: recovered.verified },
+      { puts: 2, skipped: 0, retries: 0, verified: 2 });
+    assert.deepEqual(p.writes, [releaseKey, indexKey]);
+    assert.deepEqual(await (await h.storage.get(indexKey)).json(), next.index);
+    assert.deepEqual(await (await h.storage.get(releaseKey)).json(), next.release);
+    assert.equal(h.d1.stats.statements, 0);
+    assert.equal(h.d1.stats.writes, 0);
+  });
+
+  test("MIG-0627 U02e PREP T10: failed index PUT exposes the non-atomic boundary; retry skips verified release", async (t) => {
+    const h = harness(t, { FORCE_STATIC_ONLY: "1" });
+    const previous = handoffFixture();
+    const next = handoffFixture({
+      generation: "mig-0627-u02e-next",
+      eventTitle: "Updated Public Event",
+      videoId: "video-next",
+    });
+    const p = publisherBinding(h);
+    await publishApiArtifacts(previous.result, p.bucket);
+    p.reads.length = 0;
+    p.writes.length = 0;
+
+    // Fail before the index PUT commits, after the release has been verified.
+    // Both fixtures are explicitly public: this is not revocation acceptance.
+    const failure = new Error("synthetic index PUT unavailable");
+    const failedIndex = {
+      get: p.bucket.get,
+      async put(key, body) {
+        if (key === indexKey) {
+          p.writes.push(key);
+          throw failure;
+        }
+        return p.bucket.put(key, body);
+      },
+    };
+    await assert.rejects(publishApiArtifacts(next.result, failedIndex), (error) => error === failure);
+    assert.deepEqual(p.writes, [releaseKey, indexKey]);
+    assert.deepEqual(p.reads, [releaseKey, releaseKey, indexKey]);
+    assert.deepEqual(await (await h.storage.get(indexKey)).json(), previous.index);
+    assert.deepEqual(await (await h.storage.get(releaseKey)).json(), next.release);
+    assert.equal(h.d1.stats.statements, 0);
+
+    const list = await h.request("/api/events");
+    assert.equal(list.status, 200);
+    assert.deepEqual((await list.json()).items.map((row) => [row.id, row.title]), [["evt-public", "Public Event"]]);
+    const release = await h.request("/api/event-endpoints/evt-public/release");
+    assert.equal(release.status, 200);
+    assert.deepEqual((await release.json()).videos.map((row) => row.id), ["video-next"]);
+    assert.deepEqual(h.reads, [indexKey, releaseKey]);
+    assert.deepEqual({ statements: h.d1.stats.statements, writes: h.d1.stats.writes }, { statements: 1, writes: 0 });
+
+    p.reads.length = 0;
+    p.writes.length = 0;
+    const recovered = await publishApiArtifacts(next.result, p.bucket);
+    assert.deepEqual({ puts: recovered.puts, skipped: recovered.skipped, retries: recovered.retries, verified: recovered.verified },
+      { puts: 1, skipped: 1, retries: 0, verified: 2 });
+    assert.deepEqual(p.writes, [indexKey]);
+    assert.deepEqual(p.reads, [releaseKey, indexKey, indexKey]);
+    assert.deepEqual(await (await h.storage.get(indexKey)).json(), next.index);
+    assert.deepEqual(await (await h.storage.get(releaseKey)).json(), next.release);
+    assert.deepEqual({ statements: h.d1.stats.statements, writes: h.d1.stats.writes }, { statements: 1, writes: 0 });
+  });
+
 }
