@@ -45,8 +45,8 @@ export function AdminSpreadsheetReadView({
   const [exportBusy, setExportBusy] = React.useState(false);
   const [exportMessage, setExportMessage] = React.useState<string | null>(null);
   const exportRef = React.useRef<AbortController | null>(null);
-  const visibleContext = React.useRef({ fetchFn, selectedTable, page });
-  visibleContext.current = { fetchFn, selectedTable, page };
+  const visibleContext = React.useRef({ fetchFn, initialTable, selectedTable, page });
+  visibleContext.current = { fetchFn, initialTable, selectedTable, page };
 
   async function refreshAfterMutation(): Promise<void> {
     const requestedTable = selectedTable;
@@ -61,17 +61,35 @@ export function AdminSpreadsheetReadView({
     if (result.status !== "ok") throw new Error("spreadsheet_reload_failed");
   }
 
-  React.useEffect(() => () => exportRef.current?.abort(), [selectedTable]);
+  React.useEffect(() => {
+    setExportBusy(false);
+    setExportMessage(null);
+    return () => {
+      exportRef.current?.abort();
+      exportRef.current = null;
+    };
+  }, [fetchFn, initialTable, selectedTable]);
 
+  // Keep both browser delivery paths under the same async operation guard.
   async function exportDelimited(format: "csv" | "tsv", destination: "download" | "copy"): Promise<void> {
     if (!selectedTable || exportRef.current) return;
     const controller = new AbortController();
     exportRef.current = controller;
+    const isCurrent = (): boolean => {
+      const live = visibleContext.current;
+      // Render-time context tracking closes the gap before cleanup; exports span all pages.
+      return exportRef.current === controller && !controller.signal.aborted &&
+        live.fetchFn === fetchFn && live.initialTable === initialTable && live.selectedTable === selectedTable;
+    };
+    if (!isCurrent()) {
+      exportRef.current = null;
+      return;
+    }
     setExportBusy(true);
     setExportMessage(null);
     try {
       const result = await loadSpreadsheetExport(fetchFn, selectedTable, format, controller.signal);
-      if (controller.signal.aborted) return;
+      if (!isCurrent()) return;
       if (result.status === "disabled") {
         setCatalog({ status: "disabled" });
         return;
@@ -82,12 +100,13 @@ export function AdminSpreadsheetReadView({
       }
       if (destination === "copy") {
         const body = await result.data.blob.text();
-        if (controller.signal.aborted) return;
+        if (!isCurrent()) return;
         let copied = false;
         try {
           await navigator.clipboard.writeText(body);
           copied = true;
         } catch {
+          if (!isCurrent()) return;
           // Matches CURRENT's fallback for browsers without Clipboard API grants.
           const textarea = document.createElement("textarea");
           textarea.value = body;
@@ -104,6 +123,7 @@ export function AdminSpreadsheetReadView({
             textarea.remove();
           }
         }
+        if (!isCurrent()) return;
         if (!copied) {
           setExportMessage("クリップボードへのコピーに失敗しました。");
           return;
@@ -113,6 +133,7 @@ export function AdminSpreadsheetReadView({
           : "クリップボードにコピーしました。");
         return;
       }
+      if (!isCurrent()) return;
       // No remote filename is trusted: the table ID is sanitized before download.
       const safeName = selectedTable.replace(/[^A-Za-z0-9_-]/g, "_");
       const name = `${safeName}${result.data.truncated ? "-partial" : ""}.${format}`;
@@ -127,15 +148,17 @@ export function AdminSpreadsheetReadView({
       } finally {
         URL.revokeObjectURL(objectUrl);
       }
+      if (!isCurrent()) return;
       setExportMessage(result.data.truncated
         ? "件数またはサイズ上限により一部のデータのみ保存しました。"
         : `${format.toUpperCase()} をダウンロードしました。`);
     } catch {
-      if (!controller.signal.aborted) setExportMessage("エクスポートに失敗しました。");
+      if (isCurrent()) setExportMessage("エクスポートに失敗しました。");
     } finally {
+      const current = isCurrent();
       if (exportRef.current === controller) {
         exportRef.current = null;
-        if (!controller.signal.aborted) setExportBusy(false);
+        if (current) setExportBusy(false);
       }
     }
   }
