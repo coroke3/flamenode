@@ -241,7 +241,68 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
-  test("SEC-726: normalized-equal unsafe persisted Active X must never report idempotent success", async () => {
+  test("SEC-726: unsafe normalized-equal Active X arriving after session read never reports idempotent success", async () => {
+    for (const [label, id, raw] of [
+      ["prefix over 128 codepoints", "a".repeat(128), "@" + "a".repeat(128)],
+      ["trim over 128 codepoints", "b".repeat(128), " " + "b".repeat(128)],
+      ["prefix over 512 UTF8 bytes", "🌀".repeat(128), "@" + "🌀".repeat(128)],
+    ]) {
+      const w = world();
+      try {
+        insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
+        insert(w.sqlite, "x_user_account_links", {
+          x_user_id: id, auth_user_id: "u_multi", link_role: "manager",
+        });
+        // Inject a concurrent legacy writer AFTER the actual session SELECT.
+        // This isolates SA-098's own boundary even after SEC-713 lands.
+        const initial = snapshot(w);
+        let afterConcurrentWrite;
+        let injected = 0;
+        w.d1 = atomicD1(w.sqlite, {
+          beforeRead(sql, sqlite) {
+            if (!sql.includes('FROM "session" s')) return;
+            assert.equal(++injected, 1, "one real session read");
+            assert.equal(sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = ?')
+              .get("u_multi").active_x_user_id, "x_m1", "session starts valid");
+            sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?')
+              .run(raw, "u_multi");
+            afterConcurrentWrite = snapshot(w);
+          },
+        });
+        const reads = w.d1.stats.reads;
+        const batches = w.d1.stats.batches;
+        const response = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: id });
+        assert.equal(response.status, 503, label);
+        assert.equal(response.result.ok, false, label);
+        assert.equal(response.result.reason, "db_unavailable", label);
+        assert.equal(w.d1.stats.reads - reads, 2, "session + selected identity only: " + label);
+        assert.equal(w.d1.stats.batches - batches, 0, "no user/audit batch: " + label);
+        assert.equal(injected, 1, label);
+        assert.ok(afterConcurrentWrite, "external race was exercised");
+        const expected = { ...initial, users: initial.users.map((row) =>
+          row.id === "u_multi" ? { ...row, active_x_user_id: raw } : row) };
+        assert.deepEqual(snapshot(w), afterConcurrentWrite, "no implicit repair, audit or queue: " + label);
+        assert.deepEqual(JSON.parse(JSON.stringify(afterConcurrentWrite)), JSON.parse(JSON.stringify(expected)),
+          "only the injected external write changed the fixture: " + label);
+        assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0, label);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
+  test("SEC-726 / SEC-713: preexisting unsafe Active X is denied at the applicable reader or writer boundary", async () => {
+    // Auth changes cannot be stacked (GIT_WORKFLOW §11). Before #714 is
+    // merged, this tests the SA-098 fallback; once its explicit bounded
+    // reader contract is present, the SAME mounted test must prove the
+    // one-read initial-session denial. Never select expectations from the
+    // returned response or silently skip the scenario.
+    const session = await import("../src/auth/session.ts");
+    const boundedReader = Object.hasOwn(session, "MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS");
+    if (boundedReader) {
+      assert.equal(session.MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS, 128);
+      assert.equal(session.MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES, 512);
+    }
     for (const [label, id, raw] of [
       ["prefix over 128 codepoints", "a".repeat(128), "@" + "a".repeat(128)],
       ["trim over 128 codepoints", "b".repeat(128), " " + "b".repeat(128)],
@@ -261,8 +322,9 @@ if (runUnderRootTsx(import.meta.url)) {
         const response = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: id });
         assert.equal(response.status, 503, label);
         assert.equal(response.result.ok, false, label);
-        assert.equal(response.result.reason, "db_unavailable", label);
-        assert.equal(w.d1.stats.reads - reads, 2, "session + selected identity only: " + label);
+        assert.equal(response.result.reason, boundedReader ? "database_unavailable" : "db_unavailable", label);
+        assert.equal(w.d1.stats.reads - reads, boundedReader ? 1 : 2, "reader or writer boundary: " + label);
+        if (boundedReader) assert.ok(w.d1.stats.readSql.every((sql) => sql.includes('FROM "session" s')), "no selected-identity read");
         assert.equal(w.d1.stats.batches - batches, 0, "no user/audit batch: " + label);
         assert.deepEqual(snapshot(w), before, "no implicit repair, audit or queue: " + label);
         assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0, label);
@@ -292,9 +354,14 @@ if (runUnderRootTsx(import.meta.url)) {
         const response = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: id });
         assert.equal(response.status, 200, label);
         assert.deepEqual(response.result, { ok: true, message: "すでにこの X ID がアクティブです。" }, label);
+        const { resolveSessionUser } = await import("../src/auth/session.ts");
+        const readsAfterNoOp = w.d1.stats.reads;
         assert.equal(w.d1.stats.reads - reads, 2, "session + selected identity only: " + label);
         assert.equal(w.d1.stats.batches - batches, 0, label);
         assert.deepEqual(snapshot(w), before, "CURRENT safe no-op is unchanged: " + label);
+        const nextSession = await resolveSessionUser(w.d1, "tok_u_multi", { now: 1_800_000_000_000 });
+        assert.equal(nextSession?.active_x_user_id, raw, "next real session preserves valid legacy spelling: " + label);
+        assert.equal(w.d1.stats.reads - readsAfterNoOp, 1, label);
         assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0, label);
       } finally {
         w.sqlite.close();
