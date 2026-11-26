@@ -11,6 +11,9 @@ if (runUnderRootTsx(import.meta.url)) {
   const { app } = await import("../apps/api/src/app.ts");
   const { resetOperationModeCachesForTests } = await import("../apps/api/src/routes/live/operationMode.ts");
   const { clearPublicApiRateLimitForTests } = await import("@flamenode/server-core/publicData/publicApi");
+  const { wrapSnapshot } = await import("../apps/site/scripts/produceSnapshots.ts");
+  const { publishApiArtifacts } = await import("../apps/site/scripts/publishApiArtifacts.ts");
+  const { EVENT_INDEX_KEY, eventDetailKey, eventReleaseKey } = await import("../apps/site/src/lib/publicDataLoader.ts");
 
   const indexKey = "events/index.json";
   const releaseKey = "events/evt-public/release.v1.json";
@@ -145,5 +148,141 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.match(honoStaff, /eventBaseObjectKey\(eventId\)/);
     assert.doesNotMatch(apiBindings, /FLAMENODE_SNAPSHOT_(?:DIR|MANIFEST_FILE)/,
       "Astro's build-local directory is not a published API Worker artifact binding");
+  });
+
+  // Use the actual merged MIG-0666 publisher and envelope builder, not a
+  // hand-written R2 body. The shared in-memory bucket is an injected test
+  // binding only; no deployment, atomic generation pointer or live R2 proof.
+  function handoffFixture() {
+    const generation = "mig-0627-u02e-handoff";
+    const event = {
+      id: "evt-public", title: "Public Event", visibility_status: "public",
+      start_time: 1700002000, end_time: 1700003000,
+    };
+    const index = { generated_at: 1700000000, items: [event], group_sections: [] };
+    const release = {
+      schema_version: 1, generated_at: 1700000000, event,
+      videos: [{
+        id: "video-public", title: "Public Video", visibility_status: "public",
+        collaboration_type: "individual", creator_display_name: "Creator", members: [],
+      }],
+      total: 1,
+    };
+    const snapshots = [
+      wrapSnapshot(EVENT_INDEX_KEY, generation, index),
+      wrapSnapshot(eventDetailKey(event.id), generation, { event }),
+      wrapSnapshot(eventReleaseKey(event.id), generation, release),
+    ];
+    return {
+      index, release,
+      result: {
+        publicEventIds: [event.id], snapshots,
+        manifest: {
+          schemaVersion: 1, generation,
+          allowedKeys: snapshots.map((snapshot) => snapshot.key),
+          blockedKeys: [],
+        },
+      },
+    };
+  }
+
+  function publisherBinding(h) {
+    const reads = [];
+    const writes = [];
+    return {
+      reads, writes,
+      bucket: {
+        async get(key) {
+          reads.push(key);
+          return h.storage.get(key);
+        },
+        async put(key, body) {
+          writes.push(key);
+          return h.storage.put(key, body);
+        },
+      },
+    };
+  }
+
+  test("MIG-0627 U02e PREP T07: actual build publisher hands bare event index and release DTOs to mounted Hono", async (t) => {
+    const h = harness(t, { FORCE_STATIC_ONLY: "1" });
+    const { result, index, release } = handoffFixture();
+    const p = publisherBinding(h);
+
+    const first = await publishApiArtifacts(result, p.bucket);
+    assert.deepEqual({ artifacts: first.artifacts, puts: first.puts, skipped: first.skipped, retries: first.retries, verified: first.verified },
+      { artifacts: 2, puts: 2, skipped: 0, retries: 0, verified: 2 });
+    assert.deepEqual(p.writes, [releaseKey, indexKey], "release before index publication");
+    assert.deepEqual(p.reads, [releaseKey, releaseKey, indexKey, indexKey], "comparison and readback per artifact");
+    assert.deepEqual(await (await h.storage.get(indexKey)).json(), index);
+    assert.deepEqual(await (await h.storage.get(releaseKey)).json(), release);
+    assert.equal(first.bytes, Buffer.byteLength(JSON.stringify(index)) + Buffer.byteLength(JSON.stringify(release)));
+    assert.equal(h.d1.stats.statements, 0, "publisher does not touch runtime D1");
+
+    const list = await h.request("/api/events");
+    assert.equal(list.status, 200);
+    const listBody = await list.json();
+    assert.deepEqual(listBody.items.map((row) => [row.id, row.title]), [["evt-public", "Public Event"]]);
+    assert.deepEqual({ page: listBody.page, limit: listBody.limit }, { page: 1, limit: 60 });
+    assert.equal(list.headers.get("Cache-Control"), "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
+    assert.deepEqual(h.reads, [indexKey]);
+    assert.equal(h.d1.stats.statements, 0);
+
+    const response = await h.request("/api/event-endpoints/evt-public/release");
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.event.id, "evt-public");
+    assert.deepEqual(body.videos.map((row) => row.id), ["video-public"]);
+    assert.equal(body.total, 1);
+    assert.equal(response.headers.get("Cache-Control"), "public, max-age=30, s-maxage=60, stale-while-revalidate=120");
+    assert.deepEqual(h.reads, [indexKey, releaseKey]);
+    assert.deepEqual({ statements: h.d1.stats.statements, writes: h.d1.stats.writes }, { statements: 1, writes: 0 });
+
+    for (const id of ["evt-private", "evt-disabled"]) {
+      const denied = await h.request("/api/event-endpoints/" + id + "/release");
+      assert.equal(denied.status, 404);
+      assert.deepEqual(await denied.json(), { error: "not_found" });
+    }
+    assert.deepEqual(h.reads, [indexKey, releaseKey], "D1 authorization precedes artifact access");
+    assert.deepEqual({ statements: h.d1.stats.statements, writes: h.d1.stats.writes }, { statements: 3, writes: 0 });
+
+    p.reads.length = 0;
+    const unchanged = await publishApiArtifacts(result, p.bucket);
+    assert.deepEqual({ puts: unchanged.puts, skipped: unchanged.skipped, verified: unchanged.verified },
+      { puts: 0, skipped: 2, verified: 2 });
+    assert.deepEqual(p.writes, [releaseKey, indexKey], "identical build issues no additional PUT");
+    assert.deepEqual(p.reads, [releaseKey, indexKey]);
+  });
+
+  test("MIG-0627 U02e PREP T08: bad build generation, digest or manifest deny before publication I/O", async (t) => {
+    const h = harness(t, { FORCE_STATIC_ONLY: "1" });
+    const { result, index, release } = handoffFixture();
+    const p = publisherBinding(h);
+    await publishApiArtifacts(result, p.bucket);
+    p.reads.length = 0;
+    p.writes.length = 0;
+
+    const key = eventReleaseKey("evt-public");
+    for (const kind of ["generation", "digest", "blocked"]) {
+      const invalid = structuredClone(result);
+      const snapshot = invalid.snapshots.find((entry) => entry.key === key);
+      assert.ok(snapshot);
+      if (kind === "generation") {
+        const envelope = JSON.parse(snapshot.json);
+        envelope.generation = "different-generation";
+        snapshot.json = JSON.stringify(envelope);
+      } else if (kind === "digest") {
+        snapshot.sha256 = "0".repeat(64);
+      } else {
+        invalid.manifest.blockedKeys.push(key);
+      }
+      await assert.rejects(publishApiArtifacts(invalid, p.bucket), /api artifact publish:/, kind);
+      assert.deepEqual(p.reads, [], kind + ": preflight must precede comparison reads");
+      assert.deepEqual(p.writes, [], kind + ": no rejected generation is published");
+      assert.deepEqual(await (await h.storage.get(indexKey)).json(), index);
+      assert.deepEqual(await (await h.storage.get(releaseKey)).json(), release);
+    }
+    assert.equal(h.d1.stats.statements, 0);
+    assert.equal(h.d1.stats.writes, 0);
   });
 }
