@@ -67,6 +67,8 @@ export function AdminSpreadsheetEditableGrid({
   const nextEditId = React.useRef(0);
   const [anchorCell, setAnchorCell] = React.useState<GridCell>({ row: 0, col: 0 });
   const [focusedCell, setFocusedCell] = React.useState<GridCell>({ row: 0, col: 0 });
+  // CURRENT's committed state preserves the observed ordering of batched press/enter/release events.
+  const [dragging, setDragging] = React.useState(false);
   const [findOpen, setFindOpen] = React.useState(false);
   const [findQuery, setFindQuery] = React.useState("");
   const [findHint, setFindHint] = React.useState<string | null>(null);
@@ -124,7 +126,7 @@ export function AdminSpreadsheetEditableGrid({
       const width = clampColumnWidth(drag.startWidth + event.clientX - drag.startX);
       setColWidths(previous => ({ ...previous, [drag.column]: width }));
     };
-    const onUp = () => { resizeRef.current = null; };
+    const onUp = () => { resizeRef.current = null; setDragging(false); };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => {
@@ -351,6 +353,12 @@ export function AdminSpreadsheetEditableGrid({
     tableRef.current?.querySelector<HTMLTableCellElement>(`[data-grid-cell="${focus.row}:${focus.col}"]`)?.focus();
   }
 
+  function canSelectWithPointer(): boolean {
+    // CURRENT permits pointer selection during history; keep the live draft fence until blur-save is ported.
+    return !identityChanged && isCurrent() && liveSelection.current === null &&
+      rows.length > 0 && columns.length > 0;
+  }
+
   function canUseFind(): boolean {
     // Keep the existing draft fence until CURRENT blur-save is ported. Ordinary saves are not historyBusy.
     return !identityChanged && isCurrent() && liveSelection.current === null &&
@@ -492,6 +500,22 @@ export function AdminSpreadsheetEditableGrid({
 
   return (
     <section aria-label="管理スプレッドシート編集">
+      <style>{`
+        [data-spreadsheet-grid-viewport] {
+          --sheet-bg: #ffffff;
+          --sheet-header-bg: #f8f9fa;
+          --sheet-focus: #1a73e8;
+          --sheet-focus-soft: color-mix(in srgb, #1a73e8 10%, #ffffff);
+        }
+        @media (prefers-color-scheme: dark) {
+          [data-spreadsheet-grid-viewport] {
+            --sheet-bg: var(--bg-base, #1a1a1a);
+            --sheet-header-bg: var(--bg-elevated, #252525);
+            --sheet-focus: var(--accent-primary, #8ab4f8);
+            --sheet-focus-soft: color-mix(in srgb, var(--accent-primary, #8ab4f8) 14%, var(--bg-base, #1a1a1a));
+          }
+        }
+      `}</style>
       <p>{editable ? "編集可能な列のみ変更できます。主キー列は変更できません。" : "読み取り専用（編集は無効です）。"}</p>
       {notice ? <p role="status">{notice}</p> : null}
       {!identityChanged && findHint ? <p role="status">{findHint}</p> : null}
@@ -529,7 +553,7 @@ export function AdminSpreadsheetEditableGrid({
         </div>
       ) : null}
       <p>矢印キーで移動、Shift＋矢印で範囲選択、Ctrl/Cmd＋Aで全体選択、Shift＋Spaceで行選択、Ctrl/Cmd＋Spaceで列選択、Ctrl/Cmd＋CでTSVコピー、Enterで編集できます。</p>
-      <p>見出しのクリックで全体・行・列を選択し、Shift＋行・列見出しで現在の始点から範囲を広げられます。</p>
+      <p>セルのドラッグで範囲選択できます。見出しのクリックで全体・行・列を選択し、Shift＋行・列見出しで現在の始点から範囲を広げられます。</p>
       <p>編集中はEnterで確定して下へ、Tabで確定して右へ、Shift＋Tabで確定して左へ移動できます。Escapeでキャンセルできます。</p>
       <p>Ctrl/Cmd＋Fで現在のページ内を検索できます。</p>
       {currentSelection && selectionConflict && !busy ? (
@@ -540,7 +564,7 @@ export function AdminSpreadsheetEditableGrid({
       ) : currentSelection && !selectionConflict ? (
         <p>見出しで選択する前に、セルを保存するかキャンセルしてください。</p>
       ) : null}
-      <div style={{ overflowX: "auto" }}>
+      <div data-spreadsheet-grid-viewport="" style={{ overflowX: "auto" }}>
         <table ref={tableRef} tabIndex={rows.length === 0 || columns.length === 0 ? 0 : -1}
           style={{ borderCollapse: "separate", borderSpacing: 0, fontSize: 12, minWidth: "max-content", width: "100%" }}
           onFocusCapture={event => {
@@ -607,6 +631,7 @@ export function AdminSpreadsheetEditableGrid({
                     event.preventDefault();
                     event.stopPropagation();
                     resizeRef.current = { column: c.name, startX: event.clientX, startWidth: colWidth(c.name) };
+                    setDragging(true);
                   }} />
               </th>
               );
@@ -629,22 +654,43 @@ export function AdminSpreadsheetEditableGrid({
                 const canEdit = editable && c.editable && c.pk === 0 && !c.generated &&
                   primaryKey(row, primaryKeys) !== null;
                 const editing = !selectionConflict && currentSelection?.rowIndex === ri && currentSelection?.column === c.name;
+                const selected = !identityChanged && ri >= Math.min(visibleAnchor.row, visibleFocus.row) &&
+                  ri <= Math.max(visibleAnchor.row, visibleFocus.row) &&
+                  columns.indexOf(c) >= Math.min(visibleAnchor.col, visibleFocus.col) &&
+                  columns.indexOf(c) <= Math.max(visibleAnchor.col, visibleFocus.col);
+                const focused = !identityChanged && visibleFocus.row === ri && visibleFocus.col === columns.indexOf(c);
                 return (
                   <td key={c.name} data-grid-cell={`${ri}:${columns.indexOf(c)}`}
                     data-find-match={findHit || undefined}
                     style={{ width: colWidth(c.name), padding: 0, maxWidth: 280, verticalAlign: "middle",
-                      background: findHit ? "color-mix(in srgb, #fbbc04 35%, var(--sheet-bg, var(--bg-base, #fff)))" : undefined }}
+                      background: findHit ? "color-mix(in srgb, #fbbc04 35%, var(--sheet-bg, var(--bg-base, #fff)))" :
+                        !canEdit ? "var(--sheet-header-bg)" : selected ? "var(--sheet-focus-soft)" : "var(--sheet-bg)",
+                      boxShadow: focused ? "inset 0 0 0 2px var(--sheet-focus)" : undefined,
+                      position: focused ? "relative" : undefined, zIndex: focused ? 1 : undefined }}
                     tabIndex={visibleFocus.row === ri && visibleFocus.col === columns.indexOf(c) ? 0 : -1}
-                    aria-selected={!identityChanged && ri >= Math.min(visibleAnchor.row, visibleFocus.row) &&
-                      ri <= Math.max(visibleAnchor.row, visibleFocus.row) &&
-                      columns.indexOf(c) >= Math.min(visibleAnchor.col, visibleFocus.col) &&
-                      columns.indexOf(c) <= Math.max(visibleAnchor.col, visibleFocus.col)}
-                    onClick={(event) => {
+                    aria-selected={selected}
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) return;
                       if (event.target !== event.currentTarget &&
                           !(event.target instanceof HTMLElement && event.target.hasAttribute("data-grid-cell-content"))) return;
-                      const pos = { row: ri, col: columns.indexOf(c) };
-                      setAnchorCell(pos);
-                      setFocusedCell(pos);
+                      event.preventDefault();
+                      if (!canSelectWithPointer()) return;
+                      const position = boundCellToPage({ row: ri, col: columns.indexOf(c) });
+                      setDragging(true);
+                      if (!event.shiftKey) setAnchorCell(position);
+                      focusGridCell(position);
+                      event.currentTarget.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+                    }}
+                    onMouseEnter={(event) => {
+                      if (!dragging || !canSelectWithPointer()) return;
+                      const position = boundCellToPage({ row: ri, col: columns.indexOf(c) });
+                      const table = tableRef.current;
+                      const active = event.currentTarget.ownerDocument.activeElement;
+                      // Roving TD keys use their coordinates; transfer only focus already owned by this grid.
+                      if (table && (active === table || (active instanceof HTMLElement && active.tagName === "TD" &&
+                          active.hasAttribute("data-grid-cell") && table.contains(active)))) focusGridCell(position);
+                      else setFocusedCell(position);
+                      event.currentTarget.scrollIntoView?.({ block: "nearest", inline: "nearest" });
                     }}
                     onKeyDown={(event) => handleGridKey(event, ri, columns.indexOf(c))}>{editing && currentSelection ? (
                     <label>{c.name} を編集

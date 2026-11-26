@@ -128,9 +128,19 @@ function gridCell(ui, position) {
 function selectedCells(ui) {
   return [...ui.host.querySelectorAll('[aria-selected="true"]')].map(cell => cell.dataset.gridCell);
 }
+async function clickCellTarget(target) {
+  await React.act(async () => {
+    const down = new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, buttons: 1, detail: 1 });
+    target.dispatchEvent(down);
+    // JSDOM does not execute the browser's default mousedown focus action.
+    if (!down.defaultPrevented) target.closest("[data-grid-cell]")?.focus();
+    target.dispatchEvent(new dom.window.MouseEvent("mouseup", { bubbles: true, button: 0, detail: 1 }));
+    target.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0, detail: 1 }));
+  });
+}
 async function selectCell(ui, position) {
   const cell = gridCell(ui, position);
-  await React.act(async () => { cell.focus(); cell.click(); });
+  await clickCellTarget(cell);
   return cell;
 }
 async function clickButton(ui, text) {
@@ -804,7 +814,7 @@ test("MIG-0737 U01 column sizing: empty and null display spans with nonzero layo
     for (const position of ["0:1", "1:1", "2:1"]) measureValue(ui, position, 350);
     await autoFitColumn(ui, 1);
     assert.equal(gridColumnWidth(ui, 1), 56);
-    await React.act(async () => displayedValue(ui, "1:1").click());
+    await clickCellTarget(displayedValue(ui, "1:1"));
     assert.deepEqual(selectedCells(ui), ["1:1"]);
     await ui.render({ data: { ...rangeData, rows: [
       { id: "a", title: " " }, { id: "b", title: 0 }, { id: "c", title: false },
@@ -876,7 +886,7 @@ test("MIG-0737 U01 column sizing: value wrapper preserves range navigation and c
   } });
   const ui = await mount({ data: rangeData });
   try {
-    await React.act(async () => displayedValue(ui, "1:1").click());
+    await clickCellTarget(displayedValue(ui, "1:1"));
     assert.deepEqual(selectedCells(ui), ["1:1"]);
     const cell = gridCell(ui, "1:1");
     assert.equal(cell.tabIndex, 0);

@@ -114,7 +114,14 @@ async function click(ui, name) {
 }
 async function select(ui, position) {
   const target = cell(ui, position);
-  await React.act(async () => { target.focus(); target.click(); });
+  await React.act(async () => {
+    const down = new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, buttons: 1, detail: 1 });
+    target.dispatchEvent(down);
+    // JSDOM does not execute the browser's default mousedown focus action.
+    if (!down.defaultPrevented) target.focus();
+    target.dispatchEvent(new dom.window.MouseEvent("mouseup", { bubbles: true, button: 0, detail: 1 }));
+    target.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0, detail: 1 }));
+  });
   return target;
 }
 async function inputValue(input, value) {
