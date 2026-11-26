@@ -603,3 +603,123 @@ test("MIG-0737 U01: page navigation keeps a table-wide export active", async () 
     observed.restore();
   }
 });
+
+
+test("MIG-0737 U01: same active table on page one preserves rows and a pending export", async () => {
+  const observed = observeExports();
+  const pending = deferred();
+  const requests = [];
+  let exportSignal;
+  const fn = async (path, init) => {
+    requests.push({ path, method: init.method });
+    if (path.includes("/tables")) return json(200, catalog);
+    if (path.includes("/data")) return json(200, page("videos", 1, true));
+    exportSignal = init.signal;
+    return pending.promise;
+  };
+  const ui = await mount(fn, "videos");
+  try {
+    await React.act(async () => exportButton(ui.host).click());
+    const active = ui.host.querySelector('nav button[aria-pressed="true"]');
+    assert.ok(active);
+    await React.act(async () => active.click());
+    await flush();
+    assert.match(ui.host.textContent, /<unsafe>/);
+    assert.equal(requests.filter(x => x.path.includes("/data")).length, 1);
+    assert.equal(exportSignal.aborted, false);
+    assert.equal(exportButton(ui.host).disabled, true);
+    await React.act(async () => pending.resolve(exportResponse()));
+    await flush();
+    assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+    assert.ok(requests.every(x => x.method === "GET"));
+  } finally {
+    await ui.cleanup();
+    observed.restore();
+  }
+});
+
+test("MIG-0737 U01: reselecting active table on page two resets to page one", async () => {
+  const reads = [];
+  const fn = async (path, init) => {
+    assert.equal(init.method, "GET");
+    if (path.includes("/tables")) return json(200, catalog);
+    const params = new URL(path, "https://flamenode.test").searchParams;
+    const n = Number(params.get("page"));
+    reads.push(n);
+    return json(200, page(params.get("table"), n, n === 1));
+  };
+  const ui = await mount(fn, "videos");
+  try {
+    await React.act(async () => exportButton(ui.host, "次へ").click());
+    await flush();
+    assert.match(ui.host.textContent, /page two/);
+    await React.act(async () => ui.host.querySelector('nav button[aria-pressed="true"]').click());
+    await flush();
+    assert.match(ui.host.textContent, /<unsafe>/);
+    assert.deepEqual(reads, [1, 2, 1]);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01: explicit reload retries a failed page and refreshes read-only rows", async () => {
+  for (const status of [403, 503]) {
+    const reads = [];
+    const fn = async (path, init) => {
+      assert.equal(init.method, "GET");
+      if (path.includes("/tables")) return json(200, catalog);
+      reads.push(path);
+      if (reads.length === 1) return json(status, { reason: "admin_required" });
+      return json(200, { ...page("videos", 1), rows: [{ title: "reload " + reads.length }] });
+    };
+    const ui = await mount(fn, "videos");
+    try {
+      assert.equal(ui.host.querySelector("table"), null);
+      await React.act(async () => ui.host.querySelector('nav button[aria-pressed="true"]').click());
+      await flush();
+      assert.equal(reads.length, 1, "same-page selection is inert even after failure");
+      assert.equal(exportButton(ui.host, "再読込").disabled, false);
+      await React.act(async () => exportButton(ui.host, "再読込").click());
+      await flush();
+      assert.match(ui.host.textContent, /reload 2/);
+      await React.act(async () => exportButton(ui.host, "再読込").click());
+      await flush();
+      assert.match(ui.host.textContent, /reload 3/);
+      assert.deepEqual(reads, Array(3).fill("/api/admin/spreadsheet/data?table=videos&page=1"));
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01: stale explicit reload cannot overwrite newer table rows", async () => {
+  for (const staleStatus of [200, 403]) {
+    const pending = deferred();
+    let oldSignal;
+    let videoReads = 0;
+    const fn = async (path, init) => {
+      assert.equal(init.method, "GET");
+      if (path.includes("/tables")) return json(200, catalog);
+      const name = new URL(path, "https://flamenode.test").searchParams.get("table");
+      if (name === "videos" && ++videoReads === 2) {
+        oldSignal = init.signal;
+        return pending.promise;
+      }
+      return json(200, { ...page(name, 1), rows: [{ title: name === "events" ? "current events" : "initial videos" }] });
+    };
+    const ui = await mount(fn, "videos");
+    try {
+      await React.act(async () => exportButton(ui.host, "再読込").click());
+      await flush();
+      assert.ok(oldSignal);
+      assert.equal(exportButton(ui.host, "再読込").disabled, true);
+      const events = [...ui.host.querySelectorAll("nav button")].find(b => b.textContent.includes("イベント"));
+      await React.act(async () => events.click());
+      await flush();
+      assert.equal(oldSignal.aborted, true);
+      assert.match(ui.host.textContent, /current events/);
+      await React.act(async () => pending.resolve(staleStatus === 200
+        ? json(200, { ...page("videos", 1), rows: [{ title: "stale videos" }] })
+        : json(403, { reason: "admin_required" })));
+      await flush();
+      assert.match(ui.host.textContent, /current events/);
+      assert.doesNotMatch(ui.host.textContent, /stale videos|管理者権限が必要/);
+    } finally { await ui.cleanup(); }
+  }
+});

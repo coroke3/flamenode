@@ -41,6 +41,7 @@ export function AdminSpreadsheetReadView({
   const [catalogOrigin, setCatalogOrigin] = React.useState<{ fetchFn: OpsFetch; initialTable?: string } | null>(null);
   const [selectedTable, setSelectedTable] = React.useState("");
   const [page, setPage] = React.useState(1);
+  const [reloadVersion, setReloadVersion] = React.useState(0);
   const [rows, setRows] = React.useState<PageState>({ status: "loading" });
   const [exportBusy, setExportBusy] = React.useState(false);
   const [exportMessage, setExportMessage] = React.useState<string | null>(null);
@@ -53,8 +54,8 @@ export function AdminSpreadsheetReadView({
   const catalogReady = catalog.status === "ready" && catalogOrigin?.fetchFn === fetchFn &&
     catalogOrigin.initialTable === initialTable;
   const pageContext = React.useMemo(() => ({
-    fetchFn, initialTable, selectedTable, page, enableMutations, catalogReady,
-  }), [fetchFn, initialTable, selectedTable, page, enableMutations, catalogReady]);
+    fetchFn, initialTable, selectedTable, page, enableMutations, catalogReady, reloadVersion,
+  }), [fetchFn, initialTable, selectedTable, page, enableMutations, catalogReady, reloadVersion]);
   const committedPageContext = React.useRef<typeof pageContext | null>(null);
   const pageReadRef = React.useRef<AbortController | null>(null);
   React.useLayoutEffect(() => {
@@ -255,7 +256,14 @@ export function AdminSpreadsheetReadView({
       <nav aria-label="テーブル一覧">
         {catalog.tables.map((item) => (
           <button type="button" key={item.table} aria-pressed={item.table === selectedTable}
-            onClick={() => { exportRef.current?.abort(); exportRef.current = null; setExportBusy(false); setExportMessage(null); setRows({ status: "loading" }); setSelectedTable(item.table); setPage(1); }}>
+            onClick={() => {
+              // Selecting the same table and page cannot schedule another GET.
+              // Keep existing rows, export and any live editor draft in place.
+              if (item.table === selectedTable && page === 1) return;
+              exportRef.current?.abort(); exportRef.current = null;
+              setExportBusy(false); setExportMessage(null); setRows({ status: "loading" });
+              setSelectedTable(item.table); setPage(1);
+            }}>
             {item.label} ({item.mode === "readonly" ? "RO" : "RW"})
           </button>
         ))}
@@ -269,6 +277,15 @@ export function AdminSpreadsheetReadView({
             <button type="button" disabled={exportBusy} onClick={() => void exportDelimited("csv", "copy")}>コピー (CSV)</button>
           </div>
           {exportMessage ? <p role="status">{exportMessage}</p> : null}
+          {/* Explicit read retry uses the same committed page lease. A ready
+              editable grid must not be unmounted by a reload until its draft
+              and mutation lifecycle is reconciled with CURRENT. */}
+          {!enableMutations || !data || active.mode === "readonly" ? (
+            <button type="button" disabled={rows.status === "loading"}
+              onClick={() => { setRows({ status: "loading" }); setReloadVersion(n => n + 1); }}>
+              再読込
+            </button>
+          ) : null}
           {data ? (
             <>
               <p>ページ {data.page} ・ {data.limit} 件/ページ ・ {enableMutations ? "編集可能列のみ操作可" : "読み取り専用"}</p>

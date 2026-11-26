@@ -186,3 +186,30 @@ for (const staleStatus of [200, 403]) {
     }
   });
 }
+
+
+test("MIG-0737 U01: reselecting the ready editable table preserves the live cell draft", async () => {
+  const requests = [];
+  const fn = async (path, init) => {
+    requests.push({ path, method: init.method });
+    return path.includes("/tables") ? json(200, catalog) : json(200, page("videos"));
+  };
+  const ui = await mount({ fetchFn: fn, initialTable: "videos", enableMutations: true });
+  try {
+    await click(ui, "1行 title を編集");
+    const input = ui.host.querySelector("label input[type=text]");
+    assert.ok(input);
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+    await React.act(async () => {
+      setter.call(input, "unsaved draft");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await click(ui, "動画 (RW)");
+    assert.equal(ui.host.querySelector("label input[type=text]"), input);
+    assert.equal(input.value, "unsaved draft");
+    assert.equal(requests.filter(x => x.path.includes("/data")).length, 1);
+    assert.ok(requests.every(x => x.method === "GET"));
+    assert.ok(![...ui.host.querySelectorAll("button")].some(b => b.textContent.trim() === "再読込"),
+      "ready editable grid must not expose a reload that would discard the draft");
+  } finally { await ui.cleanup(); }
+});
