@@ -13,7 +13,7 @@ import {
   SlotReserveBodySchema,
   type SlotMutationResult,
 } from "@flamenode/contracts";
-import { evaluateCostGuardCore, type WriteFeatureKey } from "@flamenode/domain/admin";
+import { evaluateCostGuardCore, WRITE_FEATURE_KEYS, type WriteFeatureKey } from "@flamenode/domain/admin";
 import { actorSnapshotFromRow, type ActorSnapshotRow } from "@flamenode/server-core/audit/logger";
 import { mapAuditSettings, type AuditSettingsRow } from "@flamenode/server-core/audit/settings";
 import {
@@ -41,11 +41,19 @@ import {
 const GENERIC_FAILURE_MESSAGE =
   "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。";
 
+// SA-019 stores a canonical JSON array of distinct WRITE_FEATURE_KEYS.
+// Its longest valid serialization contains every key; use the same bound in
+// the invalid-snapshot predicate and SELECT projection.
+const MAX_SLOT_GATE_DISABLED_FEATURES_BYTES =
+  new TextEncoder().encode(JSON.stringify(WRITE_FEATURE_KEYS)).byteLength;
+
 /**
  * SEC #716: the fused guard also reads legacy TEXT values. Limit every
  * projected scalar *inside SQLite*, before D1 serializes a first-row result.
- * These caps sum to 8,832 raw bytes, under 64KiB even if all ASCII control
- * bytes expand to six-byte JSON escapes. Oversized/wrong-type fields are
+ * The fixed caps sum to 8,064 bytes; adding the current 924-byte canonical
+ * list gives 8,988 raw bytes, at most 53,928 escaped bytes plus fixed row
+ * keys/numbers (under 64KiB). The parity test guards this aggregate budget.
+ * Oversized/wrong-type fields are
  * replaced with NULL on the wire and signalled for a 503, never truncated.
  */
 const SLOT_GATE_BOUNDED_TEXT = [
@@ -56,7 +64,7 @@ const SLOT_GATE_BOUNDED_TEXT = [
   ['x."x_name"', 1024],
   ['x."icon_url"', 2048],
   ['settings."operation_mode"', 128],
-  ['settings."disabled_features_json"', 768],
+  ['settings."disabled_features_json"', MAX_SLOT_GATE_DISABLED_FEATURES_BYTES],
   ['settings."cost_guard_exception_features_json"', 768],
 ] as const;
 const SLOT_GATE_NUMERIC_FIELDS = [
@@ -118,7 +126,7 @@ const SLOT_WRITE_GATE_SQL = `${TERMS_REACCEPT_REQUIRED_CTE_SQL}
    ${boundedGateTextSql('u."active_x_user_id"', 512)} AS active_x_user_id, ${boundedGateTextSql('u."image"', 2048)} AS user_image,
    ${boundedGateTextSql('x."x_name"', 1024)} AS x_name, ${boundedGateTextSql('x."icon_url"', 2048)} AS x_icon_url,
    settings."id" AS settings_id, ${boundedGateTextSql('settings."operation_mode"', 128)} AS operation_mode,
-   ${boundedGateTextSql('settings."disabled_features_json"', 768)} AS disabled_features_json,
+   ${boundedGateTextSql('settings."disabled_features_json"', MAX_SLOT_GATE_DISABLED_FEATURES_BYTES)} AS disabled_features_json,
    ${boundedGateNumberSql('settings."cost_guard_exception_until"')} AS cost_guard_exception_until,
    ${boundedGateTextSql('settings."cost_guard_exception_features_json"', 768)} AS cost_guard_exception_features_json,
    ${boundedGateNumberSql('settings."audit_normal_retention_days"')} AS audit_normal_retention_days,

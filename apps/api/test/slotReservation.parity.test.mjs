@@ -37,6 +37,7 @@ if (runUnderRootTsx(import.meta.url)) {
     "../../../packages/server-core/src/queues/wakeBudget.ts"
   );
   const { SlotMutationResultSchema } = await import("@flamenode/contracts");
+  const { WRITE_FEATURE_KEYS, parseDisabledFeaturesInput, evaluateCostGuardCore } = await import("@flamenode/domain/admin");
   process.env.NEXT_PUBLIC_SITE_URL = SITE;
 
   const NOW_SEC = 1800000000;
@@ -1599,6 +1600,101 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal((await allowed.json()).ok, true);
     } finally {
       thaw();
+    }
+  });
+
+  test("SEC #716 / S3 #725: canonical SA-019 list fits the fused CostGuard gate", async () => {
+    const canonical = (features) => {
+      const result = parseDisabledFeaturesInput({ features, reason: "synthetic", confirm: "APPLY" });
+      assert.equal(result.ok, true, "valid CURRENT SA-019 input");
+      return JSON.stringify(result.features);
+    };
+    const all = canonical(WRITE_FEATURE_KEYS);
+    const exceptReserve = canonical(WRITE_FEATURE_KEYS.filter((key) => key !== "reserve_slot"));
+    const maxBytes = Buffer.byteLength(all, "utf8");
+    assert.ok(Buffer.byteLength(exceptReserve, "utf8") > 768,
+      "regression must exercise the previously rejected valid list");
+    // Seven identity/mode caps and the unchanged exception cap sum to 8,064.
+    // Worst-case six-byte JSON escaping plus 2KiB of fixed keys/numbers stays bounded.
+    assert.ok((8064 + maxBytes) * 6 + 2048 < 64 * 1024,
+      "canonical feature growth must not violate the full gate-row wire budget");
+    const cases = [
+      { label: "reserve enabled in large canonical list", raw: exceptReserve, status: 200, reason: null },
+      { label: "reserve disabled in full canonical list", raw: all, status: 503, reason: "cost_guard_blocked" },
+      { label: "full canonical list with active reserve exception", raw: all, exception: true, status: 200, reason: null },
+      { label: "malformed within byte bound", raw: '["reserve_slot",', status: 503, reason: "cost_guard_blocked" },
+      { label: "invalid one byte over canonical bound", raw: all + "x", oversized: true, status: 503, reason: "db_unavailable" },
+    ];
+    for (const fixture of cases) {
+      const w = world();
+      const token = "s3-canonical-cost-guard";
+      insert(w.sqlite, "session", {
+        sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+      });
+      const exceptionUntil = fixture.exception ? NOW_SEC + 60 : null;
+      const exceptionJson = fixture.exception ? JSON.stringify(["reserve_slot"]) : null;
+      w.sqlite.prepare(`UPDATE system_settings SET operation_mode = 'normal',
+        disabled_features_json = ?, cost_guard_exception_until = ?,
+        cost_guard_exception_features_json = ? WHERE id = 'default'`)
+        .run(fixture.raw, exceptionUntil, exceptionJson);
+      const currentDecision = evaluateCostGuardCore({
+        feature: "reserve_slot", operationMode: "normal", disabledFeaturesJson: fixture.raw,
+        exceptionUntil, exceptionFeaturesJson: exceptionJson, now: NOW_SEC,
+      });
+      assert.equal(currentDecision.blocked, fixture.status !== 200, fixture.label);
+      if (fixture.oversized) assert.equal(Buffer.byteLength(fixture.raw, "utf8"), maxBytes + 1);
+      let gateRow;
+      const prepare = w.d1.prepare.bind(w.d1);
+      w.d1.prepare = (sql) => {
+        const statement = prepare(sql);
+        if (!sql.includes("invalid_gate_snapshot")) return statement;
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...params) => {
+          const bound = bind(...params);
+          const first = bound.first.bind(bound);
+          bound.first = async () => {
+            gateRow = await first();
+            return gateRow;
+          };
+          return bound;
+        };
+        return statement;
+      };
+      const before = state(w);
+      const thaw = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev1/slots/s20/reserve", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ display_name: "Canonical CostGuard" }),
+        }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        const result = await response.json();
+        assert.equal(response.status, fixture.status, fixture.label + ": " + JSON.stringify(result));
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.equal(result.ok, fixture.status === 200, fixture.label);
+        assert.ok(gateRow, fixture.label + " executes the real fused gate");
+        assert.equal(gateRow.invalid_gate_snapshot, fixture.oversized ? 1 : 0);
+        assert.equal(gateRow.disabled_features_json, fixture.oversized ? null : fixture.raw);
+        assert.ok(Buffer.byteLength(JSON.stringify(gateRow), "utf8") < 64 * 1024);
+        assert.match(w.d1.stats.readSql[0], /FROM "session" s/);
+        assert.match(w.d1.stats.readSql[1], /invalid_gate_snapshot/);
+        if (fixture.status === 200) {
+          assert.equal(w.d1.stats.reads, 3, fixture.label);
+          assert.match(w.d1.stats.readSql[2], /invalid_snapshot/);
+          assert.equal(w.d1.stats.batches, 1, fixture.label);
+          assert.equal(w.sqlite.prepare("SELECT status FROM slots WHERE id = 's20'").get().status, "reserved");
+        } else {
+          assert.equal(result.reason, fixture.reason, fixture.label);
+          assert.equal(w.d1.stats.reads, 2, fixture.label);
+          assert.equal(w.d1.stats.batches, 0, fixture.label);
+          assert.deepEqual(state(w), before, fixture.label + " cannot write slots/audit/outbox/queue");
+        }
+      } finally {
+        thaw();
+      }
     }
   });
 
