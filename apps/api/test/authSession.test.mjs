@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { Hono } from "hono";
 import {
   extractSessionToken,
   parseCookieHeader,
@@ -453,6 +454,106 @@ test("SEC-713: corrupt Active X causes private 503, not anonymous 401 or an auth
   assert.equal(denied.status, 503);
   assert.equal(denied.body.error, "database_unavailable");
   assert.equal(headers.get("cache-control"), "private, no-store");
+});
+
+test("SEC-713: throwing diagnostics cannot replace mounted private authentication responses", async (t) => {
+  const d1 = createTestD1();
+  t.after(() => d1.close());
+  const app = new Hono();
+  let grants = 0;
+  let state;
+  app.use("*", sessionMiddleware({ now: () => BASELINE_NOW_MS }));
+  app.use("*", async (c, next) => {
+    state = { sessionState: c.get("sessionState"), user: c.get("user"), session: c.get("session") };
+    await next();
+  });
+  app.get("/api/me", requireAuth(), (c) => {
+    grants++;
+    return c.json({ id: c.get("user").id });
+  });
+
+  // Provider rejection may itself be a hostile proxy: never inspect it.
+  const hostile = new Proxy(new Error("SENSITIVE_PROVIDER_VALUE"), {
+    get() { throw new Error("provider property inspected"); },
+    getPrototypeOf() { throw new Error("provider prototype inspected"); },
+  });
+  let failedReads = 0;
+  let bindingReads = 0;
+  const failingDb = {
+    prepare() {
+      return {
+        bind() {
+          return {
+            async first() {
+              failedReads++;
+              throw hostile;
+            },
+          };
+        },
+      };
+    },
+  };
+  const brokenBinding = {
+    get DB() {
+      bindingReads++;
+      throw hostile;
+    },
+  };
+
+  const logs = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    logs.push(args);
+    throw new Error("diagnostic sink unavailable");
+  };
+  const request = (token, env) =>
+    app.request("https://flamenode.net/api/me", {
+      headers: { Cookie: `${BASELINE_COOKIES.sessionToken.name}=${token}` },
+    }, env);
+
+  try {
+    d1.setActiveX(USERS.valid.id, "x".repeat(129));
+    for (const [label, env, code, expectedReads] of [
+      ["invalid identity", { DB: d1 }, "INVALID_ACTIVE_X_ID_VALUE", 1],
+      ["rejected lookup", { DB: failingDb }, "D1_LOOKUP_FAILED", 0],
+      ["missing binding", {}, "D1_BINDING_MISSING", 0],
+      ["throwing binding", brokenBinding, "D1_BINDING_FAILED", 0],
+    ]) {
+      logs.length = 0;
+      d1.resetQueryCount();
+      const response = await request(SESSIONS.valid.sessionToken, env);
+      assert.equal(response.status, 503, label);
+      assert.equal(response.headers.get("cache-control"), "private, no-store", label);
+      assert.deepEqual(await response.json(), { error: "database_unavailable" }, label);
+      assert.deepEqual(state, { sessionState: "unavailable", user: null, session: null }, label);
+      assert.equal(grants, 0, label);
+      assert.equal(d1.getQueryCount(), expectedReads, label);
+      assert.deepEqual(logs, [[`[auth:session] ${code}`]], label);
+    }
+    assert.equal(failedReads, 1);
+    assert.equal(bindingReads, 1);
+
+    logs.length = 0;
+    d1.setActiveX(USERS.valid.id, USERS.valid.active_x_user_id);
+    d1.resetQueryCount();
+    const valid = await request(SESSIONS.valid.sessionToken, { DB: d1 });
+    assert.equal(valid.status, 200);
+    assert.deepEqual(await valid.json(), { id: USERS.valid.id });
+    assert.equal(state.sessionState, "user");
+    assert.equal(grants, 1);
+    assert.equal(d1.getQueryCount(), 1);
+
+    d1.resetQueryCount();
+    const expired = await request(SESSIONS.expired.sessionToken, { DB: d1 });
+    assert.equal(expired.status, 401);
+    assert.equal(expired.headers.get("cache-control"), "private, no-store");
+    assert.equal(state.sessionState, "none");
+    assert.equal(grants, 1);
+    assert.equal(d1.getQueryCount(), 1);
+    assert.deepEqual(logs, []);
+  } finally {
+    console.error = originalConsoleError;
+  }
 });
 
 test("T02: expired session resolves to null (unauthenticated)", async (t) => {

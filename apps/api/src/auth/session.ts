@@ -242,6 +242,20 @@ export function extractSessionToken(
 export const MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS = 128;
 export const MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES = 512;
 
+type SessionDiagnostic =
+  | "INVALID_ACTIVE_X_ID_VALUE"
+  | "D1_LOOKUP_FAILED"
+  | "D1_BINDING_FAILED"
+  | "D1_BINDING_MISSING";
+
+function logSessionDiagnostic(code: SessionDiagnostic): void {
+  try {
+    console.error(`[auth:session] ${code}`);
+  } catch {
+    // A failing diagnostic sink must not replace the authentication outcome.
+  }
+}
+
 export interface ResolveSessionOptions {
   now?: number;
 }
@@ -320,38 +334,36 @@ export async function resolveSessionUser(
       return null;
     }
 
-    // Do not turn a corrupted legacy Active X into a valid-looking null selection.
-    // D1 projects only a valid text value plus a separate invalidity marker.
-    if (row.user_active_x_id_invalid === 1) {
-      // This is malformed persisted identity data, not a failed D1 lookup.
-      // Use a fixed code; never include the selected X ID in diagnostics.
-      console.error("[auth:session] INVALID_ACTIVE_X_ID_VALUE");
-      throw new SessionUnavailableError();
+    // The invalid marker must never become a successful session with null Active X.
+    // Keep the success path inside the D1 catch, but handle the marker after it
+    // so provider exceptions need not be inspected or mistaken for our own error.
+    if (row.user_active_x_id_invalid !== 1) {
+      const role =
+        row.user_role === "admin" || row.user_role === "moderator"
+          ? row.user_role
+          : "user";
+
+      return {
+        id: row.user_id,
+        name: row.user_name ?? null,
+        email: row.user_email ?? null,
+        image: row.user_image ?? null,
+        role,
+        is_banned: row.user_is_banned === 1 ? 1 : 0,
+        active_x_user_id: row.user_active_x_user_id ?? null,
+      };
     }
-
-    const role =
-      row.user_role === "admin" || row.user_role === "moderator"
-        ? row.user_role
-        : "user";
-
-    return {
-      id: row.user_id,
-      name: row.user_name ?? null,
-      email: row.user_email ?? null,
-      image: row.user_image ?? null,
-      role,
-      is_banned: row.user_is_banned === 1 ? 1 : 0,
-      active_x_user_id: row.user_active_x_user_id ?? null,
-    };
-  } catch (error) {
-    if (error instanceof SessionUnavailableError) throw error;
+  } catch {
     // D1/adapter errors may include bound session tokens in their message/stack.
-    // Emit a fixed code only; do not serialize the underlying exception.
-    console.error("[auth:session] D1_LOOKUP_FAILED");
+    // Emit a fixed code only; do not inspect or serialize the underlying exception.
+    logSessionDiagnostic("D1_LOOKUP_FAILED");
     // CURRENT currentUser.ts: a failed lookup is CurrentUserUnavailableError
     // ("database_unavailable"), never "no session". Callers map it to 503.
     throw new SessionUnavailableError();
   }
+
+  logSessionDiagnostic("INVALID_ACTIVE_X_ID_VALUE");
+  throw new SessionUnavailableError();
 }
 
 /** Reason code CURRENT CurrentUserUnavailableError uses for D1 failures. */
@@ -417,11 +429,7 @@ export function sessionMiddleware(options?: SessionMiddlewareOptions) {
       bindingGetterFailed = true;
     }
     if (!db) {
-      console.error(
-        bindingGetterFailed
-          ? "[auth:session] D1_BINDING_FAILED"
-          : "[auth:session] D1_BINDING_MISSING",
-      );
+      logSessionDiagnostic(bindingGetterFailed ? "D1_BINDING_FAILED" : "D1_BINDING_MISSING");
       c.set("user", null);
       c.set("session", null);
       c.set("sessionState", "unavailable" satisfies SessionState);
