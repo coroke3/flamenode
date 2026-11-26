@@ -33,12 +33,20 @@ export function redactWorkerLogValue(value: string): string {
 
 /** Error object / stack をそのまま出さず、安全な短い要約だけを残す。 */
 export function safeErrorSummary(error: unknown): string {
-  const raw =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : "worker task failed";
+  let raw = "worker task failed";
+  try {
+    // Provider Error.message may be a throwing accessor or a non-string value.
+    // Even instanceof can throw for a Proxy with a hostile getPrototypeOf trap.
+    if (error instanceof Error) {
+      const message: unknown = error.message;
+      if (typeof message === "string") raw = message;
+    } else if (typeof error === "string") {
+      raw = error;
+    }
+  } catch {
+    // Queue/Cron failure handling must not fail while describing a provider error.
+    return "worker task failed";
+  }
   const normalized = redactWorkerLogValue(raw.replace(/[\r\n\t]+/g, " ").trim());
   return (normalized || "worker task failed").slice(0, MAX_ERROR_SUMMARY_LENGTH);
 }
@@ -105,15 +113,19 @@ export function logQueueConsumerFailure(input: {
   error: unknown;
   traceId?: string;
 }): void {
-  console.warn(
-    JSON.stringify({
-      service: input.service,
-      job: "queue-consumer",
-      queue_kind: input.queueKind,
-      message_count: input.messageCount,
-      trace_id: input.traceId ?? null,
-      result: "failed",
-      error: safeErrorSummary(input.error),
-    }),
-  );
+  try {
+    console.warn(
+      JSON.stringify({
+        service: input.service,
+        job: "queue-consumer",
+        queue_kind: input.queueKind,
+        message_count: input.messageCount,
+        trace_id: input.traceId ?? null,
+        result: "failed",
+        error: safeErrorSummary(input.error),
+      }),
+    );
+  } catch {
+    // Diagnostics are best-effort; a broken sink must not skip retryAll(messages).
+  }
 }

@@ -636,4 +636,158 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("SEC-776: an unavailable diagnostic sink cannot turn CURRENT or Hono private 503 into rejection", async () => {
+    const cases = [
+      { label: "R2 absent", opts: { noBucket: true }, marker: "R2_BINDING_UNAVAILABLE" },
+      { label: "R2 getter", opts: { throwBucketGetter: true }, marker: "R2_BINDING_UNAVAILABLE" },
+      { label: "V1+V2 missing", opts: { objects: new Map() }, marker: "SUGGESTIONS_UNAVAILABLE" },
+      { label: "R2 read failure", opts: { throwR2Get: true }, marker: "SUGGESTIONS_LOOKUP_FAILED" },
+    ];
+    const oldWarn = console.warn;
+    const oldError = console.error;
+    const logs = [];
+    console.warn = (...args) => {
+      logs.push(args.map(String).join(" "));
+      throw new Error("SEC776_LOG_SINK_UNAVAILABLE");
+    };
+    console.error = (...args) => {
+      logs.push(args.map(String).join(" "));
+      throw new Error("SEC776_LOG_SINK_UNAVAILABLE");
+    };
+    try {
+      for (const scenario of cases) {
+        logs.length = 0;
+        const legacy = makeEnv(scenario.opts);
+        resetLegacyV1();
+        resetLegacyV2();
+        globalThis.__mig0648LegacyTest = {
+          guard: { ok: true, user: { id: "user-1", is_banned: 0 } },
+          env: legacy.env,
+        };
+        try {
+          const res = await legacyGET(new Request(URL_BASE + "?q=alice"));
+          assert.equal(res.status, 503, "CURRENT " + scenario.label);
+          verifyPrivate(res, true);
+          assert.deepEqual(await res.json(), { error: "suggestions_unavailable" });
+          assert.equal(legacy.stats.writes, 0);
+        } finally {
+          delete globalThis.__mig0648LegacyTest;
+        }
+        assert.ok(logs.some((s) => s.includes(scenario.marker)),
+          "CURRENT diagnostic: " + scenario.label);
+        logs.length = 0;
+        const target = await request("?q=alice", scenario.opts);
+        assert.equal(target.response.status, 503, "Hono " + scenario.label);
+        verifyPrivate(target.response, true);
+        assert.deepEqual(target.body, { error: "suggestions_unavailable" });
+        assert.equal(target.stats.reads, 1);
+        assert.equal(target.stats.writes, 0);
+        assert.ok(logs.some((s) => s.includes(scenario.marker)),
+          "Hono diagnostic: " + scenario.label);
+        const output = logs.join("\n");
+        for (const marker of ["R2_BINDING_ACCESS_FAILURE_DO_NOT_EXPOSE", "R2_GET_SECRET_SENTINEL"]) {
+          assert.ok(!output.includes(marker), "sensitive provider error must never be logged");
+        }
+      }
+    } finally {
+      console.warn = oldWarn;
+      console.error = oldError;
+      delete globalThis.__mig0648LegacyTest;
+    }
+  });
+
+  test("SEC-776: real CURRENT/Hono routes never read poisoned Error.name or log its secrets", async () => {
+    let nameReads = 0;
+    const poison = new Error("SEC776_PROVIDER_SECRET_CAUSE", {
+      cause: new Error("SEC776_PROVIDER_NESTED_SECRET"),
+    });
+    Object.defineProperty(poison, "name", {
+      get() {
+        nameReads++;
+        throw new Error("SEC776_POISONED_PROVIDER_NAME");
+      },
+    });
+    const previousWarn = console.warn;
+    const previousError = console.error;
+    const logs = [];
+    const capture = (...args) => { logs.push(args.map(String).join(" ")); };
+    console.warn = capture;
+    console.error = capture;
+    try {
+      for (const source of ["bucket-getter", "r2-get"]) {
+        for (const target of ["CURRENT", "Hono"]) {
+          const host = makeEnv();
+          if (source === "bucket-getter") {
+            Object.defineProperty(host.env, "BUCKET", {
+              configurable: true, get() { throw poison; },
+            });
+          } else {
+            host.env.BUCKET.get = async () => { throw poison; };
+          }
+          let response;
+          if (target === "CURRENT") {
+            resetLegacyV1();
+            resetLegacyV2();
+            globalThis.__mig0648LegacyTest = {
+              guard: { ok: true, user: { id: "user-1" } },
+              env: host.env,
+            };
+            try { response = await legacyGET(new Request(URL_BASE + "?q=alice")); }
+            finally { delete globalThis.__mig0648LegacyTest; }
+          } else {
+            resetMemberSuggestionsCacheForTest();
+            resetMemberSuggestionsV2CacheForTest();
+            const app = new Hono();
+            app.route("/api/internal/x-users/search", xUsersSearchRoutes);
+            response = await app.request(URL_BASE + "?q=alice", {
+              headers: { Cookie: COOKIE },
+            }, host.env);
+            assert.equal(host.stats.reads, 1);
+          }
+          assert.equal(response.status, 503, target + " " + source);
+          verifyPrivate(response, true);
+          assert.deepEqual(await response.json(), { error: "suggestions_unavailable" });
+          assert.equal(host.stats.writes, 0);
+        }
+      }
+    } finally {
+      console.warn = previousWarn;
+      console.error = previousError;
+      delete globalThis.__mig0648LegacyTest;
+    }
+    assert.equal(nameReads, 0, "provider Error.name is not a trusted diagnostic input");
+    const printed = logs.join("\n");
+    for (const secret of ["SEC776_PROVIDER_SECRET_CAUSE", "SEC776_PROVIDER_NESTED_SECRET",
+      "SEC776_POISONED_PROVIDER_NAME"]) {
+      assert.ok(!printed.includes(secret), "provider-controlled fields cannot reach log: " + secret);
+    }
+    assert.match(printed, /R2_BINDING_UNAVAILABLE/);
+    assert.match(printed, /SUGGESTIONS_LOOKUP_FAILED/);
+  });
+
+  test("SEC-776: Hono session binding failure still returns private 503 if error logging throws", async () => {
+    const before = console.error;
+    const logs = [];
+    console.error = (...args) => {
+      logs.push(args.map(String).join(" "));
+      throw new Error("SEC776_SESSION_LOG_SINK_FAILURE");
+    };
+    try {
+      const { env, stats } = makeEnv({ throwDbGetter: true });
+      const response = await fullHonoApp.request(URL_BASE + "?q=alice", {
+        headers: { Cookie: COOKIE },
+      }, env);
+      assert.equal(response.status, 503);
+      verifyPrivate(response);
+      assert.deepEqual(await response.json(), { error: "database_unavailable" });
+      assert.equal(stats.reads, 0);
+      assert.equal(stats.gets.length, 0);
+      assert.equal(stats.writes, 0);
+    } finally {
+      console.error = before;
+    }
+    assert.ok(logs.some((s) => s.includes("SESSION_RESOLUTION_UNAVAILABLE")));
+    assert.doesNotMatch(logs.join("\n"), /D1_BINDING_SECRET_SENTINEL/);
+  });
+
 }

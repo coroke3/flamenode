@@ -294,16 +294,21 @@ type PublicVisibilityGuardResult = {
 
 function warnPublicVisibilityManifestFailure(
   mode: ReturnType<typeof resolvePublicVisibilityGuardModeFromEnv>,
-  error: unknown,
+  _error: unknown,
 ): void {
-  console.warn(
-    JSON.stringify({
-      service: "public-visibility-guard",
-      mode,
-      result: "manifest_read_failed",
-      error_name: error instanceof Error ? error.name : undefined,
-    }),
-  );
+  // Provider errors and diagnostic sinks are untrusted. Enforce-mode failures
+  // must remain unavailable even when the log sink itself throws.
+  try {
+    console.warn(
+      JSON.stringify({
+        service: "public-visibility-guard",
+        mode,
+        result: "manifest_read_failed",
+      }),
+    );
+  } catch {
+    // Diagnostic-only failure.
+  }
 }
 
 async function resolvePublicVisibilityGuard(
@@ -406,16 +411,21 @@ function warnPublicStaticJson(
     | "target_probe_failed"
     | "enqueue_failed"
     | "database_unavailable",
-  error?: unknown,
+  _error?: unknown,
 ): void {
-  console.warn(
-    JSON.stringify({
-      service: "public-static-json",
-      object_key: key.slice(0, 240),
-      result,
-      error_name: error instanceof Error ? error.name : undefined,
-    }),
-  );
+  // Provider Error.name may be secret-bearing or a throwing getter; logging
+  // must never change an R2 miss into a request failure.
+  try {
+    console.warn(
+      JSON.stringify({
+        service: "public-static-json",
+        object_key: key.slice(0, 240),
+        result,
+      }),
+    );
+  } catch {
+    // Diagnostic-only failure.
+  }
 }
 
 async function readStaticJson<T>(key: string): Promise<T | null> {
@@ -551,8 +561,7 @@ async function resolvePublicJsonMiss<T = never>(
       warnPublicStaticJson(options.targetType, "target_probe_failed", error);
       probe = {
         state: "unknown",
-        errorCode:
-          error instanceof Error ? error.name : "public_target_probe_failed",
+        errorCode: "public_target_probe_failed",
       };
     }
 

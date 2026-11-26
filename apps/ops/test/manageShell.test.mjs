@@ -157,21 +157,55 @@ test("MIG-0719 T06: Ops packaging dry-run has a fixed target and rejects routes/
 
 test("MIG-0719 router: admin routes keep a single main landmark", async () => {
   const { OpsRoutes } = await import("../.test-dist/apps/ops/src/routes/router.js");
-  const dom = new JSDOM("<!doctype html><div id=root></div>", { url: "http://localhost/admin/cost-guard" });
-  const saved = { window: globalThis.window, document: globalThis.document };
-  globalThis.window = dom.window; globalThis.document = dom.window.document;
-  try {
-    const api = {
-      getSummary: async () => ({ status: "ok", summary: { role: "admin", canAccessAdmin: true, canAccessManage: true } }),
-      checkManageNavigation: async () => "allow",
-    };
-    const root = createRoot(dom.window.document.getElementById("root"));
-    root.render(React.createElement(MemoryRouter, { initialEntries: ["/admin/cost-guard"] }, React.createElement(OpsRoutes, { api })));
-    for (let i = 0; i < 50 && !dom.window.document.querySelector("main"); i++) await new Promise(r => setTimeout(r, 10));
-    assert.equal(dom.window.document.querySelectorAll("main").length, 1);
-    root.unmount();
-  } finally {
-    globalThis.window = saved.window; globalThis.document = saved.document;
+  // Exercise both responsive states: ConsoleDrawer reads matchMedia on mount.
+  for (const mobile of [false, true]) {
+    const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
+      url: "http://localhost/admin/cost-guard",
+      pretendToBeVisual: true,
+    });
+    const mediaListeners = new dom.window.EventTarget();
+    Object.defineProperty(dom.window, "matchMedia", {
+      configurable: true,
+      value: query => ({
+        matches: mobile && query === "(max-width: 760px)",
+        media: query,
+        onchange: null,
+        addListener: listener => mediaListeners.addEventListener("change", listener),
+        removeListener: listener => mediaListeners.removeEventListener("change", listener),
+        addEventListener: (type, listener) => mediaListeners.addEventListener(type, listener),
+        removeEventListener: (type, listener) => mediaListeners.removeEventListener(type, listener),
+        dispatchEvent: event => mediaListeners.dispatchEvent(event),
+      }),
+    });
+    const keys = ["window", "document", "navigator", "HTMLElement", "Node", "IS_REACT_ACT_ENVIRONMENT"];
+    const originals = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+    for (const key of keys.slice(0, 5)) {
+      Object.defineProperty(globalThis, key, { configurable: true, value: dom.window[key] });
+    }
+    Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true });
+    let root;
+    try {
+      const api = {
+        getSummary: async () => ({ status: "ok", summary: { role: "admin", canAccessAdmin: true, canAccessManage: true } }),
+        checkManageNavigation: async () => "allow",
+      };
+      root = createRoot(dom.window.document.getElementById("root"));
+      await React.act(async () => {
+        root.render(React.createElement(MemoryRouter, { initialEntries: ["/admin/cost-guard"] }, React.createElement(OpsRoutes, { api })));
+      });
+      assert.equal(dom.window.document.querySelectorAll("main").length, 1, mobile ? "mobile" : "desktop");
+    } finally {
+      try {
+        if (root) await React.act(async () => { root.unmount(); });
+      } finally {
+        for (const key of keys) {
+          const descriptor = originals.get(key);
+          if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+          else delete globalThis[key];
+        }
+        dom.window.close();
+      }
+    }
   }
 });
 
