@@ -610,4 +610,75 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+
+  // #892 characterization only: identity must be validated before projection
+  // even when zero items hide the embedded event ID. Equal response-body
+  // ETags are expected here; the eventual fix must reject the bad artifact,
+  // not salt the ETag or remove correct empty/page-past-end responses.
+  test("MIG-0627 U02d PREP T20: KNOWN GAP #892 - empty results conceal wrong event identity and share ETags", async (t) => {
+    const cases = [
+      { label: "empty-pool", rows: [], query: "Tokyo", page: "1", total: 0 },
+      { label: "unmatched-query", rows: [{ ...tokyoEventVideo, score: 1 }], query: "zz-no-match-zz", page: "1", total: 0 },
+      { label: "page-past-end", rows: [{ ...tokyoEventVideo, score: 1 }], query: "Tokyo", page: "2", total: 1 },
+    ];
+    for (const path of ["base", "composed"]) {
+      for (const sort of ["new", "old", "score"]) {
+        const h = harness(t, "enforce");
+        const key = path === "base" ? baseKey : composedKey;
+        const reads = path === "base"
+          ? [identityVisibilityKey, baseKey]
+          : [identityVisibilityKey, baseKey, identityVisibilityKey, composedKey];
+        for (const { label, rows, query, page, total } of cases) {
+          const where = path + "/" + sort + "/" + label;
+          await seedIdentityManifest(h.storage);
+          const good = eventPayload(rows);
+          await h.storage.put(key, good);
+          const params = { event: eventId, sort, page, limit: "1" };
+          const expected = { items: [], total, page: Number(page), limit: 1 };
+          h.reads.length = 0;
+          const first = await h.query(query, params);
+          assert.equal(first.response.status, 200, where);
+          assert.deepEqual(first.payload, expected, where);
+          const tag = first.response.headers.get("ETag");
+          assert.ok(tag, where);
+          assert.match(first.response.headers.get("Cache-Control") ?? "", /^public,/, where);
+          assert.deepEqual(h.reads, reads, where);
+          h.reads.length = 0;
+          const valid304 = await h.query(query, params, { "If-None-Match": tag });
+          assert.equal(valid304.response.status, 304, where);
+          assert.equal(valid304.payload, null, where);
+          assert.deepEqual(h.reads, reads, where);
+
+          // Only the artifact's event identity differs; the empty DTO is
+          // byte-equivalent, so a body-derived validator cannot detect it.
+          await h.storage.put(key, { ...good, event: { ...good.event, id: "evt-other" } });
+          h.reads.length = 0;
+          const wrong = await h.query(query, params);
+          assert.equal(wrong.response.status, 200, "KNOWN GAP: " + where);
+          assert.deepEqual(wrong.payload, expected, where);
+          assert.equal(wrong.response.headers.get("ETag"), tag, where);
+          assert.deepEqual(h.reads, reads, where);
+          for (const conditional of [tag, "*"]) {
+            h.reads.length = 0;
+            const revalidated = await h.query(query, params, { "If-None-Match": conditional });
+            assert.equal(revalidated.response.status, 304, "KNOWN GAP: " + where);
+            assert.equal(revalidated.payload, null, where);
+            assert.equal(revalidated.response.headers.get("ETag"), tag, where);
+            assert.deepEqual(h.reads, reads, where);
+          }
+
+          // A requested-event fence remains authoritative even when the
+          // prior correct and wrong artifact generated the same validator.
+          await seedIdentityManifest(h.storage, eventId);
+          for (const conditional of [tag, "*"]) {
+            h.reads.length = 0;
+            assertIdentityUnavailable(await h.query(query, params, { "If-None-Match": conditional }));
+            assert.deepEqual(h.reads, [identityVisibilityKey, identityVisibilityKey], where);
+          }
+          assertNoD1(h);
+        }
+      }
+    }
+  });
+
 }
