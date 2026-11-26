@@ -96,38 +96,35 @@ export function SlotBatchForm({
 }: SlotBatchFormProps): React.ReactElement {
   const [mode, setMode] = React.useState<"time" | "count">("time");
   const [interval, setInterval] = React.useState("5");
-  const [busy, setBusy] = React.useState(false);
-  const busyRef = React.useRef(false);
+  // A committed event/adapter generation owns its own single-flight lock.
+  const context = React.useMemo(() => ({ eventId, onGenerate, onClearAvailable, onChanged }),
+    [eventId, onGenerate, onClearAvailable, onChanged]);
+  const contextRef = React.useRef<typeof context | null>(null);
+  const busyRef = React.useRef<typeof context | null>(null);
+  const [busyContext, setBusyContext] = React.useState<typeof context | null>(null);
+  const busy = busyContext === context;
   const [confirmClearFor, setConfirmClearFor] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
-  // Drop stale writes and confirmations after switching management events.
-  const contextRef = React.useRef({ eventId, onGenerate, onClearAvailable, onChanged });
-  // A -> B -> A still invalidates A's in-flight result, even with the same callbacks.
-  if (contextRef.current.eventId !== eventId ||
-      contextRef.current.onGenerate !== onGenerate ||
-      contextRef.current.onClearAvailable !== onClearAvailable ||
-      contextRef.current.onChanged !== onChanged) {
-    contextRef.current = { eventId, onGenerate, onClearAvailable, onChanged };
-  }
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
+    // Only committed contexts can authorize a UI dispatch or consume its receipt.
+    contextRef.current = context;
     setConfirmClearFor(null);
     setError(null);
     setNotice(null);
-  }, [eventId]);
-  React.useEffect(() => () => {
-    // Invalidate in-flight callbacks after this form leaves the component tree.
-    contextRef.current = { ...contextRef.current };
-  }, []);
+    return () => {
+      if (contextRef.current === context) contextRef.current = null;
+    };
+  }, [context]);
 
   const perform = async (action: () => Promise<SlotMutationResult>, success: string) => {
     // React state may not commit between two rapid submits; claim the lock
     // synchronously so one user gesture cannot dispatch duplicate writes.
-    if (busyRef.current) return;
-    busyRef.current = true;
-    const started = contextRef.current;
+    if (contextRef.current !== context || busyRef.current === context) return;
+    const started = context;
+    busyRef.current = started;
     const stillCurrent = () => contextRef.current === started;
-    setBusy(true);
+    setBusyContext(started);
     setError(null);
     setNotice(null);
     try {
@@ -144,14 +141,19 @@ export function SlotBatchForm({
     } catch {
       if (stillCurrent()) setError("枠操作中に通信エラーが発生しました。");
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      // A late receipt must not release a newer generation's pending write.
+      if (busyRef.current === started) {
+        busyRef.current = null;
+        if (contextRef.current !== null) {
+          setBusyContext(previous => previous === started ? null : previous);
+        }
+      }
     }
   };
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busyRef.current) return;
+    if (contextRef.current !== context || busyRef.current === context) return;
     const parsed = parseSlotGenerateForm(new FormData(event.currentTarget), mode);
     if (!parsed.ok) {
       setError(parsed.message);
@@ -218,7 +220,8 @@ export function SlotBatchForm({
       <button type="button" className="fn-btn fn-btn-primary"
         onClick={() => {
           // A confirmation may never carry across an event transition.
-          if (busyRef.current || confirmClearFor !== eventId) return;
+          if (contextRef.current !== context || busyRef.current === context ||
+              confirmClearFor !== eventId) return;
           setConfirmClearFor(null);
           void perform(onClearAvailable, "空き枠を削除しました。");
         }} disabled={busy}>全削除する</button>

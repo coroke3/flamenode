@@ -285,3 +285,84 @@ test("MIG-0722 U02b-7: unmount invalidates pending slot batch result", async () 
     dom.window.close();
   }
 });
+
+test("MIG-0722 U02b-10: a new batch generation can write while an old receipt is pending", async () => {
+  for (const scenario of ["event", "A-B-A", "adapter"]) {
+    for (const rejectOld of [false, true]) {
+      const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+        url: "https://flamenode.test/manage/events/A/slots",
+      });
+      const keys = ["window", "document", "Element", "HTMLElement", "Node", "navigator", "FormData"];
+      const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+      const prevAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+      for (const key of keys) Object.defineProperty(globalThis, key, {
+        configurable: true, writable: true, value: dom.window[key],
+      });
+      globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+      const { createRoot } = await import("react-dom/client");
+      const root = createRoot(dom.window.document.getElementById("root"));
+      try {
+        const calls = [];
+        const pending = [];
+        let refreshes = 0;
+        const port = name => body => {
+          calls.push({ name, body });
+          return new Promise((resolve, reject) => pending.push({ resolve, reject }));
+        };
+        const a = port("A");
+        const b = port("B");
+        const onClearAvailable = async () => ({ ok: true });
+        const onChanged = () => { refreshes++; };
+        const view = (eventId, onGenerate) => React.createElement(SlotBatchForm, {
+          eventId, totalSlots: 0, onGenerate, onClearAvailable, onChanged,
+        });
+        const submit = () => dom.window.document.querySelector("form").dispatchEvent(
+          new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+        const button = () => dom.window.document.querySelector('button[type="submit"]');
+        const fill = () => {
+          const form = dom.window.document.querySelector("form");
+          form.querySelector('[name="start_at"]').value = "2026-11-08T10:00";
+          form.querySelector('[name="end_at"]').value = "2026-11-08T10:30";
+        };
+        await React.act(async () => root.render(view("A", a)));
+        fill();
+        await React.act(async () => submit());
+        assert.equal(calls.length, 1);
+        assert.equal(button().disabled, true);
+
+        if (scenario === "A-B-A") {
+          await React.act(async () => root.render(view("B", b)));
+          await React.act(async () => root.render(view("A", a)));
+        } else {
+          await React.act(async () => root.render(view(scenario === "adapter" ? "A" : "B", b)));
+        }
+        assert.equal(button().disabled, false, scenario + " must not inherit the old busy state");
+        fill();
+        await React.act(async () => { submit(); submit(); });
+        assert.equal(calls.length, 2, "one explicit new write, no duplicate");
+        assert.equal(button().disabled, true);
+        await React.act(async () => {
+          if (rejectOld) pending[0].reject(new Error("OLD-ERROR"));
+          else pending[0].resolve({ ok: true, message: "OLD-SUCCESS" });
+        });
+        assert.equal(refreshes, 0);
+        assert.doesNotMatch(dom.window.document.body.textContent, /OLD-SUCCESS|通信エラー/);
+        assert.equal(button().disabled, true, "old finally must not unlock the new write");
+        await React.act(async () => submit());
+        assert.equal(calls.length, 2, "no replay while the new write is pending");
+        await React.act(async () => pending[1].resolve({ ok: true, message: "NEW-SUCCESS" }));
+        assert.equal(refreshes, 1);
+        assert.equal(button().disabled, false);
+        assert.match(dom.window.document.body.textContent, /NEW-SUCCESS/);
+      } finally {
+        await React.act(async () => root.unmount());
+        for (const [key, descriptor] of previous) {
+          if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+          else delete globalThis[key];
+        }
+        globalThis.IS_REACT_ACT_ENVIRONMENT = prevAct;
+        dom.window.close();
+      }
+    }
+  }
+});

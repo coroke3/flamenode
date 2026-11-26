@@ -85,6 +85,7 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
   const status = normalizeSlotFilter(search.get("status"));
   const [request, setRequest] = React.useState<TaggedResult | null>(null);
   const [refresh, setRefresh] = React.useState(0);
+  const onChanged = React.useCallback(() => setRefresh(v => v + 1), []);
   // Tag every read with its exact UI generation. A refetch of the same
   // event/filter must not briefly reveal a previously authorized snapshot.
   // Object identity also prevents A -> B -> A from reviving cached rows.
@@ -117,5 +118,5 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
       onClick={() => setRefresh(v => v + 1)}>再読み込み</button>
   </div>;
   return <EventSlotsView eventId={eventId} status={status} data={validRequest.data}
-    writeActions={writeActions} onChanged={() => setRefresh(v => v + 1)} />;
+    writeActions={writeActions} onChanged={onChanged} />;
 }

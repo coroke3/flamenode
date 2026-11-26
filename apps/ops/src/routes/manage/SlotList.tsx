@@ -95,38 +95,31 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
   ]);
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
   const [label, setLabel] = React.useState("");
+  const context = React.useMemo(() => ({ eventId, slots, onAction, onChanged, canManageSubmittedSlots }),
+    [eventId, slots, onAction, onChanged, canManageSubmittedSlots]);
+  const contextRef = React.useRef<typeof context | null>(null);
   const [pending, setPending] = React.useState<{ operation: SlotListOperation;
     eventId: string; slots: readonly ManageSlotRow[];
-    onAction: typeof onAction;
-    context: { eventId: string; slots: readonly ManageSlotRow[];
-      onAction: typeof onAction; canManageSubmittedSlots: boolean } } | null>(null);
-  const [busy, setBusy] = React.useState(false);
-  const busyRef = React.useRef(false);
-  // Always compare against the latest render, not the stale async callback closure.
-  const contextRef = React.useRef({ eventId, slots, onAction, canManageSubmittedSlots });
-  // Capture context generations, not just values: reject A -> B -> A stale writes.
-  if (contextRef.current.eventId !== eventId ||
-      contextRef.current.slots !== slots ||
-      contextRef.current.onAction !== onAction ||
-      contextRef.current.canManageSubmittedSlots !== canManageSubmittedSlots) {
-    contextRef.current = { eventId, slots, onAction, canManageSubmittedSlots };
-  }
+    onAction: typeof onAction; context: typeof context } | null>(null);
+  const busyRef = React.useRef<typeof context | null>(null);
+  const [busyContext, setBusyContext] = React.useState<typeof context | null>(null);
+  const busy = busyContext === context;
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   // A filter/event refresh invalidates both the previous row selection and
   // any pending destructive confirmation. Old row IDs must not resurface
   // when the user returns to a previously selected status filter.
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
+    contextRef.current = context;
     setSelected(new Set());
     setPending(null);
     setLabel("");
     setError(null);
     setNotice(null);
-  }, [eventId, slots, onAction, canManageSubmittedSlots]);
-  React.useEffect(() => () => {
-    // Even a matching A context after remount cannot accept pre-unmount results.
-    contextRef.current = { ...contextRef.current };
-  }, []);
+    return () => {
+      if (contextRef.current === context) contextRef.current = null;
+    };
+  }, [context]);
   const visibleIds = slots.filter(row => row.event_id === eventId).map(row => row.id);
   const visibleSelected = visibleIds.filter(id => selected.has(id));
   const selectedAvailable = slots.filter(row => selected.has(row.id) &&
@@ -136,16 +129,17 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
   const limited = visibleSelected.length > MAX_ATOMIC_SELECTION;
   const displayLabel = label.trim();
   const confirm = (op: SlotListOperation) => {
+    if (contextRef.current !== context || busyRef.current === context) return;
     if (!validateSlotListOperation(slots, eventId, op, canManageSubmittedSlots)) {
       setError("選択した枠の状態または件数を確認してください。");
       return;
     }
     setError(null);
     setNotice(null);
-    setPending({ operation: op, eventId, slots, onAction, context: contextRef.current });
+    setPending({ operation: op, eventId, slots, onAction, context });
   };
   const runConfirmed = async () => {
-    if (busyRef.current || !pending || !onAction) return;
+    if (contextRef.current !== context || busyRef.current === context || !pending || !onAction) return;
     // A new event, filter snapshot or handler must never inherit a pending
     // confirmation, even if row IDs and statuses happen to match.
     if (pending.context !== contextRef.current ||
@@ -157,10 +151,10 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
       return;
     }
     const operation = pending.operation;
-    const started = contextRef.current;
+    const started = context;
     const stillCurrent = () => contextRef.current === started;
-    busyRef.current = true;
-    setBusy(true);
+    busyRef.current = started;
+    setBusyContext(started);
     setPending(null);
     setError(null);
     setNotice(null);
@@ -177,8 +171,13 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     } catch {
       if (stillCurrent()) setError("枠操作中に通信エラーが発生しました。");
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      // No old generation can release the lock for a newly dispatched write.
+      if (busyRef.current === started) {
+        busyRef.current = null;
+        if (contextRef.current !== null) {
+          setBusyContext(previous => previous === started ? null : previous);
+        }
+      }
     }
   };
   if (slots.length === 0) return <p className="fn-muted fn-text-sm">枠はまだありません。</p>;

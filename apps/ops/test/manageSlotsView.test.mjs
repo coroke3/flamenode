@@ -548,3 +548,74 @@ test("MIG-0722 U02b-9: submitted-slot capability revocation invalidates pending 
     assert.equal(button("強制解放"), undefined);
   });
 });
+
+test("MIG-0722 U02b-10: new list operations own their lock after event or capability rotation", async () => {
+  for (const scenario of ["event", "A-B-A", "adapter", "capability"]) {
+    for (const rejectOld of [false, true]) {
+      await withSlotDom(async (dom, root) => {
+        const rowsA = [
+          slot("available", { event_id: "A", status: "available" }),
+          slot("submitted", { event_id: "A", status: "submitted" }),
+        ];
+        const rowsB = [slot("available", { event_id: "B", status: "available" })];
+        const calls = [];
+        const pending = [];
+        let refreshes = 0;
+        const port = name => operation => {
+          calls.push({ name, operation });
+          return new Promise((resolve, reject) => pending.push({ resolve, reject }));
+        };
+        const a = port("A");
+        const b = port("B");
+        const onChanged = () => { refreshes++; };
+        const view = (eventId, slots, onAction, permitted) => React.createElement(MemoryRouter, null,
+          React.createElement(SlotList, {
+            eventId, slots, partGapMinutes: 15, parts: [], onAction, onChanged,
+            canManageSubmittedSlots: permitted,
+          }));
+        const button = label => [...dom.window.document.querySelectorAll("button")]
+          .find(el => el.textContent.trim() === label);
+        await React.act(async () => root.render(view("A", rowsA, a, true)));
+        await React.act(async () => button(scenario === "capability" ? "強制解放" : "削除").click());
+        await React.act(async () => button("実行する").click());
+        assert.equal(calls.length, 1);
+        assert.equal(button("削除").disabled, true);
+
+        if (scenario === "A-B-A") {
+          await React.act(async () => root.render(view("B", rowsB, b, true)));
+          await React.act(async () => root.render(view("A", rowsA, a, true)));
+        } else if (scenario === "capability") {
+          await React.act(async () => root.render(view("A", rowsA, a, false)));
+          assert.equal(button("強制解放"), undefined, "revoked submitted controls stay hidden");
+        } else if (scenario === "adapter") {
+          await React.act(async () => root.render(view("A", rowsA, b, true)));
+        } else {
+          await React.act(async () => root.render(view("B", rowsB, b, true)));
+        }
+        assert.equal(button("削除").disabled, false, scenario + " must not inherit the old lock");
+        await React.act(async () => button("削除").click());
+        await React.act(async () => {
+          const confirm = button("実行する");
+          confirm.click();
+          confirm.click();
+        });
+        assert.equal(calls.length, 2);
+        assert.deepEqual(calls[1].operation, { kind: "delete", slotId: "available" });
+        assert.equal(button("削除").disabled, true);
+        await React.act(async () => {
+          if (rejectOld) pending[0].reject(new Error("OLD-ERROR"));
+          else pending[0].resolve({ ok: true, message: "OLD-SUCCESS" });
+        });
+        assert.equal(refreshes, 0);
+        assert.doesNotMatch(dom.window.document.body.textContent, /OLD-SUCCESS|通信エラー/);
+        assert.equal(button("削除").disabled, true, "old finally cannot unlock the new request");
+        await React.act(async () => button("削除").click());
+        assert.equal(calls.length, 2, "no duplicate or automatic retry");
+        await React.act(async () => pending[1].resolve({ ok: true, message: "NEW-SUCCESS" }));
+        assert.equal(refreshes, 1);
+        assert.equal(button("削除").disabled, false);
+        assert.match(dom.window.document.body.textContent, /NEW-SUCCESS/);
+      });
+    }
+  }
+});
