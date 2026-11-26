@@ -1799,6 +1799,10 @@
 | `apps/ops/src/lib/event/dateInput.ts` | HELPER | MIG-0721 U01b-4 JST datetime-local formatter for future EventForm four timestamp fields; unmounted | MIG-0721 | SAME (formatter only from `src/lib/utils/dateInput.ts`; strict parser retained in domain) | IN_PROGRESS | PR#515 SHA=15266ef6099b17eb6eed75d899f2413f1f77d814 TEST=isolated tsc and node --test apps/ops/test/eventDateInput.test.mjs (4/4 UTC and 4/4 America/Los_Angeles PASS; exact-head CI pending) |
 | `apps/ops/test/eventDateInput.test.mjs` | TEST | MIG-0721 U01b-4 source parity, JST minute and calendar boundaries, invalid inputs | MIG-0721 | SAME (new Ops regression tests) | IN_PROGRESS | PR#515 SHA=15266ef6099b17eb6eed75d899f2413f1f77d814 TEST=node --test apps/ops/test/eventDateInput.test.mjs (isolated 4/4 per timezone PASS; full CI pending) |
 
+| `apps/ops/src/components/event/EventForm.tsx` | TARGET_SKELETON | MIG-0721 U01 unmounted Ops EventForm create/edit, CURRENT JSX, draft hooks and submission control flow; injected action/navigation only | MIG-0721 | SAME (source `src/components/admin/EventForm.tsx`; adapter, serializer and CSS wiring only) | IN_PROGRESS | PR#515 SHA=122d3fdd8c0e1006aab94814b9470cc3ac13c7e4 TEST=apps/ops/test/eventForm.test.mjs (static source/JSX parity verified; CI runtime pending) |
+| `apps/ops/src/components/event/eventFormStyles.ts` | HELPER | MIG-0721 U01 scoped EventForm CSS for the unmounted UI; existing portCssModule selector semantics | MIG-0721 | SAME (source `src/components/admin/EventForm.module.css`; stylesheet registration pending) | IN_PROGRESS | PR#515 SHA=122d3fdd8c0e1006aab94814b9470cc3ac13c7e4 TEST=apps/ops/test/eventForm.test.mjs (CSS mapping checked; runtime CI pending) |
+| `apps/ops/test/eventForm.test.mjs` | TEST | MIG-0721 U01 source/CSS parity, SSR create and staff permission UI, T01/T02/T04 and failed edit retry with injected handlers | MIG-0721 | SAME (new Ops tests) | IN_PROGRESS | PR#515 SHA=122d3fdd8c0e1006aab94814b9470cc3ac13c7e4 TEST=npm run test --workspace=@flamenode/ops (6 tests authored; CI pending) |
+
 
 ## Future files requiring source/target registration
 
