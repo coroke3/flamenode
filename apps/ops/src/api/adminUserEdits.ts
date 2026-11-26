@@ -22,7 +22,11 @@ export async function sendAdminGuardedWrite<T extends { ok: boolean }>(
   let forbidden = false;
   const result = await send<T>(async (url, init) => {
     const response = await fetchFn(url, init);
-    if (response.status === 403) forbidden = true;
+    if (response.status === 403) {
+      forbidden = true;
+      // The status alone revokes access; do not await or interpret the denied body.
+      return new Response(null, { status: 403 });
+    }
     return response;
   }, method, path, body);
   return forbidden ? { status: "forbidden" } : result;

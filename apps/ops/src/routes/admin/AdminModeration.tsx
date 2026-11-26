@@ -11,6 +11,7 @@ import { ModerationCaseStatusForm } from "./ModerationCaseStatusForm.js";
 import { ModerationFlashNotice } from "./ModerationFlashNotice.js";
 
 const api = createAdminModerationApi();
+const navigateOnDenial = (destination: string): void => window.location.assign(destination);
 const typeOptions = ["all", "x_reapply", "void", "duplicate", "rights", "operator"] as const;
 const statusOptions = ["all", "open", "resolved", "rejected", "expired", "cancelled"] as const;
 
@@ -49,8 +50,11 @@ export function moderationGetSearchParams(formData: FormData): URLSearchParams {
   return next;
 }
 
-export function AdminModerationContent({ data, filters, onSaved, onFilterChange }: {
+export function AdminModerationContent({ data, filters, onSaved, onAccessRevoked, canSubmit, client, onFilterChange }: {
   data: AdminModerationResponse; filters: ModerationFilters; onSaved?: () => void;
+  onAccessRevoked?: (destination: "/entry" | "/dashboard") => void;
+  canSubmit?: () => boolean;
+  client?: Pick<ReturnType<typeof createAdminModerationApi>, "resolveCase">;
   onFilterChange?: (params: URLSearchParams) => void;
 }): React.ReactElement {
   return <div className="fn-public-container fn-page">
@@ -107,8 +111,9 @@ export function AdminModerationContent({ data, filters, onSaved, onFilterChange 
               <p style={{ whiteSpace: "pre-wrap" }}>内部メモ: {row.private_note || "—"}</p>
             </details></td>
             <td>{row.status === "open"
-              ? onSaved
-                ? <ModerationCaseStatusForm caseId={row.id} onSaved={onSaved} />
+              ? onSaved && onAccessRevoked
+                ? <ModerationCaseStatusForm caseId={row.id} onSaved={onSaved}
+                    onAccessRevoked={onAccessRevoked} canSubmit={canSubmit} client={client} />
                 : <span aria-label="未移植操作">更新操作は未移植</span>
               : <a href={"/admin/audit?table=video_moderation_cases&record=" +
                   encodeURIComponent(row.id)}>監査</a>}</td>
@@ -121,28 +126,44 @@ export function AdminModerationContent({ data, filters, onSaved, onFilterChange 
 }
 
 /** Not mounted: case updates have no approved Hono SA-044 counterpart. */
-export function AdminModeration(): React.ReactElement {
+export function AdminModeration({ client = api, navigateOnRevocation = navigateOnDenial }: {
+  client?: ReturnType<typeof createAdminModerationApi>;
+  navigateOnRevocation?: (destination: string) => void;
+} = {}): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const [refreshKey, setRefreshKey] = React.useState(0);
+  const [writeRedirect, setWriteRedirect] = React.useState<"/entry" | "/dashboard" | null>(null);
+  const revokedRef = React.useRef<"/entry" | "/dashboard" | null>(null);
+  const canSubmit = () => revokedRef.current === null;
+  const revokeAccess = (destination: "/entry" | "/dashboard") => {
+    if (revokedRef.current !== null) return;
+    // Latch before another form can dispatch or consume a stale receipt.
+    revokedRef.current = destination;
+    setWriteRedirect(destination);
+  };
   const [successfulReadKey, setSuccessfulReadKey] = React.useState(0);
   const filters = moderationFilters(params);
   const key = params.toString();
   const result = useApiResult(async (signal) => {
-    const response = await api.list(filters, signal);
-    onModerationReadCompleted(signal, response, () => setSuccessfulReadKey((value) => value + 1));
+    const response = await client.list(filters, signal);
+    if (revokedRef.current === null) {
+      onModerationReadCompleted(signal, response, () => setSuccessfulReadKey((value) => value + 1));
+    }
     return response;
   }, "admin-moderation:" + key, refreshKey);
   React.useEffect(() => {
-    if (result.status === "anonymous") window.location.assign("/entry");
-    if (result.status === "forbidden") window.location.assign(result.redirect || "/dashboard");
-  }, [result]);
-  if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden")
+    if (writeRedirect) { navigateOnRevocation(writeRedirect); return; }
+    if (result.status === "anonymous") navigateOnRevocation("/entry");
+    if (result.status === "forbidden") navigateOnRevocation(result.redirect || "/dashboard");
+  }, [result, writeRedirect, navigateOnRevocation]);
+  if (writeRedirect || result.status === "loading" || result.status === "anonymous" || result.status === "forbidden")
     return <div role="status" aria-busy="true">読み込み中...</div>;
   if (result.status !== "ok") return <section role="alert">モデレーション情報を取得できませんでした。</section>;
   return <>
     <ModerationFlashNotice refreshKey={successfulReadKey} />
     <AdminModerationContent data={result.data} filters={filters}
-      onSaved={() => setRefreshKey((value) => value + 1)}
+      client={client} canSubmit={canSubmit} onAccessRevoked={revokeAccess}
+      onSaved={() => { if (canSubmit()) setRefreshKey((value) => value + 1); }}
       onFilterChange={(next) => setParams(next)} />
   </>;
 }

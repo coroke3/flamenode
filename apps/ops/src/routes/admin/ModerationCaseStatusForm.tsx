@@ -27,17 +27,25 @@ export function parseModerationFormInput(input: FormData):
   } };
 }
 
-export function ModerationCaseStatusForm({ caseId, onSaved, client = api }: {
+export function ModerationCaseStatusForm({ caseId, onSaved, onAccessRevoked, canSubmit = () => true, client = api }: {
   caseId: string;
   onSaved: () => void;
+  onAccessRevoked: (destination: "/entry" | "/dashboard") => void;
+  canSubmit?: () => boolean;
   client?: Pick<ReturnType<typeof createAdminModerationApi>, "resolveCase">;
 }): React.ReactElement {
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
+  const revokedRef = React.useRef(false);
+  const mountedRef = React.useRef(false);
+  React.useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [error, setError] = React.useState<string | null>(null);
 
   async function submit(form: HTMLFormElement): Promise<void> {
-    if (busyRef.current) return;
+    if (busyRef.current || revokedRef.current || !mountedRef.current || !canSubmit()) return;
     const parsed = parseModerationFormInput(new FormData(form));
     if (!parsed.ok) { setError("入力値が不正です。"); return; }
     busyRef.current = true;
@@ -45,10 +53,12 @@ export function ModerationCaseStatusForm({ caseId, onSaved, client = api }: {
     setError(null);
     try {
       const result = await client.resolveCase(caseId, parsed.body);
-      if (result.status === "anonymous") {
-        window.location.assign("/entry");
+      if (result.status === "anonymous" || result.status === "forbidden") {
+        revokedRef.current = true;
+        onAccessRevoked(result.status === "anonymous" ? "/entry" : "/dashboard");
         return;
       }
+      if (!mountedRef.current || !canSubmit()) return;
       if (result.status !== "ok" || !result.data.ok) {
         setError(result.status === "ok"
           ? (result.data.message ?? "更新に失敗しました。")
@@ -62,10 +72,10 @@ export function ModerationCaseStatusForm({ caseId, onSaved, client = api }: {
       });
       onSaved();
     } catch {
-      setError("更新に失敗しました。再度お試しください。");
+      if (mountedRef.current && canSubmit()) setError("更新に失敗しました。再度お試しください。");
     } finally {
       busyRef.current = false;
-      setBusy(false);
+      if (mountedRef.current && !revokedRef.current && canSubmit()) setBusy(false);
     }
   }
 

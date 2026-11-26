@@ -3,7 +3,7 @@ import {
   AdminModerationResponseSchema, type AdminModerationResponse,
 } from "@flamenode/contracts";
 import { getJson, type OpsFetch, type OpsResult } from "./read.js";
-import { send, type OpsWriteResult } from "./write.js";
+import { sendAdminGuardedWrite, type AdminGuardedWriteResult } from "./adminUserEdits.js";
 import { AdminOpsResultSchema, type AdminOpsResult } from "@flamenode/contracts";
 
 export type ModerationFilters = { type: string; status: string; overdue: boolean };
@@ -37,10 +37,10 @@ export function createAdminModerationApi(fetchFn: OpsFetch = (path, init) => fet
       status: "resolved" | "rejected" | "cancelled" | "expired";
       video_status: "" | "pending" | "public" | "private" | "voided";
       private_note: string;
-    }): Promise<OpsWriteResult<AdminOpsResult>> {
+    }): Promise<AdminGuardedWriteResult<AdminOpsResult>> {
       if (!caseId.trim()) return { status: "unavailable" };
       const path = "/api/admin/moderation/cases/" + encodeURIComponent(caseId) + "/status";
-      const result = await send<AdminOpsResult>(fetchFn, "POST", path, body);
+      const result = await sendAdminGuardedWrite<AdminOpsResult>(fetchFn, "POST", path, body);
       if (result.status !== "ok") return result;
       const parsed = AdminOpsResultSchema.safeParse(result.data);
       return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };

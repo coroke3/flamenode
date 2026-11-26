@@ -2,10 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createRoot } from "react-dom/client";
+import { JSDOM } from "jsdom";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import {
   moderationFilters, moderationReadPath, createAdminModerationApi,
 } from "../.test-dist/apps/ops/src/api/adminModeration.js";
-import { AdminModerationContent, requestModerationFilterSubmit, onModerationReadCompleted, moderationGetSearchParams } from "../.test-dist/apps/ops/src/routes/admin/AdminModeration.js";
+import { AdminModeration, AdminModerationContent, requestModerationFilterSubmit, onModerationReadCompleted, moderationGetSearchParams } from "../.test-dist/apps/ops/src/routes/admin/AdminModeration.js";
 import { ModerationCaseStatusForm, parseModerationFormInput } from "../.test-dist/apps/ops/src/routes/admin/ModerationCaseStatusForm.js";
 import { MODERATION_FLASH_KEY, parseModerationSaveNotice, storeModerationSaveNotice,
   consumeModerationSaveNotice, ModerationFlashNotice } from "../.test-dist/apps/ops/src/routes/admin/ModerationFlashNotice.js";
@@ -125,7 +128,7 @@ test("MIG-0731 U03 form: correct SA-044 path, body, no-store and safe failure ha
 });
 test("MIG-0731 U03 form: mirrors CURRENT status/video/note controls but remains unmounted", () => {
   const html = renderToStaticMarkup(React.createElement(ModerationCaseStatusForm, {
-    caseId: "c1", onSaved() {},
+    caseId: "c1", onSaved() {}, onAccessRevoked() {},
   }));
   for (const item of ["resolved", "rejected", "cancelled", "expired", "pending", "public", "private", "voided"]) {
     assert.match(html, new RegExp('value="' + item + '"'));
@@ -176,7 +179,7 @@ test("MIG-0731 U03 flash: exact session key, one-shot display, rejection of mali
 test("MIG-0731 U03 T04: unmounted screen wires open-case form and one-shot refresh candidate", () => {
   const html = renderToStaticMarkup(React.createElement(AdminModerationContent, {
     data: fixture, filters: { type: "all", status: "open", overdue: false },
-    onSaved() {},
+    onSaved() {}, onAccessRevoked() {},
   }));
   assert.match(html, /name="id" value="case\/1"/);
   assert.match(html, /name="status"/);
@@ -186,7 +189,7 @@ test("MIG-0731 U03 T04: unmounted screen wires open-case form and one-shot refre
   const terminal = renderToStaticMarkup(React.createElement(AdminModerationContent, {
     data: { ...fixture, cases: [{ ...fixture.cases[0], status: "resolved" }] },
     filters: { type: "all", status: "resolved", overdue: false },
-    onSaved() {},
+    onSaved() {}, onAccessRevoked() {},
   }));
   assert.match(terminal, /\/admin\/audit\?table=video_moderation_cases&amp;record=case%2F1/);
   assert.doesNotMatch(terminal, /name="private_note"/);
@@ -225,4 +228,106 @@ test("MIG-0731 U03: SPA filter preserves GET semantics and strips unselected ove
   assert.ok(markup.includes('action="/admin/moderation"'));
   assert.match(markup, /name="type"/);
   assert.match(markup, /name="status"/);
+});
+
+
+test("MIG-0731 U03 SEC: SA-044 HTTP authorization denial precedes body parsing", async () => {
+  const body = { status: "resolved", video_status: "", private_note: "" };
+  const controls = [
+    [resp(403, { ok: false, message: "denied", redirect: "https://evil.invalid" }), "forbidden"],
+    [resp(403, { ok: true }), "forbidden"],
+    [new Response("not json", { status: 403 }), "forbidden"],
+    [new Response(null, { status: 403 }), "forbidden"],
+    [resp(401, { ok: true }), "anonymous"],
+  ];
+  for (const [reply, status] of controls) {
+    let reads = 0, posts = 0;
+    reply.json = async () => { reads++; throw new Error("denial body must not be read"); };
+    const client = createAdminModerationApi(async () => { posts++; return reply; });
+    assert.deepEqual(await client.resolveCase("c1", body), { status });
+    assert.equal(reads, 0);
+    assert.equal(posts, 1);
+  }
+  const conflict = createAdminModerationApi(async () => resp(409, { ok: false, message: "conflict" }));
+  assert.deepEqual(await conflict.resolveCase("c1", body), { status: "ok", data: { ok: false, message: "conflict" } });
+  const malformed = createAdminModerationApi(async () => resp(200, { ok: "invalid" }));
+  assert.deepEqual(await malformed.resolveCase("c1", body), { status: "unavailable" });
+});
+
+test("MIG-0731 U03 SEC: mounted candidate hides all private cases before fixed denial navigation", async () => {
+  for (const [reply, destination] of [
+    [() => resp(403, { ok: false, message: "denied", redirect: "https://evil.invalid" }), "/dashboard"],
+    [() => resp(403, { ok: true }), "/dashboard"],
+    [() => new Response("invalid JSON", { status: 403 }), "/dashboard"],
+    [() => resp(401, { ok: true }), "/entry"],
+    [() => resp(409, { ok: false, message: "conflict" }), null],
+    [() => resp(200, { ok: "invalid" }), null],
+  ]) {
+    const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "https://flamenode.invalid/admin/moderation" });
+    const names = ["window", "document", "navigator", "HTMLElement", "Node", "FormData", "sessionStorage", "IS_REACT_ACT_ENVIRONMENT"];
+    const previous = Object.fromEntries(names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+    for (const name of names) Object.defineProperty(globalThis, name, {
+      configurable: true, writable: true,
+      value: name === "IS_REACT_ACT_ENVIRONMENT" ? true : dom.window[name],
+    });
+    const target = dom.window.document.getElementById("root");
+    const root = createRoot(target);
+    let gets = 0, posts = 0;
+    const navigations = [];
+    const client = createAdminModerationApi(async (_path, init) => {
+      if (init.method === "GET") {
+        gets++;
+        return resp(200, { ...fixture, cases: [...fixture.cases, { ...fixture.cases[0], id: "case/2", private_note: "SECOND_PRIVATE_NOTE" }] });
+      }
+      posts++;
+      return reply();
+    });
+    function Screen() {
+      const navigate = useNavigate();
+      return React.createElement(AdminModeration, {
+        client, navigateOnRevocation: (path) => {
+          assert.equal(target.querySelector("table"), null);
+          assert.doesNotMatch(target.textContent, /SECOND_PRIVATE_NOTE|<script>private<\/script>/);
+          navigations.push(path);
+          navigate(path, { replace: true });
+        },
+      });
+    }
+    try {
+      await React.act(async () => root.render(React.createElement(MemoryRouter, {
+        initialEntries: ["/admin/moderation"],
+      }, React.createElement(Routes, null,
+        React.createElement(Route, { path: "/admin/moderation", element: React.createElement(Screen) }),
+        React.createElement(Route, { path: "/dashboard", element: React.createElement("p", null, "dashboard destination") }),
+        React.createElement(Route, { path: "/entry", element: React.createElement("p", null, "entry destination") }),
+      ))));
+      assert.equal(gets, 1);
+      assert.match(target.textContent, /SECOND_PRIVATE_NOTE/);
+      const form = target.querySelector('input[name="id"]').form;
+      const submit = () => form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+      await React.act(async () => { submit(); submit(); });
+      assert.equal(posts, 1);
+      assert.equal(gets, 1);
+      assert.equal(dom.window.sessionStorage.getItem(MODERATION_FLASH_KEY), null);
+      if (destination) {
+        assert.deepEqual(navigations, [destination]);
+        assert.equal(target.querySelector("table"), null);
+        assert.match(target.textContent, new RegExp(destination.slice(1) + " destination"));
+        await React.act(async () => { submit(); });
+        assert.equal(posts, 1);
+      } else {
+        assert.deepEqual(navigations, []);
+        assert.match(target.textContent, /SECOND_PRIVATE_NOTE/);
+        assert.ok(target.querySelector('[role="alert"]'));
+        assert.equal(form.querySelector('button[type="submit"]').disabled, false);
+      }
+    } finally {
+      await React.act(async () => root.unmount());
+      dom.window.close();
+      for (const name of names) {
+        if (previous[name]) Object.defineProperty(globalThis, name, previous[name]);
+        else delete globalThis[name];
+      }
+    }
+  }
 });
