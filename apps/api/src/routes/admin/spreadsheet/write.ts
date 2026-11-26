@@ -651,10 +651,21 @@ export function deriveSpreadsheetQueueTargets(
 }
 
 export function countingRawDb(rawDb: D1Database, counter: { reads: number }): D1Database {
+  // The CRUD/import planners use prepare/bind/all for read-only preflights.
+  // Provider exceptions cannot establish a missing row, FK violation or
+  // preview conflict. Keep actual planner and mutation errors outside this
+  // boundary so their existing client-facing classifications remain intact.
+  function guardPreflightSetup<T>(operation: () => T): T {
+    try {
+      return operation();
+    } catch {
+      throw new Error("spreadsheet_preflight_read_failed");
+    }
+  }
   const wrapExecutable = (stmt: D1PreparedStatement): D1PreparedStatement => ({
     ...stmt,
     bind(...values: unknown[]) {
-      return wrapExecutable(stmt.bind(...values));
+      return guardPreflightSetup(() => wrapExecutable(stmt.bind(...values)));
     },
     first: async <T>(colName?: string) => {
       counter.reads += 1;
@@ -662,7 +673,11 @@ export function countingRawDb(rawDb: D1Database, counter: { reads: number }): D1
     },
     all: async <T>() => {
       counter.reads += 1;
-      return stmt.all<T>();
+      try {
+        return await stmt.all<T>();
+      } catch {
+        throw new Error("spreadsheet_preflight_read_failed");
+      }
     },
     run: async <T>() => {
       counter.reads += 1;
@@ -682,7 +697,7 @@ export function countingRawDb(rawDb: D1Database, counter: { reads: number }): D1
 
   return {
     prepare(query: string) {
-      return wrapExecutable(rawDb.prepare(query));
+      return guardPreflightSetup(() => wrapExecutable(rawDb.prepare(query)));
     },
     batch: rawDb.batch.bind(rawDb),
     exec: rawDb.exec?.bind(rawDb),

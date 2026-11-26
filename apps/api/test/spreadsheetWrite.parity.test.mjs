@@ -742,6 +742,96 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(honoSqlite.prepare("SELECT * FROM software_catalog ORDER BY id").all(), beforeRows);
   });
 
+  test("MIG-0638 U01/U02: row, FK and UPSERT preflight provider errors are internal failures", async () => {
+    resetAllCaches();
+    const { honoSqlite, honoD1, callHono } = createFixture();
+    const upsert = {
+      table: "software_catalog", mode: "upsert",
+      rows: [{ id: "sw-base", name: "After preflight", normalized_name: "base soft", created_at: "100", updated_at: "101" }],
+    };
+    const preview = await callHono("POST", "/import", { ...upsert, dryRun: true });
+    assert.equal(preview.status, 200);
+    contracts.AdminSpreadsheetImportDryRunResponseSchema.parse(preview.body);
+    const apply = { ...upsert, previewToken: preview.body.previewToken };
+    const rowRead = sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE "id" = ? LIMIT ');
+    const cases = [
+      ["PATCH", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" }, column: "name", value: "changed" }, rowRead],
+      ["DELETE", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" } }, rowRead],
+      ["PATCH", "/data", { table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: "a-open" },
+        sql => sql.startsWith('SELECT "id" AS value FROM "events" WHERE "id" IN (')],
+      ["POST", "/import", apply, sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE ("id" = ?) LIMIT ')],
+    ];
+    const snapshot = () => ({
+      rows: honoSqlite.prepare("SELECT * FROM software_catalog ORDER BY id").all(),
+      slots: honoSqlite.prepare("SELECT * FROM slots ORDER BY id").all(),
+      nonces: honoSqlite.prepare("SELECT * FROM spreadsheet_import_runs ORDER BY nonce").all(),
+      audits: allAudits(honoSqlite),
+      queue: allQueueRows(honoSqlite),
+    });
+    const before = snapshot();
+    const beforeBatches = honoD1.stats.batches;
+    const beforeWrites = honoD1.stats.writes;
+    const originalPrepare = honoD1.prepare;
+    const originalError = console.error;
+    const faults = [
+      new Error("preview_required"),
+      new Error("row_not_found"),
+      new Error("FOREIGN KEY constraint failed: PREFLIGHT_CANARY"),
+      Object.defineProperty(new Error(), "message", { get() { throw new Error("PREFLIGHT_CANARY"); } }),
+    ];
+    const stages = ["prepare", "bind", "all"];
+    const logs = [];
+    let injected = 0;
+    try {
+      console.error = (...args) => logs.push(args);
+      for (const [method, path, body, matches] of cases) {
+        for (const fault of faults) {
+          for (const stage of stages) {
+            resetAllCaches();
+            const prior = injected;
+            honoD1.prepare = sql => {
+              if (!matches(sql)) return originalPrepare(sql);
+              if (stage === "prepare") { injected++; throw fault; }
+              const stmt = originalPrepare(sql);
+              return {
+                ...stmt,
+                bind(...params) {
+                  if (stage === "bind") { injected++; throw fault; }
+                  return {
+                    ...stmt.bind(...params),
+                    async all() { injected++; throw fault; },
+                  };
+                },
+              };
+            };
+            const result = await callHono(method, path, body);
+            assert.equal(injected, prior + 1, method + " " + path + " " + stage);
+            assert.equal(result.status, 500);
+            assert.deepEqual(result.body, { error: "internal_error" });
+            assert.match(result.headers.get("cache-control"), /private.*no-store/);
+          }
+        }
+      }
+      assert.equal(injected, cases.length * faults.length * stages.length);
+      assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] WRITE_FAILED"]));
+    } finally {
+      honoD1.prepare = originalPrepare;
+      console.error = originalError;
+    }
+    assert.equal(honoD1.stats.batches, beforeBatches);
+    assert.equal(honoD1.stats.writes, beforeWrites);
+    assert.deepEqual(snapshot(), before);
+
+    // The same signed preview is still usable: failed reads must not consume
+    // the nonce, create audits or prevent a legitimate retry.
+    const recovered = await callHono("POST", "/import", apply);
+    assert.equal(recovered.status, 200);
+    contracts.AdminSpreadsheetImportApplyResponseSchema.parse(recovered.body);
+    assert.equal(recovered.body.updated, 1);
+    assert.equal(honoSqlite.prepare("SELECT name FROM software_catalog WHERE id = 'sw-base'").get().name, "After preflight");
+    assert.equal(honoD1.stats.batches, beforeBatches + 1);
+  });
+
   test("MIG-0638 T06: D1 statement budget (S2 reads <= 3, S3 writes pre-reads + 1 atomic batch)", async () => {
     resetAllCaches();
     const { honoD1, callHono } = createFixture();
