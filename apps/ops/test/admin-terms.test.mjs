@@ -88,3 +88,58 @@ test("MIG-0727 U03b: reaccept broadcast requires TERMS and carries the prior cur
   assert.equal((await api.broadcast("", "TERMS", "", "確認してください")).ok, false);
   assert.equal(calls.length, 1);
 });
+
+
+test("SEC-terms: write 401/403 revoke once; 503 and validation errors do not", async () => {
+  for (const [status, reason, expected] of [[401, "unauthenticated", "anonymous"], [403, "forbidden", "forbidden"], [403, "banned", "forbidden"]]) {
+    const denied = [];
+    const api = createAdminTermsApi(async () =>
+      reply(status, { ok: false, reason, message: "denied", redirect: "https://example.invalid/evil" }),
+    reason => denied.push(reason));
+    const outcome = await api.updateDraft("tv1", draft);
+    assert.equal(outcome.ok, false);
+    assert.deepEqual(denied, [expected], `status ${status} must notify without honoring external redirects`);
+  }
+  const denied = [];
+  const down = createAdminTermsApi(async () => reply(503, { ok: false, reason: "forbidden", message: "offline" }),
+    reason => denied.push(reason));
+  assert.equal((await down.publish("tv1")).ok, false);
+  assert.equal((await down.createDraft({ ...draft, body_markdown: "" })).ok, false);
+  assert.deepEqual(denied, [], "ordinary failure and local validation do not revoke admin state");
+});
+
+test("SEC-terms: recognized non-identity 403 stays inline", async () => {
+  for (const reason of ["invalid_origin", "maintenance_mode", "cost_guard_blocked", "tos_required"]) {
+    const denied = [];
+    const api = createAdminTermsApi(async () => reply(403, { ok: false, reason, message: "inline denial" }),
+      value => denied.push(value));
+    assert.deepEqual(await api.publish("tv1"), { ok: false, message: "inline denial" });
+    assert.deepEqual(denied, []);
+  }
+});
+
+test("SEC-terms: unknown, malformed and stalled 403 quarantine rather than redirect", async () => {
+  for (const response of [reply(403, { ok: false, reason: "unknown" }), new Response("not JSON", { status: 403 })]) {
+    const denied = [];
+    const api = createAdminTermsApi(async () => response, value => denied.push(value));
+    assert.equal((await api.publish("tv1")).ok, false);
+    assert.deepEqual(denied, ["unknown"]);
+  }
+  let controller;
+  const body = new ReadableStream({ start(value) { controller = value; } });
+  const denied = [];
+  const api = createAdminTermsApi(async () => new Response(body, {
+    status: 403, headers: { "content-type": "application/json" },
+  }), value => denied.push(value));
+  try {
+    assert.equal((await api.publish("tv1")).ok, false);
+    assert.deepEqual(denied, ["unknown"]);
+  } finally {
+    controller.close();
+  }
+});
+
+test("SEC-terms: non-opted-in broadcast callers keep their transport result", async () => {
+  const api = createAdminTermsApi(async () => reply(403, { ok: false, reason: "invalid_origin", message: "inline denial" }));
+  assert.deepEqual(await api.broadcast("tv1", "TERMS", "", "確認してください"), { ok: false, message: "inline denial" });
+});

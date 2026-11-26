@@ -149,3 +149,61 @@ test("normalizeStaticTop filters point events from card lists", () => {
 test("normalizeStaticTop: 空 payload は miss 扱いにする", () => {
   assert.equal(normalizeStaticTop({ items: [] }), null);
 });
+
+test("normalizeStaticTop rejects nonpublic video markers on every homepage rail", () => {
+  const video = (id, markers = {}) => ({
+    id, title: `Video ${id}`, display_name: "Creator", ...markers,
+  });
+  const top = normalizeStaticTop({
+    recommended: [
+      video("private-status", { status: "private" }),
+      video("recommended-public", { status: "public" }),
+      video("private-alias", { status: "public", visibility_status: "private" }),
+      video("legacy-recommended"),
+    ],
+    latest: [
+      video("draft-status", { status: "draft" }),
+      video("latest-public", { status: "public", visibility_status: "public" }),
+      video("conflicting-status", { status: "private", visibility_status: "public" }),
+    ],
+    nostalgic: [
+      video("hidden-alias", { visibility_status: "private" }),
+      video("legacy-nostalgic", { status: null, visibility_status: null }),
+      video("hidden-empty", { status: "public", visibility_status: "" }),
+    ],
+  });
+  assert.ok(top);
+  assert.deepEqual(top.recommended.map((row) => row.id), [
+    "recommended-public", "legacy-recommended",
+  ]);
+  assert.deepEqual(top.latest.map((row) => row.id), ["latest-public"]);
+  assert.deepEqual(top.nostalgic.map((row) => row.id), ["legacy-nostalgic"]);
+  assert.ok([...top.recommended, ...top.latest, ...top.nostalgic]
+    .every((row) => row.status === "public"));
+});
+
+test("normalizeStaticTop retains legacy items while rejecting explicit private or malformed status", () => {
+  const card = (id, markers = {}) => ({
+    id, title: `Video ${id}`, display_name: "Creator", ...markers,
+  });
+  const top = normalizeStaticTop({
+    items: [
+      card("legacy"),
+      card("explicit-public", { visibility_status: "public" }),
+      card("null-public", { status: null, visibility_status: "public" }),
+      card("all-null", { status: null, visibility_status: null }),
+      card("private", { status: "private" }),
+      card("draft", { visibility_status: "draft" }),
+      card("malformed", { status: "public", visibility_status: 0 }),
+    ],
+  });
+  assert.ok(top);
+  for (const rail of [top.recommended, top.latest]) {
+    assert.deepEqual(rail.map((video) => video.id), [
+      "legacy", "explicit-public", "null-public", "all-null",
+    ]);
+  }
+  assert.equal(normalizeStaticTop({
+    items: [card("hidden", { status: "private" })],
+  }), null, "only nonpublic video rows do not produce a public top payload");
+});

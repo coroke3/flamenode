@@ -135,15 +135,14 @@ export async function maybeMarkOnboardingComplete(
       .update(users)
       .set({ onboarding_completed_at: Math.floor(Date.now() / 1000) })
       .where(and(eq(users.id, authUserId), isNull(users.onboarding_completed_at))!);
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        service: "onboarding_marker",
-        result: "failed",
-        auth_user_id: authUserId,
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+  } catch {
+    // This optional marker cannot break a completed X-ID request or page load.
+    // Provider exceptions and user identifiers must never enter diagnostics.
+    try {
+      console.warn(JSON.stringify({ service: "onboarding_marker", result: "failed" }));
+    } catch {
+      // A broken log sink is also best-effort.
+    }
   }
 }
 

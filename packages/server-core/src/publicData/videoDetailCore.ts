@@ -1,3 +1,4 @@
+import { normalizePublicProfileXId } from "./publicProfileXId.ts";
 import { isPublicVideoDirect } from "./visibility.ts";
 import {
   normalizeCoercedString as normalizeNullableString,
@@ -210,7 +211,7 @@ function normalizeVideo(value: unknown): StaticVideoDetailVideo | null {
   const title = normalizeString(row.title);
   const visibility = normalizeString(row.visibility_status) ?? "public";
   if (!id || !title || !isPublicVideoDirect(visibility)) return null;
-  const creatorXUserId = normalizeNullableString(row.creator_x_user_id);
+  const creatorXUserId = normalizePublicProfileXId(row.creator_x_user_id);
   return {
     id,
     title,
@@ -252,7 +253,7 @@ function normalizeMember(value: unknown): StaticVideoMember | null {
   return {
     id,
     display_name: displayName,
-    x_user_id: normalizeNullableString(row.x_user_id),
+    x_user_id: normalizePublicProfileXId(row.x_user_id),
     role_label: normalizeNullableString(row.role_label),
     order_index: normalizeUnix(row.order_index),
     comment: normalizeNullableString(row.comment),
@@ -334,7 +335,7 @@ function normalizeRelatedVideo(value: unknown): StaticRelatedVideo | null {
     youtube_video_id: normalizeNullableString(row.youtube_video_id),
     display_name: displayName,
     icon_url: normalizeNullableString(row.icon_url),
-    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
+    creator_x_user_id: normalizePublicProfileXId(row.creator_x_user_id),
     primary_event_id: normalizeNullableString(row.primary_event_id),
     scheduled_time: normalizeUnix(row.scheduled_time),
   };
