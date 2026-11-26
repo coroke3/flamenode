@@ -1,4 +1,4 @@
-import { Hono, type MiddlewareHandler } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { AppEnv } from "../../env.ts";
 import { sessionMiddleware } from "../../auth/session.ts";
 import { loadPublicSnapshot } from "../../lib/publicSnapshot.ts";
@@ -17,7 +17,7 @@ import {
   TERMS_REACCEPT_REQUIRED_CASE_SQL,
   TERMS_REACCEPT_REQUIRED_CTE_SQL,
 } from "../personal/context.ts";
-import { resolveActiveXUserId } from "../account/summary.ts";
+import { ACCOUNT_SUMMARY_MAX_X_ROWS, resolveActiveXUserId } from "../account/summary.ts";
 import type {
   VideoViewerOverlayDto,
   VideoViewerOverlayPlaylistItem,
@@ -31,6 +31,30 @@ const PRIVATE_HEADERS = {
 
 /** CURRENT src/lib/publicData/r2EventPlaylist.ts readVisibleEventArtifact: other ids are never read. */
 const PLAYLIST_EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+/** ZERO_1102 S2: public chapter full notes are read only when one row is explicitly requested. */
+/** ZERO_1102 S2: response cap; never truncate a stored note in an editor DTO. */
+const MAX_VIEWER_OVERLAY_RESPONSE_BYTES = 64 * 1024;
+// A malformed legacy approved-X row can contain an arbitrarily large TEXT id.
+// The canonical public identifier is <=20 chars; retain 128-character legacy
+// spellings (including four-byte Unicode scalars) while bounding D1 JSON bytes.
+// SQLite length(TEXT) stops at NUL: reject embedded NUL and check complete BLOB
+// byte lengths in the FIRST D1 projection, before JSON is materialized.
+const MAX_APPROVED_X_ID_PROJECTION_CHARS = 128;
+const MAX_APPROVED_X_ID_PROJECTION_BYTES = MAX_APPROVED_X_ID_PROJECTION_CHARS * 4;
+const INVALID_SELECTED_X_ID_SQL = `(
+  u."active_x_user_id" IS NOT NULL AND (
+    typeof(u."active_x_user_id") != 'text' OR
+    instr(u."active_x_user_id", char(0)) > 0 OR
+    length(u."active_x_user_id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} OR
+    length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_APPROVED_X_ID_PROJECTION_BYTES}
+  )
+)`;
+const INVALID_LINKED_X_ID_SQL = `(
+  typeof(a."id") != 'text' OR
+  instr(a."id", char(0)) > 0 OR
+  length(a."id") > ${MAX_APPROVED_X_ID_PROJECTION_CHARS} OR
+  length(CAST(a."id" AS BLOB)) > ${MAX_APPROVED_X_ID_PROJECTION_BYTES}
+)`;
 
 const UNAVAILABLE_HEADERS = {
   ...PRIVATE_HEADERS,
@@ -66,9 +90,105 @@ function emptyOverlay(args?: {
     viewerXApproved: false,
     viewerCanEditChapters: false,
     privateChapters: [],
+    editablePublicChapters: [],
     playlistLabel: args?.playlistLabel ?? "再生リスト",
     playlistItems: args?.playlistItems ?? [],
   };
+}
+
+
+/**
+ * Issue #709: every successful/degraded RH-031 response, including early
+ * static-only and unauthenticated returns, must honor the UTF-8 S2 ceiling.
+ * The playlist and one-row editor projection are optional; private chapters
+ * and permission facts are not. Never truncate a PUT-ready chapter note.
+ */
+function boundedOverlayResponse(c: Context<AppEnv>, body: VideoViewerOverlayDto): Response {
+  const encode = (dto: VideoViewerOverlayDto) => JSON.stringify(dto);
+  // Every UTF-16 code unit needs at least one UTF-8 byte (surrogate pairs
+  // need four bytes for two units). Reject obviously oversized JSON before
+  // allocating a potentially multi-megabyte TextEncoder output. For shorter
+  // strings still count *bytes*, never treat code-unit length as UTF-8 length.
+  const withinLimit = (json: string) =>
+    json.length <= MAX_VIEWER_OVERLAY_RESPONSE_BYTES &&
+    new TextEncoder().encode(json).byteLength <= MAX_VIEWER_OVERLAY_RESPONSE_BYTES;
+  // S2 guard: an 8MiB-but-valid R2 playlist must never trigger an
+  // 8MiB JSON.stringify of the viewer DTO. Every UTF-16 code unit in a
+  // string value needs at least one UTF-8 byte in its JSON representation.
+  // This is a conservative lower bound, not a replacement for exact byte
+  // accounting of the surviving response. Stop as soon as it exceeds 64KiB.
+  const units = (value: unknown) => typeof value === "string" ? value.length : 0;
+  // The active X identity is required auth context, just like private
+  // chapters: dropping or truncating it would silently change permissions.
+  // A malformed legacy D1 identity must fail before a huge JSON.stringify.
+  let mandatoryUnits = units(body.activeXId);
+  if (mandatoryUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+    return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+  }
+  for (const chapter of body.privateChapters) {
+    // Every string in a required private chapter is non-droppable; long
+    // legacy labels/author fields must fail before serializing the DTO too.
+    mandatoryUnits += units(chapter.id) + units(chapter.chapter_label) +
+      units(chapter.note) + units(chapter.author_name) + units(chapter.author_icon);
+    if (mandatoryUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+      return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+    }
+  }
+
+  let projectedBody = body;
+  let editorUnits = 0;
+  for (const chapter of body.editablePublicChapters ?? []) {
+    editorUnits += units(chapter.note) + units(chapter.chapter_label) + units(chapter.id);
+    if (editorUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+      projectedBody = { ...projectedBody, editablePublicChapters: [] };
+      break;
+    }
+  }
+  // Public-event names in the video snapshot also become the playlist
+  // label. Include that string before serializing the DTO: an unusually long
+  // event name must not force a multi-megabyte JSON.stringify on S2.
+  let playlistUnits = units(body.playlistLabel);
+  if (playlistUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+    projectedBody = {
+      ...projectedBody,
+      editablePublicChapters: [],
+      playlistLabel: "再生リスト",
+      playlistItems: [],
+    };
+  } else {
+    for (const item of body.playlistItems) {
+      playlistUnits += units(item.id) + units(item.title) +
+        units(item.display_name) + units(item.youtube_video_id);
+      if (playlistUnits > MAX_VIEWER_OVERLAY_RESPONSE_BYTES) {
+        // Preserve the existing no-editor/no-playlist optional fallback.
+        projectedBody = {
+          ...projectedBody,
+          editablePublicChapters: [],
+          playlistLabel: "再生リスト",
+          playlistItems: [],
+        };
+        break;
+      }
+    }
+  }
+
+  let json = encode(projectedBody);
+  if (!withinLimit(json)) {
+    const noEditor = { ...projectedBody, editablePublicChapters: [] };
+    json = encode(noEditor);
+    if (!withinLimit(json)) {
+      // A valid full public R2 playlist can contain 500 long UTF-8 titles.
+      // Do not let that optional list bypass the cap on early-return routes.
+      json = encode({ ...noEditor, playlistLabel: "再生リスト", playlistItems: [] });
+      if (!withinLimit(json)) {
+        return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+      }
+    }
+  }
+  return c.body(json, 200, {
+    ...PRIVATE_HEADERS,
+    "Content-Type": "application/json; charset=utf-8",
+  });
 }
 
 async function loadStaticEventPlaylistOverlay(
@@ -135,8 +255,9 @@ export function createVideoViewerOverlayRoutes(
         guardModeRaw: c.env.PUBLIC_VISIBILITY_GUARD_MODE,
         targetEntityId: rawId,
       });
-    } catch (error) {
-      console.error("[video-viewer-overlay] snapshot read error", { rawId, error });
+    } catch {
+      // Raw provider exceptions may contain internal paths, SQL values or credentials.
+      console.error("[video-viewer-overlay] snapshot read failed", "provider_error");
       return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
     }
 
@@ -152,44 +273,51 @@ export function createVideoViewerOverlayRoutes(
       return c.json({ error: "video_not_found" }, 404, PRIVATE_HEADERS);
     }
 
+    // An editor lookup is one user-selected D1 row, not a playlist view.
+    // Skip the unrelated event-playlist R2 read and any large playlist DTO.
+    // Duplicate query keys are ambiguous and never grant a targeted edit.
+    const requestedChapterIds = c.req.queries("editChapterId") ?? [];
+    const requestedChapterId = requestedChapterIds.length === 1 ? requestedChapterIds[0]! : "";
+    const targetPublicChapterId = requestedChapterId.length > 0 &&
+      requestedChapterId.length <= 128 && requestedChapterId === requestedChapterId.trim()
+      ? requestedChapterId : null;
     const playlist = (c.req.query("playlist") ?? "").trim().slice(0, 128);
     const playlistEventTitle = playlist
       ? detail.publicEvents.find((event) => event.id === playlist)?.title ?? null
       : null;
 
-    const publicPlaylist = await loadStaticEventPlaylistOverlay(
-      c.env.BUCKET,
-      c.env.PUBLIC_VISIBILITY_GUARD_MODE,
-      playlist,
-      playlistEventTitle,
-    );
+    const publicPlaylist: Pick<VideoViewerOverlayDto, "playlistLabel" | "playlistItems"> =
+      targetPublicChapterId
+        ? { playlistLabel: "再生リスト", playlistItems: [] }
+        : await loadStaticEventPlaylistOverlay(
+            c.env.BUCKET,
+            c.env.PUBLIC_VISIBILITY_GUARD_MODE,
+            playlist,
+            playlistEventTitle,
+          );
 
     const operationMode = await resolvePublicOperationMode(c.env, { allowD1: false });
     if (!isLiveApiEnabled(operationMode)) {
-      return c.json(emptyOverlay(publicPlaylist), 200, PRIVATE_HEADERS);
+      return boundedOverlayResponse(c, emptyOverlay(publicPlaylist));
     }
 
     await resolveSession(c, async () => {});
     if (c.get("sessionState") === "unavailable") {
-      return c.json(
-        {
-          ...emptyOverlay(publicPlaylist),
-          authUnavailable: true,
-        },
-        200,
-        PRIVATE_HEADERS,
-      );
+      return boundedOverlayResponse(c, {
+        ...emptyOverlay(publicPlaylist),
+        authUnavailable: true,
+      });
     }
 
     const viewer = c.get("user");
     if (!viewer) {
-      return c.json(emptyOverlay(publicPlaylist), 200, PRIVATE_HEADERS);
+      return boundedOverlayResponse(c, emptyOverlay(publicPlaylist));
     }
 
     // CURRENT getCurrentUserContext: the user row (terms) and the approved linked X ids are read for
     // every signed-in viewer, banned included; a failed read is "auth unavailable" (signed out shape).
     const authUnavailable = () =>
-      c.json({ ...emptyOverlay(publicPlaylist), authUnavailable: true }, 200, PRIVATE_HEADERS);
+      boundedOverlayResponse(c, { ...emptyOverlay(publicPlaylist), authUnavailable: true });
     if (!c.env.DB) return authUnavailable();
 
     let degraded: Pick<
@@ -221,8 +349,20 @@ SELECT
   (SELECT json_object(
       'is_tos_accepted', u."is_tos_accepted",
       'terms_reaccept_required', ${TERMS_REACCEPT_REQUIRED_CASE_SQL},
-      'active_x_id', u."active_x_user_id",
-      'approved_x_ids', (SELECT coalesce(json_group_array(x."id"), '[]') FROM "x_user_account_links" l INNER JOIN "x_users" x ON x."id" = l."x_user_id" WHERE l."auth_user_id" = u."id" AND x."approval_status" = 'approved')
+      'active_x_id', CASE
+        WHEN ${INVALID_SELECTED_X_ID_SQL} THEN NULL
+        ELSE u."active_x_user_id" END,
+      'invalid_active_x_id', CASE
+        WHEN ${INVALID_SELECTED_X_ID_SQL} THEN 1
+        ELSE 0 END,
+      'approved_x_ids', (SELECT coalesce(json_group_array(
+        CASE WHEN ${INVALID_LINKED_X_ID_SQL} THEN NULL ELSE a."id" END
+      ), '[]') FROM (
+        SELECT x."id" FROM "x_user_account_links" l
+        INNER JOIN "x_users" x ON x."id" = l."x_user_id"
+        WHERE l."auth_user_id" = u."id" AND x."approval_status" = 'approved'
+        LIMIT ${ACCOUNT_SUMMARY_MAX_X_ROWS + 1}
+      ) a)
    )
    FROM "user" u
    WHERE u."id" = ?
@@ -233,18 +373,32 @@ SELECT
         row1 = await c.env.DB.prepare(stmt1Sql)
           .bind(viewer.id, rawId, rawId, viewer.id)
           .first<{ video_json: string | null; user_json: string | null }>();
-      } catch (error) {
-        console.error("[video-viewer-overlay] viewer read failed", { rawId, error });
+      } catch {
+        // Do not forward bound SQL parameters or nested provider exceptions to logs.
+        console.error("[video-viewer-overlay] viewer read failed", "provider_error");
         return authUnavailable();
       }
       // CURRENT: a session whose user row is gone is signed out.
-      if (!row1?.user_json) return c.json(emptyOverlay(publicPlaylist), 200, PRIVATE_HEADERS);
+      if (!row1?.user_json) return boundedOverlayResponse(c, emptyOverlay(publicPlaylist));
 
       const userData = JSON.parse(row1.user_json) as Record<string, unknown>;
       const isTosAccepted = userData.is_tos_accepted === 1;
       const termsReacceptRequired = userData.terms_reaccept_required === 1;
       const rawActiveX = typeof userData.active_x_id === "string" ? userData.active_x_id : null;
       const approvedXIds = parseJsonArray<string>(userData.approved_x_ids);
+      // S2: cap correlated D1 JSON aggregation *before* JSON.parse and the
+      // private chapter authorization projection. A null SQL sentinel means
+      // a legacy linked X id was too long to include safely in the JSON.
+      // Do not silently omit this identity from the authorization set.
+      // The selected active ID is an independently stored legacy TEXT field.
+      // Even with <=100 bounded links it could have megabytes of data; the
+      // D1 projection sends a compact invalidity marker, never that value.
+      if (userData.invalid_active_x_id === 1 ||
+          approvedXIds.length > ACCOUNT_SUMMARY_MAX_X_ROWS ||
+          approvedXIds.some((id) => typeof id !== "string" ||
+            Array.from(id).length > MAX_APPROVED_X_ID_PROJECTION_CHARS)) {
+        return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+      }
       // CURRENT resolveActiveXUserId: the D1 spelling of the matching approved X id, else the only
       // approved X id, else null; viewerXApproved is approvedXIds.includes(activeXId).
       const activeXId = resolveActiveXUserId(
@@ -257,30 +411,31 @@ SELECT
       const viewerCanWriteChapters = viewerXApproved && isTosAccepted && !termsReacceptRequired && viewer.is_banned !== 1;
 
       if (viewer.is_banned === 1) {
-        return c.json(
-          {
-            ...emptyOverlay(publicPlaylist),
-            loggedIn: true,
-            isBanned: true,
-            isTosAccepted,
-            termsReacceptRequired,
-            activeXId,
-          },
-          200,
-          PRIVATE_HEADERS,
-        );
+        return boundedOverlayResponse(c, {
+          ...emptyOverlay(publicPlaylist),
+          loggedIn: true,
+          isBanned: true,
+          isTosAccepted,
+          termsReacceptRequired,
+          activeXId,
+        });
       }
       degraded = { isTosAccepted, termsReacceptRequired, activeXId, viewerXApproved };
 
       let viewerCanEditChapters = false;
+      let matchesPublicD1Video = false;
       if (row1.video_json) {
         const videoData = JSON.parse(row1.video_json) as {
           id: string;
           primary_event_id: string | null;
+          visibility_status: string;
           ve_json: unknown;
           staff_json: unknown;
         };
         if (videoData.id === detail.video.id) {
+          // A stale R2 artifact must not grant public chapter editing after
+          // the canonical D1 video has been made private.
+          matchesPublicD1Video = videoData.visibility_status === "public";
           viewerCanEditChapters = canAdministerChapters(viewer.role, approvedXIds, {
             primary_event_id: videoData.primary_event_id,
             access: parseAccessFacts(videoData.ve_json, videoData.staff_json),
@@ -288,9 +443,20 @@ SELECT
         }
       }
 
+      // A stale R2 public artifact is not authority to offer chapter mutation
+      // controls when D1 has already revoked the video's public visibility.
+      const mayManagePublicView = viewerCanWriteChapters && matchesPublicD1Video;
       const canSeeAllPrivate = viewer.role === "admin" || viewerCanEditChapters;
-      const canSeeAnyPrivate = canSeeAllPrivate || approvedXIds.length > 0;
-      const isLibPlaylist = playlist === "lib-like" || playlist === "lib-bookmark";
+      // The ordinary viewer overlay never reads public editing notes. An
+      // explicit single-row request is not an authorization claim: the same
+      // SQL, Active-X, terms, approval and chapter-admin gates still apply.
+      // Targeted requests only need an edit grant, not the unrelated private
+      // chapter list; keep the response small without a fourth D1 statement.
+      const canSeeAnyPrivate = !targetPublicChapterId && (canSeeAllPrivate || approvedXIds.length > 0);
+      // A targeted editor lookup must also avoid the unrelated 500-item
+      // personal library aggregation when given a playlist query parameter.
+      const isLibPlaylist = !targetPublicChapterId &&
+        (playlist === "lib-like" || playlist === "lib-bookmark");
       const libKind = playlist === "lib-like" ? "like" : "bookmark";
 
       // Statement 2: private chapters + interactions + lib playlist
@@ -319,6 +485,37 @@ SELECT
            ) c) AS chapters_json`
         : `'[]' AS chapters_json`;
 
+      // Issue #661: return full note/visibility from D1 for one explicitly
+      // requested row only. A signed SSG row is not a write grant; owner
+      // link and manager permissions are rechecked within the existing D1
+      // statement. No public chapter SELECT runs on normal page loads.
+      const editablePublicSubquery = mayManagePublicView && targetPublicChapterId
+        ? `(SELECT coalesce(json_group_array(json_object(
+              'id', c."id",
+              'chapter_time', c."chapter_time",
+              'chapter_label', c."chapter_label",
+              'visibility', 'public',
+              'note', c."note",
+              'chapter_owner_x_id', c."x_user_id"
+           )), '[]')
+           FROM (
+             SELECT ch."id", ch."chapter_time", ch."chapter_label", ch."note", ch."x_user_id"
+               FROM "video_chapters" ch
+              WHERE ch."video_id" = ? AND ch."visibility" = 'public'
+                AND ch."id" = ?
+                AND (${viewerCanEditChapters ? "1=1" : `ch."x_user_id" = ? AND EXISTS (
+                  SELECT 1 FROM "x_user_account_links" l
+                  INNER JOIN "x_users" xu ON xu."id" = l."x_user_id"
+                  WHERE l."auth_user_id" = ? AND l."x_user_id" = ch."x_user_id"
+                    AND xu."approval_status" = 'approved'
+                )`})
+                AND ch."id" NOT LIKE '%:member:%'
+                AND ch."id" NOT LIKE '%:legacy:%'
+              ORDER BY ch."chapter_time" ASC, ch."id" ASC
+              LIMIT 1
+           ) c) AS editable_public_chapters_json`
+        : `'[]' AS editable_public_chapters_json`;
+
       const libPlaylistSubquery = isLibPlaylist
         ? `, (SELECT coalesce(json_group_array(json_object(
               'id', p."id",
@@ -339,6 +536,7 @@ SELECT
 
       const stmt2Sql = `SELECT 
         ${chaptersSubquery},
+        ${editablePublicSubquery},
         (SELECT coalesce(json_group_array("interaction_type"), '[]')
            FROM (
              SELECT "interaction_type"
@@ -358,6 +556,10 @@ SELECT
           stmt2Binds.push(JSON.stringify(approvedXIds));
         }
       }
+      if (mayManagePublicView && targetPublicChapterId) {
+        stmt2Binds.push(detail.video.id, targetPublicChapterId);
+        if (!viewerCanEditChapters) stmt2Binds.push(activeXId, viewer.id);
+      }
       stmt2Binds.push(viewer.id, detail.video.id);
       if (isLibPlaylist) {
         stmt2Binds.push(viewer.id, libKind);
@@ -367,6 +569,7 @@ SELECT
         .bind(...stmt2Binds)
         .first<{
           chapters_json: string | null;
+          editable_public_chapters_json: string | null;
           interactions_json: string | null;
           lib_playlist_json?: string | null;
         }>();
@@ -377,9 +580,22 @@ SELECT
         VideoViewerOverlayDto["privateChapters"][number] & { chapter_owner_x_id: string | null }
       >(row2?.chapters_json).map(({ chapter_owner_x_id, ...chapter }) => ({
         ...chapter,
-        viewerCanManage: viewerCanWriteChapters &&
+        viewerCanManage: mayManagePublicView &&
           (viewerCanEditChapters || Boolean(activeXId && chapter_owner_x_id === activeXId)),
       }));
+      // Never send raw chapter-owner X identities to the browser. The SQL
+      // grants only authorized rows; re-check the active X before labeling
+      // each row manageable, then drop owner metadata unconditionally.
+      const editablePublicChapters = parseJsonArray<{
+        id: string; chapter_time: number; chapter_label: string;
+        note: string | null; visibility: "public"; chapter_owner_x_id: string | null;
+      }>(row2?.editable_public_chapters_json)
+        .filter((chapter) => mayManagePublicView &&
+          (viewerCanEditChapters || Boolean(activeXId && chapter.chapter_owner_x_id === activeXId)))
+        .map(({ chapter_owner_x_id: _ownerId, ...chapter }) => ({
+          ...chapter,
+          viewerCanManage: true as const,
+        }));
       const interactions = parseJsonArray<string>(row2?.interactions_json);
       const likeActive = interactions.includes("like");
       const bookmarkActive = interactions.includes("bookmark");
@@ -404,26 +620,28 @@ SELECT
         bookmarkActive,
         viewerXApproved,
         // Server-side capability only; do not derive from the viewer X approval bit.
-        viewerCanEditChapters: viewerCanEditChapters && viewerCanWriteChapters,
+        viewerCanEditChapters: viewerCanEditChapters && mayManagePublicView,
         privateChapters,
+        editablePublicChapters,
         ...finalPlaylist,
       };
 
-      return c.json(result, 200, PRIVATE_HEADERS);
-    } catch (error) {
-      console.error("[video-viewer-overlay] db read failed", { rawId, error });
+      // Public editor rows are requested one at a time, with original notes.
+      // Notes must be complete when offered for PUT. If the response would
+      // exceed S2's 64KiB limit, fail closed instead of truncating any note,
+      // returning a partially usable editor, or serializing an oversized body.
+      return boundedOverlayResponse(c, result);
+    } catch {
+      // The degraded response is intentionally stable regardless of provider detail.
+      console.error("[video-viewer-overlay] db read failed", "provider_error");
       if (!degraded) return authUnavailable();
       // CURRENT: the viewer is known, the overlay read failed.
-      return c.json(
-        {
-          ...emptyOverlay(publicPlaylist),
-          loggedIn: true,
-          authUnavailable: true,
-          ...degraded,
-        },
-        200,
-        PRIVATE_HEADERS,
-      );
+      return boundedOverlayResponse(c, {
+        ...emptyOverlay(publicPlaylist),
+        loggedIn: true,
+        authUnavailable: true,
+        ...degraded,
+      });
     }
   });
 
