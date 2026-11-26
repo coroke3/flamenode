@@ -60,6 +60,18 @@ function dedupeStaticRebuildInputs(
   return Array.from(byKey.values());
 }
 
+type EnqueueFailureCode = "enqueue_failed" | "bulk_enqueue_failed" | "history_log_failed";
+
+// Diagnostics are optional: a broken sink or provider exception must never
+// reject this post-commit best-effort path or skip the failure audit.
+function warnEnqueueFailure(code: EnqueueFailureCode): void {
+  try {
+    console.warn("[static-rebuild]", code);
+  } catch {
+    // Diagnostic failure cannot change the enqueue outcome.
+  }
+}
+
 const ENQUEUE_CONFLICT_RETRY_LIMIT = 3;
 // A full 100-member replacement can invalidate both old and new user pages
 // (up to 200 user targets) plus the video/index/event projections. Keep the
@@ -282,25 +294,22 @@ export async function enqueueStaticRebuild(
       }
     }
     throw new Error("static rebuild queue changed during enqueue retries");
-  } catch (error) {
-    console.warn("[enqueueStaticRebuild] failed", target, error);
+  } catch {
+    warnEnqueueFailure("enqueue_failed");
     try {
-      await auditAction(db, {
+      const auditId = await auditAction(db, {
         table_name: "static_rebuild_queue",
         record_id: `${target.targetType}:${target.targetId}`,
         action: "UPDATE",
-        after_data: JSON.stringify({
-          reason: target.reason,
-          error: error instanceof Error ? error.message : String(error),
-        }),
+        // Preserve the audit subject/actor, but not arbitrary provider errors
+        // or the caller's unbounded reason string in the failure payload.
+        after_data: { error: "enqueue_failed" },
         operator_user_id: input.requestedByUserId ?? "system",
         retention_class: "normal",
       });
-    } catch (historyError) {
-      console.warn(
-        "[enqueueStaticRebuild] history log failed",
-        historyError,
-      );
+      if (auditId === null) warnEnqueueFailure("history_log_failed");
+    } catch {
+      warnEnqueueFailure("history_log_failed");
     }
   }
 }
@@ -332,12 +341,9 @@ export async function enqueueStaticRebuildMany(
       ...options,
       sentKinds: options?.sentKinds ?? new Set<QueueWakeKind>(),
     }, loadWakeHost);
-  } catch (error) {
+  } catch {
     // rebuild enqueueは本体保存後のbest-effort経路。大量fanoutやplan上限でも本体成功を巻き戻さない。
-    console.warn("[enqueueStaticRebuildMany] bulk enqueue failed", {
-      targetCount: items.length,
-      error,
-    });
+    warnEnqueueFailure("bulk_enqueue_failed");
   }
 }
 

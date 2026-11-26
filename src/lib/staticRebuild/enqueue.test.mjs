@@ -56,11 +56,11 @@ test("複数enqueueのplan生成失敗もbest-effort境界内で吸収する", (
   );
   const tryIndex = manyFn.indexOf("try {");
   const buildIndex = manyFn.indexOf("buildStaticRebuildQueueBatch(db, items)");
-  const catchIndex = manyFn.indexOf("catch (error)");
+  const catchIndex = manyFn.indexOf("catch {");
   assert.ok(tryIndex >= 0);
   assert.ok(buildIndex > tryIndex);
   assert.ok(catchIndex > buildIndex);
-  assert.match(manyFn, /targetCount: items\.length/);
+  assert.match(manyFn, /warnEnqueueFailure\("bulk_enqueue_failed"\)/);
 });
 
 test("queueBatchCoreはactive重複をfail-closedにする", () => {
