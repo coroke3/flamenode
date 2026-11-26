@@ -142,3 +142,17 @@ test("HTML clipboard fallback does not mistake comments or table attributes for 
     [["A", "B"]],
   );
 });
+
+test("HTML clipboard fallback treats only actual br tags as breaks and handles quoted delimiters", () => {
+  const html = '<table><tr><td>A<br-widget></br-widget>B</td><td>A<br title="x>y">B</td><td>A<BR class="line-break" />B</td></tr></table>';
+  const expected = [["AB", "A\nB", "A\nB"]];
+  assert.deepEqual(parseHtmlClipboardTable(html), expected);
+  assert.deepEqual(parseClipboardContent("", html), expected);
+});
+
+test("HTML clipboard fallback strips whole quoted inline tags and comments without inventing breaks", () => {
+  const html = "<table><tr><td>A<strong title='x>y'>B</strong>C</td><td>A<span title='<br>'>B</span></td><td>A<!-- <br> -->B</td></tr></table>";
+  const expected = [["ABC", "AB", "AB"]];
+  assert.deepEqual(parseHtmlClipboardTable(html), expected);
+  assert.deepEqual(parseClipboardContent("", html), expected);
+});

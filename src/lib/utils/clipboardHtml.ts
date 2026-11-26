@@ -21,7 +21,10 @@ function decodeHtmlEntities(text: string): string {
 
 function stripHtmlTags(fragment: string): string {
   return decodeHtmlEntities(
-    fragment.replace(/<br\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, ""),
+    fragment.replace(
+      /<!--[\s\S]*?-->|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi,
+      (tag) => /^<br(?=[\s/>])/i.test(tag) ? "\n" : "",
+    ),
   ).replace(/\u00a0/g, " ");
 }
 
