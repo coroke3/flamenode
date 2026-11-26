@@ -33,8 +33,12 @@ export async function GET(req: Request): Promise<Response> {
   let staticIndex: Awaited<ReturnType<typeof loadStaticEventsIndex>>;
   try {
     staticIndex = await loadStaticEventsIndex();
-  } catch (error) {
-    console.error("[public-events] static index load failed", error);
+  } catch {
+    try {
+      console.error("[public-events] static index load failed");
+    } catch {
+      // Diagnostics must not replace the fixed availability response.
+    }
     return publicServiceUnavailableResponse("database_unavailable");
   }
   if (staticIndex.strategy === "static_json_only" && staticIndex.index) {
@@ -64,8 +68,12 @@ export async function GET(req: Request): Promise<Response> {
   let db: ReturnType<typeof getDatabase>;
   try {
     db = getDatabase();
-  } catch (error) {
-    console.error("[public-events] runtime bindings unavailable", error);
+  } catch {
+    try {
+      console.error("[public-events] runtime bindings unavailable");
+    } catch {
+      // Diagnostics must not replace the fixed availability response.
+    }
     return publicServiceUnavailableResponse("database_unavailable");
   }
   if (!db) return publicServiceUnavailableResponse("database_unavailable");
@@ -111,8 +119,12 @@ export async function GET(req: Request): Promise<Response> {
       .orderBy(desc(eventsTable.start_time), desc(eventsTable.created_at))
       .limit(limit)
       .offset((page - 1) * limit);
-  } catch (error) {
-    console.error("[public-events] list query failed", error);
+  } catch {
+    try {
+      console.error("[public-events] list query failed");
+    } catch {
+      // Diagnostics must not replace the fixed availability response.
+    }
     return publicServiceUnavailableResponse("database_unavailable");
   }
 

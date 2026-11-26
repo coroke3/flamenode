@@ -210,8 +210,12 @@ videoDetailRoutes.get("/:id", async (c) => {
   let row: PublicVideoRow | null;
   try {
     row = await fetchPublicVideo(db, key);
-  } catch (error) {
-    console.error("[public-videos] detail query failed", error);
+  } catch {
+    try {
+      console.error("[public-videos] detail query failed");
+    } catch {
+      // Diagnostics must not replace the fixed availability response.
+    }
     return unavailable();
   }
   if (!row) return jsonResponse(inm, { error: "not_found" }, "no-store", 404);

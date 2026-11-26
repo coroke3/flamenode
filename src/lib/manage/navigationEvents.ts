@@ -88,17 +88,25 @@ async function loadEventRows(
   return rows;
 }
 
+// SQLite DESC places NULL after finite values. Invalid non-finite provider
+// timestamps must follow the same path so the comparator stays antisymmetric.
+function finiteSidebarTimestamp(value: number | null | undefined): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : Number.NEGATIVE_INFINITY;
+}
+
 function compareSidebarRows(
   left: ManageNavigationEventRow,
   right: ManageNavigationEventRow,
 ): number {
   // SQLite DESC places NULL values after non-NULL values.  Mapping NULL to
   // negative infinity reproduces that order without adding a client query.
-  const leftStart = left.start_time ?? Number.NEGATIVE_INFINITY;
-  const rightStart = right.start_time ?? Number.NEGATIVE_INFINITY;
+  const leftStart = finiteSidebarTimestamp(left.start_time);
+  const rightStart = finiteSidebarTimestamp(right.start_time);
   if (leftStart !== rightStart) return rightStart > leftStart ? 1 : -1;
-  const leftCreated = left.created_at ?? Number.NEGATIVE_INFINITY;
-  const rightCreated = right.created_at ?? Number.NEGATIVE_INFINITY;
+  const leftCreated = finiteSidebarTimestamp(left.created_at);
+  const rightCreated = finiteSidebarTimestamp(right.created_at);
   if (leftCreated !== rightCreated) return rightCreated > leftCreated ? 1 : -1;
   // IDs are ASCII identifiers in the canonical schema. Relational string
   // comparison keeps the same binary tie-break as SQLite ORDER BY id DESC;
