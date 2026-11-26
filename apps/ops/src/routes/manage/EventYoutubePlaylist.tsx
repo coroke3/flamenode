@@ -176,14 +176,23 @@ function PlaylistForEvent({ eventId, fetchFn }: { eventId: string; fetchFn: OpsF
   const inFlight = React.useRef(false);
   const currentId = React.useRef(eventId);
   currentId.current = eventId;
-  const result = useApiResult((signal) => readManagePlaylist(fetchFn, eventId, signal), eventId, refreshKey);
+  // useApiResult retains successful data on transient same-key failures.
+  // A foreign-event 200 is not a transient failure: quarantine the prior form
+  // until a valid same-event response arrives. The ref also guards submission
+  // before React commits the error render.
+  const identityRejectedRef = React.useRef(false);
+  const [identityRejected, setIdentityRejected] = React.useState(false);
+  const result = useApiResult((signal) => readManagePlaylist(fetchFn, eventId, signal, (matches) => {
+    identityRejectedRef.current = !matches;
+    setIdentityRejected(!matches);
+  }), eventId, refreshKey);
   const authRedirect = playlistAuthRedirect(eventId, result);
   React.useEffect(() => {
     if (authRedirect) window.location.assign(authRedirect);
   }, [authRedirect]);
 
   async function mutate(action: "saved" | "queued", form?: FormData): Promise<void> {
-    if (inFlight.current || result.status !== "ok" || !result.data.canEdit) return;
+    if (identityRejectedRef.current || inFlight.current || result.status !== "ok" || !result.data.canEdit) return;
     if (action === "queued" && result.data.config?.enabled !== 1) return;
     inFlight.current = true;
     setBusy(true);
@@ -212,7 +221,7 @@ function PlaylistForEvent({ eventId, fetchFn }: { eventId: string; fetchFn: OpsF
   }
   if (result.status === "loading" || authRedirect) return <div role="status" aria-busy="true">読み込み中...</div>;
   if (result.status === "notFound") return <NotFoundView />;
-  if (result.status !== "ok") return <div role="alert">同期設定を取得できませんでした。再読み込みしてください。</div>;
+  if (identityRejected || result.status !== "ok") return <div role="alert">同期設定を取得できませんでした。再読み込みしてください。</div>;
   return <EventYoutubePlaylistBody key={result.data.event.id} data={result.data} search={search}
     busy={busy} onSave={(form) => { void mutate("saved", form); }} onQueue={() => { void mutate("queued"); }} />;
 }

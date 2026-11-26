@@ -17,11 +17,17 @@ export async function readManagePlaylist(
   fetchFn: OpsFetch,
   eventId: string,
   signal?: AbortSignal,
+  onIdentityCheck?: (matches: boolean) => void,
 ): Promise<OpsResult<ManagePlaylistResponse>> {
   const result = await getJson<unknown>(fetchFn, playlistApiPath(eventId), signal);
   if (result.status !== "ok") return result;
   const parsed = ManagePlaylistResponseSchema.safeParse(result.data);
-  return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
+  if (!parsed.success) return { status: "unavailable" };
+  // A schema-valid response is not necessarily scoped to the requested event.
+  // Never expose its title, playlist, or permissions under another event's URL.
+  const matches = parsed.data.event.id === eventId;
+  if (!signal?.aborted) onIdentityCheck?.(matches);
+  return matches ? { status: "ok", data: parsed.data } : { status: "unavailable" };
 }
 
 export type PlaylistMutationResult =

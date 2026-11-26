@@ -3,12 +3,14 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import {
   playlistPagePath, playlistResultHref, playlistSettingsBody, queueManagePlaylist,
   readManagePlaylist, saveManagePlaylist,
 } from "../.test-dist/apps/ops/src/api/managePlaylist.js";
 import {
-  EventYoutubePlaylistBody,
+  EventYoutubePlaylist, EventYoutubePlaylistBody,
 } from "../.test-dist/apps/ops/src/routes/manage/EventYoutubePlaylist.js";
 
 const fixture = {
@@ -161,4 +163,104 @@ test("MIG-0725 U01: unknown untrusted status keys are rendered as text not proto
     assert.ok(html.includes(value));
     assert.doesNotMatch(html, /function Object/);
   }
+});
+
+test("MIG-0725 review P2: reject schema-valid foreign event including case/encoding variants", async () => {
+  const checks = [];
+  for (const id of ["other-event", "A/B", "a%2Fb"]) {
+    const foreign = { ...fixture, event: { ...fixture.event, id, title: "FOREIGN_TITLE" }, canEdit: true };
+    const result = await readManagePlaylist(async () => response(200, foreign), "a/b", undefined, match => checks.push(match));
+    assert.deepEqual(result, { status: "unavailable" });
+    assert.equal("data" in result, false);
+  }
+  const result = await readManagePlaylist(async () => response(200, fixture), "a/b", undefined, match => checks.push(match));
+  assert.equal(result.status, "ok");
+  assert.equal(result.data.event.id, "a/b");
+  assert.deepEqual(checks, [false, false, false, true]);
+  const controller = new AbortController();
+  const aborted = await readManagePlaylist(async () => {
+    controller.abort();
+    return response(200, fixture);
+  }, "a/b", controller.signal, match => checks.push(match));
+  assert.deepEqual(aborted, { status: "unavailable" });
+  assert.deepEqual(checks, [false, false, false, true]);
+});
+
+const routeFixture = { ...fixture, event: { ...fixture.event, id: "event-a", title: "OWN_EVENT" } };
+const foreignFixture = {
+  ...fixture,
+  event: { ...fixture.event, id: "event-b", title: "FOREIGN_TITLE" },
+  config: { ...fixture.config, playlist_id: "FOREIGN_PLAYLIST" },
+  canEdit: true,
+};
+
+async function withPlaylistRoute(fetchFn, run) {
+  const dom = new JSDOM('<div id="root"></div>', { url: "https://flamenode.test/manage/events/event-a/youtube-playlist", pretendToBeVisual: true });
+  const keys = ["window", "document", "navigator", "HTMLElement", "HTMLInputElement", "HTMLFormElement", "Node", "Event", "FormData", "IS_REACT_ACT_ENVIRONMENT"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const key of keys) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: key === "IS_REACT_ACT_ENVIRONMENT" ? true : key === "window" ? dom.window : dom.window[key] });
+  const node = dom.window.document.getElementById("root");
+  const root = createRoot(node);
+  try {
+    await React.act(async () => root.render(
+      React.createElement(MemoryRouter, { initialEntries: ["/manage/events/event-a/youtube-playlist"] },
+        React.createElement(Routes, null,
+          React.createElement(Route, {
+            path: "/manage/events/:id/youtube-playlist",
+            element: React.createElement(EventYoutubePlaylist, { fetchFn }),
+          }),
+        ),
+      ),
+    ));
+    await run({ node, dom });
+  } finally {
+    try { await React.act(async () => root.unmount()); }
+    finally {
+      for (const [key, descriptor] of previous) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else delete globalThis[key];
+      }
+      dom.window.close();
+    }
+  }
+}
+
+function assertIdentityRejected(node) {
+  assert.match(node.querySelector('[role="alert"]')?.textContent ?? "", /同期設定を取得できませんでした/);
+  assert.doesNotMatch(node.innerHTML, /FOREIGN_TITLE|FOREIGN_PLAYLIST|OWN_EVENT/);
+  assert.equal(node.querySelector('form'), null);
+  assert.equal(node.querySelector('input[name="playlist_id"]'), null);
+  assert.equal(node.querySelector('button[type="submit"]'), null);
+}
+
+test("MIG-0725 review P2: route A with foreign B response displays no protected data or mutation form", async () => {
+  const calls = [];
+  await withPlaylistRoute(async (path, init) => {
+    calls.push([path, init.method]);
+    return response(200, foreignFixture);
+  }, async ({ node }) => {
+    assertIdentityRejected(node);
+    assert.deepEqual(calls, [["/api/manage/events/event-a/youtube-playlist", "GET"]]);
+  });
+});
+
+test("MIG-0725 review P2: foreign response on same-event refresh removes previously valid write controls", async () => {
+  const calls = [];
+  let gets = 0;
+  await withPlaylistRoute(async (path, init) => {
+    calls.push([path, init.method]);
+    if (init.method === "GET") return response(200, ++gets === 1 ? routeFixture : foreignFixture);
+    return response(200, { ok: true, saved: true });
+  }, async ({ node, dom }) => {
+    assert.match(node.textContent, /OWN_EVENT/);
+    const field = node.querySelector('input[name="playlist_id"]');
+    assert.ok(field && !field.disabled);
+    const form = field.closest("form");
+    await React.act(async () => form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })));
+    assertIdentityRejected(node);
+    assert.deepEqual(calls.map(call => call[1]), ["GET", "PUT", "GET"]);
+    // A detached old form must not trigger another write.
+    await React.act(async () => form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })));
+    assert.equal(calls.filter(call => call[1] !== "GET").length, 1);
+  });
 });
