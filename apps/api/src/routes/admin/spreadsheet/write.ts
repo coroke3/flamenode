@@ -576,36 +576,64 @@ export async function loadSpreadsheetVideoReleaseEvents(
     const chunk = videoIds.slice(offset, offset + SPREADSHEET_VIDEO_EVENT_LOOKUP_CHUNK_SIZE);
     const placeholders = chunk.map(() => "?").join(", ");
     reads += 1;
-    const result = await db
-      .prepare(
-        `SELECT v."id" AS videoId, ve."event_id" AS eventId, v."primary_event_id" AS primaryEventId
+    // A malformed receipt does not establish that no events are linked.
+    // Keep provider faults separate from genuine split-limit errors.
+    let overflow = false;
+    try {
+      const result = await db
+        .prepare(
+          `SELECT v."id" AS videoId, ve."event_id" AS eventId, v."primary_event_id" AS primaryEventId
          FROM "videos" v
          LEFT JOIN "video_events" ve ON ve."video_id" = v."id"
          WHERE v."id" IN (${placeholders})
          LIMIT ${SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1}`,
-      )
-      .bind(...chunk)
-      .all<{ videoId: string; eventId: string | null; primaryEventId: string | null }>();
-    const rows = result.results ?? [];
-    if (rows.length > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
-      throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
-    }
-    for (const row of rows) {
-      const videoId = String(row.videoId ?? "").trim();
-      if (!videoId) continue;
-      const eventIds = eventIdsByVideo.get(videoId) ?? new Set<string>();
-      for (const eventId of [row.eventId, row.primaryEventId]) {
-        const normalized = String(eventId ?? "").trim();
-        if (normalized) {
-          eventIds.add(normalized);
-          linkedEventIds.add(normalized);
+        )
+        .bind(...chunk)
+        .all<{ videoId: string; eventId: string | null; primaryEventId: string | null }>();
+      const rows = result.results;
+      if (result.success !== true || !Array.isArray(rows)) {
+        throw new Error("invalid_snapshot");
+      }
+      const rowCount = rows.length;
+      if (!Number.isSafeInteger(rowCount) || rowCount < 0) {
+        throw new Error("invalid_snapshot");
+      }
+      if (rowCount > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+        overflow = true;
+      } else {
+        const requested = new Set(chunk);
+        for (let i = 0; i < rowCount; i++) {
+          const row = rows[i];
+          if (!row || typeof row !== "object" || Array.isArray(row) ||
+              !Object.hasOwn(row, "videoId") || !Object.hasOwn(row, "eventId") ||
+              !Object.hasOwn(row, "primaryEventId")) {
+            throw new Error("invalid_snapshot");
+          }
+          const { videoId, eventId, primaryEventId } = row;
+          if (typeof videoId !== "string" || !requested.has(videoId) ||
+              (eventId !== null && typeof eventId !== "string") ||
+              (primaryEventId !== null && typeof primaryEventId !== "string")) {
+            throw new Error("invalid_snapshot");
+          }
+          const eventIds = eventIdsByVideo.get(videoId) ?? new Set<string>();
+          for (const linkedId of [eventId, primaryEventId]) {
+            const normalized = linkedId?.trim();
+            if (normalized) {
+              eventIds.add(normalized);
+              linkedEventIds.add(normalized);
+            }
+          }
+          if (linkedEventIds.size > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+            overflow = true;
+            break;
+          }
+          eventIdsByVideo.set(videoId, eventIds);
         }
       }
-      if (linkedEventIds.size > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
-        throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
-      }
-      eventIdsByVideo.set(videoId, eventIds);
+    } catch {
+      throw new Error("spreadsheet_release_lookup_failed");
     }
+    if (overflow) throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
   }
   return {
     eventIdsByVideo: new Map([...eventIdsByVideo].map(([videoId, eventIds]) => [videoId, [...eventIds]])),

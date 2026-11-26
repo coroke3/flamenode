@@ -832,6 +832,119 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(honoD1.stats.batches, beforeBatches + 1);
   });
 
+  test("MIG-0638 U01/U02: release lookup rejects malformed receipts before mutation and nonce consumption", async () => {
+    resetAllCaches();
+    const { honoSqlite, honoD1, callHono } = createFixture();
+    // The fixture already links av-pending-1 to a-open. A second link and
+    // primary event exercise repeated video IDs and distinct event targets.
+    insert(honoSqlite, "video_events", { video_id: "av-pending-1", event_id: "a-ended" });
+    honoSqlite.prepare("UPDATE videos SET primary_event_id = 'a-ended' WHERE id = 'av-pending-1'").run();
+    const patch = { table: "video_members", primaryKey: { id: "vm-1" }, column: "name", value: "Edited Member" };
+    const upsert = { table: "video_members", mode: "upsert", rows: [{ id: "vm-1", name: "Imported Member" }] };
+    const preview = await callHono("POST", "/import", { ...upsert, dryRun: true });
+    assert.equal(preview.status, 200);
+    contracts.AdminSpreadsheetImportDryRunResponseSchema.parse(preview.body);
+    const apply = { ...upsert, previewToken: preview.body.previewToken };
+    const snapshot = () => ({
+      members: honoSqlite.prepare("SELECT * FROM video_members ORDER BY id").all(),
+      audits: allAudits(honoSqlite),
+      queue: allQueueRows(honoSqlite),
+      nonces: honoSqlite.prepare("SELECT * FROM spreadsheet_import_runs ORDER BY nonce").all(),
+    });
+    const before = snapshot();
+    const beforeWrites = honoD1.stats.writes;
+    const beforeBatches = honoD1.stats.batches;
+    const originalPrepare = honoD1.prepare;
+    const originalError = console.error;
+    const validRow = { videoId: "av-pending-1", eventId: "a-open", primaryEventId: "a-ended" };
+    const invalid = [
+      () => ({ success: true }),
+      () => ({ success: false, results: [validRow] }),
+      () => ({ success: true, results: null }),
+      () => ({ success: true, results: "not-an-array" }),
+      () => ({ success: true, results: [{ videoId: "av-pending-1", eventId: "a-open" }] }),
+      () => ({ success: true, results: [{ ...validRow, videoId: "unrequested" }] }),
+      () => ({ success: true, results: [{ ...validRow, eventId: 42 }] }),
+      () => ({ success: true, results: [Object.create(validRow)] }),
+      () => ({ success: true, results: [Object.defineProperty({ ...validRow }, "eventId", {
+        get() { throw new Error("preview_required"); },
+      })] }),
+      () => Object.defineProperty({ success: true }, "results", {
+        get() { throw new Error("row_not_found"); },
+      }),
+    ];
+    const faults = [
+      ...invalid.map(receipt => ({ stage: "all", receipt })),
+      ...["prepare", "bind", "all"].map(stage => ({ stage, error: new Error("FOREIGN KEY constraint failed: RELEASE_CANARY") })),
+    ];
+    const logs = [];
+    let injected = 0;
+    try {
+      console.error = (...args) => logs.push(args);
+      for (const [method, path, body] of [["PATCH", "/data", patch], ["POST", "/import", apply]]) {
+        for (const fault of faults) {
+          resetAllCaches();
+          const prior = injected;
+          honoD1.prepare = sql => {
+            if (!sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"')) return originalPrepare(sql);
+            if (fault.stage === "prepare") { injected++; throw fault.error; }
+            const stmt = originalPrepare(sql);
+            return {
+              ...stmt,
+              bind(...params) {
+                assert.deepEqual(params, ["av-pending-1"]);
+                if (fault.stage === "bind") { injected++; throw fault.error; }
+                return {
+                  ...stmt.bind(...params),
+                  async all() {
+                    injected++;
+                    if (fault.error) throw fault.error;
+                    return fault.receipt();
+                  },
+                };
+              },
+            };
+          };
+          const response = await callHono(method, path, body);
+          assert.equal(injected, prior + 1, method + " " + path + " " + fault.stage);
+          assert.equal(response.status, 500);
+          assert.deepEqual(response.body, { error: "internal_error" });
+          assert.match(response.headers.get("cache-control"), /private.*no-store/);
+        }
+      }
+      assert.equal(injected, faults.length * 2);
+      assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] WRITE_FAILED"]));
+    } finally {
+      honoD1.prepare = originalPrepare;
+      console.error = originalError;
+    }
+    assert.equal(honoD1.stats.writes, beforeWrites);
+    assert.equal(honoD1.stats.batches, beforeBatches);
+    assert.deepEqual(snapshot(), before);
+
+    // A legitimate retry with the same token must enqueue both release targets.
+    const recovered = await callHono("POST", "/import", apply);
+    assert.equal(recovered.status, 200);
+    contracts.AdminSpreadsheetImportApplyResponseSchema.parse(recovered.body);
+    assert.equal(recovered.body.updated, 1);
+    assert.equal(honoD1.stats.batches, beforeBatches + 1);
+    assert.equal(honoSqlite.prepare("SELECT name FROM video_members WHERE id = 'vm-1'").get().name, "Imported Member");
+    const queue = allQueueRows(honoSqlite);
+    for (const [type, id] of [["video", "av-pending-1"], ["users_index", "global"], ["event_release", "a-open"], ["event_release", "a-ended"]]) {
+      assert.ok(queue.some(row => row.target_type === type && row.target_id === id), type + ":" + id);
+    }
+    assert.equal(queue.filter(row => row.target_type === "event_release").length, 2);
+
+    // A genuine LEFT JOIN null row remains writable and adds no event target.
+    const noLink = await callHono("PATCH", "/data", {
+      table: "video_members", primaryKey: { id: "vm-ov-0" }, column: "name", value: "No linked event",
+    });
+    assert.equal(noLink.status, 200);
+    assert.equal(honoD1.stats.batches, beforeBatches + 2);
+    assert.deepEqual(allQueueRows(honoSqlite).filter(row => row.target_type === "event_release"),
+      queue.filter(row => row.target_type === "event_release"));
+  });
+
   test("MIG-0638 T06: D1 statement budget (S2 reads <= 3, S3 writes pre-reads + 1 atomic batch)", async () => {
     resetAllCaches();
     const { honoD1, callHono } = createFixture();
