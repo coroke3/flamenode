@@ -10,6 +10,32 @@ import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 /** MIG-0737 U01: CURRENT RH-003/009 paths; the feature-disabled 404 is distinct from an unknown table. */
 export type SpreadsheetReadResult<T> = OpsResult<T> | { status: "disabled" };
 
+// A cancelled 404 read must settle even if its optional body reader ignores abort.
+async function classifySpreadsheet404(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<SpreadsheetReadResult<never>> {
+  let onAbort: (() => void) | undefined;
+  try {
+    if (signal?.aborted) return { status: "unavailable" };
+    const aborted = new Promise<null>(resolve => {
+      if (!signal) return;
+      onAbort = () => resolve(null);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) resolve(null);
+    });
+    // Preserve the existing distinction: only the explicit marker means disabled.
+    // No live-read deadline or ambiguous-404 export policy is introduced here.
+    const body: unknown = await Promise.race([response.json().catch(() => null), aborted]);
+    if (signal?.aborted) return { status: "unavailable" };
+    return body && typeof body === "object" && !Array.isArray(body) &&
+      "error" in body && body.error === "spreadsheet_disabled"
+      ? { status: "disabled" } : { status: "notFound" };
+  } finally {
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
+}
+
 async function getSpreadsheetJson<T>(
   fetchFn: OpsFetch,
   path: string,
@@ -27,15 +53,7 @@ async function getSpreadsheetJson<T>(
     });
     if (signal?.aborted) return { status: "unavailable" };
     if (response.status === 401) return { status: "anonymous" };
-    if (response.status === 404) {
-      // Hono deliberately returns 404 for BOTH a disabled feature and missing data.
-      // Never infer a disabled feature from the status alone.
-      const error: unknown = await response.json().catch(() => null);
-      if (signal?.aborted) return { status: "unavailable" };
-      return error && typeof error === "object" && !Array.isArray(error) &&
-        "error" in error && error.error === "spreadsheet_disabled"
-        ? { status: "disabled" } : { status: "notFound" };
-    }
+    if (response.status === 404) return await classifySpreadsheet404(response, signal);
     if (response.status === 501) return { status: "unsupported" };
     if (response.status === 403) {
       // Reuse the bounded, allowlisted Ops denial parser on this already
@@ -108,13 +126,7 @@ export async function loadSpreadsheetExport(
     if (signal?.aborted) return { status: "unavailable" };
     if (response.status === 401) return { status: "anonymous" };
     if (response.status === 403) return { status: "forbidden" };
-    if (response.status === 404) {
-      const raw: unknown = await response.json().catch(() => null);
-      if (signal?.aborted) return { status: "unavailable" };
-      return raw && typeof raw === "object" && !Array.isArray(raw) &&
-        "error" in raw && raw.error === "spreadsheet_disabled"
-        ? { status: "disabled" } : { status: "notFound" };
-    }
+    if (response.status === 404) return await classifySpreadsheet404(response, signal);
     if (response.status === 501) return { status: "unsupported" };
     if (response.status !== 200) return { status: "unavailable" };
     const mime = response.headers.get("content-type")?.toLowerCase() ?? "";

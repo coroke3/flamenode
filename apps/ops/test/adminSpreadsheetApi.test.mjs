@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { getEventListeners } from "node:events";
 import {
   loadSpreadsheetCatalog,
   loadSpreadsheetPage,
@@ -227,3 +228,68 @@ test("MIG-0737 U01: abort during optional 403 metadata read is not a current den
   }), "videos", 1, controller.signal);
   assert.deepEqual(result, { status: "unavailable" });
 });
+
+const read404Adapters = [
+  ["catalog", (fetchFn, signal) => loadSpreadsheetCatalog(fetchFn, false, signal)],
+  ["page", (fetchFn, signal) => loadSpreadsheetPage(fetchFn, "videos", 1, signal)],
+  ["CSV", (fetchFn, signal) => loadSpreadsheetExport(fetchFn, "videos", "csv", signal)],
+  ["TSV", (fetchFn, signal) => loadSpreadsheetExport(fetchFn, "videos", "tsv", signal)],
+];
+
+for (const [label, load] of read404Adapters) {
+  test("MIG-0737 U01 404 abort: " + label + " settles before an abort-ignoring body", { timeout: 3000 }, async () => {
+    for (const outcome of ["resolve", "reject"]) {
+      const controller = new AbortController();
+      let release, rejectBody, started, calls = 0, reads = 0;
+      const body = new Promise((resolve, reject) => { release = resolve; rejectBody = reject; });
+      const bodyStarted = new Promise(resolve => { started = resolve; });
+      const pending = load(async (_, init) => {
+        calls++;
+        assert.equal(init.signal, controller.signal);
+        return { status: 404, json() { reads++; started(); return body; } };
+      }, controller.signal);
+      try {
+        await bodyStarted;
+        controller.abort();
+        // No artificial body resolution to get the cancellation result.
+        const settled = await Promise.race([
+          pending,
+          new Promise(resolve => setImmediate(() => resolve("still pending"))),
+        ]);
+        assert.deepEqual(settled, { status: "unavailable" });
+        assert.equal(calls, 1);
+        assert.equal(reads, 1);
+      } finally {
+        if (outcome === "resolve") release({ error: "spreadsheet_disabled" });
+        else rejectBody(Error("late body failure"));
+        await pending;
+      }
+    }
+  });
+
+  test("MIG-0737 U01 404 abort: " + label + " preserves un-aborted classification and listener cleanup", async () => {
+    const cases = [
+      [() => json(404, { error: "spreadsheet_disabled" }), "disabled"],
+      [() => json(404, { error: "unknown_table" }), "notFound"],
+      [() => new Response("<html>missing</html>", { status: 404 }), "notFound"],
+      [() => json(404, null), "notFound"],
+      [() => json(404, [{ error: "spreadsheet_disabled" }]), "notFound"],
+      [() => ({ status: 404, json() { throw Error("sync body failure"); } }), "unavailable"],
+    ];
+    for (const [makeResponse, status] of cases) {
+      const controller = new AbortController();
+      assert.deepEqual(await load(async () => makeResponse(), controller.signal), { status });
+      assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+      assert.deepEqual(await load(async () => makeResponse()), { status });
+    }
+    const controller = new AbortController();
+    let reads = 0;
+    const result = await load(async () => ({
+      status: 404,
+      json() { reads++; controller.abort(); return new Promise(() => {}); },
+    }), controller.signal);
+    assert.deepEqual(result, { status: "unavailable" });
+    assert.equal(reads, 1);
+    assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+  });
+}
