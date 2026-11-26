@@ -77,3 +77,56 @@ test("MIG-0730 U02bm: SA-084 POST and SA-085 PUT share one same-video in-module 
     }
   }
 });
+
+test("MIG-0730 U02dv: HTTP 401 releases the shared SA-084/085 latch without decoding, replay or cross-video blocking", async () => {
+  for (const [initial, next] of [["permission", "members"], ["members", "permission"]]) {
+    for (const status of [401, 403]) {
+      const videoId = "u02dv-" + initial + "-" + status;
+      const otherVideoId = "another-" + videoId;
+      const requests = [];
+      let resolveFirst;
+      let bodyReads = 0;
+      const waiting = new Promise(resolve => { resolveFirst = resolve; });
+      const original = request(initial, videoId, (path, init) => {
+        requests.push({ path, method: init.method });
+        return waiting;
+      });
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].method, initial === "permission" ? "POST" : "PUT");
+      const blocked = await request(next, videoId, (path, init) => {
+        requests.push({ path, method: init.method });
+        return Promise.resolve(receipt(videoId));
+      });
+      assert.equal(blocked.ok, false);
+      assert.equal(blocked.reason, undefined, "local contention is not HTTP authentication loss");
+      assert.match(blocked.message, /処理中/);
+      assert.equal(requests.length, 1);
+      assert.deepEqual(await request(next, otherVideoId, (path, init) => {
+        requests.push({ path, method: init.method });
+        return Promise.resolve(receipt(otherVideoId));
+      }), { ok: true });
+      assert.equal(requests.length, 2);
+      resolveFirst({
+        status,
+        json() { bodyReads++; return { ok: true, videoId, reason: "unauthenticated" }; },
+      });
+      const settled = await original;
+      assert.equal(settled.ok, false);
+      if (status === 401) {
+        assert.deepEqual(settled, { ok: false, reason: "unauthenticated", message: "再ログインが必要です。" });
+      } else {
+        assert.equal(settled.reason, undefined, "403 cannot fabricate a 401 classification");
+      }
+      assert.equal(bodyReads, 0);
+      assert.equal(requests.length, 2, "neither write is automatically replayed");
+      // Simulate a separately authorized explicit attempt only; actual host
+      // must retire the old authority and revalidate data before allowing it.
+      assert.deepEqual(await request(next, videoId, (path, init) => {
+        requests.push({ path, method: init.method });
+        return Promise.resolve(receipt(videoId));
+      }), { ok: true });
+      assert.equal(requests.length, 3);
+      assert.equal(requests[2].method, next === "permission" ? "POST" : "PUT");
+    }
+  }
+});
