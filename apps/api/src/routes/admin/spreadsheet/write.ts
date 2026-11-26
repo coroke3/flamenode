@@ -702,7 +702,16 @@ export function countingRawDb(rawDb: D1Database, counter: { reads: number }): D1
     all: async <T>() => {
       counter.reads += 1;
       try {
-        return await stmt.all<T>();
+        const receipt = await stmt.all<T>();
+        const success = receipt.success;
+        const results = receipt.results;
+        // Missing or unsuccessful read receipts cannot establish absence of
+        // rows, a missing FK, an empty catalog or a new UPSERT identity.
+        // Snapshot the envelope once before exposing it to the planners.
+        if (success !== true || !Array.isArray(results)) {
+          throw new Error("invalid_snapshot");
+        }
+        return { success: true, results, meta: receipt.meta };
       } catch {
         throw new Error("spreadsheet_preflight_read_failed");
       }

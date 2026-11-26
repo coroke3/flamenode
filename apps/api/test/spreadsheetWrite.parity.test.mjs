@@ -945,6 +945,127 @@ if (runUnderRootTsx(import.meta.url)) {
       queue.filter(row => row.target_type === "event_release"));
   });
 
+  test("MIG-0638 U01/U02: counted read receipt failures never authorize writes or masquerade as absence", async () => {
+    resetAllCaches();
+    const { honoSqlite, honoD1, callHono } = createFixture();
+    const upsert = {
+      table: "software_catalog", mode: "upsert",
+      rows: [{ id: "sw-base", name: "After receipt check", normalized_name: "base soft", created_at: "100", updated_at: "101" }],
+    };
+    const preview = await callHono("POST", "/import", { ...upsert, dryRun: true });
+    assert.equal(preview.status, 200);
+    contracts.AdminSpreadsheetImportDryRunResponseSchema.parse(preview.body);
+    const apply = { ...upsert, previewToken: preview.body.previewToken };
+    const patch = { table: "software_catalog", primaryKey: { id: "sw-base" }, column: "name", value: "changed" };
+    const rowRead = sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE "id" = ? LIMIT ');
+    const cases = [
+      ["PATCH", "/data", patch, rowRead],
+      ["DELETE", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" } }, rowRead],
+      ["PATCH", "/data", { table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: "a-open" },
+        sql => sql.startsWith('SELECT "id" AS value FROM "events" WHERE "id" IN (')],
+      ["POST", "/import", apply, sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE ("id" = ?) LIMIT ')],
+      ["PATCH", "/data", patch, sql => sql.includes("FROM pragma_table_xinfo(?) AS x")],
+    ];
+    const snapshot = () => ({
+      rows: honoSqlite.prepare("SELECT * FROM software_catalog ORDER BY id").all(),
+      slots: honoSqlite.prepare("SELECT * FROM slots ORDER BY id").all(),
+      nonces: honoSqlite.prepare("SELECT * FROM spreadsheet_import_runs ORDER BY nonce").all(),
+      audits: allAudits(honoSqlite), queue: allQueueRows(honoSqlite),
+    });
+    const before = snapshot();
+    const beforeWrites = honoD1.stats.writes;
+    const beforeBatches = honoD1.stats.batches;
+    const originalPrepare = honoD1.prepare;
+    const originalError = console.error;
+    const faults = [
+      receipt => ({ ...receipt, success: false }),
+      receipt => ({ ...receipt, success: false, results: [] }),
+      receipt => ({ results: receipt.results, meta: receipt.meta }),
+      receipt => ({ success: true, meta: receipt.meta }),
+      receipt => ({ ...receipt, results: null }),
+      receipt => ({ ...receipt, results: "invalid" }),
+      receipt => Object.defineProperty({ ...receipt }, "results", { get() { throw new Error("row_not_found"); } }),
+      receipt => Object.defineProperty({ ...receipt }, "success", { get() { throw new Error("preview_required"); } }),
+    ];
+    let injected = 0;
+    const logs = [];
+    try {
+      console.error = (...args) => logs.push(args);
+      for (const [method, path, body, matches] of cases) {
+        for (const fault of faults) {
+          resetAllCaches();
+          const prior = injected;
+          honoD1.prepare = sql => {
+            const stmt = originalPrepare(sql);
+            if (!matches(sql)) return stmt;
+            return { ...stmt, bind(...params) {
+              const bound = stmt.bind(...params);
+              return { ...bound, async all() {
+                injected++;
+                return fault(await bound.all());
+              } };
+            } };
+          };
+          const result = await callHono(method, path, body);
+          assert.equal(injected, prior + 1, method + " " + path);
+          assert.equal(result.status, 500);
+          assert.deepEqual(result.body, { error: "internal_error" });
+          assert.match(result.headers.get("cache-control"), /private.*no-store/);
+        }
+      }
+      assert.equal(injected, cases.length * faults.length);
+      assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] WRITE_FAILED"]));
+    } finally {
+      honoD1.prepare = originalPrepare;
+      console.error = originalError;
+    }
+    assert.equal(honoD1.stats.writes, beforeWrites);
+    assert.equal(honoD1.stats.batches, beforeBatches);
+    assert.deepEqual(snapshot(), before);
+
+    // A stable successful receipt with accessors must be captured once.
+    // Re-reading its result field could substitute the audited before-image.
+    const upsertRead = cases[3][3];
+    let successReads = 0;
+    let resultReads = 0;
+    try {
+      honoD1.prepare = sql => {
+        const stmt = originalPrepare(sql);
+        if (!upsertRead(sql)) return stmt;
+        return { ...stmt, bind(...params) {
+          const bound = stmt.bind(...params);
+          return { ...bound, async all() {
+            const receipt = await bound.all();
+            return {
+              get success() { assert.equal(++successReads, 1); return true; },
+              get results() { assert.equal(++resultReads, 1); return receipt.results; },
+              meta: receipt.meta,
+            };
+          } };
+        } };
+      };
+      const recovered = await callHono("POST", "/import", apply);
+      assert.equal(recovered.status, 200);
+      contracts.AdminSpreadsheetImportApplyResponseSchema.parse(recovered.body);
+      assert.equal(recovered.body.updated, 1);
+    } finally {
+      honoD1.prepare = originalPrepare;
+    }
+    assert.equal(successReads, 1);
+    assert.equal(resultReads, 1);
+    assert.equal(honoD1.stats.batches, beforeBatches + 1);
+    assert.equal(honoSqlite.prepare("SELECT name FROM software_catalog WHERE id = 'sw-base'").get().name, "After receipt check");
+    const missing = await callHono("PATCH", "/data", { ...patch, primaryKey: { id: "not-present" } });
+    assert.equal(missing.status, 404);
+    assert.deepEqual(missing.body, { error: "row_not_found" });
+    const fkMissing = await callHono("PATCH", "/data", {
+      table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: "not-present",
+    });
+    assert.equal(fkMissing.status, 400);
+    assert.deepEqual(fkMissing.body, { error: "foreign_key_violation" });
+    assert.equal(honoD1.stats.batches, beforeBatches + 1);
+  });
+
   test("MIG-0638 T06: D1 statement budget (S2 reads <= 3, S3 writes pre-reads + 1 atomic batch)", async () => {
     resetAllCaches();
     const { honoD1, callHono } = createFixture();
