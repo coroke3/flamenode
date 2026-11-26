@@ -13,9 +13,15 @@ export type AdminPermissionBatchInput = {
   intents: { x_user_id: string; display_name: string; intent: "on" | "off" }[];
 };
 
-export type AdminPermissionBatchResult = { ok: boolean; message?: string };
+export type AdminPermissionBatchResult = {
+  ok: boolean;
+  message?: string;
+  /** D-17-3: provisional projection of HTTP 401 / shared send anonymous. */
+  reason?: "unauthenticated";
+};
 const FAILURE = "権限変更を確認できませんでした。状態を再取得してください。";
 const INVALID = "権限変更の入力に誤りがあります。";
+const ANONYMOUS = "再ログインが必要です。";
 
 // SA-084 and SA-085 must not concurrently mutate one video's participant
 // and permission rows in the same browser module graph (U02bm).
@@ -123,7 +129,13 @@ export async function applyAdminVideoMemberPermissionBatch(
     );
     // The mutation may have committed even if the response was lost or invalid.
     // Never assume a failure response is proof of a rollback.
-    if (response.status !== 200) return { ok: false, message: FAILURE };
+    // D-17-3: HTTP 401 takes precedence over any body, including a forged
+    // success receipt. Only the eventual current-authority host may redirect.
+    const status = response.status;
+    if (status === 401) {
+      return { ok: false, reason: "unauthenticated", message: ANONYMOUS };
+    }
+    if (status !== 200) return { ok: false, message: FAILURE };
     const json: unknown = await response.json();
     if (!json || typeof json !== "object" || Array.isArray(json)) {
       return { ok: false, message: FAILURE };

@@ -89,7 +89,9 @@ test("MIG-0730 U02f: 401/403/404/503/invalid success never claim committed", asy
       calls++;
       return json({ ok: true, message: "unauthorized hidden" }, status);
     });
-    assert.deepEqual(response, { ok: false, message: "権限変更を確認できませんでした。状態を再取得してください。" });
+    assert.deepEqual(response, status === 401
+      ? { ok: false, reason: "unauthenticated", message: "再ログインが必要です。" }
+      : { ok: false, message: "権限変更を確認できませんでした。状態を再取得してください。" });
   }
   for (const response of [
     json({ ok: false, message: "secret" }),
@@ -442,4 +444,64 @@ test("MIG-0730 U02dj: backend SA-084 committed and authorized no-op receipts mat
     assert.doesNotMatch(actual.message ?? "", /internal details/);
   }
   assert.equal(posts, successPaths.length + 3, "no implicit retry after any receipt");
+});
+
+test("MIG-0730 U02du: SA-084 HTTP 401 is authoritative without decoding or replay", async () => {
+  let requests = 0;
+  let reads = 0;
+  const bodies = [
+    { ok: true, videoId: "video-1", message: "FORGED_SUCCESS" },
+    { ok: false, reason: "forbidden", message: "PRIVATE_PROVIDER" },
+    { ok: false, reason: "unauthenticated" },
+    null,
+    new Error("PRIVATE_JSON_FAILURE"),
+  ];
+  for (const body of bodies) {
+    const result = await applyAdminVideoMemberPermissionBatch(input(), async (path, init) => {
+      requests++;
+      assert.equal(path, "/api/videos/video-1/collaborators/batch");
+      assert.equal(init.method, "POST");
+      return { status: 401, json: async () => {
+        reads++;
+        if (body instanceof Error) throw body;
+        return body;
+      } };
+    });
+    assert.deepEqual(result, { ok: false, reason: "unauthenticated", message: "再ログインが必要です。" });
+  }
+  assert.equal(requests, bodies.length);
+  assert.equal(reads, 0, "HTTP 401 must not decode the body");
+
+  // Only a new explicit action may submit after the 401 settles.
+  const later = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+    requests++;
+    return json({ ok: true, videoId: "video-1" });
+  });
+  assert.deepEqual(later, { ok: true });
+  assert.equal(requests, bodies.length + 1);
+});
+
+test("MIG-0730 U02du: SA-084 reason is derived only from the captured HTTP status", async () => {
+  const failure = { ok: false, message: "権限変更を確認できませんでした。状態を再取得してください。" };
+  let requests = 0;
+  for (const status of [403, 409, 503, 200]) {
+    const result = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+      requests++;
+      return json({ ok: false, reason: "unauthenticated", message: "PRIVATE_PROVIDER" }, status);
+    });
+    assert.deepEqual(result, failure);
+  }
+  let statusReads = 0;
+  let bodyReads = 0;
+  const result = await applyAdminVideoMemberPermissionBatch(input(), async () => {
+    requests++;
+    return {
+      get status() { statusReads++; return statusReads === 1 ? 403 : 401; },
+      async json() { bodyReads++; throw Error("PRIVATE_BODY"); },
+    };
+  });
+  assert.deepEqual(result, failure);
+  assert.equal(statusReads, 1);
+  assert.equal(bodyReads, 0);
+  assert.equal(requests, 5);
 });
