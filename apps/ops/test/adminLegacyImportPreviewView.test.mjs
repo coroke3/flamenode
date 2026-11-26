@@ -20,6 +20,12 @@ const preview = () => ({
 });
 const step = { ok: true, continuation_required: true,
   progress: { stage: "events", index: 1, completed: 1, total: 2 } };
+const committedPending = {
+  ok: false, committed: true, kind: "committed_progress_pending", retryable: true,
+  requires_repreview: false, plan_hash: "private-hash", attempt: 1,
+  progress: { stage: "videos", index: 1, completed: 6, total: 7 },
+  result: { complete: false }, message: "private-provider-canary",
+};
 const reply = (status, data) => new Response(JSON.stringify(data), {
   status, headers: { "content-type": "application/json" },
 });
@@ -147,5 +153,120 @@ test("MIG-0737 U02: file change invalidates preview and disables apply", async (
     await chooseFiles(ui, [new File(["x"], "different.json")]);
     assert.equal(ui.host.querySelectorAll("button")[1].disabled, true);
     assert.doesNotMatch(ui.host.textContent, /プレビュー済み/);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U02: committed 409/503 shows saved progress and locks ordinary apply without retry", async () => {
+  for (const code of [409, 503]) {
+    const requests = [];
+    const fn = async (_, init) => {
+      const mode = init.body.get("mode");
+      requests.push(mode);
+      return mode === "preview" ? reply(200, preview()) : reply(code, committedPending);
+    };
+    const ui = await mount({ fetchFn: fn, allowApply: true, confirmApply: () => true });
+    try {
+      await chooseFiles(ui, [file]);
+      await click(ui, "サーバーでプレビュー");
+      await click(ui, "確認して1ステップ反映");
+      assert.match(ui.host.textContent, /ステップ保存済み（進捗復旧中）/);
+      assert.match(ui.host.textContent, /反映進捗: 6\/7/);
+      assert.match(ui.host.textContent, /進捗復旧を確認/);
+      assert.doesNotMatch(ui.host.innerHTML, /private-provider-canary|private-token|private-hash/);
+      assert.doesNotMatch(ui.host.textContent, /反映処理が終了|反映結果を確認できません/);
+      const apply = ui.host.querySelectorAll("button")[1];
+      assert.equal(apply.disabled, true);
+      await React.act(async () => apply.click());
+      await flush();
+      assert.deepEqual(requests, ["preview", "apply"]);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U02: committed final step is recovery pending, not import completion", async () => {
+  const fn = async (_, init) => init.body.get("mode") === "preview" ? reply(200, preview()) : reply(503, {
+    ...committedPending, progress: { stage: "complete", index: 0, completed: 7, total: 7 },
+    result: { complete: true },
+  });
+  const ui = await mount({ fetchFn: fn, allowApply: true, confirmApply: () => true });
+  try {
+    await chooseFiles(ui, [file]);
+    await click(ui, "サーバーでプレビュー");
+    await click(ui, "確認して1ステップ反映");
+    assert.match(ui.host.textContent, /ステップ保存済み（進捗復旧中）/);
+    assert.match(ui.host.textContent, /反映進捗: 7\/7/);
+    assert.doesNotMatch(ui.host.textContent, /反映処理が終了|インポート完了/);
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, true);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U02: R2 progress failure preserves the latest committed step after a successful step", async () => {
+  let applies = 0;
+  const fn = async (_, init) => {
+    if (init.body.get("mode") === "preview") return reply(200, preview());
+    applies++;
+    return applies === 1 ? reply(200, { ...step,
+      progress: { stage: "videos", index: 0, completed: 5, total: 7 },
+    }) : reply(409, committedPending);
+  };
+  const ui = await mount({ fetchFn: fn, allowApply: true, confirmApply: () => true });
+  try {
+    await chooseFiles(ui, [file]);
+    await click(ui, "サーバーでプレビュー");
+    await click(ui, "確認して1ステップ反映");
+    assert.match(ui.host.textContent, /反映進捗: 5\/7/);
+    await click(ui, "続きの1ステップを承認して実行");
+    assert.match(ui.host.textContent, /反映進捗: 6\/7/);
+    assert.doesNotMatch(ui.host.textContent, /反映進捗: 5\/7|続きの1ステップを承認して実行/);
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, true);
+    assert.equal(applies, 2);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U02: ordinary or invalid 409/503 never claims saved progress", async () => {
+  for (const [status, payload] of [[409, { ok: false, retryable: true }],
+    [503, { ...committedPending, plan_hash: "other-plan" }],
+    [409, { ...committedPending, committed: "true" }]]) {
+    let applies = 0;
+    const fn = async (_, init) => {
+      if (init.body.get("mode") === "preview") return reply(200, preview());
+      applies++;
+      return reply(status, payload);
+    };
+    const ui = await mount({ fetchFn: fn, allowApply: true, confirmApply: () => true });
+    try {
+      await chooseFiles(ui, [file]);
+      await click(ui, "サーバーでプレビュー");
+      await click(ui, "確認して1ステップ反映");
+      assert.match(ui.host.textContent, /反映結果を確認できません/);
+      assert.doesNotMatch(ui.host.textContent, /ステップ保存済み|反映進捗/);
+      assert.equal(ui.host.querySelectorAll("button")[1].disabled, true);
+      assert.equal(applies, 1);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U02: late committed progress cannot return after transport/session replacement", async () => {
+  let release;
+  let signal;
+  const previous = async (_, init) => {
+    if (init.body.get("mode") === "preview") return reply(200, preview());
+    signal = init.signal;
+    return new Promise(resolve => { release = resolve; });
+  };
+  let nextRequests = 0;
+  const next = async () => { nextRequests++; return reply(200, preview()); };
+  const ui = await mount({ fetchFn: previous, allowApply: true, confirmApply: () => true });
+  try {
+    await chooseFiles(ui, [file]);
+    await click(ui, "サーバーでプレビュー");
+    await click(ui, "確認して1ステップ反映");
+    await ui.render({ fetchFn: next, allowApply: true });
+    assert.equal(signal.aborted, true);
+    await React.act(async () => release(reply(503, committedPending)));
+    await flush();
+    assert.doesNotMatch(ui.host.textContent, /ステップ保存済み|反映進捗|プレビュー済み/);
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, true);
+    assert.equal(nextRequests, 0);
   } finally { await ui.cleanup(); }
 });

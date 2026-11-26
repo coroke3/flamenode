@@ -5,12 +5,12 @@ import {
   previewLegacyImport,
   type LegacyPreviewCredential,
   type LegacyImportPreview,
-  type LegacyImportStep,
+  type LegacyImportApplyResponse,
 } from "../../api/adminLegacyImport.js";
 
 /** MIG-0737 U02: isolated legacy-import shell.
  * Not routed, apply OFF by default until MIG-0645, MIG-0726 and independent review.
- * CURRENT's 50k-line progressive/chunked apply and custom Q mapping are not yet ported.
+ * CURRENT's progressive/chunked apply and custom Q mapping are not yet ported.
  */
 export function AdminLegacyImportPreviewView({
   fetchFn = fetch,
@@ -24,7 +24,9 @@ export function AdminLegacyImportPreviewView({
   const [files, setFiles] = React.useState<File[]>([]);
   const [credential, setCredential] = React.useState<LegacyPreviewCredential | null>(null);
   const [preview, setPreview] = React.useState<LegacyImportPreview | null>(null);
-  const [applyStatus, setApplyStatus] = React.useState<LegacyImportStep | null>(null);
+  const [applyStatus, setApplyStatus] = React.useState<
+    Extract<LegacyImportApplyResponse, { status: "ok" | "committedProgressPending" }> | null
+  >(null);
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const controller = React.useRef<AbortController | null>(null);
@@ -38,9 +40,15 @@ export function AdminLegacyImportPreviewView({
   // including during the render before the effect clears the old state.
   const trusted = source === fetchFn;
   const currentPreview = trusted ? preview : null;
+  const currentApplyStatus = trusted ? applyStatus : null;
+  const recoveryPending = currentApplyStatus?.status === "committedProgressPending";
+  const progress = currentApplyStatus?.status === "ok"
+    ? currentApplyStatus.data.progress : currentApplyStatus?.progress;
+  const continuationRequired = currentApplyStatus?.status === "ok" &&
+    currentApplyStatus.data.continuation_required;
   const validCredential = trusted && credential &&
     credential.expiresAt > Math.floor(Date.now() / 1000);
-  const canApply = Boolean(allowApply && validCredential && !busy && files.length > 0 &&
+  const canApply = Boolean(allowApply && validCredential && !busy && !recoveryPending && files.length > 0 &&
     !currentPreview?.requires_field_mapping);
 
   function reset(): void {
@@ -73,7 +81,7 @@ export function AdminLegacyImportPreviewView({
   }
 
   async function runPreview(): Promise<void> {
-    if (active.current || files.length === 0 || !trusted) return;
+    if (active.current || files.length === 0 || !trusted || recoveryPending) return;
     active.current = true;
     const id = ++generation.current;
     const signalController = new AbortController();
@@ -133,11 +141,16 @@ export function AdminLegacyImportPreviewView({
         Math.floor(Date.now() / 1000), signalController.signal);
       if (id !== generation.current || signalController.signal.aborted ||
           activeFetch.current !== fetchFn) return;
+      if (result.status === "committedProgressPending") {
+        setApplyStatus(result);
+        setMessage("このステップは保存済み。進捗復旧中。保存済みの処理は再送しません。サーバーの進捗復旧を確認してから続行してください。");
+        return;
+      }
       if (result.status !== "ok") {
         setMessage("反映結果を確認できません。自動再送は行いません。操作前にサーバー状態を確認してください。");
         return;
       }
-      setApplyStatus(result.data);
+      setApplyStatus(result);
       if (result.data.continuation_required) {
         setCredential({
           ...issued,
@@ -168,7 +181,7 @@ export function AdminLegacyImportPreviewView({
       {files.length > 0 ? <ul>{files.map((file, i) => (
         <li key={i}>{file.name}（{file.size} bytes）</li>
       ))}</ul> : null}
-      <button type="button" disabled={busy || !trusted || files.length === 0}
+      <button type="button" disabled={busy || !trusted || recoveryPending || files.length === 0}
         onClick={() => void runPreview()}>サーバーでプレビュー</button>
       {currentPreview ? (
         <section aria-label="旧形式プレビュー結果">
@@ -180,13 +193,14 @@ export function AdminLegacyImportPreviewView({
           {currentPreview.requires_field_mapping ? <p role="alert">列マッピングが必要です。反映できません。</p> : null}
         </section>
       ) : null}
-      {applyStatus?.progress ? (
-        <p role="status">反映進捗: {applyStatus.progress.completed}/{applyStatus.progress.total}</p>
+      {recoveryPending ? <h3>ステップ保存済み（進捗復旧中）</h3> : null}
+      {progress ? (
+        <p role="status">反映進捗: {progress.completed}/{progress.total}</p>
       ) : null}
-      {message ? <p role="status">{message}</p> : null}
+      {trusted && message ? <p role="status">{message}</p> : null}
       <button type="button" disabled={!canApply}
         onClick={() => void runApply()}>
-        {applyStatus?.continuation_required ? "続きの1ステップを承認して実行" : "確認して1ステップ反映"}
+        {continuationRequired ? "続きの1ステップを承認して実行" : "確認して1ステップ反映"}
       </button>
       {!allowApply ? <p>書き込み操作は移行ゲート未完了のため無効です。</p> : null}
     </section>

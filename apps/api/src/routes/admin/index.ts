@@ -24,6 +24,7 @@ import { apiEndpointRoutes } from "./apiEndpoints.ts";
 import { auditAdminRoutes } from "./audit.ts";
 import { listEventTemplatesForAdminApi } from "../events/templates.ts";
 import { costGuardAdminRoutes } from "./costGuard.ts";
+import { adminEventGroupRoutes } from "./eventGroups.ts";
 import { adminNotificationRoutes } from "./notifications.ts";
 import { adminPermissionsRoutes } from "./permissions.ts";
 import { adminTermsRoutes } from "./terms.ts";
@@ -60,6 +61,8 @@ export function createAdminRoutes(
   admin.route("/api-endpoints", apiEndpointRoutes);
   admin.route("/audit", auditAdminRoutes);
   admin.route("/cost-guard", costGuardAdminRoutes);
+  // SA-025..030: event-group candidate search (GET) and group/membership writes.
+  admin.route("/event-groups", adminEventGroupRoutes);
   admin.route("/notifications", adminNotificationRoutes);
   admin.route("/permissions", adminPermissionsRoutes);
   admin.route("/terms", adminTermsRoutes);

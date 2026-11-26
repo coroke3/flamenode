@@ -18,6 +18,13 @@ const result = { ok: true, mode: "apply", continuation_required: true,
   progress: { stage: "events", index: 1, completed: 1, total: 2 } };
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+// CURRENT route: D1 step committed, then claimed.advance(progress) failed in R2.
+const committedPending = {
+  ok: false, committed: true, kind: "committed_progress_pending",
+  retryable: true, requires_repreview: false, plan_hash: credential.planHash, attempt: 1,
+  progress: { stage: "videos", index: 1, completed: 6, total: 7 },
+  result: { complete: false, created: { videos: 1 } },
+};
 
 test("MIG-0737 U02: preview POST multipart matches CURRENT, excludes old token", async () => {
   const options = new FormData();
@@ -145,4 +152,107 @@ test("MIG-0737 U02: apply fails closed on non-atomic response and never retries 
     { ...result, continuation_required: "false" },
   ]) assert.deepEqual(await applyLegacyImportStep(async () => json(200, body), credential, now),
     { status: "unavailable" });
+});
+
+test("MIG-0737 U02: 409/503 preserves confirmed progress without reflecting private recovery data", async () => {
+  for (const code of [409, 503]) {
+    let requests = 0;
+    const out = await applyLegacyImportStep(async () => {
+      requests++;
+      return json(code, { ...committedPending,
+        message: "private-provider-canary", error: { sql: "private-provider-canary" },
+        result: { ...committedPending.result, private: "private-provider-canary" },
+      });
+    }, credential, now);
+    assert.deepEqual(out, { status: "committedProgressPending", progress: committedPending.progress });
+    assert.equal(requests, 1, "progress recovery never retries the committed D1 step");
+    assert.doesNotMatch(JSON.stringify(out), /private-provider-canary|opaque-plan-hash|opaque-token/);
+  }
+});
+
+test("MIG-0737 U02: last committed D1 step still requires progress recovery", async () => {
+  const progress = { stage: "complete", index: 0, completed: 7, total: 7 };
+  const out = await applyLegacyImportStep(async () => json(503, {
+    ...committedPending, progress, result: { complete: true },
+  }), credential, now);
+  assert.deepEqual(out, { status: "committedProgressPending", progress });
+});
+
+test("MIG-0737 U02: recovery markers never override HTTP/auth boundaries or turn preview into apply", async () => {
+  for (const [code, status] of [[200, "unavailable"], [400, "unavailable"],
+    [401, "anonymous"], [403, "forbidden"], [404, "notFound"], [423, "unavailable"],
+    [500, "unavailable"], [501, "unsupported"]]) {
+    assert.deepEqual(await applyLegacyImportStep(async () => json(code, committedPending), credential, now),
+      { status });
+  }
+  for (const code of [409, 503]) {
+    assert.deepEqual(await previewLegacyImport(async () => json(code, committedPending),
+      new FormData(), [file], [], undefined, now), { status: "unavailable" });
+  }
+});
+
+test("MIG-0737 U02: incomplete, mismatched or impossible recovery DTOs fail closed", async () => {
+  const wrong = [
+    { ok: true }, { committed: "true" }, { committed: false }, { committed: undefined },
+    { kind: "unknown" }, { kind: undefined }, { retryable: "true" }, { retryable: false },
+    { requires_repreview: true }, { requires_repreview: undefined },
+    { plan_hash: "another-plan" }, { plan_hash: undefined },
+    { attempt: 0 }, { attempt: 1.5 }, { attempt: Number.MAX_SAFE_INTEGER + 1 },
+    { progress: undefined }, { result: undefined }, { result: { complete: "false" } },
+    { result: { complete: true } },
+    ...[
+      { stage: "private-provider-canary" }, { index: -1 }, { index: "1" },
+      { index: 7 }, { completed: 1.5 }, { completed: "6" }, { completed: 8 },
+      { total: 0 }, { total: -1 }, { total: Number.MAX_SAFE_INTEGER + 1 },
+      { stage: "complete", index: 0, completed: 6, total: 7 },
+    ].map(progress => ({ progress: { ...committedPending.progress, ...progress } })),
+    { progress: { stage: "complete", index: 1, completed: 7, total: 7 }, result: { complete: true } },
+  ];
+  for (const patch of wrong) {
+    for (const code of [409, 503]) {
+      assert.deepEqual(await applyLegacyImportStep(async () => json(code, {
+        ...committedPending, ...patch,
+      }), credential, now), { status: "unavailable" }, JSON.stringify({ code, patch }));
+    }
+  }
+});
+
+test("MIG-0737 U02: recovery body is byte-bounded before parsing, including chunked UTF-8", async () => {
+  const encoder = new TextEncoder();
+  const prefix = JSON.stringify(committedPending);
+  const atLimit = prefix + " ".repeat(64 * 1024 - encoder.encode(prefix).byteLength);
+  assert.deepEqual(await applyLegacyImportStep(async () => new Response(atLimit, { status: 409 }),
+    credential, now), { status: "committedProgressPending", progress: committedPending.progress });
+
+  for (const [code, padding, headers] of [[409, " ".repeat(64 * 1024), {}],
+    [503, "あ".repeat(24_000), { "content-length": "1" }]]) {
+    let cancelled = false;
+    const chunks = [encoder.encode(prefix), encoder.encode(padding)];
+    const stream = new ReadableStream({
+      pull(controller) {
+        if (chunks.length) controller.enqueue(chunks.shift());
+      },
+      cancel() { cancelled = true; },
+    });
+    const out = await applyLegacyImportStep(async () => new Response(stream, { status: code, headers }),
+      credential, now);
+    assert.deepEqual(out, { status: "unavailable" });
+    assert.equal(cancelled, true, "oversized body is cancelled without draining the response");
+  }
+});
+
+test("MIG-0737 U02: malformed or cancelled recovery body cannot assert a commit", async () => {
+  for (const body of ["{bad json", new Uint8Array([0xff]), null]) {
+    assert.deepEqual(await applyLegacyImportStep(async () => new Response(body, { status: 503 }),
+      credential, now), { status: "unavailable" });
+  }
+  const controller = new AbortController();
+  let cancelled = false;
+  const stream = new ReadableStream({ cancel() { cancelled = true; } });
+  const pending = applyLegacyImportStep(async () => new Response(stream, { status: 409 }),
+    credential, now, controller.signal);
+  await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  assert.deepEqual(await pending, { status: "unavailable" });
+  assert.equal(cancelled, true);
 });

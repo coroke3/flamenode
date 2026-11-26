@@ -1,3 +1,4 @@
+// D-16-1 provisional: replace with @flamenode/contracts at merge
 /**
  * MIG-0737 U02 / RH-002: legacy JSON/CSV/TSV preview/apply transport.
  * Non-routed transport only. No automatic apply retries: a committed step may have
@@ -48,6 +49,27 @@ const applySchema = z.object({
   }).optional(),
   result: z.unknown().optional(),
 });
+const recoveryProgressSchema = z.object({
+  stage: z.enum(["system_user", "x_users", "softwares", "events", "custom_questions", "videos", "complete"]),
+  index: z.number().int().nonnegative().safe(),
+  completed: z.number().int().nonnegative().safe(),
+  total: z.number().int().positive().safe(),
+}).refine(progress => progress.index <= progress.completed && progress.completed <= progress.total &&
+  (progress.stage === "complete"
+    ? progress.index === 0 && progress.completed === progress.total
+    : progress.completed < progress.total));
+const committedPendingSchema = z.object({
+  ok: z.literal(false),
+  committed: z.literal(true),
+  kind: z.literal("committed_progress_pending"),
+  retryable: z.literal(true),
+  requires_repreview: z.literal(false),
+  plan_hash: z.string().min(1),
+  attempt: z.number().int().positive().safe(),
+  progress: recoveryProgressSchema,
+  result: z.object({ complete: z.boolean() }),
+}).refine(response => response.result.complete === (response.progress.stage === "complete"));
+
 export type LegacyImportPreview = z.infer<typeof previewSchema>;
 export type LegacyImportStep = z.infer<typeof applySchema>;
 export type LegacyPreviewCredential = {
@@ -56,6 +78,10 @@ export type LegacyPreviewCredential = {
   expiresAt: number;
 };
 export type LegacyImportResponse<T> = OpsResult<T>;
+export type LegacyImportApplyResponse = LegacyImportResponse<LegacyImportStep> |
+  { status: "committedProgressPending"; progress: z.infer<typeof recoveryProgressSchema> };
+
+const MAX_RECOVERY_RESPONSE_BYTES = 64 * 1024;
 
 function validCredential(c: LegacyPreviewCredential, now: number): boolean {
   return typeof c.token === "string" && c.token.length > 0 &&
@@ -63,12 +89,37 @@ function validCredential(c: LegacyPreviewCredential, now: number): boolean {
     Number.isSafeInteger(c.expiresAt) && c.expiresAt > now;
 }
 
-async function submit<T>(
+/** Bound untrusted error bodies before parsing, including responses without Content-Length. */
+async function readRecoveryJson(response: Response, signal?: AbortSignal): Promise<unknown> {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const cancel = () => { void reader.cancel().catch(() => undefined); };
+  signal?.addEventListener("abort", cancel, { once: true });
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let size = 0;
+  let text = "";
+  try {
+    while (!signal?.aborted) {
+      const { done, value } = await reader.read();
+      if (signal?.aborted) return null;
+      if (done) return JSON.parse(text + decoder.decode());
+      size += value.byteLength;
+      if (size > MAX_RECOVERY_RESPONSE_BYTES) return null;
+      text += decoder.decode(value, { stream: true });
+    }
+    return null;
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+    cancel();
+    reader.releaseLock();
+  }
+}
+
+async function submit(
   fetchFn: OpsFetch,
   form: FormData,
-  schema: z.ZodType<T>,
   signal?: AbortSignal,
-): Promise<LegacyImportResponse<T>> {
+): Promise<OpsResult<{ httpStatus: number; body: unknown }>> {
   if (signal?.aborted) return { status: "unavailable" };
   try {
     const response = await fetchFn("/api/admin/import/legacy", {
@@ -84,11 +135,13 @@ async function submit<T>(
     if (response.status === 403) return { status: "forbidden" };
     if (response.status === 404) return { status: "notFound" };
     if (response.status === 501) return { status: "unsupported" };
-    if (response.status !== 200) return { status: "unavailable" };
-    const parsed: unknown = await response.json();
+    if (response.status !== 200 && (form.get("mode") !== "apply" ||
+      (response.status !== 409 && response.status !== 503))) return { status: "unavailable" };
+    const parsed: unknown = response.status === 200
+      ? await response.json()
+      : await readRecoveryJson(response, signal);
     if (signal?.aborted) return { status: "unavailable" };
-    const checked = schema.safeParse(parsed);
-    return checked.success ? { status: "ok", data: checked.data } : { status: "unavailable" };
+    return { status: "ok", data: { httpStatus: response.status, body: parsed } };
   } catch {
     return { status: "unavailable" };
   }
@@ -121,11 +174,12 @@ export async function previewLegacyImport(
   form.set("mode", "preview");
   form.set("video_custom_field_decisions", JSON.stringify(decisions));
   for (const file of files) form.append("files", file);
-  const result = await submit(fetchFn, form, previewSchema, signal);
-  if (result.status === "ok" && result.data.expires_at <= nowSeconds) {
-    return { status: "unavailable" };
-  }
-  return result;
+  const result = await submit(fetchFn, form, signal);
+  if (result.status !== "ok") return result;
+  const checked = previewSchema.safeParse(result.data.body);
+  return checked.success && checked.data.expires_at > nowSeconds
+    ? { status: "ok", data: checked.data }
+    : { status: "unavailable" };
 }
 
 /** Apply *one* committed step. Calling code must confirm and handle continuation manually. */
@@ -134,11 +188,20 @@ export async function applyLegacyImportStep(
   credential: LegacyPreviewCredential,
   nowSeconds: number = Math.floor(Date.now() / 1000),
   signal?: AbortSignal,
-): Promise<LegacyImportResponse<LegacyImportStep>> {
+): Promise<LegacyImportApplyResponse> {
   if (!validCredential(credential, nowSeconds)) return { status: "unavailable" };
   const form = new FormData();
   form.set("mode", "apply");
   form.set("preview_token", credential.token);
   form.set("plan_hash", credential.planHash);
-  return submit(fetchFn, form, applySchema, signal);
+  const result = await submit(fetchFn, form, signal);
+  if (result.status !== "ok") return result;
+  if (result.data.httpStatus === 200) {
+    const checked = applySchema.safeParse(result.data.body);
+    return checked.success ? { status: "ok", data: checked.data } : { status: "unavailable" };
+  }
+  const recovery = committedPendingSchema.safeParse(result.data.body);
+  if (!recovery.success || recovery.data.plan_hash !== credential.planHash) return { status: "unavailable" };
+  // The view needs confirmed progress, never provider messages, credentials or raw result fields.
+  return { status: "committedProgressPending", progress: recovery.data.progress };
 }
