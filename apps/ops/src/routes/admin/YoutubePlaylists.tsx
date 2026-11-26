@@ -22,24 +22,56 @@ function intervalLabel(minutes: number): string {
   if (minutes % 60 === 0) return String(minutes / 60) + "時間";
   return String(minutes) + "分";
 }
+/** A denied GET header is authoritative even if its optional 403 JSON never settles. */
+export function youtubePlaylistsRevokedDestination(status: number | string): "/entry" | "/dashboard" | null {
+  if (status === 401 || status === "anonymous") return "/entry";
+  if (status === 403 || status === "forbidden") return "/dashboard";
+  return null;
+}
+
 export function YoutubePlaylists(): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const query = params.toString();
   const [data, setData] = React.useState<AdminYoutubePlaylistsResponse | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const revokedRef = React.useRef(false);
+  const [revokedTo, setRevokedTo] = React.useState<"/entry" | "/dashboard" | null>(null);
+  React.useEffect(() => {
+    if (revokedTo) window.location.assign(revokedTo);
+  }, [revokedTo]);
   React.useEffect(() => {
     const controller = new AbortController();
     setData(null);
-    void readYoutubePlaylists(query ? "?" + query : "", undefined, controller.signal).then(result => {
-      if (controller.signal.aborted) return;
+    const readWithHeaderGuard = async (path: string, init?: RequestInit): Promise<Response> => {
+      const response = await fetch(path, init);
+      const destination = youtubePlaylistsRevokedDestination(response.status);
+      if (!controller.signal.aborted && !revokedRef.current && destination) {
+        revokedRef.current = true;
+        setData(null);
+        setError(null);
+        setRevokedTo(destination);
+      }
+      return response;
+    };
+    void readYoutubePlaylists(query ? "?" + query : "", readWithHeaderGuard, controller.signal).then(result => {
+      if (controller.signal.aborted || revokedRef.current) return;
+      const destination = youtubePlaylistsRevokedDestination(result.status);
+      if (destination) {
+        revokedRef.current = true;
+        setData(null);
+        setError(null);
+        setRevokedTo(destination);
+        return;
+      }
       if (result.status === "ok") { setData(result.data); setError(null); }
-      else setError(result.status === "anonymous" ? "再ログインが必要です。" : "再生リストを取得できませんでした。");
+      else setError("再生リストを取得できませんでした。");
     });
     return () => controller.abort();
   }, [query]);
   const rows = data?.rows ?? [];
   const waiting = rows.reduce((sum, row) => sum + Math.max(0, row.eligible_count - row.synced_count), 0);
   const failed = rows.filter(row => row.sync_status === "failed").length;
+  if (revokedTo) return <section role="alert">再生リスト同期管理へのアクセスが終了しました。</section>;
   return <div className="fn-public-container fn-page">
     <header className="fn-page-head"><h1>イベント再生リスト同期</h1>
       <p>同期を明示的に設定したイベントのYouTube再生リストへの反映状況です。</p></header>
