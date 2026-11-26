@@ -341,3 +341,141 @@ test("MIG-0737 U01 export denial headers: post-mutation 403 fences delivery befo
     dom.window.HTMLAnchorElement.prototype.click = oldClick;
   }
 });
+
+// Control only the optional-403-body deadline, so the pre-deadline delivery window never depends on wall time.
+function holdForbiddenBodyDeadline() {
+  const originalSet = globalThis.setTimeout;
+  const originalClear = globalThis.clearTimeout;
+  const pending = new Map();
+  const held = new Set();
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if (delay !== 250) return originalSet(callback, delay, ...args);
+    const handle = {};
+    held.add(handle);
+    pending.set(handle, () => callback(...args));
+    return handle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    if (held.has(handle)) pending.delete(handle);
+    else originalClear(handle);
+  };
+  return {
+    get pending() { return pending.size; },
+    expire() {
+      const callbacks = [...pending.values()];
+      pending.clear();
+      for (const callback of callbacks) callback();
+    },
+    restore() {
+      globalThis.setTimeout = originalSet;
+      globalThis.clearTimeout = originalClear;
+      pending.clear();
+      held.clear();
+    },
+  };
+}
+
+for (const completion of ["metadata", "deadline"]) {
+  // Exercise the actual PATCH-to-GET caller, including delivery while its optional 403 body remains pending.
+  test("MIG-0737 U01 raw403: post-mutation GET retires old delivery before " + completion + " completion without replaying the PATCH", async () => {
+    const deadline = holdForbiddenBodyDeadline();
+    const requests = [];
+    const signals = [];
+    let resolveExport;
+    let resolveReplacement;
+    let resolveMetadata;
+    const pendingExport = new Promise(resolve => { resolveExport = resolve; });
+    const replacementExport = new Promise(resolve => { resolveReplacement = resolve; });
+    const metadata = new Promise(resolve => { resolveMetadata = resolve; });
+    let reads = 0;
+    let metadataStarted = false;
+    const oldCreate = URL.createObjectURL;
+    const oldRevoke = URL.revokeObjectURL;
+    const oldClick = dom.window.HTMLAnchorElement.prototype.click;
+    const created = [];
+    const delivered = [];
+    URL.createObjectURL = (blob) => { created.push(blob); return "blob:raw403-export"; };
+    URL.revokeObjectURL = () => {};
+    dom.window.HTMLAnchorElement.prototype.click = function () { delivered.push(this.download); };
+    const fn = async (path, init) => {
+      requests.push({ path, method: init.method, body: init.body ? JSON.parse(init.body) : null });
+      if (path.includes("/tables")) return json(200, catalog);
+      if (path.includes("/export")) {
+        signals.push(init.signal);
+        return signals.length === 1 ? pendingExport : replacementExport;
+      }
+      if (init.method === "PATCH") return json(200, { ok: true });
+      if (++reads === 1) return json(200, page("videos"));
+      const response = json(403, { reason: "admin_required" });
+      response.json = () => { metadataStarted = true; return metadata; };
+      return response;
+    };
+    const ui = await mount({ fetchFn: fn, initialTable: "videos", enableMutations: true });
+    try {
+      await click(ui, "CSV ダウンロード");
+      await click(ui, "1行 title を編集");
+      const input = ui.host.querySelector("label input[type=text]");
+      assert.ok(input);
+      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+      await React.act(async () => {
+        setter.call(input, "after");
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      });
+      await click(ui, "セルを保存");
+      assert.equal(reads, 2);
+      assert.equal(metadataStarted, true);
+      assert.equal(deadline.pending, 1, "neither metadata nor its deadline has settled");
+      assert.equal(signals[0].aborted, true, "the refresh response retires export before its optional body finishes");
+      const writes = () => requests.filter(x => x.method === "PATCH").map(x => x.body);
+      const expectedWrites = [{ table: "videos", primaryKey: { id: "v1" }, column: "title", value: "after" }];
+      assert.deepEqual(writes(), expectedWrites);
+      const patchIndex = requests.findIndex(x => x.method === "PATCH");
+      assert.equal(requests[patchIndex + 1].method, "GET");
+      assert.equal(requests[patchIndex + 1].path, "/api/admin/spreadsheet/data?table=videos&page=1");
+      assert.equal(ui.host.querySelector("table"), null, "the post-write header denial unmounts the grid before metadata");
+      assert.match(ui.host.textContent, /管理者権限が必要/);
+      assert.doesNotMatch(ui.host.textContent, /データを取得できませんでした/);
+      await React.act(async () => resolveExport(new Response("old export", { headers: { "content-type": "text/csv" } })));
+      await flush();
+      assert.deepEqual(created, []);
+      assert.deepEqual(delivered, []);
+      assert.doesNotMatch(ui.host.textContent, /ダウンロードしました/);
+      assert.equal(deadline.pending, 1, "old response delivery was fenced before the metadata deadline");
+      await click(ui, "CSV ダウンロード");
+      assert.equal(signals.length, 2);
+      await React.act(async () => {
+        if (completion === "deadline") deadline.expire();
+        else resolveMetadata({ reason: "admin_required", redirect: "/dashboard" });
+      });
+      await flush();
+      assert.equal(deadline.pending, 0);
+      assert.match(ui.host.textContent, /管理者権限が必要/);
+      assert.equal(ui.host.querySelector("table"), null, "metadata completion preserves the already committed denial");
+      assert.equal(signals[1].aborted, false, "the same refresh cannot revoke the replacement a second time");
+      const download = [...ui.host.querySelectorAll("button")].find(button => button.textContent === "CSV ダウンロード");
+      assert.equal(download.disabled, true);
+      await React.act(async () => resolveReplacement(new Response("replacement export", { headers: { "content-type": "text/csv" } })));
+      await flush();
+      assert.deepEqual(delivered, ["videos.csv"]);
+      assert.equal(await created[0].text(), "replacement export");
+      if (completion === "deadline") {
+        await React.act(async () => resolveMetadata({ reason: "late metadata", redirect: "/dashboard" }));
+        await flush();
+        assert.equal(signals[1].aborted, false);
+        assert.match(ui.host.textContent, /CSV をダウンロードしました/, "late metadata cannot erase the new receipt");
+      }
+      assert.deepEqual(writes(), expectedWrites, "neither denial nor delayed metadata replays the successful PATCH");
+      assert.equal(reads, 2);
+      assert.ok(requests.every(request => request.method === "GET" || request.method === "PATCH"));
+    } finally {
+      await ui.cleanup();
+      resolveExport(new Response("unused", { headers: { "content-type": "text/csv" } }));
+      resolveReplacement(new Response("unused", { headers: { "content-type": "text/csv" } }));
+      resolveMetadata({ reason: "admin_required" });
+      URL.createObjectURL = oldCreate;
+      URL.revokeObjectURL = oldRevoke;
+      dom.window.HTMLAnchorElement.prototype.click = oldClick;
+      deadline.restore();
+    }
+  });
+}

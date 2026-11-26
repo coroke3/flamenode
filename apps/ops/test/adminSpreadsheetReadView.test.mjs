@@ -1144,3 +1144,383 @@ test("MIG-0737 U01 export denial headers: obsolete raw 403 is not a current deni
     assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
   } finally { await ui.cleanup(); observed.restore(); }
 });
+
+// Hold only the shared optional-403-body deadline; React and other UI timers keep their normal behavior.
+function holdForbiddenBodyDeadline() {
+  const originalSet = globalThis.setTimeout;
+  const originalClear = globalThis.clearTimeout;
+  const pending = new Map();
+  const held = new Set();
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if (delay !== 250) return originalSet(callback, delay, ...args);
+    const handle = {};
+    held.add(handle);
+    pending.set(handle, () => callback(...args));
+    return handle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    if (held.has(handle)) pending.delete(handle);
+    else originalClear(handle);
+  };
+  return {
+    get pending() { return pending.size; },
+    restore() {
+      globalThis.setTimeout = originalSet;
+      globalThis.clearTimeout = originalClear;
+      pending.clear();
+      held.clear();
+    },
+  };
+}
+
+for (const prior of ["pending export", "no export", "completed receipt"]) {
+  // Keep the full response/body/export ordering in one scenario: the same page read must revoke only once.
+  test("MIG-0737 U01 raw403: pending metadata after " + prior + " cannot retire a replacement export or its receipt twice", async () => {
+    const deadline = holdForbiddenBodyDeadline();
+    const observed = observeExports();
+    const metadata = deferred();
+    const oldExport = deferred();
+    const replacement = deferred();
+    const signals = [];
+    let reads = 0;
+    let bodyStarted = false;
+    const fn = async (path, init) => {
+      assert.equal(init.method, "GET");
+      if (path.includes("/tables")) return json(200, catalog);
+      if (path.includes("/data")) {
+        if (++reads === 1) return json(200, page("videos", 1));
+        const response = json(403, { reason: "admin_required" });
+        response.json = () => { bodyStarted = true; return metadata.promise; };
+        return response;
+      }
+      signals.push(init.signal);
+      if (signals.length === 1 && prior === "pending export") return oldExport.promise;
+      if (signals.length === 1 && prior === "completed receipt") return exportResponse();
+      return replacement.promise;
+    };
+    const ui = await mount(fn, "videos");
+    try {
+      if (prior !== "no export") {
+        await React.act(async () => exportButton(ui.host).click());
+        await flush();
+      }
+      if (prior === "completed receipt") assert.match(ui.host.textContent, /CSV をダウンロードしました/);
+      await React.act(async () => exportButton(ui.host, "再読込").click());
+      await flush();
+      assert.equal(bodyStarted, true);
+      assert.equal(deadline.pending, 1, "metadata and its deadline are both still pending");
+      assert.match(ui.host.textContent, /管理者権限が必要/);
+      assert.equal(ui.host.querySelector("table"), null, "the current header denial retires rows before metadata");
+      assert.doesNotMatch(ui.host.textContent, /読み込み中|ダウンロードしました/);
+      assert.equal(exportButton(ui.host).disabled, false, "raw status retires delivery before metadata settles");
+      if (prior === "pending export") assert.equal(signals[0].aborted, true);
+      await React.act(async () => exportButton(ui.host).click());
+      const replacementSignal = signals.at(-1);
+      assert.equal(signals.length, prior === "no export" ? 1 : 2);
+      assert.equal(replacementSignal.aborted, false);
+      assert.equal(exportButton(ui.host).disabled, true);
+      if (prior === "pending export") {
+        await React.act(async () => oldExport.resolve(exportResponse("csv", "old export")));
+        await flush();
+        assert.deepEqual(observed.effects.downloaded, []);
+        assert.equal(exportButton(ui.host).disabled, true, "old export cleanup cannot unlock the replacement");
+      }
+      if (prior === "completed receipt") {
+        await React.act(async () => replacement.resolve(exportResponse("csv", "replacement export")));
+        await flush();
+        assert.match(ui.host.textContent, /CSV をダウンロードしました/);
+        assert.equal(observed.effects.downloaded.length, 2, "the completed old download cannot be recalled");
+      }
+      assert.equal(deadline.pending, 1, "replacement delivery is observed before the metadata deadline");
+      await React.act(async () => metadata.resolve({ reason: "admin_required", redirect: "/dashboard" }));
+      await flush();
+      assert.equal(deadline.pending, 0);
+      assert.match(ui.host.textContent, /管理者権限が必要/);
+      assert.equal(replacementSignal.aborted, false, "parsed metadata must not revoke a later export");
+      if (prior === "completed receipt") {
+        assert.match(ui.host.textContent, /CSV をダウンロードしました/, "the later receipt belongs to the replacement");
+        assert.equal(exportButton(ui.host).disabled, false);
+      } else {
+        assert.equal(exportButton(ui.host).disabled, true);
+        assert.deepEqual(observed.effects.downloaded, []);
+        await React.act(async () => replacement.resolve(exportResponse("csv", "replacement export")));
+        await flush();
+        assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+        assert.match(ui.host.textContent, /CSV をダウンロードしました/);
+      }
+      assert.equal(await observed.effects.created.at(-1).text(), "replacement export");
+      assert.equal(reads, 2);
+    } finally {
+      await ui.cleanup();
+      metadata.resolve({ reason: "admin_required" });
+      oldExport.resolve(exportResponse());
+      replacement.resolve(exportResponse());
+      observed.restore();
+      deadline.restore();
+    }
+  });
+}
+
+for (const phase of ["blob", "text"]) {
+  test("MIG-0737 U01 raw403: header denial fences a pending " + (phase === "blob" ? "TSV blob" : "CSV text") + " conversion before metadata or its deadline", async () => {
+    const deadline = holdForbiddenBodyDeadline();
+    const observed = observeExports();
+    const metadata = deferred();
+    const pending = deferred();
+    let reads = 0;
+    let started = false;
+    let metadataStarted = false;
+    let signal;
+    const fn = async (path, init) => {
+      assert.equal(init.method, "GET");
+      if (path.includes("/tables")) return json(200, catalog);
+      if (path.includes("/data")) {
+        if (++reads === 1) return json(200, page("videos", 1));
+        const response = json(403, { reason: "admin_required" });
+        response.json = () => { metadataStarted = true; return metadata.promise; };
+        return response;
+      }
+      signal = init.signal;
+      const response = exportResponse(phase === "blob" ? "tsv" : "csv");
+      if (phase === "blob") response.blob = () => { started = true; return pending.promise; };
+      else {
+        const blob = new Blob(["old export"], { type: "text/csv" });
+        blob.text = () => { started = true; return pending.promise; };
+        response.blob = async () => blob;
+      }
+      return response;
+    };
+    const ui = await mount(fn, "videos");
+    try {
+      await React.act(async () => exportButton(ui.host, phase === "blob" ? "TSV ダウンロード" : "コピー (CSV)").click());
+      await flush();
+      assert.equal(started, true);
+      await React.act(async () => exportButton(ui.host, "再読込").click());
+      await flush();
+      assert.equal(metadataStarted, true);
+      assert.equal(deadline.pending, 1);
+      assert.match(ui.host.textContent, /管理者権限が必要/);
+      assert.equal(ui.host.querySelector("table"), null);
+      assert.equal(signal.aborted, true);
+      await React.act(async () => pending.resolve(phase === "blob"
+        ? new Blob(["old export"], { type: "text/tab-separated-values" }) : "old export"));
+      await flush();
+      assert.deepEqual(observed.effects, { created: [], downloaded: [], revoked: [], copied: [], fallback: [] });
+      assert.equal(exportButton(ui.host).disabled, false);
+      assert.equal(deadline.pending, 1, "old conversion settles before the optional body or deadline");
+      await React.act(async () => metadata.resolve({ reason: "admin_required" }));
+      await flush();
+      assert.match(ui.host.textContent, /管理者権限が必要/);
+      assert.equal(deadline.pending, 0);
+    } finally {
+      await ui.cleanup();
+      metadata.resolve({ reason: "admin_required" });
+      pending.resolve(phase === "blob" ? new Blob(["old export"], { type: "text/tab-separated-values" }) : "old export");
+      observed.restore();
+      deadline.restore();
+    }
+  });
+}
+
+for (const outcome of ["resolve", "reject"]) {
+  test("MIG-0737 U01 raw403: delayed Clipboard " + outcome + " cannot publish a receipt or fallback before metadata settles", async () => {
+    const deadline = holdForbiddenBodyDeadline();
+    const observed = observeExports();
+    const metadata = deferred();
+    const oldClipboard = deferred();
+    const replacement = deferred();
+    const signals = [];
+    let reads = 0;
+    observed.clipboard.writeText = (body) => {
+      observed.effects.copied.push(body);
+      return oldClipboard.promise;
+    };
+    const fn = async (path, init) => {
+      assert.equal(init.method, "GET");
+      if (path.includes("/tables")) return json(200, catalog);
+      if (path.includes("/data")) {
+        if (++reads === 1) return json(200, page("videos", 1));
+        const response = json(403, { reason: "admin_required" });
+        response.json = () => metadata.promise;
+        return response;
+      }
+      signals.push(init.signal);
+      return signals.length === 1 ? exportResponse("csv", "already dispatched") : replacement.promise;
+    };
+    const ui = await mount(fn, "videos");
+    try {
+      await React.act(async () => exportButton(ui.host, "コピー (CSV)").click());
+      await flush();
+      assert.deepEqual(observed.effects.copied, ["already dispatched"], "an OS request already issued cannot be recalled");
+      await React.act(async () => exportButton(ui.host, "再読込").click());
+      await flush();
+      assert.equal(deadline.pending, 1);
+      assert.match(ui.host.textContent, /管理者権限が必要/);
+      assert.equal(ui.host.querySelector("table"), null);
+      assert.equal(signals[0].aborted, true);
+      await React.act(async () => exportButton(ui.host).click());
+      assert.equal(signals.length, 2);
+      await React.act(async () => oldClipboard[outcome](outcome === "reject" ? new Error("clipboard denied") : undefined));
+      await flush();
+      assert.deepEqual(observed.effects.fallback, []);
+      assert.equal(document.querySelectorAll("textarea").length, 0);
+      assert.doesNotMatch(ui.host.textContent, /コピーしました|コピーに失敗|エクスポートに失敗/);
+      assert.equal(signals[1].aborted, false);
+      assert.equal(exportButton(ui.host).disabled, true);
+      assert.equal(deadline.pending, 1, "the old Clipboard completion is fenced before the metadata deadline");
+      await React.act(async () => metadata.resolve({ reason: "admin_required" }));
+      await flush();
+      assert.match(ui.host.textContent, /管理者権限が必要/);
+      assert.equal(signals[1].aborted, false);
+      assert.equal(exportButton(ui.host).disabled, true);
+      assert.equal(deadline.pending, 0);
+      await React.act(async () => replacement.resolve(exportResponse("csv", "replacement export")));
+      await flush();
+      assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+      assert.equal(await observed.effects.created[0].text(), "replacement export");
+      assert.deepEqual(observed.effects.copied, ["already dispatched"]);
+    } finally {
+      await ui.cleanup();
+      metadata.resolve({ reason: "admin_required" });
+      oldClipboard.resolve();
+      replacement.resolve(exportResponse());
+      observed.restore();
+      deadline.restore();
+    }
+  });
+}
+
+for (const replacement of ["A-to-B-to-A", "transport", "page"]) {
+  test("MIG-0737 U01 raw403: an aborted " + replacement + " read cannot retire the current export", async () => {
+    const observed = observeExports();
+    const oldRead = deferred();
+    const currentExport = deferred();
+    let videoReads = 0;
+    let metadataReads = 0;
+    let oldReadSignal;
+    let exportSignal;
+    const exportFn = (_path, init) => { exportSignal = init.signal; return currentExport.promise; };
+    const fn = async (path, init) => {
+      assert.equal(init.method, "GET");
+      if (path.includes("/tables")) return json(200, catalog);
+      if (path.includes("/export")) return exportFn(path, init);
+      const params = new URL(path, "https://flamenode.test").searchParams;
+      if (params.get("table") === "videos" && ++videoReads === 2) {
+        oldReadSignal = init.signal;
+        return oldRead.promise;
+      }
+      return json(200, page(params.get("table"), Number(params.get("page")), true));
+    };
+    const ui = await mount(fn, "videos");
+    try {
+      await React.act(async () => exportButton(ui.host, replacement === "page" ? "次へ" : "再読込").click());
+      await flush();
+      if (replacement === "transport") await ui.rerender(fetchWithExport(exportFn), "videos");
+      else {
+        for (const label of replacement === "page" ? ["動画"] : ["イベント", "動画"]) {
+          const button = [...ui.host.querySelectorAll("nav button")].find(item => item.textContent.includes(label));
+          assert.ok(button);
+          await React.act(async () => button.click());
+          await flush();
+        }
+      }
+      assert.equal(oldReadSignal.aborted, true);
+      assert.match(ui.host.textContent, /<unsafe>/);
+      await React.act(async () => exportButton(ui.host).click());
+      const response = new Response("<p>obsolete denial</p>", { status: 403 });
+      response.json = async () => { metadataReads++; return { reason: "obsolete" }; };
+      await React.act(async () => oldRead.resolve(response));
+      await flush();
+      assert.equal(metadataReads, 0, "aborted raw responses are discarded before metadata parsing");
+      assert.equal(exportSignal.aborted, false);
+      assert.equal(exportButton(ui.host).disabled, true);
+      assert.match(ui.host.textContent, /<unsafe>/);
+      assert.doesNotMatch(ui.host.textContent, /管理者権限が必要|データを取得できませんでした/);
+      await React.act(async () => currentExport.resolve(exportResponse()));
+      await flush();
+      assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+    } finally {
+      await ui.cleanup();
+      oldRead.resolve(new Response("", { status: 403 }));
+      currentExport.resolve(exportResponse());
+      observed.restore();
+    }
+  });
+}
+
+test("MIG-0737 U01 raw403: obsolete metadata completion cannot reset a newer read's one-denial fence", async () => {
+  const deadline = holdForbiddenBodyDeadline();
+  const observed = observeExports();
+  const oldMetadata = deferred();
+  const currentMetadata = deferred();
+  const oldExport = deferred();
+  const replacement = deferred();
+  const signals = [];
+  let videoReads = 0;
+  let metadataReads = 0;
+  const fn = async (path, init) => {
+    assert.equal(init.method, "GET");
+    if (path.includes("/tables")) return json(200, catalog);
+    if (path.includes("/export")) {
+      signals.push(init.signal);
+      return signals.length === 1 ? oldExport.promise : replacement.promise;
+    }
+    const name = new URL(path, "https://flamenode.test").searchParams.get("table");
+    if (name === "videos" && [2, 4].includes(++videoReads)) {
+      const pending = videoReads === 2 ? oldMetadata : currentMetadata;
+      const response = json(403, { reason: "admin_required" });
+      response.json = () => { metadataReads++; return pending.promise; };
+      return response;
+    }
+    return json(200, page(name, 1));
+  };
+  const ui = await mount(fn, "videos");
+  try {
+    await React.act(async () => exportButton(ui.host, "再読込").click());
+    await flush();
+    assert.equal(metadataReads, 1);
+    assert.equal(deadline.pending, 1);
+    for (const label of ["イベント", "動画"]) {
+      const button = [...ui.host.querySelectorAll("nav button")].find(item => item.textContent.includes(label));
+      assert.ok(button);
+      await React.act(async () => button.click());
+      await flush();
+    }
+    await React.act(async () => exportButton(ui.host).click());
+    await React.act(async () => exportButton(ui.host, "再読込").click());
+    await flush();
+    assert.equal(metadataReads, 2);
+    assert.equal(deadline.pending, 1, "the obsolete read's abort cleared only its own deadline");
+    assert.equal(signals[0].aborted, true);
+    await React.act(async () => oldMetadata.resolve({ reason: "obsolete" }));
+    await flush();
+    assert.equal(deadline.pending, 1);
+    assert.match(ui.host.textContent, /管理者権限が必要/);
+    assert.equal(ui.host.querySelector("table"), null);
+    assert.doesNotMatch(ui.host.textContent, /読み込み中/);
+    await React.act(async () => exportButton(ui.host).click());
+    assert.equal(signals.length, 2);
+    await React.act(async () => currentMetadata.resolve({ reason: "current" }));
+    await flush();
+    assert.equal(deadline.pending, 0);
+    assert.match(ui.host.textContent, /管理者権限が必要/);
+    assert.equal(signals[1].aborted, false);
+    assert.equal(exportButton(ui.host).disabled, true);
+    await React.act(async () => oldExport.resolve(exportResponse("csv", "obsolete export")));
+    await flush();
+    assert.equal(exportButton(ui.host).disabled, true);
+    assert.deepEqual(observed.effects.downloaded, []);
+    await React.act(async () => replacement.resolve(exportResponse("csv", "current export")));
+    await flush();
+    assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+    assert.equal(await observed.effects.created[0].text(), "current export");
+  } finally {
+    await ui.cleanup();
+    oldMetadata.resolve({});
+    currentMetadata.resolve({});
+    oldExport.resolve(exportResponse());
+    replacement.resolve(exportResponse());
+    observed.restore();
+    deadline.restore();
+  }
+});
