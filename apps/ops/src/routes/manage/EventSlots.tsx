@@ -124,7 +124,82 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
     return () => controller.abort();
   }, [eventId, status, fetchFn, refresh]);
 
-  const validRequest = request?.context === contextRef.current ? request.result : null;
+  const readContext = contextRef.current;
+  const validRequest = request?.context === readContext ? request.result : null;
+
+  // One mounted view owns its in-flight receipts. A previous view may still
+  // commit a write, but can only invalidate a current read of the same event.
+  // Wait for current-view writes to settle before tearing down their controls.
+  const writeView = React.useMemo(() => ({
+    eventId, feedbackScope, pending: 0, refreshNeeded: false,
+    failure: undefined as string | null | undefined, canInvalidate: false,
+  }), [eventId, feedbackScope, readContext]);
+  const committedWriteView = React.useRef<typeof writeView | null>(null);
+  React.useLayoutEffect(() => {
+    committedWriteView.current = writeView;
+    return () => {
+      if (committedWriteView.current === writeView) committedWriteView.current = null;
+    };
+  }, [writeView]);
+  React.useLayoutEffect(() => {
+    writeView.canInvalidate = validRequest === null || validRequest.status === "ok";
+  }, [writeView, validRequest]);
+
+  const trackedWrites = React.useMemo<SlotWriteActions | undefined>(() => {
+    if (typeof onGenerate !== "function" || typeof onClearAvailable !== "function" ||
+        typeof onAction !== "function") return undefined;
+    const flush = (view: typeof writeView) => {
+      if (committedWriteView.current !== view || !view.canInvalidate ||
+          view.pending !== 0 || !view.refreshNeeded) return;
+      const failure = view.failure;
+      view.refreshNeeded = false;
+      view.failure = undefined;
+      setReload(previous => ({
+        key: previous.key + 1,
+        failure: failure === undefined ? previous.failure : failure === null ? null :
+          { scope: view.feedbackScope, message: failure },
+      }));
+    };
+    const track = async <T extends { ok: boolean; message?: string },>(
+      action: () => Promise<T>, refreshOnFailure: boolean,
+    ): Promise<T> => {
+      if (committedWriteView.current !== writeView || !writeView.canInvalidate) {
+        throw new Error("Obsolete slot write view");
+      }
+      writeView.pending++;
+      writeView.failure = undefined;
+      try {
+        const result = await action();
+        const refreshNeeded = result.ok || refreshOnFailure;
+        const current = committedWriteView.current;
+        if (current === writeView) {
+          writeView.refreshNeeded ||= refreshNeeded;
+          writeView.failure = result.ok ? null : result.message ??
+            (refreshOnFailure ? "枠の操作に失敗しました。" : "枠操作に失敗しました。");
+        } else if (refreshNeeded && current?.eventId === writeView.eventId) {
+          // Do not publish an obsolete result message or reuse an old port.
+          current.refreshNeeded = true;
+          flush(current);
+        }
+        return result;
+      } catch (error) {
+        if (committedWriteView.current === writeView) {
+          writeView.failure = "枠操作中に通信エラーが発生しました。";
+        }
+        throw error;
+      } finally {
+        writeView.pending--;
+        flush(writeView);
+      }
+    };
+    return {
+      onGenerate: request => track(() => onGenerate(request), false),
+      onClearAvailable: () => track(onClearAvailable, false),
+      onAction: operation => track(() => onAction(operation), true),
+      canManageSubmittedSlots,
+    };
+  }, [writeView, onGenerate, onClearAvailable, onAction, canManageSubmittedSlots]);
+
   if (validRequest === null) return <p role="status" aria-busy="true">枠を読み込み中...</p>;
   if (validRequest.status === "anonymous") return <p role="alert">ログインが必要です。</p>;
   if (validRequest.status === "notFound" || validRequest.status === "forbidden") {
@@ -141,6 +216,6 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
   return <>
     {failure !== null && <p role="alert" className="fn-alert fn-alert--danger">{failure}</p>}
     <EventSlotsView eventId={eventId} status={status} data={validRequest.data}
-      writeActions={writeActions} onChanged={onChanged} onClearFailure={onClearFailure} />
+      writeActions={trackedWrites} onClearFailure={onClearFailure} />
   </>;
 }

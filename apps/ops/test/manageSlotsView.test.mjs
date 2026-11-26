@@ -727,3 +727,138 @@ test("MIG-0722 T04: transport rejection is distinct from a resolved domain failu
     assert.equal(button("削除").disabled, false);
   });
 });
+
+
+test("MIG-0722 U02b-12: stale same-event list/batch receipts invalidate only the current authorized view", async () => {
+  for (const scenario of [
+    { oldKind: "list", navigation: "rotate", order: "new-first" },
+    { oldKind: "batch", navigation: "roundtrip", order: "new-first" },
+    { oldKind: "list", navigation: "rotate", order: "old-first" },
+    { oldKind: "batch", navigation: "rotate", order: "old-first-reject" },
+    { oldKind: "list", navigation: "other", order: "old-first" },
+    { oldKind: "batch", navigation: "rotate", order: "new-first", deny: true },
+  ]) {
+    await withSlotDom(async (dom, root) => {
+      const initial = data();
+      let oldCommitted = false;
+      let newCommitted = false;
+      let deny = false;
+      const reads = [];
+      const fetchFn = async path => {
+        const eventId = decodeURIComponent(path.split("/")[4]);
+        reads.push(eventId);
+        if (deny && eventId === "ev id") return new Response(null, { status: 403 });
+        const slots = initial.slots
+          .filter(row => eventId !== "ev id" || !oldCommitted || row.id !== "s1")
+          .map(row => ({ ...row, event_id: eventId,
+            ...(eventId === "ev id" && newCommitted && row.id === "s2" ?
+              { status: "available", display_name: null, reserved_x_id_snapshot: null,
+                discord_display_name: null, discord_id: null } : {}) }));
+        const counts = { available: 0, reserved: 0, submitted: 0 };
+        for (const row of slots) counts[row.status]++;
+        return new Response(JSON.stringify(data({
+          event: { ...initial.event, id: eventId, title: eventId === "other" ? "Other event" : "Event A" },
+          slots, counts, total: slots.length,
+        })), { status: 200, headers: { "content-type": "application/json" } });
+      };
+      let oldResolve, newResolve, newReject;
+      const calls = [];
+      const oldPort = () => {
+        calls.push("old");
+        return new Promise(resolve => { oldResolve = resolve; });
+      };
+      const nextPort = () => {
+        calls.push("new");
+        return new Promise((resolve, reject) => { newResolve = resolve; newReject = reject; });
+      };
+      const oldWrites = {
+        onGenerate: async () => ({ ok: true }),
+        onClearAvailable: oldPort,
+        onAction: oldPort,
+      };
+      const newWrites = { ...oldWrites, onAction: nextPort };
+      const view = (eventId, writeActions) => React.createElement(MemoryRouter, null,
+        React.createElement(EventSlots, { eventId, fetchFn, writeActions }));
+      const body = () => dom.window.document.body.textContent;
+      const button = label => [...dom.window.document.querySelectorAll("button")]
+        .find(element => element.textContent.trim() === label);
+      const row = id => dom.window.document.querySelector('input[aria-label="枠 ' + id + ' を選択"]');
+      const waitFor = async predicate => {
+        for (let i = 0; i < 10 && !predicate(); i++) {
+          await React.act(async () => { await new Promise(resolve => setImmediate(resolve)); });
+        }
+        assert.ok(predicate(), JSON.stringify(scenario) + " " + body());
+      };
+      await React.act(async () => root.render(view("ev id", oldWrites)));
+      await waitFor(() => body().includes("Event A"));
+      if (scenario.oldKind === "list") {
+        await React.act(async () => button("削除").click());
+        await React.act(async () => button("実行する").click());
+      } else {
+        await React.act(async () => button("空き枠を全削除").click());
+        await React.act(async () => button("全削除する").click());
+      }
+      assert.deepEqual(calls, ["old"]);
+      if (scenario.navigation !== "rotate") {
+        await React.act(async () => root.render(view("other", newWrites)));
+        await waitFor(() => body().includes("Other event"));
+        if (scenario.navigation === "other") {
+          const before = reads.length;
+          oldCommitted = true;
+          await React.act(async () => oldResolve({ ok: true, message: "OBSOLETE-RECEIPT" }));
+          assert.equal(reads.length, before, "unrelated event must not refetch");
+          assert.match(body(), /Other event/);
+          assert.doesNotMatch(body(), /OBSOLETE-RECEIPT/);
+          assert.deepEqual(calls, ["old"]);
+          return;
+        }
+      }
+      await React.act(async () => root.render(view("ev id", newWrites)));
+      await waitFor(() => body().includes("Event A") && row("s1") !== null);
+      const before = reads.length;
+      await React.act(async () => button("解放").click());
+      await React.act(async () => button("実行する").click());
+      assert.deepEqual(calls, ["old", "new"]);
+      assert.equal(button("解放").disabled, true);
+      if (scenario.order === "new-first") {
+        newCommitted = true;
+        await React.act(async () => newResolve({ ok: true, message: "NEW-RECEIPT" }));
+        await waitFor(() => reads.length === before + 1 && row("s1") !== null &&
+          !body().includes("User <name>"));
+        deny = Boolean(scenario.deny);
+        oldCommitted = true;
+        await React.act(async () => oldResolve({ ok: true, message: "OBSOLETE-RECEIPT" }));
+        await waitFor(() => reads.length === before + 2 && !body().includes("枠を読み込み中"));
+        assert.equal(row("s1"), null);
+        if (deny) {
+          assert.match(body(), /権限がありません/);
+          assert.doesNotMatch(body(), /Event A|すべて選択|一括生成/);
+        } else {
+          assert.match(body(), /Event A/);
+          assert.doesNotMatch(body(), /User <name>/);
+        }
+      } else {
+        oldCommitted = true;
+        await React.act(async () => oldResolve({ ok: true, message: "OBSOLETE-RECEIPT" }));
+        assert.equal(reads.length, before, "stale settlement must not unmount a pending new write");
+        assert.equal(button("解放").disabled, true);
+        await React.act(async () => button("解放").click());
+        assert.deepEqual(calls, ["old", "new"]);
+        if (scenario.order === "old-first-reject") {
+          await React.act(async () => newReject(new Error("transport")));
+        } else {
+          newCommitted = true;
+          await React.act(async () => newResolve({ ok: true }));
+        }
+        await waitFor(() => reads.length === before + 1 && row("s1") === null &&
+          body().includes("Event A"));
+        if (scenario.order === "old-first-reject") {
+          assert.match(body(), /枠操作中に通信エラー/);
+          assert.match(body(), /User <name>/);
+        }
+      }
+      assert.doesNotMatch(body(), /OBSOLETE-RECEIPT/);
+      assert.deepEqual(calls, ["old", "new"], "no automatic replay");
+    });
+  }
+});
