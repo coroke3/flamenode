@@ -78,6 +78,22 @@ test("publicData normalize helpers handle null and edge cases", () => {
   assert.equal(normalizeCount(undefined), null);
 });
 
+test("publicData numeric helpers accept decimal strings but reject alternate radices", () => {
+  for (const value of ["0x64", "0X64", "0b10", "0B10", "0o10", "0O10", " 0x64 ", "1e", "1_000"]) {
+    assert.equal(normalizeNullableUnix(value), null, value);
+    assert.equal(normalizeNumericUnix(value), null, value);
+    assert.equal(normalizeCount(value), null, value);
+  }
+  for (const [value, expected] of [[" 1.9 ", 1], ["+1e2", 100], [".5", 0], ["1.", 1], ["0010", 10], ["1E+3", 1000]]) {
+    assert.equal(normalizeNullableUnix(value), expected, value);
+    assert.equal(normalizeNumericUnix(value), expected, value);
+    assert.equal(normalizeCount(value), expected, value);
+  }
+  assert.equal(normalizeNullableUnix("-1.5"), -2);
+  assert.equal(normalizeNumericUnix("-1.5"), -2);
+  assert.equal(normalizeCount("-1.5"), null);
+});
+
 test("publicData visibility helpers enforce public status strictly", () => {
   assert.equal(isPublicVideoListable("public"), true);
   assert.equal(isPublicVideoListable("private"), false);

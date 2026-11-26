@@ -21,8 +21,13 @@ export function normalizeCoercedString(value: unknown): string | null {
 
 function normalizeFiniteNumericValue(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value !== "string" || value.trim() === "") return null;
-  const normalized = Number(value.trim());
+  if (typeof value !== "string") return null;
+  const decimal = value.trim();
+  // Keep decimal fractions and exponent notation, but reject JS radix prefixes.
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(decimal)) {
+    return null;
+  }
+  const normalized = Number(decimal);
   return Number.isFinite(normalized) ? normalized : null;
 }
 
