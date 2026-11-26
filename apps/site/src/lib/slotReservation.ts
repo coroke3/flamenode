@@ -48,6 +48,8 @@ async function post(
 ): Promise<SlotReservationResult> {
   const response = await fetcher(path, {
     method: "POST",
+    // A mutation endpoint must not redirect/replay its POST to another URL.
+    redirect: "error",
     credentials: "same-origin",
     cache: "no-store",
     headers: {

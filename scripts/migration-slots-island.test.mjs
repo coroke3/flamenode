@@ -1,6 +1,8 @@
 // MIG-0514 U02: HTTP request contract, not an integration substitute for MIG-0657 / browser parity.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import {
   reserveSlot, releaseSlot, extendSlot, mergeSlotGroup,
 } from "../apps/site/src/lib/slotReservation.ts";
@@ -17,6 +19,7 @@ function server(status, body) {
 function assertPost(call, expectedUrl, body) {
   assert.equal(call.url, expectedUrl);
   assert.equal(call.init.method, "POST");
+  assert.equal(call.init.redirect, "error");
   assert.equal(call.init.credentials, "same-origin");
   assert.equal(call.init.cache, "no-store");
   assert.equal(call.init.headers.Accept, "application/json");
@@ -165,6 +168,43 @@ test("U03d SA-065..068 reject undecodable or contradictory HTTP results without 
     }
   }
 });
+
+// A real loopback server is necessary: a fake fetch sees only one invocation
+// even when Fetch internally follows a redirect and sends another request.
+for (const [id, mutate] of slotMutationCalls) {
+  test(`U03e ${id} rejects unexpected HTTP redirects without a second request`, { timeout: 10000 }, async () => {
+    let status = 307;
+    const requests = [];
+    const server = createServer(async (req, res) => {
+      for await (const _chunk of req) { /* consume the POST body */ }
+      requests.push({ method: req.method, url: req.url });
+      if (req.url === "/unexpected") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, slotId: "s", slotCount: 2, groupSize: 2 }));
+      } else {
+        res.writeHead(status, { Location: "/unexpected" });
+        res.end();
+      }
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    try {
+      for (const redirect of [307, 308, 303, 301, 302]) {
+        status = redirect;
+        requests.length = 0;
+        const result = await mutate((path, init) => fetch(new URL(path, origin), init))
+          .then(value => ({ value }), error => ({ error }));
+        assert.equal(requests.length, 1, `${id} HTTP ${status}: no second request`);
+        assert.equal(requests[0].method, "POST");
+        assert.notEqual(requests[0].url, "/unexpected");
+        assert.ok(result.error instanceof TypeError, `${id} HTTP ${status}: reject redirect`);
+      }
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+}
 
 test("U01 RH-014 invalid privilege flags and malformed JSON fail closed", async () => {
   const { parseSlotViewerOverlay, unavailableSlotViewerOverlay, fetchSlotViewerOverlay } =
