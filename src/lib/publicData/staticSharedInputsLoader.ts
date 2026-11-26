@@ -248,9 +248,10 @@ async function loadPublicXIconMapV1(
   const needsIndexFallback =
     !primary ||
     Array.from(requiredIds).some((xId) => {
+      // Legacy V1 normalization may still return a plain object.
+      if (!Object.hasOwn(primary.entries, xId)) return true;
       const entry = primary.entries[xId];
-      if (!entry) return true;
-      return entry.source === "video";
+      return !entry || entry.source === "video";
     });
 
   if (!needsIndexFallback) return primary;
