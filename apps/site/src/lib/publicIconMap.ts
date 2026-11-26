@@ -15,7 +15,7 @@ import { normalizeStaticUsersIndex, type StaticUsersIndexPayload } from "../../.
 import type { StaticEventDetail } from "../../../../src/lib/publicData/staticEventDetailCore.ts";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
 import { normalizeXId } from "../../../../src/lib/utils/xid.ts";
-import { PUBLIC_X_ICON_MAP_KEY, loadPublicXIconMapPayload } from "./publicDataLoader.ts";
+import { PUBLIC_X_ICON_MAP_KEY, SnapshotBuildError, loadPublicXIconMapPayload } from "./publicDataLoader.ts";
 import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
 
 /** CURRENT V1 + users-index supplement. Registered/none entries have priority;
@@ -27,7 +27,11 @@ export function projectPublicXIconMap(v1: unknown, usersIndex: unknown): PublicX
     : null;
   if (!index) return primary;
 
-  const entries: Record<string, PublicXIconEntry> = { ...(primary?.entries ?? {}) };
+  // Null-prototype entries prevent inherited keys and __proto__ setters from
+  // hiding valid X handles during users-index supplementation.
+  const entries: Record<string, PublicXIconEntry> = Object.assign(
+    Object.create(null) as Record<string, PublicXIconEntry>, primary?.entries ?? {},
+  );
   for (const user of index.items) {
     const xId = normalizeXId(user.x_id);
     if (!xId) continue;
@@ -45,6 +49,14 @@ export function projectPublicXIconMap(v1: unknown, usersIndex: unknown): PublicX
   };
 }
 
+// The optional icon map may fail, but diagnostics must stay bounded and non-sensitive.
+const SAFE_SNAPSHOT_CODES = new Set([
+  "MANIFEST_UNAVAILABLE", "INVALID_KEY", "NOT_PUBLIC", "INVALID_LIMIT",
+  "SOURCE_UNAVAILABLE", "SNAPSHOT_MISSING", "INVALID_SIZE", "INVALID_JSON",
+  "INVALID_ENVELOPE", "GENERATION_MISMATCH", "INVALID_HASH", "HASH_MISMATCH",
+  "INVALID_PAYLOAD", "ENTITY_MISMATCH",
+]);
+
 /** Invalid or absent optional metadata degrades to the existing snapshot icon.
  * A bad digest is never used even if the payload appears public. */
 export async function loadPublicXIconMapForBuild(
@@ -56,10 +68,21 @@ export async function loadPublicXIconMapForBuild(
     const payload = await loadPublicXIconMapPayload(access.source, access.options);
     return publicXIconEntriesToMap(normalizePublicXIconMap(payload));
   } catch (error) {
-    const code = error instanceof Error && "code" in error
-      ? String((error as { code: unknown }).code)
-      : "UNKNOWN";
-    console.warn(`[icon-map] empty: snapshot ${PUBLIC_X_ICON_MAP_KEY} unavailable (${code})`);
+    let code = "UNKNOWN";
+    try {
+      // Neither an error.code getter nor a Proxy prototype trap is trusted.
+      if (error instanceof SnapshotBuildError) {
+        const candidate: unknown = error.code;
+        if (typeof candidate === "string" && SAFE_SNAPSHOT_CODES.has(candidate)) code = candidate;
+      }
+    } catch {
+      // Never replace an empty icon-map fallback with a diagnostic exception.
+    }
+    try {
+      console.warn(`[icon-map] empty: snapshot ${PUBLIC_X_ICON_MAP_KEY} unavailable (${code})`);
+    } catch {
+      // Optional icon data stays unavailable even when the logger itself fails.
+    }
     return new Map();
   }
 }

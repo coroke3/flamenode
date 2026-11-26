@@ -379,3 +379,64 @@ test("T08: renderPublicPage and stylesheet binding have no references in active 
   const gatewaySource = fs.readFileSync(new URL("./index.ts", import.meta.url), "utf8");
   assert.doesNotMatch(queueSource + gatewaySource, /renderPublicPage|PUBLIC_PAGE_STYLESHEETS/);
 });
+test("SEC-783: poisoned provider Error.message cannot prevent Queue retry or expose diagnostics", async () => {
+  let messageReads = 0;
+  let nameReads = 0;
+  const error = new Error("SEC783_PROVIDER_PRIVATE_PAYLOAD", {
+    cause: new Error("SEC783_NESTED_PRIVATE_CAUSE"),
+  });
+  Object.defineProperty(error, "message", {
+    get() {
+      messageReads++;
+      throw new Error("SEC783_POISONED_MESSAGE_GETTER");
+    },
+  });
+  Object.defineProperty(error, "name", {
+    get() {
+      nameReads++;
+      throw new Error("SEC783_POISONED_NAME_GETTER");
+    },
+  });
+  const callbacks = [];
+  const input = (index) => ({
+    body: doorbell("event", "ev-private"),
+    ack() { callbacks.push("ack-" + index); },
+    retry() { callbacks.push("retry-" + index); },
+  });
+  const env = {
+    DB: { prepare() { throw error; } },
+    R2_STORAGE: { async delete() { throw new Error("unexpected R2 call"); } },
+    VISIBILITY_KV: { async get() { throw new Error("unexpected KV call"); } },
+  };
+  const outcomes = await handlePageRenderQueue(
+    { messages: [input(0), input(1)] },
+    env,
+    async () => { throw new Error("unexpected route lookup"); },
+  );
+  assert.deepEqual(outcomes, [{ action: "retry", reason: "processing_failed" }]);
+  assert.deepEqual(callbacks, ["retry-1", "retry-0"],
+    "one message per invocation, and a failed first message is retried, never acked");
+  assert.equal(messageReads, 0);
+  assert.equal(nameReads, 0);
+  assert.doesNotMatch(JSON.stringify(outcomes), /SEC783_/);
+});
+
+test("SEC-783: ordinary provider failures do not leak Error.message via Queue outcomes", async () => {
+  const callbacks = [];
+  const outcomes = await handlePageRenderQueue(
+    { messages: [{
+      body: doorbell("user", "creator-alpha"),
+      ack() { callbacks.push("ack"); },
+      retry() { callbacks.push("retry"); },
+    }] },
+    {
+      DB: { prepare() { throw new Error("SEC783_SECRET_ACCOUNT_ID_AND_QUERY"); } },
+      R2_STORAGE: { async delete() {} },
+      VISIBILITY_KV: { async get() { return null; } },
+    },
+    async () => null,
+  );
+  assert.deepEqual(outcomes, [{ action: "retry", reason: "processing_failed" }]);
+  assert.deepEqual(callbacks, ["retry"]);
+  assert.doesNotMatch(JSON.stringify(outcomes), /SEC783_SECRET/);
+});

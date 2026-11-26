@@ -69,7 +69,8 @@ export function buildPublicXIconMapPayloadFromProjection(
   },
   generatedAt: number,
 ): PublicXIconMapPayload {
-  const entries: Record<string, PublicXIconEntry> = {};
+  // X handles such as __proto__ and constructor are valid IDs, not object methods.
+  const entries: Record<string, PublicXIconEntry> = Object.create(null);
 
   for (const user of sources.registeredUsers) {
     const xId = normalizeXId(user.id);
@@ -112,7 +113,8 @@ export function normalizePublicXIconMap(
   if (Number(payload.schema_version) !== 1) return null;
   if (!payload.entries || typeof payload.entries !== "object") return null;
 
-  const entries: Record<string, PublicXIconEntry> = {};
+  // X handles such as __proto__ and constructor are valid IDs, not object methods.
+  const entries: Record<string, PublicXIconEntry> = Object.create(null);
   for (const [rawXId, rawEntry] of Object.entries(
     payload.entries as Record<string, unknown>,
   )) {

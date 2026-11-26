@@ -262,3 +262,133 @@ test("oversized current V2 manifest is ignored before JSON parse", async () => {
   await rebuildPublicIconV2FromLegacyArtifact({ R2: bucket });
   assert.equal(parsed, false);
 });
+
+async function withBrokenWarnSink(action) {
+  const originalWarn = console.warn;
+  const attempted = [];
+  console.warn = (line) => {
+    attempted.push(JSON.parse(line));
+    throw new Error("SEC759_DIAGNOSTIC_SINK_SECRET");
+  };
+  try {
+    const value = await action();
+    return { value, attempted };
+  } finally {
+    console.warn = originalWarn;
+  }
+}
+
+function poisonedR2Failure() {
+  const error = new Error("SEC759_R2_PROVIDER_SECRET");
+  Object.defineProperty(error, "name", {
+    get() { throw new Error("SEC759_THROWING_ERROR_NAME"); },
+  });
+  return error;
+}
+
+test("SEC-759: a broken fallback-restore log sink does not skip manifest withdrawal and shard cleanup", async () => {
+  const state = persistentBucket();
+  const providerError = poisonedR2Failure();
+  const put = state.bucket.put.bind(state.bucket);
+  let manifestPuts = 0;
+  state.bucket.put = async (key, body, options) => {
+    if (key === PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY && ++manifestPuts >= 2) {
+      throw providerError;
+    }
+    return put(key, body, options);
+  };
+
+  const { attempted } = await withBrokenWarnSink(async () => {
+    await assert.rejects(
+      () => rebuildPublicIconV2FromLegacyArtifact({ R2: state.bucket }),
+      (error) => error === providerError,
+    );
+  });
+
+  assert.equal(manifestPuts, 3, "initial fallback and failed commit/restore attempted");
+  assert.equal(state.objects.has(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY), false);
+  assert.deepEqual([...state.objects.keys()], [PUBLIC_X_ICON_MAP_OBJECT_KEY],
+    "unreferenced shards were cleaned up after manifest withdrawal");
+  assert.equal(attempted.length, 1);
+  assert.equal(attempted[0].service, "public-icon-v2");
+  assert.equal(attempted[0].result, "fallback_manifest_restore_failed");
+  assert.equal(typeof attempted[0].generation, "string");
+  assert.ok(!JSON.stringify(attempted).includes("SEC759_R2_PROVIDER_SECRET"));
+});
+
+test("SEC-759: failed manifest withdrawal retains potentially referenced shards despite broken logger", async () => {
+  const state = persistentBucket();
+  const providerError = poisonedR2Failure();
+  const put = state.bucket.put.bind(state.bucket);
+  const remove = state.bucket.delete.bind(state.bucket);
+  let manifestPuts = 0;
+  let shardDeleteCalls = 0;
+  state.bucket.put = async (key, body, options) => {
+    if (key === PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY && ++manifestPuts >= 2) {
+      throw providerError;
+    }
+    return put(key, body, options);
+  };
+  state.bucket.delete = async (keys) => {
+    const list = Array.isArray(keys) ? keys : [keys];
+    if (list.includes(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY)) throw providerError;
+    shardDeleteCalls += 1;
+    return remove(keys);
+  };
+
+  const { attempted } = await withBrokenWarnSink(async () => {
+    await assert.rejects(
+      () => rebuildPublicIconV2FromLegacyArtifact({ R2: state.bucket }),
+      (error) => error === providerError,
+    );
+  });
+
+  assert.equal(manifestPuts, 3);
+  assert.equal(shardDeleteCalls, 0, "uncertain manifest state must protect shards");
+  assert.ok(state.objects.size > 2, "written shards are preserved");
+  assert.deepEqual(attempted.map((event) => event.result), [
+    "fallback_manifest_restore_failed", "manifest_cleanup_failed",
+  ]);
+  assert.ok(!JSON.stringify(attempted).includes("SEC759_R2_PROVIDER_SECRET"));
+});
+
+test("SEC-759: old-generation R2 cleanup failure cannot turn a committed new generation into an error", async () => {
+  const state = persistentBucket();
+  const first = await rebuildPublicIconV2FromLegacyArtifact({ R2: state.bucket });
+  const original = state.objects.get(PUBLIC_X_ICON_MAP_OBJECT_KEY);
+  const replacement = structuredClone(original);
+  replacement.entries.alpha = {
+    icon_url: "https://example.com/alpha.png",
+    source: "registered",
+  };
+  state.objects.set(PUBLIC_X_ICON_MAP_OBJECT_KEY, replacement);
+
+  const providerError = poisonedR2Failure();
+  const remove = state.bucket.delete.bind(state.bucket);
+  let oldDeleteCalls = 0;
+  state.bucket.delete = async (keys) => {
+    const list = Array.isArray(keys) ? keys : [keys];
+    if (list.some((key) => key.includes(first.generation))) {
+      oldDeleteCalls += 1;
+      throw providerError;
+    }
+    return remove(keys);
+  };
+  const { value: result, attempted } = await withBrokenWarnSink(() =>
+    rebuildPublicIconV2FromLegacyArtifact({ R2: state.bucket })
+  );
+  assert.equal(result.skipped, false);
+  assert.notEqual(result.generation, first.generation);
+  assert.equal(oldDeleteCalls, 1);
+  const manifest = normalizePublicXIconV2Manifest(
+    state.objects.get(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY),
+  );
+  assert.equal(manifest?.generation, result.generation, "new manifest stays committed");
+  for (const shard of manifest.shards) {
+    assert.ok(state.objects.has(publicXIconV2ShardObjectKey(result.generation, shard)));
+  }
+  assert.deepEqual(attempted.map((event) => event.result), [
+    "generation_cleanup_failed",
+  ]);
+  assert.ok(!JSON.stringify(attempted).includes("SEC759_R2_PROVIDER_SECRET"));
+});

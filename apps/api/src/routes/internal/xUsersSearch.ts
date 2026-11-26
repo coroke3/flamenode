@@ -28,6 +28,22 @@ const PRIVATE_HEADERS = {
   Expires: "0",
 } as const;
 const UNAVAILABLE_HEADERS = { ...PRIVATE_HEADERS, "Retry-After": "3" } as const;
+
+type SuggestionsDiagnostic =
+  | "SESSION_RESOLUTION_UNAVAILABLE"
+  | "R2_BINDING_UNAVAILABLE"
+  | "SUGGESTIONS_UNAVAILABLE"
+  | "SUGGESTIONS_LOOKUP_FAILED";
+
+/** A failed diagnostic sink cannot replace a private HTTP denial or expose provider errors. */
+function logSuggestionsDiagnostic(code: SuggestionsDiagnostic, level: "warn" | "error" = "warn"): void {
+  try {
+    if (level === "error") console.error(`[x-users-search] ${code}`);
+    else console.warn(`[x-users-search] ${code}`);
+  } catch {
+    // The original auth/R2 failure controls the response, never console.
+  }
+}
 const REFINE_HINT = "候補が多いため、名前またはX IDを追加で入力してください。";
 
 type SearchContext = Context<AppEnv>;
@@ -184,7 +200,7 @@ xUsersSearchRoutes.use("/", async (c, next) => {
       return c.json({ error: "unauthorized" }, 401, PRIVATE_HEADERS);
     }
     // A host exception may embed credentials. Do not log its message, stack or name.
-    console.error("[x-users-search] SESSION_RESOLUTION_UNAVAILABLE");
+    logSuggestionsDiagnostic("SESSION_RESOLUTION_UNAVAILABLE", "error");
     return c.json({ error: "database_unavailable" }, 503, PRIVATE_HEADERS);
   }
 });
@@ -215,11 +231,11 @@ xUsersSearchRoutes.get("/", async (c) => {
     bucket = c.env?.BUCKET;
   } catch {
     // Binding access failures must not disclose provider exception details.
-    console.warn("[x-users-search] R2_BINDING_UNAVAILABLE");
+    logSuggestionsDiagnostic("R2_BINDING_UNAVAILABLE");
     return unavailable(c);
   }
   if (!bucket) {
-    console.warn("[x-users-search] bucket binding unavailable");
+    logSuggestionsDiagnostic("R2_BINDING_UNAVAILABLE");
     return unavailable(c);
   }
 
@@ -242,16 +258,13 @@ xUsersSearchRoutes.get("/", async (c) => {
 
     const v1 = await withIndexTimeout(loadMemberSuggestionsIndexFromBucket(bucket));
     if (!v1.ok) {
-      console.warn("[x-users-search] suggestions unavailable", {
-        v2_reason: v2.ok ? "compatibility_fallback" : v2.reason,
-        v1_reason: v1.reason,
-      });
+      logSuggestionsDiagnostic("SUGGESTIONS_UNAVAILABLE");
       return unavailable(c);
     }
     return searchResult(c, v1.items, query, limit, offset, onlyApproved, "v1").response;
   } catch {
     // R2 client exceptions may contain request metadata or private keys.
-    console.error("[x-users-search] SUGGESTIONS_LOOKUP_FAILED");
+    logSuggestionsDiagnostic("SUGGESTIONS_LOOKUP_FAILED", "error");
     return unavailable(c);
   }
 });

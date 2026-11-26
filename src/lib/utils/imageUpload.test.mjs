@@ -39,7 +39,9 @@ function buildJpeg({ width = 64, height = 64 } = {}) {
   bytes.push(...new TextEncoder().encode("JFIF\0"), 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00);
   bytes.push(0xff, 0xc0, 0x00, 0x0b, 0x08);
   bytes.push((height >> 8) & 0xff, height & 0xff, (width >> 8) & 0xff, width & 0xff);
-  bytes.push(0x01, 0x01, 0x11, 0x00, 0xff, 0xd9);
+  bytes.push(0x01, 0x01, 0x11, 0x00);
+  // SOS for one component, followed by a synthetic nonempty entropy byte.
+  bytes.push(0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0x2a, 0xff, 0xd9);
   return new Uint8Array(bytes);
 }
 
@@ -182,6 +184,114 @@ test("inspectSupportedImageUpload detects animated PNG and WebP", () => {
 
   const animatedWebp = buildWebp({ width: 64, height: 64, animated: true });
   assert.equal(inspectSupportedImageUpload(animatedWebp.buffer)?.animated, true);
+});
+
+
+
+test("JPEG requires an SOS segment and nonempty entropy-coded scan", () => {
+  const valid = buildJpeg({ width: 128, height: 96 });
+  const sos = valid.findIndex((value, index) => value === 0xff && valid[index + 1] === 0xda);
+  assert.ok(sos >= 0);
+  const noSos = new Uint8Array([...valid.subarray(0, sos), 0xff, 0xd9]);
+  const noEntropy = new Uint8Array([...valid.subarray(0, -3), 0xff, 0xd9]);
+  const earlyEoi = new Uint8Array([...valid.subarray(0, -2), 0xff, 0xd9, 0xff, 0xd9]);
+  const wrongSos = valid.slice();
+  wrongSos[sos + 3] = 0x06;
+  for (const [name, bytes] of [
+    ["SOF + EOI only", noSos],
+    ["SOS without entropy", noEntropy],
+    ["EOI before final EOI", earlyEoi],
+    ["malformed SOS length", wrongSos],
+  ]) {
+    assert.equal(inspectSupportedImageUpload(bytes.buffer), null, name);
+    assert.equal(validateIconImageUpload({ buffer: bytes.buffer }).ok, false, name);
+  }
+  // A stuffed FF entropy byte must not be misinterpreted as a marker.
+  const stuffed = new Uint8Array([...valid.subarray(0, -3), 0xff, 0x00, 0xff, 0xd9]);
+  assert.equal(inspectSupportedImageUpload(stuffed.buffer)?.width, 128);
+});
+
+test("JPEG inspector rejects missing EOI, trailing data, and invalid SOF length", () => {
+  const valid = buildJpeg({ width: 128, height: 96 });
+  const noEoi = valid.slice(0, -2);
+  const trailing = new Uint8Array([...valid, 0]);
+  const badSof = valid.slice();
+  const sof = badSof.findIndex((value, index) => value === 0xff && badSof[index + 1] === 0xc0);
+  assert.ok(sof >= 0);
+  badSof[sof + 3] = 0x08; // one component needs a SOF length of 11, not 8.
+  for (const [name, bytes] of [["no EOI", noEoi], ["trailing byte", trailing], ["short SOF", badSof]]) {
+    assert.equal(inspectSupportedImageUpload(bytes.buffer), null, name);
+    assert.equal(validateIconImageUpload({ buffer: bytes.buffer }).ok, false, name);
+  }
+});
+
+test("JPEG rejects a duplicate frame header before or after a scan", () => {
+  const jpeg = buildJpeg({ width: 128, height: 96 });
+  const sof = jpeg.findIndex((value, index) => value === 0xff && jpeg[index + 1] === 0xc0);
+  const sos = jpeg.findIndex((value, index) => value === 0xff && jpeg[index + 1] === 0xda);
+  assert.ok(sof >= 0 && sos > sof);
+  const frame = jpeg.subarray(sof, sos);
+  const widerFrame = buildJpeg({ width: 160, height: 96 }).subarray(sof, sos);
+  const eoi = jpeg.length - 2;
+
+  for (const [name, offset, secondFrame] of [
+    ["same dimensions before scan", sos, frame],
+    ["same dimensions after scan", eoi, frame],
+    ["different dimensions after scan", eoi, widerFrame],
+  ]) {
+    const bytes = new Uint8Array([...jpeg.subarray(0, offset), ...secondFrame, ...jpeg.subarray(offset)]);
+    assert.equal(inspectSupportedImageUpload(bytes.buffer), null, name);
+    assert.equal(validateIconImageUpload({ buffer: bytes.buffer }).ok, false, name);
+  }
+});
+
+test("JPEG upload validation rejects a single frame above the dimension limit", () => {
+  const { buffer } = buildJpeg({ width: 3000, height: 3000 });
+  assert.deepEqual(inspectSupportedImageUpload(buffer), {
+    contentType: "image/jpeg",
+    ext: "jpg",
+    width: 3000,
+    height: 3000,
+    animated: false,
+  });
+  assert.deepEqual(validateIconImageUpload({ buffer }), {
+    ok: false,
+    message: "2048px 以下の画像を選んでください。",
+  });
+});
+
+test("JPEG accepts multiple progressive scans under one frame header", () => {
+  const jpeg = buildJpeg({ width: 128, height: 96 });
+  const sof = jpeg.findIndex((value, index) => value === 0xff && jpeg[index + 1] === 0xc0);
+  const sos = jpeg.findIndex((value, index) => value === 0xff && jpeg[index + 1] === 0xda);
+  assert.ok(sof >= 0 && sos > sof);
+  jpeg[sof + 1] = 0xc2;
+  const bytes = new Uint8Array([
+    ...jpeg.subarray(0, sos),
+    0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2a, // DC scan
+    0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x01, 0x3f, 0x00, 0x2a, // AC scan
+    0xff, 0xd9,
+  ]);
+  const image = { contentType: "image/jpeg", ext: "jpg", width: 128, height: 96, animated: false };
+  assert.deepEqual(inspectSupportedImageUpload(bytes.buffer), image);
+  assert.deepEqual(validateIconImageUpload({ buffer: bytes.buffer }), { ok: true, image });
+});
+
+test("WebP inspector rejects VP8X-only canvas and missing chunk padding", () => {
+  const vp8x = new Uint8Array(10);
+  vp8x[4] = 63;
+  vp8x[7] = 63;
+  const headerBody = [];
+  pushWebpChunk(headerBody, "VP8X", vp8x);
+  const headerOnly = wrapWebpRiff(headerBody);
+
+  const frameBody = [];
+  pushWebpChunk(frameBody, "VP8L", new Uint8Array([0x2f, 63, 0, 0, 0]));
+  const missingPadding = wrapWebpRiff(frameBody.slice(0, -1));
+  for (const [name, bytes] of [["canvas only", headerOnly], ["no final padding", missingPadding]]) {
+    assert.equal(inspectSupportedImageUpload(bytes.buffer), null, name);
+    assert.equal(validateIconImageUpload({ buffer: bytes.buffer }).ok, false, name);
+  }
 });
 
 test("inspectSupportedImageUpload rejects GIF and SVG signatures", () => {
