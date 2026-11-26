@@ -775,22 +775,26 @@ PR を revert（まだどの route からも使われない）。
 
 ### MIG-0714: Personal SPA の投稿 form その C: `VideoForm` と `UnslottedPostForm` の移植（MIG-0703）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-16-11: MIG-0712 と MIG-0713 の部品を使う）。submit は props の adapter にして API を待たない
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-16-11 / D-19-5: MIG-0712・MIG-0713・MIG-0738 の部品を使う）。submit は props の adapter にして API を待たない（純粋 helper 群と `ErrorCallout` / `PublicReflectionDelayNotice` は MIG-0738 へ分離し 3000 行超過を抑える）
 - **Recipe:** R-UI
 - **Runtime:** N
-- **Depends on:** MIG-0712, MIG-0713 / **Decisions:** D-16-4, D-16-11
-- **Verified against:** `c2a6ecb` (2026-10-26)
+- **Depends on:** MIG-0712, MIG-0713, MIG-0738 / **Decisions:** D-16-4, D-16-11, D-19-5
+- **Verified against:** `61463174f` (2026-11-18)
 #### Source snapshot
-- CURRENT: `src/components/forms/VideoForm.tsx`（3756 行 + css 1224。`export function VideoForm` :469、型 `VideoFormInitialValues` :112 / `EventOption` :142 / `XIdOption` :193。submit は `createFreeVideo` / `submitSlotVideo` / `updateVideo`（:13-17）を `submitFormCompat` で呼ぶ、guard は `redirectForGuardReason`、下書きは `useFormDraft` / `videoFormDraft` / `draftFileStore`）、`UnslottedPostForm.tsx`（261 行、`VideoForm` を包む）。
-- import する `src/lib`: `youtube/id`、`video/{types,formSettings,requiredVideoFields,atomicLimits,videoEditPermissionView,permissionUnlockHint,customQuestions,videoFormDraft}`、`client/{guardRedirect,activeXSwitchEvents}`、`forms/submitFormCompat`、`interactions/{useFormDraft,draftFileStore}`、`event/youtubeDescriptionTemplate`。
+- CURRENT: `src/components/forms/VideoForm.tsx`（3757 行 + css 1224。`export function VideoForm` :470、型 `VideoFormInitialValues` :113 / `EventOption` :143 / `XIdOption` :194。submit は `createFreeVideo` / `submitSlotVideo` / `updateVideo`（:14-18）を `submitFormCompat` で呼ぶ、guard は `redirectForGuardReason`、下書きは `useFormDraft` / `videoFormDraft` / `draftFileStore`）、`UnslottedPostForm.tsx`（261 行、`VideoForm` を包む）。
+- 移植済み（依存から import）:
+  - MIG-0712: `SquareIconEditor`, `YoutubeChannelPicker`, `SocialLinksEditor`, `VideoIconPicker`, `YoutubeDescriptionPreview`, `CustomQuestionFields`, `customQuestions`, `youtubeDescriptionTemplate`, `url`, `socialLinks`, `clipboard`
+  - MIG-0713: `VideoMembersField`, `FieldLockNote`, `PermissionBadge`, `PermissionFieldLabel`, `memberInput`, `memberSuggestionRank`, `videoEditPermissionView`
+  - MIG-0738: `ErrorCallout`, `PublicReflectionDelayNotice`, `youtubeId`, `publicReflectionNotice`, `videoTypes`, `videoFormSettings`, `requiredVideoFields`, `permissionUnlockHint`, `videoFormDraft`, `guardRedirect`, `activeXSwitchEvents`, `submitFormCompat`, `useFormDraft`, `draftFileStore`
+  - `@flamenode/domain/video/atomicLimits`, `@flamenode/domain`（`normalizeXId` 等）
 #### Owned paths
-- 新規: `+apps/app/src/components/forms/{VideoForm,UnslottedPostForm}.tsx`, `+apps/app/src/lib/` の下に pure module（1 行目 `// Port of CURRENT <path> (MIG-0714). Same output.`）, `+apps/app/src/lib/guardRedirect.ts`（D-16-4）, `+apps/app/src/styles/video-form.css`（`MODULES` に `["vform", "src/components/forms/VideoForm.module.css", "apps/app/src/styles/video-form.css"]`）, `+apps/app/test/videoForm.test.mjs`
+- 新規: `+apps/app/src/components/forms/VideoForm.tsx`, `+apps/app/src/components/forms/UnslottedPostForm.tsx`, `+apps/app/src/styles/video-form.css`（`MODULES` に `["vform", "src/components/forms/VideoForm.module.css", "apps/app/src/styles/video-form.css"]`）, `+apps/app/test/videoForm.test.mjs`
 - 変更: `apps/app/scripts/portCssModule.mjs`, `apps/app/src/main.tsx`, `docs/migration/FILE_MIGRATION_MATRIX.md`
-- 触らない: `src/components/**`, `src/lib/**`, MIG-0712 / 0713 の部品（import だけ）
+- 触らない: `src/components/**`, `src/lib/**`, MIG-0712 / 0713 / 0738 の部品（import だけ）
 #### Micro-units
-- **U01 lib**: MIG-0712 U01 と同じ規則。`useFormDraft` / `draftFileStore`（localStorage / IndexedDB）は browser の API だけを使うので中身を変えずに写す。
+- **U01 lib**: MIG-0738 へ分離済み（D-19-5）。
 - **U02 adapter**: `VideoForm` の props に `submit(mode: "free" | "slot" | "update", fd: FormData): Promise<VideoActionResult>` を足し、`createFreeVideo` / `submitSlotVideo` / `updateVideo` の直呼びを置き換える。`VideoMembersField` の 2 adapter（MIG-0713）は `VideoForm` の props から渡す。
-- **U03 移植**: 残りは React のまま（wizard の手順・必須 field の検査・下書き・文言を変えない）。`next/link` は `<a>`、`useRouter` は `useNavigate`。
+- **U03 移植**: `VideoForm.tsx` と `UnslottedPostForm.tsx` と `video-form.css` を移植（wizard の手順・必須 field の検査・下書き・文言を変えない）。`next/link` は `<a>`、`useRouter` は `useNavigate`。
 - **U04 test**: CURRENT の `src/components/forms/*.contract.test.mjs` と同じ入力で、adapter に渡る FormData の key と値が同じことを確かめる。
 - **Follow-up gate（MIG-0712 から引き継ぎ、owner authorization 2026-11-01）**: MIG-0712 の部品（`SquareIconEditor` / `VideoIconPicker` 等）は 390px / 1440px の browser parity を未実施。route が最初にこれらを mount する task（MIG-0713 / 0714 / route task）の DONE 前に実施する。
 #### Test cases
@@ -811,13 +815,96 @@ npm run check:project-docs
 #### Ledger updates
 `FILE_MIGRATION_MATRIX.md` に新規 file と `VideoForm.tsx` / `UnslottedPostForm.tsx` 行の移植先。
 #### DONE checklist
-- [ ] U01〜U04 が DONE、T01〜T04 が PASS
+- [ ] U02〜U04 が DONE、T01〜T04 が PASS
 - [ ] 部品が network を呼ばない
 #### STOP
-- 1 PR の差分が 3000 行を超えそうなら U01 だけで先に PR を出す（R-CORE と同じ扱い）。
+- 1 PR の差分が 3000 行を超えそうなら `UnslottedPostForm` / test / CSS の分割提案を止めて確認する。
 - 投稿の検査を SPA 側だけで決める必要が出たら止める（Hono が正）。
 #### Rollback
 PR を revert（まだどの route からも使われない）。
+
+### MIG-0738: Personal SPA 投稿フォームの純粋ヘルパー群と通知コンポーネント（ex MIG-0714 U01）
+- **Model:** small
+- **Readiness:** READY_FOR_SMALL_MODEL — 依存（MIG-0701, MIG-0713）は DONE。41 本の open PR とのファイル競合 0 件。移植対象 14 本の import 先（`../routes/next.js`, `../../routes/ui/Icon.js`, `./memberInput.js`, `./videoEditPermissionView.js`, `@flamenode/domain/video`, `react`）と対応する CURRENT 54 件の単体・契約テストを `61463174f` 上で確認済み。`apps/app` の既存 build (`tsc && vite build`: 143 modules)・`.test-dist` build・`typecheck`・`check:project-docs` はすべて終了コード `0` を実測確認した。なお Windows 環境では既存の drift guard 4 件（`costGuardBanner.test.mjs`, `onboarding.test.mjs`, `styles.test.mjs` x2）が改行コード CRLF/LF 差で落ちるため、ローカル検証では新規テストファイル `apps/app/test/videoFormHelpers.test.mjs` を直接指定し、workspace 全テストは Linux CI で確認する
+- **Recipe:** R-UI
+- **Runtime:** N
+- **Depends on:** MIG-0701, MIG-0713 / **Decisions:** D-16-4, D-16-11, D-19-5
+- **Verified against:** `61463174f` (2026-11-18)
+#### Source snapshot
+- `apps/app/src/lib/` 既存モジュール（変更しない）: `memberInput.ts`（`VideoMemberInput` 型）, `videoEditPermissionView.ts`（`VideoEditPermissionViewModel`, `VideoFieldPermission` 型）, `customQuestions.ts`, `youtubeDescriptionTemplate.ts`。
+- 移植元（CURRENT。変更しない）と移植先（新規。1 行目に `// Port of CURRENT <path> (MIG-0738). Same output.` を付ける）:
+  1. `src/lib/youtube/id.ts`（124 行）→ `apps/app/src/lib/youtubeId.ts`（import なし）
+  2. `src/lib/staticRebuild/publicReflectionNotice.ts`（32 行）→ `apps/app/src/lib/publicReflectionNotice.ts`（import なし）
+  3. `src/lib/video/types.ts`（11 行、`VideoActionResult`）→ `apps/app/src/lib/videoTypes.ts`（`WriteGuardDenyReason` は `src/lib/auth/writeGuard.ts:87-98` の 11 文字列リテラル union を同ファイル内に定義し、`PendingPublicReflection` は `./publicReflectionNotice.js` から import）
+  4. `src/lib/video/formSettings.ts`（220 行）→ `apps/app/src/lib/videoFormSettings.ts`（import なし）
+  5. `src/lib/video/requiredVideoFields.ts:14-33`（`drizzle-orm` / `loadUnionRequiredVideoFields` は D1 依存なので除外し、`@flamenode/domain/video` からの純粋 re-export 20 行だけ）→ `apps/app/src/lib/requiredVideoFields.ts`
+  6. `src/lib/video/permissionUnlockHint.ts`（50 行）→ `apps/app/src/lib/permissionUnlockHint.ts`（`./videoEditPermissionView.js` から型 import）
+  7. `src/lib/video/videoFormDraft.ts`（266 行）→ `apps/app/src/lib/videoFormDraft.ts`（`./memberInput.js` から `type { VideoMemberInput }`）
+  8. `src/lib/client/guardRedirect.ts`（48 行）→ `apps/app/src/lib/guardRedirect.ts`（`sanitizeNextPath` は `../routes/next.js` から import、`#utils/next` を使わない）
+  9. `src/lib/client/activeXSwitchEvents.ts`（26 行）→ `apps/app/src/lib/activeXSwitchEvents.ts`（import なし）
+  10. `src/lib/forms/submitFormCompat.ts`（25 行）→ `apps/app/src/lib/submitFormCompat.ts`（import なし）
+  11. `src/lib/interactions/useFormDraft.ts`（337 行）→ `apps/app/src/lib/useFormDraft.ts`（`react` のみ import）
+  12. `src/lib/interactions/draftFileStore.ts`（146 行）→ `apps/app/src/lib/draftFileStore.ts`（import なし）
+  13. `src/components/ui/PublicReflectionDelayNotice.tsx`（17 行）→ `apps/app/src/components/ui/PublicReflectionDelayNotice.tsx`（`../../lib/publicReflectionNotice.js` から `PUBLIC_REFLECTION_DELAY_MESSAGE`）
+  14. `src/components/ui/ErrorCallout.tsx`（153 行）→ `apps/app/src/components/ui/ErrorCallout.tsx`（`next/link` は `<a href={...}>`、`Icon` は `../../routes/ui/Icon.js`、CSS は既存の `.fn-btn .fn-btn-sm .fn-btn-primary .fn-btn-ghost` とインライン style のまま。新規 CSS module 不要）
+- 対応する CURRENT 既存テスト（54 件すべて `61463174f` で PASS 確認済み）: `src/lib/youtube/id.test.mjs`, `src/lib/video/formSettings.test.mjs`, `src/lib/video/requiredVideoFields.test.mjs`, `src/lib/video/permissionUnlockHint.test.mjs`, `src/lib/video/videoFormDraft.test.mjs`, `src/lib/client/guardRedirect.test.mjs`, `src/lib/client/activeXSwitchEvents.test.mjs`, `src/lib/forms/submitFormCompat.test.mjs`, `src/lib/interactions/useFormDraft.contract.test.mjs`, `src/lib/staticRebuild/publicReflectionNotice.test.mjs`。
+- 既存テスト構成: `apps/app/tsconfig.test.json` は `apps/app/.test-dist/apps/app/src/...` へ出力するため、テストファイル `apps/app/test/videoFormHelpers.test.mjs` からは `../.test-dist/apps/app/src/lib/*.js` および `../.test-dist/apps/app/src/components/ui/*.js` を import する（`apps/app/test/formPureHelpers.test.mjs` と同一方式）。
+#### Owned paths
+- 新規: `+apps/app/src/lib/youtubeId.ts`, `+apps/app/src/lib/publicReflectionNotice.ts`, `+apps/app/src/lib/videoTypes.ts`, `+apps/app/src/lib/videoFormSettings.ts`, `+apps/app/src/lib/requiredVideoFields.ts`, `+apps/app/src/lib/permissionUnlockHint.ts`, `+apps/app/src/lib/videoFormDraft.ts`, `+apps/app/src/lib/guardRedirect.ts`, `+apps/app/src/lib/activeXSwitchEvents.ts`, `+apps/app/src/lib/submitFormCompat.ts`, `+apps/app/src/lib/useFormDraft.ts`, `+apps/app/src/lib/draftFileStore.ts`, `+apps/app/src/components/ui/PublicReflectionDelayNotice.tsx`, `+apps/app/src/components/ui/ErrorCallout.tsx`, `+apps/app/test/videoFormHelpers.test.mjs`, `+docs/migration/work-items/MIG-0738.md`
+- 変更: `docs/migration/FILE_MIGRATION_MATRIX.md`（本 task が追加する 15 ファイル分の新規行と、MIG-0714 から移管した移植先の記録のみ）
+- 触らない: `src/components/**`, `src/lib/**`, `apps/app/src/lib/memberInput.ts`, `apps/app/src/lib/videoEditPermissionView.ts`, `apps/app/src/lib/customQuestions.ts`, `apps/app/src/lib/youtubeDescriptionTemplate.ts`, `apps/app/scripts/portCssModule.mjs`, `apps/app/src/main.tsx`, `apps/app/test/styles.test.mjs`, `apps/api/**`
+#### Micro-units
+- **U01 pure-helpers**: 上記 1〜10（`youtubeId.ts`, `publicReflectionNotice.ts`, `videoTypes.ts`, `videoFormSettings.ts`, `requiredVideoFields.ts`, `permissionUnlockHint.ts`, `videoFormDraft.ts`, `guardRedirect.ts`, `activeXSwitchEvents.ts`, `submitFormCompat.ts`）を CURRENT と同一ロジック・同一文言・相対 `.js` import で作成する。
+  ```bash
+  npm run build --workspace=@flamenode/app
+  npx tsc -p apps/app/tsconfig.test.json
+  ```
+  期待: 両コマンドが終了コード `0`（`vite build` 完了、型エラー `0` 件、`.test-dist/apps/app/src/lib/` 出力あり）。
+- **U02 draft-and-ui**: 上記 11〜14（`useFormDraft.ts`, `draftFileStore.ts`, `PublicReflectionDelayNotice.tsx`, `ErrorCallout.tsx`）を作成する。`ErrorCallout.tsx` は `Link` を `<a href={...}>`、`Icon` を `../../routes/ui/Icon.js` に置き換え、`ctaFor` / `toneFor` / `withQueryParam` /文言を CURRENT `src/components/ui/ErrorCallout.tsx` と完全一致させる。
+  ```bash
+  npm run build --workspace=@flamenode/app
+  npm run typecheck
+  ```
+  期待: 両コマンドが終了コード `0` で完了する。
+- **U03 parity-tests**: `apps/app/test/videoFormHelpers.test.mjs` を作成し、CURRENT の 10 本の `.test.mjs` の 54 テストケースすべてを `.test-dist/apps/app/src/` 向けに移植するに加え、`ErrorCallout`（各 `reason` の CTA href/label・`warning/danger` トーン・`extraCta`・空時の `null`）と `PublicReflectionDelayNotice` の `renderToStaticMarkup` 検証、および新規 14 ソースに `next/`・`@/`・`fetch(` が 0 件であることをアサートする検査を追加する。
+  ```bash
+  npx tsc -p apps/app/tsconfig.test.json && node --test apps/app/test/videoFormHelpers.test.mjs
+  ```
+  期待: 終了コード `0`、全サブテスト PASS（fail `0`、skipped `0`）。
+- **U04 ledger-and-docs**: `docs/migration/FILE_MIGRATION_MATRIX.md` に本 task の新規 14 ソース + テスト行（`MIG-0738` 所有）と `work-items/MIG-0738.md` を登録し、全体検証を通す（`npm run test --workspace=@flamenode/app` は Linux CI で全件 PASS を確認し、Windows 環境の 4 件既存 CRLF 差は PR 本文へ切り分け記録する）。
+  ```bash
+  npm run build --workspace=@flamenode/app
+  npm run typecheck
+  npm run check:project-docs
+  ```
+  期待: 3 コマンドすべて終了コード `0`（`[check:project-docs] OK`）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | `extractYoutubeId`, `youtubeWatchUrl`, `youtubeEmbedUrl`（malformed ID 含む） | CURRENT `src/lib/youtube/id.test.mjs` 18 件と全一致 |
+| T02 | `parseVideoFormSettings`, `resolveStagePermissionFieldsFromJson`, `unionRequiredVideoFields`, `resolvePermissionUnlockHint`, `buildVideoFormDraft`, `parseVideoFormDraft` | CURRENT 20 件の契約と全一致 |
+| T03 | `getGuardRedirectPath`, `redirectForGuardReason`, `dispatchBeforeActiveXSwitch`, `submitFormCompat`, `useFormDraft`, `publicReflectionNotice` | CURRENT 16 件と全一致 |
+| T04 | `ErrorCallout` の `tos_required` / `submitter_change_denied` / `cost_guard_blocked` / `duplicate_youtube_id` と `PublicReflectionDelayNotice` | CURRENT と同一 DOM・href・ラベル・CSS class |
+| T05 | 新規 14 ファイルの静的 import 検査 | `next/`・`@/`・`@/lib/actions`・`fetch(` が 0 件 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/app
+npx tsc -p apps/app/tsconfig.test.json && node --test apps/app/test/videoFormHelpers.test.mjs
+npm run typecheck
+npm run check:project-docs
+```
+期待: 上記 4 コマンドすべて終了コード `0`。
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` に新規 15 ファイル（14 ソース＋テスト）の `MIG-0738` 行を追加し、CURRENT `src/lib/**` 元行の所有は変更しない。`MIG-0714` の `U01` 完了元として `MIG-0738` を参照する。
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T05 が PASS
+- [ ] Linux CI（`migration-contract` + `migration-workspaces`）および `check:project-docs` が PASS
+- [ ] `apps/app/src/lib/` や `ErrorCallout` が `next/*`・`@/`・`fetch(` を呼ばない
+#### STOP
+- 既存の `MIG-0712` / `MIG-0713` / `#683` が所有するファイル（`memberInput.ts`, `portCssModule.mjs`, `main.tsx`, `styles.test.mjs`）の変更が必要に見えたら止める。
+- `useFormDraft` 以外のブラウザ API で CURRENT と互換のない挙動が出たら止める。
+#### Rollback
+PR を revert（新規ファイルのみ追加し、既存の SPA ルートからは `MIG-0714` まで未参照）。
 
 ### MIG-0715: `/dashboard/edit/:id/permissions` の画面（SA-082..084、MIG-0703 U02 の後半）
 - **Model:** lead

@@ -1437,3 +1437,64 @@ test("smoke surfaces the deep health 503 reason code and artifact key", async ()
     /deep health: unexpected status 503\. reason=artifact_stale key=rules\/current\.json/,
   );
 });
+
+
+test("SEC-765: poisoned network error names cannot leak or replace production smoke failures", async () => {
+  // The smoke command is a release gate: a failed transport must still fail
+  // closed, without printing arbitrary provider error fields to CI logs.
+  const originalFetch = smokeFetch(COMMIT);
+  for (const stage of ["health", "top"]) {
+    for (const nameCase of ["arbitrary", "throwing_getter"]) {
+      const secret = "SEC765_PROVIDER_SECRET";
+      const providerError = new Error(secret, { cause: new Error(secret) });
+      let nameReads = 0;
+      if (nameCase === "arbitrary") {
+        providerError.name = secret;
+      } else {
+        Object.defineProperty(providerError, "name", {
+          get() {
+            nameReads += 1;
+            throw new Error("SEC765_POISONED_NAME_GETTER");
+          },
+        });
+      }
+      let failures = 0;
+      const fetchImpl = async (input, init = {}) => {
+        const url = new URL(input);
+        const selected = url.hostname === "flamenode.example.com" &&
+          (stage === "health" ? url.pathname === "/api/health" : url.pathname === "/");
+        if (selected) {
+          failures += 1;
+          throw providerError;
+        }
+        return originalFetch(input, init);
+      };
+      const env = {
+        ...productionEnv(),
+        SMOKE_PROPAGATION_ATTEMPTS: "1",
+        SMOKE_PROPAGATION_DELAY_MS: "0",
+        SMOKE_DEGRADED_ATTEMPTS: "1",
+        SMOKE_DEGRADED_DELAY_MS: "0",
+      };
+      await assert.rejects(
+        () => runSmoke({
+          env,
+          expectedCommit: COMMIT,
+          fetchImpl,
+          requestOptions: { attempts: 1, retryDelayMs: 0 },
+        }),
+        (error) => {
+          assert.match(error.message, new RegExp(
+            (stage === "health" ? "web health" : "top page") +
+            ": request failed after 1 attempts \\(network_error\\)"
+          ));
+          assert.doesNotMatch(error.message, /SEC765_PROVIDER_SECRET|SEC765_POISONED_NAME_GETTER/);
+          return true;
+        },
+        stage + "/" + nameCase,
+      );
+      assert.equal(failures, 1, "one bounded request per synthetic failure");
+      assert.equal(nameReads, 0, "the rejected provider error must never be inspected");
+    }
+  }
+});
