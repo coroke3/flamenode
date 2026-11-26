@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const read = (relative) =>
@@ -75,9 +76,48 @@ test("onboarding_completed_at は認可非依存のbest-effort補助マーカー
   assert.match(onboarding, /認可には使わない補助マーカー/);
   assert.match(
     onboarding,
-    /export async function maybeMarkOnboardingComplete[\s\S]*try \{[\s\S]*\.update\(users\)[\s\S]*catch \(error\)/,
+    /export async function maybeMarkOnboardingComplete[\s\S]*try \{[\s\S]*\.update\(users\)[\s\S]*catch \{/,
   );
   assert.match(onboarding, /service: "onboarding_marker"/);
+});
+
+test("SEC-750: CURRENT and TARGET marker failure logs are fixed and cannot reject on a broken sink", () => {
+  // These two marker handlers are intentionally best-effort AFTER the canonical
+  // X-ID mutation; test the actual source handler bodies with no Next/D1 runtime.
+  const implementations = [
+    ["CURRENT", onboarding, "export async function maybeMarkOnboardingComplete("],
+    ["TARGET", read("../../../packages/server-core/src/xid/requests.ts"), "async function afterXIdLinkRequestAccepted("],
+  ];
+  for (const [name, source, signature] of implementations) {
+    const begin = source.indexOf(signature);
+    assert.ok(begin >= 0, name + " marker function exists");
+    const fixedWarning = 'console.warn(JSON.stringify({ service: "onboarding_marker", result: "failed" }));';
+    const warningIndex = source.indexOf(fixedWarning, begin);
+    assert.ok(warningIndex > begin, name + " has fixed diagnostic shape");
+    const blockBegin = source.lastIndexOf("  } catch {", warningIndex);
+    const blockEnd = source.indexOf("\n  }\n", warningIndex);
+    assert.ok(blockBegin >= begin && blockEnd > warningIndex, name + " has bounded catch handler");
+    const catchBlock = source.slice(blockBegin, blockEnd + "\n  }".length);
+    assert.match(catchBlock, /try \{[\s\S]*console\.warn\([\s\S]*\} catch \{/,
+      name + " logging must be surrounded by another catch");
+    assert.doesNotMatch(catchBlock, /auth_user_id|error_name|\.name\b|\.message\b|\.cause\b/,
+      name + " may not serialize provider details or user identifiers");
+
+    // Execute the exact captured JavaScript catch block (not a reimplementation)
+    // under a synthetic provider error and a synthetic broken diagnostic sink.
+    const executable = 'try { throw new Error("SEC750_PROVIDER_SECRET");\n' + catchBlock;
+    const messages = [];
+    assert.doesNotThrow(() => runInNewContext(executable, {
+      console: { warn: (message) => messages.push(message) },
+    }), name + " rejects neither an optional marker failure nor its logging");
+    assert.deepEqual(messages.map((message) => JSON.parse(message)), [
+      { service: "onboarding_marker", result: "failed" },
+    ], name + " logs fixed, bounded data only");
+    assert.ok(!JSON.stringify(messages).includes("SEC750_PROVIDER_SECRET"));
+    assert.doesNotThrow(() => runInNewContext(executable, {
+      console: { warn: () => { throw new Error("SEC750_LOG_SINK_UNAVAILABLE"); } },
+    }), name + " swallows a throwing warning sink");
+  }
 });
 
 test("onboardingUrls は sanitizeOnboardingNext で循環を拒否する", () => {

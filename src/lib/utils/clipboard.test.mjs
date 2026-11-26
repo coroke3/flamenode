@@ -102,3 +102,65 @@ test("ブラウザAPIとDOMがない場合はfalseを返す", async () => {
 
   assert.equal(await writeTextToClipboard("no-browser"), false);
 });
+
+test("DOM fallback restores the previously focused element on success and failure", async () => {
+  for (const copyFails of [false, true]) {
+    let focus = "copy-button";
+    let removed = false;
+    const copyButton = {
+      focus: () => {
+        assert.equal(removed, true, "temporary textarea must be removed before focus returns");
+        focus = "copy-button";
+      },
+    };
+    const textarea = {
+      value: "",
+      style: {},
+      setAttribute: () => {},
+      focus: () => { focus = "textarea"; },
+      select: () => {},
+      remove: () => { removed = true; },
+    };
+    setGlobal("navigator", {});
+    setGlobal("document", {
+      activeElement: copyButton,
+      body: { appendChild: (node) => assert.equal(node, textarea) },
+      createElement: (tag) => {
+        assert.equal(tag, "textarea");
+        return textarea;
+      },
+      execCommand: (command) => {
+        assert.equal(command, "copy");
+        assert.equal(focus, "textarea");
+        if (copyFails) throw new Error("copy is blocked");
+        return true;
+      },
+    });
+
+    assert.equal(await writeTextToClipboard("focus"), !copyFails);
+    assert.equal(removed, true);
+    assert.equal(focus, "copy-button");
+  }
+});
+
+test("failed focus restoration does not change a successful clipboard result", async () => {
+  let removed = false;
+  const textarea = {
+    value: "",
+    style: {},
+    setAttribute: () => {},
+    focus: () => {},
+    select: () => {},
+    remove: () => { removed = true; },
+  };
+  setGlobal("navigator", {});
+  setGlobal("document", {
+    activeElement: { focus: () => { throw new Error("detached copy button"); } },
+    body: { appendChild: () => {} },
+    createElement: () => textarea,
+    execCommand: () => true,
+  });
+
+  assert.equal(await writeTextToClipboard("focus"), true);
+  assert.equal(removed, true);
+});
