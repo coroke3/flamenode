@@ -65,9 +65,9 @@ for (const key of ["window", "document", "navigator", "HTMLElement", "Node"]) {
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 function deferred() {
-  let resolve;
-  const promise = new Promise(ok => { resolve = ok; });
-  return { promise, resolve };
+  let resolve, reject;
+  const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
+  return { promise, resolve, reject };
 }
 async function mounted(element) {
   const target = document.createElement("div");
@@ -76,6 +76,7 @@ async function mounted(element) {
   await React.act(async () => { root.render(element); });
   return {
     target,
+    render: async element => React.act(async () => { root.render(element); }),
     click: async text => React.act(async () => {
       const buttons = [...target.querySelectorAll("button")];
       const button = buttons.find(x => x.textContent.includes(text));
@@ -169,4 +170,99 @@ test("MIG-0724 U01 T04: status form validation blocks unchanged/void without rea
     assert.deepEqual(calls.at(-1), { event_id: "e2", video_id: "v2", status: "public" });
     assert.match(manage.target.textContent, /ステータスを更新しました/);
   } finally { await manage.cleanup(); }
+});
+
+
+test("MIG-0724 U01: deferred receipts are scoped to video, event, authority epoch and mounted view", async () => {
+  for (const kind of ["approve", "status", "quick"]) {
+    for (const scenario of ["video", "event", "return", "authority", "adapter", "unmount", "reject", "retryable"]) {
+      const old = deferred(), calls = [], refreshes = [], navigations = [];
+      const action = fd => { calls.push(Object.fromEntries(fd.entries())); return old.promise; };
+      const newAction = async () => { throw new Error("unexpected replay"); };
+      const noop = async () => ({ ok: true });
+      const node = (videoId = "v1", eventId = "e1", authorizationEpoch = "authority-a", activeAction = action) => {
+        const shared = { videoId, hiddenFields: { event_id: eventId }, authorizationEpoch,
+          onRefresh: () => refreshes.push([videoId, eventId, authorizationEpoch]),
+          onNavigate: href => navigations.push(href) };
+        if (kind === "approve") return h(VideoApproveActions, {
+          ...shared, currentStatus: "pending", approveAction: noop, approveAndNextAction: activeAction,
+        });
+        if (kind === "quick") return h(VideoReviewQuickApproveButton, { ...shared, action: activeAction });
+        return h(VideoStatusForm, { ...shared, currentStatus: "pending", statuses: MANAGE_STATUS_VALUES,
+          action: activeAction, formIdPrefix: "race", statusLabel: "変更", submitLabel: "保存" });
+      };
+      const ui = await mounted(node());
+      try {
+        if (kind === "status") { await ui.change("public"); await ui.submit(); }
+        else await ui.click(kind === "approve" ? "承認して次へ" : "承認");
+        assert.equal(calls.length, 1, kind + ":" + scenario);
+        assert.equal(calls[0].video_id, "v1");
+        assert.equal(calls[0].event_id, "e1");
+        if (kind === "status") assert.equal(calls[0].status, "public");
+        if (scenario === "event") await ui.render(node("v1", "e2"));
+        else if (scenario === "authority") await ui.render(node("v1", "e1", "authority-b"));
+        else if (scenario === "adapter") await ui.render(node("v1", "e1", "authority-a", newAction));
+        else if (scenario === "unmount") await ui.render(null);
+        else {
+          await ui.render(node("v2"));
+          if (scenario === "return") await ui.render(node());
+        }
+        await React.act(async () => {
+          if (scenario === "reject") old.reject(new Error("OLD_FAILURE"));
+          else if (scenario === "retryable") old.resolve({ ok: false, retryable: true, message: "OLD_FAILURE" });
+          else old.resolve({ ok: true, message: "OLD_RECEIPT", pendingPublicReflection: true,
+            nextHref: "/manage/events/e1/videos/next" });
+        });
+        assert.deepEqual(refreshes, [], kind + ":" + scenario);
+        assert.deepEqual(navigations, [], kind + ":" + scenario);
+        assert.equal(calls.length, 1, "no automatic write replay");
+        assert.doesNotMatch(ui.target.textContent, /OLD_|通信エラー|承認しました|ステータスを更新しました|公開ページへの反映は/);
+        assert.equal(ui.target.querySelector('[aria-busy="true"]'), null);
+      } finally { await ui.cleanup(); }
+    }
+  }
+});
+
+test("MIG-0724 U01: old completion cannot unlock a new same-video authority's in-flight quick approval", async () => {
+  const old = deferred(), current = deferred(), calls = [], refreshes = [];
+  const actionA = fd => { calls.push(["A", fd.get("video_id")]); return old.promise; };
+  const actionB = fd => { calls.push(["B", fd.get("video_id")]); return current.promise; };
+  const render = (authorizationEpoch, action) => h(VideoReviewQuickApproveButton, {
+    videoId: "v1", hiddenFields: { event_id: "e1" }, authorizationEpoch, action,
+    onRefresh: () => refreshes.push(authorizationEpoch),
+  });
+  const ui = await mounted(render("A", actionA));
+  try {
+    await ui.click("承認");
+    await ui.render(render("B", actionB));
+    await ui.click("承認");
+    assert.deepEqual(calls, [["A", "v1"], ["B", "v1"]]);
+    await React.act(async () => old.resolve({ ok: true, pendingPublicReflection: true }));
+    assert.equal(ui.target.querySelector("button").disabled, true);
+    assert.deepEqual(refreshes, []);
+    assert.doesNotMatch(ui.target.textContent, /公開ページへの反映は/);
+    await React.act(async () => current.resolve({ ok: true, pendingPublicReflection: true }));
+    assert.deepEqual(refreshes, ["B"]);
+    assert.equal(ui.target.querySelector("button").disabled, false);
+    assert.match(ui.target.textContent, /公開ページへの反映は/);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0724 U01: same-view reordered hidden fields retain a pending receipt and refresh once", async () => {
+  const pending = deferred(), calls = [], refreshes = [];
+  const action = fd => { calls.push(Object.fromEntries(fd.entries())); return pending.promise; };
+  const render = hiddenFields => h(VideoReviewQuickApproveButton, {
+    videoId: "v1", authorizationEpoch: "A", hiddenFields, action,
+    onRefresh: () => refreshes.push(true),
+  });
+  const ui = await mounted(render({ event_id: "e1", review_event_id: "e1" }));
+  try {
+    await ui.click("承認");
+    await ui.render(render({ review_event_id: "e1", event_id: "e1" }));
+    assert.equal(ui.target.querySelector("button").disabled, true);
+    await React.act(async () => pending.resolve({ ok: true }));
+    assert.equal(calls.length, 1);
+    assert.deepEqual(refreshes, [true]);
+    assert.equal(ui.target.querySelector("button").disabled, false);
+  } finally { await ui.cleanup(); }
 });

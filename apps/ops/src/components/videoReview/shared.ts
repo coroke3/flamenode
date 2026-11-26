@@ -63,3 +63,16 @@ export function formatRelative(sec: number, now = Date.now() / 1000): string {
   if (diff < 31536000) return `${Math.floor(diff / 2592000)}か月前`;
   return `${Math.floor(diff / 31536000)}年前`;
 }
+
+
+/** Identity of a committed review view, not an authorization decision.
+ * The future authorized host must rotate authorizationEpoch on principal or
+ * permission-scope change. Canonical field ordering avoids remount on a
+ * harmless new hiddenFields object, while preserving exact event context.
+ */
+export function reviewMutationScopeKey(
+  videoId: string, hiddenFields?: Record<string, string>, authorizationEpoch?: string,
+): string {
+  const fields = Object.entries(hiddenFields ?? {}).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  return JSON.stringify([videoId, authorizationEpoch ?? null, fields]);
+}

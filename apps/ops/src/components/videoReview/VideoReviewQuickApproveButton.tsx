@@ -1,23 +1,39 @@
 import * as React from "react";
-import { COMMUNICATION_ERROR_MESSAGE, PUBLIC_REFLECTION_DELAY_MESSAGE, type ReviewAction } from "./shared.js";
+import { COMMUNICATION_ERROR_MESSAGE, PUBLIC_REFLECTION_DELAY_MESSAGE, reviewMutationScopeKey, type ReviewAction } from "./shared.js";
 
 export interface VideoReviewQuickApproveButtonProps {
   videoId: string;
   action: ReviewAction;
   hiddenFields?: Record<string, string>;
+  authorizationEpoch?: string;
   /** Re-fetch the list after success, retryable failure or uncertain network outcome. */
   onRefresh: () => void;
 }
 
-export function VideoReviewQuickApproveButton({
+export function VideoReviewQuickApproveButton(props: VideoReviewQuickApproveButtonProps): React.ReactElement {
+  return <ScopedQuickApproveButton
+    key={reviewMutationScopeKey(props.videoId, props.hiddenFields, props.authorizationEpoch)} {...props} />;
+}
+
+function ScopedQuickApproveButton({
   videoId, action, hiddenFields, onRefresh,
 }: VideoReviewQuickApproveButtonProps): React.ReactElement {
   const [submitting, setSubmitting] = React.useState(false);
   const inFlight = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   const [pendingPublicReflection, setPendingPublicReflection] = React.useState(false);
+  const scopeRef = React.useRef<object | null>(null);
+  React.useLayoutEffect(() => {
+    scopeRef.current = {};
+    inFlight.current = false;
+    setSubmitting(false);
+    setError(null);
+    setPendingPublicReflection(false);
+    return () => { scopeRef.current = null; };
+  }, [action]);
   const onApprove = () => {
-    if (inFlight.current) return;
+    const scope = scopeRef.current;
+    if (!scope || inFlight.current) return;
     inFlight.current = true;
     setSubmitting(true);
     setError(null);
@@ -28,6 +44,7 @@ export function VideoReviewQuickApproveButton({
     void (async () => {
       try {
         const result = await action(fd);
+        if (scopeRef.current !== scope) return;
         if (!result.ok) {
           setError(result.message ?? "承認に失敗しました。");
           if (result.retryable) onRefresh();
@@ -36,11 +53,14 @@ export function VideoReviewQuickApproveButton({
         setPendingPublicReflection(result.pendingPublicReflection === true);
         onRefresh();
       } catch {
+        if (scopeRef.current !== scope) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         onRefresh();
       } finally {
-        inFlight.current = false;
-        setSubmitting(false);
+        if (scopeRef.current === scope) {
+          inFlight.current = false;
+          setSubmitting(false);
+        }
       }
     })();
   };

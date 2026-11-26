@@ -1,7 +1,7 @@
 import * as React from "react";
 import {
   COMMUNICATION_ERROR_MESSAGE, PUBLIC_REFLECTION_DELAY_MESSAGE,
-  VIDEO_STATUS_LABELS, VOID_REASON_LABELS,
+  VIDEO_STATUS_LABELS, VOID_REASON_LABELS, reviewMutationScopeKey,
   type ReviewAction, type ReviewActionResult, type VideoVisibilityStatus,
 } from "./shared.js";
 
@@ -21,6 +21,7 @@ export interface VideoStatusFormProps {
   submitLabel: string;
   optionDescription?: boolean;
   hiddenFields?: Record<string, string>;
+  authorizationEpoch?: string;
   allowVoidReason?: boolean;
   openVoidCaseId?: string | null;
   showMessageIcons?: boolean;
@@ -29,26 +30,26 @@ export interface VideoStatusFormProps {
 }
 
 export function ManageVideoStatusForm({
-  eventId, videoId, currentStatus, sourceType, youtubeVideoId, action, onRefresh, onNavigate,
+  eventId, videoId, currentStatus, sourceType, youtubeVideoId, action, onRefresh, onNavigate, authorizationEpoch,
 }: {
   eventId: string; videoId: string; currentStatus: string;
-  sourceType?: string | null; youtubeVideoId?: string | null;
+  sourceType?: string | null; youtubeVideoId?: string | null; authorizationEpoch?: string;
   action: ReviewAction; onRefresh: () => void; onNavigate: (href: string) => void;
 }): React.ReactElement {
   return <VideoStatusForm videoId={videoId} currentStatus={currentStatus}
     sourceType={sourceType} youtubeVideoId={youtubeVideoId}
     statuses={MANAGE_STATUS_VALUES} action={action}
     formIdPrefix={`manage-video-${videoId}`} statusLabel="公開状態を変更"
-    submitLabel="審査結果を保存" hiddenFields={{ event_id: eventId }}
+    submitLabel="審査結果を保存" hiddenFields={{ event_id: eventId }} authorizationEpoch={authorizationEpoch}
     onRefresh={onRefresh} onNavigate={onNavigate} />;
 }
 
 export function AdminVideoStatusForm({
   videoId, currentStatus, sourceType, youtubeVideoId, openVoidCaseId, hiddenFields,
-  action, onRefresh, onNavigate,
+  action, onRefresh, onNavigate, authorizationEpoch,
 }: {
   videoId: string; currentStatus: string;
-  sourceType?: string | null; youtubeVideoId?: string | null;
+  sourceType?: string | null; youtubeVideoId?: string | null; authorizationEpoch?: string;
   openVoidCaseId?: string | null; hiddenFields?: Record<string, string>;
   action: ReviewAction; onRefresh: () => void; onNavigate: (href: string) => void;
 }): React.ReactElement {
@@ -56,7 +57,7 @@ export function AdminVideoStatusForm({
     sourceType={sourceType} youtubeVideoId={youtubeVideoId} statuses={ADMIN_STATUS_VALUES}
     action={action} formIdPrefix="admin-video" statusLabel="変更先ステータス"
     submitLabel="適用" optionDescription allowVoidReason openVoidCaseId={openVoidCaseId}
-    showMessageIcons hiddenFields={hiddenFields} onRefresh={onRefresh} onNavigate={onNavigate} />;
+    showMessageIcons hiddenFields={hiddenFields} authorizationEpoch={authorizationEpoch} onRefresh={onRefresh} onNavigate={onNavigate} />;
 }
 
 function isVideoVisibilityStatus(value: string): value is VideoVisibilityStatus {
@@ -68,7 +69,12 @@ function formatStatusOption(value: VideoVisibilityStatus, includeDescription: bo
 }
 
 /** CURRENT VideoStatusForm's FormData and client-side validation, without Next Server Action imports. */
-export function VideoStatusForm({
+export function VideoStatusForm(props: VideoStatusFormProps): React.ReactElement {
+  return <ScopedVideoStatusForm
+    key={reviewMutationScopeKey(props.videoId, props.hiddenFields, props.authorizationEpoch)} {...props} />;
+}
+
+function ScopedVideoStatusForm({
   videoId, currentStatus, statuses, action, formIdPrefix, statusLabel, submitLabel,
   optionDescription = false, hiddenFields, allowVoidReason = false, openVoidCaseId = null,
   showMessageIcons = false, onRefresh, onNavigate,
@@ -82,6 +88,19 @@ export function VideoStatusForm({
   const [success, setSuccess] = React.useState(false);
   const [successMessage, setSuccessMessage] = React.useState<string | null>(null);
   const [pendingPublicReflection, setPendingPublicReflection] = React.useState(false);
+  const scopeRef = React.useRef<object | null>(null);
+  React.useLayoutEffect(() => {
+    scopeRef.current = {};
+    inFlight.current = false;
+    setSubmitting(false);
+    setError(null);
+    setSuccess(false);
+    setSuccessMessage(null);
+    setPendingPublicReflection(false);
+    setReason("");
+    setReasonCategory("operator_decision");
+    return () => { scopeRef.current = null; };
+  }, [action]);
   const requiresReason = allowVoidReason && status === "voided";
   const requiresCaseId = allowVoidReason && currentStatus === "voided" && status !== "voided";
   const statusOptions = React.useMemo<VideoVisibilityStatus[]>(() => {
@@ -92,7 +111,8 @@ export function VideoStatusForm({
   React.useEffect(() => { setStatus(currentStatus); }, [currentStatus]);
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (inFlight.current) return;
+    const scope = scopeRef.current;
+    if (!scope || inFlight.current) return;
     if (status === currentStatus) {
       setError("変更先のステータスを選択してください。");
       return;
@@ -126,10 +146,12 @@ export function VideoStatusForm({
         try {
           result = await action(fd);
         } catch {
+          if (scopeRef.current !== scope) return;
           setError(COMMUNICATION_ERROR_MESSAGE);
           onRefresh();
           return;
         }
+        if (scopeRef.current !== scope) return;
         if (!result.ok) {
           setError(result.message ?? "更新に失敗しました。");
           if (result.retryable) onRefresh();
@@ -142,8 +164,10 @@ export function VideoStatusForm({
           else onRefresh();
         }
       } finally {
-        inFlight.current = false;
-        setSubmitting(false);
+        if (scopeRef.current === scope) {
+          inFlight.current = false;
+          setSubmitting(false);
+        }
       }
     })();
   };

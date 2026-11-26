@@ -26,6 +26,7 @@ export interface VideoReviewQueueTableProps {
   canApprove?: boolean;
   quickApproveAction?: ReviewAction;
   quickApproveHiddenFields?: Record<string, string>;
+  authorizationEpoch?: string;
   onRefresh: () => void;
   variant?: "admin" | "manage";
 }
@@ -37,7 +38,7 @@ function VisibilityCell({ status, manage }: { status: string; manage: boolean })
 /** Mirrors CURRENT table columns, status/permission hiding and quick-approve boundaries. */
 export function VideoReviewQueueTable({
   rows, reviewHref, contentHref, extraActions, canApprove = false, quickApproveAction,
-  quickApproveHiddenFields, onRefresh, variant = "admin",
+  quickApproveHiddenFields, authorizationEpoch, onRefresh, variant = "admin",
 }: VideoReviewQueueTableProps): React.ReactElement {
   const isManage = variant === "manage";
   const showQuickApprove = canApprove && quickApproveAction &&
@@ -86,7 +87,7 @@ export function VideoReviewQueueTable({
                 {canApprove ? <Link href={reviewHref(v.id)} className="fn-btn fn-btn-primary fn-btn-sm">審査</Link> : null}
                 {canApprove && v.visibility_status === "pending" && showQuickApprove && quickApproveAction
                   ? <VideoReviewQuickApproveButton videoId={v.id} action={quickApproveAction}
-                      hiddenFields={quickApproveHiddenFields} onRefresh={onRefresh} />
+                      hiddenFields={quickApproveHiddenFields} authorizationEpoch={authorizationEpoch} onRefresh={onRefresh} />
                   : null}
                 <Link href={contentHref(v.id)} className="fn-btn fn-btn-ghost fn-btn-sm">内容確認</Link>
                 {extraActions ? extraActions(v.id) : null}
