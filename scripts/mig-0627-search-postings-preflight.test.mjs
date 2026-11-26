@@ -46,14 +46,14 @@ if (runUnderRootTsx(import.meta.url)) {
     const env = { DB: d1, KV: createFakeKv(), BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: mode };
     return {
       storage, reads, d1,
-      async query(value = "Tokyo", params = {}) {
+      async query(value = "Tokyo", params = {}, headers = {}) {
         const url = new URL("http://localhost/api/videos");
         url.searchParams.set("q", value);
         for (const [key, parameter] of Object.entries(params)) {
           url.searchParams.set(key, parameter);
         }
-        const response = await app.request(new Request(url), {}, env);
-        return { response, payload: await response.json() };
+        const response = await app.request(new Request(url, { headers }), {}, env);
+        return { response, payload: response.status === 304 ? null : await response.json() };
       },
     };
   }
@@ -372,6 +372,101 @@ if (runUnderRootTsx(import.meta.url)) {
     }
     assert.deepEqual(h.reads, [baseKey, baseKey, baseKey]);
     assertNoD1(h);
+  });
+
+  // #892: conditional HTTP responses must be examined separately from
+  // projection. Keep these controls when the owner fixes the identity guard.
+  const identityVisibilityKey = "visibility/blocked-entities.v1.json";
+  async function seedIdentityManifest(storage, blockedId = null) {
+    await storage.put(identityVisibilityKey, {
+      schema_version: 1,
+      revision: blockedId === null ? 1 : 2,
+      generated_at: 1700000000,
+      entities: blockedId === null ? [] : [{
+        entity_type: "event", entity_id: blockedId,
+        fence_token: "fixture-fence", blocked_at: 1700000000,
+      }],
+    });
+  }
+
+  function assertIdentityUnavailable(result) {
+    assert.equal(result.response.status, 503);
+    assert.deepEqual(result.payload, { error: "static_list_unavailable" });
+    assert.equal(result.response.headers.get("Cache-Control"), "no-store");
+    assert.equal(result.response.headers.get("Retry-After"), "30");
+    assert.equal(result.response.headers.get("ETag"), null);
+  }
+
+  test("MIG-0627 U02d PREP T16: correct event ETag cannot override requested event revocation", async (t) => {
+    for (const path of ["base", "composed"]) {
+      for (const sort of ["new", "old", "score"]) {
+        const h = harness(t, "enforce");
+        await seedIdentityManifest(h.storage);
+        await h.storage.put(path === "base" ? baseKey : composedKey,
+          eventPayload([{ ...tokyoEventVideo, score: 1 }]));
+        const params = { event: eventId, sort };
+        const first = await h.query("Tokyo", params);
+        assert.equal(first.response.status, 200);
+        assert.deepEqual(first.payload.items.map((item) => item.primary_event_id), [eventId]);
+        const etag = first.response.headers.get("ETag");
+        assert.ok(etag);
+        const revalidated = await h.query("Tokyo", params, { "If-None-Match": etag });
+        assert.equal(revalidated.response.status, 304);
+        assert.equal(revalidated.payload, null);
+        const reads = path === "base"
+          ? [identityVisibilityKey, baseKey]
+          : [identityVisibilityKey, baseKey, identityVisibilityKey, composedKey];
+        assert.deepEqual(h.reads, [...reads, ...reads]);
+        await seedIdentityManifest(h.storage, eventId);
+        for (const tag of [etag, "*"]) {
+          h.reads.length = 0;
+          assertIdentityUnavailable(await h.query("Tokyo", params, { "If-None-Match": tag }));
+          assert.deepEqual(h.reads, [identityVisibilityKey, identityVisibilityKey],
+            "requested event fence rejects both paths before any artifact read");
+        }
+        assertNoD1(h);
+      }
+    }
+  });
+
+  // CHARACTERIZATION ONLY. #892 is unresolved; these assertions reproduce
+  // the current defect, not an acceptable response contract. Invert the
+  // 200/304 expectations to fixed 503/no-store/no-ETag with the approved
+  // identity repair, preserving T16 and the embedded-event fence control.
+  test("MIG-0627 U02d PREP T17: KNOWN GAP #892 - wrong public event identity can return 200 and 304", async (t) => {
+    const wrongId = "evt-other";
+    for (const path of ["base", "composed"]) {
+      for (const sort of ["new", "old", "score"]) {
+        const h = harness(t, "enforce");
+        await seedIdentityManifest(h.storage);
+        const wrong = eventPayload([{ ...tokyoEventVideo, score: 1 }]);
+        wrong.event = { ...wrong.event, id: wrongId };
+        await h.storage.put(path === "base" ? baseKey : composedKey, wrong);
+        const params = { event: eventId, sort };
+        const first = await h.query("Tokyo", params);
+        assert.equal(first.response.status, 200, "KNOWN GAP: wrong event returned");
+        assert.deepEqual(first.payload.items.map((item) => item.primary_event_id), [wrongId]);
+        const etag = first.response.headers.get("ETag");
+        assert.ok(etag);
+        assert.match(first.response.headers.get("Cache-Control") ?? "", /^public,/);
+        for (const tag of [etag, "*"]) {
+          const revalidated = await h.query("Tokyo", params, { "If-None-Match": tag });
+          assert.equal(revalidated.response.status, 304, "KNOWN GAP: wrong event revalidated");
+          assert.equal(revalidated.payload, null);
+        }
+        const reads = path === "base"
+          ? [identityVisibilityKey, baseKey]
+          : [identityVisibilityKey, baseKey, identityVisibilityKey, composedKey];
+        assert.deepEqual(h.reads, [...reads, ...reads, ...reads]);
+        await seedIdentityManifest(h.storage, wrongId);
+        for (const tag of [etag, "*"]) {
+          h.reads.length = 0;
+          assertIdentityUnavailable(await h.query("Tokyo", params, { "If-None-Match": tag }));
+          assert.deepEqual(h.reads, [identityVisibilityKey, baseKey, identityVisibilityKey, composedKey]);
+        }
+        assertNoD1(h);
+      }
+    }
   });
 
 }
