@@ -13,7 +13,7 @@
  * existing /api/media icon check, collab member X resolution, or software
  * lookup), followed by 1 audited atomic D1 batch via mutateWithAudit.
  * Custom R2 icon upload executes right before the D1 batch and is rolled back
- * via bucket.delete(uploadedKey) if plan preparation or D1 commit fails.
+ * by deleting only the uploaded R2 key if plan preparation or D1 commit fails.
  * Queue wake = 0 (NOOP_WAKE_HOST; DOCUMENTED DIFFERENCE D-0603-1).
  */
 import type { VideoSubmitResult } from "@flamenode/contracts";
