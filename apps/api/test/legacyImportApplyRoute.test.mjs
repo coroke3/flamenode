@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
+import { normalizeLegacyFiles } from "@flamenode/server-core/legacyImport/normalize";
+import { createLegacyImportPreview } from "@flamenode/server-core/legacyImport/previewStore";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createLegacyImportApplyRoutes } from "../src/routes/admin/legacyImportApplyRoute.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
@@ -11,7 +13,7 @@ const SITE = "https://app.flamenode.example";
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "admin", is_banned: 0, active_x_user_id: null };
 
-function setup({ user = ADMIN, role = "admin", settings = "normal", bucket } = {}) {
+function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, applyStep } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite, { role, settings });
   let d1ApplyCalls = 0;
@@ -23,8 +25,9 @@ function setup({ user = ADMIN, role = "admin", settings = "normal", bucket } = {
       await next();
     },
   });
-  admin.route("/import/legacy/apply", createLegacyImportApplyRoutes(async () => {
+  admin.route("/import/legacy/apply", createLegacyImportApplyRoutes(async (input) => {
     d1ApplyCalls += 1;
+    if (applyStep) return applyStep(input);
     throw new Error("D1 apply must never be reached on denied request");
   }));
   app.route("/api/admin", admin);
@@ -98,4 +101,131 @@ test("MIG-0645 U02 apply Hono: non-multipart input rejects before claim and D1",
   assert.equal((await res.json()).ok, false);
   assert.equal(getD1ApplyCalls(), 0);
   assert.equal(stats.batches, 0);
+});
+
+
+// Test the real shared preview-store CAS with an explicitly simulated D1 step.
+// This does not establish the atomic D1 mutation/step-marker/audit contract.
+function previewBucket({ failAdvanceOnce = false } = {}) {
+  const objects = new Map();
+  let version = 0;
+  return {
+    bucket: {
+      async get(key) {
+        const entry = objects.get(key);
+        return entry ? {
+          etag: entry.etag, size: Buffer.byteLength(entry.data),
+          text: async () => entry.data,
+        } : null;
+      },
+      async put(key, value, options = {}) {
+        const previous = objects.get(key);
+        const expected = options.onlyIf?.etagMatches;
+        if (expected && expected !== previous?.etag) return null;
+        const data = String(value);
+        const next = JSON.parse(data);
+        if (failAdvanceOnce && expected && next.status === "ready" &&
+            next.progress.stage === "x_users") {
+          failAdvanceOnce = false;
+          return null;
+        }
+        const etag = String(++version);
+        objects.set(key, { etag, data });
+        return { etag };
+      },
+      async delete(key) { objects.delete(key); },
+    },
+    record: () => JSON.parse([...objects.values()][0].data),
+  };
+}
+
+async function createApplyCredential(bucket, authUserId = ADMIN.id) {
+  const plan = normalizeLegacyFiles([], {
+    eventVisibility: "private", videoVisibility: "private", now: 1700000000,
+  });
+  assert.deepEqual(plan.errors, []);
+  const credential = await createLegacyImportPreview(bucket, {
+    authUserId, strategy: "create_only", plan,
+  });
+  const form = () => {
+    const data = new FormData();
+    data.set("mode", "apply");
+    data.set("preview_token", credential.previewToken);
+    data.set("plan_hash", credential.planHash);
+    return data;
+  };
+  return { credential, form };
+}
+
+test("MIG-0645 U02 apply Hono: authenticated request DB and owner reach exactly one step, then R2 advances", async () => {
+  const { bucket, record } = previewBucket();
+  const { credential, form } = await createApplyCredential(bucket);
+  const { request, stats, sqlite, getD1ApplyCalls } = setup({
+    bucket,
+    applyStep: async (input) => {
+      assert.equal(typeof input.db.select, "function", "request-scoped Drizzle DB required");
+      assert.equal(input.actorAuthUserId, ADMIN.id);
+      assert.equal(input.previewToken, credential.previewToken);
+      assert.equal(input.planHash, credential.planHash);
+      assert.equal(input.progress.stage, "system_user");
+      assert.equal(record().status, "claimed");
+      return { progress: { ...input.progress, stage: "x_users", index: 0 }, complete: false };
+    },
+  });
+  const res = await request(form());
+  assert.equal(res.status, 200, JSON.stringify(await res.clone().json()));
+  const body = await res.json();
+  assert.equal(body.continuation_required, true);
+  assert.equal(body.progress.stage, "x_users");
+  assert.equal(body.attempt, 1);
+  assert.equal(body.result.complete, false);
+  assert.equal(getD1ApplyCalls(), 1);
+  assert.equal(record().status, "ready");
+  assert.equal(record().progress.stage, "x_users");
+  assert.equal(stats.batches, 0, "injected step is deliberately not a D1 writer");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(res.headers.get("cache-control"), "private, no-store");
+});
+
+test("MIG-0645 U02 apply Hono: advance CAS failure reports committed pending and releases claim for recovery", async () => {
+  const { bucket, record } = previewBucket({ failAdvanceOnce: true });
+  const { credential, form } = await createApplyCredential(bucket);
+  let simulatedMarker = null;
+  let simulatedCommits = 0;
+  const { request, stats, getD1ApplyCalls } = setup({
+    bucket,
+    applyStep: async (input) => {
+      assert.equal(typeof input.db.select, "function");
+      assert.equal(input.actorAuthUserId, ADMIN.id);
+      assert.equal(input.planHash, credential.planHash);
+      assert.equal(input.progress.stage, "system_user");
+      // Simulate the future D1 adapter's marker replay; no actual D1 write.
+      if (!simulatedMarker) {
+        simulatedCommits++;
+        simulatedMarker = { ...input.progress, stage: "x_users", index: 0 };
+      }
+      return { progress: simulatedMarker, complete: false };
+    },
+  });
+  const failed = await request(form());
+  assert.equal(failed.status, 503, JSON.stringify(await failed.clone().json()));
+  const body = await failed.json();
+  assert.equal(body.kind, "committed_progress_pending");
+  assert.equal(body.committed, true);
+  assert.equal(body.retryable, true);
+  assert.equal(body.requires_repreview, false);
+  assert.equal(body.progress.stage, "x_users");
+  assert.equal(failed.headers.get("cache-control"), "private, no-store");
+  assert.equal(getD1ApplyCalls(), 1, "one step per HTTP request, never retry within the handler");
+  assert.equal(record().status, "ready");
+  assert.equal(record().progress.stage, "system_user", "failed CAS did not advance R2");
+  const recovered = await request(form());
+  assert.equal(recovered.status, 200, JSON.stringify(await recovered.clone().json()));
+  const retry = await recovered.json();
+  assert.equal(retry.attempt, 2);
+  assert.equal(retry.progress.stage, "x_users");
+  assert.equal(getD1ApplyCalls(), 2);
+  assert.equal(simulatedCommits, 1, "simulated marker replay does not simulate a second commit");
+  assert.equal(record().progress.stage, "x_users");
+  assert.equal(stats.batches, 0, "real audit-atomic D1 step is still not wired");
 });

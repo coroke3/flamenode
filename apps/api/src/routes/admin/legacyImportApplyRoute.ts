@@ -18,7 +18,10 @@ import { onlyMutating } from "../../middleware/writeOrigin.ts";
 import { runLegacyImportApplyPipeline } from "./legacyImportApplyPipeline.ts";
 import { legacyImportR2Adapter } from "./legacyImportR2Adapter.ts";
 
-type AtomicD1Step = Parameters<typeof runLegacyImportApplyPipeline<LegacyImportApplyProgress>>[0]["applyStep"];
+type PipelineStep = Parameters<typeof runLegacyImportApplyPipeline<LegacyImportApplyProgress>>[0]["applyStep"];
+type AtomicD1Step = (input: Parameters<PipelineStep>[0] & {
+  db: AppEnv["Variables"]["db"];
+}) => ReturnType<PipelineStep>;
 
 /**
  * Creates a route only when an audit-atomic D1 step has been provided.
@@ -35,7 +38,8 @@ export function createLegacyImportApplyRoutes(applyStep: AtomicD1Step) {
   router.post("/", async (c) => {
     c.header("Cache-Control", "private, no-store");
     const user = c.get("user");
-    if (!user || user.role !== "admin" || !c.get("db")) {
+    const db = c.get("db");
+    if (!user || user.role !== "admin" || !db) {
       return c.json({ ok: false, message: "forbidden" }, 403);
     }
     const formData = await c.req.raw.formData().catch(() => null);
@@ -47,7 +51,7 @@ export function createLegacyImportApplyRoutes(applyStep: AtomicD1Step) {
       formData,
       authUserId: user.id,
       claimPreview: r2.claimPreview,
-      applyStep,
+      applyStep: (input) => applyStep({ ...input, db }),
       mapPreviewError: r2.mapPreviewError,
       isTransientApplyFailure: (cause) =>
         isTransientDbError(cause) ||
