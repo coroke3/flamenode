@@ -43,7 +43,14 @@ function parseHtmlTableRegex(html: string): string[][] {
   let row: string[] | null = null;
   let cell: { name: string; start: number } | null = null;
   let rawHeader: string | null = null;
+  // matchAll can skip an unterminated comment or quoted tag and resume at
+  // a nested-looking token. Refuse such gaps instead of inventing cells.
+  const unmatchedMarkup = /<(?:!--|\/?[a-z])/i;
+  let scannedThrough = 0;
+  let completeTable = false;
   for (const match of html.matchAll(tokens)) {
+    if (unmatchedMarkup.test(html.slice(scannedThrough, match.index))) return [];
+    scannedThrough = match.index + match[0].length;
     // The fallback is not an HTML5 parser. Do not interpret inert/raw-text
     // contents as rows. Allow simple style/title wrappers outside tables,
     // but decline markup inside them or other unsupported parsing contexts.
@@ -76,7 +83,10 @@ function parseHtmlTableRegex(html: string): string[][] {
       // rows and ignore everything after the first complete table (even
       // when it is empty). Preserve standalone row fragments only if no
       // explicit table was encountered, as supported by the legacy fallback.
-      if (closing) break;
+      if (closing) {
+        completeTable = true;
+        break;
+      }
       rows.length = 0;
     } else if (name === "tr") {
       if (!closing) {
@@ -97,6 +107,7 @@ function parseHtmlTableRegex(html: string): string[][] {
     }
   }
   if (rawHeader !== null || inTable || row !== null || cell !== null) return [];
+  if (!completeTable && unmatchedMarkup.test(html.slice(scannedThrough))) return [];
   return rows.filter((r) => !(r.length === 1 && r[0].trim() === ""));
 }
 

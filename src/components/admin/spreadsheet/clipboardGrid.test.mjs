@@ -297,3 +297,52 @@ test("HTML clipboard fallback preserves supported standalone row fragments and f
   assert.deepEqual(parseClipboardContent("", html), [["A\nB", "C"]]);
   assert.equal(looksLikeTabularClipboard("", html), true);
 });
+
+test("HTML clipboard fallback declines skipped malformed markup before or inside a table", () => {
+  const ghost = '<table><tr><td>GHOST</td><td>ROW</td></tr></table>';
+  const fixtures = [
+    '<!-- ' + ghost,
+    '<div title="' + ghost,
+    "<div title='" + ghost,
+    '<table><tr><td>A<!-- </td><td>GHOST</td></tr></table>',
+    '<tr><td>GHOST</td><td>ROW</td></tr><!-- unfinished',
+    '<tr><td>GHOST</td><td>ROW</td></tr><div title="unfinished',
+  ];
+  for (const html of fixtures) {
+    assert.deepEqual(parseHtmlClipboardTable(html), [], html);
+    assert.deepEqual(parseClipboardContent("KEEP", html), [["KEEP"]], html);
+    assert.deepEqual(parseClipboardContent("", html), [], html);
+    assert.equal(looksLikeTabularClipboard("KEEP", html), false, html);
+  }
+});
+
+test("HTML clipboard fallback keeps complete first tables and valid text/markup boundaries", () => {
+  const row = '<tr><td>A<br>B</td><td>1 < 3 &amp; &lt;tag&gt;</td></tr>';
+  const expected = [["A\nB", "1 < 3 & <tag>"]];
+  const table = '<table>' + row + '</table>';
+  for (const html of [row, table, table + '<!-- unfinished', table + '<div title="unfinished', '<!DOCTYPE html><html><head><style><!-- td { color: red; } --></style></head><body>' + table + '</body></html>']) {
+    assert.deepEqual(parseHtmlClipboardTable(html), expected, html);
+    assert.deepEqual(parseClipboardContent("", html), expected, html);
+    assert.equal(looksLikeTabularClipboard("", html), true, html);
+  }
+  const balanced = '<table><tr><td>A<!-- <tr><td>FAKE</td></tr> --><span title="<br>">B</span></td><td>C</td></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(balanced), [["AB", "C"]]);
+});
+
+test("HTML clipboard fallback after a DOMParser exception still declines malformed markup", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  try {
+    Object.defineProperty(globalThis, "DOMParser", {
+      configurable: true,
+      value: class DOMParserStub {
+        parseFromString() { throw new Error("parser unavailable"); }
+      },
+    });
+    const html = '<!-- <table><tr><td>GHOST</td><td>ROW</td></tr></table>';
+    assert.deepEqual(parseClipboardContent("KEEP", html), [["KEEP"]]);
+    assert.equal(looksLikeTabularClipboard("KEEP", html), false);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
