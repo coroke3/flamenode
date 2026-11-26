@@ -80,18 +80,76 @@ export function AdminRulesView({
 export function AdminRulesPage({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const [refreshKey, refresh] = React.useReducer(n => n + 1, 0);
+  const [accessEpoch, nextAccessEpoch] = React.useReducer(n => n + 1, 0);
   const status = ruleStatusQuery(params);
   const result = useApiResult(
     signal => readAdminRules(new URLSearchParams({ status }), fetchFn, signal),
-    "admin-rules?status=" + status,
+    "admin-rules?status=" + status + "&access=" + accessEpoch,
     refreshKey,
   );
   const redirect = result.status === "loading" ? null : adminReadRedirect(result);
   React.useEffect(() => {
     if (redirect) window.location.assign(redirect);
   }, [redirect]);
-  const broadcastApi = React.useMemo(() => createAdminTermsApi(fetchFn), [fetchFn]);
+  // Distinguish identity loss from ordinary write-guard failures. Unknown
+  // 403 replies must hide the private view until an authoritative fresh GET.
+  const [writeRevoked, setWriteRevoked] = React.useState(false);
+  const writeRevokedRef = React.useRef(false);
+  const [accessUnknown, setAccessUnknown] = React.useState(false);
+  const onDeniedWrite = React.useCallback((status: 401 | 403) => {
+    if (writeRevokedRef.current) return;
+    writeRevokedRef.current = true;
+    setWriteRevoked(true);
+    window.location.assign(status === 401 ? "/entry" : "/dashboard");
+  }, []);
+  const broadcastApi = React.useMemo(() => {
+    const guardedFetch: OpsFetch = async (path, init) => {
+      const response = await (fetchFn ?? fetch)(path, init);
+      if (response.status === 401) {
+        onDeniedWrite(401);
+        return response;
+      }
+      if (response.status !== 403) return response;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<null>(resolve => {
+        timeout = setTimeout(() => resolve(null), 250);
+      });
+      // Consume once and replay a bounded result for the shared writer.
+      const parsed: unknown = await Promise.race([
+        Promise.resolve().then(() => response.json()).catch(() => null),
+        deadline,
+      ]);
+      if (timeout !== undefined) clearTimeout(timeout);
+      const body = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown> : null;
+      const reason = body?.ok === false ? body.reason : null;
+      if (reason === "unauthenticated") onDeniedWrite(401);
+      else if (reason === "forbidden" || reason === "banned") onDeniedWrite(403);
+      else if (typeof reason !== "string" || ![
+        "invalid_origin", "maintenance_mode", "cost_guard_blocked",
+        "tos_required", "tos_reaccept_required", "active_x_required",
+        "active_x_rejected", "active_x_not_approved",
+      ].includes(reason)) {
+        setAccessUnknown(true);
+        return new Response(JSON.stringify({ ok: false, message: "管理権限を確認できません。再読み込みしてください。" }), {
+          status: 403, headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(body), {
+        status: 403, headers: { "content-type": "application/json" },
+      });
+    };
+    return createAdminTermsApi(guardedFetch);
+  }, [fetchFn, onDeniedWrite]);
 
+  if (writeRevoked) return <p role="status">規約管理へのアクセスが終了しました。</p>;
+  if (accessUnknown) return <section>
+    <p role="alert">管理権限を確認できません。再読み込みしてください。</p>
+    <button type="button" onClick={() => {
+      nextAccessEpoch();
+      setAccessUnknown(false);
+    }}>再読み込み</button>
+  </section>;
   if (result.status === "loading" || result.status === "anonymous" || result.status === "forbidden") {
     return <p role="status">読み込み中…</p>;
   }

@@ -27,7 +27,11 @@ export function projectPublicXIconMap(v1: unknown, usersIndex: unknown): PublicX
     : null;
   if (!index) return primary;
 
-  const entries: Record<string, PublicXIconEntry> = { ...(primary?.entries ?? {}) };
+  // Null-prototype entries prevent inherited keys and __proto__ setters from
+  // hiding valid X handles during users-index supplementation.
+  const entries: Record<string, PublicXIconEntry> = Object.assign(
+    Object.create(null) as Record<string, PublicXIconEntry>, primary?.entries ?? {},
+  );
   for (const user of index.items) {
     const xId = normalizeXId(user.x_id);
     if (!xId) continue;

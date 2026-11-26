@@ -8,6 +8,19 @@ import {
 import { normalizeStaticTop, type StaticTopEvent } from "./staticTopCore.ts";
 
 export const TOP_SECTIONS_SCHEMA_VERSION = 1 as const;
+/** Producer uses numeric Unix seconds; avoid coercing malformed or future R2 generations. */
+export const TOP_SECTIONS_MAX_FUTURE_SKEW_SEC = 5 * 60;
+
+function normalizeTopSectionGeneration(payload: Record<string, unknown>): number | null {
+  if (payload.schema_version !== TOP_SECTIONS_SCHEMA_VERSION) return null;
+  const generatedAt = payload.generated_at;
+  if (typeof generatedAt !== "number" || !Number.isSafeInteger(generatedAt) || generatedAt <= 0) {
+    return null;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  if (generatedAt > now + TOP_SECTIONS_MAX_FUTURE_SKEW_SEC) return null;
+  return generatedAt;
+}
 
 export const TOP_RECOMMENDED_OBJECT_KEY = "top/sections/recommended.v1.json";
 export const TOP_LATEST_OBJECT_KEY = "top/sections/latest.v1.json";
@@ -80,9 +93,8 @@ function normalizeVideoItems(value: unknown): TopVideoSectionData["items"] {
 export function normalizeTopRecommendedSection(value: unknown): TopVideoSectionData | null {
   if (!value || typeof value !== "object") return null;
   const payload = value as Record<string, unknown>;
-  if (Number(payload.schema_version) !== TOP_SECTIONS_SCHEMA_VERSION) return null;
-  const generatedAt = normalizeUnix(payload.generated_at);
-  if (generatedAt == null || generatedAt <= 0) return null;
+  const generatedAt = normalizeTopSectionGeneration(payload);
+  if (generatedAt === null) return null;
   const source = payload.items ?? payload.recommended;
   if (!Array.isArray(source)) return null;
   return { generatedAt, items: normalizeVideoItems(source) };
@@ -91,9 +103,8 @@ export function normalizeTopRecommendedSection(value: unknown): TopVideoSectionD
 export function normalizeTopLatestSection(value: unknown): TopVideoSectionData | null {
   if (!value || typeof value !== "object") return null;
   const payload = value as Record<string, unknown>;
-  if (Number(payload.schema_version) !== TOP_SECTIONS_SCHEMA_VERSION) return null;
-  const generatedAt = normalizeUnix(payload.generated_at);
-  if (generatedAt == null || generatedAt <= 0) return null;
+  const generatedAt = normalizeTopSectionGeneration(payload);
+  if (generatedAt === null) return null;
   const source = payload.items ?? payload.latest;
   if (!Array.isArray(source)) return null;
   return { generatedAt, items: normalizeVideoItems(source) };
@@ -102,11 +113,10 @@ export function normalizeTopLatestSection(value: unknown): TopVideoSectionData |
 export function normalizeTopNostalgicSection(value: unknown): TopNostalgicSectionData | null {
   if (!value || typeof value !== "object") return null;
   const payload = value as Record<string, unknown>;
-  if (Number(payload.schema_version) !== TOP_SECTIONS_SCHEMA_VERSION) return null;
-  const generatedAt = normalizeUnix(payload.generated_at);
+  const generatedAt = normalizeTopSectionGeneration(payload);
   const shuffledAt = normalizeUnix(payload.shuffled_at);
   const selectionDay = normalizeString(payload.selection_day);
-  if (generatedAt == null || generatedAt <= 0) return null;
+  if (generatedAt === null) return null;
   if (shuffledAt == null || shuffledAt <= 0) return null;
   if (!selectionDay) return null;
   if (!Array.isArray(payload.pool) || !Array.isArray(payload.display)) return null;
@@ -122,9 +132,8 @@ export function normalizeTopNostalgicSection(value: unknown): TopNostalgicSectio
 export function normalizeTopEventsSection(value: unknown): TopEventsSectionData | null {
   if (!value || typeof value !== "object") return null;
   const payload = value as Record<string, unknown>;
-  if (Number(payload.schema_version) !== TOP_SECTIONS_SCHEMA_VERSION) return null;
-  const generatedAt = normalizeUnix(payload.generated_at);
-  if (generatedAt == null || generatedAt <= 0) return null;
+  const generatedAt = normalizeTopSectionGeneration(payload);
+  if (generatedAt === null) return null;
   if (!Array.isArray(payload.active_events) || !Array.isArray(payload.latest_events)) {
     return null;
   }
@@ -153,9 +162,8 @@ export function normalizeTopAnnouncementsSection(
 ): TopAnnouncementsSectionData | null {
   if (!value || typeof value !== "object") return null;
   const payload = value as Record<string, unknown>;
-  if (Number(payload.schema_version) !== TOP_SECTIONS_SCHEMA_VERSION) return null;
-  const generatedAt = normalizeUnix(payload.generated_at);
-  if (generatedAt == null || generatedAt <= 0) return null;
+  const generatedAt = normalizeTopSectionGeneration(payload);
+  if (generatedAt === null) return null;
   const source = payload.items ?? payload.announcements;
   if (!Array.isArray(source)) return null;
   return {
@@ -167,9 +175,8 @@ export function normalizeTopAnnouncementsSection(
 export function normalizeTopStatsSection(value: unknown): TopStatsSectionData | null {
   if (!value || typeof value !== "object") return null;
   const payload = value as Record<string, unknown>;
-  if (Number(payload.schema_version) !== TOP_SECTIONS_SCHEMA_VERSION) return null;
-  const generatedAt = normalizeUnix(payload.generated_at);
-  if (generatedAt == null || generatedAt <= 0) return null;
+  const generatedAt = normalizeTopSectionGeneration(payload);
+  if (generatedAt === null) return null;
   if (!payload.stats || typeof payload.stats !== "object") return null;
   const statsRow = payload.stats as Record<string, unknown>;
   return {

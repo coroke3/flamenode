@@ -58,6 +58,6 @@ test("公開作品一覧APIは投影欠損時に503を返し、空配列200に�
   );
   assert.match(
     route,
-    /catch \(error\)[\s\S]*?publicServiceUnavailableResponse\("database_unavailable"\)/,
+    /catch(?:\s*\([^)]*\))?\s*\{[\s\S]*?publicServiceUnavailableResponse\("database_unavailable"\)/,
   );
 });
