@@ -1,22 +1,24 @@
 function decodeHtmlEntities(text: string): string {
-  return text
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#(x[0-9a-f]+|\d+);/gi, (_, raw: string) => {
-      const point = /^x/i.test(raw)
-        ? Number.parseInt(raw.slice(1), 16)
-        : Number(raw);
-      // Numeric HTML references denote Unicode scalar values, not UTF-16
-      // code units. fromCharCode truncates emoji and may introduce NUL.
-      if (!Number.isFinite(point) || point <= 0 || point > 0x10ffff
-        || (point >= 0xd800 && point <= 0xdfff)) return "\uFFFD";
-      return String.fromCodePoint(point);
-    })
-    // Decode ampersands last. An escaped numeric reference such as
-    // &amp;#128640; is literal text, not a second entity to evaluate.
-    .replace(/&amp;/g, "&");
+  // Match the existing supported references once; replacement text is never
+  // scanned again, even when numeric references produce an ampersand.
+  return text.replace(/&(?:[nN][bB][sS][pP]|lt|gt|quot|amp|#(?:[xX][0-9a-fA-F]+|\d+));/g, (entity) => {
+    switch (entity) {
+      case "&lt;": return "<";
+      case "&gt;": return ">";
+      case "&quot;": return '"';
+      case "&amp;": return "&";
+    }
+    if (!entity.startsWith("&#")) return " ";
+    const raw = entity.slice(2, -1);
+    const point = /^x/i.test(raw)
+      ? Number.parseInt(raw.slice(1), 16)
+      : Number(raw);
+    // Numeric HTML references denote Unicode scalar values, not UTF-16
+    // code units. fromCharCode truncates emoji and may introduce NUL.
+    if (!Number.isFinite(point) || point <= 0 || point > 0x10ffff
+      || (point >= 0xd800 && point <= 0xdfff)) return "\uFFFD";
+    return String.fromCodePoint(point);
+  });
 }
 
 function stripHtmlTags(fragment: string): string {

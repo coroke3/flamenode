@@ -423,3 +423,25 @@ test("HTML clipboard fallback never synthesizes a character reference across mar
     assert.equal(looksLikeTabularClipboard("", html), true, html);
   }
 });
+
+test("HTML clipboard fallback never reinterprets decoded character-reference text", () => {
+  const fixtures = [
+    ["&#38;amp;", "&amp;"], ["&#x26;amp;", "&amp;"], ["&#38;am&#112;;", "&amp;"],
+    ["&#38;lt;", "&lt;"], ["&#38;quot;", "&quot;"], ["&#38;nbsp;", "&nbsp;"],
+    ["&#38;#128640;", "&#128640;"], ["&#x26;#x1F680;", "&#x1F680;"],
+    ["&amp;amp;", "&amp;"], ["&amp;#38;", "&#38;"], ["&#38;", "&"], ["&amp;", "&"],
+    ["&#128640;", "\u{1f680}"], ["&#X1f680;", "\u{1f680}"], ["&#0;", "\uFFFD"],
+    ["&#55296;", "\uFFFD"], ["&#x110000;", "\uFFFD"], ["A&NBSP;B", "A B"],
+    ["&lt;&gt;&quot;", '<>"'],
+    // Preserve the existing bounded fallback vocabulary and case handling.
+    ["&LT;&AMP;&copy;", "&LT;&AMP;&copy;"],
+  ];
+  for (const [cell, expectedCell] of fixtures) {
+    const html = "<table><tr><td>" + cell + "</td><td>END</td></tr></table>";
+    const expected = [[expectedCell, "END"]];
+    assert.deepEqual(parseHtmlClipboardTable(html), expected, html);
+    assert.deepEqual(parseClipboardContent("", html), expected, html);
+    assert.equal(looksLikeTabularClipboard("", html), true, html);
+    assert.deepEqual(parseClipboardContent("PLAIN\tEND", html), [["PLAIN", "END"]], html);
+  }
+});
