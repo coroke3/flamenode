@@ -1,8 +1,9 @@
-/** MIG-0725 U03b: unmounted read-only X ID pending queue. Write actions await MIG-0605. */
+/** MIG-0725 U03c: unmounted X ID queue and injected review UI. Live writes await MIG-0605. */
 import * as React from "react";
 import type { ManageXLinkRequest, ManageXLinkRequestsResponse } from "@flamenode/contracts";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
-import { readManageXLinkRequests } from "../../api/manageXLinkRequests.js";
+import { readManageXLinkRequests, type XIdLinkReviewResult } from "../../api/manageXLinkRequests.js";
+import type { OpsWriteResult } from "../../api/write.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { ManageXIcon } from "../../components/shared/ManageXIcon.js";
 import { FnTable } from "../../components/shared/FnTable.js";
@@ -59,7 +60,7 @@ function XIdPreview({ id, name, icon, compact = false }: {
   </span>;
 }
 
-function Row({ row }: { row: ManageXLinkRequest }): React.ReactElement {
+function Row({ row, children }: { row: ManageXLinkRequest; children?: React.ReactNode }): React.ReactElement {
   const type = row.request_type === "new_link" || row.request_type === "existing_link"
     ? "X ID連携" : row.request_type;
   const discordIcon = safeIconUrl(row.discord_image);
@@ -83,23 +84,146 @@ function Row({ row }: { row: ManageXLinkRequest }): React.ReactElement {
       </span>
     </span></td>
     <td><time>{formatRequestedAt(row.requested_at)}</time></td>
+    {children}
   </tr>;
 }
 
-/** No approve/reject button until the Hono mutation contract is verified. */
-export function ManageXLinkRequestsBody({ data }: { data: ManageXLinkRequestsResponse }): React.ReactElement {
+type ReviewActions = {
+  approve: (requestId: string) => Promise<OpsWriteResult<XIdLinkReviewResult>>;
+  reject: (requestId: string, reason: string) => Promise<OpsWriteResult<XIdLinkReviewResult>>;
+  onRefresh: () => void | Promise<void>;
+  onAnonymous: () => void;
+};
+
+const REVIEW_UNAVAILABLE = "通信または処理中に問題が発生しました。再読み込みしてお試しください。";
+
+function isLinkRequest(row: ManageXLinkRequest): boolean {
+  return row.request_type === "new_link" || row.request_type === "existing_link";
+}
+
+/**
+ * Contract-first candidate: absent reviewActions means read-only.
+ * A future authorized host may inject a stable adapter only after MIG-0605.
+ * Server-side xid.link_requests permission, CAS and audit remain authoritative.
+ */
+export function ManageXLinkRequestsBody({ data, reviewActions }: {
+  data: ManageXLinkRequestsResponse; reviewActions?: ReviewActions;
+}): React.ReactElement {
+  const [pending, setPending] = React.useState(false);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [rejectingId, setRejectingId] = React.useState<string | null>(null);
+  const [reason, setReason] = React.useState("");
+  const [authLost, setAuthLost] = React.useState(false);
+  const [acknowledged, setAcknowledged] = React.useState<ReadonlySet<string>>(() => new Set());
+  const acknowledgedRef = React.useRef(new Set<string>());
+  const inFlight = React.useRef(false);
+  const denied = React.useRef(false);
+  const lifetime = React.useRef<object | null>(null);
+  const actionsRef = React.useRef(reviewActions);
+
+  React.useLayoutEffect(() => {
+    lifetime.current = {};
+    return () => { lifetime.current = null; };
+  }, []);
+  React.useLayoutEffect(() => { actionsRef.current = reviewActions; }, [reviewActions]);
+
+  function closeReject(): void {
+    setRejectingId(null);
+    setReason("");
+  }
+
+  async function run(row: ManageXLinkRequest, action: "approve" | "reject"): Promise<void> {
+    const adapter = actionsRef.current;
+    const token = lifetime.current;
+    if (!adapter || !token || denied.current || inFlight.current ||
+        !isLinkRequest(row) || acknowledgedRef.current.has(row.id)) return;
+    // Synchronous fence: React's disabled state is committed after the event.
+    inFlight.current = true;
+    setPending(true);
+    setMessage(null);
+    const isCurrent = () => lifetime.current === token && actionsRef.current === adapter;
+    try {
+      const result = action === "approve"
+        ? await adapter.approve(row.id)
+        : await adapter.reject(row.id, reason.trim().slice(0, 500));
+      if (!isCurrent()) return;
+      if (result.status === "anonymous") {
+        denied.current = true;
+        setAuthLost(true);
+        adapter.onAnonymous();
+        return;
+      }
+      if (result.status !== "ok") {
+        setMessage(REVIEW_UNAVAILABLE);
+        return;
+      }
+      setMessage(result.data.message ?? (result.data.ok ? "処理しました。" : "処理に失敗しました。"));
+      if (result.data.ok) {
+        // Do not allow another write for an acknowledged pending record if a
+        // refresh fails or returns the old queue. Do not replay the POST.
+        acknowledgedRef.current.add(row.id);
+        setAcknowledged(new Set(acknowledgedRef.current));
+        closeReject();
+        try {
+          await adapter.onRefresh();
+        } catch {
+          if (isCurrent()) setMessage((current) => (current ?? "処理しました。") + " 一覧の再取得に失敗しました。再読み込みしてください。");
+        }
+      }
+    } catch {
+      if (isCurrent() && !denied.current) setMessage(REVIEW_UNAVAILABLE);
+    } finally {
+      if (lifetime.current === token) {
+        inFlight.current = false;
+        setPending(false);
+      }
+    }
+  }
+
+  if (authLost) return <div role="status" aria-busy="true">読み込み中...</div>;
+
   return <div className="manage-x-link-requests">
     <ConsolePageHeader title="X ID 申請"
-      description="X ID連携申請の内容を確認します。承認・却下操作は移行検証中です。"
+      description={reviewActions ? "X ID連携申請を承認・却下します。統合操作は管理者画面に限定されます。" : "X ID連携申請の内容を確認します。承認・却下操作は移行検証中です。"}
       backHref="/manage" backLabel="イベント運営トップへ" accent>
       <span className="fn-badge fn-badge-soft">{data.rows.length}件</span>
     </ConsolePageHeader>
     <section className="fn-console-section">
+      {message ? <p role="status" className="fn-text-sm">{message}</p> : null}
       {data.rows.length === 0
         ? <p className="fn-muted fn-text-sm">承認待ちの X ID 連携申請はありません。</p>
         : <FnTable className="approval-queue-table approval-queue-table-xid">
-          <thead><tr><th>申請 ID</th><th>X ID</th><th>種別</th><th>申請者</th><th>申請日時</th></tr></thead>
-          <tbody>{data.rows.map((row) => <Row key={row.id} row={row} />)}</tbody>
+          <thead><tr><th>申請 ID</th><th>X ID</th><th>種別</th><th>申請者</th><th>申請日時</th>{reviewActions ? <th>操作</th> : null}</tr></thead>
+          <tbody>{data.rows.map((row) => <Row key={row.id} row={row}>
+            {reviewActions ? <td>
+              {isLinkRequest(row) ? <>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button type="button" className="fn-btn fn-btn-primary fn-btn-sm"
+                    disabled={pending || acknowledged.has(row.id)}
+                    onClick={() => { void run(row, "approve"); }}>承認</button>
+                  <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
+                    disabled={pending || acknowledged.has(row.id)}
+                    onClick={() => {
+                      setRejectingId(rejectingId === row.id ? null : row.id);
+                      setReason("");
+                    }}>却下</button>
+                </div>
+                {rejectingId === row.id && !acknowledged.has(row.id) ? <div style={{
+                  marginTop: 8, display: "flex", flexDirection: "column", gap: 6, maxWidth: 280,
+                }}>
+                  <textarea className="fn-input" placeholder="却下理由 (任意・履歴に残る)"
+                    aria-label="却下理由" rows={2} maxLength={500} disabled={pending}
+                    value={reason} onChange={(event) => setReason(event.target.value.slice(0, 500))} />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button type="button" className="fn-btn fn-btn-danger fn-btn-sm"
+                      disabled={pending} onClick={() => { void run(row, "reject"); }}>理由を添えて却下</button>
+                    <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
+                      disabled={pending} onClick={closeReject}>キャンセル</button>
+                  </div>
+                </div> : null}
+              </> : "—"}
+            </td> : null}
+          </Row>)}</tbody>
         </FnTable>}
     </section>
   </div>;
