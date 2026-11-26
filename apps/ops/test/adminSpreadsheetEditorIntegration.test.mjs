@@ -117,3 +117,72 @@ test("MIG-0737 U01: readonly table cannot opt in to mutation UI", async () => {
     assert.equal(ui.host.querySelector('button[aria-label="1行を削除"]').disabled, true);
   } finally { await ui.cleanup(); }
 });
+
+for (const staleStatus of [200, 403]) {
+  test("MIG-0737 U01: old post-write GET (" + staleStatus + ") cannot overwrite a newer A-B-A page", async () => {
+    let resolveOld;
+    const oldResponse = new Promise(resolve => { resolveOld = resolve; });
+    let oldSignal;
+    let videoReads = 0;
+    const writes = [];
+    const fn = async (path, init) => {
+      if (path.includes("/tables")) return json(200, catalog);
+      if (init.method === "PATCH") {
+        writes.push(JSON.parse(init.body));
+        return json(200, { ok: true });
+      }
+      const table = new URL(path, "https://flamenode.test").searchParams.get("table");
+      if (table === "events") return json(200, page("events", "other-table"));
+      videoReads++;
+      if (videoReads === 1) return json(200, page("videos", "before"));
+      if (videoReads === 2) {
+        oldSignal = init.signal;
+        // The mocked transport deliberately ignores cancellation.
+        return oldResponse;
+      }
+      return json(200, page("videos", "new-authorized-value"));
+    };
+    const ui = await mount({ fetchFn: fn, initialTable: "videos", enableMutations: true });
+    try {
+      await click(ui, "1行 title を編集");
+      const editor = ui.host.querySelector("label input[type=text]");
+      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+      await React.act(async () => {
+        setter.call(editor, "committed-value");
+        editor.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      });
+      await click(ui, "セルを保存");
+      assert.equal(videoReads, 2);
+      assert.ok(oldSignal instanceof AbortSignal);
+      assert.equal(oldSignal.aborted, false);
+      await click(ui, "イベント (RO)");
+      assert.equal(oldSignal.aborted, true);
+      assert.match(ui.host.textContent, /other-table/);
+      await click(ui, "動画 (RW)");
+      assert.equal(videoReads, 3);
+      assert.match(ui.host.textContent, /new-authorized-value/);
+      await click(ui, "1行 title を編集");
+      const newerEditor = ui.host.querySelector("label input[type=text]");
+      assert.ok(newerEditor);
+      await React.act(async () => {
+        setter.call(newerEditor, "new-draft");
+        newerEditor.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      });
+      await React.act(async () => {
+        resolveOld(staleStatus === 200 ? json(200, page("videos", "old-response")) :
+          json(403, { reason: "forbidden" }));
+        await new Promise(resolve => setImmediate(resolve));
+      });
+      await flush();
+      assert.doesNotMatch(ui.host.textContent, /old-response|管理者権限が必要/);
+      assert.equal(ui.host.querySelector("label input[type=text]"), newerEditor);
+      assert.equal(newerEditor.value, "new-draft");
+      assert.deepEqual(writes, [{ table: "videos", primaryKey: { id: "v1" },
+        column: "title", value: "committed-value" }]);
+      assert.equal(videoReads, 3);
+    } finally {
+      resolveOld(json(200, page("videos", "unused")));
+      await ui.cleanup();
+    }
+  });
+}

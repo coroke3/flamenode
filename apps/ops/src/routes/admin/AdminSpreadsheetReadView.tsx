@@ -48,17 +48,50 @@ export function AdminSpreadsheetReadView({
   const visibleContext = React.useRef({ fetchFn, initialTable, selectedTable, page });
   visibleContext.current = { fetchFn, initialTable, selectedTable, page };
 
+  // Both initial/page reads and post-mutation reloads share one committed
+  // context and request lease. A→B→A is not the same read generation.
+  const catalogReady = catalog.status === "ready" && catalogOrigin?.fetchFn === fetchFn &&
+    catalogOrigin.initialTable === initialTable;
+  const pageContext = React.useMemo(() => ({
+    fetchFn, initialTable, selectedTable, page, enableMutations, catalogReady,
+  }), [fetchFn, initialTable, selectedTable, page, enableMutations, catalogReady]);
+  const committedPageContext = React.useRef<typeof pageContext | null>(null);
+  const pageReadRef = React.useRef<AbortController | null>(null);
+  React.useLayoutEffect(() => {
+    committedPageContext.current = pageContext;
+    return () => {
+      committedPageContext.current = null;
+      pageReadRef.current?.abort();
+      pageReadRef.current = null;
+    };
+  }, [pageContext]);
+
+  const beginPageRead = React.useCallback((): AbortController | null => {
+    if (committedPageContext.current !== pageContext || !pageContext.catalogReady ||
+        !pageContext.selectedTable) return null;
+    pageReadRef.current?.abort();
+    const controller = new AbortController();
+    pageReadRef.current = controller;
+    return controller;
+  }, [pageContext]);
+  const isCurrentPageRead = React.useCallback((controller: AbortController): boolean =>
+    committedPageContext.current === pageContext && pageReadRef.current === controller &&
+    !controller.signal.aborted, [pageContext]);
+
   async function refreshAfterMutation(): Promise<void> {
-    const requestedTable = selectedTable;
-    const requestedPage = page;
-    const source = fetchFn;
-    const result = await loadSpreadsheetPage(source, requestedTable, requestedPage);
-    const live = visibleContext.current;
-    if (live.fetchFn !== source || live.selectedTable !== requestedTable || live.page !== requestedPage) return;
-    setRows(result.status === "ok"
-      ? { status: "ready", data: result.data }
-      : { status: result.status });
-    if (result.status !== "ok") throw new Error("spreadsheet_reload_failed");
+    const controller = beginPageRead();
+    if (!controller) return;
+    try {
+      const result = await loadSpreadsheetPage(pageContext.fetchFn, pageContext.selectedTable,
+        pageContext.page, controller.signal);
+      if (!isCurrentPageRead(controller)) return;
+      setRows(result.status === "ok"
+        ? { status: "ready", data: result.data }
+        : { status: result.status });
+      if (result.status !== "ok") throw new Error("spreadsheet_reload_failed");
+    } finally {
+      if (pageReadRef.current === controller) pageReadRef.current = null;
+    }
   }
 
   React.useEffect(() => {
@@ -186,17 +219,23 @@ export function AdminSpreadsheetReadView({
   }, [fetchFn, initialTable]);
 
   React.useEffect(() => {
-    if (catalog.status !== "ready" || !selectedTable) return;
-    const controller = new AbortController();
+    const controller = beginPageRead();
+    if (!controller) return;
     setRows({ status: "loading" });
-    void loadSpreadsheetPage(fetchFn, selectedTable, page, controller.signal).then((result) => {
-      if (controller.signal.aborted) return;
+    void loadSpreadsheetPage(pageContext.fetchFn, pageContext.selectedTable, pageContext.page,
+      controller.signal).then((result) => {
+      if (!isCurrentPageRead(controller)) return;
       setRows(result.status === "ok"
         ? { status: "ready", data: result.data }
         : { status: result.status });
+    }).finally(() => {
+      if (pageReadRef.current === controller) pageReadRef.current = null;
     });
-    return () => controller.abort();
-  }, [fetchFn, catalog.status, selectedTable, page]);
+    return () => {
+      controller.abort();
+      if (pageReadRef.current === controller) pageReadRef.current = null;
+    };
+  }, [pageContext, beginPageRead, isCurrentPageRead]);
 
   // Render-time origin verification prevents even a transient old-session paint
   // before the effect can clear state on a changed fetch function or URL selection.
