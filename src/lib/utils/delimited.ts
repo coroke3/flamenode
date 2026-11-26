@@ -71,17 +71,13 @@ export function parseDelimited(
       continue;
     }
 
-    if (ch === "\r") {
-      i += 1;
-      continue;
-    }
-
-    if (ch === "\n") {
+    if (ch === "\r" || ch === "\n") {
       cur.push(field);
       if (pushRow()) return rows;
       cur = [];
       field = "";
-      i += 1;
+      // CRLF is one record separator; bare CR and LF also separate records.
+      i += ch === "\r" && text[i + 1] === "\n" ? 2 : 1;
       continue;
     }
 
