@@ -28,15 +28,17 @@ export const EMPTY_RANDOM_VIDEO_POOL: RandomVideoPool = {
   items: [],
 };
 
-function isValidNullableUnixInput(value: unknown): boolean {
-  if (value == null || value === "") return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value !== "string") return false;
-  const normalized = value.trim();
-  if (!/^[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(normalized)) {
-    return false;
+function parseDecimalUnix(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !/^[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(value.trim())) {
+    return null;
   }
-  return Number.isFinite(Number(normalized));
+  // Reuse the shared date-representable Unix-second bounds after flooring.
+  return normalizeNullableUnix(value);
+}
+
+function isValidNullableUnixInput(value: unknown): boolean {
+  return value == null || value === "" || parseDecimalUnix(value) !== null;
 }
 
 function normalizeRelatedItem(value: unknown): StaticRelatedVideo | null {
@@ -58,16 +60,6 @@ function normalizeRelatedItem(value: unknown): StaticRelatedVideo | null {
   };
 }
 
-function isValidGeneratedAtInput(value: unknown): boolean {
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value !== "string") return false;
-  const normalized = value.trim();
-  if (!/^[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(normalized)) {
-    return false;
-  }
-  return Number.isFinite(Number(normalized));
-}
-
 export function normalizeRandomVideoPool(
   value: unknown,
 ): RandomVideoPool | null {
@@ -79,7 +71,8 @@ export function normalizeRandomVideoPool(
     items?: unknown;
   };
   if (payload.schema_version !== RANDOM_VIDEO_POOL_SCHEMA_VERSION) return null;
-  if (!isValidGeneratedAtInput(payload.generated_at)) return null;
+  const generatedAt = parseDecimalUnix(payload.generated_at);
+  if (generatedAt === null || generatedAt <= 0) return null;
   if (!Array.isArray(payload.items)) return null;
 
   const seen = new Set<string>();
@@ -91,19 +84,18 @@ export function normalizeRandomVideoPool(
     items.push(item);
   }
 
-  const generated = Number(payload.generated_at);
   const generationKey =
     typeof payload.generation_key === "string" &&
     payload.generation_key.trim()
       ? payload.generation_key.trim()
       : null;
 
-  if (!Number.isFinite(generated) || generated <= 0 || !generationKey) {
+  if (!generationKey) {
     return null;
   }
 
   return {
-    generatedAt: Math.floor(generated),
+    generatedAt,
     generationKey,
     items,
   };
