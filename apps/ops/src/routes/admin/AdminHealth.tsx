@@ -21,10 +21,27 @@ const OPERATIONAL_CHECK_IDS = [
   "x_id_merge_pending_stale",
 ] as const;
 
+// Match the actual CURRENT/Hono count-to-status rules. A complete but
+// contradictory receipt is unavailable, not a reassuring all-clear.
 function hasCompleteOperationalResults(results: AdminHealthResponse["results"]): boolean {
   if (results.length !== OPERATIONAL_CHECK_IDS.length) return false;
   const ids = new Set(results.map(result => result.id));
-  return OPERATIONAL_CHECK_IDS.every(id => ids.has(id));
+  if (!OPERATIONAL_CHECK_IDS.every(id => ids.has(id))) return false;
+  return results.every(({ id, status, count }) => {
+    if (!Number.isSafeInteger(count) || count < 0) return false;
+    switch (id) {
+      case "system_settings_single_row":
+        return status === (count === 1 ? "ok" : "warn");
+      case "notification_failed_volume":
+        return status === (count >= 20 ? "warn" : count > 0 ? "info" : "ok");
+      case "notification_processing_stuck":
+      case "open_moderation_cases_overdue":
+      case "x_id_merge_pending_stale":
+        return status === (count === 0 ? "ok" : "warn");
+      default:
+        return false;
+    }
+  });
 }
 
 export function AdminHealthView({

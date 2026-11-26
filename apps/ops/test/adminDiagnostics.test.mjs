@@ -35,6 +35,7 @@ const operationalIds = [
 const operationalResults = operationalIds.map((id, i) => ({
   ...(i < 3 ? results[i] : results[0]),
   id,
+  ...(i === 0 ? { count: 1 } : {}),
   ...(i > 2 ? { label: "check " + id } : {}),
 }));
 
@@ -158,6 +159,49 @@ test("MIG-0736 operational health requires all five distinct CURRENT check ident
   const warned = await view(operationalResults, "warn");
   assert.match(warned, /WARN 1 件/);
   assert.equal(new JSDOM(warned).window.document.querySelectorAll("tbody tr").length, 1);
+});
+
+test("MIG-0736 operational health rejects contradictory count/status even with all five IDs", async () => {
+  const clean = operationalResults.map(result => result.status === "warn"
+    ? { ...result, status: "ok", count: 0, samples: [] } : result);
+  // The producer distinguishes the one-row invariant and the failed-volume
+  // threshold (INFO at 1..19, WARN from 20) from the other count checks.
+  const counts = [0, 1, 2, 19, 20, Number.MAX_SAFE_INTEGER];
+  const expected = [
+    ["warn", "ok", "warn", "warn", "warn", "warn"],
+    ["ok", "warn", "warn", "warn", "warn", "warn"],
+    ["ok", "info", "info", "info", "warn", "warn"],
+    ["ok", "warn", "warn", "warn", "warn", "warn"],
+    ["ok", "warn", "warn", "warn", "warn", "warn"],
+  ];
+  const renderReceipt = async rows => {
+    const data = await getAdminHealth(async () => response(200, {
+      status: "all", results: rows, error: null,
+    }), false);
+    return render(h(AdminHealthView, { data, fullRun: false, initialFilter: "all", onRefresh: () => {} }));
+  };
+  const withRow = (index, count, status) => clean.map((row, i) => i === index
+    ? { ...row, count, status, samples: [] } : row);
+  for (let i = 0; i < clean.length; i++) {
+    for (let j = 0; j < counts.length; j++) {
+      for (const status of ["ok", "warn", "info"]) {
+        const html = await renderReceipt(withRow(i, counts[j], status));
+        const context = clean[i].id + ":" + counts[j] + ":" + status;
+        if (status === expected[i][j]) {
+          assert.match(html, status === "warn" ? /WARN 1 件/ : /WARN はありません/, context);
+          assert.match(html, /状態フィルタ/, context);
+        } else {
+          assert.match(html, /診断結果を取得できませんでした/, context);
+          assert.doesNotMatch(html, /WARN はありません|状態フィルタ|<table/, context);
+        }
+      }
+    }
+    for (const count of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const html = await renderReceipt(withRow(i, count, "ok"));
+      assert.match(html, /診断結果を取得できませんでした/, clean[i].id);
+      assert.doesNotMatch(html, /WARN はありません|状態フィルタ|<table/, clean[i].id);
+    }
+  }
 });
 
 test("MIG-0736 deep catalog or empty results never show an all-clear before U03", async () => {
@@ -593,6 +637,31 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
           });
           assert.match(target.textContent, /診断結果を取得できませんでした/, path);
           assert.doesNotMatch(target.textContent, /WARN はありません|full-operational-before-partial/, path);
+          assert.equal(target.querySelector("table"), null, path);
+
+          // Recover on a fresh operational read, then reject a complete receipt
+          // whose positive stuck count claims OK. Neither the old summary nor
+          // the contradictory new receipt may survive a refresh.
+          await go(runPath);
+          await go(path);
+          const freshComplete = pending.at(-1);
+          assert.equal(freshComplete.url, idleUrl, path);
+          await finish(freshComplete, "full-operational-before-contradiction");
+          assert.match(target.textContent, /full-operational-before-contradiction/, path);
+          const retryComplete = [...target.querySelectorAll("button")]
+            .find(button => button.textContent.trim() === "最新状態を再チェック");
+          assert.ok(retryComplete, path);
+          await React.act(async () => { retryComplete.click(); });
+          assert.notEqual(pending.at(-1), freshComplete, path);
+          assert.equal(pending.at(-1).url, idleUrl, path);
+          await React.act(async () => {
+            pending.at(-1).resolve(response(200, {
+              status: "all", error: null,
+              results: operationalResults.map((row, i) => i === 1 ? { ...row, status: "ok" } : row),
+            }));
+          });
+          assert.match(target.textContent, /診断結果を取得できませんでした/, path);
+          assert.doesNotMatch(target.textContent, /WARN はありません|full-operational-before-contradiction/, path);
           assert.equal(target.querySelector("table"), null, path);
         } else {
           // Re-enter after the denial, then prove a shape-valid partial refresh
