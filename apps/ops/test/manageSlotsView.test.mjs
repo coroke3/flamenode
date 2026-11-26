@@ -825,6 +825,7 @@ test("MIG-0722 U02b-12: stale same-event list/batch receipts invalidate only the
         await React.act(async () => newResolve({ ok: true, message: "NEW-RECEIPT" }));
         await waitFor(() => reads.length === before + 1 && row("s1") !== null &&
           !body().includes("User <name>"));
+        assert.match(body(), /NEW-RECEIPT/, "current receipt survives authorized refresh");
         deny = Boolean(scenario.deny);
         oldCommitted = true;
         await React.act(async () => oldResolve({ ok: true, message: "OBSOLETE-RECEIPT" }));
@@ -832,9 +833,10 @@ test("MIG-0722 U02b-12: stale same-event list/batch receipts invalidate only the
         assert.equal(row("s1"), null);
         if (deny) {
           assert.match(body(), /権限がありません/);
-          assert.doesNotMatch(body(), /Event A|すべて選択|一括生成/);
+          assert.doesNotMatch(body(), /Event A|すべて選択|一括生成|NEW-RECEIPT/);
         } else {
           assert.match(body(), /Event A/);
+          assert.match(body(), /NEW-RECEIPT/, "stale invalidation does not replace current receipt");
           assert.doesNotMatch(body(), /User <name>/);
         }
       } else {
@@ -859,6 +861,125 @@ test("MIG-0722 U02b-12: stale same-event list/batch receipts invalidate only the
       }
       assert.doesNotMatch(body(), /OBSOLETE-RECEIPT/);
       assert.deepEqual(calls, ["old", "new"], "no automatic replay");
+    });
+  }
+});
+
+
+test("MIG-0722 U02b-12: authorized success receipts survive the refresh for all four UI action families", async () => {
+  const cases = [
+    ...["single", "batch", "generate", "clear"].flatMap(kind =>
+      [false, true].map(pending => ({ kind, pending, status: 200 }))),
+    { kind: "single", pending: true, status: 401 },
+    { kind: "batch", pending: true, status: 403 },
+    { kind: "generate", pending: true, status: 404 },
+    { kind: "clear", pending: true, status: 503 },
+  ];
+  for (const { kind, pending, status } of cases) {
+    await withSlotDom(async (dom, root) => {
+      const previousFormData = Object.getOwnPropertyDescriptor(globalThis, "FormData");
+      Object.defineProperty(globalThis, "FormData", {
+        configurable: true, writable: true, value: dom.window.FormData,
+      });
+      try {
+        const initial = data();
+        const fresh = data({ slots: initial.slots.map(row =>
+          row.id === "s2" ? { ...row, display_name: "Fresh holder" } : row) });
+        const json = value => new Response(JSON.stringify(value), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+        let reads = 0;
+        let resolveRead;
+        const fetchFn = async () => {
+          reads++;
+          if (reads === 1 || reads === 3) return json(initial);
+          return new Promise(resolve => { resolveRead = resolve; });
+        };
+        const calls = [];
+        const message = kind === "generate" ? "7 件の枠を生成しました。"
+          : kind === "clear" ? "3 件の空き枠を削除しました。" : "SUCCESS-" + kind;
+        const settle = (action, input) => {
+          calls.push({ action, input });
+          return Promise.resolve({ ok: true, pendingPublicReflection: pending,
+            ...(kind === "generate" ? { created: 7 } :
+              kind === "clear" ? { created: 3 } : { message }) });
+        };
+        const writes = {
+          onGenerate: request => settle("generate", request),
+          onClearAvailable: () => settle("clear"),
+          onAction: operation => settle("list", operation),
+        };
+        const view = actions => React.createElement(MemoryRouter, null,
+          React.createElement(EventSlots, { eventId: "ev id", fetchFn, writeActions: actions }));
+        const body = () => dom.window.document.body.textContent;
+        const button = label => [...dom.window.document.querySelectorAll("button")]
+          .find(node => node.textContent.trim() === label);
+        const waitFor = async predicate => {
+          for (let i = 0; i < 10 && !predicate(); i++) {
+            await React.act(async () => { await new Promise(resolve => setImmediate(resolve)); });
+          }
+          assert.ok(predicate(), kind + " " + status + " " + body());
+        };
+        await React.act(async () => root.render(view(writes)));
+        await waitFor(() => body().includes("User <name>"));
+        if (kind === "generate") {
+          await React.act(async () => button("時間なし").click());
+          const form = dom.window.document.querySelector('form[aria-label="枠の一括生成"]');
+          form.querySelector('[name="count"]').value = "7";
+          await React.act(async () => form.dispatchEvent(new dom.window.Event("submit", {
+            bubbles: true, cancelable: true,
+          })));
+          assert.deepEqual(calls, [{ action: "generate",
+            input: { mode: "count", count: 7, label_prefix: "No.", start_index: 1 } }]);
+        } else if (kind === "clear") {
+          await React.act(async () => button("空き枠を全削除").click());
+          assert.equal(calls.length, 0);
+          await React.act(async () => button("全削除する").click());
+          assert.deepEqual(calls, [{ action: "clear", input: undefined }]);
+        } else {
+          if (kind === "batch") {
+            await React.act(async () => dom.window.document.querySelector('input[aria-label="枠 s1 を選択"]').click());
+            await React.act(async () => button("空き枠を削除 (1)").click());
+          } else {
+            await React.act(async () => button("削除").click());
+          }
+          assert.equal(calls.length, 0);
+          await React.act(async () => button("実行する").click());
+          assert.deepEqual(calls, [{ action: "list", input: kind === "batch"
+            ? { kind: "batch-delete", slotIds: ["s1"] } : { kind: "delete", slotId: "s1" } }]);
+        }
+        assert.equal(reads, 2);
+        assert.match(body(), /枠を読み込み中/);
+        assert.ok(!body().includes(message));
+        assert.doesNotMatch(body(), /User <name>|公開画面への反映は処理中/);
+        await React.act(async () => resolveRead(status === 200 ? json(fresh) : new Response(null, { status })));
+        await waitFor(() => !body().includes("枠を読み込み中"));
+        if (status === 200) {
+          assert.match(body(), /Fresh holder/);
+          const receipts = [...dom.window.document.querySelectorAll('[role="status"]')]
+            .filter(node => node.textContent.includes(message));
+          assert.equal(receipts.length, 1);
+          assert.equal(receipts[0].textContent.trim(),
+            message + (pending ? " 公開画面への反映は処理中です。" : ""));
+          await React.act(async () => root.render(view({ ...writes, onAction: async () => ({ ok: true }) })));
+          assert.ok(!body().includes(message), "port rotation drops old receipt");
+          await React.act(async () => root.render(view(writes)));
+          assert.ok(!body().includes(message), "A-B-A cannot revive old receipt");
+        } else {
+          assert.ok(!body().includes(message));
+          assert.doesNotMatch(body(), /Fresh holder|User <name>|公開画面への反映は処理中|すべて選択/);
+          if (status === 503) {
+            await React.act(async () => button("再読み込み").click());
+            await waitFor(() => body().includes("User <name>"));
+            assert.equal(reads, 3);
+            assert.ok(!body().includes(message));
+          }
+        }
+        assert.equal(calls.length, 1, "never replay a mutation");
+      } finally {
+        if (previousFormData) Object.defineProperty(globalThis, "FormData", previousFormData);
+        else delete globalThis.FormData;
+      }
     });
   }
 });

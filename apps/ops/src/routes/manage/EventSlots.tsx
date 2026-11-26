@@ -77,6 +77,7 @@ type ReadContext = {
   eventId: string; status: string; fetchFn?: OpsFetch; refresh: number;
 };
 type TaggedResult = { context: ReadContext; result: OpsResult<ManageSlotsList> };
+type MutationReceipt = { kind: "success" | "failure"; message: string; pendingPublicReflection?: boolean };
 
 /** Intended to be mounted by MIG-0719's router owner after U02–U04 are complete. */
 export function EventSlots({ eventId, fetchFn, writeActions }: {
@@ -86,24 +87,15 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
   const status = normalizeSlotFilter(search.get("status"));
   const [request, setRequest] = React.useState<TaggedResult | null>(null);
   const { onGenerate, onClearAvailable, onAction, canManageSubmittedSlots } = writeActions ?? {};
-  // Keep the domain-failure notice across a fresh authorized read, not across
+  // Keep the current mutation receipt across a fresh authorized read, not across
   // navigation, adapter replacement or capability changes (including A-B-A).
   const feedbackScope = React.useMemo(() => ({
     eventId, status, fetchFn, onGenerate, onClearAvailable, onAction, canManageSubmittedSlots,
   }), [eventId, status, fetchFn, onGenerate, onClearAvailable, onAction, canManageSubmittedSlots]);
   const [reload, setReload] = React.useState<{
-    key: number; failure: { scope: typeof feedbackScope; message: string } | null;
-  }>({ key: 0, failure: null });
+    key: number; receipt: { scope: typeof feedbackScope; value: MutationReceipt } | null;
+  }>({ key: 0, receipt: null });
   const refresh = reload.key;
-  const onChanged = React.useCallback((failure?: string) => {
-    setReload(previous => ({
-      key: previous.key + 1,
-      failure: failure === undefined ? null : { scope: feedbackScope, message: failure },
-    }));
-  }, [feedbackScope]);
-  const onClearFailure = React.useCallback(() => {
-    setReload(previous => previous.failure === null ? previous : { ...previous, failure: null });
-  }, []);
   // Tag every read with its exact UI generation. A refetch of the same
   // event/filter must not briefly reveal a previously authorized snapshot.
   // Object identity also prevents A -> B -> A from reviving cached rows.
@@ -132,7 +124,7 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
   // Wait for current-view writes to settle before tearing down their controls.
   const writeView = React.useMemo(() => ({
     eventId, feedbackScope, pending: 0, refreshNeeded: false,
-    failure: undefined as string | null | undefined, canInvalidate: false,
+    receipt: undefined as MutationReceipt | undefined, canInvalidate: false,
   }), [eventId, feedbackScope, readContext]);
   const committedWriteView = React.useRef<typeof writeView | null>(null);
   React.useLayoutEffect(() => {
@@ -151,31 +143,40 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
     const flush = (view: typeof writeView) => {
       if (committedWriteView.current !== view || !view.canInvalidate ||
           view.pending !== 0 || !view.refreshNeeded) return;
-      const failure = view.failure;
+      const receipt = view.receipt;
       view.refreshNeeded = false;
-      view.failure = undefined;
+      view.receipt = undefined;
       setReload(previous => ({
         key: previous.key + 1,
-        failure: failure === undefined ? previous.failure : failure === null ? null :
-          { scope: view.feedbackScope, message: failure },
+        receipt: receipt === undefined ? previous.receipt :
+          { scope: view.feedbackScope, value: receipt },
       }));
     };
-    const track = async <T extends { ok: boolean; message?: string },>(
+    const track = async <T extends {
+      ok: boolean; message?: string; created?: number; pendingPublicReflection?: boolean;
+    },>(
       action: () => Promise<T>, refreshOnFailure: boolean,
+      success: (result: T) => string,
     ): Promise<T> => {
       if (committedWriteView.current !== writeView || !writeView.canInvalidate) {
         throw new Error("Obsolete slot write view");
       }
       writeView.pending++;
-      writeView.failure = undefined;
+      writeView.receipt = undefined;
+      // A new explicit mutation clears the previously rendered receipt for
+      // both forms and list operations; never resurrect it on a retry.
+      setReload(previous => previous.receipt === null ? previous : { ...previous, receipt: null });
       try {
         const result = await action();
         const refreshNeeded = result.ok || refreshOnFailure;
         const current = committedWriteView.current;
         if (current === writeView) {
           writeView.refreshNeeded ||= refreshNeeded;
-          writeView.failure = result.ok ? null : result.message ??
-            (refreshOnFailure ? "枠の操作に失敗しました。" : "枠操作に失敗しました。");
+          writeView.receipt = result.ok
+            ? { kind: "success", message: result.message ?? success(result),
+                pendingPublicReflection: result.pendingPublicReflection }
+            : { kind: "failure", message: result.message ??
+                (refreshOnFailure ? "枠の操作に失敗しました。" : "枠操作に失敗しました。") };
         } else if (refreshNeeded && current?.eventId === writeView.eventId) {
           // Do not publish an obsolete result message or reuse an old port.
           current.refreshNeeded = true;
@@ -184,7 +185,7 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
         return result;
       } catch (error) {
         if (committedWriteView.current === writeView) {
-          writeView.failure = "枠操作中に通信エラーが発生しました。";
+          writeView.receipt = { kind: "failure", message: "枠操作中に通信エラーが発生しました。" };
         }
         throw error;
       } finally {
@@ -192,10 +193,22 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
         flush(writeView);
       }
     };
+    // Use a supplied terminal count only. Do not infer a whole-operation
+    // success/count from a provisional chunk response.
+    const batchMessage = (result: SlotMutationResult, verb: "generate" | "clear") => {
+      const count = result.created;
+      const hasCount = typeof count === "number" && Number.isSafeInteger(count) && count >= 0;
+      return verb === "generate"
+        ? hasCount ? `${count} 件の枠を生成しました。` : "枠を生成しました。"
+        : hasCount ? `${count} 件の空き枠を削除しました。` : "空き枠を削除しました。";
+    };
     return {
-      onGenerate: request => track(() => onGenerate(request), false),
-      onClearAvailable: () => track(onClearAvailable, false),
-      onAction: operation => track(() => onAction(operation), true),
+      onGenerate: request => track(() => onGenerate(request), false,
+        result => batchMessage(result, "generate")),
+      onClearAvailable: () => track(onClearAvailable, false,
+        result => batchMessage(result, "clear")),
+      onAction: operation => track(() => onAction(operation), true,
+        () => "枠を更新しました。"),
       canManageSubmittedSlots,
     };
   }, [writeView, onGenerate, onClearAvailable, onAction, canManageSubmittedSlots]);
@@ -208,14 +221,17 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
   if (validRequest.status !== "ok") return <div role="alert">
     <p>枠一覧を取得できませんでした。権限と通信状態を確認してください。</p>
     <button type="button" className="fn-btn fn-btn-ghost"
-      onClick={() => onChanged()}>再読み込み</button>
+      onClick={() => setReload(previous => ({ key: previous.key + 1, receipt: null }))}>再読み込み</button>
   </div>;
   // A denied, failed or still-pending GET never renders a mutation receipt
   // or the previous private rows. Only the newly authorized snapshot can.
-  const failure = reload.failure?.scope === feedbackScope ? reload.failure.message : null;
+  const receipt = reload.receipt?.scope === feedbackScope ? reload.receipt.value : null;
   return <>
-    {failure !== null && <p role="alert" className="fn-alert fn-alert--danger">{failure}</p>}
+    {receipt?.kind === "failure" && <p role="alert" className="fn-alert fn-alert--danger">{receipt.message}</p>}
+    {receipt?.kind === "success" && <p role="status" className="fn-console-note">
+      {receipt.message}{receipt.pendingPublicReflection ? " 公開画面への反映は処理中です。" : ""}
+    </p>}
     <EventSlotsView eventId={eventId} status={status} data={validRequest.data}
-      writeActions={trackedWrites} onClearFailure={onClearFailure} />
+      writeActions={trackedWrites} />
   </>;
 }
