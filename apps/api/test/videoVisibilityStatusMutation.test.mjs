@@ -841,3 +841,138 @@ test("Next control-flow during R2 precommit and compensation failures never hide
       "R2 errors and framework control exception must not enter structured logs or responses");
   }
 });
+
+test("MIG-0603: diagnostic sink failure cannot erase uncertain R2 compensation outcomes", async () => {
+  const privateMarker = "PRIVATE_PROVIDER_MARKER";
+  for (const mode of ["compensator-throw", "readback-false", "readback-throw", "framework-control"]) {
+    const calls = [];
+    const original = new Error(privateMarker);
+    const result = await executeVideoVisibilityStatusMutation({
+      db: {}, videoId: "v-1", requestedStatus: "private",
+      transition: transition(), reason: null, logTag: "admin-video-status",
+    }, host({
+      mutate: async () => { calls.push("mutate"); throw original; },
+      rethrowFrameworkControl: error => {
+        if (mode === "framework-control") throw error;
+      },
+      compensate: async (_db, details) => {
+        calls.push("compensate");
+        assert.equal(details.fenceToken, "fence-1");
+        if (mode === "compensator-throw" || mode === "framework-control") {
+          throw new Error(privateMarker);
+        }
+      },
+      confirmCompensation: async () => {
+        calls.push("confirm");
+        if (mode === "readback-throw") throw new Error(privateMarker);
+        return false;
+      },
+      isAuditMutationError: () => { calls.push("unexpected-classifier"); return true; },
+      rereadStatus: async () => { calls.push("unexpected-reread"); return "private"; },
+      log: (level, tag, details) => {
+        calls.push(["log", level, tag, details]);
+        throw new Error(privateMarker);
+      },
+    }, calls));
+    assert.deepEqual(result, {
+      ok: false, message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+      errorCode: "status_unverified", traceId: "trace-1", retryable: false,
+    }, mode);
+    assert.deepEqual(calls, [
+      "precommit", "mutate", "compensate",
+      ...(mode.startsWith("readback-") ? ["confirm"] : []),
+      ["log", "warn", "[admin-video-status] visibility compensation failed",
+        { traceId: "trace-1", error_code: "visibility_compensation_failed" }],
+    ], mode);
+    assert.doesNotMatch(JSON.stringify({ calls, result }), /PRIVATE_PROVIDER_MARKER/);
+  }
+});
+
+test("MIG-0603: throwing diagnostic sink preserves every classified failure result", async () => {
+  const cases = [
+    ["precommit", "visibility_precommit_failed", false, ["precommit", "compensate", "log"]],
+    ["guarded", "status_unverified", false, ["mutate", "log"]],
+    ["reread-throw", "status_unverified", false, ["mutate", "reread", "log"]],
+    ["reread-missing", "status_unverified", false, ["mutate", "reread", "log"]],
+    ["legacy-marker", "visibility_precommit_failed", false, ["mutate", "log"]],
+    ["ordinary", "mutation_failed", true, ["mutate", "log"]],
+  ];
+  for (const [mode, errorCode, retryable, expected] of cases) {
+    const calls = [];
+    const input = {
+      db: {}, videoId: "v-1", requestedStatus: "private", reason: null,
+      transition: transition({ fenceToken: mode === "precommit" ? "fence-1" : null }),
+      logTag: "admin-video-status",
+      ...(mode === "guarded" ? { preMutationAssertions: ["trusted-guard"] } : {}),
+    };
+    const adapters = {
+      preCommit: async () => { calls.push("precommit"); throw new Error("private precommit"); },
+      mutate: async () => { calls.push("mutate"); throw new Error("private mutation"); },
+      isAuditMutationError: () => mode.startsWith("reread-"),
+      isVisibilityPrecommitFailure: () => mode === "legacy-marker",
+      rereadStatus: async () => {
+        calls.push("reread");
+        if (mode === "reread-throw") throw new Error("private reread");
+        return undefined;
+      },
+    };
+    const healthy = await executeVideoVisibilityStatusMutation(input, host(adapters, []));
+    calls.length = 0;
+    const result = await executeVideoVisibilityStatusMutation(input, host({
+      ...adapters,
+      log: (_level, _tag, details) => {
+        calls.push(["log", Object.keys(details).sort()]);
+        throw new Error("private sink");
+      },
+    }, calls));
+    // Compare the DTO with a healthy sink, not just its error code.
+    assert.deepEqual(result, healthy, mode);
+    assert.equal(result.ok, false, mode);
+    assert.equal(result.errorCode, errorCode, mode);
+    assert.equal(result.retryable, retryable, mode);
+    assert.deepEqual(calls.map(item => Array.isArray(item) ? item[0] : item), expected, mode);
+    assert.deepEqual(calls.at(-1), ["log", ["error_code", "traceId"]], mode);
+    assert.doesNotMatch(JSON.stringify(result), /private (precommit|mutation|reread|sink)/);
+  }
+});
+
+test("MIG-0603: hostile provider failure classification is nonretryable and never rereads status", async () => {
+  const privateMarker = "PRIVATE_CLASSIFIER_MARKER";
+  const poisonedMessage = Object.defineProperty(new Error(), "message", {
+    get() { throw new Error(privateMarker); },
+  });
+  const poisonedCoercion = { [Symbol.toPrimitive]() { throw new Error(privateMarker); } };
+  const poisonedPrototype = new Proxy({}, {
+    getPrototypeOf() { throw new Error(privateMarker); },
+  });
+  for (const failure of [poisonedMessage, poisonedCoercion, poisonedPrototype]) {
+    const calls = [];
+    const result = await executeVideoVisibilityStatusMutation({
+      db: {}, videoId: "v-1", requestedStatus: "public", reason: null,
+      transition: transition({ fenceToken: null, depublicizedFromPublic: false }),
+      logTag: "admin-video-status",
+    }, host({
+      mutate: async () => { calls.push("mutate"); throw failure; },
+      // Match the production adapter's instanceof/message/coercion shape.
+      isAuditMutationError: error => error instanceof TypeError,
+      isVisibilityPrecommitFailure: error => {
+        const message = error instanceof Error ? error.message : String(error);
+        return message.includes("public_visibility_fence") || message.includes("public_visibility_manifest");
+      },
+      rereadStatus: async () => { calls.push("unexpected-reread"); return "public"; },
+      log: (level, tag, details) => {
+        calls.push(["log", level, tag, details]);
+        throw new Error(privateMarker);
+      },
+    }, calls));
+    assert.deepEqual(result, {
+      ok: false, message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+      errorCode: "status_unverified", traceId: "trace-1", retryable: false,
+    });
+    assert.deepEqual(calls, [
+      "mutate", ["log", "warn", "[admin-video-status] status failure classification unavailable",
+        { traceId: "trace-1", error_code: "status_failure_classification_unavailable" }],
+    ]);
+    assert.doesNotMatch(JSON.stringify({ calls, result }), /PRIVATE_CLASSIFIER_MARKER/);
+  }
+});

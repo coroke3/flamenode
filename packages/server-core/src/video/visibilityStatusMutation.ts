@@ -137,6 +137,15 @@ export async function executeVideoVisibilityStatusMutation<DB>(
       staticRebuildWakeSource: input.staticRebuildWakeSource,
     });
   } catch (error) {
+    // Observability is best-effort: a failing diagnostic sink must never
+    // replace the established mutation or visibility-compensation result.
+    const logFailure: VideoVisibilityStatusMutationHost<DB>["log"] = (level, tag, details) => {
+      try {
+        host.log(level, tag, details);
+      } catch {
+        // Do not log the logger failure or inspect its provider error.
+      }
+    };
     // Next control-flow exceptions (redirect/notFound) must still propagate,
     // but only AFTER a possibly-written R2 visibility fence is compensated
     // and its removal is confirmed. Re-throwing first strands the fence.
@@ -169,7 +178,7 @@ export async function executeVideoVisibilityStatusMutation<DB>(
         compensationFailed = true;
         // Provider/D1/R2 exceptions can contain SQL, request bodies or
         // credentials. Do not send exception objects to console adapters.
-        host.log("warn", `[${logTag}] visibility compensation failed`, {
+        logFailure("warn", `[${logTag}] visibility compensation failed`, {
           traceId,
           error_code: "visibility_compensation_failed",
         });
@@ -204,7 +213,7 @@ export async function executeVideoVisibilityStatusMutation<DB>(
       };
     }
     if (preCommitInFlight) {
-      host.log("error", `[${logTag}] visibility precommit failed`, {
+      logFailure("error", `[${logTag}] visibility precommit failed`, {
         traceId, error_code: "visibility_precommit_failed",
       });
       return {
@@ -224,7 +233,7 @@ export async function executeVideoVisibilityStatusMutation<DB>(
     // status or allow an automatic CAS retry after permission revocation.
     // Unguarded CURRENT callers keep their established CAS classification.
     if (input.preMutationAssertions?.length) {
-      host.log("warn", `[${logTag}] guarded status mutation unverified`, {
+      logFailure("warn", `[${logTag}] guarded status mutation unverified`, {
         traceId, error_code: "status_guard_or_mutation_failed",
       });
       return {
@@ -235,7 +244,27 @@ export async function executeVideoVisibilityStatusMutation<DB>(
         retryable: false,
       };
     }
-    if (host.isAuditMutationError(error)) {
+    // Provider exceptions may have throwing message/coercion/prototype hooks.
+    // Preserve ordinary classification order, but an uninspectable failure
+    // cannot justify a status oracle or an automatic retry.
+    let failureKind: "audit" | "precommit" | "mutation";
+    try {
+      failureKind = host.isAuditMutationError(error)
+        ? "audit"
+        : host.isVisibilityPrecommitFailure(error) ? "precommit" : "mutation";
+    } catch {
+      logFailure("warn", `[${logTag}] status failure classification unavailable`, {
+        traceId, error_code: "status_failure_classification_unavailable",
+      });
+      return {
+        ok: false,
+        message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+        errorCode: "status_unverified",
+        traceId,
+        retryable: false,
+      };
+    }
+    if (failureKind === "audit") {
       let currentStatus: string | null | undefined;
       try {
         currentStatus = await host.rereadStatus(db, videoId);
@@ -243,7 +272,7 @@ export async function executeVideoVisibilityStatusMutation<DB>(
         // A failed CAS followed by an unavailable D1 reread has an UNKNOWN
         // final status. Do not leak SQL/provider errors or mark it idempotent
         // or automatically retry a potentially fenced visibility transition.
-        host.log("warn", `[${logTag}] visibility status reread failed`, {
+        logFailure("warn", `[${logTag}] visibility status reread failed`, {
           traceId, error_code: "visibility_status_reread_failed",
         });
         return {
@@ -258,7 +287,7 @@ export async function executeVideoVisibilityStatusMutation<DB>(
         // No row is not proof of a concurrent update. The video may be
         // missing or the D1 read may have returned no result; a blind retry
         // is unsafe while an R2 visibility fence may still exist.
-        host.log("warn", `[${logTag}] visibility status missing after CAS conflict`, {
+        logFailure("warn", `[${logTag}] visibility status missing after CAS conflict`, {
           traceId, error_code: "visibility_status_missing",
         });
         return {
@@ -283,8 +312,8 @@ export async function executeVideoVisibilityStatusMutation<DB>(
         retryable: true,
       };
     }
-    if (host.isVisibilityPrecommitFailure(error)) {
-      host.log("error", `[${logTag}] visibility precommit failed`, {
+    if (failureKind === "precommit") {
+      logFailure("error", `[${logTag}] visibility precommit failed`, {
         traceId, error_code: "visibility_precommit_failed",
       });
       return {
@@ -295,7 +324,7 @@ export async function executeVideoVisibilityStatusMutation<DB>(
         retryable: false,
       };
     }
-    host.log("error", `[${logTag}] mutation failed`, {
+    logFailure("error", `[${logTag}] mutation failed`, {
       traceId, error_code: "mutation_failed",
     });
     return {
