@@ -10,29 +10,79 @@ const TARGETS = ["top", "top_recommended", "top_latest", "top_nostalgic", "top_e
   "users_index", "list_recent", "list_popular", "search_index", "recommend_core", "recommend", "rules",
   "youtube_related_blocklist", "random_video_pool", "member_suggestions"] as const;
 
-export function StaticBuilds(): React.ReactElement {
+/** Never treat an admin authorization rejection as a retryable application error. */
+export function staticBuildsRevokedDestination(status: string): "/entry" | "/dashboard" | null {
+  if (status === "anonymous") return "/entry";
+  if (status === "forbidden") return "/dashboard";
+  return null;
+}
+
+/** The real router uses location.assign; injection permits verifying navigation
+ * calls without relying on jsdom's intentionally unimplemented navigation. */
+function navigateStaticBuildsRevoked(destination: "/entry" | "/dashboard"): void {
+  window.location.assign(destination);
+}
+
+export function StaticBuilds({ onRevokedNavigate = navigateStaticBuildsRevoked }: {
+  onRevokedNavigate?: (destination: "/entry" | "/dashboard") => void;
+} = {}): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const [data, setData] = React.useState<AdminStaticBuildsResponse | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
   const [refreshId, setRefreshId] = React.useState(0);
+  const [revokedTo, setRevokedTo] = React.useState<"/entry" | "/dashboard" | null>(null);
+  // A response from an older in-flight GET must never re-mount private state.
+  const accessRevokedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (revokedTo) onRevokedNavigate(revokedTo);
+  }, [revokedTo, onRevokedNavigate]);
   React.useEffect(() => {
     const controller = new AbortController();
-    void readStaticBuilds(undefined, controller.signal).then(result => {
-      if (controller.signal.aborted) return;
+    // HTTP 401/403 headers are authoritative. The shared read adapter may
+    // await an optional 403 JSON error body indefinitely; unmount private
+    // diagnostics immediately when headers arrive, without waiting for it.
+    void readStaticBuilds(async (path, init) => {
+      const response = await fetch(path, init);
+      if (!controller.signal.aborted && !accessRevokedRef.current) {
+        const destination = response.status === 401 ? "/entry"
+          : response.status === 403 ? "/dashboard" : null;
+        if (destination) {
+          accessRevokedRef.current = true;
+          setData(null);
+          setRevokedTo(destination);
+        }
+      }
+      return response;
+    }, controller.signal).then(result => {
+      if (controller.signal.aborted || accessRevokedRef.current) return;
+      const destination = staticBuildsRevokedDestination(result.status);
+      if (destination) {
+        accessRevokedRef.current = true;
+        setData(null);
+        setRevokedTo(destination);
+        return;
+      }
       if (result.status === "ok") { setData(result.data); setLoadError(null); }
       else { setData(null); setLoadError(result.status === "anonymous" ? "再ログインが必要です。" : "取得できませんでした。"); }
     });
     return () => controller.abort();
   }, [refreshId]);
   async function mutate(path: string, payload: Record<string, string>, carryQuery = false): Promise<void> {
-    if (busyRef.current) return;
+    if (busyRef.current || accessRevokedRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setLoadError(null);
     try {
       const result = await postAdminOp(path, payload);
+      const destination = staticBuildsRevokedDestination(result.status);
+      if (destination) {
+        accessRevokedRef.current = true;
+        setData(null);
+        setRevokedTo(destination);
+        return;
+      }
       if (result.status !== "ok" && result.status !== "outcome") {
         setLoadError(result.status === "anonymous" ? "再ログインが必要です。" : "操作できませんでした。更新後に状態を確認してください。");
         return;
@@ -59,6 +109,9 @@ export function StaticBuilds(): React.ReactElement {
     failed: "修復操作に失敗しました。ログとdeep healthを確認してください。",
   };
   const stateFailed = query.get("backfill_state_persisted") === "0";
+  // Hide all previously loaded queue diagnostics and privileged repair controls
+  // before the fixed internal navigation effect runs.
+  if (revokedTo) return <section role="alert">管理画面へのアクセスが終了しました。</section>;
   return <div className="fn-public-container fn-page">
     <header className="fn-page-head"><h1>静的JSON再生成</h1>
       <p>編集駆動のR2公開用JSONキュー。Next.jsのビルドとは別です。</p></header>

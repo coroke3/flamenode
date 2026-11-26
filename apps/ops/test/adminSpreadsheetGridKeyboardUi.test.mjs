@@ -26,18 +26,23 @@ async function mount(props = {}) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  await React.act(async () => root.render(React.createElement(AdminSpreadsheetEditableGrid, {
+  let currentProps = {
     data, onRefresh: () => {}, fetchFn: async () => { throw Error("unexpected mutation"); },
     ...props,
-  })));
-  return { host, cleanup: async () => { await React.act(async () => root.unmount()); host.remove(); } };
+  };
+  const render = async (next = {}) => {
+    currentProps = { ...currentProps, ...next };
+    await React.act(async () => root.render(React.createElement(AdminSpreadsheetEditableGrid, currentProps)));
+  };
+  await render();
+  return { host, render, cleanup: async () => { await React.act(async () => root.unmount()); host.remove(); } };
 }
 async function press(cell, key, options = {}) {
-  await React.act(async () => {
-    cell.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
-      key, bubbles: true, cancelable: true, ...options,
-    }));
+  const event = new dom.window.KeyboardEvent("keydown", {
+    key, bubbles: true, cancelable: true, ...options,
   });
+  await React.act(async () => { cell.dispatchEvent(event); });
+  return event;
 }
 async function flush() {
   await React.act(async () => { await new Promise(resolve => setImmediate(resolve)); });
@@ -97,3 +102,263 @@ test("MIG-0737 U01: Enter opens only mutable columns; missing clipboard permissi
     else delete navigator.clipboard;
   }
 });
+
+const rangeData = {
+  ...data,
+  columns: [...data.columns, { name: "note", type: "TEXT", editable: false, pk: 0, notNull: false }],
+  rows: [
+    { id: "a1", title: "Alpha", note: "first" },
+    { id: "b2", title: "Beta", note: "second" },
+    { id: "c3", title: "Gamma", note: "third" },
+  ],
+  page: 2, limit: 3, hasMore: true,
+};
+const pageCells = ["0:0", "0:1", "0:2", "1:0", "1:1", "1:2", "2:0", "2:1", "2:2"];
+const rowCells = ["1:0", "1:1", "1:2"];
+const columnCells = ["0:1", "1:1", "2:1"];
+const pageTsv = "a1\tAlpha\tfirst\nb2\tBeta\tsecond\nc3\tGamma\tthird";
+const rowTsv = "b2\tBeta\tsecond";
+const columnTsv = "Alpha\nBeta\nGamma";
+
+function gridCell(ui, position) {
+  const cell = ui.host.querySelector(`[data-grid-cell="${position}"]`);
+  assert.ok(cell, "missing cell " + position);
+  return cell;
+}
+function selectedCells(ui) {
+  return [...ui.host.querySelectorAll('[aria-selected="true"]')].map(cell => cell.dataset.gridCell);
+}
+async function selectCell(ui, position) {
+  const cell = gridCell(ui, position);
+  await React.act(async () => { cell.focus(); cell.click(); });
+  return cell;
+}
+async function clickButton(ui, text) {
+  const button = [...ui.host.querySelectorAll("button")].find(button =>
+    button.textContent === text || button.getAttribute("aria-label") === text);
+  assert.ok(button, "missing button " + text);
+  assert.equal(button.disabled, false);
+  await React.act(async () => { button.click(); });
+}
+async function beginTitleSave(ui, value) {
+  const cell = await selectCell(ui, "1:1");
+  await press(cell, "Enter");
+  const input = cell.querySelector("input");
+  await React.act(async () => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(input, value);
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+  await clickButton(ui, "セルを保存");
+  return cell;
+}
+const successfulWrite = () => new Response(JSON.stringify({ ok: true }), {
+  headers: { "content-type": "application/json" },
+});
+
+test("MIG-0737 U01: batched arrows preserve the anchor established by the preceding move", async () => {
+  const ui = await mount({ data: rangeData });
+  try {
+    const first = await selectCell(ui, "0:0");
+    await React.act(async () => {
+      first.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      document.activeElement.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+        key: "ArrowDown", shiftKey: true, bubbles: true,
+      }));
+    });
+    assert.deepEqual(selectedCells(ui), ["0:1", "1:1"]);
+    assert.equal(document.activeElement?.getAttribute("data-grid-cell"), "1:1");
+  } finally { await ui.cleanup(); }
+});
+
+for (const scenario of [
+  { name: "Ctrl+A with mutations off", key: "a", modifiers: { ctrlKey: true },
+    cells: pageCells, tsv: pageTsv, end: "2:2", next: "2:1", allowMutations: false },
+  { name: "Cmd+A on a readonly table", key: "a", modifiers: { metaKey: true },
+    cells: pageCells, tsv: pageTsv, end: "2:2", next: "2:1", mode: "readonly" },
+  { name: "Shift+Space", key: " ", modifiers: { shiftKey: true },
+    cells: rowCells, tsv: rowTsv, end: "1:2", next: "1:1" },
+  { name: "Ctrl+Space", key: " ", modifiers: { ctrlKey: true },
+    cells: columnCells, tsv: columnTsv, end: "2:1", next: "1:1", arrow: "ArrowUp" },
+  { name: "Cmd+Space", key: " ", modifiers: { metaKey: true },
+    cells: columnCells, tsv: columnTsv, end: "2:1", next: "1:1", arrow: "ArrowUp" },
+  { name: "Ctrl+Shift+Space row precedence", key: " ", modifiers: { ctrlKey: true, shiftKey: true },
+    cells: rowCells, tsv: rowTsv, end: "1:2", next: "1:1" },
+  { name: "Cmd+Shift+Space row precedence", key: " ", modifiers: { metaKey: true, shiftKey: true },
+    cells: rowCells, tsv: rowTsv, end: "1:2", next: "1:1" },
+  { name: "CURRENT Ctrl+Alt+A", key: "a", modifiers: { ctrlKey: true, altKey: true },
+    cells: pageCells, tsv: pageTsv, end: "2:2", next: "2:1" },
+  { name: "CURRENT Alt+Shift+Space", key: " ", modifiers: { altKey: true, shiftKey: true },
+    cells: rowCells, tsv: rowTsv, end: "1:2", next: "1:1" },
+]) {
+  test(`MIG-0737 U01: ${scenario.name} selects current-page cells and moves from the endpoint`, async () => {
+    const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const copied = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async (body) => { copied.push(body); },
+    } });
+    let calls = 0;
+    let refreshes = 0;
+    const ui = await mount({
+      data: { ...rangeData, def: { ...rangeData.def, mode: scenario.mode ?? "editable" } },
+      allowMutations: scenario.allowMutations ?? true,
+      fetchFn: async () => { calls++; throw Error("selection must not fetch or mutate"); },
+      onRefresh: () => { refreshes++; },
+    });
+    try {
+      const start = await selectCell(ui, "1:1");
+      const event = await press(start, scenario.key, scenario.modifiers);
+      assert.equal(event.defaultPrevented, true);
+      assert.deepEqual(selectedCells(ui), scenario.cells);
+      const end = gridCell(ui, scenario.end);
+      assert.equal(document.activeElement, end);
+      assert.deepEqual([...ui.host.querySelectorAll('[data-grid-cell][tabindex="0"]')], [end]);
+      await press(end, "c", { ctrlKey: true });
+      assert.deepEqual(copied, [scenario.tsv]);
+      await press(end, scenario.arrow ?? "ArrowLeft");
+      assert.deepEqual(selectedCells(ui), [scenario.next]);
+      assert.equal(document.activeElement, gridCell(ui, scenario.next));
+      assert.equal(calls, 0);
+      assert.equal(refreshes, 0);
+      assert.equal(ui.host.querySelectorAll("input").length, 0);
+    } finally {
+      await ui.cleanup();
+      if (previous) Object.defineProperty(navigator, "clipboard", previous);
+      else delete navigator.clipboard;
+    }
+  });
+}
+
+test("MIG-0737 U01: selection shortcuts leave input and child-button keys to their owners", async () => {
+  const ui = await mount({ data: rangeData, allowMutations: true });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    const button = cell.querySelector("button");
+    assert.equal((await press(button, "a", { ctrlKey: true })).defaultPrevented, false);
+    assert.deepEqual(selectedCells(ui), ["1:1"]);
+    await press(cell, "Enter");
+    const input = cell.querySelector("input");
+    assert.ok(input);
+    for (const target of [input, cell]) {
+      for (const [key, modifiers] of [
+        ["a", { ctrlKey: true }], ["a", { metaKey: true }],
+        [" ", { shiftKey: true }], [" ", { ctrlKey: true }],
+      ]) {
+        assert.equal((await press(target, key, modifiers)).defaultPrevented, false);
+        assert.deepEqual(selectedCells(ui), ["1:1"]);
+        assert.equal(cell.querySelector("input"), input);
+        assert.equal(input.value, "Beta");
+      }
+    }
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01: same-turn duplicate undo sends once and freezes range shortcuts until completion", async () => {
+  const pending = [];
+  let refreshes = 0;
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => pending.push({ resolve, init })),
+    onRefresh: () => { refreshes++; },
+  });
+  try {
+    const cell = await beginTitleSave(ui, "Changed");
+    assert.equal(pending.length, 1);
+    assert.equal((await press(cell, "a", { ctrlKey: true })).defaultPrevented, false);
+    await React.act(async () => { pending[0].resolve(successfulWrite()); });
+    await flush();
+    assert.equal(cell.querySelector("input"), null);
+    const immediateSelect = new dom.window.KeyboardEvent("keydown", {
+      key: "a", ctrlKey: true, bubbles: true, cancelable: true,
+    });
+    await React.act(async () => {
+      cell.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+      cell.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+      cell.dispatchEvent(immediateSelect);
+    });
+    assert.equal(pending.length, 2);
+    assert.equal(immediateSelect.defaultPrevented, false);
+    for (const modifiers of [{ shiftKey: true }, { ctrlKey: true }]) {
+      assert.equal((await press(cell, " ", modifiers)).defaultPrevented, false);
+    }
+    assert.deepEqual(selectedCells(ui), ["1:1"]);
+    await React.act(async () => { pending[1].resolve(successfulWrite()); });
+    await flush();
+    assert.equal((await press(cell, "a", { ctrlKey: true })).defaultPrevented, true);
+    assert.deepEqual(selectedCells(ui), pageCells);
+    assert.deepEqual(pending.map(request => JSON.parse(request.init.body).value), ["Changed", "Beta"]);
+    assert.equal(refreshes, 2);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01: an old undo completion cannot unlock a newer transport's pending history", async () => {
+  const oldRequests = [];
+  const newRequests = [];
+  let refreshes = 0;
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => oldRequests.push({ resolve, init })),
+    onRefresh: () => { refreshes++; },
+  });
+  try {
+    const oldCell = await beginTitleSave(ui, "Old transport");
+    await React.act(async () => { oldRequests[0].resolve(successfulWrite()); });
+    await flush();
+    await press(oldCell, "z", { ctrlKey: true });
+    assert.equal(oldRequests.length, 2);
+    await ui.render({ fetchFn: (_, init) => new Promise(resolve => newRequests.push({ resolve, init })) });
+    assert.equal(oldRequests[1].init.signal.aborted, true);
+    const newCell = await beginTitleSave(ui, "New transport");
+    await React.act(async () => { newRequests[0].resolve(successfulWrite()); });
+    await flush();
+    await press(newCell, "z", { metaKey: true });
+    assert.equal(newRequests.length, 2);
+    await React.act(async () => { oldRequests[1].resolve(successfulWrite()); });
+    await flush();
+    assert.equal(newRequests[1].init.signal.aborted, false);
+    assert.equal((await press(newCell, "a", { ctrlKey: true })).defaultPrevented, false);
+    assert.deepEqual(selectedCells(ui), ["1:1"]);
+    await React.act(async () => { newRequests[1].resolve(successfulWrite()); });
+    await flush();
+    assert.equal((await press(newCell, "a", { ctrlKey: true })).defaultPrevented, true);
+    assert.deepEqual(selectedCells(ui), pageCells);
+    assert.equal(refreshes, 3);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01: an ordinary pending row deletion does not freeze range selection", async () => {
+  let finish;
+  let calls = 0;
+  const ui = await mount({ data: rangeData, allowMutations: true, confirmDelete: () => true,
+    fetchFn: () => { calls++; return new Promise(resolve => { finish = resolve; }); },
+  });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    await clickButton(ui, "2行を削除");
+    assert.equal(calls, 1);
+    assert.equal((await press(cell, "a", { ctrlKey: true })).defaultPrevented, true);
+    assert.deepEqual(selectedCells(ui), pageCells);
+    await React.act(async () => { finish(successfulWrite()); });
+    await flush();
+    assert.equal(calls, 1);
+  } finally { await ui.cleanup(); }
+});
+
+for (const [name, next] of [
+  ["page", { data: { ...rangeData, page: 3 } }],
+  ["table", { data: { ...rangeData, def: { ...rangeData.def, table: "songs" } } }],
+  ["transport", { fetchFn: async () => { throw Error("unexpected request"); } }],
+]) {
+  test(`MIG-0737 U01: ${name} replacement resets the previous range`, async () => {
+    const ui = await mount({ data: rangeData });
+    try {
+      const start = await selectCell(ui, "1:1");
+      await press(start, "a", { ctrlKey: true });
+      assert.deepEqual(selectedCells(ui), pageCells);
+      await ui.render(next);
+      assert.deepEqual(selectedCells(ui), ["0:0"]);
+      const first = gridCell(ui, "0:0");
+      assert.deepEqual([...ui.host.querySelectorAll('[data-grid-cell][tabindex="0"]')], [first]);
+      assert.equal(document.activeElement?.getAttribute("data-grid-cell"), "0:0");
+      await press(document.activeElement, "ArrowRight");
+      assert.deepEqual(selectedCells(ui), ["0:1"]);
+    } finally { await ui.cleanup(); }
+  });
+}

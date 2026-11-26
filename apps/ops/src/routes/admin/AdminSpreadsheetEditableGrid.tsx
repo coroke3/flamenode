@@ -60,7 +60,10 @@ export function AdminSpreadsheetEditableGrid({
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [history, setHistory] = React.useState<History>({ key: "", undo: [], redo: [] });
+  const tableRef = React.useRef<HTMLTableElement>(null);
   const inFlight = React.useRef<AbortController | null>(null);
+  // CURRENT gives undo/redo its own busy flag; range shortcuts must not use the general mutation lock.
+  const historyInFlight = React.useRef<AbortController | null>(null);
   const contextRef = React.useRef({ fetchFn, table: def.table, page, allowMutations });
   contextRef.current = { fetchFn, table: def.table, page, allowMutations };
   const previousContext = React.useRef(contextRef.current);
@@ -81,12 +84,15 @@ export function AdminSpreadsheetEditableGrid({
         old.page !== page || old.allowMutations !== allowMutations) {
       inFlight.current?.abort();
       inFlight.current = null;
+      historyInFlight.current = null;
       previousContext.current = { fetchFn, table: def.table, page, allowMutations };
       setContextVersion(v => v + 1);
       setHistory({ key: "", undo: [], redo: [] });
       setSelection(null);
       setAnchorCell({ row: 0, col: 0 });
       setFocusedCell({ row: 0, col: 0 });
+      // CURRENT returns keyboard focus to the reset grid after a context replacement.
+      tableRef.current?.querySelector<HTMLTableCellElement>('[data-grid-cell="0:0"]')?.focus();
       setInsertOpen(false);
       setInsertDraft({});
       setBusy(false);
@@ -160,11 +166,16 @@ export function AdminSpreadsheetEditableGrid({
   async function replay(direction: "undo" | "redo"): Promise<void> {
     const source = safeHistory[direction];
     const entry = source[source.length - 1];
-    if (!entry || !canMutate || entry.table !== def.table || entry.page !== page) return;
+    if (!entry || !canMutate || inFlight.current !== null || entry.table !== def.table || entry.page !== page) return;
     const value = direction === "undo" ? entry.before : entry.after;
-    const ok = await runMutation(signal => patchSpreadsheetCell(fetchFn, {
+    const pending = runMutation(signal => patchSpreadsheetCell(fetchFn, {
       table: def.table, primaryKey: entry.pk, column: entry.column, value,
     }, signal));
+    const controller = inFlight.current;
+    historyInFlight.current = controller;
+    const ok = await pending.finally(() => {
+      if (historyInFlight.current === controller) historyInFlight.current = null;
+    });
     if (!ok) return;
     setHistory(state => {
       if (state.key !== key) return state;
@@ -189,6 +200,14 @@ export function AdminSpreadsheetEditableGrid({
     }
   }
 
+  function focusGridCell(focus: GridCell, source: HTMLTableCellElement): void {
+    setFocusedCell(focus);
+    // The next key originates from the selected endpoint, including after whole-row/column selection.
+    source.closest("table")
+      ?.querySelector<HTMLTableCellElement>(`[data-grid-cell="${focus.row}:${focus.col}"]`)?.focus();
+  }
+
+  // Keep shortcut precedence in one dispatcher: Shift+Space wins over Ctrl/Cmd+Space.
   function handleGridKey(
     event: React.KeyboardEvent<HTMLTableCellElement>,
     rowIndex: number,
@@ -197,6 +216,20 @@ export function AdminSpreadsheetEditableGrid({
     // Inputs/buttons own their own shortcuts and text-selection semantics.
     if (event.target !== event.currentTarget) return;
     const shortcut = event.ctrlKey || event.metaKey;
+    const selectAll = shortcut && event.key === "a";
+    const selectRow = event.key === " " && event.shiftKey;
+    const selectColumn = event.key === " " && shortcut;
+    if (selectAll || selectRow || selectColumn) {
+      const historyBusy = inFlight.current !== null && historyInFlight.current === inFlight.current;
+      if (identityChanged || currentSelection || historyBusy || rows.length === 0 || columns.length === 0) return;
+      event.preventDefault();
+      setAnchorCell({ row: selectRow ? rowIndex : 0, col: selectAll || selectRow ? 0 : colIndex });
+      focusGridCell(
+        { row: selectRow ? rowIndex : rows.length - 1, col: selectAll || selectRow ? columns.length - 1 : colIndex },
+        event.currentTarget,
+      );
+      return;
+    }
     if (shortcut && !event.altKey && event.key.toLowerCase() === "c") {
       event.preventDefault();
       void copyRange();
@@ -222,11 +255,7 @@ export function AdminSpreadsheetEditableGrid({
     if (moved.row === rowIndex && moved.col === colIndex) return;
     event.preventDefault();
     if (!event.shiftKey) setAnchorCell(moved);
-    setFocusedCell(moved);
-    // The target cell already exists; focus before React's next render.
-    const target = event.currentTarget.closest("table")
-      ?.querySelector<HTMLTableCellElement>(`[data-grid-cell="${moved.row}:${moved.col}"]`);
-    target?.focus();
+    focusGridCell(moved, event.currentTarget);
   }
 
   async function addRow(): Promise<void> {
@@ -286,9 +315,9 @@ export function AdminSpreadsheetEditableGrid({
           <button type="button" disabled={!canMutate} onClick={() => void addRow()}>追加を保存</button>
         </div>
       ) : null}
-      <p>矢印キーで移動、Shift＋矢印で範囲選択、Ctrl/Cmd＋CでTSVコピー、Enterで編集できます。</p>
+      <p>矢印キーで移動、Shift＋矢印で範囲選択、Ctrl/Cmd＋Aで全体選択、Shift＋Spaceで行選択、Ctrl/Cmd＋Spaceで列選択、Ctrl/Cmd＋CでTSVコピー、Enterで編集できます。</p>
       <div style={{ overflowX: "auto" }}>
-        <table>
+        <table ref={tableRef}>
           <thead><tr>{columns.map(c => <th key={c.name} scope="col">{c.name}</th>)}<th scope="col">操作</th></tr></thead>
           <tbody>
             {rows.map((row, ri) => (
