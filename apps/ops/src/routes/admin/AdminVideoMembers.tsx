@@ -146,18 +146,27 @@ type AdminVideoMembersReadPageProps = {
   /**
    * Provisional UNMOUNTED host generation, matching the editor preview.
    * A real route must supply a non-secret generation and rotate it on every
-   * committed authority change. Omitting it is legacy fixture compatibility,
-   * not proof of an authenticated session or permission.
+   * committed authority change; use null when authority cannot be established.
+   * Initial omission is legacy fixture compatibility only; after a committed
+   * supplied generation it must not enable an unbound GET.
    */
-  authorityEpoch?: number;
+  authorityEpoch?: number | null;
 };
 
 export function AdminVideoMembersReadPage({
   authorityEpoch, ...props
 }: AdminVideoMembersReadPageProps): React.ReactElement {
-  // Reject malformed supplied generations before starting a private GET.
-  if (authorityEpoch !== undefined &&
-      (!Number.isSafeInteger(authorityEpoch) || authorityEpoch < 0)) {
+  // A committed generation-bound lifetime cannot downgrade to legacy mode.
+  // null means the host cannot establish current authority. A missing initial
+  // prop is retained only for isolated legacy fixtures.
+  const authorityWasBound = React.useRef(false);
+  React.useLayoutEffect(() => {
+    if (authorityEpoch !== undefined) authorityWasBound.current = true;
+  }, [authorityEpoch]);
+  if ((authorityEpoch === undefined && authorityWasBound.current) ||
+      (authorityEpoch !== undefined &&
+        (typeof authorityEpoch !== "number" ||
+          !Number.isSafeInteger(authorityEpoch) || authorityEpoch < 0))) {
     return <p role="alert">参加者データを表示できません。</p>;
   }
   // An unchanged URL and fetch port do not identify the authenticated actor.

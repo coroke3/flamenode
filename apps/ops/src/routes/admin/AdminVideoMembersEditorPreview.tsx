@@ -20,11 +20,12 @@ export interface AdminVideoMembersEditorPreviewProps {
   /**
    * Provisional UNMOUNTED host input: a non-secret local generation rotated
    * on committed authenticated authority changes, even for the same video.
-   * Omission is supported only for the existing isolated preview fixtures.
-   * A real route must supply and rotate it from verified host authority;
-   * this key is not authentication, authorization, or an HTTP credential.
+   * A real route must supply and rotate it from verified host authority,
+   * or use null when authority cannot be established. Initial omission is
+   * legacy fixture compatibility only, never a downgrade from bound mode.
+   * This key is not authentication, authorization, or an HTTP credential.
    */
-  authorityEpoch?: number;
+  authorityEpoch?: number | null;
 }
 
 const unavailableSearch: FieldProps["searchXUsers"] = async () => {
@@ -257,10 +258,17 @@ export function AdminVideoMembersEditorPreview({
     };
   }, [applyPermissionBatch, videoId]);
 
-  // Reject an invalid supplied generation before reading private DTO fields.
-  // Callback identity and mutable metadata are not authenticated authority.
-  if (authorityEpoch !== undefined &&
-      (!Number.isSafeInteger(authorityEpoch) || authorityEpoch < 0)) {
+  // A committed generation-bound lifetime cannot downgrade to legacy mode.
+  // null means the host cannot establish current authority. A missing initial
+  // prop is retained only for isolated legacy fixtures.
+  const authorityWasBound = React.useRef(false);
+  React.useLayoutEffect(() => {
+    if (authorityEpoch !== undefined) authorityWasBound.current = true;
+  }, [authorityEpoch]);
+  if ((authorityEpoch === undefined && authorityWasBound.current) ||
+      (authorityEpoch !== undefined &&
+        (typeof authorityEpoch !== "number" ||
+          !Number.isSafeInteger(authorityEpoch) || authorityEpoch < 0))) {
     return <p role="alert">参加者データを表示できません。</p>;
   }
 

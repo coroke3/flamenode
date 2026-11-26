@@ -1619,3 +1619,70 @@ test("MIG-0730 U02dq: malformed supplied host generation fails closed before rea
     target.remove();
   }
 });
+
+test("MIG-0730 U02ds: bound editor cannot read a DTO or enable writes when authority becomes unknown", async () => {
+  for (const unknown of [undefined, null]) {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const root = createRoot(target);
+    let reads = 0, writes = 0, searches = 0;
+    const privatePayload = { get initialMembers() { reads++; throw Error("OLD_AUTHORITY"); } };
+    const adapters = {
+      save: async () => { writes++; return { ok: true }; },
+      searchXUsers: async () => { searches++; return { items: [], hasMore: false, nextOffset: null }; },
+      applyPermissionBatch: async () => { writes++; return { ok: true }; },
+    };
+    const render = async (authorityEpoch, payload) => React.act(async () =>
+      root.render(React.createElement(AdminVideoMembersEditorPreview, {
+        videoId: "A", data: payload, authorityEpoch, ...adapters,
+      })));
+    try {
+      await render(7, data("A", "OLD_AUTHORITY"));
+      assert.equal(formPayload(target)[0].name, "OLD_AUTHORITY");
+      await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
+      assert.ok(target.querySelector('[role="alertdialog"]'));
+      await render(unknown, privatePayload);
+      await render(undefined, privatePayload);
+      assert.match(target.textContent, /参加者データを表示できません/);
+      assert.equal(target.querySelector("form"), null);
+      assert.equal(target.querySelector('[role="alertdialog"]'), null);
+      assert.doesNotMatch(target.textContent, /OLD_AUTHORITY/);
+      assert.equal(reads, 0);
+      assert.equal(writes, 0);
+      const searchesBeforeReentry = searches;
+      await render(8, data("A", "FRESH_AUTHORITY"));
+      assert.equal(formPayload(target)[0].name, "FRESH_AUTHORITY");
+      assert.equal(target.querySelector('[role="alertdialog"]'), null);
+      assert.ok(target.querySelector('button[type="submit"]'));
+      assert.equal(writes, 0);
+      assert.equal(searches, searchesBeforeReentry);
+    } finally {
+      await React.act(async () => root.unmount());
+      target.remove();
+    }
+  }
+});
+
+test("MIG-0730 U02ds: explicit unknown editor authority from first render remains closed on omission", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  let reads = 0;
+  const payload = { get initialMembers() { reads++; throw Error("PRIVATE"); } };
+  const render = async (authorityEpoch, snapshot) => React.act(async () =>
+    root.render(React.createElement(AdminVideoMembersEditorPreview, {
+      videoId: "A", data: snapshot, authorityEpoch,
+    })));
+  try {
+    await render(null, payload);
+    await render(undefined, payload);
+    assert.equal(reads, 0);
+    assert.match(target.textContent, /参加者データを表示できません/);
+    assert.equal(target.querySelector("form"), null);
+    await render(0, data("A", "FRESH_AUTHORITY"));
+    assert.equal(formPayload(target)[0].name, "FRESH_AUTHORITY");
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});

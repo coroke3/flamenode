@@ -522,3 +522,47 @@ test("MIG-0730 U02dr: malformed host authority retires private read without netw
     assert.deepEqual(ui.navigations, ["/dashboard"], "current denial still follows CURRENT navigation");
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0730 U02ds: losing committed authority never downgrades to a legacy GET", async () => {
+  for (const unknown of [undefined, null]) {
+    const ui = setup();
+    try {
+      await ui.render("a", undefined, 7);
+      await React.act(async () => ui.calls[0].resolve(json(snapshot("a", [member("OLD_AUTHORITY")]))));
+      assert.match(ui.target.textContent, /OLD_AUTHORITY/);
+      await ui.render("a", undefined, unknown);
+      assert.equal(ui.calls[0].signal.aborted, true);
+      assert.match(ui.target.textContent, /参加者データを表示できません/);
+      assert.doesNotMatch(ui.target.textContent, /OLD_AUTHORITY/);
+      await ui.render("a", undefined, undefined);
+      assert.equal(ui.calls.length, 1, "missing generation cannot start an unbound GET");
+      await ui.render("a", undefined, 8);
+      assert.equal(ui.calls.length, 2);
+      await ui.render("a", undefined, undefined);
+      assert.equal(ui.calls[1].signal.aborted, true);
+      await React.act(async () => ui.calls[1].resolve(json({}, 403)));
+      assert.deepEqual(ui.navigations, []);
+      assert.equal(ui.calls.length, 2);
+      await ui.render("a", undefined, 9);
+      await React.act(async () => ui.calls[2].resolve(json(snapshot("a", [member("FRESH_AUTHORITY")]))));
+      assert.match(ui.target.textContent, /FRESH_AUTHORITY/);
+      assert.doesNotMatch(ui.target.textContent, /OLD_AUTHORITY/);
+      assert.deepEqual(ui.navigations, []);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0730 U02ds: initial explicit unknown authority cannot downgrade on omission", async () => {
+  const ui = setup();
+  try {
+    await ui.render("a", undefined, null);
+    assert.match(ui.target.textContent, /参加者データを表示できません/);
+    await ui.render("a");
+    assert.match(ui.target.textContent, /参加者データを表示できません/);
+    assert.equal(ui.calls.length, 0);
+    await ui.render("a", undefined, 0);
+    assert.equal(ui.calls.length, 1);
+    await React.act(async () => ui.calls[0].resolve(json(snapshot("a"))));
+    assert.match(ui.target.textContent, /Alice/);
+  } finally { await ui.cleanup(); }
+});
