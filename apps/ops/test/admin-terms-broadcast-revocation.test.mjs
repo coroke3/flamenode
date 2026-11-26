@@ -78,8 +78,8 @@ async function openConfirmedBroadcast(target, win) {
   return submit;
 }
 
-test("SEC broadcast: 401 and 403 write responses immediately clear all private rules UI", async () => {
-  for (const status of [401, 403]) {
+test("SEC broadcast: 401 and confirmed identity denials clear all private rules UI", async () => {
+  for (const [status, reason] of [[401, "unauthenticated"], [403, "forbidden"], [403, "banned"]]) {
     let writes = 0;
     await withRulesPage(async (path, init) => {
       if (init?.method === "GET") {
@@ -91,7 +91,7 @@ test("SEC broadcast: 401 and 403 write responses immediately clear all private r
       assert.equal(init.credentials, "same-origin");
       assert.equal(init.cache, "no-store");
       assert.equal(path, "/api/admin/terms/tv1/reaccept-broadcast");
-      return reply(status, { ok: false, redirect: "https://evil.example", message: "denied" });
+      return reply(status, { ok: false, reason, redirect: "https://evil.example", message: "denied" });
     }, async (target, win) => {
       const submit = await openConfirmedBroadcast(target, win);
       await React.act(async () => submit.click());
@@ -111,7 +111,7 @@ test("SEC broadcast: 503 retains draft, and retry successfully enqueues without 
     if (init?.method === "GET") return reply(200, rules);
     writes++;
     requests.push(JSON.parse(init.body));
-    if (writes === 1) return reply(503, { ok: false, message: "try again" });
+    if (writes === 1) return reply(503, { ok: false, reason: "forbidden", message: "try again" });
     return reply(200, { ok: true, enqueued: 1, cursor: "next-user", message: "success" });
   }, async (target, win) => {
     const submit = await openConfirmedBroadcast(target, win);
@@ -132,24 +132,58 @@ test("SEC broadcast: 503 retains draft, and retry successfully enqueues without 
   });
 });
 
-test("SEC broadcast: 403 revokes before a stalled JSON response body is parsed", async () => {
-  let controller;
-  await withRulesPage(async (_path, init) => {
-    if (init?.method === "GET") return reply(200, rules);
-    const body = new ReadableStream({ start(value) { controller = value; } });
-    return new Response(body, {
-      status: 403,
-      headers: { "content-type": "application/json" },
-    });
-  }, async (target, win) => {
-    const submit = await openConfirmedBroadcast(target, win);
-    try {
+test("SEC broadcast: recognized non-identity 403 stays inline", async () => {
+  for (const reason of ["invalid_origin", "maintenance_mode", "cost_guard_blocked"]) {
+    await withRulesPage(async (_path, init) => {
+      if (init?.method === "GET") return reply(200, rules);
+      return reply(403, { ok: false, reason, message: "inline denial" });
+    }, async (target, win) => {
+      const submit = await openConfirmedBroadcast(target, win);
       await React.act(async () => submit.click());
-      assert.match(target.textContent, /規約管理へのアクセスが終了しました/);
-      assert.equal(target.querySelector('[role="alertdialog"]'), null);
-    } finally {
-      controller?.enqueue(new TextEncoder().encode('{"ok":false}'));
-      controller?.close();
-    }
-  });
+      assert.match(target.textContent, /PRIVATE_RULE_VERSION_CANARY/);
+      assert.match(target.textContent, /inline denial/);
+      assert.ok(target.querySelector('[role="alertdialog"]'));
+      assert.equal(submit.disabled, false);
+    });
+  }
+});
+
+test("SEC broadcast: unknown or stalled 403 quarantines private UI until a new GET succeeds", async () => {
+  for (const mode of ["unknown", "malformed", "stalled"]) {
+    let controller;
+    let reads = 0;
+    let resolveRead;
+    await withRulesPage(async (_path, init) => {
+      if (init?.method === "GET") {
+        reads++;
+        if (reads === 1) return reply(200, rules);
+        return new Promise(resolve => { resolveRead = resolve; });
+      }
+      if (mode === "unknown") return reply(403, { ok: false, reason: "unknown" });
+      if (mode === "malformed") return new Response("not JSON", { status: 403 });
+      const body = new ReadableStream({ start(value) { controller = value; } });
+      return new Response(body, { status: 403, headers: { "content-type": "application/json" } });
+    }, async (target, win) => {
+      const submit = await openConfirmedBroadcast(target, win);
+      try {
+        await React.act(async () => {
+          submit.click();
+          if (mode === "stalled") await new Promise(resolve => setTimeout(resolve, 300));
+        });
+        assert.match(target.textContent, /管理権限を確認できません/);
+        assert.doesNotMatch(target.textContent, /PRIVATE_RULE_VERSION_CANARY/);
+        assert.equal(target.querySelector('[role="alertdialog"]'), null);
+        assert.equal(reads, 1);
+        await React.act(async () => target.querySelector("button").click());
+        assert.equal(reads, 2);
+        assert.doesNotMatch(target.textContent, /PRIVATE_RULE_VERSION_CANARY/);
+        await React.act(async () => resolveRead(reply(200, rules)));
+        assert.match(target.textContent, /PRIVATE_RULE_VERSION_CANARY/);
+        assert.equal(target.querySelector('[role="alertdialog"]'), null);
+      } finally {
+        controller?.enqueue(new TextEncoder().encode('{"ok":false}'));
+        controller?.close();
+      }
+    });
+  }
 });
