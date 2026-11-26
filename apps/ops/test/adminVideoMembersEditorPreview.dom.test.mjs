@@ -1434,3 +1434,188 @@ test("MIG-0730 U02bv/U02bw: forged, duplicate and unexpected FormData fields can
     target.remove();
   }
 });
+
+
+test("MIG-0730 U02dq: same-video host authority rotation retires draft and confirmation; stable epoch preserves them", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  let writes = 0;
+  const save = async () => { writes++; return { ok: true }; };
+  const searchXUsers = async () => ({ items: [], hasMore: false, nextOffset: null });
+  const applyPermissionBatch = async () => { writes++; return { ok: true }; };
+  const render = async (authorityEpoch, title = "A") => React.act(async () => {
+    const snapshot = data("A", "CURRENT");
+    snapshot.video.title = title;
+    root.render(React.createElement(AdminVideoMembersEditorPreview, {
+      videoId: "A", data: snapshot, authorityEpoch, save, searchXUsers, applyPermissionBatch,
+    }));
+  });
+  const editName = async value => {
+    const input = target.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await React.act(async () => {
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set.call(input, value);
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    assert.equal(formPayload(target)[0].name, value);
+  };
+  try {
+    await render(1);
+    await editName("PRIVATE A DRAFT");
+    const oldForm = target.querySelector("form");
+    await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
+    await render(1, "renamed metadata");
+    assert.equal(target.querySelector("form"), oldForm);
+    assert.equal(formPayload(target)[0].name, "PRIVATE A DRAFT");
+    assert.ok(target.querySelector('[role="alertdialog"]'));
+
+    // Identical video, canonical members and callable ports; only the host
+    // authority changes. Neither private draft nor confirmation may survive.
+    await render(2);
+    assert.notEqual(target.querySelector("form"), oldForm);
+    assert.equal(target.querySelector('[role="alertdialog"]'), null);
+    assert.deepEqual(formPayload(target).map(row => row.name), ["CURRENT"]);
+    assert.equal(target.querySelector('input[placeholder="表示名"]').value, "CURRENT");
+    assert.ok(target.querySelector('button[type="submit"]'));
+    await editName("PRIVATE B DRAFT");
+
+    // Return to the original actor via a NEW generation, not a reused token.
+    await render(3);
+    assert.deepEqual(formPayload(target).map(row => row.name), ["CURRENT"]);
+    assert.equal(target.querySelector('input[placeholder="表示名"]').value, "CURRENT");
+    assert.equal(target.querySelector('[role="alertdialog"]'), null);
+    assert.equal(writes, 0);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});
+
+test("MIG-0730 U02dq: same-video host rotation cannot apply a late permission receipt to the replacement form", async () => {
+  for (const outcome of ["success", "failure"]) {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const root = createRoot(target);
+    let calls = 0, finish, reject;
+    const first = new Promise((resolve, fail) => { finish = resolve; reject = fail; });
+    const adapters = {
+      save: async () => ({ ok: true }),
+      searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null }),
+      applyPermissionBatch: () => ++calls === 1 ? first : Promise.resolve({ ok: true }),
+    };
+    const render = async authorityEpoch => React.act(async () =>
+      root.render(React.createElement(AdminVideoMembersEditorPreview, {
+        videoId: "A", data: data("A", "CURRENT"), authorityEpoch, ...adapters,
+      })));
+    try {
+      await render(1);
+      await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
+      await React.act(async () => buttonNamed(target, "変更を反映").click());
+      assert.equal(calls, 1);
+      await render(2);
+      await render(3);
+      assert.equal(target.querySelector('[role="alertdialog"]'), null);
+      assert.deepEqual(formPayload(target).map(row => row.name), ["CURRENT"]);
+      if (outcome === "success") {
+        await React.act(async () => finish({ ok: true, message: "OLD AUTHORITY RECEIPT" }));
+      } else {
+        await React.act(async () => reject(new Error("OLD AUTHORITY RECEIPT")));
+      }
+      assert.equal(calls, 1);
+      assert.deepEqual(formPayload(target).map(row => row.name), ["CURRENT"]);
+      assert.doesNotMatch(target.textContent, /OLD AUTHORITY RECEIPT/);
+      await previewPermissionTsv(target, "New\tnewuser\t\t\t\tON");
+      await React.act(async () => buttonNamed(target, "変更を反映").click());
+      assert.equal(calls, 2);
+      assert.deepEqual(formPayload(target).map(row => row.name).sort(), ["CURRENT", "New"]);
+    } finally {
+      finish({ ok: false });
+      await React.act(async () => root.unmount());
+      target.remove();
+    }
+  }
+});
+
+test("MIG-0730 U02dq: same-video host rotation keeps pending PUT latch and retires old save receipt", async () => {
+  for (const outcome of ["success", "failure"]) {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const root = createRoot(target);
+    const writes = [];
+    let refreshes = 0, finish, reject;
+    const first = new Promise((resolve, fail) => { finish = resolve; reject = fail; });
+    const adapters = {
+      save: form => {
+        writes.push({ flags: form.getAll("is_collab"), names: JSON.parse(form.get("members_json")).map(row => row.name) });
+        return writes.length === 1 ? first : Promise.resolve({ ok: true, message: "NEW AUTHORITY SAVE" });
+      },
+      searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null }),
+      applyPermissionBatch: async () => ({ ok: true }),
+      onSaved: () => { refreshes++; },
+    };
+    const render = async authorityEpoch => React.act(async () =>
+      root.render(React.createElement(AdminVideoMembersEditorPreview, {
+        videoId: "A", data: data("A", "CURRENT"), authorityEpoch, ...adapters,
+      })));
+    const submit = async () => React.act(async () => {
+      const event = new dom.window.Event("submit", { bubbles: true, cancelable: true });
+      target.querySelector("form").dispatchEvent(event);
+      assert.equal(event.defaultPrevented, true);
+    });
+    try {
+      await render(1);
+      await React.act(async () => target.querySelector('input[name="is_collab"][type="checkbox"]').click());
+      assert.deepEqual(formPayload(target), []);
+      await submit();
+      assert.deepEqual(writes, [{ flags: ["false"], names: [] }]);
+      await render(2);
+      await render(3);
+      assert.deepEqual(formPayload(target).map(row => row.name), ["CURRENT"]);
+      await submit();
+      assert.equal(writes.length, 1, "old same-video PUT remains latched across authority remount");
+      assert.match(target.textContent, /前の保存処理が完了していません/);
+      if (outcome === "success") {
+        await React.act(async () => finish({ ok: true, message: "OLD AUTHORITY SAVE" }));
+      } else {
+        await React.act(async () => reject(new Error("OLD AUTHORITY SAVE")));
+      }
+      assert.equal(refreshes, 0);
+      assert.doesNotMatch(target.textContent, /OLD AUTHORITY SAVE/);
+      assert.equal(writes.length, 1);
+      await submit();
+      assert.deepEqual(writes[1], { flags: ["false", "true"], names: ["CURRENT"] });
+      assert.equal(refreshes, 1);
+      assert.match(target.textContent, /NEW AUTHORITY SAVE/);
+    } finally {
+      finish({ ok: false });
+      await React.act(async () => root.unmount());
+      target.remove();
+    }
+  }
+});
+
+test("MIG-0730 U02dq: malformed supplied host generation fails closed before reading member DTO", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const root = createRoot(target);
+  let reads = 0;
+  const payload = { get initialMembers() { reads++; throw new Error("PRIVATE"); } };
+  try {
+    for (const authorityEpoch of [null, "1", NaN, Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await React.act(async () => root.render(React.createElement(AdminVideoMembersEditorPreview, {
+        videoId: "A", data: payload, authorityEpoch,
+        save: async () => ({ ok: true }),
+        searchXUsers: async () => ({ items: [] }),
+        applyPermissionBatch: async () => ({ ok: true }),
+      })));
+      assert.match(target.textContent, /参加者データを表示できません/);
+      assert.equal(target.querySelector('input[name="members_json"]'), null);
+      assert.equal(target.querySelector('button[type="submit"]'), null);
+    }
+    assert.equal(reads, 0);
+  } finally {
+    await React.act(async () => root.unmount());
+    target.remove();
+  }
+});

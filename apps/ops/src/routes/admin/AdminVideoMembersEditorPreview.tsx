@@ -17,6 +17,14 @@ export interface AdminVideoMembersEditorPreviewProps {
   applyPermissionBatch?: FieldProps["applyPermissionBatch"];
   save?: AdminVideoMembersSave;
   onSaved?: () => void;
+  /**
+   * Provisional UNMOUNTED host input: a non-secret local generation rotated
+   * on committed authenticated authority changes, even for the same video.
+   * Omission is supported only for the existing isolated preview fixtures.
+   * A real route must supply and rotate it from verified host authority;
+   * this key is not authentication, authorization, or an HTTP credential.
+   */
+  authorityEpoch?: number;
 }
 
 const unavailableSearch: FieldProps["searchXUsers"] = async () => {
@@ -173,7 +181,7 @@ export function bindPreviewPermissionInput(
  * This component is not imported by the Ops route table.
  */
 export function AdminVideoMembersEditorPreview({
-  videoId, data, searchXUsers, applyPermissionBatch, save, onSaved,
+  videoId, data, searchXUsers, applyPermissionBatch, save, onSaved, authorityEpoch,
 }: AdminVideoMembersEditorPreviewProps): React.ReactElement {
   // Both keyed form remounts and full Preview remounts must keep an old PUT
   // latched until it settles; never retry an ambiguous possibly-committed PUT.
@@ -249,6 +257,13 @@ export function AdminVideoMembersEditorPreview({
     };
   }, [applyPermissionBatch, videoId]);
 
+  // Reject an invalid supplied generation before reading private DTO fields.
+  // Callback identity and mutable metadata are not authenticated authority.
+  if (authorityEpoch !== undefined &&
+      (!Number.isSafeInteger(authorityEpoch) || authorityEpoch < 0)) {
+    return <p role="alert">参加者データを表示できません。</p>;
+  }
+
   // This unmounted preview is also callable directly. Reject malformed IDs
   // before touching a potentially private server response.
   if (typeof videoId !== "string" || !videoId || videoId.length > 64 ||
@@ -297,9 +312,13 @@ export function AdminVideoMembersEditorPreview({
     typeof searchXUsers === "function" && typeof applyPermissionBatch === "function";
   // Capability loss/regrant is an authorization boundary. Retire the old form
   // including pending permission callbacks, private edits and confirmation UI.
-  // Changes to title/YouTube metadata alone still preserve the local draft.
+  // A committed host authority rotation must also retire the complete form,
+  // including same-video drafts and pending confirmations when canEdit stays
+  // true. The existing video-wide write latch intentionally survives remounts.
+  // Stable authority and metadata-only changes still preserve the local draft.
   const snapshotKey = JSON.stringify([
     valid.video.id, valid.video.collaboration_type, valid.initialMembers, canEdit,
+    authorityEpoch ?? null,
   ]);
   const field = (
     <VideoMembersField
