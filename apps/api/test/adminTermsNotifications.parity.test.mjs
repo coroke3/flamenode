@@ -523,3 +523,59 @@ test("MIG-0642 SA-047: a recipient id with surrounding whitespace resolves like 
   assert.equal(r.status, 200);
   assert.equal(x.sqlite.prepare("SELECT recipient_user_id r FROM notification_outbox WHERE id <> 'n1'").get().r, "admin-1");
 });
+
+
+test("SEC/MIG-0642: throwing diagnostic sink does not change five audited terms failure responses", async () => {
+  const cases = [
+    ["create", "POST", "/terms", { version_label: "new", body_markdown: "new body" }, () => {}],
+    ["update", "PATCH", "/terms/t1", { version_label: "updated", body_markdown: "new body" },
+      (x) => x.seedTerms({ id: "t1" })],
+    ["publish", "POST", "/terms/t1/publish", {},
+      (x) => x.seedTerms({ id: "t1" })],
+    ["archive", "POST", "/terms/t1/archive", {},
+      (x) => x.seedTerms({ id: "t1", status: "published", published_at: 900 })],
+    ["reaccept-broadcast", "POST", "/terms/t1/reaccept-broadcast", { confirm: "TERMS" },
+      (x) => {
+        x.seedTerms({ id: "t1", status: "published", severity: "major", published_at: 900 });
+        x.sqlite.prepare('UPDATE "user" SET accepted_terms_version_id = ? WHERE id = ?')
+          .run("t1", "admin-1");
+        x.sqlite.prepare('INSERT INTO "user" (id,name,role,is_tos_accepted,is_banned,is_notification_enabled) VALUES (?,?,?,?,?,?)')
+          .run("need", "n", "user", 1, 0, 1);
+      }],
+  ];
+  for (const [label, method, path, body, seed] of cases) {
+    const x = setup();
+    seed(x);
+    const before = x.sqlite.prepare(
+      "SELECT id, version_label, body_markdown, status, updated_at FROM terms_versions ORDER BY id",
+    ).all();
+    // Force an audited D1 batch to fail and roll back, while also making
+    // the diagnostic sink fail. This is not a simulated successful commit.
+    x.sqlite.exec("DROP TABLE audit_logs");
+    const priorError = console.error;
+    let diagnosticCalls = 0;
+    let response;
+    try {
+      console.error = () => {
+        diagnosticCalls += 1;
+        throw new Error("SECRET_LOGGER_FAILURE");
+      };
+      response = await x.request(method, path, body);
+    } finally {
+      console.error = priorError;
+    }
+    assert.equal(diagnosticCalls, 1, label + " should attempt one fixed diagnostic");
+    assert.equal(response.status, 409, label + " must retain its audited conflict status");
+    const result = await response.json();
+    assert.deepEqual(result, {
+      ok: false,
+      message: "更新が競合したか、監査記録に失敗しました。再読み込みしてお試しください。",
+    }, label);
+    assert.ok(!JSON.stringify(result).includes("SECRET_LOGGER_FAILURE"), label);
+    assert.deepEqual(x.sqlite.prepare(
+      "SELECT id, version_label, body_markdown, status, updated_at FROM terms_versions ORDER BY id",
+    ).all(), before, label + " must not commit a partial terms mutation");
+    assert.equal(x.count("static_rebuild_queue"), 0, label + " must not commit a rebuild job");
+    assert.equal(x.sends.length, 0, label + " must not wake a queue");
+  }
+});
