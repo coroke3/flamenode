@@ -507,8 +507,14 @@ export function AdminSpreadsheetEditableGrid({
           --sheet-focus: #1a73e8;
           --sheet-focus-soft: color-mix(in srgb, #1a73e8 10%, #ffffff);
         }
+        :root[data-theme="dark"] [data-spreadsheet-grid-viewport] {
+          --sheet-bg: var(--bg-base, #1a1a1a);
+          --sheet-header-bg: var(--bg-elevated, #252525);
+          --sheet-focus: var(--accent-primary, #8ab4f8);
+          --sheet-focus-soft: color-mix(in srgb, var(--accent-primary, #8ab4f8) 14%, var(--bg-base, #1a1a1a));
+        }
         @media (prefers-color-scheme: dark) {
-          [data-spreadsheet-grid-viewport] {
+          :root:not([data-theme="light"]):not([data-theme="dark"]) [data-spreadsheet-grid-viewport] {
             --sheet-bg: var(--bg-base, #1a1a1a);
             --sheet-header-bg: var(--bg-elevated, #252525);
             --sheet-focus: var(--accent-primary, #8ab4f8);

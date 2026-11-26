@@ -481,7 +481,8 @@ test("MIG-0737 U01 pointer: range, readonly and Find feedback retain CURRENT pre
     assert.equal(rules[0].style.getPropertyValue("--sheet-focus").trim(), "#1a73e8");
     const dark = rules.find(rule => rule.conditionText === "(prefers-color-scheme: dark)");
     assert.ok(dark);
-    assert.equal(dark.cssRules[0].selectorText, "[data-spreadsheet-grid-viewport]");
+    assert.equal(dark.cssRules[0].selectorText,
+      ':root:not([data-theme="light"]):not([data-theme="dark"]) [data-spreadsheet-grid-viewport]');
     assert.equal(dark.cssRules[0].style.getPropertyValue("--sheet-focus").trim(), "var(--accent-primary, #8ab4f8)");
     assertNoEffects(ui);
   } finally { await ui.cleanup(); }
@@ -535,5 +536,183 @@ test("MIG-0737 U01 pointer: unmount removes the shared listener and a new Grid h
     if (ui) await ui.cleanup();
     window.addEventListener = originalAdd;
     window.removeEventListener = originalRemove;
+  }
+});
+
+const sheetPalettes = {
+  light: {
+    "--sheet-bg": "#ffffff",
+    "--sheet-header-bg": "#f8f9fa",
+    "--sheet-focus": "#1a73e8",
+    "--sheet-focus-soft": "color-mix(in srgb, #1a73e8 10%, #ffffff)",
+  },
+  dark: {
+    "--sheet-bg": "var(--bg-base, #1a1a1a)",
+    "--sheet-header-bg": "var(--bg-elevated, #252525)",
+    "--sheet-focus": "var(--accent-primary, #8ab4f8)",
+    "--sheet-focus-soft": "color-mix(in srgb, var(--accent-primary, #8ab4f8) 14%, var(--bg-base, #1a1a1a))",
+  },
+};
+
+// JSDOM resolves matching custom-property declarations, not media preferences, rendered colors or contrast.
+test("MIG-0737 U01 theme: explicit root palettes resolve on mount and switch without remounting", async () => {
+  const previous = document.documentElement.getAttribute("data-theme");
+  let ui;
+  try {
+    for (const initial of ["light", "dark"]) {
+      document.documentElement.setAttribute("data-theme", initial);
+      ui = await mount();
+      const viewport = ui.host.querySelector("[data-spreadsheet-grid-viewport]");
+      assert.ok(viewport);
+      for (const theme of [initial, initial === "light" ? "dark" : "light", initial]) {
+        await React.act(async () => document.documentElement.setAttribute("data-theme", theme));
+        assert.ok(ui.host.querySelector("[data-spreadsheet-grid-viewport]") === viewport, "same viewport retained");
+        const computed = window.getComputedStyle(viewport);
+        for (const [property, value] of Object.entries(sheetPalettes[theme])) {
+          assert.equal(computed.getPropertyValue(property).trim(), value, theme + " " + property);
+        }
+        assertNoEffects(ui);
+      }
+      await ui.cleanup();
+      ui = null;
+    }
+  } finally {
+    if (ui) await ui.cleanup();
+    if (previous === null) document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", previous);
+  }
+});
+
+test("MIG-0737 U01 theme: system fallback excludes recognized root themes and unrelated elements", async () => {
+  const previous = document.documentElement.getAttribute("data-theme");
+  const ui = await mount();
+  const outside = document.createElement("div");
+  document.body.append(outside);
+  try {
+    const viewport = ui.host.querySelector("[data-spreadsheet-grid-viewport]");
+    assert.ok(viewport);
+    const media = [...ui.host.querySelector("style").sheet.cssRules]
+      .find(rule => rule.conditionText === "(prefers-color-scheme: dark)");
+    assert.ok(media);
+    const fallback = media.cssRules[0];
+    for (const [theme, matches] of [[null, true], ["system", true], ["sepia", true], ["light", false], ["dark", false]]) {
+      if (theme === null) document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", theme);
+      assert.equal(viewport.matches(fallback.selectorText), matches, "fallback applicability for " + theme);
+      assert.equal(outside.matches(fallback.selectorText), false);
+    }
+    for (const [property, value] of Object.entries(sheetPalettes.dark)) {
+      assert.equal(fallback.style.getPropertyValue(property).trim(), value, property);
+    }
+    assertNoEffects(ui);
+  } finally {
+    outside.remove();
+    await ui.cleanup();
+    if (previous === null) document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", previous);
+  }
+});
+
+test("MIG-0737 U01 theme: switching preserves the selected range, Find query and active search node", async () => {
+  const previous = document.documentElement.getAttribute("data-theme");
+  const ui = await mount({ allowMutations: true });
+  try {
+    await down(cell(ui, "0:0"));
+    await enter(cell(ui, "0:0"), cell(ui, "1:1"));
+    await up();
+    await key(document.activeElement, "f", { ctrlKey: true });
+    const search = ui.host.querySelector('input[type="search"]');
+    assert.ok(search);
+    await setInput(search, "Beta");
+    const range = selected(ui);
+    for (const theme of ["dark", "light"]) {
+      await React.act(async () => document.documentElement.setAttribute("data-theme", theme));
+      assert.deepEqual(selected(ui), range);
+      assert.ok(document.activeElement === search, "Find retains DOM focus");
+      assert.ok(ui.host.querySelector('input[type="search"]') === search, "same Find input retained");
+      assert.equal(search.value, "Beta");
+      assert.equal(cell(ui, "1:1").dataset.findMatch, "true");
+      assert.match(cell(ui, "1:1").style.background, /#fbbc04/);
+      assert.equal(cell(ui, "0:0").style.background, "var(--sheet-header-bg)");
+      assertNoEffects(ui);
+      const computed = window.getComputedStyle(ui.host.querySelector("[data-spreadsheet-grid-viewport]"));
+      for (const [property, value] of Object.entries(sheetPalettes[theme])) {
+        assert.equal(computed.getPropertyValue(property).trim(), value, property);
+      }
+    }
+  } finally {
+    await ui.cleanup();
+    if (previous === null) document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", previous);
+  }
+});
+
+test("MIG-0737 U01 theme: switching retains the live draft input, value, focus and explicit cancellation", async () => {
+  const previous = document.documentElement.getAttribute("data-theme");
+  const ui = await mount({ allowMutations: true });
+  try {
+    const input = await editTitle(ui);
+    for (const theme of ["dark", "light", "dark"]) {
+      await React.act(async () => document.documentElement.setAttribute("data-theme", theme));
+      assert.ok(cell(ui, "0:1").querySelector("input") === input, "same draft input retained");
+      assert.ok(document.activeElement === input, "draft retains DOM focus");
+      assert.equal(input.value, "Unsaved");
+      assert.deepEqual(selected(ui), ["0:1"]);
+      assertNoEffects(ui);
+      const computed = window.getComputedStyle(ui.host.querySelector("[data-spreadsheet-grid-viewport]"));
+      for (const [property, value] of Object.entries(sheetPalettes[theme])) {
+        assert.equal(computed.getPropertyValue(property).trim(), value, property);
+      }
+    }
+    await key(input, "Escape");
+    assert.ok(cell(ui, "0:1").querySelector("input") === null, "original draft remains cancellable");
+    assert.ok(document.activeElement === cell(ui, "0:1"), "cancel restores cell focus");
+    assertNoEffects(ui);
+  } finally {
+    await ui.cleanup();
+    if (previous === null) document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", previous);
+  }
+});
+
+test("MIG-0737 U01 theme: two Grids retain scoped palettes through a sibling unmount", async () => {
+  // Keep both mounts and the sibling removal together to verify that a shared root theme never leaks sheet variables.
+  const previous = document.documentElement.getAttribute("data-theme");
+  const grids = [];
+  const outside = document.createElement("div");
+  document.body.append(outside);
+  try {
+    grids.push(await mount());
+    grids.push(await mount());
+    await select(grids[0], "1:1");
+    await select(grids[1], "2:1");
+    for (const theme of ["dark", "light"]) {
+      await React.act(async () => document.documentElement.setAttribute("data-theme", theme));
+      for (const ui of grids) {
+        const computed = window.getComputedStyle(ui.host.querySelector("[data-spreadsheet-grid-viewport]"));
+        for (const [property, value] of Object.entries(sheetPalettes[theme])) {
+          assert.equal(computed.getPropertyValue(property).trim(), value, property);
+          assert.equal(window.getComputedStyle(outside).getPropertyValue(property), "", "no external sheet variable");
+        }
+        assertNoEffects(ui);
+      }
+      assert.deepEqual(selected(grids[0]), ["1:1"]);
+      assert.deepEqual(selected(grids[1]), ["2:1"]);
+    }
+    await grids.shift().cleanup();
+    await React.act(async () => document.documentElement.setAttribute("data-theme", "dark"));
+    const computed = window.getComputedStyle(grids[0].host.querySelector("[data-spreadsheet-grid-viewport]"));
+    for (const [property, value] of Object.entries(sheetPalettes.dark)) {
+      assert.equal(computed.getPropertyValue(property).trim(), value, "surviving Grid " + property);
+      assert.equal(window.getComputedStyle(outside).getPropertyValue(property), "", "no external sheet variable");
+    }
+    assert.deepEqual(selected(grids[0]), ["2:1"]);
+    assert.ok(document.activeElement === cell(grids[0], "2:1"), "sibling unmount preserves remaining Grid focus");
+    assertNoEffects(grids[0]);
+  } finally {
+    for (const ui of grids) await ui.cleanup();
+    outside.remove();
+    if (previous === null) document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", previous);
   }
 });
