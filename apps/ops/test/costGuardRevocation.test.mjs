@@ -106,12 +106,12 @@ test("SEC-814: all five Cost Guard mutation routes classify an actual 403 forbid
   ]);
 });
 
-test("SEC-814: shared notification writes keep their original D-17-3 result contract", async () => {
+test("SEC-814: notification writes preserve SEC-816's confirmed 403 revocation result", async () => {
   const notifications = createAdminNotificationsApi(async () =>
     response(403, { ok: false, reason: "forbidden", message: "既存の通知操作は拒否されました。" }));
   assert.deepEqual(await notifications.retry("safe-id"),
-    { ok: false, message: "既存の通知操作は拒否されました。" },
-    "Cost Guard's new revocation flag must not leak into other callers of postAdminBody");
+    { ok: false, forbidden: true, message: "既存の通知操作は拒否されました。" },
+    "a notification 403 with the forbidden reason must report revoked access");
 });
 
 test("SEC-814: POST 403 forbidden immediately hides private Cost Guard data and every action", async () => {
