@@ -26,24 +26,12 @@ export interface StaticRecommendCoreData {
   underrated: VideoCardData[];
 }
 
-function isValidGeneratedAtInput(value: unknown): boolean {
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value !== "string") return false;
-  const normalized = value.trim();
-  if (!/^[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(normalized)) {
-    return false;
-  }
-  return Number.isFinite(Number(normalized));
-}
-
 export function normalizeRecommendCore(value: unknown): StaticRecommendCoreData | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const payload = value as StaticRecommendCorePayload;
   if (payload.schema_version !== RECOMMEND_CORE_SCHEMA_VERSION) return null;
   if (!Array.isArray(payload.recommended) || !Array.isArray(payload.latest)) return null;
   if (!Array.isArray(payload.underrated)) return null;
-  if (!isValidGeneratedAtInput(payload.generated_at)) return null;
-  // Validate the floored timestamp against the shared Date-representable bounds.
   const generatedAt = normalizeNullableUnix(payload.generated_at);
   if (generatedAt == null || generatedAt <= 0) return null;
   return {

@@ -71,6 +71,21 @@ test("recommend core preserves finite numeric and decimal numeric-string timesta
   assert.equal(fractional.generatedAt, 1_729_000_000);
 });
 
+test("recommend core preserves timestamps with a leading or trailing decimal point", () => {
+  for (const [generatedAt, expected] of [
+    ["1729000000.", 1_729_000_000],
+    [".1729e10", 1_729_000_000],
+    ["1.", 1],
+    [".15e1", 1],
+  ]) {
+    assert.equal(
+      normalizeRecommendCore(payload({ generated_at: generatedAt }))?.generatedAt,
+      expected,
+      generatedAt,
+    );
+  }
+});
+
 test("recommend core preserves valid empty pools", () => {
   const normalized = normalizeRecommendCore(payload());
   assert.ok(normalized);
