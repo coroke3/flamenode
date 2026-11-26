@@ -67,12 +67,33 @@ test("U02 extend direction uses the slot id in the URL, not a group id", async (
   assertPost(srv.calls[1], "/api/events/e/slots/s/extend", { direction: "backward" });
 });
 
-test("U02 merge sends gap_slot_id and display_name only", async () => {
+test("U02 merge sends gap_slot_id and display_name only when override is omitted", async () => {
   const srv = server(200, { ok: true });
   await mergeSlotGroup("e", { gap_slot_id: "gap-slot", display_name: "制作者" }, srv.fetcher);
   assertPost(srv.calls[0], "/api/events/e/slot-groups/merge", {
     gap_slot_id: "gap-slot", display_name: "制作者",
   });
+});
+
+test("U03c SA-067/068 forward only an explicitly supplied operator override", async () => {
+  const denied = { ok: false, reason: "forbidden", message: "運営権限が必要です。" };
+  for (const override of [undefined, false, true]) {
+    const flag = override === undefined ? {} : { operator_override: override };
+    const srv = server(403, denied);
+    assert.deepEqual(await extendSlot("my/event", "slot?#", {
+      direction: "backward", ...flag,
+    }, srv.fetcher), denied, "client cannot turn a denial into success");
+    assertPost(srv.calls[0], "/api/events/my%2Fevent/slots/slot%3F%23/extend", {
+      direction: "backward", ...flag,
+    });
+    assert.deepEqual(await mergeSlotGroup("my/event", {
+      gap_slot_id: "gap-slot", display_name: "運営", ...flag,
+    }, srv.fetcher), denied);
+    assertPost(srv.calls[1], "/api/events/my%2Fevent/slot-groups/merge", {
+      gap_slot_id: "gap-slot", display_name: "運営", ...flag,
+    });
+    assert.equal(srv.calls.length, 2, "one request per operation; no automatic retry");
+  }
 });
 
 test("U02 409 race loser and 403 guard denial preserve error payload for CURRENT UI", async () => {

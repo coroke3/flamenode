@@ -21,11 +21,13 @@ export interface ReserveSlotInput {
 
 export interface ExtendSlotInput {
   direction: "forward" | "backward";
+  operator_override?: boolean;
 }
 
 export interface MergeSlotGroupInput {
   gap_slot_id: string;
   display_name: string;
+  operator_override?: boolean;
 }
 
 function parseResult(value: unknown): SlotReservationResult {
@@ -93,7 +95,10 @@ export function extendSlot(
   input: ExtendSlotInput,
   fetcher: typeof fetch = fetch,
 ): Promise<SlotReservationResult> {
-  return post(`${slotPath(eventId, slotId)}/extend`, { direction: input.direction }, fetcher);
+  return post(`${slotPath(eventId, slotId)}/extend`, {
+    direction: input.direction,
+    ...(input.operator_override === undefined ? {} : { operator_override: input.operator_override }),
+  }, fetcher);
 }
 
 export function mergeSlotGroup(
@@ -104,5 +109,6 @@ export function mergeSlotGroup(
   return post(`/api/events/${encodeURIComponent(eventId)}/slot-groups/merge`, {
     gap_slot_id: input.gap_slot_id,
     display_name: input.display_name,
+    ...(input.operator_override === undefined ? {} : { operator_override: input.operator_override }),
   }, fetcher);
 }
