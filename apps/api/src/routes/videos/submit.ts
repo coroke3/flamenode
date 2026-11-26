@@ -528,7 +528,12 @@ async function rollbackUploadedVideoIcon(
     await bucket.delete(uploadedKey);
   } catch {
     // Fixed-code diagnostic only; never leak storage internals or input data.
-    console.error("video_icon_orphan_cleanup_failed");
+    try {
+      console.error("video_icon_orphan_cleanup_failed");
+    } catch {
+      // A failed diagnostic sink must not replace the original mutation error.
+      // The failed deletion still leaves an orphan for storage remediation.
+    }
   }
 }
 

@@ -686,6 +686,85 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("T04 SEC: failed R2 compensation and throwing diagnostic sink preserve original SA-086 conflict", async () => {
+    const cleanupMarker = "video_icon_orphan_cleanup_failed";
+    const unrelatedKey = "video-icons/x_other/v_unrelated/keep.png";
+    for (const failure of ["duplicate", "audit-abort"]) {
+      for (const throwSink of [false, true]) {
+        const w = seedWorld();
+        const wakes = [];
+        const logs = [];
+        const originalError = console.error;
+        const origBatch = w.d1.batch.bind(w.d1);
+        let attemptedBatches = 0;
+        let expectedState = snapshotDb(w.sqlite);
+        const unrelated = { bytes: new Uint8Array([1, 2, 3]) };
+        w.bucket.objects.set(unrelatedKey, unrelated);
+        // Abort inside the real SQLite transaction, after business statements
+        // have been prepared. The duplicate case instead races at the batch edge.
+        if (failure === "audit-abort") {
+          w.sqlite.exec("CREATE TEMP TRIGGER reject_video_audit BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(ABORT, 'SYNTHETIC_AUDIT_FAILURE'); END");
+        }
+        w.d1.batch = async (statements) => {
+          attemptedBatches++;
+          if (failure === "duplicate" && attemptedBatches === 1) {
+            insert(w.sqlite, "videos", {
+              id: "v_racer",
+              creator_x_user_id: "x_owner",
+              submitted_by_user_id: "u_owner",
+              creator_display_name: "Racer",
+              title: "Racer",
+              youtube_video_id: "dQw4w9WgXcQ",
+              visibility_status: "public",
+              created_at: 100,
+              updated_at: 100,
+            });
+            expectedState = snapshotDb(w.sqlite);
+          }
+          return origBatch(statements);
+        };
+        w.bucket.delete = async (key) => {
+          w.bucket.deletes.push(key);
+          throw new Error("SYNTHETIC_R2_DELETE_FAILURE");
+        };
+        console.error = (...args) => {
+          logs.push(args);
+          if (throwSink) throw new Error("SYNTHETIC_DIAGNOSTIC_FAILURE");
+        };
+        try {
+          const fd = baseForm();
+          fd.set("icon_mode", "upload");
+          fd.set("icon_file", new File([buildPng()], "icon.png", { type: "image/png" }));
+          const res = await submitApp(w.d1, "u_owner", w.bucket, wakes)(fd);
+          assert.equal(res.status, 409, failure + "/" + throwSink);
+          assert.equal(res.headers.get("cache-control"), "private, no-store");
+          assert.deepEqual(await res.json(), {
+            ok: false,
+            message: failure === "duplicate"
+              ? "このYouTube動画は既に登録されています。"
+              : "イベント設定が変更されたか、保存内容が競合しました。入力内容を確認して再試行してください。",
+          });
+          assert.equal(attemptedBatches, 1, "do not replay a failed mutation");
+          assert.equal(w.d1.stats.batches, 1);
+          assert.ok(w.d1.stats.batchStatements > 1);
+          assert.deepEqual(snapshotDb(w.sqlite), expectedState, "no partial business/audit/outbox commit");
+          assert.deepEqual(wakes, []);
+          assert.equal(w.bucket.puts.length, 1);
+          const uploadedKey = w.bucket.puts[0].key;
+          assert.match(uploadedKey, /^video-icons\/x_owner\/v_/);
+          assert.deepEqual(w.bucket.deletes, [uploadedKey], "one attempt for only the new icon");
+          assert.equal(w.bucket.objects.size, 2, "failed deletion leaves an orphan, not successful compensation");
+          assert.ok(w.bucket.objects.has(uploadedKey));
+          assert.equal(w.bucket.objects.get(unrelatedKey), unrelated);
+          assert.deepEqual(logs, [[cleanupMarker]]);
+        } finally {
+          console.error = originalError;
+          w.sqlite.close();
+        }
+      }
+    }
+  });
+
   test("T05: icon_mode='existing' validates /api/media/... candidate ownership", async () => {
     const w = seedWorld();
     try {
