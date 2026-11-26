@@ -501,3 +501,52 @@ test("MIG-0627 U02a T21: single-read user index keeps CURRENT fractional lastmod
     }
   }
 });
+
+test("MIG-0627 U02a T22: optional index omission and fixture result survive a throwing diagnostic sink", async () => {
+  const sinkFailure = new Error("synthetic diagnostic failure");
+  const warnings = [];
+  const warn = (message) => { warnings.push(message); throw sinkFailure; };
+  for (const [options, expectedReads, code] of [
+    [{ manifestAllowed: false }, [], "NOT_PUBLIC"],
+    [{ manifestBlocked: true }, [], "NOT_PUBLIC"],
+    [{ bytes: null }, [SITEMAP_VIDEOS_KEY], "SNAPSHOT_MISSING"],
+  ]) {
+    const fixture = accessWith(options);
+    assert.deepEqual(await sitemapVideosOrEmpty(fixture.access, warn), { generated_at: null, videos: [] });
+    assert.deepEqual(fixture.reads, expectedReads);
+    assert.equal(fixture.metrics.rejected, 1);
+    assert.match(warnings.at(-1), new RegExp(code));
+  }
+  assert.equal(warnings.length, 3);
+  const expected = await sitemapVideosOrEmpty(null, () => {});
+  assert.ok(expected.videos.length > 0);
+  assert.deepEqual(await sitemapVideosOrEmpty(null, warn), expected);
+  assert.equal(warnings.length, 4);
+  assert.match(warnings.at(-1), /using published video fixtures/);
+});
+
+test("MIG-0627 U02a T23: a broken diagnostic sink cannot mask valid or corrupt snapshot results", async () => {
+  let warnings = 0;
+  const warn = () => { warnings++; throw new Error("synthetic diagnostic failure"); };
+  const valid = accessWith();
+  assert.deepEqual(await sitemapVideosOrEmpty(valid.access, warn), publicVideos);
+  assert.deepEqual(valid.reads, [SITEMAP_VIDEOS_KEY]);
+  for (const [bytes, code] of [
+    [buildEnvelope(publicVideos, { generationId: "previous-build" }), "GENERATION_MISMATCH"],
+    [buildEnvelope(publicVideos, { hash: "0".repeat(64) }), "HASH_MISMATCH"],
+    [buildEnvelope({ generated_at: 1, videos: [{ id: 42, youtube_video_id: null, scheduled_time: null }] }), "INVALID_PAYLOAD"],
+  ]) {
+    const fixture = accessWith({ bytes });
+    await assert.rejects(sitemapVideosOrEmpty(fixture.access, warn), (error) => error?.code === code);
+    assert.deepEqual(fixture.reads, [SITEMAP_VIDEOS_KEY]);
+    assert.equal(fixture.metrics.rejected, 1);
+  }
+  const unavailable = accessWith();
+  unavailable.access.source.read = async (key) => {
+    unavailable.reads.push(key);
+    throw new Error("synthetic source failure");
+  };
+  await assert.rejects(sitemapVideosOrEmpty(unavailable.access, warn), (error) => error?.code === "SOURCE_UNAVAILABLE");
+  assert.deepEqual(unavailable.reads, [SITEMAP_VIDEOS_KEY]);
+  assert.equal(warnings, 0);
+});

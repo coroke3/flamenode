@@ -21,6 +21,15 @@ import {
 
 const EMPTY_VIDEOS: SitemapVideoSnapshot = { generated_at: null, videos: [] };
 
+/** Diagnostics must not override an intentional optional-source omission. */
+function bestEffortSitemapWarning(warn: (message: string) => void, message: string): void {
+  try {
+    warn(message);
+  } catch {
+    // Keep the existing fixture/optional-index result when the diagnostic sink fails.
+  }
+}
+
 export async function sitemapVideosOrEmpty(
   access: SnapshotAccess | null,
   warn: (message: string) => void = console.warn,
@@ -40,7 +49,7 @@ export async function sitemapVideosOrEmpty(
         scheduled_time: detail.video.scheduled_time,
       };
     });
-    warn("[sitemap] no build snapshot configured; using published video fixtures");
+    bestEffortSitemapWarning(warn, "[sitemap] no build snapshot configured; using published video fixtures");
     return { generated_at: null, videos };
   }
   try {
@@ -48,7 +57,7 @@ export async function sitemapVideosOrEmpty(
   } catch (error) {
     // A missing or unpublished optional video index must not fail the entire public build.
     if (error instanceof SnapshotBuildError && (error.code === "NOT_PUBLIC" || error.code === "SNAPSHOT_MISSING")) {
-      warn(`[sitemap] ${SITEMAP_VIDEOS_KEY} unavailable: ${error.code}; video URLs omitted`);
+      bestEffortSitemapWarning(warn, `[sitemap] ${SITEMAP_VIDEOS_KEY} unavailable: ${error.code}; video URLs omitted`);
       return EMPTY_VIDEOS;
     }
     throw error; // Corruption/hash/generation/source failures must remain fail-closed.
