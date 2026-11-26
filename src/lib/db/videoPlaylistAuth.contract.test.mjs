@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { eventVideoPageHref } from "../youtube/id.ts";
 
-const [eventPage, videoPage, videoQueries, videoOverlay] = await Promise.all([
+const [eventPage, videoPage, videoQueries, videoOverlay, playlistFallbackLog] = await Promise.all([
   readFile(
     new URL("../../../app/(public)/event/[id]/page.tsx", import.meta.url),
     "utf8",
@@ -14,6 +14,7 @@ const [eventPage, videoPage, videoQueries, videoOverlay] = await Promise.all([
   ),
   readFile(new URL("./videoDetailQueries.ts", import.meta.url), "utf8"),
   readFile(new URL("../video/videoViewerOverlay.ts", import.meta.url), "utf8"),
+  readFile(new URL("./videoPlaylistFallbackLog.ts", import.meta.url), "utf8"),
 ]);
 
 test("event cards preserve the public event playlist on a validated same-origin route", () => {
@@ -70,7 +71,10 @@ test("playlist R2 fallback は理由を分類して event visibility guard を�
   assert.match(videoQueries, /r2_invalid/);
   assert.match(videoQueries, /r2_incomplete/);
   assert.match(videoQueries, /r2_error/);
-  assert.match(videoQueries, /event_playlist_d1_fallback/);
+  assert.match(videoQueries, /logEventPlaylistFallback\(eventId, reason\)/);
+  assert.match(playlistFallbackLog, /event_playlist_d1_fallback/);
+  assert.match(playlistFallbackLog, /console\.warn\(JSON\.stringify/);
+  assert.match(playlistFallbackLog, /catch \{/);
   assert.match(videoQueries, /from\(events\)/);
   assert.match(videoQueries, /visibility_status !== "public"/);
   assert.match(videoQueries, /readPublicVisibilityBlockedEntitiesManifest/);
