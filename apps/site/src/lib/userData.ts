@@ -46,6 +46,8 @@ export interface UserBuildData {
   users: Map<string, UserBuildEntry>;
   /** CURRENT legacy index entries; null when the index object is not published. */
   index: StaticUsersIndexEntry[] | null;
+  /** Generation timestamp from the SAME verified index read as the emitted user pages. */
+  generatedAt: number | null;
   source: "snapshot" | "fixture";
 }
 
@@ -139,7 +141,12 @@ export async function loadUserBuildDataFrom(source: UserPayloadSource): Promise<
     const profile = payload ? normalizeStaticUserProfile(payload) : null;
     // A profile object that names another user is a producer error: never publish it under this URL.
     if (!profile || normalizeXId(profile.user.id) !== id) {
-      console.warn(`[user-routes] no page for ${id}: profile snapshot unavailable`);
+      // A missing/nonpublic/mismatched profile must stay omitted even if diagnostics fail.
+      try {
+        console.warn("[user-routes] profile snapshot unavailable");
+      } catch {
+        // Logging is best effort; it must not abort the public build.
+      }
       continue;
     }
     users.set(id, {
@@ -150,7 +157,13 @@ export async function loadUserBuildDataFrom(source: UserPayloadSource): Promise<
   }
   // The index lists only creators that have a page: a card must not lead to the gateway 404.
   const listed = index ? index.filter((entry) => users.has(normalizeXId(entry.x_id))) : null;
-  return { users, index: listed, source: source.kind };
+  // Preserve the sitemap's previous Number(raw generated_at) semantics (including
+  // sub-second fractions). normalizeStaticUsersIndex intentionally floors it for
+  // user views; using that projection here silently changes sitemap lastmod.
+  // Only a published user index may contribute a sitemap generation timestamp.
+  const rawGeneratedAt = index && indexPayload ? Number(indexPayload.generated_at) : NaN;
+  const generatedAt = Number.isFinite(rawGeneratedAt) && rawGeneratedAt > 0 ? rawGeneratedAt : null;
+  return { users, index: listed, generatedAt, source: source.kind };
 }
 
 let cached: Promise<UserBuildData> | null = null;
