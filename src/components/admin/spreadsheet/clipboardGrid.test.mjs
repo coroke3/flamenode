@@ -156,3 +156,18 @@ test("HTML clipboard fallback strips whole quoted inline tags and comments witho
   assert.deepEqual(parseHtmlClipboardTable(html), expected);
   assert.deepEqual(parseClipboardContent("", html), expected);
 });
+
+test("HTML clipboard fallback preserves explicit br separators at both cell edges", () => {
+  const html = '<table><tr><td><br>A</td><td>A<br></td><td><br><br></td><td>B</td></tr></table>';
+  const expected = [["\nA", "A\n", "\n\n", "B"]];
+  assert.deepEqual(parseHtmlClipboardTable(html), expected);
+  assert.deepEqual(parseClipboardContent("", html), expected);
+});
+
+test("HTML clipboard fallback retains legacy whitespace trimming and single blank row filtering", () => {
+  const html = '<table><tr><td><br><br></td></tr><tr><td>  A&nbsp;  </td><td>  <br>B</td><td>C<br>  </td></tr></table>';
+  const expected = [["A", "\nB", "C\n"]];
+  assert.deepEqual(parseHtmlClipboardTable(html), expected);
+  assert.deepEqual(parseClipboardContent("", html), expected);
+  assert.deepEqual(parseHtmlClipboardTable("<table><tr><td><br></td></tr></table>"), []);
+});

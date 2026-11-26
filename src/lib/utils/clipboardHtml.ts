@@ -20,12 +20,17 @@ function decodeHtmlEntities(text: string): string {
 }
 
 function stripHtmlTags(fragment: string): string {
-  return decodeHtmlEntities(
-    fragment.replace(
-      /<!--[\s\S]*?-->|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi,
-      (tag) => /^<br(?=[\s/>])/i.test(tag) ? "\n" : "",
-    ),
-  ).replace(/\u00a0/g, " ");
+  // Keep explicit BR separators separate from text whitespace trimming.
+  const parts = fragment.split(/(<!--[\s\S]*?-->|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>)/gi);
+  const lines = [""];
+  for (const [index, part] of parts.entries()) {
+    if (index % 2 === 0) lines[lines.length - 1] += part;
+    else if (/^<br(?=[\s/>])/i.test(part)) lines.push("");
+  }
+  const decoded = lines.map((line) => decodeHtmlEntities(line).replace(/\u00a0/g, " "));
+  decoded[0] = decoded[0].trimStart();
+  decoded[decoded.length - 1] = decoded[decoded.length - 1].trimEnd();
+  return decoded.join("\n");
 }
 
 /**
@@ -60,11 +65,11 @@ function parseHtmlTableRegex(html: string): string[][] {
     const cellRe = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
     let cellMatch: RegExpExecArray | null;
     while ((cellMatch = cellRe.exec(rowHtml)) !== null) {
-      cells.push(stripHtmlTags(cellMatch[1] ?? "").trim());
+      cells.push(stripHtmlTags(cellMatch[1] ?? ""));
     }
     if (cells.length > 0) rows.push(cells);
   }
-  return rows.filter((r) => !(r.length === 1 && r[0] === ""));
+  return rows.filter((r) => !(r.length === 1 && r[0].trim() === ""));
 }
 
 /**
