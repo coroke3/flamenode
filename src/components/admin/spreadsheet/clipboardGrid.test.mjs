@@ -398,3 +398,28 @@ test("HTML clipboard fallback declines ambiguous declarations after a DOMParser 
     else delete globalThis.DOMParser;
   }
 });
+
+test("HTML clipboard fallback never synthesizes a character reference across markup boundaries", () => {
+  const fixtures = [
+    ["&am<span></span>p;", "&amp;"],
+    ["&<!--note-->amp;", "&amp;"],
+    ["&#<span></span>128640;", "&#128640;"],
+    ["&#x<!--note-->1f680;", "&#x1f680;"],
+    ["&amp;", "&"],
+    ["&amp;#128640;", "&#128640;"],
+    ["&#128640;", "\u{1f680}"],
+    ["&#x1f680;", "\u{1f680}"],
+    ["A<br>B", "A\nB"],
+    ["&lt;<b>x</b>&gt;", "<x>"],
+    ["A&nbsp;<b>B</b>", "A B"],
+    ["<br>A<br>", "\nA\n"],
+    ["&lt;<!--note-->&amp;", "<&"],
+  ];
+  for (const [cell, expectedCell] of fixtures) {
+    const html = "<table><tr><td>" + cell + "</td><td>END</td></tr></table>";
+    const expected = [[expectedCell, "END"]];
+    assert.deepEqual(parseHtmlClipboardTable(html), expected, html);
+    assert.deepEqual(parseClipboardContent("", html), expected, html);
+    assert.equal(looksLikeTabularClipboard("", html), true, html);
+  }
+});

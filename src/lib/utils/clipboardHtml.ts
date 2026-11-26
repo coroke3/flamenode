@@ -24,13 +24,14 @@ function stripHtmlTags(fragment: string): string {
   const parts = fragment.split(/(<!--[\s\S]*?-->|<!(?!--)[^<>]*>|<\?[^<>]*>|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>)/gi);
   const lines = [""];
   for (const [index, part] of parts.entries()) {
-    if (index % 2 === 0) lines[lines.length - 1] += part;
+    // Decode each text token before joining across markup; otherwise removing
+    // a tag or comment can create a character reference that was never present.
+    if (index % 2 === 0) lines[lines.length - 1] += decodeHtmlEntities(part).replace(/\u00a0/g, " ");
     else if (/^<br(?=[\s/>])/i.test(part)) lines.push("");
   }
-  const decoded = lines.map((line) => decodeHtmlEntities(line).replace(/\u00a0/g, " "));
-  decoded[0] = decoded[0].trimStart();
-  decoded[decoded.length - 1] = decoded[decoded.length - 1].trimEnd();
-  return decoded.join("\n");
+  lines[0] = lines[0].trimStart();
+  lines[lines.length - 1] = lines[lines.length - 1].trimEnd();
+  return lines.join("\n");
 }
 
 /** DOM なし環境向けの簡易 HTML 表パース */
