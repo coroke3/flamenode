@@ -8,9 +8,17 @@ import {
   type LegacyImportApplyResponse,
 } from "../../api/adminLegacyImport.js";
 
+type FileRange = { start: string; end: string };
+
+function validRange({ start, end }: FileRange): boolean {
+  const valid = (raw: string) => !raw.trim() ||
+    (/^[1-9]\d*$/.test(raw.trim()) && Number.isSafeInteger(Number(raw.trim())));
+  return valid(start) && valid(end) && (!start.trim() || !end.trim() || Number(start) <= Number(end));
+}
+
 /** MIG-0737 U02: isolated legacy-import shell.
  * Not routed, apply OFF by default until MIG-0645, MIG-0726 and independent review.
- * CURRENT's progressive/chunked apply and custom Q mapping are not yet ported.
+ * CURRENT's chunk suggestions/progressive apply and custom Q mapping are not yet ported.
  */
 export function AdminLegacyImportPreviewView({
   fetchFn = fetch,
@@ -22,6 +30,7 @@ export function AdminLegacyImportPreviewView({
   confirmApply?: (text: string) => boolean;
 }): React.ReactElement {
   const [files, setFiles] = React.useState<File[]>([]);
+  const [ranges, setRanges] = React.useState<FileRange[]>([]);
   const [credential, setCredential] = React.useState<LegacyPreviewCredential | null>(null);
   const [preview, setPreview] = React.useState<LegacyImportPreview | null>(null);
   const [applyStatus, setApplyStatus] = React.useState<
@@ -48,7 +57,8 @@ export function AdminLegacyImportPreviewView({
     currentApplyStatus.data.continuation_required;
   const validCredential = trusted && credential &&
     credential.expiresAt > Math.floor(Date.now() / 1000);
-  const canApply = Boolean(allowApply && validCredential && !busy && !recoveryPending && files.length > 0 &&
+  const invalidRange = ranges.some(range => !validRange(range));
+  const canApply = Boolean(!invalidRange && allowApply && validCredential && !busy && !recoveryPending && files.length > 0 &&
     !currentPreview?.requires_field_mapping);
 
   function reset(): void {
@@ -66,6 +76,7 @@ export function AdminLegacyImportPreviewView({
   React.useEffect(() => {
     reset();
     setFiles([]);
+    setRanges([]);
     // React treats function values as updaters; wrap the fetch transport in a thunk.
     setSource(() => fetchFn);
     return () => {
@@ -77,11 +88,21 @@ export function AdminLegacyImportPreviewView({
   function chooseFiles(list: FileList | null): void {
     if (busy || active.current) return;
     reset();
-    setFiles(list ? Array.from(list) : []);
+    const selected = list ? Array.from(list) : [];
+    setFiles(selected);
+    setRanges(selected.map(() => ({ start: "", end: "" })));
+  }
+
+  function changeRange(index: number, field: keyof FileRange, value: string): void {
+    if (busy || active.current || !trusted || recoveryPending) return;
+    const hadPreview = currentPreview !== null;
+    reset();
+    setRanges(current => current.map((range, i) => i === index ? { ...range, [field]: value } : range));
+    if (hadPreview) setMessage("入力が変更されたため、プレビューをやり直してください。");
   }
 
   async function runPreview(): Promise<void> {
-    if (active.current || files.length === 0 || !trusted || recoveryPending) return;
+    if (active.current || files.length === 0 || !trusted || recoveryPending || invalidRange) return;
     active.current = true;
     const id = ++generation.current;
     const signalController = new AbortController();
@@ -92,7 +113,13 @@ export function AdminLegacyImportPreviewView({
     setPreview(null);
     setApplyStatus(null);
     try {
-      const result = await previewLegacyImport(fetchFn, new FormData(), files,
+      const fields = new FormData();
+      // RH-002 associates inclusive, one-based bounds with the repeated files' order.
+      ranges.forEach((range, index) => {
+        fields.set(`range_start_${index}`, range.start);
+        fields.set(`range_end_${index}`, range.end);
+      });
+      const result = await previewLegacyImport(fetchFn, fields, files,
         [], signalController.signal);
       if (id !== generation.current || signalController.signal.aborted ||
           activeFetch.current !== fetchFn) return;
@@ -173,15 +200,30 @@ export function AdminLegacyImportPreviewView({
     <section aria-label="旧形式インポート">
       <h2>旧形式インポート</h2>
       <p>旧JSON・CSV・TSVを現行DB正本に変換します。プレビューが完了するまで反映できません。</p>
-      <p>現行のカスタム質問マッピング・行範囲指定・複数ステップ自動再開は移行準備中です。</p>
+      <p>現行のカスタム質問マッピング・チャンク提案・複数ステップ自動再開は移行準備中です。</p>
       <label>インポートファイル
         <input type="file" multiple accept=".json,.csv,.tsv,application/json,text/csv,text/tab-separated-values"
           disabled={busy} onChange={(event) => chooseFiles(event.currentTarget.files)} />
       </label>
       {files.length > 0 ? <ul>{files.map((file, i) => (
-        <li key={i}>{file.name}（{file.size} bytes）</li>
+        <li key={i}>
+          {file.name}（{file.size} bytes）
+          <label>開始位置（1始まり）
+            <input type="number" name={`range_start_${i}`} min={1} step={1}
+              inputMode="numeric" placeholder="先頭" aria-label={`${file.name}の開始位置`}
+              value={ranges[i]?.start ?? ""} disabled={busy || !trusted || recoveryPending}
+              onChange={event => changeRange(i, "start", event.currentTarget.value)} />
+          </label>
+          <label>終了位置（この行を含む）
+            <input type="number" name={`range_end_${i}`} min={1} step={1}
+              inputMode="numeric" placeholder="末尾" aria-label={`${file.name}の終了位置`}
+              value={ranges[i]?.end ?? ""} disabled={busy || !trusted || recoveryPending}
+              onChange={event => changeRange(i, "end", event.currentTarget.value)} />
+          </label>
+        </li>
       ))}</ul> : null}
-      <button type="button" disabled={busy || !trusted || recoveryPending || files.length === 0}
+      {invalidRange ? <p role="alert">範囲は1以上の整数で、終了位置は開始位置以上にしてください。空欄は先頭または末尾を意味します。</p> : null}
+      <button type="button" disabled={busy || !trusted || recoveryPending || invalidRange || files.length === 0}
         onClick={() => void runPreview()}>サーバーでプレビュー</button>
       {currentPreview ? (
         <section aria-label="旧形式プレビュー結果">

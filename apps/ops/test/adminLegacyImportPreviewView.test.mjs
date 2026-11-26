@@ -270,3 +270,69 @@ test("MIG-0737 U02: late committed progress cannot return after transport/sessio
     assert.equal(nextRequests, 0);
   } finally { await ui.cleanup(); }
 });
+
+
+async function changeRange(ui, name, value) {
+  const input = ui.host.querySelector(`input[name="${name}"]`);
+  assert.ok(input, "range input missing: " + name);
+  assert.equal(input.disabled, false);
+  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+  await React.act(async () => {
+    setter.call(input, value);
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  });
+  await flush();
+}
+
+test("MIG-0737 U02: manual inclusive ranges preserve RH-002 repeated-file order and blank endpoints", async () => {
+  const requests = [];
+  const second = new File(["id,title\\n2,Beta"], "second.csv", { type: "text/csv" });
+  const ui = await mount({ fetchFn: async (_, init) => {
+    requests.push(init.body);
+    return reply(200, preview());
+  }, allowApply: true });
+  try {
+    await chooseFiles(ui, [file, second]);
+    await changeRange(ui, "range_start_0", "1");
+    await changeRange(ui, "range_end_0", "2");
+    await changeRange(ui, "range_end_1", "3");
+    await click(ui, "サーバーでプレビュー");
+    assert.equal(requests.length, 1);
+    const form = requests[0];
+    assert.deepEqual(form.getAll("files").map(f => f.name), ["legacy.csv", "second.csv"]);
+    assert.deepEqual(["range_start_0", "range_end_0", "range_start_1", "range_end_1"].map(k => form.get(k)),
+      ["1", "2", "", "3"]);
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, false);
+    await changeRange(ui, "range_end_0", "4");
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, true);
+    assert.match(ui.host.textContent, /入力が変更されたため、プレビューをやり直してください/);
+    assert.doesNotMatch(ui.host.textContent, /プレビュー済み（期限/);
+    await click(ui, "サーバーでプレビュー");
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].get("range_end_0"), "4");
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U02: invalid ranges cannot preview and new files reset old range indexes", async () => {
+  let calls = 0;
+  const ui = await mount({ fetchFn: async () => { calls++; return reply(200, preview()); }, allowApply: true });
+  try {
+    await chooseFiles(ui, [file]);
+    await changeRange(ui, "range_start_0", "3");
+    await changeRange(ui, "range_end_0", "2");
+    assert.equal(ui.host.querySelectorAll("button")[0].disabled, true);
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, true);
+    assert.match(ui.host.textContent, /終了位置は開始位置以上/);
+    assert.equal(calls, 0);
+    await changeRange(ui, "range_end_0", "0");
+    assert.equal(ui.host.querySelectorAll("button")[0].disabled, true);
+    await changeRange(ui, "range_end_0", "4");
+    assert.equal(ui.host.querySelectorAll("button")[0].disabled, false);
+    await chooseFiles(ui, [new File(["id"], "other.csv")]);
+    assert.equal(ui.host.querySelector('input[name="range_start_0"]').value, "");
+    assert.equal(ui.host.querySelector('input[name="range_end_0"]').value, "");
+    await click(ui, "サーバーでプレビュー");
+    assert.equal(calls, 1);
+  } finally { await ui.cleanup(); }
+});
