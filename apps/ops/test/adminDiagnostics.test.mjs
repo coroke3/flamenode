@@ -91,6 +91,31 @@ test("U01 health preserves deep and integrity navigation; errors never show diag
   assert.doesNotMatch(unsupported, /注意/);
 });
 
+test("MIG-0736 deep catalog or empty results never show an all-clear before U03", async () => {
+  for (const payload of [
+    { status: "all", results: [], error: null, checkIds: ["system_settings_single_row", "primary_event_sync"] },
+    { status: "all", results: [], error: null },
+  ]) {
+    const calls = [];
+    const data = await getAdminHealth(async (path) => {
+      calls.push(path);
+      return response(200, payload);
+    }, true);
+    assert.deepEqual(calls, ["/api/admin-read/ops/health?deep=1"]);
+    const html = render(h(AdminHealthView, { data, fullRun: true, initialFilter: "all", onRefresh: () => {} }), "/admin/health?deep=1");
+    assert.match(html, /全体診断は現在利用できません/);
+    assert.doesNotMatch(html, /WARN はありません|状態フィルタ|最新状態を再チェック/);
+    assert.equal(new JSDOM(html).window.document.querySelectorAll("tbody tr").length, 0);
+  }
+  const completed = await getAdminHealth(async () => response(200, {
+    status: "all", results: [results[0]], error: null,
+  }), true);
+  const valid = render(h(AdminHealthView, { data: completed, fullRun: true, initialFilter: "all", onRefresh: () => {} }), "/admin/health?deep=1");
+  assert.match(valid, /WARN はありません/);
+  assert.match(valid, /安全/);
+  assert.doesNotMatch(valid, /全体診断は現在利用できません/);
+});
+
 test("U01 security first view shows run prompt without result table", () => {
   const data = { status: "ok", data: { status: "all", ran: false, results: [], error: null } };
   const idle = render(h(AdminSecurityView, { data, shouldRun: false, initialFilter: "all", onRefresh: () => {} }), "/admin/security");

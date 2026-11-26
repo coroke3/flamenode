@@ -36,13 +36,16 @@ export function AdminHealthView({
           <OpsLink href="/admin/health/integrity" className="fn-btn fn-btn-ghost">DB整合性チェックへ</OpsLink>
         </div>
       </section>
+      {/* MIG-0626 may return a catalog with zero results before any check runs.
+          Until U03, never display an empty deep response as an all-clear. */}
       {data.status === "loading" ? <p role="status">読み込み中…</p>
-        : data.status === "ok" && data.data.error === null ? (
+        : data.status === "ok" && data.data.error === null && (!fullRun || data.data.results.length > 0) ? (
           <DiagnosticStatusResults kind="health" results={data.data.results}
             initialFilter={initialFilter} onRefresh={onRefresh} />
         ) : (
           <p role="alert" style={{ marginTop: 20 }}>
-            {data.status === "unsupported" ? "全体診断は現在利用できません。"
+            {data.status === "unsupported" || (fullRun && data.status === "ok" && data.data.error === null && data.data.results.length === 0)
+              ? "全体診断は現在利用できません。"
               : data.status === "anonymous" ? "ログインが必要です。"
               : data.status === "forbidden" || data.status === "notFound" ? "閲覧権限がありません。"
               : "診断結果を取得できませんでした。"}
