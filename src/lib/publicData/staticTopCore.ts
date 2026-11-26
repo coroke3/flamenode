@@ -11,7 +11,7 @@ import {
   normalizePresentString as normalizeString,
 } from "./normalize.ts";
 import { normalizeStaticVideoCardBase } from "./staticVideoCardCore.ts";
-import { normalizePublicEventVisibility } from "./visibility.ts";
+import { isPublicVideoListable, normalizePublicEventVisibility } from "./visibility.ts";
 import { isPointEvent } from "../utils/eventStatusCore.ts";
 
 export interface StaticTopPayload {
@@ -115,10 +115,16 @@ function normalizeVideo(value: unknown): VideoCardData | null {
   const base = normalizeStaticVideoCardBase(value);
   if (!base) return null;
   const row = value as Record<string, unknown>;
+  // Legacy top snapshots may omit status fields. An explicitly non-public
+  // marker, however, must never become a public homepage video card.
+  if (
+    (row.status != null && !isPublicVideoListable(row.status)) ||
+    (row.visibility_status != null && !isPublicVideoListable(row.visibility_status))
+  ) return null;
   return {
     ...base,
     creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
-    status: normalizeNullableString(row.status) ?? "public",
+    status: "public",
     part: normalizeNullableString(row.part),
   };
 }
