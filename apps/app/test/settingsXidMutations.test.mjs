@@ -38,6 +38,56 @@ test("MIG-0708 T02: approved nonactive X has switch, unlink and profile form; ac
   await active.unmount();
 });
 
+test("MIG-0708 T02 / MIG-0702 T03: manager-only approved X exposes CURRENT switch, profile and unlink controls", async () => {
+  // This is the exact SettingsResponse DTO shape verified from a real
+  // link_role='manager' D1 row by apps/api/test/personal.parity.test.mjs.
+  // SettingsXIdSchema intentionally does not expose link_role to the SPA.
+  const managerId = "manager_only_x";
+  const data = settings({
+    user: user({ active_x_user_id: "active" }),
+    xIds: [settingsX("active"), settingsX(managerId)],
+    panel: { xId: managerId, iconCandidates: [], channelCandidates: [] },
+  });
+  const calls = [];
+  const a = fakeApi({ getSettings: ok(data) });
+  a.xidProfile = {
+    setActive: async id => { calls.push(id); return { ok: true }; },
+    updateProfile: async () => ({ ok: true }),
+    deleteXId: async () => ({ ok: true }),
+    setIcon: async () => ({ ok: true }),
+    uploadIcon: async () => ({ ok: true }),
+  };
+  const m = await mount(`/dashboard/settings?x=${managerId}`, a);
+  try {
+    assert.match(m.container.querySelector("#settings-x-h")?.textContent ?? "", /manager_only_x/);
+    const buttons = [...m.container.querySelectorAll("button")];
+    const active = buttons.find(b => b.textContent.includes("アクティブに設定"));
+    assert.ok(active, "CURRENT allows approved manager X to become Active X");
+    assert.ok(buttons.some(b => b.textContent.includes("連携を解除")),
+      "nonactive manager X exposes unlink confirmation; backend checks owner dependencies");
+    assert.ok(m.container.querySelector('input[name="x_name"]'),
+      "approved manager X gets the same profile editor as an owner link");
+    await act(async () => active.click());
+    await flush();
+    assert.deepEqual(calls, [managerId], "Active X request must address the manager-linked X exactly once");
+  } finally { await m.unmount(); }
+
+  const denied = settings({
+    user: user({ active_x_user_id: "active" }),
+    xIds: [settingsX("active"), settingsX(managerId, { approval_status: "pending" })],
+    panel: { xId: managerId, iconCandidates: [], channelCandidates: [] },
+  });
+  const pendingApi = fakeApi({ getSettings: ok(denied) });
+  pendingApi.xidProfile = a.xidProfile;
+  const pending = await mount(`/dashboard/settings?x=${managerId}`, pendingApi);
+  try {
+    assert.ok(![...pending.container.querySelectorAll("button")].some(b => b.textContent.includes("アクティブに設定")),
+      "unapproved manager X cannot switch Active X");
+    assert.equal(pending.container.querySelector(".settings-editPanel"), null,
+      "unapproved manager X cannot edit a public profile");
+  } finally { await pending.unmount(); }
+});
+
 test("MIG-0708 T06: setActive success rereads settings silently without replacing visible panel with loading", async () => {
   const data = makeFixture();
   let resolveRefresh;

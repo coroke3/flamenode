@@ -1,3 +1,4 @@
+import { normalizeCount } from "@flamenode/server-core/publicData/normalize";
 import { Hono } from "hono";
 import type { AppEnv } from "../env.ts";
 
@@ -7,6 +8,7 @@ import type { AppEnv } from "../env.ts";
 const MAX_STATS_BYTES = 64 * 1024;
 const TOP_STATS_OBJECT_KEY = "top/sections/stats.v1.json";
 const TOP_SECTIONS_SCHEMA_VERSION = 1;
+const TOP_SECTIONS_MAX_FUTURE_SKEW_SEC = 5 * 60;
 
 const HEADERS = {
   "Cache-Control": "public, max-age=300, stale-while-revalidate=1800",
@@ -36,30 +38,23 @@ async function cancelR2BodyBestEffort(object: { body?: unknown } | null | undefi
   }
 }
 
-// Same semantics as CURRENT normalizeNumericUnix / normalizeCount.
-function normalizeNumber(value: unknown): number | null {
-  const normalized = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(normalized) ? Math.floor(normalized) : null;
-}
-
-function normalizeCount(value: unknown): number {
-  const normalized = normalizeNumber(value);
-  return normalized != null && normalized >= 0 ? normalized : 0;
-}
-
 /** Mirrors normalizeTopStatsSection, projected to the public about-stats DTO. */
 export function normalizeAboutStats(value: unknown): AboutStats | null {
   if (!value || typeof value !== "object") return null;
   const payload = value as Record<string, unknown>;
-  if (Number(payload.schema_version) !== TOP_SECTIONS_SCHEMA_VERSION) return null;
-  const generatedAt = normalizeNumber(payload.generated_at);
-  if (generatedAt == null || generatedAt <= 0) return null;
+  if (payload.schema_version !== TOP_SECTIONS_SCHEMA_VERSION) return null;
+  const generatedAt = payload.generated_at;
+  if (typeof generatedAt !== "number" || !Number.isSafeInteger(generatedAt) || generatedAt <= 0) {
+    return null;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  if (generatedAt > now + TOP_SECTIONS_MAX_FUTURE_SKEW_SEC) return null;
   if (!payload.stats || typeof payload.stats !== "object") return null;
   const stats = payload.stats as Record<string, unknown>;
   return {
-    publicVideos: normalizeCount(stats.public_videos),
-    creators: normalizeCount(stats.creators),
-    events: normalizeCount(stats.public_events),
+    publicVideos: normalizeCount(stats.public_videos) ?? 0,
+    creators: normalizeCount(stats.creators) ?? 0,
+    events: normalizeCount(stats.public_events) ?? 0,
   };
 }
 
@@ -113,10 +108,14 @@ publicAboutStatsRoutes.get("/", async (c) => {
     }
 
     return response;
-  } catch (error) {
-    console.warn("[about-stats] compact R2 stats read failed", {
-      error: error instanceof Error ? error.name : "unknown",
-    });
+  } catch {
+    // R2/provider exceptions and diagnostic sinks are untrusted. A failed log
+    // must never replace the stable no-store 503 response with a thrown error.
+    try {
+      console.warn("[about-stats] compact R2 stats read failed");
+    } catch {
+      // Best-effort diagnostics only.
+    }
     return unavailable();
   }
 });

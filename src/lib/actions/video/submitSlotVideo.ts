@@ -81,6 +81,22 @@ import {
   sortSlotsChronologically,
 } from "@/lib/utils/slotGroupingCore";
 
+type SlotSubmitFailureDiagnostic =
+  | "event_plan_rejected"
+  | "stage_permission_fields_unavailable"
+  | "atomic_save_rejected"
+  | "preflight_rejected";
+
+/** A diagnostic-only sink must not change an existing safe Server Action result. */
+function warnSlotSubmissionFailure(result: SlotSubmitFailureDiagnostic): void {
+  try {
+    // Only fixed code is logged: never serialize provider Error or user input.
+    console.warn(JSON.stringify({ service: "submit_slot_video", result }));
+  } catch {
+    // Preflight and failed-save results must still be returned if logging fails.
+  }
+}
+
 const MAX_SUBMIT_SLOT_REBUILD_EVENT_TARGETS = 5;
 
 const SLOT_SUBMIT_REJECT_MESSAGE = "枠が見つかりません。";
@@ -176,15 +192,15 @@ async function submitSlotVideoCore(
       alwaysInclude: [slotRow.event_id],
       user: { id: userId, role: sessionUser.role ?? null },
     });
-  } catch (error) {
-    console.warn("[submitSlotVideo] event plan rejected", error);
+  } catch {
+    warnSlotSubmissionFailure("event_plan_rejected");
     return { ok: false, message: "選択イベント数が保存上限を超えています。" };
   }
   let stageFields: Awaited<ReturnType<typeof getStagePermissionFieldsForEvents>>;
   try {
     stageFields = await getStagePermissionFieldsForEvents(db, syncedEventIds);
-  } catch (error) {
-    console.warn("[submitSlotVideo] stage permission fields read rejected", error);
+  } catch {
+    warnSlotSubmissionFailure("stage_permission_fields_unavailable");
     return { ok: false, message: "ステージ許諾項目を読み込めませんでした。" };
   }
   const stageResult = buildStagePermissionSubmission(formData, stageFields);
@@ -429,6 +445,8 @@ async function submitSlotVideoCore(
       };
 
   let staticRebuildEnqueued = false;
+  // Keep wake deduplication across the committed D1 batch and later best-effort YouTube wake.
+  const wakeSentKinds = new Set<QueueWakeKind>();
   try {
     const plan = emptyVideoAtomicWritePlan();
     plan.statements.push(
@@ -652,22 +670,18 @@ async function submitSlotVideoCore(
     staticRebuildEnqueued = queue.statements.length > 0;
     plan.statements.push(...queue.statements);
     plan.expectedChanges.push(...queue.expectedChanges);
-    const wakeSentKinds = new Set<QueueWakeKind>();
     await executeVideoAtomicWritePlan(db, plan, {
       notificationWakeSource,
       staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
       wakeSentKinds,
     });
-    if (youtubeFieldPresent && submittedYoutubeId) {
-      await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
-    }
   } catch (error) {
     unstable_rethrow(error);
     await rollbackUploadedVideoIcon(iconResolved.value.uploadedKey);
     if (isYoutubeIdUniqueConstraintError(error)) {
       return { ok: false, message: "このYouTube動画は既に登録されています。" };
     }
-    console.warn("[submitSlotVideo] atomic save rejected", error);
+    warnSlotSubmissionFailure("atomic_save_rejected");
     return { ok: false, message: "保存対象が多すぎるか競合が発生しました。再読み込みして再試行してください。" };
   }
 
@@ -675,6 +689,15 @@ async function submitSlotVideoCore(
   await runPostCommitBestEffort(
     { flow: "submit_slot_video", traceId },
     [
+      // A wake failure cannot enter the D1 failure catch or remove an icon now referenced by the committed video.
+      ...(youtubeFieldPresent && submittedYoutubeId
+        ? [{
+            name: "youtube_sync_wake",
+            run: async () => {
+              await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
+            },
+          }]
+        : []),
       {
         name: "revalidate",
         run: async () => {
@@ -723,7 +746,7 @@ export async function submitSlotVideo(
     return await submitSlotVideoCore(formData);
   } catch (error) {
     unstable_rethrow(error);
-    console.warn("[submitSlotVideo] preflight rejected", error);
+    warnSlotSubmissionFailure("preflight_rejected");
     return {
       ok: false,
       message: SLOT_SUBMIT_UNEXPECTED_ERROR_MESSAGE,
