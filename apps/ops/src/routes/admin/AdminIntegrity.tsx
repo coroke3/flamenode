@@ -54,7 +54,9 @@ export function AdminIntegrityView({ data, shouldRun, onRefresh }: {
 export function AdminIntegrity({ fetchFn = fetch }: { fetchFn?: OpsFetch }): React.ReactElement {
   const [params] = useSearchParams();
   const [refreshKey, setRefreshKey] = React.useState(0);
-  const shouldRun = params.get("run") === "1";
+  // CURRENT rejects array-valued run parameters, including repeated "1".
+  const run = params.getAll("run");
+  const shouldRun = run.length === 1 && run[0] === "1";
   const data = useApiResult(
     (signal) => getAdminIntegrity(fetchFn, shouldRun, signal),
     shouldRun ? "admin-integrity:run" : "admin-integrity:idle",

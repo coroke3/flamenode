@@ -47,8 +47,11 @@ export function AdminSecurityView({
 export function AdminSecurity({ fetchFn = fetch }: { fetchFn?: OpsFetch }): React.ReactElement {
   const [params] = useSearchParams();
   const [refreshKey, setRefreshKey] = React.useState(0);
-  const shouldRun = params.get("run") === "1";
-  const initialFilter = normalizeDiagnosticFilter(params.get("status"));
+  // Match CURRENT scalar searchParams; duplicate keys do not opt in.
+  const run = params.getAll("run");
+  const status = params.getAll("status");
+  const shouldRun = run.length === 1 && run[0] === "1";
+  const initialFilter = normalizeDiagnosticFilter(status.length === 1 ? status[0] : null);
   const data = useApiResult(
     (signal) => getAdminSecurity(fetchFn, shouldRun, signal),
     shouldRun ? "admin-security:run" : "admin-security:idle",

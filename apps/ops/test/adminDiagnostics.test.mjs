@@ -3,13 +3,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { JSDOM } from "jsdom";
 import { getAdminHealth, getAdminSecurity, getAdminWorkers, getAdminIntegrity } from "../.test-dist/apps/ops/src/api/adminDiagnostics.js";
-import { AdminHealthView } from "../.test-dist/apps/ops/src/routes/admin/AdminHealth.js";
-import { AdminSecurityView } from "../.test-dist/apps/ops/src/routes/admin/AdminSecurity.js";
+import { AdminHealth, AdminHealthView } from "../.test-dist/apps/ops/src/routes/admin/AdminHealth.js";
+import { AdminSecurity, AdminSecurityView } from "../.test-dist/apps/ops/src/routes/admin/AdminSecurity.js";
 import { AdminWorkersView } from "../.test-dist/apps/ops/src/routes/admin/AdminWorkers.js";
-import { AdminIntegrityView } from "../.test-dist/apps/ops/src/routes/admin/AdminIntegrity.js";
+import { AdminIntegrity, AdminIntegrityView } from "../.test-dist/apps/ops/src/routes/admin/AdminIntegrity.js";
 import { DiagnosticStatusResults, normalizeDiagnosticFilter } from "../.test-dist/apps/ops/src/routes/admin/DiagnosticStatusResults.js";
 
 const h = (type, props, ...children) => React.createElement(type, props, ...children);
@@ -256,4 +257,64 @@ test("U02c integrity idle/unsupported/denied views show no fabricated check coun
     data: { status: "forbidden" }, shouldRun: true, onRefresh: () => {},
   }), "/admin/health/integrity?run=1");
   assert.match(denied, /閲覧権限がありません/);
+});
+
+// CURRENT Next page searchParams represents repeated query keys as arrays.
+test("MIG-0736 diagnostic route query parity: duplicate keys never opt in or select a filter", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test" });
+  const keys = ["window", "document", "navigator", "HTMLElement", "Node", "IS_REACT_ACT_ENVIRONMENT"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  try {
+    for (const key of keys) {
+      Object.defineProperty(globalThis, key, {
+        configurable: true,
+        value: key === "IS_REACT_ACT_ENVIRONMENT" ? true : dom.window[key],
+      });
+    }
+    async function check(Component, path, expectedRequests, expectedText, filter) {
+      const calls = [];
+      const target = dom.window.document.createElement("div");
+      dom.window.document.body.append(target);
+      const root = createRoot(target);
+      const fetchFn = async (url) => {
+        calls.push(url);
+        if (url.includes("/integrity")) return response(501, { error: "unsupported" });
+        return response(200, { status: "all", results, error: null, ...(url.includes("/security") ? { ran: true } : {}) });
+      };
+      try {
+        await React.act(async () => {
+          root.render(h(MemoryRouter, { initialEntries: [path] }, h(Component, { fetchFn })));
+        });
+        assert.deepEqual(calls, expectedRequests, path);
+        assert.match(target.textContent, expectedText, path);
+        if (filter) assert.equal(target.querySelector('button[aria-pressed="true"]')?.textContent.trim(), filter, path);
+      } finally {
+        await React.act(async () => root.unmount());
+        target.remove();
+      }
+    }
+    await check(AdminHealth, "/admin/health?deep=1&deep=0&run=1&run=1&status=warn&status=ok",
+      ["/api/admin-read/ops/health"], /運用チェック/, "すべて (3)");
+    await check(AdminHealth, "/admin/health?deep=1&deep=1&run=1&status=warn",
+      ["/api/admin-read/ops/health?deep=1"], /全体診断/, "WARN (1)");
+    await check(AdminHealth, "/admin/health?deep=1&run=1&run=0",
+      ["/api/admin-read/ops/health?deep=1"], /全体診断/);
+    for (const duplicate of ["run=1&run=0", "run=1&run=1", "run=0&run=1"]) {
+      await check(AdminSecurity, "/admin/security?" + duplicate, [], /セキュリティ診断は未実行です/);
+      await check(AdminIntegrity, "/admin/health/integrity?" + duplicate, [], /DB整合性診断は未実行です/);
+    }
+    await check(AdminSecurity, "/admin/security?run=1&status=warn&status=ok",
+      ["/api/admin-read/ops/security?run=1"], /セキュリティ WARN 1 件/, "すべて (3)");
+    await check(AdminSecurity, "/admin/security?run=1&status=warn",
+      ["/api/admin-read/ops/security?run=1"], /セキュリティ WARN 1 件/, "WARN (1)");
+    await check(AdminIntegrity, "/admin/health/integrity?run=1",
+      ["/api/admin-read/ops/integrity?run=1"], /DB整合性診断は現在利用できません/);
+  } finally {
+    for (const key of keys) {
+      const descriptor = previous.get(key);
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    dom.window.close();
+  }
 });

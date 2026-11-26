@@ -55,8 +55,14 @@ export function AdminHealthView({
 export function AdminHealth({ fetchFn = fetch }: { fetchFn?: OpsFetch }): React.ReactElement {
   const [params] = useSearchParams();
   const [refreshKey, setRefreshKey] = React.useState(0);
-  const fullRun = params.get("deep") === "1" || params.get("run") === "1";
-  const initialFilter = normalizeDiagnosticFilter(params.get("status"));
+  // CURRENT Next searchParams supplies arrays for duplicate keys; only a
+  // single scalar "1" requests the expensive diagnostic for each alias.
+  const deep = params.getAll("deep");
+  const run = params.getAll("run");
+  const status = params.getAll("status");
+  const fullRun = (deep.length === 1 && deep[0] === "1") ||
+    (run.length === 1 && run[0] === "1");
+  const initialFilter = normalizeDiagnosticFilter(status.length === 1 ? status[0] : null);
   const data = useApiResult(
     (signal) => getAdminHealth(fetchFn, fullRun, signal),
     fullRun ? "admin-health:deep" : "admin-health:operational",
