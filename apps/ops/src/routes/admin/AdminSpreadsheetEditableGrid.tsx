@@ -51,7 +51,7 @@ export function AdminSpreadsheetEditableGrid({
   /** Separate opt-in prevents accidental production writes while MIG-0638 is READY. */
   allowMutations?: boolean;
 }): React.ReactElement {
-  const { def, rows, columns, primaryKeys, page } = data;
+  const { def, rows, columns, primaryKeys, page, limit } = data;
   const [selection, setSelection] = React.useState<CellSelection | null>(null);
   const [anchorCell, setAnchorCell] = React.useState<GridCell>({ row: 0, col: 0 });
   const [focusedCell, setFocusedCell] = React.useState<GridCell>({ row: 0, col: 0 });
@@ -76,6 +76,8 @@ export function AdminSpreadsheetEditableGrid({
   const canMutate = editable && !identityChanged && !busy && inFlight.current == null;
   const safeHistory = !identityChanged && history.key === key ? history : { key, undo: [], redo: [] };
   const currentSelection = !identityChanged && selection?.key === key ? selection : null;
+  // Keep drafts intact until CURRENT blur-save is ported; header selection does not commit or discard edits.
+  const canSelectHeaders = !identityChanged && currentSelection === null && rows.length > 0 && columns.length > 0;
   const insertColumns = columns.filter(c => !c.generated && (c.pk > 0 || c.editable));
 
   React.useEffect(() => {
@@ -316,12 +318,45 @@ export function AdminSpreadsheetEditableGrid({
         </div>
       ) : null}
       <p>矢印キーで移動、Shift＋矢印で範囲選択、Ctrl/Cmd＋Aで全体選択、Shift＋Spaceで行選択、Ctrl/Cmd＋Spaceで列選択、Ctrl/Cmd＋CでTSVコピー、Enterで編集できます。</p>
+      <p>見出しのクリックで全体・行・列を選択し、Shift＋行・列見出しで現在の始点から範囲を広げられます。</p>
+      {currentSelection ? <p>見出しで選択する前に、セルを保存するかキャンセルしてください。</p> : null}
       <div style={{ overflowX: "auto" }}>
         <table ref={tableRef}>
-          <thead><tr>{columns.map(c => <th key={c.name} scope="col">{c.name}</th>)}<th scope="col">操作</th></tr></thead>
+          <thead><tr>
+            <th scope="col" data-grid-all-header="" aria-label="全セルを選択" title="クリックで全選択"
+              aria-disabled={!canSelectHeaders} style={{ userSelect: "none" }}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                if (!canSelectHeaders) return;
+                const end = { row: rows.length - 1, col: columns.length - 1 };
+                setAnchorCell({ row: 0, col: 0 });
+                const table = event.currentTarget.closest("table");
+                if (table?.contains(event.currentTarget.ownerDocument.activeElement)) focusGridCell(end, event.currentTarget);
+                else setFocusedCell(end);
+              }} />
+            {columns.map((c, ci) => (
+              <th key={c.name} scope="col" data-grid-column-header={ci} title={`${c.name} (${c.type})`}
+                aria-disabled={!canSelectHeaders} style={{ userSelect: "none" }}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  if (!canSelectHeaders) return;
+                  if (!event.shiftKey) setAnchorCell({ row: 0, col: ci });
+                  focusGridCell({ row: rows.length - 1, col: ci }, event.currentTarget);
+                }}>{c.name}</th>
+            ))}<th scope="col">操作</th>
+          </tr></thead>
           <tbody>
             {rows.map((row, ri) => (
-              <tr key={ri}>{columns.map(c => {
+              <tr key={ri}>
+                <th scope="row" data-grid-row-header={ri} title="クリックで行選択"
+                  aria-disabled={!canSelectHeaders} style={{ userSelect: "none" }}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    if (event.button !== 0 || !canSelectHeaders) return;
+                    if (!event.shiftKey) setAnchorCell({ row: ri, col: 0 });
+                    focusGridCell({ row: ri, col: columns.length - 1 }, event.currentTarget);
+                  }}>{(page - 1) * Math.max(1, limit) + ri + 1}</th>
+                {columns.map(c => {
                 const value = cellValue(row[c.name]);
                 const canEdit = editable && c.editable && c.pk === 0 && !c.generated &&
                   primaryKey(row, primaryKeys) !== null;

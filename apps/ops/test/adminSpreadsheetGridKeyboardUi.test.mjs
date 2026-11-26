@@ -362,3 +362,211 @@ for (const [name, next] of [
     } finally { await ui.cleanup(); }
   });
 }
+
+const allHeader = "[data-grid-all-header]";
+const rowHeader = index => `[data-grid-row-header="${index}"]`;
+const columnHeader = index => `[data-grid-column-header="${index}"]`;
+function gridHeader(ui, selector) {
+  const header = ui.host.querySelector(selector);
+  assert.ok(header, "missing header " + selector);
+  return header;
+}
+function headerEvent(options = {}) {
+  return new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true, ...options });
+}
+async function pressHeader(ui, selector, options = {}) {
+  const event = headerEvent(options);
+  await React.act(async () => { gridHeader(ui, selector).dispatchEvent(event); });
+  assert.equal(event.defaultPrevented, true);
+}
+
+for (const scenario of [
+  { name: "corner with mutations off", selector: allHeader, cells: pageCells, tsv: pageTsv,
+    end: "2:2", next: "2:1", allowMutations: false },
+  { name: "row ignoring Ctrl/Meta/Alt", selector: rowHeader(1), cells: rowCells, tsv: rowTsv,
+    end: "1:2", next: "1:1", options: { ctrlKey: true, metaKey: true, altKey: true } },
+  { name: "readonly column from outside focus", selector: columnHeader(1), cells: columnCells, tsv: columnTsv,
+    end: "2:1", next: "1:1", arrow: "ArrowUp", mode: "readonly", externalFocus: true },
+]) {
+  test(`MIG-0737 U01 header: ${scenario.name} selects only page data for TSV and following arrows`, async () => {
+    const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const copied = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async body => { copied.push(body); },
+    } });
+    let calls = 0;
+    let refreshes = 0;
+    const ui = await mount({ data: { ...rangeData, def: { ...rangeData.def, mode: scenario.mode ?? "editable" } },
+      allowMutations: scenario.allowMutations ?? true,
+      fetchFn: async () => { calls++; throw Error("header selection must not send"); },
+      onRefresh: () => { refreshes++; },
+    });
+    const outside = document.createElement("input");
+    document.body.append(outside);
+    try {
+      await selectCell(ui, "1:1");
+      if (scenario.externalFocus) outside.focus();
+      await pressHeader(ui, scenario.selector, scenario.options);
+      assert.deepEqual(selectedCells(ui), scenario.cells);
+      assert.equal(document.activeElement?.getAttribute("data-grid-cell"), scenario.end);
+      assert.deepEqual([...ui.host.querySelectorAll('[data-grid-cell][tabindex="0"]')]
+        .map(cell => cell.dataset.gridCell), [scenario.end]);
+      assert.deepEqual([...ui.host.querySelectorAll('th[scope="row"]')].map(header => header.textContent), ["4", "5", "6"]);
+      await press(document.activeElement, "c", { ctrlKey: true });
+      assert.deepEqual(copied, [scenario.tsv]);
+      await press(document.activeElement, scenario.arrow ?? "ArrowLeft");
+      assert.deepEqual(selectedCells(ui), [scenario.next]);
+      assert.equal(calls, 0);
+      assert.equal(refreshes, 0);
+    } finally {
+      outside.remove();
+      await ui.cleanup();
+      if (previous) Object.defineProperty(navigator, "clipboard", previous);
+      else delete navigator.clipboard;
+    }
+  });
+}
+
+for (const button of [1, 2]) {
+  for (const scenario of [
+    { name: "row", selector: rowHeader(0), cells: ["1:1"], end: "1:1" },
+    { name: "column", selector: columnHeader(1), cells: columnCells, end: "2:1" },
+    { name: "corner ignoring Shift", selector: allHeader, cells: pageCells, end: "2:2", shiftKey: true },
+  ]) {
+    test(`MIG-0737 U01 header: CURRENT button=${button} behavior for ${scenario.name}`, async () => {
+      const ui = await mount({ data: rangeData });
+      try {
+        await selectCell(ui, "1:1");
+        await pressHeader(ui, scenario.selector, { button, shiftKey: scenario.shiftKey });
+        assert.deepEqual(selectedCells(ui), scenario.cells);
+        assert.equal(document.activeElement?.getAttribute("data-grid-cell"), scenario.end);
+      } finally { await ui.cleanup(); }
+    });
+  }
+}
+
+for (const scenario of [
+  { name: "row forward", start: "1:1", selector: rowHeader(2), cells: ["1:1", "1:2", "2:1", "2:2"], end: "2:2" },
+  { name: "row backward", start: "2:1", selector: rowHeader(0), cells: ["0:1", "0:2", "1:1", "1:2", "2:1", "2:2"], end: "0:2" },
+  { name: "column forward", start: "1:0", selector: columnHeader(2), cells: ["1:0", "1:1", "1:2", "2:0", "2:1", "2:2"], end: "2:2" },
+  { name: "column backward", start: "1:2", selector: columnHeader(0), cells: ["1:0", "1:1", "1:2", "2:0", "2:1", "2:2"], end: "2:0" },
+]) {
+  test(`MIG-0737 U01 header: Shift ${scenario.name} extends the original cell anchor`, async () => {
+    const ui = await mount({ data: rangeData });
+    try {
+      await selectCell(ui, scenario.start);
+      await pressHeader(ui, scenario.selector, { shiftKey: true });
+      assert.deepEqual(selectedCells(ui), scenario.cells);
+      assert.equal(document.activeElement?.getAttribute("data-grid-cell"), scenario.end);
+    } finally { await ui.cleanup(); }
+  });
+}
+
+for (const scenario of [
+  { name: "row", first: rowHeader(1), second: rowHeader(2), cells: ["1:0", "1:1", "1:2", "2:0", "2:1", "2:2"] },
+  { name: "column", first: columnHeader(1), second: columnHeader(2), cells: ["0:1", "0:2", "1:1", "1:2", "2:1", "2:2"] },
+]) {
+  test(`MIG-0737 U01 header: batched ${scenario.name} presses retain the newly established anchor`, async () => {
+    const ui = await mount({ data: rangeData });
+    try {
+      await selectCell(ui, "0:0");
+      await React.act(async () => {
+        gridHeader(ui, scenario.first).dispatchEvent(headerEvent());
+        gridHeader(ui, scenario.second).dispatchEvent(headerEvent({ shiftKey: true }));
+      });
+      assert.deepEqual(selectedCells(ui), scenario.cells);
+      assert.equal(document.activeElement?.getAttribute("data-grid-cell"), "2:2");
+    } finally { await ui.cleanup(); }
+  });
+}
+
+test("MIG-0737 U01 header: corner selection preserves an external control's focus", async () => {
+  const ui = await mount({ data: rangeData });
+  const outside = document.createElement("input");
+  document.body.append(outside);
+  try {
+    outside.focus();
+    await pressHeader(ui, allHeader, { shiftKey: true });
+    assert.deepEqual(selectedCells(ui), pageCells);
+    assert.equal(document.activeElement === outside, true);
+    assert.equal(gridCell(ui, "2:2").tabIndex, 0);
+  } finally { outside.remove(); await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 header: the interim editor fence retains an unsaved draft and its focus", async () => {
+  let calls = 0;
+  let refreshes = 0;
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: async () => { calls++; throw Error("header must not commit an active draft"); },
+    onRefresh: () => { refreshes++; },
+  });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    await press(cell, "Enter");
+    const input = cell.querySelector("input");
+    await React.act(async () => {
+      input.focus();
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(input, "Unsaved draft");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    for (const selector of [allHeader, rowHeader(0), columnHeader(0)]) {
+      for (const shiftKey of [false, true]) {
+        await pressHeader(ui, selector, { shiftKey });
+        assert.deepEqual(selectedCells(ui), ["1:1"]);
+        assert.equal(document.activeElement === input, true);
+        assert.equal(input.value, "Unsaved draft");
+        assert.equal(cell.querySelector("input") === input, true);
+      }
+    }
+    assert.match(ui.host.textContent, /セルを保存するかキャンセル/);
+    assert.equal(calls, 0);
+    assert.equal(refreshes, 0);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 header: pointer selection remains available during history without bypassing its keyboard lock", async () => {
+  const requests = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ resolve, init })),
+  });
+  try {
+    const cell = await beginTitleSave(ui, "Changed");
+    await React.act(async () => { requests[0].resolve(successfulWrite()); });
+    await flush();
+    await press(cell, "z", { ctrlKey: true });
+    assert.equal(requests.length, 2);
+    for (const [selector, expected] of [[rowHeader(1), rowCells], [columnHeader(1), columnCells], [allHeader, pageCells]]) {
+      await pressHeader(ui, selector);
+      assert.deepEqual(selectedCells(ui), expected);
+      assert.equal((await press(document.activeElement, "a", { ctrlKey: true })).defaultPrevented, false);
+      assert.deepEqual(selectedCells(ui), expected);
+      assert.equal(requests.length, 2);
+    }
+    await React.act(async () => { requests[1].resolve(successfulWrite()); });
+    await flush();
+  } finally { await ui.cleanup(); }
+});
+
+for (const [name, empty] of [
+  ["rows", { ...rangeData, rows: [] }],
+  ["columns", { ...rangeData, columns: [] }],
+  ["rows and columns", { ...rangeData, rows: [], columns: [] }],
+]) {
+  test(`MIG-0737 U01 header: empty ${name} has no selectable or focusable data range`, async () => {
+    const ui = await mount({ data: empty });
+    const outside = document.createElement("input");
+    document.body.append(outside);
+    try {
+      outside.focus();
+      const headers = [allHeader];
+      if (empty.columns.length) headers.push(columnHeader(0));
+      if (empty.rows.length) headers.push(rowHeader(0));
+      for (const selector of headers) {
+        await pressHeader(ui, selector, { shiftKey: true });
+        assert.deepEqual(selectedCells(ui), []);
+        assert.equal(document.activeElement === outside, true);
+      }
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell][tabindex="0"]').length, 0);
+    } finally { outside.remove(); await ui.cleanup(); }
+  });
+}
