@@ -23,6 +23,26 @@ const results = [
   { id: "c", label: "情報", status: "info", count: 1, samples: [], note: "メモ" },
 ];
 
+// Fixed CURRENT/Hono identities, not fabricated generic IDs for a complete security run.
+const securityIds = [
+  "access_token_not_null",
+  "rejected_xid_active",
+  "unapproved_creator_videos",
+  "banned_user_videos",
+  "tos_not_accepted_user_videos",
+  "custom_page_dangerous_html",
+  "banned_user_chapters",
+  "orphan_approved_xid",
+  "public_api_leak",
+  "notification_table_mismatch",
+];
+const securityResults = securityIds.map((id, i) => ({
+  ...(i < 2 ? results[i] : i >= 8 ? results[2] : results[0]),
+  id,
+  ...(i > 2 ? { label: "check " + id } : {}),
+}));
+
+
 test("U01 health checks no-store GET, default vs deep URL, and preserves abort signal", async () => {
   const calls = [];
   const fn = async (path, init) => {
@@ -43,7 +63,7 @@ test("U01 security is idle without a D1 request; explicit run fetches validated 
   const fn = async (path) => {
     requests++;
     assert.equal(path, "/api/admin-read/ops/security?run=1");
-    return response(200, { status: "all", ran: true, results, error: null });
+    return response(200, { status: "all", ran: true, results: securityResults, error: null });
   };
   const idle = await getAdminSecurity(fn, false);
   assert.deepEqual(idle, { status: "ok", data: { status: "all", ran: false, results: [], error: null } });
@@ -122,9 +142,46 @@ test("U01 security first view shows run prompt without result table", () => {
   assert.match(idle, /診断は未実行です/);
   assert.match(idle, /href="\/admin\/security\?run=1"/);
   assert.doesNotMatch(idle, /状態フィルタ/);
-  const running = render(h(AdminSecurityView, { data: { status: "ok", data: { status: "all", ran: true, results, error: null } }, shouldRun: true, initialFilter: "warn", onRefresh: () => {} }), "/admin/security?run=1");
+  const running = render(h(AdminSecurityView, { data: { status: "ok", data: { status: "all", ran: true, results: securityResults, error: null } }, shouldRun: true, initialFilter: "warn", onRefresh: () => {} }), "/admin/security?run=1");
   assert.match(running, /セキュリティ WARN 1 件/);
   assert.match(running, /注意/);
+});
+
+
+test("MIG-0736 security requires all ten distinct CURRENT check identities before a summary", async () => {
+  const clean = securityResults.map(result => result.status === "warn"
+    ? { ...result, status: "ok", count: 0, samples: [] } : result);
+  const malformed = [
+    [],
+    clean.slice(0, 9),
+    [clean[0]],
+    [...clean.slice(0, 9), clean[0]],
+    [...clean.slice(0, 9), { ...clean[9], id: "unregistered" }],
+    [...clean, { ...clean[9], id: "extra" }],
+  ];
+  const view = async rows => {
+    const data = await getAdminSecurity(async () => response(200, {
+      status: "all", ran: true, results: rows, error: null,
+    }), true);
+    // These are shape-valid responses; the screen must reject incomplete
+    // receipts rather than keeping an earlier successful summary.
+    assert.equal(data.status, "ok");
+    return render(h(AdminSecurityView, {
+      data, shouldRun: true, initialFilter: "all", onRefresh: () => {},
+    }), "/admin/security?run=1");
+  };
+  for (const rows of malformed) {
+    const html = await view(rows);
+    assert.match(html, /診断結果を取得できませんでした/);
+    assert.doesNotMatch(html, /WARN はありません|状態フィルタ/);
+    assert.equal(new JSDOM(html).window.document.querySelector("table"), null);
+  }
+  for (const rows of [clean, [...clean].reverse()]) {
+    const html = await view(rows);
+    assert.match(html, /セキュリティ WARN はありません/);
+    assert.equal(new JSDOM(html).window.document.querySelectorAll("tbody tr").length, 10);
+  }
+  assert.match(await view(securityResults), /セキュリティ WARN 1 件/);
 });
 
 
@@ -307,7 +364,8 @@ test("MIG-0736 diagnostic route query parity: duplicate keys never opt in or sel
       const fetchFn = async (url) => {
         calls.push(url);
         if (url.includes("/integrity")) return response(501, { error: "unsupported" });
-        return response(200, { status: "all", results, error: null, ...(url.includes("/security") ? { ran: true } : {}) });
+        const security = url.includes("/security");
+        return response(200, { status: "all", results: security ? securityResults : results, error: null, ...(security ? { ran: true } : {}) });
       };
       try {
         await React.act(async () => {
@@ -332,7 +390,7 @@ test("MIG-0736 diagnostic route query parity: duplicate keys never opt in or sel
       await check(AdminIntegrity, "/admin/health/integrity?" + duplicate, [], /DB整合性診断は未実行です/);
     }
     await check(AdminSecurity, "/admin/security?run=1&status=warn&status=ok",
-      ["/api/admin-read/ops/security?run=1"], /セキュリティ WARN 1 件/, "すべて (3)");
+      ["/api/admin-read/ops/security?run=1"], /セキュリティ WARN 1 件/, "すべて (10)");
     await check(AdminSecurity, "/admin/security?run=1&status=warn",
       ["/api/admin-read/ops/security?run=1"], /セキュリティ WARN 1 件/, "WARN (1)");
     await check(AdminIntegrity, "/admin/health/integrity?run=1",
@@ -396,7 +454,8 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
             status: "all",
             ran: true,
             error: null,
-            results: [{ ...results[0], label: label + " OK" }, { ...results[1], label }],
+            results: (idleUrl ? results.slice(0, 2) : securityResults).map((result, i) =>
+              i === 0 ? { ...result, label: label + " OK" } : i === 1 ? { ...result, label } : result),
           }));
         });
       };
@@ -430,7 +489,7 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
         assert.doesNotMatch(target.textContent, /operational-current/, path);
         await finish(current, "new-run-WARN");
         assert.match(target.textContent, /new-run-WARN/, path);
-        assert.equal(activeFilter(), "すべて (2)", path);
+        assert.equal(activeFilter(), idleUrl ? "すべて (2)" : "すべて (10)", path);
 
         // The transport deliberately ignores abort and resolves the first run late.
         await finish(obsolete, "obsolete-private-result");
@@ -443,8 +502,8 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
         assert.equal(target.querySelectorAll("tbody tr").length, 1, path);
         assert.doesNotMatch(target.textContent, /new-run-WARN OK/, path);
         await go(-1);
-        assert.equal(activeFilter(), "すべて (2)", path);
-        assert.equal(target.querySelectorAll("tbody tr").length, 2, path);
+        assert.equal(activeFilter(), idleUrl ? "すべて (2)" : "すべて (10)", path);
+        assert.equal(target.querySelectorAll("tbody tr").length, idleUrl ? 2 : 10, path);
         await go(1);
         assert.equal(activeFilter(), "WARN (1)", path);
         assert.equal(pending.length, count, path);
@@ -462,6 +521,31 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
         assert.match(target.textContent, /閲覧権限がありません/, path);
         assert.doesNotMatch(target.textContent, /new-run-WARN|obsolete-private-result/, path);
         assert.equal(target.querySelector("table"), null, path);
+
+        if (!idleUrl) {
+          // Re-enter after the denial, then prove a shape-valid partial refresh
+          // replaces (rather than retains) the previous full diagnostic.
+          await go(runPath + "&run=1");
+          assert.match(target.textContent, idleText, path);
+          await go(-1);
+          const fresh = pending.at(-1);
+          assert.notEqual(fresh, current);
+          await finish(fresh, "full-before-partial");
+          assert.match(target.textContent, /full-before-partial/, path);
+          const retry = [...target.querySelectorAll("button")]
+            .find(button => button.textContent.trim() === "最新状態を再チェック");
+          assert.ok(retry);
+          await React.act(async () => { retry.click(); });
+          assert.notEqual(pending.at(-1), fresh);
+          await React.act(async () => {
+            pending.at(-1).resolve(response(200, {
+              status: "all", ran: true, error: null, results: [securityResults[0]],
+            }));
+          });
+          assert.match(target.textContent, /診断結果を取得できませんでした/);
+          assert.doesNotMatch(target.textContent, /WARN はありません|full-before-partial/);
+          assert.equal(target.querySelector("table"), null);
+        }
       } finally {
         await React.act(async () => root.unmount());
         target.remove();

@@ -9,6 +9,28 @@ import { OpsLink } from "../../components/shared/OpsLink.js";
 import { useApiResult, type OpsDataState } from "../useApiResult.js";
 import { DiagnosticStatusResults, normalizeDiagnosticFilter, type DiagnosticFilter } from "./DiagnosticStatusResults.js";
 
+// CURRENT runSecurityChecks and the mounted Hono /ops/security?run=1
+// both return these ten check identities, including the two static INFO rows.
+// A shape-valid but incomplete receipt must not be shown as an all-clear.
+const SECURITY_CHECK_IDS = [
+  "access_token_not_null",
+  "rejected_xid_active",
+  "unapproved_creator_videos",
+  "banned_user_videos",
+  "tos_not_accepted_user_videos",
+  "custom_page_dangerous_html",
+  "banned_user_chapters",
+  "orphan_approved_xid",
+  "public_api_leak",
+  "notification_table_mismatch",
+] as const;
+
+function hasCompleteSecurityResults(results: AdminSecurityResponse["results"]): boolean {
+  if (results.length !== SECURITY_CHECK_IDS.length) return false;
+  const ids = new Set(results.map(result => result.id));
+  return SECURITY_CHECK_IDS.every(id => ids.has(id));
+}
+
 export function AdminSecurityView({
   data, shouldRun, initialFilter, onRefresh,
 }: {
@@ -32,7 +54,7 @@ export function AdminSecurityView({
           </OpsLink>
         </section>
       ) : data.status === "loading" ? <p role="status">読み込み中…</p>
-        : data.status === "ok" && data.data.error === null && data.data.ran ? (
+        : data.status === "ok" && data.data.error === null && data.data.ran && hasCompleteSecurityResults(data.data.results) ? (
           <DiagnosticStatusResults kind="security" results={data.data.results}
             initialFilter={initialFilter} onRefresh={onRefresh} />
         ) : <p role="alert" style={{ marginTop: 20 }}>
