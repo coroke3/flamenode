@@ -140,6 +140,59 @@ test("SA-090/091 SEC: review DB failures deny 503 without logging provider SQL o
   }
 });
 
+test("SA-090/091 SEC: throwing authorization diagnostic sink preserves controlled 503", async () => {
+  const canary = "SYNTHETIC_REVIEW_PROVIDER_CANARY";
+  let authorizationCalls = 0;
+  const badDb = new Proxy({}, {
+    get(_target, property) {
+      if (property === "select") {
+        authorizationCalls++;
+        throw new Error("SELECT * FROM private_accounts " + canary);
+      }
+      return undefined;
+    },
+  });
+  let downstreamCalls = 0;
+  let unhandledErrors = 0;
+  let actorAtExit;
+  const app = new Hono();
+  app.onError((_error, c) => {
+    unhandledErrors++;
+    return c.json({ ok: false, message: "unexpected_error" }, 500);
+  });
+  app.use("*", async (c, next) => {
+    c.set("user", { id: "u_staff", role: "user", active_x_user_id: "x_staff" });
+    c.set("db", badDb);
+    await next();
+    actorAtExit = c.get("xidLinkRequestActorXUserId");
+  });
+  app.use("*", xidLinkRequestReviewAuthorizationMiddleware);
+  app.get("/review", (c) => {
+    downstreamCalls++;
+    return c.json({ ok: true });
+  });
+  const originalError = console.error;
+  const logged = [];
+  console.error = (...args) => {
+    logged.push(args);
+    throw new Error("SYNTHETIC_DIAGNOSTIC_SINK_CANARY");
+  };
+  try {
+    const response = await app.request("/review");
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      ok: false, message: "時間をおいて再試行してください。",
+    });
+    assert.ok(authorizationCalls > 0, "provider fault must be exercised");
+    assert.equal(downstreamCalls, 0);
+    assert.equal(unhandledErrors, 0);
+    assert.equal(actorAtExit, undefined);
+    assert.deepEqual(logged, [["[xid] review authorization failed"]]);
+  } finally {
+    console.error = originalError;
+  }
+});
+
 test("SA-090/091 SEC: downstream failures remain separate from authorization failures", async () => {
   const app = new Hono();
   app.onError((_error, c) => c.json({ ok: false, error: "mutation_failed" }, 502));

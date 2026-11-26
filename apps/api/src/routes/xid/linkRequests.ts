@@ -48,7 +48,11 @@ export const xidLinkRequestReviewAuthorizationMiddleware: MiddlewareHandler<AppE
     } catch {
       // D1/provider exceptions can contain SQL, credentials and request data.
       // The authorization boundary must never serialize the raw exception.
-      console.error("[xid] review authorization failed");
+      try {
+        console.error("[xid] review authorization failed");
+      } catch {
+        // Diagnostic sink failures cannot override the authorization denial.
+      }
       return c.json({ ok: false, message: "時間をおいて再試行してください。" }, 503);
     }
     if (!evidence.allowed) {
