@@ -1,7 +1,7 @@
 // MIG-0725 U03a. Read-only request queue contract; server denies unauthorized staff with 404.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readManageXLinkRequests } from "../.test-dist/apps/ops/src/api/manageXLinkRequests.js";
+import { readManageXLinkRequests, approveXIdLinkRequest, rejectXIdLinkRequest } from "../.test-dist/apps/ops/src/api/manageXLinkRequests.js";
 
 const response = (status, body) => new Response(JSON.stringify(body), {
   status, headers: { "content-type": "application/json" },
@@ -67,4 +67,73 @@ test("U03a unauthorized or unavailable reads never expose prior request rows", a
   assert.deepEqual(await readManageXLinkRequests(
     async () => response(200, { rows: [row] }), abort.signal),
     { status: "unavailable" });
+});
+
+test("U03c SA-090: exact encoded request path, no duplicate id or authority in JSON", async () => {
+  const calls = [];
+  const result = await approveXIdLinkRequest(async (url, init) => {
+    calls.push([url, init]);
+    return response(200, { ok: true, message: "連携を承認しました。" });
+  }, " req/1 ");
+  assert.deepEqual(result, { status: "ok", data: { ok: true, message: "連携を承認しました。" } });
+  assert.equal(calls.length, 1);
+  const [url, init] = calls[0];
+  assert.equal(url, "/api/xid/link-requests/req%2F1/approve");
+  assert.equal(init.method, "POST");
+  assert.equal(init.credentials, "same-origin");
+  assert.equal(init.cache, "no-store");
+  assert.deepEqual(init.headers, { accept: "application/json", "content-type": "application/json" });
+  assert.deepEqual(JSON.parse(init.body), {});
+});
+
+test("U03c SA-091: CURRENT trim, optional reason and 500 UTF-16 code-unit limit", async () => {
+  for (const [input, expected] of [[undefined, ""], ["  理由  ", "理由"], ["  " + "あ".repeat(501) + " ", "あ".repeat(500)]]) {
+    let calls = 0;
+    const got = await rejectXIdLinkRequest(async (url, init) => {
+      calls++;
+      assert.equal(url, "/api/xid/link-requests/req%2F1/reject");
+      assert.equal(init.method, "POST");
+      assert.deepEqual(JSON.parse(init.body), { reason: expected });
+      return response(200, { ok: true, message: "却下しました。" });
+    }, "req/1", input);
+    assert.equal(calls, 1);
+    assert.deepEqual(got, { status: "ok", data: { ok: true, message: "却下しました。" } });
+  }
+});
+
+test("U03c SA-090/091: blank and unsafe dot-segment or malformed Unicode IDs never fetch", async () => {
+  for (const mutate of [approveXIdLinkRequest, rejectXIdLinkRequest]) {
+    let calls = 0;
+    const fetchFn = async () => { calls++; return response(200, { ok: true }); };
+    assert.deepEqual(await mutate(fetchFn, "  "), { status: "ok", data: { ok: false, message: "申請 ID がありません。" } });
+    for (const id of [".", "..", String.fromCharCode(0xd800)]) {
+      assert.deepEqual(await mutate(fetchFn, id), { status: "unavailable" });
+    }
+    assert.equal(calls, 0);
+  }
+});
+
+test("U03c D-17-3: 401 wins over JSON and non-401 denial messages retain CURRENT result", async () => {
+  for (const mutate of [approveXIdLinkRequest, rejectXIdLinkRequest]) {
+    for (const payload of [{ ok: false, message: "ログインが必要です。" }, { ok: true }, null]) {
+      assert.deepEqual(await mutate(async () => response(401, payload), "req1"), { status: "anonymous" });
+    }
+    assert.deepEqual(await mutate(async () => new Response("not json", { status: 401 }), "req1"), { status: "anonymous" });
+    for (const status of [400, 403, 404, 409, 413, 503]) {
+      const denial = { ok: false, message: "処理できません。" };
+      assert.deepEqual(await mutate(async () => response(status, denial), "req1"), { status: "ok", data: denial });
+      assert.deepEqual(await mutate(async () => response(status, { ok: true }), "req1"), { status: "unavailable" });
+    }
+  }
+});
+
+test("U03c strict provisional result: unknown fields, malformed messages and transport failures fail closed", async () => {
+  for (const mutate of [approveXIdLinkRequest, rejectXIdLinkRequest]) {
+    for (const payload of [null, [], {}, { ok: "true" }, { ok: true, message: null }, { ok: true, message: 123 }, { ok: true, redirect: "https://evil.invalid" }, { ok: false, actor_x_user_id: "unexpected" }]) {
+      assert.deepEqual(await mutate(async () => response(200, payload), "req1"), { status: "unavailable" });
+    }
+    assert.deepEqual(await mutate(async () => new Response("not json", { status: 200 }), "req1"), { status: "unavailable" });
+    assert.deepEqual(await mutate(async () => { throw new Error("private provider detail"); }, "req1"), { status: "unavailable" });
+    assert.deepEqual(await mutate(async () => response(200, { ok: true }), "req1"), { status: "ok", data: { ok: true } });
+  }
 });
