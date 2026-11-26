@@ -23,7 +23,11 @@ export const manageDashboardRoutes = new Hono<AppEnv>().get("/", async (c) => {
   try {
     data = await loadManageData(db, user, snapshot, { inbox: true, notifications: true, linked: true });
   } catch {
-    console.warn("[manage] notification_outbox.event_id unavailable");
+    try {
+      console.warn("[manage] notification_outbox.event_id unavailable");
+    } catch {
+      // Diagnostic sinks are best-effort; preserve the legacy-schema fallback.
+    }
     notificationSchemaMissing = true;
     data = await loadManageData(db, user, snapshot, { inbox: true, linked: true });
   }

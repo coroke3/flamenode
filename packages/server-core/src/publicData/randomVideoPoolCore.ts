@@ -28,26 +28,16 @@ export const EMPTY_RANDOM_VIDEO_POOL: RandomVideoPool = {
   items: [],
 };
 
-function parseDecimalUnix(value: unknown): number | null {
-  if (typeof value !== "number" && typeof value !== "string") return null;
-  if (typeof value === "string" && !/^[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(value.trim())) {
-    return null;
-  }
-  // Reuse the shared date-representable Unix-second bounds after flooring.
-  return normalizeNullableUnix(value);
-}
-
-function isValidNullableUnixInput(value: unknown): boolean {
-  return value == null || value === "" || parseDecimalUnix(value) !== null;
-}
-
 function normalizeRelatedItem(value: unknown): StaticRelatedVideo | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const id = normalizeTrimmedString(row.id);
   const title = normalizeTrimmedString(row.title);
   const displayName = normalizeTrimmedString(row.display_name);
-  if (!id || !title || !displayName || !isValidNullableUnixInput(row.scheduled_time)) return null;
+  if (!id || !title || !displayName) return null;
+  const scheduledTimeInput = row.scheduled_time;
+  const scheduledTime = normalizeNullableUnix(scheduledTimeInput);
+  if (scheduledTime === null && scheduledTimeInput != null && scheduledTimeInput !== "") return null;
   return {
     id,
     title,
@@ -56,7 +46,7 @@ function normalizeRelatedItem(value: unknown): StaticRelatedVideo | null {
     icon_url: normalizeNullableString(row.icon_url),
     creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     primary_event_id: normalizeNullableString(row.primary_event_id),
-    scheduled_time: normalizeNullableUnix(row.scheduled_time),
+    scheduled_time: scheduledTime,
   };
 }
 
@@ -71,7 +61,7 @@ export function normalizeRandomVideoPool(
     items?: unknown;
   };
   if (payload.schema_version !== RANDOM_VIDEO_POOL_SCHEMA_VERSION) return null;
-  const generatedAt = parseDecimalUnix(payload.generated_at);
+  const generatedAt = normalizeNullableUnix(payload.generated_at);
   if (generatedAt === null || generatedAt <= 0) return null;
   if (!Array.isArray(payload.items)) return null;
 

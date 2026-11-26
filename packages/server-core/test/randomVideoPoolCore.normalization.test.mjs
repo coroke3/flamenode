@@ -70,6 +70,21 @@ test("random video pool preserves finite numbers and decimal numeric-string comp
   assert.equal(fractional.generatedAt, 1_729_000_000);
 });
 
+test("random video pool preserves generation timestamps with a leading or trailing decimal point", () => {
+  for (const [generatedAt, expected] of [
+    ["1729000000.", 1_729_000_000],
+    [".1729e10", 1_729_000_000],
+    ["1.", 1],
+    [".15e1", 1],
+  ]) {
+    assert.equal(
+      normalizeRandomVideoPool(payload({ generated_at: generatedAt }))?.generatedAt,
+      expected,
+      generatedAt,
+    );
+  }
+});
+
 test("random video pool retains valid empty pools and their generation key", () => {
   const normalized = normalizeRandomVideoPool(payload());
   assert.ok(normalized);
@@ -93,7 +108,17 @@ test("random video pool drops malformed item scheduled_time values without poiso
 });
 
 test("random video pool preserves nullable and primitive numeric item timestamps", () => {
-  for (const scheduledTime of [null, 0, 1_728_000_000, "1728000000"]) {
+  for (const [scheduledTime, expected] of [
+    [null, null],
+    [undefined, null],
+    ["", null],
+    [0, 0],
+    [1_728_000_000, 1_728_000_000],
+    ["1728000000", 1_728_000_000],
+    ["1729000000.", 1_729_000_000],
+    [".5", 0],
+    ["-.5", -1],
+  ]) {
     const normalized = normalizeRandomVideoPool(payload({
       items: [{
         id: "video-a",
@@ -103,7 +128,7 @@ test("random video pool preserves nullable and primitive numeric item timestamps
       }],
     }));
     assert.ok(normalized);
-    assert.equal(normalized.items[0].scheduled_time, scheduledTime == null ? null : Number(scheduledTime));
+    assert.equal(normalized.items[0]?.scheduled_time, expected, String(scheduledTime));
   }
 });
 
