@@ -175,7 +175,9 @@ export function SlotBatchForm({
         aria-pressed={mode === "count"} onClick={() => setMode("count")} disabled={busy}>時間なし</button>
     </div>
     <form onSubmit={onSubmit} aria-label="枠の一括生成">
-      {mode === "time" ? <div className="manage-slot-fields">
+      {/* Separate field identities: the controlled time interval must not
+          become the uncontrolled count-mode start index on a mode change. */}
+      {mode === "time" ? <div key="time" className="manage-slot-fields">
         <label className="fn-label">開始日時
           <input className="fn-input" type="datetime-local" name="start_at" required disabled={busy} />
         </label>
@@ -192,7 +194,7 @@ export function SlotBatchForm({
             className={interval === String(n) ? "fn-btn fn-btn-primary" : "fn-btn fn-btn-ghost"}
             onClick={() => setInterval(String(n))} disabled={busy}>{n}分</button>)}
         </div>
-      </div> : <div className="manage-slot-fields">
+      </div> : <div key="count" className="manage-slot-fields">
         <label className="fn-label">作成枠数
           <input className="fn-input" type="number" name="count" min={1} max={100}
             defaultValue={10} required disabled={busy} />

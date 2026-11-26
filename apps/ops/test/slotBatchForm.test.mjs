@@ -366,3 +366,77 @@ test("MIG-0722 U02b-10: a new batch generation can write while an old receipt is
     }
   }
 });
+
+
+test("MIG-0722 U02b-12: switching generation modes never carries the interval into the start number", async () => {
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.test/manage/events/ev1/slots",
+  });
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "navigator", "FormData"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const prevAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) Object.defineProperty(globalThis, key, {
+    configurable: true, writable: true, value: dom.window[key],
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const { createRoot } = await import("react-dom/client");
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    const calls = [];
+    const onGenerate = async body => { calls.push(body); return { ok: true }; };
+    const onClearAvailable = async () => ({ ok: true });
+    const view = totalSlots => React.createElement(SlotBatchForm, {
+      eventId: "ev1", totalSlots, onGenerate, onClearAvailable,
+    });
+    const field = name => dom.window.document.querySelector('input[name="' + name + '"]');
+    const button = label => [...dom.window.document.querySelectorAll("button")]
+      .find(node => node.textContent.trim() === label);
+    const click = async label => React.act(async () => button(label).click());
+    const submit = async () => React.act(async () => dom.window.document.querySelector("form")
+      .dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })));
+    await React.act(async () => root.render(view(0)));
+    assert.equal(field("interval_minutes").value, "5");
+    await click("15分");
+    assert.equal(field("interval_minutes").value, "15");
+    const originalInterval = field("interval_minutes");
+
+    await click("時間なし");
+    assert.equal(field("interval_minutes"), null);
+    assert.notEqual(field("start_index"), originalInterval, "different DOM input identity");
+    assert.equal(field("count").value, "10");
+    assert.equal(field("label_prefix").value, "No.");
+    assert.equal(field("start_index").value, "1", "never inherit the timed interval");
+    field("count").value = "7";
+    field("label_prefix").value = "Test-";
+    field("start_index").value = "21";
+    await click("時間なし");
+    assert.equal(field("start_index").value, "21", "same-mode render preserves input");
+    await submit();
+    assert.deepEqual(calls, [{ mode: "count", count: 7, label_prefix: "Test-", start_index: 21 }]);
+
+    await click("時間付き");
+    assert.equal(field("start_index"), null);
+    assert.equal(field("interval_minutes").value, "15", "preset state survives round trip");
+    field("start_at").value = "2026-11-08T10:00";
+    field("end_at").value = "2026-11-08T10:30";
+    await submit();
+    assert.deepEqual(calls[1], { mode: "time", start_at: "2026-11-08T10:00",
+      end_at: "2026-11-08T10:30", interval_minutes: 15 });
+
+    await click("時間なし");
+    assert.equal(field("count").value, "10");
+    assert.equal(field("label_prefix").value, "No.");
+    assert.equal(field("start_index").value, "1");
+    await submit();
+    assert.deepEqual(calls[2], { mode: "count", count: 10, label_prefix: "No.", start_index: 1 });
+    assert.equal(calls.length, 3, "only explicit submits dispatch");
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = prevAct;
+    dom.window.close();
+  }
+});
