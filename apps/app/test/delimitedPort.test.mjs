@@ -57,3 +57,15 @@ test("detectDelimiter: multiline fields and escaped quotes stay inside the first
   assert.equal(detectDelimiter("\n \nname,role\nBob,admin"), ",");
   assert.equal(detectDelimiter("\n \nname\trole\nBob\tadmin"), "\t");
 });
+
+test("SEC-CSV-CR: Ops port keeps CR-only CSV rows and CRLF/LF parity", () => {
+  const input = 'name,notes\rAlice,"hello\rworld"\rBob,done';
+  assert.deepEqual(parseDelimited(input), [
+    ["name", "notes"], ["Alice", "hello\rworld"], ["Bob", "done"],
+  ]);
+  assert.deepEqual(parseDelimited("a\tb\r\n1\t2\r3\t4", "\t"), [
+    ["a", "b"], ["1", "2"], ["3", "4"],
+  ]);
+  assert.deepEqual(parseDelimited(input, ",", { maxRows: 1 }), [["name", "notes"]]);
+  assert.equal(detectDelimiter("a\tb\r1\t2"), "\t");
+});

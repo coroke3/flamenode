@@ -83,6 +83,7 @@ test("HTML clipboard DOMParser path preserves br text separators inside nested f
         parseFromString() {
           return {
             querySelector: (selector) => selector === "table" ? {
+              querySelector: () => null,
               querySelectorAll: (name) => name === "tr" ? [{
                 querySelectorAll: (cells) => cells === "td, th" ? [cell] : [],
               }] : [],
@@ -99,4 +100,45 @@ test("HTML clipboard DOMParser path preserves br text separators inside nested f
     if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
     else delete globalThis.DOMParser;
   }
+});
+
+test("HTML clipboard fallback declines nested tables and preserves plain TSV fallback", () => {
+  const nested = "<table><tr><td>A<table><tr><td>B</td></tr></table></td><td>C</td></tr></table>";
+  assert.deepEqual(parseHtmlClipboardTable(nested), []);
+  assert.deepEqual(parseClipboardContent("", nested), []);
+  assert.deepEqual(parseClipboardContent("A\tC", nested), [["A", "C"]]);
+});
+
+test("HTML clipboard DOMParser path declines nested tables without reading descendant rows", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  const html = "<table><tr><td>A<table><tr><td>B</td></tr></table></td><td>C</td></tr></table>";
+  let reads = 0;
+  try {
+    Object.defineProperty(globalThis, "DOMParser", {
+      configurable: true,
+      value: class DOMParserStub {
+        parseFromString() {
+          return {
+            querySelector: () => ({
+              querySelector: (selector) => selector === "table" ? {} : null,
+              querySelectorAll: () => { reads++; return []; },
+            }),
+          };
+        }
+      },
+    });
+    assert.deepEqual(parseHtmlClipboardTable(html), []);
+    assert.equal(reads, 0);
+    assert.deepEqual(parseClipboardContent("A\tC", html), [["A", "C"]]);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
+
+test("HTML clipboard fallback does not mistake comments or table attributes for nested table tags", () => {
+  assert.deepEqual(
+    parseHtmlClipboardTable('<table title="<table>"><!-- <table> --><tr><td>A</td><td>B</td></tr></table>'),
+    [["A", "B"]],
+  );
 });

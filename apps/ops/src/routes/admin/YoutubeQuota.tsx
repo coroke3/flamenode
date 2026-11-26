@@ -4,19 +4,52 @@ import type { AdminYoutubeQuotaResponse } from "@flamenode/contracts";
 import { readYoutubeQuota } from "../../api/adminStaticBuilds.js";
 import { AdminVideoManagementTabs } from "../../components/admin/AdminVideoManagementTabs.js";
 
+/** HTTP auth rejection takes precedence over optional or stalled JSON bodies. */
+export function youtubeQuotaRevokedDestination(status: number | string): "/entry" | "/dashboard" | null {
+  if (status === 401 || status === "anonymous") return "/entry";
+  if (status === 403 || status === "forbidden") return "/dashboard";
+  return null;
+}
+
 export function YoutubeQuota(): React.ReactElement {
   const [data, setData] = React.useState<AdminYoutubeQuotaResponse | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [refresh, setRefresh] = React.useState(0);
+  const revokedRef = React.useRef(false);
+  const [revokedTo, setRevokedTo] = React.useState<"/entry" | "/dashboard" | null>(null);
+  React.useEffect(() => {
+    if (revokedTo) window.location.assign(revokedTo);
+  }, [revokedTo]);
   React.useEffect(() => {
     const controller = new AbortController();
-    void readYoutubeQuota(undefined, controller.signal).then(result => {
-      if (controller.signal.aborted) return;
+    const readWithHeaderGuard = async (path: string, init?: RequestInit): Promise<Response> => {
+      const response = await fetch(path, init);
+      const destination = youtubeQuotaRevokedDestination(response.status);
+      if (!controller.signal.aborted && !revokedRef.current && destination) {
+        revokedRef.current = true;
+        setData(null);
+        setError(null);
+        setRevokedTo(destination);
+      }
+      return response;
+    };
+    void readYoutubeQuota(readWithHeaderGuard, controller.signal).then(result => {
+      if (controller.signal.aborted || revokedRef.current) return;
+      const destination = youtubeQuotaRevokedDestination(result.status);
+      if (destination) {
+        revokedRef.current = true;
+        setData(null);
+        setError(null);
+        setRevokedTo(destination);
+        return;
+      }
       if (result.status === "ok") { setData(result.data); setError(null); }
-      else { setData(null); setError(result.status === "anonymous" ? "再ログインが必要です。" : "quota情報を取得できませんでした。"); }
+      else { setData(null); setError("quota情報を取得できませんでした。"); }
     });
     return () => controller.abort();
   }, [refresh]);
+  // A revoked session must unmount both quota diagnostics and navigation controls.
+  if (revokedTo) return <section role="alert">YouTube quota管理へのアクセスが終了しました。</section>;
   return <div className="fn-public-container fn-page">
     <header className="fn-page-head"><h1>YouTube quota</h1>
       <p>単一APIキー。Google Cloud Consoleの日次上限の80%以内で共有管理します。</p></header>

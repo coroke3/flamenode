@@ -25,8 +25,29 @@ function stripHtmlTags(fragment: string): string {
   ).replace(/\u00a0/g, " ");
 }
 
+/**
+ * The simple fallback cannot safely flatten nested tables into a rectangular
+ * spreadsheet. Recognize table tags without treating quoted attributes or
+ * comments as markup, and decline nested tables rather than duplicating cells.
+ */
+function hasNestedTableMarkup(html: string): boolean {
+  const tokens = /<!--[\s\S]*?-->|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
+  let depth = 0;
+  for (const match of html.matchAll(tokens)) {
+    const tag = match[0];
+    if (/^<table(?=[\s/>])/i.test(tag)) {
+      if (depth > 0) return true;
+      depth++;
+    } else if (/^<\/table(?=[\s/>])/i.test(tag)) {
+      depth = Math.max(0, depth - 1);
+    }
+  }
+  return false;
+}
+
 /** DOM なし環境向けの簡易 HTML 表パース */
 function parseHtmlTableRegex(html: string): string[][] {
+  if (hasNestedTableMarkup(html)) return [];
   const rows: string[][] = [];
   const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
   let trMatch: RegExpExecArray | null;
@@ -74,6 +95,8 @@ export function parseHtmlClipboardTable(html: string): string[][] {
       const doc = new DOMParser().parseFromString(html, "text/html");
       const table = doc.querySelector("table");
       if (table) {
+        // Do not flatten nested tables into extra pasted rows/columns.
+        if (table.querySelector("table")) return [];
         const rows: string[][] = [];
         for (const tr of table.querySelectorAll("tr")) {
           const cells = [...tr.querySelectorAll("td, th")].map((el) => {
