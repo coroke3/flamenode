@@ -62,7 +62,7 @@ export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
   if (denied) return denied;
   if (!snapshot.isAdmin && !snapshot.manageableEventIds.includes(eventId)) return c.json({ error: "Not Found" }, 404);
 
-  const read = (withNotifications: boolean): Promise<Sections | null> => {
+  const read = (withNotifications: boolean, verifyLegacySchema = false): Promise<Sections | null> => {
     const params: unknown[] = [];
     const piece = (sql: string, ...binds: unknown[]): string => {
       params.push(...binds);
@@ -133,7 +133,7 @@ export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
     ];
     // Only a failed notification-inclusive read needs to prove that the old
     // schema truly lacks event_id; no extra statement on the healthy path.
-    if (!withNotifications) {
+    if (verifyLegacySchema) {
       columns.push(`${LEGACY_NOTIFICATION_EVENT_ID_SQL} AS legacy_notification_schema`);
     }
     return db.prepare(`SELECT ${columns.join(", ")}`).bind(...params).first<Sections>();
@@ -159,7 +159,7 @@ export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
     }
   }
   if (firstReadFailed || notificationJsonInvalid) {
-    const fallback = await read(false);
+    const fallback = await read(false, firstReadFailed);
     if (firstReadFailed && fallback?.legacy_notification_schema !== 1) {
       throw new Error("manage_notification_schema_not_legacy");
     }

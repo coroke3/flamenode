@@ -603,10 +603,18 @@ if (runUnderRootTsx(import.meta.url)) {
   function corruptFirstNotificationJson(sqlite, column, invalid) {
     const base = createD1(sqlite);
     let corrupted = 0;
+    let schemaProbes = 0;
     return {
       ...base,
       get corrupted() { return corrupted; },
+      get schemaProbes() { return schemaProbes; },
       prepare(sql) {
+        // Metadata access is not needed after a successful fused SELECT.
+        // Simulate a provider that rejects schema introspection.
+        if (sql.includes("pragma_table_info('notification_outbox')")) {
+          schemaProbes++;
+          throw new Error("SYNTHETIC_SCHEMA_PROBE_UNAVAILABLE");
+        }
         const original = base.prepare(sql);
         return {
           ...original,
@@ -646,6 +654,7 @@ if (runUnderRootTsx(import.meta.url)) {
       try {
         const r = await call(path, "tok-owner", { d1 });
         assert.equal(d1.corrupted, 1, path + " corruption injected into a real SQL result");
+        assert.equal(d1.schemaProbes, 0, path + " notification-only fallback must not query schema metadata");
         assert.equal(r.status, 200, path + " must preserve CURRENT notification-only degradation");
         assert.equal(r.headers.get("cache-control"), "private, no-store");
         assert.equal(r.body.notificationSchemaMissing, true);

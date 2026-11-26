@@ -37,7 +37,9 @@ export const manageDashboardRoutes = new Hono<AppEnv>().get("/", async (c) => {
     const fallback = await loadManageData(db, user, snapshot, {
       inbox: true,
       linked: true,
-      extra: {
+      // A successfully read but malformed notification section does not
+      // require access to schema metadata to recover.
+      extra: initial ? {} : {
         legacyNotificationSchema: {
           sql: `json_object('legacy', ${LEGACY_NOTIFICATION_EVENT_ID_SQL})`,
           params: [],
