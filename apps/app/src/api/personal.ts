@@ -1,6 +1,6 @@
 /**
- * Read client for the Personal SPA (MIG-0701). Calls only the MIG-0611 read endpoints
- * (GET /api/personal/*, `Cache-Control: private, no-store`); never writes (mutations are MIG-0702).
+ * Personal SPA read client (MIG-0701) with separate typed X ID mutation adapters.
+ * GET /api/personal/* remains private/no-store; mutations are explicit Hono calls.
  *
  * Status mapping (apps/api requireAuth + personalRoutes.onError):
  *   200 -> ok(body)   401 -> anonymous   403 -> banned   anything else / network / bad JSON -> unavailable
@@ -8,6 +8,7 @@
  */
 import { EntryIndexResponseSchema, type EntryIndexResponse } from "@flamenode/contracts";
 import { createXidRequestsApi, type XidRequestsApi } from "./xidRequests.js";
+import { createXidProfileApi, type XidProfileApi } from "./xidProfile.js";
 import type {
   DashboardResponse,
   LibraryResponse,
@@ -45,6 +46,8 @@ export interface SettingsQuery {
 export interface PersonalApi {
   /** Optional for migration-only read fixtures; production always supplies this adapter. */
   xidRequests?: XidRequestsApi;
+  /** Optional for legacy read-only fixtures; production supplies Hono X ID writes. */
+  xidProfile?: XidProfileApi;
   getSession(signal?: AbortSignal): Promise<SessionResult>;
   getDashboard(signal?: AbortSignal): Promise<ApiResult<DashboardResponse>>;
   getLibrary(query: LibraryQuery, signal?: AbortSignal): Promise<ApiResult<LibraryResponse>>;
@@ -90,6 +93,7 @@ async function read<T>(fetchFn: FetchLike, target: string, signal?: AbortSignal)
 export function createPersonalApi(fetchFn: FetchLike = (input, init) => fetch(input, init)): PersonalApi {
   return {
     xidRequests: createXidRequestsApi(fetchFn),
+    xidProfile: createXidProfileApi(fetchFn),
     async getSession(signal) {
       const r = await read<PersonalSessionResponse>(fetchFn, url("session"), signal);
       return r.status === "ok" ? { status: "ok", user: r.data.user } : r;
