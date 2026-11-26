@@ -286,4 +286,59 @@ if (runUnderRootTsx(import.meta.url)) {
     assertNoD1(h);
   });
 
+  // Characterization of the existing RH-032 cutover blocker, NOT acceptance
+  // of Hono's 503 as equivalent to CURRENT's bounded degraded-D1 listing.
+  const boundaryRows = Array.from({ length: 501 }, (_, index) => ({
+    id: `pool-${String(index).padStart(3, "0")}`,
+    title: `Tokyo work ${index}`,
+    display_name: "Pool artist",
+    scheduled_time: 1700001000 + index,
+    status: "public",
+    score: index,
+  }));
+
+  test("MIG-0627 U02d PREP T13: exactly 500 event videos retain bounded final page for all sorts", async (t) => {
+    const h = harness(t);
+    const rows = boundaryRows.slice(0, 500);
+    await h.storage.put(baseKey, eventPayload(rows));
+    await h.storage.put(composedKey, eventPayload([composedVideo]));
+    await seedLite(h.storage);
+    for (const sort of ["new", "old", "score"]) {
+      const { response, payload } = await h.query("Tokyo", { event: eventId, sort, page: "11", limit: "48" });
+      assert.equal(response.status, 200, sort);
+      assert.equal(payload.total, 500, sort);
+      assert.equal(payload.page, 11, sort);
+      assert.equal(payload.limit, 48, sort);
+      const expected = sort === "old"
+        ? rows.slice(480, 500)
+        : rows.slice(0, 20).reverse();
+      assert.deepEqual(payload.items.map((item) => item.id), expected.map((item) => item.id), sort);
+      assert.ok(payload.items.every((item) => item.status === "public"), sort);
+    }
+    assert.deepEqual(h.reads, [baseKey, baseKey, baseKey], "one base read per request; no composed or global fallback");
+    assertNoD1(h);
+  });
+
+  test("MIG-0627 U02d PREP T14: KNOWN GAP - 501 event videos fail closed without truncated or stale results", async (t) => {
+    const cases = [
+      { label: "500 stored / 501 declared", base: eventPayload(boundaryRows.slice(0, 500), 501), composed: eventPayload([composedVideo]), reads: [baseKey] },
+      { label: "501 stored / 501 declared", base: eventPayload(boundaryRows), composed: eventPayload([composedVideo]), reads: [baseKey] },
+      { label: "missing base / oversized composed", base: null, composed: eventPayload(boundaryRows), reads: [baseKey, composedKey] },
+    ];
+    for (const { label, base, composed, reads } of cases) {
+      const h = harness(t);
+      if (base) await h.storage.put(baseKey, base);
+      await h.storage.put(composedKey, composed);
+      await seedLite(h.storage);
+      const { response, payload } = await h.query("Tokyo", { event: eventId, page: "1", limit: "48" });
+      assert.equal(response.status, 503, label);
+      assert.deepEqual(payload, { error: "static_list_unavailable" }, label);
+      assert.equal(response.headers.get("Cache-Control"), "no-store", label);
+      assert.match(response.headers.get("Retry-After") ?? "", /^\d+$/, label);
+      assert.equal(response.headers.get("ETag"), null, label);
+      assert.deepEqual(h.reads, reads, label);
+      assertNoD1(h);
+    }
+  });
+
 }
