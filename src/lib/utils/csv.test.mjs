@@ -57,3 +57,22 @@ test("detectDelimiter: multiline fields and escaped quotes stay inside the first
   assert.equal(detectDelimiter("\n \nname,role\nBob,admin"), ",");
   assert.equal(detectDelimiter("\n \nname\trole\nBob\tadmin"), "\t");
 });
+
+test("SEC-CSV-CR: bare CR separates CSV/TSV rows without destroying quoted CR", () => {
+  const csv = 'name,role\rAlice,owner\rBob,"line 1\rline 2"\r';
+  assert.equal(detectDelimiter(csv), ",");
+  assert.deepEqual(parseCsv(csv), [
+    ["name", "role"], ["Alice", "owner"], ["Bob", "line 1\rline 2"],
+  ]);
+  assert.deepEqual(parseDelimited(csv, ",", { maxRows: 2 }), [
+    ["name", "role"], ["Alice", "owner"],
+  ]);
+  const tsv = "name\trole\rAlice\towner\rBob\tstaff";
+  assert.equal(detectDelimiter(tsv), "\t");
+  assert.deepEqual(parseDelimited(tsv, "\t"), [
+    ["name", "role"], ["Alice", "owner"], ["Bob", "staff"],
+  ]);
+  assert.deepEqual(parseCsv("name,role\r\nAlice,owner\nBob,staff\rCarol,guest"), [
+    ["name", "role"], ["Alice", "owner"], ["Bob", "staff"], ["Carol", "guest"],
+  ]);
+});
