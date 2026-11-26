@@ -38,8 +38,12 @@ export async function GET(_req: Request, { params }: Params): Promise<Response> 
   let db: ReturnType<typeof getDatabase>;
   try {
     db = getDatabase();
-  } catch (error) {
-    console.error("[public-videos] runtime bindings unavailable", error);
+  } catch {
+    try {
+      console.error("[public-videos] runtime bindings unavailable");
+    } catch {
+      // Diagnostics must not replace the fixed availability response.
+    }
     return publicServiceUnavailableResponse("database_unavailable");
   }
   if (!db) {
@@ -49,8 +53,12 @@ export async function GET(_req: Request, { params }: Params): Promise<Response> 
   let row: Awaited<ReturnType<typeof fetchPublicVideoByIdOrYoutube>>;
   try {
     row = await fetchPublicVideoByIdOrYoutube(db, key);
-  } catch (error) {
-    console.error("[public-videos] detail query failed", error);
+  } catch {
+    try {
+      console.error("[public-videos] detail query failed");
+    } catch {
+      // Diagnostics must not replace the fixed availability response.
+    }
     return publicServiceUnavailableResponse("database_unavailable");
   }
   if (!row) {

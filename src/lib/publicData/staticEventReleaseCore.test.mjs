@@ -70,3 +70,48 @@ test("event release normalizer does not expose stale counts for filtered videos"
   assert.equal(result?.videos.length, 1);
   assert.equal(result?.total, 1);
 });
+
+test("event release excludes contradictory explicit video status before public projection", () => {
+  const release = normalizeStaticEventRelease({
+    schema_version: 1,
+    generated_at: 1700000000,
+    event: { id: "event-1", title: "Public Event", visibility_status: "public" },
+    total: 10,
+    truncated: false,
+    videos: [
+      { id: "public-only", title: "Public", visibility_status: "public", members: [] },
+      { id: "public-alias", title: "Public", visibility_status: "public", status: "public", members: [] },
+      { id: "null-alias", title: "Public", visibility_status: "public", status: null, members: [] },
+      { id: "private-alias", title: "Hidden", visibility_status: "public", status: "private", members: [
+        { name: "Hidden member", is_public_member: 1 },
+      ] },
+      { id: "draft-alias", title: "Hidden", visibility_status: "public", status: "draft", members: [] },
+      { id: "malformed-alias", title: "Hidden", visibility_status: "public", status: false, members: [] },
+      { id: "empty-alias", title: "Hidden", visibility_status: "public", status: "", members: [] },
+      { id: "inverse-conflict", title: "Hidden", visibility_status: "private", status: "public", members: [] },
+    ],
+  });
+  assert.ok(release);
+  assert.deepEqual(release.videos.map((video) => video.id), [
+    "public-only", "public-alias", "null-alias",
+  ]);
+  assert.ok(release.videos.every((video) => video.visibility_status === "public"));
+  assert.equal(release.total, 3, "do not expose stale total after excluding revoked rows");
+  assert.equal(release.truncated, false);
+});
+
+test("event release preserves valid legacy/public counts and producer truncation", () => {
+  const release = normalizeStaticEventRelease({
+    schema_version: 1,
+    event: { id: "event-1", title: "Public Event", visibility_status: "public" },
+    total: 9,
+    truncated: true,
+    videos: [
+      { id: "legacy", title: "Public", visibility_status: "public", members: [] },
+      { id: "explicit", title: "Public", visibility_status: "public", status: "public", members: [] },
+    ],
+  });
+  assert.deepEqual(release?.videos.map((video) => video.id), ["legacy", "explicit"]);
+  assert.equal(release?.total, 9);
+  assert.equal(release?.truncated, true);
+});
