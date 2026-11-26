@@ -96,13 +96,24 @@ const JST_FORMAT: Intl.DateTimeFormatOptions = {
 };
 
 function logSafeAuthError(error: Error): void {
-  const candidate = error as Error & { type?: unknown };
-  const errorType =
-    typeof candidate.type === "string" ? candidate.type : error.name;
-  const safeType = /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(errorType)
-    ? errorType
+  let candidateType: unknown;
+  try {
+    // Auth.js/provider errors are untrusted; getters and Proxy traps may throw.
+    const candidate = error as Error & { type?: unknown };
+    const declaredType = candidate?.type;
+    candidateType = typeof declaredType === "string" ? declaredType : candidate?.name;
+  } catch {
+    candidateType = undefined;
+  }
+  const safeType = typeof candidateType === "string" && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(candidateType)
+    ? candidateType
     : "AUTH_ERROR";
-  console.error(`[auth][error] ${safeType}`);
+  // Diagnostics must never replace Auth.js' fixed authentication failure handling.
+  try {
+    console.error(`[auth][error] ${safeType}`);
+  } catch {
+    // Best effort only; never propagate a failing diagnostic sink.
+  }
 }
 
 function strictConfiguredOrigin(value: string): string {
