@@ -469,4 +469,69 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+
+  // #892 characterization only. A present wrong-ID base must not become
+  // acceptable merely because an otherwise usable composed artifact exists.
+  // Once the owner-approved identity fix lands, invert the wrong-base
+  // 200/304 expectations below to assertIdentityUnavailable without fallback.
+  test("MIG-0627 U02d PREP T18: KNOWN GAP #892 - wrong base takes precedence over matching composed", async (t) => {
+    for (const sort of ["new", "old", "score"]) {
+      const h = harness(t, "enforce");
+      await seedIdentityManifest(h.storage);
+      await h.storage.put(composedKey, eventPayload([{ ...composedVideo, score: 1 }]));
+      const params = { event: eventId, sort };
+      const baseReads = [identityVisibilityKey, baseKey];
+      const composedReads = [...baseReads, identityVisibilityKey, composedKey];
+
+      // Control: a true base miss still serves the matching composed artifact.
+      const good = await h.query("Tokyo", params);
+      assert.equal(good.response.status, 200, sort);
+      assert.deepEqual(good.payload.items.map((item) => [item.id, item.primary_event_id]),
+        [[composedVideo.id, eventId]], sort);
+      const goodTag = good.response.headers.get("ETag");
+      assert.ok(goodTag, sort);
+      assert.deepEqual(h.reads, composedReads, sort);
+      h.reads.length = 0;
+      const good304 = await h.query("Tokyo", params, { "If-None-Match": goodTag });
+      assert.equal(good304.response.status, 304, sort);
+      assert.equal(good304.payload, null, sort);
+      assert.deepEqual(h.reads, composedReads, sort);
+
+      // Both keys now exist. The current bug returns the other event instead
+      // of refusing it; the previous valid composed ETag does not match.
+      const wrongId = "evt-other";
+      const wrong = eventPayload([{ ...tokyoEventVideo, score: 1 }]);
+      wrong.event = { ...wrong.event, id: wrongId };
+      await h.storage.put(baseKey, wrong);
+      h.reads.length = 0;
+      const bad = await h.query("Tokyo", params, { "If-None-Match": goodTag });
+      assert.equal(bad.response.status, 200, "KNOWN GAP: wrong base returned");
+      assert.deepEqual(bad.payload.items.map((item) => [item.id, item.primary_event_id]),
+        [[tokyoEventVideo.id, wrongId]], sort);
+      const badTag = bad.response.headers.get("ETag");
+      assert.ok(badTag, sort);
+      assert.notEqual(badTag, goodTag, sort);
+      assert.deepEqual(h.reads, baseReads, sort);
+      for (const tag of [badTag, "*"]) {
+        h.reads.length = 0;
+        const bad304 = await h.query("Tokyo", params, { "If-None-Match": tag });
+        assert.equal(bad304.response.status, 304, "KNOWN GAP: wrong base revalidated");
+        assert.equal(bad304.payload, null, sort);
+        assert.deepEqual(h.reads, baseReads, sort);
+      }
+
+      // A wrong-ID base that also declares an oversized pool must not cause
+      // a composed/global retry or return a cached 304 under either ETag.
+      const oversized = eventPayload(boundaryRows.slice(0, 500), 501);
+      oversized.event = { ...oversized.event, id: wrongId };
+      await h.storage.put(baseKey, oversized);
+      for (const headers of [{}, ...[goodTag, badTag, "*"].map((tag) => ({ "If-None-Match": tag }))]) {
+        h.reads.length = 0;
+        assertIdentityUnavailable(await h.query("Tokyo", params, headers));
+        assert.deepEqual(h.reads, baseReads, sort);
+      }
+      assertNoD1(h);
+    }
+  });
+
 }
