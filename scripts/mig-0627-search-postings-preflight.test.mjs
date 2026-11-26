@@ -534,4 +534,80 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+
+  // #892 decision boundary, characterization only: visibility filtering
+  // rejects a fenced/nonpublic embedded event before the list route sees
+  // its identity. A matching composed artifact may then still be returned.
+  // The owner must choose whether to retain this fallback or refuse present
+  // identity corruption before filtering. Neither is approved by this test.
+  test("MIG-0627 U02d PREP T19: KNOWN GAP #892 - rejected wrong base and matching composed fallback", async (t) => {
+    const wrongId = "evt-other";
+    for (const sort of ["new", "old", "score"]) {
+      const h = harness(t, "enforce");
+      const params = { event: eventId, sort };
+      const baseReads = [identityVisibilityKey, baseKey];
+      const composedReads = [...baseReads, identityVisibilityKey, composedKey];
+      await seedIdentityManifest(h.storage);
+      await h.storage.put(composedKey, eventPayload([{ ...composedVideo, score: 1 }]));
+
+      // Establish the matching composed response and its ETag on true miss.
+      const good = await h.query("Tokyo", params);
+      assert.equal(good.response.status, 200, sort);
+      assert.deepEqual(good.payload.items.map((item) => [item.id, item.primary_event_id]),
+        [[composedVideo.id, eventId]], sort);
+      const goodTag = good.response.headers.get("ETag");
+      assert.ok(goodTag);
+      assert.deepEqual(h.reads, composedReads, sort);
+
+      // Obtain the wrong historical ETag while the embedded event is public.
+      const wrong = eventPayload([{ ...tokyoEventVideo, score: 1 }]);
+      wrong.event = { ...wrong.event, id: wrongId };
+      await h.storage.put(baseKey, wrong);
+      h.reads.length = 0;
+      const bad = await h.query("Tokyo", params);
+      assert.equal(bad.response.status, 200, "KNOWN GAP: wrong base returned");
+      assert.deepEqual(bad.payload.items.map((item) => item.primary_event_id), [wrongId]);
+      const badTag = bad.response.headers.get("ETag");
+      assert.ok(badTag);
+      assert.notEqual(badTag, goodTag);
+      assert.deepEqual(h.reads, baseReads, sort);
+
+      // Both artifacts still exist. Filtering the embedded B makes the
+      // current snapshot result non-ok, so matching A is retried. This
+      // characterizes existing fallback, not acceptance of that policy.
+      for (const rejection of ["embedded-fenced", "embedded-nonpublic"]) {
+        await seedIdentityManifest(h.storage, rejection === "embedded-fenced" ? wrongId : null);
+        await h.storage.put(baseKey, {
+          ...wrong,
+          event: { ...wrong.event, visibility_status: rejection === "embedded-nonpublic" ? "private" : "public" },
+        });
+        for (const [tag, expectedStatus] of [[null, 200], [badTag, 200], [goodTag, 304], ["*", 304]]) {
+          h.reads.length = 0;
+          const result = await h.query("Tokyo", params, tag === null ? {} : { "If-None-Match": tag });
+          assert.equal(result.response.status, expectedStatus, rejection + "/" + sort);
+          assert.equal(result.response.headers.get("ETag"), goodTag);
+          if (expectedStatus === 200) {
+            assert.deepEqual(result.payload, good.payload, rejection + "/" + sort);
+          } else {
+            assert.equal(result.payload, null);
+          }
+          assert.deepEqual(h.reads, composedReads, rejection + "/" + sort);
+        }
+      }
+
+      // A fence on the requested event itself must deny both existing
+      // artifacts, regardless of either previous ETag or a wildcard.
+      await h.storage.put(baseKey, wrong);
+      await seedIdentityManifest(h.storage, eventId);
+      for (const tag of [null, goodTag, badTag, "*"]) {
+        h.reads.length = 0;
+        assertIdentityUnavailable(await h.query("Tokyo", params,
+          tag === null ? {} : { "If-None-Match": tag }));
+        assert.deepEqual(h.reads, [identityVisibilityKey, identityVisibilityKey],
+          "requested fence must stop both artifact GETs");
+      }
+      assertNoD1(h);
+    }
+  });
+
 }
