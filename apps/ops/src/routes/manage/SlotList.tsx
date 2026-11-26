@@ -83,12 +83,14 @@ export function validateSlotListOperation(
  * authorized writes. Supplying onAction explicitly enables U02b controls.
  */
 export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
-  onChanged, onClearFailure, canManageSubmittedSlots = false }: {
+  onChanged, onClearFailure, canManageSubmittedSlots = false, writeBlocked = false, canStartWrite }: {
   eventId: string; slots: readonly ManageSlotRow[];
   partGapMinutes: number | null; parts: readonly string[];
   onAction?: (operation: SlotListOperation) => Promise<SlotListActionResult>;
   onChanged?: (failure?: string) => void;
   onClearFailure?: () => void;
+  writeBlocked?: boolean;
+  canStartWrite?: () => boolean;
   canManageSubmittedSlots?: boolean;
 }): React.ReactElement {
   const labels = React.useMemo(() => partLabels(slots, partGapMinutes, parts), [
@@ -104,7 +106,7 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     onAction: typeof onAction; context: typeof context } | null>(null);
   const busyRef = React.useRef<typeof context | null>(null);
   const [busyContext, setBusyContext] = React.useState<typeof context | null>(null);
-  const busy = busyContext === context;
+  const busy = busyContext === context || writeBlocked;
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   // A filter/event refresh invalidates both the previous row selection and
@@ -130,7 +132,8 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
   const limited = visibleSelected.length > MAX_ATOMIC_SELECTION;
   const displayLabel = label.trim();
   const confirm = (op: SlotListOperation) => {
-    if (contextRef.current !== context || busyRef.current === context) return;
+    if (contextRef.current !== context || busyRef.current === context ||
+        writeBlocked || canStartWrite?.() === false) return;
     if (!validateSlotListOperation(slots, eventId, op, canManageSubmittedSlots)) {
       setError("選択した枠の状態または件数を確認してください。");
       return;
@@ -140,7 +143,8 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     setPending({ operation: op, eventId, slots, onAction, context });
   };
   const runConfirmed = async () => {
-    if (contextRef.current !== context || busyRef.current === context || !pending || !onAction) return;
+    if (contextRef.current !== context || busyRef.current === context || !pending || !onAction ||
+        writeBlocked || canStartWrite?.() === false) return;
     // A new event, filter snapshot or handler must never inherit a pending
     // confirmation, even if row IDs and statuses happen to match.
     if (pending.context !== contextRef.current ||

@@ -983,3 +983,108 @@ test("MIG-0722 U02b-12: authorized success receipts survive the refresh for all 
     });
   }
 });
+
+
+test("MIG-0722 U02b-12: shared snapshot dispatch gate serializes list and batch writes", async () => {
+  for (const first of ["list", "batch"]) {
+    for (const outcome of ["success", "failure", "rejection"]) {
+      await withSlotDom(async (dom, root) => {
+        let reads = 0;
+        let finishRead;
+        const json = () => new Response(JSON.stringify(data()), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+        const fetchFn = async () => {
+          reads++;
+          if (reads === 1) return json();
+          return new Promise(resolve => { finishRead = resolve; });
+        };
+        const calls = [];
+        let settle, reject;
+        const port = family => () => {
+          calls.push(family);
+          return new Promise((resolve, fail) => { settle = resolve; reject = fail; });
+        };
+        const writeActions = {
+          onGenerate: port("generate"), onClearAvailable: port("batch"), onAction: port("list"),
+        };
+        const button = label => [...dom.window.document.querySelectorAll("button")]
+          .find(node => node.textContent.trim() === label);
+        const body = () => dom.window.document.body.textContent;
+        const waitFor = async predicate => {
+          for (let i = 0; i < 10 && !predicate(); i++) {
+            await React.act(async () => { await new Promise(resolve => setImmediate(resolve)); });
+          }
+          assert.ok(predicate(), first + " " + outcome + " " + body());
+        };
+        await React.act(async () => root.render(React.createElement(MemoryRouter, null,
+          React.createElement(EventSlots, { eventId: "ev id", fetchFn, writeActions }))));
+        await waitFor(() => body().includes("User <name>"));
+        // Prepare both confirmations before any dispatch. The second click is
+        // deliberately in the same React batch, before disabled props commit.
+        await React.act(async () => button("削除").click());
+        await React.act(async () => button("空き枠を全削除").click());
+        const listConfirm = button("実行する");
+        const batchConfirm = button("全削除する");
+        assert.ok(listConfirm && batchConfirm);
+        await React.act(async () => {
+          (first === "list" ? listConfirm : batchConfirm).click();
+          (first === "list" ? batchConfirm : listConfirm).click();
+        });
+        assert.deepEqual(calls, [first], "only the first same-turn operation may dispatch");
+        assert.equal(reads, 1);
+        assert.equal(button("削除").disabled, true);
+        assert.equal(button("空き枠を全削除").disabled, true);
+        assert.equal(button("解放").disabled, true);
+        assert.equal((first === "list" ? batchConfirm : listConfirm).disabled, true);
+        await React.act(async () => {
+          button("削除").click();
+          button("空き枠を全削除").click();
+        });
+        assert.deepEqual(calls, [first], "hanging first write fences all competing controls");
+
+        const message = "FIRST-" + first + "-" + outcome;
+        if (outcome === "rejection") {
+          await React.act(async () => reject(new Error("transport")));
+        } else {
+          await React.act(async () => settle({ ok: outcome === "success", message,
+            pendingPublicReflection: outcome === "success" }));
+        }
+        const shouldRefresh = outcome === "success" || (first === "list" && outcome === "failure");
+        if (shouldRefresh) {
+          assert.equal(reads, 2);
+          assert.match(body(), /枠を読み込み中/);
+          assert.doesNotMatch(body(), /User <name>|FIRST-/);
+          await React.act(async () => finishRead(json()));
+          await waitFor(() => body().includes(message));
+          const receipts = [...dom.window.document.querySelectorAll('[role="alert"], [role="status"]')]
+            .filter(node => node.textContent.includes(message));
+          assert.equal(receipts.length, 1);
+          assert.equal(receipts[0].textContent.trim(), message +
+            (outcome === "success" ? " 公開画面への反映は処理中です。" : ""));
+        } else {
+          assert.equal(reads, 1, "rejection and batch domain failure retain CURRENT no-refresh behavior");
+          assert.match(body(), outcome === "rejection" ? /枠操作中に通信エラー/ : /FIRST-batch-failure/);
+        }
+        assert.equal(button("削除").disabled, false);
+        assert.equal(button("空き枠を全削除").disabled, false);
+        assert.deepEqual(calls, [first]);
+        // The other family can start explicitly after the authorized refresh
+        // (or a non-refresh failure); its receipt cannot be overwritten by
+        // the first operation's already settled callback.
+        const second = first === "list" ? "batch" : "list";
+        if (second === "batch") {
+          await React.act(async () => button("空き枠を全削除").click());
+          await React.act(async () => button("全削除する").click());
+        } else {
+          await React.act(async () => button("削除").click());
+          await React.act(async () => button("実行する").click());
+        }
+        assert.deepEqual(calls, [first, second]);
+        await React.act(async () => reject(new Error("second transport")));
+        assert.deepEqual(calls, [first, second], "no automatic replay");
+        if (shouldRefresh) assert.ok(!body().includes(message), "new operation clears prior refreshed receipt");
+      });
+    }
+  }
+});

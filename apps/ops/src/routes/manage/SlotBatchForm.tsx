@@ -22,6 +22,8 @@ export type SlotBatchFormProps = {
   onGenerate: (body: SlotGenerateRequest) => Promise<SlotMutationResult>;
   onClearAvailable: () => Promise<SlotMutationResult>;
   onChanged?: () => void;
+  writeBlocked?: boolean;
+  canStartWrite?: () => boolean;
 };
 
 export type SlotFormParse =
@@ -92,7 +94,7 @@ export function parseSlotGenerateForm(data: FormData, mode: "time" | "count"): S
 }
 
 export function SlotBatchForm({
-  eventId, totalSlots, onGenerate, onClearAvailable, onChanged,
+  eventId, totalSlots, onGenerate, onClearAvailable, onChanged, writeBlocked = false, canStartWrite,
 }: SlotBatchFormProps): React.ReactElement {
   const [mode, setMode] = React.useState<"time" | "count">("time");
   const [interval, setInterval] = React.useState("5");
@@ -102,7 +104,7 @@ export function SlotBatchForm({
   const contextRef = React.useRef<typeof context | null>(null);
   const busyRef = React.useRef<typeof context | null>(null);
   const [busyContext, setBusyContext] = React.useState<typeof context | null>(null);
-  const busy = busyContext === context;
+  const busy = busyContext === context || writeBlocked;
   const [confirmClearFor, setConfirmClearFor] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -120,7 +122,8 @@ export function SlotBatchForm({
   const perform = async (action: () => Promise<SlotMutationResult>, success: string) => {
     // React state may not commit between two rapid submits; claim the lock
     // synchronously so one user gesture cannot dispatch duplicate writes.
-    if (contextRef.current !== context || busyRef.current === context) return;
+    if (contextRef.current !== context || busyRef.current === context ||
+        writeBlocked || canStartWrite?.() === false) return;
     const started = context;
     busyRef.current = started;
     const stillCurrent = () => contextRef.current === started;
@@ -153,7 +156,8 @@ export function SlotBatchForm({
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (contextRef.current !== context || busyRef.current === context) return;
+    if (contextRef.current !== context || busyRef.current === context ||
+        writeBlocked || canStartWrite?.() === false) return;
     const parsed = parseSlotGenerateForm(new FormData(event.currentTarget), mode);
     if (!parsed.ok) {
       setError(parsed.message);
@@ -207,9 +211,11 @@ export function SlotBatchForm({
       {notice && <p role="status" className="fn-console-note">{notice}</p>}
       <div className="manage-slot-actions">
         <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>
-          {busy ? "生成中…" : "一括生成"}</button>
+          {busyContext === context ? "生成中…" : "一括生成"}</button>
         <button type="button" className="fn-btn fn-btn-ghost"
-          onClick={() => setConfirmClearFor(eventId)} disabled={busy}>空き枠を全削除</button>
+          onClick={() => {
+            if (!writeBlocked && canStartWrite?.() !== false) setConfirmClearFor(eventId);
+          }} disabled={busy}>空き枠を全削除</button>
       </div>
     </form>
     {confirmClearFor === eventId && <div role="group"
@@ -221,7 +227,7 @@ export function SlotBatchForm({
         onClick={() => {
           // A confirmation may never carry across an event transition.
           if (contextRef.current !== context || busyRef.current === context ||
-              confirmClearFor !== eventId) return;
+              writeBlocked || canStartWrite?.() === false || confirmClearFor !== eventId) return;
           setConfirmClearFor(null);
           void perform(onClearAvailable, "空き枠を削除しました。");
         }} disabled={busy}>全削除する</button>

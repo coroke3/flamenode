@@ -27,10 +27,13 @@ function countFor(data: ManageSlotsList, status: string): number {
 }
 
 /** U02b view composition. Without all three explicit handlers it is read-only. */
-export function EventSlotsView({ eventId, status, data, writeActions, onChanged, onClearFailure }: {
+export function EventSlotsView({ eventId, status, data, writeActions, onChanged, onClearFailure,
+  writeBlocked = false, canStartWrite }: {
   eventId: string; status: string; data: ManageSlotsList;
   writeActions?: SlotWriteActions; onChanged?: (failure?: string) => void;
   onClearFailure?: () => void;
+  writeBlocked?: boolean;
+  canStartWrite?: () => boolean;
 }): React.ReactElement {
   // Even dynamically assembled/partially configured callers must fail closed.
   const writes = writeActions &&
@@ -60,12 +63,13 @@ export function EventSlotsView({ eventId, status, data, writeActions, onChanged,
     </nav>
     {writes && <SlotBatchForm eventId={eventId} totalSlots={data.total}
       onGenerate={writes.onGenerate} onClearAvailable={writes.onClearAvailable}
-      onChanged={onChanged} />}
+      onChanged={onChanged} writeBlocked={writeBlocked} canStartWrite={canStartWrite} />}
     <section className="manage-section" aria-label="枠一覧">
       <h2 className="fn-console-eyebrow">{`枠一覧 (${data.slots.length})`}</h2>
       <SlotList eventId={eventId} slots={data.slots}
         partGapMinutes={data.event.slot_part_gap_minutes} parts={data.event.parts}
         onAction={writes?.onAction} onChanged={onChanged} onClearFailure={onClearFailure}
+        writeBlocked={writeBlocked} canStartWrite={canStartWrite}
         canManageSubmittedSlots={Boolean(writes?.canManageSubmittedSlots)} />
       {data.atLimit && <p role="status">最大500件まで表示しています。条件を絞り込んでください。</p>}
       {data.total === 0 && !writes && <p>枠の追加機能は移行中です。</p>}
@@ -123,10 +127,11 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
   // commit a write, but can only invalidate a current read of the same event.
   // Wait for current-view writes to settle before tearing down their controls.
   const writeView = React.useMemo(() => ({
-    eventId, feedbackScope, pending: 0, refreshNeeded: false,
-    receipt: undefined as MutationReceipt | undefined, canInvalidate: false,
+    eventId, feedbackScope, pending: 0, refreshNeeded: false, refreshScheduled: false,
+    receipt: undefined as MutationReceipt | undefined, canInvalidate: false, authorized: false,
   }), [eventId, feedbackScope, readContext]);
   const committedWriteView = React.useRef<typeof writeView | null>(null);
+  const [busyView, setBusyView] = React.useState<typeof writeView | null>(null);
   React.useLayoutEffect(() => {
     committedWriteView.current = writeView;
     return () => {
@@ -135,17 +140,30 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
   }, [writeView]);
   React.useLayoutEffect(() => {
     writeView.canInvalidate = validRequest === null || validRequest.status === "ok";
+    writeView.authorized = validRequest?.status === "ok";
   }, [writeView, validRequest]);
+
+  // Serialize the two operation families within the same committed snapshot.
+  // A synchronous guard is necessary even before disabled props commit.
+  // Rotation to another read/adapter generation does not inherit this lock.
+  const canStartWrite = React.useCallback(() =>
+    committedWriteView.current === writeView && writeView.authorized &&
+    writeView.pending === 0 && !writeView.refreshNeeded && !writeView.refreshScheduled,
+  [writeView]);
 
   const trackedWrites = React.useMemo<SlotWriteActions | undefined>(() => {
     if (typeof onGenerate !== "function" || typeof onClearAvailable !== "function" ||
         typeof onAction !== "function") return undefined;
     const flush = (view: typeof writeView) => {
       if (committedWriteView.current !== view || !view.canInvalidate ||
-          view.pending !== 0 || !view.refreshNeeded) return;
+          view.pending !== 0 || !view.refreshNeeded || view.refreshScheduled) return;
       const receipt = view.receipt;
       view.refreshNeeded = false;
+      // Do not admit another write in the interval between scheduling a
+      // refresh and committing the replacement read context.
+      view.refreshScheduled = true;
       view.receipt = undefined;
+      setBusyView(view);
       setReload(previous => ({
         key: previous.key + 1,
         receipt: receipt === undefined ? previous.receipt :
@@ -158,10 +176,9 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
       action: () => Promise<T>, refreshOnFailure: boolean,
       success: (result: T) => string,
     ): Promise<T> => {
-      if (committedWriteView.current !== writeView || !writeView.canInvalidate) {
-        throw new Error("Obsolete slot write view");
-      }
+      if (!canStartWrite()) throw new Error("Slot write view is unavailable or busy");
       writeView.pending++;
+      setBusyView(writeView);
       writeView.receipt = undefined;
       // A new explicit mutation clears the previously rendered receipt for
       // both forms and list operations; never resurrect it on a retry.
@@ -191,6 +208,9 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
       } finally {
         writeView.pending--;
         flush(writeView);
+        if (committedWriteView.current === writeView && !writeView.refreshScheduled) {
+          setBusyView(previous => previous === writeView ? null : previous);
+        }
       }
     };
     // Use a supplied terminal count only. Do not infer a whole-operation
@@ -211,7 +231,7 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
         () => "枠を更新しました。"),
       canManageSubmittedSlots,
     };
-  }, [writeView, onGenerate, onClearAvailable, onAction, canManageSubmittedSlots]);
+  }, [writeView, canStartWrite, onGenerate, onClearAvailable, onAction, canManageSubmittedSlots]);
 
   if (validRequest === null) return <p role="status" aria-busy="true">枠を読み込み中...</p>;
   if (validRequest.status === "anonymous") return <p role="alert">ログインが必要です。</p>;
@@ -232,6 +252,6 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
       {receipt.message}{receipt.pendingPublicReflection ? " 公開画面への反映は処理中です。" : ""}
     </p>}
     <EventSlotsView eventId={eventId} status={status} data={validRequest.data}
-      writeActions={trackedWrites} />
+      writeActions={trackedWrites} writeBlocked={busyView === writeView} canStartWrite={canStartWrite} />
   </>;
 }
