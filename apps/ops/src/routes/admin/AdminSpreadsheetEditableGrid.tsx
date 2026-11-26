@@ -16,6 +16,13 @@ type CellSelection = {
   pk: Record<string, string>; before: string | null; invalidated?: boolean;
 };
 const HISTORY_LIMIT = 100;
+const DEFAULT_COL_WIDTH = 110;
+const MIN_COL_WIDTH = 56;
+const MAX_COL_WIDTH = 420;
+
+function clampColumnWidth(width: number): number {
+  return Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, width));
+}
 
 function cellValue(raw: unknown): string {
   if (raw == null) return "";
@@ -68,6 +75,8 @@ export function AdminSpreadsheetEditableGrid({
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [history, setHistory] = React.useState<History>({ key: "", undo: [], redo: [] });
+  const [colWidths, setColWidths] = React.useState<Record<string, number>>({});
+  const resizeRef = React.useRef<{ column: string; startX: number; startWidth: number } | null>(null);
   const tableRef = React.useRef<HTMLTableElement>(null);
   const focusedGridElement = React.useRef<HTMLElement | null>(null);
   const displayedPage = React.useRef(data);
@@ -84,6 +93,7 @@ export function AdminSpreadsheetEditableGrid({
   const identityChanged = previous.fetchFn !== fetchFn || previous.table !== def.table ||
     previous.page !== page || previous.allowMutations !== allowMutations;
   const editable = allowMutations && def.mode === "editable";
+  const colWidth = (name: string) => colWidths[name] ?? DEFAULT_COL_WIDTH;
   const canMutate = editable && !identityChanged && !busy && inFlight.current == null;
   const safeHistory = !identityChanged && history.key === key ? history : { key, undo: [], redo: [] };
   const currentSelection = !identityChanged && selection?.key === key ? selection : null;
@@ -105,6 +115,23 @@ export function AdminSpreadsheetEditableGrid({
   const canFind = canUseFind();
   const visibleAnchor = boundCellToPage(anchorCell);
   const visibleFocus = boundCellToPage(focusedCell);
+
+  // CURRENT keeps widths and an active drag by column name across mounted page/table changes.
+  React.useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      const drag = resizeRef.current;
+      if (!drag) return;
+      const width = clampColumnWidth(drag.startWidth + event.clientX - drag.startX);
+      setColWidths(previous => ({ ...previous, [drag.column]: width }));
+    };
+    const onUp = () => { resizeRef.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
   const insertColumns = columns.filter(c => !c.generated && (c.pk > 0 || c.editable));
 
   React.useEffect(() => {
@@ -515,6 +542,7 @@ export function AdminSpreadsheetEditableGrid({
       ) : null}
       <div style={{ overflowX: "auto" }}>
         <table ref={tableRef} tabIndex={rows.length === 0 || columns.length === 0 ? 0 : -1}
+          style={{ borderCollapse: "separate", borderSpacing: 0, fontSize: 12, minWidth: "max-content", width: "100%" }}
           onFocusCapture={event => {
             const target = event.target;
             focusedGridElement.current = target instanceof HTMLElement && target.tagName === "TD" &&
@@ -525,6 +553,11 @@ export function AdminSpreadsheetEditableGrid({
             if (focusedGridElement.current?.isConnected) focusedGridElement.current = null;
           }}
           onKeyDown={event => { if (event.target === event.currentTarget) openFind(event); }}>
+          <colgroup>
+            <col style={{ width: 46 }} />
+            {columns.map(column => <col key={column.name} style={{ width: colWidth(column.name) }} />)}
+            <col />
+          </colgroup>
           <thead><tr>
             <th scope="col" data-grid-all-header="" aria-label="全セルを選択" title="クリックで全選択"
               aria-disabled={!canSelectHeaders} style={{ userSelect: "none" }}
@@ -537,16 +570,47 @@ export function AdminSpreadsheetEditableGrid({
                 if (table?.contains(event.currentTarget.ownerDocument.activeElement)) focusGridCell(end);
                 else setFocusedCell(end);
               }} />
-            {columns.map((c, ci) => (
+            {columns.map((c, ci) => {
+              let index = ci;
+              let letter = "";
+              while (index >= 0) {
+                letter = String.fromCharCode(65 + (index % 26)) + letter;
+                index = Math.floor(index / 26) - 1;
+              }
+              // Label, selection and resize stay on the same header to preserve event propagation.
+              return (
               <th key={c.name} scope="col" data-grid-column-header={ci} title={`${c.name} (${c.type})`}
-                aria-disabled={!canSelectHeaders} style={{ userSelect: "none" }}
+                aria-disabled={!canSelectHeaders}
+                style={{ userSelect: "none", position: "relative", width: colWidth(c.name), padding: 0, maxWidth: 280 }}
                 onMouseDown={(event) => {
                   event.preventDefault();
                   if (!canSelectHeaders) return;
                   if (!event.shiftKey) setAnchorCell({ row: 0, col: ci });
                   focusGridCell({ row: rows.length - 1, col: ci });
-                }}>{c.name}</th>
-            ))}<th scope="col">操作</th>
+                }}
+                onDoubleClick={() => {
+                  let width = MIN_COL_WIDTH;
+                  const cells = tableRef.current?.querySelectorAll<HTMLElement>(
+                    `[data-grid-cell$=":${ci}"] [data-grid-cell-content]`,
+                  );
+                  cells?.forEach(cell => {
+                    // CURRENT measures .cell only; empty .cellEmpty spans and active inputs are excluded.
+                    if (cell.textContent !== "") width = Math.max(width, cell.scrollWidth + 16);
+                  });
+                  setColWidths(previous => ({ ...previous, [c.name]: clampColumnWidth(width) }));
+                }}>
+                <span data-grid-column-letter="" style={{ display: "block", fontSize: 10, fontWeight: 700, lineHeight: 1.2 }}>{letter}</span>
+                <span style={{ display: "block", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 500 }}>{c.name}</span>
+                <span data-grid-column-resizer=""
+                  style={{ position: "absolute", top: 0, right: 0, width: 5, height: "100%", cursor: "col-resize", zIndex: 3 }}
+                  onMouseDown={event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    resizeRef.current = { column: c.name, startX: event.clientX, startWidth: colWidth(c.name) };
+                  }} />
+              </th>
+              );
+            })}<th scope="col">操作</th>
           </tr></thead>
           <tbody>
             {rows.map((row, ri) => (
@@ -568,14 +632,16 @@ export function AdminSpreadsheetEditableGrid({
                 return (
                   <td key={c.name} data-grid-cell={`${ri}:${columns.indexOf(c)}`}
                     data-find-match={findHit || undefined}
-                    style={{ background: findHit ? "color-mix(in srgb, #fbbc04 35%, var(--sheet-bg, var(--bg-base, #fff)))" : undefined }}
+                    style={{ width: colWidth(c.name), padding: 0, maxWidth: 280, verticalAlign: "middle",
+                      background: findHit ? "color-mix(in srgb, #fbbc04 35%, var(--sheet-bg, var(--bg-base, #fff)))" : undefined }}
                     tabIndex={visibleFocus.row === ri && visibleFocus.col === columns.indexOf(c) ? 0 : -1}
                     aria-selected={!identityChanged && ri >= Math.min(visibleAnchor.row, visibleFocus.row) &&
                       ri <= Math.max(visibleAnchor.row, visibleFocus.row) &&
                       columns.indexOf(c) >= Math.min(visibleAnchor.col, visibleFocus.col) &&
                       columns.indexOf(c) <= Math.max(visibleAnchor.col, visibleFocus.col)}
                     onClick={(event) => {
-                      if (event.target !== event.currentTarget) return;
+                      if (event.target !== event.currentTarget &&
+                          !(event.target instanceof HTMLElement && event.target.hasAttribute("data-grid-cell-content"))) return;
                       const pos = { row: ri, col: columns.indexOf(c) };
                       setAnchorCell(pos);
                       setFocusedCell(pos);
@@ -606,7 +672,11 @@ export function AdminSpreadsheetEditableGrid({
                         onClick={() => cancelCellEdit(currentSelection.id, { row: ri, col: columns.indexOf(c) })}>キャンセル</button>
                     </label>
                   ) : (
-                    <>{value}{canEdit ? (
+                    <><span data-grid-cell-content="" style={value === "" ? { display: "block", minHeight: 20 } : {
+                      display: "block", padding: "2px 6px", lineHeight: "20px", overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280,
+                      fontFamily: "var(--font-mono, ui-monospace, monospace)", wordBreak: "break-word",
+                    }}>{value}</span>{canEdit ? (
                       <button type="button" disabled={!canMutate || selectionConflict} aria-label={String(ri + 1) + "行 " + c.name + " を編集"}
                         onClick={() => startCellEdit(ri, columns.indexOf(c))}>編集</button>
                     ) : null}</>

@@ -573,3 +573,367 @@ for (const [name, empty] of [
     } finally { outside.remove(); await ui.cleanup(); }
   });
 }
+
+function gridColumnWidth(ui, index) {
+  const head = gridHeader(ui, columnHeader(index));
+  const col = ui.host.querySelectorAll("colgroup col")[index + 1];
+  assert.ok(col, "missing width column " + index);
+  assert.equal(head.style.width, col.style.width);
+  for (const cell of ui.host.querySelectorAll(`[data-grid-cell$=":${index}"]`)) {
+    assert.equal(cell.style.width, col.style.width);
+  }
+  return Number.parseInt(col.style.width, 10);
+}
+function displayedValue(ui, position) {
+  const span = gridCell(ui, position).querySelector("[data-grid-cell-content]");
+  assert.ok(span, "missing displayed value " + position);
+  return span;
+}
+function measureValue(ui, position, width) {
+  Object.defineProperty(displayedValue(ui, position), "scrollWidth", { configurable: true, value: width });
+}
+async function startResize(ui, index, options = {}) {
+  const handle = gridHeader(ui, columnHeader(index)).querySelector("[data-grid-column-resizer]");
+  assert.ok(handle, "missing resize handle " + index);
+  const event = headerEvent({ clientX: 100, ...options });
+  await React.act(async () => handle.dispatchEvent(event));
+  assert.equal(event.defaultPrevented, true);
+}
+async function moveResize(clientX) {
+  await React.act(async () => window.dispatchEvent(new dom.window.MouseEvent("mousemove", { clientX })));
+}
+async function endResize() {
+  await React.act(async () => window.dispatchEvent(new dom.window.MouseEvent("mouseup")));
+}
+async function autoFitColumn(ui, index) {
+  const header = gridHeader(ui, columnHeader(index));
+  // Dispatch the preceding presses too: a bare dblclick would miss header selection and the draft fence.
+  for (let detail = 1; detail <= 2; detail++) {
+    await React.act(async () => {
+      header.dispatchEvent(headerEvent({ detail }));
+      header.dispatchEvent(new dom.window.MouseEvent("mouseup", { bubbles: true, detail }));
+      header.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, detail }));
+    });
+  }
+  await React.act(async () => header.dispatchEvent(
+    new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }),
+  ));
+}
+
+test("MIG-0737 U01 column sizing: CURRENT letters, initial widths and automatic table layout", async () => {
+  const columns = Array.from({ length: 53 }, (_, index) => ({
+    name: "field_" + index, type: "TEXT", editable: false, pk: 0, notNull: false,
+  }));
+  const ui = await mount({ data: { ...data, columns, rows: [], primaryKeys: [] } });
+  try {
+    for (const [index, letter] of [[0, "A"], [25, "Z"], [26, "AA"], [27, "AB"], [51, "AZ"], [52, "BA"]]) {
+      const header = gridHeader(ui, columnHeader(index));
+      assert.equal(header.querySelector("[data-grid-column-letter]")?.textContent, letter);
+      assert.equal(header.title, columns[index].name + " (TEXT)");
+      assert.equal(gridColumnWidth(ui, index), 110);
+    }
+    const table = ui.host.querySelector("table");
+    assert.notEqual(table.style.tableLayout, "fixed");
+    assert.equal(table.style.width, "100%");
+    assert.equal(table.style.minWidth, "max-content");
+    assert.equal(table.style.borderCollapse, "separate");
+    assert.equal(table.querySelector("col").style.width, "46px");
+    assert.equal(table.querySelectorAll("col").length, columns.length + 2);
+    assert.equal(table.querySelector("col:last-child").style.width, "");
+    assert.equal(ui.host.querySelectorAll("[data-grid-column-letter]").length, 53);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 column sizing: drag clamps and starts from the last requested width without other effects", async () => {
+  let calls = 0;
+  let refreshes = 0;
+  const ui = await mount({ data: rangeData,
+    fetchFn: async () => { calls++; throw Error("resize must not send"); },
+    onRefresh: () => { refreshes++; },
+  });
+  const outside = document.createElement("input");
+  document.body.append(outside);
+  try {
+    await selectCell(ui, "1:1");
+    outside.focus();
+    const selected = selectedCells(ui);
+    await startResize(ui, 1, { clientX: 200 });
+    await moveResize(240);
+    assert.equal(gridColumnWidth(ui, 1), 150);
+    await moveResize(2000);
+    assert.equal(gridColumnWidth(ui, 1), 420);
+    await moveResize(-2000);
+    assert.equal(gridColumnWidth(ui, 1), 56);
+    await endResize();
+    await moveResize(250);
+    assert.equal(gridColumnWidth(ui, 1), 56);
+    await startResize(ui, 1);
+    await moveResize(125);
+    assert.equal(gridColumnWidth(ui, 1), 81);
+    await endResize();
+    assert.equal(gridColumnWidth(ui, 0), 110);
+    assert.equal(gridColumnWidth(ui, 2), 110);
+    assert.deepEqual(selectedCells(ui), selected);
+    assert.equal(document.activeElement, outside);
+    assert.equal(calls, 0);
+    assert.equal(refreshes, 0);
+  } finally { outside.remove(); await ui.cleanup(); }
+});
+
+for (const button of [0, 1, 2]) {
+  test(`MIG-0737 U01 column sizing: CURRENT resize button=${button} and modifier acceptance`, async () => {
+    const ui = await mount({ data: rangeData });
+    try {
+      await selectCell(ui, "1:1");
+      await startResize(ui, 2, { button, shiftKey: true, ctrlKey: true, metaKey: true, altKey: true });
+      await moveResize(135);
+      assert.equal(gridColumnWidth(ui, 2), 145);
+      assert.deepEqual(selectedCells(ui), ["1:1"]);
+      assert.equal(document.activeElement, gridCell(ui, "1:1"));
+      await endResize();
+    } finally { await ui.cleanup(); }
+  });
+}
+
+test("MIG-0737 U01 column sizing: mounted replacement, reorder and removed names retain CURRENT drag and widths", async () => {
+  const ui = await mount({ data: rangeData });
+  try {
+    await startResize(ui, 1);
+    await moveResize(130);
+    assert.equal(gridColumnWidth(ui, 1), 140);
+    const next = { ...rangeData, page: 3, def: { ...rangeData.def, table: "songs" } };
+    await ui.render({ data: next, allowMutations: true,
+      fetchFn: async () => { throw Error("sizing must not send"); },
+    });
+    await moveResize(160);
+    assert.equal(gridColumnWidth(ui, 1), 170);
+    await ui.render({ data: { ...next, columns: [next.columns[2], next.columns[1], next.columns[0]] } });
+    assert.equal(gridColumnWidth(ui, 1), 170);
+    assert.equal(gridColumnWidth(ui, 0), 110);
+    await ui.render({ data: { ...next, columns: next.columns.filter(c => c.name !== "title") } });
+    await moveResize(200);
+    await ui.render({ data: { ...next, columns: [next.columns[1], next.columns[0], next.columns[2]] } });
+    assert.equal(gridColumnWidth(ui, 0), 210);
+    await endResize();
+    await ui.render({ data: rangeData });
+    await moveResize(300);
+    assert.equal(gridColumnWidth(ui, 1), 210);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 column sizing: CURRENT drag survives window blur and listeners are removed on unmount", async () => {
+  const originalAdd = window.addEventListener;
+  const originalRemove = window.removeEventListener;
+  const listeners = new Map([["mousemove", new Set()], ["mouseup", new Set()]]);
+  window.addEventListener = function(type, listener, options) {
+    listeners.get(type)?.add(listener);
+    return originalAdd.call(this, type, listener, options);
+  };
+  window.removeEventListener = function(type, listener, options) {
+    listeners.get(type)?.delete(listener);
+    return originalRemove.call(this, type, listener, options);
+  };
+  let ui;
+  try {
+    ui = await mount();
+    await startResize(ui, 1);
+    await moveResize(125);
+    await React.act(async () => window.dispatchEvent(new dom.window.Event("blur")));
+    await moveResize(150);
+    assert.equal(gridColumnWidth(ui, 1), 160);
+    assert.equal(listeners.get("mousemove").size, 1);
+    assert.equal(listeners.get("mouseup").size, 1);
+    await ui.cleanup();
+    ui = null;
+    assert.equal(listeners.get("mousemove").size, 0);
+    assert.equal(listeners.get("mouseup").size, 0);
+    await moveResize(300);
+  } finally {
+    if (ui) await ui.cleanup();
+    window.addEventListener = originalAdd;
+    window.removeEventListener = originalRemove;
+  }
+});
+
+test("MIG-0737 U01 column sizing: autofit measures only displayed values in the current column and clamps", async () => {
+  const ui = await mount({ data: rangeData, allowMutations: true });
+  try {
+    measureValue(ui, "0:1", 200);
+    measureValue(ui, "1:1", 100);
+    measureValue(ui, "0:2", 999);
+    for (const node of ui.host.querySelectorAll("th, button")) {
+      Object.defineProperty(node, "scrollWidth", { configurable: true, value: 2000 });
+    }
+    await autoFitColumn(ui, 1);
+    assert.equal(gridColumnWidth(ui, 1), 216);
+    assert.equal(gridColumnWidth(ui, 2), 110);
+    assert.deepEqual(selectedCells(ui), columnCells);
+    assert.equal(document.activeElement, gridCell(ui, "2:1"));
+    await selectCell(ui, "1:0");
+    const handle = gridHeader(ui, columnHeader(1)).querySelector("[data-grid-column-resizer]");
+    measureValue(ui, "0:1", 240);
+    for (let detail = 1; detail <= 2; detail++) {
+      await React.act(async () => {
+        handle.dispatchEvent(headerEvent({ detail }));
+        handle.dispatchEvent(new dom.window.MouseEvent("mouseup", { bubbles: true, detail }));
+        handle.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, detail }));
+      });
+    }
+    await React.act(async () => handle.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, detail: 2 })));
+    assert.equal(gridColumnWidth(ui, 1), 256);
+    assert.deepEqual(selectedCells(ui), ["1:0"]);
+    assert.equal(document.activeElement, gridCell(ui, "1:0"));
+    await moveResize(400);
+    assert.equal(gridColumnWidth(ui, 1), 256);
+    measureValue(ui, "0:1", 600);
+    await autoFitColumn(ui, 1);
+    assert.equal(gridColumnWidth(ui, 1), 420);
+    await autoFitColumn(ui, 0);
+    assert.equal(gridColumnWidth(ui, 0), 56);
+    await ui.render({ data: { ...rangeData, rows: [] } });
+    await autoFitColumn(ui, 1);
+    assert.equal(gridColumnWidth(ui, 1), 56);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 column sizing: empty and null display spans with nonzero layout widths are excluded", async () => {
+  const ui = await mount({ data: { ...rangeData, rows: [
+    { id: "a", title: "" }, { id: "b", title: null }, { id: "c" },
+  ] } });
+  try {
+    for (const position of ["0:1", "1:1", "2:1"]) measureValue(ui, position, 350);
+    await autoFitColumn(ui, 1);
+    assert.equal(gridColumnWidth(ui, 1), 56);
+    await React.act(async () => displayedValue(ui, "1:1").click());
+    assert.deepEqual(selectedCells(ui), ["1:1"]);
+    await ui.render({ data: { ...rangeData, rows: [
+      { id: "a", title: " " }, { id: "b", title: 0 }, { id: "c", title: false },
+    ] } });
+    measureValue(ui, "0:1", 80);
+    measureValue(ui, "1:1", 120);
+    measureValue(ui, "2:1", 90);
+    await autoFitColumn(ui, 1);
+    assert.equal(gridColumnWidth(ui, 1), 136);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 column sizing: repeated autofit retains CURRENT measured-scroll-width behavior", async () => {
+  const ui = await mount({ data });
+  try {
+    // A block's scrollWidth may track its current box; these supplied measurements are not native layout proof.
+    const value = displayedValue(ui, "0:1");
+    assert.equal(value.style.display, "block");
+    assert.equal(value.style.padding, "2px 6px");
+    assert.equal(value.style.maxWidth, "280px");
+    assert.equal(value.style.whiteSpace, "nowrap");
+    assert.equal(value.style.fontFamily, "var(--font-mono, ui-monospace, monospace)");
+    Object.defineProperty(value, "scrollWidth", { configurable: true, get: () => gridColumnWidth(ui, 1) });
+    await autoFitColumn(ui, 1);
+    assert.equal(gridColumnWidth(ui, 1), 126);
+    await autoFitColumn(ui, 1);
+    assert.equal(gridColumnWidth(ui, 1), 142);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 column sizing: resize and autofit exclude the active input and preserve its draft and focus", async () => {
+  let calls = 0;
+  let refreshes = 0;
+  const ui = await mount({ allowMutations: true,
+    fetchFn: async () => { calls++; throw Error("sizing must not save"); },
+    onRefresh: () => { refreshes++; },
+  });
+  try {
+    const cell = await selectCell(ui, "0:1");
+    await press(cell, "Enter");
+    const input = cell.querySelector("input");
+    await React.act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(input, "unsaved");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      input.focus();
+    });
+    Object.defineProperty(input, "scrollWidth", { configurable: true, value: 2000 });
+    measureValue(ui, "1:1", 70);
+    await startResize(ui, 1);
+    await moveResize(145);
+    assert.equal(gridColumnWidth(ui, 1), 155);
+    await endResize();
+    await autoFitColumn(ui, 1);
+    assert.equal(gridColumnWidth(ui, 1), 86);
+    assert.equal(cell.querySelector("input"), input);
+    assert.equal(input.value, "unsaved");
+    assert.equal(document.activeElement, input);
+    assert.deepEqual(selectedCells(ui), ["0:1"]);
+    assert.equal(calls, 0);
+    assert.equal(refreshes, 0);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 column sizing: value wrapper preserves range navigation and copied TSV", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const copied = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+    writeText: async body => { copied.push(body); },
+  } });
+  const ui = await mount({ data: rangeData });
+  try {
+    await React.act(async () => displayedValue(ui, "1:1").click());
+    assert.deepEqual(selectedCells(ui), ["1:1"]);
+    const cell = gridCell(ui, "1:1");
+    assert.equal(cell.tabIndex, 0);
+    await press(cell, "ArrowDown", { shiftKey: true });
+    await press(document.activeElement, "c", { ctrlKey: true });
+    assert.deepEqual(copied, ["Beta\nGamma"]);
+    await startResize(ui, 1);
+    await moveResize(180);
+    await endResize();
+    assert.deepEqual(copied, ["Beta\nGamma"]);
+    await press(document.activeElement, "c", { ctrlKey: true });
+    assert.deepEqual(copied, ["Beta\nGamma", "Beta\nGamma"]);
+  } finally {
+    await ui.cleanup();
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
+
+test("MIG-0737 U01 column sizing: pending save and history keep their requests and receipts during sizing", async () => {
+  const requests = [];
+  let refreshes = 0;
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ resolve, init })),
+    onRefresh: () => { refreshes++; },
+  });
+  try {
+    const cell = await beginTitleSave(ui, "Changed");
+    assert.equal(requests.length, 1);
+    await startResize(ui, 1);
+    await moveResize(130);
+    await endResize();
+    assert.equal(gridColumnWidth(ui, 1), 140);
+    measureValue(ui, "0:1", 170);
+    await autoFitColumn(ui, 1);
+    assert.equal(gridColumnWidth(ui, 1), 186);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].init.signal.aborted, false);
+    assert.equal(refreshes, 0);
+    await React.act(async () => requests[0].resolve(successfulWrite()));
+    await flush();
+    assert.equal(refreshes, 1);
+    await press(cell, "z", { ctrlKey: true });
+    assert.equal(requests.length, 2);
+    await startResize(ui, 1);
+    await moveResize(110);
+    await endResize();
+    assert.equal(gridColumnWidth(ui, 1), 196);
+    await autoFitColumn(ui, 1);
+    assert.equal(gridColumnWidth(ui, 1), 186);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].init.signal.aborted, false);
+    assert.equal((await press(document.activeElement, "a", { ctrlKey: true })).defaultPrevented, false);
+    await React.act(async () => requests[1].resolve(successfulWrite()));
+    await flush();
+    assert.equal(refreshes, 2);
+    assert.equal(requests.length, 2);
+    assert.match(ui.host.textContent, /保存しました/);
+  } finally { await ui.cleanup(); }
+});
