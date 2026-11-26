@@ -4,7 +4,7 @@ import test from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import {
-  reserveSlot, releaseSlot, extendSlot, mergeSlotGroup,
+  reserveSlot, releaseSlot, extendSlot, mergeSlotGroup, describeSlotMutationResult,
 } from "../apps/site/src/lib/slotReservation.ts";
 
 function server(status, body) {
@@ -205,6 +205,54 @@ for (const [id, mutate] of slotMutationCalls) {
     }
   });
 }
+
+const mutationFeedbackCases = [
+  [{ operation: "reserve", requestedCount: 5, canPost: true }, { slotCount: 2, groupSize: 3 }, "2枠連続で確保しました。"],
+  [{ operation: "reserve", requestedCount: 5, canPost: false }, { groupSize: 3 }, "3枠連続で確保しました。"],
+  [{ operation: "reserve", requestedCount: 5, canPost: false }, {}, "5枠連続で確保しました。"],
+  [{ operation: "reserve", requestedCount: 5, canPost: true }, { slotCount: 1, groupSize: 3 }, "枠を確保しました。続けて作品情報を登録できます。"],
+  [{ operation: "reserve", requestedCount: 1, canPost: false }, {}, "枠を確保しました。作品投稿には X ID の承認が必要です。"],
+  [{ operation: "release" }, { slotCount: 3, groupSize: 3 }, "枠を解放しました。"],
+  [{ operation: "extend", canPost: false }, { slotCount: 1, groupSize: 3 }, "連続3枠になりました。"],
+  [{ operation: "extend", canPost: true }, { slotCount: 3, groupSize: 1 }, "枠を拡張しました。続けて作品情報を登録できます。"],
+  [{ operation: "extend", canPost: false }, {}, "枠を拡張しました。作品投稿には X ID の承認が必要です。"],
+  [{ operation: "merge", canPost: false }, { slotCount: 1, groupSize: 4 }, "4枠を1つの連続枠にまとめました。"],
+  [{ operation: "merge", canPost: true }, { groupSize: 1 }, "枠を結合しました。続けて作品情報を登録できます。"],
+  [{ operation: "merge", canPost: false }, {}, "枠を結合しました。作品投稿には X ID の承認が必要です。"],
+];
+
+test("U03f success feedback keeps CURRENT messages, count precedence and reflection state", () => {
+  for (const [presentation, fields, message] of mutationFeedbackCases) {
+    for (const flag of [undefined, false, true]) {
+      const result = Object.freeze({ ok: true, ...fields, ...(flag === undefined ? {} : { pendingPublicReflection: flag }) });
+      assert.deepEqual(describeSlotMutationResult(Object.freeze(presentation), result), {
+        kind: "success", message, pendingPublicReflection: flag,
+      });
+    }
+  }
+});
+
+test("U03f failure feedback keeps operation fallback, exact denial message and guard reason", () => {
+  const cases = [
+    [{ operation: "reserve", requestedCount: 2, canPost: true }, "枠の確保に失敗しました。"],
+    [{ operation: "release" }, "枠の解放に失敗しました。"],
+    [{ operation: "extend", canPost: false }, "枠の拡張に失敗しました。"],
+    [{ operation: "merge", canPost: false }, "枠の結合に失敗しました。"],
+  ];
+  for (const [presentation, fallback] of cases) {
+    for (const [fields, expectedMessage, expectedReason] of [
+      [{}, fallback, undefined],
+      [{ message: "先に確保されました" }, "先に確保されました", undefined],
+      [{ message: "", reason: "tos_required" }, "", "tos_required"],
+      [{ reason: "unauthenticated" }, fallback, "unauthenticated"],
+      [{ message: "利用停止中", reason: "banned", pendingPublicReflection: true }, "利用停止中", "banned"],
+    ]) {
+      assert.deepEqual(describeSlotMutationResult(presentation, Object.freeze({ ok: false, ...fields })), {
+        kind: "failure", message: expectedMessage, reason: expectedReason,
+      });
+    }
+  }
+});
 
 test("U01 RH-014 invalid privilege flags and malformed JSON fail closed", async () => {
   const { parseSlotViewerOverlay, unavailableSlotViewerOverlay, fetchSlotViewerOverlay } =

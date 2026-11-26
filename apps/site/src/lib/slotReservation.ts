@@ -114,3 +114,68 @@ export function mergeSlotGroup(
     ...(input.operator_override === undefined ? {} : { operator_override: input.operator_override }),
   }, fetcher);
 }
+
+/** U03 presentation only; do not mount mutation controls before the U04 schema gate. */
+export type SlotMutationPresentation =
+  | { operation: "reserve"; requestedCount: number; canPost: boolean }
+  | { operation: "release" }
+  | { operation: "extend" | "merge"; canPost: boolean };
+
+export type SlotMutationFeedback =
+  | { kind: "success"; message: string; pendingPublicReflection: boolean | undefined }
+  | { kind: "failure"; message: string; reason: string | undefined };
+
+const failureMessages = {
+  reserve: "枠の確保に失敗しました。",
+  release: "枠の解放に失敗しました。",
+  extend: "枠の拡張に失敗しました。",
+  merge: "枠の結合に失敗しました。",
+} as const;
+
+/** CURRENT SlotGrid result text. Navigation, refresh and authorization stay with the host. */
+export function describeSlotMutationResult(
+  presentation: SlotMutationPresentation,
+  result: SlotReservationResult,
+): SlotMutationFeedback {
+  if (!result.ok) {
+    return {
+      kind: "failure",
+      message: result.message ?? failureMessages[presentation.operation],
+      reason: result.reason,
+    };
+  }
+  let message: string;
+  switch (presentation.operation) {
+    case "reserve": {
+      const count = result.slotCount ?? result.groupSize ?? presentation.requestedCount;
+      message = count > 1
+        ? `${count}枠連続で確保しました。`
+        : presentation.canPost
+          ? "枠を確保しました。続けて作品情報を登録できます。"
+          : "枠を確保しました。作品投稿には X ID の承認が必要です。";
+      break;
+    }
+    case "release":
+      message = "枠を解放しました。";
+      break;
+    case "extend": {
+      const count = result.groupSize ?? 0;
+      message = count > 1
+        ? `連続${count}枠になりました。`
+        : presentation.canPost
+          ? "枠を拡張しました。続けて作品情報を登録できます。"
+          : "枠を拡張しました。作品投稿には X ID の承認が必要です。";
+      break;
+    }
+    case "merge": {
+      const count = result.groupSize ?? 0;
+      message = count > 1
+        ? `${count}枠を1つの連続枠にまとめました。`
+        : presentation.canPost
+          ? "枠を結合しました。続けて作品情報を登録できます。"
+          : "枠を結合しました。作品投稿には X ID の承認が必要です。";
+      break;
+    }
+  }
+  return { kind: "success", message, pendingPublicReflection: result.pendingPublicReflection };
+}
