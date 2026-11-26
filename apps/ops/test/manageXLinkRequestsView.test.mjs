@@ -125,6 +125,7 @@ const deferred = () => {
   return { promise, resolve };
 };
 const reviewAdapter = (overrides = {}) => ({
+  authorizationEpoch: "test-authority-1",
   approve: async () => success,
   reject: async () => success,
   onRefresh: () => {},
@@ -298,5 +299,102 @@ test("U03c acknowledged success survives refresh failure; network failure remain
     assert.match(node.querySelector('[role="status"]').textContent, /処理しました.*一覧の再取得に失敗/);
     assert.doesNotMatch(node.textContent, /private refresh detail/);
     assert.equal(button(node, "承認").disabled, true);
+  });
+});
+
+test("U03c explicit authority epoch is required for injected mutation controls", () => {
+  for (const authorizationEpoch of ["", " ", undefined]) {
+    const doc = new JSDOM(render(h(ManageXLinkRequestsBody, {
+      data: { rows: [row] }, reviewActions: reviewAdapter({ authorizationEpoch }),
+    }))).window.document;
+    assert.equal(doc.querySelectorAll("button").length, 0);
+  }
+});
+
+test("U03c committed A-B-A and A-absent-A discard old success, 401 and domain failure", async () => {
+  for (const oldResult of [
+    success, { status: "anonymous" }, { status: "ok", data: { ok: false, message: "obsolete receipt" } },
+  ]) {
+    for (const intermediate of [reviewAdapter({ authorizationEpoch: "test-authority-2" }), undefined]) {
+      const first = deferred();
+      const second = deferred();
+      const calls = [];
+      let refreshes = 0;
+      let anonymous = 0;
+      const adapter = reviewAdapter({
+        approve: (id) => { calls.push(id); return id === "req/1" ? first.promise : second.promise; },
+        onRefresh: () => { refreshes++; },
+        onAnonymous: () => { anonymous++; },
+      });
+      await withReviewBody(adapter, async ({ node, draw }) => {
+        await React.act(async () => button(node, "却下").click());
+        assert.ok(node.querySelector("textarea"));
+        await React.act(async () => button(node, "承認").click());
+        assert.deepEqual(calls, ["req/1"]);
+        await draw(intermediate);
+        assert.equal(node.querySelector("textarea"), null);
+        await draw(adapter);
+        assert.equal(node.querySelector("textarea"), null);
+        // Same global queue: do not assume another actor has a disjoint write scope.
+        assert.equal(button(node, "承認", 1).disabled, true);
+        await React.act(async () => button(node, "承認", 1).click());
+        assert.deepEqual(calls, ["req/1"]);
+        await React.act(async () => first.resolve(oldResult));
+        assert.equal(refreshes, 0);
+        assert.equal(anonymous, 0);
+        assert.doesNotMatch(node.textContent, /obsolete receipt|処理しました/);
+        assert.equal(button(node, "承認").disabled, true);
+        assert.equal(button(node, "却下").disabled, true);
+        assert.equal(button(node, "承認", 1).disabled, false);
+        await React.act(async () => button(node, "承認", 1).click());
+        assert.deepEqual(calls, ["req/1", "req/2"]);
+        assert.equal(button(node, "承認", 1).disabled, true);
+        await React.act(async () => second.resolve(success));
+        assert.equal(refreshes, 1);
+        assert.equal(anonymous, 0);
+        assert.equal(button(node, "承認", 1).disabled, true);
+      });
+    }
+  }
+});
+
+test("U03c a stable adapter with changed epoch invalidates receipt; ordinary queue refresh does not", async () => {
+  const receipt = deferred();
+  let refreshes = 0;
+  const adapter = reviewAdapter({
+    approve: () => receipt.promise, onRefresh: () => { refreshes++; },
+  });
+  await withReviewBody(adapter, async ({ node, draw }) => {
+    await React.act(async () => button(node, "却下").click());
+    await draw(adapter, [{ ...row }, { ...row, id: "req/2" }]);
+    assert.ok(node.querySelector("textarea"));
+    await draw(adapter, [{ ...row, id: "req/2" }]);
+    assert.equal(node.querySelector("textarea"), null);
+    await draw(adapter);
+    assert.equal(node.querySelector("textarea"), null);
+    await React.act(async () => button(node, "承認").click());
+    adapter.authorizationEpoch = "test-authority-3";
+    await draw(adapter);
+    await React.act(async () => receipt.resolve(success));
+    assert.equal(refreshes, 0);
+    assert.equal(button(node, "承認").disabled, true);
+    assert.equal(button(node, "承認", 1).disabled, false);
+  });
+});
+
+test("U03c a committed 401 stays hidden until a new explicit authority epoch", async () => {
+  let anonymous = 0;
+  const adapter = reviewAdapter({
+    approve: async () => ({ status: "anonymous" }), onAnonymous: () => { anonymous++; },
+  });
+  await withReviewBody(adapter, async ({ node, draw }) => {
+    await React.act(async () => button(node, "承認").click());
+    assert.equal(anonymous, 1);
+    await draw(undefined);
+    await draw(reviewAdapter());
+    assert.doesNotMatch(node.textContent, /Discord Staff|account1/);
+    await draw(reviewAdapter({ authorizationEpoch: "test-authority-4" }));
+    assert.match(node.textContent, /Discord Staff/);
+    assert.equal(button(node, "承認").disabled, false);
   });
 });

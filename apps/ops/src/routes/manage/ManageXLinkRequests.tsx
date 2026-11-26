@@ -89,6 +89,9 @@ function Row({ row, children }: { row: ManageXLinkRequest; children?: React.Reac
 }
 
 type ReviewActions = {
+  // Opaque, nonempty host-verified authorization generation. Rotate after
+  // reauthentication, account/capability changes, and authoritative revalidation.
+  authorizationEpoch: string;
   approve: (requestId: string) => Promise<OpsWriteResult<XIdLinkReviewResult>>;
   reject: (requestId: string, reason: string) => Promise<OpsWriteResult<XIdLinkReviewResult>>;
   onRefresh: () => void | Promise<void>;
@@ -104,11 +107,16 @@ function isLinkRequest(row: ManageXLinkRequest): boolean {
 /**
  * Contract-first candidate: absent reviewActions means read-only.
  * A future authorized host may inject a stable adapter only after MIG-0605.
- * Server-side xid.link_requests permission, CAS and audit remain authoritative.
+ * Rotate its authorizationEpoch on verified authority changes, not ordinary
+ * queue refresh. The queue is global; do not assume different actors have
+ * disjoint write scopes. Server-side permission, CAS and audit are authoritative.
  */
-export function ManageXLinkRequestsBody({ data, reviewActions }: {
+export function ManageXLinkRequestsBody({ data, reviewActions: proposedActions }: {
   data: ManageXLinkRequestsResponse; reviewActions?: ReviewActions;
 }): React.ReactElement {
+  const reviewActions = typeof proposedActions?.authorizationEpoch === "string" &&
+    proposedActions.authorizationEpoch.trim() ? proposedActions : undefined;
+  const epoch = reviewActions?.authorizationEpoch;
   const [pending, setPending] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [rejectingId, setRejectingId] = React.useState<string | null>(null);
@@ -116,16 +124,53 @@ export function ManageXLinkRequestsBody({ data, reviewActions }: {
   const [authLost, setAuthLost] = React.useState(false);
   const [acknowledged, setAcknowledged] = React.useState<ReadonlySet<string>>(() => new Set());
   const acknowledgedRef = React.useRef(new Set<string>());
-  const inFlight = React.useRef(false);
+  const [quarantined, setQuarantined] = React.useState<ReadonlySet<string>>(() => new Set());
+  const quarantinedRef = React.useRef(new Set<string>());
+  const inFlight = React.useRef<{ rowId: string; generation: object } | null>(null);
   const denied = React.useRef(false);
-  const lifetime = React.useRef<object | null>(null);
+  const generation = React.useRef<object | null>(null);
+  const lastAuthorizedEpoch = React.useRef<string | undefined>(undefined);
   const actionsRef = React.useRef(reviewActions);
 
   React.useLayoutEffect(() => {
-    lifetime.current = {};
-    return () => { lifetime.current = null; };
-  }, []);
-  React.useLayoutEffect(() => { actionsRef.current = reviewActions; }, [reviewActions]);
+    // A committed adapter/epoch transition invalidates receipts even if the
+    // very same adapter object later returns (A -> B -> A or A -> absent -> A).
+    const token = {};
+    generation.current = token;
+    actionsRef.current = reviewActions;
+    const outstanding = inFlight.current;
+    if (outstanding && outstanding.generation !== token) {
+      // The abandoned write may already have committed. Keep the global
+      // single-flight lock until it settles, and fence that request from replay
+      // for this mounted candidate. The future host must reconcile by authorized
+      // read/CAS; do not infer non-commit or retry from an obsolete receipt.
+      quarantinedRef.current.add(outstanding.rowId);
+      setQuarantined(new Set(quarantinedRef.current));
+    }
+    setMessage(null);
+    setRejectingId(null);
+    setReason("");
+    if (epoch !== undefined && epoch !== lastAuthorizedEpoch.current) {
+      // Only a new explicit authority generation may clear a prior 401.
+      lastAuthorizedEpoch.current = epoch;
+      denied.current = false;
+      setAuthLost(false);
+      // Retain no-replay protection for previously acknowledged global IDs,
+      // without carrying their success messages into the next generation.
+      for (const id of acknowledgedRef.current) quarantinedRef.current.add(id);
+      setQuarantined(new Set(quarantinedRef.current));
+      acknowledgedRef.current.clear();
+      setAcknowledged(new Set());
+    }
+    return () => { generation.current = null; actionsRef.current = undefined; };
+  }, [reviewActions, epoch]);
+
+  React.useLayoutEffect(() => {
+    if (rejectingId !== null && !data.rows.some(row => row.id === rejectingId && isLinkRequest(row))) {
+      setRejectingId(null);
+      setReason("");
+    }
+  }, [data.rows, rejectingId]);
 
   function closeReject(): void {
     setRejectingId(null);
@@ -134,14 +179,17 @@ export function ManageXLinkRequestsBody({ data, reviewActions }: {
 
   async function run(row: ManageXLinkRequest, action: "approve" | "reject"): Promise<void> {
     const adapter = actionsRef.current;
-    const token = lifetime.current;
+    const token = generation.current;
     if (!adapter || !token || denied.current || inFlight.current ||
-        !isLinkRequest(row) || acknowledgedRef.current.has(row.id)) return;
-    // Synchronous fence: React's disabled state is committed after the event.
-    inFlight.current = true;
+        !isLinkRequest(row) || acknowledgedRef.current.has(row.id) ||
+        quarantinedRef.current.has(row.id)) return;
+    // Synchronous global queue fence: the old finally may release only its own
+    // operation, never a newer one. Context rotation is not server cancellation.
+    const operation = { rowId: row.id, generation: token };
+    inFlight.current = operation;
     setPending(true);
     setMessage(null);
-    const isCurrent = () => lifetime.current === token && actionsRef.current === adapter;
+    const isCurrent = () => generation.current === token && actionsRef.current === adapter;
     try {
       const result = action === "approve"
         ? await adapter.approve(row.id)
@@ -173,9 +221,9 @@ export function ManageXLinkRequestsBody({ data, reviewActions }: {
     } catch {
       if (isCurrent() && !denied.current) setMessage(REVIEW_UNAVAILABLE);
     } finally {
-      if (lifetime.current === token) {
-        inFlight.current = false;
-        setPending(false);
+      if (inFlight.current === operation) {
+        inFlight.current = null;
+        if (generation.current !== null) setPending(false);
       }
     }
   }
@@ -199,16 +247,16 @@ export function ManageXLinkRequestsBody({ data, reviewActions }: {
               {isLinkRequest(row) ? <>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button type="button" className="fn-btn fn-btn-primary fn-btn-sm"
-                    disabled={pending || acknowledged.has(row.id)}
+                    disabled={pending || acknowledged.has(row.id) || quarantined.has(row.id)}
                     onClick={() => { void run(row, "approve"); }}>承認</button>
                   <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
-                    disabled={pending || acknowledged.has(row.id)}
+                    disabled={pending || acknowledged.has(row.id) || quarantined.has(row.id)}
                     onClick={() => {
                       setRejectingId(rejectingId === row.id ? null : row.id);
                       setReason("");
                     }}>却下</button>
                 </div>
-                {rejectingId === row.id && !acknowledged.has(row.id) ? <div style={{
+                {rejectingId === row.id && !acknowledged.has(row.id) && !quarantined.has(row.id) ? <div style={{
                   marginTop: 8, display: "flex", flexDirection: "column", gap: 6, maxWidth: 280,
                 }}>
                   <textarea className="fn-input" placeholder="却下理由 (任意・履歴に残る)"
