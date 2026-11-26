@@ -417,7 +417,17 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c, next) => {
 }, dbMiddleware, async (c) => {
   const userId = c.get("user")!.id;
   const { before, canonicalXId } = c.get("xidSelected");
-  if (normalizeXId(before.active_x_user_id as string | null) === canonicalXId) {
+  const persistedActiveXId = before.active_x_user_id;
+  if (typeof persistedActiveXId === "string" &&
+      normalizeXId(persistedActiveXId) === canonicalXId) {
+    // SEC-726: normalization can hide a legacy raw value outside the next
+    // session's bounds (for example @ + 128 ASCII codepoints). A no-op
+    // must not claim a usable selection while leaving that value in D1.
+    // Do not silently repair or audit a different identity here. Preserve
+    // the CURRENT no-write behavior for session-safe legacy spellings.
+    if (!isSessionSafeSelectedXId(persistedActiveXId)) {
+      return writeGuardDenyResponse(c, "db_unavailable", 503);
+    }
     return c.json({ ok: true, message: "すでにこの X ID がアクティブです。" });
   }
 

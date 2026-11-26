@@ -241,6 +241,67 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("SEC-726: normalized-equal unsafe persisted Active X must never report idempotent success", async () => {
+    for (const [label, id, raw] of [
+      ["prefix over 128 codepoints", "a".repeat(128), "@" + "a".repeat(128)],
+      ["trim over 128 codepoints", "b".repeat(128), " " + "b".repeat(128)],
+      ["prefix over 512 UTF8 bytes", "🌀".repeat(128), "@" + "🌀".repeat(128)],
+    ]) {
+      const w = world();
+      try {
+        insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
+        insert(w.sqlite, "x_user_account_links", {
+          x_user_id: id, auth_user_id: "u_multi", link_role: "manager",
+        });
+        w.sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?')
+          .run(raw, "u_multi");
+        const before = snapshot(w);
+        const reads = w.d1.stats.reads;
+        const batches = w.d1.stats.batches;
+        const response = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: id });
+        assert.equal(response.status, 503, label);
+        assert.equal(response.result.ok, false, label);
+        assert.equal(response.result.reason, "db_unavailable", label);
+        assert.equal(w.d1.stats.reads - reads, 2, "session + selected identity only: " + label);
+        assert.equal(w.d1.stats.batches - batches, 0, "no user/audit batch: " + label);
+        assert.deepEqual(snapshot(w), before, "no implicit repair, audit or queue: " + label);
+        assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0, label);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
+  test("SEC-726: session-safe persisted Active X remains idempotent, including exact 512 UTF8 bytes", async () => {
+    for (const [label, id, raw] of [
+      ["exact 128 ASCII", "a".repeat(128), "a".repeat(128)],
+      ["exact 512 UTF8 bytes", "🌀".repeat(128), "🌀".repeat(128)],
+      ["safe legacy spelling", "c".repeat(127), "@" + "C".repeat(127)],
+    ]) {
+      const w = world();
+      try {
+        insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
+        insert(w.sqlite, "x_user_account_links", {
+          x_user_id: id, auth_user_id: "u_multi", link_role: "manager",
+        });
+        w.sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?')
+          .run(raw, "u_multi");
+        const before = snapshot(w);
+        const reads = w.d1.stats.reads;
+        const batches = w.d1.stats.batches;
+        const response = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: id });
+        assert.equal(response.status, 200, label);
+        assert.deepEqual(response.result, { ok: true, message: "すでにこの X ID がアクティブです。" }, label);
+        assert.equal(w.d1.stats.reads - reads, 2, "session + selected identity only: " + label);
+        assert.equal(w.d1.stats.batches - batches, 0, label);
+        assert.deepEqual(snapshot(w), before, "CURRENT safe no-op is unchanged: " + label);
+        assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0, label);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
   test("SEC-726: oversized, embedded-NUL and normalized-invalid selected X IDs fail before mutation", async () => {
     for (const [label, id] of [
       ["ASCII129", "x".repeat(129)],
