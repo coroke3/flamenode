@@ -33,42 +33,43 @@ function stripHtmlTags(fragment: string): string {
   return decoded.join("\n");
 }
 
-/**
- * The simple fallback cannot safely flatten nested tables into a rectangular
- * spreadsheet. Recognize table tags without treating quoted attributes or
- * comments as markup, and decline nested tables rather than duplicating cells.
- */
-function hasNestedTableMarkup(html: string): boolean {
-  const tokens = /<!--[\s\S]*?-->|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
-  let depth = 0;
-  for (const match of html.matchAll(tokens)) {
-    const tag = match[0];
-    if (/^<table(?=[\s/>])/i.test(tag)) {
-      if (depth > 0) return true;
-      depth++;
-    } else if (/^<\/table(?=[\s/>])/i.test(tag)) {
-      depth = Math.max(0, depth - 1);
-    }
-  }
-  return false;
-}
-
 /** DOM なし環境向けの簡易 HTML 表パース */
 function parseHtmlTableRegex(html: string): string[][] {
-  if (hasNestedTableMarkup(html)) return [];
+  // Use the same quote/comment-aware tokens as cell text extraction. Never
+  // search raw attributes or comments for row/cell delimiters.
+  const tokens = /<!--[\s\S]*?-->|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
   const rows: string[][] = [];
-  const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  let trMatch: RegExpExecArray | null;
-  while ((trMatch = trRe.exec(html)) !== null) {
-    const rowHtml = trMatch[1] ?? "";
-    const cells: string[] = [];
-    const cellRe = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
-    let cellMatch: RegExpExecArray | null;
-    while ((cellMatch = cellRe.exec(rowHtml)) !== null) {
-      cells.push(stripHtmlTags(cellMatch[1] ?? ""));
+  let inTable = false;
+  let row: string[] | null = null;
+  let cell: { name: string; start: number } | null = null;
+  for (const match of html.matchAll(tokens)) {
+    const structure = /^<(\/?)(table|tr|td|th)(?=[\s/>])/i.exec(match[0]);
+    if (!structure) continue;
+    const closing = structure[1] === "/";
+    const name = structure[2].toLowerCase();
+    if (name === "table") {
+      // Nested or unbalanced tables cannot be flattened safely.
+      if (row !== null || inTable === !closing) return [];
+      inTable = !closing;
+    } else if (name === "tr") {
+      if (!closing) {
+        if (row !== null) return [];
+        row = [];
+      } else {
+        if (row === null || cell !== null) return [];
+        if (row.length > 0) rows.push(row);
+        row = null;
+      }
+    } else if (!closing) {
+      if (row === null || cell !== null) return [];
+      cell = { name, start: match.index + match[0].length };
+    } else {
+      if (row === null || cell === null || cell.name !== name) return [];
+      row.push(stripHtmlTags(html.slice(cell.start, match.index)));
+      cell = null;
     }
-    if (cells.length > 0) rows.push(cells);
   }
+  if (inTable || row !== null || cell !== null) return [];
   return rows.filter((r) => !(r.length === 1 && r[0].trim() === ""));
 }
 

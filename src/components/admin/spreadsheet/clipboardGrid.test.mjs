@@ -171,3 +171,36 @@ test("HTML clipboard fallback retains legacy whitespace trimming and single blan
   assert.deepEqual(parseClipboardContent("", html), expected);
   assert.deepEqual(parseHtmlClipboardTable("<table><tr><td><br></td></tr></table>"), []);
 });
+
+test("HTML clipboard fallback ignores fake table structure in comments and quoted attributes", () => {
+  const fixtures = [
+    '<table><!-- <tr><td>FAKE</td></tr> --><tr><td>A</td><td>B</td></tr></table>',
+    '<table title="<tr><td>FAKE</td></tr>"><tr><td>A</td><td>B</td></tr></table>',
+  ];
+  for (const html of fixtures) {
+    assert.deepEqual(parseHtmlClipboardTable(html), [["A", "B"]]);
+    assert.deepEqual(parseClipboardContent("", html), [["A", "B"]]);
+    assert.deepEqual(parseClipboardContent("A\tB", html), [["A", "B"]]);
+  }
+});
+
+test("HTML clipboard fallback uses actual cell boundaries despite quoted delimiters and comments", () => {
+  const fixtures = [
+    ["<table><tr><td title='x>y'>A</td><td>B</td></tr></table>", [["A", "B"]]],
+    ['<table><tr><td>A<span title="</td><td>FAKE">B</span>C</td><td>D</td></tr></table>', [["ABC", "D"]]],
+    '<table><tr><td>A<!-- </td><td>FAKE -->B</td><td>C</td></tr></table>',
+  ];
+  assert.deepEqual(parseHtmlClipboardTable(fixtures[0][0]), fixtures[0][1]);
+  assert.deepEqual(parseClipboardContent("", fixtures[0][0]), fixtures[0][1]);
+  assert.deepEqual(parseHtmlClipboardTable(fixtures[1][0]), fixtures[1][1]);
+  assert.deepEqual(parseClipboardContent("", fixtures[1][0]), fixtures[1][1]);
+  assert.deepEqual(parseHtmlClipboardTable(fixtures[2]), [["AB", "C"]]);
+  assert.deepEqual(parseClipboardContent("", fixtures[2]), [["AB", "C"]]);
+});
+
+test("HTML clipboard fallback refuses unbalanced cells rather than pasting partial HTML data", () => {
+  const html = '<table><tr><td>A</td><td>B</th></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(html), []);
+  assert.deepEqual(parseClipboardContent("", html), []);
+  assert.deepEqual(parseClipboardContent("A\tB", html), [["A", "B"]]);
+});
