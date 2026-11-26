@@ -136,14 +136,40 @@ export function currentAdminVideoMembersResult(
     snapshot.epoch === epoch ? snapshot.result : null;
 }
 
-export function AdminVideoMembersReadPage({ videoId, fetchFn, onNavigate, managementTabs }: {
+type AdminVideoMembersReadPageProps = {
   videoId: string;
   fetchFn?: OpsFetch;
   /** Testing port; the actual Ops navigation uses window.location.assign. */
   onNavigate?: (path: string) => void;
   /** Optional MIG-0729 #506 AdminVideoTabs injection, never a write capability. */
   managementTabs?: AdminVideoMembersTabsPort;
-}): React.ReactElement {
+  /**
+   * Provisional UNMOUNTED host generation, matching the editor preview.
+   * A real route must supply a non-secret generation and rotate it on every
+   * committed authority change. Omitting it is legacy fixture compatibility,
+   * not proof of an authenticated session or permission.
+   */
+  authorityEpoch?: number;
+};
+
+export function AdminVideoMembersReadPage({
+  authorityEpoch, ...props
+}: AdminVideoMembersReadPageProps): React.ReactElement {
+  // Reject malformed supplied generations before starting a private GET.
+  if (authorityEpoch !== undefined &&
+      (!Number.isSafeInteger(authorityEpoch) || authorityEpoch < 0)) {
+    return <p role="alert">参加者データを表示できません。</p>;
+  }
+  // An unchanged URL and fetch port do not identify the authenticated actor.
+  // Key the read lifetime to the committed host generation, so the previous
+  // DTO, tabs and pending redirects cannot survive a same-video rotation.
+  // A fresh GET must still be authorized by the server.
+  return <AdminVideoMembersReadPageForAuthority key={authorityEpoch ?? "legacy"} {...props} />;
+}
+
+function AdminVideoMembersReadPageForAuthority({
+  videoId, fetchFn, onNavigate, managementTabs,
+}: Omit<AdminVideoMembersReadPageProps, "authorityEpoch">): React.ReactElement {
   const [snapshot, setSnapshot] = React.useState<AdminVideoMembersReadSnapshot | null>(null);
   const identity = React.useRef({ videoId, fetchFn, epoch: 0 });
   if (identity.current.videoId !== videoId || identity.current.fetchFn !== fetchFn) {

@@ -119,9 +119,9 @@ function setup(managementTabs) {
     calls.push({ ...wait, url, signal: init?.signal });
     return wait.promise;
   };
-  const render = async (videoId, activeFetch = fetchFn) => React.act(async () => {
+  const render = async (videoId, activeFetch = fetchFn, authorityEpoch) => React.act(async () => {
     root.render(wrap(React.createElement(AdminVideoMembersReadPage, {
-      videoId, fetchFn: activeFetch, onNavigate, managementTabs,
+      videoId, fetchFn: activeFetch, onNavigate, managementTabs, authorityEpoch,
     })));
   });
   const cleanup = async () => React.act(async () => { root.unmount(); target.remove(); });
@@ -437,5 +437,88 @@ test("MIG-0730 U02dm: page mounts six-tab seam only after current authorized GET
     assert.equal(ui.target.querySelector("nav")?.getAttribute("data-target"), "c");
     assert.deepEqual(calls.map(x => x.videoId), ["a", "c"]);
     assert.deepEqual(calls.map(x => x.active), ["members", "members"]);
+  } finally { await ui.cleanup(); }
+});
+
+
+test("MIG-0730 U02dr: same-video committed authority rotation hides old participants and tabs before fresh GET", async () => {
+  const tabs = [];
+  function Tabs(props) {
+    tabs.push(props.videoId);
+    return React.createElement("nav", { "aria-label": "作品管理メニュー" }, props.videoId);
+  }
+  const ui = setup(Tabs);
+  try {
+    await ui.render("a", undefined, 1);
+    await React.act(async () => ui.calls[0].resolve(json(snapshot("a", [member("OLD_AUTHORITY")] ))));
+    assert.match(ui.target.textContent, /OLD_AUTHORITY/);
+    assert.ok(ui.target.querySelector("nav"));
+    await ui.render("a", undefined, 1);
+    assert.equal(ui.calls.length, 1, "stable authority and transport keep the current read");
+    assert.match(ui.target.textContent, /OLD_AUTHORITY/);
+    const tabsBeforeRotation = tabs.length;
+
+    await ui.render("a", undefined, 2);
+    assert.equal(ui.calls[0].signal.aborted, true);
+    assert.equal(ui.calls.length, 2);
+    assert.equal(ui.calls[0].url, ui.calls[1].url, "video and transport path stay identical");
+    assert.match(ui.target.textContent, /読み込み中/);
+    assert.doesNotMatch(ui.target.textContent, /OLD_AUTHORITY/);
+    assert.equal(ui.target.querySelector("nav"), null);
+    assert.equal(tabs.length, tabsBeforeRotation, "loading does not render stale management tabs");
+
+    await React.act(async () => ui.calls[1].resolve(json(snapshot("a", [member("NEW_AUTHORITY")] ))));
+    assert.match(ui.target.textContent, /NEW_AUTHORITY/);
+    assert.doesNotMatch(ui.target.textContent, /OLD_AUTHORITY/);
+    assert.ok(ui.target.querySelector("nav"));
+    assert.deepEqual(ui.navigations, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0730 U02dr: same-video A-B-A ignores previous authority's delayed success or denial", async () => {
+  for (const status of [200, 401, 403, 404]) {
+    const ui = setup();
+    try {
+      await ui.render("a", undefined, 1);
+      await ui.render("a", undefined, 2);
+      await ui.render("a", undefined, 3);
+      assert.equal(ui.calls.length, 3);
+      assert.equal(ui.calls[0].signal.aborted, true);
+      assert.equal(ui.calls[1].signal.aborted, true);
+      assert.equal(ui.calls[2].signal.aborted, false);
+      const late = status === 200
+        ? json(snapshot("a", [member("STALE_AUTHORITY")]))
+        : json({ redirect: "/dashboard" }, status);
+      await React.act(async () => ui.calls[0].resolve(late));
+      assert.match(ui.target.textContent, /読み込み中/);
+      assert.deepEqual(ui.navigations, []);
+      await React.act(async () => ui.calls[2].resolve(json(snapshot("a", [member("FRESH_AUTHORITY")]))));
+      await React.act(async () => ui.calls[1].resolve(json(snapshot("a", [member("STALE_AUTHORITY")]))));
+      assert.match(ui.target.textContent, /FRESH_AUTHORITY/);
+      assert.doesNotMatch(ui.target.textContent, /STALE_AUTHORITY/);
+      assert.deepEqual(ui.navigations, []);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0730 U02dr: malformed host authority retires private read without network and reentry loads fresh", async () => {
+  const ui = setup();
+  try {
+    await ui.render("a", undefined, 1);
+    await React.act(async () => ui.calls[0].resolve(json(snapshot("a", [member("OLD_AUTHORITY")]))));
+    assert.match(ui.target.textContent, /OLD_AUTHORITY/);
+    for (const value of [null, "1", NaN, Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await ui.render("a", undefined, value);
+      assert.match(ui.target.textContent, /参加者データを表示できません/);
+      assert.doesNotMatch(ui.target.textContent, /OLD_AUTHORITY/);
+      assert.equal(ui.calls.length, 1, "invalid supplied epoch must not start a GET");
+    }
+    assert.equal(ui.calls[0].signal.aborted, true);
+    await ui.render("a", undefined, 1);
+    assert.equal(ui.calls.length, 2, "reentry after invalid authority requires a fresh GET");
+    assert.match(ui.target.textContent, /読み込み中/);
+    assert.doesNotMatch(ui.target.textContent, /OLD_AUTHORITY/);
+    await React.act(async () => ui.calls[1].resolve(json({}, 403)));
+    assert.deepEqual(ui.navigations, ["/dashboard"], "current denial still follows CURRENT navigation");
   } finally { await ui.cleanup(); }
 });
