@@ -41,6 +41,60 @@ test("MIG-0651: an index name alone does not imply a unique-constraint failure",
   assert.equal(fromCore("constraint failed: videos_youtube_id_active_uniq"), false);
 });
 
+test("SEC-763: hostile provider Error getters cannot throw out of YouTube conflict classification", () => {
+  let nameReads = 0;
+  let messageReads = 0;
+  const poisoned = new Error("SEC763_PROVIDER_SECRET");
+  Object.defineProperty(poisoned, "message", {
+    get() {
+      messageReads++;
+      throw new Error("SEC763_THROWING_MESSAGE_GETTER");
+    },
+  });
+  Object.defineProperty(poisoned, "name", {
+    get() {
+      nameReads++;
+      throw new Error("SEC763_THROWING_NAME_GETTER");
+    },
+  });
+  assert.equal(fromCore(poisoned), false);
+  assert.equal(fromNextBridge(poisoned), false);
+  assert.equal(messageReads, 2);
+  assert.equal(nameReads, 0, "provider Error.name is never accessed");
+});
+
+test("SEC-763: hostile coercion, a hostile proxy and non-string message fail closed", () => {
+  const thrower = () => { throw new Error("SEC763_PRIVATE_PROVIDER_VALUE"); };
+  const nonStringMessage = new Error("initial");
+  Object.defineProperty(nonStringMessage, "message", {
+    get() { return { toString: thrower }; },
+  });
+  for (const invalid of [
+    { [Symbol.toPrimitive]: thrower },
+    { toString: thrower, valueOf: thrower },
+    new Proxy({}, { getPrototypeOf: thrower }),
+    new Proxy(new Error("provider"), {
+      get(target, key, receiver) {
+        if (key === "message") return thrower();
+        return Reflect.get(target, key, receiver);
+      },
+    }),
+    nonStringMessage,
+  ]) {
+    assert.equal(fromCore(invalid), false, "uninspectable provider error must not throw");
+  }
+});
+
+test("SEC-763: classifiable messages remain identical and Error.name is irrelevant", () => {
+  const valid = new Error("UNIQUE constraint failed: videos.youtube_video_id");
+  Object.defineProperty(valid, "name", {
+    get() { throw new Error("SEC763_UNSAFE_NAME"); },
+  });
+  assert.equal(fromCore(valid), true);
+  assert.equal(fromCore({ toString: () => "UNIQUE constraint failed: videos_youtube_id_active_uniq" }), true);
+  assert.equal(fromCore(new Error("UNIQUE constraint failed: videos.id")), false);
+});
+
 const dialect = new SQLiteSyncDialect();
 
 test("MIG-0651: the CURRENT video-duplicate database helper retains exact canonical identity", () => {
