@@ -8,6 +8,8 @@ import type { StaticTopData } from "./staticTopCore";
 export const TOP_SLOT_STATS_OBJECT_KEY = "top/slot-stats.v1.json";
 export const TOP_SLOT_STATS_SCHEMA_VERSION = 1 as const;
 export const TOP_SLOT_STATS_MAX_OBJECT_BYTES = 64 * 1024;
+/** Writer timestamps are Unix seconds; tolerate only small positive clock drift. */
+export const TOP_SLOT_STATS_MAX_FUTURE_SKEW_SEC = 5 * 60;
 
 export interface StaticTopSlotStatsPayload {
   schema_version?: unknown;
@@ -36,13 +38,25 @@ function normalizeSlotStatItems(value: unknown): Map<string, HomeIntroSlotStat> 
   return result;
 }
 
-export function normalizeStaticTopSlotStats(value: unknown): StaticTopSlotStats | null {
-  if (!value || typeof value !== "object") return null;
+export function normalizeStaticTopSlotStats(
+  value: unknown,
+  nowSec = Math.floor(Date.now() / 1000),
+): StaticTopSlotStats | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const payload = value as StaticTopSlotStatsPayload;
-  if (Number(payload.schema_version) !== TOP_SLOT_STATS_SCHEMA_VERSION) return null;
+  // The R2 writer emits a numeric schema version and integer Unix seconds.
+  // Coercion accepts forged strings/booleans; a future timestamp can also
+  // outrank the legitimate R2 generation in the shared cache-first loader.
+  if (payload.schema_version !== TOP_SLOT_STATS_SCHEMA_VERSION) return null;
   if (!Array.isArray(payload.items)) return null;
-  const generated = Number(payload.generated_at);
-  if (!Number.isFinite(generated) || generated <= 0) return null;
+  if (!Number.isSafeInteger(nowSec) || nowSec < 0) return null;
+  const generated = payload.generated_at;
+  if (
+    typeof generated !== "number" ||
+    !Number.isSafeInteger(generated) ||
+    generated <= 0 ||
+    generated > nowSec + TOP_SLOT_STATS_MAX_FUTURE_SKEW_SEC
+  ) return null;
   return {
     generatedAt: generated,
     items: normalizeSlotStatItems(payload.items),
