@@ -155,11 +155,12 @@ if (runUnderRootTsx(import.meta.url)) {
   // binding only; no deployment, atomic generation pointer or live R2 proof.
   function handoffFixture({
     generation = "mig-0627-u02e-handoff",
+    eventId = "evt-public",
     eventTitle = "Public Event",
     videoId = "video-public",
   } = {}) {
     const event = {
-      id: "evt-public", title: eventTitle, visibility_status: "public",
+      id: eventId, title: eventTitle, visibility_status: "public",
       start_time: 1700002000, end_time: 1700003000,
     };
     const index = { generated_at: 1700000000, items: [event], group_sections: [] };
@@ -390,6 +391,170 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(await (await h.storage.get(indexKey)).json(), next.index);
     assert.deepEqual(await (await h.storage.get(releaseKey)).json(), next.release);
     assert.deepEqual({ statements: h.d1.stats.statements, writes: h.d1.stats.writes }, { statements: 1, writes: 0 });
+  });
+
+  // These synthetic all-public cases characterize the current publisher, NOT
+  // acceptance of generation fencing, atomic activation or visibility revocation.
+  test("MIG-0627 U02e PREP T11: late older writer can overwrite a verified newer generation", { timeout: 5000 }, async (t) => {
+    const h = harness(t, { FORCE_STATIC_ONLY: "1" });
+    const baseline = handoffFixture();
+    const older = handoffFixture({ generation: "mig-0627-u02e-old", eventTitle: "Older Public Event", videoId: "video-older" });
+    const newer = handoffFixture({ generation: "mig-0627-u02e-new", eventTitle: "Newer Public Event", videoId: "video-newer" });
+    const p = publisherBinding(h);
+    await publishApiArtifacts(baseline.result, p.bucket);
+    p.reads.length = 0;
+    p.writes.length = 0;
+
+    let signalPaused, resumeOlder;
+    const paused = new Promise((resolve) => { signalPaused = resolve; });
+    const resume = new Promise((resolve) => { resumeOlder = resolve; });
+    let firstRelease = true;
+    const oldRun = publishApiArtifacts(older.result, {
+      get: p.bucket.get,
+      async put(key, body) {
+        if (firstRelease && key === releaseKey) {
+          firstRelease = false;
+          signalPaused();
+          await resume;
+        }
+        return p.bucket.put(key, body);
+      },
+    });
+    try {
+      // An unexpected early resolution/rejection fails instead of hanging on
+      // the pause signal. No timing sleeps or network operations are involved.
+      await Promise.race([paused, oldRun.then(() => {
+        throw new Error("older writer finished before the expected pause");
+      })]);
+      const newReport = await publishApiArtifacts(newer.result, p.bucket);
+      assert.deepEqual({ puts: newReport.puts, skipped: newReport.skipped, retries: newReport.retries, verified: newReport.verified },
+        { puts: 2, skipped: 0, retries: 0, verified: 2 });
+      assert.deepEqual(await (await h.storage.get(indexKey)).json(), newer.index);
+      assert.deepEqual(await (await h.storage.get(releaseKey)).json(), newer.release);
+    } finally {
+      resumeOlder();
+      await oldRun;
+    }
+    const oldReport = await oldRun;
+    assert.deepEqual({ puts: oldReport.puts, skipped: oldReport.skipped, retries: oldReport.retries, verified: oldReport.verified },
+      { puts: 2, skipped: 0, retries: 0, verified: 2 });
+    assert.deepEqual(p.writes, [releaseKey, indexKey, releaseKey, indexKey]);
+    assert.deepEqual(await (await h.storage.get(indexKey)).json(), older.index);
+    assert.deepEqual(await (await h.storage.get(releaseKey)).json(), older.release);
+    assert.equal(h.d1.stats.statements, 0);
+
+    const list = await h.request("/api/events");
+    assert.equal(list.status, 200);
+    assert.deepEqual((await list.json()).items.map((row) => [row.id, row.title]), [["evt-public", "Older Public Event"]]);
+    assert.equal(list.headers.get("Cache-Control"), "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
+    const release = await h.request("/api/event-endpoints/evt-public/release");
+    assert.equal(release.status, 200);
+    assert.deepEqual((await release.json()).videos.map((row) => row.id), ["video-older"]);
+    assert.equal(release.headers.get("Cache-Control"), "public, max-age=30, s-maxage=60, stale-while-revalidate=120");
+    assert.deepEqual(h.reads, [indexKey, releaseKey]);
+    assert.deepEqual({ statements: h.d1.stats.statements, writes: h.d1.stats.writes }, { statements: 1, writes: 0 });
+    // Known gap: a future approved monotonic promotion contract must prevent
+    // the late older writer from activating; do not interpret green as safety.
+  });
+
+  test("MIG-0627 U02e PREP T12: lost index PUT acknowledgement leaves new objects and retry skips both", async (t) => {
+    const h = harness(t, { FORCE_STATIC_ONLY: "1" });
+    const previous = handoffFixture();
+    const next = handoffFixture({ generation: "mig-0627-u02e-next", eventTitle: "Updated Public Event", videoId: "video-next" });
+    const p = publisherBinding(h);
+    await publishApiArtifacts(previous.result, p.bucket);
+    p.reads.length = 0;
+    p.writes.length = 0;
+    const lostAck = new Error("synthetic index PUT acknowledgement lost");
+    await assert.rejects(publishApiArtifacts(next.result, {
+      get: p.bucket.get,
+      async put(key, body) {
+        await p.bucket.put(key, body);
+        if (key === indexKey) throw lostAck;
+      },
+    }), (error) => error === lostAck);
+    assert.deepEqual(p.reads, [releaseKey, releaseKey, indexKey]);
+    assert.deepEqual(p.writes, [releaseKey, indexKey]);
+    assert.deepEqual(await (await h.storage.get(indexKey)).json(), next.index);
+    assert.deepEqual(await (await h.storage.get(releaseKey)).json(), next.release);
+    assert.equal(h.d1.stats.statements, 0);
+
+    const list = await h.request("/api/events");
+    assert.equal(list.status, 200);
+    assert.deepEqual((await list.json()).items.map((row) => [row.id, row.title]), [["evt-public", "Updated Public Event"]]);
+    const release = await h.request("/api/event-endpoints/evt-public/release");
+    assert.equal(release.status, 200);
+    assert.deepEqual((await release.json()).videos.map((row) => row.id), ["video-next"]);
+    assert.deepEqual(h.reads, [indexKey, releaseKey]);
+    assert.deepEqual({ statements: h.d1.stats.statements, writes: h.d1.stats.writes }, { statements: 1, writes: 0 });
+
+    p.reads.length = 0;
+    p.writes.length = 0;
+    const retry = await publishApiArtifacts(next.result, p.bucket);
+    assert.deepEqual({ puts: retry.puts, skipped: retry.skipped, retries: retry.retries, verified: retry.verified },
+      { puts: 0, skipped: 2, retries: 0, verified: 2 });
+    assert.deepEqual(p.reads, [releaseKey, indexKey]);
+    assert.deepEqual(p.writes, []);
+    assert.deepEqual({ statements: h.d1.stats.statements, writes: h.d1.stats.writes }, { statements: 1, writes: 0 });
+  });
+
+  function twoEventFixture(generation, titleSuffix) {
+    const first = handoffFixture({ generation, eventTitle: "Public Event " + titleSuffix, videoId: "video-first-" + titleSuffix });
+    const second = handoffFixture({ generation, eventId: "evt-secondary", eventTitle: "Secondary Event " + titleSuffix, videoId: "video-second-" + titleSuffix });
+    const index = { ...first.index, items: [...first.index.items, ...second.index.items] };
+    const snapshots = [
+      wrapSnapshot(EVENT_INDEX_KEY, generation, index),
+      ...first.result.snapshots.filter((snapshot) => snapshot.key !== EVENT_INDEX_KEY),
+      ...second.result.snapshots.filter((snapshot) => snapshot.key !== EVENT_INDEX_KEY),
+    ];
+    return {
+      index, release: first.release, secondRelease: second.release,
+      result: {
+        publicEventIds: [...first.result.publicEventIds, ...second.result.publicEventIds],
+        snapshots,
+        manifest: { schemaVersion: 1, generation, allowedKeys: snapshots.map((snapshot) => snapshot.key), blockedKeys: [] },
+      },
+    };
+  }
+
+  test("MIG-0627 U02e PREP T13: failed second release retains old index and retry skips first verified release", async (t) => {
+    const h = harness(t, { FORCE_STATIC_ONLY: "1" });
+    const secondReleaseKey = "events/evt-secondary/release.v1.json";
+    const previous = twoEventFixture("mig-0627-u02e-old", "old");
+    const next = twoEventFixture("mig-0627-u02e-new", "new");
+    const p = publisherBinding(h);
+    await publishApiArtifacts(previous.result, p.bucket);
+    p.reads.length = 0;
+    p.writes.length = 0;
+    const failure = new Error("synthetic second release PUT unavailable");
+    await assert.rejects(publishApiArtifacts(next.result, {
+      get: p.bucket.get,
+      async put(key, body) {
+        if (key === secondReleaseKey) {
+          p.writes.push(key);
+          throw failure;
+        }
+        return p.bucket.put(key, body);
+      },
+    }), (error) => error === failure);
+    assert.deepEqual(p.reads, [releaseKey, releaseKey, secondReleaseKey]);
+    assert.deepEqual(p.writes, [releaseKey, secondReleaseKey]);
+    assert.deepEqual(await (await h.storage.get(indexKey)).json(), previous.index);
+    assert.deepEqual(await (await h.storage.get(releaseKey)).json(), next.release);
+    assert.deepEqual(await (await h.storage.get(secondReleaseKey)).json(), previous.secondRelease);
+    assert.deepEqual({ statements: h.d1.stats.statements, writes: h.d1.stats.writes }, { statements: 0, writes: 0 });
+
+    p.reads.length = 0;
+    p.writes.length = 0;
+    const retry = await publishApiArtifacts(next.result, p.bucket);
+    assert.deepEqual({ artifacts: retry.artifacts, puts: retry.puts, skipped: retry.skipped, retries: retry.retries, verified: retry.verified },
+      { artifacts: 3, puts: 2, skipped: 1, retries: 0, verified: 3 });
+    assert.deepEqual(p.reads, [releaseKey, secondReleaseKey, secondReleaseKey, indexKey, indexKey]);
+    assert.deepEqual(p.writes, [secondReleaseKey, indexKey]);
+    assert.deepEqual(await (await h.storage.get(indexKey)).json(), next.index);
+    assert.deepEqual(await (await h.storage.get(releaseKey)).json(), next.release);
+    assert.deepEqual(await (await h.storage.get(secondReleaseKey)).json(), next.secondRelease);
+    assert.deepEqual({ statements: h.d1.stats.statements, writes: h.d1.stats.writes }, { statements: 0, writes: 0 });
   });
 
 }
