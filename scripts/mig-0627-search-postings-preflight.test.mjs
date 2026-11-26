@@ -46,9 +46,12 @@ if (runUnderRootTsx(import.meta.url)) {
     const env = { DB: d1, KV: createFakeKv(), BUCKET: bucket, PUBLIC_VISIBILITY_GUARD_MODE: mode };
     return {
       storage, reads, d1,
-      async query(value = "Tokyo") {
+      async query(value = "Tokyo", params = {}) {
         const url = new URL("http://localhost/api/videos");
         url.searchParams.set("q", value);
+        for (const [key, parameter] of Object.entries(params)) {
+          url.searchParams.set(key, parameter);
+        }
         const response = await app.request(new Request(url), {}, env);
         return { response, payload: await response.json() };
       },
@@ -186,6 +189,101 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(h.reads, [manifestKey, liteKey], "only the two documented index keys can be read");
     assert.equal(h.d1.stats.statements, 0);
     assert.equal(h.d1.stats.writes, 0);
+  });
+
+  // Event-scoped search is a distinct RH-032 consumer branch. Characterize
+  // its existing fallback before replacing either R2 artifact; do not change
+  // runtime code, heal enqueue behavior, or the documented >500-row STOP.
+  const eventId = "evt-preflight";
+  const baseKey = `events/${eventId}/base.v1.json`;
+  const composedKey = `events/${eventId}.json`;
+
+  function eventPayload(videos, videoTotal = videos.length) {
+    return {
+      generated_at: 1700000000,
+      event: { id: eventId, title: "Event preflight", visibility_status: "public" },
+      public_videos: videos,
+      video_total: videoTotal,
+    };
+  }
+
+  const tokyoEventVideo = {
+    id: "event-tokyo",
+    title: "Tokyo event work",
+    display_name: "Event Artist",
+    scheduled_time: 1700001000,
+    status: "public",
+  };
+  const kyotoEventVideo = {
+    id: "event-kyoto",
+    title: "Kyoto event work",
+    display_name: "Other Artist",
+    scheduled_time: 1700002000,
+    status: "public",
+  };
+  const composedVideo = { ...tokyoEventVideo, id: "composed-tokyo" };
+
+  function assertNoD1(h) {
+    assert.deepEqual(
+      { statements: h.d1.stats.statements, writes: h.d1.stats.writes },
+      { statements: 0, writes: 0 },
+    );
+  }
+
+  test("MIG-0627 U02d PREP T09: event-scoped search reads complete base, not composed or global postings", async (t) => {
+    const h = harness(t);
+    await seedPostings(h.storage);
+    await seedLite(h.storage);
+    await h.storage.put(baseKey, eventPayload([tokyoEventVideo, kyotoEventVideo]));
+    await h.storage.put(composedKey, eventPayload([composedVideo]));
+
+    const { response, payload } = await h.query("Tokyo", { event: eventId, limit: "1" });
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload.items.map((item) => item.id), ["event-tokyo"]);
+    assert.equal(payload.total, 1);
+    assert.equal(payload.page, 1);
+    assert.equal(payload.limit, 1);
+    assert.equal(payload.items[0].status, "public");
+    assert.deepEqual(h.reads, [baseKey]);
+    assertNoD1(h);
+  });
+
+  test("MIG-0627 U02d PREP T10: absent event base uses the existing composed artifact once", async (t) => {
+    const h = harness(t);
+    await seedLite(h.storage);
+    await h.storage.put(composedKey, eventPayload([composedVideo, kyotoEventVideo]));
+
+    const { response, payload } = await h.query("Tokyo", { event: eventId });
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload.items.map((item) => item.id), ["composed-tokyo"]);
+    assert.equal(payload.total, 1);
+    assert.deepEqual(h.reads, [baseKey, composedKey]);
+    assertNoD1(h);
+  });
+
+  test("MIG-0627 U02d PREP T11: present incomplete event base does not fall back to stale composed", async (t) => {
+    const h = harness(t);
+    await h.storage.put(baseKey, eventPayload([tokyoEventVideo], 2));
+    await h.storage.put(composedKey, eventPayload([composedVideo]));
+
+    const { response, payload } = await h.query("Tokyo", { event: eventId });
+    assert.equal(response.status, 503);
+    assert.deepEqual(payload, { error: "static_list_unavailable" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.deepEqual(h.reads, [baseKey]);
+    assertNoD1(h);
+  });
+
+  test("MIG-0627 U02d PREP T12: composed event without score cannot pretend to support score sort", async (t) => {
+    const h = harness(t);
+    await h.storage.put(composedKey, eventPayload([composedVideo]));
+
+    const { response, payload } = await h.query("Tokyo", { event: eventId, sort: "score" });
+    assert.equal(response.status, 503);
+    assert.deepEqual(payload, { error: "static_list_unavailable" });
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.deepEqual(h.reads, [baseKey, composedKey]);
+    assertNoD1(h);
   });
 
 }
