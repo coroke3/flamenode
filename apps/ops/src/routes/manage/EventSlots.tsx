@@ -27,9 +27,10 @@ function countFor(data: ManageSlotsList, status: string): number {
 }
 
 /** U02b view composition. Without all three explicit handlers it is read-only. */
-export function EventSlotsView({ eventId, status, data, writeActions, onChanged }: {
+export function EventSlotsView({ eventId, status, data, writeActions, onChanged, onClearFailure }: {
   eventId: string; status: string; data: ManageSlotsList;
-  writeActions?: SlotWriteActions; onChanged?: () => void;
+  writeActions?: SlotWriteActions; onChanged?: (failure?: string) => void;
+  onClearFailure?: () => void;
 }): React.ReactElement {
   // Even dynamically assembled/partially configured callers must fail closed.
   const writes = writeActions &&
@@ -64,7 +65,7 @@ export function EventSlotsView({ eventId, status, data, writeActions, onChanged 
       <h2 className="fn-console-eyebrow">{`枠一覧 (${data.slots.length})`}</h2>
       <SlotList eventId={eventId} slots={data.slots}
         partGapMinutes={data.event.slot_part_gap_minutes} parts={data.event.parts}
-        onAction={writes?.onAction} onChanged={onChanged}
+        onAction={writes?.onAction} onChanged={onChanged} onClearFailure={onClearFailure}
         canManageSubmittedSlots={Boolean(writes?.canManageSubmittedSlots)} />
       {data.atLimit && <p role="status">最大500件まで表示しています。条件を絞り込んでください。</p>}
       {data.total === 0 && !writes && <p>枠の追加機能は移行中です。</p>}
@@ -84,8 +85,25 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
   const [search] = useSearchParams();
   const status = normalizeSlotFilter(search.get("status"));
   const [request, setRequest] = React.useState<TaggedResult | null>(null);
-  const [refresh, setRefresh] = React.useState(0);
-  const onChanged = React.useCallback(() => setRefresh(v => v + 1), []);
+  const { onGenerate, onClearAvailable, onAction, canManageSubmittedSlots } = writeActions ?? {};
+  // Keep the domain-failure notice across a fresh authorized read, not across
+  // navigation, adapter replacement or capability changes (including A-B-A).
+  const feedbackScope = React.useMemo(() => ({
+    eventId, status, fetchFn, onGenerate, onClearAvailable, onAction, canManageSubmittedSlots,
+  }), [eventId, status, fetchFn, onGenerate, onClearAvailable, onAction, canManageSubmittedSlots]);
+  const [reload, setReload] = React.useState<{
+    key: number; failure: { scope: typeof feedbackScope; message: string } | null;
+  }>({ key: 0, failure: null });
+  const refresh = reload.key;
+  const onChanged = React.useCallback((failure?: string) => {
+    setReload(previous => ({
+      key: previous.key + 1,
+      failure: failure === undefined ? null : { scope: feedbackScope, message: failure },
+    }));
+  }, [feedbackScope]);
+  const onClearFailure = React.useCallback(() => {
+    setReload(previous => previous.failure === null ? previous : { ...previous, failure: null });
+  }, []);
   // Tag every read with its exact UI generation. A refetch of the same
   // event/filter must not briefly reveal a previously authorized snapshot.
   // Object identity also prevents A -> B -> A from reviving cached rows.
@@ -115,8 +133,14 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
   if (validRequest.status !== "ok") return <div role="alert">
     <p>枠一覧を取得できませんでした。権限と通信状態を確認してください。</p>
     <button type="button" className="fn-btn fn-btn-ghost"
-      onClick={() => setRefresh(v => v + 1)}>再読み込み</button>
+      onClick={() => onChanged()}>再読み込み</button>
   </div>;
-  return <EventSlotsView eventId={eventId} status={status} data={validRequest.data}
-    writeActions={writeActions} onChanged={onChanged} />;
+  // A denied, failed or still-pending GET never renders a mutation receipt
+  // or the previous private rows. Only the newly authorized snapshot can.
+  const failure = reload.failure?.scope === feedbackScope ? reload.failure.message : null;
+  return <>
+    {failure !== null && <p role="alert" className="fn-alert fn-alert--danger">{failure}</p>}
+    <EventSlotsView eventId={eventId} status={status} data={validRequest.data}
+      writeActions={writeActions} onChanged={onChanged} onClearFailure={onClearFailure} />
+  </>;
 }

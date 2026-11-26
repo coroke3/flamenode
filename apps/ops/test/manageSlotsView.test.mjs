@@ -619,3 +619,111 @@ test("MIG-0722 U02b-10: new list operations own their lock after event or capabi
     }
   }
 });
+
+
+test("MIG-0722 T04: resolved batch failure re-reads once and shows its message only after authorized GET", async () => {
+  for (const status of [200, 401, 403, 404, 503]) {
+    await withSlotDom(async (dom, root) => {
+      const initial = data();
+      const updated = data({ slots: initial.slots.map(row =>
+        row.id === "s2" ? { ...row, display_name: "Fresh authorized holder" } : row) });
+      const json = value => new Response(JSON.stringify(value), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+      let reads = 0;
+      let finishRead;
+      const fetchFn = async () => {
+        reads++;
+        if (reads === 1 || reads === 3) return json(initial);
+        return new Promise(resolve => { finishRead = resolve; });
+      };
+      const operations = [];
+      const writes = {
+        onGenerate: async () => ({ ok: true }),
+        onClearAvailable: async () => ({ ok: true }),
+        onAction: async operation => {
+          operations.push(operation);
+          return { ok: false, message: "DOMAIN-FAILURE: 枠の状態が変わりました。" };
+        },
+      };
+      const view = actions => React.createElement(MemoryRouter, null,
+        React.createElement(EventSlots, { eventId: "ev id", fetchFn, writeActions: actions }));
+      const body = () => dom.window.document.body.textContent;
+      const flushUntil = async predicate => {
+        for (let i = 0; i < 10 && !predicate(); i++) {
+          await React.act(async () => { await new Promise(resolve => setImmediate(resolve)); });
+        }
+        assert.ok(predicate(), body());
+      };
+      const button = label => [...dom.window.document.querySelectorAll("button")]
+        .find(element => element.textContent.trim() === label);
+
+      await React.act(async () => root.render(view(writes)));
+      await flushUntil(() => body().includes("User <name>"));
+      await React.act(async () => dom.window.document.querySelector('input[aria-label="枠 s1 を選択"]').click());
+      await React.act(async () => button("空き枠を削除 (1)").click());
+      assert.equal(operations.length, 0, "confirmation precedes mutation");
+      await React.act(async () => button("実行する").click());
+      assert.deepEqual(operations, [{ kind: "batch-delete", slotIds: ["s1"] }]);
+      assert.equal(reads, 2, "resolved domain failure must re-read exactly once");
+      assert.match(body(), /枠を読み込み中/);
+      assert.doesNotMatch(body(), /User <name>|DOMAIN-FAILURE|一括生成/);
+
+      await React.act(async () => finishRead(status === 200 ? json(updated) : new Response(null, { status })));
+      await flushUntil(() => !body().includes("枠を読み込み中"));
+      assert.equal(reads, 2);
+      if (status === 200) {
+        assert.match(body(), /Fresh authorized holder/);
+        assert.doesNotMatch(body(), /User <name>/);
+        assert.equal([...dom.window.document.querySelectorAll('[role="alert"]')]
+          .filter(node => node.textContent.includes("DOMAIN-FAILURE")).length, 1);
+        assert.equal(button("削除").disabled, false);
+        // Rotating a write port on the same event invalidates old feedback.
+        await React.act(async () => root.render(view({ ...writes, onAction: async () => ({ ok: true }) })));
+        assert.doesNotMatch(body(), /DOMAIN-FAILURE/);
+        await React.act(async () => root.render(view(writes)));
+        assert.doesNotMatch(body(), /DOMAIN-FAILURE/, "A-B-A cannot revive old feedback");
+      } else {
+        assert.doesNotMatch(body(), /User <name>|Fresh authorized holder|DOMAIN-FAILURE|一括生成|すべて選択/);
+        if (status === 503) {
+          await React.act(async () => button("再読み込み").click());
+          await flushUntil(() => body().includes("User <name>"));
+          assert.equal(reads, 3);
+          assert.doesNotMatch(body(), /DOMAIN-FAILURE/, "manual retry cannot replay an old receipt");
+        }
+      }
+      assert.equal(operations.length, 1, "never retry a mutation automatically");
+    });
+  }
+});
+
+test("MIG-0722 T04: transport rejection is distinct from a resolved domain failure", async () => {
+  await withSlotDom(async (dom, root) => {
+    let reads = 0;
+    let writes = 0;
+    const fetchFn = async () => {
+      reads++;
+      return new Response(JSON.stringify(data()), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    };
+    const writeActions = {
+      onGenerate: async () => ({ ok: true }),
+      onClearAvailable: async () => ({ ok: true }),
+      onAction: async () => { writes++; throw new Error("transport rejected"); },
+    };
+    await React.act(async () => root.render(React.createElement(MemoryRouter, null,
+      React.createElement(EventSlots, { eventId: "ev id", fetchFn, writeActions }))));
+    for (let i = 0; i < 10 && !dom.window.document.body.textContent.includes("User <name>"); i++) {
+      await React.act(async () => { await new Promise(resolve => setImmediate(resolve)); });
+    }
+    const button = label => [...dom.window.document.querySelectorAll("button")]
+      .find(element => element.textContent.trim() === label);
+    await React.act(async () => button("削除").click());
+    await React.act(async () => button("実行する").click());
+    assert.equal(writes, 1);
+    assert.equal(reads, 1, "CURRENT catch does not trigger router.refresh");
+    assert.match(dom.window.document.body.textContent, /枠操作中に通信エラー/);
+    assert.equal(button("削除").disabled, false);
+  });
+});

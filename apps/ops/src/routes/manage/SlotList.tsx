@@ -83,11 +83,12 @@ export function validateSlotListOperation(
  * authorized writes. Supplying onAction explicitly enables U02b controls.
  */
 export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
-  onChanged, canManageSubmittedSlots = false }: {
+  onChanged, onClearFailure, canManageSubmittedSlots = false }: {
   eventId: string; slots: readonly ManageSlotRow[];
   partGapMinutes: number | null; parts: readonly string[];
   onAction?: (operation: SlotListOperation) => Promise<SlotListActionResult>;
-  onChanged?: () => void;
+  onChanged?: (failure?: string) => void;
+  onClearFailure?: () => void;
   canManageSubmittedSlots?: boolean;
 }): React.ReactElement {
   const labels = React.useMemo(() => partLabels(slots, partGapMinutes, parts), [
@@ -158,11 +159,17 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     setPending(null);
     setError(null);
     setNotice(null);
+    onClearFailure?.();
     try {
       const result = await onAction(operation);
       if (!stillCurrent()) return;
-      if (!result.ok) setError(result.message ?? "枠の操作に失敗しました。");
-      else {
+      // CURRENT refreshes after a resolved action regardless of domain success.
+      // A rejected transport promise follows the separate catch path.
+      if (!result.ok) {
+        const failure = result.message ?? "枠の操作に失敗しました。";
+        setError(failure);
+        onChanged?.(failure);
+      } else {
         setSelected(new Set());
         setNotice((result.message ?? "枠を更新しました。") +
           (result.pendingPublicReflection ? " 公開画面への反映は処理中です。" : ""));
