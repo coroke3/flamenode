@@ -6,16 +6,17 @@ import { runUnderRootTsx, createSqlite } from "./support/personalHarness.mjs";
 
 if (runUnderRootTsx(import.meta.url)) {
   const { registerHooks } = await import("node:module");
+  const navigationUrl = import.meta.resolve("next/navigation.js");
   const stubs = {
     "server-only": "export {}",
     "next/cache": "export function revalidatePath() {}",
-    "next/navigation": "export function unstable_rethrow() {} export function redirect() {} export function notFound() {}",
     "@/lib/auth/writeGuard": "export async function writeGuard(o) { return globalThis.__interactionGuard(o); }",
     "@/lib/serverCore/nextPorts":
       "export const nextQueueWakeHost = { readEnv: () => globalThis.__wakeEnv(), readWaitUntil: () => null, readKv: () => null };",
   };
   registerHooks({
     resolve(specifier, context, nextResolve) {
+      if (specifier === "next/navigation") return nextResolve(navigationUrl, context);
       if (specifier in stubs) return {
         url: `data:text/javascript,${encodeURIComponent(stubs[specifier])}`, shortCircuit: true,
       };
@@ -202,6 +203,67 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(expected.wakes, 1);
     assert.equal(b.d1.stats.batches, 1);
     assert.equal(b.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+  });
+
+  test("SEC-820: Next control-flow classification does not call provider digest accessors", async () => {
+    let reads = 0;
+    const providerError = new Error("ordinary provider failure");
+    Object.defineProperty(providerError, "digest", {
+      get() {
+        reads += 1;
+        return "ordinary provider diagnostic";
+      },
+    });
+    const w = world();
+    w.d1.batch = async () => { throw providerError; };
+
+    const { result } = await current(w, "u_owner", "v_pub", "bookmark");
+    assert.deepEqual(result, {
+      ok: false,
+      message: "操作が競合したか、保存に失敗しました。再読み込みして再試行してください。",
+    });
+    assert.equal(reads, 0);
+  });
+
+  test("SEC-820: genuine Next control signals preserve identity across the CURRENT catch", async () => {
+    const { redirect, notFound } = await import(navigationUrl);
+    const { DynamicServerError } = await import("next/dist/client/components/hooks-server-context.js");
+    const { BailoutToCSRError } = await import("next/dist/shared/lib/lazy-dynamic/bailout-to-csr.js");
+    const { unstable_postpone } = await import("next/dist/compiled/react-experimental/index.js");
+    const throwSignals = [
+      ["redirect", () => redirect("/list"), [0, 1, 16, 32]],
+      ["notFound", () => notFound(), [0, 1, 16, 32]],
+      ["dynamic server usage", () => { throw new DynamicServerError("headers"); }],
+      ["client rendering bailout", () => { throw new BailoutToCSRError("test"); }],
+      ["React postpone", () => unstable_postpone("test")],
+    ];
+    for (const [name, throwSignal, wrapperDepths = [0, 1]] of throwSignals) {
+      let signal;
+      try {
+        throwSignal();
+      } catch (error) {
+        signal = error;
+      }
+      assert.ok(signal, name);
+      for (const depth of wrapperDepths) {
+        let failure = signal;
+        for (let wraps = 0; wraps < depth; wraps += 1) {
+          failure = new Error("wrapped control flow", { cause: failure });
+        }
+        const label = `${name} through ${depth} Error.cause wrappers`;
+        const w = world();
+        const before = state(w);
+        w.d1.batch = async () => { throw failure; };
+        const warnings = [];
+        await assert.rejects(
+          current(w, "u_owner", "v_pub", "bookmark", (...args) => warnings.push(args)),
+          (error) => error === signal,
+          label,
+        );
+        assert.deepEqual(warnings, [], label);
+        assert.deepEqual(state(w), before, label);
+      }
+    }
   });
 
   test("SEC-820: malformed provider errors and a throwing warning sink cannot mask CURRENT/Hono write failures", async () => {

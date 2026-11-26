@@ -476,6 +476,33 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(r.stats.statements, 4, "session + staff + failed data + retry data");
   });
 
+
+  test("SEC-809: manage dashboard legacy notification fallback ignores a throwing warning sink", async () => {
+    const old = createSqlite();
+    seed(old);
+    old.exec("DROP INDEX IF EXISTS notification_outbox_event_idx");
+    old.exec("ALTER TABLE notification_outbox DROP COLUMN event_id");
+    const previousWarn = console.warn;
+    const warnings = [];
+    console.warn = (code) => {
+      warnings.push(code);
+      throw new Error("SEC809_LOGGER_FAILED");
+    };
+    try {
+      const r = await call("/api/manage", "tok-owner", { sqlite: old });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.notificationSchemaMissing, true);
+      assert.deepEqual(r.body.notifications, []);
+      assert.equal(r.body.failedNotificationCount, 0);
+      assert.ok(r.body.events.length > 0 && r.body.inbox.length > 0);
+      assert.equal(r.stats.statements, 4, "session, staff, failed read, retry read");
+      assert.deepEqual(warnings, ["[manage] notification_outbox.event_id unavailable"]);
+    } finally {
+      console.warn = previousWarn;
+      old.close();
+    }
+  });
+
   // ---------------- staff ----------------
   test("T-staff: staff page equals CURRENT for every user and event", async () => {
     // Both CURRENT and Hono sign internal profile icons in 60-second buckets.
@@ -1140,6 +1167,32 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(degraded.body.notificationSchemaMissing, true);
     assert.deepEqual(degraded.body.notifications, []);
     assert.equal(degraded.body.notifCounts.all, 0);
+  });
+
+
+  test("SEC-809: manage event overview legacy notification fallback ignores a throwing warning sink", async () => {
+    const old = createSqlite();
+    seed(old);
+    old.exec("DROP INDEX IF EXISTS notification_outbox_event_idx");
+    old.exec("ALTER TABLE notification_outbox DROP COLUMN event_id");
+    const previousWarn = console.warn;
+    const warnings = [];
+    console.warn = (code) => {
+      warnings.push(code);
+      throw new Error("SEC809_LOGGER_FAILED");
+    };
+    try {
+      const r = await call("/api/manage/events/evA", "tok-owner", { sqlite: old });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.notificationSchemaMissing, true);
+      assert.deepEqual(r.body.notifications, []);
+      assert.equal(r.body.notifCounts.all, 0);
+      assert.equal(r.body.event.id, "evA");
+      assert.deepEqual(warnings, ["[manage] notification_outbox.event_id unavailable"]);
+    } finally {
+      console.warn = previousWarn;
+      old.close();
+    }
   });
 
   test("T-center: notification center equals CURRENT for every user and filter", async () => {

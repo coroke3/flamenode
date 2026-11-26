@@ -19,6 +19,36 @@ import { publicVideoRevalidationPaths } from "@/lib/video/publicVideoRevalidatio
 type InteractionKind = "like" | "bookmark";
 type RequestedState = boolean | "toggle";
 
+function rethrowVideoInteractionFrameworkControl(error: unknown): void {
+  const seen = new Set<object>();
+  while (typeof error === "object" && error !== null && !seen.has(error)) {
+    seen.add(error);
+
+    // Next inspects these fields. Pass only their own data values so provider
+    // accessors cannot run inside the framework's classifier.
+    let metadata: { digest: unknown; message: unknown; $$typeof: unknown };
+    let cause: unknown;
+    try {
+      metadata = {
+        digest: Object.getOwnPropertyDescriptor(error, "digest")?.value,
+        message: Object.getOwnPropertyDescriptor(error, "message")?.value,
+        $$typeof: Object.getOwnPropertyDescriptor(error, "$$typeof")?.value,
+      };
+      cause = error instanceof Error ? Object.getOwnPropertyDescriptor(error, "cause")?.value : undefined;
+    } catch {
+      return;
+    }
+
+    try {
+      unstable_rethrow(metadata);
+    } catch (controlFlow) {
+      if (controlFlow === metadata) throw error;
+    }
+
+    error = cause;
+  }
+}
+
 function isVideoInteractionAuthUniqueConstraintError(err: unknown): boolean {
   // D1/provider exceptions are untrusted. A throwing message getter or
   // coercion must not replace the stable mutation failure with a new error.
@@ -234,7 +264,7 @@ async function mutateVideoInteraction(
       staticRebuildWakeSource,
     });
   } catch (error) {
-    unstable_rethrow(error);
+    rethrowVideoInteractionFrameworkControl(error);
     if (active && isVideoInteractionAuthUniqueConstraintError(error)) {
       await revalidateVideoInteractionPaths(target.youtube_video_id, videoId);
       return { ok: true, active, videoId };
