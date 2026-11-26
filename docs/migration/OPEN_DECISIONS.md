@@ -33,6 +33,7 @@
 | D-16 | **API 待ちの画面・Island を契約先行で着手できるようにする（Merge gate）。MIG-0702 / 0703 / 0513〜0515 を分割（MIG-0519, 0708〜0718）、CostGuardBanner の読み API（MIG-0661）、既存 Hono session の security review（MIG-0807）。個別の決定 D-16-1〜14 は §D-16** | DECIDED | MIG-0513〜0515, 0519, 0606, 0607, 0636, 0640, 0641, 0648, 0650, 0651, 0657, 0659, 0661, 0701〜0705, 0708〜0718, 0804, 0807 | 本番操作（Remote D1・secret・deploy・Route・Queue binding）と SPA の本番 Route 切替は従来どおり作業直前の明示承認 |
 | D-17 | **Ops SPA の画面を画面群に分割（MIG-0719〜0737）、SA-011 の API（MIG-0662）、Manage navigation の 2 field（MIG-0663）、Ops guard の degraded の写像（MIG-0664）。個別は §D-17** | DECIDED | MIG-0606, 0607, 0626, 0637, 0642〜0644, 0662〜0664, 0704〜0707, 0719〜0737 | 本番操作（Ops の Worker / Route / Custom Domain、Remote D1、secret）は従来どおり作業直前の明示承認 |
 | D-18 | **`/list` の event 名 parity: RH-032 `PublicVideoDto` に event title が無いため DTO は変えず CURRENT の title 欠落時 fallback（chip は event ID、index 行は `イベント`）を採る（Option A、accepted parity limitation）。個別は §D-18** | DECIDED | MIG-0510, 0634 | 公開 API field の追加は MIG-0634 owner の別 task。本番操作なし |
+| D-19 | **停滞 PR の判断・解除と次期タスク整備（MIG-0605 Option A、#524/#475/#519/#436/#505/#682 調整、MIG-0662 契約先行化、MIG-0627 → MIG-0665/0666 分割、MIG-0738 小型モデル分割、MIG-0610 行番号更新）。個別は §D-19** | DECIDED | MIG-0516, 0605, 0610, 0626, 0627, 0636, 0638, 0662, 0665, 0666, 0714, 0738, 0907 | 本番 deploy / Route / Remote D1 / R2 write token / 0065 確認 / PR squash merge 承認は従来どおり人間・owner の個別承認。決定者: Antigravity/Gemini（owner-delegate）2026-11-18 |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -432,6 +433,7 @@ Option 4（hybrid）を採る。
   | MIG-0730 | MIG-0707, MIG-0726, MIG-0650, MIG-0648 |
   | MIG-0731 | MIG-0707, MIG-0726, MIG-0637, MIG-0642, MIG-0603 |
   | MIG-0732 | MIG-0707, MIG-0726, MIG-0605, MIG-0644 |
+  | MIG-0662 | MIG-0603 |
   | MIG-0733 | MIG-0707, MIG-0726, MIG-0662 |
   | MIG-0734 | MIG-0707, MIG-0726, MIG-0637, MIG-0642 |
   | MIG-0735 | MIG-0707, MIG-0726, MIG-0643 |
@@ -530,3 +532,36 @@ Option 4（hybrid）を採る。
 Decision adopted by owner authorization 2026-11-01: A。理由: 公開 API field の追加は MIG-0510 の owned paths 外で、MIG-0634 は DONE。A は CURRENT の fallback 文言と同じで、権限・公開範囲・D1 budget に影響しない。
 
 Follow-up（まだ MIG task ではない）: B を行う場合は MIG-0634 owner の小さな DTO 拡張 task を新設し、完了後に Island の chip / index 行の title を戻す。それまで Phase 5 Gate (MIG-0508) では accepted limitation として扱う。
+
+## D-19 — 停滞 PR 解除・契約先行化・次期タスク分割整備（DECIDED、2026-11-18）
+
+決定者: Antigravity/Gemini（owner-delegate、2026-11-18、ベース `main` `61463174f`）。
+
+### D-19-1: MIG-0605（PR #524 `U05x-B` scope gate）→ Option A 採用（DECIDED）
+
+PR #524 が `U05x-B` で停止していた SA-090/091 承認サービス依存について、別 task 切り出し（Option B）ではなく **Option A（`MIG-0605` Owned paths の狭い拡張）** を採る。
+- 追加許可: `+packages/server-core/src/xid/linkRequestReview.ts`, `+packages/server-core/test/xidLinkRequestReview.test.mjs`, `packages/server-core/package.json`（`./xid/linkRequestReview`）, `src/lib/actions/xid-admin.ts`（SA-090/091 実行部の server-core 委譲 bridge のみ。他 export・予約紐付け・署名ルール・CAS 不変）。
+- `apps/api/src/routes/xid/linkRequests.ts` は薄い HTTP adapter に留め、D-10 server-core 境界・独立セキュリティ/権限レビュー・人間の個別の squash merge 承認を維持する。
+
+### D-19-2: 既存 Open PR 間の競合整理と解消済み blocker の記録（調整方針、STATUS は未合流のため維持）
+
+- **`#524` vs `#475` / `#519`:** `docs/migration/work-items/MIG-0605.md` の単独所有は PR #524（`MIG-0605`）とする。`#475`（MIG-0636）と `#519`（MIG-0638）は `main` 同期・rebase 時に `work-items/MIG-0605.md` への歴史的明確化差分を取り下げる（権限移管は D-13-56 と `PHASE_6_SPEC.md` が保持済み）。`apps/api/src/env.ts` は `xidLinkRequestActorXUserId`（`#524`）と `xidSelected`（`#475`）の両フィールドを保持する。
+- **PR `#436`（MIG-0516）:** `main`（`61463174f`）上で `#668`・`#670` が合流済みであり、`src/lib/xid/mergeBudget.execution.test.mjs`（3/3 PASS）が 100-target merge plan 48/50 文（`#436` 予約マーカー込み 50/50 文）を確認したため、旧 52/50 D1 budget STOP blocker は技術的に解消済み。`main` 同期・最終 Head CI・独立レビュー・owner による本番 `0065` read-only 確認は引き続き merge 条件。
+- **PR `#505`（MIG-0626）:** PR branch（`22e2f309b`）上で `checkAuditLogsRetentionCandidates` は既に `COUNT(*) OVER () ... LIMIT 5`（`result.stats.statements === 3`）へ統合済み。`main` 同期・`like_count_drift` workerd CPU 実測 / CI・独立レビューが残る。
+- **PR `#682`（`fix/manage-staff-icon-parity-clock-681`）:** `apps/api/test/manage.parity.test.mjs` と `FILE_MIGRATION_MATRIX.md` のみを変更した test-only PR。旧HEAD `d9b33ad26f182d0133e1f4310073468ea7be43b9` に対する `Actions #43415695985`（`migration-contract` / `migration-workspaces`）と独立 `APPROVE` レビュー（detached worktree の 37/37 subtest PASS、`check:project-docs` PASS）を経て、**2026-11-18 02:46:44 UTC に squash merge 済み**（現main commit `87a16047abac5b75d4509acbba0cd8b3076d78aa`、[PR #682](https://github.com/coroke3/flamenode/pull/682)）。旧「人間の個別 squash merge 承認待ち」は判断時点の履歴であり、現在のブロッカーではない。
+
+### D-19-3: MIG-0662（SA-011 `/api/admin/audit/restore`）を契約先行（D-16-1）で `READY` 化（DECIDED）
+
+- `MIG-0616`・`MIG-0629` は DONE。`MIG-0603`（PR #523）待ちだった可変部（`auditRestoreHost.ts` が参照する R2 visibility manifest / public cache keys）を `Depends on:` から **`Merge gate: MIG-0603`**（D-16-1 / `merge-gates` 表）へ移す。
+- 着手時は `main` に存在する `packages/server-core/src/visibility/{manifestR2,fenceStore}.ts` と `packages/server-core/src/publicCache/{delete,eventExportKeys}.ts` を用いて `// MIG-0662 / D-16-1 provisional` adapter を実装し、`MIG-0603` DONE 後に `U04` で `videoTransitionHost.ts` / `publicCacheKeys.ts` へ置換してから merge する。高リスクデータ整合性操作のため `Model: lead`・独立セキュリティレビュー必須は変えない。
+
+### D-19-4: MIG-0627 の分割（`MIG-0665` / `MIG-0666` + 読手置換 `MIG-0627`）（DECIDED）
+
+- **`MIG-0665`:** `/admin/static-builds` shared-input diagnostics の build snapshot 連携（D-13-52、旧 MIG-0627 DONE 条件）。PR #505（MIG-0626）と `apps/api/src/routes/adminRead/ops.ts` / `packages/contracts/src/adminReadOps.ts` が競合するため `Depends on: MIG-0626, MIG-0509`（`BLOCKED`）とする。
+- **`MIG-0666`:** build 時 R2 API artifact（`events/index.json`、`events/<id>/release.v1.json`）の差分 PUT と完全性検査・`BUILD_TIME_DATA.md` §6 Class A 月間見積り（旧 MIG-0627 U04/U05）。依存は `MIG-0509`（DONE）のみで **`READY`**（実 R2 write credential / 本番 PUT は承認まで停止）。
+- **`MIG-0627`:** 残存 runtime R2 artifact 読み手の置換と `R2_ARTIFACT_CONSUMERS.md` 完了管理へ責務を絞り、`READY` を維持する。`MIG-0907`（旧 `json-generator` 退役）の依存を `MIG-0904, MIG-0610, MIG-0627, MIG-0665, MIG-0666` に更新する。
+
+### D-19-5: `MIG-0738` 分割（`READY_FOR_SMALL_MODEL` 整備）と `MIG-0714` / `MIG-0610` 更新（DECIDED）
+
+- `MIG-0714` は 3,757 行の `VideoForm.tsx` 等を含み STOP 上限（3,000 行）を超えるため、旧 U01 に相当する 12 本の純粋ヘルパー群と `ErrorCallout` / `PublicReflectionDelayNotice`（計 14 ソース + テスト、既存 41 本の Open PR とのファイル重複 0 件、依存 `MIG-0701, MIG-0713` DONE）を **`MIG-0738`** として分離し、`Model: small` + `Readiness: READY_FOR_SMALL_MODEL` として登録する。
+- `MIG-0714` は `Depends on: MIG-0712, MIG-0713, MIG-0738` として差分規模を抑制し、`MIG-0610` の `Source snapshot` を `61463174f` の実ファイル行番号（`createCronWorker.ts:128` 等）へ更新した。

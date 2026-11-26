@@ -53,6 +53,11 @@ export function clampPaging(args: {
 
 /** 件数とページサイズから総ページ数を出す。0 件なら 1 を返す (空ページを 1 ページ目として扱う)。 */
 export function totalPagesFor(total: number, pageSize: number): number {
-  if (total <= 0 || pageSize <= 0) return 1;
-  return Math.max(1, Math.ceil(total / pageSize));
+  // Malformed counts/sizes must not leak NaN, Infinity or imprecise page
+  // numbers into public links or admin pagination.
+  if (!Number.isFinite(total) || !Number.isFinite(pageSize) || total <= 0 || pageSize <= 0) {
+    return 1;
+  }
+  const pages = Math.ceil(total / pageSize);
+  return Number.isSafeInteger(pages) ? Math.max(1, pages) : 1;
 }
