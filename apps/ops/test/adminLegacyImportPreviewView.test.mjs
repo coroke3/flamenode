@@ -174,6 +174,19 @@ test("MIG-0737 U02: committed 409/503 shows saved progress and locks ordinary ap
       assert.match(ui.host.textContent, /進捗復旧を確認/);
       assert.doesNotMatch(ui.host.innerHTML, /private-provider-canary|private-token|private-hash/);
       assert.doesNotMatch(ui.host.textContent, /反映処理が終了|反映結果を確認できません/);
+      // Even a synthetic change dispatched to a disabled file input cannot clear
+      // the same-session committed-progress fence or restore a preview credential.
+      assert.equal(ui.host.querySelector('input[type="file"]').disabled, true);
+      assert.equal(ui.host.querySelector('input[name="range_start_0"]').disabled, true);
+      await chooseFiles(ui, [new File(["id,title\n2,Beta"], "other.csv")]);
+      assert.match(ui.host.textContent, /ステップ保存済み（進捗復旧中）/);
+      assert.match(ui.host.textContent, /反映進捗: 6\/7/);
+      assert.match(ui.host.textContent, /legacy\.csv/);
+      assert.doesNotMatch(ui.host.textContent, /other\.csv/);
+      const previewButton = ui.host.querySelectorAll("button")[0];
+      assert.equal(previewButton.disabled, true);
+      await React.act(async () => previewButton.click());
+      await flush();
       const apply = ui.host.querySelectorAll("button")[1];
       assert.equal(apply.disabled, true);
       await React.act(async () => apply.click());

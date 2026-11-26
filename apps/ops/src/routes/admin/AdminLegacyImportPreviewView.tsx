@@ -86,7 +86,8 @@ export function AdminLegacyImportPreviewView({
   }, [fetchFn]);
 
   function chooseFiles(list: FileList | null): void {
-    if (busy || active.current) return;
+    // A same-session file replacement must not discard confirmed committed progress.
+    if (busy || active.current || !trusted || recoveryPending) return;
     reset();
     const selected = list ? Array.from(list) : [];
     setFiles(selected);
@@ -203,7 +204,7 @@ export function AdminLegacyImportPreviewView({
       <p>現行のカスタム質問マッピング・チャンク提案・複数ステップ自動再開は移行準備中です。</p>
       <label>インポートファイル
         <input type="file" multiple accept=".json,.csv,.tsv,application/json,text/csv,text/tab-separated-values"
-          disabled={busy} onChange={(event) => chooseFiles(event.currentTarget.files)} />
+          disabled={busy || !trusted || recoveryPending} onChange={(event) => chooseFiles(event.currentTarget.files)} />
       </label>
       {files.length > 0 ? <ul>{files.map((file, i) => (
         <li key={i}>
