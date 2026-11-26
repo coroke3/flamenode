@@ -854,6 +854,73 @@ test("U03a ISSUE-703: late submit success cannot clear a new identity draft", as
   }
 });
 
+// A returned identity has a fresh committed shell even when its persistent
+// draft key is identical. An old network completion cannot delete that key.
+for (const [switchKind, destination] of [
+  ["auth-user", { draftAuthUserId: "u2" }],
+  ["active-x", { activeXId: "@BOB" }],
+  ["route-remount", null],
+]) {
+  for (const draftState of ["restored", "pending", "saved"]) {
+    test(`U03a ISSUE-703: returning ${switchKind} preserves ${draftState} draft on old success`, async () => {
+      dom.window.localStorage.clear();
+      const key = buildFormDraftStorageKey({
+        authUserId: "u1", formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+      });
+      const container = dom.window.document.createElement("div");
+      dom.window.document.body.append(container);
+      const root = createRoot(container);
+      let latestSuccess;
+      const renderVideoForm = args => {
+        latestSuccess = args.onSubmitSuccess;
+        return renderStub(args);
+      };
+      const render = identity => identity === null ? null :
+        React.createElement(UnslottedPostShell, props({ ...identity, renderVideoForm }));
+      try {
+        await act(async () => root.render(render({})));
+        await act(async () => selected(container, "none").click());
+        const oldSuccess = latestSuccess;
+        assert.equal(typeof oldSuccess, "function");
+
+        await act(async () => root.render(render(destination)));
+        assert.ok(dom.window.localStorage.getItem(key), "departed dirty A was flushed");
+        await act(async () => root.render(render({})));
+        assert.equal(selected(container, "none").checked, true, "return restores A");
+
+        if (draftState !== "restored") {
+          await act(async () => selected(container, "event").click());
+          await act(async () => setSelect(container.querySelector("#unslotted_event_choice"), eventA.id));
+        }
+        if (draftState === "saved") {
+          await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+        }
+        await act(async () => {
+          const before = dom.window.localStorage.getItem(key);
+          assert.ok(before, "returning A owns a persistent draft");
+          oldSuccess();
+          assert.equal(dom.window.localStorage.getItem(key), before,
+            "old success must not delete the returning shell's stored draft");
+        });
+        if (draftState !== "restored") {
+          assert.equal(selected(container, "event").checked, true);
+          await act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+          assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(key)).value,
+            { affiliation: "event", selectedEventId: eventA.id },
+            "new pending or saved event choice survives old success");
+        }
+        await act(async () => latestSuccess());
+        assert.equal(dom.window.localStorage.getItem(key), null,
+          "the latest shell can still clear its own draft on success");
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
+        dom.window.localStorage.clear();
+      }
+    });
+  }
+}
+
 test("U03a ISSUE-703: updated eligible options cannot revert an in-progress affiliation choice", async () => {
   dom.window.localStorage.clear();
   const key = buildFormDraftStorageKey({

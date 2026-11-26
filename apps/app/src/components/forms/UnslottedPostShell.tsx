@@ -43,6 +43,14 @@ export interface UnslottedPostShellProps<
 
 type AffiliationChoice = "none" | "event" | null;
 
+// ISSUE-703: only the latest committed shell for a persistent key may clear it.
+// Keep departed owners long enough for a late success after A -> B; a remount
+// of A invalidates the old token even before the new draft debounce runs.
+// Bound tab-local history; eviction intentionally preserves rather than deletes
+// a draft whose owner can no longer be established. Never store draft contents.
+const MAX_RECENT_SHELL_DRAFT_OWNERS = 64;
+const latestShellDraftOwners = new Map<string, symbol>();
+
 // A real canonical X handle can literally be "unassigned" (1–20 [a-z0-9_]).
 // Keep the legacy empty-active-X draft key unchanged, but give that valid
 // handle a separate namespace to prevent it reading the empty-X user's draft.
@@ -141,6 +149,17 @@ function UnslottedPostShellForIdentity<
       })
     : "";
   const formKey = `unslotted-video:${authUserId || "anonymous"}:${activeXKey}`;
+  const shellDraftOwner = React.useRef(Symbol("unslotted-shell-draft"));
+  React.useLayoutEffect(() => {
+    if (!shellDraftKey) return;
+    // Publish only after commit, not from an abandoned concurrent render.
+    latestShellDraftOwners.delete(shellDraftKey);
+    latestShellDraftOwners.set(shellDraftKey, shellDraftOwner.current);
+    if (latestShellDraftOwners.size > MAX_RECENT_SHELL_DRAFT_OWNERS) {
+      const oldestKey = latestShellDraftOwners.keys().next().value;
+      if (oldestKey !== undefined) latestShellDraftOwners.delete(oldestKey);
+    }
+  }, [shellDraftKey]);
 
   // Only a draft identity change should trigger restoration. Event-option
   // arrays are refreshed independently while a person may be editing; tying
@@ -429,6 +448,7 @@ function UnslottedPostShellForIdentity<
             onDraftFlushReady: handleVideoDraftFlushReady,
             onFormStateChanged,
             onSubmitSuccess: () => {
+              if (shellDraftKey && latestShellDraftOwners.get(shellDraftKey) !== shellDraftOwner.current) return;
               if (selectionRevisionAtRender !== selectionRevisionRef.current) return;
               // The refreshed choices may revoke the event before the effect
               // advances the generation; fail closed in that render window.
