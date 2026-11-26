@@ -37,7 +37,12 @@ export async function loadAdminVideoDetail(
   const response = await getJson<unknown>(fetchFn, url, signal);
   if (response.status !== "ok") return response;
   const parsed = AdminVideoDetailResponseSchema.safeParse(response.data);
-  if (!parsed.success || parsed.data.video.id !== videoId) return { status: "unavailable" };
+  // The Hono read handler echoes c.req.query("event")?.trim() || null.
+  // Accept only the DTO for this exact video and normalized review context.
+  const expectedEvent = event?.trim() || null;
+  if (!parsed.success || parsed.data.video.id !== videoId || parsed.data.event !== expectedEvent) {
+    return { status: "unavailable" };
+  }
   return { status: "ok", data: parsed.data };
 }
 

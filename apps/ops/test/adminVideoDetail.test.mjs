@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
@@ -114,7 +114,7 @@ test("MIG-0729 U03a: detail footer and public tab share the CURRENT canonical UR
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const root = createRoot(dom.window.document.getElementById("root"));
   let calls = 0;
-  const payload = { ...detail, video: { ...detail.video,
+  const payload = { ...detail, event: null, video: { ...detail.video,
     youtube_video_id: "https://youtu.be/dQw4w9WgXcQ?t=30" } };
   try {
     await React.act(async () => root.render(React.createElement(MemoryRouter, {
@@ -173,9 +173,11 @@ test("MIG-0729 U01/U02: internal list/detail/reset/pagination links remain in Op
       mutations.push({ path, body: JSON.parse(init.body) });
       return json(200, { ok: true, nextHref: "/admin/videos/video-2?event=event-1" });
     }
-    if (path.startsWith("/api/admin-read/videos/video-1")) return json(200, detail);
+    if (path.startsWith("/api/admin-read/videos/video-1")) {
+      return json(200, { ...detail, event: "event-1" });
+    }
     if (path.startsWith("/api/admin-read/videos/video-2")) {
-      return json(200, { ...detail, video: { ...detail.video, id: "video-2" } });
+      return json(200, { ...detail, event: "event-1", video: { ...detail.video, id: "video-2" } });
     }
     // The privileged list adapter rejects responses for another search key.
     // Model the server's echoed filters/page rather than reusing page-2 data
@@ -708,5 +710,85 @@ test("MIG-0729 T04: current-view moderation success resets fields and refreshes 
     assert.deepEqual(refreshes, [true]);
     assert.equal(note.value, "");
     assert.match(dom.window.document.body.textContent, /CASE_OK/);
+  });
+});
+
+
+test("MIG-0729 U02: detail response must echo the Hono-normalized event context", async () => {
+  for (const event of ["event/1", " event/1 ", null, "", "   "]) {
+    const expected = event?.trim() || null;
+    const payload = { ...detail, event: expected };
+    let path;
+    const result = await loadAdminVideoDetail(async url => {
+      path = url;
+      return json(200, payload);
+    }, "video-1", event);
+    assert.deepEqual(result, { status: "ok", data: payload });
+    assert.equal(path, "/api/admin-read/videos/video-1" +
+      (event ? "?event=" + encodeURIComponent(event) : ""));
+    for (const wrong of [null, "", "other-event", " event/1 "].filter(x => x !== expected)) {
+      assert.deepEqual(await loadAdminVideoDetail(async () =>
+        json(200, { ...payload, event: wrong }), "video-1", event),
+      { status: "unavailable" }, "reject event echo " + JSON.stringify([event, wrong]));
+    }
+  }
+});
+
+test("MIG-0729 U02: mounted detail rejects another event response before enabling writes", async () => {
+  await withMutationDom(async ({ dom, root }) => {
+    const gets = [], posts = [];
+    const receipt = deferredReceipt();
+    const fetchFn = async (path, init) => {
+      if (init.method === "POST") {
+        posts.push({ path, body: JSON.parse(init.body) });
+        return receipt.promise;
+      }
+      gets.push(path);
+      const event = new URL(path, "https://flamenode.invalid").searchParams.get("event");
+      return json(200, {
+        ...detail,
+        // The same video ID is not sufficient to accept a stale event DTO.
+        event: event === "event-b" ? "event-a" : event,
+        video: { ...detail.video, title: event === "event-b" ? "WRONG_EVENT_DTO" : "SCOPED_" + event },
+      });
+    };
+    let navigate;
+    function Probe() {
+      navigate = useNavigate();
+      const location = useLocation();
+      return React.createElement("output", { id: "route-location" }, location.pathname + location.search);
+    }
+    const go = path => React.act(async () => { navigate(path); });
+    const findApprove = () => [...dom.window.document.querySelectorAll("button")]
+      .find(b => b.textContent.trim() === "承認して次へ");
+    await React.act(async () => root.render(React.createElement(MemoryRouter, {
+      initialEntries: ["/admin/videos/video-1?event=event-a"],
+    }, React.createElement(Probe), React.createElement(Routes, null,
+      React.createElement(Route, { path: "/admin/videos/:id",
+        element: React.createElement(AdminVideoDetail, { fetchFn }) }),
+    ))));
+    assert.match(dom.window.document.body.textContent, /SCOPED_event-a/);
+    assert.ok(findApprove());
+    await React.act(async () => findApprove().dispatchEvent(
+      new dom.window.MouseEvent("click", { bubbles: true, cancelable: true })));
+    assert.deepEqual(posts, [{ path: "/api/admin/videos/video-1/status",
+      body: { status: "public", reason: "", review_event_id: "event-a", and_next: "1" } }]);
+    await go("/admin/videos/video-1?event=event-b");
+    assert.match(dom.window.document.body.textContent, /作品詳細を取得できませんでした/);
+    assert.doesNotMatch(dom.window.document.body.textContent, /WRONG_EVENT_DTO|SCOPED_event-a/);
+    assert.equal(findApprove(), undefined);
+    assert.equal(dom.window.document.querySelector('[name="private_note"]'), null);
+    const beforeReceipt = gets.length;
+    await React.act(async () => receipt.resolve(json(200, {
+      ok: true, message: "OLD_RECEIPT", nextHref: "/admin/videos/other?event=event-a",
+    })));
+    assert.equal(dom.window.document.getElementById("route-location").textContent,
+      "/admin/videos/video-1?event=event-b");
+    assert.equal(gets.length, beforeReceipt, "stale write may not refresh the new route");
+    assert.equal(posts.length, 1, "never replay a possibly committed write");
+    assert.doesNotMatch(dom.window.document.body.textContent, /OLD_RECEIPT/);
+    await go("/admin/videos/video-1?event=event-c");
+    assert.match(dom.window.document.body.textContent, /SCOPED_event-c/);
+    assert.ok(findApprove(), "valid matching detail can still render write controls");
   });
 });
