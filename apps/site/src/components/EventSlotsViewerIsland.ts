@@ -38,14 +38,16 @@ function parseSlot(value: unknown): SlotViewerOverlaySlot | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   if (typeof row.id !== "string" || !row.id) return null;
-  if (!["active", "unassigned", "account_other", "none"].includes(String(row.viewer_relation))) return null;
+  const relation = row.viewer_relation;
+  if (relation !== "active" && relation !== "unassigned" &&
+      relation !== "account_other" && relation !== "none") return null;
   if (typeof row.is_owned_by_viewer !== "boolean") return null;
   // CURRENT derives this flag from canActAsSlotActor(viewer_relation).
   // Reject contradictions in BOTH directions. Otherwise an apparently denied
   // row with an "active" relation could still inject private identity fields
   // into the merged public slot, despite its owned flag being false.
   const relationAllowsOwnership =
-    row.viewer_relation === "active" || row.viewer_relation === "unassigned";
+    relation === "active" || relation === "unassigned";
   if (row.is_owned_by_viewer !== relationAllowsOwnership) return null;
   return {
     id: row.id,
@@ -54,7 +56,7 @@ function parseSlot(value: unknown): SlotViewerOverlaySlot | null {
     profile_x_user_id: nullableString(row.profile_x_user_id),
     submitted_icon_url: nullableString(row.submitted_icon_url),
     is_owned_by_viewer: row.is_owned_by_viewer,
-    viewer_relation: row.viewer_relation as SlotViewerOverlaySlot["viewer_relation"],
+    viewer_relation: relation,
     group_key: nullableString(row.group_key),
     x_user_id: nullableString(row.x_user_id),
   };

@@ -162,6 +162,48 @@ test("U01 contradictory RH-014 slot actor relation never grants ownership", asyn
     "account_other remains visible as a non-owned relation");
 });
 
+test("U01 RH-014 relation must be an exact string enum before merging private fields", async () => {
+  const { parseSlotViewerOverlay, mergeViewerSlotOverlay } =
+    await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const flags = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: false, viewerXId: "active-x", viewerXIdNotice: null,
+  };
+  const sibling = { id: "s2", viewer_relation: "active", is_owned_by_viewer: true };
+  const base = [{ id: "s1", display_name: "public-name", group_key: "public-group" },
+    { id: "s2", display_name: "public-two" }];
+  for (const invalid of [["active"], ["unassigned"], ["account_other"], ["none"],
+    [["none"]], { toString: "none" }, true, 1, null, "ACTIVE", ""]) {
+    for (const owned of [false, true]) {
+      const bad = { id: "s1", viewer_relation: invalid, is_owned_by_viewer: owned,
+        display_name: "private-name", reserved_x_id: "private-reserved",
+        profile_x_user_id: "private-profile", submitted_icon_url: "https://private.invalid/icon",
+        x_user_id: "private-x", group_key: "private-group" };
+      const overlay = parseSlotViewerOverlay({ ...flags, slots: [bad, sibling] });
+      assert.ok(overlay, "a malformed row must not discard valid siblings");
+      assert.deepEqual(overlay.slots.map((slot) => slot.id), ["s2"]);
+      const merged = mergeViewerSlotOverlay(base, overlay, true);
+      assert.equal(merged[0].display_name, "public-name");
+      assert.equal(merged[0].group_key, "public-group");
+      assert.equal(merged[0].is_owned_by_viewer, false);
+      assert.equal(merged[0].viewer_relation, "none");
+      for (const key of ["reserved_x_id", "profile_x_user_id", "submitted_icon_url", "x_user_id"]) {
+        assert.equal(merged[0][key], null);
+      }
+      assert.equal(merged[1].is_owned_by_viewer, true);
+    }
+  }
+  for (const relation of ["active", "unassigned", "account_other", "none"]) {
+    const owned = relation === "active" || relation === "unassigned";
+    const overlay = parseSlotViewerOverlay({ ...flags, slots: [
+      { id: "s1", viewer_relation: relation, is_owned_by_viewer: owned },
+    ] });
+    assert.equal(overlay?.slots[0]?.viewer_relation, relation);
+    assert.equal(overlay?.slots[0]?.is_owned_by_viewer, owned);
+  }
+});
+
 test("U01 duplicate RH-014 slot IDs cannot elevate ownership regardless of response order", async () => {
   const { parseSlotViewerOverlay, mergeViewerSlotOverlay } =
     await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
