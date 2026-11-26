@@ -141,7 +141,12 @@ export async function loadUserBuildDataFrom(source: UserPayloadSource): Promise<
     const profile = payload ? normalizeStaticUserProfile(payload) : null;
     // A profile object that names another user is a producer error: never publish it under this URL.
     if (!profile || normalizeXId(profile.user.id) !== id) {
-      console.warn(`[user-routes] no page for ${id}: profile snapshot unavailable`);
+      // A missing/nonpublic/mismatched profile must stay omitted even if diagnostics fail.
+      try {
+        console.warn("[user-routes] profile snapshot unavailable");
+      } catch {
+        // Logging is best effort; it must not abort the public build.
+      }
       continue;
     }
     users.set(id, {
