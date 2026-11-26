@@ -1,0 +1,394 @@
+import * as React from "react";
+import { useNavigate } from "react-router-dom";
+import type { ProfileFields, XidProfileApi } from "../../../api/xidProfile.js";
+import { isSafeRelativePath } from "../../next.js";
+import { SocialLinksEditor } from "../../../components/shared/SocialLinksEditor.js";
+import { YoutubeChannelPicker } from "../../../components/shared/YoutubeChannelPicker.js";
+import { SquareIconEditor } from "../../../components/shared/SquareIconEditor.js";
+import { SquareIconEditorBoundary } from "../../../components/shared/SquareIconEditorBoundary.js";
+import { ConfirmDialog } from "../../../components/shared/ConfirmDialog.js";
+import { Icon } from "../../ui/Icon.js";
+
+/** MIG-0708 U03: Personal settings form controls, mounted after MIG-0636 contract integration. */
+const NETWORK_ERROR = "通信または処理中に問題が発生しました。再読み込みしてお試しください。";
+const MAX_CONVERTED_ICON_BYTES = 2 * 1024 * 1024;
+const ALLOWED_ICON_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+/** The Hono SA-105 handler constructs /api/media/xicons/<canonical X ID>/<generated ID>.<validated extension>. 
+ * Never turn an untrusted API envelope's iconUrl into an external or script URL. */
+export function isSafeUploadedIconUrl(url: string, xUserId: string): boolean {
+  const prefix = `/api/media/xicons/${xUserId}/`;
+  if (!url.startsWith(prefix)) return false;
+  return /^[A-Za-z0-9_-]+\.(?:png|jpg|webp)$/.test(url.slice(prefix.length));
+}
+
+/** A ref closes the same-tick double-click race that React pending state alone cannot prevent. */
+function usePendingAction() {
+  const lock = React.useRef(false);
+  const [pending, setPending] = React.useState(false);
+  const execute = React.useCallback(async (fn: () => Promise<void>) => {
+    if (lock.current) return;
+    lock.current = true;
+    setPending(true);
+    try { await fn(); }
+    finally { lock.current = false; setPending(false); }
+  }, []);
+  return { pending, execute };
+}
+
+export function SetActiveXButton({
+  api, xUserId, approved, isActive = false, next, onRefresh, label = "アクティブに設定", className,
+}: {
+  api: XidProfileApi;
+  xUserId: string;
+  approved: boolean;
+  isActive?: boolean;
+  next?: string | null;
+  onRefresh: () => void;
+  label?: string;
+  className?: string;
+}): React.ReactElement | null {
+  const navigate = useNavigate();
+  const { pending, execute } = usePendingAction();
+  const [error, setError] = React.useState<string | null>(null);
+  const identityRef = React.useRef({ xUserId, generation: 0 });
+  if (identityRef.current.xUserId !== xUserId) {
+    identityRef.current = { xUserId, generation: identityRef.current.generation + 1 };
+  }
+  React.useEffect(() => { setError(null); }, [xUserId]);
+  if (!approved || isActive) return null;
+
+  const run = () => {
+    const requestIdentity = identityRef.current;
+    void execute(async () => {
+      setError(null);
+      try {
+        const result = await api.setActive(xUserId);
+        // Do not navigate the next account on a previous account's completion.
+        if (identityRef.current !== requestIdentity) return;
+        if (!result.ok) { setError(result.message ?? "切替に失敗しました。"); return; }
+        // Do not turn a malformed / external next parameter into a navigation.
+        if (next && isSafeRelativePath(next)) {
+          navigate(next);
+        } else {
+          onRefresh();
+        }
+      } catch {
+        if (identityRef.current === requestIdentity) setError(NETWORK_ERROR);
+      }
+    });
+  };
+  return (
+    <>
+      <button type="button" className={className ?? "fn-btn fn-btn-ghost fn-btn-sm"}
+        disabled={pending} aria-busy={pending} onClick={run}>
+        {pending ? "設定中…" : label}
+      </button>
+      {error ? <p className="xids-msgErr xids-msgGap" role="alert">{error}</p> : null}
+    </>
+  );
+}
+
+export function XIdIconPicker({
+  api, xUserId, currentIconUrl, candidates, onRefresh,
+}: {
+  api: XidProfileApi;
+  xUserId: string;
+  currentIconUrl: string | null;
+  candidates: readonly string[];
+  onRefresh: () => void;
+}): React.ReactElement {
+  const { pending, execute } = usePendingAction();
+  const [error, setError] = React.useState<string | null>(null);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [selected, setSelected] = React.useState(currentIconUrl);
+  // Only expose a saved upload URL for the X ID that originated the upload.
+  // The identity guard prevents a transient link to A while rendering B.
+  const [savedUpload, setSavedUpload] = React.useState<{ xUserId: string; url: string } | null>(null);
+  const savedIconUrl = savedUpload?.xUserId === xUserId ? savedUpload.url : null;
+  // CURRENT: if no saved icon exists, the first server-scoped candidate is
+  // visually selected; it does not perform a write until the user clicks it.
+  const selectedIconUrl = selected ?? candidates[0] ?? null;
+  // The same X ID can be selected again after a detour A -> B -> A.
+  // Track a monotonically increasing generation, not only the identity string.
+  const identityRef = React.useRef({ xUserId, generation: 0 });
+  if (identityRef.current.xUserId !== xUserId) {
+    identityRef.current = { xUserId, generation: identityRef.current.generation + 1 };
+  }
+  // Refreshes can replace the authoritative icon after a write or account switch.
+  React.useEffect(() => { setSelected(currentIconUrl); setSavedUpload(null); }, [currentIconUrl, xUserId]);
+  // Identity changes invalidate previously displayed mutation notices.
+  React.useEffect(() => { setError(null); setMessage(null); }, [xUserId]);
+  const [upload, setUpload] = React.useState(false);
+  const [uploadPending, setUploadPending] = React.useState(false);
+  const uploadLock = React.useRef(false);
+  const [editorKey, setEditorKey] = React.useState(0);
+  // A different X ID must never inherit a previous account's editor or uploaded image.
+  React.useEffect(() => { setUpload(false); }, [xUserId]);
+  const update = (task: () => ReturnType<XidProfileApi["setIcon"]>, successText: string) => {
+    const requestIdentity = identityRef.current;
+    if (uploadLock.current) return;
+    void execute(async () => {
+      setError(null); setMessage(null);
+      try {
+        const result = await task();
+        // The component may have changed accounts while the request was pending.
+        if (identityRef.current !== requestIdentity) return;
+        if (!result.ok) { setError(result.message ?? "アイコンの更新に失敗しました。"); return; }
+        setMessage(result.message ?? successText);
+        setSavedUpload(null);
+        if (result.iconUrl) setSelected(result.iconUrl);
+        onRefresh();
+      } catch {
+        if (identityRef.current === requestIdentity) setError(NETWORK_ERROR);
+      }
+    });
+  };
+  /** Editor produces an actual cropped 256x256 File, never the unprocessed original. */
+  const onUploadProcessedFile = async (file: File): Promise<{ ok: true } | { ok: false; message: string }> => {
+    if (pending || uploadLock.current) {
+      return { ok: false, message: "処理中です。少しお待ちください。" };
+    }
+    // Both the original and the converted file are capped at 2 MiB by CURRENT
+    // and Hono SA-105. The 8 MiB limit covers the whole multipart request only.
+    if (!ALLOWED_ICON_MIME_TYPES.has(file.type) || file.size === 0) {
+      return { ok: false, message: "PNG・JPEG・WebP形式の画像が必要です。" };
+    }
+    if (file.size > MAX_CONVERTED_ICON_BYTES) {
+      return { ok: false, message: "変換後の画像サイズが2MBを超えています。" };
+    }
+    const requestIdentity = identityRef.current;
+    uploadLock.current = true;
+    setUploadPending(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.uploadIcon(xUserId, file);
+      if (identityRef.current !== requestIdentity) {
+        return { ok: false, message: "X IDの選択が変更されました。" };
+      }
+      if (!result.ok) {
+        const message = result.message ?? "アップロードに失敗しました。";
+        setError(message);
+        return { ok: false, message };
+      }
+      setMessage(result.message ?? "アイコンをアップロードしました。");
+      // Server controls the final R2 path; only expose its canonical scoped
+      // media URL as a navigable link. Do not trust optional envelope fields.
+      if (result.iconUrl && isSafeUploadedIconUrl(result.iconUrl, xUserId)) {
+        setSelected(result.iconUrl);
+        setSavedUpload({ xUserId, url: result.iconUrl });
+      } else {
+        setSavedUpload(null);
+      }
+      setUpload(false);
+      setEditorKey((key) => key + 1);
+      onRefresh();
+      return { ok: true };
+    } catch {
+      const message = NETWORK_ERROR;
+      if (identityRef.current === requestIdentity) setError(message);
+      return { ok: false, message };
+    } finally {
+      uploadLock.current = false;
+      setUploadPending(false);
+    }
+  };
+  return (
+    <div className="xids-stack">
+      <p className="xids-compactLabel">アイコン候補（作品サムネから自動取得）</p>
+      <div className="xids-iconRow" role="group" aria-label="X IDアイコン">
+        {candidates.map(url => (
+          <button key={url} type="button"
+            className={`xids-iconButton${url === selectedIconUrl ? " xids-iconButtonActive" : ""}`}
+            disabled={pending || uploadPending} aria-busy={pending || uploadPending} aria-pressed={url === selectedIconUrl}
+            aria-label="候補アイコンを選択"
+            onClick={() => update(() => api.setIcon(xUserId, url), "アイコンを更新しました。")}>
+            <img src={url} alt="" className="xids-iconThumb" width={36} height={36} />
+            {url === selectedIconUrl ? (
+              <span className="xids-iconSelectedMark" aria-hidden="true">
+                <Icon name="check" size={12} />
+              </span>
+            ) : null}
+          </button>
+        ))}
+        <button type="button"
+          className={`xids-iconButton xids-iconAddButton${pending || uploadPending ? " xids-iconAddButtonDisabled" : ""}`}
+          title="画像をアップロード" aria-label="画像をアップロード"
+          disabled={pending || uploadPending} aria-expanded={upload}
+          onClick={() => { setError(null); setMessage(null); setUpload(v => !v); }}>
+          <Icon name="plus" size={18} aria-hidden />
+        </button>
+      </div>
+      {upload ? (
+        <SquareIconEditorBoundary>
+          <SquareIconEditor key={`${xUserId}:${editorKey}`} pending={pending || uploadPending}
+            onUseImage={onUploadProcessedFile} onCancel={() => setUpload(false)} />
+        </SquareIconEditorBoundary>
+      ) : null}
+      {candidates.length === 0
+        ? <p className="fn-muted fn-text-sm">まだ候補がありません。＋からアップロードするか、作品に設定したアイコンが候補になります。</p> : null}
+      {message ? (
+        <p className="xids-msgOk" role="status">
+          <Icon name="check" size={12} aria-hidden /> {message}
+          {savedIconUrl ? (
+            <>{" "}<a href={savedIconUrl} className="xids-iconHint">保存済み画像を表示</a></>
+          ) : null}
+        </p>
+      ) : null}
+      {error ? <p className="xids-msgErr" role="alert"><Icon name="warning" size={12} aria-hidden /> {error}</p> : null}
+    </div>
+  );
+}
+
+export function XIdCompactProfileForm({
+  api, x, iconCandidates, channelCandidates = [], onRefresh, onCancel,
+}: {
+  api: XidProfileApi;
+  x: { id: string; x_name: string; icon_url: string | null; profile_text: string | null;
+    portfolio_contact: string | null; youtube_channel_url: string | null; other_social_links: string | null };
+  iconCandidates: readonly string[];
+  channelCandidates: string[];
+  onRefresh: () => void;
+  onCancel?: () => void;
+}): React.ReactElement {
+  const { pending, execute } = usePendingAction();
+  const [error, setError] = React.useState<string | null>(null);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const identityRef = React.useRef({ xUserId: x.id, generation: 0 });
+  if (identityRef.current.xUserId !== x.id) {
+    identityRef.current = { xUserId: x.id, generation: identityRef.current.generation + 1 };
+  }
+  React.useEffect(() => { setError(null); setMessage(null); }, [x.id]);
+  const onSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
+    ev.preventDefault();
+    // Node test and browser FormData implementations differ for HTMLFormElement;
+    // reading the named controls also preserves empty strings exactly.
+    const form = ev.currentTarget;
+    const read = (name: string) => (form.elements.namedItem(name) as
+      HTMLInputElement | HTMLTextAreaElement | null)?.value ?? "";
+    const fields: ProfileFields = {
+      x_name: read("x_name"),
+      profile_text: read("profile_text"),
+      portfolio_contact: read("portfolio_contact"),
+      youtube_channel_url: read("youtube_channel_url"),
+      other_social_links: read("other_social_links"),
+    };
+    const requestIdentity = identityRef.current;
+    void execute(async () => {
+      setError(null); setMessage(null);
+      try {
+        const result = await api.updateProfile(x.id, fields);
+        if (identityRef.current !== requestIdentity) return;
+        if (!result.ok) { setError(result.message ?? "更新に失敗しました。"); return; }
+        setMessage(result.message ?? "保存しました。");
+        onRefresh();
+        onCancel?.();
+      } catch {
+        if (identityRef.current === requestIdentity) setError(NETWORK_ERROR);
+      }
+    });
+  };
+  return (
+    <div className="xids-stack">
+      <form key={x.id} className="xids-stack" onSubmit={onSubmit}>
+        <label className="xids-compactLabel">表示名オーバーライド（空欄で @ハンドル表示）
+          <input name="x_name" className="xids-input" maxLength={80} disabled={pending}
+            placeholder={`@${x.id}`} defaultValue={x.x_name} />
+        </label>
+        <XIdIconPicker api={api} xUserId={x.id} currentIconUrl={x.icon_url}
+          candidates={iconCandidates} onRefresh={onRefresh} />
+        <label className="xids-compactLabel">About / 自己紹介
+          <textarea name="profile_text" className="xids-textarea" rows={3} maxLength={2000}
+            placeholder="制作スタイル、得意なこと、活動紹介など"
+            disabled={pending} defaultValue={x.profile_text ?? ""} />
+        </label>
+        <label className="xids-compactLabel">Contact / 連絡先
+          <textarea name="portfolio_contact" className="xids-textarea" rows={2} maxLength={1200}
+            placeholder="依頼・連絡先、メール、フォームURL、DM可否など"
+            disabled={pending} defaultValue={x.portfolio_contact ?? ""} />
+        </label>
+        <label className="xids-compactLabel">YouTube チャンネル（過去の作品から候補を表示）</label>
+        <YoutubeChannelPicker defaultValue={x.youtube_channel_url}
+          candidates={channelCandidates} disabled={pending} />
+        <SocialLinksEditor initialValue={x.other_social_links} disabled={pending} />
+        <div className="xids-rowEnd">
+          {onCancel ? <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
+            disabled={pending} onClick={onCancel}>キャンセル</button> : null}
+          <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm"
+            disabled={pending} aria-busy={pending}>{pending ? "保存中…" : "保存"}</button>
+        </div>
+        {message ? <p className="xids-msgOk" role="status">{message}</p> : null}
+        {error ? <p role="alert" className="xids-msgErr">{error}</p> : null}
+      </form>
+    </div>
+  );
+}
+
+export function DeleteXIdForm({
+  api, xUserId, isActive, onRefresh, label = "連携を解除", className,
+}: {
+  api: XidProfileApi;
+  xUserId: string;
+  isActive: boolean;
+  onRefresh: () => void;
+  label?: string;
+  className?: string;
+}): React.ReactElement | null {
+  const { pending, execute } = usePendingAction();
+  const [open, setOpen] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  // A -> B -> A must not reuse the first A request's confirmation or result.
+  const identityRef = React.useRef({ xUserId, generation: 0 });
+  if (identityRef.current.xUserId !== xUserId) {
+    identityRef.current = { xUserId, generation: identityRef.current.generation + 1 };
+  }
+  React.useEffect(() => {
+    setOpen(false);
+    setError(null);
+  }, [xUserId]);
+  const expected = `DELETE ${xUserId}`;
+  if (isActive) return null;
+
+  const doDelete = () => {
+    const requestIdentity = identityRef.current;
+    // ConfirmDialog only invokes onConfirm after the literal expectedText is
+    // entered. The HTTP client and Hono repeat the confirmation check.
+    void execute(async () => {
+      setError(null);
+      try {
+        const result = await api.deleteXId(xUserId, expected);
+        if (identityRef.current !== requestIdentity) return;
+        if (!result.ok) { setError(result.message ?? "削除に失敗しました。"); return; }
+        onRefresh();
+      } catch {
+        if (identityRef.current === requestIdentity) setError(NETWORK_ERROR);
+      }
+    });
+  };
+  return (
+    <>
+      <button type="button" className={className ?? "fn-btn fn-btn-ghost fn-btn-sm"}
+        disabled={pending} onClick={() => { setError(null); setOpen(true); }}>
+        <Icon name="trash" size={12} aria-hidden />
+        {label}
+      </button>
+      {error ? <p role="alert" className="xids-msgErr">{error}</p> : null}
+      <ConfirmDialog open={open} title="X ID 連携を削除しますか?"
+        message={<>
+          <p style={{ margin: 0 }}>
+            この X ID <strong>@{xUserId}</strong> とDiscordアカウントの紐付けを解除します。
+          </p>
+          <ul style={{ margin: "8px 0 0", paddingLeft: "1.2em", fontSize: 12 }}>
+            <li>X ID自体・過去の作品・履歴は削除されません。</li>
+            <li>このDiscordアカウントからは編集できなくなります。</li>
+            <li>同じX IDを再連携すれば編集権限は戻ります。</li>
+          </ul>
+        </>}
+        expectedText={expected} confirmLabel="連携を削除する" tone="danger"
+        busy={pending}
+        onConfirm={() => { setOpen(false); doDelete(); }}
+        onCancel={() => setOpen(false)} />
+    </>
+  );
+}

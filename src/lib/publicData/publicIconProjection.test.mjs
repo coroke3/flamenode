@@ -117,3 +117,45 @@ test("video source is not treated as a public profile", () => {
     false,
   );
 });
+
+
+test("SEC: a valid __proto__ X handle survives producer, JSON and normalizer without prototype mutation", () => {
+  const producer = buildPublicXIconMapPayloadFromProjection(
+    {
+      registeredUsers: [{ id: "__proto__", icon_url: "https://example.test/registered.png" }],
+      iconUrls: new Map([["constructor", "https://example.test/video.png"]]),
+      orphans: [{ x_id: "constructor" }],
+    },
+    123,
+  );
+  assert.equal(Object.getPrototypeOf(producer.entries), null);
+  assert.equal(Object.hasOwn(producer.entries, "__proto__"), true);
+  assert.equal(producer.entries.__proto__.source, "registered");
+  assert.equal(Object.hasOwn(producer.entries, "constructor"), true,
+    "inherited Object.prototype.constructor must not cause an orphan to be skipped");
+  assert.equal(producer.entries.constructor.source, "video");
+
+  const encoded = JSON.stringify(producer);
+  assert.match(encoded, /"__proto__"/);
+  assert.match(encoded, /"constructor"/);
+  const decoded = normalizePublicXIconMap(JSON.parse(encoded));
+  assert.ok(decoded);
+  assert.equal(Object.getPrototypeOf(decoded.entries), null);
+  assert.equal(Object.hasOwn(decoded.entries, "__proto__"), true);
+  assert.equal(decoded.entries.__proto__.source, "registered");
+  assert.equal(decoded.entries.constructor.source, "video");
+  assert.equal(publicXIconEntriesToMap(decoded).get("__proto__").source, "registered");
+  assert.equal(publicXIconEntriesToMap(decoded).get("constructor").source, "video");
+  assert.equal(Object.hasOwn(Object.prototype, "icon_url"), false,
+    "valid icon-map keys must never modify Object.prototype");
+
+  const standalone = normalizePublicXIconMap(JSON.parse(
+    '{"schema_version":1,"generated_at":5,"entries":{"__proto__":{"icon_url":null,"source":"none"}}}',
+  ));
+  assert.ok(standalone);
+  assert.equal(Object.hasOwn(standalone.entries, "__proto__"), true);
+  assert.equal(hasProjectedPublicProfile({
+    xUserId: "__proto__",
+    iconMap: publicXIconEntriesToMap(standalone),
+  }), true);
+});
