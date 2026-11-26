@@ -91,7 +91,6 @@ async function requestWithRetry(
   label,
   { attempts = 3, timeoutMs = 10_000, retryDelayMs = 250 } = {},
 ) {
-  let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -107,16 +106,17 @@ async function requestWithRetry(
         continue;
       }
       return response;
-    } catch (error) {
+    } catch {
       clearTimeout(timer);
-      lastError = error;
       if (attempt < attempts) {
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
         continue;
       }
     }
   }
-  throw new Error(`${label}: request failed after ${attempts} attempts (${lastError?.name ?? "network_error"}).`);
+  // Provider Error.name/message/cause can contain secrets or throwing accessors.
+  // A transport failure must not serialize untrusted provider diagnostics.
+  throw new Error(`${label}: request failed after ${attempts} attempts (network_error).`);
 }
 
 function assertStatus(response, expected, label) {

@@ -34,6 +34,28 @@ const SHARD_METADATA_SCHEMA_KEY = "flamenode_schema";
 const SHARD_METADATA_GENERATION_KEY = "flamenode_generation";
 const SHARD_METADATA_SHARD_KEY = "flamenode_shard";
 
+type PublicIconV2DiagnosticResult =
+  | "generation_cleanup_failed"
+  | "manifest_cleanup_failed"
+  | "fallback_manifest_restore_failed";
+
+function warnPublicIconV2Diagnostic(
+  result: PublicIconV2DiagnosticResult,
+  generation?: string,
+): void {
+  // R2 exceptions are untrusted, including Error.name getters; diagnostics
+  // must not alter manifest safety or replace the original operation result.
+  try {
+    console.warn(JSON.stringify({
+      service: "public-icon-v2",
+      result,
+      ...(generation === undefined ? {} : { generation }),
+    }));
+  } catch {
+    // Best-effort sink only.
+  }
+}
+
 function throwIfAborted(signal?: AbortSignal): void {
   signal?.throwIfAborted();
 }
@@ -111,15 +133,8 @@ async function deleteGenerationBestEffort(
   if (keys.length === 0) return;
   try {
     await env.R2.delete(keys);
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        service: "public-icon-v2",
-        result: "generation_cleanup_failed",
-        generation,
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+  } catch {
+    warnPublicIconV2Diagnostic("generation_cleanup_failed", generation);
   }
 }
 
@@ -127,14 +142,8 @@ async function deleteManifestBestEffort(env: Env): Promise<boolean> {
   try {
     await env.R2.delete(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY);
     return true;
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        service: "public-icon-v2",
-        result: "manifest_cleanup_failed",
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+  } catch {
+    warnPublicIconV2Diagnostic("manifest_cleanup_failed");
     return false;
   }
 }
@@ -265,16 +274,8 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
     try {
       await putManifest(env, fallbackManifest);
       manifestSafeForShardCleanup = true;
-    } catch (manifestError) {
-      console.warn(
-        JSON.stringify({
-          service: "public-icon-v2",
-          result: "fallback_manifest_restore_failed",
-          generation,
-          error_name:
-            manifestError instanceof Error ? manifestError.name : "UnknownError",
-        }),
-      );
+    } catch {
+      warnPublicIconV2Diagnostic("fallback_manifest_restore_failed", generation);
       manifestSafeForShardCleanup = await deleteManifestBestEffort(env);
     }
 

@@ -29,12 +29,15 @@ export const EMPTY_RANDOM_VIDEO_POOL: RandomVideoPool = {
 };
 
 function normalizeRelatedItem(value: unknown): StaticRelatedVideo | null {
-  if (!value || typeof value !== "object") return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const id = normalizeTrimmedString(row.id);
   const title = normalizeTrimmedString(row.title);
   const displayName = normalizeTrimmedString(row.display_name);
   if (!id || !title || !displayName) return null;
+  const scheduledTimeInput = row.scheduled_time;
+  const scheduledTime = normalizeNullableUnix(scheduledTimeInput);
+  if (scheduledTime === null && scheduledTimeInput != null && scheduledTimeInput !== "") return null;
   return {
     id,
     title,
@@ -43,21 +46,23 @@ function normalizeRelatedItem(value: unknown): StaticRelatedVideo | null {
     icon_url: normalizeNullableString(row.icon_url),
     creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     primary_event_id: normalizeNullableString(row.primary_event_id),
-    scheduled_time: normalizeNullableUnix(row.scheduled_time),
+    scheduled_time: scheduledTime,
   };
 }
 
 export function normalizeRandomVideoPool(
   value: unknown,
 ): RandomVideoPool | null {
-  if (!value || typeof value !== "object") return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const payload = value as {
     schema_version?: unknown;
     generated_at?: unknown;
     generation_key?: unknown;
     items?: unknown;
   };
-  if (Number(payload.schema_version) !== 1) return null;
+  if (payload.schema_version !== RANDOM_VIDEO_POOL_SCHEMA_VERSION) return null;
+  const generatedAt = normalizeNullableUnix(payload.generated_at);
+  if (generatedAt === null || generatedAt <= 0) return null;
   if (!Array.isArray(payload.items)) return null;
 
   const seen = new Set<string>();
@@ -69,19 +74,18 @@ export function normalizeRandomVideoPool(
     items.push(item);
   }
 
-  const generated = Number(payload.generated_at);
   const generationKey =
     typeof payload.generation_key === "string" &&
     payload.generation_key.trim()
       ? payload.generation_key.trim()
       : null;
 
-  if (!Number.isFinite(generated) || generated <= 0 || !generationKey) {
+  if (!generationKey) {
     return null;
   }
 
   return {
-    generatedAt: Math.floor(generated),
+    generatedAt,
     generationKey,
     items,
   };

@@ -48,10 +48,42 @@ export type QueueConsumerResult = {
 
 const missingWarned = new Set<string>();
 
+type WorkerWakeFailureReason =
+  | "binding_missing"
+  | "send_failed"
+  | "feature_flags_unavailable";
+
+async function recordWakeFailureSafely(
+  input: { kind: QueueWakeKind; kv?: KVNamespace | null },
+  reason: WorkerWakeFailureReason,
+): Promise<void> {
+  // A diagnostic KV failure must not invalidate committed business work or
+  // turn an optional Queue wake into a failed Worker invocation. This guard is
+  // independent of the shared-core hardening proposed in PR #741.
+  try {
+    await recordQueueWakeFailureBestEffort({
+      kind: input.kind,
+      reason,
+      kv: input.kv,
+    });
+  } catch {
+    // Provider errors, nested causes and custom Error.name can contain secrets.
+    warnOnce(`worker_wake_diagnostic_failed:${input.kind}`, {
+      service: "queue-wake-worker",
+      result: "failure_record_unavailable",
+      kind: input.kind,
+    });
+  }
+}
+
 function warnOnce(key: string, payload: Record<string, unknown>): void {
   if (missingWarned.has(key)) return;
   missingWarned.add(key);
-  console.warn(JSON.stringify(payload));
+  try {
+    console.warn(JSON.stringify(payload));
+  } catch {
+    // Diagnostic sink failures must never escape a best-effort wake path.
+  }
 }
 
 export function extractValidatedWakeFromBatch(
@@ -83,7 +115,20 @@ export async function sendWorkerQueueWakeBestEffort(input: {
   sentKinds?: Set<QueueWakeKind>;
   kv?: KVNamespace | null;
 }): Promise<boolean> {
-  const flags = resolveQueueFeatureFlags(input.envFlags ?? null);
+  let flags: ReturnType<typeof resolveQueueFeatureFlags>;
+  try {
+    // Worker env binding accessors/Proxies may throw even when the env object
+    // exists. Fail closed without aborting an already committed mutation.
+    flags = resolveQueueFeatureFlags(input.envFlags ?? null);
+  } catch {
+    warnOnce(`worker_wake_flags_unavailable:${input.kind}`, {
+      service: "queue-wake-worker",
+      result: "feature_flags_unavailable",
+      kind: input.kind,
+    });
+    await recordWakeFailureSafely(input, "feature_flags_unavailable");
+    return false;
+  }
   if (!flags.dispatchEnabled) return false;
   if (input.source === "continuation" && !flags.continuationEnabled) {
     return false;
@@ -104,11 +149,7 @@ export async function sendWorkerQueueWakeBestEffort(input: {
       result: "binding_missing",
       kind: input.kind,
     });
-    await recordQueueWakeFailureBestEffort({
-      kind: input.kind,
-      reason: "binding_missing",
-      kv: input.kv,
-    });
+    await recordWakeFailureSafely(input, "binding_missing");
     return false;
   }
 
@@ -131,19 +172,14 @@ export async function sendWorkerQueueWakeBestEffort(input: {
       await input.queue.send(message, { delaySeconds: input.delaySeconds });
     }
     return true;
-  } catch (error) {
+  } catch {
     input.sentKinds?.delete(input.kind);
     warnOnce(`worker_wake_send_failed:${input.kind}`, {
       service: "queue-wake-worker",
       result: "send_failed",
       kind: input.kind,
-      error_name: error instanceof Error ? error.name : undefined,
     });
-    await recordQueueWakeFailureBestEffort({
-      kind: input.kind,
-      reason: "send_failed",
-      kv: input.kv,
-    });
+    await recordWakeFailureSafely(input, "send_failed");
     return false;
   }
 }

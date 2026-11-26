@@ -26,7 +26,11 @@ export async function deletePublicJsonCache(
     await host.readEdgeCache().delete(publicJsonCacheUrl(r2Key));
   } catch {
     // Cache API failure must not take down the mutation path. Key は出さない。
-    console.warn("[public-cache] cache_api_delete_failed");
+    try {
+      console.warn("[public-cache] cache_api_delete_failed");
+    } catch {
+      // Diagnostic sinks are best-effort; never reject cache invalidation.
+    }
   }
 }
 
