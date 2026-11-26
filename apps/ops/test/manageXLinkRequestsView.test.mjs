@@ -136,11 +136,15 @@ async function withReviewBody(actions, run, rows = [row, { ...row, id: "req/2" }
   const dom = new JSDOM('<div id="root"></div>', {
     url: "https://flamenode.test/manage/x-link-requests", pretendToBeVisual: true,
   });
-  const keys = ["window", "document", "navigator", "HTMLElement", "HTMLTextAreaElement", "Node", "Event", "IS_REACT_ACT_ENVIRONMENT"];
+  const keys = ["window", "document", "navigator", "HTMLElement", "HTMLTextAreaElement", "Node", "Event", "IS_REACT_ACT_ENVIRONMENT", "ResizeObserver"];
+  // JSDOM has no ResizeObserver; TableScroll only observes/disconnects.
+  // Restore the previous descriptor below; do not change production scrolling.
+  class TestResizeObserver { observe() {} disconnect() {} }
   const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   for (const key of keys) Object.defineProperty(globalThis, key, {
     configurable: true, writable: true,
-    value: key === "IS_REACT_ACT_ENVIRONMENT" ? true : key === "window" ? dom.window : dom.window[key],
+    value: key === "ResizeObserver" ? TestResizeObserver
+      : key === "IS_REACT_ACT_ENVIRONMENT" ? true : key === "window" ? dom.window : dom.window[key],
   });
   const node = dom.window.document.getElementById("root");
   let root;
