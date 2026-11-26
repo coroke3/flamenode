@@ -10,6 +10,23 @@ import { OpsLink } from "../../components/shared/OpsLink.js";
 import { useApiResult, type OpsDataState } from "../useApiResult.js";
 import { DiagnosticStatusResults, normalizeDiagnosticFilter, type DiagnosticFilter } from "./DiagnosticStatusResults.js";
 
+// CURRENT runOperationalHealthChecks and Hono GET /ops/health return these five
+// identities. A valid DTO with missing, duplicate or unexpected rows is not
+// a complete operational diagnosis, even when its HTTP status is 200.
+const OPERATIONAL_CHECK_IDS = [
+  "system_settings_single_row",
+  "notification_processing_stuck",
+  "notification_failed_volume",
+  "open_moderation_cases_overdue",
+  "x_id_merge_pending_stale",
+] as const;
+
+function hasCompleteOperationalResults(results: AdminHealthResponse["results"]): boolean {
+  if (results.length !== OPERATIONAL_CHECK_IDS.length) return false;
+  const ids = new Set(results.map(result => result.id));
+  return OPERATIONAL_CHECK_IDS.every(id => ids.has(id));
+}
+
 export function AdminHealthView({
   data, fullRun, initialFilter, onRefresh,
 }: {
@@ -39,7 +56,7 @@ export function AdminHealthView({
       {/* MIG-0626 may return a catalog with zero results before any check runs.
           Until U03, never display an empty deep response as an all-clear. */}
       {data.status === "loading" ? <p role="status">読み込み中…</p>
-        : data.status === "ok" && data.data.error === null && (!fullRun || data.data.results.length > 0) ? (
+        : data.status === "ok" && data.data.error === null && (fullRun ? data.data.results.length > 0 : hasCompleteOperationalResults(data.data.results)) ? (
           <DiagnosticStatusResults kind="health" results={data.data.results}
             initialFilter={initialFilter} onRefresh={onRefresh} />
         ) : (

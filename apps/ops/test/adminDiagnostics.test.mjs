@@ -23,6 +23,21 @@ const results = [
   { id: "c", label: "情報", status: "info", count: 1, samples: [], note: "メモ" },
 ];
 
+// The operational endpoint is a fixed five-check set; generic rows are
+// reserved for component-only tests and the pre-U03 deep-response fixture.
+const operationalIds = [
+  "system_settings_single_row",
+  "notification_processing_stuck",
+  "notification_failed_volume",
+  "open_moderation_cases_overdue",
+  "x_id_merge_pending_stale",
+];
+const operationalResults = operationalIds.map((id, i) => ({
+  ...(i < 3 ? results[i] : results[0]),
+  id,
+  ...(i > 2 ? { label: "check " + id } : {}),
+}));
+
 // Fixed CURRENT/Hono identities, not fabricated generic IDs for a complete security run.
 const securityIds = [
   "access_token_not_null",
@@ -100,7 +115,7 @@ test("U01 CURRENT status filter stays on client; security warning and INFO count
 });
 
 test("U01 health preserves deep and integrity navigation; errors never show diagnostics", () => {
-  const base = { status: "ok", data: { status: "all", results, error: null } };
+  const base = { status: "ok", data: { status: "all", results: operationalResults, error: null } };
   const html = render(h(AdminHealthView, { data: base, fullRun: false, initialFilter: "all", onRefresh: () => {} }));
   assert.match(html, /全体診断を実行/);
   assert.match(html, /href="\/admin\/health\?deep=1"/);
@@ -109,6 +124,40 @@ test("U01 health preserves deep and integrity navigation; errors never show diag
   const unsupported = render(h(AdminHealthView, { data: { status: "unsupported" }, fullRun: true, initialFilter: "all", onRefresh: () => {} }));
   assert.match(unsupported, /全体診断は現在利用できません/);
   assert.doesNotMatch(unsupported, /注意/);
+});
+
+test("MIG-0736 operational health requires all five distinct CURRENT check identities", async () => {
+  const clean = operationalResults.map(result => result.status === "warn"
+    ? { ...result, status: "ok", count: 0, samples: [] } : result);
+  const invalid = [
+    [], clean.slice(0, 4), [clean[0]],
+    [...clean.slice(0, 4), clean[0]],
+    [...clean.slice(0, 4), { ...clean[4], id: "unknown" }],
+    [...clean, { ...clean[4], id: "extra" }],
+  ];
+  const view = async (rows, initialFilter = "all") => {
+    const data = await getAdminHealth(async () => response(200, {
+      status: "all", results: rows, error: null,
+    }), false);
+    assert.equal(data.status, "ok", "the DTO is shape-valid");
+    return render(h(AdminHealthView, {
+      data, fullRun: false, initialFilter, onRefresh: () => {},
+    }));
+  };
+  for (const rows of invalid) {
+    const html = await view(rows);
+    assert.match(html, /診断結果を取得できませんでした/);
+    assert.doesNotMatch(html, /WARN はありません|状態フィルタ/);
+    assert.equal(new JSDOM(html).window.document.querySelector("table"), null);
+  }
+  for (const rows of [clean, [...clean].reverse()]) {
+    const html = await view(rows);
+    assert.match(html, /WARN はありません/);
+    assert.equal(new JSDOM(html).window.document.querySelectorAll("tbody tr").length, 5);
+  }
+  const warned = await view(operationalResults, "warn");
+  assert.match(warned, /WARN 1 件/);
+  assert.equal(new JSDOM(warned).window.document.querySelectorAll("tbody tr").length, 1);
 });
 
 test("MIG-0736 deep catalog or empty results never show an all-clear before U03", async () => {
@@ -365,7 +414,7 @@ test("MIG-0736 diagnostic route query parity: duplicate keys never opt in or sel
         calls.push(url);
         if (url.includes("/integrity")) return response(501, { error: "unsupported" });
         const security = url.includes("/security");
-        return response(200, { status: "all", results: security ? securityResults : results, error: null, ...(security ? { ran: true } : {}) });
+        return response(200, { status: "all", results: security ? securityResults : url.includes("?deep=1") ? results : operationalResults, error: null, ...(security ? { ran: true } : {}) });
       };
       try {
         await React.act(async () => {
@@ -380,7 +429,7 @@ test("MIG-0736 diagnostic route query parity: duplicate keys never opt in or sel
       }
     }
     await check(AdminHealth, "/admin/health?deep=1&deep=0&run=1&run=1&status=warn&status=ok",
-      ["/api/admin-read/ops/health"], /運用チェック/, "すべて (3)");
+      ["/api/admin-read/ops/health"], /運用チェック/, "すべて (5)");
     await check(AdminHealth, "/admin/health?deep=1&deep=1&run=1&status=warn",
       ["/api/admin-read/ops/health?deep=1"], /全体診断/, "WARN (1)");
     await check(AdminHealth, "/admin/health?deep=1&run=1&run=0",
@@ -454,7 +503,7 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
             status: "all",
             ran: true,
             error: null,
-            results: (idleUrl ? results.slice(0, 2) : securityResults).map((result, i) =>
+            results: (idleUrl ? request.url === idleUrl ? operationalResults : results.slice(0, 2) : securityResults).map((result, i) =>
               i === 0 ? { ...result, label: label + " OK" } : i === 1 ? { ...result, label } : result),
           }));
         });
@@ -522,7 +571,30 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
         assert.doesNotMatch(target.textContent, /new-run-WARN|obsolete-private-result/, path);
         assert.equal(target.querySelector("table"), null, path);
 
-        if (!idleUrl) {
+        if (idleUrl) {
+          // Return to the operational view after the deep-run denial. A
+          // shape-valid partial operational refresh must clear the old table.
+          await go(path);
+          const fresh = pending.at(-1);
+          assert.equal(fresh.url, idleUrl, path);
+          assert.notEqual(fresh, current, path);
+          await finish(fresh, "full-operational-before-partial");
+          assert.match(target.textContent, /full-operational-before-partial/, path);
+          const retry = [...target.querySelectorAll("button")]
+            .find(button => button.textContent.trim() === "最新状態を再チェック");
+          assert.ok(retry, path);
+          await React.act(async () => { retry.click(); });
+          assert.notEqual(pending.at(-1), fresh, path);
+          assert.equal(pending.at(-1).url, idleUrl, path);
+          await React.act(async () => {
+            pending.at(-1).resolve(response(200, {
+              status: "all", error: null, results: [operationalResults[0]],
+            }));
+          });
+          assert.match(target.textContent, /診断結果を取得できませんでした/, path);
+          assert.doesNotMatch(target.textContent, /WARN はありません|full-operational-before-partial/, path);
+          assert.equal(target.querySelector("table"), null, path);
+        } else {
           // Re-enter after the denial, then prove a shape-valid partial refresh
           // replaces (rather than retains) the previous full diagnostic.
           await go(runPath + "&run=1");
