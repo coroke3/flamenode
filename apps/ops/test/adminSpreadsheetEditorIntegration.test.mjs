@@ -276,3 +276,68 @@ for (const denial of [
     }
   });
 }
+
+
+test("MIG-0737 U01 export denial headers: post-mutation 403 fences delivery before metadata without replay", async () => {
+  const requests = [];
+  let resolveExport;
+  let resolveMetadata;
+  const pendingExport = new Promise(resolve => { resolveExport = resolve; });
+  const pendingMetadata = new Promise(resolve => { resolveMetadata = resolve; });
+  let reads = 0;
+  let signal;
+  let abortedAtBodyStart;
+  const oldCreate = URL.createObjectURL;
+  const oldRevoke = URL.revokeObjectURL;
+  const oldClick = dom.window.HTMLAnchorElement.prototype.click;
+  const delivered = [];
+  URL.createObjectURL = () => "blob:pending-export";
+  URL.revokeObjectURL = () => {};
+  dom.window.HTMLAnchorElement.prototype.click = function () { delivered.push(this.download); };
+  const fn = async (path, init) => {
+    requests.push({ path, method: init.method, body: init.body ? JSON.parse(init.body) : null });
+    if (path.includes("/tables")) return json(200, catalog);
+    if (path.includes("/export")) { signal = init.signal; return pendingExport; }
+    if (init.method === "PATCH") return json(200, { ok: true });
+    if (++reads === 1) return json(200, page("videos"));
+    const response = json(403, {});
+    response.json = () => {
+      abortedAtBodyStart = signal.aborted;
+      resolveExport(new Response("old export", { headers: { "content-type": "text/csv" } }));
+      return pendingMetadata;
+    };
+    return response;
+  };
+  const ui = await mount({ fetchFn: fn, initialTable: "videos", enableMutations: true });
+  try {
+    await click(ui, "CSV ダウンロード");
+    await click(ui, "1行 title を編集");
+    const input = ui.host.querySelector("label input[type=text]");
+    assert.ok(input);
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+    await React.act(async () => {
+      setter.call(input, "after");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await click(ui, "セルを保存");
+    await flush();
+    assert.equal(abortedAtBodyStart, true);
+    assert.equal(signal.aborted, true);
+    assert.equal(ui.host.querySelector("table"), null);
+    assert.match(ui.host.textContent, /管理者権限が必要です/);
+    assert.deepEqual(delivered, []);
+    await React.act(async () => resolveMetadata({ reason: "admin_required" }));
+    await flush();
+    assert.deepEqual(delivered, []);
+    assert.deepEqual(requests.filter(x => x.method === "PATCH").map(x => x.body), [
+      { table: "videos", primaryKey: { id: "v1" }, column: "title", value: "after" },
+    ]);
+    assert.equal(reads, 2);
+  } finally {
+    resolveMetadata({});
+    await ui.cleanup();
+    URL.createObjectURL = oldCreate;
+    URL.revokeObjectURL = oldRevoke;
+    dom.window.HTMLAnchorElement.prototype.click = oldClick;
+  }
+});

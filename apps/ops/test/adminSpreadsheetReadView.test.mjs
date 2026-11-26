@@ -995,3 +995,152 @@ test("MIG-0737 U01 export denial: a current denial clears an already completed e
     observed.restore();
   }
 });
+
+
+for (const [label, format] of [
+  ["CSV ダウンロード", "csv"], ["TSV ダウンロード", "tsv"], ["コピー (CSV)", "csv"],
+]) {
+  test("MIG-0737 U01 export denial headers: current 403 fences " + label + " before optional metadata", async () => {
+    const observed = observeExports();
+    const pending = deferred();
+    const metadata = deferred();
+    let reads = 0;
+    let exports = 0;
+    let exportSignal;
+    let abortedAtBodyStart;
+    const fn = async (path, init) => {
+      assert.equal(init.method, "GET");
+      if (path.includes("/tables")) return json(200, catalog);
+      if (path.includes("/data")) {
+        if (++reads === 1) return json(200, page("videos", 1));
+        const response = json(403, {});
+        response.json = () => {
+          abortedAtBodyStart = exportSignal.aborted;
+          // The earlier export becomes deliverable while metadata is still pending.
+          pending.resolve(exportResponse(format));
+          return metadata.promise;
+        };
+        return response;
+      }
+      exports++;
+      exportSignal = init.signal;
+      return pending.promise;
+    };
+    const ui = await mount(fn, "videos");
+    try {
+      await React.act(async () => exportButton(ui.host, label).click());
+      await React.act(async () => exportButton(ui.host, "再読込").click());
+      await flush();
+      assert.equal(abortedAtBodyStart, true, "403 must fence the export before response.json()");
+      assert.equal(exportSignal.aborted, true);
+      assert.equal(ui.host.querySelector("table"), null);
+      assert.match(ui.host.textContent, /管理者権限が必要です/);
+      assert.deepEqual(observed.effects, { created: [], downloaded: [], revoked: [], copied: [], fallback: [] });
+      await React.act(async () => metadata.resolve({ reason: "admin_required" }));
+      await flush();
+      assert.deepEqual(observed.effects, { created: [], downloaded: [], revoked: [], copied: [], fallback: [] });
+      assert.equal(reads, 2);
+      assert.equal(exports, 1);
+    } finally {
+      metadata.resolve({});
+      await ui.cleanup();
+      observed.restore();
+    }
+  });
+}
+
+test("MIG-0737 U01 export denial headers: late metadata does not revoke a fresh explicit export request", async () => {
+  const observed = observeExports();
+  const oldExport = deferred();
+  const replacement = deferred();
+  const metadata = deferred();
+  const signals = [];
+  let reads = 0;
+  let abortedAtBodyStart;
+  const fn = async (path, init) => {
+    assert.equal(init.method, "GET");
+    if (path.includes("/tables")) return json(200, catalog);
+    if (path.includes("/data")) {
+      if (++reads === 1) return json(200, page("videos", 1));
+      const response = json(403, {});
+      response.json = () => { abortedAtBodyStart = signals[0].aborted; return metadata.promise; };
+      return response;
+    }
+    signals.push(init.signal);
+    return signals.length === 1 ? oldExport.promise : replacement.promise;
+  };
+  const ui = await mount(fn, "videos");
+  try {
+    await React.act(async () => exportButton(ui.host).click());
+    await React.act(async () => exportButton(ui.host, "再読込").click());
+    await flush();
+    assert.equal(abortedAtBodyStart, true);
+    assert.equal(exportButton(ui.host).disabled, false);
+    // A fresh explicit attempt is still checked by the server; it is not the old export lease.
+    await React.act(async () => exportButton(ui.host).click());
+    assert.equal(signals.length, 2);
+    await React.act(async () => metadata.resolve({ reason: "admin_required" }));
+    await flush();
+    assert.equal(signals[1].aborted, false, "late metadata must not commit the same denial twice");
+    await React.act(async () => oldExport.resolve(exportResponse()));
+    await flush();
+    assert.deepEqual(observed.effects.downloaded, []);
+    assert.equal(exportButton(ui.host).disabled, true);
+    await React.act(async () => replacement.resolve(json(403, {})));
+    await flush();
+    assert.deepEqual(observed.effects.downloaded, []);
+    assert.equal(exportButton(ui.host).disabled, false);
+  } finally {
+    metadata.resolve({});
+    await ui.cleanup();
+    observed.restore();
+  }
+});
+
+test("MIG-0737 U01 export denial headers: obsolete raw 403 is not a current denial", async () => {
+  const observed = observeExports();
+  const oldRead = deferred();
+  const pending = deferred();
+  let videoReads = 0;
+  let readSignal;
+  let exportSignal;
+  let bodyReads = 0;
+  const fn = async (path, init) => {
+    assert.equal(init.method, "GET");
+    if (path.includes("/tables")) return json(200, catalog);
+    if (path.includes("/data")) {
+      const table = new URL(path, "https://flamenode.test").searchParams.get("table");
+      if (table === "videos" && ++videoReads === 2) {
+        readSignal = init.signal;
+        return oldRead.promise;
+      }
+      return json(200, page(table, 1));
+    }
+    exportSignal = init.signal;
+    return pending.promise;
+  };
+  const ui = await mount(fn, "videos");
+  try {
+    await React.act(async () => exportButton(ui.host, "再読込").click());
+    const select = async (label) => {
+      const button = [...ui.host.querySelectorAll("nav button")].find(b => b.textContent.includes(label));
+      assert.ok(button);
+      await React.act(async () => button.click());
+      await flush();
+    };
+    await select("イベント");
+    await select("動画");
+    await React.act(async () => exportButton(ui.host).click());
+    assert.equal(readSignal.aborted, true);
+    const response = json(403, {});
+    response.json = () => { bodyReads++; return new Promise(() => {}); };
+    await React.act(async () => oldRead.resolve(response));
+    await flush();
+    assert.equal(bodyReads, 0);
+    assert.equal(exportSignal.aborted, false);
+    assert.doesNotMatch(ui.host.textContent, /管理者権限が必要/);
+    await React.act(async () => pending.resolve(exportResponse()));
+    await flush();
+    assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+  } finally { await ui.cleanup(); observed.restore(); }
+});

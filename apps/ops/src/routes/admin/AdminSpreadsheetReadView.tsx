@@ -98,13 +98,31 @@ export function AdminSpreadsheetReadView({
     return true;
   }, [isCurrentPageRead]);
 
+  const readCurrentPage = React.useCallback(async (
+    controller: AbortController,
+  ): Promise<SpreadsheetReadResult<AdminSpreadsheetPageResponse> | undefined> => {
+    let denialCommitted = false;
+    const observeDenial: OpsFetch = async (path, init) => {
+      const response = await pageContext.fetchFn(path, init);
+      // The current HTTP 403 is authoritative before optional JSON metadata.
+      // Commit using the same read lease; an obsolete response cannot revoke a new export.
+      if (response.status === 403) denialCommitted = commitPageRead(controller, { status: "forbidden" });
+      return response;
+    };
+    const result = await loadSpreadsheetPage(observeDenial, pageContext.selectedTable,
+      pageContext.page, controller.signal);
+    // Metadata is not used by this view. Never commit the same denial again
+    // after an intervening explicit retry or a replacement export.
+    if (denialCommitted) return isCurrentPageRead(controller) ? result : undefined;
+    return commitPageRead(controller, result) ? result : undefined;
+  }, [pageContext, commitPageRead, isCurrentPageRead]);
+
   async function refreshAfterMutation(): Promise<void> {
     const controller = beginPageRead();
     if (!controller) return;
     try {
-      const result = await loadSpreadsheetPage(pageContext.fetchFn, pageContext.selectedTable,
-        pageContext.page, controller.signal);
-      if (!commitPageRead(controller, result)) return;
+      const result = await readCurrentPage(controller);
+      if (!result) return;
       if (result.status !== "ok") throw new Error("spreadsheet_reload_failed");
     } finally {
       if (pageReadRef.current === controller) pageReadRef.current = null;
@@ -239,17 +257,14 @@ export function AdminSpreadsheetReadView({
     const controller = beginPageRead();
     if (!controller) return;
     setRows({ status: "loading" });
-    void loadSpreadsheetPage(pageContext.fetchFn, pageContext.selectedTable, pageContext.page,
-      controller.signal).then((result) => {
-      commitPageRead(controller, result);
-    }).finally(() => {
+    void readCurrentPage(controller).finally(() => {
       if (pageReadRef.current === controller) pageReadRef.current = null;
     });
     return () => {
       controller.abort();
       if (pageReadRef.current === controller) pageReadRef.current = null;
     };
-  }, [pageContext, beginPageRead, commitPageRead]);
+  }, [beginPageRead, readCurrentPage]);
 
   // Render-time origin verification prevents even a transient old-session paint
   // before the effect can clear state on a changed fetch function or URL selection.
