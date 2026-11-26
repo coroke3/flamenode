@@ -87,7 +87,7 @@ test("MIG-0730 U02g: forged video IDs, invalid FormData and private member fail 
   assert.equal(calls, 0);
 });
 
-test("MIG-0730 U02g: 401/403/409/503, lost response and forged 200 are unverified; no retry", async () => {
+test("MIG-0730 U02g: 401/403/409/503, lost response and forged 200 are never success; no retry", async () => {
   for (const status of [401, 403, 409, 503]) {
     let calls = 0;
     const result = await saveAdminVideoMembers("video-1", form(), async () => {
@@ -96,6 +96,7 @@ test("MIG-0730 U02g: 401/403/409/503, lost response and forged 200 are unverifie
     });
     assert.equal(result.ok, false);
     assert.doesNotMatch(result.message, /secret/);
+    assert.equal(result.reason, status === 401 ? "unauthenticated" : undefined);
     assert.equal(calls, 1);
   }
   for (const body of [
@@ -553,4 +554,50 @@ test("MIG-0730 U02dl: UTF-8 wire overflow is rejected before invoking JSON.parse
   assert.match(result.message, /暫定256KiB制限/,
     "oversized wire payload is classified before the JSON parser");
   assert.equal(requests, 0);
+});
+
+test("MIG-0730 U02dt: D-17-3 HTTP 401 takes precedence over every body without reading it", async () => {
+  const responses = [
+    reply({ ok: false, reason: "unauthenticated", message: "PRIVATE" }, 401),
+    reply({ ok: true, videoId: "video-1", pendingPublicReflection: true }, 401),
+    new Response("invalid JSON", { status: 401 }),
+    new Response(null, { status: 401 }),
+    { status: 401, json() { throw Error("BODY MUST NOT BE READ"); } },
+  ];
+  for (const response of responses) {
+    let calls = 0;
+    let reads = 0;
+    const result = await saveAdminVideoMembers("video-1", form(), async () => {
+      calls++;
+      return {
+        status: response.status,
+        json() { reads++; return response.json(); },
+      };
+    });
+    assert.deepEqual(result, {
+      ok: false, reason: "unauthenticated", message: "再ログインが必要です。",
+    });
+    assert.equal(reads, 0, "401 cannot be downgraded by a malformed or hanging body");
+    assert.equal(calls, 1, "401 must never auto-replay");
+  }
+  // A later explicit call is still possible after the old latch settles.
+  assert.deepEqual(await saveAdminVideoMembers("video-1", form(), async () =>
+    reply({ ok: true, videoId: "video-1" })), { ok: true });
+});
+
+test("MIG-0730 U02dt: a non-401 body cannot forge the anonymous transport classification", async () => {
+  for (const status of [200, 403, 409, 503]) {
+    let calls = 0;
+    const result = await saveAdminVideoMembers("video-1", form(), async () => {
+      calls++;
+      return reply({ ok: false, reason: "unauthenticated", message: "PRIVATE" }, status);
+    });
+    assert.deepEqual(result, {
+      ok: false, message: "保存結果を確認できませんでした。最新状態を再取得してください。",
+    });
+    assert.equal(calls, 1);
+  }
+  const success = await saveAdminVideoMembers("video-1", form(), async () =>
+    reply({ ok: true, videoId: "video-1", reason: "unauthenticated" }));
+  assert.deepEqual(success, { ok: true }, "untrusted extra success fields are not forwarded");
 });

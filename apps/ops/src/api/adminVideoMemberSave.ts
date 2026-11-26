@@ -9,11 +9,14 @@ export type AdminVideoMemberSaveResult = {
   ok: boolean;
   message?: string;
   pendingPublicReflection?: boolean;
+  /** D-17-3: provisional projection of HTTP 401 / shared send anonymous. */
+  reason?: "unauthenticated";
 };
 
 const INVALID = "参加者設定の入力を確認してください。";
 const TOO_LARGE = "参加者データが移行先の暫定256KiB制限を超えています。現行の管理画面で保存してください。";
 const UNVERIFIED = "保存結果を確認できませんでした。最新状態を再取得してください。";
+const ANONYMOUS = "再ログインが必要です。";
 // SA-085 shares the same in-tab video lock with SA-084 collaborator writes.
 // The Hono route still requires independent server CAS/audit/Queue.
 const BUSY = "この作品の参加者保存は処理中です。完了後に最新状態を確認してください。";
@@ -141,7 +144,15 @@ export async function saveAdminVideoMembers(
         body: parsed.body,
       },
     );
-    if (response.status !== 200) return { ok: false, message: UNVERIFIED };
+    // D-17-3: HTTP 401 is authoritative even if its body is missing,
+    // malformed or contains a forged success receipt. Do not parse it.
+    // Keep this candidate's existing ok/message port shape; the real host
+    // will map the explicit reason to its current-authority navigation.
+    const status = response.status;
+    if (status === 401) {
+      return { ok: false, reason: "unauthenticated", message: ANONYMOUS };
+    }
+    if (status !== 200) return { ok: false, message: UNVERIFIED };
     const json: unknown = await response.json();
     if (!json || typeof json !== "object" || Array.isArray(json)) {
       return { ok: false, message: UNVERIFIED };
