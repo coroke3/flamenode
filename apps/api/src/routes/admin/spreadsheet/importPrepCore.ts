@@ -84,6 +84,26 @@ export type PreparedSpreadsheetImport = {
   invalidColumns: string[];
 };
 
+// Only this validation boundary may attach user-supplied column details to
+// a 400 response. A provider Error with the same prefix is not proof
+// that column validation ran.
+export class SpreadsheetImportColumnError extends Error {
+  #publicMessage: string;
+
+  constructor(code: "unknown_column" | "column_not_editable", columns: readonly string[]) {
+    const message = `${code}:${columns.join(",")}`;
+    super(message);
+    this.#publicMessage = message;
+  }
+
+  static readPublicMessage(error: unknown): string | null {
+    if (typeof error !== "object" || error === null || !(#publicMessage in error)) {
+      return null;
+    }
+    return error.#publicMessage;
+  }
+}
+
 export function assertSpreadsheetImportColumns(opts: {
   mappedColumns: string[];
   invalidColumns: string[];
@@ -91,17 +111,17 @@ export function assertSpreadsheetImportColumns(opts: {
   readonlyColumns: string[];
 }): void {
   if (opts.invalidColumns.length > 0) {
-    throw new Error(`unknown_column:${opts.invalidColumns.join(",")}`);
+    throw new SpreadsheetImportColumnError("unknown_column", opts.invalidColumns);
   }
   const unknown = opts.mappedColumns.filter(
     (column) => !opts.columnNames.includes(column),
   );
-  if (unknown.length > 0) throw new Error(`unknown_column:${unknown.join(",")}`);
+  if (unknown.length > 0) throw new SpreadsheetImportColumnError("unknown_column", unknown);
   const readonly = opts.mappedColumns.filter((column) =>
     opts.readonlyColumns.includes(column),
   );
   if (readonly.length > 0) {
-    throw new Error(`column_not_editable:${readonly.join(",")}`);
+    throw new SpreadsheetImportColumnError("column_not_editable", readonly);
   }
 }
 

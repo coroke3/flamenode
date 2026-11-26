@@ -52,6 +52,7 @@ import {
   primaryKeysFromColumns,
 } from "./registry.ts";
 import { SPREADSHEET_COLUMN_ENUMS, SPREADSHEET_SCHEMA_TABLES } from "./schemaCatalog.ts";
+import { SpreadsheetImportColumnError } from "./importPrepCore.ts";
 import { readSpreadsheetJsonBody } from "./writeBody.ts";
 import {
   parseSpreadsheetCrudBody,
@@ -297,21 +298,31 @@ const CLIENT_ERROR_CODES_400 = new Set([
 ]);
 
 export function spreadsheetWriteFailure(c: Context<AppEnv>, error: unknown): Response {
-  if (error instanceof SpreadsheetError) {
-    return c.json(
-      { error: error.code },
-      error.code === SPREADSHEET_ERROR.DB_UNAVAILABLE ? 503 : 400,
-      PRIVATE_HEADERS,
-    );
+  let message = "";
+  try {
+    const columnMessage = SpreadsheetImportColumnError.readPublicMessage(error);
+    if (columnMessage !== null) {
+      return c.json({ error: columnMessage }, 400, PRIVATE_HEADERS);
+    }
+    if (error instanceof SpreadsheetError) {
+      const code = error.code;
+      if (code === SPREADSHEET_ERROR.DB_UNAVAILABLE || code === SPREADSHEET_ERROR.UNKNOWN_TABLE) {
+        message = code;
+      }
+    } else if (error instanceof Error) {
+      const rawMessage = error.message;
+      if (typeof rawMessage === "string") {
+        message = mapSqliteMessage(rawMessage) ?? rawMessage;
+      }
+    }
+  } catch {
+    // A provider error can have throwing accessors or proxy traps.
+    message = "";
   }
-  const rawMessage = error instanceof Error ? error.message : "";
-  const message = rawMessage ? (mapSqliteMessage(rawMessage) ?? rawMessage) : "";
 
-  if (
-    message.startsWith("unknown_column:") ||
-    message.startsWith("column_not_editable:") ||
-    CLIENT_ERROR_CODES_400.has(message)
-  ) {
+  // Preserve fixed legacy codes and SQLite constraint categories, but never
+  // expose arbitrary provider text by accepting a message prefix.
+  if (CLIENT_ERROR_CODES_400.has(message)) {
     return c.json({ error: message }, 400, PRIVATE_HEADERS);
   }
   if (message === "row_not_found" || message === "spreadsheet_disabled") {
@@ -324,7 +335,11 @@ export function spreadsheetWriteFailure(c: Context<AppEnv>, error: unknown): Res
     return c.json({ error: message }, 503, PRIVATE_HEADERS);
   }
 
-  console.error("[spreadsheet] WRITE_FAILED", error instanceof Error ? error.message : String(error));
+  try {
+    console.error("[spreadsheet] WRITE_FAILED");
+  } catch {
+    // Logging failure must not replace the stable HTTP error response.
+  }
   return c.json({ error: "internal_error" }, 500, PRIVATE_HEADERS);
 }
 

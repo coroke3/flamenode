@@ -573,6 +573,89 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("MIG-0638 U02: write/import provider diagnostics never reflect forged column details", async () => {
+    resetAllCaches();
+    const { honoSqlite, honoD1, callHono, callCurrent } = createFixture();
+    // Genuine RH-008 validation retains the detailed CURRENT error envelope.
+    for (const [table, row, expected] of [
+      ["software_catalog", { not_a_column: "x" }, "unknown_column:not_a_column"],
+      ["events", { visibility_status: "private" }, "column_not_editable:visibility_status"],
+    ]) {
+      const body = { table, dryRun: true, rows: [row] };
+      const current = await callCurrent(currentImportRoute, "POST", "/import", body);
+      const target = await callHono("POST", "/import", body);
+      assert.equal(current.status, 400);
+      assert.equal(target.status, 400);
+      assert.deepEqual(current.body, { error: expected });
+      assert.deepEqual(target.body, current.body);
+    }
+
+    const beforeAudits = allAudits(honoSqlite);
+    const beforeQueue = allQueueRows(honoSqlite);
+    const beforeRows = honoSqlite.prepare("SELECT * FROM software_catalog ORDER BY id").all();
+    const beforeBatches = honoD1.stats.batches;
+    const beforeWrites = honoD1.stats.writes;
+    const originalPrepare = honoD1.prepare;
+    const originalError = console.error;
+    const canary = "MIG0638_PROVIDER_CANARY";
+    const hostileMessage = Object.defineProperty(new Error(), "message", {
+      get() { throw new Error(canary); },
+    });
+    const hostilePrototype = new Proxy({}, {
+      getPrototypeOf() { throw new Error(canary); },
+    });
+    const forged = [
+      new Error("unknown_column:" + canary),
+      new Error("column_not_editable:" + canary),
+      new Error("provider params: " + canary),
+      hostileMessage,
+      hostilePrototype,
+    ];
+    const row = { id: "sw-redaction", name: "New", normalized_name: "new", created_at: "1", updated_at: "1" };
+    const logs = [];
+    let injected = 0;
+    try {
+      console.error = (...args) => logs.push(args);
+      for (const fault of forged) {
+        for (const [path, body] of [
+          ["/data", { table: "software_catalog", row }],
+          ["/import", { table: "software_catalog", dryRun: true, rows: [row] }],
+        ]) {
+          resetAllCaches();
+          honoD1.prepare = (sql) => {
+            if (sql.includes("FROM pragma_table_xinfo(?) AS x")) {
+              injected++;
+              throw fault;
+            }
+            return originalPrepare(sql);
+          };
+          const result = await callHono("POST", path, body);
+          assert.equal(result.status, 500);
+          assert.deepEqual(result.body, { error: "internal_error" });
+          assert.match(result.headers.get("cache-control"), /private.*no-store/);
+        }
+      }
+      assert.equal(injected, forged.length * 2);
+      assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] WRITE_FAILED"]));
+
+      // Even a broken diagnostic sink must not replace the response.
+      resetAllCaches();
+      console.error = () => { throw new Error(canary); };
+      const result = await callHono("POST", "/data", { table: "software_catalog", row });
+      assert.equal(result.status, 500);
+      assert.deepEqual(result.body, { error: "internal_error" });
+      assert.equal(injected, forged.length * 2 + 1);
+    } finally {
+      honoD1.prepare = originalPrepare;
+      console.error = originalError;
+    }
+    assert.equal(honoD1.stats.batches, beforeBatches);
+    assert.equal(honoD1.stats.writes, beforeWrites);
+    assert.deepEqual(allAudits(honoSqlite), beforeAudits);
+    assert.deepEqual(allQueueRows(honoSqlite), beforeQueue);
+    assert.deepEqual(honoSqlite.prepare("SELECT * FROM software_catalog ORDER BY id").all(), beforeRows);
+  });
+
   test("MIG-0638 T06: D1 statement budget (S2 reads <= 3, S3 writes pre-reads + 1 atomic batch)", async () => {
     resetAllCaches();
     const { honoD1, callHono } = createFixture();
