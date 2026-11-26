@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { EVENT_INDEX_KEY, eventDetailKey, eventReleaseKey } from "../src/lib/publicDataLoader.ts";
 import { eventReleaseObjectKey } from "../../../src/lib/publicData/staticEventDetailCore.ts";
-import type { ProduceResult, ProducedSnapshot } from "./produceSnapshots.ts";
+import { MAX_SNAPSHOT_BYTES, type ProduceResult, type ProducedSnapshot } from "./produceSnapshots.ts";
 
 const RELEASE_SOURCE_PATTERN = /^snapshot\/event-release\/([A-Za-z0-9_-]{1,128})\.json$/;
 const EVENT_DETAIL_SOURCE_PATTERN = /^snapshot\/event-detail\/([A-Za-z0-9_-]{1,128})\.json$/;
@@ -46,13 +46,23 @@ function digest(body: string): string {
  * for Astro SSG, while the CURRENT API R2 objects have bare JSON payloads.
  * Publishing an envelope instead would silently break the Hono readers.
  */
-export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "manifest">): ApiArtifactToPublish[] {
+export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "manifest" | "publicEventIds">): ApiArtifactToPublish[] {
   const allowed = new Set(result.manifest.allowedKeys);
   const blocked = new Set(result.manifest.blockedKeys);
   if (allowed.size !== result.manifest.allowedKeys.length ||
       result.manifest.schemaVersion !== 1) {
     throw new Error("api artifact publish: invalid or duplicate manifest entries");
   }
+  // The index is filtered to 200 rows, while valid public events can be
+  // off-index. The manifest is derived from successful snapshot adds, so it
+  // cannot itself prove that every public event produced its release.
+  const expectedIds = result.publicEventIds;
+  if (!Array.isArray(expectedIds) || expectedIds.length > MAX_API_RELEASE_OBJECTS ||
+      expectedIds.some((id) => typeof id !== "string" || !EVENT_ID_PATTERN.test(id)) ||
+      new Set(expectedIds).size !== expectedIds.length) {
+    throw new Error("api artifact publish: invalid public event inventory");
+  }
+  const expectedPublicIds = new Set(expectedIds);
   const sources = new Map<string, ProducedSnapshot>();
   for (const snapshot of result.snapshots) {
     if (sources.has(snapshot.key)) throw new Error("api artifact publish: duplicate snapshot key");
@@ -66,22 +76,35 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
     const release = RELEASE_SOURCE_PATTERN.exec(key);
     if (release) releaseIds.add(release[1]!);
   }
-  if (releaseIds.size > MAX_API_RELEASE_OBJECTS ||
-      detailIds.size !== releaseIds.size ||
-      [...detailIds].some((id) => !releaseIds.has(id) ||
+  if (releaseIds.size !== expectedPublicIds.size ||
+      detailIds.size !== expectedPublicIds.size ||
+      [...expectedPublicIds].some((id) => !releaseIds.has(id) || !detailIds.has(id) ||
         !allowed.has(eventDetailKey(id)) || !allowed.has(eventReleaseKey(id)))) {
     throw new Error("api artifact publish: incomplete event release coverage");
   }
   // A failed release PUT/readback must never promote an index pointing at it.
   // This is index-last ordering, not an atomic cross-key transaction: existing
   // readers can still see a changed release before index promotion.
+  // Detail snapshots are not PUT by this publisher, but an allowed manifest
+  // key alone cannot prove the expected public detail body exists or is valid.
+  // Validate all detail envelopes before any remote GET/PUT, including events
+  // omitted from CURRENT's period-filtered, 200-row index.
+  const detailKeys = [...expectedPublicIds].sort().map(eventDetailKey);
   const sourceKeys = [...[...releaseIds].sort().map(eventReleaseKey), EVENT_INDEX_KEY];
-  const artifacts = sourceKeys.map((sourceKey) => {
+  const publishedSourceKeys = new Set(sourceKeys);
+  const verifiedBodies = new Map<string, string>();
+  for (const sourceKey of [...detailKeys, ...sourceKeys]) {
     if (!allowed.has(sourceKey) || blocked.has(sourceKey)) {
       throw new Error("api artifact publish: event artifact is not allowed by build manifest");
     }
     const snapshot = sources.get(sourceKey);
     if (!snapshot) throw new Error("api artifact publish: manifest-listed snapshot missing");
+    if (typeof snapshot.json !== "string") {
+      throw new Error("api artifact publish: invalid snapshot envelope");
+    }
+    if (Buffer.byteLength(snapshot.json, "utf8") > MAX_SNAPSHOT_BYTES) {
+      throw new Error("api artifact publish: snapshot envelope exceeds byte budget");
+    }
     let envelope: any;
     try { envelope = JSON.parse(snapshot.json); }
     catch { throw new Error("api artifact publish: invalid snapshot envelope"); }
@@ -95,13 +118,19 @@ export function selectApiArtifacts(result: Pick<ProduceResult, "snapshots" | "ma
         digest(body) !== snapshot.sha256 || digest(body) !== envelope.sha256) {
       throw new Error("api artifact publish: payload digest or byte budget mismatch");
     }
+    if (publishedSourceKeys.has(sourceKey)) {
+      verifiedBodies.set(sourceKey, body);
+    }
+  }
+  const artifacts = sourceKeys.map((sourceKey) => {
+    const body = verifiedBodies.get(sourceKey)!;
     const match = RELEASE_SOURCE_PATTERN.exec(sourceKey);
     const key = match ? eventReleaseObjectKey(match[1]!) : "events/index.json";
     return { key, body, sha256: digest(body) };
   });
-  // The manifest alone cannot expose an event whose detail AND release
-  // both failed to build. Compare against the CURRENT events/index.json
-  // items, which were generated from the public event IDs for this build.
+  // Check index-specific contracts separately: CURRENT filters point/half-
+  // bounded events and caps at 200, so the index is only a subset of the
+  // authoritative source publicEventIds that we checked above.
   let eventIndex: unknown;
   try { eventIndex = JSON.parse(artifacts[artifacts.length - 1]!.body); }
   catch { throw new Error("api artifact publish: event index JSON is invalid"); }
@@ -151,7 +180,7 @@ async function readExisting(bucket: ApiArtifactBucket, target: ApiArtifactToPubl
  * does not become a successful build, and an unchanged object is never PUT.
  */
 export async function publishApiArtifacts(
-  result: Pick<ProduceResult, "snapshots" | "manifest">,
+  result: Pick<ProduceResult, "snapshots" | "manifest" | "publicEventIds">,
   bucket: ApiArtifactBucket,
 ): Promise<ApiArtifactPublishReport> {
   const artifacts = selectApiArtifacts(result);

@@ -90,11 +90,12 @@ export async function probePublicStaticTarget(
       return { state: "not_public", canonicalTargetId: exists[0].id };
     }
     return { state: "public", canonicalTargetId: rows[0].id };
-  } catch (error) {
+  } catch {
+    // DB/provider errors may contain arbitrary data or expose a throwing
+    // name getter. An unknown result must remain fail-closed and bounded.
     return {
       state: "unknown",
-      errorCode:
-        error instanceof Error ? error.name : "public_target_probe_failed",
+      errorCode: "public_target_probe_failed",
     };
   }
 }

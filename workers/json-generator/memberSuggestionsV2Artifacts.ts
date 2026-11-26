@@ -24,6 +24,30 @@ const MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS = 256;
 const MEMBER_SUGGESTIONS_V2_CLEANUP_LIST_LIMIT = 1000;
 const PRIVATE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
+type V2DiagnosticResult =
+  | "manifest_cleanup_failed"
+  | "orphan_cleanup_failed"
+  | "previous_generation_cleanup_truncated"
+  | "previous_generation_cleanup_failed"
+  | "v1_fallback_object_budget"
+  | "v1_fallback";
+
+/** Diagnostics must never expose a provider error or change the V1/V2 commit boundary. */
+function logV2Diagnostic(
+  result: V2DiagnosticResult,
+  counts: { object_count?: number; deleted_count?: number; max_objects?: number } = {},
+  level: "warn" | "info" = "warn",
+): void {
+  try {
+    const payload = JSON.stringify({ service: "member-suggestions-v2", result, ...counts });
+    if (level === "info") console.info(payload);
+    else console.warn(payload);
+  } catch {
+    // A broken logger must not roll back a committed manifest or block V1 fallback.
+  }
+}
+
+
 type V2Bucket = Pick<R2Bucket, "get" | "put" | "delete" | "list">;
 
 const throwIfAborted = abortGuard("member suggestions v2 rebuild aborted");
@@ -82,14 +106,8 @@ async function deleteManifestBestEffort(bucket: V2Bucket): Promise<boolean> {
   try {
     await bucket.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
     return true;
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        service: "member-suggestions-v2",
-        result: "manifest_cleanup_failed",
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+  } catch {
+    logV2Diagnostic("manifest_cleanup_failed");
     return false;
   }
 }
@@ -101,15 +119,8 @@ async function deleteKeysBestEffort(
   if (keys.length === 0) return;
   try {
     await bucket.delete([...keys]);
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        service: "member-suggestions-v2",
-        result: "orphan_cleanup_failed",
-        object_count: keys.length,
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+  } catch {
+    logV2Diagnostic("orphan_cleanup_failed", { object_count: keys.length });
   }
 }
 
@@ -134,24 +145,12 @@ async function cleanupPreviousGenerationBestEffort(
     const keys = listed.objects.map((object) => object.key);
     if (keys.length > 0) await bucket.delete(keys);
     if (listed.truncated) {
-      console.warn(
-        JSON.stringify({
-          service: "member-suggestions-v2",
-          result: "previous_generation_cleanup_truncated",
-          generation: previousGeneration,
-          deleted_count: keys.length,
-        }),
-      );
+      logV2Diagnostic("previous_generation_cleanup_truncated", {
+        deleted_count: keys.length,
+      });
     }
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        service: "member-suggestions-v2",
-        result: "previous_generation_cleanup_failed",
-        generation: previousGeneration,
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+  } catch {
+    logV2Diagnostic("previous_generation_cleanup_failed");
   }
 }
 
@@ -208,14 +207,10 @@ export async function publishMemberSuggestionsV2BestEffort(args: {
     ];
     const objectCount = entries.length + 1;
     if (objectCount > MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS) {
-      console.info(
-        JSON.stringify({
-          service: "member-suggestions-v2",
-          result: "v1_fallback_object_budget",
-          object_count: objectCount,
-          max_objects: MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS,
-        }),
-      );
+      logV2Diagnostic("v1_fallback_object_budget", {
+        object_count: objectCount,
+        max_objects: MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS,
+      }, "info");
       return {
         published: false,
         objectCount,
@@ -257,17 +252,11 @@ export async function publishMemberSuggestionsV2BestEffort(args: {
     }
     if (signal?.aborted) throw error;
 
-    console.warn(
-      JSON.stringify({
-        service: "member-suggestions-v2",
-        result: "v1_fallback",
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+    logV2Diagnostic("v1_fallback");
     return {
       published: false,
       objectCount: 0,
-      reason: error instanceof Error ? error.message : "unknown_error",
+      reason: "publish_failed",
     };
   }
 }

@@ -226,3 +226,89 @@ test("aborted pickup load releases the R2 body and never starts a D1 fallback", 
   await assert.rejects(resolvePickupCreatorsWithFallback(env, 30, "test", controller.signal), /cancelled/);
   assert.equal(cancelled, true);
 });
+
+async function withBrokenPickupLogger(action) {
+  const original = console.warn;
+  const logs = [];
+  console.warn = (...args) => {
+    logs.push(args);
+    throw new Error("SEC777_BROKEN_LOGGER");
+  };
+  try {
+    return { result: await action(), logs };
+  } finally {
+    console.warn = original;
+  }
+}
+
+test("SEC-777: hostile R2 error and broken logger preserve stable get_error", async () => {
+  const error = new Error("SEC777_PRIVATE_PROVIDER_PAYLOAD");
+  let providerMessageReads = 0;
+  Object.defineProperty(error, "message", {
+    get() { providerMessageReads++; throw new Error("SEC777_MESSAGE_GETTER"); },
+  });
+  Object.defineProperty(error, "name", {
+    get() { throw new Error("SEC777_NAME_GETTER"); },
+  });
+  const { result, logs } = await withBrokenPickupLogger(() =>
+    loadPickupCreatorsFromR2({ R2: { async get() { throw error; } } }));
+  assert.deepEqual(result, { ok: false, reason: "get_error" });
+  assert.equal(providerMessageReads, 0, "provider Error.message is never read");
+  assert.deepEqual(logs, [[
+    "[pickupCreatorsR2] get_error",
+    { key: PICKUP_CREATORS_OBJECT_KEY, reason: "r2_read_failed" },
+  ]]);
+  assert.doesNotMatch(JSON.stringify(logs), /SEC777_PRIVATE_PROVIDER|SEC777_MESSAGE_GETTER/);
+});
+
+test("SEC-777: missing and untrusted schema classification survive a throwing logger", async () => {
+  const missing = await withBrokenPickupLogger(() =>
+    loadPickupCreatorsFromR2({ R2: { async get() { return null; } } }));
+  assert.deepEqual(missing.result, { ok: false, reason: "missing" });
+  assert.equal(missing.logs[0][0], "[pickupCreatorsR2] missing");
+
+  const schema = await withBrokenPickupLogger(() =>
+    loadPickupCreatorsFromR2({
+      R2: { async get() { return {
+        async json() { return { schema_version: "SEC777_UNTRUSTED_SCHEMA_SECRET", creators: [] }; },
+      }; } },
+    }));
+  assert.deepEqual(schema.result, { ok: false, reason: "schema_mismatch" });
+  assert.deepEqual(schema.logs[0], [
+    "[pickupCreatorsR2] schema_mismatch",
+    { key: PICKUP_CREATORS_OBJECT_KEY, reason: "unsupported_schema_version" },
+  ]);
+  assert.doesNotMatch(JSON.stringify(schema.logs), /SEC777_UNTRUSTED_SCHEMA_SECRET/);
+});
+
+test("SEC-777: throwing fallback logger still executes two D1 queries and returns pickup creators", async () => {
+  const sqlCalls = [];
+  const db = {
+    prepare(sql) {
+      sqlCalls.push(sql);
+      return {
+        async all() {
+          if (/FROM x_users\s+WHERE/.test(sql)) {
+            return { results: [{ id: "creator", x_name: "Creator",
+              icon_url: null, profile_text: null, youtube_channel_url: null }] };
+          }
+          return { results: [{ x_id: "creator", personal_count: 1, collab_count: 0,
+            total_works: 1, updated_at: 123, personal_updated_at: 123,
+            x_user_exists: 1 }] };
+        },
+      };
+    },
+  };
+  const { result: creators, logs } = await withBrokenPickupLogger(() =>
+    resolvePickupCreatorsWithFallback(
+      { R2: { async get() { return null; } }, DB: db },
+      30,
+      "rebuildTop",
+    ));
+  assert.equal(sqlCalls.length, 2, "set-level projection query count unchanged");
+  assert.equal(creators.length, 1);
+  assert.equal(creators[0].id, "creator");
+  assert.equal(logs.length, 2);
+  assert.equal(logs[0][0], "[pickupCreatorsR2] missing");
+  assert.equal(logs[1][0], "[rebuildTop] pickup_creators_d1_fallback");
+});
