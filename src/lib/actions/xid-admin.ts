@@ -14,6 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -1323,17 +1324,6 @@ async function rejectXIdLinkRequestOnce(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const decisionFields = buildXIdentityDecisionFields({
-    decidedByAuthUserId: operatorAuthUserId,
-    decisionReason: reason || "X ID申請を却下",
-    decidedAt: now,
-  });
-  const afterRequest = {
-    ...request,
-    status: "rejected" as const,
-    updated_at: now,
-    ...decisionFields,
-  };
   const rejectedXIdLabel =
     request.requested_x_id ?? request.source_x_user_id ?? "不明";
   const { buildXIdRejectedNotification } = await import(
@@ -1383,47 +1373,18 @@ async function rejectXIdLinkRequestOnce(
     }),
     dedupeKey: `xid_reject_webhook:${request.id}`,
   });
-  const statements: BatchItem<"sqlite">[] = [
-    db
-      .update(xIdentityRequests)
-      .set({
-        status: "rejected",
-        updated_at: now,
-        ...decisionFields,
-      })
-      .where(
-        and(
-          eq(xIdentityRequests.id, request.id),
-          eq(xIdentityRequests.status, "pending"),
-        )!,
-      ),
-  ];
-  const expected: Array<number | null> = [1];
-  if (notification) {
-    statements.push(notification.statement);
-    expected.push(null);
-  }
-  if (channelNotification) {
-    statements.push(channelNotification.statement);
-    expected.push(null);
-  }
+  const notificationStatements: BatchItem<"sqlite">[] = [];
+  if (notification) notificationStatements.push(notification.statement);
+  if (channelNotification) notificationStatements.push(channelNotification.statement);
   await mutateWithAudit(db, {
-    mutationStatements: statements,
-    expectedMutationChanges: expected,
-    audits: [
-      {
-        table_name: "x_identity_requests",
-        target_id: request.id,
-        operation: "UPDATE",
-        before: { ...request },
-        after: afterRequest,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: reason || "X ID申請を却下",
-        context: "x-identity-request",
-        retention_class: "long_audit",
-      },
-    ],
+    ...planXIdLinkRejection(db, {
+      request,
+      actorUserId: operatorAuthUserId,
+      actorXUserId: operatorActorXUserId,
+      reason,
+      now,
+      notificationStatements,
+    }),
     notificationWakeSource:
       notification || channelNotification ? "admin" : undefined,
   });
