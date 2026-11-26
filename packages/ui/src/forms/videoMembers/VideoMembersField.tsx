@@ -855,13 +855,23 @@ function VideoMembersFieldForTarget({
         })),
       });
       if (requestEpoch !== permissionEpochRef.current) return;
-      // Injected permission adapters are a runtime boundary, not just a
-      // TypeScript type. A truthy string/number must not grant local edit
-      // privileges or apply imported rows as though the POST had committed.
-      if (!result || typeof result !== "object" || Array.isArray(result) ||
-          typeof result.ok !== "boolean" ||
-          (result.message !== undefined &&
-            (typeof result.message !== "string" || result.message.length > 300))) {
+      // Snapshot the injected receipt once. A stateful getter must not
+      // validate as false and later apply collaborator privileges as true.
+      let ok: unknown;
+      let message: unknown;
+      try {
+        if (result && typeof result === "object" && !Array.isArray(result)) {
+          ok = result.ok;
+          if (typeof ok === "boolean") message = result.message;
+        }
+      } catch {
+        // Throwing accessors and revoked proxies are unverified receipts.
+        ok = undefined;
+      }
+      if (requestEpoch !== permissionEpochRef.current) return;
+      if (typeof ok !== "boolean" ||
+          (message !== undefined &&
+            (typeof message !== "string" || message.length > 300))) {
         setPermResult({
           ok: false,
           message: "編集権限の反映結果を確認できませんでした。状態を再取得してください。",
@@ -869,10 +879,10 @@ function VideoMembersFieldForTarget({
         return;
       }
       setPermResult({
-        ok: result.ok,
-        message: result.message ?? (result.ok ? "反映しました。" : "反映に失敗しました。"),
+        ok,
+        message: message ?? (ok ? "反映しました。" : "反映に失敗しました。"),
       });
-      if (result.ok === true) {
+      if (ok) {
         setPermConfirmOpen(false);
         runPendingApply();
         syncPermissionIntentsToLocalRows(intents);

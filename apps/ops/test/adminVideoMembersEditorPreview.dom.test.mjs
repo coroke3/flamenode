@@ -1686,3 +1686,67 @@ test("MIG-0730 U02ds: explicit unknown editor authority from first render remain
     target.remove();
   }
 });
+
+
+test("MIG-0730 U02dw: injected permission receipt fields are snapshotted before applying rows", async () => {
+  const unverified = "編集権限の反映結果を確認できませんでした。状態を再取得してください。";
+  const cases = [
+    { label: "failure cannot turn into success", firstOk: false, laterOk: true,
+      firstMessage: "確認済みの拒否", expected: "確認済みの拒否", applied: false },
+    { label: "confirmed success cannot turn into failure", firstOk: true, laterOk: false,
+      firstMessage: "確認済みの成功", applied: true },
+    { label: "absent message cannot become private text", firstOk: false, laterOk: false,
+      firstMessage: undefined, expected: "反映に失敗しました。", applied: false },
+    { label: "oversized message cannot become a valid success", firstOk: true, laterOk: true,
+      firstMessage: "x".repeat(301), expected: unverified, applied: false },
+    { label: "throwing message is an unverified receipt", firstOk: true, laterOk: true,
+      throwMessage: true, expected: unverified, applied: false },
+    { label: "malformed ok must not read message", firstOk: "true", laterOk: true,
+      throwMessage: true, expected: unverified, applied: false },
+  ];
+  for (const scenario of cases) {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const root = createRoot(target);
+    let requests = 0, okReads = 0, messageReads = 0;
+    const receipt = {
+      get ok() { return ++okReads === 1 ? scenario.firstOk : scenario.laterOk; },
+      get message() {
+        messageReads++;
+        if (scenario.throwMessage) throw Error("PRIVATE_THROW");
+        return messageReads === 1 ? scenario.firstMessage : "PRIVATE_LATER";
+      },
+    };
+    try {
+      await React.act(async () => root.render(React.createElement(
+        AdminVideoMembersEditorPreview, {
+          videoId: "A", data: data("A", "CURRENT"),
+          save: async () => ({ ok: true }),
+          searchXUsers: async () => ({ items: [], hasMore: false, nextOffset: null }),
+          applyPermissionBatch: async () => { requests++; return receipt; },
+        },
+      )));
+      await previewPermissionTsv(target, "Bob\tbob\t\t\t\tON");
+      await React.act(async () => buttonNamed(target, "変更を反映").click());
+      assert.equal(requests, 1, scenario.label);
+      assert.equal(okReads, 1, scenario.label + " ok read count");
+      assert.equal(messageReads, typeof scenario.firstOk === "boolean" ? 1 : 0,
+        scenario.label + " message read count");
+      const dialog = target.querySelector('[role="alertdialog"]');
+      if (scenario.applied) {
+        assert.equal(dialog, null, scenario.label);
+        assert.deepEqual(formPayload(target).map(x => x.name).sort(), ["Bob", "CURRENT"]);
+      } else {
+        assert.ok(dialog, scenario.label);
+        assert.deepEqual(formPayload(target).map(x => x.name), ["CURRENT"]);
+        assert.ok(dialog.textContent.includes(scenario.expected), scenario.label);
+        assert.equal(buttonNamed(target, "変更を反映").disabled, false,
+          "settled refusal releases the UI latch for an explicit later action");
+      }
+      assert.doesNotMatch(target.textContent, /PRIVATE_LATER|PRIVATE_THROW/);
+    } finally {
+      await React.act(async () => root.unmount());
+      target.remove();
+    }
+  }
+});
