@@ -262,13 +262,16 @@ test("U02c integrity idle/unsupported/denied views show no fabricated check coun
 // CURRENT Next page searchParams represents repeated query keys as arrays.
 test("MIG-0736 diagnostic route query parity: duplicate keys never opt in or select a filter", async () => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test" });
-  const keys = ["window", "document", "navigator", "HTMLElement", "Node", "IS_REACT_ACT_ENVIRONMENT"];
+  const keys = ["window", "document", "navigator", "HTMLElement", "Node", "ResizeObserver", "IS_REACT_ACT_ENVIRONMENT"];
   const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   try {
     for (const key of keys) {
       Object.defineProperty(globalThis, key, {
         configurable: true,
-        value: key === "IS_REACT_ACT_ENVIRONMENT" ? true : dom.window[key],
+        // jsdom has no layout observer; TableScroll needs only its lifecycle.
+        value: key === "IS_REACT_ACT_ENVIRONMENT" ? true
+          : key === "ResizeObserver" ? class { observe() {} disconnect() {} }
+          : dom.window[key],
       });
     }
     async function check(Component, path, expectedRequests, expectedText, filter) {
