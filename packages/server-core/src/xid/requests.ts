@@ -139,15 +139,14 @@ async function afterXIdLinkRequestAccepted(
       .update(users)
       .set({ onboarding_completed_at: nowUnix() })
       .where(and(eq(users.id, authUserId), sql`${users.onboarding_completed_at} IS NULL`)!);
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        service: "onboarding_marker",
-        result: "failed",
-        auth_user_id: authUserId,
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+  } catch {
+    // The marker update is outside the canonical audited request mutation.
+    // Never surface untrusted provider errors or user IDs via diagnostics.
+    try {
+      console.warn(JSON.stringify({ service: "onboarding_marker", result: "failed" }));
+    } catch {
+      // Diagnostic logging is optional, even when the sink is unavailable.
+    }
   }
 }
 

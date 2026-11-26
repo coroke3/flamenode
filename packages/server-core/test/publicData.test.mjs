@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   normalizeTrimmedString,
   normalizeNullableUnix,
+  normalizeNumericUnix,
   normalizeCount,
 } from "../src/publicData/normalize.ts";
 
@@ -49,13 +50,48 @@ test("publicData normalize helpers handle null and edge cases", () => {
   assert.equal(normalizeTrimmedString(null), null);
 
   assert.equal(normalizeNullableUnix("1700000000"), 1700000000);
+  assert.equal(normalizeNullableUnix(" 1700000000 "), 1700000000);
+  assert.equal(normalizeNullableUnix(1700000000), 1700000000);
   assert.equal(normalizeNullableUnix(""), null);
+  assert.equal(normalizeNullableUnix("   "), null);
   assert.equal(normalizeNullableUnix(null), null);
+  assert.equal(normalizeNullableUnix(undefined), null);
+  for (const malformed of [true, false, [], [1700000000], {}, { valueOf: () => 1700000000 }]) {
+    assert.equal(normalizeNullableUnix(malformed), null, String(malformed));
+  }
+
+  assert.equal(normalizeNumericUnix("1700000000"), 1700000000);
+  assert.equal(normalizeNumericUnix(1700000000), 1700000000);
+  assert.equal(normalizeNumericUnix(" 1700000000 "), 1700000000);
+  assert.equal(normalizeNumericUnix(null), 0, "preserve the legacy null count/timestamp default");
+  assert.equal(normalizeNumericUnix(""), 0, "preserve the legacy empty-string default");
+  assert.equal(normalizeNumericUnix("   "), null);
+  for (const malformed of [true, false, [], [10], {}, { valueOf: () => 10 }]) {
+    assert.equal(normalizeNumericUnix(malformed), null, String(malformed));
+  }
 
   assert.equal(normalizeCount("10"), 10);
   assert.equal(normalizeCount("-1"), null);
+  assert.equal(normalizeCount("   "), null);
+  assert.equal(normalizeCount(true), null);
   assert.equal(normalizeCount(null), 0);
   assert.equal(normalizeCount(undefined), null);
+});
+
+test("publicData numeric helpers accept decimal strings but reject alternate radices", () => {
+  for (const value of ["0x64", "0X64", "0b10", "0B10", "0o10", "0O10", " 0x64 ", "1e", "1_000"]) {
+    assert.equal(normalizeNullableUnix(value), null, value);
+    assert.equal(normalizeNumericUnix(value), null, value);
+    assert.equal(normalizeCount(value), null, value);
+  }
+  for (const [value, expected] of [[" 1.9 ", 1], ["+1e2", 100], [".5", 0], ["1.", 1], ["0010", 10], ["1E+3", 1000]]) {
+    assert.equal(normalizeNullableUnix(value), expected, value);
+    assert.equal(normalizeNumericUnix(value), expected, value);
+    assert.equal(normalizeCount(value), expected, value);
+  }
+  assert.equal(normalizeNullableUnix("-1.5"), -2);
+  assert.equal(normalizeNumericUnix("-1.5"), -2);
+  assert.equal(normalizeCount("-1.5"), null);
 });
 
 test("publicData visibility helpers enforce public status strictly", () => {
