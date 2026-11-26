@@ -294,7 +294,8 @@ if (runUnderRootTsx(import.meta.url)) {
     display_name: "Pool artist",
     scheduled_time: 1700001000 + index,
     status: "public",
-    score: index,
+    // Deliberately independent of scheduled_time so score-as-new cannot pass.
+    score: (index * 137) % 500,
   }));
 
   test("MIG-0627 U02d PREP T13: exactly 500 event videos retain bounded final page for all sorts", async (t) => {
@@ -309,10 +310,17 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(payload.total, 500, sort);
       assert.equal(payload.page, 11, sort);
       assert.equal(payload.limit, 48, sort);
-      const expected = sort === "old"
-        ? rows.slice(480, 500)
-        : rows.slice(0, 20).reverse();
-      assert.deepEqual(payload.items.map((item) => item.id), expected.map((item) => item.id), sort);
+      const expectedIds = sort === "old"
+        ? rows.slice(480, 500).map((item) => item.id)
+        : sort === "new"
+          ? rows.slice(0, 20).reverse().map((item) => item.id)
+          : [
+              "pool-387", "pool-314", "pool-241", "pool-168", "pool-095",
+              "pool-022", "pool-449", "pool-376", "pool-303", "pool-230",
+              "pool-157", "pool-084", "pool-011", "pool-438", "pool-365",
+              "pool-292", "pool-219", "pool-146", "pool-073", "pool-000",
+            ];
+      assert.deepEqual(payload.items.map((item) => item.id), expectedIds, sort);
       assert.ok(payload.items.every((item) => item.status === "public"), sort);
     }
     assert.deepEqual(h.reads, [baseKey, baseKey, baseKey], "one base read per request; no composed or global fallback");
@@ -334,11 +342,36 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(response.status, 503, label);
       assert.deepEqual(payload, { error: "static_list_unavailable" }, label);
       assert.equal(response.headers.get("Cache-Control"), "no-store", label);
-      assert.match(response.headers.get("Retry-After") ?? "", /^\d+$/, label);
+      assert.equal(response.headers.get("Retry-After"), "30", label);
       assert.equal(response.headers.get("ETag"), null, label);
       assert.deepEqual(h.reads, reads, label);
       assertNoD1(h);
     }
+  });
+
+
+  test("MIG-0627 U02d PREP T15: equal score and time retain deterministic order", async (t) => {
+    const h = harness(t);
+    const rows = [
+      { ...boundaryRows[0], id: "tie-z", score: 10, scheduled_time: 100 },
+      { ...boundaryRows[1], id: "tie-b", score: 10, scheduled_time: 200 },
+      { ...boundaryRows[2], id: "tie-a", score: 10, scheduled_time: 200 },
+      { ...boundaryRows[3], id: "tie-c", score: 5, scheduled_time: 300 },
+    ];
+    await h.storage.put(baseKey, eventPayload(rows));
+    const expected = {
+      score: ["tie-a", "tie-b", "tie-z", "tie-c"],
+      new: ["tie-c", "tie-a", "tie-b", "tie-z"],
+      old: ["tie-z", "tie-a", "tie-b", "tie-c"],
+    };
+    for (const [sort, ids] of Object.entries(expected)) {
+      const { response, payload } = await h.query("Tokyo", { event: eventId, sort });
+      assert.equal(response.status, 200, sort);
+      assert.equal(payload.total, 4, sort);
+      assert.deepEqual(payload.items.map((item) => item.id), ids, sort);
+    }
+    assert.deepEqual(h.reads, [baseKey, baseKey, baseKey]);
+    assertNoD1(h);
   });
 
 }
