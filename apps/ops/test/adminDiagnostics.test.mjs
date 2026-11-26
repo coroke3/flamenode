@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { JSDOM } from "jsdom";
 import { getAdminHealth, getAdminSecurity, getAdminWorkers, getAdminIntegrity } from "../.test-dist/apps/ops/src/api/adminDiagnostics.js";
 import { AdminHealth, AdminHealthView } from "../.test-dist/apps/ops/src/routes/admin/AdminHealth.js";
@@ -337,6 +337,136 @@ test("MIG-0736 diagnostic route query parity: duplicate keys never opt in or sel
       ["/api/admin-read/ops/security?run=1"], /セキュリティ WARN 1 件/, "WARN (1)");
     await check(AdminIntegrity, "/admin/health/integrity?run=1",
       ["/api/admin-read/ops/integrity?run=1"], /DB整合性診断は現在利用できません/);
+  } finally {
+    for (const key of keys) {
+      const descriptor = previous.get(key);
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    dom.window.close();
+  }
+});
+
+// U01: route reuse must not resurrect a response from an earlier explicit run.
+test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only navigation does not fetch", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test" });
+  const keys = ["window", "document", "navigator", "HTMLElement", "Node", "ResizeObserver", "IS_REACT_ACT_ENVIRONMENT"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  try {
+    for (const key of keys) {
+      Object.defineProperty(globalThis, key, {
+        configurable: true,
+        value: key === "IS_REACT_ACT_ENVIRONMENT" ? true
+          : key === "ResizeObserver" ? class { observe() {} disconnect() {} }
+          : dom.window[key],
+      });
+    }
+    for (const scenario of [
+      {
+        Component: AdminHealth, path: "/admin/health", flag: "deep",
+        runUrl: "/api/admin-read/ops/health?deep=1",
+        idleUrl: "/api/admin-read/ops/health",
+      },
+      {
+        Component: AdminSecurity, path: "/admin/security", flag: "run",
+        runUrl: "/api/admin-read/ops/security?run=1",
+        idleText: /セキュリティ診断は未実行です/,
+      },
+    ]) {
+      const { Component, path, flag, runUrl, idleUrl, idleText } = scenario;
+      const target = dom.window.document.createElement("div");
+      dom.window.document.body.append(target);
+      const root = createRoot(target);
+      const pending = [];
+      const fetchFn = (url, init) => new Promise(resolve => {
+        pending.push({ url, signal: init.signal, resolve });
+      });
+      let navigate;
+      function Harness() {
+        navigate = useNavigate();
+        return h(Component, { fetchFn });
+      }
+      const runPath = path + "?" + flag + "=1";
+      const go = async to => {
+        await React.act(async () => { navigate(to); });
+      };
+      const finish = async (request, label) => {
+        await React.act(async () => {
+          request.resolve(response(200, {
+            status: "all",
+            ran: true,
+            error: null,
+            results: [{ ...results[0], label: label + " OK" }, { ...results[1], label }],
+          }));
+        });
+      };
+      const activeFilter = () => target.querySelector('button[aria-pressed="true"]')?.textContent.trim();
+      try {
+        await React.act(async () => {
+          root.render(h(MemoryRouter, { initialEntries: [runPath] }, h(Harness)));
+        });
+        assert.equal(pending.length, 1, path);
+        const obsolete = pending[0];
+        assert.equal(obsolete.url, runUrl, path);
+
+        await go(runPath + "&" + flag + "=1");
+        assert.equal(obsolete.signal.aborted, true, path);
+        if (idleUrl) {
+          assert.equal(pending.length, 2, path);
+          assert.equal(pending[1].url, idleUrl, path);
+          await finish(pending[1], "operational-current");
+          assert.match(target.textContent, /operational-current/, path);
+        } else {
+          assert.equal(pending.length, 1, path);
+          assert.match(target.textContent, idleText, path);
+          assert.equal(target.querySelector("table"), null, path);
+        }
+
+        // Back returns to the same component instance, but starts a new run.
+        await go(-1);
+        assert.equal(pending.length, idleUrl ? 3 : 2, path);
+        const current = pending.at(-1);
+        assert.equal(current.url, runUrl, path);
+        assert.doesNotMatch(target.textContent, /operational-current/, path);
+        await finish(current, "new-run-WARN");
+        assert.match(target.textContent, /new-run-WARN/, path);
+        assert.equal(activeFilter(), "すべて (2)", path);
+
+        // The transport deliberately ignores abort and resolves the first run late.
+        await finish(obsolete, "obsolete-private-result");
+        assert.doesNotMatch(target.textContent, /obsolete-private-result/, path);
+        assert.match(target.textContent, /new-run-WARN/, path);
+
+        const count = pending.length;
+        await go(runPath + "&status=warn");
+        assert.equal(activeFilter(), "WARN (1)", path);
+        assert.equal(target.querySelectorAll("tbody tr").length, 1, path);
+        assert.doesNotMatch(target.textContent, /new-run-WARN OK/, path);
+        await go(-1);
+        assert.equal(activeFilter(), "すべて (2)", path);
+        assert.equal(target.querySelectorAll("tbody tr").length, 2, path);
+        await go(1);
+        assert.equal(activeFilter(), "WARN (1)", path);
+        assert.equal(pending.length, count, path);
+
+        // Same-key refresh must not retain prior admin results after denial.
+        const refresh = [...target.querySelectorAll("button")]
+          .find(button => button.textContent.trim() === "最新状態を再チェック");
+        assert.ok(refresh, path);
+        await React.act(async () => { refresh.click(); });
+        assert.equal(pending.length, count + 1, path);
+        assert.equal(pending.at(-1).url, runUrl, path);
+        await React.act(async () => {
+          pending.at(-1).resolve(response(403, { redirect: "/dashboard" }));
+        });
+        assert.match(target.textContent, /閲覧権限がありません/, path);
+        assert.doesNotMatch(target.textContent, /new-run-WARN|obsolete-private-result/, path);
+        assert.equal(target.querySelector("table"), null, path);
+      } finally {
+        await React.act(async () => root.unmount());
+        target.remove();
+      }
+    }
   } finally {
     for (const key of keys) {
       const descriptor = previous.get(key);
