@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { preflightLegacyImportPlan } from "@flamenode/server-core/legacyImport/preflight";
 import { readLegacyImportPreviewFiles } from "../src/routes/admin/legacyImportFiles.ts";
 import { prepareLegacyImportPreview } from "../src/routes/admin/legacyImportPreview.ts";
 import {
@@ -97,16 +98,54 @@ test("RH-002 U02 preview persist: warning threshold strictly greater than 80% an
   assert.deepEqual(prepared.plan.warnings, original);
 });
 
-test("RH-002 U02 preview persist: D1 preflight failure cannot create a preview token", async () => {
+test("RH-002 U02 preview persist: genuine domain conflict retains CURRENT message and prevents R2", async () => {
   const prepared = await fixture();
-  const a = adapters(prepared, { preflightError: new Error("current DB conflict") });
+  const a = adapters({ ...prepared, strategy: "create_only" });
+  a.args.preflight = async (plan, strategy) => {
+    a.calls.push("preflight");
+    const db = { select: () => ({ from: () => ({ where: async () => [{ id: "event-a" }] }) }) };
+    return preflightLegacyImportPlan(db, plan, strategy);
+  };
   const result = await persistLegacyImportPreview(a.args);
   assert.deepEqual(a.calls, ["estimate", "preflight"]);
   assert.equal(result.status, 409);
   assert.equal(result.body.ok, false);
   assert.equal(result.body.requires_repreview, false);
-  assert.equal(result.body.message, "current DB conflict");
+  assert.match(result.body.message, /イベント event-a は既に存在します/);
   assert.equal(result.body.preview_token, undefined);
+});
+
+test("RH-002 U02 preview persist: provider exceptions cannot expose SQL, params or throwing accessors", async () => {
+  const prepared = await fixture();
+  let inspected = 0;
+  const hostile = new Error();
+  for (const key of ["code", "message", "cause"]) {
+    Object.defineProperty(hostile, key, {
+      get() { inspected++; throw new Error("PRIVATE_PROVIDER_GETTER"); },
+    });
+  }
+  const proxy = new Proxy(new Error("PRIVATE_PROVIDER"), {
+    get() { inspected++; throw new Error("PRIVATE_PROXY"); },
+    getPrototypeOf() { inspected++; throw new Error("PRIVATE_PROTOTYPE"); },
+  });
+  const revoked = Proxy.revocable({}, {});
+  revoked.revoke();
+  for (const cause of [
+    new Error("Failed query: SELECT secret FROM internal_table; params: PRIVATE_VALUE"),
+    new Error("イベント event-a は既に存在します。 PRIVATE_SPOOF"),
+    hostile, proxy, revoked.proxy,
+  ]) {
+    const a = adapters(prepared, { preflightError: cause });
+    const result = await persistLegacyImportPreview(a.args);
+    assert.deepEqual(a.calls, ["estimate", "preflight"]);
+    assert.equal(result.status, 409);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.requires_repreview, false);
+    assert.equal(result.body.message, "現在のDB状態へ適用できないplanです。");
+    assert.equal(result.body.preview_token, undefined);
+    assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_|SELECT secret|internal_table/);
+  }
+  assert.equal(inspected, 0, "untrusted error objects must not be inspected");
 });
 
 test("RH-002 U02 preview persist: R2 storage error maps to fail-closed response", async () => {

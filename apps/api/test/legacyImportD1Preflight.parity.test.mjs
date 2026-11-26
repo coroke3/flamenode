@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { normalizeLegacyFiles } from "@flamenode/server-core/legacyImport/normalize";
 import { parseLegacyImportText } from "@flamenode/server-core/legacyImport/parse";
 import { legacyImportD1PreflightAdapter } from "../src/routes/admin/legacyImportD1PreflightAdapter.ts";
-import { preflightLegacyImportPlan } from "@flamenode/server-core/legacyImport/preflight";
+import { preflightLegacyImportPlan, legacyImportPreflightValidationMessage } from "@flamenode/server-core/legacyImport/preflight";
 
 function plan(csv = "") {
   return normalizeLegacyFiles(
@@ -121,4 +121,37 @@ test("RH-002 U02 D1 preflight: CURRENT source retains the same SQL guards and im
     assert.ok(shared.includes(key), "shared port missing " + key);
   }
   assert.doesNotMatch(shared, /server-only|@\/lib\//);
+});
+
+
+test("RH-002 U02 D1 preflight: only the locally constructed domain validation error is trusted", async () => {
+  const db = readOnlyDb([{ id: "event-a" }]);
+  const incoming = plan("eventid,eventname\nevent-a,Event A\n");
+  let validation;
+  await assert.rejects(preflightLegacyImportPlan(db, incoming, "create_only"), (cause) => {
+    validation = cause;
+    assert.equal(cause.code, "legacy_import_preflight_validation");
+    assert.match(legacyImportPreflightValidationMessage(cause), /イベント event-a は既に存在します/);
+    assert.equal(legacyImportPreflightValidationMessage(cause), cause.message);
+    return true;
+  });
+  const original = validation.message;
+  const spoof = Object.create(Object.getPrototypeOf(validation));
+  Object.assign(spoof, { code: validation.code, message: "PRIVATE_SPOOF" });
+  assert.equal(legacyImportPreflightValidationMessage(spoof), undefined);
+  Object.defineProperty(validation, "message", { get() { throw new Error("must not read message"); } });
+  assert.equal(legacyImportPreflightValidationMessage(validation), original);
+  assert.equal(legacyImportPreflightValidationMessage(null), undefined);
+  assert.equal(legacyImportPreflightValidationMessage("PRIVATE_STRING"), undefined);
+});
+
+test("RH-002 U02 D1 preflight: a provider failure is propagated but never branded as domain validation", async () => {
+  const provider = new Error("Failed query: SELECT secret; params: PRIVATE_VALUE");
+  const db = { select() { throw provider; } };
+  const incoming = plan("eventid,eventname\nevent-a,Event A\n");
+  await assert.rejects(preflightLegacyImportPlan(db, incoming, "create_only"), (cause) => {
+    assert.equal(cause, provider);
+    assert.equal(legacyImportPreflightValidationMessage(cause), undefined);
+    return true;
+  });
 });

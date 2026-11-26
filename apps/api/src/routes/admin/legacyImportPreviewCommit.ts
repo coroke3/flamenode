@@ -1,6 +1,7 @@
 import { estimateLegacyImportStoredPlanBytes } from "@flamenode/server-core/legacyImport/previewEstimate";
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "@flamenode/server-core/legacyImport/normalize";
 import type { LegacyImportPreparedPreview } from "./legacyImportPreview.ts";
+import { legacyImportPreflightValidationMessage } from "@flamenode/server-core/legacyImport/preflight";
 
 /**
  * MIG-0645: unmounted, dependency-injected RH-002 preview persistence boundary.
@@ -68,7 +69,8 @@ export async function persistLegacyImportPreview(args: {
       status: 409,
       body: {
         ok: false,
-        message: cause instanceof Error ? cause.message : "現在のDB状態へ適用できないplanです。",
+        // Preserve CURRENT validation copy, but never serialize an arbitrary D1 exception.
+        message: legacyImportPreflightValidationMessage(cause) ?? "現在のDB状態へ適用できないplanです。",
         mode: "preview",
         summary,
         file_ranges: fileRanges,

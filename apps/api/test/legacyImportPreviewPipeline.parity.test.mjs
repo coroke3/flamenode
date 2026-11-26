@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { preflightLegacyImportPlan } from "@flamenode/server-core/legacyImport/preflight";
 import { runLegacyImportPreviewPipeline } from "../src/routes/admin/legacyImportPreviewPipeline.ts";
 
 function fixture(csv = "eventid,eventname\nevent-a,Event A\n") {
@@ -87,16 +88,47 @@ test("RH-002 U02 pipeline: 512KiB stored plan guard prevents D1 and R2", async (
   assert.deepEqual(actions, ["read", "estimate"]);
 });
 
-test("RH-002 U02 pipeline: D1 preflight failure prevents R2 save", async () => {
+test("RH-002 U02 pipeline: genuine D1 domain conflict preserves feedback without R2 save", async () => {
   const { args, actions } = fixture();
-  args.preflight = async () => {
+  args.formData.set("strategy", "create_only");
+  args.preflight = async (plan, strategy) => {
     actions.push("preflight");
-    throw new Error("duplicate");
+    const db = { select: () => ({ from: () => ({ where: async () => [{ id: "event-a" }] }) }) };
+    return preflightLegacyImportPlan(db, plan, strategy);
   };
   const result = await runLegacyImportPreviewPipeline(args);
   assert.equal(result.status, 409);
-  assert.equal(result.body.message, "duplicate");
+  assert.match(result.body.message, /イベント event-a は既に存在します/);
+  assert.equal(result.body.preview_token, undefined);
   assert.deepEqual(actions, ["read", "estimate", "preflight"]);
+});
+
+test("RH-002 U02 pipeline: D1 provider failures return fixed 409 without reading error properties", async () => {
+  let inspected = 0;
+  const hostile = new Error();
+  Object.defineProperty(hostile, "message", {
+    get() { inspected++; throw new Error("PRIVATE_MESSAGE_GETTER"); },
+  });
+  const proxy = new Proxy({}, {
+    get() { inspected++; throw new Error("PRIVATE_PROXY"); },
+    getPrototypeOf() { inspected++; throw new Error("PRIVATE_PROTOTYPE"); },
+  });
+  for (const cause of [
+    new Error("Failed query: SELECT secret FROM internal_table; params: PRIVATE_VALUE"),
+    hostile, proxy,
+  ]) {
+    const { args, actions } = fixture();
+    args.preflight = async () => { actions.push("preflight"); throw cause; };
+    const result = await runLegacyImportPreviewPipeline(args);
+    assert.equal(result.status, 409);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.message, "現在のDB状態へ適用できないplanです。");
+    assert.equal(result.body.requires_repreview, false);
+    assert.equal(result.body.preview_token, undefined);
+    assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_|SELECT secret|internal_table/);
+    assert.deepEqual(actions, ["read", "estimate", "preflight"]);
+  }
+  assert.equal(inspected, 0);
 });
 
 test("RH-002 U02 pipeline: R2 failure is fail-closed and does not return preview credentials", async () => {
