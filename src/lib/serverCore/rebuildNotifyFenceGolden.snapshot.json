@@ -2226,13 +2226,8 @@
       {
         "op": "console.warn",
         "args": [
-          "[enqueueStaticRebuildMany] bulk enqueue failed",
-          {
-            "targetCount": 257,
-            "error": {
-              "error": "static_rebuild_batch_target_limit_exceeded"
-            }
-          }
+          "[static-rebuild]",
+          "bulk_enqueue_failed"
         ]
       }
     ],
@@ -2519,16 +2514,8 @@
       {
         "op": "console.warn",
         "args": [
-          "[enqueueStaticRebuild] failed",
-          {
-            "targetType": "video",
-            "targetId": "v1",
-            "reason": "video_update",
-            "requestedByUserId": "u-actor"
-          },
-          {
-            "error": "static rebuild queue changed during enqueue retries"
-          }
+          "[static-rebuild]",
+          "enqueue_failed"
         ]
       },
       {
@@ -2554,8 +2541,8 @@
           "video:v1",
           "UPDATE",
           null,
-          "{\"reason\":\"video_update\",\"error\":\"static rebuild queue changed during enqueue retries\"}",
-          "[\"reason\",\"error\"]",
+          "{\"error\":\"enqueue_failed\"}",
+          "[\"error\"]",
           null,
           "u-actor",
           null,
@@ -2567,7 +2554,7 @@
           "not_restorable",
           "strategy_none",
           "この監査操作には復元戦略がありません。",
-          87,
+          26,
           1767776000,
           1760000000
         ]
@@ -2602,8 +2589,8 @@
         "target_id": "video:v1",
         "operation": "UPDATE",
         "before_json": null,
-        "after_json": "{\"reason\":\"video_update\",\"error\":\"static rebuild queue changed during enqueue retries\"}",
-        "changed_keys_json": "[\"reason\",\"error\"]",
+        "after_json": "{\"error\":\"enqueue_failed\"}",
+        "changed_keys_json": "[\"error\"]",
         "inverse_patch_json": null,
         "actor_user_id": "u-actor",
         "actor_snapshot_json": "{\"discord_id\":\"discord-a\",\"discord_name\":\"Actor\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":null}",
@@ -2614,7 +2601,7 @@
         "restore_status": "not_restorable",
         "restore_unavailable_reason_code": "strategy_none",
         "restore_unavailable_message": "この監査操作には復元戦略がありません。",
-        "payload_size_bytes": 87,
+        "payload_size_bytes": 26,
         "expires_at": 1767776000,
         "created_at": 1760000000,
         "actor_x_user_id": null
