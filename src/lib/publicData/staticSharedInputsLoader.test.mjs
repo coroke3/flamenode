@@ -116,7 +116,7 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
     },
   });
 
-  const { loadStaticJsonFreshStaleUnavailable } = await import(
+  const { loadStaticJsonFreshStaleUnavailable, loadPublicXIconMapOptional } = await import(
     "./staticSharedInputsLoader.ts"
   );
   const {
@@ -141,6 +141,42 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
     cacheWrites.length = 0;
     resetPublicJsonIsolateCacheForTests();
   }
+
+  test("CURRENT V1 users-index fallback preserves special X IDs as own icon entries", async () => {
+    resetHarness();
+    const canonicalKey = "users/public-x-icon-map.v1.json";
+    cacheStore.set(canonicalKey, {
+      payload: {
+        schema_version: 1,
+        generated_at: 100,
+        entries: { ordinary: { icon_url: "https://example.com/ordinary.png", source: "registered" } },
+      },
+      stored_at: Math.floor(Date.now() / 1000),
+    });
+    cacheStore.set("users/index.json", {
+      payload: {
+        generated_at: 101,
+        items: ["__proto__", "constructor"].map((x_id) => ({
+          x_id,
+          x_name: x_id,
+          icon_url: "https://example.com/" + x_id + ".png",
+        })),
+      },
+      stored_at: Math.floor(Date.now() / 1000),
+    });
+
+    const result = await loadPublicXIconMapOptional(["__proto__", "constructor"]);
+    assert.ok(result);
+    assert.equal(Object.getPrototypeOf(result.entries), null);
+    for (const id of ["__proto__", "constructor"]) {
+      assert.equal(Object.hasOwn(result.entries, id), true);
+      assert.equal(result.entries[id].source, "registered");
+      assert.equal(result.entries[id].icon_url, "https://example.com/" + id + ".png");
+      assert.equal(JSON.parse(JSON.stringify(result)).entries[id].source, "registered");
+    }
+    assert.equal(result.entries.ordinary.source, "registered");
+    assert.equal(Object.prototype.icon_url, undefined);
+  });
 
   test("loadStaticJsonFreshStaleUnavailable prefers newer R2 over fresh cache", async () => {
     resetHarness();
