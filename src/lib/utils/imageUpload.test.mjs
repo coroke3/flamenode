@@ -225,6 +225,58 @@ test("JPEG inspector rejects missing EOI, trailing data, and invalid SOF length"
   }
 });
 
+test("JPEG rejects a duplicate frame header before or after a scan", () => {
+  const jpeg = buildJpeg({ width: 128, height: 96 });
+  const sof = jpeg.findIndex((value, index) => value === 0xff && jpeg[index + 1] === 0xc0);
+  const sos = jpeg.findIndex((value, index) => value === 0xff && jpeg[index + 1] === 0xda);
+  assert.ok(sof >= 0 && sos > sof);
+  const frame = jpeg.subarray(sof, sos);
+  const widerFrame = buildJpeg({ width: 160, height: 96 }).subarray(sof, sos);
+  const eoi = jpeg.length - 2;
+
+  for (const [name, offset, secondFrame] of [
+    ["same dimensions before scan", sos, frame],
+    ["same dimensions after scan", eoi, frame],
+    ["different dimensions after scan", eoi, widerFrame],
+  ]) {
+    const bytes = new Uint8Array([...jpeg.subarray(0, offset), ...secondFrame, ...jpeg.subarray(offset)]);
+    assert.equal(inspectSupportedImageUpload(bytes.buffer), null, name);
+    assert.equal(validateIconImageUpload({ buffer: bytes.buffer }).ok, false, name);
+  }
+});
+
+test("JPEG upload validation rejects a single frame above the dimension limit", () => {
+  const { buffer } = buildJpeg({ width: 3000, height: 3000 });
+  assert.deepEqual(inspectSupportedImageUpload(buffer), {
+    contentType: "image/jpeg",
+    ext: "jpg",
+    width: 3000,
+    height: 3000,
+    animated: false,
+  });
+  assert.deepEqual(validateIconImageUpload({ buffer }), {
+    ok: false,
+    message: "2048px 以下の画像を選んでください。",
+  });
+});
+
+test("JPEG accepts multiple progressive scans under one frame header", () => {
+  const jpeg = buildJpeg({ width: 128, height: 96 });
+  const sof = jpeg.findIndex((value, index) => value === 0xff && jpeg[index + 1] === 0xc0);
+  const sos = jpeg.findIndex((value, index) => value === 0xff && jpeg[index + 1] === 0xda);
+  assert.ok(sof >= 0 && sos > sof);
+  jpeg[sof + 1] = 0xc2;
+  const bytes = new Uint8Array([
+    ...jpeg.subarray(0, sos),
+    0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2a, // DC scan
+    0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x01, 0x3f, 0x00, 0x2a, // AC scan
+    0xff, 0xd9,
+  ]);
+  const image = { contentType: "image/jpeg", ext: "jpg", width: 128, height: 96, animated: false };
+  assert.deepEqual(inspectSupportedImageUpload(bytes.buffer), image);
+  assert.deepEqual(validateIconImageUpload({ buffer: bytes.buffer }), { ok: true, image });
+});
+
 test("WebP inspector rejects VP8X-only canvas and missing chunk padding", () => {
   const vp8x = new Uint8Array(10);
   vp8x[4] = 63;

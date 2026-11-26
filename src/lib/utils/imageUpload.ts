@@ -124,6 +124,8 @@ function parseJpeg(bytes: Uint8Array): { width: number; height: number; animated
     if (segmentLength < 2 || segmentLength > bytes.length - 2 - offset) return null;
 
     if (isJpegSofMarker(marker)) {
+      // One frame defines the dimensions for all scans.
+      if (width !== null) return null;
       // SOF length = 8-byte base + three bytes per component.
       const componentCount = bytes[offset + 7];
       if (
