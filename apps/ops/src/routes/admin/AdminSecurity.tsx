@@ -25,10 +25,35 @@ const SECURITY_CHECK_IDS = [
   "notification_table_mismatch",
 ] as const;
 
+// Preserve each CURRENT/Hono check's count/status contract, including the
+// intentional INFO rows and the orphan-check failure warning. Never show a
+// reassuring summary for a complete but contradictory receipt.
 function hasCompleteSecurityResults(results: AdminSecurityResponse["results"]): boolean {
   if (results.length !== SECURITY_CHECK_IDS.length) return false;
   const ids = new Set(results.map(result => result.id));
-  return SECURITY_CHECK_IDS.every(id => ids.has(id));
+  if (!SECURITY_CHECK_IDS.every(id => ids.has(id))) return false;
+  return results.every(({ id, status, count }) => {
+    if (!Number.isSafeInteger(count) || count < 0) return false;
+    switch (id) {
+      case "access_token_not_null":
+      case "rejected_xid_active":
+      case "unapproved_creator_videos":
+      case "banned_user_videos":
+      case "tos_not_accepted_user_videos":
+      case "banned_user_chapters":
+        return status === (count === 0 ? "ok" : "warn");
+      case "custom_page_dangerous_html":
+        return count === 0 && status === "ok";
+      case "orphan_approved_xid":
+        // A failed check is WARN/1 in both CURRENT and Hono.
+        return status === (count === 0 ? "ok" : "info") || (count === 1 && status === "warn");
+      case "public_api_leak":
+      case "notification_table_mismatch":
+        return count === 0 && status === "info";
+      default:
+        return false;
+    }
+  });
 }
 
 export function AdminSecurityView({

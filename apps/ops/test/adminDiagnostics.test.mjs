@@ -55,6 +55,7 @@ const securityIds = [
 const securityResults = securityIds.map((id, i) => ({
   ...(i < 2 ? results[i] : i >= 8 ? results[2] : results[0]),
   id,
+  ...(i >= 8 ? { count: 0 } : {}),
   ...(i > 2 ? { label: "check " + id } : {}),
 }));
 
@@ -277,6 +278,55 @@ test("MIG-0736 security requires all ten distinct CURRENT check identities befor
   assert.match(await view(securityResults), /セキュリティ WARN 1 件/);
 });
 
+
+test("MIG-0736 security rejects contradictory count/status even with all ten IDs", async () => {
+  const clean = securityResults.map(result => result.status === "warn"
+    ? { ...result, status: "ok", count: 0, samples: [] } : result);
+  const counts = [0, 1, 2, 20, Number.MAX_SAFE_INTEGER];
+  const risk = [["ok"], ["warn"], ["warn"], ["warn"], ["warn"]];
+  const staticOk = [["ok"], [], [], [], []];
+  const staticInfo = [["info"], [], [], [], []];
+  const orphan = [["ok"], ["info", "warn"], ["info"], ["info"], ["info"]];
+  const expected = [risk, risk, risk, risk, risk, staticOk, risk, orphan, staticInfo, staticInfo];
+  const view = async rows => {
+    const data = await getAdminSecurity(async () => response(200, {
+      status: "all", ran: true, results: rows, error: null,
+    }), true);
+    return render(h(AdminSecurityView, {
+      data, shouldRun: true, initialFilter: "all", onRefresh: () => {},
+    }), "/admin/security?run=1");
+  };
+  const withRow = (index, count, status) => clean.map((row, i) => i === index
+    ? { ...row, count, status, samples: [] } : row);
+  for (let i = 0; i < clean.length; i++) {
+    for (let j = 0; j < counts.length; j++) {
+      for (const status of ["ok", "warn", "info"]) {
+        const html = await view(withRow(i, counts[j], status));
+        const context = clean[i].id + ":" + counts[j] + ":" + status;
+        if (expected[i][j].includes(status)) {
+          assert.match(html, status === "warn" ? /セキュリティ WARN 1 件/ : /セキュリティ WARN はありません/, context);
+          assert.match(html, /状態フィルタ/, context);
+        } else {
+          assert.match(html, /診断結果を取得できませんでした/, context);
+          assert.doesNotMatch(html, /WARN はありません|状態フィルタ|<table/, context);
+        }
+      }
+    }
+    for (const count of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const html = await view(withRow(i, count, "ok"));
+      assert.match(html, /診断結果を取得できませんでした/, clean[i].id);
+      assert.doesNotMatch(html, /WARN はありません|状態フィルタ|<table/, clean[i].id);
+    }
+  }
+  // Preserve the real producer's four-check group-failure receipt. In
+  // particular, a failed orphan check is WARN/1, not INFO/1.
+  const failedGroup = clean.map((row, i) => [3, 4, 6, 7].includes(i)
+    ? { ...row, count: 1, status: "warn", samples: [],
+      note: "検査自体の実行に失敗しました。DB接続、schema適用状況、サーバーログを確認してください。" }
+    : row);
+  assert.match(await view(failedGroup), /セキュリティ WARN 4 件/);
+  assert.match(await view(withRow(7, 2, "info")), /セキュリティ WARN はありません/);
+});
 
 test("U02a worker monitoring fetches one guarded no-store snapshot with cancellation signal", async () => {
   const calls = [];
@@ -686,6 +736,31 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
           assert.match(target.textContent, /診断結果を取得できませんでした/);
           assert.doesNotMatch(target.textContent, /WARN はありません|full-before-partial/);
           assert.equal(target.querySelector("table"), null);
+
+          // Recover via explicit re-entry, then reject a full receipt with
+          // a positive risk count mislabeled OK on a same-key refresh.
+          await go(runPath + "&run=1");
+          assert.match(target.textContent, idleText, path);
+          await go(-1);
+          const freshComplete = pending.at(-1);
+          assert.notEqual(freshComplete, fresh);
+          await finish(freshComplete, "full-security-before-contradiction");
+          assert.match(target.textContent, /full-security-before-contradiction/, path);
+          const retryComplete = [...target.querySelectorAll("button")]
+            .find(button => button.textContent.trim() === "最新状態を再チェック");
+          assert.ok(retryComplete, path);
+          await React.act(async () => { retryComplete.click(); });
+          assert.notEqual(pending.at(-1), freshComplete, path);
+          assert.equal(pending.at(-1).url, runUrl, path);
+          await React.act(async () => {
+            pending.at(-1).resolve(response(200, {
+              status: "all", ran: true, error: null,
+              results: securityResults.map((row, i) => i === 1 ? { ...row, status: "ok" } : row),
+            }));
+          });
+          assert.match(target.textContent, /診断結果を取得できませんでした/, path);
+          assert.doesNotMatch(target.textContent, /WARN はありません|full-security-before-contradiction/, path);
+          assert.equal(target.querySelector("table"), null, path);
         }
       } finally {
         await React.act(async () => root.unmount());
