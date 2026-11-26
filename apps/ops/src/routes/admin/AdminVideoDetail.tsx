@@ -143,30 +143,42 @@ function InfoPanel({ data }: { data: AdminVideoDetailResponse }): React.ReactEle
   );
 }
 
-export function StatusControls({
-  data, eventId, onRefresh, onNext, actions,
-}: {
+type StatusControlsProps = {
   data: AdminVideoDetailResponse;
   eventId: string | null;
   onRefresh: () => void;
   onNext: (href: string) => void;
   actions: ReturnType<typeof createAdminVideoStatusActions>;
-}): React.ReactElement {
+};
+
+export function StatusControls(props: StatusControlsProps): React.ReactElement {
+  // A return to A after visiting B must be a fresh view, not A's old write scope.
+  return <VideoStatusControls key={JSON.stringify([props.data.video.id, props.eventId])} {...props} />;
+}
+
+function VideoStatusControls({
+  data, eventId, onRefresh, onNext, actions,
+}: StatusControlsProps): React.ReactElement {
   const v = data.video;
   const [selected, setSelected] = React.useState(v.visibility_status);
   const [reason, setReason] = React.useState("");
   const [category, setCategory] = React.useState<string>("operator_decision");
   const [pending, setPending] = React.useState(false);
   const inFlight = React.useRef(false);
+  const liveScope = React.useRef<object | null>(null);
+  React.useLayoutEffect(() => {
+    liveScope.current = {};
+    return () => { liveScope.current = null; };
+  }, []);
   const [message, setMessage] = React.useState<{ ok: boolean; text: string; pendingPublicReflection?: boolean } | null>(null);
   const openCase = selectOpenVoidCaseId(data.moderationCases);
 
   // A successful mutation refreshes the same video with a new status. Keep its
   // success / delayed-public-reflection notice visible across that refresh.
   React.useEffect(() => { setSelected(v.visibility_status); }, [v.id, v.visibility_status]);
-  React.useEffect(() => { setMessage(null); }, [v.id]);
   async function run(action: AdminVideoMutation, form: FormData): Promise<void> {
-    if (inFlight.current) return;
+    const scope = liveScope.current;
+    if (!scope || inFlight.current) return;
     inFlight.current = true;
     setPending(true);
     setMessage(null);
@@ -174,6 +186,9 @@ export function StatusControls({
       form.set("video_id", v.id);
       if (eventId) form.set("review_event_id", eventId);
       const result: AdminVideoMutationResult = await action(form);
+      // The POST may have committed. Never replay it or deliver its receipt to
+      // a different mounted view (including an A -> B -> A navigation).
+      if (liveScope.current !== scope) return;
       if (result.ok) {
         setMessage({
           ok: true,
@@ -191,11 +206,14 @@ export function StatusControls({
         if (result.retryable) onRefresh();
       }
     } catch {
+      if (liveScope.current !== scope) return;
       setMessage({ ok: false, text: "通信状態を確認し、作品を再取得してください。" });
       onRefresh();
     } finally {
-      inFlight.current = false;
-      setPending(false);
+      if (liveScope.current === scope) {
+        inFlight.current = false;
+        setPending(false);
+      }
     }
   }
   function statusForm(event: React.FormEvent<HTMLFormElement>): void {

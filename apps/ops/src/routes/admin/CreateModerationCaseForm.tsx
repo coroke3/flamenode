@@ -3,21 +3,33 @@ import type { AdminVideoMutation } from "../../api/adminVideoStatus.js";
 import { SaveSuccessNotice } from "../../components/shared/SaveSuccessNotice.js";
 
 /** MIG-0729 U02: CURRENT SA-043 form; held unmounted until MIG-0603. */
-export function CreateModerationCaseForm({
-  videoId, action, onRefresh,
-}: {
+type CreateModerationCaseFormProps = {
   videoId: string;
   action: AdminVideoMutation;
   onRefresh: () => void;
-}): React.ReactElement {
+};
+
+export function CreateModerationCaseForm(props: CreateModerationCaseFormProps): React.ReactElement {
+  return <VideoModerationCaseForm key={props.videoId} {...props} />;
+}
+
+function VideoModerationCaseForm({
+  videoId, action, onRefresh,
+}: CreateModerationCaseFormProps): React.ReactElement {
   const formRef = React.useRef<HTMLFormElement>(null);
   const inFlight = React.useRef(false);
+  const liveScope = React.useRef<object | null>(null);
+  React.useLayoutEffect(() => {
+    liveScope.current = {};
+    return () => { liveScope.current = null; };
+  }, []);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<{ message: string; pendingPublicReflection?: boolean } | null>(null);
   function submit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (inFlight.current) return;
+    const scope = liveScope.current;
+    if (!scope || inFlight.current) return;
     inFlight.current = true;
     setPending(true);
     setError(null);
@@ -28,6 +40,8 @@ export function CreateModerationCaseForm({
     void (async () => {
       try {
         const result = await action(data);
+        // A potentially committed case belongs to the initiating view only.
+        if (liveScope.current !== scope) return;
         if (!result.ok) {
           setError(result.message ?? "ケースの作成に失敗しました。");
           if (result.retryable) onRefresh();
@@ -40,11 +54,14 @@ export function CreateModerationCaseForm({
         formRef.current?.reset();
         onRefresh();
       } catch {
+        if (liveScope.current !== scope) return;
         setError("通信状態を確認し、ケースの現在の状態を再取得してください。");
         onRefresh();
       } finally {
-        inFlight.current = false;
-        setPending(false);
+        if (liveScope.current === scope) {
+          inFlight.current = false;
+          setPending(false);
+        }
       }
     })();
   }

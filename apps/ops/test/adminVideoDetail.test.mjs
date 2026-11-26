@@ -552,3 +552,161 @@ test("MIG-0729 U02: moderation form matches CURRENT visible field names", () => 
   }
   assert.match(markup, /モデレーションケースを作成/);
 });
+
+
+// Deferred HTTP receipts reproduce navigation races without resubmitting or
+// aborting a possibly committed mutation.
+function deferredReceipt() {
+  let resolve, reject;
+  const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+async function withMutationDom(run) {
+  const saved = Object.fromEntries(["window", "document", "FormData", "IS_REACT_ACT_ENVIRONMENT"]
+    .map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "https://flamenode.invalid" });
+  Object.assign(globalThis, {
+    window: dom.window, document: dom.window.document, FormData: dom.window.FormData,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    await run({ dom, root });
+  } finally {
+    await React.act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, descriptor] of Object.entries(saved)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+}
+
+test("MIG-0729 U02: deferred approval receipts cannot navigate or refresh another video or a fresh A visit", async () => {
+  for (const scenario of ["switch", "return", "reject", "event", "unmount"]) {
+    await withMutationDom(async ({ dom, root }) => {
+      const old = deferredReceipt();
+      const calls = [], next = [], refreshes = [];
+      const actions = {
+        approve: async () => ({ ok: true }),
+        approveAndNext: form => {
+          calls.push([form.get("video_id"), form.get("review_event_id")]);
+          return old.promise;
+        },
+        setStatus: async () => ({ ok: true }),
+      };
+      const render = async (id, eventId = "event-a") => React.act(async () => {
+        root.render(id === null ? null : React.createElement(StatusControls, {
+          data: { ...detail, video: { ...detail.video, id } },
+          eventId, actions, onNext: href => next.push([id, href]),
+          onRefresh: () => refreshes.push(id),
+        }));
+      });
+      const clickNext = async () => React.act(async () => {
+        const btn = [...dom.window.document.querySelectorAll("button")]
+          .find(b => b.textContent.trim() === "承認して次へ");
+        assert.ok(btn && !btn.disabled);
+        btn.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      });
+      await render("video-a");
+      await clickNext();
+      assert.deepEqual(calls, [["video-a", "event-a"]]);
+      if (scenario === "unmount") await render(null);
+      else if (scenario === "event") await render("video-a", "event-b");
+      else {
+        await render("video-b");
+        if (scenario === "return") await render("video-a");
+      }
+      await React.act(async () => {
+        if (scenario === "reject") old.reject(new Error("OLD_FAILURE"));
+        else old.resolve({ ok: true, message: "OLD_RECEIPT", nextHref: "/admin/videos/next-from-a" });
+      });
+      assert.deepEqual(next, [], scenario);
+      assert.deepEqual(refreshes, [], scenario);
+      assert.equal(calls.length, 1, "never automatically retry POST");
+      assert.doesNotMatch(dom.window.document.body.textContent, /OLD_RECEIPT|通信状態を確認/);
+      if (scenario !== "unmount") {
+        const btn = [...dom.window.document.querySelectorAll("button")]
+          .find(b => b.textContent.trim() === "承認して次へ");
+        assert.ok(btn && !btn.disabled, "new view has its own write state");
+      }
+    });
+  }
+});
+
+test("MIG-0729 U02: same-view deferred approval-and-next still uses the accepted nextHref once", async () => {
+  await withMutationDom(async ({ dom, root }) => {
+    const receipt = deferredReceipt();
+    const next = [], refreshes = [], calls = [];
+    const actions = {
+      approve: async () => ({ ok: true }),
+      approveAndNext: form => { calls.push(form.get("video_id")); return receipt.promise; },
+      setStatus: async () => ({ ok: true }),
+    };
+    await React.act(async () => root.render(React.createElement(StatusControls, {
+      data: detail, eventId: null, actions,
+      onNext: href => next.push(href), onRefresh: () => refreshes.push(true),
+    })));
+    const btn = [...dom.window.document.querySelectorAll("button")]
+      .find(b => b.textContent.trim() === "承認して次へ");
+    await React.act(async () => btn.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
+    await React.act(async () => receipt.resolve({ ok: true, nextHref: "/admin/videos/next" }));
+    assert.deepEqual(calls, ["video-1"]);
+    assert.deepEqual(next, ["/admin/videos/next"]);
+    assert.deepEqual(refreshes, []);
+  });
+});
+
+test("MIG-0729 U02: stale moderation case receipt cannot reset a different or returning video's form", async () => {
+  for (const scenario of ["switch", "return", "reject", "retryable"]) {
+    await withMutationDom(async ({ dom, root }) => {
+      const old = deferredReceipt();
+      const calls = [], refreshes = [];
+      const action = fd => { calls.push([fd.get("video_id"), fd.get("private_note")]); return old.promise; };
+      const render = id => React.act(async () => root.render(React.createElement(CreateModerationCaseForm, {
+        videoId: id, action, onRefresh: () => refreshes.push(id),
+      })));
+      await render("video-a");
+      dom.window.document.querySelector('[name="private_note"]').value = "original A";
+      await React.act(async () => dom.window.document.querySelector("form")
+        .dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })));
+      assert.deepEqual(calls, [["video-a", "original A"]]);
+      await render("video-b");
+      if (scenario === "return") await render("video-a");
+      const note = dom.window.document.querySelector('[name="private_note"]');
+      note.value = "new view unsaved note";
+      await React.act(async () => {
+        if (scenario === "reject") old.reject(new Error("OLD_FAILURE"));
+        else if (scenario === "retryable") old.resolve({ ok: false, retryable: true, message: "OLD_FAILURE" });
+        else old.resolve({ ok: true, message: "OLD_CASE_RECEIPT" });
+      });
+      assert.equal(note.value, "new view unsaved note");
+      assert.deepEqual(refreshes, []);
+      assert.equal(calls.length, 1);
+      assert.doesNotMatch(dom.window.document.body.textContent, /OLD_CASE_RECEIPT|OLD_FAILURE|通信状態を確認/);
+      assert.equal(dom.window.document.querySelector('button[type="submit"]').disabled, false);
+    });
+  }
+});
+
+test("MIG-0729 T04: current-view moderation success resets fields and refreshes exactly once", async () => {
+  await withMutationDom(async ({ dom, root }) => {
+    const receipt = deferredReceipt();
+    const calls = [], refreshes = [];
+    await React.act(async () => root.render(React.createElement(CreateModerationCaseForm, {
+      videoId: "video-a",
+      action: fd => { calls.push(fd.get("video_id")); return receipt.promise; },
+      onRefresh: () => refreshes.push(true),
+    })));
+    const note = dom.window.document.querySelector('[name="private_note"]');
+    note.value = "original";
+    await React.act(async () => dom.window.document.querySelector("form")
+      .dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })));
+    await React.act(async () => receipt.resolve({ ok: true, message: "CASE_OK" }));
+    assert.deepEqual(calls, ["video-a"]);
+    assert.deepEqual(refreshes, [true]);
+    assert.equal(note.value, "");
+    assert.match(dom.window.document.body.textContent, /CASE_OK/);
+  });
+});
