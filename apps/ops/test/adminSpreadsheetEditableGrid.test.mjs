@@ -271,3 +271,340 @@ test("MIG-0737 U01: keyboard edit retains original PK and value through unchange
     ]);
   } finally { await ui.cleanup(); }
 });
+
+
+const editorRows = [
+  { id: "v1", title: "Alpha", secret: "first" },
+  { id: "v2", title: "Beta", secret: "second" },
+];
+const editorData = () => fixture("videos", "editable", 1, editorRows);
+const saveResponse = () => json(200, { ok: true });
+function namedButton(ui, name) {
+  const button = [...ui.host.querySelectorAll("button")].find(el =>
+    el.getAttribute("aria-label") === name || el.textContent.trim() === name);
+  assert.ok(button, "missing button: " + name);
+  return button;
+}
+function editedInput(ui) {
+  const target = ui.host.querySelector('[data-grid-cell] input');
+  assert.ok(target, "missing cell editor");
+  return target;
+}
+function editorKey(target, key, options = {}) {
+  return target.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    key, bubbles: true, cancelable: true, ...options,
+  }));
+}
+async function openDraft(ui, value, row = 1) {
+  await click(ui, `${row}行 title を編集`);
+  await input(ui, "title を編集", value);
+  return editedInput(ui);
+}
+function selectedCoordinates(ui) {
+  return [...ui.host.querySelectorAll('[data-grid-cell][aria-selected="true"]')]
+    .map(cell => cell.dataset.gridCell);
+}
+
+for (const scenario of [
+  { name: "Enter down", key: "Enter", row: 1, end: "1:1" },
+  { name: "Enter at last row", key: "Enter", row: 2, end: "1:1" },
+  { name: "Tab right", key: "Tab", row: 1, end: "0:2" },
+  { name: "Shift+Tab left", key: "Tab", shiftKey: true, row: 1, end: "0:0" },
+  { name: "Tab at last column", key: "Tab", row: 1, end: "0:1", columns: columns.slice(0, 2) },
+  { name: "Shift+Tab at first column", key: "Tab", shiftKey: true, row: 1, end: "0:0",
+    columns: [columns[1], columns[0], columns[2]] },
+]) {
+  test(`MIG-0737 U01 editor: ${scenario.name} closes before PATCH completes and clamps focus`, async () => {
+    const pending = [];
+    let refreshes = 0;
+    const ui = await mount({ data: { ...editorData(), columns: scenario.columns ?? columns },
+      allowMutations: true, onRefresh: () => { refreshes++; },
+      fetchFn: (_, init) => new Promise(resolve => pending.push({ init, resolve })),
+    });
+    try {
+      const target = await openDraft(ui, "Changed", scenario.row);
+      assert.equal(document.activeElement === target, true);
+      await React.act(async () => assert.equal(editorKey(target, scenario.key,
+        { shiftKey: scenario.shiftKey ?? false }), false));
+      assert.equal(ui.host.querySelector('[data-grid-cell] input') === null, true);
+      assert.equal(document.activeElement?.getAttribute("data-grid-cell"), scenario.end);
+      assert.deepEqual(selectedCoordinates(ui), [scenario.end]);
+      assert.equal(pending.length, 1);
+      assert.deepEqual(JSON.parse(pending[0].init.body), {
+        table: "videos", primaryKey: { id: `v${scenario.row}` }, column: "title", value: "Changed",
+      });
+      assert.equal(refreshes, 0);
+      await React.act(async () => pending[0].resolve(saveResponse()));
+      await flush();
+      assert.equal(refreshes, 1);
+      assert.equal(namedButton(ui, "元に戻す").disabled, false);
+    } finally { await ui.cleanup(); }
+  });
+}
+
+test("MIG-0737 U01 editor: explicit Save closes immediately without optimistic row replacement", async () => {
+  let finish;
+  const requests = [];
+  const ui = await mount({ data: editorData(), allowMutations: true, onRefresh: () => {},
+    fetchFn: (_, init) => { requests.push(init); return new Promise(resolve => { finish = resolve; }); },
+  });
+  try {
+    await openDraft(ui, "Changed");
+    await click(ui, "セルを保存");
+    assert.equal(ui.host.querySelector('[data-grid-cell] input') === null, true);
+    assert.match(ui.host.querySelector('[data-grid-cell="0:1"]').textContent, /Alpha/);
+    assert.equal(document.activeElement?.getAttribute("data-grid-cell"), "0:1");
+    assert.equal(namedButton(ui, "1行 title を編集").disabled, true);
+    assert.equal(requests.length, 1);
+    await React.act(async () => finish(saveResponse()));
+    await flush();
+  } finally { await ui.cleanup(); }
+});
+
+for (const [typed, expected] of [["", null], [" \t ", null], [" null ", null], ["NuLl", null],
+  ["  text  ", "  text  "], ["42", "42"], ['{"x":1}', '{"x":1}']]) {
+  test(`MIG-0737 U01 editor: explicit commit preserves CURRENT normalization for ${JSON.stringify(typed)}`, async () => {
+    const requests = [];
+    const ui = await mount({ data: editorData(), allowMutations: true, onRefresh: () => {},
+      fetchFn: async (_, init) => { requests.push(JSON.parse(init.body)); return saveResponse(); },
+    });
+    try {
+      await openDraft(ui, typed);
+      await click(ui, "セルを保存");
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].value, expected);
+      await click(ui, "元に戻す");
+      assert.equal(requests[1].value, "Alpha");
+    } finally { await ui.cleanup(); }
+  });
+}
+
+for (const [name, original, typed] of [["text", "Alpha", "Alpha"], ["null", null, ""],
+  ["undefined", undefined, " NULL "], ["empty display", "", " \t "]]) {
+  test(`MIG-0737 U01 editor: ${name} no-op closes and moves without PATCH, refresh or history`, async () => {
+    let calls = 0;
+    let refreshes = 0;
+    const ui = await mount({ data: fixture("videos", "editable", 1,
+      [{ ...editorRows[0], title: original }, editorRows[1]]), allowMutations: true,
+      fetchFn: async () => { calls++; return saveResponse(); }, onRefresh: () => { refreshes++; },
+    });
+    try {
+      const target = await openDraft(ui, typed);
+      await React.act(async () => editorKey(target, "Enter"));
+      assert.equal(ui.host.querySelector('[data-grid-cell] input') === null, true);
+      assert.equal(document.activeElement?.getAttribute("data-grid-cell"), "1:1");
+      assert.deepEqual(selectedCoordinates(ui), ["1:1"]);
+      assert.equal(calls, 0);
+      assert.equal(refreshes, 0);
+      assert.equal(namedButton(ui, "元に戻す").disabled, true);
+      assert.equal(ui.host.querySelector('[role="status"]') === null, true);
+    } finally { await ui.cleanup(); }
+  });
+}
+
+
+test("MIG-0737 U01 editor: same-turn input, key and Save consume the latest draft exactly once", async () => {
+  const requests = [];
+  let finish;
+  const ui = await mount({ data: editorData(), allowMutations: true, onRefresh: () => {},
+    fetchFn: (_, init) => { requests.push(JSON.parse(init.body)); return new Promise(resolve => { finish = resolve; }); },
+  });
+  try {
+    await click(ui, "1行 title を編集");
+    const target = editedInput(ui);
+    const save = namedButton(ui, "セルを保存");
+    await React.act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(target, "Latest draft");
+      target.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      editorKey(target, "Enter");
+      save.click();
+      save.click();
+    });
+    assert.equal(ui.host.querySelector('[data-grid-cell] input') === null, true);
+    assert.deepEqual(requests.map(request => request.value), ["Latest draft"]);
+    await React.act(async () => finish(saveResponse()));
+    await flush();
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 editor: cancelled drafts cannot be revived by a stale same-turn Save", async () => {
+  let calls = 0;
+  const ui = await mount({ data: editorData(), allowMutations: true, onRefresh: () => {},
+    fetchFn: async () => { calls++; return saveResponse(); },
+  });
+  try {
+    await openDraft(ui, "Discarded");
+    const save = namedButton(ui, "セルを保存");
+    const cancel = namedButton(ui, "キャンセル");
+    await React.act(async () => { cancel.click(); save.click(); });
+    assert.equal(ui.host.querySelector('[data-grid-cell] input') === null, true);
+    assert.equal(calls, 0);
+    assert.equal(namedButton(ui, "元に戻す").disabled, true);
+  } finally { await ui.cleanup(); }
+});
+
+for (const outsideFocus of [false, true]) {
+  test(`MIG-0737 U01 editor: failed commit reselects its cell with external focus=${outsideFocus}`, async () => {
+    let finish;
+    let refreshes = 0;
+    const outside = document.createElement("input"); document.body.append(outside);
+    const ui = await mount({ data: editorData(), allowMutations: true,
+      onRefresh: () => { refreshes++; }, fetchFn: () => new Promise(resolve => { finish = resolve; }),
+    });
+    try {
+      const target = await openDraft(ui, "Rejected");
+      await React.act(async () => editorKey(target, "Enter"));
+      if (outsideFocus) outside.focus();
+      await React.act(async () => finish(json(500, { ok: false })));
+      await flush();
+      assert.equal(ui.host.querySelector('[data-grid-cell] input') === null, true);
+      assert.deepEqual(selectedCoordinates(ui), ["0:1"]);
+      assert.equal(document.activeElement === (outsideFocus ? outside : ui.host.querySelector('[data-grid-cell="0:1"]')), true);
+      assert.match(ui.host.textContent, /保存できませんでした/);
+      assert.equal(namedButton(ui, "元に戻す").disabled, true);
+      assert.equal(refreshes, 0);
+    } finally { outside.remove(); await ui.cleanup(); }
+  });
+}
+
+test("MIG-0737 U01 editor: successful PATCH with failed refresh remains saved and undoable without retry", async () => {
+  const requests = [];
+  const ui = await mount({ data: editorData(), allowMutations: true,
+    fetchFn: async (_, init) => { requests.push(JSON.parse(init.body)); return saveResponse(); },
+    onRefresh: async () => { throw Error("refresh unavailable"); },
+  });
+  try {
+    await openDraft(ui, "Saved");
+    await click(ui, "セルを保存");
+    assert.equal(ui.host.querySelector('[data-grid-cell] input') === null, true);
+    assert.match(ui.host.textContent, /保存済みですが、再取得できませんでした/);
+    assert.equal(requests.length, 1);
+    assert.equal(namedButton(ui, "元に戻す").disabled, false);
+    await click(ui, "元に戻す");
+    assert.deepEqual(requests.map(request => request.value), ["Saved", "Alpha"]);
+  } finally { await ui.cleanup(); }
+});
+
+for (const context of ["transport", "page", "round-trip"]) {
+  for (const outcome of ["resolve", "reject"]) {
+    test(`MIG-0737 U01 editor: stale refresh ${outcome} preserves a new ${context} draft`, async () => {
+      let settle;
+      const oldRefresh = new Promise((resolve, reject) => { settle = outcome === "resolve" ? resolve : reject; });
+      const oldRequests = [];
+      let newCalls = 0;
+      const props = { data: editorData(), allowMutations: true,
+        fetchFn: async (_, init) => { oldRequests.push(JSON.parse(init.body)); return saveResponse(); },
+        onRefresh: () => oldRefresh,
+      };
+      const ui = await mount(props);
+      try {
+        await openDraft(ui, "Old saved value");
+        await click(ui, "セルを保存");
+        assert.equal(oldRequests.length, 1);
+        const next = { ...props, onRefresh: () => {} };
+        if (context === "transport" || context === "round-trip") next.fetchFn = async () => { newCalls++; return saveResponse(); };
+        else next.data = { ...editorData(), page: 2 };
+        await ui.render(next);
+        if (context === "round-trip") await ui.render({ ...props, onRefresh: () => {} });
+        const fresh = await openDraft(ui, "New unsaved value");
+        await React.act(async () => settle(outcome === "reject" ? Error("old refresh failed") : undefined));
+        await flush();
+        assert.equal(ui.host.querySelector('[data-grid-cell] input') === fresh, true);
+        assert.equal(fresh.value, "New unsaved value");
+        assert.equal(document.activeElement === fresh, true);
+        assert.equal(namedButton(ui, "セルを保存").disabled, false);
+        assert.equal(namedButton(ui, "元に戻す").disabled, true);
+        assert.equal(ui.host.querySelector('[role="status"]') === null, true);
+        assert.equal(oldRequests.length, 1);
+        assert.equal(newCalls, 0);
+      } finally { await ui.cleanup(); }
+    });
+  }
+}
+
+test("MIG-0737 U01 editor: stale PATCH cannot refresh or clear a replacement transport's draft", async () => {
+  let finish;
+  let oldRefreshes = 0;
+  let oldSignal;
+  const props = { data: editorData(), allowMutations: true,
+    fetchFn: (_, init) => { oldSignal = init.signal; return new Promise(resolve => { finish = resolve; }); },
+    onRefresh: () => { oldRefreshes++; },
+  };
+  const ui = await mount(props);
+  try {
+    await openDraft(ui, "Old write");
+    await click(ui, "セルを保存");
+    await ui.render({ ...props, fetchFn: async () => saveResponse(), onRefresh: () => {} });
+    const fresh = await openDraft(ui, "Fresh draft");
+    assert.equal(oldSignal.aborted, true);
+    await React.act(async () => finish(saveResponse()));
+    await flush();
+    assert.equal(ui.host.querySelector('[data-grid-cell] input') === fresh, true);
+    assert.equal(fresh.value, "Fresh draft");
+    assert.equal(oldRefreshes, 0);
+  } finally { await ui.cleanup(); }
+});
+
+
+test("MIG-0737 U01 editor: Escape keeps keyboard cancellation reachable without committing", async () => {
+  let calls = 0;
+  const ui = await mount({ data: editorData(), allowMutations: true, onRefresh: () => {},
+    fetchFn: async () => { calls++; return saveResponse(); },
+  });
+  try {
+    const target = await openDraft(ui, "Discarded by keyboard");
+    assert.equal(document.activeElement === target, true);
+    await React.act(async () => assert.equal(editorKey(target, "Escape"), false));
+    assert.equal(ui.host.querySelector('[data-grid-cell] input') === null, true);
+    assert.equal(document.activeElement?.getAttribute("data-grid-cell"), "0:1");
+    assert.equal(calls, 0);
+    assert.equal(namedButton(ui, "元に戻す").disabled, true);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 editor: an empty original display records CURRENT null for undo", async () => {
+  const requests = [];
+  const ui = await mount({ data: fixture("videos", "editable", 1, [{ ...editorRows[0], title: "" }]),
+    allowMutations: true, onRefresh: () => {},
+    fetchFn: async (_, init) => { requests.push(JSON.parse(init.body)); return saveResponse(); },
+  });
+  try {
+    await openDraft(ui, "New value");
+    await click(ui, "セルを保存");
+    await click(ui, "元に戻す");
+    assert.deepEqual(requests.map(request => request.value), ["New value", null]);
+  } finally { await ui.cleanup(); }
+});
+
+
+for (const scenario of [
+  { name: "reordered row and column", row: 1,
+    next: { ...editorData(), rows: [...editorRows].reverse(), columns: [columns[1], columns[0], columns[2]] }, end: "1:0" },
+  { name: "removed last row", row: 2, next: { ...editorData(), rows: [editorRows[0]] }, end: "0:1" },
+  { name: "removed column", row: 1, next: { ...editorData(), columns: [columns[0], columns[2]] }, end: "0:1" },
+  { name: "empty page", row: 1, next: { ...editorData(), rows: [] }, end: null },
+]) {
+  test(`MIG-0737 U01 editor: failed commit resolves focus against ${scenario.name}`, async () => {
+    let finish;
+    const sent = [];
+    let refreshes = 0;
+    const props = { data: editorData(), allowMutations: true, onRefresh: () => { refreshes++; },
+      fetchFn: (_, init) => { sent.push(JSON.parse(init.body)); return new Promise(resolve => { finish = resolve; }); },
+    };
+    const ui = await mount(props);
+    try {
+      await openDraft(ui, "Rejected", scenario.row);
+      await click(ui, "セルを保存");
+      await ui.render({ ...props, data: scenario.next });
+      await React.act(async () => finish(json(500, { ok: false })));
+      await flush();
+      assert.deepEqual(sent, [{ table: "videos", primaryKey: { id: `v${scenario.row}` }, column: "title", value: "Rejected" }]);
+      assert.equal(refreshes, 0);
+      assert.equal(ui.host.querySelector('[data-grid-cell] input') === null, true);
+      assert.deepEqual(selectedCoordinates(ui), scenario.end === null ? [] : [scenario.end]);
+      const tabbable = [...ui.host.querySelectorAll('[data-grid-cell][tabindex="0"]')].map(cell => cell.dataset.gridCell);
+      assert.deepEqual(tabbable, scenario.end === null ? [] : [scenario.end]);
+      if (scenario.end !== null) assert.equal(document.activeElement?.getAttribute("data-grid-cell"), scenario.end);
+    } finally { await ui.cleanup(); }
+  });
+}

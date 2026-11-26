@@ -12,7 +12,7 @@ import {
 type Change = { table: string; page: number; pk: Record<string, string>; column: string; before: string | null; after: string | null };
 type History = { key: string; undo: Change[]; redo: Change[] };
 type CellSelection = {
-  rowIndex: number; column: string; value: string; key: string;
+  id: number; rowIndex: number; column: string; value: string; key: string;
   pk: Record<string, string>; before: string | null; invalidated?: boolean;
 };
 const HISTORY_LIMIT = 100;
@@ -56,6 +56,8 @@ export function AdminSpreadsheetEditableGrid({
 }): React.ReactElement {
   const { def, rows, columns, primaryKeys, page, limit } = data;
   const [selection, setSelection] = React.useState<CellSelection | null>(null);
+  const liveSelection = React.useRef<CellSelection | null>(null);
+  const nextEditId = React.useRef(0);
   const [anchorCell, setAnchorCell] = React.useState<GridCell>({ row: 0, col: 0 });
   const [focusedCell, setFocusedCell] = React.useState<GridCell>({ row: 0, col: 0 });
   const [insertOpen, setInsertOpen] = React.useState(false);
@@ -64,6 +66,8 @@ export function AdminSpreadsheetEditableGrid({
   const [busy, setBusy] = React.useState(false);
   const [history, setHistory] = React.useState<History>({ key: "", undo: [], redo: [] });
   const tableRef = React.useRef<HTMLTableElement>(null);
+  const displayedPage = React.useRef(data);
+  displayedPage.current = data;
   const inFlight = React.useRef<AbortController | null>(null);
   // CURRENT gives undo/redo its own busy flag; range shortcuts must not use the general mutation lock.
   const historyInFlight = React.useRef<AbortController | null>(null);
@@ -106,7 +110,7 @@ export function AdminSpreadsheetEditableGrid({
       previousContext.current = { fetchFn, table: def.table, page, allowMutations };
       setContextVersion(v => v + 1);
       setHistory({ key: "", undo: [], redo: [] });
-      setSelection(null);
+      setCellEdit(null);
       setAnchorCell({ row: 0, col: 0 });
       setFocusedCell({ row: 0, col: 0 });
       // CURRENT returns keyboard focus to the reset grid after a context replacement.
@@ -119,23 +123,37 @@ export function AdminSpreadsheetEditableGrid({
     return () => inFlight.current?.abort();
   }, [fetchFn, def.table, page, allowMutations]);
 
-  // Latch an observed conflicting committed snapshot; a later A→B→A
-  // refresh must not revive a draft whose target was already invalidated.
+  // Keep the live draft and rendered conflict latch in sync, including after A→B→A refreshes.
   React.useEffect(() => {
-    if (!currentSelection || !selectionConflict || currentSelection.invalidated) return;
-    setSelection(previous => previous && previous.pk === currentSelection.pk
-      ? { ...previous, invalidated: true } : previous);
+    const draft = liveSelection.current;
+    if (!currentSelection || !selectionConflict || currentSelection.invalidated || draft?.id !== currentSelection.id) return;
+    setCellEdit({ ...draft, invalidated: true });
   }, [currentSelection, selectionConflict]);
 
-  function beginEdit(rowIndex: number, column: (typeof columns)[number]): boolean {
-    if (!canMutate || selectionConflict || !column.editable || column.pk !== 0 || column.generated) return false;
+  function setCellEdit(next: CellSelection | null): void {
+    liveSelection.current = next;
+    setSelection(next);
+  }
+
+  function startCellEdit(rowIndex: number, colIndex: number): boolean {
+    const column = columns[colIndex];
     const row = rows[rowIndex];
     const pk = row ? primaryKey(row, primaryKeys) : null;
-    if (!row || !pk) return false;
+    if (!canMutate || inFlight.current !== null || !isCurrent() || selectionConflict || !column || !row || !pk ||
+        !column.editable || column.pk !== 0 || column.generated) return false;
     const value = cellValue(row[column.name]);
-    setSelection({ rowIndex, column: column.name, value, key, pk,
+    setCellEdit({ id: ++nextEditId.current, rowIndex, column: column.name, value, key, pk,
       before: row[column.name] == null ? null : value });
+    const position = { row: rowIndex, col: colIndex };
+    setAnchorCell(position);
+    setFocusedCell(position);
     return true;
+  }
+
+  function cancelCellEdit(editId: number, position: GridCell): void {
+    if (liveSelection.current?.id !== editId) return;
+    setCellEdit(null);
+    focusGridCell(position);
   }
 
   function isCurrent(): boolean {
@@ -146,7 +164,7 @@ export function AdminSpreadsheetEditableGrid({
   async function runMutation(
     operation: (signal: AbortSignal) => ReturnType<typeof patchSpreadsheetCell>,
   ): Promise<boolean> {
-    if (!canMutate || !isCurrent()) return false;
+    if (!canMutate || inFlight.current !== null || !isCurrent()) return false;
     const controller = new AbortController();
     inFlight.current = controller;
     setBusy(true);
@@ -163,11 +181,13 @@ export function AdminSpreadsheetEditableGrid({
       try {
         await onRefresh();
       } catch {
-        if (!controller.signal.aborted) setNotice("保存済みですが、再取得できませんでした。画面を再読み込みしてください。");
+        if (!controller.signal.aborted && isCurrent()) {
+          setNotice("保存済みですが、再取得できませんでした。画面を再読み込みしてください。");
+        }
       }
-      return true;
+      return !controller.signal.aborted && isCurrent() && inFlight.current === controller;
     } catch {
-      if (!controller.signal.aborted) setNotice("保存状態を確認できません。再読み込みしてください。");
+      if (!controller.signal.aborted && isCurrent()) setNotice("保存状態を確認できません。再読み込みしてください。");
       return false;
     } finally {
       if (inFlight.current === controller) {
@@ -177,21 +197,53 @@ export function AdminSpreadsheetEditableGrid({
     }
   }
 
-  async function saveCell(): Promise<void> {
-    if (!currentSelection || !canMutate || selectionConflict) return;
-    const { pk, before, column } = currentSelection;
-    const after = currentSelection.value === "" ? null : currentSelection.value;
-    if (before === after) { setSelection(null); return; }
+  // Keep snapshot, consumption and completion ordering together so queued input/focus events cannot resubmit a draft.
+  async function saveCell(editId: number, nextFocus?: GridCell): Promise<void> {
+    const draft = liveSelection.current;
+    if (!draft || draft.id !== editId || draft.key !== key || draft.invalidated || selectionConflict ||
+        !canMutate || inFlight.current !== null || !isCurrent()) return;
+    const { pk, column } = draft;
+    const colIndex = columns.findIndex(c => c.name === column);
+    const before = draft.before === "" ? null : draft.before;
+    const trimmed = draft.value.trim();
+    const after = trimmed === "" || trimmed.toUpperCase() === "NULL" ? null : draft.value;
+    setCellEdit(null);
+    if (nextFocus) {
+      setAnchorCell(nextFocus);
+      focusGridCell(nextFocus);
+    }
+    if ((after ?? "") === (draft.before ?? "")) return;
+    const operationContext = previousContext.current;
     const ok = await runMutation(signal => patchSpreadsheetCell(fetchFn, {
       table: def.table, primaryKey: pk, column, value: after,
     }, signal));
-    if (!ok) return;
+    if (previousContext.current !== operationContext || !isCurrent() || !tableRef.current) return;
+    if (!ok) {
+      const latest = displayedPage.current;
+      if (latest.rows.length === 0 || latest.columns.length === 0) return;
+      // The failed target can move or disappear while PATCH is pending; never restore stale coordinates.
+      const matchingRow = Object.keys(pk).length === latest.primaryKeys.length
+        ? latest.rows.findIndex(row => {
+          const candidate = primaryKey(row, latest.primaryKeys);
+          return candidate !== null && latest.primaryKeys.every(name => Object.hasOwn(pk, name) && candidate[name] === pk[name]);
+        }) : -1;
+      const matchingColumn = latest.columns.findIndex(c => c.name === column);
+      const position = {
+        row: matchingRow >= 0 ? matchingRow : Math.min(draft.rowIndex, latest.rows.length - 1),
+        col: matchingColumn >= 0 ? matchingColumn : Math.min(colIndex, latest.columns.length - 1),
+      };
+      setAnchorCell(position);
+      const table = tableRef.current;
+      const active = table.ownerDocument.activeElement;
+      if (table.contains(active) || active === table.ownerDocument.body) focusGridCell(position);
+      else setFocusedCell(position);
+      return;
+    }
     const entry: Change = { table: def.table, page, pk, column, before, after };
     setHistory(state => {
       const prev = state.key === key ? state.undo : [];
       return { key, undo: [...prev, entry].slice(-HISTORY_LIMIT), redo: [] };
     });
-    setSelection(null);
   }
 
   async function replay(direction: "undo" | "redo"): Promise<void> {
@@ -231,11 +283,10 @@ export function AdminSpreadsheetEditableGrid({
     }
   }
 
-  function focusGridCell(focus: GridCell, source: HTMLTableCellElement): void {
+  function focusGridCell(focus: GridCell): void {
     setFocusedCell(focus);
     // The next key originates from the selected endpoint, including after whole-row/column selection.
-    source.closest("table")
-      ?.querySelector<HTMLTableCellElement>(`[data-grid-cell="${focus.row}:${focus.col}"]`)?.focus();
+    tableRef.current?.querySelector<HTMLTableCellElement>(`[data-grid-cell="${focus.row}:${focus.col}"]`)?.focus();
   }
 
   // Keep shortcut precedence in one dispatcher: Shift+Space wins over Ctrl/Cmd+Space.
@@ -257,7 +308,6 @@ export function AdminSpreadsheetEditableGrid({
       setAnchorCell({ row: selectRow ? rowIndex : 0, col: selectAll || selectRow ? 0 : colIndex });
       focusGridCell(
         { row: selectRow ? rowIndex : rows.length - 1, col: selectAll || selectRow ? columns.length - 1 : colIndex },
-        event.currentTarget,
       );
       return;
     }
@@ -272,8 +322,7 @@ export function AdminSpreadsheetEditableGrid({
       return;
     }
     if (event.key === "Enter" && canMutate && !event.ctrlKey && !event.metaKey) {
-      const column = columns[colIndex];
-      if (column && beginEdit(rowIndex, column)) event.preventDefault();
+      if (startCellEdit(rowIndex, colIndex)) event.preventDefault();
       return;
     }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -281,7 +330,7 @@ export function AdminSpreadsheetEditableGrid({
     if (moved.row === rowIndex && moved.col === colIndex) return;
     event.preventDefault();
     if (!event.shiftKey) setAnchorCell(moved);
-    focusGridCell(moved, event.currentTarget);
+    focusGridCell(moved);
   }
 
   async function addRow(): Promise<void> {
@@ -301,7 +350,7 @@ export function AdminSpreadsheetEditableGrid({
       setInsertOpen(false);
       setInsertDraft({});
       setHistory({ key, undo: [], redo: [] });
-      setSelection(null);
+      setCellEdit(null);
     }
   }
 
@@ -313,7 +362,7 @@ export function AdminSpreadsheetEditableGrid({
     if (!confirmDelete("選択した行を削除します。元に戻せません。続行しますか？")) return;
     const ok = await runMutation(signal => deleteSpreadsheetRow(fetchFn, { table: def.table, primaryKey: pk }, signal));
     if (ok) {
-      setSelection(null);
+      setCellEdit(null);
       setHistory({ key, undo: [], redo: [] });
     }
   }
@@ -343,10 +392,11 @@ export function AdminSpreadsheetEditableGrid({
       ) : null}
       <p>矢印キーで移動、Shift＋矢印で範囲選択、Ctrl/Cmd＋Aで全体選択、Shift＋Spaceで行選択、Ctrl/Cmd＋Spaceで列選択、Ctrl/Cmd＋CでTSVコピー、Enterで編集できます。</p>
       <p>見出しのクリックで全体・行・列を選択し、Shift＋行・列見出しで現在の始点から範囲を広げられます。</p>
+      <p>編集中はEnterで確定して下へ、Tabで確定して右へ、Shift＋Tabで確定して左へ移動できます。Escapeでキャンセルできます。</p>
       {currentSelection && selectionConflict && !busy ? (
         <div role="alert">
           <p>編集中の行または列の状態が変更されました。編集を破棄して最新の内容を確認してください。</p>
-          <button type="button" onClick={() => setSelection(null)}>編集を破棄</button>
+          <button type="button" onClick={() => setCellEdit(null)}>編集を破棄</button>
         </div>
       ) : currentSelection && !selectionConflict ? (
         <p>見出しで選択する前に、セルを保存するかキャンセルしてください。</p>
@@ -362,7 +412,7 @@ export function AdminSpreadsheetEditableGrid({
                 const end = { row: rows.length - 1, col: columns.length - 1 };
                 setAnchorCell({ row: 0, col: 0 });
                 const table = event.currentTarget.closest("table");
-                if (table?.contains(event.currentTarget.ownerDocument.activeElement)) focusGridCell(end, event.currentTarget);
+                if (table?.contains(event.currentTarget.ownerDocument.activeElement)) focusGridCell(end);
                 else setFocusedCell(end);
               }} />
             {columns.map((c, ci) => (
@@ -372,7 +422,7 @@ export function AdminSpreadsheetEditableGrid({
                   event.preventDefault();
                   if (!canSelectHeaders) return;
                   if (!event.shiftKey) setAnchorCell({ row: 0, col: ci });
-                  focusGridCell({ row: rows.length - 1, col: ci }, event.currentTarget);
+                  focusGridCell({ row: rows.length - 1, col: ci });
                 }}>{c.name}</th>
             ))}<th scope="col">操作</th>
           </tr></thead>
@@ -385,7 +435,7 @@ export function AdminSpreadsheetEditableGrid({
                     event.preventDefault();
                     if (event.button !== 0 || !canSelectHeaders) return;
                     if (!event.shiftKey) setAnchorCell({ row: ri, col: 0 });
-                    focusGridCell({ row: ri, col: columns.length - 1 }, event.currentTarget);
+                    focusGridCell({ row: ri, col: columns.length - 1 });
                   }}>{(page - 1) * Math.max(1, limit) + ri + 1}</th>
                 {columns.map(c => {
                 const value = cellValue(row[c.name]);
@@ -405,21 +455,35 @@ export function AdminSpreadsheetEditableGrid({
                       setAnchorCell(pos);
                       setFocusedCell(pos);
                     }}
-                    onKeyDown={(event) => handleGridKey(event, ri, columns.indexOf(c))}>{editing ? (
+                    onKeyDown={(event) => handleGridKey(event, ri, columns.indexOf(c))}>{editing && currentSelection ? (
                     <label>{c.name} を編集
-                      <input type="text" disabled={!canMutate} value={currentSelection?.value ?? ""}
+                      <input type="text" autoFocus disabled={!canMutate} value={currentSelection.value}
                         onChange={e => {
-                          const nextValue = e.target.value;
-                          setSelection(previous => previous && !previous.invalidated && previous.pk === currentSelection?.pk
-                            ? { ...previous, value: nextValue } : previous);
+                          const draft = liveSelection.current;
+                          if (draft?.id === currentSelection.id && !draft.invalidated) setCellEdit({ ...draft, value: e.target.value });
+                        }}
+                        onKeyDown={event => {
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelCellEdit(currentSelection.id, { row: ri, col: columns.indexOf(c) });
+                            return;
+                          }
+                          if (event.key !== "Enter" && event.key !== "Tab") return;
+                          event.preventDefault();
+                          const moveKey = event.key === "Enter" ? "ArrowDown" : event.shiftKey ? "ArrowLeft" : "ArrowRight";
+                          void saveCell(currentSelection.id, moveSpreadsheetFocus(
+                            { row: ri, col: columns.indexOf(c) }, moveKey, rows.length, columns.length,
+                          ));
                         }} />
-                      <button type="button" disabled={!canMutate} onClick={() => void saveCell()}>セルを保存</button>
-                      <button type="button" disabled={busy} onClick={() => setSelection(null)}>キャンセル</button>
+                      <button type="button" disabled={!canMutate}
+                        onClick={() => void saveCell(currentSelection.id, { row: ri, col: columns.indexOf(c) })}>セルを保存</button>
+                      <button type="button" disabled={busy}
+                        onClick={() => cancelCellEdit(currentSelection.id, { row: ri, col: columns.indexOf(c) })}>キャンセル</button>
                     </label>
                   ) : (
                     <>{value}{canEdit ? (
                       <button type="button" disabled={!canMutate || selectionConflict} aria-label={String(ri + 1) + "行 " + c.name + " を編集"}
-                        onClick={() => beginEdit(ri, c)}>編集</button>
+                        onClick={() => startCellEdit(ri, columns.indexOf(c))}>編集</button>
                     ) : null}</>
                   )}</td>
                 );

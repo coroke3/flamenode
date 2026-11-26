@@ -262,10 +262,13 @@ test("MIG-0737 U01: same-turn duplicate undo sends once and freezes range shortc
   try {
     const cell = await beginTitleSave(ui, "Changed");
     assert.equal(pending.length, 1);
-    assert.equal((await press(cell, "a", { ctrlKey: true })).defaultPrevented, false);
+    assert.equal(cell.querySelector("input") === null, true);
+    assert.equal((await press(cell, "a", { ctrlKey: true })).defaultPrevented, true);
+    assert.deepEqual(selectedCells(ui), pageCells);
+    await selectCell(ui, "1:1");
     await React.act(async () => { pending[0].resolve(successfulWrite()); });
     await flush();
-    assert.equal(cell.querySelector("input"), null);
+    assert.equal(cell.querySelector("input") === null, true);
     const immediateSelect = new dom.window.KeyboardEvent("keydown", {
       key: "a", ctrlKey: true, bubbles: true, cancelable: true,
     });
