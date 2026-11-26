@@ -1750,3 +1750,102 @@ test("MIG-0730 U02dw: injected permission receipt fields are snapshotted before 
     }
   }
 });
+
+
+test("MIG-0730 U02dx: same-video authority rotation inside permission receipt cannot grant an existing member", async () => {
+  const { flushSync } = await import("react-dom");
+  for (const scenario of ["stable", "ok getter", "message getter", "throwing message getter"]) {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const root = createRoot(target);
+    const requests = [];
+    const initialMembers = [member("CURRENT")];
+    const searchXUsers = async () => ({ items: [], hasMore: false, nextOffset: null });
+    let settle, committedAdapter, rotationCalls = 0, okReads = 0, messageReads = 0;
+    const previousAdapter = input => {
+      requests.push({ authority: "old", input });
+      return new Promise(resolve => { settle = resolve; });
+    };
+    const nextAdapter = async input => {
+      requests.push({ authority: "new", input });
+      return { ok: true };
+    };
+    function CommitProbe({ adapter }) {
+      React.useLayoutEffect(() => { committedAdapter = adapter; }, [adapter]);
+      return null;
+    }
+    const render = adapter => root.render(React.createElement(React.Fragment, null,
+      React.createElement(VideoMembersField, {
+        initialMembers, permissionTargetVideoId: "A", searchXUsers,
+        applyPermissionBatch: adapter,
+      }),
+      React.createElement(CommitProbe, { adapter }),
+    ));
+    const rotate = () => {
+      rotationCalls++;
+      // Commit the replacement adapter before the receipt getter returns.
+      // The same field instance and video ID must remain mounted.
+      flushSync(() => render(nextAdapter));
+    };
+    const permissionBadge = () => {
+      const badges = [...target.querySelectorAll(".fn-badge")]
+        .map(node => node.textContent)
+        .filter(value => value === "編集不可" || value === "作品編集に参加");
+      assert.equal(badges.length, 1, scenario + " existing-member badge");
+      return badges[0];
+    };
+    try {
+      await React.act(async () => render(previousAdapter));
+      assert.equal(committedAdapter, previousAdapter);
+      assert.equal(permissionBadge(), "編集不可");
+      const tsv = "CURRENT\tuser_0\t\t\t\tON";
+      await previewPermissionTsv(target, tsv);
+      await React.act(async () => buttonNamed(target, "変更を反映").click());
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].input.videoId, "A");
+      assert.deepEqual(requests[0].input.intents.map(({ x_user_id, intent }) =>
+        ({ x_user_id, intent })), [{ x_user_id: "user_0", intent: "on" }]);
+      assert.equal(permissionBadge(), "編集不可");
+
+      await React.act(async () => settle({
+        get ok() {
+          okReads++;
+          if (scenario === "ok getter") rotate();
+          return true;
+        },
+        get message() {
+          messageReads++;
+          if (scenario.includes("message getter")) rotate();
+          if (scenario === "throwing message getter") throw Error("STALE_PRIVATE_RECEIPT");
+          return "STALE_PRIVATE_RECEIPT";
+        },
+      }));
+      assert.equal(okReads, 1, scenario);
+      assert.equal(messageReads, 1, scenario);
+      assert.equal(rotationCalls, scenario === "stable" ? 0 : 1, scenario);
+      assert.equal(committedAdapter, scenario === "stable" ? previousAdapter : nextAdapter);
+      assert.equal(requests.length, 1, "settlement must not replay the write");
+      assert.equal(target.querySelector('[role="alertdialog"]'), null);
+      assert.deepEqual(formPayload(target).map(row => row.name), ["CURRENT"]);
+      // Names and members_json are insufficient: can_edit is display-only.
+      // Removing the second epoch check must fail the rotating success cases.
+      assert.equal(permissionBadge(), scenario === "stable" ? "作品編集に参加" : "編集不可",
+        scenario + " must only apply current-authority permission success");
+      assert.doesNotMatch(target.textContent, /STALE_PRIVATE_RECEIPT/);
+
+      if (scenario !== "stable") {
+        await previewPermissionTsv(target, tsv);
+        assert.equal(buttonNamed(target, "変更を反映").disabled, false);
+        await React.act(async () => buttonNamed(target, "変更を反映").click());
+        assert.equal(requests.length, 2);
+        assert.equal(requests[1].authority, "new");
+        assert.equal(permissionBadge(), "作品編集に参加", "fresh explicit write may grant the badge");
+        assert.equal(target.querySelector('[role="alertdialog"]'), null);
+      }
+    } finally {
+      settle?.({ ok: false });
+      await React.act(async () => root.unmount());
+      target.remove();
+    }
+  }
+});
