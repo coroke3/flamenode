@@ -10,6 +10,7 @@ import {
 } from "./staticEventPlaylistCore.ts";
 import {
   isEntityBlockedInManifest,
+  type PublicVisibilityBlockedEntitiesManifest,
 } from "./publicVisibilityManifestCore.ts";
 import {
   readPublicVisibilityBlockedEntitiesManifest,
@@ -55,6 +56,10 @@ async function readVisibleEventArtifact<T>(args: {
   maxBytes: number;
   objectKey: (eventId: string) => string;
   normalize: (payload: unknown, eventId: string) => T | null;
+  /** Enforce-mode only. Runs after the second manifest read and ETag check. */
+  filterAfterVisibility?: (
+    value: T, manifest: PublicVisibilityBlockedEntitiesManifest, rawArtifact: unknown,
+  ) => T | null;
 }): Promise<T | null> {
   const normalizedId = args.eventId.trim();
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(normalizedId)) return null;
@@ -109,6 +114,11 @@ async function readVisibleEventArtifact<T>(args: {
         visibility.etag !== afterVisibility.etag
       ) {
         return null;
+      }
+      // Use the post-read manifest for video-level revocations, not the
+      // potentially stale context from before the artifact GET.
+      if (args.filterAfterVisibility) {
+        return args.filterAfterVisibility(normalized, afterVisibility.manifest, artifact.value);
       }
     }
     return normalized;
@@ -167,6 +177,32 @@ export async function loadPublicEventPlaylistR2Only(
       );
       // partial artifactは「上映順」の正本として使わない。
       return normalized?.complete ? normalized : null;
+    },
+    filterAfterVisibility: (playlist, manifest, rawArtifact) => {
+      // Normalization drops optional per-video visibility flags. The original
+      // source rows are still position-aligned with normalized items, so
+      // check those flags as well as explicit individual video fences.
+      const rawItems =
+        rawArtifact && typeof rawArtifact === "object" && !Array.isArray(rawArtifact)
+          ? (rawArtifact as { items?: unknown }).items
+          : null;
+      if (!Array.isArray(rawItems) || rawItems.length !== playlist.items.length) {
+        return null;
+      }
+      const blockedVideos = new Set(
+        manifest.entities
+          .filter((entry) => entry.entity_type === "video")
+          .map((entry) => entry.entity_id),
+      );
+      const items = playlist.items.filter((item, index) => {
+        const raw = rawItems[index];
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+        const sourceRow = raw as { visibility_status?: unknown; status?: unknown };
+        return !blockedVideos.has(item.id) &&
+          (sourceRow.visibility_status == null || sourceRow.visibility_status === "public") &&
+          (sourceRow.status == null || sourceRow.status === "public");
+      });
+      return items.length === playlist.items.length ? playlist : { ...playlist, items };
     },
   });
 }

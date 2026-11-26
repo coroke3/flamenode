@@ -19,8 +19,14 @@ import {
 export type { AnnouncementResult };
 
 function announcementMutationError(error: unknown): AnnouncementResult {
+  // Keep Next's navigation/control-flow rethrow ahead of the best-effort logger.
   unstable_rethrow(error);
-  console.error("[announcement] atomic mutation failed", error);
+  try {
+    // D1/Drizzle errors can contain SQL bindings. Never log provider objects.
+    console.error("[announcement] atomic mutation failed");
+  } catch {
+    // A failed diagnostic sink must not replace the fixed action result.
+  }
   return {
     ok: false,
     message: "保存に失敗しました。再読み込みして、もう一度お試しください。",

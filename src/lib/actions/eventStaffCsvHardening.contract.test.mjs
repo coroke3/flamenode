@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 import { planD1AuditMutationBudget } from "../audit/mutateBudget.ts";
+import { parseEventStaffPermissionKeys } from "../../../packages/domain/src/event/staffInput.ts";
+import { canonicalizePermissionKey } from "../../../packages/domain/src/auth/permissions/aliases.ts";
+import {
+  assertEventWillRetainOwner,
+  assertOwnershipTransferInput,
+  assertSelfChangeConfirmation,
+  validateEventStaffSubject,
+  validateEventStaffUniqueness,
+} from "../../../packages/domain/src/event/ownership.ts";
 
 const source = readFileSync(
   fileURLToPath(new URL("./event-staff-admin.ts", import.meta.url)),
@@ -86,4 +96,354 @@ test("staff CSV matches legacy X spellings without rewriting stored rows", () =>
   assert.match(helper, /if \(exact\) return exact/);
   assert.match(helper, /parseCanonicalXId\(row\.x_user_id\) === xUserId/);
   assert.match(helper, /matches\.length > 1/);
+});
+
+test("SEC-800: preparation read failure logs fixed code without inspecting provider error", () => {
+  // Exercise the exact production function body while replacing only its
+  // TypeScript signature and Next.js-only navigation rethrow dependency.
+  const start = source.indexOf("function staffPreparationError(error: unknown): StaffActionResult");
+  const end = source.indexOf("\n// The domain parser embeds only", start);
+  assert.ok(start >= 0 && end > start, "isolate only the real CURRENT failure handler");
+  const declaration = source.slice(start, end).replace(
+    "function staffPreparationError(error: unknown): StaffActionResult",
+    "function staffPreparationError(error)",
+  );
+  const execute = (log, rethrow = () => {}) => runInNewContext(
+    declaration + "\nstaffPreparationError",
+    { console: { error: log }, unstable_rethrow: rethrow },
+  );
+
+  const secret = "SEC800_PRIVATE_PROVIDER_QUERY_AND_PARAMS";
+  const hostileError = new Proxy(new Error(secret), {
+    get(target, key) {
+      if (["message", "name", "stack", "cause"].includes(String(key))) {
+        throw new Error("provider error getter must not run");
+      }
+      return Reflect.get(target, key);
+    },
+  });
+  const diagnostics = [];
+  const result = execute((...args) => { diagnostics.push(args); })(hostileError);
+  assert.equal(result.ok, false);
+  assert.equal(result.message,
+    "スタッフ情報の取得に失敗しました。再読み込みして、もう一度お試しください。");
+  assert.deepEqual(diagnostics, [["[event-staff] PREPARATION_READ_FAILED"]]);
+  assert.doesNotMatch(JSON.stringify(diagnostics), /SEC800_PRIVATE|params|provider error getter/);
+
+  let attempted = 0;
+  const brokenLogger = execute(() => { attempted += 1; throw new Error(secret); });
+  const preserved = brokenLogger(hostileError);
+  assert.equal(attempted, 1, "a failed diagnostic sink must not be retried");
+  assert.equal(preserved.ok, false);
+  assert.equal(preserved.message, result.message,
+    "broken logger must not replace the normal sanitized action failure");
+
+  const navigationSentinel = { digest: "NEXT_REDIRECT" };
+  let loggedAfterRethrow = false;
+  const redirected = execute(
+    () => { loggedAfterRethrow = true; },
+    () => { throw navigationSentinel; },
+  );
+  assert.throws(() => redirected(navigationSentinel), (error) => error === navigationSentinel,
+    "Next.js navigation control flow must still propagate before diagnostics");
+  assert.equal(loggedAfterRethrow, false);
+});
+
+test("SEC-800: only fixed domain messages and matching user-owned confirmations reach staff actions", () => {
+  const start = source.indexOf("const STAFF_SAFE_ACTION_MESSAGES = new Set");
+  const end = source.indexOf("\nfunction staffPreparationError", start);
+  assert.ok(start >= 0 && end > start, "extract the production whitelist without transcribing it");
+  const functionSignature = /function staffSafeActionMessage\(\s*error: unknown,\s*fallback: string,\s*eventId\?: string,\s*explicitAllowed\?: readonly string\[],\s*\): string \{/;
+  const policySource = source.slice(start, end)
+    .replace(
+      functionSignature,
+      "function staffSafeActionMessage(error, fallback, eventId, explicitAllowed) {",
+    )
+    .replace("let message: unknown;", "let message;");
+  assert.doesNotMatch(policySource, functionSignature, "signature was made executable in node:vm");
+  const { policy, makeError } = runInNewContext(
+    policySource + "\n({ policy: staffSafeActionMessage, makeError: (message) => new Error(message) })",
+  );
+  const fallback = "スタッフを保存できません。";
+  const publicDomainMessages = [
+    "このイベントには同じ X ID のスタッフが既に登録されています。",
+    "イベントには最低1人の代表者が必要です。先に別のスタッフへ代表権限を移譲してください。",
+    "代表権限を付与できるのはイベント代表者または管理者だけです。",
+    "X ID確認権限は site admin 専用です。",
+    "自分自身のスタッフ権限は一括更新できません。個別の確認付き操作を使用してください。",
+  ];
+  for (const allowed of publicDomainMessages) {
+    assert.equal(policy(makeError(allowed), fallback), allowed,
+      "existing intended domain UX is preserved");
+  }
+
+  const canary = "SEC800_SQL_PARAMS_secret_user_id_abc123";
+  for (const unsafe of [
+    "Failed query: UPDATE event_staff; params: " + canary,
+    canary,
+    publicDomainMessages[0] + " " + canary,
+    "SQLITE_CONSTRAINT " + canary,
+    "A".repeat(260),
+  ]) {
+    assert.equal(policy(makeError(unsafe), fallback), fallback,
+      "unrecognized provider error body must never reach the response");
+  }
+  assert.equal(policy({ message: canary }, fallback), fallback);
+  const getterTrap = makeError(canary);
+  Object.defineProperty(getterTrap, "message", { get() { throw Error(canary); } });
+  assert.equal(policy(getterTrap, fallback), fallback,
+    "poisoned Error.message must not replace the user-visible failure");
+  const protoTrap = new Proxy(makeError(canary), {
+    getPrototypeOf() { throw Error(canary); },
+  });
+  assert.equal(policy(protoTrap, fallback), fallback,
+    "poisoned instanceof checks must also fail closed");
+
+  for (const action of ["SELF CHANGE", "REMOVE SELF", "TRANSFER"]) {
+    const expected = `確認のため「${action} event_123」と入力してください。`;
+    assert.equal(policy(makeError(expected), fallback, "event_123"), expected);
+    assert.equal(policy(makeError(expected), fallback, "event_456"), fallback);
+    assert.equal(policy(makeError(expected + canary), fallback, "event_123"), fallback);
+  }
+  const csv = "17行目: X IDが不正です";
+  assert.equal(policy(makeError(csv), "CSV入力エラーです。", undefined, [csv]), csv);
+  assert.equal(policy(makeError(csv), "CSV入力エラーです。", undefined, []), "CSV入力エラーです。");
+  assert.equal(policy(makeError("some failure " + canary), fallback, "event_123"), fallback);
+});
+
+test("SEC-800: all staff catch paths use the bounded allowlist, never raw provider message", () => {
+  assert.doesNotMatch(source, /message:\s*error instanceof Error\s*\?\s*error\.message/,
+    "no action may directly reflect untrusted Error.message to staff results");
+  const invocationCount = (source.match(/message:\s*staffSafeActionMessage\(\s*error,/g) ?? []).length;
+  assert.equal(invocationCount, 8,
+    "manager permission, assignment, owner grant, write, CSV input/write, remove, transfer");
+  assert.match(source, /data\.rows\.flatMap\(\(row\) => \[/,
+    "CSV row-specific errors must be compared against validated source line numbers");
+  assert.match(source, /staffSafeActionMessage\(error, "代表者を移譲できません。", data\.event_id\)/,
+    "event-confirmation copy remains available only for the matching event");
+});
+
+test("SEC-800: actual shared-domain ownership errors retain intended staff UI messages", () => {
+  // Execute the production allowlist against errors thrown by the real
+  // shared-domain functions, rather than only copied literal messages.
+  const start = source.indexOf("const STAFF_SAFE_ACTION_MESSAGES = new Set");
+  const end = source.indexOf("\nfunction staffPreparationError", start);
+  assert.ok(start >= 0 && end > start);
+  const policySource = source.slice(start, end)
+    .replace(
+      /function staffSafeActionMessage\(\s*error: unknown,\s*fallback: string,\s*eventId\?: string,\s*explicitAllowed\?: readonly string\[],\s*\): string \{/,
+      "function staffSafeActionMessage(error, fallback, eventId, explicitAllowed) {",
+    )
+    .replace("let message: unknown;", "let message;");
+  // Use the host Error constructor so the real domain Error instances
+  // satisfy instanceof in the isolated policy without an artificial wrapper.
+  const policy = runInNewContext(
+    policySource + "\nstaffSafeActionMessage",
+    { Error },
+  );
+  const fallback = "スタッフを保存できません。";
+  const eventId = "event_123";
+  const from = {
+    id: "staff_owner",
+    event_id: eventId,
+    x_user_id: "creator",
+    permission_preset: "owner",
+  };
+  const to = {
+    id: "staff_manager",
+    event_id: eventId,
+    x_user_id: "editor",
+    permission_preset: "manager",
+  };
+  const transfer = {
+    eventId, from, to,
+    confirmText: `TRANSFER ${eventId}`,
+    reason: "権限移譲のため",
+  };
+  const cases = [
+    { call: () => validateEventStaffSubject({ xUserId: "bad id!" }),
+      message: "イベントスタッフには X ID が必要です。" },
+    { call: () => validateEventStaffUniqueness({
+        rows: [from], candidate: { id: "another", event_id: eventId, x_user_id: from.x_user_id },
+      }),
+      message: "このイベントには同じ X ID のスタッフが既に登録されています。" },
+    { call: () => assertEventWillRetainOwner({
+        owners: [from], target: from, nextPreset: "manager",
+      }),
+      message: "イベントには最低1人の代表者が必要です。先に別のスタッフへ代表権限を移譲してください。" },
+    { call: () => assertSelfChangeConfirmation({
+        eventId, isSelfTarget: true, removesMembership: false, losesMemberPermission: true,
+        confirmText: null, reason: "",
+      }),
+      message: "自分の権限を変更する理由を入力してください。" },
+    { call: () => assertSelfChangeConfirmation({
+        eventId, isSelfTarget: true, removesMembership: false, losesMemberPermission: true,
+        confirmText: "", reason: "理由",
+      }),
+      message: `確認のため「SELF CHANGE ${eventId}」と入力してください。` },
+    { call: () => assertSelfChangeConfirmation({
+        eventId, isSelfTarget: true, removesMembership: true, losesMemberPermission: true,
+        confirmText: "", reason: "理由",
+      }),
+      message: `確認のため「REMOVE SELF ${eventId}」と入力してください。` },
+    { call: () => assertOwnershipTransferInput({ ...transfer, reason: "" }),
+      message: "代表権限の移譲理由を入力してください。" },
+    { call: () => assertOwnershipTransferInput({ ...transfer, confirmText: "" }),
+      message: `確認のため「TRANSFER ${eventId}」と入力してください。` },
+    { call: () => assertOwnershipTransferInput({ ...transfer, from: null }),
+      message: "移譲元は現在の代表者である必要があります。" },
+    { call: () => assertOwnershipTransferInput({ ...transfer, to: null }),
+      message: "移譲先は同じイベントに登録済みのスタッフを選択してください。" },
+    { call: () => assertOwnershipTransferInput({ ...transfer, to: from }),
+      message: "移譲元と移譲先に同じスタッフは指定できません。" },
+  ];
+  for (const { call, message } of cases) {
+    let error;
+    try { call(); } catch (caught) { error = caught; }
+    assert.ok(error instanceof Error, "shared domain actually throws");
+    assert.equal(error.message, message, "CURRENT domain message has not changed");
+    assert.equal(policy(error, fallback, eventId), message,
+      "exact shared-domain error must retain its approved UI wording");
+    const isEventConfirmation = message.startsWith("確認のため「");
+    assert.equal(policy(error, fallback, "other_event"),
+      isEventConfirmation ? fallback : message,
+      "only event-specific confirmation messages depend on the event identity");
+  }
+
+  assert.doesNotThrow(() => assertSelfChangeConfirmation({
+    eventId, isSelfTarget: false, removesMembership: true,
+    losesMemberPermission: true, confirmText: null, reason: null,
+  }), "non-self operation must not suddenly require a confirmation");
+  assert.doesNotThrow(() => assertOwnershipTransferInput(transfer),
+    "correct transfer remains allowed by the shared domain");
+});
+
+test("SEC-800: actual event.members collaborator denial retains CURRENT permission message", async () => {
+  // Execute the canonical shared-core authorization function rather than
+  // constructing a guessed message. Only the D1-dependent resolver is mocked.
+  const authSource = readFileSync(
+    fileURLToPath(new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url)),
+    "utf8",
+  );
+  const start = authSource.indexOf("export async function assertCanEditEvent(");
+  const end = authSource.indexOf("\nexport async function loadVideoEventIdsForAccessContext", start);
+  assert.ok(start >= 0 && end > start, "read the real shared authorization function");
+  const authSignature =
+    /export async function assertCanEditEvent\([\s\S]*?\): Promise<string \| null> \{/;
+  const declaration = authSource.slice(start, end).replace(
+    authSignature,
+    "async function assertCanEditEvent(db, user, eventId, requiredKey) {",
+  );
+  assert.doesNotMatch(declaration, authSignature,
+    "the actual authorization function must be executable in the fixture");
+  const authorize = runInNewContext(declaration + "\nassertCanEditEvent", {
+    Error,
+    resolveEventEditAuthorization: async () => ({
+      allowed: false,
+      actorXUserId: null,
+    }),
+  });
+
+  const staffGuardStart = source.indexOf("async function ensureEventManager(");
+  const staffGuardEnd = source.indexOf("\nfunction revalidateEventStaffPaths", staffGuardStart);
+  assert.ok(staffGuardStart >= 0 && staffGuardEnd > staffGuardStart);
+  const staffGuard = source.slice(staffGuardStart, staffGuardEnd);
+  assert.match(staffGuard, /await assertCanEditEvent\([\s\S]*?"event\.members"/,
+    "this staff action must still pass the exact permission key");
+  assert.match(staffGuard, /staffSafeActionMessage\(error, "権限がありません。"\)/,
+    "guard catch must use the safe response helper");
+
+  const policyStart = source.indexOf("const STAFF_SAFE_ACTION_MESSAGES = new Set");
+  const policyEnd = source.indexOf("\nfunction staffPreparationError", policyStart);
+  assert.ok(policyStart >= 0 && policyEnd > policyStart);
+  const safePolicy = source.slice(policyStart, policyEnd)
+    .replace(
+      /function staffSafeActionMessage\(\s*error: unknown,\s*fallback: string,\s*eventId\?: string,\s*explicitAllowed\?: readonly string\[],\s*\): string \{/,
+      "function staffSafeActionMessage(error, fallback, eventId, explicitAllowed) {",
+    )
+    .replace("let message: unknown;", "let message;");
+  const responseMessage = runInNewContext(
+    safePolicy + "\nstaffSafeActionMessage", { Error },
+  );
+
+  let denial;
+  try {
+    await authorize({}, { id: "collaborator", role: null }, "event_123", "event.members");
+  } catch (error) {
+    denial = error;
+  }
+  const exact = "権限が不足しています (event.members)";
+  assert.ok(denial instanceof Error, "shared core must deny insufficient permissions");
+  assert.equal(denial.message, exact, "shared auth remains the CURRENT source of truth");
+  const fallback = "権限がありません。";
+  assert.equal(responseMessage(denial, fallback), exact,
+    "staff action must preserve the genuine fixed permission denial message");
+  for (const hostile of [
+    exact + " SQL params: sec800_token_secret",
+    "権限が不足しています (event.slots)",
+    "SQLITE_ERROR: " + exact,
+  ]) {
+    assert.equal(responseMessage(new Error(hostile), fallback), fallback,
+      "near-matches and SQL/secret-bearing provider messages stay private");
+  }
+});
+
+test("SEC-800: real invalid permission parser preserves only matching input errors", () => {
+  const start = source.indexOf("function expectedInvalidStaffPermissionMessage(");
+  const end = source.indexOf("\nasync function ensureEventManager", start);
+  assert.ok(start >= 0 && end > start, "extract CURRENT input-only permission error helper");
+  const signature = /function expectedInvalidStaffPermissionMessage\(\s*raw: string \| null \| undefined,\s*\): string \| null \{/;
+  const helper = source.slice(start, end).replace(
+    signature, "function expectedInvalidStaffPermissionMessage(raw) {",
+  );
+  assert.doesNotMatch(helper, signature);
+  const expectedMessage = runInNewContext(
+    helper + "\nexpectedInvalidStaffPermissionMessage", { canonicalizePermissionKey },
+  );
+
+  const policyStart = source.indexOf("const STAFF_SAFE_ACTION_MESSAGES = new Set");
+  const policyEnd = source.indexOf("\nfunction staffPreparationError", policyStart);
+  const policy = runInNewContext(
+    source.slice(policyStart, policyEnd)
+      .replace(
+        /function staffSafeActionMessage\(\s*error: unknown,\s*fallback: string,\s*eventId\?: string,\s*explicitAllowed\?: readonly string\[],\s*\): string \{/,
+        "function staffSafeActionMessage(error, fallback, eventId, explicitAllowed) {",
+      )
+      .replace("let message: unknown;", "let message;")
+      + "\nstaffSafeActionMessage",
+    { Error },
+  );
+  const fallback = "入力エラー";
+  const rawInvalid = [
+    "INVALID_STAFF_PERMISSION",
+    "video.basics,INVALID_STAFF_PERMISSION",
+    "videos.title, INVALID_STAFF_PERMISSION ,event.members",
+  ];
+  for (const raw of rawInvalid) {
+    let thrown;
+    try { parseEventStaffPermissionKeys(raw); } catch (error) { thrown = error; }
+    assert.ok(thrown instanceof Error, "canonical domain parser rejects the unknown key");
+    const expected = expectedMessage(raw);
+    assert.equal(expected, thrown.message, "input-derived expected error matches actual parser");
+    assert.equal(policy(thrown, fallback, undefined, [expected]), thrown.message,
+      "legitimate legacy invalid permission key feedback survives");
+    assert.equal(policy(new Error(thrown.message + " SQL params: private-key"),
+      fallback, undefined, [expected]), fallback, "provider text must not be reflected");
+    assert.equal(policy(new Error(thrown.message),
+      fallback, undefined, []), fallback, "without exact input evidence, text stays private");
+  }
+
+  for (const raw of ["video.basics,videos.title", "", "x".repeat(513), "x".repeat(101)]) {
+    if (raw === "" || raw.includes("video.basics")) {
+      assert.doesNotThrow(() => parseEventStaffPermissionKeys(raw));
+    }
+    assert.equal(expectedMessage(raw), null,
+      "unknown oversized or entirely valid input does not create a reflection exception");
+  }
+  const assignmentStart = source.indexOf("let assignment: ReturnType<typeof assignmentFromInput>");
+  const assignmentEnd = source.indexOf("\n  let existing:", assignmentStart);
+  assert.ok(assignmentStart >= 0 && assignmentEnd > assignmentStart);
+  assert.match(source.slice(assignmentStart, assignmentEnd),
+    /expectedInvalidStaffPermissionMessage\(data\.permission_keys\)/,
+    "the exception handler uses only its already validated request payload");
 });
