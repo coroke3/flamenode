@@ -31,6 +31,67 @@ function page(name, current, hasMore = false) {
 }
 const json = (status, data) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+function exportResponse(format = "csv", body = "id,name\n1,private export") {
+  return new Response(body, { headers: {
+    "content-type": format === "tsv" ? "text/tab-separated-values" : "text/csv",
+  } });
+}
+function fetchWithExport(exportFn) {
+  return async (path, init) => {
+    if (path.includes("/tables")) return json(200, catalog);
+    const params = new URL("https://flamenode.test" + path).searchParams;
+    if (path.includes("/data")) {
+      const currentPage = Number(params.get("page"));
+      return json(200, page(params.get("table"), currentPage, currentPage === 1));
+    }
+    assert.match(path, /\/export\?/);
+    return exportFn(path, init);
+  };
+}
+function observeExports() {
+  const oldCreate = URL.createObjectURL;
+  const oldRevoke = URL.revokeObjectURL;
+  const oldClick = dom.window.HTMLAnchorElement.prototype.click;
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const oldExec = document.execCommand;
+  const effects = { created: [], downloaded: [], revoked: [], copied: [], fallback: [] };
+  const clipboard = { writeText: async (body) => { effects.copied.push(body); } };
+  URL.createObjectURL = (blob) => {
+    effects.created.push(blob);
+    return `blob:https://flamenode.test/export-${effects.created.length}`;
+  };
+  URL.revokeObjectURL = (url) => effects.revoked.push(url);
+  dom.window.HTMLAnchorElement.prototype.click = function () {
+    effects.downloaded.push(this.download);
+  };
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard });
+  document.execCommand = (command) => {
+    effects.fallback.push({ command, body: document.querySelector("textarea")?.value });
+    return true;
+  };
+  return {
+    effects, clipboard,
+    restore() {
+      URL.createObjectURL = oldCreate;
+      URL.revokeObjectURL = oldRevoke;
+      dom.window.HTMLAnchorElement.prototype.click = oldClick;
+      if (oldClipboard) Object.defineProperty(navigator, "clipboard", oldClipboard);
+      else delete navigator.clipboard;
+      document.execCommand = oldExec;
+    },
+  };
+}
+function exportButton(host, label = "CSV ダウンロード") {
+  const button = [...host.querySelectorAll("button")].find(item => item.textContent === label);
+  assert.ok(button, `missing export control: ${label}`);
+  return button;
+}
 async function flush() {
   await React.act(async () => { await new Promise((resolve) => setImmediate(resolve)); });
 }
@@ -326,5 +387,219 @@ test("MIG-0737 U01: mismatched server page/table identities never render rows", 
     } finally {
       await ui.cleanup();
     }
+  }
+});
+
+for (const contextChange of ["transport", "initialTable"]) {
+  for (const [label, format] of [
+    ["CSV ダウンロード", "csv"], ["TSV ダウンロード", "tsv"], ["コピー (CSV)", "csv"],
+  ]) {
+    test(`MIG-0737 U01: ${contextChange} cancels pending ${label} even when the table stays videos`, async () => {
+      const observed = observeExports();
+      const pending = deferred();
+      let signal;
+      const firstFetch = fetchWithExport((_path, init) => {
+        signal = init.signal;
+        return pending.promise;
+      });
+      const secondFetch = fetchWithExport(() => exportResponse(format));
+      const ui = await mount(firstFetch, "videos");
+      try {
+        await React.act(async () => exportButton(ui.host, label).click());
+        assert.ok(signal);
+        assert.equal(exportButton(ui.host, label).disabled, true);
+        await ui.rerender(contextChange === "transport" ? secondFetch : firstFetch,
+          contextChange === "transport" ? "videos" : "not-in-catalog");
+        assert.equal(ui.host.querySelector('nav button[aria-pressed="true"]')?.textContent, "動画 (RW)");
+        assert.equal(signal.aborted, true);
+        assert.equal(exportButton(ui.host, label).disabled, false);
+        // This transport deliberately ignores AbortSignal and still returns its old data.
+        await React.act(async () => pending.resolve(exportResponse(format)));
+        await flush();
+        assert.deepEqual(observed.effects, { created: [], downloaded: [], revoked: [], copied: [], fallback: [] });
+        assert.doesNotMatch(ui.host.textContent, /ダウンロードしました|コピーしました|エクスポートに失敗/);
+      } finally {
+        await ui.cleanup();
+        observed.restore();
+      }
+    });
+  }
+}
+
+test("MIG-0737 U01: a pending blob text read cannot copy after transport replacement", async () => {
+  const observed = observeExports();
+  const pendingText = deferred();
+  let textStarted = false;
+  const firstFetch = fetchWithExport(() => {
+    const response = exportResponse();
+    const blob = new Blob(["old private data"], { type: "text/csv" });
+    blob.text = () => { textStarted = true; return pendingText.promise; };
+    response.blob = async () => blob;
+    return response;
+  });
+  const secondFetch = fetchWithExport(() => exportResponse());
+  const ui = await mount(firstFetch, "videos");
+  try {
+    await React.act(async () => exportButton(ui.host, "コピー (CSV)").click());
+    await flush();
+    assert.equal(textStarted, true);
+    await ui.rerender(secondFetch, "videos");
+    await React.act(async () => pendingText.resolve("OLD_SESSION_PRIVATE"));
+    await flush();
+    assert.deepEqual(observed.effects.copied, []);
+    assert.deepEqual(observed.effects.fallback, []);
+    assert.doesNotMatch(ui.host.textContent, /コピーしました|コピーに失敗|OLD_SESSION_PRIVATE/);
+    assert.equal(exportButton(ui.host, "コピー (CSV)").disabled, false);
+  } finally {
+    await ui.cleanup();
+    observed.restore();
+  }
+});
+
+for (const outcome of ["resolve", "reject"]) {
+  test(`MIG-0737 U01: old clipboard ${outcome} cannot affect a newer export after a table change`, async () => {
+    const observed = observeExports();
+    const pendingClipboard = deferred();
+    const pendingExport = deferred();
+    let newSignal;
+    observed.clipboard.writeText = (body) => {
+      observed.effects.copied.push(body);
+      return pendingClipboard.promise;
+    };
+    const fetchFn = fetchWithExport((path, init) => {
+      if (path.includes("table=videos")) return exportResponse();
+      newSignal = init.signal;
+      return pendingExport.promise;
+    });
+    const ui = await mount(fetchFn, "videos");
+    try {
+      await React.act(async () => exportButton(ui.host, "コピー (CSV)").click());
+      await flush();
+      assert.equal(observed.effects.copied.length, 1);
+      const events = [...ui.host.querySelectorAll("nav button")].find(button => button.textContent.includes("イベント"));
+      await React.act(async () => events.click());
+      await flush();
+      await React.act(async () => exportButton(ui.host).click());
+      assert.ok(newSignal);
+      assert.equal(exportButton(ui.host).disabled, true);
+      await React.act(async () => pendingClipboard[outcome](outcome === "reject" ? new Error("grant denied") : undefined));
+      await flush();
+      assert.deepEqual(observed.effects.fallback, []);
+      assert.equal(document.querySelectorAll("textarea").length, 0);
+      assert.doesNotMatch(ui.host.textContent, /コピーしました|コピーに失敗|エクスポートに失敗/);
+      assert.equal(newSignal.aborted, false);
+      assert.equal(exportButton(ui.host).disabled, true, "old finally must not release the new export");
+      await React.act(async () => pendingExport.resolve(exportResponse()));
+      await flush();
+      assert.deepEqual(observed.effects.downloaded, ["events.csv"]);
+      assert.equal(exportButton(ui.host).disabled, false);
+    } finally {
+      await ui.cleanup();
+      observed.restore();
+    }
+  });
+}
+
+test("MIG-0737 U01: unmount prevents delayed clipboard rejection from using the fallback", async () => {
+  const observed = observeExports();
+  const pendingClipboard = deferred();
+  observed.clipboard.writeText = (body) => {
+    observed.effects.copied.push(body);
+    return pendingClipboard.promise;
+  };
+  const ui = await mount(fetchWithExport(() => exportResponse()), "videos");
+  let unmounted = false;
+  try {
+    await React.act(async () => exportButton(ui.host, "コピー (CSV)").click());
+    await flush();
+    assert.equal(observed.effects.copied.length, 1);
+    await ui.cleanup();
+    unmounted = true;
+    await React.act(async () => pendingClipboard.reject(new Error("grant denied after unmount")));
+    await flush();
+    assert.deepEqual(observed.effects.fallback, []);
+    assert.equal(document.querySelectorAll("textarea").length, 0);
+  } finally {
+    if (!unmounted) await ui.cleanup();
+    observed.restore();
+  }
+});
+
+test("MIG-0737 U01: the old response cannot finish or unlock a new transport export", async () => {
+  const observed = observeExports();
+  const oldResponse = deferred();
+  const newResponse = deferred();
+  let newSignal;
+  const firstFetch = fetchWithExport(() => oldResponse.promise);
+  const secondFetch = fetchWithExport((_path, init) => {
+    newSignal = init.signal;
+    return newResponse.promise;
+  });
+  const ui = await mount(firstFetch, "videos");
+  try {
+    await React.act(async () => exportButton(ui.host).click());
+    await ui.rerender(secondFetch, "videos");
+    assert.equal(exportButton(ui.host).disabled, false);
+    await React.act(async () => exportButton(ui.host).click());
+    assert.ok(newSignal);
+    await React.act(async () => oldResponse.resolve(exportResponse("csv", "OLD_SESSION_PRIVATE")));
+    await flush();
+    assert.deepEqual(observed.effects.created, []);
+    assert.equal(exportButton(ui.host).disabled, true);
+    assert.equal(newSignal.aborted, false);
+    await React.act(async () => newResponse.resolve(exportResponse("csv", "NEW_SESSION_PRIVATE")));
+    await flush();
+    assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+    assert.equal(await observed.effects.created[0].text(), "NEW_SESSION_PRIVATE");
+    assert.equal(observed.effects.revoked.length, 1);
+    assert.equal(exportButton(ui.host).disabled, false);
+  } finally {
+    await ui.cleanup();
+    observed.restore();
+  }
+});
+
+test("MIG-0737 U01: completed export notices are cleared when the transport changes", async () => {
+  const observed = observeExports();
+  const firstFetch = fetchWithExport(() => exportResponse());
+  const secondFetch = fetchWithExport(() => exportResponse());
+  const ui = await mount(firstFetch, "videos");
+  try {
+    await React.act(async () => exportButton(ui.host).click());
+    await flush();
+    assert.match(ui.host.textContent, /CSV をダウンロードしました/);
+    await ui.rerender(secondFetch, "videos");
+    assert.doesNotMatch(ui.host.textContent, /ダウンロードしました|エクスポートに失敗/);
+    assert.equal(exportButton(ui.host).disabled, false);
+  } finally {
+    await ui.cleanup();
+    observed.restore();
+  }
+});
+
+test("MIG-0737 U01: page navigation keeps a table-wide export active", async () => {
+  const observed = observeExports();
+  const pending = deferred();
+  let signal;
+  const ui = await mount(fetchWithExport((_path, init) => {
+    signal = init.signal;
+    return pending.promise;
+  }), "videos");
+  try {
+    await React.act(async () => exportButton(ui.host).click());
+    const next = [...ui.host.querySelectorAll("button")].find(button => button.textContent === "次へ");
+    await React.act(async () => next.click());
+    await flush();
+    assert.match(ui.host.textContent, /page two/);
+    assert.equal(signal.aborted, false);
+    assert.equal(exportButton(ui.host).disabled, true);
+    await React.act(async () => pending.resolve(exportResponse()));
+    await flush();
+    assert.deepEqual(observed.effects.downloaded, ["videos.csv"]);
+    assert.equal(observed.effects.revoked.length, 1);
+    assert.equal(exportButton(ui.host).disabled, false);
+  } finally {
+    await ui.cleanup();
+    observed.restore();
   }
 });
