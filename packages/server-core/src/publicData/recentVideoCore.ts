@@ -17,6 +17,7 @@ export interface StaticRecentVideoRow {
   primary_event_title?: unknown;
   scheduled_time?: unknown;
   status?: unknown;
+  visibility_status?: unknown;
   part?: unknown;
 }
 
@@ -72,6 +73,12 @@ function normalizeStaticRecentVideoRow(
   const base = normalizeStaticVideoCardBase(value);
   if (!base) return null;
   const row = value as StaticRecentVideoRow;
+  // Old public snapshot rows omitted visibility fields; preserve those rows.
+  // If either visibility field is present, never re-label a revoked row public.
+  if ((row.status != null && row.status !== "public") ||
+      (row.visibility_status != null && row.visibility_status !== "public")) {
+    return null;
+  }
   return {
     ...base,
     primary_event_title: normalizeNullableString(row.primary_event_title),
