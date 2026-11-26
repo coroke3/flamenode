@@ -256,3 +256,93 @@ test("MIG-0737 U02: malformed or cancelled recovery body cannot assert a commit"
   assert.deepEqual(await pending, { status: "unavailable" });
   assert.equal(cancelled, true);
 });
+
+
+test("MIG-0737 U02: 413/422 preview exposes only validated candidate metadata, never credentials", async () => {
+  const candidates = [{ source_key: "追加列", non_empty_rows: 3 }];
+  for (const code of [413, 422]) {
+    const payload = {
+      ok: false, mode: "preview", video_custom_field_candidates: [
+        { ...candidates[0], private_provider_detail: "provider-canary" },
+      ],
+      preview_token: "private-token", plan_hash: "private-plan",
+      message: "provider-canary", errors: ["provider-canary"],
+    };
+    const out = await previewLegacyImport(async () => json(code, payload),
+      new FormData(), [file], [], undefined, now);
+    assert.deepEqual(out, { status: "previewValidationFailed", httpStatus: code, candidates });
+    assert.deepEqual(await applyLegacyImportStep(async () => json(code, payload), credential, now),
+      { status: "unavailable" });
+    assert.deepEqual(await previewLegacyImport(async () => json(code, {
+      ...payload, video_custom_field_candidates: [],
+    }), new FormData(), [file], [], undefined, now),
+    { status: "previewValidationFailed", httpStatus: code, candidates: [] });
+  }
+});
+
+test("MIG-0737 U02: malformed or forged validation response cannot be used as a preview", async () => {
+  const candidate = { source_key: "field", non_empty_rows: 1 };
+  const base = { ok: false, mode: "preview", video_custom_field_candidates: [candidate] };
+  for (const payload of [
+    { ...base, ok: true, preview_token: preview.preview_token, plan_hash: preview.plan_hash,
+      expires_at: preview.expires_at },
+    { ...base, mode: "apply" },
+    { ...base, video_custom_field_candidates: undefined },
+    { ...base, video_custom_field_candidates: [{ ...candidate, source_key: " field" }] },
+    { ...base, video_custom_field_candidates: [{ ...candidate, source_key: "x".repeat(121) }] },
+    { ...base, video_custom_field_candidates: [{ ...candidate, source_key: "field\u0000" }] },
+    { ...base, video_custom_field_candidates: [{ ...candidate, non_empty_rows: 0 }] },
+    { ...base, video_custom_field_candidates: [{ ...candidate, non_empty_rows: "1" }] },
+    { ...base, video_custom_field_candidates: [{ ...candidate, non_empty_rows: Number.MAX_SAFE_INTEGER + 1 }] },
+    { ...base, video_custom_field_candidates: [candidate, candidate] },
+    { ...base, video_custom_field_candidates: Array.from({ length: 51 }, (_, i) =>
+      ({ source_key: "field" + i, non_empty_rows: 1 })) },
+  ]) {
+    for (const code of [413, 422]) {
+      const out = await previewLegacyImport(async () => json(code, payload),
+        new FormData(), [file], [], undefined, now);
+      assert.deepEqual(out, { status: "unavailable" });
+    }
+  }
+  for (const code of [401, 403]) {
+    assert.equal((await previewLegacyImport(async () => json(code, base),
+      new FormData(), [file], [], undefined, now)).status,
+      code === 401 ? "anonymous" : "forbidden");
+  }
+});
+
+test("MIG-0737 U02: validation error bodies retain the 64 KiB stream bound and abort fence", async () => {
+  const candidates = [{ source_key: "field", non_empty_rows: 1 }];
+  const base = { ok: false, mode: "preview", video_custom_field_candidates: candidates };
+  const encoder = new TextEncoder();
+  const prefix = JSON.stringify(base);
+  const atLimit = prefix + " ".repeat(64 * 1024 - encoder.encode(prefix).byteLength);
+  assert.deepEqual(await previewLegacyImport(async () => new Response(atLimit, { status: 422 }),
+    new FormData(), [file], [], undefined, now),
+    { status: "previewValidationFailed", httpStatus: 422, candidates });
+  for (const code of [413, 422]) {
+    let cancelled = false;
+    const chunks = [encoder.encode(prefix), encoder.encode(" ".repeat(64 * 1024))];
+    const stream = new ReadableStream({
+      pull(controller) { if (chunks.length) controller.enqueue(chunks.shift()); },
+      cancel() { cancelled = true; },
+    });
+    assert.deepEqual(await previewLegacyImport(async () => new Response(stream, {
+      status: code, headers: { "content-length": "1" },
+    }), new FormData(), [file], [], undefined, now), { status: "unavailable" });
+    assert.equal(cancelled, true);
+  }
+  for (const body of ["{bad json", new Uint8Array([0xff])]) {
+    assert.deepEqual(await previewLegacyImport(async () => new Response(body, { status: 422 }),
+      new FormData(), [file], [], undefined, now), { status: "unavailable" });
+  }
+  const controller = new AbortController();
+  let cancelled = false;
+  const stream = new ReadableStream({ cancel() { cancelled = true; } });
+  const pending = previewLegacyImport(async () => new Response(stream, { status: 422 }),
+    new FormData(), [file], [], controller.signal, now);
+  await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  assert.deepEqual(await pending, { status: "unavailable" });
+  assert.equal(cancelled, true);
+});

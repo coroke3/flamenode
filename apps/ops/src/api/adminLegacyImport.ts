@@ -32,6 +32,19 @@ const previewSchema = z.object({
     non_empty_rows: z.number().int().nonnegative(),
   })).optional(),
 });
+// CURRENT normalize.ts accepts at most 50 decision source keys, 120 characters each.
+// Validation responses cannot grant apply credentials. Keep only the bounded DTO.
+const validationCandidateSchema = z.object({
+  source_key: z.string().min(1).max(120).refine(key => key === key.trim() &&
+    !/[\u0000-\u001F\u007F]/.test(key)),
+  non_empty_rows: z.number().int().positive().safe(),
+});
+const previewValidationSchema = z.object({
+  ok: z.literal(false),
+  mode: z.literal("preview"),
+  video_custom_field_candidates: z.array(validationCandidateSchema).max(50)
+    .refine(candidates => new Set(candidates.map(candidate => candidate.source_key)).size === candidates.length),
+});
 const applySchema = z.object({
   ok: z.literal(true),
   mode: z.enum(["preview", "apply"]).optional(),
@@ -78,10 +91,13 @@ export type LegacyPreviewCredential = {
   expiresAt: number;
 };
 export type LegacyImportResponse<T> = OpsResult<T>;
+export type LegacyImportPreviewResponse = LegacyImportResponse<LegacyImportPreview> |
+  { status: "previewValidationFailed"; httpStatus: 413 | 422;
+    candidates: z.infer<typeof validationCandidateSchema>[] };
 export type LegacyImportApplyResponse = LegacyImportResponse<LegacyImportStep> |
   { status: "committedProgressPending"; progress: z.infer<typeof recoveryProgressSchema> };
 
-const MAX_RECOVERY_RESPONSE_BYTES = 64 * 1024;
+const MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
 
 function validCredential(c: LegacyPreviewCredential, now: number): boolean {
   return typeof c.token === "string" && c.token.length > 0 &&
@@ -90,7 +106,7 @@ function validCredential(c: LegacyPreviewCredential, now: number): boolean {
 }
 
 /** Bound untrusted error bodies before parsing, including responses without Content-Length. */
-async function readRecoveryJson(response: Response, signal?: AbortSignal): Promise<unknown> {
+async function readBoundedErrorJson(response: Response, signal?: AbortSignal): Promise<unknown> {
   const reader = response.body?.getReader();
   if (!reader) return null;
   const cancel = () => { void reader.cancel().catch(() => undefined); };
@@ -104,7 +120,7 @@ async function readRecoveryJson(response: Response, signal?: AbortSignal): Promi
       if (signal?.aborted) return null;
       if (done) return JSON.parse(text + decoder.decode());
       size += value.byteLength;
-      if (size > MAX_RECOVERY_RESPONSE_BYTES) return null;
+      if (size > MAX_ERROR_RESPONSE_BYTES) return null;
       text += decoder.decode(value, { stream: true });
     }
     return null;
@@ -135,11 +151,13 @@ async function submit(
     if (response.status === 403) return { status: "forbidden" };
     if (response.status === 404) return { status: "notFound" };
     if (response.status === 501) return { status: "unsupported" };
-    if (response.status !== 200 && (form.get("mode") !== "apply" ||
-      (response.status !== 409 && response.status !== 503))) return { status: "unavailable" };
+    const mode = form.get("mode");
+    const knownError = (mode === "apply" && (response.status === 409 || response.status === 503)) ||
+      (mode === "preview" && (response.status === 413 || response.status === 422));
+    if (response.status !== 200 && !knownError) return { status: "unavailable" };
     const parsed: unknown = response.status === 200
       ? await response.json()
-      : await readRecoveryJson(response, signal);
+      : await readBoundedErrorJson(response, signal);
     if (signal?.aborted) return { status: "unavailable" };
     return { status: "ok", data: { httpStatus: response.status, body: parsed } };
   } catch {
@@ -157,7 +175,7 @@ export async function previewLegacyImport(
   > = [],
   signal?: AbortSignal,
   nowSeconds: number = Math.floor(Date.now() / 1000),
-): Promise<LegacyImportResponse<LegacyImportPreview>> {
+): Promise<LegacyImportPreviewResponse> {
   if (files.length < 1 || files.some(f => !f.name || f.size < 0) ||
     decisions.some(d => !d.source_key.trim() ||
       (d.action === "custom_question" && (!d.question_label.trim() || d.question_label.length > 120)))) {
@@ -176,6 +194,11 @@ export async function previewLegacyImport(
   for (const file of files) form.append("files", file);
   const result = await submit(fetchFn, form, signal);
   if (result.status !== "ok") return result;
+  if (result.data.httpStatus === 413 || result.data.httpStatus === 422) {
+    const rejected = previewValidationSchema.safeParse(result.data.body);
+    return rejected.success ? { status: "previewValidationFailed", httpStatus: result.data.httpStatus,
+      candidates: rejected.data.video_custom_field_candidates } : { status: "unavailable" };
+  }
   const checked = previewSchema.safeParse(result.data.body);
   return checked.success && checked.data.expires_at > nowSeconds
     ? { status: "ok", data: checked.data }
