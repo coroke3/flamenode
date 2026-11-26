@@ -152,10 +152,17 @@ export async function resolveSpreadsheetWriteTableContext(
     return { ctx: hit.ctx, foreignKeys: hit.foreignKeys, fromCache: true };
   }
 
-  const result = await db
-    .prepare(TABLE_WRITE_COLUMNS_SQL)
-    .bind(def.table, def.table, def.table)
-    .all<WriteColumnRow>();
+  // Only the catalog query crosses this provider boundary. A SELECT failure
+  // cannot prove a client validation error or a mutation constraint conflict.
+  let result: D1Result<WriteColumnRow>;
+  try {
+    result = await db
+      .prepare(TABLE_WRITE_COLUMNS_SQL)
+      .bind(def.table, def.table, def.table)
+      .all<WriteColumnRow>();
+  } catch {
+    throw new Error("spreadsheet_catalog_read_failed");
+  }
   const rows = result.results ?? [];
   const enumCache = SPREADSHEET_COLUMN_ENUMS;
   const raw: (AdminSpreadsheetColumnMeta & { pk: number })[] = rows.map((row) => {

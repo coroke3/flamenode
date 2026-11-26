@@ -617,6 +617,7 @@ if (runUnderRootTsx(import.meta.url)) {
         const result = await callHono("GET", path, undefined, options);
         assert.equal(result.status, 500);
         assert.deepEqual(result.body, { error: "internal_error" });
+        assert.match(result.headers.get("cache-control"), /private.*no-store/);
       }
       assert.equal(injected, (faults.length + 1) * paths.length);
     } finally {
@@ -665,6 +666,13 @@ if (runUnderRootTsx(import.meta.url)) {
       new Error("unknown_column:" + canary),
       new Error("column_not_editable:" + canary),
       new Error("provider params: " + canary),
+      // A catalog SELECT cannot establish any of these client/constraint errors.
+      new Error("preview_required"),
+      new Error("row_not_found"),
+      new Error("unknown_table"),
+      new Error("db_unavailable"),
+      new Error("batch_too_large"),
+      new Error("UNIQUE constraint failed: " + canary),
       hostileMessage,
       hostilePrototype,
     ];
@@ -673,26 +681,46 @@ if (runUnderRootTsx(import.meta.url)) {
     let injected = 0;
     try {
       console.error = (...args) => logs.push(args);
+      const stages = ["prepare", "bind", "all"];
       for (const fault of forged) {
-        for (const [path, body] of [
-          ["/data", { table: "software_catalog", row }],
-          ["/import", { table: "software_catalog", dryRun: true, rows: [row] }],
-        ]) {
-          resetAllCaches();
-          honoD1.prepare = (sql) => {
-            if (sql.includes("FROM pragma_table_xinfo(?) AS x")) {
-              injected++;
-              throw fault;
-            }
-            return originalPrepare(sql);
-          };
-          const result = await callHono("POST", path, body);
-          assert.equal(result.status, 500);
-          assert.deepEqual(result.body, { error: "internal_error" });
-          assert.match(result.headers.get("cache-control"), /private.*no-store/);
+        for (const stage of stages) {
+          for (const [path, body] of [
+            ["/data", { table: "software_catalog", row }],
+            ["/import", { table: "software_catalog", dryRun: true, rows: [row] }],
+          ]) {
+            resetAllCaches();
+            honoD1.prepare = (sql) => {
+              if (!sql.includes("FROM pragma_table_xinfo(?) AS x")) return originalPrepare(sql);
+              if (stage === "prepare") {
+                injected++;
+                throw fault;
+              }
+              const stmt = originalPrepare(sql);
+              return {
+                ...stmt,
+                bind(...params) {
+                  if (stage === "bind") {
+                    injected++;
+                    throw fault;
+                  }
+                  return {
+                    ...stmt.bind(...params),
+                    all: async () => {
+                      injected++;
+                      throw fault;
+                    },
+                  };
+                },
+              };
+            };
+            const result = await callHono("POST", path, body);
+            assert.equal(result.status, 500, stage);
+            assert.deepEqual(result.body, { error: "internal_error" });
+            assert.match(result.headers.get("cache-control"), /private.*no-store/);
+          }
         }
       }
-      assert.equal(injected, forged.length * 2);
+      assert.equal(injected, forged.length * stages.length * 2);
       assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] WRITE_FAILED"]));
 
       // Even a broken diagnostic sink must not replace the response.
@@ -701,7 +729,8 @@ if (runUnderRootTsx(import.meta.url)) {
       const result = await callHono("POST", "/data", { table: "software_catalog", row });
       assert.equal(result.status, 500);
       assert.deepEqual(result.body, { error: "internal_error" });
-      assert.equal(injected, forged.length * 2 + 1);
+      assert.match(result.headers.get("cache-control"), /private.*no-store/);
+      assert.equal(injected, forged.length * stages.length * 2 + 1);
     } finally {
       honoD1.prepare = originalPrepare;
       console.error = originalError;
