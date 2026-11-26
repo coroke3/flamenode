@@ -3490,3 +3490,49 @@ test("MIG-0638 U02: signed import rejects missing effective/default FKs before n
     sqlite.close();
   }
 });
+
+test("U02 delimited parser preserves CURRENT CR/LF/CRLF logical records and quoted separators", async () => {
+  const { parseDelimited, detectDelimiter, serializeDelimited } =
+    await import("../src/routes/admin/spreadsheet/delimited.ts");
+  const current = await import("../../../src/lib/utils/delimited.ts");
+  for (const delimiter of [",", "\t"]) {
+    const expected = [["id", "notes"], ["a", "x\ry"], ["b", "x\r\ny"], ["c", 'x\n"y"']];
+    const records = [
+      ["id", "notes"].join(delimiter),
+      ["a", '"x\ry"'].join(delimiter),
+      ["b", '"x\r\ny"'].join(delimiter),
+      ["c", '"x\n""y"""'].join(delimiter),
+    ];
+    for (const separator of ["\r", "\n", "\r\n"]) {
+      const text = "\uFEFF" + records.join(separator) + separator;
+      assert.equal(detectDelimiter(text), delimiter);
+      for (const maxRows of [undefined, 0, 1, 2, 4, 5]) {
+        const options = { maxRows };
+        const wanted = maxRows === undefined ? expected : expected.slice(0, maxRows);
+        assert.deepEqual(parseDelimited(text, delimiter, options), wanted);
+        assert.deepEqual(parseDelimited(text, delimiter, options), current.parseDelimited(text, delimiter, options));
+      }
+    }
+    const mixed = records[0] + "\r" + records[1] + "\r\n" + records[2] + "\n" + records[3];
+    assert.deepEqual(parseDelimited(mixed, delimiter), expected);
+    assert.deepEqual(parseDelimited(serializeDelimited(expected, delimiter), delimiter), expected);
+  }
+});
+
+test("U02 RH-008 import preserves CR-delimited rows and enforces the logical 500-row limit", async () => {
+  const { prepareSpreadsheetImportRows } = await import("../src/routes/admin/spreadsheet/importPrepCore.ts");
+  const { parseSpreadsheetPaste } = await import("../src/routes/admin/spreadsheet/paste.ts");
+  const columnNames = ["id", "notes"];
+  for (const delimiter of [",", "\t"]) {
+    const text = ["id" + delimiter + "notes", "a" + delimiter + '"x\ry"', "b" + delimiter + "NULL"].join("\r");
+    const expected = [{ id: "a", notes: "x\ry" }, { id: "b", notes: null }];
+    const parsed = prepareSpreadsheetImportRows({ text, columnNames, hasHeader: true, delimiter: "auto" });
+    assert.deepEqual(parsed.rows, expected);
+    assert.deepEqual(parsed.mappedColumns, columnNames);
+    assert.deepEqual(parsed.invalidColumns, []);
+    assert.deepEqual(parseSpreadsheetPaste(text, columnNames, { hasHeader: true, delimiter: "auto", maxRows: 1 }).rows, expected.slice(0, 1));
+    const makeText = count => ["id" + delimiter + "notes", ...Array.from({ length: count }, (_, i) => "row-" + i + delimiter + "value")].join("\r");
+    assert.equal(prepareSpreadsheetImportRows({ text: makeText(500), columnNames, hasHeader: true, delimiter: "auto" }).rows.length, 500);
+    assert.throws(() => prepareSpreadsheetImportRows({ text: makeText(501), columnNames, hasHeader: true, delimiter: "auto" }), /too_many_rows/);
+  }
+});
