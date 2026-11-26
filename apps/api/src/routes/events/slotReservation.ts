@@ -249,6 +249,19 @@ function fail(
   return c.json(body, status);
 }
 
+// Provider exceptions are untrusted. Diagnostics must never change the HTTP outcome.
+function slotMutationUnavailable(
+  c: Context<AppEnv>,
+  operation: "reserve" | "release" | "extend" | "merge",
+) {
+  try {
+    console.error(`[slot-reservation] ${operation} failed`);
+  } catch {
+    // A diagnostic sink failure must not mask the fixed HTTP 503.
+  }
+  return fail(c, 503, GENERIC_FAILURE_MESSAGE);
+}
+
 function respond(c: Context<AppEnv>, outcome: SlotMutationOutcome) {
   const body: SlotMutationResult = outcome.body;
   return c.json(body, outcome.status);
@@ -341,9 +354,8 @@ export function createSlotReservationRoutes(
             operator_override: isSlotOperatorOverrideRequested(parsed.data.operator_override),
           }),
         );
-      } catch (error) {
-        console.error("[slot-reservation] reserve failed", error instanceof Error ? error.name : "UnknownError");
-        return fail(c, 503, GENERIC_FAILURE_MESSAGE);
+      } catch {
+        return slotMutationUnavailable(c, "reserve");
       }
     },
   );
@@ -371,9 +383,8 @@ export function createSlotReservationRoutes(
           c,
           await releaseSlotCore(c.env.DB, c.get("db"), mutationContext(c), { eventId, slotId }),
         );
-      } catch (error) {
-        console.error("[slot-reservation] release failed", error instanceof Error ? error.name : "UnknownError");
-        return fail(c, 503, GENERIC_FAILURE_MESSAGE);
+      } catch {
+        return slotMutationUnavailable(c, "release");
       }
     },
   );
@@ -405,9 +416,8 @@ export function createSlotReservationRoutes(
             operator_override: isSlotOperatorOverrideRequested(parsed.data.operator_override),
           }),
         );
-      } catch (error) {
-        console.error("[slot-reservation] extend failed", error instanceof Error ? error.name : "UnknownError");
-        return fail(c, 503, GENERIC_FAILURE_MESSAGE);
+      } catch {
+        return slotMutationUnavailable(c, "extend");
       }
     },
   );
@@ -438,9 +448,8 @@ export function createSlotReservationRoutes(
             operator_override: isSlotOperatorOverrideRequested(parsed.data.operator_override),
           }),
         );
-      } catch (error) {
-        console.error("[slot-reservation] merge failed", error instanceof Error ? error.name : "UnknownError");
-        return fail(c, 503, GENERIC_FAILURE_MESSAGE);
+      } catch {
+        return slotMutationUnavailable(c, "merge");
       }
     },
   );

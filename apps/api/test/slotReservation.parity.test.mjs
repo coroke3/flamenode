@@ -1837,4 +1837,85 @@ if (runUnderRootTsx(import.meta.url)) {
       }
     }
   });
+
+  // A failing provider and a failing diagnostic sink must not alter the fixed
+  // private HTTP response. Throw after the actual third SQLite read (not in
+  // auth or ToS), so each of the four mounted route catch boundaries is tested.
+  for (const [operation, path, input] of [
+    ["reserve", "/api/events/ev1/slots/s20/reserve", { display_name: "No write" }],
+    ["release", "/api/events/ev1/slots/s20/release", {}],
+    ["extend", "/api/events/ev1/slots/s20/extend", { direction: "forward" }],
+    ["merge", "/api/events/ev1/slot-groups/merge", { gap_slot_id: "s20", display_name: "No write" }],
+  ]) {
+    test("MIG-0657: " + operation + " provider and diagnostic failures retain private 503", async () => {
+      const marker = "SLOT_DIAGNOSTIC_PRIVATE_FIXTURE";
+      let fault;
+      let intercepted = 0;
+      let nameReads = 0;
+      let prototypeReads = 0;
+      const w = world({
+        beforeRead(sql) {
+          if (sql.includes("invalid_snapshot")) {
+            intercepted += 1;
+            throw fault;
+          }
+        },
+      });
+      insert(w.sqlite, "session", {
+        sessionToken: "slot-diagnostic-fault", userId: "u_owner",
+        expires: NOW_SEC * 1000 + 60000,
+      });
+      const fixtures = [
+        ["throwing name", Object.defineProperty(new Error(marker), "name", {
+          get() { nameReads += 1; throw new Error(marker); },
+        }), false],
+        ["untrusted name", Object.assign(new Error(marker), { name: marker }), false],
+        ["throwing prototype", new Proxy(new Error(marker), {
+          getPrototypeOf() { prototypeReads += 1; throw new Error(marker); },
+        }), false],
+        ["throwing logger", new Error(marker), true],
+      ];
+      const before = state(w);
+      const originalError = console.error;
+      const thaw = freeze();
+      try {
+        for (const [label, injected, sinkFails] of fixtures) {
+          fault = injected;
+          const readCount = w.d1.stats.reads;
+          const batchCount = w.d1.stats.batches;
+          const faultCount = intercepted;
+          const captured = [];
+          console.error = (...args) => {
+            captured.push(args);
+            if (sinkFails) throw new Error(marker);
+          };
+          const response = await app.request(SITE + path, {
+            method: "POST",
+            headers: {
+              Origin: SITE, cookie: "__Secure-authjs.session-token=slot-diagnostic-fault",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(input),
+          }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+          assert.equal(response.status, 503, label);
+          assert.equal(response.headers.get("cache-control"), "private, no-store", label);
+          assert.deepEqual(await response.json(), {
+            ok: false,
+            message: "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
+          }, label);
+          assert.equal(intercepted - faultCount, 1, label);
+          assert.equal(w.d1.stats.reads - readCount, 3, label + " session + gate + snapshot");
+          assert.equal(w.d1.stats.batches - batchCount, 0, label);
+          assert.deepEqual(state(w), before, label + " no slot/audit/outbox/queue writes");
+          assert.equal(nameReads, 0, label);
+          assert.equal(prototypeReads, 0, label);
+          assert.deepEqual(captured, [["[slot-reservation] " + operation + " failed"]], label);
+        }
+      } finally {
+        console.error = originalError;
+        thaw();
+        w.sqlite.close();
+      }
+    });
+  }
 }
