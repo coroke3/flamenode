@@ -66,6 +66,7 @@
     "./publicCache/delete": "./src/publicCache/delete.ts",
     "./xid/pendingInsert": "./src/xid/pendingInsert.ts",
     "./xid/requests": "./src/xid/requests.ts",
+    "./xid/linkRequestReview": "./src/xid/linkRequestReview.ts",
     "./publicCache/eventExportKeys": "./src/publicCache/eventExportKeys.ts",
     "./eventExport/payload": "./src/eventExport/payload.ts",
     "./eventExport/data": "./src/eventExport/data.ts",

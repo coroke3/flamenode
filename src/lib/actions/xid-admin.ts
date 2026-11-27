@@ -14,6 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdSiblingCancellation, prepareXIdLinkRejectionMutation, prepareXIdReviewNotifications } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -29,7 +30,6 @@ import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
-import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import {
@@ -807,40 +807,15 @@ async function approveXIdLinkRequestOnce(
           : `@${submittedXUserId} の既存aliasまたは正本が不整合のため、別名を安全に追加できません。`,
       };
     }
-    const alias = { x_user_id: targetXUserId, alias_x_id: submittedXUserId };
-    // The read above is advisory only. This conditional INSERT is the actual
-    // race-safe integrity gate: a new canonical row or any normalized alias
-    // inserted concurrently makes changes()=0 and rolls back the whole batch.
-    statements.push(db.run(sql`
-      INSERT INTO x_user_aliases (x_user_id, alias_x_id)
-      SELECT ${targetXUserId}, ${submittedXUserId}
-      WHERE EXISTS (
-        SELECT 1 FROM x_users
-        WHERE id = ${targetXUserId}
-          AND approval_status = 'approved'
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM x_users
-        WHERE lower(trim(ltrim(trim(id), '@'))) = lower(${submittedXUserId})
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM x_user_aliases
-        WHERE lower(trim(ltrim(trim(alias_x_id), '@'))) = lower(${submittedXUserId})
-      )
-    `));
-    expected.push(1);
-    audits.push({
-      table_name: "x_user_aliases",
-      target_id: `${targetXUserId}:${submittedXUserId}`,
-      operation: "CREATE",
-      before: null,
-      after: alias,
-      actor_user_id: operatorAuthUserId,
-      actor_x_user_id: operatorActorXUserId,
-      reason: "X名義の別名申請を承認",
-      context: "x-identity-request",
-      retention_class: "long_audit",
+    const aliasPlan = planXIdAliasApproval(db, {
+      targetXUserId,
+      submittedXUserId,
+      actorUserId: operatorAuthUserId,
+      actorXUserId: operatorActorXUserId,
     });
+    statements.push(aliasPlan.statement);
+    expected.push(aliasPlan.expectedChanges);
+    audits.push(aliasPlan.audit);
     notificationXUserId = targetXUserId;
   } else {
     if (!submittedXUserId) return { ok: false, message: "申請 X ID がありません。" };
@@ -883,55 +858,17 @@ async function approveXIdLinkRequestOnce(
         )
         .limit(1)
     )[0];
-    if (!xUser) {
-      const newXUser = {
-        id: effectiveXUserId,
-        x_name: `@${effectiveXUserId}`,
-        icon_url: null,
-        profile_text: null,
-        portfolio_contact: null,
-        youtube_channel_url: null,
-        other_social_links: null,
-        creative_start_date: null,
-        approval_status: "approved" as const,
-      };
-      statements.push(db.insert(xUsers).values(newXUser));
-      expected.push(1);
+    const xUserPlan = planXIdCanonicalApproval(db, {
+      effectiveXUserId,
+      xUser,
+      actorUserId: operatorAuthUserId,
+      actorXUserId: operatorActorXUserId,
+    });
+    if (xUserPlan) {
+      statements.push(xUserPlan.statement);
+      expected.push(xUserPlan.expectedChanges);
       publicVisibilityChanged = true;
-      audits.push({
-        table_name: "x_users",
-        target_id: effectiveXUserId,
-        operation: "CREATE",
-        before: null,
-        after: newXUser,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "新規X名義申請を承認",
-        context: "x-identity-request",
-        retention_class: "long_audit",
-      });
-    } else if (xUser.approval_status !== "approved") {
-      const afterXUser = { ...xUser, approval_status: "approved" as const };
-      statements.push(
-        db
-          .update(xUsers)
-          .set({ approval_status: "approved" })
-          .where(expectedRowCondition({ expectedCurrent: xUser })),
-      );
-      expected.push(1);
-      publicVisibilityChanged = true;
-      audits.push({
-        table_name: "x_users",
-        target_id: effectiveXUserId,
-        operation: "UPDATE",
-        before: { ...xUser },
-        after: afterXUser,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "既存X名義の連携申請を承認",
-        context: "x-identity-request",
-        retention_class: "long_audit",
-      });
+      audits.push(xUserPlan.audit);
     }
 
     if (!duplicateLink) {
@@ -943,50 +880,32 @@ async function approveXIdLinkRequestOnce(
         created_at: now,
         updated_at: now,
       };
-      statements.push(db.insert(xUserAccountLinks).values(link));
-      expected.push(1);
-      audits.push({
-        table_name: "x_user_account_links",
-        target_id: `${effectiveXUserId}:${requestedAuthUserId}`,
-        operation: "CREATE",
-        before: null,
-        after: link,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "X名義と認証ユーザーを連携",
-        context: "x-identity-request",
-        retention_class: "long_audit",
+      const linkPlan = planXIdAccountLinkInsert(db, {
+        link,
+        actorUserId: operatorAuthUserId,
+        actorXUserId: operatorActorXUserId,
       });
+      statements.push(linkPlan.statement);
+      expected.push(linkPlan.expectedChanges);
+      audits.push(linkPlan.audit);
     }
 
     const authUser = (
       await db.select().from(users).where(eq(users.id, requestedAuthUserId)).limit(1)
     )[0];
-    if (authUser && !authUser.active_x_user_id) {
-      requesterPostApprovalActiveX = {
-        activeXId: effectiveXUserId,
-        activeXName: xUser?.x_name ?? `@${effectiveXUserId}`,
-      };
-      const afterUser = { ...authUser, active_x_user_id: effectiveXUserId };
-      statements.push(
-        db
-          .update(users)
-          .set({ active_x_user_id: effectiveXUserId })
-          .where(expectedRowCondition({ expectedCurrent: authUser })),
-      );
-      expected.push(1);
-      audits.push({
-        table_name: "user",
-        target_id: requestedAuthUserId,
-        operation: "UPDATE",
-        before: { ...authUser },
-        after: afterUser,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "初回連携X名義をアクティブに設定",
-        context: "x-identity-request",
-        retention_class: "normal",
-      });
+    const activeXPlan = planXIdInitialActiveSelection(db, {
+      authUser: authUser ?? null,
+      effectiveXUserId,
+      requestedAuthUserId,
+      xName: xUser?.x_name ?? null,
+      actorUserId: operatorAuthUserId,
+      actorXUserId: operatorActorXUserId,
+    });
+    if (activeXPlan) {
+      requesterPostApprovalActiveX = activeXPlan.notificationActiveX;
+      statements.push(activeXPlan.statement);
+      expected.push(activeXPlan.expectedChanges);
+      audits.push(activeXPlan.audit);
     }
     notificationXUserId = effectiveXUserId;
 
@@ -1003,28 +922,17 @@ async function approveXIdLinkRequestOnce(
         )!,
       );
     for (const sibling of siblingPendings) {
-      const afterSibling = {
-        ...sibling,
-        status: "cancelled" as const,
-        updated_at: now,
-        ...buildXIdentityDecisionFields({
-          decidedByAuthUserId: operatorAuthUserId,
-          decisionReason: "同一X IDの重複pending申請を取り消す",
-          decidedAt: now,
-        }),
-      };
+      const cancellation = planXIdSiblingCancellation({
+        sibling,
+        actorUserId: operatorAuthUserId,
+        actorXUserId: operatorActorXUserId,
+        reason: "同一X IDの重複pending申請を取り消す",
+        now,
+      });
       statements.push(
         db
           .update(xIdentityRequests)
-          .set({
-            status: "cancelled",
-            updated_at: now,
-            ...buildXIdentityDecisionFields({
-              decidedByAuthUserId: operatorAuthUserId,
-              decisionReason: "同一X IDの重複pending申請を取り消す",
-              decidedAt: now,
-            }),
-          })
+          .set(cancellation.update)
           .where(
             and(
               eq(xIdentityRequests.id, sibling.id),
@@ -1033,39 +941,27 @@ async function approveXIdLinkRequestOnce(
           ),
       );
       expected.push(1);
-      audits.push({
-        table_name: "x_identity_requests",
-        target_id: sibling.id,
-        operation: "UPDATE",
-        before: { ...sibling },
-        after: afterSibling,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "同一X IDの重複pending申請を取り消す",
-        context: "x-identity-request",
-        retention_class: "long_audit",
-      });
+      audits.push(cancellation.audit);
     }
   }
 
-  const afterRequest = {
-    ...request,
+  const approvalUpdate = {
     status: "approved" as const,
     slot_bind_status: "pending" as const,
     slot_bind_updated_at: now,
     updated_at: now,
     ...decisionFields,
   };
+  const approvalAudit = buildXIdRequestApprovalAudit({
+    request,
+    update: approvalUpdate,
+    actorUserId: operatorAuthUserId,
+    actorXUserId: operatorActorXUserId,
+  });
   statements.push(
     db
       .update(xIdentityRequests)
-      .set({
-        status: "approved",
-        slot_bind_status: "pending",
-        slot_bind_updated_at: now,
-        updated_at: now,
-        ...decisionFields,
-      })
+      .set(approvalUpdate)
       .where(
         and(
           eq(xIdentityRequests.id, request.id),
@@ -1074,74 +970,76 @@ async function approveXIdLinkRequestOnce(
       ),
   );
   expected.push(1);
-  audits.push({
-    table_name: "x_identity_requests",
-    target_id: request.id,
-    operation: "UPDATE",
-    before: { ...request },
-    after: afterRequest,
-    actor_user_id: operatorAuthUserId,
-    actor_x_user_id: operatorActorXUserId,
-    reason: "X ID申請を承認",
-    context: "x-identity-request",
-    retention_class: "long_audit",
-  });
+  audits.push(approvalAudit);
 
-  const {
-    buildXIdApprovedNotification,
-    buildXIdAliasApprovedNotification,
-  } = await import("@/lib/notifications/templates/xid");
-  const notification = await buildNotificationOutboxStatement(db, {
-    recipientUserId: requestedAuthUserId,
-    type: request.request_type === "alias" ? "x_id_alias_approved" : "x_id_approved",
-    payload:
-      request.request_type === "alias"
-        ? buildXIdAliasApprovedNotification({
-            xUserId: submittedXUserId,
-            requestId: request.id,
-          })
-        : buildXIdApprovedNotification({
-            xUserId: notificationXUserId,
-            requestId: request.id,
-          }),
-    dedupeKey: `xid_approved:${request.id}`,
-  });
-  const {
-    overlayNotificationActorActiveX,
-    resolveNotificationActor,
-  } = await import("@/lib/notifications/actor");
-  const {
-    buildChannelXIdApprovedNotification,
-    buildXIdApproveThreadName,
-  } = await import("@/lib/notifications/templates/xidChannel");
-  const { buildOpsChannelWebhookStatement } = await import(
-    "@/lib/notifications/opsWebhook"
-  );
-  const requester = overlayNotificationActorActiveX(
-    await resolveNotificationActor(db, requestedAuthUserId),
-    requesterPostApprovalActiveX,
-  );
-  const operatorActor = await resolveNotificationActor(db, operatorAuthUserId);
-  const approveXIdLabel =
-    submittedXUserId ??
-    request.requested_x_id ??
-    request.source_x_user_id ??
-    "不明";
-  const channelNotification = await buildOpsChannelWebhookStatement(db, {
-    target: "account",
-    threadName: buildXIdApproveThreadName(approveXIdLabel, requester),
-    actorUserId: operatorAuthUserId,
-    payload: buildChannelXIdApprovedNotification({
-      requestId: request.id,
-      requestType: request.request_type,
-      requestedXId: request.requested_x_id,
-      sourceXUserId: request.source_x_user_id,
-      targetXUserId: request.target_x_user_id,
-      requester,
-      operator: operatorActor,
-      approvedAt: now,
-    }),
-    dedupeKey: `xid_approve_webhook:${request.id}`,
+  const reviewRequestType = request.request_type;
+  const approvedSubmittedXId = submittedXUserId;
+  const approvedNotificationXId = notificationXUserId;
+  const { notification, channelNotification } = await prepareXIdReviewNotifications({
+    requesterUserId: requestedAuthUserId,
+    operatorUserId: operatorAuthUserId,
+    buildDm: async () => {
+      const {
+        buildXIdApprovedNotification,
+        buildXIdAliasApprovedNotification,
+      } = await import("@/lib/notifications/templates/xid");
+      return buildNotificationOutboxStatement(db, {
+        recipientUserId: requestedAuthUserId,
+        type: reviewRequestType === "alias" ? "x_id_alias_approved" : "x_id_approved",
+        payload:
+          reviewRequestType === "alias"
+            ? buildXIdAliasApprovedNotification({
+                xUserId: approvedSubmittedXId,
+                requestId: request.id,
+              })
+            : buildXIdApprovedNotification({
+                xUserId: approvedNotificationXId,
+                requestId: request.id,
+              }),
+        dedupeKey: `xid_approved:${request.id}`,
+      });
+    },
+    loadChannel: async () => {
+      const {
+        overlayNotificationActorActiveX,
+        resolveNotificationActor,
+      } = await import("@/lib/notifications/actor");
+      const {
+        buildChannelXIdApprovedNotification,
+        buildXIdApproveThreadName,
+      } = await import("@/lib/notifications/templates/xidChannel");
+      const { buildOpsChannelWebhookStatement } = await import(
+        "@/lib/notifications/opsWebhook"
+      );
+      return {
+        resolveActor: (userId) => resolveNotificationActor(db, userId),
+        overlayRequester: (actor) =>
+          overlayNotificationActorActiveX(actor, requesterPostApprovalActiveX),
+        build: (requester, operatorActor) => {
+          const approveXIdLabel =
+            submittedXUserId ??
+            request.requested_x_id ??
+            request.source_x_user_id ??
+            "不明";
+          return buildOpsChannelWebhookStatement(db, {
+            target: "account",
+            threadName: buildXIdApproveThreadName(approveXIdLabel, requester),
+            actorUserId: operatorAuthUserId,
+            payload: buildChannelXIdApprovedNotification({
+              requestId: request.id,
+              requestType: reviewRequestType,
+              requestedXId: request.requested_x_id,
+              sourceXUserId: request.source_x_user_id,
+              targetXUserId: request.target_x_user_id,
+              requester,
+              operator: operatorActor,
+              approvedAt: now,
+            }),
+            dedupeKey: `xid_approve_webhook:${request.id}`,
+          });
+        },
+      };
+    },
   });
   if (notification) {
     statements.push(notification.statement);
@@ -1323,110 +1221,68 @@ async function rejectXIdLinkRequestOnce(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const decisionFields = buildXIdentityDecisionFields({
-    decidedByAuthUserId: operatorAuthUserId,
-    decisionReason: reason || "X ID申請を却下",
-    decidedAt: now,
-  });
-  const afterRequest = {
-    ...request,
-    status: "rejected" as const,
-    updated_at: now,
-    ...decisionFields,
-  };
-  const rejectedXIdLabel =
-    request.requested_x_id ?? request.source_x_user_id ?? "不明";
-  const { buildXIdRejectedNotification } = await import(
-    "@/lib/notifications/templates/xid"
-  );
-  const notification = await buildNotificationOutboxStatement(db, {
-    recipientUserId: request.requested_by_auth_user_id,
-    type: "x_id_rejected",
-    payload: buildXIdRejectedNotification({
-      requestedXId: request.requested_x_id ?? rejectedXIdLabel,
-      requestId: request.id,
-      reason: reason || null,
-    }),
-    dedupeKey: `xid_rejected:${request.id}`,
-  });
-  const { resolveNotificationActor } = await import(
-    "@/lib/notifications/actor"
-  );
-  const {
-    buildChannelXIdRejectedNotification,
-    buildXIdRejectThreadName,
-  } = await import("@/lib/notifications/templates/xidChannel");
-  const { buildOpsChannelWebhookStatement } = await import(
-    "@/lib/notifications/opsWebhook"
-  );
-  const requester = await resolveNotificationActor(
-    db,
-    request.requested_by_auth_user_id,
-  );
-  const operatorActor = await resolveNotificationActor(db, operatorAuthUserId);
-  const rejectXIdLabel =
-    request.requested_x_id ?? request.source_x_user_id ?? "不明";
-  const channelNotification = await buildOpsChannelWebhookStatement(db, {
-    target: "account",
-    threadName: buildXIdRejectThreadName(rejectXIdLabel, requester),
+  const reviewRequestType = request.request_type;
+  const mutation = await prepareXIdLinkRejectionMutation(db, {
+    request,
     actorUserId: operatorAuthUserId,
-    payload: buildChannelXIdRejectedNotification({
-      requestId: request.id,
-      requestType: request.request_type,
-      requestedXId: request.requested_x_id,
-      sourceXUserId: request.source_x_user_id,
-      targetXUserId: request.target_x_user_id,
-      requester,
-      operator: operatorActor,
-      reason: reason || null,
-      rejectedAt: now,
-    }),
-    dedupeKey: `xid_reject_webhook:${request.id}`,
+    actorXUserId: operatorActorXUserId,
+    reason,
+    now,
+    buildDm: async () => {
+      const rejectedXIdLabel =
+        request.requested_x_id ?? request.source_x_user_id ?? "不明";
+      const { buildXIdRejectedNotification } = await import(
+        "@/lib/notifications/templates/xid"
+      );
+      return buildNotificationOutboxStatement(db, {
+        recipientUserId: request.requested_by_auth_user_id,
+        type: "x_id_rejected",
+        payload: buildXIdRejectedNotification({
+          requestedXId: request.requested_x_id ?? rejectedXIdLabel,
+          requestId: request.id,
+          reason: reason || null,
+        }),
+        dedupeKey: `xid_rejected:${request.id}`,
+      });
+    },
+    loadChannel: async () => {
+      const { resolveNotificationActor } = await import(
+        "@/lib/notifications/actor"
+      );
+      const {
+        buildChannelXIdRejectedNotification,
+        buildXIdRejectThreadName,
+      } = await import("@/lib/notifications/templates/xidChannel");
+      const { buildOpsChannelWebhookStatement } = await import(
+        "@/lib/notifications/opsWebhook"
+      );
+      return {
+        resolveActor: (userId) => resolveNotificationActor(db, userId),
+        build: (requester, operatorActor) => {
+          const rejectXIdLabel =
+            request.requested_x_id ?? request.source_x_user_id ?? "不明";
+          return buildOpsChannelWebhookStatement(db, {
+            target: "account",
+            threadName: buildXIdRejectThreadName(rejectXIdLabel, requester),
+            actorUserId: operatorAuthUserId,
+            payload: buildChannelXIdRejectedNotification({
+              requestId: request.id,
+              requestType: reviewRequestType,
+              requestedXId: request.requested_x_id,
+              sourceXUserId: request.source_x_user_id,
+              targetXUserId: request.target_x_user_id,
+              requester,
+              operator: operatorActor,
+              reason: reason || null,
+              rejectedAt: now,
+            }),
+            dedupeKey: `xid_reject_webhook:${request.id}`,
+          });
+        },
+      };
+    },
   });
-  const statements: BatchItem<"sqlite">[] = [
-    db
-      .update(xIdentityRequests)
-      .set({
-        status: "rejected",
-        updated_at: now,
-        ...decisionFields,
-      })
-      .where(
-        and(
-          eq(xIdentityRequests.id, request.id),
-          eq(xIdentityRequests.status, "pending"),
-        )!,
-      ),
-  ];
-  const expected: Array<number | null> = [1];
-  if (notification) {
-    statements.push(notification.statement);
-    expected.push(null);
-  }
-  if (channelNotification) {
-    statements.push(channelNotification.statement);
-    expected.push(null);
-  }
-  await mutateWithAudit(db, {
-    mutationStatements: statements,
-    expectedMutationChanges: expected,
-    audits: [
-      {
-        table_name: "x_identity_requests",
-        target_id: request.id,
-        operation: "UPDATE",
-        before: { ...request },
-        after: afterRequest,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: reason || "X ID申請を却下",
-        context: "x-identity-request",
-        retention_class: "long_audit",
-      },
-    ],
-    notificationWakeSource:
-      notification || channelNotification ? "admin" : undefined,
-  });
+  await mutateWithAudit(db, mutation);
   await runXIdAdminPostCommit("xid-admin.rejectXIdLinkRequest", () => {
     revalidateIdentityAdminPaths();
   });

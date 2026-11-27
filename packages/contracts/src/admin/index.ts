@@ -5,4 +5,5 @@ export * from "./spreadsheet.ts";
 export * from "./audit.ts";
 
 export * from "./ops.ts";
+export * from "../xidLinkRequest.ts";
 export * from "./termsNotifications.ts";

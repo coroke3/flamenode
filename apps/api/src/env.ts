@@ -39,6 +39,8 @@ export type Variables = {
   actorSnapshotJsonById: Record<string, string>;
   /** MIG-0636: one pre-read supplies selected identity and full user CAS snapshot. */
   xidSelected: { before: Record<string, unknown>; canonicalXId: string };
+  /** X identity that authorized SA-090/091; used as the audit actor by the mutation handler. */
+  xidLinkRequestActorXUserId: string | null;
 };
 
 export type AppEnv = {
