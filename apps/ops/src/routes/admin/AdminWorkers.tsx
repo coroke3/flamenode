@@ -37,6 +37,8 @@ function formatRelative(value: number | null): string {
   return `${Math.floor(diff / 31536000)}年前`;
 }
 function formatCount(value: number): string {
+  // Preserve CURRENT formatCount for malformed numeric aggregates.
+  if (!Number.isFinite(value) || value < 0) return "0";
   if (value < 1000) return String(value);
   if (value < 10000) return `${(value / 1000).toFixed(1)}k`;
   if (value < 1000000) return `${Math.floor(value / 1000)}k`;

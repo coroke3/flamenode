@@ -452,6 +452,61 @@ test("U02b Worker dashboard shows CURRENT cron, queue, pipelines, artifacts and 
   }
 });
 
+test("MIG-0736 Worker queue, pipeline and total counts preserve CURRENT numeric formatting", async () => {
+  const baseline = workerMonitoringFixture();
+  const formatCases = [
+    [-1, "0"], [-0.1, "0"], [-1000000, "0"], [0, "0"], [0.5, "0.5"],
+    [999, "999"], [1000, "1.0k"], [1500, "1.5k"], [9999, "10.0k"],
+    [10000, "10k"], [999999, "999k"], [1000000, "1.0M"],
+    [1500000, "1.5M"], [10000000, "10M"], [15000000, "15M"],
+  ];
+  function snapshotWithCount(value) {
+    return {
+      ...baseline,
+      notifications: { ...baseline.notifications, pending: value, failed: value, deadLetter: 0, stuck: value },
+      staticRebuilds: { ...baseline.staticRebuilds, failed: 0, deadLetter: 0 },
+      youtube: { ...baseline.youtube, failed: 0, pending: value },
+      pipelines: baseline.pipelines.map(pipeline => ({ ...pipeline, backlog: value, capacityPerDay: value })),
+    };
+  }
+  function assertRenderedCounts(data, expected) {
+    const html = render(h(AdminWorkersView, { data, onRefresh: () => {} }), "/admin/workers");
+    const dom = new JSDOM(html).window.document;
+    const tables = dom.querySelectorAll("table");
+    assert.equal(tables.length, 3);
+    const queueRows = tables[1].querySelectorAll("tbody tr");
+    for (const index of [1, 3, 5]) assert.equal(queueRows[0].children[index].textContent, expected);
+    assert.equal(queueRows[2].children[1].textContent, expected);
+    for (const row of tables[2].querySelectorAll("tbody tr")) {
+      assert.equal(row.children[2].textContent, expected);
+      assert.equal(row.children[3].textContent, expected);
+    }
+    const totalLabel = [...dom.querySelectorAll("div")].find(node => node.textContent === "失敗データ");
+    assert.equal(totalLabel?.nextElementSibling?.textContent, expected);
+  }
+  for (const [value, expected] of formatCases) {
+    const snapshot = snapshotWithCount(value);
+    const data = await getAdminWorkers(async () => response(200, { snapshot, error: null }));
+    assert.equal(data.status, "ok");
+    assertRenderedCounts(data, expected);
+  }
+  // JSON cannot carry these numeric values, so exercise the view directly.
+  // A total of individually finite values can also overflow during addition.
+  for (const value of [NaN, Infinity, -Infinity]) {
+    assertRenderedCounts({ status: "ok", data: { snapshot: snapshotWithCount(value), error: null } }, "0");
+  }
+  const overflow = snapshotWithCount(0);
+  overflow.notifications.failed = Number.MAX_VALUE;
+  overflow.staticRebuilds.failed = Number.MAX_VALUE;
+  const data = await getAdminWorkers(async () => response(200, { snapshot: overflow, error: null }));
+  assert.equal(data.status, "ok");
+  const html = render(h(AdminWorkersView, { data, onRefresh: () => {} }), "/admin/workers");
+  const dom = new JSDOM(html).window.document;
+  const totalLabel = [...dom.querySelectorAll("div")].find(node => node.textContent === "失敗データ");
+  assert.equal(totalLabel?.nextElementSibling?.textContent, "0");
+  assert.doesNotMatch(html, /InfinityM|NaNM/);
+});
+
 test("MIG-0736 Worker monitoring requires complete identities and a consistent aggregate level", async () => {
   const baseline = workerMonitoringFixture();
   const clean = {
