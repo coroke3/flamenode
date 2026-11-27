@@ -1467,14 +1467,14 @@ if (runUnderRootTsx(import.meta.url)) {
     const label = "like_count 実数差分 (閾値 max(±5, ±5%))";
     const authNote = "保存されているいいね数と Auth User 単位の video_interactions_auth 実数が大きくズレている作品があります。";
     const cases = [
-      ["zero", 0, 5, 5, 0],
+      ["00-zero", 0, 5, 5, 0],
       ["abs-below", 4, 0, 0, 0],
-      ["abs-equal", 5, 0, 0, 0],
-      ["abs-above", 6, 0, 0, 0],
+      ["04-abs-equal", 5, 0, 0, 0],
+      ["03-abs-above", 6, 0, 0, 0],
       ["ratio-below", 105, 110, 110, 0],
       ["ratio-equal", 104, 110, 110, 0],
-      ["ratio-above", 103, 110, 110, 0],
-      ["ratio-tie", 95, 100, 100, 0],
+      ["02-ratio-above", 103, 110, 110, 0],
+      ["01-ratio-tie", 95, 100, 100, 0],
       ["auth-healthy-legacy-empty", 6, 0, 6, 0],
       ["legacy-masks-auth-drift", 5, 5, 0, 0],
       ["bookmarks-not-likes", 5, 0, 0, 8],
@@ -1603,7 +1603,7 @@ if (runUnderRootTsx(import.meta.url)) {
         const threshold = Math.max(5, ratioThreshold);
         if (Math.abs(Number(row.stored) - actual) >= threshold) legacyDriftIds.add(row.id);
       }
-      assert.ok(!legacyVideoRows.some((row) => row.id === prefix + "zero"), "legacy excludes stored zero");
+      assert.ok(!legacyVideoRows.some((row) => row.id === prefix + "00-zero"), "legacy excludes stored zero");
       assert.ok(legacyDriftIds.has(prefix + "auth-healthy-legacy-empty"), "legacy reports a healthy Auth count as drift");
       assert.ok(!legacyDriftIds.has(prefix + "legacy-masks-auth-drift"), "legacy rows can mask an Auth-authority drift");
       assert.ok(legacyDriftIds.has(prefix + "bookmarks-not-likes"), "legacy bookmark rows do not count as likes");
@@ -1611,11 +1611,11 @@ if (runUnderRootTsx(import.meta.url)) {
       const first = await measure();
       assertReadOnly(first, 2, 5);
       assert.deepEqual(first.body, expected("warn", 8, [
-        "video:" + prefix + "abs-above stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
-        "video:" + prefix + "abs-equal stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
-        "video:" + prefix + "bookmarks-not-likes stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
-        "video:" + prefix + "legacy-masks-auth-drift stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
-        "video:" + prefix + "ratio-above stored:103 actual:110 diff:7 threshold:6 [ratio(6)]",
+        "video:" + prefix + "00-zero stored:0 actual:5 diff:5 threshold:5 [abs(5)]",
+        "video:" + prefix + "01-ratio-tie stored:95 actual:100 diff:5 threshold:5 [ratio(5)]",
+        "video:" + prefix + "02-ratio-above stored:103 actual:110 diff:7 threshold:6 [ratio(6)]",
+        "video:" + prefix + "03-abs-above stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
+        "video:" + prefix + "04-abs-equal stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
       ]));
 
       // More than 100 healthy rows plus seven drifts: count all, transfer five.
@@ -1640,11 +1640,11 @@ if (runUnderRootTsx(import.meta.url)) {
       const many = await measure();
       assertReadOnly(many, 2, 5);
       assert.deepEqual(many.body, expected("warn", 15, [
-        "video:" + prefix + "abs-above stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
-        "video:" + prefix + "abs-equal stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
-        "video:" + prefix + "bookmarks-not-likes stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
-        "video:" + prefix + "legacy-masks-auth-drift stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
-        "video:" + prefix + "ratio-above stored:103 actual:110 diff:7 threshold:6 [ratio(6)]",
+        "video:" + prefix + "00-zero stored:0 actual:5 diff:5 threshold:5 [abs(5)]",
+        "video:" + prefix + "01-ratio-tie stored:95 actual:100 diff:5 threshold:5 [ratio(5)]",
+        "video:" + prefix + "02-ratio-above stored:103 actual:110 diff:7 threshold:6 [ratio(6)]",
+        "video:" + prefix + "03-abs-above stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
+        "video:" + prefix + "04-abs-equal stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
       ]));
 
       const invalidId = prefix + "zz-invalid-counter";
