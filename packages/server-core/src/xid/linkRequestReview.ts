@@ -5,7 +5,6 @@ import { buildXIdentityDecisionFields } from "@flamenode/domain/xid";
 import type { ServerCoreDb } from "../db.ts";
 import type { NotificationActor } from "../notifications/actor.ts";
 import type { AtomicAuditMutationInput } from "../audit/mutate.ts";
-import type { EnqueueStaticRebuildInput } from "../staticRebuild/types.ts";
 import { expectedRowCondition } from "../audit/expectedRowCondition.ts";
 
 /**
@@ -384,34 +383,4 @@ export async function prepareXIdReviewNotifications(input: {
   const operator = await channel.resolveActor(input.operatorUserId);
   const channelNotification = await channel.build(projectedRequester, operator);
   return { notification, channelNotification };
-}
-
-/**
- * SA-090: plan only the public X identity rebuild targets. Keep the two
- * targets in CURRENT order and preserve the initiating auth-user attribution.
- * The host retains the separate member-suggestions batch, atomic mutation,
- * wake policy, and post-commit slot binding.
- */
-export function planXIdApprovalPublicRebuildTargets(input: {
-  publicVisibilityChanged: boolean;
-  notificationXUserId: string | null;
-  operatorAuthUserId: string;
-}): EnqueueStaticRebuildInput[] {
-  if (!input.publicVisibilityChanged || !input.notificationXUserId) return [];
-  return [
-    {
-      targetType: "user",
-      targetId: input.notificationXUserId,
-      reason: "x_id_approved",
-      requestedByUserId: input.operatorAuthUserId,
-      priority: "normal",
-    },
-    {
-      targetType: "users_index",
-      targetId: "global",
-      reason: "x_id_approved",
-      requestedByUserId: input.operatorAuthUserId,
-      priority: "low",
-    },
-  ];
 }
