@@ -542,6 +542,72 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3);
   });
 
+  test("SEC #715: oversized event_staff fields never enter the first D1 video JSON row", async () => {
+    for (const [field, badValue] of [
+      ["permission_preset", "\\u0000" + "p".repeat(180_000)],
+      ["custom_permission_keys_json", "\\u0000" + "k".repeat(180_000)],
+    ]) {
+      const { env, sqlite, d1 } = setupTestEnv();
+      const row = {
+        id: "staff_legacy_" + field,
+        event_id: "evt-1",
+        x_user_id: "alice_x",
+        display_name: "Alice",
+        permission_preset: "manager",
+        custom_permission_keys_json: null,
+        is_public: 1,
+        created_at: 1000,
+        updated_at: 1000,
+      };
+      row[field] = badValue;
+      insert(sqlite, "event_staff", row);
+
+      const originalPrepare = env.DB.prepare.bind(env.DB);
+      let inspected = 0;
+      env.DB.prepare = (sql) => {
+        const stmt = originalPrepare(sql);
+        if (!sql.includes("AS video_json") || !sql.includes("AS user_json")) return stmt;
+        assert.match(sql, /WITH staff_entries AS MATERIALIZED/);
+        assert.match(sql, /length\\(CAST\\(q\\."custom_permission_keys_json" AS BLOB\\)\\)/);
+        assert.match(sql, /length\\(CAST\\(q\\."permission_preset" AS BLOB\\)\\)/);
+        const originalBind = stmt.bind.bind(stmt);
+        stmt.bind = (...params) => {
+          const bound = originalBind(...params);
+          const originalFirst = bound.first.bind(bound);
+          bound.first = async () => {
+            const raw = await originalFirst();
+            inspected += 1;
+            assert.ok(raw?.video_json, "inspect the real first D1 video projection");
+            const bytes = Buffer.byteLength(raw.video_json, "utf8");
+            assert.ok(bytes < 12_000, "oversized staff data must be excluded before D1 row serialization");
+            assert.equal(raw.video_json.includes(badValue), false);
+            const video = JSON.parse(raw.video_json);
+            assert.equal(video.staff_json, null, "invalid staff projection must become a SQL NULL sentinel");
+            return raw;
+          };
+          return bound;
+        };
+        return stmt;
+      };
+
+      const beforeWrites = d1.stats.writes;
+      const beforeBatches = d1.stats.batches;
+      d1.stats.statements = 0;
+      const response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, env);
+      assert.equal(inspected, 1, "the mounted real SQLite query must be inspected");
+      assert.equal(response.status, 503, "invalid staff authorization facts must fail closed");
+      assert.equal(response.headers.get("Cache-Control"),
+        "private, no-store, no-cache, must-revalidate");
+      assert.equal(response.headers.get("Retry-After"), "3");
+      assert.deepEqual(await response.json(), { error: "viewer_overlay_unavailable" });
+      assert.ok(d1.stats.statements <= 3);
+      assert.equal(d1.stats.writes, beforeWrites);
+      assert.equal(d1.stats.batches, beforeBatches);
+    }
+  });
+
   test("Issue #709: huge required private chapter label fails before oversized JSON serialization", async () => {
     const { env, sqlite, d1 } = setupTestEnv();
     const hugeChapterLabel = "非公開チャプター".repeat(18_000);
