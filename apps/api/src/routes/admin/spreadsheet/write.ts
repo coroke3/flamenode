@@ -1026,7 +1026,7 @@ async function handleCrudWrite(
       const combined = buildSpreadsheetMemberFkReleaseLookup(foreignKeys, [fkRow], [plan.audit]);
       if (combined) {
         const receipt = await countedDb.prepare(combined.statement).bind(...combined.binds).all<unknown>();
-        eventIdsByVideo = validateSpreadsheetMemberFkReleaseLookupReceipt(combined, receipt);
+        eventIdsByVideo = validateSpreadsheetMemberFkReleaseLookupReceipt(combined, receipt).eventIdsByVideo;
       } else {
         // Other FK plans retain the original FK-first preflight and release lookup.
         await validateSpreadsheetForeignKeys(
