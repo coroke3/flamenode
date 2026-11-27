@@ -4,11 +4,8 @@
  * This verifies the safe transition and retry outcomes, not OAuth issuance.
  */
 import { Hono } from "hono";
-import {
-  buildUnmountedAuthConfig,
-  invokeUnmountedAuth,
-  type UnmountedAuthInputs,
-} from "../auth/authjs.ts";
+import type { UnmountedAuthInputs } from "../auth/authjs.ts";
+import { handleUnmountedAuthRequest } from "./auth.ts";
 import {
   resolveUnmountedAuthCompleteSession,
   unmountedAuthCompleteDestination,
@@ -31,11 +28,12 @@ export function createUnmountedAuthCompleteRoutes(
     let sessionSetCookies: string[] = [];
     const result = await resolveUnmountedAuthCompleteSession<CompleteSession>(
       async () => {
-        const config = buildUnmountedAuthConfig(input);
         const url = new URL("/api/auth/session", input.authOrigin);
         const headers = new Headers();
         if (sessionCookie) headers.set("cookie", sessionCookie);
-        const response = await invokeUnmountedAuth(new Request(url, { headers }), config);
+        // Reuse the request-local adapter monitor: Auth.js otherwise hides
+        // provider failures behind 200/null, which would look like logout.
+        const response = await handleUnmountedAuthRequest(new Request(url, { headers }), input);
         if (!response.ok) throw new Error("AUTH_COMPLETE_SESSION_READ_UNAVAILABLE");
         const session = await response.json() as CompleteSession | null;
         sessionSetCookies = response.headers.getSetCookie();
