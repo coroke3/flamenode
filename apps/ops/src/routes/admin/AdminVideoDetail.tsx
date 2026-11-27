@@ -322,15 +322,21 @@ export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetc
   const [refreshKey, setRefreshKey] = React.useState(0);
   const refresh = React.useCallback(() => setRefreshKey(x => x + 1), []);
   const load = React.useCallback(
-    (signal: AbortSignal) => loadAdminVideoDetail(fetchFn, id, eventId, signal),
+    async (signal: AbortSignal) => {
+      const receipt = await loadAdminVideoDetail(fetchFn, id, eventId, signal);
+      // A parsed but invalid 200 must replace the cached snapshot, unlike a
+      // transient unavailable response. Null is a local, non-renderable
+      // snapshot; do not widen the shared Ops read or change other screens.
+      return receipt.status === "invalid" ? { status: "ok" as const, data: null } : receipt;
+    },
     [fetchFn, id, eventId],
   );
-  const result = useApiResult(load, JSON.stringify([id, eventId]), refreshKey);
+  const result = useApiResult<AdminVideoDetailResponse | null>(load, JSON.stringify([id, eventId]), refreshKey);
   const actions = React.useMemo(() => createAdminVideoStatusActions(fetchFn), [fetchFn]);
   const createCase = React.useMemo(() => createModerationCaseAction(fetchFn), [fetchFn]);
 
   if (result.status === "loading") return <section role="status" aria-busy="true">作品詳細を読み込み中...</section>;
-  if (result.status !== "ok") return (
+  if (result.status !== "ok" || result.data === null) return (
     <section role="alert"><h1>作品詳細</h1>
       <p>{result.status === "notFound" ? "対象作品が見つかりません。"
         : result.status === "anonymous" ? "ログインが必要です。"

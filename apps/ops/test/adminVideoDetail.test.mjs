@@ -281,9 +281,11 @@ test("MIG-0729 U02: 404, 403, invalid DTO and mismatched private detail are fail
     { status: "notFound" });
   assert.deepEqual(await loadAdminVideoDetail(async () => json(403, { redirect: "/dashboard" }), "video-1", null),
     { status: "forbidden", redirect: "/dashboard" });
-  assert.deepEqual(await loadAdminVideoDetail(async () => json(200, { ...detail, video: { ...detail.video, id: "other" } }), "video-1", null),
-    { status: "unavailable" });
-  assert.deepEqual(await loadAdminVideoDetail(async () => json(200, { ...detail, moderationCases: "invalid" }), "video-1", null),
+  assert.deepEqual(await loadAdminVideoDetail(async () => json(200, { ...detail, event: null, video: { ...detail.video, id: "other" } }), "video-1", null),
+    { status: "invalid" });
+  assert.deepEqual(await loadAdminVideoDetail(async () => json(200, { ...detail, event: null, moderationCases: "invalid" }), "video-1", null),
+    { status: "invalid" });
+  assert.deepEqual(await loadAdminVideoDetail(async () => json(503, {}), "video-1", null),
     { status: "unavailable" });
   assert.deepEqual(await loadAdminVideoDetail(async () => json(200, detail), "", null),
     { status: "notFound" });
@@ -729,7 +731,7 @@ test("MIG-0729 U02: detail response must echo the Hono-normalized event context"
     for (const wrong of [null, "", "other-event", " event/1 "].filter(x => x !== expected)) {
       assert.deepEqual(await loadAdminVideoDetail(async () =>
         json(200, { ...payload, event: wrong }), "video-1", event),
-      { status: "unavailable" }, "reject event echo " + JSON.stringify([event, wrong]));
+      { status: "invalid" }, "reject event echo " + JSON.stringify([event, wrong]));
     }
   }
 });
@@ -791,4 +793,62 @@ test("MIG-0729 U02: mounted detail rejects another event response before enablin
     assert.match(dom.window.document.body.textContent, /SCOPED_event-c/);
     assert.ok(findApprove(), "valid matching detail can still render write controls");
   });
+});
+
+test("MIG-0729 U02: same-key invalid detail refresh evicts private content and controls but 503 retains CURRENT state", async () => {
+  for (const failure of ["event", "video", "schema", "503"]) {
+    await withMutationDom(async ({ dom, root }) => {
+      const gets = [], posts = [];
+      const initial = {
+        ...detail, event: "event-a",
+        video: { ...detail.video, title: "PREVIOUS_PRIVATE_TITLE", intro_comment: "PREVIOUS_PRIVATE_CONTENT" },
+      };
+      const fetchFn = async (path, init) => {
+        if (init.method === "POST") {
+          posts.push(path);
+          return json(200, { ok: true, message: "APPROVED_RECEIPT" });
+        }
+        gets.push(path);
+        if (gets.length === 1) return json(200, initial);
+        if (failure === "503") return json(503, {});
+        return json(200, {
+          ...initial,
+          event: failure === "event" ? "other-event" : initial.event,
+          video: { ...initial.video, title: "INVALID_RECEIPT_TITLE",
+            id: failure === "video" ? "other-video" : initial.video.id },
+          moderationCases: failure === "schema" ? "invalid" : initial.moderationCases,
+        });
+      };
+      const findApprove = () => [...dom.window.document.querySelectorAll("button")]
+        .find(b => b.textContent.trim() === "承認");
+      await React.act(async () => root.render(React.createElement(MemoryRouter, {
+        initialEntries: ["/admin/videos/video-1?event=event-a"],
+      }, React.createElement(Routes, null,
+        React.createElement(Route, { path: "/admin/videos/:id",
+          element: React.createElement(AdminVideoDetail, { fetchFn }) }),
+      ))));
+      assert.match(dom.window.document.body.textContent, /PREVIOUS_PRIVATE_TITLE/);
+      assert.match(dom.window.document.body.textContent, /PREVIOUS_PRIVATE_CONTENT/);
+      assert.ok(findApprove());
+      assert.ok(dom.window.document.querySelector('[name="private_note"]'));
+      await React.act(async () => findApprove().dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true, cancelable: true })));
+      assert.deepEqual(gets, Array(2).fill("/api/admin-read/videos/video-1?event=event-a"));
+      assert.deepEqual(posts, ["/api/admin/videos/video-1/status"], "never replay POST");
+      const content = dom.window.document.body.textContent;
+      assert.doesNotMatch(content, /INVALID_RECEIPT_TITLE/);
+      if (failure === "503") {
+        assert.match(content, /PREVIOUS_PRIVATE_TITLE/);
+        assert.match(content, /PREVIOUS_PRIVATE_CONTENT/);
+        assert.match(content, /APPROVED_RECEIPT/);
+        assert.ok(findApprove());
+        assert.ok(dom.window.document.querySelector('[name="private_note"]'));
+      } else {
+        assert.match(content, /作品詳細を取得できませんでした/);
+        assert.doesNotMatch(content, /PREVIOUS_PRIVATE_TITLE|PREVIOUS_PRIVATE_CONTENT|APPROVED_RECEIPT/);
+        assert.equal(findApprove(), undefined);
+        assert.equal(dom.window.document.querySelector('[name="private_note"]'), null);
+      }
+    });
+  }
 });
