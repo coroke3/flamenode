@@ -1088,3 +1088,49 @@ test("MIG-0722 U02b-12: shared snapshot dispatch gate serializes list and batch 
     }
   }
 });
+
+
+test("MIG-0722 U02b: submitted release confirmation preserves CURRENT group-impact warnings", async () => {
+  const releaseText = "枠の確保状態は維持したまま、現在提出されている作品を枠から外します。利用者はこの枠へ別の作品を再度提出できます。";
+  const groupText = "同じ提出グループの連続枠もまとめて未提出状態へ戻します。";
+  const forceText = "作品は削除せず、提出済み枠との紐付けだけを解除して空き状態に戻します。連続枠の場合は同じ提出グループをまとめて解放します。";
+  for (const kind of ["release-submitted-video", "force-release-submitted"]) {
+    for (const grouped of [false, true]) {
+      await withSlotDom(async (dom, root) => {
+        const calls = [];
+        const rows = [
+          slot("other", { status: "submitted", reservation_group_id: "other-group" }),
+          slot("target", { status: "submitted", reservation_group_id: grouped ? "target-group" : null }),
+        ];
+        const onAction = async operation => { calls.push(operation); return { ok: true }; };
+        const view = React.createElement(MemoryRouter, null, React.createElement(SlotList, {
+          eventId: "ev id", slots: rows, partGapMinutes: 15, parts: [],
+          onAction, canManageSubmittedSlots: true,
+        }));
+        await React.act(async () => root.render(view));
+        const doc = dom.window.document;
+        const label = kind === "release-submitted-video" ? "作品のみ解放" : "強制解放";
+        const row = [...doc.querySelectorAll("tbody tr")][1];
+        const action = [...row.querySelectorAll("button")].find(button => button.textContent.trim() === label);
+        const dialog = () => doc.querySelector('[aria-label="枠操作の確認"]');
+        const button = text => [...dialog().querySelectorAll("button")]
+          .find(element => element.textContent.trim() === text);
+        const expected = kind === "release-submitted-video"
+          ? releaseText + (grouped ? groupText : "") : forceText;
+
+        await React.act(async () => action.click());
+        assert.equal(dialog().querySelector("p").textContent, expected);
+        assert.deepEqual(calls, [], "opening a confirmation never dispatches");
+        await React.act(async () => button("キャンセル").click());
+        assert.equal(dialog(), null);
+        assert.deepEqual(calls, [], "cancel never dispatches");
+
+        await React.act(async () => action.click());
+        assert.equal(dialog().querySelector("p").textContent, expected);
+        await React.act(async () => button("実行する").click());
+        assert.deepEqual(calls, [{ kind, slotId: "target" }]);
+        assert.equal(dialog(), null);
+      });
+    }
+  }
+});

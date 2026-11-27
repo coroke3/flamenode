@@ -191,6 +191,10 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
       }
     }
   };
+  const pendingOperation = pending?.operation;
+  const releaseIncludesGroup = pendingOperation?.kind === "release-submitted-video" &&
+    slots.some(slot => slot.event_id === eventId && slot.id === pendingOperation.slotId &&
+      Boolean(slot.reservation_group_id));
   if (slots.length === 0) return <p className="fn-muted fn-text-sm">枠はまだありません。</p>;
   return <div className="manage-slot-list">
     {error && <p role="alert" className="fn-alert fn-alert--danger">{error}</p>}
@@ -316,9 +320,10 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     {onAction && pending && <div role="group" aria-label="枠操作の確認"
       className="manage-slot-confirm">
       <p>{pending.operation.kind === "release-submitted-video"
-        ? "作品の提出だけを解除します。予約状態は維持されます。"
+        ? "枠の確保状態は維持したまま、現在提出されている作品を枠から外します。利用者はこの枠へ別の作品を再度提出できます。" +
+          (releaseIncludesGroup ? "同じ提出グループの連続枠もまとめて未提出状態へ戻します。" : "")
         : pending.operation.kind === "force-release-submitted"
-          ? "提出済み枠を強制解放します。作品自体は削除されません。"
+          ? "作品は削除せず、提出済み枠との紐付けだけを解除して空き状態に戻します。連続枠の場合は同じ提出グループをまとめて解放します。"
           : "選択した枠の変更を実行します。よろしいですか？"}</p>
       <button type="button" className="fn-btn fn-btn-ghost" disabled={busy}
         onClick={() => setPending(null)}>キャンセル</button>
