@@ -21,12 +21,40 @@ const OPERATIONAL_CHECK_IDS = [
   "x_id_merge_pending_stale",
 ] as const;
 
-// Match the actual CURRENT/Hono count-to-status rules. A complete but
-// contradictory receipt is unavailable, not a reassuring all-clear.
-function hasCompleteOperationalResults(results: AdminHealthResponse["results"]): boolean {
-  if (results.length !== OPERATIONAL_CHECK_IDS.length) return false;
+// CURRENT runHealthChecks returns all 22 identities. Until U03 assembles the
+// authorized per-ID receipts, a nonempty subset is not proof of a completed run.
+const FULL_CHECK_IDS = [
+  "system_settings_single_row",
+  "primary_event_sync",
+  "orphan_event_ref",
+  "orphan_video_ref",
+  "available_slot_with_video",
+  "submitted_slot_without_video",
+  "reservation_group_user_mix",
+  "public_video_without_youtube_id",
+  "voided_video_visible",
+  "slot_duplicate_start_time",
+  "like_count_drift",
+  "video_statistics_columns",
+  "missing_video_youtube_metadata",
+  "videos_outro_comment_legacy",
+  "chapter_non_chapter_marker",
+  "orphan_video_member",
+  "notification_processing_stuck",
+  "notification_failed_volume",
+  "open_moderation_cases_overdue",
+  "public_api_event_flag",
+  "x_id_merge_pending_stale",
+  "audit_logs_retention_candidates",
+] as const;
+
+// Keep CURRENT count-to-status rules for both the operational and full views.
+// Never expose a reassuring summary for missing or contradictory results.
+function hasCompleteHealthResults(results: AdminHealthResponse["results"], fullRun: boolean): boolean {
+  const expectedIds = fullRun ? FULL_CHECK_IDS : OPERATIONAL_CHECK_IDS;
+  if (results.length !== expectedIds.length) return false;
   const ids = new Set(results.map(result => result.id));
-  if (!OPERATIONAL_CHECK_IDS.every(id => ids.has(id))) return false;
+  if (!expectedIds.every(id => ids.has(id))) return false;
   return results.every(({ id, status, count }) => {
     if (!Number.isSafeInteger(count) || count < 0) return false;
     switch (id) {
@@ -34,6 +62,25 @@ function hasCompleteOperationalResults(results: AdminHealthResponse["results"]):
         return status === (count === 1 ? "ok" : "warn");
       case "notification_failed_volume":
         return status === (count >= 20 ? "warn" : count > 0 ? "info" : "ok");
+      case "public_video_without_youtube_id":
+      case "videos_outro_comment_legacy":
+      case "audit_logs_retention_candidates":
+        return status === (count === 0 ? "ok" : "info");
+      case "video_statistics_columns":
+      case "chapter_non_chapter_marker":
+      case "public_api_event_flag":
+        return status === "ok" && count === 0;
+      case "primary_event_sync":
+      case "orphan_event_ref":
+      case "orphan_video_ref":
+      case "available_slot_with_video":
+      case "submitted_slot_without_video":
+      case "reservation_group_user_mix":
+      case "voided_video_visible":
+      case "slot_duplicate_start_time":
+      case "like_count_drift":
+      case "missing_video_youtube_metadata":
+      case "orphan_video_member":
       case "notification_processing_stuck":
       case "open_moderation_cases_overdue":
       case "x_id_merge_pending_stale":
@@ -73,7 +120,7 @@ export function AdminHealthView({
       {/* MIG-0626 may return a catalog with zero results before any check runs.
           Until U03, never display an empty deep response as an all-clear. */}
       {data.status === "loading" ? <p role="status">読み込み中…</p>
-        : data.status === "ok" && data.data.error === null && (fullRun ? data.data.results.length > 0 : hasCompleteOperationalResults(data.data.results)) ? (
+        : data.status === "ok" && data.data.error === null && hasCompleteHealthResults(data.data.results, fullRun) ? (
           <DiagnosticStatusResults kind="health" results={data.data.results}
             initialFilter={initialFilter} onRefresh={onRefresh} />
         ) : (

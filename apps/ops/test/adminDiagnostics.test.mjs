@@ -24,7 +24,7 @@ const results = [
 ];
 
 // The operational endpoint is a fixed five-check set; generic rows are
-// reserved for component-only tests and the pre-U03 deep-response fixture.
+// reserved for component-only tests.
 const operationalIds = [
   "system_settings_single_row",
   "notification_processing_stuck",
@@ -34,6 +34,38 @@ const operationalIds = [
 ];
 const operationalResults = operationalIds.map((id, i) => ({
   ...(i < 3 ? results[i] : results[0]),
+  id,
+  ...(i === 0 ? { count: 1 } : {}),
+  ...(i > 2 ? { label: "check " + id } : {}),
+}));
+
+// Full CURRENT runHealthChecks receipt (fixture only; per-ID orchestration waits for U03).
+const deepIds = [
+  "system_settings_single_row",
+  "primary_event_sync",
+  "orphan_event_ref",
+  "orphan_video_ref",
+  "available_slot_with_video",
+  "submitted_slot_without_video",
+  "reservation_group_user_mix",
+  "public_video_without_youtube_id",
+  "voided_video_visible",
+  "slot_duplicate_start_time",
+  "like_count_drift",
+  "video_statistics_columns",
+  "missing_video_youtube_metadata",
+  "videos_outro_comment_legacy",
+  "chapter_non_chapter_marker",
+  "orphan_video_member",
+  "notification_processing_stuck",
+  "notification_failed_volume",
+  "open_moderation_cases_overdue",
+  "public_api_event_flag",
+  "x_id_merge_pending_stale",
+  "audit_logs_retention_candidates",
+];
+const deepResults = deepIds.map((id, i) => ({
+  ...(i === 1 ? results[1] : i === 7 ? results[2] : results[0]),
   id,
   ...(i === 0 ? { count: 1 } : {}),
   ...(i > 2 ? { label: "check " + id } : {}),
@@ -249,29 +281,55 @@ test("MIG-0736 operational health rejects contradictory count/status even with a
   }
 });
 
-test("MIG-0736 deep catalog or empty results never show an all-clear before U03", async () => {
-  for (const payload of [
-    { status: "all", results: [], error: null, checkIds: ["system_settings_single_row", "primary_event_sync"] },
-    { status: "all", results: [], error: null },
-  ]) {
+test("MIG-0736 deep diagnosis requires all CURRENT check identities and consistent results", async () => {
+  const clean = deepResults.map(row => row.id === "primary_event_sync"
+    ? { ...row, status: "ok", count: 0, samples: [] } : row);
+  const change = (id, fields) => clean.map(row => row.id === id ? { ...row, ...fields } : row);
+  const receipts = [
+    { rows: [], message: /全体診断は現在利用できません/, checkIds: deepIds },
+    { rows: [], message: /全体診断は現在利用できません/ },
+    { rows: [results[0]], message: /診断結果を取得できませんでした/ },
+    { rows: [clean[0]], message: /診断結果を取得できませんでした/ },
+    { rows: operationalResults, message: /診断結果を取得できませんでした/ },
+    { rows: clean.slice(0, -1), message: /診断結果を取得できませんでした/ },
+    { rows: [...clean, clean[0]], message: /診断結果を取得できませんでした/ },
+    { rows: [...clean.slice(0, -1), clean[0]], message: /診断結果を取得できませんでした/ },
+    { rows: change("audit_logs_retention_candidates", { id: "unknown" }), message: /診断結果を取得できませんでした/ },
+    { rows: change("primary_event_sync", { count: 1 }), message: /診断結果を取得できませんでした/ },
+    { rows: change("system_settings_single_row", { count: 0 }), message: /診断結果を取得できませんでした/ },
+    { rows: change("notification_failed_volume", { status: "info", count: 20 }), message: /診断結果を取得できませんでした/ },
+    { rows: change("video_statistics_columns", { count: 1 }), message: /診断結果を取得できませんでした/ },
+    { rows: change("public_video_without_youtube_id", { status: "warn" }), message: /診断結果を取得できませんでした/ },
+    { rows: change("orphan_video_ref", { count: -1 }), message: /診断結果を取得できませんでした/ },
+    { rows: change("orphan_video_ref", { count: 0.5 }), message: /診断結果を取得できませんでした/ },
+    { rows: change("orphan_video_ref", { count: Number.MAX_SAFE_INTEGER + 1, status: "warn" }), message: /診断結果を取得できませんでした/ },
+  ];
+  for (const { rows, message, checkIds } of receipts) {
     const calls = [];
     const data = await getAdminHealth(async (path) => {
       calls.push(path);
-      return response(200, payload);
+      return response(200, { status: "all", results: rows, error: null, ...(checkIds ? { checkIds } : {}) });
     }, true);
     assert.deepEqual(calls, ["/api/admin-read/ops/health?deep=1"]);
     const html = render(h(AdminHealthView, { data, fullRun: true, initialFilter: "all", onRefresh: () => {} }), "/admin/health?deep=1");
-    assert.match(html, /全体診断は現在利用できません/);
-    assert.doesNotMatch(html, /WARN はありません|状態フィルタ|最新状態を再チェック/);
-    assert.equal(new JSDOM(html).window.document.querySelectorAll("tbody tr").length, 0);
+    assert.match(html, message);
+    assert.doesNotMatch(html, /WARN はありません|状態フィルタ|最新状態を再チェック|<table/);
   }
-  const completed = await getAdminHealth(async () => response(200, {
-    status: "all", results: [results[0]], error: null,
-  }), true);
-  const valid = render(h(AdminHealthView, { data: completed, fullRun: true, initialFilter: "all", onRefresh: () => {} }), "/admin/health?deep=1");
-  assert.match(valid, /WARN はありません/);
-  assert.match(valid, /安全/);
-  assert.doesNotMatch(valid, /全体診断は現在利用できません/);
+  for (const { rows, warning } of [{ rows: clean, warning: false }, { rows: deepResults, warning: true }]) {
+    const data = await getAdminHealth(async () => response(200, {
+      status: "all", results: rows, error: null,
+    }), true);
+    const html = render(h(AdminHealthView, { data, fullRun: true, initialFilter: "all", onRefresh: () => {} }), "/admin/health?deep=1");
+    assert.match(html, warning ? /WARN 1 件/ : /WARN はありません/);
+    assert.match(html, /安全/);
+    assert.doesNotMatch(html, /全体診断は現在利用できません|診断結果を取得できませんでした/);
+    const dom = new JSDOM(html);
+    try {
+      assert.equal(dom.window.document.querySelectorAll("tbody tr").length, 22);
+    } finally {
+      dom.window.close();
+    }
+  }
 });
 
 test("U01 security first view shows run prompt without result table", () => {
@@ -804,7 +862,7 @@ test("MIG-0736 diagnostic route query parity: duplicate keys never opt in or sel
         calls.push(url);
         if (url.includes("/integrity")) return response(501, { error: "unsupported" });
         const security = url.includes("/security");
-        return response(200, { status: "all", results: security ? securityResults : url.includes("?deep=1") ? results : operationalResults, error: null, ...(security ? { ran: true } : {}) });
+        return response(200, { status: "all", results: security ? securityResults : url.includes("?deep=1") ? deepResults : operationalResults, error: null, ...(security ? { ran: true } : {}) });
       };
       try {
         await React.act(async () => {
@@ -893,7 +951,7 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
             status: "all",
             ran: true,
             error: null,
-            results: (idleUrl ? request.url === idleUrl ? operationalResults : results.slice(0, 2) : securityResults).map((result, i) =>
+            results: (idleUrl ? request.url === idleUrl ? operationalResults : deepResults : securityResults).map((result, i) =>
               i === 0 ? { ...result, label: label + " OK" } : i === 1 ? { ...result, label } : result),
           }));
         });
@@ -928,7 +986,7 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
         assert.doesNotMatch(target.textContent, /operational-current/, path);
         await finish(current, "new-run-WARN");
         assert.match(target.textContent, /new-run-WARN/, path);
-        assert.equal(activeFilter(), idleUrl ? "すべて (2)" : "すべて (10)", path);
+        assert.equal(activeFilter(), idleUrl ? "すべて (22)" : "すべて (10)", path);
 
         // The transport deliberately ignores abort and resolves the first run late.
         await finish(obsolete, "obsolete-private-result");
@@ -941,8 +999,8 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
         assert.equal(target.querySelectorAll("tbody tr").length, 1, path);
         assert.doesNotMatch(target.textContent, /new-run-WARN OK/, path);
         await go(-1);
-        assert.equal(activeFilter(), idleUrl ? "すべて (2)" : "すべて (10)", path);
-        assert.equal(target.querySelectorAll("tbody tr").length, idleUrl ? 2 : 10, path);
+        assert.equal(activeFilter(), idleUrl ? "すべて (22)" : "すべて (10)", path);
+        assert.equal(target.querySelectorAll("tbody tr").length, idleUrl ? 22 : 10, path);
         await go(1);
         assert.equal(activeFilter(), "WARN (1)", path);
         assert.equal(pending.length, count, path);
