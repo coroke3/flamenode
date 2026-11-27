@@ -164,6 +164,7 @@ export function PermissionsReadView({
         </section>
       )}
       <p className="fn-page-footnote">
+        <Icon name="info" size={12} aria-hidden />
         監査ログは管理者向け画面で確認できます。通常の作品編集は
         <AppLink href={href}>編集ページ</AppLink>から行ってください。
       </p>

@@ -395,3 +395,87 @@ test("MIG-0715 U03: admin query does not grant menu access and denied receipts n
     } finally { await m.unmount(); }
   }
 });
+
+test("MIG-0715 U03: admin menu retires before passive effects on resource and mode changes", async () => {
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  const requests = [];
+  const commits = [];
+  let navigate;
+  const load = options => new Promise(resolve => requests.push({ ...options, resolve }));
+  const menu = () => container.querySelector('nav[aria-label="作品管理メニュー"]');
+  const path = (id, mode = "") => "/dashboard/edit/" + id + "/permissions" + mode;
+  function Probe() {
+    navigate = useNavigate();
+    const location = useLocation();
+    React.useLayoutEffect(() => {
+      commits.push({ menu: Boolean(menu()), text: container.textContent });
+    }, [location.key]);
+    return null;
+  }
+  const go = async target => {
+    await act(async () => { navigate(target); });
+    await flush();
+    assert.equal(commits.at(-1).menu, false, "no old admin menu in committed DOM");
+    assert.doesNotMatch(commits.at(-1).text, /private-first-A|private-new-A/);
+    assert.equal(menu(), null);
+  };
+  const admin = (id, title) => ({ ...permissionReceipt(id, title), privilegeMode: "admin" });
+  const complete = async (i, data) => {
+    await act(async () => { requests[i].resolve(ok(data)); });
+    await flush();
+  };
+  try {
+    await act(async () => root.render(React.createElement(MemoryRouter, { initialEntries: [path("A")] },
+      React.createElement(React.Fragment, null,
+        React.createElement(Routes, null, React.createElement(Route, {
+          path: "/dashboard/edit/:id/permissions",
+          element: React.createElement(Permissions, { load }),
+        })),
+        React.createElement(Probe)))));
+    await flush();
+    await complete(0, admin("A", "first-A"));
+    assert.equal(menu()?.querySelector("a")?.getAttribute("href"), "/admin/videos/A");
+    await go(path("B"));
+    assert.equal(requests[0].signal.aborted, true);
+    await go(path("A"));
+    assert.equal(requests[1].signal.aborted, true);
+    assert.equal(requests.length, 3);
+    await complete(1, admin("B", "retired-B"));
+    assert.equal(menu(), null, "obsolete successful admin receipt cannot restore menu");
+    assert.doesNotMatch(container.textContent, /retired-B/);
+    await complete(2, admin("A", "new-A"));
+    assert.ok(menu());
+    await go(path("A", "?privileged=event"));
+    assert.equal(requests[2].signal.aborted, true);
+    assert.deepEqual(requests[3].privilegeModes, ["event"]);
+    await complete(3, { ...permissionReceipt("A", "event-A"), privilegeMode: "event" });
+    assert.equal(menu(), null);
+    assert.match(container.textContent, /private-event-A/);
+    await go(path("A", "?privileged=admin"));
+    await complete(4, { kind: "no_access", privilegeMode: "admin" });
+    assert.equal(menu(), null);
+    assert.match(container.textContent, /編集権限がありません/);
+    assert.equal(container.querySelectorAll("button,input,form").length, 0);
+  } finally { await act(async () => root.unmount()); }
+});
+
+test("MIG-0715 U03: CURRENT audit footnote retains decorative info icon on authorized views", async () => {
+  for (const showCollabSection of [true, false]) {
+    const receipt = { ...permissionReceipt("A", "video"), privilegeMode: "admin", showCollabSection };
+    if (!showCollabSection) receipt.subjects = [];
+    const m = await mountPermissions("/dashboard/edit/A/permissions", async () => ok(receipt));
+    try {
+      const footnote = m.container.querySelector(".fn-page-footnote");
+      assert.ok(footnote);
+      assert.match(footnote.textContent, /監査ログは管理者向け画面で確認できます/);
+      const icon = footnote.querySelector('svg[aria-hidden="true"]');
+      assert.ok(icon);
+      assert.equal(icon.getAttribute("width"), "12");
+      assert.equal(icon.getAttribute("height"), "12");
+      assert.equal(footnote.querySelector("a")?.getAttribute("href"), "/dashboard/edit/A?privileged=admin");
+      assert.equal(m.container.querySelector('nav[aria-label="作品管理メニュー"]')?.querySelectorAll("a").length, 6);
+      assert.equal(m.container.querySelectorAll("button,input,form").length, 0);
+    } finally { await m.unmount(); }
+  }
+});
