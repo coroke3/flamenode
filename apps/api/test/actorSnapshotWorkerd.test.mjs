@@ -252,7 +252,8 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
   fs.writeFileSync(configPath, [
     'name = "flamenode-u04a-actor-probe"',
     'main = "worker.mjs"',
-    'compatibility_date = "2026-11-27"',
+    // Match the pinned API Wrangler template; do not use the calendar date of the test run.
+    'compatibility_date = "2026-07-21"',
     'compatibility_flags = ["nodejs_compat"]',
     'workers_dev = false',
     "",
