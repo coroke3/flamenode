@@ -32,6 +32,7 @@ import { areSlotsInSamePart } from "@/lib/utils/slotGroupingCore";
 import type { SlotViewerRelation } from "@/lib/slots/slotIdentityCore";
 import { redirectForGuardReason as redirectForGuard } from "@/lib/client/guardRedirect";
 import { normalizeXId } from "@/lib/utils/xid";
+import { ACTIVE_X_CHANGED_EVENT } from "@/lib/client/activeXSwitchEvents";
 import { readPersistedSlotDisplayName, persistSlotDisplayName, reusableSlotDisplayName } from "@/lib/slots/slotDisplayNameStorage";
 import { computeFloatingMenuPosition } from "@/lib/ui/floatingMenuPosition";
 import { buildConsecutiveSlotGuidance } from "@/lib/slots/slotGuidance";
@@ -265,18 +266,26 @@ export function SlotGrid({
   );
 
   React.useEffect(() => {
-    setError(null);
-    setSuccess(null);
-    setReservedSlotId(null);
-    setConfirmReleaseId(null);
-    setConfirmExtend(null);
-    setConfirmMerge(null);
-    setReserveTarget(null);
-    setActionMenu(null);
-    setMergeDisplayName("");
-    setReserveDisplayName("");
-    setReserveCount("1");
+    const clearViewerPrivateUi = () => {
+      setError(null);
+      setSuccess(null);
+      setReservedSlotId(null);
+      setConfirmReleaseId(null);
+      setConfirmExtend(null);
+      setConfirmMerge(null);
+      setReserveTarget(null);
+      setActionMenu(null);
+      setMergeDisplayName("");
+      setReserveDisplayName("");
+      setReserveCount("1");
+      setSavedName("");
+    };
+    clearViewerPrivateUi();
     setSavedName(readSavedSlotDisplayName(viewerXId));
+    // A successful Active X switch must clear an already-open dialog even
+    // before the parent overlay supplies a different viewerXId.
+    window.addEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
+    return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
   }, [viewerXId]);
 
   React.useEffect(() => {

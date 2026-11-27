@@ -64,3 +64,16 @@ test("SEC-899: switching between null-X accounts never prefills the next reserva
   assert.match(source, /setReserveDisplayName\(reusableSlotDisplayName\(normalizeXId\(viewerXId \?\? ""\), savedName\)\)/);
   assert.match(source, /setSavedName\(reusableSlotDisplayName\(normalizeXId\(viewerXId \?\? ""\), dn\)\)/);
 });
+
+test("SEC-899: successful Active X switch clears even an already-open reservation", () => {
+  const source = readFileSync(fileURLToPath(new URL("../../components/event/SlotGrid.tsx", import.meta.url)), "utf8");
+  assert.match(source, /import \{ ACTIVE_X_CHANGED_EVENT \} from/);
+  assert.match(source, /window\.addEventListener\(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi\)/);
+  assert.match(source, /window\.removeEventListener\(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi\)/);
+  const block = source.slice(source.indexOf("const clearViewerPrivateUi = () => {"),
+    source.indexOf("clearViewerPrivateUi();"));
+  for (const expression of ["setReserveTarget(null);", "setConfirmExtend(null);",
+    "setConfirmMerge(null);", 'setReserveDisplayName("");', 'setSavedName("");']) {
+    assert.ok(block.includes(expression), expression);
+  }
+});
