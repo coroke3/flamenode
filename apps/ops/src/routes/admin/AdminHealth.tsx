@@ -132,7 +132,10 @@ export function AdminHealthView({
               : data.status === "forbidden" || data.status === "notFound" ? "閲覧権限がありません。"
               : "診断結果を取得できませんでした。"}
           </DiagnosticErrorNotice>
-          {data.status === "ok" && isInvalidDiagnosticReceipt(data.data) ? (
+          {/* A schema-valid but incomplete 200 is also a rejected receipt.
+              Keep the staged empty deep catalog distinct from a failed run. */}
+          {data.status === "ok" && (isInvalidDiagnosticReceipt(data.data) ||
+            (data.data.error === null && (!fullRun || data.data.results.length > 0))) ? (
             <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={onRefresh}>
               最新状態を再チェック
             </button>

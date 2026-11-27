@@ -313,7 +313,12 @@ test("MIG-0736 deep diagnosis requires all CURRENT check identities and consiste
     assert.deepEqual(calls, ["/api/admin-read/ops/health?deep=1"]);
     const html = render(h(AdminHealthView, { data, fullRun: true, initialFilter: "all", onRefresh: () => {} }), "/admin/health?deep=1");
     assert.match(html, message);
-    assert.doesNotMatch(html, /WARN はありません|状態フィルタ|最新状態を再チェック|<table/);
+    assert.doesNotMatch(html, /WARN はありません|状態フィルタ|<table/);
+    if (rows.length === 0) {
+      assert.doesNotMatch(html, /最新状態を再チェック/, "staged empty deep catalog is still unsupported");
+    } else {
+      assert.match(html, /最新状態を再チェック/, "rejected nonempty deep receipt can be retried manually");
+    }
   }
   for (const { rows, warning } of [{ rows: clean, warning: false }, { rows: deepResults, warning: true }]) {
     const data = await getAdminHealth(async () => response(200, {
@@ -1611,7 +1616,7 @@ test("MIG-0736 invalid 200 replaces old diagnosis and explicit same-key retry re
         assert.equal(pending[0].url, endpoint);
         await finish(pending[0], response(200, healthy("fresh-receipt-0")));
         confirmHealthy("fresh-receipt-0");
-        for (const [index, invalid] of [
+        const invalidReceipts = [
           () => response(200, { status: "all", ran: true, error: null }),
           () => new Response("{", { status: 200 }),
           () => new Response(new ReadableStream({ start(controller) {
@@ -1620,9 +1625,28 @@ test("MIG-0736 invalid 200 replaces old diagnosis and explicit same-key retry re
           () => response(200, { ...healthy("invalid-private"), results: [
             { ...rows[0], count: "0" }, ...rows.slice(1),
           ] }),
-        ].entries()) {
+          // Schema-valid receipts which fail the existing completeness rules.
+          () => { const dto = healthy("invalid-private"); return response(200, {
+            ...dto, results: dto.results.slice(0, -1),
+          }); },
+          () => { const dto = healthy("invalid-private"); return response(200, {
+            ...dto, results: [...dto.results.slice(0, -1), dto.results[0]],
+          }); },
+          () => { const dto = healthy("invalid-private"); return response(200, {
+            ...dto, results: [{ ...dto.results[0], count: -1 }, ...dto.results.slice(1)],
+          }); },
+          () => { const dto = healthy("invalid-private"); return response(200, {
+            ...dto, results: [{ ...dto.results[0], status: "warn" }, ...dto.results.slice(1)],
+          }); },
+          ...(Component === AdminSecurity ? [() => response(200, {
+            ...healthy("invalid-private"), ran: false,
+          })] : []),
+        ];
+        for (const [index, invalid] of invalidReceipts.entries()) {
           const request = await retry();
+          const afterRequest = pending.length;
           await finish(request, invalid());
+          assert.equal(pending.length, afterRequest, path + ": no automatic retry");
           assert.match(target.textContent, /診断結果を取得できませんでした/, path);
           assert.doesNotMatch(target.textContent, /WARN はありません|fresh-receipt-|provider-only-marker|invalid-private/, path);
           assert.equal(target.querySelector("table"), null, path);
@@ -1632,10 +1656,10 @@ test("MIG-0736 invalid 200 replaces old diagnosis and explicit same-key retry re
         }
         // Real transient failures preserve the last successful same-key receipt.
         await finish(await retry(), response(503, {}));
-        confirmHealthy("fresh-receipt-4");
+        confirmHealthy("fresh-receipt-" + invalidReceipts.length);
         const offline = await retry();
         await React.act(async () => offline.reject(new Error("offline")));
-        confirmHealthy("fresh-receipt-4");
+        confirmHealthy("fresh-receipt-" + invalidReceipts.length);
         // A newer manual refresh wins over an obsolete malformed response.
         const obsolete = await retry();
         const current = await retry();

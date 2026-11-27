@@ -88,7 +88,9 @@ export function AdminSecurityView({
             : data.status === "forbidden" || data.status === "notFound" ? "閲覧権限がありません。"
             : "診断結果を取得できませんでした。"}
         </DiagnosticErrorNotice>
-          {data.status === "ok" && isInvalidDiagnosticReceipt(data.data) ? (
+          {/* Missing, duplicate or contradictory rows in a successful response
+              are rejected receipts too; recover only by explicit user retry. */}
+          {data.status === "ok" && (isInvalidDiagnosticReceipt(data.data) || data.data.error === null) ? (
             <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={onRefresh}>
               最新状態を再チェック
             </button>
