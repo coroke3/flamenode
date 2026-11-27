@@ -3329,6 +3329,9 @@ PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・�
 - `apps/api/test/auditCopyGolden.test.mjs` (exact shared-admission read-count compatibility only; first owner retained)
 - `apps/api/test/videoChapters.test.mjs` (exact shared-admission read-count compatibility only; first owner retained)
 - `apps/api/test/videoInteraction.parity.test.mjs` (exact shared-admission read-count compatibility only; first owner retained)
+- `apps/api/test/adminOpsGuards.parity.test.mjs` (proposed exact-count scope; adoption conditional on Lead historical lock reconciliation)
+- `apps/api/test/adminYoutubeResync.parity.test.mjs` (proposed exact-count scope; adoption conditional on Lead historical lock reconciliation)
+- `apps/api/test/eventTemplates.test.mjs` (proposed exact-count scope; adoption conditional on Lead historical lock reconciliation)
 - `docs/migration/work-items/MIG-0689.md`
 - `docs/migration/PHASE_6_SPEC.md` (MIG-0689 section only)
 - `docs/migration/TASK_CARDS_6_7.md` (MIG-0689 card only)
@@ -3338,7 +3341,7 @@ PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・�
 #### Micro-units
 - **U01 joined admission snapshot:** after Origin and session resolution, join the user ToS/actor/active-X projection with the unique `system_settings.id='default'` row. Successful request uses one fresh request-local admission read. No global/cross-request authorization cache.
 - **U02 failure provenance:** on joined-query failure, retry canonical ToS first; preserve `503 db_unavailable` if it fails. Only after identity succeeds, retry CostGuard independently; preserve `503 cost_guard_blocked` if that read fails. Missing settings row remains `maintenance_mode`, not unauthenticated. Active-X is checked only after CostGuard.
-- **U03 dependent-route acceptance:** coordinate with resource owners and verify actual full route read/bind/batch accounting; this task's shared read reduction is not itself S3 acceptance. For existing consumer suites, the 2026-11-27 [Lead scope decision](https://github.com/coroke3/flamenode/pull/901#issuecomment-7213469681) and [#523 coordination](https://github.com/coroke3/flamenode/pull/523#issuecomment-7213468788) reserve only the four non-conflicting exact-count test-only paths listed above. The three suites restored after the failed owner-check run (#45965333735) require explicit release of the MIG-0643/MIG-0604 checkpoint claims or owner-led reconciliation before adoption; no resource handlers or historical golden fixture edits, no assertion weakening, no first-owner transfer. The predecessor exact CI established only the expected one-read delta; final CI and real route acceptance remain mandatory.
+- **U03 dependent-route acceptance:** coordinate with resource owners and verify actual full route read/bind/batch accounting; this task's shared read reduction is not itself S3 acceptance. For existing consumer suites, the 2026-11-27 [Lead scope decision](https://github.com/coroke3/flamenode/pull/901#issuecomment-7213469681) and [#523 coordination](https://github.com/coroke3/flamenode/pull/523#issuecomment-7213468788) reserve the four non-conflicting exact-count test-only paths. Three additional suites are proposed only with the reviewed historical checkpoint reconciliation (MIG-0643 state synchronization to existing merged DONE; MIG-0604 release of completed SA-036 test path, BLOCKED unchanged). Adoption requires explicit Lead resolution and live-ownership recheck; no resource handlers or historical golden fixture edits, no assertion weakening, no first-owner transfer. The predecessor exact CI established only the expected one-read delta; final CI and real route acceptance remain mandatory.
 
 #### Test cases
 | ID | Input/operation | Expected |
@@ -3365,7 +3368,7 @@ npm run check:project-docs
 #### Ledger updates
 - Add MIG-0689 to `STATUS.md` as IN_PROGRESS, dependent only on MIG-0602.
 - Add this Work Order and the MIG-0689 task card.
-- Append MIG-0689 evidence only to its shared middleware and four explicitly reserved test compatibility rows in `FILE_MIGRATION_MATRIX.md`; preserve historical first owners, states and every unrelated row.
+- Append MIG-0689 evidence only to its shared middleware and four reserved and three conditionally reconciled test compatibility rows in `FILE_MIGRATION_MATRIX.md`; preserve historical first owners, states and every unrelated row.
 
 #### DONE checklist
 - [ ] Exact-head `migration-contract` and `migration-workspaces` both PASS.
