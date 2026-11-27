@@ -124,3 +124,12 @@ test("BFCache復元時は旧viewer overlay・予約ダイアログの両方を�
   assert.match(slotGrid, /setReserveTarget\(null\)/);
   assert.match(slotGrid, /setConfirmMerge\(null\)/);
 });
+
+test("old viewer GET is retired synchronously before Active-X or BFCache effect cleanup", () => {
+  assert.match(panel, /const overlayGeneration = React\.useRef\(0\)/);
+  assert.match(panel, /const requestGeneration = overlayGeneration\.current/);
+  assert.match(panel, /if \(!active \|\| !value \|\| requestGeneration !== overlayGeneration\.current\) return/);
+  assert.match(panel, /const refresh = \(\) => \{\s*overlayGeneration\.current \+= 1/);
+  assert.match(panel, /if \(event\.persisted\) refresh\(\)/);
+  assert.match(panel, /window\.addEventListener\(ACTIVE_X_CHANGED_EVENT, refresh\)/);
+});
