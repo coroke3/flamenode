@@ -318,6 +318,9 @@ export async function loadTosState(
   const costGuardJoin = includeCostGuardSettings
     ? `LEFT JOIN "system_settings" s ON s."id" = 'default'`
     : "";
+  // actorSnapshotFromRow prefers a nonempty X icon over the user image.
+  // Do not transfer a shadowed fallback image. TEXT length (rather than BLOB
+  // length) conservatively keeps the fallback for leading-NUL legacy text.
   const row = await db
     .prepare(
       `SELECT
@@ -370,7 +373,9 @@ export async function loadTosState(
            THEN 1 ELSE 0
          END AS terms_reaccept_required,
          u."discord_id" AS discord_id, u."name" AS discord_name,
-         u."active_x_user_id" AS active_x_user_id, u."image" AS user_image,
+         u."active_x_user_id" AS active_x_user_id,
+         CASE WHEN typeof(x."icon_url") = 'text' AND length(x."icon_url") > 0
+           THEN NULL ELSE u."image" END AS user_image,
          x."x_name" AS x_name, x."icon_url" AS x_icon_url${activeXColumns}${costGuardColumns}
        FROM "user" u
        LEFT JOIN "x_users" x ON x."id" = u."active_x_user_id"

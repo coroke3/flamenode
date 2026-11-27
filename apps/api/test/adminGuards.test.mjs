@@ -713,6 +713,56 @@ test("audit rows are identical whether settings/actor are preloaded by guards or
   }
 });
 
+test("shared admission does not transfer a shadowed actor image", async () => {
+  const { loadTosState } = await import("../src/middleware/writeOrigin.ts");
+  const { actorSnapshotFromRow } = await import("@flamenode/server-core/audit/logger");
+  const d1 = createAdminD1();
+  seedBase(d1.sqlite);
+  d1.sqlite.exec("INSERT INTO x_users (id, x_name, approval_status) VALUES ('x1', 'XN', 'approved'); UPDATE \"user\" SET active_x_user_id = 'x1'");
+  const setImage = d1.sqlite.prepare('UPDATE "user" SET image = ? WHERE id = ?');
+  const setIcon = d1.sqlite.prepare("UPDATE x_users SET icon_url = ? WHERE id = 'x1'");
+  const canonical = d1.sqlite.prepare(
+    'SELECT u.discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM "user" u LEFT JOIN x_users x ON x.id = u.active_x_user_id WHERE u.id = ?'
+  );
+  const rows = [];
+  const prepare = d1.db.prepare.bind(d1.db);
+  const db = {
+    ...d1.db,
+    prepare(query) {
+      const statement = prepare(query);
+      return {
+        ...statement,
+        bind(...values) {
+          const bound = statement.bind(...values);
+          return {
+            ...bound,
+            first: async (...args) => {
+              const row = await bound.first(...args);
+              rows.push(row);
+              return row;
+            },
+          };
+        },
+      };
+    },
+  };
+  for (const icon of [null, "", "https://i/x.png", "\u0000hidden", "a\u0000tail", "\u65e5\ud83d\ude00"]) {
+    const image = icon === "https://i/x.png" ? "u".repeat(100000) : "https://i/u.png";
+    setImage.run(image, "admin-1");
+    setIcon.run(icon);
+    const oldRow = canonical.get("admin-1");
+    for (const joined of [false, true]) {
+      const before = d1.stats.reads;
+      const snapshot = await loadTosState(db, "admin-1", undefined, joined);
+      assert.ok(snapshot);
+      assert.equal(snapshot.actor_snapshot_json, JSON.stringify(actorSnapshotFromRow(oldRow)));
+      assert.equal(d1.stats.reads - before, 1);
+      assert.equal(rows.at(-1).user_image,
+        oldRow.x_icon_url ? null : oldRow.user_image);
+    }
+  }
+});
+
 test("identity denies win over active X denies (banned before active_x_required)", async () => {
   const g = guardApp({ user: { ...U("admin"), is_banned: 1 }, activeX: { requireActiveXId: true } });
   assert.equal((await (await g.post()).json()).reason, "banned");
