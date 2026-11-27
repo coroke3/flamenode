@@ -1109,3 +1109,191 @@ test("U01 SSR / JS-disabled public page contains only a safe notice, never reser
   assert.match(html, /display-only/);
   assert.doesNotMatch(html, /<button|reserve|viewerXId/i);
 });
+
+test("U03k host serializes mutations and reconciles only a committed current viewer", async () => {
+  const React = (await import("react")).default;
+  const { JSDOM } = await import("jsdom");
+  const { EventSlotsViewerIsland } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const { ACTIVE_X_CHANGED_EVENT } = await import("../src/lib/client/activeXSwitchEvents.ts");
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.net/event/e/slots",
+  });
+  const domKeys = ["window", "document", "navigator", "HTMLElement", "Node"];
+  const previousDom = new Map(domKeys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const key of domKeys) {
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: dom.window[key] });
+  }
+  const { createRoot } = await import("react-dom/client");
+  const previousFetch = globalThis.fetch;
+  const previousAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+  const requests = [];
+  globalThis.fetch = async (_url, init) => new Promise(resolve => requests.push({ resolve, init }));
+  const makeOverlay = id => ({
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: false, viewerXId: id, viewerXIdNotice: null,
+    slots: [{ id: "s", viewer_relation: "active", is_owned_by_viewer: true, x_user_id: id }],
+  });
+  const baseSlots = [{ id: "s" }];
+  let snapshot;
+  let runMutation;
+  let publicReads = 0;
+  let publicReadResult = true;
+  let mutationCalls = 0;
+  const outcomes = [];
+  const navigations = [];
+  const refreshPublic = async () => {
+    publicReads += 1;
+    return publicReadResult;
+  };
+  const onNavigate = path => navigations.push(path);
+  const onOutcome = (outcome, isCurrent) => outcomes.push({
+    kind: outcome.kind, message: outcome.message, current: isCurrent(),
+  });
+  const Harness = () => React.createElement(EventSlotsViewerIsland, {
+    eventId: "e", baseSlots, accepting: true, eventStatus: "open",
+    refreshPublic, onNavigate,
+  }, viewer => {
+    snapshot = viewer;
+    runMutation = viewer.runMutation;
+    return React.createElement("div", null, viewer.loading ? "loading" : "ready");
+  });
+  const root = createRoot(dom.window.document.getElementById("root"));
+  const render = () => React.act(async () => {
+    root.render(React.createElement(Harness));
+    await new Promise(resolve => setTimeout(resolve, 10));
+  });
+  const settleOverlay = (index, id) => React.act(async () => {
+    requests[index].resolve({ ok: true, json: async () => makeOverlay(id) });
+    await new Promise(resolve => setTimeout(resolve, 10));
+  });
+  const presentation = { operation: "reserve", requestedCount: 1, canPost: true };
+
+  try {
+    await render();
+    assert.equal(requests.length, 1);
+    await settleOverlay(0, "x1");
+    assert.equal(snapshot.canManageOwnSlots, true);
+    const firstReceipt = snapshot.captureMutationReceipt();
+    assert.equal(firstReceipt(), true);
+
+    let resolveFirst;
+    let firstResult;
+    let duplicate;
+    await React.act(async () => {
+      const firstPromise = runMutation(presentation, () => {
+        mutationCalls += 1;
+        return new Promise(resolve => { resolveFirst = resolve; });
+      }, onOutcome);
+      duplicate = await runMutation(presentation, async () => {
+        mutationCalls += 1;
+        return { status: 200, result: { ok: true, slotId: "s" } };
+      }, onOutcome);
+      assert.equal(duplicate.kind, "busy");
+      assert.equal(mutationCalls, 1, "single-flight must not issue a second POST");
+      resolveFirst({ status: 200, result: { ok: true, slotId: "s" } });
+      firstResult = await firstPromise;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+    assert.equal(firstResult.kind, "settled");
+    assert.equal(firstResult.outcome.kind, "success");
+    assert.equal(outcomes.length, 1);
+    assert.equal(outcomes[0].current, true, "current result callback runs under its receipt");
+    assert.equal(firstReceipt(), false, "the post-mutation refresh retires the old receipt");
+    assert.equal(publicReads, 1, "success performs one RH-020 read");
+    assert.equal(requests.length, 2, "success is followed by one RH-014 read");
+    await settleOverlay(1, "x1");
+
+    let resolveStale;
+    let stalePromise;
+    let staleResult;
+    await React.act(async () => {
+      stalePromise = runMutation(presentation, () => {
+        mutationCalls += 1;
+        return new Promise(resolve => { resolveStale = resolve; });
+      }, onOutcome);
+    });
+    const oldReceipt = snapshot.captureMutationReceipt();
+    assert.equal(oldReceipt(), true);
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+    });
+    assert.equal(oldReceipt(), false);
+    assert.equal(requests.length, 3);
+    await React.act(async () => {
+      resolveStale({ status: 200, result: { ok: true, slotId: "s" } });
+      staleResult = await stalePromise;
+    });
+    assert.equal(staleResult.kind, "stale");
+    assert.equal(publicReads, 1, "no successor read starts before a current receipt commits");
+    assert.equal(outcomes.length, 1, "stale success cannot update successor UI");
+
+    await settleOverlay(2, "x2");
+    assert.equal(publicReads, 2, "the new committed viewer performs a fresh RH-020 read");
+    assert.equal(requests.length, 4, "the current host follows with one RH-014 read");
+    await settleOverlay(3, "x2");
+
+    let resolveStaleGuard;
+    let staleGuardPromise;
+    let staleGuardResult;
+    await React.act(async () => {
+      staleGuardPromise = runMutation(presentation, () => {
+        mutationCalls += 1;
+        return new Promise(resolve => { resolveStaleGuard = resolve; });
+      }, onOutcome);
+    });
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+    });
+    assert.equal(requests.length, 5);
+    await React.act(async () => {
+      resolveStaleGuard({ status: 403, result: { ok: false, reason: "tos_required", message: "terms" } });
+      staleGuardResult = await staleGuardPromise;
+    });
+    assert.equal(staleGuardResult.kind, "stale");
+    assert.equal(navigations.length, 0, "a stale guard cannot navigate the successor");
+    assert.equal(publicReads, 2, "a stale guard does not refresh either read");
+    await settleOverlay(4, "x3");
+
+    let redirectResult;
+    await React.act(async () => {
+      redirectResult = await runMutation(presentation, async () => {
+        mutationCalls += 1;
+        return { status: 403, result: { ok: false, reason: "tos_required", message: "terms" } };
+      }, onOutcome);
+    });
+    assert.equal(redirectResult.kind, "settled");
+    assert.equal(redirectResult.outcome.kind, "redirect");
+    assert.deepEqual(navigations, ["/onboarding?next=%2Fevent%2Fe%2Fslots"]);
+    assert.equal(publicReads, 2, "a current guard redirects without mutation refresh");
+
+    publicReadResult = false;
+    let conflictResult;
+    await React.act(async () => {
+      conflictResult = await runMutation(presentation, async () => {
+        mutationCalls += 1;
+        return { status: 409, result: { ok: false, reason: "slot_conflict", message: "conflict" } };
+      }, onOutcome);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+    assert.equal(conflictResult.kind, "settled");
+    assert.equal(conflictResult.outcome.kind, "failure");
+    assert.equal(outcomes.length, 2);
+    assert.equal(outcomes[1].kind, "failure");
+    assert.equal(publicReads, 3, "typed 409 performs one RH-020 read");
+    assert.equal(requests.length, 6, "typed 409 is followed by one RH-014 read even when RH-020 fails");
+    assert.equal(mutationCalls, 5, "no mutation path retries its POST");
+    await settleOverlay(5, "x3");
+  } finally {
+    await React.act(async () => root.unmount());
+    globalThis.fetch = previousFetch;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = previousAct;
+    for (const [key, descriptor] of previousDom) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    dom.window.close();
+  }
+});

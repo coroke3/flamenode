@@ -40,21 +40,29 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
   // a slot ID. A subsequent RH-020 success can mean that the slot was released
   // and reserved by another account without changing the public layout.
   const [viewerRefreshEpoch, setViewerRefreshEpoch] = React.useState(0);
+  const publicRefreshRef = React.useRef<(() => Promise<boolean>) | null>(null);
+  const refreshPublic = React.useCallback(
+    () => publicRefreshRef.current?.() ?? Promise.resolve(false),
+    [],
+  );
   React.useEffect(() => {
     const controller = new AbortController();
     // Two 30-second polls can overlap. An older RH-020 response must never
     // overwrite the grid after a newer poll has started and completed.
     let latestRequest = 0;
+    let activeRequestController: AbortController | null = null;
     // First successful read after an earlier failure must also invalidate
     // RH-014 fetched during that failed initial poll.
     let hasSettledPublicRead = false;
-    const load = async () => {
+    const load = async (refreshViewerOnSuccess = true): Promise<boolean> => {
       const request = ++latestRequest;
+      activeRequestController?.abort();
       setNow(Math.floor(Date.now() / 1000));
       // The common effect controller only aborts on unmount. An unanswered
       // RH-020 fetch could otherwise leave the initial grid "loading" forever.
       // Race a finite deadline even when a custom fetch ignores AbortSignal.
       const requestController = new AbortController();
+      activeRequestController = requestController;
       const abortOnUnmount = () => requestController.abort();
       controller.signal.addEventListener("abort", abortOnUnmount, { once: true });
       let deadlineId: number | undefined;
@@ -70,11 +78,14 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
           fetchLiveSlots(detail.event.id, requestController.signal),
           deadline,
         ]);
+      } catch {
+        result = null;
       } finally {
         if (deadlineId !== undefined) window.clearTimeout(deadlineId);
         controller.signal.removeEventListener("abort", abortOnUnmount);
+        if (activeRequestController === requestController) activeRequestController = null;
       }
-      if (controller.signal.aborted || request !== latestRequest) return;
+      if (controller.signal.aborted || request !== latestRequest) return false;
       if (result) {
         setLive(result);
         setPhase("ready");
@@ -82,8 +93,9 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
         // A first *completed* public read does not duplicate RH-014.
         // Success after ANY preceding completed attempt (including 503) must
         // invalidate that prior identity snapshot before showing ownership.
-        if (hasSettledPublicRead) setViewerRefreshEpoch((n) => n + 1);
+        if (refreshViewerOnSuccess && hasSettledPublicRead) setViewerRefreshEpoch((n) => n + 1);
         hasSettledPublicRead = true;
+        return true;
       } else {
         // A failed *refresh* preserves the last successfully fetched grid, but
         // must not imply that these slot names/states were just revalidated.
@@ -91,12 +103,17 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
         setStalePublicNotice(true);
         hasSettledPublicRead = true;
         setPhase((current) => (current === "ready" ? current : "unavailable"));
+        return false;
       }
     };
+    const refreshPublicRequest = () => load(false);
+    publicRefreshRef.current = refreshPublicRequest;
     void load();
     const timer = window.setInterval(() => void load(), REFRESH_MS);
     return () => {
       controller.abort();
+      activeRequestController?.abort();
+      if (publicRefreshRef.current === refreshPublicRequest) publicRefreshRef.current = null;
       window.clearInterval(timer);
     };
   }, [detail]);
@@ -122,6 +139,7 @@ function EventSlotsIslandForEvent({ detail, builtAt }: EventSlotsIslandProps): R
             baseSlots: publicSlotIds,
             accepting: isAcceptingEntries(detail.event, now),
             eventStatus: computeEventStatus(detail.event, now),
+            refreshPublic,
           },
           (viewer) => {
             // RH-014 may only annotate a public slot snapshot that has already

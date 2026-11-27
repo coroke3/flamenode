@@ -1,5 +1,10 @@
 import * as React from "react";
 import { ACTIVE_X_CHANGED_EVENT } from "../../../../src/lib/client/activeXSwitchEvents.ts";
+import {
+  runSlotMutation,
+  type SlotMutationOutcome,
+  type SlotMutationPresentation,
+} from "../lib/slotReservation.ts";
 import type {
   SlotViewerOverlayDto,
   SlotViewerOverlaySlot,
@@ -299,22 +304,120 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
   return { overlay: value, loading: pending, slots, canTakeSlot, canManageOwnSlots, refresh, captureMutationReceipt };
 }
 
-/** Host-level React wrapper; later U03 supplies SlotGrid controls as a render function. */
+
+export type SlotMutationAction = Parameters<typeof runSlotMutation>[1];
+export type SlotMutationOutcomeHandler = (
+  outcome: SlotMutationOutcome,
+  isCurrent: () => boolean,
+) => void;
+export type SlotMutationHostResult =
+  | { kind: "busy" }
+  | { kind: "stale" }
+  | { kind: "settled"; outcome: SlotMutationOutcome; isCurrent: () => boolean };
+
+export interface ViewerSlotsHostState<T extends ViewerSlotBase> extends ViewerSlotsState<T> {
+  runMutation: (
+    presentation: SlotMutationPresentation,
+    mutate: SlotMutationAction,
+    onOutcome?: SlotMutationOutcomeHandler,
+  ) => Promise<SlotMutationHostResult>;
+}
+
+const NO_PUBLIC_REFRESH = () => Promise.resolve(false);
+
+/** Host-level wrapper; U03k exposes a receipt-scoped single-flight mutation host. */
 export function EventSlotsViewerIsland<T extends ViewerSlotBase>({
   eventId,
   baseSlots,
   accepting,
   eventStatus,
+  refreshPublic,
+  onNavigate,
   children,
 }: {
   eventId: string;
   baseSlots: readonly T[];
   accepting: boolean;
   eventStatus: string;
-  children: (viewer: ViewerSlotsState<T>) => React.ReactNode;
+  refreshPublic?: () => Promise<boolean>;
+  onNavigate?: (path: string) => void;
+  children: (viewer: ViewerSlotsHostState<T>) => React.ReactNode;
 }): React.ReactElement {
   const state = useEventSlotsViewer(eventId, baseSlots, accepting);
   const currentPath = `/event/${encodeURIComponent(eventId)}/slots`;
+  const refreshPublicRead = refreshPublic ?? NO_PUBLIC_REFRESH;
+  const defaultNavigate = React.useCallback((path: string) => {
+    if (typeof window !== "undefined") window.location.assign(path);
+  }, []);
+  const navigate = onNavigate ?? defaultNavigate;
+  const inFlight = React.useRef(false);
+  const staleReconcilePending = React.useRef(false);
+  const currentHostRef = React.useRef({
+    capture: state.captureMutationReceipt,
+    refreshViewer: state.refresh,
+    refreshPublic: refreshPublicRead,
+  });
+  currentHostRef.current = {
+    capture: state.captureMutationReceipt,
+    refreshViewer: state.refresh,
+    refreshPublic: refreshPublicRead,
+  };
+  const reconcileCurrent = React.useCallback(async () => {
+    const current = currentHostRef.current;
+    const receipt = current.capture();
+    if (!receipt) return;
+    staleReconcilePending.current = false;
+    try {
+      await current.refreshPublic();
+    } catch {
+      // A failed public read still requires a fresh private read below.
+    }
+    if (receipt()) current.refreshViewer();
+    else staleReconcilePending.current = true;
+  }, []);
+  React.useEffect(() => {
+    if (staleReconcilePending.current) void reconcileCurrent();
+  }, [state.captureMutationReceipt, state.loading, reconcileCurrent]);
+  const runMutation = React.useCallback(async (
+    presentation: SlotMutationPresentation,
+    mutate: SlotMutationAction,
+    onOutcome?: SlotMutationOutcomeHandler,
+  ): Promise<SlotMutationHostResult> => {
+    if (inFlight.current) return { kind: "busy" };
+    const receipt = state.captureMutationReceipt();
+    if (!receipt) return { kind: "stale" };
+    inFlight.current = true;
+    try {
+      const outcome = await runSlotMutation(presentation, mutate, () => currentPath);
+      if (!receipt()) {
+        if (outcome.refresh) {
+          staleReconcilePending.current = true;
+          await reconcileCurrent();
+        }
+        return { kind: "stale" };
+      }
+      if (outcome.kind === "redirect") {
+        navigate(outcome.path);
+        return { kind: "settled", outcome, isCurrent: receipt };
+      }
+      onOutcome?.(outcome, receipt);
+      if (outcome.refresh && receipt()) {
+        try {
+          await refreshPublicRead();
+        } catch {
+          // The private RH-014 read below still runs after an RH-020 failure.
+        }
+        if (receipt()) state.refresh();
+        else {
+          staleReconcilePending.current = true;
+          await reconcileCurrent();
+        }
+      }
+      return { kind: "settled", outcome, isCurrent: receipt };
+    } finally {
+      inFlight.current = false;
+    }
+  }, [state.captureMutationReceipt, state.refresh, currentPath, refreshPublicRead, navigate, reconcileCurrent]);
   const link = (path: string, label: string) =>
     React.createElement("a", { href: `${path}?next=${encodeURIComponent(currentPath)}` }, label);
   const message = !accepting && !state.overlay.operatorOverrideAllowed
@@ -341,6 +444,6 @@ export function EventSlotsViewerIsland<T extends ViewerSlotBase>({
     state.overlay.viewerXIdNotice
       ? React.createElement("p", { role: "status", className: "notice" }, state.overlay.viewerXIdNotice)
       : null,
-    children(state),
+    children({ ...state, runMutation }),
   );
 }
