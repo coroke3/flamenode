@@ -106,6 +106,48 @@ test("missing CostGuard settings row preserves the authenticated user and fails 
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM announcements").get().n, 0);
 });
 
+test("shared admission reuses the latest major and projects the strict ToS flag", async () => {
+  const { loadTosState } = await import("../src/middleware/writeOrigin.ts");
+  const cases = [
+    { flag: 1, mirror: "major-old", consent: null, accepted: 1, reaccept: 1, reason: "tos_reaccept_required" },
+    { flag: 1, mirror: "major-new", consent: null, accepted: 1, reaccept: 0, reason: null },
+    { flag: 1, mirror: "minor-new", consent: null, accepted: 1, reaccept: 0, reason: null },
+    { flag: 1, mirror: null, consent: "major-new", accepted: 1, reaccept: 0, reason: null },
+    { flag: "x".repeat(100000), mirror: "major-new", consent: null, accepted: 0, reaccept: 0, reason: "tos_required" },
+    { flag: Buffer.from([49]), mirror: "major-new", consent: null, accepted: 0, reaccept: 0, reason: "tos_required" },
+  ];
+  for (const [i, fixture] of cases.entries()) {
+    const { sqlite, db, request, stats, reads } = setup({ cookieSession: true });
+    sqlite.exec(`INSERT INTO terms_versions VALUES
+      ('major-old', 'major', 100, 1), ('major-new', 'major', 100, 2),
+      ('minor-new', 'minor', 200, 3), ('unpublished', 'major', NULL, 4)`);
+    sqlite.prepare('UPDATE "user" SET is_tos_accepted = ?, accepted_terms_version_id = ? WHERE id = ?')
+      .run(fixture.flag, fixture.mirror, ADMIN.id);
+    if (fixture.consent) {
+      sqlite.prepare("INSERT INTO user_tos_consents VALUES (?, ?, ?)")
+        .run("consent", ADMIN.id, fixture.consent);
+    }
+    const standalone = await loadTosState(db, ADMIN.id);
+    assert.equal(standalone.is_tos_accepted, fixture.accepted);
+    assert.equal(standalone.terms_reaccept_required, fixture.reaccept);
+    assert.equal(stats.reads, 1);
+    const standaloneRead = reads[0];
+    assert.equal(sqlite.prepare(standaloneRead.sql).get(...standaloneRead.values).is_tos_accepted, fixture.accepted);
+    const response = await request("POST", "/api/admin/announcements", { ...VALID, id: "tos-" + i });
+    assert.equal(response.status, fixture.reason ? 403 : 200);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    if (fixture.reason) assert.equal((await response.json()).reason, fixture.reason);
+    assert.equal(stats.reads, 3, "one standalone fixture read, then session + admission");
+    assert.equal(stats.batches, fixture.reason ? 0 : 1);
+    const admission = reads[2];
+    assert.equal((admission.sql.match(/FROM "terms_versions"\s+WHERE "severity" = 'major'/g) ?? []).length, 1);
+    // Replay only in the test fixture, outside the actual Hono/D1 accounting.
+    const raw = sqlite.prepare(admission.sql).get(...admission.values);
+    assert.equal(raw.is_tos_accepted, fixture.accepted);
+    assert.equal(raw.terms_reaccept_required, fixture.reaccept);
+  }
+});
+
 test("S3 budget parity: guard-fed audit equals audit that reads settings/actor itself", async () => {
   const { sqlite, request } = setup();
   sqlite.prepare("UPDATE system_settings SET audit_normal_retention_days = 45").run();

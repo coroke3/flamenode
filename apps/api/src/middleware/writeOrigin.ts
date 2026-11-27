@@ -334,60 +334,48 @@ export async function loadTosState(
   const costGuardJoin = includeCostGuardSettings
     ? `LEFT JOIN "system_settings" s ON s."id" = 'default'`
     : "";
+  // Normalize the already strict numeric ToS flag in SQL; never transfer a
+  // malformed large value. Reuse one latest-major row in the
+  // correlated CASE; the derived SELECT avoids a materialized CTE and keeps
+  // the existing ordering and non-NULL predicate.
   // actorSnapshotFromRow prefers a nonempty X icon over the user image.
   // Do not transfer a shadowed fallback image. TEXT length (rather than BLOB
   // length) conservatively keeps the fallback for leading-NUL legacy text.
   const row = await db
     .prepare(
       `SELECT
-         u."is_tos_accepted" AS is_tos_accepted,
-         CASE
-           WHEN u."is_tos_accepted" = 1
-            AND (
-              SELECT "published_at" FROM "terms_versions"
-              WHERE "severity" = 'major' AND "published_at" IS NOT NULL
-              ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
-            ) IS NOT NULL
-            AND NOT (
-              EXISTS (
-                SELECT 1 FROM "terms_versions" accepted_terms
-                WHERE accepted_terms."id" = u."accepted_terms_version_id"
-                  AND accepted_terms."published_at" IS NOT NULL
-                  AND (
-                    accepted_terms."id" = (
-                      SELECT "id" FROM "terms_versions"
-                      WHERE "severity" = 'major' AND "published_at" IS NOT NULL
-                      ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
-                    )
-                    OR accepted_terms."published_at" > (
-                      SELECT "published_at" FROM "terms_versions"
-                      WHERE "severity" = 'major' AND "published_at" IS NOT NULL
-                      ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
-                    )
-                  )
-              )
-              OR EXISTS (
-                SELECT 1 FROM "user_tos_consents" consent
-                INNER JOIN "terms_versions" consent_terms
-                  ON consent_terms."id" = consent."terms_version_id"
-                WHERE consent."user_id" = u."id"
-                  AND consent_terms."published_at" IS NOT NULL
-                  AND (
-                    consent_terms."id" = (
-                      SELECT "id" FROM "terms_versions"
-                      WHERE "severity" = 'major' AND "published_at" IS NOT NULL
-                      ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
-                    )
-                    OR consent_terms."published_at" > (
-                      SELECT "published_at" FROM "terms_versions"
-                      WHERE "severity" = 'major' AND "published_at" IS NOT NULL
-                      ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
-                    )
-                  )
-              )
-            )
-           THEN 1 ELSE 0
-         END AS terms_reaccept_required,
+         CASE WHEN typeof(u."is_tos_accepted") IN ('integer', 'real')
+                    AND u."is_tos_accepted" = 1 THEN 1 ELSE 0 END AS is_tos_accepted,
+         CASE WHEN u."is_tos_accepted" = 1 THEN COALESCE((
+           SELECT CASE WHEN NOT (
+             EXISTS (
+               SELECT 1 FROM "terms_versions" accepted_terms
+               WHERE accepted_terms."id" = u."accepted_terms_version_id"
+                 AND accepted_terms."published_at" IS NOT NULL
+                 AND (
+                   accepted_terms."id" = required_major."id"
+                   OR accepted_terms."published_at" > required_major."published_at"
+                 )
+             )
+             OR EXISTS (
+               SELECT 1 FROM "user_tos_consents" consent
+               INNER JOIN "terms_versions" consent_terms
+                 ON consent_terms."id" = consent."terms_version_id"
+               WHERE consent."user_id" = u."id"
+                 AND consent_terms."published_at" IS NOT NULL
+                 AND (
+                   consent_terms."id" = required_major."id"
+                   OR consent_terms."published_at" > required_major."published_at"
+                 )
+             )
+           ) THEN 1 ELSE 0 END
+           FROM (
+             SELECT "id", "published_at" FROM "terms_versions"
+             WHERE "severity" = 'major' AND "published_at" IS NOT NULL
+             ORDER BY "published_at" DESC, "updated_at" DESC
+             LIMIT ${MAX_SINGLE_ROW_LIMIT}
+           ) required_major
+         ), 0) ELSE 0 END AS terms_reaccept_required,
          u."discord_id" AS discord_id, u."name" AS discord_name,
          u."active_x_user_id" AS active_x_user_id,
          CASE WHEN typeof(x."icon_url") = 'text' AND length(x."icon_url") > 0
