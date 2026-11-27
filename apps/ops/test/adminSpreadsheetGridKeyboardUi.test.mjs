@@ -1789,6 +1789,12 @@ test("MIG-0737 U01 direct typing: delivered printable keys replace only the init
       const input = cell.querySelector('input[type="text"]');
       assert.ok(input && document.activeElement === input);
       assert.equal(input.value, key);
+      assert.deepEqual([input.selectionStart, input.selectionEnd], [0, key.length]);
+      input.setSelectionRange(key.length, key.length);
+      await ui.render();
+      assert.ok(document.activeElement === input);
+      assert.deepEqual([input.selectionStart, input.selectionEnd], [key.length, key.length],
+        "rerender must not select the character again");
       assert.deepEqual(selectedCells(ui), ["1:1"]);
       assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 1);
       assert.equal((await press(input, "Escape")).defaultPrevented, true);
@@ -1893,5 +1899,42 @@ test("MIG-0737 U01 direct typing: a pending ordinary write or invalidated draft 
     assert.equal((await press(gridCell(ui, "2:1"), "r")).defaultPrevented, false);
     assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
     assert.equal(requests.length, 1);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 direct typing: a new draft on the same cell selects once, including batched cancel/reopen", async () => {
+  const effects = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: async () => { effects.push("request"); throw Error("typing must not write"); },
+    onRefresh: () => { effects.push("refresh"); } });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    assert.equal((await press(cell, "x")).defaultPrevented, true);
+    const first = cell.querySelector("input");
+    assert.ok(first && document.activeElement === first);
+    assert.deepEqual([first.selectionStart, first.selectionEnd], [0, 1]);
+    first.setSelectionRange(1, 1);
+    const cancel = new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const reopen = new dom.window.KeyboardEvent("keydown", { key: "あ", bubbles: true, cancelable: true });
+    await React.act(async () => { first.dispatchEvent(cancel); cell.dispatchEvent(reopen); });
+    assert.equal(cancel.defaultPrevented, true);
+    assert.equal(reopen.defaultPrevented, true);
+    const second = cell.querySelector("input");
+    assert.ok(second && document.activeElement === second);
+    assert.equal(second.value, "あ");
+    assert.deepEqual([second.selectionStart, second.selectionEnd], [0, 1]);
+    second.setSelectionRange(1, 1);
+    await ui.render();
+    assert.deepEqual([second.selectionStart, second.selectionEnd], [1, 1]);
+    await press(second, "Escape");
+    assertNavigation(ui, "1:1");
+    await press(cell, "F2");
+    const f2 = cell.querySelector("input");
+    assert.ok(f2 && document.activeElement === f2);
+    assert.equal(f2.value, "Beta");
+    await press(f2, "Escape");
+    await openCellEditor(cell);
+    assert.equal(cell.querySelector("input").value, "Beta");
+    assert.deepEqual(effects, []);
   } finally { await ui.cleanup(); }
 });

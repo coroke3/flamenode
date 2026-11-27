@@ -14,6 +14,7 @@ type History = { key: string; undo: Change[]; redo: Change[] };
 type CellSelection = {
   id: number; rowIndex: number; column: string; value: string; key: string;
   pk: Record<string, string>; before: string | null; invalidated?: boolean;
+  selectInitialText?: boolean;
 };
 const HISTORY_LIMIT = 100;
 const DEFAULT_COL_WIDTH = 110;
@@ -80,6 +81,7 @@ export function AdminSpreadsheetEditableGrid({
   const [colWidths, setColWidths] = React.useState<Record<string, number>>({});
   const resizeRef = React.useRef<{ column: string; startX: number; startWidth: number } | null>(null);
   const tableRef = React.useRef<HTMLTableElement>(null);
+  const editorRef = React.useRef<HTMLInputElement>(null);
   const focusedGridElement = React.useRef<HTMLElement | null>(null);
   const displayedPage = React.useRef(data);
   displayedPage.current = data;
@@ -112,6 +114,7 @@ export function AdminSpreadsheetEditableGrid({
     primaryKeys.some(name => !Object.hasOwn(currentSelection.pk, name) || selectedPk[name] !== currentSelection.pk[name]) ||
     (selectedRow[selectedColumn.name] == null ? null : cellValue(selectedRow[selectedColumn.name])) !== currentSelection.before
   );
+  const typedEntryId = currentSelection?.selectInitialText && !selectionConflict ? currentSelection.id : null;
   // Keep drafts intact until CURRENT blur-save is ported; header selection does not commit or discard edits.
   const canSelectHeaders = !identityChanged && currentSelection === null && rows.length > 0 && columns.length > 0;
   const canFind = canUseFind();
@@ -190,6 +193,16 @@ export function AdminSpreadsheetEditableGrid({
     (cell ?? table).focus();
   });
 
+  // CURRENT selects the initial typed character on edit entry. Run once per draft,
+  // not per value update/render, and never act on an invalidated or replaced draft.
+  React.useLayoutEffect(() => {
+    const draft = liveSelection.current;
+    const input = editorRef.current;
+    if (typedEntryId === null || draft?.id !== typedEntryId || draft.invalidated || !input || input.disabled) return;
+    input.focus();
+    input.select();
+  }, [typedEntryId]);
+
   React.useEffect(() => {
     if (!findHint) return;
     const timer = window.setTimeout(() => setFindHint(null), 3500);
@@ -210,7 +223,7 @@ export function AdminSpreadsheetEditableGrid({
         !column.editable || column.pk !== 0 || column.generated) return false;
     const value = cellValue(row[column.name]);
     setCellEdit({ id: ++nextEditId.current, rowIndex, column: column.name, value: initialChar ?? value, key, pk,
-      before: row[column.name] == null ? null : value });
+      before: row[column.name] == null ? null : value, selectInitialText: initialChar !== undefined });
     const position = { row: rowIndex, col: colIndex };
     setAnchorCell(position);
     setFocusedCell(position);
@@ -787,7 +800,7 @@ export function AdminSpreadsheetEditableGrid({
                     }}
                     onKeyDown={(event) => handleGridKey(event, ri, columns.indexOf(c))}>{editing && currentSelection ? (
                     <label>{c.name} を編集
-                      <input type="text" autoFocus disabled={!canMutate} value={currentSelection.value}
+                      <input ref={editorRef} type="text" autoFocus disabled={!canMutate} value={currentSelection.value}
                         onChange={e => {
                           const draft = liveSelection.current;
                           if (draft?.id === currentSelection.id && !draft.invalidated) setCellEdit({ ...draft, value: e.target.value });
