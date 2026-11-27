@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { spawnSync } from "node:child_process";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, templateResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
 async function loadReplayWorker(generation, script, body) {
@@ -1061,6 +1061,84 @@ test("MIG-0639: upper-bound fixtures are really at the documented bounds", () =>
   assert.match(sc["HONO-AR-26"].kinds.limit(0, "t").path, /\?offset=12000$/);
   // chapter bulk: MAX_CHAPTER_BULK_ROWS = 8 rows
   assert.equal(JSON.parse(sc["SA-015"].kinds.limit(0, "t").body).csv.split("\n").length, 8);
+});
+
+test("MIG-0639: template normal/limit fixtures and exact response checks survive warm resets and cold recording", async () => {
+  const plan = { adminToken: "template-fixtures" };
+  const scenarios = buildScenarios(plan).filter(sc => ["HONO-AR-10", "HONO-AR-11"].includes(sc.id));
+  assert.equal(scenarios.length, 2);
+  const target = await createInprocTarget(plan);
+  const headers = new Headers({ "cache-control": "private, no-store", "content-type": "application/json; charset=UTF-8" });
+  try {
+    for (const sc of scenarios) {
+      for (const kind of ["normal", "limit", "normal"]) {
+        const spec = sc.kinds[kind](0, "template");
+        assert.ok(spec.setup && spec.expectTemplates);
+        // A prior benchmark write with a higher timestamp must not survive.
+        await target.exec([{ sql: "INSERT OR REPLACE INTO event_templates (id,name,settings_json,created_by_user_id,created_at,updated_at) VALUES ('poison-template','poison','{}','bench-admin',10,9000000000)", params: [] }]);
+        await target.exec(spec.setup);
+        const expected = spec.expectTemplates;
+        const count = kind === "limit" ? 100 : 1;
+        assert.equal(expected.templates.length, count);
+        assert.equal(spec.setup[1].params[0], kind === "limit" ? 101 : 1);
+        assert.equal(expected.templates[0].id, "bench-ar-template-001");
+        assert.equal(expected.templates.at(-1).id, kind === "limit" ? "bench-ar-template-100" : "bench-ar-template-001");
+        if (kind === "limit") {
+          assert.ok(expected.templates.every(row => row.name.length === 120 && row.description.length === 500));
+        }
+        if (sc.id === "HONO-AR-11") {
+          assert.equal(new URL(spec.path, "http://bench.local").searchParams.get("template"), expected.templateId);
+          assert.equal(Buffer.byteLength(expected.templateSettingsJson), kind === "limit" ? 65536 : 7);
+        } else {
+          assert.equal(spec.path, "/api/admin-read/events/templates");
+          assert.equal(Object.hasOwn(expected, "templateSettingsJson"), false);
+        }
+        const rows = [1, 1, count];
+        const result = await target.run(spec);
+        assert.equal(result.status, 200);
+        assert.equal(result.responseBodyMismatch, false, sc.id + "/" + kind);
+        assert.equal(result.bytes, Buffer.byteLength(JSON.stringify(expected)));
+        assert.equal(result.d1, 3);
+        assert.deepEqual(result.d1PerQueryRows, rows);
+        const rec = await target.recordForReplay(spec);
+        assert.equal(rec.status, 200);
+        assert.equal(rec.responseBodyMismatch, false);
+        assert.deepEqual(rec.d1PerQueryRows, rows);
+        const cold = await target.recordFirstRequest(spec, sc.prepareKind?.[kind]);
+        assert.equal(cold.status, 200);
+        assert.equal(cold.responseBodyMismatch, false);
+        assert.deepEqual(cold.d1PerQueryRows, rows);
+        assert.equal(cold.coldRecorder.requestOrdinal, 1);
+        const body = JSON.stringify(expected);
+        assert.equal(templateResponseMismatch(spec, body, headers, 3, rows), false);
+        for (const wrong of [{ ...expected, guardOk: false }, { ...expected, templates: [] }, { ...expected, templates: [...expected.templates, expected.templates[0]] }]) {
+          assert.equal(templateResponseMismatch(spec, JSON.stringify(wrong), headers, 3, rows), true);
+        }
+        assert.equal(templateResponseMismatch(spec, body, new Headers(), 3, rows), true);
+        assert.equal(templateResponseMismatch(spec, body, headers, 2, rows), true);
+        assert.equal(templateResponseMismatch(spec, body, headers, 3, [1, 1, 0]), true);
+        if (sc.id === "HONO-AR-11") assert.equal(templateResponseMismatch(spec, JSON.stringify({ ...expected, templateSettingsJson: null }), headers, 3, rows), true);
+      }
+      const invalid = sc.kinds.invalid(0, "template");
+      assert.equal(invalid.setup, undefined);
+      assert.equal(invalid.expectTemplates, undefined);
+      assert.equal(invalid.headers.cookie, undefined);
+      assert.equal((await target.run(invalid)).status, 401);
+    }
+  } finally { await target.close(); }
+});
+
+test("MIG-0639: template body/row evidence is mandatory even for successful warm and cold HTTP responses", async () => {
+  const sc = buildScenarios({ adminToken: "t" }).find(sc => sc.id === "HONO-AR-11");
+  const result = { status: 200, cpuMs: 1, bytes: 2, d1: 3 };
+  const target = { exec: async () => {}, record: async () => null, run: async spec => spec.expectTemplates ? result : { status: 401, cpuMs: 1, bytes: 2, d1: 0 }, reload: async () => {} };
+  for (const check of [undefined, true, false]) {
+    result.responseBodyMismatch = check;
+    const warm = await runScenario(target, sc, { warmup: 0, samples: 1 }, { tagSeq: 0 });
+    assert.deepEqual(warm.map(sample => sample.unexpected), [check !== false, check !== false, false]);
+    const cold = await runCold(target, [sc], { coldSamples: 1 });
+    assert.equal(cold.get(sc.id)[0].unexpected, check !== false);
+  }
 });
 
 test("MIG-0639: per-sample fixtures never reuse an id (DELETE scenarios would turn into 404 otherwise)", () => {

@@ -678,6 +678,52 @@ export function playlistResponseMismatch(spec, body) {
   } catch { return true; }
 }
 
+// Local-only fixture. Reset the template table on every authenticated sample;
+// otherwise a prior SA-035 write or earlier limit sample can pollute normal.
+// No fixture generation or validation is included in the workerd profile.
+const BENCH_TEMPLATE_ID = "bench-ar-template-001";
+function benchTemplateFixture(kind, selected) {
+  const limit = kind === "limit";
+  const count = limit ? 100 : 1;
+  const name = limit ? "\u3042".repeat(120) : "Bench template";
+  const description = limit ? "\u3042".repeat(500) : "Short description";
+  const prefix = '{"v":"', suffix = '"}';
+  const raw = limit ? prefix + ('\\' + '"').repeat((65536 - Buffer.byteLength(prefix + suffix)) / 2) + suffix : '{"v":1}';
+  const templates = Array.from({ length: count }, (_, i) => ({
+    id: "bench-ar-template-" + String(i + 1).padStart(3, "0"),
+    name, description, source_event_id: "bench-evt", updated_at: 4102444800 - i - 1,
+  }));
+  const expected = { guardOk: true, templates, ...(selected ? {
+    userId: "bench-admin", templateId: BENCH_TEMPLATE_ID, templateName: name,
+    templateSettingsJson: raw, formInitial: "deferred",
+  } : {}) };
+  return { expected, setup: [
+    { sql: "DELETE FROM event_templates", params: [] },
+    { sql: "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n < ?)\n" +
+      "INSERT INTO event_templates (id,name,description,source_event_id,settings_json,created_by_user_id,created_at,updated_at)\n" +
+      "SELECT printf('bench-ar-template-%03d',n), ?, ?, 'bench-evt', CASE WHEN n=1 THEN ? ELSE '{\"v\":1}' END,\n" +
+      "'bench-admin',1700000000,4102444800-n FROM seq", params: [limit ? count + 1 : count, name, description, raw] },
+  ] };
+}
+
+/** Host-side check of exact DTO wire bytes and actual read evidence, not an
+ * exception to the S2 total-byte budget. A real maximal valid result can
+ * exceed 64KiB; never turn a truncated or denied list into a CPU PASS. */
+export function templateResponseMismatch(spec, body, headers, d1, rows) {
+  const expected = spec.expectTemplates;
+  if (expected == null) return false;
+  if (headers.get("cache-control") !== "private, no-store" || !/^application\/json(?:;|$)/i.test(headers.get("content-type") ?? "") ||
+      d1 !== 3 || rows?.length !== 3 || rows[0] !== 1 || rows[1] !== 1 || rows[2] !== expected.templates.length) return true;
+  return !Buffer.from(body).equals(Buffer.from(JSON.stringify(expected)));
+}
+
+function hasResponseExpectation(spec) {
+  return spec.expectPlaylist != null || spec.expectTemplates != null;
+}
+function benchmarkResponseMismatch(spec, body, headers, d1, rows) {
+  return playlistResponseMismatch(spec, body) || templateResponseMismatch(spec, body, headers, d1, rows);
+}
+
 const tplRow = (id) => ({ sql: `INSERT INTO event_templates (id, name, settings_json, created_by_user_id, created_at, updated_at) VALUES (?, 'bench tpl', '{}', 'bench-admin', 10, 10)`, params: [id] });
 const chapterRow = (id) => ({ sql: `INSERT INTO video_chapters (id, video_id, chapter_time, chapter_label, visibility, created_at, updated_at) VALUES (?, 'bench-vid', 7, 'bench', 'public', 10, 10)`, params: [id] });
 
@@ -841,8 +887,8 @@ export const ROUTE_INVENTORY = [
   ["HONO-AR-07", "GET", "/api/admin-read/videos/:id", "a"],
   ["HONO-AR-08", "GET", "/api/admin-read/event-groups", "a"],
   ["HONO-AR-09", "GET", "/api/admin-read/event-groups/:id", "a"],
-  ["HONO-AR-10", "GET", "/api/admin-read/events/templates", "a"],
-  ["HONO-AR-11", "GET", "/api/admin-read/events/new", "a"],
+  ["HONO-AR-10", "GET", "/api/admin-read/events/templates", "a", { lq: "", templateRead: "list" }],
+  ["HONO-AR-11", "GET", "/api/admin-read/events/new", "a", { nq: "?template=" + BENCH_TEMPLATE_ID, templateRead: "new" }],
   ["HONO-AR-12", "GET", "/api/admin-read/events", "a"],
   ["HONO-AR-13", "GET", "/api/admin-read/moderation", "a"],
   ["HONO-AR-14", "GET", "/api/admin-read/x-link-requests", "a"],
@@ -1160,8 +1206,9 @@ export function buildRouteScenarios() {
         }
       }
       const dyn = opts.params?.(kind, i, tag) ?? {};
-      const setup = kind === "invalid" ? undefined : opts.setup?.(kind, i, tag);
-      return { method, path: fillRoute(pattern, longId, dyn) + query, headers, body, expect: expected[kind], ...(setup ? { setup } : {}) };
+      const template = opts.templateRead && kind !== "invalid" ? benchTemplateFixture(kind, opts.templateRead === "new") : null;
+      const setup = template?.setup ?? (kind === "invalid" ? undefined : opts.setup?.(kind, i, tag));
+      return { method, path: fillRoute(pattern, longId, dyn) + query, headers, body, expect: expected[kind], ...(setup ? { setup } : {}), ...(template ? { expectTemplates: template.expected } : {}) };
     };
     return {
       id, title: `${method} ${pattern}`, runtimeClass: opts.cls ?? (method === "GET" || method === "OPTIONS" ? "S2" : "S3"),
@@ -1832,9 +1879,11 @@ export async function createInprocTarget(plan) {
     await inprocInputs.run(rec ? (kind, args, actual) => trace(kind, [args], () => actual) : null,
       () => { recInvalid = true; }, dispatch);
     } finally { globalThis.fetch = realFetch; }
-    const cpuMs = performance.now() - before;
+    // Include response consumption in the Node wall-time proxy, just as the
+    // workerd profiler remains active until the complete body is received.
     const buf = await res.arrayBuffer();
-    return { status: res.status, bytes: buf.byteLength, cpuMs, d1: stmts, d1RowsReturned, d1PerQueryRows: [...d1PerQueryRows], ...(spec.expectPlaylist != null ? { responseBodyMismatch: playlistResponseMismatch(spec, buf) } : {}), debug: process.env.BENCH_DEBUG ? Buffer.from(buf).toString("utf8").slice(0, 240) : undefined };
+    const cpuMs = performance.now() - before;
+    return { status: res.status, bytes: buf.byteLength, cpuMs, d1: stmts, d1RowsReturned, d1PerQueryRows: [...d1PerQueryRows], ...(hasResponseExpectation(spec) ? { responseBodyMismatch: benchmarkResponseMismatch(spec, buf, res.headers, stmts, d1PerQueryRows) } : {}), debug: process.env.BENCH_DEBUG ? Buffer.from(buf).toString("utf8").slice(0, 240) : undefined };
   };
 
   return {
@@ -1842,7 +1891,7 @@ export async function createInprocTarget(plan) {
     get requestOrdinal() { return requestOrdinal; },
     resolutionMs: 0.001,
     digits: 3,
-    cpuSource: "performance.now() wall delta around app.fetch (Node/V8, node:sqlite as D1 plus result normalization/counting; WALL-TIME PROXY, not workerd CPU)",
+    cpuSource: "performance.now() wall delta through complete app.fetch response body (Node/V8, node:sqlite as D1 plus result normalization/counting; WALL-TIME PROXY, not workerd CPU)",
     supportsCold: false,
     setR2: async (body, key = STATS_KEY) => {
       assertInprocIdle();
@@ -1858,7 +1907,7 @@ export async function createInprocTarget(plan) {
       try {
         const r = await fetchOnce(spec);
         if (recInvalid) throw new Error("bench replay recording invalid");
-        return { script: rec, status: r.status, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, ...(spec.expectPlaylist != null ? { responseBodyMismatch: r.responseBodyMismatch } : {}) };
+        return { script: rec, status: r.status, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, ...(hasResponseExpectation(spec) ? { responseBodyMismatch: r.responseBodyMismatch } : {}) };
       } finally {
         rec = null;
         recInvalid = false;
@@ -2322,17 +2371,18 @@ async function createWranglerTarget(plan, opts) {
     const buf = await res.arrayBuffer();
     const stop = await call("Profiler.stop");
     if (stop.error) throw new Error(`Profiler.stop failed: ${json(stop.error)}`);
+    const d1 = res.headers.has("x-bench-d1") ? Number(res.headers.get("x-bench-d1")) : rec ? null : 0;
+    const rows = (res.headers.get("x-bench-query-rows") || "").split(",").filter(Boolean).map(Number);
     return {
       status: res.status, bytes: buf.byteLength,
-      d1: res.headers.has("x-bench-d1") ? Number(res.headers.get("x-bench-d1")) : rec ? null : 0,
+      d1,
       d1RowsReturned: res.headers.has("x-bench-returned-rows")
         ? Number(res.headers.get("x-bench-returned-rows")) : null,
-      d1PerQueryRows: (res.headers.get("x-bench-query-rows") || "")
-        .split(",").filter(Boolean).map(Number),
+      d1PerQueryRows: rows,
       replayRowsMismatch: rec ? replayEvidenceMismatch(rec, res.headers) : false,
       cacheState: res.headers.get("x-flamenode-cache"),
       bodyHash: createHash("sha256").update(Buffer.from(buf)).digest("hex"),
-      ...(spec.expectPlaylist != null ? { responseBodyMismatch: playlistResponseMismatch(spec, buf) || rec?.responseBodyMismatch === true } : {}),
+      ...(hasResponseExpectation(spec) ? { responseBodyMismatch: benchmarkResponseMismatch(spec, buf, res.headers, d1, rows) || (rec != null && rec.responseBodyMismatch !== false) } : {}),
       cpuMs: profileBusyMs(stop.result.profile),
       replayStatusMismatch: rec ? rec.status !== res.status : false,
       isFirstIsolateRequest: firstBuild !== null
@@ -2424,7 +2474,7 @@ export async function runScenario(target, sc, opts, state) {
   const samples = [];
   const note = (kind, spec, r, cpuMs) => samples.push({
     kind, cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, cacheState: r.cacheState ?? null,
-    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache) || r.bodyReuseMismatch === true || r.responseBodyMismatch === true || (spec.expectPlaylist != null && r.responseBodyMismatch !== false),
+    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache) || r.bodyReuseMismatch === true || r.responseBodyMismatch === true || (hasResponseExpectation(spec) && r.responseBodyMismatch !== false),
   });
   for (const kind of ["normal", "limit", "invalid"]) {
     const pk = sc.prepareKind?.[kind];
@@ -2516,7 +2566,7 @@ export async function runCold(target, scenarios, opts) {
         coldRecorder: rec?.coldRecorder ?? null,
         requestOrdinal: r.requestOrdinal ?? null,
         cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows,
-        unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || r.responseBodyMismatch === true || (spec.expectPlaylist != null && r.responseBodyMismatch !== false) });
+        unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || r.responseBodyMismatch === true || (hasResponseExpectation(spec) && r.responseBodyMismatch !== false) });
     }
     process.stderr.write(`cold round ${round + 1}/${opts.coldSamples}\r`);
   }
