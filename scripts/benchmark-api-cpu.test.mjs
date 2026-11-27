@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
 async function loadReplayWorker(generation, script, body) {
@@ -1744,4 +1744,308 @@ test("MIG-0639: failed R2/cache-clear control responses stop benchmark setup", (
   const source = fs.readFileSync(fileURLToPath(new URL("./benchmark-api-cpu.mjs", import.meta.url)), "utf8");
   assert.match(source, /requireBenchmarkControl\(response, "r2"\)/);
   assert.match(source, /requireBenchmarkControl\(await post\("\/__bench\/cache-clear"\), "cache-clear"\)/);
+});
+
+test("MIG-0639: R2 HEAD records metadata/null without a GET and replays warm/cold with the same bytes", async () => {
+  const { app } = await import("../apps/api/src/app.ts");
+  const originalAppFetch = app.fetch, originalFetch = globalThis.fetch;
+  const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const target = await createInprocTarget({ adminToken: "head-transcript" });
+  const body = JSON.stringify({ message: "投影🙂" });
+  const probe = async (request, env) => {
+    const head = await env.BUCKET.head("head-fixture");
+    const metadata = { ...head };
+    head.size = -1; // App mutation must not rewrite the recorded result.
+    const missing = await env.BUCKET.head("missing");
+    const object = await env.BUCKET.get("head-fixture");
+    return Response.json({ metadata, missing, headKeys: Object.keys(head), size: object.size, etag: object.etag, text: await object.text() });
+  };
+  let observed;
+  app.fetch = async (...args) => {
+    const response = await probe(...args);
+    observed = await response.clone().json();
+    return response;
+  };
+  try {
+    await target.setR2(body, "head-fixture");
+    const recorded = await target.recordForReplay({ method: "GET", path: "/head" });
+    const expected = observed;
+    assert.equal(recorded.d1, 0);
+    assert.deepEqual(recorded.script.map((entry) => entry.identity), [
+      replayIdentity(["r2.head", "head-fixture", []]), replayIdentity(["r2.head", "missing", []]), replayIdentity(["r2.get", "head-fixture", []]),
+    ], "HEAD is one independent metadata operation, never an internal GET/body read");
+    assert.deepEqual(recorded.script[0].result, { size: Buffer.byteLength(body), etag: expected.etag });
+    assert.equal(recorded.script[1].result, null);
+    assert.deepEqual([...expected.headKeys].sort(), ["etag", "size"]);
+    assert.equal(expected.size, expected.metadata.size);
+    assert.equal(expected.text, body);
+    for (const mode of ["warm", "cold"]) {
+      const worker = await loadReplayWorker(`head-${mode}`, mode === "cold" ? recorded.script : null, `return (${probe.toString()})(request, env);`);
+      if (mode === "warm") {
+        const registered = await worker.fetch(new Request("http://bench.local/__bench/script", {
+          method: "POST", body: JSON.stringify({ id: mode, script: recorded.script }),
+        }), {}, {});
+        assert.equal(registered.status, 200);
+      }
+      const response = await worker.fetch(new Request("http://bench.local/head", { headers: { "x-bench-script": mode } }), {}, {});
+      assert.deepEqual(await response.json(), expected);
+      assert.equal(replayEvidenceMismatch(recorded, response.headers), false);
+    }
+    app.fetch = async (request, env) => {
+      try { await env.BUCKET.head("head-fixture", { unsupported: () => {} }); } catch {}
+      return new Response("caught");
+    };
+    await assert.rejects(target.recordForReplay({ method: "GET", path: "/head" }), /replay recording invalid/,
+      "caught unsupported HEAD input invalidates the recorder too");
+  } finally {
+    app.fetch = originalAppFetch;
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+    await target.close();
+  }
+});
+
+test("MIG-0639: HEAD replay retains strict key/options/method/order identity and sticky caught failures", async () => {
+  const originalFetch = globalThis.fetch, originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const entry = { identity: replayIdentity(["r2.head", "manifest", [{ onlyIf: { etagMatches: "A" } }]]), result: { size: 12, etag: "A" } };
+  const correct = 'await env.BUCKET.head("manifest", { onlyIf: { etagMatches: "A" } });';
+  const cases = [
+    ["head-key", [entry], 'await env.BUCKET.head("other", { onlyIf: { etagMatches: "A" } });'],
+    ["head-options", [entry], 'await env.BUCKET.head("manifest", { onlyIf: { etagMatches: "B" } });'],
+    ["head-options-type", [entry], 'await env.BUCKET.head("manifest", { onlyIf: { etagMatches: 1 } });'],
+    ["head-method", [entry], 'await env.BUCKET.get("manifest", { onlyIf: { etagMatches: "A" } });'],
+    ["head-order", [{ identity: replayIdentity(["r2.get", "playlist", []]), result: { size: 2, text: "{}", etag: "P" } }, entry], correct],
+    ["head-exhausted", [], correct],
+    ["head-trailing", [entry, entry], correct],
+  ];
+  try {
+    for (const [name, script, operation] of cases) {
+      const worker = await loadReplayWorker(name, script, `try { ${operation} } catch {} return new Response("caught");`);
+      const response = await worker.fetch(new Request("http://bench.local/probe", { headers: { "x-bench-script": "cold" } }), {}, {});
+      assert.equal(response.headers.get("x-bench-replay-complete"), "0", name);
+      assert.equal(response.headers.get("x-bench-d1"), "0", "HEAD is not a D1 execution");
+    }
+    const worker = await loadReplayWorker("head-caught-then-consumed", [entry],
+      `try { await env.BUCKET.head("wrong"); } catch {} ${correct} return new Response("caught then consumed");`);
+    const response = await worker.fetch(new Request("http://bench.local/probe", { headers: { "x-bench-script": "cold" } }), {}, {});
+    assert.equal(response.headers.get("x-bench-replay-complete"), "0", "consuming every entry after a caught mismatch cannot restore validity");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+  }
+});
+
+test("MIG-0639: benchmark guard selection accepts only explicit modes and preserves the shared env", () => {
+  const env = Object.freeze({ PUBLIC_VISIBILITY_GUARD_MODE: "observe", DB: {} });
+  const originalHeaders = { "x-existing": "kept" };
+  assert.equal(benchmarkRequestEnv(env, benchmarkRequestHeaders({ headers: originalHeaders })), env);
+  for (const mode of ["off", "observe", "enforce"]) {
+    const headers = benchmarkRequestHeaders({ headers: originalHeaders, visibilityGuardMode: mode });
+    const selected = benchmarkRequestEnv(env, headers);
+    assert.notEqual(selected, env);
+    assert.equal(selected.DB, env.DB);
+    assert.equal(selected.PUBLIC_VISIBILITY_GUARD_MODE, mode);
+    assert.equal(headers.get("x-existing"), "kept");
+  }
+  assert.deepEqual(originalHeaders, { "x-existing": "kept" });
+  assert.equal(env.PUBLIC_VISIBILITY_GUARD_MODE, "observe");
+  for (const invalid of [undefined, null, "", "ENFORCE", " enforce ", 0, {}, []]) {
+    assert.throws(() => benchmarkRequestHeaders({ visibilityGuardMode: invalid }), /invalid visibility guard mode/);
+  }
+  assert.throws(() => benchmarkRequestHeaders({ headers: { "x-bench-visibility-guard-mode": "enforce" } }), /reserved/);
+  assert.throws(() => benchmarkRequestEnv(env, new Headers({ "x-bench-visibility-guard-mode": "invalid" })), /invalid visibility guard mode/);
+});
+
+test("MIG-0639: guard mode is request-local in the real recorder and sim/replay dispatch after success or throw", async () => {
+  const { app } = await import("../apps/api/src/app.ts");
+  const originalAppFetch = app.fetch, originalFetch = globalThis.fetch;
+  const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const target = await createInprocTarget({ adminToken: "guard-mode" });
+  const seen = [];
+  app.fetch = async (request, env) => {
+    seen.push(env);
+    if (new URL(request.url).pathname === "/throw") throw new Error("guard probe failure");
+    return Response.json({ mode: env.PUBLIC_VISIBILITY_GUARD_MODE ?? null });
+  };
+  try {
+    await target.recordForReplay({ method: "GET", path: "/mode", visibilityGuardMode: "enforce" });
+    await target.run({ method: "GET", path: "/mode" });
+    await assert.rejects(target.recordForReplay({ method: "GET", path: "/throw", visibilityGuardMode: "off" }), /guard probe failure/);
+    await target.recordForReplay({ method: "GET", path: "/mode" });
+    assert.deepEqual(seen.map((env) => env.PUBLIC_VISIBILITY_GUARD_MODE), ["enforce", undefined, "off", undefined]);
+    assert.equal(seen[1], seen[3], "the unspecified shared env is unchanged after success and throw");
+    assert.notEqual(seen[0], seen[1]);
+    assert.notEqual(seen[2], seen[1]);
+    for (const mode of ["sim", "replay", "cold"]) {
+      const worker = await loadReplayWorker(`guard-${mode}`, mode === "cold" ? [] : null,
+        'if (pathname === "/throw") throw new Error("guard probe failure"); return Response.json({mode: env.PUBLIC_VISIBILITY_GUARD_MODE ?? null});');
+      const env = Object.freeze({ PUBLIC_VISIBILITY_GUARD_MODE: "observe", DB: {} });
+      let first = true;
+      const invoke = async (pathname, selected) => {
+        const spec = { ...(selected === undefined ? {} : { visibilityGuardMode: selected }) };
+        const headers = benchmarkRequestHeaders(spec);
+        if (mode === "cold" && first) headers.set("x-bench-script", "cold");
+        else if (mode !== "sim") {
+          const registration = await worker.fetch(new Request("http://bench.local/__bench/script", {
+            method: "POST", body: JSON.stringify({ id: "next", script: [] }),
+          }), env, {});
+          assert.equal(registration.status, 200);
+          headers.set("x-bench-script", "next");
+        }
+        first = false;
+        return worker.fetch(new Request(`http://bench.local${pathname}`, { headers }), env, {});
+      };
+      const initial = await invoke("/mode", "enforce");
+      assert.deepEqual(await initial.json(), { mode: "enforce" });
+      if (mode === "cold") assert.equal(initial.headers.get("x-bench-request"), "1", "cold mode selection needs no setup fetch");
+      assert.deepEqual(await (await invoke("/mode")).json(), { mode: "observe" });
+      await assert.rejects(invoke("/throw", "off"), /guard probe failure/);
+      assert.deepEqual(await (await invoke("/mode")).json(), { mode: "observe" });
+      assert.equal(env.PUBLIC_VISIBILITY_GUARD_MODE, "observe");
+      await assert.rejects(worker.fetch(new Request("http://bench.local/mode", {
+        headers: { "x-bench-visibility-guard-mode": "invalid" },
+      }), env, {}), /invalid visibility guard mode/);
+      assert.deepEqual(await (await invoke("/mode")).json(), { mode: "observe" });
+    }
+  } finally {
+    app.fetch = originalAppFetch;
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+    await target.close();
+  }
+});
+
+test("MIG-0639: explicit playlist fixtures retain default 155/video-only input and exercise canonical raw 500/501 bounds", async () => {
+  const { normalizeStaticEventPlaylist } = await import("../packages/server-core/src/publicData/eventPlaylistCore.ts");
+  const { normalizePublicVisibilityBlockedEntitiesManifest } = await import("../packages/server-core/src/visibility/manifestCore.ts");
+  const defaults = buildScenarios({ adminToken: "t" });
+  const selected = buildScenarios({ adminToken: "t" }, { includeEventPlaylist: true });
+  assert.equal(defaults.length, 155);
+  assert.equal(selected.length, 156);
+  assert.deepEqual(selected.filter((sc) => sc.id !== "RH-031-PLAYLIST").map((sc) => sc.id), defaults.map((sc) => sc.id));
+  assert.equal(selected.at(-1).id, "BASELINE");
+  const original = defaults.find((sc) => sc.id === "RH-031");
+  assert.equal(original.kinds.normal(0, "fixture").path, "/api/videos/bench-vid/viewer-overlay");
+  assert.deepEqual(Object.keys(original.prepareKind.normal.r2Objects), ["videos/bench-vid.json"]);
+  assert.ok(defaults.every((sc) => Object.values(sc.kinds).every((make) => !Object.hasOwn(make(0, "fixture"), "visibilityGuardMode"))));
+  const variant = selected.find((sc) => sc.id === "RH-031-PLAYLIST");
+  for (const [kind, count] of Object.entries({ normal: 3, limit: 500, invalid: 501 })) {
+    const spec = variant.kinds[kind](0, "fixture");
+    assert.equal(spec.path, "/api/videos/bench-playlist-video/viewer-overlay?playlist=bench-playlist-event");
+    assert.equal(spec.visibilityGuardMode, "enforce");
+    const objects = variant.prepareKind[kind].r2Objects;
+    const artifact = JSON.parse(objects["events/bench-playlist-event/playlist.v1.json"]);
+    const manifest = normalizePublicVisibilityBlockedEntitiesManifest(JSON.parse(objects["visibility/blocked-entities.v1.json"]));
+    assert.ok(manifest);
+    assert.equal(manifest.entities[0].entity_id, "bp-v1");
+    assert.equal(artifact.items.length, count);
+    assert.equal(artifact.complete, true);
+    const normalized = normalizeStaticEventPlaylist(artifact, "bench-playlist-event");
+    if (kind === "invalid") assert.equal(normalized, null, "raw 501 rows stay invalid even though one would be fenced away");
+    else assert.equal(normalized.items.length, count);
+    assert.equal(spec.expectPlaylist.ids.length, kind === "invalid" ? 0 : count - 1);
+    assert.ok(!spec.expectPlaylist.ids.includes("bp-v1"));
+    const response = { loggedIn: true, authUnavailable: false, playlistLabel: spec.expectPlaylist.label,
+      playlistItems: kind === "invalid" ? [] : artifact.items.filter((item) => item.id !== "bp-v1").map(({ scheduled_time, ...item }) => item) };
+    assert.equal(playlistResponseMismatch(spec, JSON.stringify(response)), false, "valid 500-row fixture does not rely on optional 64 KiB suppression");
+  }
+});
+
+test("MIG-0639: playlist body checks reject empty/leaked/reordered/degraded/oversized 200 responses after recording", async () => {
+  const { app } = await import("../apps/api/src/app.ts");
+  const originalAppFetch = app.fetch;
+  const target = await createInprocTarget({ adminToken: "playlist-body" });
+  const variant = buildScenarios({ adminToken: "t" }, { includeEventPlaylist: true }).find((sc) => sc.id === "RH-031-PLAYLIST");
+  const spec = variant.kinds.normal(0, "body");
+  const good = { loggedIn: true, authUnavailable: false, playlistLabel: spec.expectPlaylist.label,
+    playlistItems: spec.expectPlaylist.ids.map((id) => ({ id })) };
+  const failures = [
+    { ...good, playlistItems: [] },
+    { ...good, playlistItems: [...good.playlistItems, { id: "bp-v1" }] },
+    { ...good, playlistItems: [...good.playlistItems].reverse() },
+    { ...good, loggedIn: false }, { ...good, authUnavailable: true },
+    { ...good, playlistLabel: "再生リスト" }, { ...good, padding: "x".repeat(64 * 1024) },
+  ];
+  try {
+    await target.exec(spec.setup);
+    let seed;
+    app.fetch = async (request, env) => {
+      seed = await env.DB.prepare("SELECT v.id AS video_id, e.id AS event_id FROM videos v INNER JOIN events e ON e.id = v.primary_event_id WHERE v.id = ?")
+        .bind("bench-playlist-video").first();
+      return Response.json(good);
+    };
+    assert.equal((await target.recordForReplay(spec)).responseBodyMismatch, false);
+    assert.deepEqual(seed, { video_id: "bench-playlist-video", event_id: "bench-playlist-event" }, "the isolated fixture executes on the real migrated schema");
+    assert.equal(playlistResponseMismatch(spec, "not json"), true);
+    assert.equal(playlistResponseMismatch({}, "unchanged default response"), false);
+    for (const response of [good, ...failures]) {
+      app.fetch = async () => Response.json(response);
+      const recorded = await target.recordForReplay(spec);
+      assert.equal(recorded.status, 200);
+      assert.equal(recorded.responseBodyMismatch, response !== good);
+    }
+  } finally {
+    app.fetch = originalAppFetch;
+    await target.close();
+  }
+});
+
+test("MIG-0639: warm/cold samples reject body mismatches and cold requests reapply their own manifest", async () => {
+  const variant = buildScenarios({ adminToken: "t" }, { includeEventPlaylist: true }).find((sc) => sc.id === "RH-031-PLAYLIST");
+  const objects = new Map();
+  const result = { status: 200, cpuMs: 1, bytes: 2, d1: 0, responseBodyMismatch: true };
+  const target = { setR2: async (body, key) => objects.set(key, body), exec: async () => {}, record: async () => null,
+    run: async () => result, reload: async () => {} };
+  const warm = await runScenario(target, variant, { warmup: 0, samples: 1 }, { tagSeq: 0 });
+  assert.ok(warm.every((sample) => sample.unexpected), "HTTP 200 cannot hide a failed playlist body contract");
+  delete result.responseBodyMismatch;
+  const unchecked = await runScenario(target, variant, { warmup: 0, samples: 1 }, { tagSeq: 0 });
+  assert.ok(unchecked.every((sample) => sample.unexpected), "missing body verification cannot qualify the opt-in variant");
+  result.responseBodyMismatch = true;
+  const key = "visibility/blocked-entities.v1.json";
+  const scenarios = ["A", "B"].map((id) => ({
+    id, prepareKind: { normal: { r2Objects: { [key]: id } } },
+    kinds: { normal: () => ({ method: "GET", path: `/${id}`, expect: [200], marker: id }) },
+  }));
+  const visited = [];
+  target.record = async (spec) => {
+    assert.equal(objects.get(key), spec.marker, "each cold transcript records its selected manifest, not the last scenario's fixture");
+    visited.push(spec.marker);
+    return null;
+  };
+  const cold = await runCold(target, scenarios, { coldSamples: 2 });
+  assert.deepEqual(visited, ["A", "B", "A", "B"]);
+  assert.ok([...cold.values()].flat().every((sample) => sample.unexpected));
+});
+
+test("MIG-0639: ordered GET/playlist/HEAD replay preserves changed or missing ETags for a fail-closed consumer", async () => {
+  const originalFetch = globalThis.fetch, originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const manifest = "visibility/blocked-entities.v1.json", playlist = "events/bench-playlist-event/playlist.v1.json";
+  const body = JSON.stringify({ items: [{ id: "visible-1" }, { id: "visible-2" }] });
+  const before = { identity: replayIdentity(["r2.get", manifest, []]), result: { size: 2, text: "{}", etag: "A" } };
+  const artifact = { identity: replayIdentity(["r2.get", playlist, []]), result: { size: Buffer.byteLength(body), text: body, etag: "P" } };
+  // This is a harness consumer probe, not #723 integration evidence: main does
+  // not contain that runtime change. Root separately diagnoses the attested
+  // combined Hono candidate with these same distinguishable GET/HEAD inputs.
+  const probe = `const before = await env.BUCKET.get(${JSON.stringify(manifest)});
+    const artifact = await env.BUCKET.get(${JSON.stringify(playlist)});
+    const after = await env.BUCKET.head(${JSON.stringify(manifest)});
+    return Response.json({ items: before.etag === after?.etag ? (await artifact.json()).items : [] });`;
+  try {
+    for (const [name, metadata, count] of [["stable", { size: 2, etag: "A" }, 2], ["changed", { size: 2, etag: "B" }, 0], ["missing", null, 0]]) {
+      const script = [before, artifact, { identity: replayIdentity(["r2.head", manifest, []]), result: metadata }];
+      const worker = await loadReplayWorker(`head-race-${name}`, script, probe);
+      const response = await worker.fetch(new Request("http://bench.local/probe", { headers: { "x-bench-script": "cold" } }), {}, {});
+      assert.equal((await response.json()).items.length, count, name);
+      assert.equal(response.headers.get("x-bench-replay-complete"), "1", "all three operations match even when the consumer denies the playlist");
+      assert.equal(response.headers.get("x-bench-d1"), "0");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+  }
 });

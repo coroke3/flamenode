@@ -353,7 +353,7 @@ function rh013Seed() {
   ];
 }
 
-export function buildScenarios(ctx, { includePending = false } = {}) {
+export function buildScenarios(ctx, { includePending = false, includeEventPlaylist = false } = {}) {
   const stats = (padBytes) => {
     const base = { schema_version: 1, generated_at: 1_700_000_000, stats: { public_videos: 3000, creators: 800, public_events: 20 } };
     if (padBytes <= 0) return json(base);
@@ -536,7 +536,8 @@ export function buildScenarios(ctx, { includePending = false } = {}) {
   ];
   // MIG-0639: every other main Hono method (inventory below), then BASELINE last (noise floor of the same run).
   const baseline = core.pop();
-  return [...core, ...buildRouteScenarios(), ...(includePending ? buildPendingScenarios() : []), baseline];
+  return [...core, ...buildRouteScenarios(), ...(includePending ? buildPendingScenarios() : []),
+    ...(includeEventPlaylist ? [buildEventPlaylistScenario()] : []), baseline];
 }
 
 // ------------------------------------------------ MIG-0639 route inventory
@@ -584,6 +585,86 @@ const videoOverlayArtifact = json({
   public_events: [], public_chapters: [],
 });
 const prep = (normal, limit, invalid = normal) => ({ normal: { r2Objects: normal }, limit: { r2Objects: limit }, invalid: { r2Objects: invalid } });
+
+// Explicit diagnostic variant, not another mounted method or part of the default
+// 155-scenario inventory. Positive fence/race behavior requires the attested
+// #719/#723 runtime candidate; this harness branch does not supply those fixes.
+function buildEventPlaylistScenario() {
+  const videoId = "bench-playlist-video", eventId = "bench-playlist-event";
+  const blockedId = "bp-v1";
+  const detail = json({
+    version: 1, generated_at: 1000,
+    video: { id: videoId, title: "Bench playlist video", visibility_status: "public", scheduled_time: 2000, primary_event_id: eventId },
+    public_events: [{ id: eventId, title: "Bench playlist", visibility_status: "public" }],
+    public_chapters: [],
+  });
+  const manifest = json({ schema_version: 1, revision: 1, generated_at: 1_700_000_000,
+    entities: [{ entity_type: "video", entity_id: blockedId, fence_token: "bench-playlist-fence", blocked_at: 1_700_000_000 }],
+  });
+  const items = (count) => Array.from({ length: count }, (_, i) => ({
+    id: i === 0 ? videoId : `bp-v${i}`, title: "V", display_name: "B", youtube_video_id: `yt${i}`, scheduled_time: null,
+  }));
+  const counts = { normal: 3, limit: 500, invalid: 501 };
+  const prepareKind = {}, kinds = {};
+  for (const [kind, count] of Object.entries(counts)) {
+    const rows = items(count);
+    prepareKind[kind] = { r2Objects: {
+      [MANIFEST_KEY]: manifest,
+      [`videos/${videoId}.json`]: detail,
+      [`events/${eventId}/playlist.v1.json`]: json({
+        schema_version: 1, generated_at: 1_700_000_000, event_id: eventId, complete: true, items: rows,
+      }),
+    } };
+    kinds[kind] = (i) => ({
+      method: "GET", path: `/api/videos/${videoId}/viewer-overlay?playlist=${eventId}`,
+      headers: { "cf-connecting-ip": BENCH_IP(kind, i), cookie: ADMIN_COOKIE },
+      visibilityGuardMode: "enforce", expect: [200],
+      expectPlaylist: {
+        label: kind === "invalid" ? "再生リスト" : "Bench playlist 上映順",
+        ids: kind === "invalid" ? [] : rows.filter((row) => row.id !== blockedId).map((row) => row.id),
+      },
+      setup: [
+        { sql: "INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, public_api_enabled) VALUES (?, 'Bench playlist', 'event', 'public', 1000, 2000, 10, 20, 0)", params: [eventId] },
+        { sql: "INSERT OR REPLACE INTO videos (id, submitted_by_user_id, creator_display_name, title, visibility_status, updated_at, primary_event_id) VALUES (?, 'bench-admin', 'B', 'V', 'public', 1000, ?)", params: [videoId, eventId] },
+      ],
+    });
+  }
+  return { id: "RH-031-PLAYLIST", title: "GET video viewer-overlay with enforced event playlist (opt-in candidate diagnostic)", runtimeClass: "S2", prepareKind, kinds };
+}
+
+/** Bench-only transport; an explicit mode is never installed in shared env. */
+export function benchmarkRequestHeaders(spec) {
+  const headers = new Headers(spec.headers ?? {});
+  if (headers.has("x-bench-visibility-guard-mode")) throw new Error("bench visibility guard header is reserved; use visibilityGuardMode");
+  if (Object.hasOwn(spec, "visibilityGuardMode")) {
+    if (!["off", "observe", "enforce"].includes(spec.visibilityGuardMode)) throw new Error("bench invalid visibility guard mode");
+    headers.set("x-bench-visibility-guard-mode", spec.visibilityGuardMode);
+  }
+  return headers;
+}
+
+export function benchmarkRequestEnv(env, headers) {
+  const mode = headers.get("x-bench-visibility-guard-mode");
+  if (mode === null) return env;
+  if (!["off", "observe", "enforce"].includes(mode)) throw new Error("bench invalid visibility guard mode");
+  return { ...env, PUBLIC_VISIBILITY_GUARD_MODE: mode };
+}
+
+/** Host-side assertion after timing/profiling stops; no response bytes enter a transcript. */
+export function playlistResponseMismatch(spec, body) {
+  if (spec.expectPlaylist == null) return false;
+  const bytes = Buffer.from(body);
+  if (bytes.byteLength > 64 * 1024) return true;
+  try {
+    const value = JSON.parse(bytes.toString("utf8"));
+    const expected = spec.expectPlaylist;
+    return value.loggedIn !== true || value.authUnavailable !== false
+      || value.playlistLabel !== expected.label || !Array.isArray(value.playlistItems)
+      || value.playlistItems.length !== expected.ids.length
+      || value.playlistItems.some((item, i) => item?.id !== expected.ids[i]);
+  } catch { return true; }
+}
+
 const tplRow = (id) => ({ sql: `INSERT INTO event_templates (id, name, settings_json, created_by_user_id, created_at, updated_at) VALUES (?, 'bench tpl', '{}', 'bench-admin', 10, 10)`, params: [id] });
 const chapterRow = (id) => ({ sql: `INSERT INTO video_chapters (id, video_id, chapter_time, chapter_label, visibility, created_at, updated_at) VALUES (?, 'bench-vid', 7, 'bench', 'public', 10, 10)`, params: [id] });
 
@@ -1550,6 +1631,7 @@ export async function createInprocTarget(plan) {
     },
   };
   const r2Objects = new Map();
+  const r2Metadata = (body) => ({ size: Buffer.byteLength(body), etag: BENCH_ETAG });
   const bucket = {
     put: async (key, value, ...args) => trace("r2.put", [key, value, args], () => {
       r2Objects.set(key, Buffer.from(value).toString("base64"));
@@ -1559,11 +1641,16 @@ export async function createInprocTarget(plan) {
       r2Objects.delete(key);
       return { deleted: true };
     }),
+    head: async (key, ...args) => trace("r2.head", [key, args], () => {
+      const body = r2Objects.get(key);
+      return body == null ? null : r2Metadata(body);
+    }),
     get: async (key, ...args) => {
       const value = trace("r2.get", [key, args], () => {
         const body = r2Objects.get(key);
         if (body == null) return null;
-        return { size: Buffer.byteLength(body), text: body, etag: BENCH_ETAG };
+        const metadata = r2Metadata(body);
+        return { size: metadata.size, text: body, etag: metadata.etag };
       });
       return value && {
         size: value.size,
@@ -1590,8 +1677,9 @@ export async function createInprocTarget(plan) {
     stmts = 0;
     d1RowsReturned = 0;
     d1PerQueryRows = [];
-    const headers = new Headers(spec.headers ?? {});
+    const headers = benchmarkRequestHeaders(spec);
     const before = performance.now();
+    const requestEnv = benchmarkRequestEnv(env, headers);
     let res;
     // Request construction is host setup, outside the app input transcript in
     // both Node and workerd. Keep performance.now() and profiling untouched.
@@ -1603,13 +1691,13 @@ export async function createInprocTarget(plan) {
     const dispatch = async () => {
     if (spec.path.startsWith("/__bench/session")) {
       const vars = {};
-      const c = { req: { url, header: (n) => headers.get(n) ?? undefined }, env, set: (k, v) => { vars[k] = v; }, header() {} };
+      const c = { req: { url, header: (n) => headers.get(n) ?? undefined }, env: requestEnv, set: (k, v) => { vars[k] = v; }, header() {} };
       await sm(c, async () => {});
       res = Response.json({ state: vars.sessionState });
     } else if (spec.path.startsWith("/__bench/noop")) {
       res = new Response("ok");
     } else {
-      res = await app.fetch(request, env);
+      res = await app.fetch(request, requestEnv);
     }
     };
     await inprocInputs.run(rec ? (kind, args, actual) => trace(kind, [args], () => actual) : null,
@@ -1617,7 +1705,7 @@ export async function createInprocTarget(plan) {
     } finally { globalThis.fetch = realFetch; }
     const cpuMs = performance.now() - before;
     const buf = await res.arrayBuffer();
-    return { status: res.status, bytes: buf.byteLength, cpuMs, d1: stmts, d1RowsReturned, d1PerQueryRows: [...d1PerQueryRows], debug: process.env.BENCH_DEBUG ? Buffer.from(buf).toString("utf8").slice(0, 240) : undefined };
+    return { status: res.status, bytes: buf.byteLength, cpuMs, d1: stmts, d1RowsReturned, d1PerQueryRows: [...d1PerQueryRows], ...(spec.expectPlaylist != null ? { responseBodyMismatch: playlistResponseMismatch(spec, buf) } : {}), debug: process.env.BENCH_DEBUG ? Buffer.from(buf).toString("utf8").slice(0, 240) : undefined };
   };
 
   return {
@@ -1640,7 +1728,7 @@ export async function createInprocTarget(plan) {
       try {
         const r = await fetchOnce(spec);
         if (recInvalid) throw new Error("bench replay recording invalid");
-        return { script: rec, status: r.status, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows };
+        return { script: rec, status: r.status, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, ...(spec.expectPlaylist != null ? { responseBodyMismatch: r.responseBodyMismatch } : {}) };
       } finally {
         rec = null;
         recInvalid = false;
@@ -1704,6 +1792,7 @@ ${replayIdentity.toString()}
 ${snapshotReplayResult.toString()}
 ${snapshotReplayScript.toString()}
 ${createReplayInputScope.toString()}
+${benchmarkRequestEnv.toString()}
 const replayInputs = createReplayInputScope();
 let activeRequest = null;
 
@@ -1756,6 +1845,10 @@ function replayEnv(env, script) {
       },
     },
     BUCKET: {
+      head: async (key, ...args) => {
+        const value = next("r2.head", [key, args]);
+        return value && { size: value.size, etag: value.etag };
+      },
       get: async (key, ...args) => {
         const value = next("r2.get", [key, args]);
         return value && {
@@ -1807,6 +1900,7 @@ function counting(env) {
 
 async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
+    const requestEnv = benchmarkRequestEnv(env, request.headers);
     if (url.pathname === "/__bench/ping") return new Response("ok", { headers: { "x-bench-build": BUILD_ID } });
     if (url.pathname === "/__bench/noop" && !request.headers.has("x-bench-script")) return new Response("ok");
 
@@ -1870,7 +1964,7 @@ async function handleRequest(request, env, ctx) {
         headers: { "x-bench-replay-complete": "0" },
       });
     }
-    const [benchEnv, count, withInputs] = sid !== null ? replayEnv(env, script) : counting(env);
+    const [benchEnv, count, withInputs] = sid !== null ? replayEnv(requestEnv, script) : counting(requestEnv);
     const evidence = () => {
       const stats = count();
       return {
@@ -2081,13 +2175,13 @@ async function createWranglerTarget(plan, opts) {
   };
   let scriptSeq = 0;
   const run = async (spec, rec = null, firstBuild = null) => {
-    const headers = { ...(spec.headers ?? {}) };
-    if (rec && firstBuild !== null) headers["x-bench-script"] = "cold";
+    const headers = benchmarkRequestHeaders(spec);
+    if (rec && firstBuild !== null) headers.set("x-bench-script", "cold");
     else if (rec) {
       const id = `s${(scriptSeq += 1)}`;
       const reg = await post("/__bench/script", json({ id, script: snapshotReplayScript(rec.script) }));
       if (!reg.ok) throw new Error(`script upload failed: ${reg.status}`);
-      headers["x-bench-script"] = id;
+      headers.set("x-bench-script", id);
     }
     await call("Profiler.start");
     const res = await fetch(`${base}${spec.path}`, { method: spec.method, headers, body: spec.body });
@@ -2104,6 +2198,7 @@ async function createWranglerTarget(plan, opts) {
       replayRowsMismatch: rec ? replayEvidenceMismatch(rec, res.headers) : false,
       cacheState: res.headers.get("x-flamenode-cache"),
       bodyHash: createHash("sha256").update(Buffer.from(buf)).digest("hex"),
+      ...(spec.expectPlaylist != null ? { responseBodyMismatch: playlistResponseMismatch(spec, buf) || rec?.responseBodyMismatch === true } : {}),
       cpuMs: profileBusyMs(stop.result.profile),
       replayStatusMismatch: rec ? rec.status !== res.status : false,
       isFirstIsolateRequest: firstBuild !== null
@@ -2191,11 +2286,11 @@ async function createWranglerTarget(plan, opts) {
 // --------------------------------------------------------------------- runner
 function tag(prefix, n) { return `${prefix}${n.toString(36)}`; }
 
-async function runScenario(target, sc, opts, state) {
+export async function runScenario(target, sc, opts, state) {
   const samples = [];
   const note = (kind, spec, r, cpuMs) => samples.push({
     kind, cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows, cacheState: r.cacheState ?? null,
-    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache) || r.bodyReuseMismatch === true,
+    unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || (spec.expectCache != null && r.cacheState !== spec.expectCache) || r.bodyReuseMismatch === true || r.responseBodyMismatch === true || (spec.expectPlaylist != null && r.responseBodyMismatch !== false),
   });
   for (const kind of ["normal", "limit", "invalid"]) {
     const pk = sc.prepareKind?.[kind];
@@ -2261,13 +2356,11 @@ async function runScenario(target, sc, opts, state) {
 export async function runCold(target, scenarios, opts) {
   const live = scenarios;
   const coldSamples = new Map(live.map((s) => [s.id, []]));
-  for (const sc of scenarios) {
-    const pk = sc.prepareKind?.normal;
-    if (pk?.r2 !== undefined) await target.setR2(pk.r2);
-    for (const [key, body] of Object.entries(pk?.r2Objects ?? {})) await target.setR2(body, key);
-  }
   for (let round = 0; round < opts.coldSamples; round += 1) {
     for (const sc of live) {
+      const pk = sc.prepareKind?.normal;
+      if (pk?.r2 !== undefined) await target.setR2(pk.r2);
+      for (const [key, body] of Object.entries(pk?.r2Objects ?? {})) await target.setR2(body, key);
       const spec = sc.kinds.normal(round, tag(`c${sc.id.replace(/[^A-Za-z0-9]/g, "")}`, round));
       if (spec.setup) await target.exec(spec.setup);
       if (spec.clearCache) await target.clearCache?.();
@@ -2280,7 +2373,7 @@ export async function runCold(target, scenarios, opts) {
         coldGeneration: r.coldGeneration ?? null, coldProcessId: r.coldProcessId ?? null,
         requestOrdinal: r.requestOrdinal ?? null,
         cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows,
-        unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true });
+        unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || r.responseBodyMismatch === true || (spec.expectPlaylist != null && r.responseBodyMismatch !== false) });
     }
     process.stderr.write(`cold round ${round + 1}/${opts.coldSamples}\r`);
   }
@@ -2307,7 +2400,9 @@ export function createReplayTarget(inproc, wr) {
 export async function main(argv) {
   const opts = parseArgs(argv);
   const plan = { adminToken: `bench-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}` };
-  const scenarios = buildScenarios(plan, { includePending: opts.includePending }).filter((s) => !opts.only || opts.only.includes(s.id) || s.id === "BASELINE");
+  const scenarios = buildScenarios(plan, { includePending: opts.includePending,
+    includeEventPlaylist: opts.only?.includes("RH-031-PLAYLIST") === true,
+  }).filter((s) => !opts.only || opts.only.includes(s.id) || s.id === "BASELINE");
 
   if (opts.dryRun) {
     const fake = Array.from({ length: opts.samples }, (_, i) => ({ kind: "normal", cpuMs: (i % 7) + 0.5, status: 200, bytes: 10, d1: 2, unexpected: false }));
