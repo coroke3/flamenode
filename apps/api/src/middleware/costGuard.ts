@@ -10,6 +10,7 @@
  */
 import {
   evaluateCostGuardCore,
+  WRITE_FEATURE_KEYS,
   type WriteFeatureKey,
 } from "@flamenode/domain/admin";
 import type { Context, Next } from "hono";
@@ -17,6 +18,30 @@ import { mapAuditSettings, type AuditSettingsRow } from "@flamenode/server-core/
 import type { AuditLogSettings } from "@flamenode/server-core/audit/types";
 import { MAX_SINGLE_ROW_LIMIT } from "../lib/limits.ts";
 import { writeGuardDenyResponse } from "./writeOrigin.ts";
+
+// Keep joined and standalone admission receipts small without changing CostGuard's
+// exception-first decision order. Invalid input remains invalid JSON, not NULL.
+const KNOWN_WRITE_FEATURE_BLOBS_SQL = WRITE_FEATURE_KEYS.map(
+  (key) => "CAST('" + key.replaceAll("'", "''") + "' AS BLOB)",
+).join(",");
+export function compactWriteFeatureListSql(
+  col: 's."disabled_features_json"' | 's."cost_guard_exception_features_json"',
+): string {
+  return `CASE
+    WHEN ${col} IS NULL OR (typeof(${col})='text' AND ${col}='') THEN NULL
+    WHEN typeof(${col})<>'text' OR instr(CAST(${col} AS BLOB), X'00')>0 THEN '!'
+    WHEN json_valid(${col})<>1 THEN '!'
+    WHEN json_type(${col})<>'array' THEN '!'
+    WHEN json_array_length(${col})>100 THEN '!'
+    WHEN EXISTS (
+      SELECT 1 FROM json_each(${col}) AS j
+      WHERE j.type<>'text' OR CAST(j.atom AS BLOB) NOT IN (${KNOWN_WRITE_FEATURE_BLOBS_SQL})
+    ) THEN '!'
+    ELSE (SELECT json_group_array(v) FROM (
+      SELECT DISTINCT j.atom AS v FROM json_each(${col}) AS j ORDER BY v
+    ))
+  END`;
+}
 
 export type CostGuardRow = AuditSettingsRow & {
   operation_mode: string | null;
@@ -44,11 +69,13 @@ export async function loadCostGuardSettingsRow(
 ): Promise<CostGuardRow | null> {
   return db
     .prepare(
-      `SELECT operation_mode, disabled_features_json,
-              cost_guard_exception_until, cost_guard_exception_features_json,
+      `SELECT operation_mode,
+              ${compactWriteFeatureListSql('s."disabled_features_json"')} AS disabled_features_json,
+              cost_guard_exception_until,
+              ${compactWriteFeatureListSql('s."cost_guard_exception_features_json"')} AS cost_guard_exception_features_json,
               audit_normal_retention_days, audit_restorable_retention_days,
               audit_long_retention_days, audit_max_payload_bytes, audit_compact_after_days
-       FROM system_settings WHERE id = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
+       FROM system_settings s WHERE s."id" = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
     )
     .bind("default")
     .first<CostGuardRow>();

@@ -121,7 +121,7 @@ test("S3 budget parity: guard-fed audit equals audit that reads settings/actor i
 // Use the existing mounted SQLite-backed Hono suite with the actual HTTPS cookie reader.
 test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard decisions", async () => {
   const { evaluateCostGuardCore, WRITE_FEATURE_KEYS } = await import("@flamenode/domain/admin");
-  const { evaluateCostGuardSnapshot } = await import("../src/middleware/costGuard.ts");
+  const { evaluateCostGuardSnapshot, loadCostGuardSettingsRow } = await import("../src/middleware/costGuard.ts");
   const { loadTosState } = await import("../src/middleware/writeOrigin.ts");
   const feature = "admin_announcement_broadcast";
   const now = Math.floor(Date.now() / 1000);
@@ -170,6 +170,11 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
     assert.equal(app.stats.batches, denied ? 0 : 1);
     assert.equal(app.sqlite.prepare("SELECT COUNT(*) AS n FROM announcements").get().n, denied ? 0 : 1);
     assert.equal(app.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, denied ? 0 : 1);
+    const standalone = await loadCostGuardSettingsRow(app.db);
+    assert.ok(standalone);
+    assert.deepEqual({ ...standalone }, state.cost_guard_settings, "both read paths emit the same settings");
+    assert.equal(evaluateCostGuardSnapshot({ row: standalone }, feature, now).denied, denied);
+    assert.equal(app.stats.reads, 4, "standalone projection costs one additional read");
   }
 });
 
@@ -320,6 +325,13 @@ test("combined admission read fallback preserves ToS and CostGuard failure class
     seedBase(d1.sqlite);
     seedCookieSession(d1.sqlite);
     if (failure === "banned") d1.sqlite.exec('UPDATE "user" SET is_banned = 1');
+    if (failure === "disabled" || failure === "active-exception") {
+      const padded = "[ " + " ".repeat(100000) + JSON.stringify("admin_announcement_broadcast") + " ]";
+      const exception = failure === "active-exception";
+      d1.sqlite.prepare("UPDATE system_settings SET operation_mode=?, disabled_features_json=?, cost_guard_exception_until=?, cost_guard_exception_features_json=? WHERE id='default'")
+        .run(exception ? "maintenance" : "normal", exception ? "!" : padded,
+          exception ? Math.floor(Date.now() / 1000) + 3600 : null, exception ? padded : null);
+    }
     const attempts = [];
     const originalPrepare = d1.db.prepare.bind(d1.db);
     const db = {
@@ -357,7 +369,7 @@ test("combined admission read fallback preserves ToS and CostGuard failure class
       headers: { Origin: SITE, cookie: "__Secure-authjs.session-token=" + SESSION_TOKEN, "content-type": "application/json" },
       body: JSON.stringify({ ...VALID, id: "fallback-admission" }),
     }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
-    const allowed = failure === "none";
+    const allowed = failure === "none" || failure === "active-exception";
     assert.equal(response.headers.get("cache-control"), "private, no-store");
     assert.equal(d1.stats.batches, allowed ? 1 : 0);
     assert.equal(d1.sqlite.prepare("SELECT COUNT(*) AS n FROM announcements").get().n, allowed ? 1 : 0);
@@ -376,6 +388,17 @@ test("combined admission read fallback preserves ToS and CostGuard failure class
   assert.equal(recovered.response.status, 200);
   assert.equal(recovered.reads, 3, "session and two source-specific fallback reads");
   assert.equal(recovered.attempts, 4, "include failed joined-read attempt; not S3 acceptance");
+
+  const disabled = await run("disabled");
+  assert.equal(disabled.response.status, 503);
+  assert.equal((await disabled.response.json()).reason, "cost_guard_blocked");
+  assert.equal(disabled.reads, 3);
+  assert.equal(disabled.attempts, 4);
+
+  const activeException = await run("active-exception");
+  assert.equal(activeException.response.status, 200);
+  assert.equal(activeException.reads, 3);
+  assert.equal(activeException.attempts, 4);
 
   const tosFailure = await run("tos");
   assert.equal(tosFailure.response.status, 503);

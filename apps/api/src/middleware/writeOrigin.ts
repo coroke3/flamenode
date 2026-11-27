@@ -25,7 +25,6 @@
 import {
   evaluateActiveXWriteAccess,
   evaluateWriteIdentity,
-  WRITE_FEATURE_KEYS,
   type WriteFeatureKey,
 } from "@flamenode/domain/admin";
 import type { Context, Next } from "hono";
@@ -33,6 +32,7 @@ import type { D1DatabaseLike, SessionUser } from "../auth/session.ts";
 import { actorSnapshotFromRow, type ActorSnapshotRow } from "@flamenode/server-core/audit/logger";
 import { MAX_SINGLE_ROW_LIMIT } from "../lib/limits.ts";
 import {
+  compactWriteFeatureListSql,
   evaluateCostGuardSnapshot,
   loadCostGuardSettingsRow,
   type CostGuardRow,
@@ -202,30 +202,6 @@ export async function evaluateAdminWriteGuard(options: {
     };
   }
   return { ok: true, user: options.user };
-}
-
-// Keep the joined admission receipt small without changing CostGuard's
-// exception-first decision order. Invalid input remains invalid JSON, not NULL.
-const KNOWN_WRITE_FEATURE_BLOBS_SQL = WRITE_FEATURE_KEYS.map(
-  (key) => "CAST('" + key.replaceAll("'", "''") + "' AS BLOB)",
-).join(",");
-function compactWriteFeatureListSql(
-  col: 's."disabled_features_json"' | 's."cost_guard_exception_features_json"',
-): string {
-  return `CASE
-    WHEN ${col} IS NULL OR (typeof(${col})='text' AND ${col}='') THEN NULL
-    WHEN typeof(${col})<>'text' OR instr(CAST(${col} AS BLOB), X'00')>0 THEN '!'
-    WHEN json_valid(${col})<>1 THEN '!'
-    WHEN json_type(${col})<>'array' THEN '!'
-    WHEN json_array_length(${col})>100 THEN '!'
-    WHEN EXISTS (
-      SELECT 1 FROM json_each(${col}) AS j
-      WHERE j.type<>'text' OR CAST(j.atom AS BLOB) NOT IN (${KNOWN_WRITE_FEATURE_BLOBS_SQL})
-    ) THEN '!'
-    ELSE (SELECT json_group_array(v) FROM (
-      SELECT DISTINCT j.atom AS v FROM json_each(${col}) AS j ORDER BY v
-    ))
-  END`;
 }
 
 /**
