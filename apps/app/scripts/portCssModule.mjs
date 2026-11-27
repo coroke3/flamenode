@@ -19,14 +19,41 @@ export const MODULES = [
   ["ychan", "src/components/settings/YoutubeChannelPicker.module.css", "apps/app/src/styles/shared-social.css"],
   ["cdlg", "src/components/ui/ConfirmDialog.module.css", "apps/app/src/styles/shared-social.css"],
   ["sqicon", "src/components/media/SquareIconEditor.module.css", "apps/app/src/styles/shared-social.css"],
+  ["vform", "src/components/forms/VideoForm.module.css", "apps/app/src/styles/video-form.css"],
 ];
+
 export function portCssModule(css, prefix) {
   const parts = css.split(/([{}])/);
   let out = "";
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
     if (parts[i + 1] === "{" && !part.trim().startsWith("@")) {
-      out += part.replace(/:global\(([^)]*)\)|\.(-?[A-Za-z_][\w-]*)/g, (m, g, cls) => (g !== undefined ? g : "." + prefix + "-" + cls));
+      // Token and balanced-span loops share this selector cursor to preserve nested/quoted global delimiters.
+      const tokens = /:global\(|\.(-?[A-Za-z_][\w-]*)/g;
+      let cursor = 0, match;
+      while ((match = tokens.exec(part))) {
+        out += part.slice(cursor, match.index);
+        if (match[1] !== undefined) {
+          out += "." + prefix + "-" + match[1];
+          cursor = tokens.lastIndex;
+          continue;
+        }
+        const start = tokens.lastIndex;
+        let end = start, depth = 1, quote = "";
+        for (; end < part.length; end++) {
+          const char = part[end];
+          if (char === "\\") { end++; continue; }
+          if (quote) {
+            if (char === quote) quote = "";
+          } else if (char === '"' || char === "'") quote = char;
+          else if (char === "(") depth++;
+          else if (char === ")" && --depth === 0) break;
+        }
+        if (depth !== 0) throw new SyntaxError("Unclosed :global() CSS selector");
+        out += part.slice(start, end);
+        cursor = tokens.lastIndex = end + 1;
+      }
+      out += part.slice(cursor);
     } else out += part;
   }
   return out;

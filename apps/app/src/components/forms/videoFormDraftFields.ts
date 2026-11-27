@@ -17,7 +17,7 @@ export function isFieldDisabled(
   return Array.isArray(disabledFields) && disabledFields.includes(key);
 }
 
-export function canRestoreDraftField(
+function canRestoreDraftField(
   name: string,
   disabledSections: string[] | undefined,
   disabledFields: string[] | undefined,
