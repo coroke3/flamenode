@@ -531,6 +531,47 @@ test("MIG-0721 U03c: streamed admin-read template DTOs remain readable by the Op
   assert.equal(newResult.data.formProps.initial.explanation, "Template information");
 });
 
+test("MIG-0721 U03d: interrupted streamed admin reads never expose partial DTOs or forms", async () => {
+  const interrupted = () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"guardOk":true,"templates":[{"id":"partial-template"'));
+      controller.error(new Error("synthetic response stream interruption"));
+    },
+  }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=UTF-8",
+      "cache-control": "private, no-store",
+    },
+  });
+
+  const listResponse = interrupted();
+  assert.deepEqual(await readAdminEventTemplates(async (path, init) => {
+    assert.equal(path, "/api/admin-read/events/templates");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.credentials, "same-origin");
+    return listResponse;
+  }), { status: "unavailable" });
+  assert.equal(listResponse.bodyUsed, true);
+
+  const selectedResponse = interrupted();
+  assert.deepEqual(await readAdminEventNew("t1", async (path, init) => {
+    assert.equal(path, "/api/admin-read/events/new?template=t1");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.credentials, "same-origin");
+    return selectedResponse;
+  }), { status: "unavailable" });
+  assert.equal(selectedResponse.bodyUsed, true);
+
+  await withEventNew({ ...eventNewPorts, fetchFn: async () => interrupted() }, async ({ container }) => {
+    assert.ok(container.querySelector('[role="alert"]'));
+    assert.match(container.querySelector('[role="alert"]').textContent, /取得できません/);
+    assert.equal(container.querySelector("form"), null);
+    assert.equal(container.querySelector('[name="title"]'), null);
+    assert.equal(container.textContent.includes("partial-template"), false);
+  });
+});
+
 test("MIG-0721 U03a: new-event read encodes selection and preserves CURRENT template defaults and owner", async () => {
   const body = { ...eventNew, templateId: "pick &/?#日" };
   const controller = new AbortController();
