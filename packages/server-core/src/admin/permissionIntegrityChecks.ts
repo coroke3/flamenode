@@ -158,7 +158,7 @@ export async function buildPermissionIntegrityChecks(
         event_id: sql<string>`event_id`,
         x_user_id: sql<string>`x_user_id`,
         permission_preset: sql<string>`permission_preset`,
-        custom_permission_keys_json: sql<string | null>`custom_permission_keys_json`,
+        custom_permission_keys_json: sql<string | null>`CASE WHEN permission_preset = 'custom' THEN custom_permission_keys_json ELSE NULL END`,
       })
       .from(sql`event_staff`)
       .where(sql`permission_preset IN ('owner', 'manager', 'custom')`)
@@ -212,8 +212,9 @@ export async function buildPermissionIntegrityChecks(
   let managerCount = Number(managerRows[0]?.total_count ?? 0);
   let invalidCustomCount = 0;
 
-  // Per-ID custom JSON still uses the canonical JS resolver; unrelated presets
-  // are excluded by SQL. The no-selection compatibility path remains unchanged.
+  // Per-ID custom JSON uses the canonical JS resolver. SQL retains CURRENT's
+  // mixed owner/manager/custom prefix but returns JSON only for custom rows;
+  // the loop skips unrelated presets before parsing. The no-selection path is unchanged.
   const selectedPreset = selectedId === "staff_custom_json_invalid" ? "custom" : null;
   for (const row of staffRows) {
     const preset = text(row.permission_preset) as EventStaffPreset;

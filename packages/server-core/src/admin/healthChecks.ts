@@ -827,7 +827,10 @@ async function checkXIdMergePendingStale(
 async function checkAuditLogsRetentionCandidates(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
-  const settings = await db.select().from(systemSettings).limit(1);
+  const settings = await db
+    .select({ audit_normal_retention_days: systemSettings.audit_normal_retention_days })
+    .from(systemSettings)
+    .limit(1);
   const days = Math.max(7, Number(settings[0]?.audit_normal_retention_days ?? 30) || 30);
   const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
   const where = and(
