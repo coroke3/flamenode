@@ -1018,6 +1018,87 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("U03a SA-088: same-statement anchor and group receipt is complete or explicit overflow", async () => {
+    const { readSlotSubmissionReceipt } = await import("../src/routes/videos/submit.ts");
+    const cases = [
+      { name: "missing anchor", count: 0, group: "g", missing: true },
+      { name: "null group", count: 1, group: null },
+      { name: "empty group", count: 1, group: "" },
+      { name: "legacy singleton group", count: 1, group: "g" },
+      { name: "two grouped rows", count: 2, group: "g" },
+      { name: "twenty rows", count: 20, group: "g" },
+      { name: "twenty-one rows", count: 21, group: "g" },
+      { name: "overflow with late anchor", count: 40, group: "g", anchor: 39 },
+      { name: "twenty rows with late anchor", count: 20, group: "g", anchor: 19 },
+      { name: "anchor changes after the one read", count: 2, group: "g", mutate: true },
+      { name: "existing video is preserved in all rows", count: 2, group: "g", linked: true },
+    ];
+    const columns = "id, event_id, reserved_by_user_id, x_user_id, reserved_x_id_snapshot, display_name, slot_label, start_time, sort_order, reservation_group_id, video_id, status, updated_at, version";
+    for (const scenario of cases) {
+      const slotId = scenario.missing ? "missing" : "receipt_" + (scenario.anchor ?? 0);
+      const w = seedWorld({
+        beforeRead(sql, sqlite) {
+          if (scenario.mutate && sql.includes("WITH anchor AS")) {
+            sqlite.prepare("UPDATE slots SET video_id='v_receipt', status='submitted', version=2 WHERE id=?").run(slotId);
+          }
+        },
+      });
+      try {
+        if (scenario.mutate || scenario.linked) {
+          insert(w.sqlite, "videos", {
+            id: "v_receipt", submitted_by_user_id: "u_owner", creator_x_user_id: "x_owner",
+            creator_display_name: "Owner", title: "Existing", visibility_status: "pending",
+            created_at: 100, updated_at: 100,
+          });
+        }
+        const add = (id, event, group, index) => insert(w.sqlite, "slots", {
+          id, event_id: event, reservation_group_id: group, reserved_by_user_id: "u_owner",
+          x_user_id: "x_owner", reserved_x_id_snapshot: "x_owner", display_name: "Owner",
+          slot_label: "slot", start_time: index % 2 ? 1000 + index : null, sort_order: index,
+          status: "reserved", video_id: scenario.linked ? "v_receipt" : null, updated_at: 100, version: 1,
+        });
+        for (let i = 0; i < scenario.count; i++) add("receipt_" + i, "ev_closed", scenario.group, i);
+        add("other_event", "ev_open", scenario.group, 0);
+        add("other_group", "ev_closed", "different", 0);
+        if (!scenario.group) add("unrelated", "ev_closed", scenario.group, 0);
+        const before = w.sqlite.prepare("SELECT " + columns + " FROM slots WHERE id=?").get(slotId);
+        const expectedRows = before?.reservation_group_id
+          ? w.sqlite.prepare("SELECT " + columns + " FROM slots WHERE reservation_group_id=? AND event_id=? LIMIT 21")
+            .all(before.reservation_group_id, before.event_id)
+          : before ? [before] : [];
+        const snapshot = snapshotDb(w.sqlite);
+        const actual = await readSlotSubmissionReceipt(w.d1, slotId);
+        assert.equal(w.d1.stats.reads, 1, scenario.name);
+        assert.equal(w.d1.stats.maxBinds, 2, scenario.name);
+        assert.equal(w.d1.stats.batches, 0, scenario.name);
+        assert.deepEqual(snapshotDb(w.sqlite), snapshot, scenario.name);
+        assert.deepEqual(w.bucket.puts, [], scenario.name);
+        assert.deepEqual(w.bucket.deletes, [], scenario.name);
+        if (scenario.missing) {
+          assert.equal(actual, null, scenario.name);
+          continue;
+        }
+        assert.deepEqual(actual.anchor, { ...before }, scenario.name);
+        if (scenario.count > 20) {
+          assert.deepEqual(actual.group, { kind: "overflow" }, scenario.name);
+          continue;
+        }
+        assert.equal(actual.group.kind, "ready", scenario.name);
+        assert.deepEqual(actual.group.rows.map((row) => row.id).sort(), expectedRows.map((row) => row.id).sort(), scenario.name);
+        for (const row of actual.group.rows) {
+          assert.deepEqual(row, { ...expectedRows.find((expected) => expected.id === row.id) }, scenario.name);
+        }
+        assert.deepEqual(actual.group.rows.find((row) => row.id === slotId), actual.anchor, scenario.name);
+        if (scenario.mutate) {
+          assert.equal(actual.anchor.version, 1);
+          assert.equal(w.sqlite.prepare("SELECT version FROM slots WHERE id=?").get(slotId).version, 2);
+        }
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
   test("U03a SA-088: CURRENT reservation group denial order and absolute cap, no writes (including preflight)", async () => {
     const { submitSlotVideo } = await import("../../../src/lib/actions/video/submitSlotVideo.ts");
     const inconsistent = "連続枠の予約者情報が不整合です。運営へ連絡してください。";

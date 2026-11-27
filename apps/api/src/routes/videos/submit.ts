@@ -17,6 +17,8 @@
  * Queue wake = 0 (NOOP_WAKE_HOST; DOCUMENTED DIFFERENCE D-0603-1).
  */
 import type { VideoSubmitResult } from "@flamenode/contracts";
+import type { slots } from "@flamenode/db/schema";
+import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
 import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@flamenode/domain/video/atomicLimits";
 import { normalizeSoftwareLabels } from "@flamenode/domain/software/labels";
 import {
@@ -149,6 +151,48 @@ export async function readFreeVideoMultipartPreflight(
     ok: true,
     value: { ...preflight.value, videoForm: parsed.data, formData },
   };
+}
+
+type SlotSubmissionReceiptRow = typeof slots.$inferSelect;
+type SlotSubmissionReceipt = {
+  anchor: SlotSubmissionReceiptRow;
+  group: { kind: "ready"; rows: SlotSubmissionReceiptRow[] } | { kind: "overflow" };
+};
+
+const SLOT_RECEIPT_COLUMNS = `id, event_id, reserved_by_user_id, x_user_id, reserved_x_id_snapshot,
+  display_name, slot_label, start_time, sort_order, reservation_group_id, video_id, status, updated_at, version`;
+
+/** SA-088 U03a candidate: one statement provides the initial anchor and the
+ * reservation group from the same database snapshot (#896 A). Do not mount
+ * until the remaining preflight and same-batch CAS are integrated. No policy
+ * decision is made here: the caller must check the anchor's authorization
+ * before form errors and report overflow at CURRENT's group-validation stage.
+ * The group is unordered; apply CURRENT's chronological comparator there.
+ * A row-count limit does not bound the bytes of legacy text columns.
+ */
+export async function readSlotSubmissionReceipt(
+  db: Pick<D1Database, "prepare">,
+  slotId: string,
+): Promise<SlotSubmissionReceipt | null> {
+  const { results } = await db.prepare(`WITH anchor AS (
+    SELECT ${SLOT_RECEIPT_COLUMNS} FROM slots WHERE id = ? LIMIT 1
+  ), group_rows AS (
+    SELECT ${SLOT_RECEIPT_COLUMNS} FROM slots
+    WHERE reservation_group_id = (SELECT NULLIF(reservation_group_id, '') FROM anchor)
+      AND event_id = (SELECT event_id FROM anchor)
+    LIMIT ?
+  )
+  SELECT 0 AS receipt_kind, anchor.* FROM anchor
+  UNION ALL
+  SELECT 1 AS receipt_kind, group_rows.* FROM group_rows`)
+    .bind(slotId, MAX_SLOTS_PER_VIDEO + 1).all<SlotSubmissionReceiptRow & { receipt_kind: number }>();
+  const anchors = results.filter((row) => row.receipt_kind === 0);
+  if (anchors.length === 0) return null;
+  const { receipt_kind: _kind, ...anchor } = anchors[0];
+  if (!anchor.reservation_group_id) return { anchor, group: { kind: "ready", rows: [anchor] } };
+  const groupRows = results.filter((row) => row.receipt_kind === 1);
+  if (groupRows.length > MAX_SLOTS_PER_VIDEO) return { anchor, group: { kind: "overflow" } };
+  return { anchor, group: { kind: "ready", rows: groupRows.map(({ receipt_kind: _kind, ...row }) => row) } };
 }
 
 type DbReadPreflightInternalResult =
