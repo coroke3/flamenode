@@ -55,15 +55,18 @@ import { SPREADSHEET_COLUMN_ENUMS, SPREADSHEET_SCHEMA_TABLES } from "./schemaCat
 import { SpreadsheetImportColumnError } from "./importPrepCore.ts";
 import { readSpreadsheetJsonBody } from "./writeBody.ts";
 import {
+  buildSpreadsheetForeignKeyLookups,
   parseSpreadsheetCrudBody,
   planSpreadsheetAtomicAuditedCrud,
   planSpreadsheetGuardedCrud,
   SPREADSHEET_ATOMIC_MAX_REBUILD_TARGETS,
   SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+  SPREADSHEET_IMPORT_APPLY_MAX_ROWS,
   spreadsheetMutationToBoundSql,
   type SpreadsheetAuditedSqlPlan,
   type SpreadsheetCrudMethod,
   type SpreadsheetForeignKey,
+  type SpreadsheetForeignKeyLookup,
   type SpreadsheetSqlTableContext,
 } from "./writeValidation.ts";
 
@@ -591,15 +594,14 @@ export function planSpreadsheetStaticRebuildTargets(
   return [...targets.values()];
 }
 
-export async function loadSpreadsheetVideoReleaseEvents(
-  db: D1Database,
-  audits: readonly {
-    table_name: string;
-    before: Record<string, unknown> | null;
-    after: Record<string, unknown> | null;
-  }[],
-): Promise<{ eventIdsByVideo: Map<string, string[]>; reads: number }> {
-  const videoIds = [
+type SpreadsheetReleaseAudit = {
+  table_name: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+};
+
+function spreadsheetReleaseVideoIds(audits: readonly SpreadsheetReleaseAudit[]): string[] {
+  return [
     ...new Set(
       audits
         .filter(
@@ -616,6 +618,65 @@ export async function loadSpreadsheetVideoReleaseEvents(
         }),
     ),
   ];
+}
+
+function spreadsheetVideoReleaseSelectSql(count: number): string {
+  const placeholders = Array.from({ length: count }, () => "?").join(", ");
+  return `SELECT v."id" AS videoId, ve."event_id" AS eventId, v."primary_event_id" AS primaryEventId
+         FROM "videos" v
+         LEFT JOIN "video_events" ve ON ve."video_id" = v."id"
+         WHERE v."id" IN (${placeholders})
+         LIMIT ${SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1}`;
+}
+
+/**
+ * #893 T06, unmounted: combine only the video_members -> videos.id FK
+ * lookup and the release lookup. Return null for any other FK plan; never
+ * skip an FK or change its validation order to obtain a smaller counter.
+ * The caller must pass the complete effective FK rows and final audit
+ * snapshots from the existing planner, after the guarded row pre-read.
+ */
+export function buildSpreadsheetMemberFkReleaseLookup(
+  foreignKeys: readonly SpreadsheetForeignKey[],
+  rows: readonly Record<string, string | null>[],
+  audits: readonly SpreadsheetReleaseAudit[],
+): { statement: string; binds: readonly (string | number | null)[]; fkLookup: SpreadsheetForeignKeyLookup; releaseIds: readonly string[] } | null {
+  if (audits.length < 1 || audits.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS ||
+      audits.some(audit => audit.table_name !== "video_members")) return null;
+  const lookups = buildSpreadsheetForeignKeyLookups(foreignKeys, rows);
+  if (lookups.length !== 1) return null;
+  const videoFk = foreignKeys.filter(fk => fk.column === "video_id" &&
+    fk.referencedTable === "videos" && fk.referencedColumn === "id");
+  if (videoFk.length !== 1) return null;
+  const [fkLookup] = buildSpreadsheetForeignKeyLookups(videoFk, rows);
+  if (!fkLookup || fkLookup.values.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS ||
+      fkLookup.statement !== lookups[0]!.statement ||
+      fkLookup.binds.length !== lookups[0]!.binds.length ||
+      fkLookup.binds.some((bind, i) => bind !== lookups[0]!.binds[i])) return null;
+  const releaseIds = spreadsheetReleaseVideoIds(audits);
+  if (releaseIds.length < 1 || releaseIds.length > 2 * SPREADSHEET_IMPORT_APPLY_MAX_ROWS ||
+      releaseIds.some(id => id.includes("\0"))) return null;
+  // Separate CTE limits: a many-event join cannot masquerade as duplicate
+  // FK rows, and an overflow cannot hide a missing FK. Keep raw FK binds
+  // separate from CURRENT's trimmed release IDs, even when they differ.
+  const statement = `WITH fk AS (${fkLookup.statement}), release AS (${spreadsheetVideoReleaseSelectSql(releaseIds.length)})
+SELECT 'fk' AS kind, value, NULL AS videoId, NULL AS eventId, NULL AS primaryEventId FROM fk
+UNION ALL
+SELECT 'release', NULL, videoId, eventId, primaryEventId FROM release
+LIMIT ${fkLookup.values.length + 1 + SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1}`;
+  return {
+    statement,
+    binds: Object.freeze([...fkLookup.binds, ...releaseIds]),
+    fkLookup: Object.freeze({ ...fkLookup, binds: Object.freeze([...fkLookup.binds]), values: Object.freeze([...fkLookup.values]) }),
+    releaseIds: Object.freeze(releaseIds),
+  };
+}
+
+export async function loadSpreadsheetVideoReleaseEvents(
+  db: D1Database,
+  audits: readonly SpreadsheetReleaseAudit[],
+): Promise<{ eventIdsByVideo: Map<string, string[]>; reads: number }> {
+  const videoIds = spreadsheetReleaseVideoIds(audits);
   const eventIdsByVideo = new Map<string, Set<string>>();
   if (videoIds.length === 0) return { eventIdsByVideo: new Map(), reads: 0 };
 
@@ -623,7 +684,6 @@ export async function loadSpreadsheetVideoReleaseEvents(
   const linkedEventIds = new Set<string>();
   for (let offset = 0; offset < videoIds.length; offset += SPREADSHEET_VIDEO_EVENT_LOOKUP_CHUNK_SIZE) {
     const chunk = videoIds.slice(offset, offset + SPREADSHEET_VIDEO_EVENT_LOOKUP_CHUNK_SIZE);
-    const placeholders = chunk.map(() => "?").join(", ");
     reads += 1;
     // A malformed receipt does not establish that no events are linked.
     // Keep provider faults separate from genuine split-limit errors.
@@ -631,11 +691,7 @@ export async function loadSpreadsheetVideoReleaseEvents(
     try {
       const result = await db
         .prepare(
-          `SELECT v."id" AS videoId, ve."event_id" AS eventId, v."primary_event_id" AS primaryEventId
-         FROM "videos" v
-         LEFT JOIN "video_events" ve ON ve."video_id" = v."id"
-         WHERE v."id" IN (${placeholders})
-         LIMIT ${SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1}`,
+          spreadsheetVideoReleaseSelectSql(chunk.length),
         )
         .bind(...chunk)
         .all<{ videoId: string; eventId: string | null; primaryEventId: string | null }>();

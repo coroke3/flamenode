@@ -1405,6 +1405,74 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(dDel.reads, 4, "warm DELETE adds 1 before-image read (4 total) + 1 atomic batch");
   });
 
+  test("MIG-0638 T06: bounded member FK/release SELECT plan (#893, unmounted)", async () => {
+    const { buildSpreadsheetMemberFkReleaseLookup } = await import("../src/routes/admin/spreadsheet/write.ts");
+    const { assertSpreadsheetForeignKeyLookup } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(":memory:");
+    try {
+      // Minimal isolated schema; mounted HTTP tests remain separate.
+      db.exec("CREATE TABLE videos (id TEXT PRIMARY KEY, primary_event_id TEXT);" +
+        "CREATE TABLE video_events (video_id TEXT, event_id TEXT, PRIMARY KEY(video_id,event_id));");
+      const addVideo = db.prepare("INSERT INTO videos VALUES (?, ?)");
+      const addEvent = db.prepare("INSERT INTO video_events VALUES (?, ?)");
+      for (const id of ["linked", "unlinked", "old", " spaced ", "spaced", "quote'--"]) {
+        addVideo.run(id, id === "linked" ? "primary" : null);
+      }
+      addEvent.run("linked", "extra");
+      addEvent.run("old", "old-event");
+      addEvent.run("spaced", "trimmed-event");
+      const fk = { column: "video_id", referencedTable: "videos", referencedColumn: "id" };
+      const other = { column: "x_user_id", referencedTable: "x_users", referencedColumn: "id" };
+      const audit = (before, after) => ({
+        table_name: "video_members",
+        before: before === null ? null : { video_id: before },
+        after: after === null ? null : { video_id: after },
+      });
+      const execute = (values, audits, fks = [fk]) => {
+        const plan = buildSpreadsheetMemberFkReleaseLookup(fks, values.map(video_id => ({ video_id })), audits);
+        assert.ok(plan);
+        const receipts = db.prepare(plan.statement).all(...plan.binds);
+        const fkRows = receipts.filter(row => row.kind === "fk").map(row => ({ value: row.value }));
+        const releaseRows = receipts.filter(row => row.kind === "release");
+        return { plan, fkRows, releaseRows };
+      };
+      const linked = execute(["linked", "unlinked", "linked"], [audit("old", "linked"), audit(null, "unlinked")], [other, fk]);
+      assert.deepEqual(linked.plan.binds, ["linked", "unlinked", "old", "linked", "unlinked"]);
+      assertSpreadsheetForeignKeyLookup(linked.plan.fkLookup, linked.fkRows);
+      assert.deepEqual(linked.releaseRows.map(row => [row.videoId, row.eventId, row.primaryEventId]).sort(),
+        [["linked", "extra", "primary"], ["old", "old-event", null], ["unlinked", null, null]]);
+      const spaced = execute([" spaced "], [audit(null, " spaced ")]);
+      assertSpreadsheetForeignKeyLookup(spaced.plan.fkLookup, spaced.fkRows);
+      assert.deepEqual(spaced.plan.binds, [" spaced ", "spaced"]);
+      assert.equal(spaced.releaseRows[0].eventId, "trimmed-event");
+      const missing = execute(["missing"], [audit("old", "missing")]);
+      assert.throws(() => assertSpreadsheetForeignKeyLookup(missing.plan.fkLookup, missing.fkRows), /foreign_key_violation/);
+      assert.equal(missing.releaseRows.length, 1);
+      const quoted = execute(["quote'--"], [audit(null, "quote'--")]);
+      assertSpreadsheetForeignKeyLookup(quoted.plan.fkLookup, quoted.fkRows);
+      assert.ok(!quoted.plan.statement.includes("quote'--"));
+      const plan = buildSpreadsheetMemberFkReleaseLookup;
+      assert.equal(plan([fk, other], [{ video_id: "linked", x_user_id: "x" }], [audit(null, "linked")]), null);
+      assert.equal(plan([other], [{ x_user_id: "linked" }], [audit(null, "linked")]), null);
+      assert.equal(plan([fk], [{ video_id: "linked" }], [{ ...audit(null, "linked"), table_name: "videos" }]), null);
+      assert.equal(plan([fk], [{ video_id: "linked" }], []), null);
+      assert.equal(plan([fk], [{ video_id: "linked" }], [audit(null, "bad\0id")]), null);
+      assert.equal(plan([fk], [{ video_id: "linked" }], Array.from({ length: 8 }, () => audit(null, "linked"))), null);
+      const ids = Array.from({ length: 7 }, (_, i) => "v" + i);
+      const max = plan([fk], ids.map(video_id => ({ video_id })), ids.map(id => audit("old-" + id, id)));
+      assert.equal(max.binds.length, 21);
+      assert.match(max.statement, /LIMIT 265$/);
+      for (let i = 0; i < 257; i++) addEvent.run("linked", "event-" + i);
+      const overflow = execute(["linked"], [audit(null, "linked")]);
+      assertSpreadsheetForeignKeyLookup(overflow.plan.fkLookup, overflow.fkRows);
+      assert.equal(overflow.releaseRows.length, 257);
+      assert.match(overflow.plan.statement, /LIMIT 259$/);
+    } finally {
+      db.close();
+    }
+  });
+
   // #893: characterization only. These expectations deliberately record the
   // CURRENT TARGET costs, including over-budget requests. Do not interpret
   // a green test as compliance with the <=3 pre-read S3 gate.
