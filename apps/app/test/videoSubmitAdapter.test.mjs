@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canRestoreDraftField, isSectionDisabled, isFieldDisabled, restoreVideoDraftControls } from "../.test-dist/apps/app/src/components/forms/videoFormDraftFields.js";
+import { canRestoreDraftField, isSectionDisabled, isFieldDisabled, restoreVideoDraftControls, buildVideoDraftControlledState } from "../.test-dist/apps/app/src/components/forms/videoFormDraftFields.js";
 import {
   mapVideoSubmitMode,
   submitVideoForm,
@@ -248,4 +248,34 @@ test("MIG-0714 part A: restore native controls with CURRENT locks and repeated-v
   } finally {
     dom.window.close();
   }
+});
+
+test("MIG-0714 part A: controlled draft patch preserves CURRENT event and field locks", () => {
+  const member = (name, chapters) => ({ name, x_user_id: "", role: "", comment: "", chapters });
+  const oldChapters = [{ time: "1:00", label: "old", note: "" }];
+  const newChapters = [{ time: "2:00", label: "new", note: "" }];
+  const draft = { schemaVersion: "video-form-v1", fields: { title: ["first", "second"], display_name: "draft", youtube_url: [] },
+    selectedEventIds: ["b", "missing", "a", "b"], selectedPart: "B", isCollab: true,
+    members: [member("draft", newChapters), member("added", newChapters)],
+    customAnswers: [{ key: "q", value: ["a", "b"] }], stageAnswers: [{ id: "s", value: "yes" }],
+    currentStep: 5, maxReachedStep: 2, metadata: {} };
+  const input = { mode: "edit", canEditEvents: true, eventOptions: [{ id: "a" }, { id: "b" }],
+    initialEventIdsForDraftSync: ["parent"], currentMembers: [member("current", oldChapters)], wizardStepCount: 4 };
+  const patch = buildVideoDraftControlledState(draft, input);
+  assert.deepEqual(patch.text, { title: "first", display_name: "draft", youtube_url: "", profile_text: "", icon_url: "", youtube_channel_url: "", other_social_links: "" });
+  assert.deepEqual(patch.selectedEventIds, ["b", "a", "b"]);
+  assert.deepEqual(patch.members, draft.members);
+  assert.deepEqual(patch.customAnswers, { q: ["a", "b"] });
+  assert.deepEqual(patch.stageAnswers, { s: "yes" });
+  assert.deepEqual([patch.selectedPart, patch.isCollab, patch.currentStep, patch.maxReachedStep], ["B", true, 3, 3]);
+  for (const options of [{ mode: "slot" }, { canEditEvents: false }]) {
+    assert.deepEqual(buildVideoDraftControlledState(draft, { ...input, ...options }).selectedEventIds, ["parent"]);
+  }
+  const locked = buildVideoDraftControlledState(draft, { ...input, disabledSections: ["submitter", "descriptions"], disabledFields: ["video.title", "event_ids", "video.part", "members.is_collab", "chapters"] });
+  assert.deepEqual(locked, { text: { youtube_url: "" }, members: [member("draft", oldChapters), member("added", [])], currentStep: 3, maxReachedStep: 3 });
+  const noMembers = buildVideoDraftControlledState({ ...draft, members: [], isCollab: false }, input);
+  assert.equal("members" in noMembers, false, "retain existing members on non-collab empty draft");
+  assert.deepEqual(buildVideoDraftControlledState({ ...draft, members: [] }, input).members, [], "empty collab draft clears members");
+  assert.equal("members" in buildVideoDraftControlledState(draft, { ...input, disabledFields: ["members"] }), false);
+  assert.deepEqual(draft.members[0].chapters, newChapters, "no draft mutation");
 });

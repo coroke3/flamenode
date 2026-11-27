@@ -1,3 +1,5 @@
+import { videoFormDraftAnswersToRecord, videoFormDraftStageAnswersToRecord, type VideoFormDraftV1 } from "../../lib/videoFormDraft.js";
+
 // MIG-0714 part A: CURRENT VideoForm draft field permissions (UI only).
 // Ported without changing field keys or defaults; server authorization remains independent.
 /** section key が disabledSections に含まれているか確認する小関数。 */
@@ -97,4 +99,52 @@ export function restoreVideoDraftControls(
       element.value = values[0] ?? "";
     }
   }
+}
+
+// A missing patch key means retain the current controlled value, not clear it.
+// The host still parses the draft, checks authority, restores native controls,
+// reads descriptions from the form, and applies the patch in the same callback.
+export function buildVideoDraftControlledState(draft: VideoFormDraftV1, input: {
+  disabledSections?: string[];
+  disabledFields?: string[];
+  mode: "free" | "slot" | "edit";
+  canEditEvents: boolean;
+  eventOptions: readonly { id: string }[];
+  initialEventIdsForDraftSync: string[];
+  currentMembers: VideoFormDraftV1["members"];
+  wizardStepCount: number;
+}) {
+  const canRestore = (name: string) => canRestoreDraftField(name, input.disabledSections, input.disabledFields);
+  const textFields = ["youtube_url", "title", "display_name", "profile_text", "icon_url", "youtube_channel_url", "other_social_links"] as const;
+  const text: Partial<Record<(typeof textFields)[number], string>> = {};
+  for (const name of textFields) {
+    if (!canRestore(name)) continue;
+    const value = draft.fields[name];
+    text[name] = Array.isArray(value) ? (value[0] ?? "") : value ?? "";
+  }
+  let selectedEventIds: string[] | undefined;
+  if (canRestore("event_ids")) {
+    const availableEventIds = new Set(input.eventOptions.map((event) => event.id));
+    selectedEventIds = input.mode === "slot" || !input.canEditEvents
+      ? input.initialEventIdsForDraftSync
+      : draft.selectedEventIds.filter((id) => availableEventIds.has(id));
+  }
+  let members: VideoFormDraftV1["members"] | undefined;
+  if (canRestore("members") && (draft.members.length > 0 || draft.isCollab)) {
+    members = draft.members.map((member, index) => ({
+      ...member,
+      chapters: canRestore("chapters") ? member.chapters : input.currentMembers[index]?.chapters ?? [],
+    }));
+  }
+  return {
+    text,
+    ...(selectedEventIds !== undefined ? { selectedEventIds } : {}),
+    ...(canRestore("part") ? { selectedPart: draft.selectedPart } : {}),
+    ...(canRestore("is_collab") ? { isCollab: draft.isCollab } : {}),
+    ...(members !== undefined ? { members } : {}),
+    ...(canRestore("custom_answers") ? { customAnswers: videoFormDraftAnswersToRecord(draft.customAnswers) } : {}),
+    ...(canRestore("stage_permission") ? { stageAnswers: videoFormDraftStageAnswersToRecord(draft.stageAnswers) } : {}),
+    currentStep: Math.min(draft.currentStep, input.wizardStepCount - 1),
+    maxReachedStep: Math.min(Math.max(draft.maxReachedStep, draft.currentStep), input.wizardStepCount - 1),
+  };
 }
