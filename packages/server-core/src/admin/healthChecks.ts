@@ -429,15 +429,15 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
         stored,
         actual,
         valid,
-        CASE WHEN valid = 1 THEN abs(stored - actual) END AS diff,
+        CASE WHEN valid = 1 THEN CAST(abs(stored - actual) AS INTEGER) END AS diff,
         CASE
-          WHEN valid = 1 THEN max(
+          WHEN valid = 1 THEN CAST(max(
             ${LIKE_COUNT_DRIFT_ABS},
             actual / 20 + CASE WHEN actual % 20 = 0 THEN 0 ELSE 1 END
-          )
+          ) AS INTEGER)
         END AS threshold,
         CASE
-          WHEN valid = 1 THEN actual / 20 + CASE WHEN actual % 20 = 0 THEN 0 ELSE 1 END
+          WHEN valid = 1 THEN CAST(actual / 20 + CASE WHEN actual % 20 = 0 THEN 0 ELSE 1 END AS INTEGER)
         END AS ratio_threshold
       FROM validated
     ),

@@ -1574,10 +1574,7 @@ if (runUnderRootTsx(import.meta.url)) {
         const id = prefix + suffix;
         video(id, stored);
         for (let i = 0; i < legacyLikes; i++) legacyInteraction(id, i, "like");
-        for (let i = 0; i < authLikes; i++) {
-          legacyInteraction(id, i, "like");
-          authInteraction(id, i, "like");
-        }
+        for (let i = 0; i < authLikes; i++) authInteraction(id, i, "like");
         for (let i = 0; i < authBookmarks; i++) {
           legacyInteraction(id, i, "bookmark");
           authInteraction(id, i, "bookmark");
@@ -2064,8 +2061,9 @@ if (runUnderRootTsx(import.meta.url)) {
       for (const total of [0, 1, 49, 50, 51, 500]) {
         let displayReads = 0;
         let jsonReads = 0;
-        const visible = preset === "manager" ? Math.min(total, 50) : total;
-        const rows = Array.from({ length: visible }, (_, i) => ({
+        const visible = Math.min(total, 50);
+        const returnedRows = preset === "custom" ? total : visible;
+        const rows = Array.from({ length: returnedRows }, (_, i) => ({
           permission_preset: preset,
           total_count: total,
           get id() { displayReads++; return "id-" + i; },
