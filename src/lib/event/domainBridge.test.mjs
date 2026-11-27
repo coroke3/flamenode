@@ -38,18 +38,44 @@ test("utils/xid.ts re-exports the domain X handle format", () => {
   assert.equal("isCanonicalXId" in domainEvent, false);
 });
 
-test("eventEditPermissions.ts uses the domain section policy (U02)", async () => {
-  const source = await import("node:fs/promises").then((fs) =>
-    fs.readFile(new URL("./eventEditPermissions.ts", import.meta.url), "utf8"),
-  );
+test("eventEditPermissions.ts retains its server boundary and re-exports the shared DB adapter", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const bridgeUrl = new URL("./eventEditPermissions.ts", import.meta.url);
+  const [bridge, source] = await Promise.all([
+    readFile(bridgeUrl, "utf8"),
+    readFile(new URL("../../../packages/server-core/src/event/editPermissions.ts", import.meta.url), "utf8"),
+  ]);
   // Admin short-circuits before the staff DB read; staff go through the domain policy.
   assert.match(
     source,
     /if \(user\.role === "admin"\) \{\s*return adminEventEditPermissions\(\);\s*\}\s*const permissions = await getCollaboratorPermissions/,
   );
   assert.match(source, /return delegatedEventEditPermissions\(permissions\);/);
-  assert.match(source, /export \{ hasAnyEventEditPermission \} from "@flamenode\/domain\/event";/);
+  assert.match(bridge, /import "server-only";/);
+  assert.match(bridge, /export \{ hasAnyEventEditPermission \} from "@flamenode\/domain\/event";/);
   assert.doesNotMatch(source, /expandPermissionAliases/);
+  assert.doesNotMatch(source, /server-only/);
+
+  // The same platform-marker stub as CURRENT ownership execution tests, scoped
+  // to this bridge. The real shared adapter and domain policies stay loaded.
+  const { registerHooks } = await import("node:module");
+  const hooks = registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (specifier === "server-only" && context.parentURL === bridgeUrl.href) {
+        return { url: "data:text/javascript,export%20{}", shortCircuit: true };
+      }
+      return nextResolve(specifier, context);
+    },
+  });
+  try {
+    const legacy = await import(bridgeUrl.href);
+    const shared = await import("@flamenode/server-core/event/editPermissions");
+    assert.deepEqual(Object.keys(legacy).sort(), ["hasAnyEventEditPermission", "resolveEventEditPermissions"]);
+    assert.equal(legacy.resolveEventEditPermissions, shared.resolveEventEditPermissions);
+    assert.equal(legacy.hasAnyEventEditPermission, domainEvent.hasAnyEventEditPermission);
+  } finally {
+    hooks.deregister();
+  }
 });
 
 test("eventIdReuseCore.ts re-exports the domain event id reuse policy (U04)", async () => {

@@ -28,6 +28,7 @@ import {
 } from "@flamenode/server-core/visibility/eventIdReuse";
 import { PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY } from "@flamenode/server-core/visibility/manifestCore";
 import { readVisibilityManifestObject, putVisibilityManifestWithCas } from "@flamenode/server-core/visibility/manifestR2";
+import { resolveEventEditPermissions } from "@flamenode/server-core/event/editPermissions";
 
 const db = drizzle(createD1(createSqlite()), { schema });
 const now = 1794115200;
@@ -941,9 +942,9 @@ test("MIG-0652 U03: preflight provider failure is private, redacted, and perform
   assert.equal(d1.stats.batches, 0);
 });
 
-// Exact CURRENT reuse extraction only. The Hono caller above still refuses
-// every old-ID tombstone. Known unsafe legacy outcomes below are evidence for
-// the separately owned follow-up, never permission to enable that route.
+// Shared CURRENT reuse contracts and scoped manifest token-safety regressions.
+// The Hono caller above still refuses every old-ID tombstone. Remaining unsafe
+// legacy outcomes are characterized separately, never permission to enable it.
 const REUSE_TOMBSTONE = {
   fence_token: "reuse-token", state: "blocked",
   reason: "event_id_rename_old_cleanup", blocked_at: now - 86400,
@@ -1106,12 +1107,7 @@ test("MIG-0652 reuse extraction: all five canonical objects use HEAD and block r
   }
 });
 
-test("MIG-0652 reuse extraction: foreign token, missing ETag and failed CAS preserve the manifest", async () => {
-  const foreign = { ...REUSE_ENTRY, fence_token: "foreign" };
-  const f = createReuseFixture({ entries: [foreign, REUSE_OTHER] });
-  assert.deepEqual(await f.prepare(), { ok: false, reason: "event_id_reuse_fence_token_mismatch" });
-  assert.deepEqual(f.manifest().entities, [foreign, REUSE_OTHER]);
-  assert.ok(!f.timeline.includes("host:write"));
+test("MIG-0652 reuse extraction: missing ETag and failed CAS preserve the manifest", async () => {
   const noEtag = createReuseFixture();
   const read = noEtag.host.readManifest;
   noEtag.host.readManifest = async bucket => ({ ...await read(bucket), etag: null });
@@ -1123,7 +1119,7 @@ test("MIG-0652 reuse extraction: foreign token, missing ETag and failed CAS pres
   assert.deepEqual(await lostCas.prepare(), { ok: false, reason: "event_id_reuse_manifest_release_failed" });
   assert.equal(puts, 3, "actual shared manifest codec retries the same conditional write three times");
   assert.deepEqual(lostCas.manifest().entities, [REUSE_ENTRY, REUSE_OTHER]);
-  for (const fixture of [f, noEtag, lostCas]) assertReuseDidNotMutateD1(fixture);
+  for (const fixture of [noEtag, lostCas]) assertReuseDidNotMutateD1(fixture);
 });
 
 test("MIG-0652 reuse extraction: compensation stays lazy and forwards the host wrappers unchanged", async () => {
@@ -1158,17 +1154,66 @@ test("MIG-0652 reuse extraction: compensation stays lazy and forwards the host w
   }
 });
 
-test("MIG-0652 reuse CURRENT characterization: mixed-token first-match deletion remains a #679 blocker", async () => {
+test("MIG-0652 reuse token ownership: any foreign token denies release regardless of entry order", async () => {
   const foreign = { ...REUSE_ENTRY, fence_token: "foreign" };
-  const ownFirst = createReuseFixture({ entries: [REUSE_ENTRY, foreign, REUSE_OTHER] });
-  assert.equal((await ownFirst.prepare()).ok, true);
-  assert.deepEqual(ownFirst.manifest().entities, [REUSE_OTHER], "KNOWN CURRENT defect: both same-key entries are removed");
-  const foreignFirst = createReuseFixture({ entries: [foreign, REUSE_ENTRY, REUSE_OTHER] });
-  assert.deepEqual(await foreignFirst.prepare(), { ok: false, reason: "event_id_reuse_fence_token_mismatch" });
-  assert.deepEqual(foreignFirst.manifest().entities, [foreign, REUSE_ENTRY, REUSE_OTHER]);
+  for (const entries of [
+    [foreign, REUSE_OTHER],
+    [REUSE_ENTRY, foreign, REUSE_OTHER],
+    [foreign, REUSE_ENTRY, REUSE_OTHER],
+    [REUSE_ENTRY, REUSE_OTHER, REUSE_ENTRY, foreign],
+  ]) {
+    const f = createReuseFixture({ entries });
+    const before = f.manifest();
+    assert.deepEqual(await f.prepare(), { ok: false, reason: "event_id_reuse_fence_token_mismatch" });
+    assert.deepEqual(f.manifest(), before, "denial preserves every block and the manifest revision");
+    assert.ok(!f.timeline.includes("host:write"));
+    assert.ok(!f.timeline.includes("r2:put"));
+    assert.equal(f.d1.stats.reads, 2);
+    assertReuseDidNotMutateD1(f);
+  }
 });
 
-test("MIG-0652 reuse CURRENT characterization: partial PUT and foreign confirmation keep their existing outcomes", async () => {
+test("MIG-0652 reuse token ownership: same-token duplicates release while unrelated IDs and types stay blocked", async () => {
+  const otherEvent = { ...REUSE_ENTRY, entity_id: "ev_other", fence_token: "other-event-token" };
+  const sameIdVideo = { ...REUSE_OTHER, entity_id: "ev_create" };
+  const duplicate = { ...REUSE_ENTRY, reason: "same-token-duplicate", blocked_at: REUSE_ENTRY.blocked_at + 1 };
+  const unrelated = [otherEvent, sameIdVideo, REUSE_OTHER];
+  for (const entries of [
+    [otherEvent, REUSE_ENTRY, sameIdVideo, duplicate, REUSE_OTHER],
+    unrelated,
+  ]) {
+    const f = createReuseFixture({ entries });
+    const previousEntry = entries.includes(REUSE_ENTRY) ? REUSE_ENTRY : null;
+    assert.deepEqual(await f.prepare(), { ok: true, precommit: {
+      eventId: "ev_create", fenceToken: "reuse-token", previousEntry,
+    } });
+    assert.deepEqual(f.manifest().entities, unrelated);
+    assert.equal(f.timeline.filter(op => op === "r2:put").length, previousEntry ? 1 : 0);
+    assert.equal(f.d1.stats.reads, 2);
+    assertReuseDidNotMutateD1(f);
+  }
+});
+
+test("MIG-0652 reuse token ownership: post-PUT confirmation rejects every remaining same-event block", async () => {
+  for (const fence_token of ["reuse-token", "new-owner"]) {
+    const remaining = { ...REUSE_ENTRY, fence_token };
+    const f = createReuseFixture();
+    const put = f.bucket.put;
+    f.bucket.put = async (...args) => {
+      const result = await put(...args);
+      f.replaceEntries([REUSE_OTHER, remaining]);
+      return result;
+    };
+    assert.deepEqual(await f.prepare(), { ok: false, reason: "event_id_reuse_manifest_release_unconfirmed" });
+    assert.deepEqual(f.manifest().entities, [REUSE_OTHER, remaining]);
+    assert.equal(f.timeline.filter(op => op === "r2:put").length, 1);
+    assert.equal(f.timeline.filter(op => op === "host:read").length, 2);
+    assert.equal(f.d1.stats.reads, 2);
+    assertReuseDidNotMutateD1(f);
+  }
+});
+
+test("MIG-0652 reuse CURRENT characterization: partial PUT failure still returns no compensation receipt", async () => {
   const partial = createReuseFixture();
   const get = partial.bucket.get;
   let reads = 0;
@@ -1176,20 +1221,19 @@ test("MIG-0652 reuse CURRENT characterization: partial PUT and foreign confirmat
   assert.deepEqual(await partial.prepare(), { ok: false, reason: "event_id_reuse_manifest_release_failed" });
   assert.deepEqual(partial.manifest().entities, [REUSE_OTHER], "KNOWN CURRENT: removed entry has no returned compensation receipt");
   assertReuseDidNotMutateD1(partial);
+});
+
+test("MIG-0652 reuse compensation: a foreign block appearing after release is preserved", async () => {
   const foreign = { ...REUSE_ENTRY, fence_token: "new-owner" };
   const raced = createReuseFixture();
-  const put = raced.bucket.put;
-  raced.bucket.put = async (...args) => {
-    const result = await put(...args);
-    raced.replaceEntries([REUSE_OTHER, foreign]);
-    return result;
-  };
   const result = await raced.prepare();
-  assert.equal(result.ok, true, "CURRENT confirmation only rejects the old token still being present");
-  const writes = raced.timeline.filter(op => op === "host:write").length;
+  assert.equal(result.ok, true);
+  raced.replaceEntries([REUSE_OTHER, foreign]);
+  raced.timeline.length = 0;
   await compensateEventIdReuseOnD1Failure(result.precommit, raced.host);
-  assert.equal(raced.timeline.filter(op => op === "host:write").length, writes);
+  assert.deepEqual(raced.timeline, ["host:bucket", "host:read", "r2:get", "r2:text"]);
   assert.deepEqual(raced.manifest().entities, [REUSE_OTHER, foreign]);
+  assertReuseDidNotMutateD1(raced);
 });
 
 test("MIG-0652 reuse CURRENT characterization: prior-cycle cleanup is accepted without a tombstone generation filter", async () => {
@@ -1216,4 +1260,88 @@ test("MIG-0652 reuse CURRENT characterization: failed creator compensation can r
   assert.deepEqual(f.manifest().entities, [REUSE_OTHER, REUSE_ENTRY], "KNOWN CURRENT availability defect; not safe reuse acceptance");
   assert.equal(f.sqlite.prepare("SELECT id FROM events").get().id, "ev_create");
   assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM public_visibility_fences").get().n, 0);
+});
+
+test("MIG-0652 update permissions: only the exact admin role bypasses D1", async () => {
+  const admin = createAtomicCreateHarness({ beforeRead() { throw new Error("admin must not read D1"); } });
+  assert.deepEqual(await resolveEventEditPermissions(admin.db, { id: "u_admin", role: "admin" }, "ev_create"),
+    { basic: true, publish: true, questions: true, slots: true });
+  assert.equal(admin.d1.stats.statements, 0);
+  assert.equal(admin.d1.stats.batches, 0);
+  for (const role of ["Admin", "admin ", "moderator", "user", null, undefined]) {
+    const f = createAtomicCreateHarness();
+    assert.deepEqual(await resolveEventEditPermissions(f.db, { id: "u_admin", role }, "ev_create"),
+      { basic: false, publish: false, questions: false, slots: false }, String(role));
+    assert.equal(f.d1.stats.reads, 1);
+    assert.equal(f.d1.stats.batches, 0);
+  }
+});
+
+test("MIG-0652 update permissions: approved owner and manager links union only this event's staff grants", async () => {
+  const f = createAtomicCreateHarness({ beforeRead(_sqlite, sql) { assert.match(sql, /^select\b/i); } });
+  seedCreateActor(f.sqlite, { selectedX: "x_rejected" });
+  addApprovedLink(f.sqlite, "x_manager", { role: "manager" });
+  addApprovedLink(f.sqlite, "x_rejected", { status: "rejected" });
+  insert(f.sqlite, "x_users", { id: "x_unlinked", x_name: "Unlinked", approval_status: "approved" });
+  const grants = [
+    { x_user_id: "x_approved", permission_preset: "custom", custom_permission_keys_json: '["event.basic"]' },
+    { x_user_id: "x_manager", permission_preset: "custom", custom_permission_keys_json: '["event.publish","event.questions"]' },
+    { x_user_id: "x_rejected" },
+    { x_user_id: "x_unlinked" },
+    { x_user_id: "x_approved", event_id: "ev_other" },
+  ];
+  for (const [index, grant] of grants.entries()) {
+    insert(f.sqlite, "event_staff", { ...owner, id: "grant_" + index, ...grant });
+  }
+  const changes = f.sqlite.prepare("SELECT total_changes() AS n").get().n;
+  assert.deepEqual(await resolveEventEditPermissions(f.db, { id: "u_admin", role: "user" }, "ev_create"),
+    { basic: true, publish: true, questions: true, slots: false });
+  assert.equal(f.d1.stats.reads, 2);
+  assert.equal(f.d1.stats.batches, 0);
+  assert.equal(f.sqlite.prepare("SELECT total_changes() AS n").get().n, changes);
+});
+
+test("MIG-0652 update permissions: approval, linkage, membership and staff presets retain CURRENT denials", async () => {
+  const denied = { basic: false, publish: false, questions: false, slots: false };
+  const cases = [
+    { name: "unlinked approved X", actor: { linked: false }, reads: 1 },
+    { name: "another actor's link", actor: { linkActor: "u_other" }, reads: 1 },
+    ...["pending", "rejected", "imported"].map(status => ({ name: status, actor: { status }, reads: 1 })),
+    { name: "no staff row", staff: null, reads: 2 },
+    { name: "other event", staff: { event_id: "ev_other" }, reads: 2 },
+    { name: "malformed custom grants", staff: { permission_preset: "custom", custom_permission_keys_json: "{" }, reads: 2 },
+    { name: "slot manager", staff: { permission_preset: "slot_manager" }, reads: 2, expected: { ...denied, slots: true } },
+    { name: "owner", reads: 2, expected: { basic: true, publish: true, questions: true, slots: true } },
+  ];
+  for (const item of cases) {
+    const f = createAtomicCreateHarness({ beforeRead(_sqlite, sql) { assert.match(sql, /^select\b/i); } });
+    seedCreateActor(f.sqlite, item.actor);
+    if (item.staff !== null) insert(f.sqlite, "event_staff", { ...owner, ...item.staff });
+    const changes = f.sqlite.prepare("SELECT total_changes() AS n").get().n;
+    assert.deepEqual(await resolveEventEditPermissions(f.db, { id: "u_admin", role: "user" }, "ev_create"),
+      item.expected ?? denied, item.name);
+    assert.equal(f.d1.stats.reads, item.reads, item.name);
+    assert.equal(f.d1.stats.batches, 0, item.name);
+    assert.equal(f.sqlite.prepare("SELECT total_changes() AS n").get().n, changes, item.name);
+  }
+});
+
+test("MIG-0652 update permissions: approved-link and staff D1 failures propagate without grants or writes", async () => {
+  for (const failAt of [1, 2]) {
+    const failure = new Error("injected permission read failure");
+    const f = createAtomicCreateHarness({ beforeRead(_sqlite, sql, count) {
+      assert.match(sql, /^select\b/i);
+      if (count === failAt) throw failure;
+    } });
+    seedCreateActor(f.sqlite);
+    insert(f.sqlite, "event_staff", owner);
+    const changes = f.sqlite.prepare("SELECT total_changes() AS n").get().n;
+    await assert.rejects(
+      resolveEventEditPermissions(f.db, { id: "u_admin", role: "user" }, "ev_create"),
+      error => error.cause === failure,
+    );
+    assert.equal(f.d1.stats.reads, failAt);
+    assert.equal(f.d1.stats.batches, 0);
+    assert.equal(f.sqlite.prepare("SELECT total_changes() AS n").get().n, changes);
+  }
 });

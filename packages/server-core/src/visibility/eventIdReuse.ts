@@ -1,9 +1,10 @@
 /**
- * MIG-0652: exact CURRENT event-ID reuse preparation and compensation.
- * The host preserves binding lookup and manifest-wrapper behavior. This move
- * does not enable Hono reuse or repair the inherited mixed-token removal,
- * partial-PUT confirmation or concurrent compensation behavior; those remain
- * explicit acceptance blockers in the owner work-item and characterization.
+ * MIG-0652: shared CURRENT event-ID reuse preparation and compensation.
+ * Release requires all same-event manifest tokens to belong to the tombstone,
+ * and confirmation requires that event's block to be absent. The host preserves
+ * binding lookup and manifest-wrapper behavior. Partial-PUT receipts, concurrent
+ * compensation and cleanup-generation checks remain acceptance blockers;
+ * Hono reuse is not enabled.
  */
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import type { ServerCoreDb } from "../db.ts";
@@ -165,7 +166,13 @@ export async function preCommitEventIdReuse(input: {
       (entry) =>
         entry.entity_type === "event" && entry.entity_id === input.eventId,
     ) ?? null;
-  if (currentEntry && currentEntry.fence_token !== input.tombstone.fence_token) {
+  const hasForeignToken = manifest.manifest.entities.some(
+    (entry) =>
+      entry.entity_type === "event" &&
+      entry.entity_id === input.eventId &&
+      entry.fence_token !== input.tombstone.fence_token,
+  );
+  if (hasForeignToken) {
     return notReady("event_id_reuse_fence_token_mismatch");
   }
 
@@ -191,8 +198,7 @@ export async function preCommitEventIdReuse(input: {
       const stillBlocked = confirmed.manifest.entities.some(
         (entry) =>
           entry.entity_type === "event" &&
-          entry.entity_id === input.eventId &&
-          entry.fence_token === input.tombstone.fence_token,
+          entry.entity_id === input.eventId,
       );
       if (stillBlocked) {
         return notReady("event_id_reuse_manifest_release_unconfirmed");

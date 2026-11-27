@@ -90,6 +90,7 @@
     "./video/generalEditPermissions": "./src/video/generalEditPermissions.ts",
     "./auth/ownership": "./src/auth/ownership.ts",
     "./event/eventOwnership": "./src/event/eventOwnership.ts",
+    "./event/editPermissions": "./src/event/editPermissions.ts",
     "./publicData/videoCardCore": "./src/publicData/videoCardCore.ts",
     "./publicData/recentVideoCore": "./src/publicData/recentVideoCore.ts",
     "./publicData/popularVideoCore": "./src/publicData/popularVideoCore.ts",
