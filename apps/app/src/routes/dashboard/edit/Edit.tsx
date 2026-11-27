@@ -171,7 +171,7 @@ function EditHeader({ page, videoId }: { page: EditPageWithHeader; videoId: stri
         </AppLink>
       </p>
       {showAdmin || showEvent || showNormal ? (
-        <div className={`fn-privilege-banner fn-privilege-banner--${mode} fn-privilege-banner--switch`} aria-label="編集権限モードの切替">
+        <div className={`fn-privilege-banner fn-privilege-banner--${mode}`} aria-label="編集権限モードの切替">
           <span className="fn-privilege-banner-actions">
             {showAdmin ? <AppLink href={`${base}?privileged=admin`} className="fn-btn fn-btn-ghost fn-btn-sm">管理者権限で編集</AppLink> : null}
             {showEvent ? <AppLink href={`${base}?privileged=event`} className="fn-btn fn-btn-ghost fn-btn-sm">イベント運営権限で編集</AppLink> : null}
