@@ -1158,12 +1158,83 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
         assert.equal(activeFilter(), "WARN (1)", path);
         assert.equal(pending.length, count, path);
 
+        // T01/T04: click the actual filter controls, not just URL-derived state.
+        // Filtering is local; the global summary/counts remain unchanged.
+        const completeRows = idleUrl ? deepResults : securityResults;
+        const nav = target.querySelector('nav[aria-label="状態フィルタ"]');
+        assert.ok(nav, path);
+        const filterButtons = [...nav.querySelectorAll("button")];
+        assert.equal(filterButtons.length, 4, path);
+        const filterCases = [
+          ["all", "すべて"], ["warn", "WARN"], ["info", "INFO"], ["ok", "OK"],
+        ];
+        const chooseFilter = async (index, rows) => {
+          const [status, label] = filterCases[index];
+          const expected = status === "all" ? rows : rows.filter(row => row.status === status);
+          const button = filterButtons[index];
+          assert.equal(button.textContent.trim(), label + " (" + expected.length + ")", path);
+          const before = pending.length;
+          await React.act(async () => { button.click(); });
+          assert.equal(pending.length, before, path);
+          assert.equal(activeFilter(), label + " (" + expected.length + ")", path);
+          assert.equal(nav.querySelectorAll('button[aria-pressed="true"]').length, 1, path);
+          const shown = [...target.querySelectorAll("tbody tr")];
+          assert.equal(shown.length, Math.max(expected.length, 1), path);
+          if (expected.length === 0) {
+            assert.equal(shown[0].cells.length, 1, path);
+            assert.equal(shown[0].cells[0].colSpan, 4, path);
+            assert.equal(shown[0].textContent.trim(), "フィルタ条件に該当する項目はありません。", path);
+          } else {
+            assert.deepEqual(shown.map(row => row.cells[1].textContent.trim()),
+              expected.map(row => row.status.toUpperCase()), path);
+          }
+        };
+        for (const index of [0, 2, 3, 1]) {
+          await chooseFilter(index, completeRows);
+          assert.match(target.querySelector('[role="status"]').textContent, /WARN 1 件/, path);
+        }
+        assert.equal(pending.length, count, path);
+
+        // A fresh complete result can resolve the only warning while WARN is
+        // selected. Preserve the selection, report zero rows honestly and
+        // allow the user to inspect the remaining OK/INFO rows without refetch.
+        const clickRefresh = async () => {
+          const button = [...target.querySelectorAll("button")]
+            .find(node => node.textContent.trim() === "最新状態を再チェック");
+          assert.ok(button, path);
+          const before = pending.length;
+          await React.act(async () => { button.click(); });
+          assert.equal(pending.length, before + 1, path);
+          assert.equal(pending.at(-1).url, runUrl, path);
+          return pending.at(-1);
+        };
+        const cleanRows = completeRows.map((row, i) => i === 1
+          ? { ...row, status: "ok", count: 0, samples: [] }
+          : i === 0 ? { ...row, label: "clean-private-marker" } : row);
+        const clean = await clickRefresh();
+        await React.act(async () => {
+          clean.resolve(response(200, { status: "all", ran: true, error: null, results: cleanRows }));
+        });
+        assert.equal(activeFilter(), "WARN (0)", path);
+        assert.match(target.querySelector('[role="status"]').textContent, /WARN はありません/, path);
+        await chooseFilter(1, cleanRows);
+        await chooseFilter(3, cleanRows);
+        assert.match(target.querySelector("tbody").textContent, /clean-private-marker/, path);
+        await chooseFilter(2, cleanRows);
+        await chooseFilter(1, cleanRows);
+        // Restore the warning on another genuine refresh; no filter reset.
+        await finish(await clickRefresh(), "new-run-WARN");
+        assert.equal(activeFilter(), "WARN (1)", path);
+        assert.match(target.querySelector("tbody").textContent, /new-run-WARN/, path);
+        assert.doesNotMatch(target.textContent, /clean-private-marker/, path);
+
         // Same-key refresh must not retain prior admin results after denial.
+        const beforeDenial = pending.length;
         const refresh = [...target.querySelectorAll("button")]
           .find(button => button.textContent.trim() === "最新状態を再チェック");
         assert.ok(refresh, path);
         await React.act(async () => { refresh.click(); });
-        assert.equal(pending.length, count + 1, path);
+        assert.equal(pending.length, beforeDenial + 1, path);
         assert.equal(pending.at(-1).url, runUrl, path);
         await React.act(async () => {
           pending.at(-1).resolve(response(403, { redirect: "/dashboard" }));
