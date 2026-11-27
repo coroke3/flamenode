@@ -153,3 +153,14 @@ test("event route change resets mounted slot dialogs and in-flight mutation UI e
   assert.match(panel, /<SlotGrid\s+key=\{eventId\}\s+slots=\{slots\}/);
   assert.match(panel, /overlayState\.eventId === eventId && overlayState\.baseSlots === baseSlots/);
 });
+
+// This is a source-contract guard; mounted async completion assertions still require runtime acceptance.
+test("unmount and viewer identity effect cleanup invalidate pending slot action completions", async () => {
+  const slotGrid = await readFile(new URL("../../components/event/SlotGrid.tsx", import.meta.url), "utf8");
+  assert.match(slotGrid, /return \(\) => \{\s*\/\/ Unmount\/identity-key replacement[\s\S]*?viewerGeneration\.current \+= 1;\s*window\.removeEventListener\(ACTIVE_X_CHANGED_EVENT/);
+  for (const action of ["reserveSlot", "releaseOwnSlot", "extendOwnSlotGroup", "mergeOwnSlotGroups"]) {
+    assert.match(slotGrid, new RegExp(`runSlotAction\\(\\(\\) => ${action}\\(fd\\)`));
+  }
+  assert.ok((slotGrid.match(/submittedGeneration !== viewerGeneration\.current/g) ?? []).length >= 8);
+  assert.match(panel, /<SlotGrid\s+key=\{eventId\}\s+slots=\{slots\}/);
+});

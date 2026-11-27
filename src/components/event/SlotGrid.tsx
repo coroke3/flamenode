@@ -295,6 +295,9 @@ export function SlotGrid({
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
     window.addEventListener("pageshow", onPageShow);
     return () => {
+      // Unmount/identity-key replacement must also retire pre-switch action callbacks.
+      // Otherwise a late resolved action can still refresh the new route after unmount.
+      viewerGeneration.current += 1;
       window.removeEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
       window.removeEventListener("pageshow", onPageShow);
     };
