@@ -355,13 +355,35 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
     assert.equal(record().progress.stage, "system_user", "R2 still points to the committed step");
     assert.equal(stats.batches, 1);
     assert.equal(durableWrites, 1);
+    // A committed receipt with hostile/mismatched identity is never evidence
+    // that this request may advance R2. Reject, release and preserve D1.
+    const auditRow = sqlite.prepare(
+      "SELECT id, after_json FROM audit_logs WHERE table_name = 'legacy_import_steps'",
+    ).get();
+    assert.ok(auditRow);
+    const originalReceipt = auditRow.after_json;
+    const corrupted = { ...JSON.parse(originalReceipt), plan_hash: "0".repeat(64) };
+    sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?")
+      .run(JSON.stringify(corrupted), auditRow.id);
+    const blocked = await request(form());
+    assert.equal(blocked.status, 409, JSON.stringify(await blocked.clone().json()));
+    const blockedBody = await blocked.json();
+    assert.equal(blockedBody.ok, false);
+    assert.equal(blockedBody.requires_repreview, true);
+    assert.equal(record().status, "ready", "identity mismatch releases R2 claim");
+    assert.equal(record().progress.stage, "system_user", "bad D1 marker cannot advance R2");
+    assert.equal(stats.batches, 1, "identity mismatch must not duplicate D1 transaction");
+    assert.equal(durableWrites, 1);
+    // Restore the test fixture to simulate a corrected persisted audit.
+    sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?")
+      .run(originalReceipt, auditRow.id);
     const second = await request(form());
     assert.equal(second.status, 200, JSON.stringify(await second.clone().json()));
     const recovered = await second.json();
     assert.equal(recovered.progress.stage, "x_users");
-    assert.equal(recovered.attempt, 2);
+    assert.equal(recovered.attempt, 3, "the invalid receipt also consumes an R2 claim");
     assert.equal(record().progress.stage, "x_users");
-    assert.equal(getD1ApplyCalls(), 2, "the adapter may be re-entered for marker replay");
+    assert.equal(getD1ApplyCalls(), 3, "both rejected and valid receipts invoke the read-only adapter");
     assert.equal(stats.batches, 1, "replaying a committed D1 audit must never write another batch");
     assert.equal(durableWrites, 1);
     for (const [table, count] of [["x_users", 1], ["static_rebuild_queue", 1], ["audit_logs", 2]]) {
