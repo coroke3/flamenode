@@ -160,6 +160,8 @@ export function EventSlotsViewerPanel({
   });
   const [loading, setLoading] = React.useState(true);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
+  // Increment synchronously on a committed Active X switch, before React effect cleanup.
+  const overlayGeneration = React.useRef(0);
 
   const overlayIsCurrent = overlayState.baseSlots === baseSlots;
   const viewerOverlay = overlayIsCurrent ? overlayState.value : EMPTY_OVERLAY;
@@ -173,6 +175,7 @@ export function EventSlotsViewerPanel({
       SLOT_VIEWER_OVERLAY_TIMEOUT_MS,
     );
     const requestBaseSlots = baseSlots;
+    const requestGeneration = overlayGeneration.current;
     setLoading(true);
     void fetch(
       `/api/events/${encodeURIComponent(eventId)}/slots/viewer-overlay`,
@@ -198,7 +201,7 @@ export function EventSlotsViewerPanel({
         return { ...EMPTY_OVERLAY, authUnavailable: true };
       })
       .then((value) => {
-        if (!active || !value) return;
+        if (!active || !value || requestGeneration !== overlayGeneration.current) return;
         setOverlayState({ value, baseSlots: requestBaseSlots });
         setLoading(false);
       })
@@ -214,6 +217,7 @@ export function EventSlotsViewerPanel({
 
   React.useEffect(() => {
     const refresh = () => {
+      overlayGeneration.current += 1;
       // Active X切替直後に旧Xの本人枠・表示名を残さない。
       setOverlayState({ value: EMPTY_OVERLAY, baseSlots: null });
       setLoading(true);

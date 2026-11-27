@@ -26,3 +26,16 @@ test("SlotGrid catches rejected slot server actions", () => {
     );
   }
 });
+
+const viewerPanelSource = await readFile(
+  new URL("../../app/(public)/event/[id]/slots/EventSlotsViewerPanel.tsx", import.meta.url),
+  "utf8",
+);
+
+test("CURRENT viewer overlay retires old GET immediately on Active X change", () => {
+  assert.match(viewerPanelSource, /const overlayGeneration = React\.useRef\(0\)/);
+  assert.match(viewerPanelSource, /const requestGeneration = overlayGeneration\.current/);
+  assert.match(viewerPanelSource, /if \(!active \|\| !value \|\| requestGeneration !== overlayGeneration\.current\) return/);
+  assert.match(viewerPanelSource, /const refresh = \(\) => \{\s*overlayGeneration\.current \+= 1/);
+  assert.match(viewerPanelSource, /window\.addEventListener\(ACTIVE_X_CHANGED_EVENT, refresh\)/);
+});
