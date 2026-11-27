@@ -1484,3 +1484,54 @@ test("MIG-0652 update payload: CURRENT runtime exports and admin section constan
   assert.equal(currentEventSections.EVENT_SECTION_PERMISSION_KEYS, EVENT_SECTION_PERMISSION_KEYS);
   assert.deepEqual(EVENT_SECTION_PERMISSION_KEYS, { basic: "event.basic", publish: "event.publish", questions: "event.questions", slots: "event.slots" });
 });
+
+const makeStageQuestionDiffRow = (key, extra = {}) => ({
+  id: "old-" + key, question_key: key, label: key, description: null,
+  type: "textarea", required: 0, options_json: null, placeholder: null,
+  max_length: 1000, sort_order: 0, is_active: 1, visibility: "review",
+  updated_at: 50, ...extra,
+});
+test("MIG-0652 U03f: pure stage diff retains matching definitions without mutations", async () => {
+  const { planStageQuestionDiff } = await import("@flamenode/server-core/event/updatePayload");
+  const oldRows = [makeStageQuestionDiffRow("a"), makeStageQuestionDiffRow("b")];
+  const nextRows = [makeStageQuestionDiffRow("a", { id: "new-a" }), makeStageQuestionDiffRow("b", { id: "new-b" })];
+  assert.deepEqual(planStageQuestionDiff(oldRows, nextRows),
+    { ok: true, obsolete: [], changed: [], inserted: [] });
+  assert.equal(oldRows[0].id, "old-a");
+  assert.equal(nextRows[0].id, "new-a");
+});
+test("MIG-0652 U03f: pure stage diff orders deletions/changes by old and inserts by next", async () => {
+  const { planStageQuestionDiff } = await import("@flamenode/server-core/event/updatePayload");
+  const oldRows = ["old1", "changed1", "old2", "changed2", "same"].map(k => makeStageQuestionDiffRow(k));
+  const newRows = [makeStageQuestionDiffRow("new2"), makeStageQuestionDiffRow("changed2", { required: 1 }),
+    makeStageQuestionDiffRow("same"), makeStageQuestionDiffRow("new1"), makeStageQuestionDiffRow("changed1", { label: "new" })];
+  const result = planStageQuestionDiff(oldRows, newRows);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.obsolete.map(x => x.question_key), ["old1", "old2"]);
+  assert.deepEqual(result.changed.map(x => x.before.question_key), ["changed1", "changed2"]);
+  assert.deepEqual(result.inserted.map(x => x.question_key), ["new2", "new1"]);
+});
+test("MIG-0652 U03f: exact eleven-field CURRENT stage comparison ignores only identity/timestamps", async () => {
+  const { planStageQuestionDiff } = await import("@flamenode/server-core/event/updatePayload");
+  for (const key of ["question_key", "label", "description", "type", "required",
+    "options_json", "placeholder", "max_length", "sort_order", "is_active", "visibility"]) {
+    const before = makeStageQuestionDiffRow("same");
+    const after = makeStageQuestionDiffRow("same", { [key]: key === "question_key" ? "different" : "different" });
+    const result = planStageQuestionDiff([before], [after]);
+    assert.equal(result.ok, true, key);
+    if (key === "question_key") {
+      assert.equal(result.obsolete.length, 1);
+      assert.equal(result.inserted.length, 1);
+    } else assert.equal(result.changed.length, 1, key);
+  }
+  assert.deepEqual(planStageQuestionDiff([makeStageQuestionDiffRow("a")],
+    [makeStageQuestionDiffRow("a", { id: "other", updated_at: 99 })]),
+    { ok: true, obsolete: [], changed: [], inserted: [] });
+});
+test("MIG-0652 U03f: duplicate stage keys fail closed", async () => {
+  const { planStageQuestionDiff } = await import("@flamenode/server-core/event/updatePayload");
+  assert.deepEqual(planStageQuestionDiff([makeStageQuestionDiffRow("a"), makeStageQuestionDiffRow("a")], []),
+    { ok: false, reason: "duplicate_existing_key" });
+  assert.deepEqual(planStageQuestionDiff([], [makeStageQuestionDiffRow("a"), makeStageQuestionDiffRow("a")]),
+    { ok: false, reason: "duplicate_next_key" });
+});
