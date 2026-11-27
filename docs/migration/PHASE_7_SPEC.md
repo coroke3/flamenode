@@ -1035,7 +1035,7 @@ Phase 7 共通契約のとおり。
 
 ### MIG-0717: `/dashboard/edit/:id` の画面（SA-089、MIG-0703 U02 の前半）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — Draft #913 の U01a/U02a/U01b1 は限定受入済み。U02b1 overview は Lead handoff comment7221102275 により着手可能。共有 CSS は予約された1 entry/import/order expectation のみ、personal client は #912 の所有を維持する。#703 の trusted TARGET route / loader / authority / refresh と全 task gate は未完。
+- **Readiness:** NEEDS_REFINEMENT — Draft #913 の U01a/U02a/U01b1 は限定受入済み。U02b1 overview は Lead handoff comment7221102275、U02b2a admin menu は既存 Edit/test の限定範囲で着手可能。共有 CSS は予約された1 entry/import/order expectation のみ、personal client は #912 の所有を維持する。#703 の trusted TARGET route / loader / authority / refresh と全 task gate は未完。
 - **Recipe:** R-SCREEN
 - **Runtime:** N
 - **Depends on:** MIG-0714 / **Decisions:** D-05 DECIDED, D-16-1, D-16-11
@@ -1048,6 +1048,7 @@ Phase 7 共通契約のとおり。
 #### Owned paths
 - U01a / U01b1 / U02a: `apps/app/src/api/videoEdit.ts`, `apps/app/src/routes/dashboard/edit/Edit.tsx`, `apps/app/src/components/permission/VideoEditPermissionSummary.tsx`, `apps/app/test/editPage.test.mjs`。U01b1 は client / Edit / 既存テストを変更する。#912 と独立した domain client を `Edit` が使用する。
 - U02b1: `+apps/app/src/components/permission/VideoEditPermissionOverview.tsx`, `+apps/app/src/styles/video-edit-permission-overview.css` と既存 Edit / editPage test。共有の `apps/app/scripts/portCssModule.mjs` / `apps/app/src/main.tsx` / `apps/app/test/styles.test.mjs` は vedit-overview の1 registration/import/order expectation だけを追加する。CURRENT component/CSS は `src/components/video/permission/VideoEditPermissionOverview.tsx` / `.module.css`。
+- U02b2a: 既存 `apps/app/src/routes/dashboard/edit/Edit.tsx` / `apps/app/test/editPage.test.mjs` のみ。CURRENT `src/components/admin/AdminVideoTabs.tsx` / `AdminResourceTabs.tsx` の表示を private presenter に移し、既存 AppLink / Icon / videoPageHref と global styles を使う。CURRENT source 行の first owner MIG-0705 と過去 evidence は維持する。共有 CSS の追加枠は不要。
 - 後続: edit shell / EmptyState、`apps/app/src/routes/router.tsx`、`apps/app/src/api/videoSubmit.ts`（MIG-0716 の client）。共有ファイルの追加変更は個別の所有権調整と該当 unit の受入後。
 - CURRENT の `app/(auth)/**` / `src/components/**` と `apps/api/**` は範囲外。
 #### Micro-units
@@ -1055,8 +1056,9 @@ Phase 7 共通契約のとおり。
 - **U01b1 options 読み取りの継続**: 未登録の `Edit` から同一の動画・requested mode・中断 signal を使い、offset 0 から順に読む。次の offset は 900 以下で増分 1〜100 の整数。`truncated:false` と `nextOffset:null` で API が示したページ列が完了する。イベントは受信順で ID 重複を拒否し、回答は一致する値だけ重複を許容する。stage answers と候補値は初回の値を採用する。最大 901 リクエストは cursor の数学的上限。
 - **U01b2 form 接続前の受入**: mounted host での取得予算と identity / authority 条件を Lead が確定する。options DTO には subject / version と所属イベント専用の打ち切り flag が無い。U01b1 の完了とは別に、同一主体の atomic snapshot、legacy の所属上限、実行時の write authority を検証する。
 - **U02a summary**: 完了した edit 読みの `permissionSummary` を表示し、現在の resolved mode を permissions リンクへ引き継ぐ。D1 canonical DTO の management card を使用する。
-- **U02b1 overview**: canonical EditAccess の解決済み mode、ownership、offered modes、10 section の可否を CURRENT と同じ順序・文言・見出しで表示する。event title は section title の null 時だけ mode title へ戻り、trim 後の重複を除く。未登録 Edit の header 直後へ置く。CSS は既存 converter を使い、自 branch の vform 直後へ予約された1 slot のみ追加。#912 統合時の順序は vform → status-panel → entry-unslotted → vedit-overview。converter / 既存 CSS / 他 owner slice は保持する。
-- **U02b2 edit shell**: 残る edit shell / EmptyState の CURRENT 表示を移植する。outer404 の実 route/layout 受入は trusted host で別途検証し、U02b1 の完了で代替しない。
+- **U02b1 overview**: canonical EditAccess の解決済み mode、ownership、offered modes、10 section の可否を CURRENT と同じ順序・文言・見出しで表示する。event title は section title の null 時だけ mode title へ戻り、trim 後の重複を除く。未登録 Edit の header と該当する admin menu の後へ置く。CSS は既存 converter を使い、自 branch の vform 直後へ予約された1 slot のみ追加。#912 統合時の順序は vform → status-panel → entry-unslotted → vedit-overview。converter / 既存 CSS / 他 owner slice は保持する。
+- **U02b2a admin menu**: kind edit、解決済み admin mode、canonical user.role admin がすべて成立するとき、header と overview の間に CURRENT の6リンクを表示する。動画 ID の encoding、public URL helper、明示的な admin query、内容編集の active 状態、nav label と装飾 icon を保持する。switch-only / requested-only admin / 失敗中には表示しない。新規 component/CSS/route を追加しない。
+- **U02b2b remaining shell**: 残る edit shell / EmptyState の CURRENT 表示を移植する。追加 CSS は個別の共有枠調整が必要。outer404 の実 route/layout 受入は trusted host で別途検証し、U02b1/U02b2a の完了で代替しない。
 - **U02c form**: U01b の完全な snapshot と MIG-0714 の `VideoForm`（mode edit）を接続し、#703 の trusted authority と draft refresh を検証する。
 - **U03 merge 直前**（D-16-1 の 5）。
 #### Test cases
@@ -1069,6 +1071,7 @@ Phase 7 共通契約のとおり。
 | T05 | 完全な edit 読みと permission summary | CURRENT の件数、名前、警告、権限モード付き管理リンクを表示する |
 | T06 | options の複数ページ、空ページ、cursor 上限、不整合、途中のアクセス喪失と中断 | 正常完了時だけ集約した読みを返し、不整合・中断時は後続 GET と private 表示を止める |
 | T07 | normal/event/admin overview、全許可/全禁止、複数イベント権限元、switch-only、失敗中 | CURRENT の10項目・文言・空状態・イベント名・accessible headings と CSS を保持し、失敗中は private overview を出さない |
+| T08 | 完全な admin edit、role/mode の不一致、switch-only、未完了・失敗中 | CURRENT の6リンク・encoding・active 状態・header と overview の間の配置を保持し、canonical admin edit 以外では menu を出さない |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/app
@@ -1079,7 +1082,7 @@ npm run check:project-docs
 #### Ledger updates
 `FILE_MIGRATION_MATRIX.md` の edit ページと追加ファイルを IN_PROGRESS とし、CURRENT 行の first owner を維持する。SA-089 の SPA 呼び出し元は write 接続時に `API_MATRIX.md` に記録する。
 #### DONE checklist
-- [ ] U01〜U03 が DONE、T01〜T07 が PASS
+- [ ] U01〜U03 が DONE、T01〜T08 が PASS
 - [ ] MIG-0651 / 0648 / 0650 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
 #### STOP
 - 編集可能 section を SPA 側で決める必要が出たら止める（読みの API が正）。

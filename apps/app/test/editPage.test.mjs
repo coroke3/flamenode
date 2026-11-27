@@ -16,6 +16,7 @@ const access = (over = {}) => ({
     memberChapters: true, primaryEvent: true, visibility: true, permissions: true },
   sectionEventSources: null, eventId: null, eventTitleForMode: null, canEditAnySection: true, ...over,
 });
+const enabledSections = (...keys) => Object.fromEntries(Object.keys(access().sections).map((key) => [key, keys.includes(key)]));
 const header = (over = {}) => ({ id: "video-1", title: "既存作品", visibility_status: "private", youtube_video_id: "abcdefghijk", ...over });
 const editPage = (over = {}) => ({
   kind: "edit", user: user(), access: access(),
@@ -50,6 +51,9 @@ const isOptions = (path) => path.split("?", 1)[0].endsWith("/form-options");
 const offsetOf = (path) => Number(new URLSearchParams(path.split("?", 2)[1]).get("offset") ?? 0);
 const href = (container, label) => [...container.querySelectorAll("a")]
   .find((a) => a.textContent.trim() === label)?.getAttribute("href");
+const overview = (container) => container.querySelector(".vedit-overview-panel");
+const editApi = (pageAccess, over = {}) => createVideoEditApi(async (path) =>
+  json(isOptions(path) ? options() : editPage({ access: pageAccess, ...over })));
 
 async function mountEdit(t, api, over = {}) {
   const container = dom.window.document.createElement("div");
@@ -228,6 +232,7 @@ test("repeat privilege queries fall back to normal and denied reads expose only 
   assert.equal(href(container, "ダッシュボードへ"), "/dashboard");
   assert.equal(href(container, "公開ページを見る"), "/video-1");
   assert.equal(container.querySelector("header, form"), null);
+  assert.equal(overview(container), null);
 });
 
 test("switch-only uses the resolved privilege mode, CURRENT header links and notice without requesting options", async (t) => {
@@ -235,7 +240,7 @@ test("switch-only uses the resolved privilege mode, CURRENT header links and not
   const api = createVideoEditApi(async (path) => {
     calls.push(path);
     return json({ kind: "switch_only", user: user({ role: "admin" }), video: header({ id: "v/a?b" }),
-      access: access({ canOfferAdminMode: true, canOfferEventMode: true, canEditAnySection: false }),
+      access: access({ sections: enabledSections(), canOfferAdminMode: true, canOfferEventMode: true, canEditAnySection: false }),
       message: "switch_admin", events: [] });
   });
   const { container } = await mountEdit(t, api, { videoId: "v/a?b", search: "?privileged=event" });
@@ -248,6 +253,10 @@ test("switch-only uses the resolved privilege mode, CURRENT header links and not
   assert.equal(href(container, "FlameNode で見る"), "/abcdefghijk");
   assert.equal(href(container, "YouTube で確認"), "https://www.youtube.com/watch?v=abcdefghijk");
   assert.equal(container.querySelector("form"), null);
+  const panel = overview(container);
+  assert.ok(panel.classList.contains("vedit-overview-normal"), "use the resolved normal mode");
+  assert.equal(container.querySelector("header").nextElementSibling, panel);
+  assert.match(panel.nextElementSibling.textContent, /明示的に権限を切り替えてください。/);
 });
 
 test("edit pages keep the same requested mode through options continuation before showing the read shell", async (t) => {
@@ -273,7 +282,7 @@ test("edit pages keep the same requested mode through options continuation befor
 test("permissions-only and incomplete snapshots cannot enable a form", async (t) => {
   const calls = [];
   const cases = [
-    [editPage({ access: access({ canEditAnySection: false }) }), options(), /現在の権限では編集できる項目がありません。/],
+    [editPage({ access: access({ sections: enabledSections("permissions"), canEditAnySection: false }) }), options(), /現在の権限では編集できる項目がありません。/],
     [editPage({ membersTruncated: true }), options()],
     [editPage({ collabTruncated: true, permissionSummary: permissionSummary() }), options()],
     [editPage(), options({ customAnswersTruncated: true })], [editPage(), options({ truncated: true })],
@@ -290,6 +299,7 @@ test("permissions-only and incomplete snapshots cannot enable a form", async (t)
     assert.match(container.textContent, fixture[2] ?? /画面の表示中に問題が発生しました/);
     if (!fixture[2]) assert.doesNotMatch(container.textContent, /既存作品/);
     assert.equal(container.querySelector("form, #video-collab-perms"), null);
+    if (!fixture[2]) assert.equal(overview(container), null);
     const [page] = fixture;
     assert.equal(calls.length, page.membersTruncated || page.collabTruncated ? 1 : 2);
   }
@@ -319,6 +329,7 @@ test("a failing options continuation suppresses private data and preserves disti
     assert.match(container.textContent, notice);
     assert.doesNotMatch(container.textContent, /既存作品/);
     assert.equal(container.querySelector("form, #video-collab-perms"), null);
+    assert.equal(overview(container), null);
   }
 });
 
@@ -332,6 +343,95 @@ test("a page response for a different video never starts form options or exposes
   assert.deepEqual(calls, ["/api/personal/edit/video-2"]);
   assert.match(container.textContent, /画面の表示中に問題が発生しました/);
   assert.doesNotMatch(container.textContent, /既存作品/);
+  assert.equal(overview(container), null);
+});
+
+test("normal overview orders all ten permission labels, links headings and keeps both empty messages", async (t) => {
+  const mixed = { ...access().sections, basics: false, credits: false, members: false, primaryEvent: false, permissions: false };
+  const { container, render } = await mountEdit(t, editApi(access({ sections: mixed })));
+  const panel = overview(container);
+  const heading = panel.querySelector("h2.vedit-overview-heading");
+  assert.equal(heading.textContent, "現在の編集権限");
+  assert.equal(panel.getAttribute("aria-labelledby"), heading.id);
+  assert.equal(heading.querySelector("svg").getAttribute("aria-hidden"), "true");
+  assert.equal(heading.querySelector("svg").getAttribute("width"), "11");
+  const blocks = [...panel.querySelectorAll(".vedit-overview-lists > section.vedit-overview-listBlock")];
+  const titles = blocks.map((block) => block.querySelector("h3.vedit-overview-listTitle"));
+  assert.deepEqual(titles.map((title) => title.textContent), ["編集可能", "編集不可"]);
+  assert.deepEqual(blocks.map((block) => block.getAttribute("aria-labelledby")), titles.map((title) => title.id));
+  assert.equal(new Set([heading.id, ...titles.map((title) => title.id)]).size, 3);
+  assert.deepEqual(blocks.map((block) => [...block.querySelectorAll(".vedit-overview-list li")].map((li) => li.textContent)), [
+    ["提出者情報", "YouTube URL", "紹介文・振り返り", "メンバーチャプター", "公開状態"],
+    ["作品タイトル・基本情報", "楽曲・クレジット", "合作メンバー", "所属イベント", "共同編集権限"],
+  ]);
+
+  for (const [sections, title, empty] of [
+    [enabledSections(), "編集可能", "現在、編集できる項目はありません。"],
+    [access().sections, "編集不可", "すべての項目が編集可能です。"],
+  ]) {
+    await render({ api: editApi(access({ sections })) });
+    const message = overview(container).querySelector(".vedit-overview-emptyList");
+    assert.equal(message.previousElementSibling.textContent, title);
+    assert.equal(message.textContent, empty);
+  }
+});
+
+test("normal overview keeps the CURRENT owner, event, admin and generic lead precedence", async (t) => {
+  const { container, render } = await mountEdit(t, editApi(access()));
+  const outsider = { isCreatorOwner: false, isCollaboratorOwner: false, isOwner: false };
+  for (const [over, lead] of [
+    [{ canOfferEventMode: true, canOfferAdminMode: true }, "所有者向け一般作品権限が適用されています。編集できる項目とできない項目は以下のとおりです。"],
+    [{ ownership: outsider, canOfferEventMode: true, canOfferAdminMode: true }, "通常モードでは編集できません。上部からイベント運営権限へ切り替えると、許可された項目を編集できます。"],
+    [{ ownership: outsider, canOfferAdminMode: true }, "通常モードでは編集できません。上部から管理者権限へ明示的に切り替えてください。"],
+    [{ ownership: outsider }, "現在の通常モードで編集できる項目とできない項目は以下のとおりです。"],
+  ]) {
+    await render({ api: editApi(access(over)) });
+    assert.equal(overview(container).querySelector(".vedit-overview-lead").textContent, lead);
+  }
+});
+
+test("event overview names distinct editable sources in section order and only falls back for missing titles", async (t) => {
+  const eventAccess = access({
+    privilegeMode: "event",
+    sections: { ...access().sections, primaryEvent: false, permissions: false },
+    eventTitleForMode: "   共通イベント   ",
+    sectionEventSources: {
+      basics: { eventId: "second", eventTitle: "  同じ名前 " },
+      identity: { eventId: "missing-title", eventTitle: null },
+      descriptions: { eventId: "another-id", eventTitle: "同じ名前" },
+      members: { eventId: "third", eventTitle: "別イベント" },
+      permissions: { eventId: "locked", eventTitle: "ロック済み" },
+      unknown: { eventId: "unknown", eventTitle: "不明" },
+    },
+  });
+  const { container, render } = await mountEdit(t, editApi(eventAccess), { search: "?privileged=event" });
+  const panel = overview(container);
+  assert.ok(panel.classList.contains("vedit-overview-event"));
+  assert.equal(panel.querySelector("h2").textContent, "イベント運営権限で編集中");
+  assert.equal(panel.querySelector("h2 svg[aria-hidden=true]").getAttribute("width"), "12");
+  assert.equal(panel.querySelector(".vedit-overview-eventName").textContent, "権限元イベント: 共通イベント / 同じ名前 / 別イベント");
+  assert.equal(panel.querySelector(".vedit-overview-lead").textContent, "項目ごとに異なるイベントの運営権限が適用されています。");
+
+  await render({ api: editApi({ ...eventAccess, sections: enabledSections("identity", "basics"), sectionEventSources: {
+    identity: { eventId: "empty", eventTitle: "" }, basics: { eventId: "whitespace", eventTitle: "   " },
+  } }) });
+  assert.equal(overview(container).querySelector(".vedit-overview-eventName"), null);
+  assert.equal(overview(container).querySelector(".vedit-overview-lead").textContent, "付与された運営権限の範囲内でのみ、作品情報を編集できます。");
+});
+
+test("admin overview appears between the page header and management card with the CURRENT audit note", async (t) => {
+  const api = editApi(access({ privilegeMode: "admin" }), { user: user({ role: "admin" }), permissionSummary: permissionSummary() });
+  const { container } = await mountEdit(t, api, { search: "?privileged=admin" });
+  const panel = overview(container);
+  const following = dom.window.Node.DOCUMENT_POSITION_FOLLOWING;
+  assert.ok(panel.classList.contains("vedit-overview-admin"));
+  assert.ok(container.querySelector("header").compareDocumentPosition(panel) & following);
+  assert.ok(panel.compareDocumentPosition(container.querySelector("#video-collab-perms")) & following);
+  assert.equal(panel.querySelector("h2").textContent, "管理者権限で編集中");
+  assert.equal(panel.querySelector("h2 svg[aria-hidden=true]").getAttribute("width"), "12");
+  assert.equal(panel.querySelector(".vedit-overview-lead").textContent, "提出主体や所属イベントなど、通常では変更できない項目も編集できます。");
+  assert.equal(panel.querySelector(".vedit-overview-auditNote").textContent, "管理者権限での変更は監査ログに記録されます。必要な操作のみ行ってください。");
+  assert.equal(panel.querySelector("ul, h3, .vedit-overview-eventName"), null);
 });
 
 test("the default edit client renders complete permission counts, names and warnings with a safe resolved-mode link", async (t) => {
@@ -354,7 +454,7 @@ test("the default edit client renders complete permission counts, names and warn
 
 test("a permission-only page can show the empty summary, using the resolved normal mode", async (t) => {
   const page = editPage({
-    access: access({ canEditAnySection: false }),
+    access: access({ sections: enabledSections("permissions"), canEditAnySection: false }),
     permissionSummary: permissionSummary({ editorCount: 0, unlinkedEditorCount: 0, notifiableEditorCount: 0, displayNames: "", warnings: [] }),
   });
   const api = createVideoEditApi(async (path) => json(isOptions(path) ? options() : page));
@@ -362,6 +462,7 @@ test("a permission-only page can show the empty summary, using the resolved norm
   const card = container.querySelector("#video-collab-perms");
   assert.match(card.textContent, /編集権限設定 0人まだ編集権限を付与された人はいません。/);
   assert.match(container.textContent, /現在の権限では編集できる項目がありません。/);
+  assert.equal(overview(container).querySelector(".vedit-overview-list").textContent, "共同編集権限");
   assert.equal(href(card, "編集できる人を管理"), "/dashboard/edit/video-1/permissions");
   assert.equal(container.querySelector("form"), null);
 });
@@ -379,6 +480,7 @@ test("identity, video, mode and client changes hide snapshots and stop stale rea
   const loading = () => {
     assert.match(container.textContent, /読み込み中/);
     assert.doesNotMatch(container.textContent, /既存作品/);
+    assert.equal(overview(container), null);
   };
   await render({ identityKey: "session-2:x-1" }, loading);
   assert.equal(calls[1].signal.aborted, true);

@@ -1,6 +1,7 @@
 import * as React from "react";
 import type { EditAccess, EditNotice, EditPageResponse } from "@flamenode/contracts";
 import { createVideoEditApi, type VideoEditApi, type VideoEditResult } from "../../../api/videoEdit.js";
+import { VideoEditPermissionOverview } from "../../../components/permission/VideoEditPermissionOverview.js";
 import { VideoEditPermissionSummary } from "../../../components/permission/VideoEditPermissionSummary.js";
 import { videoPageHref, youtubeWatchUrl } from "../../../lib/youtubeId.js";
 import { AuthUnavailable, BannedNotice, LoginRequired, SessionLoading } from "../../guard.js";
@@ -115,6 +116,7 @@ function EditReadBoundary({ api, videoId, mode }: {
   return (
     <div className="fn-public-container fn-page fn-page--video-edit">
       <EditHeader page={page} videoId={videoId} />
+      <VideoEditPermissionOverview access={page.access} />
       {notice ? (
         <div className="fn-status-panel fn-status-panel--warn" role="status">
           <p className="fn-status-panel-lead">{notice}</p>
