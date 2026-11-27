@@ -66,6 +66,9 @@ function Field({ name, value }: { name: string; value: React.ReactNode }): React
 function InfoPanel({ data }: { data: AdminVideoDetailResponse }): React.ReactElement {
   const v = data.video;
   const youtubeId = v.youtube_video_id?.trim();
+  // CURRENT youtubeWatchUrl preserves a single query component even for legacy IDs.
+  const encodedWatchId = youtubeId ? encodeURIComponent(youtubeId.replace(/[\uD800-\uDFFF]/g, "\uFFFD")) : "";
+  const watchId = encodedWatchId === "." || encodedWatchId === ".." ? "_" : encodedWatchId;
   const thumbnail = adminVideoThumbnailHref(v.youtube_video_id, "maxresdefault");
   return (
     <section>
@@ -78,7 +81,7 @@ function InfoPanel({ data }: { data: AdminVideoDetailResponse }): React.ReactEle
       <dl className="fn-card" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8 }}>
         <Field name="状態" value={v.visibility_status} />
         <Field name="作者" value={`${v.creator_name}${v.creator_x_user_id ? ` (@${v.creator_x_user_id})` : ""}`} />
-        <Field name="YouTube ID" value={youtubeId ? <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(youtubeId)}`} target="_blank" rel="noopener noreferrer">{youtubeId}</a> : "なし"} />
+        <Field name="YouTube ID" value={youtubeId ? <a href={`https://www.youtube.com/watch?v=${watchId}`} target="_blank" rel="noopener noreferrer">{youtubeId}</a> : "なし"} />
         <Field name="楽曲" value={v.music} />
         <Field name="クレジット" value={v.credit} />
         <Field name="使用ソフト" value={v.software_label} />

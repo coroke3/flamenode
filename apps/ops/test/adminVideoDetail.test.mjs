@@ -1032,3 +1032,67 @@ test("MIG-0729 U01/U02: thumbnails use CURRENT same-origin proxy, normalized IDs
     else globalThis.IS_REACT_ACT_ENVIRONMENT = saved.act;
   }
 });
+
+
+test("MIG-0729 U02: CURRENT watch link is safe for malformed legacy YouTube IDs", async () => {
+  const cases = [
+    ["dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+    ["  dQw4w9WgXcQ  ", "dQw4w9WgXcQ"],
+    [".", "_"], ["..", "_"],
+    ["a&next=bad#fragment", "a%26next%3Dbad%23fragment"],
+    ["https://youtu.be/dQw4w9WgXcQ?t=30", "https%3A%2F%2Fyoutu.be%2FdQw4w9WgXcQ%3Ft%3D30"],
+    ["a\uD800b", "a%EF%BF%BDb"], ["a\uDFFFb", "a%EF%BF%BDb"],
+    ["\uD83D\uDE00", "%EF%BF%BD%EF%BF%BD"],
+    ["日本語", "%E6%97%A5%E6%9C%AC%E8%AA%9E"],
+    ["", null], ["   ", null], [null, null],
+  ];
+  const saved = { window: globalThis.window, document: globalThis.document,
+    act: globalThis.IS_REACT_ACT_ENVIRONMENT };
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+    url: "https://flamenode.invalid/admin/videos/video-1",
+  });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    for (const [index, [input, expected]] of cases.entries()) {
+      const requests = [];
+      const fetchFn = async (path, init) => {
+        requests.push([path, init?.method]);
+        return json(200, { ...detail, event: null,
+          video: { ...detail.video, youtube_video_id: input } });
+      };
+      await React.act(async () => root.render(React.createElement(MemoryRouter, {
+        key: String(index), initialEntries: ["/admin/videos/video-1"],
+      }, React.createElement(Routes, null, React.createElement(Route, {
+        path: "/admin/videos/:id", element: React.createElement(AdminVideoDetail, { fetchFn }),
+      })))));
+      const doc = dom.window.document;
+      assert.match(doc.body.textContent, /Test/, String(index));
+      const watch = [...doc.querySelectorAll("a")].filter(a =>
+        a.getAttribute("href")?.startsWith("https://www.youtube.com/watch?v="));
+      assert.equal(watch.length, expected === null ? 0 : 1, String(index));
+      if (expected !== null) {
+        assert.equal(watch[0].getAttribute("href"), "https://www.youtube.com/watch?v=" + expected);
+        assert.equal(watch[0].getAttribute("target"), "_blank");
+        assert.equal(watch[0].getAttribute("rel"), "noopener noreferrer");
+        const url = new URL(watch[0].href);
+        assert.equal(url.origin, "https://www.youtube.com");
+        assert.equal(url.pathname, "/watch");
+        assert.deepEqual([...url.searchParams.keys()], ["v"]);
+        assert.equal(url.hash, "");
+      }
+      assert.deepEqual(requests, [["/api/admin-read/videos/video-1", "GET"]]);
+    }
+  } finally {
+    await React.act(async () => root.unmount());
+    dom.window.close();
+    if (saved.window === undefined) delete globalThis.window;
+    else globalThis.window = saved.window;
+    if (saved.document === undefined) delete globalThis.document;
+    else globalThis.document = saved.document;
+    if (saved.act === undefined) delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+    else globalThis.IS_REACT_ACT_ENVIRONMENT = saved.act;
+  }
+});
