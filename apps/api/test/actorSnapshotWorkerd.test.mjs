@@ -70,11 +70,11 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_user (id TEXT PRIMARY KEY, discord_id TEXT, name TEXT, active_x_user_id TEXT, image TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_x_users (id TEXT PRIMARY KEY, x_name TEXT NOT NULL, icon_url TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
     "  // Test-only monotonic allocation: row incarnation must survive DELETE/reinsert, REPLACE and PK changes.",
-    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_sequence (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL CHECK (n BETWEEN 0 AND 9007199254740991))');",
+    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_sequence (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL CHECK (typeof(n) = \\'integer\\' AND n BETWEEN 0 AND 9007199254740991))');",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_actor_sequence VALUES (1, 0)');",
     "  for (const [table, fields] of [['u04a_user', 'id, discord_id, name, active_x_user_id, image'], ['u04a_x_users', 'id, x_name, icon_url']]) {",
     "    for (const [kind, event] of [['insert', 'INSERT'], ['update', 'UPDATE OF ' + fields]]) {",
-    "      await run(db, 'CREATE TRIGGER IF NOT EXISTS ' + table + '_' + kind + ' AFTER ' + event + ' ON ' + table + ' BEGIN UPDATE u04a_actor_sequence SET n = n + 1 WHERE id = 1; UPDATE ' + table + ' SET actor_snapshot_version = (SELECT n FROM u04a_actor_sequence WHERE id = 1) WHERE id = NEW.id; END');",
+    "      await run(db, 'CREATE TRIGGER IF NOT EXISTS ' + table + '_' + kind + ' AFTER ' + event + ' ON ' + table + ' BEGIN SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM u04a_actor_sequence WHERE id = 1 AND typeof(n) = \\'integer\\' AND n >= 0 AND n < 9007199254740991) THEN RAISE(ABORT, \\'ACTOR_VERSION_UNAVAILABLE\\') END; UPDATE u04a_actor_sequence SET n = n + 1 WHERE id = 1; UPDATE ' + table + ' SET actor_snapshot_version = (SELECT n FROM u04a_actor_sequence WHERE id = 1) WHERE id = NEW.id; END');",
     "    }",
     "  }",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_resource (id TEXT PRIMARY KEY, value TEXT NOT NULL)');",
@@ -212,7 +212,28 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  rollbackStatements.push(db.prepare('INSERT INTO u04a_forced_failure(value) VALUES (2)'));",
     "  const lateFailed = await batchFailed(rollbackStatements);",
     "  const lateRollback = { failed: lateFailed, snapshotCount: await countSnapshot('fence-rollback'), refCount: await countRef('fence-rollback'), resource: await getResource(), beforeVersions: beforeRollback, afterVersions: await getVersions(), seqBefore, seqAfter: await getSeq(), liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name };",
-    "  return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, lateRollback };",
+    "  // Exhaustion is terminal for this disposable fixture. Explicit RAISE(ABORT)",
+    "  // must not be weakened by an outer OR IGNORE or OR FAIL statement.",
+    "  const allocatorOut = [];",
+    "  const oldSequence = await getSeq();",
+    "  const oldVersions = await getVersions();",
+    "  await run(db, 'UPDATE u04a_actor_sequence SET n = 2.5 WHERE id=1').then(() => { throw new Error('fractional sequence accepted'); }, () => {});",
+    "  const fractionalRejected = (await getSeq()) === oldSequence;",
+    "  await run(db, \"UPDATE u04a_actor_sequence SET n = 9007199254740990 WHERE id=1\");",
+    "  await run(db, \"UPDATE u04a_x_users SET x_name='at-max' WHERE id='u04a-x'\");",
+    "  const maxToken = await getVersions();",
+    "  const atMaxSeq = await getSeq();",
+    "  for (const policy of ['', 'OR IGNORE', 'OR FAIL', 'OR ABORT', 'OR REPLACE', 'OR ROLLBACK']) {",
+    "    const failed = await batchFailed([db.prepare('UPDATE ' + policy + \" u04a_x_users SET x_name='after-overflow' WHERE id='u04a-x'\")]);",
+    "    allocatorOut.push({ policy, failed, versions: await getVersions(), seq: await getSeq(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name });",
+    "  }",
+    "  const overflowBatchFailed = await batchFailed(fencedBatch('overflow-batch', maxToken, [db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-overflow' WHERE id='u04a-x'\")]));",
+    "  const overflowBatch = { failed: overflowBatchFailed, snapshotCount: await countSnapshot('overflow-batch'), refCount: await countRef('overflow-batch'), resource: await getResource(), versions: await getVersions(), seq: await getSeq(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name };",
+    "  await run(db, 'DELETE FROM u04a_actor_sequence WHERE id=1');",
+    "  const missingFailed = await batchFailed([db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-missing' WHERE id='u04a-x'\")]);",
+    "  const missing = { failed: missingFailed, versions: await getVersions(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, rows: (await all(db, 'SELECT n FROM u04a_actor_sequence')).length };",
+    "  const allocator = { fractionalRejected, oldVersions, atMaxSeq, maxToken, allocatorOut, overflowBatch, missing };",
+    "  return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, lateRollback, allocator };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -306,6 +327,25 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     assert.deepEqual(late.afterVersions, late.beforeVersions);
     assert.equal(late.seqAfter, late.seqBefore);
     assert.equal(late.liveName, "X before");
+    const allocator = body.allocator;
+    assert.equal(allocator.fractionalRejected, true);
+    assert.equal(allocator.atMaxSeq, Number.MAX_SAFE_INTEGER);
+    assert.equal(allocator.maxToken.x_version, Number.MAX_SAFE_INTEGER);
+    assert.equal(allocator.maxToken.user_version, allocator.oldVersions.user_version);
+    assert.equal(allocator.allocatorOut.length, 6);
+    for (const item of allocator.allocatorOut) {
+      assert.equal(item.failed, true, item.policy);
+      assert.deepEqual(item.versions, allocator.maxToken, item.policy);
+      assert.equal(item.seq, Number.MAX_SAFE_INTEGER, item.policy);
+      assert.equal(item.name, "at-max", item.policy);
+    }
+    assert.deepEqual(allocator.overflowBatch, {
+      failed: true, snapshotCount: 0, refCount: 0, resource: "before",
+      versions: allocator.maxToken, seq: Number.MAX_SAFE_INTEGER, name: "at-max",
+    });
+    assert.deepEqual(allocator.missing, {
+      failed: true, versions: allocator.maxToken, name: "at-max", rows: 0,
+    });
   } finally {
     await stopTree(child);
     try { fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 }); } catch {}
