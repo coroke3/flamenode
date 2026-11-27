@@ -266,21 +266,38 @@ function ModerationCases({ data, create, onRefresh }: {
   onRefresh: () => void;
 }): React.ReactElement {
   return (
-    <section className="fn-card" aria-label="モデレーションケース">
-      <h2>モデレーションケース</h2>
-      <p>未解決 {data.openCaseCount} 件 / 直近 {data.moderationCases.length} 件</p>
-      {data.moderationCases.length ? data.moderationCases.map(item => (
-        <details key={item.id}>
-          <summary>{item.status} {item.case_type} {formatAdminVideoUnix(item.created_at)}</summary>
-          <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8 }}>
-            <Field name="期限" value={formatAdminVideoUnix(item.due_at)} />
-            <Field name="関連X ID" value={item.related_x_user_id ? `@${item.related_x_user_id}` : "—"} />
-            <Field name="公開理由" value={item.public_reason} />
-            <Field name="内部メモ" value={item.private_note} />
-            <Field name="解決日時" value={formatAdminVideoUnix(item.resolved_at)} />
-          </dl>
-        </details>
-      )) : <p>この作品のケースはまだありません。</p>}
+    <section className="fn-card" aria-label="モデレーションケース" style={{ marginTop: 24 }}>
+      <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>モデレーションケース</h2>
+      <p className="fn-muted" style={{ marginBottom: 12, fontSize: 12 }}>
+        未解決 {data.openCaseCount} 件 / 直近 {data.moderationCases.length} 件
+      </p>
+      {data.moderationCases.length > 0 ? (
+        <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+          {data.moderationCases.map(item => (
+            <details key={item.id} style={{
+              padding: 10, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+            }}>
+              <summary style={{ cursor: "pointer", fontSize: 12 }}>
+                <span className={`fn-badge ${item.status === "open" ? "fn-badge-warning" : "fn-badge-soft"}`}>
+                  {item.status}
+                </span>{" "}
+                <code>{item.case_type}</code>{" "}
+                <span className="fn-muted">{formatAdminVideoUnix(item.created_at)}</span>
+              </summary>
+              <dl style={{ marginTop: 8, display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 8px", fontSize: 12 }}>
+                <dt className="fn-muted">期限</dt>
+                <dd>{item.due_at ? formatAdminVideoUnix(item.due_at) : "—"}</dd>
+                <dt className="fn-muted">関連X ID</dt>
+                <dd>{item.related_x_user_id ? `@${item.related_x_user_id}` : "—"}</dd>
+                <Field name="公開理由" value={item.public_reason || "—"} />
+                <Field name="内部メモ" value={item.private_note || "—"} />
+                <dt className="fn-muted">解決日時</dt>
+                <dd>{item.resolved_at ? formatAdminVideoUnix(item.resolved_at) : "—"}</dd>
+              </dl>
+            </details>
+          ))}
+        </div>
+      ) : <p className="fn-muted" style={{ marginBottom: 14, fontSize: 12 }}>この作品のケースはまだありません。</p>}
       <CreateModerationCaseForm videoId={data.video.id} action={create} onRefresh={onRefresh} />
     </section>
   );

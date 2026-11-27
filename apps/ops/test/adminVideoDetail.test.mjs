@@ -1096,3 +1096,83 @@ test("MIG-0729 U02: CURRENT watch link is safe for malformed legacy YouTube IDs"
     else globalThis.IS_REACT_ACT_ENVIRONMENT = saved.act;
   }
 });
+
+
+test("MIG-0729 U02: moderation case history matches CURRENT status badges, missing fields and layout", async () => {
+  const cases = [
+    { id: "open-1", case_type: "rights", status: "open", public_reason: "", private_note: null,
+      due_at: null, related_x_user_id: "", created_at: 0, resolved_at: 0 },
+    { id: "resolved-1", case_type: "void", status: "resolved", public_reason: "公開\n理由", private_note: "内部\nメモ",
+      due_at: 1_700_000_000, related_x_user_id: "related", created_at: 1_700_000_000, resolved_at: 1_700_000_100 },
+    { id: "closed-1", case_type: "other", status: "closed", public_reason: null, private_note: "",
+      due_at: 0, related_x_user_id: null, created_at: -1, resolved_at: null },
+    { id: "legacy-1", case_type: "unknown", status: "legacy", public_reason: "  ", private_note: " ",
+      due_at: -1, related_x_user_id: "x", created_at: 1, resolved_at: -1 },
+  ];
+  const saved = { window: globalThis.window, document: globalThis.document,
+    act: globalThis.IS_REACT_ACT_ENVIRONMENT };
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+    url: "https://flamenode.invalid/admin/videos/video-1",
+  });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  const expectedFields = [
+    ["—", "—", "—", "—", "—"],
+    [formatAdminVideoUnix(1_700_000_000), "@related", "公開\n理由", "内部\nメモ", formatAdminVideoUnix(1_700_000_100)],
+    ["—", "—", "—", "—", "—"],
+    [formatAdminVideoUnix(-1), "@x", "  ", " ", formatAdminVideoUnix(-1)],
+  ];
+  try {
+    for (const [index, records] of [cases, []].entries()) {
+      const requests = [];
+      const fetchFn = async (path, init) => {
+        requests.push([path, init?.method]);
+        return json(200, { ...detail, event: null, moderationCases: records,
+          openCaseCount: records.filter(item => item.status === "open").length });
+      };
+      await React.act(async () => root.render(React.createElement(MemoryRouter, {
+        key: String(index), initialEntries: ["/admin/videos/video-1"],
+      }, React.createElement(Routes, null, React.createElement(Route, {
+        path: "/admin/videos/:id", element: React.createElement(AdminVideoDetail, { fetchFn }),
+      })))));
+      const panel = dom.window.document.querySelector('section[aria-label="モデレーションケース"]');
+      assert.ok(panel);
+      assert.equal(panel.style.marginTop, "24px");
+      assert.equal(panel.querySelector("h2").style.fontSize, "14px");
+      assert.ok(panel.querySelector("p.fn-muted").textContent.includes(records.length
+        ? "未解決 1 件 / 直近 4 件" : "未解決 0 件 / 直近 0 件"));
+      const entries = [...panel.querySelectorAll("details")];
+      assert.equal(entries.length, records.length);
+      for (const [i, entry] of entries.entries()) {
+        const item = records[i];
+        const summary = entry.querySelector("summary");
+        const badge = summary.querySelector(".fn-badge");
+        assert.equal(badge.textContent.trim(), item.status);
+        assert.ok(badge.classList.contains(item.status === "open" ? "fn-badge-warning" : "fn-badge-soft"));
+        assert.equal(summary.querySelector("code").textContent, item.case_type);
+        assert.equal(summary.querySelector(".fn-muted").textContent, formatAdminVideoUnix(item.created_at));
+        assert.equal(entry.style.padding, "10px");
+        assert.equal(entry.open, false);
+        assert.deepEqual([...entry.querySelectorAll("dt")].map(node => node.textContent),
+          ["期限", "関連X ID", "公開理由", "内部メモ", "解決日時"]);
+        assert.deepEqual([...entry.querySelectorAll("dd")].map(node => node.textContent), expectedFields[i]);
+        assert.equal(entry.querySelectorAll("dd")[2].style.whiteSpace, "pre-wrap");
+        assert.equal(entry.querySelectorAll("dd")[3].style.whiteSpace, "pre-wrap");
+      }
+      if (!records.length) assert.match(panel.textContent, /この作品のケースはまだありません。/);
+      assert.ok(panel.querySelector("form"), "existing case creation form retained");
+      assert.deepEqual(requests, [["/api/admin-read/videos/video-1", "GET"]]);
+    }
+  } finally {
+    await React.act(async () => root.unmount());
+    dom.window.close();
+    if (saved.window === undefined) delete globalThis.window;
+    else globalThis.window = saved.window;
+    if (saved.document === undefined) delete globalThis.document;
+    else globalThis.document = saved.document;
+    if (saved.act === undefined) delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+    else globalThis.IS_REACT_ACT_ENVIRONMENT = saved.act;
+  }
+});
