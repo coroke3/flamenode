@@ -1574,8 +1574,14 @@ if (runUnderRootTsx(import.meta.url)) {
         const id = prefix + suffix;
         video(id, stored);
         for (let i = 0; i < legacyLikes; i++) legacyInteraction(id, i, "like");
-        for (let i = 0; i < authLikes; i++) authInteraction(id, i, "like");
-        for (let i = 0; i < authBookmarks; i++) authInteraction(id, i, "bookmark");
+        for (let i = 0; i < authLikes; i++) {
+          legacyInteraction(id, i, "like");
+          authInteraction(id, i, "like");
+        }
+        for (let i = 0; i < authBookmarks; i++) {
+          legacyInteraction(id, i, "bookmark");
+          authInteraction(id, i, "bookmark");
+        }
       }
 
       // The shared CURRENT helper remains a pinned X-authority reference:
