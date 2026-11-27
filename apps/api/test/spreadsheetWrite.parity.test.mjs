@@ -941,7 +941,7 @@ if (runUnderRootTsx(import.meta.url)) {
             return {
               ...stmt,
               bind(...params) {
-                assert.deepEqual(params, ["av-pending-1"]);
+                assert.deepEqual(params, method === "POST" ? ["av-pending-1", "av-pending-1"] : ["av-pending-1"]);
                 if (fault.stage === "bind") { injected++; throw fault.error; }
                 return {
                   ...stmt.bind(...params),
