@@ -64,6 +64,7 @@ const MAX_STAFF_EVENT_ID_BYTES = 512;
 const MAX_STAFF_PERMISSION_PRESET_BYTES = 64;
 const MAX_STAFF_CUSTOM_KEYS_BYTES = 4096;
 const MAX_STAFF_JSON_ESCAPED_BYTES = 24 * 1024;
+const MAX_VIEWER_STAFF_ROWS = 100;
 function invalidRequiredStaffTextSql(column: string, maxBytes: number): string {
   return `(typeof(${column}) != 'text' OR instr(${column}, char(0)) > 0 OR
     length(CAST(${column} AS BLOB)) > ${maxBytes})`;
@@ -89,7 +90,7 @@ function boundedViewerStaffJsonSql(): string {
     )
       AND (es."event_id" = v."primary_event_id" OR
            es."event_id" IN (SELECT "event_id" FROM "video_events" WHERE "video_id" = v."id" LIMIT 4))
-    LIMIT 101
+    LIMIT ${MAX_VIEWER_STAFF_ROWS + 1}
   ),
   row_json AS MATERIALIZED (
     SELECT CASE WHEN ${invalid} THEN NULL ELSE json_object(
@@ -106,7 +107,7 @@ function boundedViewerStaffJsonSql(): string {
     FROM row_json
   )
   SELECT CASE
-    WHEN "row_count" != "valid_count" OR
+    WHEN "row_count" > ${MAX_VIEWER_STAFF_ROWS} OR "row_count" != "valid_count" OR
          "escaped_bytes" + max("row_count" - 1, 0) + 2 > ${MAX_STAFF_JSON_ESCAPED_BYTES}
       THEN NULL
     ELSE (SELECT coalesce(json_group_array(json("item")), '[]') FROM row_json)
@@ -117,7 +118,7 @@ function parseBoundedViewerStaffRows(value: unknown): unknown[] | null {
   if (typeof value !== "string") return null;
   try {
     const parsed: unknown = JSON.parse(value);
-    if (!Array.isArray(parsed) || parsed.some((row) =>
+    if (!Array.isArray(parsed) || parsed.length > MAX_VIEWER_STAFF_ROWS || parsed.some((row) =>
       !row || typeof row !== "object" || Array.isArray(row))) return null;
     return parsed;
   } catch {
