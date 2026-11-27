@@ -1670,3 +1670,90 @@ test("MIG-0652 U03h: 256 stage update projections match frozen CURRENT object or
     assert.deepEqual(actual.after, { ...before, ...replacement, id: before.id, created_at: before.created_at }, "snapshot " + i);
   }
 });
+
+/** U03i: actual SQLite/D1 batch test of the stage update projection.
+ * This deliberately does not mount the CURRENT/Hono action or touch its owner. */
+const stageUpdateSqliteFixture = () => {
+  const f = createAtomicCreateHarness();
+  seedCreateActor(f.sqlite);
+  insert(f.sqlite, "events", event);
+  const before = {
+    ...makeStageQuestionDiffRow("stage_permission_a"),
+    id: "stage_question_1", event_id: event.id,
+    created_at: now - 100, updated_at: now - 10,
+  };
+  insert(f.sqlite, "event_custom_questions", before);
+  return { ...f, before };
+};
+const stageUpdateSqlitePlan = async (db, before) => {
+  const { and, eq } = await import("drizzle-orm");
+  const { planStageQuestionMutationSteps, projectStageQuestionUpdate } =
+    await import("@flamenode/server-core/event/updatePayload");
+  const next = { ...before, id: "generated_replacement", label: "Updated stage",
+    required: 1, updated_at: before.updated_at + 10 };
+  const stage = planStageQuestionMutationSteps({
+    existing: [before], next: [next], deletedAnswers: [],
+  });
+  assert.equal(stage.ok, true);
+  assert.deepEqual(stage.operations.map(x => x.kind), ["update_question"]);
+  assert.deepEqual(stage.expectedMutationChanges, [1]);
+  const projected = projectStageQuestionUpdate(before, next);
+  return {
+    mutationStatements: [db.update(schema.eventCustomQuestions)
+      .set(projected.updateValues)
+      .where(and(
+        eq(schema.eventCustomQuestions.id, projected.cas.id),
+        eq(schema.eventCustomQuestions.updated_at, projected.cas.updated_at),
+      ))],
+    expectedMutationChanges: stage.expectedMutationChanges,
+    audits: [{
+      table_name: "event_custom_questions", target_id: before.id, operation: "UPDATE",
+      before, after: projected.after, actor_user_id: "u_admin",
+      context: "event-update:stage-question", retention_class: "normal", strict: true,
+    }],
+  };
+};
+
+test("MIG-0652 U03i SQLite: stage CAS UPDATE and strict audit commit in one D1 batch", async () => {
+  const f = stageUpdateSqliteFixture();
+  const plan = await stageUpdateSqlitePlan(f.db, f.before);
+  const ids = await mutateWithAudit(f.db, plan);
+  assert.equal(ids.length, 1);
+  assert.equal(f.d1.stats.batches, 1);
+  const row = f.sqlite.prepare("SELECT id, event_id, created_at, updated_at, label, required FROM event_custom_questions").get();
+  assert.deepEqual({ ...row }, { id: f.before.id, event_id: event.id,
+    created_at: f.before.created_at, updated_at: f.before.updated_at + 10,
+    label: "Updated stage", required: 1 });
+  const audit = f.sqlite.prepare("SELECT operation, before_json, after_json FROM audit_logs WHERE table_name = 'event_custom_questions'").get();
+  assert.equal(audit.operation, "UPDATE");
+  assert.equal(JSON.parse(audit.before_json).label, f.before.label);
+  assert.equal(JSON.parse(audit.after_json).label, "Updated stage");
+  assert.equal(JSON.parse(audit.after_json).id, f.before.id);
+  assert.ok(f.d1.stats.maxBinds <= 100);
+});
+
+test("MIG-0652 U03i SQLite: stale stage CAS rolls back and emits no false audit", async () => {
+  const f = stageUpdateSqliteFixture();
+  const plan = await stageUpdateSqlitePlan(f.db, f.before);
+  f.sqlite.prepare("UPDATE event_custom_questions SET updated_at = ? WHERE id = ?")
+    .run(f.before.updated_at + 1, f.before.id);
+  await assert.rejects(mutateWithAudit(f.db, plan));
+  assert.equal(f.d1.stats.batches, 1);
+  const row = f.sqlite.prepare("SELECT label, updated_at FROM event_custom_questions").get();
+  assert.equal(row.label, f.before.label);
+  assert.equal(row.updated_at, f.before.updated_at + 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
+
+test("MIG-0652 U03i SQLite: strict audit failure rolls back stage UPDATE", async () => {
+  const f = stageUpdateSqliteFixture();
+  const plan = await stageUpdateSqlitePlan(f.db, f.before);
+  f.sqlite.exec("CREATE TRIGGER reject_stage_audit BEFORE INSERT ON audit_logs " +
+    "BEGIN SELECT RAISE(ABORT, 'stage-audit-denied'); END");
+  await assert.rejects(mutateWithAudit(f.db, plan), /stage-audit-denied/);
+  assert.equal(f.d1.stats.batches, 1);
+  const row = f.sqlite.prepare("SELECT label, updated_at FROM event_custom_questions").get();
+  assert.equal(row.label, f.before.label);
+  assert.equal(row.updated_at, f.before.updated_at);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
