@@ -100,3 +100,57 @@ test("RH-002 U02b/U02c: committed D1/R2 CAS error preserves HTTP recovery envelo
   assert.equal(response.body.retryable, true);
   assert.deepEqual(response.body.progress, { stage: "events", index: 2, completed: 2, total: 8 });
 });
+
+
+test("MIG-0645 U02i: SQLite/D1 batch rolls back x_users, rebuild queue and audit on marker failure", async () => {
+  const { createAdminD1 } = await import("./helpers/sqliteD1.mjs");
+  const { db, sqlite, stats } = createAdminD1();
+  try {
+    const count = (table) =>
+      sqlite.prepare('SELECT COUNT(*) AS n FROM "' + table + '"').get().n;
+    const statement = (sql, ...params) => db.prepare(sql).bind(...params);
+    // Force a duplicate audit marker as the *last* statement in the batch:
+    // the X-user row, rebuild request and entity audit have already executed.
+    sqlite.prepare(
+      "INSERT INTO audit_logs (id, table_name, target_id, context) VALUES ('marker-conflict', 'preexisting', 'other', 'test')",
+    ).run();
+    const mutation = (markerId) => [
+      statement(
+        "INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, 'imported')",
+        "legacy_x_1", "Legacy X",
+      ),
+      statement(
+        "INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, priority, status) VALUES (?, 'users_index', 'global', 'legacy_import_x_users', 'low', 'pending')",
+        "rebuild-x-1",
+      ),
+      statement(
+        "INSERT INTO audit_logs (id, table_name, target_id, context) VALUES (?, 'x_users_import_batch', 'legacy:legacy_x_1', 'legacy_import')",
+        "x-entity-audit",
+      ),
+      statement(
+        "INSERT INTO audit_logs (id, table_name, target_id, context) VALUES (?, 'legacy_import_steps', 'step:x_users:0', 'legacy_import:step')",
+        markerId,
+      ),
+    ];
+    await assert.rejects(db.batch(mutation("marker-conflict")));
+    assert.equal(count("x_users"), 0, "a failed marker must roll back inserted X users");
+    assert.equal(count("static_rebuild_queue"), 0, "a failed marker must roll back the rebuild request");
+    assert.equal(count("audit_logs"), 1, "the X-user entity audit must also roll back");
+    assert.equal(
+      sqlite.prepare("SELECT table_name FROM audit_logs WHERE id = 'marker-conflict'").get().table_name,
+      "preexisting",
+      "a failed batch cannot disturb the preexisting audit row",
+    );
+    await db.batch(mutation("marker-success"));
+    assert.equal(count("x_users"), 1);
+    assert.equal(count("static_rebuild_queue"), 1);
+    assert.equal(count("audit_logs"), 3, "entity and replay-marker audits committed together");
+    assert.equal(
+      sqlite.prepare("SELECT context FROM audit_logs WHERE id = 'marker-success'").get().context,
+      "legacy_import:step",
+    );
+    assert.equal(stats.batches, 2, "one failed batch plus one recovery batch");
+  } finally {
+    sqlite.close();
+  }
+});
