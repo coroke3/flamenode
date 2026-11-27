@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, runCold, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, runCold, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {
@@ -173,8 +173,8 @@ test("judge: noise floor can excuse an over-budget reading but never a PASS", ()
 test("MIG-0639: Node proxy, non-Linux, sim, partial and cold-skip never report formal CPU PASS", () => {
   const warm = WARM_KINDS.flatMap((kind) =>
     Array.from({length: MIN_SAMPLES}, () => ({kind, cpuMs: 0.5, status: 200})));
-  // Only the synthetic acceptance fixture is truly isolate-first; the real
-  // local post-reload sampler never sets this evidence bit.
+  // This fixture supplies hypothetical first-request evidence; it is not
+  // evidence that an actual local or deployed measurement passed.
   const cold = Array.from({length: MIN_SAMPLES}, () => ({
     kind:"cold", cpuMs: 10, status: 200, isFirstIsolateRequest: true,
   }));
@@ -302,7 +302,7 @@ test("MIG-0639: post-reload local probes cannot masquerade as isolate-first cold
     run: async () => { probes++; return {status:200,cpuMs:1,d1:0,bytes:2}; },
   };
   const cold = await runCold(target,scenarios,{coldSamples:MIN_SAMPLES});
-  assert.equal(reloads,MIN_SAMPLES,"one reload currently batches multiple scenarios");
+  assert.equal(reloads,2*MIN_SAMPLES,"each diagnostic request has its own reload");
   assert.equal(probes,2*MIN_SAMPLES);
   for (const route of scenarios) {
     const samples = cold.get(route.id);
@@ -325,6 +325,38 @@ test("MIG-0639: post-reload local probes cannot masquerade as isolate-first cold
   const gate=enforceCpuMeasurementEnvironment(rows,opts);
   assert.deepEqual(gate,{eligible:false,stopReason:"STOP_COLD"});
   assert.equal(rows[0].agg.verdict,"STOP_COLD");
+});
+
+test("MIG-0639: generated cold worker seeds replay before its first fetch and counts harness requests", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const make = async (generation) => {
+    const source = workerSource(generation, [{ id: "cold-result" }])
+      .replace(/^import .*;$/gm, "");
+    const stubs = `const app = { fetch: async (request, env) => Response.json(await env.DB.prepare('SELECT').first()) };
+      const sessionMiddleware = () => async () => {};`;
+    return (await import("data:text/javascript," + encodeURIComponent(stubs + source))).default;
+  };
+  try {
+    const fresh = await make("fresh-first");
+    assert.deepEqual(globalThis.__flamenodeBenchIdentity, { build: "fresh-first", requests: 0 });
+    const response = await fresh.fetch(new Request("http://bench.local/probe", {
+      headers: { "x-bench-script": "cold" },
+    }), {}, {});
+    assert.deepEqual(await response.json(), { id: "cold-result" });
+    assert.equal(response.headers.get("x-bench-build"), "fresh-first");
+    assert.equal(response.headers.get("x-bench-request"), "1");
+    const warmed = await make("warmed-by-ping");
+    await warmed.fetch(new Request("http://bench.local/__bench/ping"), {}, {});
+    const afterPing = await warmed.fetch(new Request("http://bench.local/probe", {
+      headers: { "x-bench-script": "cold" },
+    }), {}, {});
+    assert.equal(afterPing.headers.get("x-bench-request"), "2", "a setup request invalidates cold provenance");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+  }
 });
 
 test("MIG-0639: replay target preserves live workerd CPU profiler quantum", async () => {
