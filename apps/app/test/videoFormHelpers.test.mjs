@@ -1038,3 +1038,55 @@ test("MIG-0738 ported modules have provenance header and zero next/*, @/, or fet
     assert.equal(text.includes("fetch("), false, `${rel} must not call fetch(`);
   }
 });
+
+test("MIG-0714 B04 / #889: actual hook protects stale pagehide/visibility saves, preserving edits and explicit operations", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><body></body>", { url: "https://fixture.test/" });
+  const names = ["window", "document", "navigator", "HTMLElement", "Node", "IS_REACT_ACT_ENVIRONMENT"];
+  const previous = new Map(names.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const key of names) Object.defineProperty(globalThis, key, { configurable: true, value: key === "IS_REACT_ACT_ENVIRONMENT" ? true : key === "window" ? dom.window : dom.window[key] });
+  const { createRoot } = await import("react-dom/client");
+  const { useFormDraft } = await import("../.test-dist/apps/app/src/lib/useFormDraft.js");
+  const key = "fn:draft:hook-parity:v1", metadata = { revision: 2 }, initial = { title: "Current DB" };
+  try {
+    for (const action of ["automatic", "edit", "flush", "restore"]) {
+      const older = JSON.stringify({ savedAt: Date.now(), metadata: { revision: 1 }, value: { title: "Older draft" } });
+      dom.window.localStorage.setItem(key, older);
+      const container = dom.window.document.createElement("div"); dom.window.document.body.append(container);
+      const root = createRoot(container); let draft, update, stale = 0;
+      const onStale = () => stale++;
+      function Probe() {
+        const [value, setValue] = React.useState(initial); update = setValue;
+        draft = useFormDraft({ storageKey: key, value, metadata, debounceMs: 10, onRestore: setValue, onStale });
+        return React.createElement("output", null, value.title);
+      }
+      try {
+        await React.act(async () => root.render(React.createElement(Probe)));
+        assert.equal(stale, 1); assert.equal(container.textContent, "Current DB");
+        await React.act(async () => {
+          dom.window.dispatchEvent(new dom.window.Event("pagehide"));
+          Object.defineProperty(dom.window.document, "visibilityState", { configurable: true, value: "hidden" });
+          dom.window.document.dispatchEvent(new dom.window.Event("visibilitychange"));
+          await new Promise(resolve => setTimeout(resolve, 20));
+        });
+        assert.equal(dom.window.localStorage.getItem(key), older, "automatic lifecycle must preserve stale bytes with unchanged fingerprint");
+        if (action === "automatic") continue;
+        await React.act(async () => {
+          if (action === "edit") update({ title: "Actual edit" });
+          if (action === "flush") assert.equal(draft.flushDraft(), true);
+          if (action === "restore") assert.equal(draft.restoreStaleDraft(), true);
+        });
+        await React.act(async () => {
+          dom.window.dispatchEvent(new dom.window.Event("pagehide"));
+          await new Promise(resolve => setTimeout(resolve, 20));
+        });
+        const saved = JSON.parse(dom.window.localStorage.getItem(key));
+        assert.deepEqual(saved.metadata, metadata);
+        assert.equal(saved.value.title, { edit: "Actual edit", flush: "Current DB", restore: "Older draft" }[action]);
+      } finally { await React.act(async () => root.unmount()); container.remove(); }
+    }
+  } finally {
+    dom.window.close();
+    for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
+  }
+});

@@ -37,6 +37,8 @@ export interface ManageData {
   truncated: boolean;
   inbox: ManageInboxRow[];
   notifications: ManageNotificationRow[];
+  /** Set only for an explicitly opted-in CURRENT notification-only JSON degradation. */
+  notificationJsonInvalid: boolean;
   linked: ManageLinkedX[];
   /** Parsed JSON columns of caller-supplied pieces (see ManageDataParts.extra). */
   extra: Record<string, unknown>;
@@ -45,6 +47,8 @@ export interface ManageData {
 export interface ManageDataParts {
   inbox?: boolean;
   notifications?: boolean;
+  /** Dashboard alone can degrade an invalid notification JSON section, not DB failures. */
+  reportNotificationJsonInvalid?: boolean;
   linked?: boolean;
   /** Extra bounded JSON-column pieces appended to the same statement (aliases must be plain identifiers). */
   extra?: Record<string, Piece>;
@@ -173,11 +177,21 @@ export async function loadManageData(
   const all = parseJsonColumn<ManageEventRow[]>(row?.events, []);
   const events = [...all].sort(compareSidebarRows);
   const truncated = events.length > MAX_MANAGE_EVENTS;
+  let notifications: ManageNotificationRow[];
+  let notificationJsonInvalid = false;
+  try {
+    notifications = parseJsonColumn<ManageNotificationRow[]>(row?.notifications, []);
+  } catch (error) {
+    if (!parts.reportNotificationJsonInvalid || !parts.notifications) throw error;
+    notificationJsonInvalid = true;
+    notifications = [];
+  }
   return {
     events: truncated ? events.slice(0, MAX_MANAGE_EVENTS) : events,
     truncated,
     inbox: parseJsonColumn<ManageInboxRow[]>(row?.inbox, []),
-    notifications: parseJsonColumn<ManageNotificationRow[]>(row?.notifications, []),
+    notifications,
+    notificationJsonInvalid,
     linked: parseJsonColumn<ManageLinkedX[]>(row?.linked, []),
     extra: Object.fromEntries(Object.keys(parts.extra ?? {}).map((name) => [name, parseJsonColumn<unknown>(row?.[name], null)])),
   };

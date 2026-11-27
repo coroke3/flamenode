@@ -1,0 +1,1224 @@
+.vform-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: clamp(18px, 3vw, 28px);
+  align-items: start;
+  --form-card-radius: var(--r-card, var(--radius-md));
+  --form-section-bg: color-mix(in srgb, var(--bg-surface) 96%, var(--bg-elevated));
+}
+
+.vform-formMain {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(14px, 2vw, 20px);
+}
+
+.vform-section {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: var(--form-card-radius);
+  padding: 16px 18px 18px;
+  overflow: hidden;
+  background: var(--form-section-bg, var(--bg-surface));
+  transition: border-color 160ms ease;
+}
+
+.vform-section:not([data-permission-state="locked"]):hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 26%, var(--hairline, var(--border-subtle)));
+}
+
+.vform-section:focus-within {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 14%, transparent);
+}
+
+.vform-section[data-permission-state="locked"]:focus-within {
+  border-color: color-mix(in srgb, var(--text-muted) 42%, var(--border-subtle));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 12%, transparent);
+}
+
+.vform-sectionTitle {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: clamp(17px, 2vw, 22px);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  margin: -16px -18px 16px;
+  padding: 15px 18px 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
+  color: var(--text-primary);
+  text-wrap: balance;
+  background: var(--bg-elevated);
+}
+
+.vform-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 16px;
+  scroll-margin-top: calc(var(--header-h, 64px) + 20px);
+}
+
+.vform-field:last-child { margin-bottom: 0; }
+
+.vform-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.vform-required::after {
+  content: "*";
+  margin-left: 4px;
+  color: var(--accent-danger);
+}
+
+.vform-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .vform-row.vform-cols2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.vform-help {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 16px;
+  line-height: 1.55;
+  max-width: 72ch;
+}
+
+.vform-sectionTitle + .vform-help:last-child {
+  margin-bottom: 0;
+}
+
+.vform-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+.vform-actions .fn-btn {
+  min-height: var(--fn-control-h);
+  box-sizing: border-box;
+}
+
+.vform-submitDock {
+  display: none;
+}
+
+.vform-submitDockInner {
+  max-width: var(--content-max, 1360px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 10px var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 16px)) 10px
+    var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 16px));
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+.vform-submitDockHint {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vform-submitDock .fn-btn {
+  min-height: var(--fn-control-h);
+  flex-shrink: 0;
+}
+
+.vform-formEditMode {
+  --fn-submit-dock-h: 72px;
+  padding-bottom: calc(var(--fn-submit-dock-h) + env(safe-area-inset-bottom, 0px));
+}
+
+.vform-formEditMode .vform-submitDock {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 80;
+  display: block;
+  background: color-mix(in srgb, var(--bg-base) 94%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ウィザード操作は画面幅に関係なく固定Dockへ統一。
+   本文最下部までスクロールしても入力項目・エラー表示がDockの裏に隠れないよう
+   フォーム側に逃げ余白を確保する。 */
+.vform-formWizardMode {
+  --fn-wizard-dock-h: 76px;
+  padding-bottom: calc(var(--fn-wizard-dock-h) + env(safe-area-inset-bottom, 0px));
+}
+
+.vform-wizardDock {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 80;
+  /* iPad Safariの固定レイヤーでも子要素を確実にタップ対象にする。 */
+  pointer-events: auto;
+  isolation: isolate;
+  background: color-mix(in srgb, var(--bg-base) 96%, var(--bg-surface));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.vform-wizardDockInner {
+  max-width: var(--content-max, 1360px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 10px var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 16px)) 10px
+    var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 16px));
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+.vform-wizardDockInner .vform-wizardNavHint {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  max-width: min(42%, 360px);
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 24%, var(--border-subtle));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-surface));
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vform-wizardDock .fn-btn {
+  min-height: var(--fn-control-h);
+  flex-shrink: 0;
+}
+
+.vform-submitDock,
+.vform-wizardDock {
+  pointer-events: auto;
+}
+
+.vform-submitDock .fn-btn,
+.vform-wizardDock .fn-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vform-preview {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  border-radius: var(--r-card, var(--radius-md));
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--hairline, var(--border-subtle));
+}
+
+.vform-previewThumb {
+  width: 160px;
+  aspect-ratio: 16 / 9;
+  background-color: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.vform-previewThumb img { width: 100%; height: 100%; object-fit: cover; }
+
+.vform-previewBody {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.vform-sidePreview {
+  position: sticky;
+  top: calc(var(--header-h, 64px) + 16px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.vform-sideEyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint, var(--text-muted));
+}
+
+.vform-previewCard,
+.vform-previewChecklist,
+.vform-saveId,
+.vform-previewEvents {
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: var(--form-card-radius);
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.vform-previewCard {
+  transition: border-color 160ms ease;
+}
+
+.vform-previewCard:hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 34%, var(--hairline, var(--border-subtle)));
+}
+
+.vform-previewVisual {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--bg-inset, var(--bg-elevated));
+}
+
+.vform-previewVisual img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.72;
+}
+
+.vform-previewCode {
+  position: absolute;
+  top: 9px;
+  left: 10px;
+  z-index: 1;
+  padding: 3px 7px;
+  border-radius: 3px;
+  color: var(--accent-primary);
+  background: var(--overlay-scrim-strong);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.vform-previewPlay {
+  position: relative;
+  z-index: 1;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  /* 動画サムネ上のオーバーレイ — テーマ非依存で白を維持 */
+  color: var(--overlay-ink);
+  background: var(--overlay-scrim);
+  border: 1px solid var(--overlay-border);
+}
+
+.vform-previewInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.vform-previewInfo h3,
+.vform-previewInfo p {
+  margin: 0;
+}
+
+.vform-previewInfo h3 {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.vform-previewInfo p {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.vform-previewInfo span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.vform-previewChecklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 14px;
+}
+
+.vform-previewChecklist > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.vform-previewChecklist dt {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.vform-previewChecklist dd {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.vform-checkOk dt {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
+}
+
+.vform-checkPending dt {
+  color: var(--accent-warning);
+  background: var(--accent-warning-soft);
+}
+
+.vform-checkTodo dt {
+  color: var(--text-faint, var(--text-muted));
+  background: var(--bg-elevated);
+}
+
+.vform-saveId,
+.vform-previewEvents {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px;
+}
+
+.vform-saveIdRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.vform-saveIdAvatar {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent-ink);
+  background: var(--accent-primary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.vform-saveIdRow strong,
+.vform-saveIdRow small {
+  display: block;
+}
+
+.vform-saveIdRow strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.vform-saveIdRow small {
+  margin-top: 1px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.vform-previewEvents span:not(.vform-sideEyebrow) {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+/* ---- section disabled ----
+ *
+ * 旧コードは pointer-events: none と opacity: 0.55 でセクション全体を不活性化していたが、
+ * これだとリンク・説明文も読めなくなり、なぜ触れないのか分かりにくかった。
+ * 新ルールでは:
+ *   - input/textarea/select は readOnly/aria-readonly で「見える + コピー可 + 編集不可」
+ *   - 背景を薄く + cursor: not-allowed + 鍵アイコンバッジで「編集権限なし」を明示
+ *   - 説明文・ラベルは通常通り読める
+ */
+
+.vform-sectionDisabled {
+  position: relative;
+}
+
+.vform-sectionDisabledBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  vertical-align: middle;
+}
+
+.vform-sectionPermissionBadge {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.vform-permissionNoteStack {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.vform-sectionDisabled .vform-editableField input[readonly],
+.vform-sectionDisabled .vform-editableField textarea[readonly],
+.vform-sectionDisabled .vform-editableField input[disabled],
+.vform-sectionDisabled .vform-editableField textarea[disabled],
+.vform-sectionDisabled .vform-editableField select[disabled] {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+.vform-sectionDisabled .vform-editableField input[readonly],
+.vform-sectionDisabled .vform-editableField textarea[readonly] {
+  cursor: text;
+}
+
+/* ---- editable field hover hint ---- */
+
+.vform-editableField input:not([disabled]):not([readonly]):hover,
+.vform-editableField textarea:not([disabled]):not([readonly]):hover,
+.vform-editableField select:not([disabled]):hover {
+  border-color: var(--accent-primary);
+  outline: none;
+}
+
+.vform-editableField input:not([disabled]):not([readonly]):focus,
+.vform-editableField textarea:not([disabled]):not([readonly]):focus,
+.vform-editableField select:not([disabled]):focus {
+  border-color: var(--accent-primary);
+  box-shadow: none;
+}
+
+.vform-form .fn-input,
+.vform-form .fn-select,
+.vform-form .fn-textarea {
+  background-color: color-mix(in srgb, var(--bg-surface) 88%, var(--bg-elevated));
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.vform-form .fn-input:not(:disabled):not([readonly]):hover,
+.vform-form .fn-select:not(:disabled):hover,
+.vform-form .fn-textarea:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 38%, var(--border-subtle));
+  background-color: var(--bg-surface);
+}
+
+.vform-form .fn-input[readonly],
+.vform-form .fn-textarea[readonly] {
+  background-color: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: text;
+  opacity: 1;
+}
+
+.vform-form .fn-input:disabled,
+.vform-form .fn-select:disabled,
+.vform-form .fn-textarea:disabled {
+  background-color: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.vform-form .fn-input[readonly]:focus-visible,
+.vform-form .fn-textarea[readonly]:focus-visible {
+  border-color: color-mix(in srgb, var(--text-muted) 58%, var(--border-subtle));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 12%, transparent);
+  background-color: var(--bg-elevated);
+}
+
+.vform-form .fn-input:focus-visible,
+.vform-form .fn-select:focus-visible,
+.vform-form .fn-textarea:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  background-color: var(--bg-surface);
+}
+
+.vform-section .fn-card {
+  border-radius: var(--r-card, var(--radius-md));
+  transition: border-color 140ms ease;
+}
+
+.vform-section .fn-card:focus-within {
+  border-color: color-mix(in srgb, var(--accent-primary) 52%, var(--border-subtle));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
+
+@media (max-width: 1040px) {
+  .vform-form {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .vform-sidePreview {
+    position: static;
+    order: 2;
+  }
+
+  .vform-actions {
+    order: 3;
+  }
+}
+
+@media (max-width: 640px) {
+  .vform-formMobileDock {
+    --fn-submit-dock-h: 72px;
+    padding-bottom: calc(var(--fn-submit-dock-h) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .vform-formMobileDock .vform-submitDock {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 80;
+    display: block;
+    background: color-mix(in srgb, var(--bg-base) 94%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .vform-section {
+    padding: 14px;
+  }
+
+  .vform-sectionTitle {
+    margin: -14px -14px 14px;
+    padding: 12px 14px;
+    font-size: 17px;
+  }
+
+  .vform-preview {
+    flex-direction: column;
+  }
+
+  .vform-previewThumb {
+    width: 100%;
+    max-width: none;
+  }
+
+  .vform-actions {
+    display: none;
+  }
+
+  .vform-submitDock .fn-btn {
+    min-height: var(--fn-control-h-touch);
+  }
+
+  .vform-eventOptionGrid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
+.vform-eventOptionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+}
+
+.vform-eventOption {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.vform-eventOption:not(.vform-eventOptionLocked):hover,
+.vform-eventOption:not(.vform-eventOptionLocked):focus-within {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary-soft) 58%, transparent);
+}
+
+.vform-eventOptionChecked {
+  background: var(--accent-primary-soft);
+}
+
+.vform-eventOptionLocked {
+  cursor: not-allowed;
+  border-color: var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+/* ---- step wizard (slot / free post) ---- */
+
+.vform-stepProgress {
+  grid-column: 1 / -1;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-card, var(--radius-md));
+  background: color-mix(in srgb, var(--bg-elevated) 62%, var(--bg-surface));
+}
+
+.vform-stepProgressList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vform-stepProgressItem {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.vform-stepProgressButton {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--fn-control-h);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: left;
+  cursor: default;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.vform-stepProgressButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.vform-stepProgressButton[data-clickable="true"] {
+  cursor: pointer;
+}
+
+.vform-stepProgressButton[data-clickable="true"]:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.vform-stepProgressButton[data-clickable="true"]:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.vform-stepProgressButton[data-state="current"] {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary-soft);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
+
+.vform-stepProgressButton[data-state="current"]:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.vform-stepProgressButton[data-state="done"] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--ok) 6%, var(--bg-surface));
+}
+
+.vform-stepProgressButton > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vform-stepProgressIndex {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.vform-stepProgressButton[data-state="current"] .vform-stepProgressIndex {
+  background: var(--accent-primary);
+  color: var(--accent-ink);
+}
+
+.vform-stepProgressButton[data-state="done"] .vform-stepProgressIndex {
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
+  color: var(--ok);
+}
+
+.vform-stepPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.vform-stepPanelHidden {
+  display: none;
+}
+
+.vform-stepError {
+  padding: 10px 12px;
+  border: 1px solid var(--accent-danger);
+  border-radius: var(--r-card, var(--radius-md));
+  background: var(--accent-danger-soft);
+  color: var(--accent-danger);
+  font-size: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.vform-slotDoneCard {
+  padding: 16px 18px;
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-md);
+  background: var(--accent-primary-soft);
+}
+
+.vform-slotDoneKicker {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.vform-slotDoneTitle {
+  margin: 0 0 8px;
+  font-size: clamp(18px, 2.4vw, 22px);
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.vform-slotDoneLead {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.vform-slotDoneBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ok);
+}
+
+.vform-youtubeStepSection {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.vform-youtubeStepPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.vform-youtubeStepThumb {
+  width: 100%;
+  max-width: 640px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.vform-youtubeStepThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vform-youtubeStepMeta {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.vform-confirmSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.vform-confirmSummaryGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .vform-confirmSummaryGrid {
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 280px);
+    align-items: start;
+  }
+}
+
+.vform-confirmSummaryList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.vform-confirmSummaryList div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.vform-confirmSummaryList dt {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.vform-confirmSummaryList dd {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.vform-confirmThumb {
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.vform-confirmThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vform-wizardNavHint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vform-resultNotice,
+.vform-blockedNotice,
+.vform-permissionNotice {
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.vform-resultNotice {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 72%, var(--border-subtle));
+  background: var(--accent-primary-soft);
+  color: var(--text-primary);
+}
+
+.vform-resultNoticeHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.vform-resultActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+.vform-blockedNotice,
+.vform-permissionNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.vform-blockedNotice {
+  border: 1px solid color-mix(in srgb, var(--accent-warning) 78%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-warning-soft) 88%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.vform-permissionNotice {
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-elevated) 82%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.vform-sidePreviewHidden {
+  display: none;
+}
+
+.vform-form .fn-btn svg {
+  flex-shrink: 0;
+  display: block;
+}
+
+@media (max-width: 640px) {
+  .vform-stepProgressList {
+    flex-direction: column;
+  }
+
+  /* ウィザードDock: モバイルは [ 戻る ][ 次へ / 提出する ] の2ボタン構成。 */
+  .vform-wizardDockInner {
+    justify-content: stretch;
+    gap: 8px;
+    padding-left: var(--fn-page-gutter, 16px);
+    padding-right: var(--fn-page-gutter, 16px);
+  }
+
+  .vform-wizardDockInner .vform-wizardNavHint {
+    display: none;
+  }
+
+  .vform-wizardDock .fn-btn {
+    min-height: var(--fn-control-h-touch);
+    flex: 1;
+  }
+
+  .vform-wizardDock .fn-btn-primary {
+    flex: 1.4;
+  }
+
+  .vform-resultActions .fn-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+.vform-confirmGroups {
+  display: grid;
+  gap: 12px;
+}
+
+.vform-confirmGroup {
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.vform-confirmGroupHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.vform-confirmGroupHead h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.vform-confirmEditButton {
+  min-height: var(--fn-control-h-sm);
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary-soft);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.vform-confirmEditButton:hover {
+  background: color-mix(
+    in srgb,
+    var(--accent-primary) 22%,
+    var(--bg-elevated)
+  );
+}
+
+.vform-confirmEditButton:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.vform-confirmYoutube {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 220px);
+  gap: 14px;
+  align-items: start;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vform-section,
+  .vform-section .fn-card,
+  .vform-form .fn-input,
+  .vform-form .fn-select,
+  .vform-form .fn-textarea,
+  .vform-eventOption,
+  .vform-stepProgressButton {
+    transition: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .vform-confirmYoutube {
+    grid-template-columns: 1fr;
+  }
+}
+
+.vform-resultNoticeMessage {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/*
+ * iPadOS Safariでは、backdrop-filterを持つfixed子孫がフォーム内にあると
+ * 見えているボタンのタップがスクロールレイヤーへ吸われることがある。
+ * タッチ端末だけは不透明背景へフォールバックし、操作可能性を優先する。
+ */
+@supports (-webkit-touch-callout: none) {
+  .vform-formEditMode .vform-submitDock,
+  .vform-formMobileDock .vform-submitDock,
+  .vform-wizardDock {
+    background: var(--bg-base);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* iPadのタッチポインタは640pxを超えることがあるため、幅ではなく入力方式でも
+   主要操作のタップ領域を44px以上にそろえる。 */
+@media (hover: none) and (pointer: coarse) {
+  .vform-submitDock .fn-btn,
+  .vform-wizardDock .fn-btn {
+    min-height: var(--fn-control-h-touch);
+  }
+}
