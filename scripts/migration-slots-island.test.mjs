@@ -4,7 +4,7 @@ import test from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import {
-  reserveSlot, releaseSlot, extendSlot, mergeSlotGroup, describeSlotMutationResult,
+  reserveSlot, releaseSlot, extendSlot, mergeSlotGroup, describeSlotMutationResult, runSlotMutation,
 } from "../apps/site/src/lib/slotReservation.ts";
 
 function server(status, body) {
@@ -250,6 +250,108 @@ test("U03f failure feedback keeps operation fallback, exact denial message and g
       assert.deepEqual(describeSlotMutationResult(presentation, Object.freeze({ ok: false, ...fields })), {
         kind: "failure", message: expectedMessage, reason: expectedReason,
       });
+    }
+  }
+});
+
+
+const settlementPresentations = [
+  { operation: "reserve", requestedCount: 2, canPost: true },
+  { operation: "release" },
+  { operation: "extend", canPost: true },
+  { operation: "merge", canPost: false },
+];
+const settlementPath = "/event/e/slots?part=2";
+
+test("U03g SA-065..068 successful settlement requests one read refresh and preserves receipt", async () => {
+  for (const [index, [id, mutate]] of slotMutationCalls.entries()) {
+    for (const flag of [undefined, false, true]) {
+      const payload = { ok: true, slotId: "confirmed-slot", slotCount: 2, groupSize: 2,
+        ...(flag === undefined ? {} : { pendingPublicReflection: flag }) };
+      let requests = 0;
+      const result = await runSlotMutation(settlementPresentations[index],
+        () => mutate(async () => { requests++; return Response.json(payload); }),
+        () => { throw new Error("success must not consult navigation"); });
+      assert.deepEqual(result, {
+        ...describeSlotMutationResult(settlementPresentations[index], payload),
+        slotId: "confirmed-slot", refresh: true,
+      }, id);
+      assert.equal(requests, 1);
+    }
+  }
+});
+
+test("U03g SA-065..068 guard redirect precedes failure display and sanitizes next", async () => {
+  const reasons = [
+    ["unauthenticated", "entry", 401],
+    ["tos_required", "onboarding", 403],
+    ["tos_reaccept_required", "onboarding", 403],
+    ["active_x_required", "onboarding", 403],
+    ["active_x_rejected", "onboarding", 403],
+    ["active_x_not_approved", "onboarding", 403],
+  ];
+  for (const [index, [id, mutate]] of slotMutationCalls.entries()) {
+    for (const [reason, destination, status] of reasons) {
+      for (const [currentPath, safePath] of [[settlementPath, settlementPath], ["//external.invalid", "/"]]) {
+        let requests = 0;
+        let pathReads = 0;
+        const result = await runSlotMutation(settlementPresentations[index],
+          () => mutate(async () => {
+            requests++;
+            return Response.json({ ok: false, reason, message: "guard error" }, { status });
+          }), () => { pathReads++; return currentPath; });
+        assert.deepEqual(result, {
+          kind: "redirect", path: "/" + destination + "?next=" + encodeURIComponent(safePath), refresh: false,
+        }, id + " " + reason);
+        assert.equal(requests, 1);
+        assert.equal(pathReads, 1);
+      }
+    }
+  }
+});
+
+test("U03g ordinary denied settlement preserves CURRENT error and does not replay or refresh", async () => {
+  // T02 asks for a 409 refresh; this characterizes CURRENT only, not T02 acceptance.
+  const denials = [
+    [409, { ok: false, message: "先に確保されました" }],
+    [403, { ok: false, reason: "banned", message: "利用停止中" }],
+    [503, { ok: false, reason: "db_unavailable" }],
+    [429, { ok: false, reason: "cost_guard_blocked", message: "" }],
+  ];
+  for (const [index, [id, mutate]] of slotMutationCalls.entries()) {
+    for (const [status, payload] of denials) {
+      let requests = 0;
+      const result = await runSlotMutation(settlementPresentations[index],
+        () => mutate(async () => { requests++; return Response.json(payload, { status }); }),
+        () => settlementPath);
+      assert.deepEqual(result, {
+        ...describeSlotMutationResult(settlementPresentations[index], payload), refresh: false,
+      }, id);
+      assert.equal(requests, 1);
+    }
+  }
+});
+
+test("U03g ambiguous communication failures request read refresh, not a second mutation", async () => {
+  const failures = [
+    () => { throw new Error("private transport detail"); },
+    () => new Response("private HTML body", { status: 503 }),
+    () => new Response(null, { status: 204 }),
+    () => Response.json({ ok: true }, { status: 503 }),
+    () => Response.json({ ok: "true" }),
+  ];
+  for (const [index, [id, mutate]] of slotMutationCalls.entries()) {
+    for (const respond of failures) {
+      let requests = 0;
+      const result = await runSlotMutation(settlementPresentations[index],
+        () => mutate(async () => { requests++; return respond(); }),
+        () => { throw new Error("communication failure must not consult navigation"); });
+      assert.deepEqual(result, {
+        kind: "communication-error",
+        message: "通信エラーが発生しました。状態を再取得してもう一度お試しください。",
+        refresh: true,
+      }, id);
+      assert.equal(requests, 1);
     }
   }
 });

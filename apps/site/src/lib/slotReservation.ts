@@ -3,6 +3,8 @@
  * CURRENT SA-065..068 remains canonical; this module does not enable reservation UI.
  */
 
+import { getGuardRedirectPath } from "./guardRedirect.ts";
+
 export interface SlotReservationResult {
   ok: boolean;
   message?: string;
@@ -178,4 +180,46 @@ export function describeSlotMutationResult(
     }
   }
   return { kind: "success", message, pendingPublicReflection: result.pendingPublicReflection };
+}
+
+
+/** U03g: unmounted mutation outcome; U04 must validate the canonical DTO first. */
+export type SlotMutationOutcome =
+  | (Extract<SlotMutationFeedback, { kind: "success" }> & { refresh: true; slotId: string | undefined })
+  | (Extract<SlotMutationFeedback, { kind: "failure" }> & { refresh: false })
+  | { kind: "redirect"; path: string; refresh: false }
+  | { kind: "communication-error"; message: string; refresh: true };
+
+const COMMUNICATION_ERROR_MESSAGE =
+  "通信エラーが発生しました。状態を再取得してもう一度お試しください。";
+
+/**
+ * CURRENT SlotGrid settlement policy, with navigation and refresh delegated
+ * to the host. No retry: a transport failure may follow a committed write.
+ * The host must scope the outcome to the still-current event/viewer before
+ * acting on it and re-read both RH-014 and RH-020 when refresh is true.
+ */
+export async function runSlotMutation(
+  presentation: SlotMutationPresentation,
+  mutate: () => Promise<SlotReservationResult>,
+  getCurrentPath: () => string | null | undefined,
+): Promise<SlotMutationOutcome> {
+  let result: SlotReservationResult;
+  try {
+    result = await mutate();
+  } catch {
+    // TARGET uses HTTP, not Next control-flow exceptions.
+    return { kind: "communication-error", message: COMMUNICATION_ERROR_MESSAGE, refresh: true };
+  }
+  if (!result.ok) {
+    const path = getGuardRedirectPath(result.reason, getCurrentPath());
+    if (path) return { kind: "redirect", path, refresh: false };
+  }
+  const feedback = describeSlotMutationResult(presentation, result);
+  if (feedback.kind === "success") {
+    return { ...feedback, slotId: result.slotId, refresh: true };
+  }
+  // CURRENT returns after a typed denial, including a 409 race loss.
+  // Work Order T02 requests a refresh instead; leave that decision to Lead.
+  return { ...feedback, refresh: false };
 }
