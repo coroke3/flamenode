@@ -1992,6 +1992,92 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual((await get("/ops/cost-guard")).body, await refCostGuard(), "unknown mode falls back to normal");
   });
 
+  test("MIG-0626: cost guard bounds settings and history together without false normal state", async () => {
+    const endpoint = "/api/admin-read/ops/cost-guard";
+    const limit = 64 * 1024;
+    const size = (value) => Buffer.byteLength(JSON.stringify(value));
+    const read = () => call(endpoint, ADMIN);
+    const update = sqlite.prepare(
+      "UPDATE system_settings SET cost_guard_reason = ?, cost_guard_exception_features_json = ?, disabled_features_json = ? WHERE id = 'default'"
+    );
+    const check = (receipt, status, statements) => {
+      assert.equal(receipt.status, status);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+      assert.equal(receipt.stats.statements, statements);
+      assert.equal(receipt.stats.writes, 0);
+      assert.ok(Buffer.byteLength(receipt.text) <= limit);
+      if (status === 503) {
+        assert.deepEqual(receipt.body, { error: "unavailable" });
+        assert.doesNotMatch(receipt.text, /private-cost-guard/);
+      }
+    };
+    sqlite.exec("SAVEPOINT mig0626_cost_guard_envelope");
+    try {
+      sqlite.exec("DELETE FROM audit_logs WHERE table_name = 'system_settings' AND operation = 'UPDATE'");
+      sqlite.exec("UPDATE system_settings SET operation_mode = 'maintenance' WHERE id = 'default'");
+      update.run("seed", "[]", "[]");
+      const base = await read();
+      check(base, 200, 3);
+      assert.equal(base.body.mode, "maintenance");
+      assert.equal(base.body.isMaintenance, true);
+      assert.deepEqual(base.body.history, []);
+      const exact = "a".repeat(limit - size(base.body) + "seed".length);
+      for (const [reason, exception, disabled, accepted] of [
+        [exact, "[]", "[]", true],
+        [exact + "a", "[]", "[]", false],
+        ["private-cost-guard-" + "a".repeat(70_000), "[]", "[]", false],
+        ["private-cost-guard-" + "あ".repeat(22_000), "[]", "[]", false],
+        ["private-cost-guard-" + "\u0001".repeat(11_000), "[]", "[]", false],
+        ["seed", JSON.stringify(["あ".repeat(11_000)]), JSON.stringify(["あ".repeat(11_000)]), false],
+        ["あ".repeat(10_000), "[]", "[]", true],
+      ]) {
+        update.run(reason, exception, disabled);
+        const r = await read();
+        check(r, accepted ? 200 : 503, accepted ? 3 : 2);
+        if (accepted) {
+          assert.deepEqual(r.body, { ...base.body, reason, exceptionFeaturesJson: exception, disabledFeaturesJson: disabled });
+          if (reason === exact) assert.equal(Buffer.byteLength(r.text), limit);
+        }
+      }
+      update.run("seed", "[]", "[]");
+      for (let i = 0; i < 3; i++) {
+        ins("audit_logs", {
+          id: "mig0626-cost-envelope-" + i, table_name: "system_settings", target_id: "default",
+          operation: "UPDATE", actor_user_id: "u_carol", created_at: 4_000_000_000 + i,
+          before_json: JSON.stringify({ text: "あ".repeat(4000) }), after_json: "{}",
+        });
+      }
+      const full = await read();
+      check(full, 200, 3);
+      assert.equal(full.body.history.length, 3);
+      assert.equal(full.body.truncated, false);
+      const two = { ...full.body, history: full.body.history.slice(0, 2) };
+      const twoReason = "a".repeat(limit - size(two) + "seed".length);
+      update.run(twoReason, "[]", "[]");
+      const clipped = await read();
+      check(clipped, 200, 3);
+      assert.deepEqual(clipped.body, { ...two, reason: twoReason, truncated: true });
+      assert.equal(Buffer.byteLength(clipped.text), limit - 1);
+      update.run(twoReason + "a", "[]", "[]");
+      const one = await read();
+      check(one, 200, 3);
+      assert.deepEqual(one.body, { ...two, reason: twoReason + "a", history: two.history.slice(0, 1), truncated: true });
+      update.run("seed", "[]", "[]");
+      ins("audit_logs", {
+        id: "mig0626-cost-envelope-oversize", table_name: "system_settings", target_id: "default",
+        operation: "UPDATE", actor_user_id: "u_carol", created_at: 4_000_000_010,
+        before_json: "private-cost-guard-" + "z".repeat(70_000), after_json: "{}",
+      });
+      const oversizeRow = await read();
+      check(oversizeRow, 200, 3);
+      assert.deepEqual(oversizeRow.body, { ...base.body, truncated: true });
+      assert.doesNotMatch(oversizeRow.text, /private-cost-guard/);
+      check(await call(endpoint, "tok-alice"), 403, 1);
+    } finally {
+      sqlite.exec("ROLLBACK TO mig0626_cost_guard_envelope; RELEASE mig0626_cost_guard_envelope");
+    }
+  });
+
   test("T05 cost guard: a failing read renders CURRENT's defaults (200), without internals", async () => {
     const d1 = createD1(sqlite);
     const prepare = d1.prepare;

@@ -1061,19 +1061,39 @@ adminOpsRoutes.get("/cost-guard", async (c) => {
         disabledFeaturesJson: settings.disabled_features_json,
       };
     }
+    // Reject oversized configuration rather than reporting false normal
+    // defaults or truncating the actionable settings fields.
+    const headerTextUnits = [found.reason, found.exceptionFeaturesJson, found.disabledFeaturesJson]
+      .reduce<number>((sum, value) => sum + (value?.length ?? 0), 0);
+    if (headerTextUnits > MAX_OPS_HTTP_BYTES) {
+      return c.json({ error: "unavailable" }, 503);
+    }
+    const headerBytes = utf8Size(found);
+    if (headerBytes > MAX_OPS_HTTP_BYTES) {
+      return c.json({ error: "unavailable" }, 503);
+    }
     const { results } = await c.env.DB.prepare(
       "SELECT id, created_at, actor_user_id, target_id, before_json, after_json FROM audit_logs " +
         "WHERE table_name = 'system_settings' AND operation = 'UPDATE' ORDER BY created_at DESC LIMIT ?",
     )
       .bind(MAX_COST_GUARD_HISTORY)
       .all<AdminCostGuardResponse["history"][number]>();
-    // ZERO_1102 S2: response <= 64 KiB (before/after snapshots are the large columns).
+    // Retain the 48 KiB history budget and bound the complete envelope.
+    // headerBytes includes the empty array; each preceding row adds a comma.
+    // truncated:true is one byte shorter than the measured false header.
     const history: AdminCostGuardResponse["history"] = [];
     let used = 0;
     let truncated = false;
     for (const row of results) {
+      const remaining = Math.min(MAX_OPS_LIST_BYTES - used, MAX_OPS_HTTP_BYTES - headerBytes - used - history.length);
+      const textUnits = Object.values(row).reduce<number>((sum, value) =>
+        sum + (typeof value === "string" ? value.length : 0), 0);
+      if (textUnits > remaining) {
+        truncated = true;
+        break;
+      }
       const size = utf8Size(row);
-      if (used + size > MAX_OPS_LIST_BYTES) {
+      if (size > remaining) {
         truncated = true;
         break;
       }
