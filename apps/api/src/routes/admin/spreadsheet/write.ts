@@ -818,9 +818,7 @@ function buildSpreadsheetMemberSnapshotFkReleaseLookup(
       "(SELECT MAX(value) FROM fk_" + index + ") AS " + quoteIdent(prefix + "fk_" + index + "_found"),
     ];
   });
-  const statement = "WITH " + ctes.join(",
-") + "
-" +
+  const statement = "WITH " + ctes.join(",\n") + "\n" +
     "SELECT s.*, sc."count" AS " + quoteIdent(snapshotCountAlias) +
     ", rc."count" AS " + quoteIdent(releaseCountAlias) + ", " +
     [...fkSelects,
