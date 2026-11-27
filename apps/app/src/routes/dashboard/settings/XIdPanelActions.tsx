@@ -2,6 +2,7 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import type { ProfileFields, XidProfileApi } from "../../../api/xidProfile.js";
 import { isSafeRelativePath } from "../../next.js";
+import { isMountedPersonalPath, personalDocumentNavigation } from "../../personalPaths.js";
 import { SocialLinksEditor } from "../../../components/shared/SocialLinksEditor.js";
 import { YoutubeChannelPicker } from "../../../components/shared/YoutubeChannelPicker.js";
 import { SquareIconEditor } from "../../../components/shared/SquareIconEditor.js";
@@ -69,7 +70,8 @@ export function SetActiveXButton({
         if (!result.ok) { setError(result.message ?? "切替に失敗しました。"); return; }
         // Do not turn a malformed / external next parameter into a navigation.
         if (next && isSafeRelativePath(next)) {
-          navigate(next);
+          if (isMountedPersonalPath(next)) navigate(next);
+          else personalDocumentNavigation.assign(next);
         } else {
           onRefresh();
         }
