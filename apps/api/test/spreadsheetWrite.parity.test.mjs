@@ -1730,8 +1730,8 @@ if (runUnderRootTsx(import.meta.url)) {
           { id: "vm-1", video_id: "av-pending-1", name: "linked" + suffix },
           { id: "vm-ov-0", video_id: "av-overflow", name: "unlinked" + suffix },
         ];
-        // one shared PK read + one deduplicated FK read + one release read
-        await importPair("member FK upsert " + suffix, { table: "video_members", mode: "upsert", rows }, cold, 6, [0, 2, 0],
+        // one shared PK read + one combined FK/release CTE read
+        await importPair("member FK upsert " + suffix, { table: "video_members", mode: "upsert", rows }, cold, 5, [0, 2, 0],
           (body, _queue, beforeActive) => {
             assert.equal(body.pendingPublicReflection, true);
             for (const row of rows) assert.equal(tableRows("video_members").find(saved => saved.id === row.id).name, row.name);

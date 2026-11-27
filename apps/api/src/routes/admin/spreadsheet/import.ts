@@ -42,6 +42,9 @@ import {
   applySpreadsheetWriteMiddleware,
   countingRawDb,
   deriveSpreadsheetQueueTargets,
+  buildSpreadsheetMemberFkReleaseLookup,
+  validateSpreadsheetMemberFkReleaseLookupReceipt,
+  spreadsheetMemberForeignKeyRowFromAudit,
   loadSpreadsheetVideoReleaseEvents,
   NOOP_WAKE_HOST,
   PRIVATE_HEADERS,
@@ -315,22 +318,45 @@ async function handleImportPost(c: Context<AppEnv>): Promise<Response> {
           )
         : null;
     const planned = planSpreadsheetImportMutations(ctx, prepared, mode, existing, user.id);
-    await validateSpreadsheetPlannedImportForeignKeys(
-      countedDb,
-      ctx,
-      foreignKeys,
-      prepared,
-      planned,
-      SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES - upsertReads,
-    );
-
-    const { eventIdsByVideo, reads: videoReads } =
-      planned.mutations.length > 0
-        ? await loadSpreadsheetVideoReleaseEvents(
-            rawDb,
-            planned.mutations.map((m) => m.audit),
-          )
-        : { eventIdsByVideo: new Map<string, readonly string[]>(), reads: 0 };
+    const remainingReadBudget = SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES - upsertReads;
+    let eventIdsByVideo: Map<string, string[]>;
+    let videoReads = 0;
+    if (ctx.def.table === "video_members" && planned.mutations.length > 0) {
+      // Run existing structural/identity/audit-after-image checks first.
+      // Empty FK list suppresses only the separate FK SELECT; the tagged CTE
+      // below performs the same FK proof together with release lookup.
+      await validateSpreadsheetPlannedImportForeignKeys(
+        countedDb, ctx, [], prepared, planned, remainingReadBudget,
+      );
+      const fkRows = prepared.preparedRows.map((entry) => entry.row);
+      for (const mutation of planned.mutations) {
+        if (mutation.audit.operation === "CREATE") {
+          fkRows.push(spreadsheetMemberForeignKeyRowFromAudit(mutation.audit, foreignKeys));
+        }
+      }
+      const audits = planned.mutations.map((mutation) => mutation.audit);
+      const combined = buildSpreadsheetMemberFkReleaseLookup(foreignKeys, fkRows, audits);
+      if (combined) {
+        const receipt = await countedDb.prepare(combined.statement).bind(...combined.binds).all<unknown>();
+        eventIdsByVideo = validateSpreadsheetMemberFkReleaseLookupReceipt(combined, receipt).eventIdsByVideo;
+      } else {
+        await validateSpreadsheetPlannedImportForeignKeys(
+          countedDb, ctx, foreignKeys, prepared, planned, remainingReadBudget,
+        );
+        const loaded = await loadSpreadsheetVideoReleaseEvents(rawDb, audits);
+        eventIdsByVideo = loaded.eventIdsByVideo;
+        videoReads = loaded.reads;
+      }
+    } else {
+      await validateSpreadsheetPlannedImportForeignKeys(
+        countedDb, ctx, foreignKeys, prepared, planned, remainingReadBudget,
+      );
+      const loaded = planned.mutations.length > 0
+        ? await loadSpreadsheetVideoReleaseEvents(rawDb, planned.mutations.map((m) => m.audit))
+        : { eventIdsByVideo: new Map<string, string[]>(), reads: 0 };
+      eventIdsByVideo = loaded.eventIdsByVideo;
+      videoReads = loaded.reads;
+    }
     const queueTargets =
       planned.mutations.length > 0
         ? deriveSpreadsheetQueueTargets(

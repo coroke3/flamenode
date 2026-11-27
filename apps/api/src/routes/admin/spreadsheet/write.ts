@@ -969,7 +969,7 @@ async function buildCrudAtomicBatch(
   return input;
 }
 
-function spreadsheetMemberForeignKeyRowFromAudit(
+export function spreadsheetMemberForeignKeyRowFromAudit(
   audit: SpreadsheetReleaseAudit,
   foreignKeys: readonly SpreadsheetForeignKey[],
 ): Record<string, string | null> {
