@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { normalizeRemoteD1Sql } from "./remote-d1-utils.mjs";
 
 const ROOT = process.cwd();
 const SCRIPT = path.join(ROOT, "scripts/check-sec-726-active-x.mjs");
@@ -39,6 +40,13 @@ test("SEC-726 SQL exactly counts the SEC-713 persisted-session guard failures wi
   assert.match(sql, /length\(CAST\(active_x_user_id AS BLOB\)\) > 512/);
   assert.doesNotMatch(sql, /\b(?:UPDATE|DELETE|INSERT|DROP|ALTER|REPLACE|PRAGMA|ATTACH)\b/i);
   assert.equal((sql.match(/;/g) ?? []).length, 1, "single read-only aggregate statement");
+  fixture(({ db }) => {
+    db.prepare('INSERT INTO "user" (active_x_user_id) VALUES (?)').run("selected");
+    for (const query of [sql, normalizeRemoteD1Sql(sql)]) {
+      assert.deepEqual({ ...db.prepare(query).get() }, { unsafe_selected_legacy_ids: 0 },
+        "local and whitespace-normalized remote SQL both execute as one aggregate");
+    }
+  });
 });
 
 test("SEC-726 local preflight accepts NULL, empty TEXT and both 128-codepoint Unicode limits", () => {
@@ -65,6 +73,61 @@ test("SEC-726 local preflight blocks oversized, NUL and BLOB selections without 
     assert.doesNotMatch(r.stdout + r.stderr, /hidden|🌀|あ|safe\x00/);
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM "user"').get().n, 5,
       "read-only inspection never modifies legacy data");
+  });
+});
+
+test("SEC-726 counts decoded UTF-8 limits without rejecting admissible replacement sequences", () => {
+  // CAST preserves malformed bytes as TEXT, as in legacy D1 rows. Buffer's UTF-8
+  // decoder retains BOMs and groups incomplete valid prefixes like D1 does.
+  const cases = [
+    ["surrogate prefix below limit", "eda080".repeat(42), 126, false],
+    ["surrogate prefix at limit", "eda080".repeat(42) + "6161", 128, false],
+    ["surrogate prefix over limit", "eda080".repeat(43), 129, true],
+    ["overlong prefix at limit", "c080".repeat(64), 128, false],
+    ["overlong prefix over limit", "c080".repeat(65), 130, true],
+    ["out-of-range prefix at limit", "f4908080".repeat(32), 128, false],
+    ["out-of-range prefix over limit", "f4908080".repeat(33), 132, true],
+    ["out-of-range prefix at raw byte limit", "f4908080".repeat(128), 512, true],
+    ["incomplete three-byte prefixes", "e180".repeat(128), 128, false],
+    ["incomplete four-byte prefixes", "f19080".repeat(128), 128, false],
+    ["incomplete two-byte prefixes", "c2".repeat(128), 128, false],
+    ["continuation bytes at limit", "80".repeat(128), 128, false],
+    ["invalid third byte reprocessed", "e18041".repeat(64), 128, false],
+    ["invalid fourth byte reprocessed", "f1908041".repeat(64), 128, false],
+    ["BOM retained at limit", "efbbbf" + "eda080".repeat(42) + "61", 128, false],
+    ["BOM retained over limit", "efbbbf" + "eda080".repeat(42) + "6161", 129, true],
+    ["literal replacement characters", "efbfbd".repeat(128), 128, false],
+    ["valid four-byte scalars", "f09f8c80".repeat(128), 128, false],
+    ["highest Unicode scalars", "f48fbfbf".repeat(128), 128, false],
+  ];
+  const sql = fs.readFileSync(SQL_PATH, "utf8");
+  fixture(({ db, dbPath }) => {
+    const add = db.prepare('INSERT INTO "user" (active_x_user_id) VALUES (CAST(? AS TEXT))');
+    const queries = [sql, normalizeRemoteD1Sql(sql)].map(query => db.prepare(query));
+    const rawLength = db.prepare('SELECT length(active_x_user_id) AS n FROM "user"');
+    for (const [label, hex, decodedPoints, unsafe] of cases) {
+      const bytes = Buffer.from(hex, "hex");
+      assert.equal([...bytes.toString("utf8")].length, decodedPoints, label);
+      assert.ok(bytes.length <= 512, label);
+      add.run(bytes);
+      assert.ok(rawLength.get().n <= 128, `${label}: raw storage guard passes`);
+      for (const query of queries) {
+        assert.deepEqual({ ...query.get() }, { unsafe_selected_legacy_ids: Number(unsafe) }, label);
+      }
+      db.exec('DELETE FROM "user"');
+    }
+    for (const [, hex] of cases) add.run(Buffer.from(hex, "hex"));
+    // Duplicate unsafe rows must each contribute to the aggregate.
+    add.run(Buffer.from("eda080".repeat(43), "hex"));
+    add.run(Buffer.from("eda080".repeat(43), "hex"));
+    const count = cases.filter(([, , , unsafe]) => unsafe).length + 2;
+    const r = check("--database=" + dbPath);
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stdout, new RegExp(`unsafe_selected_legacy_ids=${count}\\b`));
+    assert.match(r.stderr, /\bBLOCKED\b/);
+    assert.doesNotMatch(r.stdout + r.stderr, /\uFFFD|\uFEFF|🌀/);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM "user"').get().n, cases.length + 2,
+      "inspection preserves every stored row");
   });
 });
 

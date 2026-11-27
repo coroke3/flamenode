@@ -340,10 +340,12 @@ export async function openLocalSqliteD1(file: string): Promise<{ db: D1Like; clo
 
 /**
  * Option A (approved 2026-10-18): read D1 over the Cloudflare REST API with a token that
- * has only the "D1 Read" permission on this account. Build time only. Every statement
- * must be a single read (SELECT / WITH); anything else is refused before any request,
- * so a mis-scoped token can still not be used to write. At most MAX_D1_HTTP_STATEMENTS
- * requests per run; the token is never logged or put in an error message.
+ * has only the "D1 Read" permission on this account. Build time only. This reader
+ * applies a conservative lexical defense-in-depth policy to the fixed SELECT/WITH
+ * producer queries, including known extension-function side-effect calls. It is not a
+ * general SQLite read-only proof; independently verify the D1 Read-only token scope.
+ * At most MAX_D1_HTTP_STATEMENTS requests per run; the token is never logged or put
+ * in an error message.
  */
 export const MAX_D1_HTTP_STATEMENTS = 19;
 // The batched snapshot producer uses up to 200 D1 reads per build. Keep this
@@ -363,6 +365,9 @@ const READ_ONLY_SQL = /^\s*(SELECT|WITH)\b/i;
 // extension function entry points that can have side effects when enabled.
 // This reader executes fixed SELECTs.
 const FORBIDDEN_SQL_WORD = /\b(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX|ANALYZE|LOAD_EXTENSION|WRITEFILE)\b/i;
+// SQLite's optional eval() extension can execute DML inside an outer SELECT.
+// Reject calls (including comment-separated/quoted spellings), but not harmless identifiers.
+const FORBIDDEN_SQL_EXEC_CALL = /\beval\s*\(/i;
 
 /** Return true when a quoted SQL identifier is immediately invoked as a function. */
 function followedBySqlCall(source: string, from: number): boolean {
@@ -422,7 +427,7 @@ function executableSqlOnly(source: string): string | null {
       // Preserve only a dangerous quoted identifier when it is called;
       // quoted column names and harmless string literals stay masked.
       const quotedName = source.slice(identifierStart, i - 1);
-      const forbiddenCall = char !== "'" && /^(?:load_extension|writefile)$/i.test(quotedName)
+      const forbiddenCall = char !== "'" && /^(?:load_extension|writefile|eval)$/i.test(quotedName)
         && followedBySqlCall(source, i);
       code += forbiddenCall ? ` ${quotedName} ` : " ";
       continue;
@@ -440,7 +445,9 @@ export function isReadOnlyStatement(sql: string): boolean {
   if (!executable || !READ_ONLY_SQL.test(executable)) return false;
   // A single optional terminal semicolon is allowed; comments/literals were masked.
   const withoutFinalSemicolon = executable.endsWith(";") ? executable.slice(0, -1) : executable;
-  return !withoutFinalSemicolon.includes(";") && !FORBIDDEN_SQL_WORD.test(withoutFinalSemicolon);
+  return !withoutFinalSemicolon.includes(";")
+    && !FORBIDDEN_SQL_WORD.test(withoutFinalSemicolon)
+    && !FORBIDDEN_SQL_EXEC_CALL.test(withoutFinalSemicolon);
 }
 
 export function openD1HttpReader(options: {
