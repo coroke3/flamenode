@@ -338,6 +338,76 @@ export const JOBS = Object.freeze([
 ]);
 export const jobById = id => JOBS.find(j => j.id === id);
 
+
+/**
+ * MIG-0610 T00a: strict, deterministic D1 trace replay primitive.
+ * A caller must record traces from the SAME seeded synthetic job independently.
+ * It is deliberately not connected to --run yet: no CPU verdict is authorized.
+ * Unsupported D1 operations, altered SQL/binds/method order, missing or surplus
+ * trace steps and batch boundary changes must never produce a valid sample.
+ */
+export function createStrictD1TraceReplay(trace) {
+  if (!Array.isArray(trace) || trace.length > 2000) throw Error("invalid D1 replay trace");
+  let cursor = 0;
+  const stmtMark = Symbol("D1 replay prepared");
+  const normalized = value => {
+    if (value === null) return ["null"];
+    if (typeof value === "string") return ["str", value];
+    if (typeof value === "boolean") return ["bool", value];
+    if (typeof value === "number" && Number.isFinite(value)) return ["num", value];
+    if (value instanceof Uint8Array) return ["bytes", [...value]];
+    if (value instanceof ArrayBuffer) return ["bytes", [...new Uint8Array(value)]];
+    throw Error("unsupported D1 replay bind type");
+  };
+  const binds = values => values.map(normalized);
+  const encoded = value => JSON.stringify(value);
+  const step = signature => {
+    const item = trace[cursor];
+    if (!item || !Object.hasOwn(item, "result") ||
+        encoded(item.request) !== encoded(signature)) {
+      throw Error("D1 replay trace mismatch at step " + cursor);
+    }
+    cursor++;
+    // No trace result may be mutated by a consumer and reused as a future response.
+    return structuredClone(item.result);
+  };
+  const prepared = (sql, values = []) => {
+    if (typeof sql !== "string" || !sql) throw Error("invalid D1 replay SQL");
+    const desc = { sql, binds: binds(values) };
+    const invoke = (method, args = []) => Promise.resolve(step({ op: method, ...desc, args }));
+    const stmt = {
+      [stmtMark]: desc,
+      bind(...args) { return prepared(sql, args); },
+      first: column => invoke("first", column === undefined ? [] : [column]),
+      all: () => invoke("all"),
+      run: () => invoke("run"),
+      raw: options => invoke("raw", options === undefined ? [] : [options]),
+    };
+    return Object.freeze(stmt);
+  };
+  const db = Object.freeze({
+    prepare: sql => prepared(sql),
+    batch: statements => {
+      if (!Array.isArray(statements) || statements.length === 0 ||
+          statements.some(s => !s || !s[stmtMark])) throw Error("invalid D1 replay batch");
+      return Promise.resolve(step({
+        op: "batch", statements: statements.map(s => s[stmtMark]),
+      }));
+    },
+    exec: sql => {
+      if (typeof sql !== "string" || !sql) throw Error("invalid D1 replay exec SQL");
+      return Promise.resolve(step({ op: "exec", sql }));
+    },
+  });
+  return Object.freeze({
+    db,
+    consumed: () => cursor,
+    assertExhausted() {
+      if (cursor !== trace.length) throw Error("unconsumed D1 replay trace: " + (trace.length - cursor));
+    },
+  });
+}
+
 export function parseArgs(args) {
   const opts = { dryRun: false, run: false, samples: MIN_SAMPLES, coldSamples: MIN_SAMPLES,
     warmup: 10, port: 8789, inspectorPort: 9240, out: null, probe: false, only: null };

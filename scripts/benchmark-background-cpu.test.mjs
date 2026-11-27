@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  createStrictD1TraceReplay,
   WORKERS, BUDGET_MS, FIXED_TIME, plan, parseArgs, seedForKind, wrapperSource,
   judgeBackground, limitRecommendation, cpuFromProfile, validateSample,
 } from "./benchmark-background-cpu.mjs";
@@ -385,4 +386,60 @@ test("U02: the wrapper source embeds a literal import() per declared module so w
   }
   assert.ok(src.indexOf("globalThis.fetch = async") < src.indexOf("await import("), "trap precedes entry import");
   assert.ok(!src.includes("https://discord.com") && !src.includes("https://youtube.googleapis.com"));
+});
+
+test("MIG-0610 T00a: strict D1 trace replay preserves SQL/binds, returns cloned rows and exhausts trace", async () => {
+  const trace = [
+    { request: { op: "first", sql: "SELECT ? AS value", binds: [["str", "abc"]], args: [] },
+      result: { value: "abc" } },
+    { request: { op: "batch", statements: [
+      { sql: "UPDATE q SET n = ?", binds: [["num", 2]] },
+      { sql: "INSERT INTO q (blob) VALUES (?)", binds: [["bytes", [0, 255]]] },
+    ] }, result: [{ success: true, meta: { changes: 1 } }, { success: true, meta: { changes: 1 } }] },
+    { request: { op: "exec", sql: "PRAGMA foreign_keys=ON" }, result: { count: 0 } },
+  ];
+  const replay = createStrictD1TraceReplay(trace);
+  const first = await replay.db.prepare("SELECT ? AS value").bind("abc").first();
+  assert.deepEqual(first, { value: "abc" });
+  first.value = "corrupted";
+  assert.equal(trace[0].result.value, "abc");
+  assert.deepEqual(await replay.db.batch([
+    replay.db.prepare("UPDATE q SET n = ?").bind(2),
+    replay.db.prepare("INSERT INTO q (blob) VALUES (?)").bind(new Uint8Array([0, 255])),
+  ]), [{ success: true, meta: { changes: 1 } }, { success: true, meta: { changes: 1 } }]);
+  assert.deepEqual(await replay.db.exec("PRAGMA foreign_keys=ON"), { count: 0 });
+  assert.equal(replay.consumed(), 3);
+  replay.assertExhausted();
+});
+
+test("MIG-0610 T00a: D1 replay rejects tampered SQL/binds/operation, missing batch and unused work", async () => {
+  const entry = { request: { op: "first", sql: "SELECT ?", binds: [["num", 1]], args: [] }, result: { x: 1 } };
+  for (const invoke of [
+    db => db.prepare("SELECT 2").bind(1).first(),
+    db => db.prepare("SELECT ?").bind(2).first(),
+    db => db.prepare("SELECT ?").bind(1).all(),
+    db => db.batch([db.prepare("SELECT ?").bind(1)]),
+  ]) {
+    const replay = createStrictD1TraceReplay([entry]);
+    await assert.rejects(() => invoke(replay.db), /D1 replay trace mismatch/);
+    assert.equal(replay.consumed(), 0);
+    assert.throws(() => replay.assertExhausted(), /unconsumed D1 replay trace/);
+  }
+  const replay = createStrictD1TraceReplay([entry]);
+  assert.deepEqual(await replay.db.prepare("SELECT ?").bind(1).first(), { x: 1 });
+  await assert.rejects(() => replay.db.prepare("SELECT ?").bind(1).first(), /mismatch/);
+  replay.assertExhausted();
+  assert.throws(() => createStrictD1TraceReplay([{ request: entry.request }]), /./, "missing result must not be accepted silently");
+});
+
+test("MIG-0610 T00a: malformed and unsupported D1 replay operations are not silently approximated", async () => {
+  assert.throws(() => createStrictD1TraceReplay(null), /invalid/);
+  assert.throws(() => createStrictD1TraceReplay(Array(2001).fill({})), /invalid/);
+  const replay = createStrictD1TraceReplay([]);
+  assert.throws(() => replay.db.prepare("SELECT ?").bind({ secret: "not a D1 scalar" }), /unsupported/);
+  assert.throws(() => replay.db.prepare("SELECT ?").bind(Number.NaN), /unsupported/);
+  assert.throws(() => replay.db.batch([]), /invalid/);
+  assert.throws(() => replay.db.batch([{}]), /invalid/);
+  assert.equal(replay.db.withSession, undefined, "unsupported D1 APIs must not fall back to real DB");
+  replay.assertExhausted();
 });
