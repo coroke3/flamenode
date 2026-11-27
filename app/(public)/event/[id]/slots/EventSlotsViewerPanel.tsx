@@ -29,6 +29,8 @@ const EMPTY_OVERLAY: SlotViewerOverlayDto = {
 
 type ViewerOverlayState = {
   value: SlotViewerOverlayDto;
+  /** Viewer data belongs to one event, even when slot arrays are reused. */
+  eventId: string | null;
   /** このviewer情報と同時に表示してよいpublic slot base。 */
   baseSlots: readonly SlotRow[] | null;
 };
@@ -156,6 +158,7 @@ export function EventSlotsViewerPanel({
 }): React.ReactElement {
   const [overlayState, setOverlayState] = React.useState<ViewerOverlayState>({
     value: EMPTY_OVERLAY,
+    eventId: null,
     baseSlots: null,
   });
   const [loading, setLoading] = React.useState(true);
@@ -163,7 +166,8 @@ export function EventSlotsViewerPanel({
   // Invalidate stale GET completions synchronously on Active X or BFCache restoration.
   const overlayGeneration = React.useRef(0);
 
-  const overlayIsCurrent = overlayState.baseSlots === baseSlots;
+  const overlayIsCurrent =
+    overlayState.eventId === eventId && overlayState.baseSlots === baseSlots;
   const viewerOverlay = overlayIsCurrent ? overlayState.value : EMPTY_OVERLAY;
   const viewerLoading = loading || !overlayIsCurrent;
 
@@ -175,6 +179,7 @@ export function EventSlotsViewerPanel({
       SLOT_VIEWER_OVERLAY_TIMEOUT_MS,
     );
     const requestBaseSlots = baseSlots;
+    const requestEventId = eventId;
     const requestGeneration = overlayGeneration.current;
     setLoading(true);
     void fetch(
@@ -202,7 +207,7 @@ export function EventSlotsViewerPanel({
       })
       .then((value) => {
         if (!active || !value || requestGeneration !== overlayGeneration.current) return;
-        setOverlayState({ value, baseSlots: requestBaseSlots });
+        setOverlayState({ value, eventId: requestEventId, baseSlots: requestBaseSlots });
         setLoading(false);
       })
       .finally(() => {
@@ -219,7 +224,7 @@ export function EventSlotsViewerPanel({
     const refresh = () => {
       overlayGeneration.current += 1;
       // Active X切替直後に旧Xの本人枠・表示名を残さない。
-      setOverlayState({ value: EMPTY_OVERLAY, baseSlots: null });
+      setOverlayState({ value: EMPTY_OVERLAY, eventId: null, baseSlots: null });
       setLoading(true);
       setRefreshNonce((value) => value + 1);
     };

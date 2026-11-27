@@ -81,12 +81,13 @@ test("slot viewer routeはnot-foundとruntime unavailableを分離する", () =>
 
 test("base slot/Active X変更時は旧viewer ownershipを即時無効化する", () => {
   assert.match(panel, /type ViewerOverlayState/);
-  assert.match(panel, /overlayState\.baseSlots === baseSlots/);
+  assert.match(panel, /overlayState\.eventId === eventId && overlayState\.baseSlots === baseSlots/);
   assert.match(panel, /overlayIsCurrent \? overlayState\.value : EMPTY_OVERLAY/);
   assert.match(panel, /const requestBaseSlots = baseSlots/);
-  assert.match(panel, /setOverlayState\(\{ value, baseSlots: requestBaseSlots \}\)/);
+  assert.match(panel, /const requestEventId = eventId/);
+  assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots \}\)/);
   assert.match(panel, /\[eventId, refreshNonce, baseSlots\]/);
-  assert.match(panel, /setOverlayState\(\{ value: EMPTY_OVERLAY, baseSlots: null \}\)/);
+  assert.match(panel, /setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null \}\)/);
   assert.match(panel, /ACTIVE_X_CHANGED_EVENT/);
 });
 
@@ -116,7 +117,7 @@ test("BFCache復元時は旧viewer overlay・予約ダイアログの両方を�
   assert.match(panel, /if \(event\.persisted\) refresh\(\)/);
   assert.match(panel, /window\.addEventListener\("pageshow", onPageShow\)/);
   assert.match(panel, /window\.removeEventListener\("pageshow", onPageShow\)/);
-  assert.match(panel, /const refresh = \(\) => \{[\s\S]*?setOverlayState\(\{ value: EMPTY_OVERLAY, baseSlots: null \}\);[\s\S]*?setRefreshNonce\(/);
+  assert.match(panel, /const refresh = \(\) => \{[\s\S]*?setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null \}\);[\s\S]*?setRefreshNonce\(/);
   assert.match(slotGrid, /if \(event\.persisted\) clearViewerPrivateUi\(\)/);
   assert.match(slotGrid, /window\.addEventListener\("pageshow", onPageShow\)/);
   assert.match(slotGrid, /window\.removeEventListener\("pageshow", onPageShow\)/);
@@ -132,4 +133,16 @@ test("old viewer GET is retired synchronously before Active-X or BFCache effect 
   assert.match(panel, /const refresh = \(\) => \{\s*overlayGeneration\.current \+= 1/);
   assert.match(panel, /if \(event\.persisted\) refresh\(\)/);
   assert.match(panel, /window\.addEventListener\(ACTIVE_X_CHANGED_EVENT, refresh\)/);
+});
+
+// This is a source-contract guard. Mounted route transitions and deferred GET
+// interleavings still require separate runtime acceptance before merge.
+test("eventId change with an identical baseSlots reference cannot authorize an old viewer overlay", () => {
+  assert.match(panel, /eventId: string \| null/);
+  assert.match(panel, /overlayState\.eventId === eventId && overlayState\.baseSlots === baseSlots/);
+  assert.match(panel, /const requestEventId = eventId/);
+  assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots \}\)/);
+  assert.match(panel, /const viewerOverlay = overlayIsCurrent \? overlayState\.value : EMPTY_OVERLAY/);
+  assert.match(panel, /const viewerLoading = loading \|\| !overlayIsCurrent/);
+  assert.match(panel, /\[eventId, refreshNonce, baseSlots\]/);
 });
