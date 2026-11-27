@@ -2,6 +2,8 @@ import * as React from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import type { EditPermissionsResponse } from "@flamenode/contracts";
 import { getEditPermissions, type EditPermissionsReadResult } from "../../../api/videoCollaborators.js";
+import { VideoCollabPermsManager } from "../../../components/VideoCollabPermsManager.js";
+import { getVideoPermissionNotificationUrlEnv } from "../../../lib/videoPermissionNotification.js";
 import { AuthUnavailable, BannedNotice, LoginRequired, SessionLoading } from "../../guard.js";
 import { AppLink, useDocumentTitle } from "../../ui/AppLink.js";
 import { Icon } from "../../ui/Icon.js";
@@ -9,11 +11,25 @@ import { ACTIVE_X_CHANGED_EVENT } from "../../../lib/activeXSwitchEvents.js";
 import { videoPageHref } from "../../../lib/youtubeId.js";
 
 type LoadState = { status: "loading" } | EditPermissionsReadResult;
+type ManagerHost = {
+  authorityKey: string;
+  notificationUrlEnv: ReturnType<typeof getVideoPermissionNotificationUrlEnv>;
+  onRefresh: () => void;
+};
 
 const reloadDocument = () => window.location.reload();
 
-/** MIG-0715 U01: intentionally unregistered until U02/U03 write + UI parity are complete. */
-export function Permissions({ load = getEditPermissions, reload = reloadDocument }: { load?: typeof getEditPermissions; reload?: () => void }): React.ReactElement {
+/** MIG-0715: host composition stays unregistered until the MIG-0650 merge gate is DONE. */
+export function Permissions({
+  load = getEditPermissions,
+  reload = reloadDocument,
+  managerEnabled = true,
+}: {
+  load?: typeof getEditPermissions;
+  reload?: () => void;
+  /** Test seam only; the production route keeps the host manager enabled. */
+  managerEnabled?: boolean;
+}): React.ReactElement {
   useDocumentTitle("編集権限の管理");
   const { id } = useParams<{ id: string }>();
   const [params] = useSearchParams();
@@ -22,14 +38,15 @@ export function Permissions({ load = getEditPermissions, reload = reloadDocument
   // Resource and exact ordered query tuple own the whole read lifecycle. A
   // new resource/mode must render loading before any passive-effect cleanup.
   // JSON encoding distinguishes duplicate values and embedded separators.
-  return <PermissionsForResource key={JSON.stringify([id, modes])} id={id} modes={modes} load={load} reload={reload} />;
+  return <PermissionsForResource key={JSON.stringify([id, modes])} id={id} modes={modes} load={load} reload={reload} managerEnabled={managerEnabled} />;
 }
 
-function PermissionsForResource({ id, modes, load, reload }: {
+function PermissionsForResource({ id, modes, load, reload, managerEnabled }: {
   id: string;
   modes: readonly string[];
   load: typeof getEditPermissions;
   reload: () => void;
+  managerEnabled: boolean;
 }): React.ReactElement {
   const queryKey = JSON.stringify(modes);
   const [snapshot, setSnapshot] = React.useState<{ loader: typeof load; result: LoadState }>({
@@ -37,6 +54,18 @@ function PermissionsForResource({ id, modes, load, reload }: {
     result: { status: "loading" },
   });
   const state: LoadState = snapshot.loader === load ? snapshot.result : { status: "loading" };
+  const [refreshKey, setRefreshKey] = React.useState(0);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [refreshFailed, setRefreshFailed] = React.useState(false);
+  // A document generation marker only: never identity, authorization or a token.
+  // Auth/Active-X changes below retire the whole document and therefore this key.
+  const [authorityKey] = React.useState(() => String(window.performance?.timeOrigin ?? Date.now()));
+  const notificationUrlEnv = React.useMemo(() => getVideoPermissionNotificationUrlEnv(), []);
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    setRefreshFailed(false);
+    setRefreshKey((value) => value + 1);
+  }, []);
 
   // Auth transitions use hard navigation; the committed Active X signal and
   // BFCache restore must also retire this private view as a full document.
@@ -55,24 +84,47 @@ function PermissionsForResource({ id, modes, load, reload }: {
 
   React.useEffect(() => {
     const controller = new AbortController();
-    setSnapshot({ loader: load, result: { status: "loading" } });
-    load({ videoId: id, privilegeModes: modes, signal: controller.signal }).then(
-      (result) => {
-        if (controller.signal.aborted) return;
-        // Even an injected loader cannot display a receipt for another video.
-        const ownedResult = result.status === "ok" && result.data.kind === "ok" && result.data.video.id !== id
-          ? { status: "unavailable" as const }
-          : result;
-        setSnapshot({ loader: load, result: ownedResult });
-      },
-      () => {
-        if (!controller.signal.aborted) setSnapshot({ loader: load, result: { status: "unavailable" } });
-      },
-    );
+    // A post-write refresh keeps the last committed read view on screen instead
+    // of flashing SessionLoading. The manager is hidden while the receipt is
+    // refreshed; only a fresh authorized, non-truncated receipt re-enables it.
+    const preservePrevious = refreshKey > 0 && state.status === "ok";
+    if (!preservePrevious) setSnapshot({ loader: load, result: { status: "loading" } });
+    Promise.resolve()
+      .then(() => load({ videoId: id, privilegeModes: modes, signal: controller.signal }))
+      .then(
+        (result) => {
+          if (controller.signal.aborted) return;
+          // Even an injected loader cannot display a receipt for another video.
+          const ownedResult = result.status === "ok" && result.data.kind === "ok" && result.data.video.id !== id
+            ? { status: "unavailable" as const }
+            : result;
+          if (preservePrevious && ownedResult.status === "unavailable") {
+            // Keep the previous inventory read-only; never leave stale write controls enabled.
+            setRefreshing(false);
+            setRefreshFailed(true);
+            return;
+          }
+          setSnapshot({ loader: load, result: ownedResult });
+          setRefreshing(false);
+          setRefreshFailed(false);
+        },
+        () => {
+          if (controller.signal.aborted) return;
+          if (preservePrevious) {
+            setRefreshing(false);
+            setRefreshFailed(true);
+          } else {
+            setSnapshot({ loader: load, result: { status: "unavailable" } });
+            setRefreshing(false);
+            setRefreshFailed(false);
+          }
+        },
+      );
     return () => controller.abort();
+    // Capture the committed view at the refresh boundary; refreshKey is the trigger.
     // Exact ordered values (including duplicates) are represented by queryKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, queryKey, load]);
+  }, [id, queryKey, load, refreshKey]);
 
 
   if (state.status === "loading") return <SessionLoading />;
@@ -80,7 +132,18 @@ function PermissionsForResource({ id, modes, load, reload }: {
   if (state.status === "banned") return <BannedNotice />;
   if (state.status === "unavailable") return <AuthUnavailable />;
   if (state.status === "not_found") return <NotFound />;
-  return <PermissionsReadView videoId={id} data={state.data} />;
+  const managerHost: ManagerHost | undefined = managerEnabled
+    ? { authorityKey, notificationUrlEnv, onRefresh }
+    : undefined;
+  return (
+    <PermissionsReadView
+      videoId={id}
+      data={state.data}
+      managerHost={managerHost}
+      refreshing={refreshing}
+      refreshFailed={refreshFailed}
+    />
+  );
 }
 
 function NotFound(): React.ReactElement {
@@ -100,9 +163,15 @@ function editHref(videoId: string, mode: "normal" | "admin" | "event"): string {
 export function PermissionsReadView({
   videoId,
   data,
+  managerHost,
+  refreshing = false,
+  refreshFailed = false,
 }: {
   videoId: string;
   data: EditPermissionsResponse;
+  managerHost?: ManagerHost;
+  refreshing?: boolean;
+  refreshFailed?: boolean;
 }): React.ReactElement {
   const href = editHref(videoId, data.privilegeMode);
   const id = encodeURIComponent(videoId);
@@ -170,15 +239,37 @@ export function PermissionsReadView({
             {data.truncated ? (
               <p role="alert">共同編集者の情報が一部省略されています。省略された一覧から権限を更新しないでください。</p>
             ) : null}
-            {/* U03 will replace this read-only inventory with the CURRENT permission manager. */}
-            <h2>共同編集者</h2>
-            <ul>
-              {data.subjects.map((subject) => (
-                <li key={subject.x_user_id}>
-                  {subject.display_name}（@{subject.x_user_id}） — {subject.can_edit === 1 ? "編集可" : "編集不可"}
-                </li>
-              ))}
-            </ul>
+            {managerHost && !data.truncated && !refreshing && !refreshFailed ? (
+              <VideoCollabPermsManager
+                videoId={data.video.id}
+                videoTitle={data.video.title}
+                subjects={data.subjects}
+                publicMembers={data.publicMembers}
+                editPrivilegeMode={data.privilegeMode}
+                authorityKey={managerHost.authorityKey}
+                notificationUrlEnv={managerHost.notificationUrlEnv}
+                onRefresh={managerHost.onRefresh}
+              />
+            ) : (
+              <>
+                {refreshing ? (
+                  <p role="status">保存しました。最新の一覧を確認しています。</p>
+                ) : null}
+                {refreshFailed ? (
+                  <p role="alert">
+                    最新の編集権限を取得できませんでした。安全のため変更操作を停止しました。ページを再読み込みして確認してください。
+                  </p>
+                ) : null}
+                <h2>共同編集者</h2>
+                <ul>
+                  {data.subjects.map((subject) => (
+                    <li key={subject.x_user_id}>
+                      {subject.display_name}（@{subject.x_user_id}） — {subject.can_edit === 1 ? "編集可" : "編集不可"}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </div>
         </section>
       )}

@@ -11,7 +11,7 @@ const { ACTIVE_X_CHANGED_EVENT } = await import("../.test-dist/apps/app/src/lib/
 
 const res = (status, body = null) => ({ status, json: async () => body });
 
-async function mountPermissions(path, load, reload = () => {}) {
+async function mountPermissions(path, load, reload = () => {}, managerEnabled = false) {
   const container = dom.window.document.createElement("div");
   const root = createRoot(container);
   await act(async () => {
@@ -19,11 +19,18 @@ async function mountPermissions(path, load, reload = () => {}) {
       React.createElement(Routes, null,
         React.createElement(Route, {
           path: "/dashboard/edit/:id/permissions",
-          element: React.createElement(Permissions, { load, reload }),
+          element: React.createElement(Permissions, { load, reload, managerEnabled }),
         }))));
   });
   await flush();
   return { container, unmount: () => act(async () => root.unmount()) };
+}
+
+async function press(container, label) {
+  const button = [...container.querySelectorAll("button")].find((candidate) => candidate.textContent.includes(label));
+  assert.ok(button, "expected button: " + label);
+  await act(async () => { button.click(); });
+  await flush();
 }
 
 test("GET preserves repeated, explicit and unknown privilege values for server-side authorization", async () => {
@@ -108,9 +115,10 @@ test("truncated collaborator data shows a warning and never provides write contr
       x_user_id: "coauthor", user_id: null, display_name: "共同作者", can_edit: 1,
       is_public_member: 1, has_discord_link: false, can_notify: false,
     }], publicMembers: [], truncated: true,
-  }));
+  }), undefined, true);
   assert.match(m.container.textContent, /共同作者/);
   assert.match(m.container.textContent, /一部省略されています/);
+  assert.equal(m.container.querySelector("#video-collab-perms"), null);
   assert.equal(m.container.querySelectorAll("button,form").length, 0);
   await m.unmount();
 });
@@ -304,7 +312,7 @@ test("MIG-0715 U01: resource and exact privilege tuple own the committed read vi
         React.createElement(React.Fragment, null,
           React.createElement(Routes, null, React.createElement(Route, {
             path: "/dashboard/edit/:id/permissions",
-            element: React.createElement(Permissions, { load }),
+            element: React.createElement(Permissions, { load, managerEnabled: false }),
           })),
           React.createElement(Probe))));
     });
@@ -431,7 +439,7 @@ test("MIG-0715 U03: admin menu retires before passive effects on resource and mo
       React.createElement(React.Fragment, null,
         React.createElement(Routes, null, React.createElement(Route, {
           path: "/dashboard/edit/:id/permissions",
-          element: React.createElement(Permissions, { load }),
+          element: React.createElement(Permissions, { load, managerEnabled: false }),
         })),
         React.createElement(Probe)))));
     await flush();
@@ -507,4 +515,85 @@ test("MIG-0715 U03b: Active X change and BFCache restore hard-remount the permis
 
   dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
   assert.deepEqual(reloads, ["reload", "reload"], "unmounted route removes its invalidation listeners");
+});
+
+
+test("MIG-0715 U03b host mounts the manager only for a complete authorized receipt", async () => {
+  const m = await mountPermissions(
+    "/dashboard/edit/A/permissions",
+    async () => ok(permissionReceipt("A", "host")),
+    undefined,
+    true,
+  );
+  try {
+    assert.ok(m.container.querySelector("#video-collab-perms"));
+    assert.ok([...m.container.querySelectorAll("button")].some((button) => button.textContent.includes("変更")));
+  } finally {
+    await m.unmount();
+  }
+});
+
+test("MIG-0715 U03b post-write refresh keeps the read view visible without LOADING", async () => {
+  const previousFetch = globalThis.fetch;
+  let loads = 0;
+  let resolveRefresh;
+  const after = permissionReceipt("A", "after");
+  after.subjects = after.subjects.map((subject) => ({ ...subject, can_edit: 0 }));
+  const load = async () => {
+    loads += 1;
+    if (loads === 1) return ok(permissionReceipt("A", "before"));
+    return new Promise((resolve) => { resolveRefresh = resolve; });
+  };
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    message: "解除しました。",
+  }), { status: 200 });
+  const m = await mountPermissions("/dashboard/edit/A/permissions", load, undefined, true);
+  try {
+    assert.ok(m.container.querySelector("#video-collab-perms"));
+    await press(m.container, "変更");
+    await press(m.container, "解除する");
+    assert.equal(loads, 2);
+    assert.equal(m.container.querySelector("#video-collab-perms"), null);
+    assert.match(m.container.textContent, /最新の一覧を確認しています/);
+    assert.doesNotMatch(m.container.textContent, /読み込み中/);
+    assert.equal(m.container.querySelectorAll("button,input,form").length, 0);
+
+    await act(async () => { resolveRefresh(ok(after)); });
+    await flush();
+    assert.ok(m.container.querySelector("#video-collab-perms"));
+    assert.match(m.container.textContent, /まだ作品編集に参加できる人はいません/);
+    assert.equal([...m.container.querySelectorAll("button")].some((button) => button.textContent.includes("変更")), false);
+  } finally {
+    await m.unmount();
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("MIG-0715 U03b failed post-write refresh keeps only a read-only stale inventory", async () => {
+  const previousFetch = globalThis.fetch;
+  let loads = 0;
+  const load = async () => {
+    loads += 1;
+    return loads === 1 ? ok(permissionReceipt("A", "stale")) : { status: "unavailable" };
+  };
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    message: "解除しました。",
+  }), { status: 200 });
+  const m = await mountPermissions("/dashboard/edit/A/permissions", load, undefined, true);
+  try {
+    assert.ok(m.container.querySelector("#video-collab-perms"));
+    await press(m.container, "変更");
+    await press(m.container, "解除する");
+    assert.equal(loads, 2);
+    assert.equal(m.container.querySelector("#video-collab-perms"), null);
+    assert.match(m.container.textContent, /最新の編集権限を取得できませんでした/);
+    assert.match(m.container.textContent, /private-stale/);
+    assert.doesNotMatch(m.container.textContent, /読み込み中/);
+    assert.equal(m.container.querySelectorAll("button,input,form").length, 0);
+  } finally {
+    await m.unmount();
+    globalThis.fetch = previousFetch;
+  }
 });
