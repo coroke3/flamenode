@@ -59,7 +59,8 @@ export type VideoVisibilityStatusMutationHost<DB> = {
    * public visibility is no longer fenced. Missing/unknown -> false or throw.
    */
   confirmCompensation(videoId: string): Promise<boolean>;
-  rethrowFrameworkControl(error: unknown): void;
+  /** Throw only a recognized framework signal; return unavailable if inspection failed. */
+  rethrowFrameworkControl(error: unknown): void | "unavailable";
   isAuditMutationError(error: unknown): boolean;
   rereadStatus(db: DB, videoId: string): Promise<string | null | undefined>;
   isVisibilityPrecommitFailure(error: unknown): boolean;
@@ -151,15 +152,12 @@ export async function executeVideoVisibilityStatusMutation<DB>(
     // and its removal is confirmed. Re-throwing first strands the fence.
     let frameworkControlRaised = false;
     let frameworkControlError: unknown;
-    if (!transition.fenceToken) {
-      host.rethrowFrameworkControl(error);
-    } else {
-      try {
-        host.rethrowFrameworkControl(error);
-      } catch (controlError) {
-        frameworkControlRaised = true;
-        frameworkControlError = controlError;
-      }
+    let frameworkControlUnavailable = false;
+    try {
+      frameworkControlUnavailable = host.rethrowFrameworkControl(error) === "unavailable";
+    } catch (controlError) {
+      frameworkControlRaised = true;
+      frameworkControlError = controlError;
     }
     if (transition.fenceToken) {
       try {
@@ -183,6 +181,20 @@ export async function executeVideoVisibilityStatusMutation<DB>(
           error_code: "visibility_compensation_failed",
         });
       }
+    }
+    if (frameworkControlUnavailable) {
+      // Unknown framework classification cannot justify a retry or status
+      // oracle, even if R2 compensation was independently confirmed.
+      logFailure("warn", `[${logTag}] framework control classification unavailable`, {
+        traceId, error_code: "status_framework_classification_unavailable",
+      });
+      return {
+        ok: false,
+        message: "状態の確認に失敗しました。状態を再取得してから操作してください。",
+        errorCode: "status_unverified",
+        traceId,
+        retryable: false,
+      };
     }
     if (frameworkControlRaised) {
       // Do not redirect when rollback is unverified: leave the visibility
