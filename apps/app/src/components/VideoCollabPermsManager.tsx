@@ -57,6 +57,13 @@ interface Props {
   publicMembers?: VideoPublicMemberCandidate[];
   /** Server Action が再検証する privilegeMode。URL の ?privileged= と一致させる。 */
   editPrivilegeMode?: "normal" | "admin" | "event";
+  /**
+   * Opaque, non-secret lifecycle key from the host's committed authenticated
+   * context. Rotate on account / Active X / session-authority changes; keep
+   * stable for ordinary refetches. This key is NOT authorization or a token.
+   * The host must still omit this manager on denial or truncated receipts.
+   */
+  authorityKey: string;
   /** Inject route-level refetch; never optimistically change owner privileges. */
   onRefresh: () => void;
 }
@@ -222,7 +229,22 @@ function PermissionDialog({
   );
 }
 
-export function VideoCollabPermsManager({
+export function VideoCollabPermsManager(props: Props): React.ReactElement {
+  // Do not enable candidate write controls without a host-owned identity.
+  if (!props.authorityKey?.trim()) {
+    return <p role="alert" className={styles.feedbackErr}>権限情報を確認できません。ページを再読み込みしてください。</p>;
+  }
+  // A committed identity change retires all dialog/form/feedback state before
+  // another resource or authority can display or submit it.
+  return (
+    <VideoCollabPermsManagerForOwner
+      key={JSON.stringify([props.videoId, props.editPrivilegeMode ?? "normal", props.authorityKey])}
+      {...props}
+    />
+  );
+}
+
+function VideoCollabPermsManagerForOwner({
   videoId,
   videoTitle,
   subjects,
@@ -230,7 +252,15 @@ export function VideoCollabPermsManager({
   editPrivilegeMode = "normal",
   onRefresh,
 }: Props): React.ReactElement {
-  const router = { refresh: onRefresh };
+  const activeRef = React.useRef(false);
+  const refreshRef = React.useRef(onRefresh);
+  React.useLayoutEffect(() => {
+    activeRef.current = true;
+    return () => { activeRef.current = false; };
+  }, []);
+  React.useLayoutEffect(() => {
+    refreshRef.current = onRefresh;
+  }, [onRefresh]);
   const [pending, startTransition] = React.useTransition();
   const permissionInFlightRef = React.useRef(false);
   const [message, setMessage] = React.useState<string | null>(null);
@@ -261,20 +291,25 @@ export function VideoCollabPermsManager({
     failureMessage: string,
   ) => {
     // pending の描画前に確認ボタンが再度押されても、付与・解除を重複送信しない。
-    if (pending || permissionInFlightRef.current) return;
+    if (!activeRef.current || pending || permissionInFlightRef.current) return;
     permissionInFlightRef.current = true;
     setError(null);
     setMessage(null);
     startTransition(async () => {
       try {
+        if (!activeRef.current) return;
         let result: VideoCollabResult;
         try {
           result = await action();
         } catch {
+          if (!activeRef.current) return;
           // 通信が途切れた場合は未保存と断定せず、再送前に現在の権限を確認させる。
           setError("編集権限の処理結果を確認できませんでした。通信状態と最新の権限を確認してから再試行してください。");
           return;
         }
+        // The request may already have committed on the server. Do not retry
+        // or refresh a different owner; ignore its retired UI completion.
+        if (!activeRef.current) return;
         if (!result.ok) {
           setError(result.message ?? failureMessage);
           return;
@@ -282,10 +317,12 @@ export function VideoCollabPermsManager({
         const savedMessage = result.message ?? successMessage;
         setMessage(savedMessage);
         try {
-          router.refresh();
+          refreshRef.current();
         } catch {
           // 保存後の表示更新失敗で、成功した権限変更を失敗へ戻さない。
-          setMessage(`${savedMessage} 一覧を更新できなかったため、ページを再読み込みして確認してください。`);
+          if (activeRef.current) {
+            setMessage(`${savedMessage} 一覧を更新できなかったため、ページを再読み込みして確認してください。`);
+          }
         }
       } finally {
         permissionInFlightRef.current = false;
@@ -294,6 +331,7 @@ export function VideoCollabPermsManager({
   };
 
   const submitUpsert = (draft: VideoCollabSubject | NewSubjectDraft, options: { notify: boolean }) => {
+    if (!activeRef.current) return;
     const xUserId = resolvedSubjectXId(draft);
     if (!xUserId) {
       setError("X ID は英数字とアンダースコア20文字以内で入力してください。");
@@ -310,6 +348,7 @@ export function VideoCollabPermsManager({
   };
 
   const submitRevoke = (subject: VideoCollabSubject) => {
+    if (!activeRef.current) return;
     const xUserId = resolvedSubjectXId(subject);
     if (!xUserId) {
       setError("編集権限を解除するには有効な X ID が必要です。");
@@ -329,6 +368,7 @@ export function VideoCollabPermsManager({
     subject: VideoCollabSubject | NewSubjectDraft,
     displayName: string,
   ) => {
+    if (!activeRef.current) return;
     if (!hasResolvableSubject(subject)) {
       setError("X ID は英数字とアンダースコア20文字以内で入力してください。");
       return;

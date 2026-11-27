@@ -15,19 +15,24 @@ async function mount(overrides = {}) {
   const container = dom.window.document.createElement("div");
   const root = createRoot(container);
   let refreshed = 0;
-  await act(async () => {
-    root.render(React.createElement(VideoCollabPermsManager, {
-      videoId: "vid 1", videoTitle: "投稿@everyone",
-      subjects: [editor()], publicMembers: [{
-        x_user_id: "second", display_name: "公開メンバー", role: "制作",
-        can_edit: 0,
-      }],
-      editPrivilegeMode: "event",
-      onRefresh: () => { refreshed++; },
-      ...overrides,
-    }));
-  });
-  return { container, get refreshed() { return refreshed; },
+  let props = {
+    videoId: "vid 1", videoTitle: "投稿@everyone",
+    subjects: [editor()], publicMembers: [{
+      x_user_id: "second", display_name: "公開メンバー", role: "制作",
+      can_edit: 0,
+    }],
+    editPrivilegeMode: "event",
+    authorityKey: "owner-A:1",
+    onRefresh: () => { refreshed++; },
+    ...overrides,
+  };
+  const rerender = async (patch = {}) => {
+    props = { ...props, ...patch };
+    await act(async () => root.render(React.createElement(VideoCollabPermsManager, props)));
+    await flush();
+  };
+  await rerender();
+  return { container, rerender, get refreshed() { return refreshed; },
     unmount: async () => act(async () => root.unmount()) };
 }
 const button = (c, label) => {
@@ -140,4 +145,113 @@ test("MIG-0715 U03 uncertain network result is not retried or reported as a succ
     assert.match(m.container.textContent, /処理結果を確認できませんでした/);
     await m.unmount();
   } finally { globalThis.fetch = priorFetch; }
+});
+
+test("MIG-0715 U03: video, privilege and host authority changes retire grant/revoke dialogs before any write", async () => {
+  const priorFetch = globalThis.fetch;
+  const sent = [];
+  globalThis.fetch = async (url, init) => {
+    sent.push({ url, init });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  try {
+    for (const patch of [
+      { videoId: "vid 2", videoTitle: "別作品" },
+      { editPrivilegeMode: "admin" },
+      { authorityKey: "owner-B:2" },
+    ]) {
+      const m = await mount();
+      try {
+        await press(button(m.container, "公開メンバー @second"));
+        const retiredGrant = button(m.container, "付与のみ");
+        await m.rerender(patch);
+        assert.equal(m.container.querySelector('[role="alertdialog"]'), null);
+        await press(retiredGrant);
+        assert.equal(sent.length, 0, "retired grant cannot issue HTTP");
+        await press(button(m.container, "変更"));
+        const retiredRevoke = button(m.container, "解除する");
+        await m.rerender({ authorityKey: "owner-C:3" });
+        assert.equal(m.container.querySelector('[role="alertdialog"]'), null);
+        await press(retiredRevoke);
+        assert.equal(sent.length, 0, "retired revoke cannot issue HTTP");
+        await press(button(m.container, "非公開編集者を追加"));
+        assert.ok(m.container.querySelector('input[placeholder="表示名"]'));
+        await m.rerender({ authorityKey: "owner-D:4" });
+        assert.equal(m.container.querySelector('input[placeholder="表示名"]'), null);
+        assert.equal(m.refreshed, 0);
+      } finally { await m.unmount(); }
+    }
+  } finally { globalThis.fetch = priorFetch; }
+});
+
+test("MIG-0715 U03: same owner rerender preserves dialog; current grant uses latest committed refresh", async () => {
+  const priorFetch = globalThis.fetch;
+  const sent = [];
+  let resolve;
+  let currentRefreshes = 0;
+  globalThis.fetch = (url, init) => {
+    sent.push({ url, init });
+    return new Promise(r => { resolve = r; });
+  };
+  const m = await mount();
+  try {
+    await press(button(m.container, "公開メンバー @second"));
+    await m.rerender({ videoTitle: "更新後の題名" });
+    assert.ok(m.container.querySelector('[role="alertdialog"]'));
+    await press(button(m.container, "付与のみ"));
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].url, "/api/videos/vid%201/collaborators/second");
+    assert.equal(JSON.parse(sent[0].init.body).edit_privilege_mode, "event");
+    await m.rerender({ onRefresh: () => { currentRefreshes++; } });
+    await act(async () => { resolve(new Response(JSON.stringify({ ok: true, message: "現在の成功" }), { status: 200 })); });
+    await flush();
+    assert.equal(m.refreshed, 0);
+    assert.equal(currentRefreshes, 1);
+    assert.match(m.container.textContent, /現在の成功/);
+  } finally { await m.unmount(); globalThis.fetch = priorFetch; }
+});
+
+test("MIG-0715 U03: A-to-B-to-A retired mutation outcomes never refresh or display on the returning owner", async () => {
+  const priorFetch = globalThis.fetch;
+  for (const outcome of ["success", "denial", "unknown"]) {
+    const requests = [];
+    globalThis.fetch = (url, init) => new Promise((resolve, reject) => requests.push({ url, init, resolve, reject }));
+    const m = await mount();
+    try {
+      await press(button(m.container, "公開メンバー @second"));
+      await press(button(m.container, "付与のみ"));
+      assert.equal(requests.length, 1);
+      await m.rerender({ authorityKey: "owner-B:2" });
+      await m.rerender({ authorityKey: "owner-A:1" });
+      await act(async () => {
+        if (outcome === "unknown") requests[0].reject(Error("connection reset"));
+        else requests[0].resolve(new Response(JSON.stringify({
+          ok: outcome === "success", message: "retired-result",
+        }), { status: outcome === "success" ? 200 : 403 }));
+      });
+      await flush();
+      assert.equal(m.refreshed, 0);
+      assert.doesNotMatch(m.container.textContent, /retired-result|処理結果を確認できませんでした/);
+      assert.equal(requests.length, 1, "never retry a retired mutation");
+      await press(button(m.container, "変更"));
+      await press(button(m.container, "解除する"));
+      assert.equal(requests.length, 2);
+      assert.equal(requests[1].url, "/api/videos/vid%201/collaborators/batch");
+      await act(async () => { requests[1].resolve(new Response(JSON.stringify({ ok: true, message: "current-result" }), { status: 200 })); });
+      await flush();
+      assert.equal(m.refreshed, 1);
+      assert.match(m.container.textContent, /current-result/);
+    } finally { await m.unmount(); globalThis.fetch = priorFetch; }
+  }
+});
+
+test("MIG-0715 U03: missing or blank host authority key cannot expose mutation controls", async () => {
+  for (const authorityKey of [undefined, "", "  "]) {
+    const m = await mount({ authorityKey });
+    try {
+      assert.equal(m.container.querySelectorAll("button,input").length, 0);
+      assert.match(m.container.textContent, /権限情報を確認できません/);
+      assert.equal(m.refreshed, 0);
+    } finally { await m.unmount(); }
+  }
 });
