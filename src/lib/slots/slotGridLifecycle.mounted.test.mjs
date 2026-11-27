@@ -1,0 +1,226 @@
+// SEC-921: mount the real CURRENT SlotGrid and drive its actual action handlers.
+// Next navigation/server actions and visual confirmation chrome are test doubles.
+// The grouping, reservation limits and X-scoped name storage helpers are real.
+// This tests the client lifecycle, not Discord login, actual browser BFCache,
+// the D1 write path or a production deployment.
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import vm from "node:vm";
+import { test } from "node:test";
+import ts from "typescript";
+import { JSDOM } from "jsdom";
+
+const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+  url: "https://flamenode.test/event/a/slots", pretendToBeVisual: true,
+});
+for (const key of ["window", "document", "navigator", "HTMLElement", "Node"]) {
+  Object.defineProperty(globalThis, key, {
+    configurable: true, value: key === "window" ? dom.window : dom.window[key],
+  });
+}
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const React = await import("react");
+const { createRoot } = await import("react-dom/client");
+const ReactDOM = await import("react-dom");
+const jsxRuntime = await import("react/jsx-runtime");
+const h = React.createElement;
+
+const requests = [];
+const refreshes = [];
+const redirects = [];
+const router = { refresh() { refreshes.push("refresh"); } };
+const action = name => fd => {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  requests.push({ name, fd, resolve, reject });
+  return promise;
+};
+const visual = () => null;
+const activeXChanged = "fn:test-active-x-changed";
+const mocks = {
+  react: React,
+  "react-dom": ReactDOM,
+  "react/jsx-runtime": jsxRuntime,
+  "next/link": ({ children, ...props }) => h("a", props, children),
+  "next/navigation": { unstable_rethrow() {}, usePathname: () => "/event/a/slots", useRouter: () => router },
+  "@/components/ui/Icon": { Icon: visual },
+  "@/components/ui/ConfirmDialog": {
+    ConfirmDialog: ({ open, title, confirmLabel, onConfirm, onCancel }) =>
+      open ? h("div", { role: "alertdialog" }, title,
+        h("button", { type: "button", onClick: onConfirm }, confirmLabel),
+        h("button", { type: "button", onClick: onCancel }, "cancel")) : null,
+  },
+  "@/components/ui/PublicReflectionDelayNotice": { PublicReflectionDelayNotice: visual },
+  "@/lib/actions/slot": {
+    reserveSlot: action("reserve"), releaseOwnSlot: action("release"),
+    extendOwnSlotGroup: action("extend"), mergeOwnSlotGroups: action("merge"),
+  },
+  "@/lib/slots/contiguousAvailable": await import("./contiguousAvailable.ts"),
+  "@/lib/slots/limits": await import("./limits.ts"),
+  "@/lib/utils/format": await import("../utils/format.ts"),
+  "@/lib/utils/cn": await import("../utils/cn.ts"),
+  "@/lib/utils/slotGrouping": await import("../utils/slotGrouping.ts"),
+  "@/lib/utils/slotGroupingCore": await import("../utils/slotGroupingCore.ts"),
+  "@/lib/client/guardRedirect": { redirectForGuardReason(_router, reason) {
+    redirects.push(reason);
+    return true;
+  } },
+  "@/lib/utils/xid": await import("../utils/xid.ts"),
+  "@/lib/client/activeXSwitchEvents": { ACTIVE_X_CHANGED_EVENT: activeXChanged },
+  "@/lib/slots/slotDisplayNameStorage": await import("./slotDisplayNameStorage.ts"),
+  "@/lib/ui/floatingMenuPosition": await import("../ui/floatingMenuPosition.ts"),
+  "@/lib/slots/slotGuidance": await import("./slotGuidance.ts"),
+  "@/lib/slots/slotReservationLimit": await import("./slotReservationLimit.ts"),
+  "./SlotGrid.module.css": {},
+};
+const source = await readFile(new URL("../../components/event/SlotGrid.tsx", import.meta.url), "utf8");
+const compiled = ts.transpileModule(source, {
+  fileName: "SlotGrid.tsx",
+  compilerOptions: {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
+    jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
+  },
+  reportDiagnostics: true,
+});
+assert.deepEqual(compiled.diagnostics ?? [], []);
+const exported = { exports: {} };
+vm.runInNewContext(compiled.outputText, {
+  module: exported, exports: exported.exports,
+  require(id) {
+    if (!Object.hasOwn(mocks, id)) throw new Error("Unexpected SlotGrid import: " + id);
+    return mocks[id];
+  },
+  window: dom.window, document: dom.window.document,
+  Node: dom.window.Node, CustomEvent: dom.window.CustomEvent,
+  FormData, console, setInterval, clearInterval, setTimeout, clearTimeout,
+}, { filename: "SlotGrid.cjs" });
+const { SlotGrid } = exported.exports;
+
+function slot(id, sort_order, owned = false) {
+  return {
+    id, sort_order, slot_label: id, start_time: null,
+    status: owned ? "reserved" : "available",
+    display_name: owned ? "previous viewer private name" : null,
+    reserved_x_id: null, x_user_id: null, is_owned_by_viewer: owned, group_key: null,
+  };
+}
+const slotsFor = name => name === "reserve" ? [slot("free", 1)]
+  : name === "merge" ? [slot("left", 1, true), slot("gap", 2), slot("right", 3, true)]
+  : [slot("left", 1, true), slot("free", 2)];
+const freshSlots = () => [slot("next-free", 1)];
+const props = (slots, viewerXId = null) => ({
+  slots, viewerXId, isAuthenticated: true, canReserve: true, canTakeSlot: true,
+  canPost: false, slotType: "count", maxSlotsPerVideo: 3,
+});
+async function settle(fn) {
+  await React.act(async () => {
+    fn?.();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+const byText = (root, text) => [...root.querySelectorAll("button")].find(el => el.textContent.trim() === text);
+async function click(element, label) {
+  assert.ok(element, "missing button: " + label);
+  assert.equal(element.disabled, false, "disabled button: " + label);
+  await settle(() => element.click());
+}
+function inputValue(input, value) {
+  Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(input, value);
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+}
+async function startAction(container, name) {
+  if (name === "reserve") {
+    await click(container.querySelector('button[aria-label="free を確保"]'), "reserve");
+    const input = container.querySelector("#reserve-display-name");
+    assert.ok(input);
+    assert.equal(input.value, "", "null X must not restore legacy storage");
+    await settle(() => inputValue(input, "previous viewer private name"));
+    const submit = container.querySelector('form[role="dialog"] button[type="submit"]');
+    await click(submit, "submit reserve");
+  } else if (name === "merge") {
+    await click(container.querySelector('button[aria-label="gap を埋めて結合"]'), "merge");
+    await click(byText(container, "結合する"), "confirm merge");
+  } else {
+    await click(container.querySelector("#slot-edit-left"), "edit");
+    const menu = document.querySelector('[role="menu"]');
+    assert.ok(menu, "portal menu");
+    await click(byText(menu, name === "release" ? "解放" : "後を追加"), name);
+    await click(byText(container, name === "release" ? "解放する" : "追加する"), "confirm " + name);
+  }
+}
+function persistedPageShow() {
+  const event = new dom.window.Event("pageshow");
+  Object.defineProperty(event, "persisted", { value: true });
+  window.dispatchEvent(event);
+}
+function assertNoPrivateActionUi(container) {
+  assert.equal(container.querySelector('[role="dialog"], [role="alertdialog"]'), null);
+  assert.equal(document.querySelector('[role="menu"]'), null);
+  assert.equal(container.querySelector('[role="status"], [role="alert"]'), null);
+  assert.doesNotMatch(container.textContent, /previous viewer private name/);
+}
+
+for (const name of ["reserve", "release", "extend", "merge"]) {
+  for (const boundary of ["bfcache-null-X", "active-X", "event-unmount", "current-control"]) {
+    test("SEC-921 mounted SlotGrid: " + name + " / " + boundary, async () => {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      const start = requests.length, refreshStart = refreshes.length, redirectStart = redirects.length;
+      const storage = dom.window.localStorage;
+      storage.clear();
+      storage.setItem("fn:lastSlotDisplayName", "legacy private");
+      storage.setItem("fn:lastSlotDisplayName:unassigned", "legacy unassigned private");
+      const storageBefore = [...Array(storage.length)].map((_, i) => [storage.key(i), storage.getItem(storage.key(i))]);
+      let pending;
+      try {
+        await settle(() => root.render(h(SlotGrid, { key: "a", ...props(slotsFor(name)) })));
+        await startAction(container, name);
+        assert.equal(requests.length, start + 1, "actual handler must submit exactly once");
+        pending = requests[start];
+        assert.equal(pending.name, name);
+        assert.equal(pending.fd.get(name === "merge" ? "gap_slot_id" : "slot_id"),
+          name === "merge" ? "gap" : name === "reserve" ? "free" : "left");
+        if (boundary === "current-control") {
+          await settle(() => pending.resolve({ ok: true, slotId: "free", groupSize: 1 }));
+          pending = null;
+          assert.equal(refreshes.length, refreshStart + 1, "current result must not be suppressed");
+          assert.ok(container.querySelector('[role="status"]'), "current success must display");
+        } else {
+          // Both Discord identities can have null viewer X IDs. The persisted
+          // event plus replacement props model the client observation of that
+          // transition, not the actual Auth.js or browser navigation itself.
+          await settle(() => {
+            if (boundary === "bfcache-null-X") persistedPageShow();
+            if (boundary === "active-X") window.dispatchEvent(new dom.window.Event(activeXChanged));
+            root.render(h(SlotGrid, {
+              key: boundary === "event-unmount" ? "b" : "a",
+              ...props(freshSlots(), boundary === "active-X" ? "new-x" : null),
+            }));
+          });
+          assertNoPrivateActionUi(container);
+          // Exercise success, guard rejection and transport rejection across
+          // the three retirement mechanisms for every real action.
+          await settle(() => {
+            if (boundary === "bfcache-null-X") pending.resolve({ ok: true, slotId: "free", groupSize: 1 });
+            else if (boundary === "active-X") pending.resolve({ ok: false, reason: "guard", message: "previous viewer private name" });
+            else pending.reject(new Error("previous viewer transport error"));
+          });
+          pending = null;
+          assertNoPrivateActionUi(container);
+          assert.equal(refreshes.length, refreshStart, "retired callback must not refresh successor");
+          assert.equal(redirects.length, redirectStart, "retired callback must not navigate successor");
+          await click(container.querySelector('button[aria-label="next-free を確保"]'), "new viewer reserve");
+          assert.equal(container.querySelector("#reserve-display-name").value, "", "new viewer must not inherit name");
+        }
+        assert.deepEqual([...Array(storage.length)].map((_, i) => [storage.key(i), storage.getItem(storage.key(i))]), storageBefore,
+          "null-X action must never persist the previous viewer name");
+      } finally {
+        await settle(() => root.unmount());
+        if (pending) await settle(() => pending.resolve({ ok: false }));
+        container.remove();
+      }
+    });
+  }
+}
