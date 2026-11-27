@@ -542,6 +542,7 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
     let actorSnapshotJson: string | undefined;
     let activeXRow: ActiveXRow | null = null;
     let costGuardSnapshot: CostGuardSnapshot | undefined;
+    let costGuardFallbackNeeded = false;
     const outcome = await evaluateAdminWriteGuard({
       user,
       hasDb: db !== undefined,
@@ -566,15 +567,9 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
                 const state = await loadTosState(db, user.id, options.activeX);
                 actorSnapshotJson = state?.actor_snapshot_json;
                 activeXRow = state?.active_x ?? null;
-                // Only after ToS succeeds do we retry CostGuard independently.
-                // Its provider failure retains the established cost_guard_blocked response.
-                try {
-                  costGuardSnapshot = {
-                    row: await loadCostGuardSettingsRow(db as unknown as D1Database),
-                  };
-                } catch {
-                  costGuardSnapshot = { row: null, unavailable: true };
-                }
+                // Defer the CostGuard fallback until identity has passed below;
+                // CURRENT does not evaluate CostGuard after a banned/ToS denial.
+                costGuardFallbackNeeded = true;
                 return state;
               }
             }
@@ -582,6 +577,17 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
     });
     if (!outcome.ok) {
       return writeGuardDenyResponse(c, outcome.reason, outcome.status);
+    }
+    if (costGuardFallbackNeeded && db) {
+      // The joined read failed, but the canonical ToS read succeeded. Now
+      // classify a CostGuard provider failure separately, after identity.
+      try {
+        costGuardSnapshot = {
+          row: await loadCostGuardSettingsRow(db as unknown as D1Database),
+        };
+      } catch {
+        costGuardSnapshot = { row: null, unavailable: true };
+      }
     }
     const admissionSnapshot = costGuardSnapshot ?? { row: null, unavailable: true };
     c.set("costGuardSnapshot", admissionSnapshot);
