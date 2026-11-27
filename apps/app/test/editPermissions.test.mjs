@@ -57,19 +57,19 @@ test("GET preserves repeated, explicit and unknown privilege values for server-s
   assert.deepEqual(seen[0].init.headers, { accept: "application/json" });
 });
 
-test("GET keeps 401/403/404/5xx/network/invalid DTO distinct", async () => {
-  for (const [http, expected] of [[401, "anonymous"], [403, "banned"], [404, "not_found"], [503, "unavailable"]]) {
+test("GET keeps auth/service/network failures distinct from invalid HTTP 200 receipts", async () => {
+  for (const [http, expected] of [[401, "anonymous"], [403, "banned"], [404, "not_found"], [500, "unavailable"], [503, "unavailable"]]) {
     const got = await getEditPermissions({ videoId: "id", privilegeModes: [], fetchFn: async () => res(http) });
     assert.equal(got.status, expected);
   }
   const invalid = await getEditPermissions({
     videoId: "id", privilegeModes: [], fetchFn: async () => res(200, { kind: "ok", subjects: [] }),
   });
-  assert.equal(invalid.status, "unavailable");
+  assert.equal(invalid.status, "invalid");
   const malformed = await getEditPermissions({
     videoId: "id", privilegeModes: [], fetchFn: async () => ({ status: 200, json: async () => { throw Error("bad json"); } }),
   });
-  assert.equal(malformed.status, "unavailable");
+  assert.equal(malformed.status, "invalid");
   const offline = await getEditPermissions({
     videoId: "id", privilegeModes: [], fetchFn: async () => { throw Error("network"); },
   });
@@ -256,13 +256,13 @@ const permissionReceipt = (id, title) => ({
 });
 
 test("MIG-0715 U01: GET refuses a schema-valid receipt for a different video", async () => {
-  for (const [returned, expected] of [["A", "ok"], ["B", "unavailable"]]) {
+  for (const [returned, expected] of [["A", "ok"], ["B", "invalid"]]) {
     const result = await getEditPermissions({
       videoId: "A", privilegeModes: ["admin"],
       fetchFn: async () => res(200, permissionReceipt(returned, "private-title")),
     });
     assert.equal(result.status, expected);
-    if (expected === "unavailable") assert.deepEqual(result, { status: "unavailable" });
+    if (expected === "invalid") assert.deepEqual(result, { status: "invalid" });
   }
   // Server fallback and denial carry their original privilege mode.
   assert.deepEqual(await getEditPermissions({
@@ -271,16 +271,23 @@ test("MIG-0715 U01: GET refuses a schema-valid receipt for a different video", a
   }), ok({ kind: "no_access", privilegeMode: "normal" }));
 });
 
-test("MIG-0715 U01: injected wrong-video receipt never renders private subjects", async () => {
-  const m = await mountPermissions("/dashboard/edit/A/permissions",
-    async () => ok(permissionReceipt("B", "wrong-video")));
+test("MIG-0715 U01: injected wrong-video receipt evicts private data and permits explicit GET recovery", async () => {
+  let loads = 0;
+  const m = await mountPermissions("/dashboard/edit/A/permissions", async () => {
+    loads += 1;
+    return loads === 1 ? ok(permissionReceipt("B", "wrong-video")) : ok(permissionReceipt("A", "recovered"));
+  });
   try {
-    assert.match(m.container.textContent, /画面の表示中に問題が発生しました/);
-    assert.doesNotMatch(m.container.textContent, /wrong-video|共同編集者/);
+    assert.equal(loads, 1);
+    assert.match(m.container.textContent, /編集権限情報を確認できません/);
+    assert.doesNotMatch(m.container.textContent, /wrong-video|private-recovered|共同編集者/);
+    assert.equal(m.container.querySelector("#video-collab-perms"), null);
+    assert.deepEqual([...m.container.querySelectorAll("button")].map(b => b.textContent.trim()), ["再取得"]);
+    await press(m.container, "再取得");
+    assert.equal(loads, 2);
+    assert.match(m.container.textContent, /private-recovered/);
+    assert.doesNotMatch(m.container.textContent, /wrong-video/);
     assert.equal(m.container.querySelectorAll("form").length, 0);
-    // AuthUnavailable deliberately preserves CURRENT's safe reload control.
-    // Permit exactly that button, never permission-changing controls.
-    assert.deepEqual([...m.container.querySelectorAll("button")].map(b => b.textContent.trim()), ["再読み込み"]);
   } finally {
     await m.unmount();
   }
@@ -610,6 +617,44 @@ test("MIG-0715 U03b failed post-write refresh keeps only a read-only stale inven
     assert.match(m.container.textContent, /private-stale/);
     assert.doesNotMatch(m.container.textContent, /読み込み中/);
     assert.equal(m.container.querySelectorAll("button,input,form").length, 0);
+  } finally {
+    await m.unmount();
+    globalThis.fetch = previousFetch;
+  }
+});
+
+
+test("MIG-0715 U03b invalid post-write receipt evicts stale private data and retries only GET", async () => {
+  const previousFetch = globalThis.fetch;
+  let loads = 0;
+  let writes = 0;
+  const load = async () => {
+    loads += 1;
+    if (loads === 1) return ok(permissionReceipt("A", "stale"));
+    if (loads === 2) return { status: "invalid" };
+    return ok(permissionReceipt("A", "fresh"));
+  };
+  globalThis.fetch = async () => {
+    writes += 1;
+    return new Response(JSON.stringify({ ok: true, message: "解除しました。" }), { status: 200 });
+  };
+  const m = await mountPermissions("/dashboard/edit/A/permissions", load, undefined, managerHostForTest);
+  try {
+    assert.ok(m.container.querySelector("#video-collab-perms"));
+    await press(m.container, "変更");
+    await press(m.container, "解除する");
+    assert.equal(loads, 2);
+    assert.equal(writes, 1);
+    assert.match(m.container.textContent, /編集権限情報を確認できません/);
+    assert.doesNotMatch(m.container.textContent, /private-stale/);
+    assert.equal(m.container.querySelector("#video-collab-perms"), null);
+    assert.deepEqual([...m.container.querySelectorAll("button")].map(b => b.textContent.trim()), ["再取得"]);
+    await press(m.container, "再取得");
+    assert.equal(loads, 3);
+    assert.equal(writes, 1, "recovery must never replay the previous mutation");
+    assert.match(m.container.textContent, /private-fresh/);
+    assert.doesNotMatch(m.container.textContent, /private-stale/);
+    assert.ok(m.container.querySelector("#video-collab-perms"));
   } finally {
     await m.unmount();
     globalThis.fetch = previousFetch;

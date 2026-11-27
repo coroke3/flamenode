@@ -6,6 +6,9 @@ export type EditPermissionsReadResult =
   | { status: "not_found" }
   | { status: "anonymous" }
   | { status: "banned" }
+  /** HTTP 200 carried an unreadable, invalid, or wrong-resource private receipt. */
+  | { status: "invalid" }
+  /** Transport/non-200 failure; same-authority refresh may retain a read-only snapshot. */
   | { status: "unavailable" };
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -47,11 +50,12 @@ export async function getEditPermissions({
   try {
     const parsed = EditPermissionsResponseSchema.safeParse(await response.json());
     if (!parsed.success || (parsed.data.kind === "ok" && parsed.data.video.id !== videoId)) {
-      return { status: "unavailable" };
+      return { status: "invalid" };
     }
     return { status: "ok", data: parsed.data };
   } catch {
-    return { status: "unavailable" };
+    // A successful response with an unreadable body is not a transient transport failure.
+    return { status: "invalid" };
   }
 }
 

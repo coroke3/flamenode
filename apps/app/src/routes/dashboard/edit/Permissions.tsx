@@ -92,7 +92,7 @@ function PermissionsForResource({ id, modes, load, reload, hostAdapterForTest }:
           if (controller.signal.aborted) return;
           // Even an injected loader cannot display a receipt for another video.
           const ownedResult = result.status === "ok" && result.data.kind === "ok" && result.data.video.id !== id
-            ? { status: "unavailable" as const }
+            ? { status: "invalid" as const }
             : result;
           if (preservePrevious && ownedResult.status === "unavailable") {
             // Keep the previous inventory read-only; never leave stale write controls enabled.
@@ -124,6 +124,21 @@ function PermissionsForResource({ id, modes, load, reload, hostAdapterForTest }:
 
 
   if (state.status === "loading") return <SessionLoading />;
+  if (state.status === "invalid") {
+    return (
+      <div className="fn-public-container fn-page fn-guard-shell">
+        <div className="fn-empty fn-guard-card">
+          <h1 className="fn-guard-title">編集権限情報を確認できません</h1>
+          <p className="fn-empty-message" role="alert">
+            サーバーから返された編集権限情報を確認できませんでした。安全のため、以前の情報は表示せず、変更操作を停止しています。
+          </p>
+          <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm fn-mt-md" onClick={onRefresh} disabled={refreshing}>
+            再取得
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (state.status === "anonymous") return <LoginRequired next={"/dashboard/edit/" + encodeURIComponent(id) + "/permissions"} />;
   if (state.status === "banned") return <BannedNotice />;
   if (state.status === "unavailable") return <AuthUnavailable />;
