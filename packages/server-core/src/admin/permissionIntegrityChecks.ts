@@ -67,7 +67,7 @@ export async function buildPermissionIntegrityChecks(
     managerResolved.has(key),
   );
 
-  const [sqlChecks, duplicateX, staffRows, ownerRows, managerRows] = await Promise.all([
+  const [sqlChecks, duplicateX, staffRows] = await Promise.all([
     Promise.all([
       (!selectedId || selectedId === "staff_missing_subject_ids") ? makeCheck({
         db,
@@ -165,6 +165,10 @@ export async function buildPermissionIntegrityChecks(
         ? sql`permission_preset = 'custom'`
         : sql`permission_preset IN ('owner', 'manager', 'custom')`)
       .limit(500) : Promise.resolve([]),
+  ]);
+  // Keep the established three-result compatibility Promise.all shape used by the
+  // CURRENT optimization contract. Selected preset reads remain one D1 statement.
+  const [ownerRows, managerRows] = await Promise.all([
     // Lead-approved U05 exception: preset-only checks need no custom JSON.
     // Count all matching rows in D1 and transfer only 50 stable issue samples.
     selectedId === "staff_owner_missing_permissions" && ownerMissingPermissions.length > 0 ? db
