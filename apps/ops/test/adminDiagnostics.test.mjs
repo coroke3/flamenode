@@ -624,6 +624,56 @@ test("U02b Worker dashboard does not expose stale snapshot on denied, failed or 
 });
 
 
+test("MIG-0736 Worker error panel preserves CURRENT presentation without stale snapshot data", () => {
+  const snapshot = workerMonitoringFixture();
+  const cases = [
+    [{ status: "anonymous" }, "ログインが必要です。"],
+    [{ status: "forbidden" }, "閲覧権限がありません。"],
+    [{ status: "notFound" }, "閲覧権限がありません。"],
+    [{ status: "unsupported" }, "監視機能は現在利用できません。"],
+    [{ status: "unavailable" }, "監視情報の取得に失敗しました。"],
+    [{ status: "ok", data: { snapshot, error: "query_failed" } }, "監視情報の取得に失敗しました。"],
+    [{ status: "ok", data: { snapshot: { ...snapshot, jobs: [] }, error: null } }, "監視情報の取得に失敗しました。"],
+  ];
+  for (const [data, message] of cases) {
+    const html = render(h(AdminWorkersView, { data, onRefresh: () => {} }), "/admin/workers");
+    const dom = new JSDOM(html);
+    try {
+      const doc = dom.window.document;
+      const panels = doc.querySelectorAll('[role="alert"]');
+      assert.equal(panels.length, 1, data.status);
+      const panel = panels[0];
+      assert.equal(panel.tagName, "DIV");
+      assert.equal(panel.textContent.trim(), message);
+      const style = panel.getAttribute("style");
+      for (const declaration of [
+        "margin-top:18px", "padding:12px 16px",
+        "border:1px solid var(--accent-danger, #dc2626)",
+        "border-radius:var(--radius-md)", "color:var(--accent-danger, #991b1b)",
+      ]) assert.ok(style?.split(";").includes(declaration), declaration);
+      assert.equal(doc.querySelectorAll("table").length, 0);
+      assert.doesNotMatch(html, /query_failed|sync_failed|wake_failed|通知が滞留しています/);
+      assert.ok([...doc.querySelectorAll("button")].some(button => button.textContent.trim() === "最新状態へ更新"));
+    } finally {
+      dom.window.close();
+    }
+  }
+  for (const [data, message] of [
+    [{ status: "loading" }, "読み込み中…"],
+    [{ status: "ok", data: { snapshot: null, error: null } }, "監視スナップショットがありません。"],
+  ]) {
+    const html = render(h(AdminWorkersView, { data, onRefresh: () => {} }), "/admin/workers");
+    const dom = new JSDOM(html);
+    try {
+      assert.equal(dom.window.document.querySelectorAll('[role="alert"]').length, 0);
+      assert.equal(dom.window.document.querySelector('[role="status"]')?.textContent.trim(), message);
+    } finally {
+      dom.window.close();
+    }
+  }
+});
+
+
 test("U02c integrity does not query D1 before explicit run; run=1 preserves unsupported status", async () => {
   let calls = 0;
   const fetchFn = async (path, init) => {

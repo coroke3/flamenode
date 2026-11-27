@@ -143,12 +143,12 @@ export function AdminWorkersView({ data, onRefresh }: {
         : data.status === "ok" && data.data.error === null && receivedSnapshot === null
           ? <p role="status">監視スナップショットがありません。</p>
         : data.status !== "ok" || data.data.error !== null || snapshot === null
-          ? <p role="alert" style={{ marginTop: 18 }}>
+          ? <div role="alert" style={{ marginTop: 18, padding: "12px 16px", border: "1px solid var(--accent-danger, #dc2626)", borderRadius: "var(--radius-md)", color: "var(--accent-danger, #991b1b)" }}>
               {data.status === "anonymous" ? "ログインが必要です。"
                 : data.status === "forbidden" || data.status === "notFound" ? "閲覧権限がありません。"
                 : data.status === "unsupported" ? "監視機能は現在利用できません。"
                 : "監視情報の取得に失敗しました。"}
-            </p>
+            </div>
           : null}
       {snapshot ? <MonitoringContent snapshot={snapshot} /> : null}
     </div>
