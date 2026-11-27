@@ -384,3 +384,43 @@ export async function prepareXIdReviewNotifications(input: {
   const channelNotification = await channel.build(projectedRequester, operator);
   return { notification, channelNotification };
 }
+
+/**
+ * SA-091: prepare the complete decision/audit/outbox batch for either host.
+ * Call only after host authorization, request lookup and pending/type checks.
+ * Notification factories stay host-owned (lazy imports, payload, dedupe and
+ * transport). The caller commits the returned input once using its own
+ * mutateWithAudit adapter; this service never executes SQL or wakes a Queue.
+ */
+export async function prepareXIdLinkRejectionMutation(
+  db: ServerCoreDb,
+  input: {
+    request: typeof xIdentityRequests.$inferSelect;
+    actorUserId: string;
+    actorXUserId: string | null;
+    reason: string;
+    now: number;
+    buildDm: () => Promise<ReviewNotificationStatement | null>;
+    loadChannel: () => Promise<Omit<ReviewNotificationChannel, "overlayRequester">>;
+  },
+): Promise<AtomicAuditMutationInput> {
+  const { request, actorUserId, actorXUserId, reason, now } = input;
+  const { notification, channelNotification } = await prepareXIdReviewNotifications({
+    requesterUserId: request.requested_by_auth_user_id,
+    operatorUserId: actorUserId,
+    buildDm: input.buildDm,
+    loadChannel: async () => {
+      const channel = await input.loadChannel();
+      return { resolveActor: channel.resolveActor, build: channel.build };
+    },
+  });
+  const notificationStatements: BatchItem<"sqlite">[] = [];
+  if (notification) notificationStatements.push(notification.statement);
+  if (channelNotification) notificationStatements.push(channelNotification.statement);
+  return {
+    ...planXIdLinkRejection(db, {
+      request, actorUserId, actorXUserId, reason, now, notificationStatements,
+    }),
+    notificationWakeSource: notification || channelNotification ? "admin" : undefined,
+  };
+}

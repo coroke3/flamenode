@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation, prepareXIdReviewNotifications } from "@flamenode/server-core/xid/linkRequestReview";
+import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdSiblingCancellation, prepareXIdLinkRejectionMutation, prepareXIdReviewNotifications } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -1222,9 +1222,12 @@ async function rejectXIdLinkRequestOnce(
 
   const now = Math.floor(Date.now() / 1000);
   const reviewRequestType = request.request_type;
-  const { notification, channelNotification } = await prepareXIdReviewNotifications({
-    requesterUserId: request.requested_by_auth_user_id,
-    operatorUserId: operatorAuthUserId,
+  const mutation = await prepareXIdLinkRejectionMutation(db, {
+    request,
+    actorUserId: operatorAuthUserId,
+    actorXUserId: operatorActorXUserId,
+    reason,
+    now,
     buildDm: async () => {
       const rejectedXIdLabel =
         request.requested_x_id ?? request.source_x_user_id ?? "不明";
@@ -1279,21 +1282,7 @@ async function rejectXIdLinkRequestOnce(
       };
     },
   });
-  const notificationStatements: BatchItem<"sqlite">[] = [];
-  if (notification) notificationStatements.push(notification.statement);
-  if (channelNotification) notificationStatements.push(channelNotification.statement);
-  await mutateWithAudit(db, {
-    ...planXIdLinkRejection(db, {
-      request,
-      actorUserId: operatorAuthUserId,
-      actorXUserId: operatorActorXUserId,
-      reason,
-      now,
-      notificationStatements,
-    }),
-    notificationWakeSource:
-      notification || channelNotification ? "admin" : undefined,
-  });
+  await mutateWithAudit(db, mutation);
   await runXIdAdminPostCommit("xid-admin.rejectXIdLinkRequest", () => {
     revalidateIdentityAdminPaths();
   });

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, getTableColumns } from "drizzle-orm";
-import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation, prepareXIdReviewNotifications } from "../src/xid/linkRequestReview.ts";
+import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation, prepareXIdLinkRejectionMutation, prepareXIdReviewNotifications } from "../src/xid/linkRequestReview.ts";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { assertChanges } from "../src/audit/mutate.ts";
 import { users, xIdentityRequests, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
@@ -776,6 +776,85 @@ test("SA-090/091 notification preparation stops at the original failed boundary"
         return {
           resolveActor: async id => { hit(id); return null; },
           overlayRequester: actor => { hit("overlay"); return actor; },
+          build: async () => { hit("channel"); return null; },
+        };
+      },
+    }), value => value === error);
+    assert.deepEqual(calls, phases.slice(0, phases.indexOf(phase) + 1));
+  }
+});
+
+test("SA-091 shared mutation preparation matches CURRENT plan, notification order and wake policy", async () => {
+  for (const requestType of ["new_link", "existing_link", "alias"]) {
+    for (const actorXUserId of [null, "reviewer-x"]) {
+      for (const reason of ["", "manual decision"]) {
+        for (const hasDm of [false, true]) {
+          for (const hasChannel of [false, true]) {
+            const row = { ...request, request_type: requestType };
+            const calls = [];
+            const dm = { fixture: "dm", then() { assert.fail("raw DM statement awaited"); } };
+            const channel = { fixture: "channel", then() { assert.fail("raw channel statement awaited"); } };
+            const actor = { userId: row.requested_by_auth_user_id };
+            const reviewer = { userId: "reviewer" };
+            const input = {
+              request: row, actorUserId: "reviewer", actorXUserId, reason, now: 20,
+              buildDm: async () => { calls.push("dm"); return hasDm ? { statement: dm } : null; },
+              loadChannel: async () => {
+                calls.push("load");
+                return {
+                  resolveActor: async (id) => {
+                    calls.push(id);
+                    return id === row.requested_by_auth_user_id ? actor : reviewer;
+                  },
+                  build: async (requester, operator) => {
+                    calls.push("channel");
+                    assert.strictEqual(requester, actor);
+                    assert.strictEqual(operator, reviewer);
+                    return hasChannel ? { statement: channel } : null;
+                  },
+                };
+              },
+            };
+            const statements = [...(hasDm ? [dm] : []), ...(hasChannel ? [channel] : [])];
+            const original = {
+              ...planXIdLinkRejection(db, { ...input, notificationStatements: statements }),
+              notificationWakeSource: hasDm || hasChannel ? "admin" : undefined,
+            };
+            const prepared = await prepareXIdLinkRejectionMutation(db, input);
+            assert.deepEqual(calls, ["dm", "load", row.requested_by_auth_user_id, "reviewer", "channel"]);
+            assert.deepEqual(prepared.mutationStatements[0].toSQL(), original.mutationStatements[0].toSQL());
+            assert.deepEqual(prepared.expectedMutationChanges, original.expectedMutationChanges);
+            assert.deepEqual(prepared.audits, original.audits);
+            assert.equal(prepared.notificationWakeSource, original.notificationWakeSource);
+            assert.equal(prepared.staticRebuildWakeSource, undefined);
+            assert.equal(prepared.mutationStatements.length, 1 + statements.length);
+            statements.forEach((statement, i) => assert.strictEqual(prepared.mutationStatements[i + 1], statement));
+            assert.equal(row.status, "pending");
+          }
+        }
+      }
+    }
+  }
+});
+
+test("SA-091 shared mutation preparation fails at the original notification boundary without a plan", async () => {
+  const phases = ["dm", "load", "applicant", "reviewer", "channel"];
+  for (const phase of phases) {
+    const calls = [];
+    const error = new Error(phase);
+    const hit = name => {
+      calls.push(name);
+      if (name === phase) throw error;
+    };
+    // The actual planning database must not be touched on notification failure.
+    const neverPlan = new Proxy({}, { get() { assert.fail("planned after a notification failure"); } });
+    await assert.rejects(prepareXIdLinkRejectionMutation(neverPlan, {
+      request, actorUserId: "reviewer", actorXUserId: null, reason: "", now: 20,
+      buildDm: async () => { hit("dm"); return null; },
+      loadChannel: async () => {
+        hit("load");
+        return {
+          resolveActor: async id => { hit(id); return null; },
           build: async () => { hit("channel"); return null; },
         };
       },
