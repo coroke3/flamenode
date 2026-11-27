@@ -224,3 +224,85 @@ for (const name of ["reserve", "release", "extend", "merge"]) {
     });
   }
 }
+
+// Pending-response tests above close the release/extend/merge confirmation
+// before the retirement event, since the action has already been submitted.
+// These cases keep the actual private UI OPEN, with no server action at all,
+// and prove that even an unchanged null-X prop is not enough to retain it.
+for (const name of ["reserve", "release", "extend", "merge", "menu"]) {
+  for (const boundary of ["bfcache-null-X", "active-event-null-X", "event-unmount"]) {
+    test("SEC-921 mounted SlotGrid: unsubmitted private UI " + name + " / " + boundary, async () => {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      const requestStart = requests.length;
+      const refreshStart = refreshes.length;
+      const redirectStart = redirects.length;
+      const initialSlots = slotsFor(name);
+      const openUi = () => name === "menu"
+        ? document.querySelector('[role="menu"]')
+        : container.querySelector('[role="dialog"], [role="alertdialog"]');
+      const storage = dom.window.localStorage;
+      storage.clear();
+      storage.setItem("fn:lastSlotDisplayName:unassigned", "legacy private");
+      try {
+        await settle(() => root.render(h(SlotGrid, { key: "a", ...props(initialSlots) })));
+        if (name === "reserve") {
+          await click(container.querySelector('button[aria-label="free を確保"]'), "reserve draft");
+          const input = container.querySelector("#reserve-display-name");
+          assert.ok(input);
+          assert.equal(input.value, "");
+          await settle(() => inputValue(input, "previous viewer private name"));
+          assert.equal(input.value, "previous viewer private name");
+        } else if (name === "merge") {
+          await click(container.querySelector('button[aria-label="gap を埋めて結合"]'), "merge draft");
+          assert.equal(openUi().querySelector("input").value, "previous viewer private name");
+        } else {
+          await click(container.querySelector("#slot-edit-left"), "edit");
+          const menu = document.querySelector('[role="menu"]');
+          assert.ok(menu);
+          if (name !== "menu") {
+            await click(byText(menu, name === "release" ? "解放" : "後を追加"), "open " + name);
+          }
+        }
+        assert.ok(openUi(), "precondition: actual UI open before authority retirement");
+        assert.equal(requests.length, requestStart, "the dialog is not submitted");
+
+        await settle(() => window.dispatchEvent(new dom.window.Event("pageshow")));
+        assert.ok(openUi(), "ordinary pageshow is not a restoration and must not close the UI");
+        if (name === "reserve") {
+          assert.equal(container.querySelector("#reserve-display-name").value, "previous viewer private name");
+        }
+
+        // For events, keep the SAME props/slot object and null X. The
+        // listener itself must clear the old dialog/menu, before a new
+        // overlay arrives, not rely on the effect for viewerXId or slots.
+        await settle(() => {
+          if (boundary === "bfcache-null-X") persistedPageShow();
+          else if (boundary === "active-event-null-X") window.dispatchEvent(new dom.window.Event(activeXChanged));
+          else root.render(h(SlotGrid, { key: "b", ...props(freshSlots()) }));
+        });
+        assert.equal(openUi(), null, "old unsubmitted UI must be retired");
+        assert.equal(document.querySelector('[role="menu"]'), null);
+        assert.equal(container.querySelector('[role="dialog"], [role="alertdialog"]'), null);
+        assert.equal(requests.length, requestStart, "retirement must not submit an old action");
+
+        await settle(() => root.render(h(SlotGrid, {
+          key: boundary === "event-unmount" ? "b" : "a", ...props(freshSlots()),
+        })));
+        assertNoPrivateActionUi(container);
+        await click(container.querySelector('button[aria-label="next-free を確保"]'), "new null-X viewer reserve");
+        assert.equal(container.querySelector("#reserve-display-name").value, "", "no inherited draft");
+        assert.equal(requests.length, requestStart);
+        assert.equal(refreshes.length, refreshStart);
+        assert.equal(redirects.length, redirectStart);
+        assert.equal(storage.length, 1);
+        assert.equal(storage.getItem("fn:lastSlotDisplayName:unassigned"), "legacy private");
+      } finally {
+        await settle(() => root.unmount());
+        storage.clear();
+        container.remove();
+      }
+    });
+  }
+}
