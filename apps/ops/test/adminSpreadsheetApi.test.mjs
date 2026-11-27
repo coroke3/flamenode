@@ -1,0 +1,295 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { getEventListeners } from "node:events";
+import {
+  loadSpreadsheetCatalog,
+  loadSpreadsheetPage,
+  loadSpreadsheetExport,
+} from "../.test-dist/apps/ops/src/api/adminSpreadsheet.js";
+
+const table = { table: "videos", label: "動画", group: "コンテンツ", mode: "readonly" };
+const catalog = {
+  tables: [table],
+  groups: { "コンテンツ": [table] },
+  pageSize: 50,
+  discoveredAt: "2026-10-30T00:00:00.000Z",
+};
+const page = {
+  def: table,
+  columns: [{ name: "id", type: "TEXT", notNull: true, pk: 1, editable: false }],
+  primaryKeys: ["id"],
+  rows: [{ id: "v-1" }],
+  hasMore: false,
+  page: 1,
+  limit: 50,
+};
+const json = (status, data) =>
+  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+
+test("MIG-0737 U01 RH-009: catalog preserves CURRENT URL, refresh and no-store", async () => {
+  const calls = [];
+  const fetchFn = async (path, init) => {
+    calls.push({ path, init });
+    return json(200, catalog);
+  };
+  assert.deepEqual(await loadSpreadsheetCatalog(fetchFn), { status: "ok", data: catalog });
+  assert.deepEqual(await loadSpreadsheetCatalog(fetchFn, true), { status: "ok", data: catalog });
+  assert.deepEqual(calls.map((x) => x.path), [
+    "/api/admin/spreadsheet/tables",
+    "/api/admin/spreadsheet/tables?refresh=1",
+  ]);
+  for (const { init } of calls) {
+    assert.equal(init.method, "GET");
+    assert.equal(init.credentials, "same-origin");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.headers.accept, "application/json");
+    assert.equal("body" in init, false);
+  }
+});
+
+test("MIG-0737 U01 RH-003: table is encoded and page DTO is schema-validated", async () => {
+  let path;
+  const fetchFn = async (url) => { path = url; return json(200, page); };
+  assert.deepEqual(await loadSpreadsheetPage(fetchFn, "video/2026 & A", 2),
+    { status: "ok", data: page });
+  assert.equal(path, "/api/admin/spreadsheet/data?table=video%2F2026%20%26%20A&page=2");
+  assert.deepEqual(await loadSpreadsheetPage(fetchFn, "", 1), { status: "unavailable" });
+  assert.deepEqual(await loadSpreadsheetPage(fetchFn, "videos", 0), { status: "unavailable" });
+  assert.deepEqual(await loadSpreadsheetPage(fetchFn, "videos", 1.5), { status: "unavailable" });
+});
+
+test("MIG-0737 T01: only explicit 404 spreadsheet_disabled renders disabled state", async () => {
+  assert.deepEqual(await loadSpreadsheetCatalog(async () =>
+    json(404, { error: "spreadsheet_disabled" })), { status: "disabled" });
+  assert.deepEqual(await loadSpreadsheetCatalog(async () =>
+    json(404, { error: "unknown_table" })), { status: "notFound" });
+  assert.deepEqual(await loadSpreadsheetCatalog(async () =>
+    new Response("<html>not found</html>", { status: 404 })), { status: "notFound" });
+  assert.deepEqual(await loadSpreadsheetPage(async () =>
+    json(404, { error: "spreadsheet_disabled" }), "videos", 1), { status: "disabled" });
+});
+
+test("MIG-0737 U01: authentication and denial are never interpreted as feature disablement", async () => {
+  const states = [
+    [401, { error: "unauthorized" }, { status: "anonymous" }],
+    [403, { reason: "admin_required", redirect: "/dashboard" },
+      { status: "forbidden", reason: "admin_required", redirect: "/dashboard" }],
+    [403, { reason: { secret: true }, redirect: ["bad"] }, { status: "forbidden" }],
+    [501, { error: "unsupported" }, { status: "unsupported" }],
+    [500, { error: "failed" }, { status: "unavailable" }],
+  ];
+  for (const [status, body, expected] of states) {
+    assert.deepEqual(await loadSpreadsheetCatalog(async () => json(status, body)), expected);
+  }
+});
+
+test("MIG-0737 U01: malformed/partial catalog or page is unavailable, never accepted", async () => {
+  for (const value of [{}, { tables: "oops" }, { ...catalog, tables: [{ ...table, mode: "superuser" }] }]) {
+    assert.deepEqual(await loadSpreadsheetCatalog(async () => json(200, value)),
+      { status: "unavailable" });
+  }
+  for (const value of [{}, { ...page, rows: "private" }, { ...page, hasMore: "yes" }]) {
+    assert.deepEqual(await loadSpreadsheetPage(async () => json(200, value), "videos", 1),
+      { status: "unavailable" });
+  }
+});
+
+test("MIG-0737 U01: fetch failure, invalid JSON and aborted responses fail closed", async () => {
+  assert.deepEqual(await loadSpreadsheetCatalog(async () => { throw Error("offline"); }),
+    { status: "unavailable" });
+  assert.deepEqual(await loadSpreadsheetCatalog(async () => new Response("error", { status: 200 })),
+    { status: "unavailable" });
+  const controller = new AbortController();
+  let signal;
+  assert.deepEqual(await loadSpreadsheetCatalog(async (_, init) => {
+    signal = init.signal;
+    controller.abort();
+    return json(200, catalog);
+  }, false, controller.signal), { status: "unavailable" });
+  assert.equal(signal, controller.signal);
+});
+
+test("MIG-0737 U01 RH-007 export retains CURRENT path, safety headers and partial signal", async () => {
+  const calls = [];
+  const fetchFn = async (path, init) => {
+    calls.push({ path, init });
+    const tsv = path.includes("format=tsv");
+    return new Response(tsv ? "id\tname\n1\ttest" : "id,name\n1,test", {
+      status: 200,
+      headers: {
+        "content-type": tsv ? "text/tab-separated-values; charset=utf-8" : "text/csv; charset=utf-8",
+        "X-Spreadsheet-Truncated": tsv ? "1" : "0",
+      },
+    });
+  };
+  const csv = await loadSpreadsheetExport(fetchFn, "video/a & b", "csv");
+  assert.equal(csv.status, "ok");
+  assert.equal(csv.data.truncated, false);
+  assert.equal(await csv.data.blob.text(), "id,name\n1,test");
+  const tsv = await loadSpreadsheetExport(fetchFn, "videos", "tsv");
+  assert.equal(tsv.status, "ok");
+  assert.equal(tsv.data.truncated, true);
+  assert.equal(await tsv.data.blob.text(), "id\tname\n1\ttest");
+  assert.deepEqual(calls.map(x => x.path), [
+    "/api/admin/spreadsheet/export?table=video%2Fa%20%26%20b&format=csv&header=1",
+    "/api/admin/spreadsheet/export?table=videos&format=tsv&header=1",
+  ]);
+  for (const { init } of calls) {
+    assert.equal(init.method, "GET");
+    assert.equal(init.credentials, "same-origin");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.body, undefined);
+  }
+});
+
+test("MIG-0737 U01 RH-007 export never turns JSON or HTML into an attachment", async () => {
+  for (const response of [
+    json(200, { error: "secret" }),
+    new Response("<html>private</html>", { status: 200, headers: { "content-type": "text/html" } }),
+    new Response("fake export", { status: 200, headers: { "content-type": "application/octet-stream" } }),
+    new Response("fake", { status: 200, headers: { "content-type": "text/csv-unsafe" } }),
+    new Response("bad", { status: 500 }),
+  ]) {
+    assert.deepEqual(await loadSpreadsheetExport(async () => response.clone(), "videos", "csv"),
+      { status: "unavailable" });
+  }
+});
+
+test("MIG-0737 U01 RH-007 preserves explicit disabled 404 and denies nonadmins", async () => {
+  const responses = [
+    [404, { error: "spreadsheet_disabled" }, { status: "disabled" }],
+    [404, { error: "unknown_table" }, { status: "notFound" }],
+    [401, { error: "unauthorized" }, { status: "anonymous" }],
+    [403, { reason: "admin_required" }, { status: "forbidden" }],
+    [501, { error: "unsupported" }, { status: "unsupported" }],
+  ];
+  for (const [status, payload, expected] of responses) {
+    assert.deepEqual(await loadSpreadsheetExport(async () => json(status, payload), "videos", "csv"), expected);
+  }
+});
+
+test("MIG-0737 U01 RH-007 abort or offline fails closed", async () => {
+  assert.deepEqual(await loadSpreadsheetExport(async () => { throw Error("offline"); }, "videos", "csv"),
+    { status: "unavailable" });
+  const controller = new AbortController();
+  controller.abort();
+  let calls = 0;
+  assert.deepEqual(await loadSpreadsheetExport(async () => { calls++; return json(200, {}); },
+    "videos", "csv", controller.signal), { status: "unavailable" });
+  assert.equal(calls, 0);
+  assert.deepEqual(await loadSpreadsheetExport(async () =>
+    new Response("test", { headers: { "content-type": "text/csv" } }), "", "csv"), { status: "unavailable" });
+});
+
+test("MIG-0737 U01: HTTP 403 remains forbidden without optional metadata", async () => {
+  const responses = [
+    () => new Response(null, { status: 403 }),
+    () => new Response("<html>denied</html>", { status: 403 }),
+    () => new Response("{", { status: 403 }),
+    () => json(403, null),
+    () => json(403, []),
+    () => json(403, "denied"),
+    () => ({ status: 403, json() { throw Error("body unavailable"); } }),
+  ];
+  for (const makeResponse of responses) {
+    for (const load of [loadSpreadsheetCatalog,
+      fetchFn => loadSpreadsheetPage(fetchFn, "videos", 1)]) {
+      let calls = 0;
+      const result = await load(async () => { calls++; return makeResponse(); });
+      assert.deepEqual(result, { status: "forbidden" });
+      assert.equal(calls, 1, "no duplicate HTTP request for metadata");
+    }
+  }
+});
+
+test("MIG-0737 U01: 403 metadata uses the shared Ops redirect allowlist", async () => {
+  for (const redirect of ["https://example.invalid/", "//example.invalid/", "/admin/users"]) {
+    assert.deepEqual(await loadSpreadsheetPage(async () =>
+      json(403, { reason: "admin_required", redirect }), "videos", 1),
+    { status: "forbidden", reason: "admin_required" });
+  }
+});
+
+test("MIG-0737 U01: stalled optional 403 body does not block denial", { timeout: 3000 }, async () => {
+  let bodyReads = 0;
+  const result = await loadSpreadsheetPage(async () => ({
+    status: 403,
+    json() { bodyReads++; return new Promise(() => {}); },
+  }), "videos", 1);
+  assert.deepEqual(result, { status: "forbidden" });
+  assert.equal(bodyReads, 1);
+});
+
+test("MIG-0737 U01: abort during optional 403 metadata read is not a current denial", async () => {
+  const controller = new AbortController();
+  const result = await loadSpreadsheetPage(async () => ({
+    status: 403,
+    json() { controller.abort(); return Promise.resolve({ reason: "admin_required" }); },
+  }), "videos", 1, controller.signal);
+  assert.deepEqual(result, { status: "unavailable" });
+});
+
+const read404Adapters = [
+  ["catalog", (fetchFn, signal) => loadSpreadsheetCatalog(fetchFn, false, signal)],
+  ["page", (fetchFn, signal) => loadSpreadsheetPage(fetchFn, "videos", 1, signal)],
+  ["CSV", (fetchFn, signal) => loadSpreadsheetExport(fetchFn, "videos", "csv", signal)],
+  ["TSV", (fetchFn, signal) => loadSpreadsheetExport(fetchFn, "videos", "tsv", signal)],
+];
+
+for (const [label, load] of read404Adapters) {
+  test("MIG-0737 U01 404 abort: " + label + " settles before an abort-ignoring body", { timeout: 3000 }, async () => {
+    for (const outcome of ["resolve", "reject"]) {
+      const controller = new AbortController();
+      let release, rejectBody, started, calls = 0, reads = 0;
+      const body = new Promise((resolve, reject) => { release = resolve; rejectBody = reject; });
+      const bodyStarted = new Promise(resolve => { started = resolve; });
+      const pending = load(async (_, init) => {
+        calls++;
+        assert.equal(init.signal, controller.signal);
+        return { status: 404, json() { reads++; started(); return body; } };
+      }, controller.signal);
+      try {
+        await bodyStarted;
+        controller.abort();
+        // No artificial body resolution to get the cancellation result.
+        const settled = await Promise.race([
+          pending,
+          new Promise(resolve => setImmediate(() => resolve("still pending"))),
+        ]);
+        assert.deepEqual(settled, { status: "unavailable" });
+        assert.equal(calls, 1);
+        assert.equal(reads, 1);
+      } finally {
+        if (outcome === "resolve") release({ error: "spreadsheet_disabled" });
+        else rejectBody(Error("late body failure"));
+        await pending;
+      }
+    }
+  });
+
+  test("MIG-0737 U01 404 abort: " + label + " preserves un-aborted classification and listener cleanup", async () => {
+    const cases = [
+      [() => json(404, { error: "spreadsheet_disabled" }), "disabled"],
+      [() => json(404, { error: "unknown_table" }), "notFound"],
+      [() => new Response("<html>missing</html>", { status: 404 }), "notFound"],
+      [() => json(404, null), "notFound"],
+      [() => json(404, [{ error: "spreadsheet_disabled" }]), "notFound"],
+      [() => ({ status: 404, json() { throw Error("sync body failure"); } }), "unavailable"],
+    ];
+    for (const [makeResponse, status] of cases) {
+      const controller = new AbortController();
+      assert.deepEqual(await load(async () => makeResponse(), controller.signal), { status });
+      assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+      assert.deepEqual(await load(async () => makeResponse()), { status });
+    }
+    const controller = new AbortController();
+    let reads = 0;
+    const result = await load(async () => ({
+      status: 404,
+      json() { reads++; controller.abort(); return new Promise(() => {}); },
+    }), controller.signal);
+    assert.deepEqual(result, { status: "unavailable" });
+    assert.equal(reads, 1);
+    assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+  });
+}

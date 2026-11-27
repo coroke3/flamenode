@@ -1,0 +1,121 @@
+/** MIG-0737 U01: pure keyboard navigation and TSV selection for the Ops admin grid.
+ * CURRENT reference: spreadsheetGridUtils.ts moveCell/copySelectionAsTsv.
+ * No mutation, clipboard API, or external calls happen in this module.
+ */
+export type GridCell = { row: number; col: number };
+
+export function moveSpreadsheetFocus(
+  current: GridCell,
+  key: string,
+  rowCount: number,
+  columnCount: number,
+): GridCell {
+  if (!Number.isSafeInteger(rowCount) || !Number.isSafeInteger(columnCount) ||
+      rowCount < 1 || columnCount < 1) return current;
+  let row = current.row;
+  let col = current.col;
+  if (key === "ArrowUp") row -= 1;
+  else if (key === "ArrowDown") row += 1;
+  else if (key === "ArrowLeft") col -= 1;
+  else if (key === "ArrowRight") col += 1;
+  else if (key === "Home") col = 0;
+  else if (key === "End") col = columnCount - 1;
+  else if (key === "CtrlHome") { row = 0; col = 0; }
+  else if (key === "CtrlEnd") { row = rowCount - 1; col = columnCount - 1; }
+  else if (key === "CtrlArrowUp") row = 0;
+  else if (key === "CtrlArrowDown") row = rowCount - 1;
+  else if (key === "CtrlArrowLeft") col = 0;
+  else if (key === "CtrlArrowRight") col = columnCount - 1;
+  else if (key === "PageUp") row -= 10;
+  else if (key === "PageDown") row += 10;
+  else if (key === "Tab") col += 1;
+  else if (key === "ShiftTab") col -= 1;
+  else if (key === "Enter") row += 1;
+  else return current;
+  return {
+    row: Math.max(0, Math.min(rowCount - 1, row)),
+    col: Math.max(0, Math.min(columnCount - 1, col)),
+  };
+}
+
+function plainCell(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value) ?? "";
+  return String(value);
+}
+
+/** Escapes multiline/tab data so copying a selection does not shift TSV columns.
+ * This is for clipboard transfer, not an executable CSV export.
+ */
+function quoteTsvCell(text: string): string {
+  return /[\t\r\n"]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
+export function copySpreadsheetSelection(
+  rows: ReadonlyArray<Record<string, unknown>>,
+  columns: ReadonlyArray<{ name: string }>,
+  anchor: GridCell,
+  focus: GridCell,
+): string {
+  if (rows.length === 0 || columns.length === 0) return "";
+  const minRow = Math.max(0, Math.min(anchor.row, focus.row));
+  const maxRow = Math.min(rows.length - 1, Math.max(anchor.row, focus.row));
+  const minCol = Math.max(0, Math.min(anchor.col, focus.col));
+  const maxCol = Math.min(columns.length - 1, Math.max(anchor.col, focus.col));
+  if (minRow > maxRow || minCol > maxCol) return "";
+  const output: string[] = [];
+  for (let row = minRow; row <= maxRow; row++) {
+    const cells: string[] = [];
+    for (let col = minCol; col <= maxCol; col++) {
+      cells.push(quoteTsvCell(plainCell(rows[row]?.[columns[col].name])));
+    }
+    output.push(cells.join("\t"));
+  }
+  return output.join("\n");
+}
+
+type PasteColumn = { name: string; pk: number; editable: boolean; generated?: boolean };
+type PasteCell = { rowIndex: number; column: string; value: string | null };
+
+/**
+ * Plan tabular clipboard cells using CURRENT buildGridPasteCellsFromGrid semantics.
+ * A recognized header takes precedence over the positional origin. This is a
+ * pure preview, not write authorization: resolve live PKs and check authority
+ * again before any future mutation. Keep generated columns fenced in Ops.
+ */
+export function planSpreadsheetGridPaste(
+  grid: ReadonlyArray<ReadonlyArray<string>>,
+  columns: ReadonlyArray<PasteColumn>,
+  focus: GridCell,
+  rowCount: number,
+  tableEditable: boolean,
+): PasteCell[] {
+  if (!tableEditable || grid.length === 0 || columns.length === 0 ||
+      !Number.isSafeInteger(rowCount) || rowCount < 1 ||
+      !Number.isSafeInteger(focus.row) || !Number.isSafeInteger(focus.col)) return [];
+  const startRow = Math.min(Math.max(0, focus.row), rowCount - 1);
+  const startCol = Math.min(Math.max(0, focus.col), columns.length - 1);
+  const header = grid[0] ?? [];
+  const headerColumns = header.map(cell => {
+    const name = String(cell ?? "").trim().toLowerCase();
+    return name ? columns.find(column => column.name.toLowerCase() === name) : undefined;
+  });
+  const hasHeader = headerColumns.some(column => column !== undefined);
+  const firstDataRow = hasHeader ? 1 : 0;
+  const cells: PasteCell[] = [];
+  for (let r = firstDataRow; r < grid.length; r++) {
+    const rowIndex = startRow + r - firstDataRow;
+    if (rowIndex >= rowCount) break;
+    const line = grid[r] ?? [];
+    const width = Math.min(line.length, hasHeader ? headerColumns.length : columns.length - startCol);
+    for (let c = 0; c < width; c++) {
+      const column = hasHeader ? headerColumns[c] : columns[startCol + c];
+      if (!column || !column.editable || column.pk !== 0 || column.generated) continue;
+      const source = String(line[c] ?? "");
+      const trimmed = source.trim();
+      cells.push({ rowIndex, column: column.name,
+        value: trimmed === "" || trimmed.toUpperCase() === "NULL" ? null : source });
+    }
+  }
+  return cells;
+}
