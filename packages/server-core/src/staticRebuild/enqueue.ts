@@ -60,6 +60,18 @@ function dedupeStaticRebuildInputs(
   return Array.from(byKey.values());
 }
 
+type EnqueueFailureCode = "enqueue_failed" | "bulk_enqueue_failed" | "history_log_failed";
+
+// Diagnostics are optional: a broken sink or provider exception must never
+// reject this post-commit best-effort path or skip the failure audit.
+function warnEnqueueFailure(code: EnqueueFailureCode): void {
+  try {
+    console.warn("[static-rebuild]", code);
+  } catch {
+    // Diagnostic failure cannot change the enqueue outcome.
+  }
+}
+
 const ENQUEUE_CONFLICT_RETRY_LIMIT = 3;
 // A full 100-member replacement can invalidate both old and new user pages
 // (up to 200 user targets) plus the video/index/event projections. Keep the
@@ -100,7 +112,8 @@ export async function buildStaticRebuildQueueBatch(
 
   const statements: BatchItem<"sqlite">[] = [];
   const expectedChanges: number[] = [];
-  const now = Math.floor(Date.now() / 1000);
+  const nowMs = Date.now();
+  const now = Math.floor(nowMs / 1000);
   const rows = normalizedItems.map((item) => ({
     id: generateId("srb"),
     target_type: item.targetType,
@@ -160,6 +173,23 @@ export async function buildStaticRebuildQueueBatch(
     );
     expectedChanges.push(chunk.length);
   }
+
+  // Invalidate the next public build in the same atomic D1 batch as the
+  // source mutation's queue invalidation. Keep the scheduler's millisecond
+  // clock separate from the queue rows' existing second timestamps.
+  // Advance the generation even if two writes share a millisecond, or a
+  // writer's clock is behind the build hook. The next requested_at must be
+  // strictly greater than BOTH the previous request and last_hook_at.
+  // Otherwise the scheduler's requested_at <= last_hook_at gate can silently
+  // skip a committed public change. This remains a single D1 UPDATE.
+  statements.push(
+    db.run(sql`
+      UPDATE public_build_state
+      SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ${nowMs})
+      WHERE id = 1
+    `),
+  );
+  expectedChanges.push(1);
 
   return {
     statements,
@@ -264,25 +294,22 @@ export async function enqueueStaticRebuild(
       }
     }
     throw new Error("static rebuild queue changed during enqueue retries");
-  } catch (error) {
-    console.warn("[enqueueStaticRebuild] failed", target, error);
+  } catch {
+    warnEnqueueFailure("enqueue_failed");
     try {
-      await auditAction(db, {
+      const auditId = await auditAction(db, {
         table_name: "static_rebuild_queue",
         record_id: `${target.targetType}:${target.targetId}`,
         action: "UPDATE",
-        after_data: JSON.stringify({
-          reason: target.reason,
-          error: error instanceof Error ? error.message : String(error),
-        }),
+        // Preserve the audit subject/actor, but not arbitrary provider errors
+        // or the caller's unbounded reason string in the failure payload.
+        after_data: { error: "enqueue_failed" },
         operator_user_id: input.requestedByUserId ?? "system",
         retention_class: "normal",
       });
-    } catch (historyError) {
-      console.warn(
-        "[enqueueStaticRebuild] history log failed",
-        historyError,
-      );
+      if (auditId === null) warnEnqueueFailure("history_log_failed");
+    } catch {
+      warnEnqueueFailure("history_log_failed");
     }
   }
 }
@@ -314,12 +341,9 @@ export async function enqueueStaticRebuildMany(
       ...options,
       sentKinds: options?.sentKinds ?? new Set<QueueWakeKind>(),
     }, loadWakeHost);
-  } catch (error) {
+  } catch {
     // rebuild enqueueは本体保存後のbest-effort経路。大量fanoutやplan上限でも本体成功を巻き戻さない。
-    console.warn("[enqueueStaticRebuildMany] bulk enqueue failed", {
-      targetCount: items.length,
-      error,
-    });
+    warnEnqueueFailure("bulk_enqueue_failed");
   }
 }
 
