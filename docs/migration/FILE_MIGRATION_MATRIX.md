@@ -1798,10 +1798,6 @@
 
 | `src/components/admin/TermsReacceptBroadcastButton.tsx` | HELPER | CURRENT admin rules reaccept broadcast modal; backdrop dismissal disarms TERMS; synchronous busyRef blocks duplicate enqueue and preserves cursor | MIG-0727 | SAME (CURRENT Next retained until Ops cutover; TARGET separately owned by PR#851) | RETAINED | PR#852 SHA=28673c304714efceaed7db70fe00adf86dee1391 TEST=node --test --experimental-strip-types src/components/admin/termsReacceptDismissal.contract.test.mjs CI=https://github.com/coroke3/flamenode/pull/852/checks (exact HEAD CI and non-writer review pending) |
 | `src/components/admin/termsReacceptDismissal.contract.test.mjs` | TEST | CURRENT Next modal backdrop/Close confirmation reset and synchronous latch source contract (not a DOM/browser test) | MIG-0727 | SAME (CURRENT only; no TARGET ownership) | RETAINED | PR#852 SHA=a3b2c9bf4f538fc3ca72b1aea01682d818aa8229 TEST=node --test --experimental-strip-types src/components/admin/termsReacceptDismissal.contract.test.mjs CI=https://github.com/coroke3/flamenode/pull/852/checks (exact HEAD CI and non-writer review pending) |
-| `docs/migration/work-items/MIG-0689.md` | DOC | D-19-2 shared write admission snapshot Work Order | MIG-0689 | SAME | IN_PROGRESS | PR#901 SHA=52e54c9d512e1a6a59af573511a221d6902eecd3 (shared middleware ownership scope, failure provenance, S3/CPU gates) |
-| `docs/migration/PHASE_6_SPEC.md` | DOC | Phase 6 Work Orders | MIG-0689 | SAME | IN_PROGRESS | PR#901 SHA=52e54c9d512e1a6a59af573511a221d6902eecd3 (MIG-0689 shared write admission snapshot Work Order; D-19-2) ; MIG-0689 PR#901 SHA=7c79c7edd46c804bb9935b3a36f236cd30e34d3b TEST=Readiness checker enum repaired; no gate relaxation |
-| `docs/migration/TASK_CARDS_6_7.md` | DOC | Phase 6/7 task card index | MIG-0689 | SAME | IN_PROGRESS | PR#901 SHA=52e54c9d512e1a6a59af573511a221d6902eecd3 (MIG-0689 task card only) |
-| `docs/migration/STATUS.md` | DOC | Migration task state registry | MIG-0689 | SAME | IN_PROGRESS | PR#901 SHA=52e54c9d512e1a6a59af573511a221d6902eecd3 (MIG-0689 Phase 6 row only; dependency MIG-0602) |
 
 ## Future files requiring source/target registration
 

@@ -20,11 +20,37 @@ const SITE = "https://app.flamenode.example";
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null, role: "admin", is_banned: 0, active_x_user_id: null };
 const VALID = { title: "T", body: "B", severity: "info", target_audience: "all", is_published: 1 };
 
+const SESSION_TOKEN = "mig-0689-fixture-token";
+function seedCookieSession(sqlite) {
+  sqlite.exec('CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT NOT NULL, "expires" INTEGER NOT NULL)');
+  sqlite.prepare('INSERT INTO "session" VALUES (?, ?, ?)').run(SESSION_TOKEN, ADMIN.id, Date.now() + 3_600_000);
+}
 function setup({ cookieSession = false } = {}) {
   const d1 = createAdminD1();
   seedBase(d1.sqlite);
+  const reads = [];
+  if (cookieSession) {
+    seedCookieSession(d1.sqlite);
+    const prepare = d1.db.prepare.bind(d1.db);
+    d1.db.prepare = (sql) => {
+      const statement = prepare(sql);
+      return {
+        ...statement,
+        bind(...values) {
+          const bound = statement.bind(...values);
+          return {
+            ...bound,
+            first: async (...args) => {
+              reads.push({ sql, values });
+              return bound.first(...args);
+            },
+          };
+        },
+      };
+    };
+  }
   const hono = new Hono();
-  hono.route("/api/admin", createAdminRoutes({
+  hono.route("/api/admin", cookieSession ? createAdminRoutes() : createAdminRoutes({
     session: async (c, next) => {
       c.set("user", ADMIN);
       c.set("sessionState", "user");
@@ -32,17 +58,17 @@ function setup({ cookieSession = false } = {}) {
     },
   }));
   const request = (method, path, body, headers = { Origin: SITE }, raw) =>
-    hono.request(path, {
+    hono.request(cookieSession ? SITE + path : path, {
       method,
-      headers: { "content-type": "application/json", ...headers },
+      headers: { "content-type": "application/json", ...(cookieSession ? { cookie: "__Secure-authjs.session-token=" + SESSION_TOKEN } : {}), ...headers },
       body: raw ?? (body === undefined ? undefined : JSON.stringify(body)),
     }, { DB: d1.db, NEXT_PUBLIC_SITE_URL: SITE });
-  return { ...d1, request, hono };
+  return { ...d1, request, hono, reads };
 }
 
 // ---------------- B2: D1 budget ----------------
 
-test("S3 budget: every successful route uses <= 3 pre-reads and exactly 1 batch", async () => {
+test("S3 budget: real-cookie routes use <= 3 pre-reads and exactly 1 batch", async () => {
   const cases = [
     ["POST", "/api/admin/announcements", { ...VALID, id: "a-b" }, null, 1],
     ["PUT", "/api/admin/announcements/a-b", { ...VALID, title: "N", base_updated_at: 100 }, (s) => s.prepare("INSERT INTO announcements VALUES ('a-b','O','B','info',0,NULL,NULL,'all','x',50,100)").run(), 2],
@@ -51,23 +77,32 @@ test("S3 budget: every successful route uses <= 3 pre-reads and exactly 1 batch"
     ["PATCH", "/api/admin/api-endpoints/ev-1", { public_api_enabled: false }, (s) => seedEvent(s, { public_api_enabled: 1 }), 2],
   ];
   for (const [method, path, body, seed, expectedReads] of cases) {
-    const { sqlite, request, stats } = setup();
+    const { sqlite, request, stats, reads } = setup({ cookieSession: true });
     if (seed) seed(sqlite);
     const res = await request(method, path, body);
     assert.equal(res.status, 200, `${method} ${path}`);
+    assert.equal(res.headers.get("cache-control"), "private, no-store");
     assert.ok(stats.reads <= 3, `${method} ${path}: reads ${stats.reads}`);
-    assert.equal(stats.reads, expectedReads, `${method} ${path} reads`);
+    assert.equal(stats.reads, expectedReads + 1, `${method} ${path} including session read`);
+    assert.equal(reads.length, stats.reads);
+    assert.match(reads[0].sql, /FROM "session" s/);
+    assert.match(reads[1].sql, /LEFT JOIN "system_settings" s/);
+    const expectedBinds = [[SESSION_TOKEN], [ADMIN.id]];
+    if (expectedReads === 2) expectedBinds.push([path.includes("/announcements") ? "a-b" : "ev-1"]);
+    assert.deepEqual(reads.map((read) => read.values), expectedBinds);
     assert.equal(stats.batches, 1, `${method} ${path} batches`);
   }
 });
 
 test("missing CostGuard settings row preserves the authenticated user and fails as maintenance", async () => {
-  const { sqlite, request, stats } = setup();
+  const { sqlite, request, stats } = setup({ cookieSession: true });
   sqlite.prepare('DELETE FROM system_settings WHERE id = "default"').run();
   const response = await request("POST", "/api/admin/announcements", { ...VALID, id: "missing-settings" });
   assert.equal(response.status, 503);
   assert.equal((await response.json()).reason, "maintenance_mode");
-  assert.equal(stats.reads, 1, "one joined admission read");
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(stats.reads, 2, "session plus one joined admission read");
+  assert.equal(stats.batches, 0);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM announcements").get().n, 0);
 });
 
@@ -83,7 +118,7 @@ test("S3 budget parity: guard-fed audit equals audit that reads settings/actor i
 
 
 // The SQL receipt is lossless for CostGuard's decision inputs, not a new policy.
-// Use the existing mounted SQLite-backed Hono suite; session is injected here.
+// Use the existing mounted SQLite-backed Hono suite with the actual HTTPS cookie reader.
 test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard decisions", async () => {
   const { evaluateCostGuardCore, WRITE_FEATURE_KEYS } = await import("@flamenode/domain/admin");
   const { evaluateCostGuardSnapshot } = await import("../src/middleware/costGuard.ts");
@@ -115,7 +150,7 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
   ];
   const maxBytes = Buffer.byteLength(JSON.stringify(WRITE_FEATURE_KEYS));
   for (const [operationMode, disabledFeaturesJson, exceptionUntil, exceptionFeaturesJson] of cases) {
-    const app = setup();
+    const app = setup({ cookieSession: true });
     app.sqlite.prepare("UPDATE system_settings SET operation_mode=?, disabled_features_json=?, cost_guard_exception_until=?, cost_guard_exception_features_json=? WHERE id='default'")
       .run(operationMode, disabledFeaturesJson, exceptionUntil, exceptionFeaturesJson);
     const expected = evaluateCostGuardCore({ feature, operationMode, disabledFeaturesJson, exceptionUntil, exceptionFeaturesJson, now });
@@ -130,7 +165,8 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
     const response = await app.request("POST", "/api/admin/announcements", { ...VALID, id: "compact-receipt" });
     assert.equal(response.status, denied ? 503 : 200);
     if (denied) assert.equal((await response.json()).reason, denied);
-    assert.equal(app.stats.reads, 2, "one additional joined read for mounted request");
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal(app.stats.reads, 3, "one direct read plus session and joined admission reads for mounted request");
     assert.equal(app.stats.batches, denied ? 0 : 1);
     assert.equal(app.sqlite.prepare("SELECT COUNT(*) AS n FROM announcements").get().n, denied ? 0 : 1);
     assert.equal(app.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, denied ? 0 : 1);
@@ -282,8 +318,12 @@ test("combined admission read fallback preserves ToS and CostGuard failure class
   const run = async (failure) => {
     const d1 = createAdminD1();
     seedBase(d1.sqlite);
+    seedCookieSession(d1.sqlite);
+    if (failure === "banned") d1.sqlite.exec('UPDATE "user" SET is_banned = 1');
+    const attempts = [];
     const originalPrepare = d1.db.prepare.bind(d1.db);
     const db = {
+      ...d1.db,
       prepare(query) {
         const statement = originalPrepare(query);
         return {
@@ -293,6 +333,7 @@ test("combined admission read fallback preserves ToS and CostGuard failure class
             return {
               ...bound,
               first: async (...args) => {
+                attempts.push({ query, values });
                 if (query.includes('LEFT JOIN "system_settings" s')) {
                   throw new Error("combined admission provider failure");
                 }
@@ -309,39 +350,50 @@ test("combined admission read fallback preserves ToS and CostGuard failure class
         };
       },
     };
-    const options = { loadSiteUrl: () => SITE, allowLocalPreview: () => false, requiredRole: "admin" };
     const app = new Hono();
-    app.use("*", originGuardMiddleware(options));
-    app.use("*", async (c, next) => {
-      c.set("user", { ...ADMIN, is_banned: failure === "banned" ? 1 : 0 });
-      c.set("sessionState", "user");
-      await next();
-    });
-    app.use("*", writeGuardMiddleware(options));
-    app.use("*", costGuardMiddleware("manage_event_update"));
-    app.post("/w", (c) => c.json({ ok: true }));
-    const response = await app.request("/w", { method: "POST", headers: { Origin: SITE } }, { DB: db });
-    return { response, reads: d1.stats.reads };
+    app.route("/api/admin", createAdminRoutes());
+    const response = await app.request(SITE + "/api/admin/announcements", {
+      method: "POST",
+      headers: { Origin: SITE, cookie: "__Secure-authjs.session-token=" + SESSION_TOKEN, "content-type": "application/json" },
+      body: JSON.stringify({ ...VALID, id: "fallback-admission" }),
+    }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
+    const allowed = failure === "none";
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal(d1.stats.batches, allowed ? 1 : 0);
+    assert.equal(d1.sqlite.prepare("SELECT COUNT(*) AS n FROM announcements").get().n, allowed ? 1 : 0);
+    assert.equal(d1.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, allowed ? 1 : 0);
+    assert.match(attempts[0].query, /FROM "session" s/);
+    assert.match(attempts[1].query, /LEFT JOIN "system_settings" s/);
+    assert.match(attempts[2].query, /FROM "user" u/);
+    assert.doesNotMatch(attempts[2].query, /LEFT JOIN "system_settings"/);
+    if (attempts.length === 4) assert.match(attempts[3].query, /FROM system_settings/);
+    assert.deepEqual(attempts.map((entry) => entry.values),
+      [[SESSION_TOKEN], [ADMIN.id], [ADMIN.id], ...(attempts.length === 4 ? [["default"]] : [])]);
+    return { response, reads: d1.stats.reads, attempts: attempts.length };
   };
 
   const recovered = await run("none");
   assert.equal(recovered.response.status, 200);
-  assert.equal(recovered.reads, 2, "ToS and CostGuard source-specific fallback reads");
+  assert.equal(recovered.reads, 3, "session and two source-specific fallback reads");
+  assert.equal(recovered.attempts, 4, "include failed joined-read attempt; not S3 acceptance");
 
   const tosFailure = await run("tos");
   assert.equal(tosFailure.response.status, 503);
   assert.equal((await tosFailure.response.json()).reason, "db_unavailable");
-  assert.equal(tosFailure.reads, 0);
+  assert.equal(tosFailure.reads, 1);
+  assert.equal(tosFailure.attempts, 3);
 
   const costFailure = await run("cost");
   assert.equal(costFailure.response.status, 503);
   assert.equal((await costFailure.response.json()).reason, "cost_guard_blocked");
-  assert.equal(costFailure.reads, 1);
+  assert.equal(costFailure.reads, 2);
+  assert.equal(costFailure.attempts, 4);
 
   const identityFailure = await run("banned");
   assert.equal(identityFailure.response.status, 403);
   assert.equal((await identityFailure.response.json()).reason, "banned");
-  assert.equal(identityFailure.reads, 1, "CostGuard fallback is not read after identity denial");
+  assert.equal(identityFailure.reads, 2, "session and ToS; no CostGuard fallback after identity denial");
+  assert.equal(identityFailure.attempts, 3);
 });
 
 test("requiredRole default is admin (moderator denied); null allows any authenticated user", async () => {
