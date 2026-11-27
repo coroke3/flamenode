@@ -42,13 +42,17 @@ export async function readPublicVisibilityBlockedEntitiesManifest(
       throw new Error("public_visibility_manifest_bucket_missing");
     }
     if (mode === "observe") {
-      console.warn(
-        JSON.stringify({
-          service: "public-visibility-guard",
-          mode,
-          result: "manifest_bucket_missing",
-        }),
-      );
+      try {
+        console.warn(
+          JSON.stringify({
+            service: "public-visibility-guard",
+            mode,
+            result: "manifest_bucket_missing",
+          }),
+        );
+      } catch {
+        // Observe-mode diagnostics must not turn a permissive read into an error.
+      }
     }
     return {
       manifest: emptyPublicVisibilityBlockedEntitiesManifest(
@@ -131,15 +135,19 @@ export async function isPublicEntityVisibilityBlocked(args: {
     args.entityId,
   );
   if (guardMode === "observe" && blocked) {
-    console.warn(
-      JSON.stringify({
-        service: "public-visibility-guard",
-        mode: guardMode,
-        entity_type: args.entityType,
-        entity_id: args.entityId,
-        result: "blocked_observe",
-      }),
-    );
+    try {
+      console.warn(
+        JSON.stringify({
+          service: "public-visibility-guard",
+          mode: guardMode,
+          entity_type: args.entityType,
+          entity_id: args.entityId,
+          result: "blocked_observe",
+        }),
+      );
+    } catch {
+      // An unavailable logger must not alter the non-enforcing guard decision.
+    }
   }
   return guardMode === "enforce" && blocked;
 }

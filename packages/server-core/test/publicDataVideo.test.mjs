@@ -95,6 +95,38 @@ test("videoCardCore normalizes card base and public cards", () => {
   assert.equal(list[0]?.id, "v1");
 });
 
+test("videoCardCore never exposes rows with conflicting explicit visibility fields", () => {
+  const card = (id, state = {}) => ({ id, title: "Video " + id, ...state });
+  const accepted = [
+    card("status-only", { status: "public" }),
+    card("visibility-only", { visibility_status: "public" }),
+    card("both-public", { status: "public", visibility_status: "public" }),
+    card("null-status", { status: null, visibility_status: "public" }),
+    card("null-visibility", { status: "public", visibility_status: null }),
+  ];
+  const rejected = [
+    card("no-status"),
+    card("both-null", { status: null, visibility_status: null }),
+    card("status-private", { status: "private" }),
+    card("visibility-private", { visibility_status: "private" }),
+    card("status-public-visibility-private", { status: "public", visibility_status: "private" }),
+    card("status-private-visibility-public", { status: "private", visibility_status: "public" }),
+    card("status-public-visibility-draft", { status: "public", visibility_status: "draft" }),
+    card("status-public-visibility-empty", { status: "public", visibility_status: "" }),
+  ];
+  for (const row of accepted) {
+    assert.equal(normalizePublicVideoCard(row)?.status, "public", row.id);
+  }
+  for (const row of rejected) {
+    assert.equal(normalizePublicVideoCard(row), null, row.id);
+  }
+  assert.deepEqual(
+    normalizePublicVideoCardList([...accepted, ...rejected]).map((video) => video.id),
+    accepted.map((row) => row.id),
+    "public list must not reclassify explicitly revoked cards",
+  );
+});
+
 test("recentVideoCore & popularVideoCore slice pages properly", () => {
   const payload = {
     generated_at: 1700000000,
