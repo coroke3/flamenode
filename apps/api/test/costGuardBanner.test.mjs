@@ -471,3 +471,41 @@ test("MIG-0661 T09: oversized mirror with bad mode or missing updated_at stays n
       { mode: "normal", reason: null });
   }
 });
+
+test("MIG-0661 T09 / #916: oversized root properties honor nested keys, last key wins and escaped spelling", async () => {
+  const large = "X".repeat(70 * 1024);
+  const cases = [
+    ['{"mode":"normal","updated_at":1,"reason":"' + large + '","mode":"maintenance"}', "maintenance"],
+    ['{"other":{"mode":"normal"},"mode":"maintenance","updated_at":1,"reason":"' + large + '"}', "maintenance"],
+    ['{"reason":"' + large + '","updated_at":1,"\\u006dode":"static_only"}', "static_only"],
+    ['{"mode":"read_only","reason":"' + large + '","updated_at":3}', "read_only"],
+  ];
+  for (const [raw, expected] of cases) {
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const env = { DB: unavailableD1(d1), KV: kvResponse(raw, kv) };
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expected);
+    assert.deepEqual(await requestWith(env), { mode: expected, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
+
+test("MIG-0661 T09 / #916: oversized malformed or invalid last root fields fail closed", async () => {
+  const large = "X".repeat(70 * 1024);
+  const cases = [
+    '{"mode":"maintenance","updated_at":1,"reason":"' + large + '","mode":null}',
+    '{"mode":"maintenance","updated_at":1,"reason":"' + large + '","updated_at":1e999}',
+    '{"mode":"maintenance","updated_at":1,"reason":"' + large + '","extra":[1,]}',
+    '{"mode":"maintenance","updated_at":1,"reason":"' + large + '"}garbage',
+    '{"mode":"maintenance","updated_at":1,"reason":"' + large + '","nested":{"x":1,}}',
+  ];
+  for (const raw of cases) {
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    assert.deepEqual(await requestWith({ DB: unavailableD1(d1), KV: kvResponse(raw, kv) }),
+      { mode: "normal", reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});

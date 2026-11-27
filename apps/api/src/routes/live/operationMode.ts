@@ -57,30 +57,144 @@ export type ParsedOperationModeKvMirror = {
 
 /** ZERO_1102 rule 78: request-time JSON.parse is capped at 64 KiB. */
 export const KV_MIRROR_PARSE_LIMIT = 64 * 1024;
-const KV_MIRROR_TAIL_SCAN = 256;
-const OVERSIZED_OPEN = /^\s*\{/;
-const OVERSIZED_MODE = /"mode"\s*:\s*"([a-z_]+)"/;
-const OVERSIZED_UPDATED_AT = /"updated_at"\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*[,}]/;
-const OVERSIZED_CLOSE = /\}\s*$/;
-
 /**
- * Bounded scan for a valid mirror above the parse limit (no JSON.parse).
- * Mode and updated_at are looked up only in the first 64 KiB head and a short
- * tail (writers put them outside the large reason string; an escaped quote
- * inside a reason cannot match the unescaped key patterns). Reason is dropped
- * (null). Truncated or unrecognised text stays null (normal).
+ * Oversized legacy mirrors: validate the complete JSON grammar without
+ * constructing the large reason or calling JSON.parse on >64 KiB input.
+ * The state machine uses O(nesting) memory and checks top-level keys only.
+ * Duplicate properties follow JSON.parse's last-key-wins semantics.
+ * Small key/mode tokens are decoded with JSON.parse (at most 128 chars).
  */
 function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null {
-  const head = raw.slice(0, KV_MIRROR_PARSE_LIMIT);
-  const tail = raw.slice(-KV_MIRROR_TAIL_SCAN);
-  if (!OVERSIZED_OPEN.test(head) || !OVERSIZED_CLOSE.test(tail)) return null;
-  const mode = OVERSIZED_MODE.exec(head)?.[1];
-  if (!isOperationMode(mode)) return null;
-  const at = OVERSIZED_UPDATED_AT.exec(head) ?? OVERSIZED_UPDATED_AT.exec(tail);
-  if (!at) return null;
-  const updatedAt = Number(at[1]);
-  if (!Number.isFinite(updatedAt)) return null;
-  return { mode, updated_at: updatedAt, reason: null };
+  let i = 0;
+  const n = raw.length;
+  const whitespace = (): void => {
+    while (i < n && (raw[i] === " " || raw[i] === "\t" || raw[i] === "\n" || raw[i] === "\r")) i++;
+  };
+  const stringToken = (): [number, number] => {
+    const start = i;
+    if (raw[i++] !== '"') throw new Error("quote");
+    while (i < n) {
+      const c = raw.charCodeAt(i++);
+      if (c === 34) return [start, i];
+      if (c < 32) throw new Error("control");
+      if (c !== 92) continue;
+      if (i >= n) throw new Error("escape");
+      const e = raw[i++];
+      if (e === "u") {
+        for (let k = 0; k < 4; k++) {
+          if (i >= n || !/[0-9a-fA-F]/.test(raw[i++])) throw new Error("unicode");
+        }
+      } else if (!'"\\/bfnrt'.includes(e)) throw new Error("escape");
+    }
+    throw new Error("unterminated string");
+  };
+  const smallString = (token: [number, number]): string | null =>
+    token[1] - token[0] <= 128 ? JSON.parse(raw.slice(token[0], token[1])) as string : null;
+  const numberToken = (): [number, number] => {
+    const start = i;
+    if (raw[i] === "-") i++;
+    if (i >= n) throw new Error("number");
+    if (raw[i] === "0") i++;
+    else {
+      if (raw[i] < "1" || raw[i] > "9") throw new Error("number digit");
+      while (i < n && raw[i] >= "0" && raw[i] <= "9") i++;
+    }
+    if (raw[i] === ".") {
+      i++;
+      if (i >= n || raw[i] < "0" || raw[i] > "9") throw new Error("fraction");
+      while (i < n && raw[i] >= "0" && raw[i] <= "9") i++;
+    }
+    if (raw[i] === "e" || raw[i] === "E") {
+      i++;
+      if (raw[i] === "+" || raw[i] === "-") i++;
+      if (i >= n || raw[i] < "0" || raw[i] > "9") throw new Error("exponent");
+      while (i < n && raw[i] >= "0" && raw[i] <= "9") i++;
+    }
+    return [start, i];
+  };
+  type Frame = { kind: "object" | "array"; state: string; root: boolean; key: string | null };
+  const stack: Frame[] = [];
+  let mode: string | null = null;
+  let updatedAt = NaN;
+  const value = (rootKey: string | null): void => {
+    whitespace();
+    const c = raw[i];
+    if (c === "{" || c === "[") {
+      i++;
+      stack.push({ kind: c === "{" ? "object" : "array",
+        state: c === "{" ? "firstKey" : "firstValue", root: false, key: null });
+      if (rootKey === "mode") mode = null;
+      if (rootKey === "updated_at") updatedAt = NaN;
+      return;
+    }
+    if (c === '"') {
+      const token = stringToken();
+      if (rootKey === "mode") mode = smallString(token);
+      if (rootKey === "updated_at") updatedAt = NaN;
+      return;
+    }
+    if (c === "-" || (c >= "0" && c <= "9")) {
+      const token = numberToken();
+      if (rootKey === "mode") mode = null;
+      if (rootKey === "updated_at") updatedAt =
+        token[1] - token[0] <= 128 ? Number(raw.slice(token[0], token[1])) : NaN;
+      return;
+    }
+    for (const literal of ["true", "false", "null"]) {
+      if (!raw.startsWith(literal, i)) continue;
+      i += literal.length;
+      if (rootKey === "mode") mode = null;
+      if (rootKey === "updated_at") updatedAt = NaN;
+      return;
+    }
+    throw new Error("value");
+  };
+  try {
+    whitespace();
+    if (raw[i++] !== "{") return null;
+    stack.push({ kind: "object", state: "firstKey", root: true, key: null });
+    while (stack.length) {
+      whitespace();
+      const frame = stack[stack.length - 1];
+      if (frame.kind === "object") {
+        if (frame.state === "firstKey" || frame.state === "key") {
+          if (raw[i] === "}" && frame.state === "firstKey") { i++; stack.pop(); continue; }
+          if (raw[i] !== '"') return null;
+          const token = stringToken();
+          frame.key = frame.root ? smallString(token) : null;
+          frame.state = "colon";
+          continue;
+        }
+        if (frame.state === "colon") {
+          if (raw[i++] !== ":") return null;
+          frame.state = "value";
+          continue;
+        }
+        if (frame.state === "value") {
+          frame.state = "after";
+          value(frame.root ? frame.key : null);
+          continue;
+        }
+        if (raw[i] === ",") { i++; frame.state = "key"; continue; }
+        if (raw[i] === "}") { i++; stack.pop(); continue; }
+        return null;
+      }
+      if (frame.state === "firstValue" && raw[i] === "]") { i++; stack.pop(); continue; }
+      if (frame.state === "firstValue" || frame.state === "value") {
+        frame.state = "after";
+        value(null);
+        continue;
+      }
+      if (raw[i] === ",") { i++; frame.state = "value"; continue; }
+      if (raw[i] === "]") { i++; stack.pop(); continue; }
+      return null;
+    }
+    whitespace();
+    if (i !== n || !isOperationMode(mode) || !Number.isFinite(updatedAt)) return null;
+    return { mode, updated_at: updatedAt, reason: null };
+  } catch {
+    return null;
+  }
 }
 
 /** Mirrors CURRENT kvMirrorCore: invalid reason is absent, not coerced. */
