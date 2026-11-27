@@ -724,6 +724,39 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("S2 bounds: an accepting slot event keeps CURRENT order and is excluded from the continuation cursor", async () => {
+    const prefix = "a_u01border_";
+    const eventIds = Array.from({ length: 131 }, (_, index) => `${prefix}${String(index).padStart(3, "0")}`);
+    const fixed = eventIds[50];
+    const slot = "sl-u01border";
+    const path = `/api/personal/entry/slotted?slot=${slot}`;
+    try {
+      for (const id of eventIds) {
+        insertEvent(id, {
+          entry_start_time: NOW - 1000,
+          entry_end_time: NOW + 6000,
+          allow_user_video_event_links: 1,
+        });
+      }
+      sqlite.prepare("INSERT INTO slots (id,event_id,status,reserved_by_user_id,x_user_id,start_time,sort_order) VALUES (?,?,?,?,?,?,?)")
+        .run(slot, fixed, "reserved", "u_alice", "alice_x", NOW + 100000, 0);
+
+      const expected = (await refSlotted("alice", slot)).eventOptions.map((option) => option.id);
+      const result = await allPages(path, "tok-alice", "eventOptions");
+      assert.equal(result.pages[0].eventOptions.length, 100);
+      assert.equal(result.pages[0].eventOptions[50].id, fixed);
+      assert.equal(result.pages[0].nextOffset, 99, "the cursor counts only non-slot accepting rows");
+      assert.equal(result.pages[1].eventOptions[0].id, eventIds[100]);
+      assert.equal(result.pages[1].eventOptions.some((option) => option.id === fixed), false);
+      assert.deepEqual(result.ids, expected);
+      assert.equal(new Set(result.ids).size, result.ids.length);
+      assert.equal(result.ids.filter((id) => id === fixed).length, 1);
+    } finally {
+      sqlite.prepare("DELETE FROM slots WHERE id = ?").run(slot);
+      sqlite.prepare(`DELETE FROM events WHERE id IN (${eventIds.map(() => "?").join(",")})`).run(...eventIds);
+    }
+  });
+
   test("S2 bounds: a prepended slot event alone cannot return a non-advancing cursor", async () => {
     const fixed = "a_pgstall_fixed";
     const accepting = "a_pgstall_accept";

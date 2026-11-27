@@ -122,7 +122,7 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
              AND (events.entry_end_time IS NULL OR events.entry_end_time > ?)
              AND (events.start_time IS NULL OR events.end_time IS NULL OR events.end_time > ?)
              AND events.allow_user_video_event_links = 1
-             AND events.id <> (SELECT id FROM ev)
+             AND (? = 0 OR events.id <> (SELECT id FROM ev))
            ORDER BY events.id
            LIMIT ${ENTRY_PAGE_ROWS} OFFSET ?
          ),
@@ -158,7 +158,7 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
          UNION ALL
          ${candidateArms()}`,
       )
-      .bind(slotId, ...owner.params, activeXId, now, now, now, offset),
+      .bind(slotId, ...owner.params, activeXId, now, now, now, offset, offset),
   );
 
   const slot = armOne<SlotRow>(arms, "slot");
@@ -201,8 +201,9 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
     youtube_description_template: ev.youtube_description_template,
     required_video_fields_json: ev.required_video_fields_json,
   };
-  // The event of the slot is always listed (first page only; later pages continue the accepting list).
-  const prependSlotEvent = offset === 0;
+  // Keep an eligible slot event in CURRENT order on page 0. If it is outside
+  // the first accepting page (or is not eligible), pin it once at the front.
+  const prependSlotEvent = offset === 0 && !accepting.some((option) => option.id === ev.id);
   const rawEventOptions = prependSlotEvent ? [slotEventOption, ...accepting] : accepting;
   const stageRows = nestedRows<StageQuestionRow>(arms, "stage");
   const stageSettings = stageSettingsJsonByEvent(stageRows);
@@ -253,7 +254,8 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
     MAX_RESPONSE_BYTES - jsonBytes({ ...rest, eventOptions: [], truncated: true, nextOffset: 1000 }),
   );
   const truncated = accepting.length >= ENTRY_PAGE_ROWS || fit.cut;
-  const keptAccepting = fit.items.length - (prependSlotEvent && fit.items.length > 0 ? 1 : 0);
+  const slotEventIncluded = fit.items.some((option) => option.id === ev.id);
+  const keptAccepting = fit.items.length - (slotEventIncluded ? 1 : 0);
   // A fixed slot event can fit while no accepting option fits. Returning the
   // same cursor would make the client loop forever, so fail closed.
   if (truncated && keptAccepting === 0) throw new Error("slotted_entry_no_progress");
