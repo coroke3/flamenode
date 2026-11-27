@@ -1862,7 +1862,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const catalogRow = id => ({ id, name: id, normalized_name: id, created_at: "1", updated_at: "1" });
       for (const cold of [true, false]) {
         const event = cold ? "a-ended" : "a-open";
-        await crud("slots FK PATCH " + event, "PATCH", { table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: event }, cold, 5,
+        await crud("slots FK PATCH " + event, "PATCH", { table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: event }, cold, 4,
           (_body, _queue) => {
             assert.equal(tableRows("slots").find(row => row.id === "slot-base").event_id, event);
           });
