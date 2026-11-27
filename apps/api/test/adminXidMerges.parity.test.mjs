@@ -546,10 +546,10 @@ if (runUnderRootTsx(import.meta.url)) {
     const d1BeforeRev = { ...hon.d1.stats };
     const honRev = await callHono(hon, "/reverts/rev-ok/approve", { confirm: "REVERT" });
     const honRevPreReads = hon.d1.stats.reads - d1BeforeRev.reads;
-    // Baseline instrumentation for SA-097 S3 review; preserve observed count in CI logs.
-    // This deliberately does not weaken or redefine the <=3 pre-read acceptance gate.
+    // The paired child/parent SELECT removes one pre-read from the prior
+    // exact-head baseline (8). This is still over the S3 limit of 3.
     console.log("[MIG-0644] SA-097 D1 pre-read baseline:", honRevPreReads);
-    assert.ok(Number.isInteger(honRevPreReads) && honRevPreReads >= 0);
+    assert.equal(honRevPreReads, 7, "SA-097 fused resource read; S3 gate remains open");
     assert.equal(curRev.ok, true, curRev.message);
     assert.equal(honRev.status, 200, JSON.stringify(honRev.body));
     assert.equal(honRev.body.message, curRev.message);
@@ -563,6 +563,151 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(side.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = \'u_holder\'').get().active_x_user_id, "@src_x");
     }
     assert.equal(hon.queueWakes.length, 0);
+  });
+
+
+  test("MIG-0644 SA-097 paired read retains CURRENT rejection precedence and no side effects", async () => {
+    const cur = createSide();
+    const hon = createSide();
+    const NOW = Math.floor(Date.now() / 1000);
+    const row = (id, overrides = {}) => ({
+      id, request_type: "revert_merge", requested_by_auth_user_id: "u_root",
+      parent_request_id: "parent-empty", revert_deadline_at: NOW + 3600,
+      status: "pending", requested_at: NOW, updated_at: NOW,
+      ...overrides,
+    });
+    const records = [
+      row("parent-empty", { request_type: "merge", status: "done", parent_request_id: null }),
+      row("parent-bad", { request_type: "merge", status: "done", restore_snapshot_json: "{}" }),
+      row("parent-pending", { request_type: "merge", status: "pending", restore_snapshot_json: "{}" }),
+      row("wrong-kind", { request_type: "merge" }),
+      row("missing-id", { parent_request_id: null, revert_deadline_at: 0 }),
+      row("blank-id", { parent_request_id: "\u00a0\ufeff\u2003\t" }),
+      row("bad-deadline", { revert_deadline_at: 0 }),
+      row("fractional-deadline", { revert_deadline_at: NOW + 0.5 }),
+      row("expired", { parent_request_id: "missing-parent", revert_deadline_at: NOW - 5 }),
+      row("missing-parent-child", { parent_request_id: "missing-parent" }),
+      row("empty-parent-child"),
+      row("invalid-snapshot", { parent_request_id: "parent-bad" }),
+      row("parent-not-done", { parent_request_id: "parent-pending" }),
+      row("self-parent", { parent_request_id: "self-parent", restore_snapshot_json: "{}" }),
+      row("invalid-child-status", { parent_request_id: "parent-pending", status: "rejected" }),
+    ];
+    for (const side of [cur, hon]) {
+      for (const record of records) insert(side.sqlite, "x_identity_requests", record);
+    }
+    const cases = [
+      ["absent", 404], ["wrong-kind", 404], ["missing-id", 400],
+      ["blank-id", 400], ["bad-deadline", 400], ["fractional-deadline", 400],
+      ["expired", 400], ["missing-parent-child", 404], ["empty-parent-child", 400],
+      ["invalid-snapshot", 409], ["parent-not-done", 409], ["self-parent", 409],
+      ["invalid-child-status", 409],
+    ];
+    const state = side => ({
+      requests: side.sqlite.prepare("SELECT * FROM x_identity_requests ORDER BY id").all(),
+      audits: side.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,
+      bucket: [...side.bucket.store.entries()],
+      wakes: [...side.queueWakes],
+      writes: side.d1.stats.writes, batches: side.d1.stats.batches,
+    });
+    const before = state(hon);
+    for (const [id, status] of cases) {
+      const expected = await runCurrentAction(cur, current.approveXIdMergeRevert, { id, confirm: "REVERT" });
+      const reads = hon.d1.stats.reads;
+      const actual = await callHono(hon, `/reverts/${id}/approve`, { confirm: "REVERT" });
+      assert.equal(expected.ok, false, id);
+      assert.equal(actual.status, status, id);
+      assert.equal(actual.body.ok, false, id);
+      assert.equal(actual.body.message, expected.message, id);
+      assert.equal(actual.headers.get("cache-control"), "private, no-store", id);
+      assert.equal(hon.d1.stats.reads - reads, 4, id + " guard + paired resource read");
+      assert.deepEqual(state(hon), before, id + " must not mutate any state");
+    }
+    cur.sqlite.close();
+    hon.sqlite.close();
+  });
+
+  test("MIG-0644 SA-097 paired lookup provider failure preserves private 503", async () => {
+    const side = createSide();
+    const originalPrepare = side.d1.prepare;
+    let pairAttempts = 0;
+    side.d1.prepare = sqlText => {
+      if (sqlText.startsWith("WITH requested_revert AS")) {
+        pairAttempts += 1;
+        throw new Error("PRIVATE_PAIR_PROVIDER_CANARY");
+      }
+      return originalPrepare(sqlText);
+    };
+    try {
+      const before = { ...side.d1.stats };
+      const response = await callHono(side, "/reverts/missing/approve", { confirm: "REVERT" });
+      assert.equal(pairAttempts, 1);
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(response.body, {
+        ok: false, message: "管理操作を処理できませんでした。再度お試しください。",
+      });
+      assert.equal(side.d1.stats.writes, before.writes);
+      assert.equal(side.d1.stats.batches, before.batches);
+      assert.equal(side.bucket.store.size, 0);
+      assert.deepEqual(side.queueWakes, []);
+    } finally {
+      side.d1.prepare = originalPrepare;
+      side.sqlite.close();
+    }
+  });
+
+  test("MIG-0644 SA-097 backwards clock correction retains eligible parent lookup", async () => {
+    const side = createSide();
+    const NOW = Math.floor(Date.now() / 1000);
+    const base = { requested_by_auth_user_id: "u_root", requested_at: NOW, updated_at: NOW };
+    insert(side.sqlite, "x_identity_requests", {
+      ...base, id: "clock-parent", request_type: "merge", status: "done",
+    });
+    insert(side.sqlite, "x_identity_requests", {
+      ...base, id: "clock-child", request_type: "revert_merge", status: "pending",
+      parent_request_id: "clock-parent", revert_deadline_at: NOW - 1,
+    });
+    const originalNow = Date.now;
+    const originalPrepare = side.d1.prepare;
+    let clock = NOW * 1000;
+    let pairReads = 0;
+    Date.now = () => clock;
+    side.d1.prepare = sqlText => {
+      const prepared = originalPrepare(sqlText);
+      if (!sqlText.startsWith("WITH requested_revert AS")) return prepared;
+      return {
+        ...prepared,
+        bind(...params) {
+          const bound = prepared.bind(...params);
+          return {
+            ...bound,
+            async all() {
+              const result = await bound.all();
+              pairReads += 1;
+              assert.equal(result.results.length, 1, "expired at SQL lookup start");
+              clock -= 2000;
+              return result;
+            },
+          };
+        },
+      };
+    };
+    try {
+      const before = { ...side.d1.stats };
+      const response = await callHono(side, "/reverts/clock-child/approve", { confirm: "REVERT" });
+      assert.equal(pairReads, 1);
+      assert.equal(response.status, 400);
+      assert.equal(response.body.message, "親統合申請に差し戻し用snapshotがありません。");
+      assert.equal(side.d1.stats.reads - before.reads, 5);
+      assert.equal(side.d1.stats.writes, before.writes);
+      assert.equal(side.d1.stats.batches, before.batches);
+      assert.deepEqual(side.queueWakes, []);
+    } finally {
+      Date.now = originalNow;
+      side.d1.prepare = originalPrepare;
+      side.sqlite.close();
+    }
   });
 
   test("SEC: hostile diagnostics cannot replace fixed X merge failure responses", async () => {

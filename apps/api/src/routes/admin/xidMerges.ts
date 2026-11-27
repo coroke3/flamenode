@@ -201,14 +201,68 @@ async function parseJsonBody<T>(
   return { ok: true, data: parsed.data };
 }
 
-const X_IDENTITY_REQUEST_SELECT_SQL = `SELECT
-  id, request_type, requested_by_auth_user_id, requested_x_id,
-  source_x_user_id, target_x_user_id, parent_request_id,
-  restore_snapshot_json, revert_deadline_at, status,
-  decision_reason, decided_by_auth_user_id, decided_at,
-  slot_bind_status, slot_bind_attempt_count, slot_bind_updated_at,
-  requested_at, updated_at
+const X_IDENTITY_REQUEST_COLUMNS = [
+  "id", "request_type", "requested_by_auth_user_id", "requested_x_id",
+  "source_x_user_id", "target_x_user_id", "parent_request_id",
+  "restore_snapshot_json", "revert_deadline_at", "status",
+  "decision_reason", "decided_by_auth_user_id", "decided_at",
+  "slot_bind_status", "slot_bind_attempt_count", "slot_bind_updated_at",
+  "requested_at", "updated_at",
+] as const satisfies readonly (keyof MergeRequestRow)[];
+
+const X_IDENTITY_REQUEST_SELECT_SQL = `SELECT ${X_IDENTITY_REQUEST_COLUMNS.join(", ")}
 FROM x_identity_requests WHERE id = ? LIMIT 1`;
+
+// SQL eligibility is only a projection optimization. The domain shape and
+// deadline checks below remain authoritative. Match String.trim whitespace,
+// including legacy Unicode spaces, without normalizing the actual parent ID.
+const REVERT_PARENT_TRIM_CHARS =
+  "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003" +
+  "\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+
+const REVERT_REQUEST_PAIR_SQL = `WITH requested_revert AS (
+  ${X_IDENTITY_REQUEST_SELECT_SQL}
+)
+SELECT 'request' AS row_kind, requested_revert.* FROM requested_revert
+UNION ALL
+SELECT 'parent' AS row_kind, ${X_IDENTITY_REQUEST_COLUMNS.map((column) => `parent.${column}`).join(", ")}
+FROM requested_revert AS child
+JOIN x_identity_requests AS parent ON parent.id = child.parent_request_id
+WHERE child.request_type = 'revert_merge'
+  AND typeof(child.parent_request_id) = 'text'
+  AND trim(child.parent_request_id, ?) <> ''
+  AND typeof(child.revert_deadline_at) = 'integer'
+  AND child.revert_deadline_at > 0
+  AND child.revert_deadline_at >= ?
+LIMIT 2`;
+
+type RevertRequestPairRow = MergeRequestRow & { row_kind: "request" | "parent" };
+
+async function loadRevertRequestPair(
+  rawDb: D1Database,
+  id: string,
+  lookupStartedAt: number,
+): Promise<{ request: MergeRequestRow | null; parentRequest: MergeRequestRow | null }> {
+  // Separate tagged rows avoid wrapping two legacy snapshots in a single
+  // potentially oversized D1 string. Each row retains the existing projection.
+  const result = await rawDb.prepare(REVERT_REQUEST_PAIR_SQL)
+    .bind(id, REVERT_PARENT_TRIM_CHARS, lookupStartedAt)
+    .all<RevertRequestPairRow>();
+  if (!result.success || !Array.isArray(result.results) || result.results.length > 2) {
+    throw new Error("revert_request_pair_unavailable");
+  }
+  let request: MergeRequestRow | null = null;
+  let parentRequest: MergeRequestRow | null = null;
+  for (const { row_kind, ...row } of result.results) {
+    if (row_kind === "request" && request === null && row.id === id) request = row;
+    else if (row_kind === "parent" && parentRequest === null) parentRequest = row;
+    else throw new Error("revert_request_pair_unavailable");
+  }
+  if (parentRequest && (!request || parentRequest.id !== request.parent_request_id)) {
+    throw new Error("revert_request_pair_unavailable");
+  }
+  return { request, parentRequest };
+}
 
 async function loadXIdentityRequest(
   rawDb: D1Database,
@@ -324,7 +378,7 @@ export const adminXIdMergeRoutes = new Hono<AppEnv>();
 adminXIdMergeRoutes.onError((_error, c) => fail(c, 503, PREFLIGHT_FAILED));
 adminXIdMergeRoutes.use("*", onlyMutating(costGuardMiddleware("xid_links")));
 
-// SA-092 createXIdMergeRequest (4 pre-reads: session + writeGuard + costGuard + 1 IN lookup)
+// SA-092 createXIdMergeRequest (4 pre-reads before strict actor-X audit validation)
 adminXIdMergeRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, AdminXIdMergeCreateBodySchema);
   if (!body.ok) return body.response;
@@ -422,7 +476,10 @@ adminXIdMergeRoutes.post("/reverts/:id/approve", async (c) => {
   if (!id) return fail(c, 400, "申請 ID が必要です。");
   if (confirm !== "REVERT") return fail(c, 400, "確認文字列 REVERT が必要です。");
 
-  const request = await loadXIdentityRequest(c.env.DB, id);
+  const lookupStartedAt = Math.floor(Date.now() / 1000);
+  const { request, parentRequest: preloadedParent } = await loadRevertRequestPair(
+    c.env.DB, id, lookupStartedAt,
+  );
   if (!request || request.request_type !== "revert_merge") {
     return fail(c, 404, "差し戻し申請が見つかりません。");
   }
@@ -439,7 +496,14 @@ adminXIdMergeRoutes.post("/reverts/:id/approve", async (c) => {
     return fail(c, 400, "統合の差し戻し期限を過ぎています。");
   }
 
-  const parentRequest = await loadXIdentityRequest(c.env.DB, request.parent_request_id!);
+  // A backwards wall-clock adjustment can make a row valid at the
+  // authoritative post-read deadline check even if SQL skipped its parent.
+  // Retain the original lookup in that exceptional case, not a false 404.
+  const parentRequest = preloadedParent ?? (
+    request.revert_deadline_at !== null && request.revert_deadline_at < lookupStartedAt
+      ? await loadXIdentityRequest(c.env.DB, request.parent_request_id!)
+      : null
+  );
   if (!parentRequest) return fail(c, 404, "親統合申請が見つかりません。");
   if (!parentRequest.restore_snapshot_json) {
     return fail(c, 400, "親統合申請に差し戻し用snapshotがありません。");
