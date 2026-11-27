@@ -7,10 +7,11 @@ import { dom, flush, ok } from "./helpers.mjs";
 
 const { getEditPermissions } = await import("../.test-dist/apps/app/src/api/videoCollaborators.js");
 const { Permissions } = await import("../.test-dist/apps/app/src/routes/dashboard/edit/Permissions.js");
+const { ACTIVE_X_CHANGED_EVENT } = await import("../.test-dist/apps/app/src/lib/activeXSwitchEvents.js");
 
 const res = (status, body = null) => ({ status, json: async () => body });
 
-async function mountPermissions(path, load) {
+async function mountPermissions(path, load, reload = () => {}) {
   const container = dom.window.document.createElement("div");
   const root = createRoot(container);
   await act(async () => {
@@ -18,7 +19,7 @@ async function mountPermissions(path, load) {
       React.createElement(Routes, null,
         React.createElement(Route, {
           path: "/dashboard/edit/:id/permissions",
-          element: React.createElement(Permissions, { load }),
+          element: React.createElement(Permissions, { load, reload }),
         }))));
   });
   await flush();
@@ -478,4 +479,32 @@ test("MIG-0715 U03: CURRENT audit footnote retains decorative info icon on autho
       assert.equal(m.container.querySelectorAll("button,input,form").length, 0);
     } finally { await m.unmount(); }
   }
+});
+
+test("MIG-0715 U03b: Active X change and BFCache restore hard-remount the permission view", async () => {
+  const reloads = [];
+  const m = await mountPermissions(
+    "/dashboard/edit/A/permissions",
+    async () => ok(permissionReceipt("A", "video")),
+    () => reloads.push("reload"),
+  );
+  try {
+    dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+    assert.deepEqual(reloads, ["reload"]);
+
+    const ordinaryPageShow = new dom.window.Event("pageshow");
+    Object.defineProperty(ordinaryPageShow, "persisted", { value: false });
+    dom.window.dispatchEvent(ordinaryPageShow);
+    assert.deepEqual(reloads, ["reload"], "ordinary pageshow is not an authority transition");
+
+    const restoredPageShow = new dom.window.Event("pageshow");
+    Object.defineProperty(restoredPageShow, "persisted", { value: true });
+    dom.window.dispatchEvent(restoredPageShow);
+    assert.deepEqual(reloads, ["reload", "reload"], "BFCache restore retires the old document");
+  } finally {
+    await m.unmount();
+  }
+
+  dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+  assert.deepEqual(reloads, ["reload", "reload"], "unmounted route removes its invalidation listeners");
 });

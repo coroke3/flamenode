@@ -5,12 +5,15 @@ import { getEditPermissions, type EditPermissionsReadResult } from "../../../api
 import { AuthUnavailable, BannedNotice, LoginRequired, SessionLoading } from "../../guard.js";
 import { AppLink, useDocumentTitle } from "../../ui/AppLink.js";
 import { Icon } from "../../ui/Icon.js";
+import { ACTIVE_X_CHANGED_EVENT } from "../../../lib/activeXSwitchEvents.js";
 import { videoPageHref } from "../../../lib/youtubeId.js";
 
 type LoadState = { status: "loading" } | EditPermissionsReadResult;
 
+const reloadDocument = () => window.location.reload();
+
 /** MIG-0715 U01: intentionally unregistered until U02/U03 write + UI parity are complete. */
-export function Permissions({ load = getEditPermissions }: { load?: typeof getEditPermissions }): React.ReactElement {
+export function Permissions({ load = getEditPermissions, reload = reloadDocument }: { load?: typeof getEditPermissions; reload?: () => void }): React.ReactElement {
   useDocumentTitle("編集権限の管理");
   const { id } = useParams<{ id: string }>();
   const [params] = useSearchParams();
@@ -19,13 +22,14 @@ export function Permissions({ load = getEditPermissions }: { load?: typeof getEd
   // Resource and exact ordered query tuple own the whole read lifecycle. A
   // new resource/mode must render loading before any passive-effect cleanup.
   // JSON encoding distinguishes duplicate values and embedded separators.
-  return <PermissionsForResource key={JSON.stringify([id, modes])} id={id} modes={modes} load={load} />;
+  return <PermissionsForResource key={JSON.stringify([id, modes])} id={id} modes={modes} load={load} reload={reload} />;
 }
 
-function PermissionsForResource({ id, modes, load }: {
+function PermissionsForResource({ id, modes, load, reload }: {
   id: string;
   modes: readonly string[];
   load: typeof getEditPermissions;
+  reload: () => void;
 }): React.ReactElement {
   const queryKey = JSON.stringify(modes);
   const [snapshot, setSnapshot] = React.useState<{ loader: typeof load; result: LoadState }>({
@@ -33,6 +37,21 @@ function PermissionsForResource({ id, modes, load }: {
     result: { status: "loading" },
   });
   const state: LoadState = snapshot.loader === load ? snapshot.result : { status: "loading" };
+
+  // Auth transitions use hard navigation; the committed Active X signal and
+  // BFCache restore must also retire this private view as a full document.
+  React.useEffect(() => {
+    const onActiveXChanged = () => reload();
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) reload();
+    };
+    window.addEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [reload]);
 
   React.useEffect(() => {
     const controller = new AbortController();
