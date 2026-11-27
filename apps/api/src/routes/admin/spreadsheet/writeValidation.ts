@@ -633,6 +633,45 @@ export const MAX_SPREADSHEET_CRUD_SNAPSHOT_ROWS = 2;
  * caching: the caller must fetch a fresh row after the write guard.
  * One D1 pre-read is consumed; the route must deduct it from S3's total.
  */
+export function snapshotSpreadsheetRawRow(
+  ctx: SpreadsheetSqlTableContext,
+  pk: Record<string, string>,
+  row: unknown,
+): Record<string, unknown> {
+  const normalized = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pk);
+  let snapshot: Record<string, unknown>;
+  try {
+    if (typeof row !== "object" || row === null || Array.isArray(row)) {
+      throw new Error("invalid_snapshot");
+    }
+    const cells: Array<[string, string | number | null]> = [];
+    for (const column of ctx.columns) {
+      if (!Object.hasOwn(row, column.name)) throw new Error("invalid_snapshot");
+      const value = (row as Record<string, unknown>)[column.name];
+      if (value !== null && typeof value !== "string" && typeof value !== "number") {
+        throw new Error("invalid_snapshot");
+      }
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        throw new Error("invalid_snapshot");
+      }
+      cells.push([column.name, value]);
+    }
+    snapshot = Object.freeze(Object.fromEntries(cells));
+    for (const key of ctx.primaryKeys) {
+      const value = snapshot[key];
+      // D1 returns SQLite INTEGER values as JS numbers. Above the safe
+      // integer range, two distinct DB keys can collapse to one JS value;
+      // comparing their rounded decimal string would misattribute audit.
+      if (typeof value === "number" && Number.isInteger(value) &&
+          !Number.isSafeInteger(value)) throw new Error("invalid_snapshot");
+      if (value === null || String(value) !== normalized[key]) throw new Error("invalid_snapshot");
+    }
+  } catch {
+    throw new Error("invalid_snapshot");
+  }
+  return snapshot;
+}
+
 export async function fetchSpreadsheetRawSnapshot(
   db: {
     prepare(sql: string): {
@@ -665,40 +704,7 @@ export async function fetchSpreadsheetRawSnapshot(
   if (!result || !Array.isArray(result.results) ||
       result.results.length > 1) throw new Error("invalid_snapshot");
   if (result.results.length === 0) throw new Error("row_not_found");
-  const row = result.results[0];
-  // U01b: return a *single* immutable before-image. A hostile/mock D1
-  // accessor cannot substitute a different PK or cell between this SELECT,
-  // the optimistic CAS WHERE clause, and the strict audit before_json.
-  // Preserve "__proto__" as an own data column rather than invoking a setter.
-  let snapshot: Record<string, unknown>;
-  try {
-    if (typeof row !== "object" || Array.isArray(row)) throw new Error("invalid_snapshot");
-    const cells: Array<[string, string | number | null]> = [];
-    for (const column of ctx.columns) {
-      if (!Object.hasOwn(row, column.name)) throw new Error("invalid_snapshot");
-      const value = row[column.name];
-      if (value !== null && typeof value !== "string" && typeof value !== "number") {
-        throw new Error("invalid_snapshot");
-      }
-      if (typeof value === "number" && !Number.isFinite(value)) {
-        throw new Error("invalid_snapshot");
-      }
-      cells.push([column.name, value]);
-    }
-    snapshot = Object.freeze(Object.fromEntries(cells));
-    for (const key of ctx.primaryKeys) {
-      const value = snapshot[key];
-      // D1 returns SQLite INTEGER values as JS numbers. Above the safe
-      // integer range, two distinct DB keys can collapse to one JS value;
-      // comparing their rounded decimal string would misattribute audit.
-      if (typeof value === "number" && Number.isInteger(value) &&
-          !Number.isSafeInteger(value)) throw new Error("invalid_snapshot");
-      if (value === null || String(value) !== normalized[key]) throw new Error("invalid_snapshot");
-    }
-  } catch {
-    throw new Error("invalid_snapshot");
-  }
-  return snapshot;
+  return snapshotSpreadsheetRawRow(ctx, normalized, result.results[0]);
 }
 
 
@@ -918,6 +924,70 @@ export interface SpreadsheetCrudReadDatabase {
   };
 }
 
+export interface PreparedSpreadsheetCrudMutation {
+  method: "PATCH" | "DELETE";
+  pk: Readonly<Record<string, string>>;
+  values: Readonly<Record<string, string | null>> | null;
+}
+
+/** Validate the mutation envelope before any D1 pre-read. */
+export function prepareSpreadsheetGuardedCrudMutation(
+  ctx: SpreadsheetSqlTableContext,
+  body: SpreadsheetCrudBody,
+  operatorId: string,
+): PreparedSpreadsheetCrudMutation {
+  if (ctx.def.table !== body.table) throw new Error("unknown_table");
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
+  if (!operatorId.trim()) throw new Error("missing_operator");
+
+  if (body.method === "DELETE") {
+    // CURRENT DELETE checks physical-delete policy before interpreting the key.
+    if (isSpreadsheetPhysicalDeleteBlocked(ctx.def.table)) {
+      throw new Error("physical_delete_requires_visibility_status");
+    }
+    const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, body.primaryKey);
+    validateSpreadsheetInputValues(ctx, pk);
+    return Object.freeze({ method: "DELETE", pk, values: null });
+  }
+
+  if (body.method !== "PATCH") throw new Error("invalid_row");
+  // CURRENT PATCH checks column existence/editability before validating the key.
+  if (!ctx.columnNames.includes(body.column)) throw new Error("unknown_column");
+  if (!isSpreadsheetColumnEditable(ctx.def, body.column)) {
+    throw new Error("column_not_editable");
+  }
+  const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, body.primaryKey);
+  validateSpreadsheetInputValues(ctx, pk);
+  const values = Object.freeze(Object.fromEntries([[body.column, body.value]]));
+  validateSpreadsheetInputValues(ctx, values);
+  if (!ctx.columns.some(column => column.name === body.column && column.pk === 0 &&
+      isSpreadsheetColumnEditable(ctx.def, column.name))) {
+    throw new Error("empty_row");
+  }
+  return Object.freeze({ method: "PATCH", pk, values });
+}
+
+/** Build the audited mutation from the exact, independently validated before-image. */
+export function buildSpreadsheetGuardedCrudPlanFromSnapshot(
+  ctx: SpreadsheetSqlTableContext,
+  prepared: PreparedSpreadsheetCrudMutation,
+  before: Record<string, unknown>,
+  operatorId: string,
+): SpreadsheetAuditedSqlPlan {
+  if (prepared.method === "DELETE") {
+    if (prepared.values !== null) throw new Error("invalid_snapshot");
+    return buildSpreadsheetAuditedDelete(ctx, prepared.pk as Record<string, string>, before, operatorId);
+  }
+  if (prepared.method !== "PATCH" || !prepared.values) throw new Error("invalid_snapshot");
+  return buildSpreadsheetAuditedUpdate(
+    ctx,
+    prepared.pk as Record<string, string>,
+    before,
+    prepared.values as Record<string, string | null>,
+    operatorId,
+  );
+}
+
 export async function planSpreadsheetGuardedCrud(
   db: SpreadsheetCrudReadDatabase,
   ctx: SpreadsheetSqlTableContext,
@@ -972,41 +1042,30 @@ export async function planSpreadsheetGuardedCrud(
   // Both UPDATE and DELETE require one fresh, complete, PK-matching before
   // snapshot; reserve that D1 statement from the shared S3 read budget.
   if (remainingReadBudget < 1) throw new Error("batch_too_large");
-  // CURRENT DELETE checks physical-delete policy before interpreting the key.
-  // CURRENT PATCH checks column existence/editability before validating it.
-  if (body.method === "DELETE" && isSpreadsheetPhysicalDeleteBlocked(ctx.def.table)) {
-    throw new Error("physical_delete_requires_visibility_status");
-  }
-  if (body.method === "PATCH") {
-    if (!ctx.columnNames.includes(body.column)) throw new Error("unknown_column");
-    if (!isSpreadsheetColumnEditable(ctx.def, body.column)) {
-      throw new Error("column_not_editable");
-    }
-  }
-  const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, body.primaryKey);
-  // CURRENT CRUD entrypoints explicitly validate normalized PK values.
-  // Keep the lower-level snapshot helper focused on row identity.
-  validateSpreadsheetInputValues(ctx, pk);
-  if (body.method === "DELETE") {
-    const before = await fetchSpreadsheetRawSnapshot(db, ctx, pk, 1);
-    return buildSpreadsheetAuditedDelete(ctx, pk, before, operatorId);
+  const prepared = prepareSpreadsheetGuardedCrudMutation(ctx, body, operatorId);
+  if (prepared.method === "DELETE") {
+    const before = await fetchSpreadsheetRawSnapshot(db, ctx, prepared.pk as Record<string, string>, 1);
+    return buildSpreadsheetGuardedCrudPlanFromSnapshot(ctx, prepared, before, operatorId);
   }
 
-  const values = Object.freeze(Object.fromEntries([[body.column, body.value]]));
-  validateSpreadsheetInputValues(ctx, values);
-  if (!ctx.columns.some(column => column.name === body.column && column.pk === 0 &&
-      isSpreadsheetColumnEditable(ctx.def, column.name))) {
-    throw new Error("empty_row");
-  }
   // Fail on an excessive FK plan before incurring any D1 reads. The FK
   // preflight may use at most the remaining S3 budget minus the PK SELECT.
   const fkReadBudget = remainingReadBudget - 1;
-  const lookups = buildSpreadsheetForeignKeyLookups(foreignKeys, [values], fkReadBudget);
-  const before = await fetchSpreadsheetRawSnapshot(db, ctx, pk, 1);
+  const lookups = buildSpreadsheetForeignKeyLookups(
+    foreignKeys,
+    [prepared.values as Record<string, string | null>],
+    fkReadBudget,
+  );
+  const before = await fetchSpreadsheetRawSnapshot(db, ctx, prepared.pk as Record<string, string>, 1);
   if (lookups.length > 0) {
-    await validateSpreadsheetForeignKeys(db, foreignKeys, [values], fkReadBudget);
+    await validateSpreadsheetForeignKeys(
+      db,
+      foreignKeys,
+      [prepared.values as Record<string, string | null>],
+      fkReadBudget,
+    );
   }
-  return buildSpreadsheetAuditedUpdate(ctx, pk, before, values, operatorId);
+  return buildSpreadsheetGuardedCrudPlanFromSnapshot(ctx, prepared, before, operatorId);
 }
 
 

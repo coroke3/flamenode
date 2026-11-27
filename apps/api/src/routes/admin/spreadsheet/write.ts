@@ -58,9 +58,13 @@ import {
   assertSpreadsheetForeignKeyLookup,
   buildSpreadsheetForeignKeyLookups,
   parseSpreadsheetCrudBody,
+  buildSpreadsheetGuardedCrudPlanFromSnapshot,
   planSpreadsheetAtomicAuditedCrud,
   planSpreadsheetGuardedCrud,
+  prepareSpreadsheetGuardedCrudMutation,
+  snapshotSpreadsheetRawRow,
   validateSpreadsheetForeignKeys,
+  type PreparedSpreadsheetCrudMutation,
   SPREADSHEET_ATOMIC_MAX_REBUILD_TARGETS,
   SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
   SPREADSHEET_IMPORT_APPLY_MAX_ROWS,
@@ -92,6 +96,11 @@ export const NOOP_WAKE_HOST: QueueWakeHostLoader = async () => ({
 
 const WRITE_CACHE_TTL_MS = 30_000;
 const SPREADSHEET_VIDEO_EVENT_LOOKUP_CHUNK_SIZE = 80;
+const SPREADSHEET_JS_TRIM_CHARS = String.fromCodePoint(
+  0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x0020, 0x00a0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+  0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff,
+);
 const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
 
 export interface SpreadsheetWriteTableContext extends SpreadsheetSqlTableContext {
@@ -707,11 +716,190 @@ export function buildSpreadsheetMemberFkReleaseLookup(
   };
 }
 
+
+/**
+ * Combine the fresh video_members before-image, every effective FK lookup,
+ * and release-event rows in one bounded read. The result keeps the complete
+ * snapshot as scalar columns (no JSON.parse/stringify of row data).
+ */
+function buildSpreadsheetMemberSnapshotFkReleaseLookup(
+  ctx: SpreadsheetWriteTableContext,
+  foreignKeys: readonly SpreadsheetForeignKey[],
+  prepared: PreparedSpreadsheetCrudMutation,
+): { statement: string; binds: readonly (string | number | null)[] } | null {
+  if (ctx.def.table !== "video_members" ||
+      (prepared.method !== "PATCH" && prepared.method !== "DELETE") ||
+      ctx.primaryKeys.length !== 1 || ctx.primaryKeys[0] !== "id" ||
+      foreignKeys.length < 1 || foreignKeys.length > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES ||
+      ctx.columns.length < 1) {
+    return null;
+  }
+  const names = ctx.columns.map(column => column.name);
+  const prefix = "__mig0638_";
+  if (new Set(names).size !== names.length ||
+      names.some(name => !isValidSqliteTableName(name) || name.startsWith(prefix)) ||
+      !names.includes("video_id") ||
+      foreignKeys.some(fk => !names.includes(fk.column) ||
+        !isValidSqliteTableName(fk.column) ||
+        !isValidSqliteTableName(fk.referencedTable) ||
+        !isValidSqliteTableName(fk.referencedColumn))) {
+    return null;
+  }
+  const videoFkIndexes = foreignKeys
+    .map((fk, index) => fk.column === "video_id" &&
+      fk.referencedTable === "videos" && fk.referencedColumn === "id" ? index : -1)
+    .filter(index => index >= 0);
+  if (videoFkIndexes.length !== 1) return null;
+  const videoFkIndex = videoFkIndexes[0]!;
+  const mutationEntries = prepared.values ? Object.entries(prepared.values) : [];
+  if ((prepared.method === "PATCH" && mutationEntries.length !== 1) ||
+      (prepared.method === "DELETE" && mutationEntries.length !== 0)) {
+    return null;
+  }
+  if (!Object.hasOwn(prepared.pk, "id") || typeof prepared.pk.id !== "string") return null;
+
+  const fkAliases = foreignKeys.map((_, index) => prefix + "fk_" + index + "_value");
+  const snapshotCountAlias = prefix + "snapshot_count";
+  const releaseCountAlias = prefix + "release_count";
+  const releaseVideoAlias = prefix + "release_video_id";
+  const releaseEventAlias = prefix + "release_event_id";
+  const releasePrimaryAlias = prefix + "release_primary_event_id";
+  const keyWhere = ctx.primaryKeys.map(key => quoteIdent(key) + " = ?").join(" AND ");
+  const mutationColumn = mutationEntries[0]?.[0] ?? null;
+  const mutationValue = mutationEntries[0]?.[1] ?? null;
+  const effectiveColumns = foreignKeys.map((fk, index) =>
+    "CASE WHEN m.column_name = ? THEN NULLIF(m.cell_value, '') ELSE s." +
+    quoteIdent(fk.column) + " END AS " + quoteIdent(fkAliases[index]!),
+  );
+  const ctes = [
+    "snapshot AS (SELECT * FROM " + quoteIdent(ctx.def.table) +
+      " WHERE " + keyWhere + " LIMIT 2)",
+    'snapshot_count AS (SELECT COUNT(*) AS "count" FROM snapshot)',
+    "snapshot_one AS (SELECT * FROM snapshot LIMIT 1)",
+    "mutation_input AS (SELECT ? AS column_name, ? AS cell_value)",
+    "effective AS (SELECT s.*, " + effectiveColumns.join(", ") +
+      " FROM snapshot_one s CROSS JOIN mutation_input m)",
+    "trim_chars AS (SELECT ? AS chars)",
+    ...foreignKeys.map((fk, index) => {
+      const alias = quoteIdent(fkAliases[index]!);
+      const referenceColumn = quoteIdent(fk.referencedColumn);
+      return "fk_" + index + " AS (SELECT " + referenceColumn + " AS value FROM " +
+        quoteIdent(fk.referencedTable) + " WHERE " + referenceColumn +
+        " IN (SELECT " + alias + " FROM effective WHERE " + alias +
+        " IS NOT NULL AND " + alias + " <> '') LIMIT 2)";
+    }),
+    "release_ids AS (" +
+      "SELECT trim(CAST(s." + quoteIdent("video_id") + " AS TEXT), (SELECT chars FROM trim_chars)) AS id " +
+      "FROM snapshot_one s WHERE s." + quoteIdent("video_id") +
+      " IS NOT NULL AND trim(CAST(s." + quoteIdent("video_id") + " AS TEXT), (SELECT chars FROM trim_chars)) <> '' " +
+      "UNION " +
+      "SELECT trim(CAST(e." + quoteIdent(fkAliases[videoFkIndex]!) +
+      " AS TEXT), (SELECT chars FROM trim_chars)) AS id " +
+      "FROM effective e WHERE e." + quoteIdent(fkAliases[videoFkIndex]!) +
+      " IS NOT NULL AND trim(CAST(e." + quoteIdent(fkAliases[videoFkIndex]!) +
+      " AS TEXT), (SELECT chars FROM trim_chars)) <> '')",
+    "release AS (SELECT v." + quoteIdent("id") + " AS videoId, ve." +
+      quoteIdent("event_id") + " AS eventId, v." + quoteIdent("primary_event_id") +
+      " AS primaryEventId FROM " + quoteIdent("videos") + " v LEFT JOIN " +
+      quoteIdent("video_events") + " ve ON ve." + quoteIdent("video_id") +
+      " = v." + quoteIdent("id") + " WHERE v." + quoteIdent("id") +
+      " IN (SELECT id FROM release_ids) LIMIT " +
+      (SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1) + ")",
+    'release_count AS (SELECT COUNT(*) AS "count" FROM release)',
+    "snapshot_projection AS (SELECT * FROM snapshot_one UNION ALL SELECT " +
+      ctx.columns.map(column => "NULL AS " + quoteIdent(column.name)).join(", ") +
+      ' WHERE (SELECT "count" FROM snapshot_count) = 0)',
+  ];
+  const fkSelects = foreignKeys.flatMap((_, index) => {
+    const alias = quoteIdent(fkAliases[index]!);
+    return [
+      "(SELECT " + alias + " FROM effective LIMIT 1) AS " + quoteIdent(prefix + "fk_" + index + "_expected"),
+      '(SELECT COUNT(*) FROM fk_' + index + ") AS " + quoteIdent(prefix + "fk_" + index + "_count"),
+      "(SELECT MAX(value) FROM fk_" + index + ") AS " + quoteIdent(prefix + "fk_" + index + "_found"),
+    ];
+  });
+  const statement = "WITH " + ctes.join(",
+") + "
+" +
+    "SELECT s.*, sc."count" AS " + quoteIdent(snapshotCountAlias) +
+    ", rc."count" AS " + quoteIdent(releaseCountAlias) + ", " +
+    [...fkSelects,
+      "r.videoId AS " + quoteIdent(releaseVideoAlias),
+      "r.eventId AS " + quoteIdent(releaseEventAlias),
+      "r.primaryEventId AS " + quoteIdent(releasePrimaryAlias),
+    ].join(", ") +
+    " FROM snapshot_projection s CROSS JOIN snapshot_count sc CROSS JOIN release_count rc " +
+    "LEFT JOIN release r ON 1 = 1 LIMIT " + (SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1);
+  const binds: (string | number | null)[] = [
+    ...ctx.primaryKeys.map(key => prepared.pk[key]!),
+    mutationColumn,
+    mutationValue,
+    ...foreignKeys.map(fk => fk.column),
+    SPREADSHEET_JS_TRIM_CHARS,
+  ];
+  if (binds.length > SPREADSHEET_MEMBER_FK_RELEASE_MAX_BINDS) return null;
+  return { statement, binds: Object.freeze(binds) };
+}
+
 /**
  * Validate the tagged result of the bounded member FK/release CTE.
  * Every FK group is validated in original planner order before release
  * overflow/row validation, preserving CURRENT's FK-first error precedence.
  */
+function validateSpreadsheetMemberReleaseLookupRows(
+  releaseIds: readonly string[],
+  releaseRows: readonly unknown[],
+): { eventIdsByVideo: Map<string, string[]> } {
+  if (releaseRows.length > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+    throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+  }
+  const requested = new Set(releaseIds);
+  const seenReleaseTuples = new Set<string>();
+  const eventIdsByVideo = new Map<string, Set<string>>();
+  const linkedEventIds = new Set<string>();
+  let overflow = false;
+  try {
+    for (const candidate of releaseRows) {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw new Error("invalid_snapshot");
+      }
+      const row = candidate as Record<string, unknown>;
+      if (!Object.hasOwn(row, "value") || !Object.hasOwn(row, "videoId") ||
+          !Object.hasOwn(row, "eventId") || !Object.hasOwn(row, "primaryEventId")) {
+        throw new Error("invalid_snapshot");
+      }
+      const { value, videoId, eventId, primaryEventId } = row;
+      if (value !== null || typeof videoId !== "string" || !requested.has(videoId) ||
+          (eventId !== null && typeof eventId !== "string") ||
+          (primaryEventId !== null && typeof primaryEventId !== "string")) {
+        throw new Error("invalid_snapshot");
+      }
+      // Do not let a malformed provider receipt collapse into the event Sets.
+      // Distinct rows may share primaryEventId, but an identical source tuple is invalid.
+      const releaseTuple = JSON.stringify([videoId, eventId, primaryEventId]);
+      if (seenReleaseTuples.has(releaseTuple)) throw new Error("invalid_snapshot");
+      seenReleaseTuples.add(releaseTuple);
+      const eventIds = eventIdsByVideo.get(videoId) ?? new Set<string>();
+      for (const linkedId of [eventId, primaryEventId]) {
+        const normalized = (linkedId as string | null)?.trim();
+        if (normalized) {
+          eventIds.add(normalized);
+          linkedEventIds.add(normalized);
+        }
+      }
+      if (linkedEventIds.size > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+        overflow = true;
+        break;
+      }
+      eventIdsByVideo.set(videoId, eventIds);
+    }
+  } catch {
+    throw new Error("invalid_snapshot");
+  }
+  if (overflow) throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+  return { eventIdsByVideo: new Map([...eventIdsByVideo].map(([id, ids]) => [id, [...ids]])) };
+}
+
 export function validateSpreadsheetMemberFkReleaseLookupReceipt(
   plan: { fkLookups: readonly SpreadsheetForeignKeyLookup[]; releaseIds: readonly string[] },
   result: { success: boolean; results: unknown[] },
@@ -774,54 +962,201 @@ export function validateSpreadsheetMemberFkReleaseLookupReceipt(
   for (let index = 0; index < plan.fkLookups.length; index++) {
     assertSpreadsheetForeignKeyLookup(plan.fkLookups[index]!, fkRowsByIndex[index]!);
   }
-  if (releaseRows.length > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
-    throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
-  }
-  const requested = new Set(plan.releaseIds);
-  const seenReleaseTuples = new Set<string>();
-  const eventIdsByVideo = new Map<string, Set<string>>();
-  const linkedEventIds = new Set<string>();
-  let overflow = false;
+  return validateSpreadsheetMemberReleaseLookupRows(plan.releaseIds, releaseRows);
+}
+
+
+/**
+ * Validate the one-read member snapshot/FK/release receipt. FK checks are
+ * evaluated in catalog order before release overflow or target validation.
+ */
+export function validateSpreadsheetMemberSnapshotFkReleaseLookupReceipt(
+  ctx: SpreadsheetWriteTableContext,
+  foreignKeys: readonly SpreadsheetForeignKey[],
+  prepared: PreparedSpreadsheetCrudMutation,
+  result: { success: boolean; results: unknown[] },
+): { before: Record<string, unknown>; eventIdsByVideo: Map<string, string[]> } {
+  const prefix = "__mig0638_";
+  const snapshotCountAlias = prefix + "snapshot_count";
+  const releaseCountAlias = prefix + "release_count";
+  const releaseVideoAlias = prefix + "release_video_id";
+  const releaseEventAlias = prefix + "release_event_id";
+  const releasePrimaryAlias = prefix + "release_primary_event_id";
+  const fkStates: Array<{
+    expected: string | number | null;
+    count: number;
+    found: string | number | null;
+  } | null> = foreignKeys.map(() => null);
+  const releaseRows: unknown[] = [];
+  let snapshotCount: number | null = null;
+  let releaseCount: number | null = null;
+  let snapshotValues: Record<string, unknown> | null = null;
+
   try {
-    for (const candidate of releaseRows) {
+    if (!result || result.success !== true || !Array.isArray(result.results) ||
+        result.results.length < 1 ||
+        result.results.length > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1) {
+      throw new Error("invalid_snapshot");
+    }
+    const required = [
+      ...ctx.columns.map(column => column.name),
+      snapshotCountAlias,
+      releaseCountAlias,
+      releaseVideoAlias,
+      releaseEventAlias,
+      releasePrimaryAlias,
+      ...foreignKeys.flatMap((_, index) => [
+        prefix + "fk_" + index + "_expected",
+        prefix + "fk_" + index + "_count",
+        prefix + "fk_" + index + "_found",
+      ]),
+    ];
+    for (const candidate of result.results) {
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
         throw new Error("invalid_snapshot");
       }
       const row = candidate as Record<string, unknown>;
-      if (!Object.hasOwn(row, "value") || !Object.hasOwn(row, "videoId") ||
-          !Object.hasOwn(row, "eventId") || !Object.hasOwn(row, "primaryEventId")) {
+      if (!required.every(key => Object.hasOwn(row, key))) throw new Error("invalid_snapshot");
+
+      const nextSnapshotCount = row[snapshotCountAlias];
+      const nextReleaseCount = row[releaseCountAlias];
+      if (!Number.isSafeInteger(nextSnapshotCount) || (nextSnapshotCount as number) < 0 ||
+          (nextSnapshotCount as number) > 2 ||
+          !Number.isSafeInteger(nextReleaseCount) || (nextReleaseCount as number) < 0 ||
+          (nextReleaseCount as number) > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1) {
         throw new Error("invalid_snapshot");
       }
-      const { value, videoId, eventId, primaryEventId } = row;
-      if (value !== null || typeof videoId !== "string" || !requested.has(videoId) ||
-          (eventId !== null && typeof eventId !== "string") ||
-          (primaryEventId !== null && typeof primaryEventId !== "string")) {
-        throw new Error("invalid_snapshot");
+      if (snapshotCount === null) snapshotCount = nextSnapshotCount as number;
+      else if (snapshotCount !== nextSnapshotCount) throw new Error("invalid_snapshot");
+      if (releaseCount === null) releaseCount = nextReleaseCount as number;
+      else if (releaseCount !== nextReleaseCount) throw new Error("invalid_snapshot");
+
+      const cells: Array<[string, string | number | null]> = [];
+      for (const column of ctx.columns) {
+        const value = row[column.name];
+        if (value !== null && typeof value !== "string" && typeof value !== "number") {
+          throw new Error("invalid_snapshot");
+        }
+        if (typeof value === "number" && !Number.isFinite(value)) {
+          throw new Error("invalid_snapshot");
+        }
+        cells.push([column.name, value]);
       }
-      // Do not let a malformed provider receipt collapse into the event Sets.
-      // Distinct rows may share primaryEventId, but an identical source tuple is invalid.
-      const releaseTuple = JSON.stringify([videoId, eventId, primaryEventId]);
-      if (seenReleaseTuples.has(releaseTuple)) throw new Error("invalid_snapshot");
-      seenReleaseTuples.add(releaseTuple);
-      const eventIds = eventIdsByVideo.get(videoId) ?? new Set<string>();
-      for (const linkedId of [eventId, primaryEventId]) {
-        const normalized = (linkedId as string | null)?.trim();
-        if (normalized) {
-          eventIds.add(normalized);
-          linkedEventIds.add(normalized);
+      const candidateSnapshot = Object.fromEntries(cells);
+      if (snapshotValues === null) snapshotValues = candidateSnapshot;
+      else {
+        for (const column of ctx.columns) {
+          if (!Object.is(snapshotValues[column.name], candidateSnapshot[column.name])) {
+            throw new Error("invalid_snapshot");
+          }
         }
       }
-      if (linkedEventIds.size > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
-        overflow = true;
-        break;
+      if (snapshotCount === 0 && cells.some(([, value]) => value !== null)) {
+        throw new Error("invalid_snapshot");
       }
-      eventIdsByVideo.set(videoId, eventIds);
+
+      for (let index = 0; index < foreignKeys.length; index++) {
+        const expected = row[prefix + "fk_" + index + "_expected"];
+        const count = row[prefix + "fk_" + index + "_count"];
+        const found = row[prefix + "fk_" + index + "_found"];
+        if ((expected !== null && typeof expected !== "string" && typeof expected !== "number") ||
+            (typeof expected === "number" && !Number.isFinite(expected)) ||
+            !Number.isSafeInteger(count) || (count as number) < 0 || (count as number) > 2 ||
+            (found !== null && typeof found !== "string" && typeof found !== "number") ||
+            (typeof found === "number" && !Number.isFinite(found)) ||
+            ((count as number) === 0 && found !== null) ||
+            ((count as number) > 0 && found === null)) {
+          throw new Error("invalid_snapshot");
+        }
+        const state = {
+          expected: expected as string | number | null,
+          count: count as number,
+          found: found as string | number | null,
+        };
+        const prior = fkStates[index];
+        if (prior === null) fkStates[index] = state;
+        else if (!Object.is(prior.expected, state.expected) ||
+            prior.count !== state.count || !Object.is(prior.found, state.found)) {
+          throw new Error("invalid_snapshot");
+        }
+      }
+
+      const videoId = row[releaseVideoAlias];
+      const eventId = row[releaseEventAlias];
+      const primaryEventId = row[releasePrimaryAlias];
+      if (videoId === null) {
+        if (eventId !== null || primaryEventId !== null) throw new Error("invalid_snapshot");
+      } else {
+        if (typeof videoId !== "string" ||
+            (eventId !== null && typeof eventId !== "string") ||
+            (primaryEventId !== null && typeof primaryEventId !== "string")) {
+          throw new Error("invalid_snapshot");
+        }
+        releaseRows.push({ value: null, videoId, eventId, primaryEventId });
+      }
+    }
+    if (snapshotCount === null || releaseCount === null ||
+        releaseRows.length !== releaseCount ||
+        result.results.length !== Math.max(1, releaseCount)) {
+      throw new Error("invalid_snapshot");
     }
   } catch {
     throw new Error("invalid_snapshot");
   }
-  if (overflow) throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
-  return { eventIdsByVideo: new Map([...eventIdsByVideo].map(([id, ids]) => [id, [...ids]])) };
+
+  if (snapshotCount === 0) throw new Error("row_not_found");
+  if (snapshotCount !== 1 || !snapshotValues) throw new Error("invalid_snapshot");
+  const before = snapshotSpreadsheetRawRow(ctx, prepared.pk as Record<string, string>, snapshotValues);
+  const effectiveEntries: Array<[string, unknown]> = Object.entries(before);
+  if (prepared.values) {
+    for (const [column, value] of Object.entries(prepared.values)) {
+      const index = effectiveEntries.findIndex(([name]) => name === column);
+      const normalized = value === "" ? null : value;
+      if (index < 0) effectiveEntries.push([column, normalized]);
+      else effectiveEntries[index] = [column, normalized];
+    }
+  }
+  const effectiveRow = Object.fromEntries(effectiveEntries);
+
+  // Keep the exact FK error precedence and canonical catalog order.
+  for (let index = 0; index < foreignKeys.length; index++) {
+    const fk = foreignKeys[index]!;
+    if (!Object.hasOwn(effectiveRow, fk.column)) throw new Error("invalid_snapshot");
+    const raw = effectiveRow[fk.column];
+    let normalized: string | null;
+    if (raw === null || raw === "") normalized = raw as null | "";
+    else if (typeof raw === "string") {
+      if (raw.includes("\0")) throw new Error("invalid_snapshot");
+      normalized = raw;
+    } else if (typeof raw === "number" && Number.isFinite(raw)) {
+      normalized = String(raw);
+    } else {
+      throw new Error("invalid_snapshot");
+    }
+    const state = fkStates[index];
+    if (!state) throw new Error("invalid_snapshot");
+    const expected = state.expected === null ? null :
+      typeof state.expected === "number" ? String(state.expected) : state.expected;
+    if (expected !== normalized) throw new Error("invalid_snapshot");
+    const lookupRow = Object.freeze({ [fk.column]: normalized });
+    const lookups = buildSpreadsheetForeignKeyLookups([fk], [lookupRow]);
+    if (lookups.length === 0) {
+      if (state.count !== 0 || state.found !== null) throw new Error("invalid_snapshot");
+      continue;
+    }
+    if (lookups.length !== 1 || state.count === 2) throw new Error("invalid_snapshot");
+    const rows = state.count === 1 ? [{ value: state.found! }] : [];
+    assertSpreadsheetForeignKeyLookup(lookups[0]!, rows);
+  }
+
+  const after = prepared.method === "PATCH" ? effectiveRow : null;
+  const releaseIds = spreadsheetReleaseVideoIds([{
+    table_name: "video_members",
+    before,
+    after,
+  }]);
+  const release = validateSpreadsheetMemberReleaseLookupRows(releaseIds, releaseRows);
+  return { before, eventIdsByVideo: release.eventIdsByVideo };
 }
 
 export async function loadSpreadsheetVideoReleaseEvents(
@@ -1072,7 +1407,7 @@ async function handleCrudWrite(
     const db = c.get("db");
     const preloaded = auditPreloaded(c);
 
-    // Track exact handler D1 pre-reads in addition to the 3 middleware reads (session, writeGuard, costGuard).
+    // Track exact handler D1 pre-reads in addition to the shared middleware.
     const readCounter = { reads: 0 };
     const countedDb = countingRawDb(rawDb, readCounter);
     const { ctx, foreignKeys } = await resolveSpreadsheetWriteTableContext(
@@ -1080,43 +1415,73 @@ async function handleCrudWrite(
       crudBody.table,
     );
     const memberMutation = crudBody.table === "video_members";
-    const plan = await planSpreadsheetGuardedCrud(
-      countedDb,
-      ctx,
-      crudBody,
-      memberMutation ? [] : foreignKeys,
-      user.id,
-      SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
-    );
+    let plan: SpreadsheetAuditedSqlPlan;
     let eventIdsByVideo: Map<string, string[]>;
     let videoReads = 0;
-    if (memberMutation) {
-      // Combine the canonical member FK proof and release lookup for POST,
-      // PATCH and DELETE. UPDATE uses its complete after-image; DELETE uses
-      // the fresh complete before-image. Other FK shapes retain safe fallback.
-      const fkRow = spreadsheetMemberForeignKeyRowFromAudit(plan.audit, foreignKeys);
-      const combined = buildSpreadsheetMemberFkReleaseLookup(foreignKeys, [fkRow], [plan.audit]);
-      if (combined) {
-        const receipt = await countedDb.prepare(combined.statement).bind(...combined.binds).all<unknown>();
-        eventIdsByVideo = validateSpreadsheetMemberFkReleaseLookupReceipt(combined, receipt).eventIdsByVideo;
-      } else {
-        // Preserve FK-first validation and release lookup for unsupported,
-        // empty or over-limit plans; no FK check is skipped on fallback.
-        await validateSpreadsheetForeignKeys(
-          countedDb,
-          foreignKeys,
-          [fkRow],
-          SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+
+    if (memberMutation && (crudBody.method === "PATCH" || crudBody.method === "DELETE")) {
+      const prepared = prepareSpreadsheetGuardedCrudMutation(ctx, crudBody, user.id);
+      const snapshotLookup = buildSpreadsheetMemberSnapshotFkReleaseLookup(ctx, foreignKeys, prepared);
+      if (snapshotLookup) {
+        const receipt = await countedDb.prepare(snapshotLookup.statement)
+          .bind(...snapshotLookup.binds).all<unknown>();
+        const validated = validateSpreadsheetMemberSnapshotFkReleaseLookupReceipt(
+          ctx, foreignKeys, prepared, receipt,
         );
+        plan = buildSpreadsheetGuardedCrudPlanFromSnapshot(ctx, prepared, validated.before, user.id);
+        eventIdsByVideo = validated.eventIdsByVideo;
+      } else {
+        // Unsupported schema/FK shapes retain the original fresh snapshot,
+        // FK-first preflight and release lookup. No validation is skipped.
+        plan = await planSpreadsheetGuardedCrud(
+          countedDb, ctx, crudBody, [], user.id, SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+        );
+        const fkRow = spreadsheetMemberForeignKeyRowFromAudit(plan.audit, foreignKeys);
+        const combined = buildSpreadsheetMemberFkReleaseLookup(foreignKeys, [fkRow], [plan.audit]);
+        if (combined) {
+          const receipt = await countedDb.prepare(combined.statement).bind(...combined.binds).all<unknown>();
+          eventIdsByVideo = validateSpreadsheetMemberFkReleaseLookupReceipt(combined, receipt).eventIdsByVideo;
+        } else {
+          await validateSpreadsheetForeignKeys(
+            countedDb, foreignKeys, [fkRow], SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+          );
+          const loaded = await loadSpreadsheetVideoReleaseEvents(rawDb, [plan.audit]);
+          eventIdsByVideo = loaded.eventIdsByVideo;
+          videoReads = loaded.reads;
+        }
+      }
+    } else {
+      plan = await planSpreadsheetGuardedCrud(
+        countedDb,
+        ctx,
+        crudBody,
+        memberMutation ? [] : foreignKeys,
+        user.id,
+        SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+      );
+      if (memberMutation) {
+        // POST/import keep the existing bounded multi-FK/release CTE. PATCH
+        // and DELETE use the snapshot-inclusive CTE above when eligible.
+        const fkRow = spreadsheetMemberForeignKeyRowFromAudit(plan.audit, foreignKeys);
+        const combined = buildSpreadsheetMemberFkReleaseLookup(foreignKeys, [fkRow], [plan.audit]);
+        if (combined) {
+          const receipt = await countedDb.prepare(combined.statement).bind(...combined.binds).all<unknown>();
+          eventIdsByVideo = validateSpreadsheetMemberFkReleaseLookupReceipt(combined, receipt).eventIdsByVideo;
+        } else {
+          await validateSpreadsheetForeignKeys(
+            countedDb, foreignKeys, [fkRow], SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+          );
+          const loaded = await loadSpreadsheetVideoReleaseEvents(rawDb, [plan.audit]);
+          eventIdsByVideo = loaded.eventIdsByVideo;
+          videoReads = loaded.reads;
+        }
+      } else {
         const loaded = await loadSpreadsheetVideoReleaseEvents(rawDb, [plan.audit]);
         eventIdsByVideo = loaded.eventIdsByVideo;
         videoReads = loaded.reads;
       }
-    } else {
-      const loaded = await loadSpreadsheetVideoReleaseEvents(rawDb, [plan.audit]);
-      eventIdsByVideo = loaded.eventIdsByVideo;
-      videoReads = loaded.reads;
     }
+
     const queueTargets = deriveSpreadsheetQueueTargets([plan.audit], eventIdsByVideo);
     const callerQueryCount = 3 + readCounter.reads + videoReads;
 

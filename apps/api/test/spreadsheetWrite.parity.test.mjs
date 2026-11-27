@@ -945,22 +945,32 @@ if (runUnderRootTsx(import.meta.url)) {
         const fkRows = method === "POST"
           ? [fkRow(0, "av-pending-1")]
           : [fkRow(0, "alice_x"), fkRow(1, "av-pending-1")];
-        const expectedBinds = method === "POST"
-          ? ["av-pending-1", "av-pending-1"]
-          : ["alice_x", "av-pending-1", "av-pending-1"];
+        const expectedBinds = method === "POST" ? ["av-pending-1", "av-pending-1"] : null;
         for (const fault of faults) {
           resetAllCaches();
           const prior = injected;
           honoD1.prepare = sql => {
             const releaseLookup = sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"');
-            const combinedLookup = sql.startsWith("WITH fk AS (") || sql.startsWith("WITH fk_0 AS (");
+            const combinedLookup = sql.startsWith("WITH snapshot AS (") ||
+              sql.startsWith("WITH fk AS (") || sql.startsWith("WITH fk_0 AS (");
             if (!releaseLookup || !combinedLookup) return originalPrepare(sql);
             if (fault.stage === "prepare") { injected++; throw fault.error; }
             const stmt = originalPrepare(sql);
             return {
               ...stmt,
               bind(...params) {
-                assert.deepEqual(params, expectedBinds);
+                if (method === "POST") {
+                  assert.deepEqual(params, expectedBinds);
+                } else {
+                  assert.deepEqual(params.slice(0, 3), [
+                    "vm-1",
+                    method === "PATCH" ? "name" : null,
+                    method === "PATCH" ? "Edited Member" : null,
+                  ]);
+                  assert.equal(params.length, 7);
+                  assert.deepEqual([...params.slice(3, -1)].sort(), ["user_id", "video_id", "x_user_id"]);
+                  assert.ok(typeof params[params.length - 1] === "string" && params[params.length - 1].includes(" "));
+                }
                 if (fault.stage === "bind") { injected++; throw fault.error; }
                 return {
                   ...stmt.bind(...params),
@@ -1666,7 +1676,7 @@ if (runUnderRootTsx(import.meta.url)) {
       for (const [id, video, linked] of [["vm-ov-0", "av-overflow", false], ["vm-1", "av-pending-1", true]]) {
         for (const cold of [true, false]) {
           const name = id + (cold ? "-cold" : "-warm");
-          await crud("member PATCH " + name, "PATCH", { table: "video_members", primaryKey: { id }, column: "name", value: name }, cold, 5,
+          await crud("member PATCH " + name, "PATCH", { table: "video_members", primaryKey: { id }, column: "name", value: name }, cold, 4,
             (body, _queue, beforeActive) => {
               assert.equal(body.pendingPublicReflection, true);
               assert.equal(tableRows("video_members").find(row => row.id === id).name, name);
@@ -1684,7 +1694,7 @@ if (runUnderRootTsx(import.meta.url)) {
             const payload = method === "POST"
               ? { table: "video_members", row: { id, video_id: video, name: id } }
               : { table: "video_members", primaryKey: { id } };
-            await crud("member " + method + " " + id, method, payload, cold, method === "POST" ? 4 : 5,
+            await crud("member " + method + " " + id, method, payload, cold, 4,
               (body, _queue, beforeActive) => {
                 assert.equal(body.pendingPublicReflection, true);
                 assert.equal(tableRows("video_members").some(row => row.id === id), method === "POST");
@@ -1701,7 +1711,7 @@ if (runUnderRootTsx(import.meta.url)) {
         const targetVideo = cold ? "av-overflow" : "av-pending-1";
         await crud("member PATCH FK change " + targetVideo, "PATCH", {
           table: "video_members", primaryKey: { id: "vm-1" }, column: "video_id", value: targetVideo,
-        }, cold, 5, (body, _queue, beforeActive) => {
+        }, cold, 4, (body, _queue, beforeActive) => {
           assert.equal(body.pendingPublicReflection, true);
           assert.equal(tableRows("video_members").find(row => row.id === "vm-1").video_id, targetVideo);
           assertQueueAdvanced(beforeActive, ["video:" + targetVideo, "users_index:global", "event_release:a-open"]);
