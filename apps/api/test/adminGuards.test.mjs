@@ -121,7 +121,7 @@ test("S3 budget parity: guard-fed audit equals audit that reads settings/actor i
 // Use the existing mounted SQLite-backed Hono suite with the actual HTTPS cookie reader.
 test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard decisions", async () => {
   const { evaluateCostGuardCore, WRITE_FEATURE_KEYS } = await import("@flamenode/domain/admin");
-  const { evaluateCostGuardSnapshot, loadCostGuardSettingsRow } = await import("../src/middleware/costGuard.ts");
+  const { compactWriteFeatureListSql, evaluateCostGuardSnapshot, loadCostGuardSettingsRow } = await import("../src/middleware/costGuard.ts");
   const { loadTosState } = await import("../src/middleware/writeOrigin.ts");
   const feature = "admin_announcement_broadcast";
   const now = Math.floor(Date.now() / 1000);
@@ -132,6 +132,9 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
   const overflowCount = JSON.stringify(Array(101).fill("reserve_slot"));
   const cases = [
     ["normal", null, null, null],
+    ["normal", " ", null, null],
+    ["normal", null, null, " "],
+    ["maintenance", null, null, " "],
     ["economy", null, null, null],
     ["read_only", null, null, null],
     ["static_only", null, null, null],
@@ -154,6 +157,16 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
     ["normal", null, now + 3600, '["unknown"]'],
     ["maintenance", null, now + 3600, malformed],
   ];
+  // Empty means zero bytes, even under a non-binary column collation.
+  // RTRIM otherwise treats a malformed space-only JSON string as empty.
+  const projectionDb = createAdminD1().sqlite;
+  for (const column of ['s."disabled_features_json"', 's."cost_guard_exception_features_json"']) {
+    const alias = column.slice(2);
+    const query = `SELECT ${compactWriteFeatureListSql(column)} AS receipt FROM (SELECT CAST(? AS TEXT) COLLATE RTRIM AS ${alias}) s`;
+    for (const [raw, receipt] of [[null, null], ["", null], [" ", "!"], ["   ", "!"], ["\t", "!"], ["\u0000", "!"], ["[]", "[]"]]) {
+      assert.equal(projectionDb.prepare(query).get(raw).receipt, receipt);
+    }
+  }
   const maxBytes = Buffer.byteLength(JSON.stringify(WRITE_FEATURE_KEYS));
   for (const [operationMode, disabledFeaturesJson, exceptionUntil, exceptionFeaturesJson] of cases) {
     const app = setup({ cookieSession: true });

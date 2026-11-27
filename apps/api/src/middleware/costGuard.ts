@@ -28,7 +28,7 @@ export function compactWriteFeatureListSql(
   col: 's."disabled_features_json"' | 's."cost_guard_exception_features_json"',
 ): string {
   return `CASE
-    WHEN ${col} IS NULL OR (typeof(${col})='text' AND ${col}='') THEN NULL
+    WHEN ${col} IS NULL OR (typeof(${col})='text' AND length(CAST(${col} AS BLOB))=0) THEN NULL
     WHEN typeof(${col})<>'text' OR instr(CAST(${col} AS BLOB), X'00')>0 THEN '!'
     WHEN json_valid(${col})<>1 THEN '!'
     WHEN json_type(${col})<>'array' THEN '!'
