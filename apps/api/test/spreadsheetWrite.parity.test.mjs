@@ -889,7 +889,7 @@ if (runUnderRootTsx(import.meta.url)) {
     insert(honoSqlite, "video_events", { video_id: "av-pending-1", event_id: "a-ended" });
     honoSqlite.prepare("UPDATE videos SET primary_event_id = 'a-ended' WHERE id = 'av-pending-1'").run();
     const patch = { table: "video_members", primaryKey: { id: "vm-1" }, column: "name", value: "Edited Member" };
-    const upsert = { table: "video_members", mode: "upsert", rows: [{ id: "vm-1", name: "Imported Member" }] };
+    const upsert = { table: "video_members", mode: "upsert", rows: [{ id: "vm-1", video_id: "av-pending-1", name: "Imported Member" }] };
     const preview = await callHono("POST", "/import", { ...upsert, dryRun: true });
     assert.equal(preview.status, 200);
     contracts.AdminSpreadsheetImportDryRunResponseSchema.parse(preview.body);
@@ -935,7 +935,7 @@ if (runUnderRootTsx(import.meta.url)) {
           resetAllCaches();
           const prior = injected;
           honoD1.prepare = sql => {
-            if (!sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"')) return originalPrepare(sql);
+            if (!sql.includes("WITH fk AS (") || !sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"')) return originalPrepare(sql);
             if (fault.stage === "prepare") { injected++; throw fault.error; }
             const stmt = originalPrepare(sql);
             return {
