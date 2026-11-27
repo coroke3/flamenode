@@ -102,6 +102,16 @@ export const adminEventTemplatesRoutes = new Hono<AppEnv>().get("/", async (c) =
   return c.json(body);
 });
 
+/** The SQL projection bounds stored bytes; a provider can expand malformed UTF-8 on decode.
+ * Keep the same nullable raw-string contract without parsing or truncating the snapshot.
+ */
+function boundedTemplateSettings(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > MAX_JSON_COLUMN_BYTES) return null;
+  if (value.length <= Math.floor(MAX_JSON_COLUMN_BYTES / 3)) return value;
+  return new TextEncoder().encodeInto(value, new Uint8Array(MAX_JSON_COLUMN_BYTES)).read === value.length
+    ? value : null;
+}
+
 export const adminEventNewRoutes = new Hono<AppEnv>().get("/", async (c) => {
   const raw = c.req.query("template");
   const templateId = typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : "";
@@ -114,7 +124,7 @@ export const adminEventNewRoutes = new Hono<AppEnv>().get("/", async (c) => {
     userId: c.get("user")?.id ?? "",
     templateId,
     templateName: templateId && row?.tpl_name != null ? row.tpl_name : null,
-    templateSettingsJson: templateId && row ? row.tpl_settings : null,
+    templateSettingsJson: templateId && row ? boundedTemplateSettings(row.tpl_settings) : null,
     formInitial: "deferred",
   };
   return c.json(body);

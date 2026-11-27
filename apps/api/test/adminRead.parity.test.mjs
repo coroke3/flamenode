@@ -62,8 +62,8 @@ if (runUnderRootTsx(import.meta.url)) {
     const text = await response.text();
     return { status: response.status, headers: response.headers, body: text ? parseBody(text) : null, stats: d1.stats };
   }
-  const get = async (path, token = "root") => {
-    const r = await call(path, `tok-${token}`);
+  const get = async (path, token = "root", options = {}) => {
+    const r = await call(path, `tok-${token}`, options);
     assert.equal(r.status, 200, `${path}: ${JSON.stringify(r.body)}`);
     assert.equal(r.headers.get("cache-control"), "private, no-store");
     assert.equal(r.stats.writes, 0, `${path}: GET must not write`);
@@ -692,34 +692,76 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(unknown.body.templateName, null);
     assert.equal(unknown.body.templateSettingsJson, null);
     assert.equal((await get("/api/admin-read/events/new?template=tpl-big", "root")).body.templateSettingsJson, null, "> 64 KiB not returned");
-    // #924: SQLite length(TEXT) counts codepoints and stops at raw NUL.
-    // Verify the raw snapshot's UTF-8 boundary through the mounted GET, not
-    // only the response parser. The template name and list guard are unchanged.
+    // #924: SQLite TEXT length counts codepoints and stops at raw NUL.
+    // The stored-byte projection and decoded-wire guard are separate bounds.
     const limit = 64 * 1024;
     const originalSettings = sqlite.prepare("SELECT settings_json FROM event_templates WHERE id = ?").get("tpl2").settings_json;
-    const setTemplateSettings = sqlite.prepare("UPDATE event_templates SET settings_json = ? WHERE id = ?");
+    const setTemplateSettings = sqlite.prepare("UPDATE event_templates SET settings_json = CAST(? AS TEXT) WHERE id = ?");
+    const expectedList = canon((await refGuardList("u_root")).templates);
     try {
       const prefix = '{"v":"';
       const suffix = '"}';
-      const overhead = Buffer.byteLength(prefix + suffix, "utf8");
+      const overhead = Buffer.byteLength(prefix + suffix);
       const cases = [];
-      for (const unit of ["x", "é", "あ", "🚀"]) {
+      for (const unit of ["x", "é", "あ", "🚀", "\\u0000", '\\"', "\\\\"]) {
         for (const size of [limit - 1, limit, limit + 1]) {
           const padding = size - overhead;
-          const width = Buffer.byteLength(unit, "utf8");
+          const width = Buffer.byteLength(unit);
           const raw = prefix + unit.repeat(Math.floor(padding / width)) + "x".repeat(padding % width) + suffix;
-          assert.equal(Buffer.byteLength(raw, "utf8"), size);
-          cases.push([raw, size <= limit ? raw : null]);
+          assert.equal(Buffer.byteLength(raw), size);
+          const wire = size <= limit ? raw : null;
+          cases.push({ raw, storedSize: size, wire, expected: wire });
         }
       }
-      cases.push(['{"v":"\\u0000"}', '{"v":"\\u0000"}']);
-      cases.push(["\u0000" + "x".repeat(limit), null]);
-      for (const [raw, expected] of cases) {
+      // node:sqlite decodes each invalid 0xff byte to U+FFFD. The stored
+      // projection can therefore fit even when the returned string exceeds 64 KiB.
+      for (const size of [limit - 1, limit, limit + 1, 90_008]) {
+        const padding = size - overhead;
+        const count = Math.floor(padding / 3);
+        const tail = "x".repeat(padding % 3);
+        const raw = Buffer.concat([Buffer.from(prefix), Buffer.alloc(count, 0xff), Buffer.from(tail + suffix)]);
+        const wire = prefix + "\ufffd".repeat(count) + tail + suffix;
+        assert.ok(raw.length <= limit);
+        assert.equal(Buffer.byteLength(wire), size);
+        cases.push({ raw, storedSize: raw.length, wire, expected: size <= limit ? wire : null });
+      }
+      // Raw settings are not parsed by this endpoint; preserve short legacy values.
+      for (const raw of ["", "{bad-json", '{"v":"\\u0000"}']) {
+        cases.push({ raw, storedSize: Buffer.byteLength(raw), wire: raw, expected: raw });
+      }
+      cases.push({ raw: "\u0000" + "x".repeat(limit), storedSize: limit + 1, wire: null, expected: null });
+      for (const { raw, storedSize, wire, expected } of cases) {
         setTemplateSettings.run(raw, "tpl2");
-        const result = await get("/api/admin-read/events/new?template=tpl2", "root");
+        const backing = createD1(sqlite);
+        const receipts = [];
+        const d1 = {
+          ...backing,
+          prepare(sql) {
+            const statement = backing.prepare(sql);
+            if (!sql.includes("AS tpl_settings")) return statement;
+            return {
+              ...statement,
+              bind(...values) {
+                const bound = statement.bind(...values);
+                return {
+                  ...bound,
+                  async first() {
+                    const row = await bound.first();
+                    receipts.push({ size: row?.tpl_size, settings: row?.tpl_settings });
+                    return row;
+                  },
+                };
+              },
+            };
+          },
+        };
+        const result = await get("/api/admin-read/events/new?template=tpl2", "root", { d1 });
+        assert.deepEqual(receipts, [{ size: storedSize, settings: wire }]);
         assert.equal(result.body.guardOk, true);
+        assert.deepEqual(result.body.templates, expectedList);
         assert.equal(result.body.templateName, "Template 2");
-        assert.equal(result.body.templateSettingsJson, expected, `snapshot bytes=${Buffer.byteLength(raw, "utf8")}`);
+        assert.equal(result.body.templateSettingsJson, expected, "stored bytes=" + storedSize);
+        assert.equal(Object.hasOwn(result.body, "tpl_size"), false);
         assert.equal(result.stats.statements, 3);
       }
     } finally {
