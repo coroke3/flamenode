@@ -707,14 +707,18 @@ export function AdminSpreadsheetEditableGrid({
       );
       return;
     }
-    if (shortcut && !event.altKey && event.key.toLowerCase() === "c") {
+    // Match CURRENT's delivered key spellings without widening mutation authority.
+    const copyShortcut = shortcut && event.key === "c";
+    const undoShortcut = shortcut && event.key === "z" && !event.shiftKey;
+    const redoShortcut = shortcut && (event.key === "y" || ((event.key === "z" || event.key === "Z") && event.shiftKey));
+    if (copyShortcut || undoShortcut || redoShortcut) {
+      const historyBusy = inFlight.current !== null && historyInFlight.current === inFlight.current;
+      if (identityChanged || !isCurrent() || displayedPage.current !== data ||
+          currentSelection !== null || liveSelection.current !== null || historyBusy ||
+          formulaNavigationPending.current || rows.length === 0 || columns.length === 0) return;
       event.preventDefault();
-      void copyRange();
-      return;
-    }
-    if (shortcut && !event.altKey && event.key.toLowerCase() === "z" && canMutate) {
-      event.preventDefault();
-      void replay(event.shiftKey ? "redo" : "undo");
+      if (copyShortcut) void copyRange();
+      else if (canMutate) void replay(redoShortcut ? "redo" : "undo");
       return;
     }
     if (event.key === "F2") {

@@ -97,7 +97,13 @@ test("MIG-0737 U01: Enter navigates, edit buttons open only mutable columns; mis
     assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
     await openCellEditor(title);
     assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 1);
-    await press(title, "c", { ctrlKey: true });
+    // A TD event delivered while the child editor owns the draft is ignored.
+    assert.equal((await press(title, "c", { ctrlKey: true })).defaultPrevented, false);
+    await flush();
+    assert.doesNotMatch(ui.host.textContent, /コピーが許可されていません/);
+    assert.equal(title.querySelector("input").value, "Alpha");
+    await clickButton(ui, "キャンセル");
+    assert.equal((await press(title, "c", { ctrlKey: true })).defaultPrevented, true);
     await flush();
     assert.match(ui.host.textContent, /コピーが許可されていません/);
   } finally {
@@ -1937,4 +1943,129 @@ test("MIG-0737 U01 direct typing: a new draft on the same cell selects once, inc
     assert.equal(cell.querySelector("input").value, "Beta");
     assert.deepEqual(effects, []);
   } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 TD history shortcuts: lowercase undo, y and both shifted z spellings replay committed entries only", async () => {
+  for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) for (const [redoKey, shiftKey] of [["y", false], ["z", true], ["Z", true]]) {
+    const pending = [];
+    let refreshes = 0;
+    const ui = await mount({ data: rangeData, allowMutations: true,
+      fetchFn: (_, init) => new Promise(resolve => pending.push({ init, resolve })),
+      onRefresh: () => { refreshes++; },
+    });
+    try {
+      const td = await selectCell(ui, "1:1");
+      assert.equal((await press(td, "z", modifier)).defaultPrevented, true);
+      assert.equal(pending.length, 0);
+      await beginTitleSave(ui, "Changed");
+      await React.act(async () => pending[0].resolve(successfulWrite()));
+      assert.equal(pending.length, 1);
+      assert.equal((await press(td, "Z", modifier)).defaultPrevented, false);
+      assert.equal((await press(td, "Y", modifier)).defaultPrevented, false);
+      assert.equal(pending.length, 1);
+      assert.equal((await press(td, "z", { ...modifier, altKey: true })).defaultPrevented, true);
+      assert.equal(pending.length, 2);
+      assert.equal((await press(td, redoKey, { ...modifier, shiftKey })).defaultPrevented, false);
+      assert.equal(pending.length, 2);
+      await React.act(async () => pending[1].resolve(successfulWrite()));
+      assert.equal((await press(td, redoKey, { ...modifier, shiftKey, altKey: true })).defaultPrevented, true);
+      assert.equal(pending.length, 3);
+      await React.act(async () => pending[2].resolve(successfulWrite()));
+      assert.deepEqual(pending.map(({ init }) => [init.method, JSON.parse(init.body)]), [
+        ["PATCH", { table: "videos", primaryKey: { id: "b2" }, column: "title", value: "Changed" }],
+        ["PATCH", { table: "videos", primaryKey: { id: "b2" }, column: "title", value: "Beta" }],
+        ["PATCH", { table: "videos", primaryKey: { id: "b2" }, column: "title", value: "Changed" }],
+      ]);
+      assert.equal(refreshes, 3);
+      assert.equal(td.querySelector("input"), null);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 TD clipboard shortcuts: delivered lowercase c accepts Alt and leaves uppercase C untouched", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const copied = [], writes = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async value => { copied.push(value); } } });
+  try {
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) {
+      const ui = await mount({ data: rangeData, fetchFn: async (_, init) => { writes.push(init); return successfulWrite(); } });
+      try {
+        copied.length = 0;
+        const td = await selectCell(ui, "1:1");
+        for (const altKey of [false, true]) {
+          assert.equal((await press(td, "C", { ...modifier, altKey, shiftKey: true })).defaultPrevented, false);
+          assert.equal((await press(td, "c", { ...modifier, altKey })).defaultPrevented, true);
+        }
+        assert.deepEqual(copied, ["Beta", "Beta"]);
+        for (const [key, shiftKey] of [["z", false], ["y", false], ["Z", true]]) {
+          assert.equal((await press(td, key, { ...modifier, shiftKey })).defaultPrevented, true);
+        }
+        assert.deepEqual(writes, []);
+        assert.equal(td.querySelector("input"), null);
+      } finally { await ui.cleanup(); }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
+
+test("MIG-0737 U01 TD clipboard and history shortcuts: draft, child ownership and pending history fence; ordinary save permits copy only", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const copied = [], pending = [];
+  let refreshes = 0;
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async value => { copied.push(value); } } });
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => pending.push({ init, resolve })), onRefresh: () => { refreshes++; },
+  });
+  const shortcuts = [["c", false], ["z", false], ["y", false], ["Z", true]];
+  try {
+    const td = await selectCell(ui, "1:1");
+    const child = td.querySelector("button");
+    for (const [key, shiftKey] of shortcuts) {
+      assert.equal((await press(child, key, { ctrlKey: true, shiftKey })).defaultPrevented, false);
+    }
+    const edit = new dom.window.KeyboardEvent("keydown", { key: "Q", bubbles: true, cancelable: true });
+    const staleCopy = new dom.window.KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true });
+    await React.act(async () => { td.dispatchEvent(edit); td.dispatchEvent(staleCopy); });
+    assert.equal(edit.defaultPrevented, true);
+    assert.equal(staleCopy.defaultPrevented, false);
+    const input = td.querySelector("input");
+    assert.equal(input.value, "Q");
+    for (const [key, shiftKey] of shortcuts) {
+      assert.equal((await press(td, key, { ctrlKey: true, shiftKey })).defaultPrevented, false);
+    }
+    assert.equal((await press(input, "z", { ctrlKey: true })).defaultPrevented, false);
+    assert.equal(input.value, "Q");
+    assert.deepEqual(copied, []);
+    assert.equal(pending.length, 0);
+    await clickButton(ui, "セルを保存");
+    assert.equal(pending.length, 1);
+    for (const [key, shiftKey] of shortcuts) {
+      assert.equal((await press(td, key, { ctrlKey: true, shiftKey })).defaultPrevented, true);
+    }
+    assert.deepEqual(copied, ["Beta"]);
+    assert.equal(pending.length, 1);
+    await React.act(async () => pending[0].resolve(successfulWrite()));
+    const undo = new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true });
+    const lateCopy = new dom.window.KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true });
+    await React.act(async () => { td.dispatchEvent(undo); td.dispatchEvent(lateCopy); });
+    assert.equal(undo.defaultPrevented, true);
+    assert.equal(lateCopy.defaultPrevented, false);
+    assert.equal(pending.length, 2);
+    for (const [key, shiftKey] of shortcuts) {
+      assert.equal((await press(td, key, { metaKey: true, shiftKey })).defaultPrevented, false);
+    }
+    assert.deepEqual(copied, ["Beta"]);
+    assert.equal(pending.length, 2);
+    await React.act(async () => pending[1].resolve(successfulWrite()));
+    assert.equal(refreshes, 2);
+    assert.deepEqual(pending.map(({ init }) => JSON.parse(init.body).value), ["Q", "Beta"]);
+    assert.equal((await press(td, "c", { metaKey: true })).defaultPrevented, true);
+    assert.deepEqual(copied, ["Beta", "Beta"]);
+  } finally {
+    await ui.cleanup();
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
 });
