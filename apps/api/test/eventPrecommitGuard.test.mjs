@@ -109,27 +109,65 @@ test("MIG-0652 U02 precommit T05: D1 batch failure compensates after confirmed R
   assert.deepEqual(f.calls, ["r2.read", "r2.write", "r2.read", "d1.commit", "compensate"]);
 });
 
-test("MIG-0652 U02 precommit T06: rollback failure never hides D1 error or leaks provider text", async () => {
-  const original = new Error("D1 conflict");
+test("MIG-0652 U02 precommit T06: failed compensation and warning sink preserve precommit and D1 errors", async () => {
+  const precommitError = new Error("R2 precommit conflict");
+  const d1Error = new Error("D1 conflict");
   const rollback = new Error("secret_token_from_R2");
-  const f = fixture();
+  const warningError = new Error("secret diagnostic sink");
   const warnings = [];
   const priorWarn = console.warn;
-  console.warn = (...args) => warnings.push(args.join(" "));
+  console.warn = (...args) => {
+    warnings.push(args.join(" "));
+    throw warningError;
+  };
   try {
+    const precommit = fixture({ readError: precommitError });
+    let precommitCompensations = 0;
     await assert.rejects(
       runEventWriteBehindVisibilityFence({
-        eventId: "e6", fenceToken: "vf6", visibilityHost: f.visibilityHost,
-        commit: async () => { throw original; },
-        compensateOnFailure: async () => { throw rollback; },
+        eventId: "e6-precommit", fenceToken: "vf6-precommit",
+        visibilityHost: precommit.visibilityHost,
+        commit: async () => { precommit.calls.push("d1.commit"); },
+        compensateOnFailure: async () => {
+          precommitCompensations++;
+          precommit.calls.push("compensate");
+          throw rollback;
+        },
       }),
-      (error) => error === original,
+      (error) => error === precommitError,
     );
+    assert.equal(precommitCompensations, 1);
+    assert.deepEqual(precommit.calls, ["r2.read", "compensate"],
+      "failed precommit read must not write R2 or start D1");
+
+    const d1 = fixture();
+    let d1Compensations = 0;
+    await assert.rejects(
+      runEventWriteBehindVisibilityFence({
+        eventId: "e6-d1", fenceToken: "vf6-d1",
+        visibilityHost: d1.visibilityHost,
+        commit: async () => {
+          d1.calls.push("d1.commit");
+          throw d1Error;
+        },
+        compensateOnFailure: async () => {
+          d1Compensations++;
+          d1.calls.push("compensate");
+          throw rollback;
+        },
+      }),
+      (error) => error === d1Error,
+    );
+    assert.equal(d1Compensations, 1);
+    assert.deepEqual(d1.calls, [
+      "r2.read", "r2.write", "r2.read", "d1.commit", "compensate",
+    ], "the failed diagnostic must not trigger extra R2 writes or a second compensation");
   } finally {
     console.warn = priorWarn;
   }
-  assert.deepEqual(warnings, ["[MIG-0652] event visibility compensation failed"]);
-  assert.ok(!warnings[0].includes("secret_token_from_R2"));
+  assert.deepEqual(warnings, ["[MIG-0652] event visibility compensation failed", "[MIG-0652] event visibility compensation failed"]);
+  assert.ok(warnings.every(message => !message.includes("secret_token_from_R2")));
+  assert.ok(warnings.every(message => !message.includes("secret diagnostic sink")));
 });
 
 test("MIG-0652 U02 precommit T07: no-token D1 failure does not compensate a nonexistent fence", async () => {

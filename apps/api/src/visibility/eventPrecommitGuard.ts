@@ -57,7 +57,12 @@ export async function runEventWriteBehindVisibilityFence<T>(args: {
       await args.compensateOnFailure();
     } catch {
       // Never log provider messages, credentials or the user-supplied event ID.
-      console.warn("[MIG-0652] event visibility compensation failed");
+      // A diagnostic sink is also best-effort and must not replace the original failure.
+      try {
+        console.warn("[MIG-0652] event visibility compensation failed");
+      } catch {
+        // Preserve the precommit/D1 error even when the logging provider is unavailable.
+      }
     }
   };
 
