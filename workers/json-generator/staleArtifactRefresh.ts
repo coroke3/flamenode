@@ -59,22 +59,55 @@ async function listStaleDetailTargets(
 ): Promise<StaticRebuildEnqueueTarget[]> {
   const placeholders = DETAIL_TARGET_TYPES.map(() => "?").join(", ");
   const result = await env.DB.prepare(
-    `SELECT a.target_type AS target_type, a.target_id AS target_id
-       FROM static_artifacts AS a
-      WHERE a.deleted_at IS NULL
-        AND a.target_type IN (${placeholders})
-      GROUP BY a.target_type, a.target_id
-     HAVING MIN(a.generated_at) < ?
-        AND NOT EXISTS (
-          SELECT 1 FROM static_rebuild_queue AS q
-           WHERE q.target_type = a.target_type
-             AND q.target_id = a.target_id
-             AND (
-               q.status IN ('pending', 'processing')
-               OR (q.status = 'failed' AND q.updated_at > ?)
-             )
-        )
-      ORDER BY MIN(a.generated_at) ASC
+    `WITH stale_detail AS (
+       SELECT a.target_type AS original_type,
+              a.target_id AS target_id,
+              MIN(a.generated_at) AS oldest_generated_at
+         FROM static_artifacts AS a
+        WHERE a.deleted_at IS NULL
+          AND a.target_type IN (${placeholders})
+        GROUP BY a.target_type, a.target_id
+       HAVING MIN(a.generated_at) < ?
+     ), required_target AS (
+       SELECT CASE
+                WHEN s.original_type = 'event' AND EXISTS (
+                  SELECT 1 FROM events AS e
+                   WHERE e.id = s.target_id
+                     AND e.visibility_status = 'public'
+                ) AND NOT EXISTS (
+                  SELECT 1 FROM static_artifacts AS section
+                   WHERE section.target_type = 'event_base'
+                     AND section.target_id = s.target_id
+                     AND section.deleted_at IS NULL
+                ) THEN 'event_base'
+                WHEN s.original_type = 'event' AND EXISTS (
+                  SELECT 1 FROM events AS e
+                   WHERE e.id = s.target_id
+                     AND e.visibility_status = 'public'
+                ) AND NOT EXISTS (
+                  SELECT 1 FROM static_artifacts AS section
+                   WHERE section.target_type = 'event_slots'
+                     AND section.target_id = s.target_id
+                     AND section.deleted_at IS NULL
+                ) THEN 'event_slots'
+                ELSE s.original_type
+              END AS target_type,
+              s.target_id AS target_id,
+              s.oldest_generated_at AS oldest_generated_at
+         FROM stale_detail AS s
+     )
+     SELECT r.target_type AS target_type, r.target_id AS target_id
+       FROM required_target AS r
+      WHERE NOT EXISTS (
+        SELECT 1 FROM static_rebuild_queue AS q
+         WHERE q.target_type = r.target_type
+           AND q.target_id = r.target_id
+           AND (
+             q.status IN ('pending', 'processing')
+             OR (q.status = 'failed' AND q.updated_at > ?)
+           )
+      )
+      ORDER BY r.oldest_generated_at ASC
       LIMIT ?`,
   )
     .bind(

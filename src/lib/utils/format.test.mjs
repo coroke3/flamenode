@@ -134,3 +134,13 @@ test("formatCount: 100万以上", () => {
   assert.equal(formatCount(1_500_000), "1.5M");
   assert.equal(formatCount(15_000_000), "15M");
 });
+
+test("formatCount: invalid negative aggregates never appear as negative public counts", () => {
+  for (const value of [-0.1, -1, -999, -1000, -1_000_000]) {
+    assert.equal(formatCount(value), "0", String(value));
+  }
+  // Preserve existing valid zero/positive formatting, including fractional metrics.
+  assert.equal(formatCount(0), "0");
+  assert.equal(formatCount(0.5), "0.5");
+  assert.equal(formatCount(1500), "1.5k");
+});

@@ -163,7 +163,11 @@ test("MIG-0511 T08: projected public X icon map entries equal CURRENT users_inde
   assert.ok(expected, "CURRENT users_index should produce public icon map rows");
   const snapshot = byKey.get(PUBLIC_X_ICON_MAP_KEY);
   assert.ok(snapshot, "MIG-0511 icon map snapshot must be produced");
-  assert.deepEqual(snapshot.payload.entries, expected.entries, "public icon resolution must match CURRENT projection");
+  assert.deepEqual(
+    snapshot.payload.entries,
+    JSON.parse(JSON.stringify(expected.entries)),
+    "public icon snapshot must match the serialized CURRENT projection, not its internal prototype",
+  );
   assert.ok(produced.result.manifest.allowedKeys.includes(PUBLIC_X_ICON_MAP_KEY));
 });
 
@@ -688,6 +692,7 @@ test("SEC-558: snapshot producer read-only fence rejects CTE DML before SQLite c
     "SELECT load_extension('not-installed')",
     'SELECT "load_extension"("not-installed")',
     "SELECT writefile('x', 'y')",
+    "SELECT eval('DELETE FROM guard_rows')",
   ];
   for (const sql of unsafe) {
     assert.throws(() => guarded.prepare(sql), /only a single SELECT\/WITH/ , sql);

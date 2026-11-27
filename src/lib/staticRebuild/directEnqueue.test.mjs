@@ -412,4 +412,67 @@ if (runTestWithTsx(import.meta.url)) {
     );
     assert.equal(harness.getWakeSendCalls(), 1);
   });
+
+  test("SEC-787: provider Error getters cannot reject direct enqueue or reveal secrets", async () => {
+    let messageReads = 0;
+    let nameReads = 0;
+    const providerError = new Error("SEC787_PRIVATE_D1_SQL_AND_TOKEN");
+    Object.defineProperty(providerError, "message", {
+      get() {
+        messageReads += 1;
+        throw new Error("SEC787_MESSAGE_GETTER_POISONED");
+      },
+    });
+    Object.defineProperty(providerError, "name", {
+      get() {
+        nameReads += 1;
+        throw new Error("SEC787_NAME_GETTER_POISONED");
+      },
+    });
+
+    const result = await directEnqueueStaticRebuild(
+      { select() { throw providerError; } },
+      BASE_INPUT,
+      PUBLIC_MISS_CAUSE,
+    );
+    assert.deepEqual(result, {
+      ok: false,
+      errorCode: "direct_enqueue_failed",
+      message: "static rebuild enqueue failed",
+      rebuildState: "failed",
+    });
+    assert.equal(messageReads, 0);
+    assert.equal(nameReads, 0);
+    assert.doesNotMatch(JSON.stringify(result), /SEC787_/);
+  });
+
+  test("SEC-787: hostile non-Error and ordinary provider failures return fixed DTO", async () => {
+    let coercions = 0;
+    const hostile = {
+      toString() {
+        coercions += 1;
+        throw new Error("SEC787_TOSTRING_POISONED");
+      },
+      [Symbol.toPrimitive]() {
+        coercions += 1;
+        throw new Error("SEC787_TOPRIMITIVE_POISONED");
+      },
+    };
+    for (const providerError of [hostile, new Error("SEC787_ACCOUNT_QUERY_PRIVATE")]) {
+      const result = await directEnqueueStaticRebuild(
+        { select() { throw providerError; } },
+        BASE_INPUT,
+        PUBLIC_MISS_CAUSE,
+      );
+      assert.deepEqual(result, {
+        ok: false,
+        errorCode: "direct_enqueue_failed",
+        message: "static rebuild enqueue failed",
+        rebuildState: "failed",
+      });
+      assert.doesNotMatch(JSON.stringify(result), /SEC787_/);
+    }
+    assert.equal(coercions, 0);
+  });
+
 }
