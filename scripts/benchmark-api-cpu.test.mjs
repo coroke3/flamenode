@@ -6,8 +6,17 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, runCold, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, summarize, workerSource,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, runCold, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
+
+async function loadReplayWorker(generation, script, body) {
+  const source = workerSource(generation, script).replace(/^import .*;$/gm, "");
+  const stubs = `const app = { fetch: async (request, env) => {
+    const pathname = new URL(request.url).pathname;
+    ${body}
+  } }; const sessionMiddleware = () => async () => {};`;
+  return (await import("data:text/javascript," + encodeURIComponent(stubs + source))).default;
+}
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {
   assert.equal(returnedRows("first", null), 0);
@@ -33,6 +42,8 @@ test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query s
     agg: aggregate(samples, { runtimeClass: "S2", resolutionMs: 0.1 }),
   }], { digits: 2, label: "test only" });
   assert.match(md, /D1 returned rows proxy \(min\/med\/max\/total\)/);
+  assert.match(md, /D1 execution requests/);
+  assert.match(md, /not completed physical DB operations or billed D1 usage/);
   assert.match(md, /\| 1\/3\/4\/8 \|/);
 });
 
@@ -339,13 +350,8 @@ test("MIG-0639: generated cold worker seeds replay before its first fetch and co
     identity: replayIdentity(["d1.first", "SELECT", [], []]),
     result: { id: "cold-result" },
   }];
-  const make = async (generation) => {
-    const source = workerSource(generation, coldScript)
-      .replace(/^import .*;$/gm, "");
-    const stubs = `const app = { fetch: async (request, env) => Response.json(await env.DB.prepare('SELECT').first()) };
-      const sessionMiddleware = () => async () => {};`;
-    return (await import("data:text/javascript," + encodeURIComponent(stubs + source))).default;
-  };
+  const make = (generation) => loadReplayWorker(generation, coldScript,
+    'return Response.json(await env.DB.prepare("SELECT").first());');
   try {
     const fresh = await make("fresh-first");
     assert.deepEqual(globalThis.__flamenodeBenchIdentity, { build: "fresh-first", requests: 0 });
@@ -1160,22 +1166,251 @@ test("MIG-0639: typed replay identity distinguishes SQL, bind types, methods, ba
   assert.throws(() => identity("x".repeat(262145)), /too large/);
 });
 
+test("MIG-0639: result snapshots preserve D1 column order, BLOBs, data keys and full large fixtures", () => {
+  const row = Object.create(null);
+  row.z = 2;
+  row.a = 1;
+  row.blob = new Uint8Array([0, 1, 255]);
+  row.__proto__ = { data: true };
+  const shared = { value: 7 };
+  const value = {
+    row, left: shared, right: shared,
+    slots: Array.from({ length: 6000 }, (_, i) => ({ id: i })),
+    members: Array.from({ length: 500 }, (_, i) => Array.from({ length: 100 }, (_, j) => i * 100 + j)),
+  };
+  const snapshot = snapshotReplayResult(value);
+  assert.deepEqual(Object.keys(snapshot.row), ["z", "a", "blob", "__proto__"]);
+  assert.equal(Object.getPrototypeOf(snapshot.row), Object.prototype);
+  assert.equal(Object.hasOwn(snapshot.row, "__proto__"), true);
+  assert.deepEqual(snapshot.row.__proto__, { data: true });
+  assert.deepEqual(snapshot.row.blob, [0, 1, 255]);
+  assert.notEqual(snapshot.left, snapshot.right, "shared acyclic objects are copied as JSON data");
+  assert.equal(snapshot.slots.length, 6000);
+  assert.equal(snapshot.slots[5999].id, 5999);
+  assert.equal(snapshot.members.length, 500);
+  assert.equal(snapshot.members[499].length, 100);
+  assert.equal(snapshot.members[499][99], 49999);
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot)), snapshot);
+  row.blob[0] = 9;
+  shared.value = 8;
+  assert.deepEqual(snapshot.row.blob, [0, 1, 255]);
+  assert.equal(snapshot.left.value, 7);
+});
+
+test("MIG-0639: result snapshots reject lossy values without calling getters or toJSON", () => {
+  let accessorCalls = 0;
+  const accessor = Object.defineProperty({}, "value", { enumerable: true, get() { accessorCalls += 1; return 1; } });
+  const arrayAccessor = Object.defineProperty([1], "0", { enumerable: true, get() { accessorCalls += 1; return 1; } });
+  const toJSON = { toJSON() { accessorCalls += 1; return {}; } };
+  const cyclic = {};
+  cyclic.self = cyclic;
+  const invalid = [
+    NaN, Infinity, -Infinity, -0, undefined, 1n, Symbol("x"), () => {},
+    new Date(0), new Map(), new ArrayBuffer(1), new Int16Array([1]),
+    { value: undefined }, { value: -0 }, accessor, arrayAccessor, toJSON,
+    Array(2), Object.assign([1], { extra: 2 }), cyclic,
+    { [Symbol("key")]: 1 }, Object.defineProperty({}, "hidden", { value: 1 }),
+  ];
+  for (const value of invalid) assert.throws(() => snapshotReplayResult(value), /replay result/);
+  assert.equal(accessorCalls, 0);
+  for (const script of [null, {}, [{}], [{ identity: "x" }], [{ identity: 1, result: null }]]) {
+    assert.throws(() => snapshotReplayScript(script), /invalid replay script/);
+  }
+});
+
+test("MIG-0639: real SQLite recording and warm/cold replay agree on requests, rows and normalized results", async () => {
+  const { app } = await import("../apps/api/src/app.ts");
+  const originalAppFetch = app.fetch;
+  const originalFetch = globalThis.fetch;
+  const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const target = await createInprocTarget({ adminToken: "result-codec" });
+  const probe = async (request, env) => {
+    env.DB.prepare("SELECT ? AS unused").bind(41).bind(42);
+    env.DB.prepare("SELECT 0 AS unused");
+    if (new URL(request.url).pathname === "/unused") return Response.json({ unused: true });
+    const originalStatement = env.DB.prepare('SELECT ? AS z, 1 AS a, X\'0001ff\' AS blob, 7 AS "__proto__"').bind(1);
+    const statement = originalStatement.bind(2);
+    const first = await statement.first();
+    const keys = Object.keys(first);
+    const plain = Object.getPrototypeOf(first) === Object.prototype;
+    const ownProto = Object.hasOwn(first, "__proto__");
+    first.blob[0] = 9;
+    const second = await originalStatement.first();
+    const all = await statement.all();
+    const run = await statement.run();
+    const raw = await statement.raw();
+    const unbound = await env.DB.prepare("SELECT 9 AS n").first();
+    const batch = await env.DB.batch([env.DB.prepare("SELECT 9 AS n"), env.DB.prepare("SELECT ? AS n").bind(10)]);
+    const slots = await env.DB.prepare("WITH RECURSIVE slots(id) AS (SELECT 1 UNION ALL SELECT id + 1 FROM slots WHERE id < 6000) SELECT id FROM slots").all();
+    return Response.json({ keys, plain, ownProto, first, second, all, run, raw, unbound, batch, slots });
+  };
+  let nodeResult;
+  app.fetch = async (...args) => {
+    const response = await probe(...args);
+    nodeResult = await response.clone().json();
+    return response;
+  };
+  try {
+    const unused = await target.recordForReplay({ method: "GET", path: "/unused" });
+    assert.deepEqual(unused, { script: [], status: 200, d1: 0, d1RowsReturned: 0, d1PerQueryRows: [] });
+    const spec = { method: "GET", path: "/probe" };
+    const recorded = await target.recordForReplay(spec);
+    assert.equal(recorded.d1, 9, "each execution call counts once; two submitted batch entries count twice");
+    assert.equal(recorded.d1RowsReturned, 6008);
+    assert.deepEqual(recorded.d1PerQueryRows, [1, 1, 1, 1, 1, 1, 1, 1, 6000]);
+    assert.deepEqual(nodeResult.keys, ["z", "a", "blob", "__proto__"]);
+    assert.equal(nodeResult.plain, true);
+    assert.equal(nodeResult.ownProto, true);
+    assert.equal(nodeResult.first.z, 2, "rebind replaces parameters without executing or mutating the original statement");
+    assert.equal(nodeResult.second.z, 1, "the earlier bound statement retains its own parameters");
+    assert.deepEqual(nodeResult.first.blob, [9, 1, 255]);
+    assert.deepEqual(recorded.script[0].result.blob, [0, 1, 255], "app mutations cannot rewrite recorded results");
+    assert.deepEqual(nodeResult.raw, [[2, 1, [0, 1, 255], 7]]);
+    assert.equal(nodeResult.slots.results.length, 6000);
+    const expected = nodeResult;
+    const direct = await target.run(spec);
+    assert.equal(direct.d1, 9);
+    assert.deepEqual(nodeResult, expected, "non-recording Node calls receive the same normalized results");
+    for (const mode of ["warm", "cold"]) {
+      const worker = await loadReplayWorker(`results-${mode}`, mode === "cold" ? recorded.script : null,
+        `return (${probe.toString()})(request, env);`);
+      if (mode === "warm") {
+        const registration = await worker.fetch(new Request("http://bench.local/__bench/script", {
+          method: "POST", body: JSON.stringify({ id: mode, script: recorded.script }),
+        }), {}, {});
+        assert.equal(registration.status, 200);
+      }
+      const response = await worker.fetch(new Request("http://bench.local/probe", {
+        headers: { "x-bench-script": mode },
+      }), {}, {});
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), expected, `${mode} replay preserves the complete Node-observed value`);
+      assert.equal(replayEvidenceMismatch(recorded, response.headers), false);
+      assert.equal(response.headers.get("x-bench-request"), mode === "cold" ? "1" : "2");
+    }
+  } finally {
+    app.fetch = originalAppFetch;
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+    await target.close();
+  }
+});
+
+test("MIG-0639: recording latches result errors caught by the app and counts failed execution requests", async () => {
+  const { app } = await import("../apps/api/src/app.ts");
+  const originalAppFetch = app.fetch;
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  const target = await createInprocTarget({ adminToken: "result-errors" });
+  let injected, caught = 0;
+  app.fetch = async (request, env) => {
+    try {
+      if (new URL(request.url).pathname === "/batch") {
+        await env.DB.batch([env.DB.prepare("SELECT missing_column"), env.DB.prepare("SELECT 1")]);
+      } else {
+        await env.DB.prepare(new URL(request.url).pathname === "/nonfinite" ? "SELECT 1e999 AS value" : "SELECT injected_result").first();
+      }
+    } catch { caught += 1; }
+    return new Response("caught errors remain an HTTP 200");
+  };
+  try {
+    await assert.rejects(target.recordForReplay({ method: "GET", path: "/nonfinite" }), /recording invalid/);
+    assert.equal(caught, 1, "actual SQLite Infinity is rejected before the app can observe a changed value");
+    const batch = await target.run({ method: "GET", path: "/batch" });
+    assert.equal(batch.status, 200);
+    assert.equal(batch.d1, 2, "both submitted batch requests count even when the first one fails");
+    await assert.rejects(target.recordForReplay({ method: "GET", path: "/batch" }), /recording invalid/);
+    DatabaseSync.prototype.prepare = function (sql) {
+      return sql === "SELECT injected_result" ? { get: () => injected } : originalPrepare.call(this, sql);
+    };
+    const cyclic = {};
+    cyclic.self = cyclic;
+    const accessor = Object.defineProperty({}, "value", { enumerable: true, get() { throw new Error("getter must not run"); } });
+    for (injected of [{ value: undefined }, { value: 1n }, { value: -0 }, new Date(0), Array(2), cyclic, accessor]) {
+      const before = caught;
+      await assert.rejects(target.recordForReplay({ method: "GET", path: "/injected" }), /recording invalid/);
+      assert.equal(caught, before + 1);
+    }
+    const failed = await target.run({ method: "GET", path: "/injected" });
+    assert.equal(failed.d1, 1);
+  } finally {
+    app.fetch = originalAppFetch;
+    DatabaseSync.prototype.prepare = originalPrepare;
+    await target.close();
+  }
+});
+
+test("MIG-0639: simulator counts execution attempts and submitted batch entries, never prepare/bind", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const native = new Set();
+  const prepare = (sql) => {
+    const result = (value) => { if (sql === "fail") throw new Error("simulated D1 failure"); return value; };
+    const statement = {
+      sql, bind: () => prepare(sql),
+      first: async () => result({ id: 1 }), all: async () => result({ results: [{ id: 1 }] }),
+      run: async () => result({ results: [] }), raw: async () => result([[1]]),
+    };
+    native.add(statement);
+    return statement;
+  };
+  const env = { DB: { prepare, batch: async (list) => {
+    assert.ok(list.every((statement) => native.has(statement)), "batch receives native prepared statements");
+    if (list.some((statement) => statement.sql === "fail")) throw new Error("simulated batch failure");
+    return list.map(() => ({ results: [{ id: 1 }] }));
+  } } };
+  try {
+    const worker = await loadReplayWorker("sim-request-count", null, `
+      env.DB.prepare("unused").bind(1).bind(2);
+      if (pathname === "/unused") return new Response("unused");
+      const bound = env.DB.prepare("query").bind(1).bind(2);
+      await bound.first(); await bound.first(); await bound.all(); await bound.run(); await bound.raw();
+      await env.DB.batch([env.DB.prepare("unbound"), bound]);
+      try { await env.DB.prepare("fail").first(); } catch {}
+      try { await env.DB.batch([env.DB.prepare("fail"), bound]); } catch {}
+      return new Response("done");`);
+    const unused = await worker.fetch(new Request("http://bench.local/unused"), env, {});
+    assert.equal(unused.headers.get("x-bench-d1"), "0");
+    const response = await worker.fetch(new Request("http://bench.local/probe"), env, {});
+    assert.equal(response.headers.get("x-bench-d1"), "10");
+    assert.equal(response.headers.get("x-bench-returned-rows"), "6");
+    assert.equal(response.headers.get("x-bench-query-rows"), "1,1,1,0,1,1,1");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+  }
+});
+
+test("MIG-0639: registration rejects non-finite JSON results and malformed scripts before replay", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  try {
+    const worker = await loadReplayWorker("invalid-registration", null, 'return new Response("must not run");');
+    for (const script of ['[{"identity":"x","result":1e999}]', '[{"identity":"x","result":-0}]', '[{"identity":"x"}]', 'null']) {
+      const response = await worker.fetch(new Request("http://bench.local/__bench/script", {
+        method: "POST", body: `{"id":"bad","script":${script}}`,
+      }), {}, {});
+      assert.equal(response.status, 400);
+      const missing = await worker.fetch(new Request("http://bench.local/probe", {
+        headers: { "x-bench-script": "bad" },
+      }), {}, {});
+      assert.equal(missing.status, 503);
+      assert.equal(missing.headers.get("x-bench-replay-complete"), "0");
+    }
+    assert.throws(() => workerSource("invalid-cold", [{ identity: "x", result: Infinity }]), /replay result/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+  }
+});
+
 test("MIG-0639: generated workerd replay fails closed on wrong SQL, exhausted/trailing scripts, R2 key/bytes, batch order and missing scripts", async () => {
   const originalFetch = globalThis.fetch;
   const originalIdentity = globalThis.__flamenodeBenchIdentity;
-  const load = async (generation, script, body) => {
-    const source = workerSource(generation, script).replace(/^import .*;$/gm, "");
-    const stubs = [
-      "const app = { fetch: async (request, env) => {",
-      "const pathname = new URL(request.url).pathname;",
-      "try {",
-      body,
-      "} catch { return new Response('caught'); }",
-      "} };",
-      "const sessionMiddleware = () => async () => {};",
-    ].join("\n");
-    return (await import("data:text/javascript," + encodeURIComponent(stubs + source))).default;
-  };
+  const load = (generation, script, body) => loadReplayWorker(generation, script,
+    `try { ${body} } catch { return new Response("caught"); }`);
   const invoke = (worker, pathname, scriptId = "cold") =>
     worker.fetch(new Request("http://bench.local" + pathname, { headers: { "x-bench-script": scriptId } }), {}, {});
   const sqlEntry = {
@@ -1188,6 +1423,7 @@ test("MIG-0639: generated workerd replay fails closed on wrong SQL, exhausted/tr
     const wrongSql = await invoke(wrongSqlWorker, "/probe");
     assert.equal(wrongSql.status, 200);
     assert.equal(wrongSql.headers.get("x-bench-replay-complete"), "0");
+    assert.equal(wrongSql.headers.get("x-bench-d1"), "1", "failed calls still count as execution requests");
 
     const exhaustedWorker = await load("exhausted", [],
       'if (pathname === "/probe") { await env.DB.prepare("SELECT expected").bind(1).first(); return new Response("unexpected"); } return new Response("unused");');
@@ -1207,6 +1443,7 @@ test("MIG-0639: generated workerd replay fails closed on wrong SQL, exhausted/tr
       'if (pathname === "/probe") { await env.DB.batch([env.DB.prepare("SELECT one").bind(1), env.DB.prepare("SELECT two").bind(2)]); return new Response("unexpected"); } return new Response("unused");');
     const batch = await invoke(batchWorker, "/probe");
     assert.equal(batch.headers.get("x-bench-replay-complete"), "0");
+    assert.equal(batch.headers.get("x-bench-d1"), "2");
 
     const r2Entry = {
       identity: replayIdentity(["r2.get", "expected-key", [{ type: "json" }]]),

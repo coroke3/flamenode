@@ -278,7 +278,7 @@ export function formatMs(v, digits) {
 
 export function renderMarkdown(results, { digits, label }) {
   const lines = [
-    `| scenario | class | kind | n | p50 | p95 | p99 | max (ms) | D1 stmts | D1 returned rows proxy (min/med/max/total) | bytes | unexpected status |`,
+    `| scenario | class | kind | n | p50 | p95 | p99 | max (ms) | D1 execution requests | D1 returned rows proxy (min/med/max/total) | bytes | unexpected status |`,
     `| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |`,
   ];
   for (const r of results) {
@@ -289,7 +289,8 @@ export function renderMarkdown(results, { digits, label }) {
       );
     }
   }
-  lines.push("", "Cold provenance: fresh local processes attest their generation and first request ordinal; inspect JSON agg.kinds.cold.coldStarts and verifiedIsolateStarts. Unverified post-reload targets remain diagnostics. LOCAL evidence does not replace separately authorized nonproduction Worker/tail cpuTime under ZERO_1102 §5.", "");
+  lines.push("", "D1 execution requests (JSON maxD1Statements): prepare/bind/rebind count 0; each first/all/run/raw attempt counts 1; batch counts submitted entries, including failed batches. These are not completed physical DB operations or billed D1 usage. Returned rows are an application-visible proxy, not D1 rows_read.", "");
+  lines.push("Cold provenance: fresh local processes attest their generation and first request ordinal; inspect JSON agg.kinds.cold.coldStarts and verifiedIsolateStarts. Unverified post-reload targets remain diagnostics. LOCAL evidence does not replace separately authorized nonproduction Worker/tail cpuTime under ZERO_1102 §5.", "");
   lines.push(`Warm-only budget verdict by max (${label}); cold shown separately (never judged):`, "");
   lines.push(`| scenario | class | budget | warm max (ms) | cold max (ms) | verdict |`, `| --- | --- | --- | ---: | ---: | --- |`);
   for (const r of results) {
@@ -1311,6 +1312,62 @@ export function replayIdentity(value) {
   return JSON.stringify(walk(value, 0));
 }
 
+// SQLite BLOBs are Uint8Array; Miniflare D1 exposes them as number[]. Preserve
+// result column order (Drizzle maps Object.keys(row)), and reject JSON losses
+// instead of silently changing what the Node app and the replay app observe.
+// Results may contain 6000 slots / 500 x 100 members: identity limits do not apply.
+export function snapshotReplayResult(value) {
+  const active = new Set();
+  const walk = (v) => {
+    if (v === null || typeof v === "string" || typeof v === "boolean") return v;
+    if (typeof v === "number" && Number.isFinite(v) && !Object.is(v, -0)) return v;
+    if (typeof v !== "object") throw new Error("bench unsupported replay result value");
+    const proto = Object.getPrototypeOf(v);
+    if (proto === Uint8Array.prototype) {
+      const bytes = Array.from(Uint8Array.prototype.values.call(v));
+      if (Reflect.ownKeys(v).length !== bytes.length) throw new Error("bench unsupported replay result bytes");
+      return bytes;
+    }
+    if (active.has(v)) throw new Error("bench cyclic replay result");
+    active.add(v);
+    try {
+      const own = (key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(v, key);
+        if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, "value")) {
+          throw new Error("bench unsupported replay result property");
+        }
+        return walk(descriptor.value);
+      };
+      if (Array.isArray(v)) {
+        if (proto !== Array.prototype || Reflect.ownKeys(v).length !== v.length + 1) {
+          throw new Error("bench unsupported replay result array");
+        }
+        return Array.from({ length: v.length }, (_, i) => own(String(i)));
+      }
+      if (proto !== Object.prototype && proto !== null) throw new Error("bench unsupported replay result object");
+      const out = {};
+      for (const key of Reflect.ownKeys(v)) {
+        if (typeof key !== "string") throw new Error("bench unsupported replay result key");
+        Object.defineProperty(out, key, { value: own(key), enumerable: true, writable: true, configurable: true });
+      }
+      return out;
+    } finally {
+      active.delete(v);
+    }
+  };
+  return walk(value);
+}
+
+// Validate once at recording/registration, never on every measured next().
+export function snapshotReplayScript(script) {
+  const snapshot = snapshotReplayResult(script);
+  if (!Array.isArray(snapshot) || snapshot.some((entry) => !entry || !Object.hasOwn(entry, "identity") ||
+      typeof entry.identity !== "string" || !Object.hasOwn(entry, "result"))) {
+    throw new Error("bench invalid replay script");
+  }
+  return snapshot;
+}
+
 // ------------------------------------------------------------ target: inproc
 export async function createInprocTarget(plan) {
   const { DatabaseSync } = await import("node:sqlite");
@@ -1333,53 +1390,63 @@ export async function createInprocTarget(plan) {
   let rec = null;
   let recInvalid = false;
   const trace = (kind, args, execute) => {
-    if (!rec) return execute();
     try {
-      const identity = replayIdentity([kind, ...args]);
-      const result = execute();
+      const identity = rec ? replayIdentity([kind, ...args]) : null;
+      const result = snapshotReplayResult(execute());
+      if (!rec) return result;
       rec.push({ identity, result });
-      return result;
+      // The app may mutate a returned row; retain an independent recorded value.
+      return JSON.parse(JSON.stringify(result));
     } catch (error) {
-      recInvalid = true;
+      if (rec) recInvalid = true;
       throw error;
     }
   };
   const make = (sql, params) => ({
     _sql: sql, _params: params,
-    first: async (...args) => trace("d1.first", [sql, params, args], () =>
-      countD1("first", sqlite.prepare(sql).get(...params) ?? null)),
-    all: async (...args) => trace("d1.all", [sql, params, args], () =>
-      countD1("all", { results: sqlite.prepare(sql).all(...params) })),
-    run: async (...args) => trace("d1.run", [sql, params, args], () =>
-      countD1("run", { results: sqlite.prepare(sql).all(...params) })),
+    bind: (...values) => make(sql, values),
+    first: async (...args) => {
+      stmts += 1;
+      return trace("d1.first", [sql, params, args], () =>
+        countD1("first", sqlite.prepare(sql).get(...params) ?? null));
+    },
+    all: async (...args) => {
+      stmts += 1;
+      return trace("d1.all", [sql, params, args], () =>
+        countD1("all", { results: sqlite.prepare(sql).all(...params) }));
+    },
+    run: async (...args) => {
+      stmts += 1;
+      return trace("d1.run", [sql, params, args], () =>
+        countD1("run", { results: sqlite.prepare(sql).all(...params) }));
+    },
     // drizzle's D1 driver reads rows as arrays through raw().
-    raw: async (...args) => trace("d1.raw", [sql, params, args], () => {
-      const st = sqlite.prepare(sql);
-      st.setReturnArrays(true);
-      try { return countD1("raw", st.all(...params)); }
-      finally { st.setReturnArrays(false); }
-    }),
+    raw: async (...args) => {
+      stmts += 1;
+      return trace("d1.raw", [sql, params, args], () => {
+        const st = sqlite.prepare(sql);
+        st.setReturnArrays(true);
+        try { return countD1("raw", st.all(...params)); }
+        finally { st.setReturnArrays(false); }
+      });
+    },
   });
   const db = {
-    // D1 allows first()/all()/run()/raw() straight on prepare() (no bind); count a statement on either path.
-    prepare: (sql) => {
-      const unbound = make(sql, []);
-      const counted = (fn) => (...a) => { stmts += 1; return fn(...a); };
-      return {
-        bind: (...params) => { stmts += 1; return make(sql, params); },
-        _sql: sql, _params: [],
-        first: counted(unbound.first), all: counted(unbound.all), run: counted(unbound.run), raw: counted(unbound.raw),
-      };
+    // Execution requests, including failed calls, not prepares/binds, completed
+    // physical DB operations, transaction-control statements or billed D1 usage.
+    prepare: (sql) => make(sql, []),
+    batch: async (list) => {
+      stmts += list.length;
+      return trace("d1.batch", [list.map((s) => [s._sql, s._params])], () => {
+        sqlite.exec("BEGIN");
+        try {
+          const out = list.map((s) => ({ results: sqlite.prepare(s._sql).all(...s._params) }));
+          sqlite.exec("COMMIT");
+          for (const result of out) countD1("all", result);
+          return out;
+        } catch (e) { sqlite.exec("ROLLBACK"); throw e; }
+      });
     },
-    batch: async (list) => trace("d1.batch", [list.map((s) => [s._sql, s._params])], () => {
-      sqlite.exec("BEGIN");
-      try {
-        const out = list.map((s) => ({ results: sqlite.prepare(s._sql).all(...s._params) }));
-        sqlite.exec("COMMIT");
-        for (const result of out) countD1("all", result);
-        return out;
-      } catch (e) { sqlite.exec("ROLLBACK"); throw e; }
-    }),
   };
   const r2Objects = new Map();
   const bucket = {
@@ -1445,7 +1512,7 @@ export async function createInprocTarget(plan) {
     name: "inproc",
     resolutionMs: 0.001,
     digits: 3,
-    cpuSource: "performance.now() wall delta around app.fetch (Node/V8, node:sqlite as D1; WALL-TIME PROXY, not workerd CPU)",
+    cpuSource: "performance.now() wall delta around app.fetch (Node/V8, node:sqlite as D1 plus result normalization/counting; WALL-TIME PROXY, not workerd CPU)",
     supportsCold: false,
     setR2: async (body, key = STATS_KEY) => { if (body == null) r2Objects.delete(key); else r2Objects.set(key, body); },
     exec,
@@ -1472,6 +1539,7 @@ export async function createInprocTarget(plan) {
 export function workerSource(buildId, coldScript = null) {
   const appUrl = APP_PATH.replaceAll("\\", "/");
   const sessionUrl = SESSION_PATH.replaceAll("\\", "/");
+  const coldScriptJson = coldScript === null ? null : JSON.stringify(snapshotReplayScript(coldScript));
   return `// generated by scripts/benchmark-api-cpu.mjs (bench-only wrapper; not part of apps/api)
 import { app } from ${JSON.stringify(appUrl)};
 import { sessionMiddleware } from ${JSON.stringify(sessionUrl)};
@@ -1480,13 +1548,18 @@ const identity = globalThis.__flamenodeBenchIdentity = { build: BUILD_ID, reques
 const sm = sessionMiddleware();
 const STATS_KEY = ${JSON.stringify(STATS_KEY)};
 const EVENT_EXPORT_CACHE_URLS = ${JSON.stringify(eventExportCacheRequestUrls())};
-const scripts = new Map(${JSON.stringify(coldScript === null ? [] : [["cold", coldScript]])});
+const scripts = new Map();
+const coldScriptJson = ${JSON.stringify(coldScriptJson)};
+// Parse JSON data, not a JS object literal: own "__proto__" columns remain data.
+if (coldScriptJson !== null) scripts.set("cold", snapshotReplayScript(JSON.parse(coldScriptJson)));
 const BENCH_PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
 // Bench-only upstream image stub: media proxy scenarios must never reach the network.
 globalThis.fetch = async () => new Response(BENCH_PNG, { headers: { "content-type": "image/png" } });
 
-// Replay env: D1/R2 return the results recorded by the in-process run, in call order,
-// so the measured CPU is the app's own work without wrangler's local D1/R2 simulator.
+// Replay env: D1/R2 return the results recorded by the in-process run, in call order.
+// The request profile includes app code and replay identity/counting bookkeeping,
+// without wrangler's local D1/R2 simulator. Registration is outside warm profiling;
+// cold parsing/validation runs at module initialization, which may precede profiling.
 function returnedRows(mode, value) {
   if (mode === "first") return value == null ? 0 : 1;
   if (mode === "raw") return Array.isArray(value) ? value.length : 0;
@@ -1512,6 +1585,8 @@ function rowCounters() {
 }
 
 ${replayIdentity.toString()}
+${snapshotReplayResult.toString()}
+${snapshotReplayScript.toString()}
 
 function replayEnv(env, script) {
   let k = 0, statements = 0, mismatch = false;
@@ -1531,15 +1606,15 @@ function replayEnv(env, script) {
       throw error;
     }
   };
-  const make = (sql, params, bound) => {
+  const make = (sql, params) => {
     const query = (mode) => async (...args) => {
-      if (!bound) statements += 1;
+      statements += 1;
       return rows.observe(mode, next("d1." + mode, [sql, params, args]));
     };
     return {
       _sql: sql,
       _params: params,
-      ...(!bound ? { bind: (...values) => { statements += 1; return make(sql, values, true); } } : {}),
+      bind: (...values) => make(sql, values),
       first: query("first"),
       all: query("all"),
       run: query("run"),
@@ -1549,8 +1624,9 @@ function replayEnv(env, script) {
   return [{
     ...env,
     DB: {
-      prepare: (sql) => make(sql, [], false),
+      prepare: (sql) => make(sql, []),
       batch: async (list) => {
+        statements += list.length;
         const result = next("d1.batch", [list.map((statement) => [statement._sql, statement._params])]);
         if (!Array.isArray(result) || result.length !== list.length) {
           mismatch = true;
@@ -1581,20 +1657,24 @@ function counting(env) {
   let n = 0;
   const rows = rowCounters();
   const DB = env.DB;
-  const wrap = (statement) => ({
-    // D1.batch must receive native prepared objects, not the counting wrappers.
-    _benchInner: statement,
-    bind: (...params) => wrap(statement.bind(...params)),
-    first: async (...args) => rows.observe("first", await statement.first(...args)),
-    all: async (...args) => rows.observe("all", await statement.all(...args)),
-    run: async (...args) => rows.observe("run", await statement.run(...args)),
-    raw: async (...args) => rows.observe("raw", await statement.raw(...args)),
-  });
+  const wrap = (statement) => {
+    const query = (mode) => async (...args) => {
+      n += 1;
+      return rows.observe(mode, await statement[mode](...args));
+    };
+    return {
+      // D1.batch must receive native prepared objects, not the counting wrappers.
+      _benchInner: statement,
+      bind: (...params) => wrap(statement.bind(...params)),
+      first: query("first"), all: query("all"), run: query("run"), raw: query("raw"),
+    };
+  };
   const wrapped = {
     ...env,
     DB: {
-      prepare: (sql) => { n += 1; return wrap(DB.prepare(sql)); },
+      prepare: (sql) => wrap(DB.prepare(sql)),
       batch: async (list) => {
+        n += list.length;
         const result = await DB.batch(list.map((stmt) => stmt._benchInner ?? stmt));
         for (const entry of result) rows.observe("all", entry);
         return result;
@@ -1652,9 +1732,14 @@ async function handleRequest(request, env, ctx) {
       return new Response("ok");
     }
     if (url.pathname === "/__bench/script") {
-      const { id, script } = await request.json();
-      scripts.set(id, script);
-      return new Response("ok");
+      try {
+        const { id, script } = await request.json();
+        if (typeof id !== "string") throw new Error("bench invalid replay script id");
+        scripts.set(id, snapshotReplayScript(script));
+        return new Response("ok");
+      } catch {
+        return new Response("bench invalid replay registration", { status: 400 });
+      }
     }
     const sid = request.headers.get("x-bench-script");
     const script = sid !== null ? scripts.get(sid) : null;
@@ -1868,7 +1953,7 @@ async function createWranglerTarget(plan, opts) {
     if (rec && firstBuild !== null) headers["x-bench-script"] = "cold";
     else if (rec) {
       const id = `s${(scriptSeq += 1)}`;
-      const reg = await post("/__bench/script", json({ id, script: rec.script }));
+      const reg = await post("/__bench/script", json({ id, script: snapshotReplayScript(rec.script) }));
       if (!reg.ok) throw new Error(`script upload failed: ${reg.status}`);
       headers["x-bench-script"] = id;
     }
@@ -2079,7 +2164,7 @@ export function createReplayTarget(inproc, wr) {
     // quantum can grow from 0.1ms to several ms while requests run; keep the
     // *live* workerd resolution so warm BASELINE and budget checks fail closed.
     get resolutionMs() { return wr.resolutionMs; },
-    cpuSource: wr.cpuSource.replace("local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)", "D1/R2 stubbed with typed results recorded from in-process node:sqlite (--d1 replay); workerd CPU includes app code and benchmark replay-identity validation; local D1/R2 simulator and real D1 round-trip excluded"),
+    cpuSource: wr.cpuSource.replace("local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)", "D1/R2 stubbed with normalized results recorded from in-process node:sqlite (--d1 replay); request profiling includes app code plus replay identity/row/count bookkeeping; Node recording and warm registration excluded; cold JSON parsing/validation runs at module initialization and may precede profiling; local D1/R2 simulator and real D1 round-trip excluded"),
     exec: inproc.exec,
     setR2: inproc.setR2,
     record: (spec) => inproc.recordForReplay(spec),
