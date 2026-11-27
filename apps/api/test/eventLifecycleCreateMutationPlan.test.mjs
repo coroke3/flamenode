@@ -1942,3 +1942,147 @@ test("MIG-0652 U03k SQLite: conflicting stage insert aborts all new question/aud
   assert.equal(f.sqlite.prepare("SELECT id FROM event_custom_questions").get().id, "preexisting_conflict");
   assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
 });
+
+/** U03l: all four stage operation families in ONE audited SQLite transaction. */
+async function stageMixedSqliteFixture() {
+  const f = await stageDeleteSqliteFixture();
+  const updatedBefore = {
+    ...f.before, id: "stage_question_keep", question_key: "stage_permission_keep",
+    label: "Before update", updated_at: now - 5,
+  };
+  insert(f.sqlite, "event_custom_questions", updatedBefore);
+  const updatedNext = {
+    ...updatedBefore, id: "regenerated_keep", label: "After update",
+    updated_at: now + 1,
+  };
+  const insertedRows = ["new_a", "new_b"].map((key, index) => ({
+    ...updatedBefore, id: "stage_insert_" + index,
+    question_key: "stage_permission_" + key, label: "Added " + index,
+    sort_order: index + 2, created_at: now, updated_at: now,
+  }));
+  const { and, eq, or } = await import("drizzle-orm");
+  const { planStageQuestionMutationSteps, projectStageQuestionUpdate } =
+    await import("@flamenode/server-core/event/updatePayload");
+  const stage = planStageQuestionMutationSteps({
+    existing: [f.before, updatedBefore],
+    next: [insertedRows[0], updatedNext, insertedRows[1]],
+    deletedAnswers: f.answers,
+  });
+  assert.equal(stage.ok, true);
+  assert.deepEqual(stage.operations.map(step => step.kind),
+    ["delete_answers", "delete_questions", "update_question", "insert_questions"]);
+  assert.deepEqual(stage.expectedMutationChanges, [2, 1, 1, 2]);
+  const statements = [];
+  const audits = [];
+  for (const step of stage.operations) {
+    if (step.kind === "delete_answers") {
+      statements.push(f.db.delete(schema.videoCustomAnswers).where(or(
+        ...step.rows.map(row => and(
+          eq(schema.videoCustomAnswers.video_id, row.video_id),
+          eq(schema.videoCustomAnswers.event_id, row.event_id),
+          eq(schema.videoCustomAnswers.question_id, row.question_id),
+          eq(schema.videoCustomAnswers.updated_at, row.updated_at),
+        )),
+      )));
+      audits.push(...step.rows.map(row => ({
+        table_name: "video_custom_answers",
+        target_id: row.video_id + ":" + row.event_id + ":" + row.question_id,
+        operation: "DELETE", before: row, after: null,
+        actor_user_id: "u_admin",
+        context: "event-update:removed-stage-question-answer",
+        retention_class: "normal", strict: true,
+      })));
+    } else if (step.kind === "delete_questions") {
+      statements.push(f.db.delete(schema.eventCustomQuestions).where(or(
+        ...step.rows.map(row => and(
+          eq(schema.eventCustomQuestions.id, row.id),
+          eq(schema.eventCustomQuestions.updated_at, row.updated_at),
+        )),
+      )));
+      audits.push(...step.rows.map(row => ({
+        table_name: "event_custom_questions", target_id: row.id,
+        operation: "DELETE", before: row, after: null,
+        actor_user_id: "u_admin", context: "event-update:removed-stage-question",
+        retention_class: "normal", strict: true,
+      })));
+    } else if (step.kind === "update_question") {
+      const projected = projectStageQuestionUpdate(step.before, step.replacement);
+      statements.push(f.db.update(schema.eventCustomQuestions)
+        .set(projected.updateValues).where(and(
+          eq(schema.eventCustomQuestions.id, projected.cas.id),
+          eq(schema.eventCustomQuestions.updated_at, projected.cas.updated_at),
+        )));
+      audits.push({
+        table_name: "event_custom_questions", target_id: step.before.id,
+        operation: "UPDATE", before: step.before, after: projected.after,
+        actor_user_id: "u_admin", context: "event-update:stage-question",
+        retention_class: "normal", strict: true,
+      });
+    } else {
+      statements.push(f.db.insert(schema.eventCustomQuestions).values(step.rows));
+      audits.push(...step.rows.map(row => ({
+        table_name: "event_custom_questions", target_id: row.id,
+        operation: "CREATE", before: null, after: row,
+        actor_user_id: "u_admin", context: "event-update:stage-question",
+        retention_class: "normal", strict: true,
+      })));
+    }
+  }
+  return { ...f, updatedBefore, insertedRows, stage, mutationPlan: {
+    mutationStatements: statements, expectedMutationChanges: stage.expectedMutationChanges,
+    audits,
+  }};
+}
+
+test("MIG-0652 U03l SQLite: mixed answer delete/question delete/update/insert and six audits commit once", async () => {
+  const f = await stageMixedSqliteFixture();
+  const ids = await mutateWithAudit(f.db, f.mutationPlan);
+  assert.equal(ids.length, 6);
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 0);
+  assert.deepEqual(
+    f.sqlite.prepare("SELECT id FROM event_custom_questions ORDER BY id").all().map(row => row.id),
+    ["stage_insert_0", "stage_insert_1", "stage_question_keep"]);
+  assert.equal(f.sqlite.prepare("SELECT label FROM event_custom_questions WHERE id = 'stage_question_keep'").get().label, "After update");
+  assert.deepEqual(f.sqlite.prepare("SELECT operation FROM audit_logs ORDER BY rowid").all().map(row => row.operation),
+    ["DELETE", "DELETE", "DELETE", "UPDATE", "CREATE", "CREATE"]);
+  assert.ok(f.d1.stats.maxBinds <= 100);
+});
+
+test("MIG-0652 U03l SQLite: stale mixed question update aborts earlier answer/question deletes and later inserts", async () => {
+  const f = await stageMixedSqliteFixture();
+  f.sqlite.prepare("UPDATE event_custom_questions SET updated_at = updated_at + 1 WHERE id = ?")
+    .run(f.updatedBefore.id);
+  await assert.rejects(mutateWithAudit(f.db, f.mutationPlan));
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 2);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 2);
+  assert.equal(f.sqlite.prepare("SELECT label FROM event_custom_questions WHERE id = ?")
+    .get(f.updatedBefore.id).label, "Before update");
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
+
+test("MIG-0652 U03l SQLite: late insert collision rolls back all preceding mixed mutations", async () => {
+  const f = await stageMixedSqliteFixture();
+  insert(f.sqlite, "event_custom_questions", {
+    ...f.insertedRows[1], id: "preexisting_mix_collision",
+  });
+  await assert.rejects(mutateWithAudit(f.db, f.mutationPlan));
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 2);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 3);
+  assert.equal(f.sqlite.prepare("SELECT label FROM event_custom_questions WHERE id = ?")
+    .get(f.updatedBefore.id).label, "Before update");
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
+
+test("MIG-0652 U03l SQLite: late mixed strict-audit failure rolls back all four operation families", async () => {
+  const f = await stageMixedSqliteFixture();
+  f.sqlite.exec("CREATE TRIGGER reject_stage_mixed_audit BEFORE INSERT ON audit_logs " +
+    "BEGIN SELECT RAISE(ABORT, 'stage-mixed-audit-denied'); END");
+  await assert.rejects(mutateWithAudit(f.db, f.mutationPlan), /stage-mixed-audit-denied/);
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 2);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 2);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
