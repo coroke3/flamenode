@@ -19,6 +19,7 @@ for (const key of ["window", "document", "navigator", "HTMLElement", "Node"]) {
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const React = await import("react");
 const { createRoot } = await import("react-dom/client");
+const ReactDOM = await import("react-dom");
 const jsxRuntime = await import("react/jsx-runtime");
 
 const source = await readFile(
@@ -52,6 +53,7 @@ function SlotGrid(props) {
 const visual = () => null;
 const mocks = {
   "react": React,
+  "react-dom": ReactDOM,
   "react/jsx-runtime": jsxRuntime,
   "next/link": ({ children, href }) => React.createElement("a", { href }, children),
   "@/components/ui/Icon": { Icon: visual },
@@ -98,6 +100,11 @@ const overlay = name => ({
 const response = value => ({
   ok: true, json: async () => value,
 });
+const pageTransition = (type, persisted) => {
+  const event = new dom.window.Event(type);
+  Object.defineProperty(event, "persisted", { value: persisted });
+  return event;
+};
 const read = container => JSON.parse(container.querySelector("#grid").textContent);
 async function settle(fn) {
   await React.act(async () => {
@@ -106,6 +113,68 @@ async function settle(fn) {
     await Promise.resolve();
   });
 }
+
+test("mounted overlay: persisted pagehide synchronously retires the current private receipt", async () => {
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(container);
+  const root = createRoot(container);
+  const start = requests.length;
+  try {
+    await settle(() => root.render(React.createElement(EventSlotsViewerPanel, props("a"))));
+    await settle(() => requests[start].resolve(response(overlay("private A"))));
+    assert.equal(read(container).slots[0].name, "private A");
+
+    await settle(() => {
+      dom.window.dispatchEvent(pageTransition("pagehide", false));
+      assert.equal(read(container).slots[0].name, "private A",
+        "a non-persisted pagehide is not a BFCache snapshot");
+    });
+    await settle(() => {
+      dom.window.dispatchEvent(pageTransition("pagehide", true));
+      assert.equal(read(container).slots[0].owned, false,
+        "flushSync must retire private ownership before pagehide returns");
+      assert.equal(read(container).slots[0].name, null);
+    });
+    assert.equal(requests.length, start + 1, "pagehide must not start a replacement GET");
+
+    await settle(() => dom.window.dispatchEvent(pageTransition("pageshow", true)));
+    assert.equal(requests.length, start + 2, "restoration starts one fresh GET");
+    await settle(() => requests[start + 1].resolve(response(overlay("restored A"))));
+    assert.equal(read(container).slots[0].name, "restored A");
+  } finally {
+    await settle(() => root.unmount());
+    container.remove();
+  }
+});
+
+test("mounted overlay: persisted pagehide fences a pending private GET before restoration", async () => {
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(container);
+  const root = createRoot(container);
+  const start = requests.length;
+  const assertEmpty = () => {
+    assert.equal(read(container).slots[0].owned, false);
+    assert.equal(read(container).slots[0].name, null);
+  };
+  try {
+    await settle(() => root.render(React.createElement(EventSlotsViewerPanel, props("a"))));
+    assert.equal(requests.length, start + 1);
+    await settle(() => {
+      dom.window.dispatchEvent(pageTransition("pagehide", true));
+      assertEmpty();
+    });
+    await settle(() => requests[start].resolve(response(overlay("stale pre-freeze A"))));
+    assertEmpty();
+
+    await settle(() => dom.window.dispatchEvent(pageTransition("pageshow", true)));
+    assert.equal(requests.length, start + 2);
+    await settle(() => requests[start + 1].resolve(response(overlay("fresh restored A"))));
+    assert.equal(read(container).slots[0].name, "fresh restored A");
+  } finally {
+    await settle(() => root.unmount());
+    container.remove();
+  }
+});
 
 test("mounted overlay: reused baseSlots event change retires delayed old GET and resets key-bound grid", async () => {
   const container = dom.window.document.createElement("div");

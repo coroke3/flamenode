@@ -154,6 +154,11 @@ function persistedPageShow() {
   Object.defineProperty(event, "persisted", { value: true });
   window.dispatchEvent(event);
 }
+function persistedPageHide() {
+  const event = new dom.window.Event("pagehide");
+  Object.defineProperty(event, "persisted", { value: true });
+  window.dispatchEvent(event);
+}
 function assertNoPrivateActionUi(container) {
   assert.equal(container.querySelector('[role="dialog"], [role="alertdialog"]'), null);
   assert.equal(document.querySelector('[role="menu"]'), null);
@@ -162,7 +167,7 @@ function assertNoPrivateActionUi(container) {
 }
 
 for (const name of ["reserve", "release", "extend", "merge"]) {
-  for (const boundary of ["bfcache-null-X", "active-X", "event-unmount", "current-control"]) {
+  for (const boundary of ["bfcache-null-X", "pagehide-null-X", "active-X", "event-unmount", "current-control"]) {
     test("SEC-921 mounted SlotGrid: " + name + " / " + boundary, async () => {
       const container = document.createElement("div");
       document.body.appendChild(container);
@@ -193,11 +198,16 @@ for (const name of ["reserve", "release", "extend", "merge"]) {
           // transition, not the actual Auth.js or browser navigation itself.
           await settle(() => {
             if (boundary === "bfcache-null-X") persistedPageShow();
+            if (boundary === "pagehide-null-X") {
+              persistedPageHide();
+              assertNoPrivateActionUi(container);
+            }
             if (boundary === "active-X") window.dispatchEvent(new dom.window.Event(activeXChanged));
             root.render(h(SlotGrid, {
               key: boundary === "event-unmount" ? "b" : "a",
               ...props(freshSlots(), boundary === "active-X" ? "new-x" : null),
             }));
+            if (boundary === "pagehide-null-X") persistedPageShow();
           });
           assertNoPrivateActionUi(container);
           // Exercise success, guard rejection and transport rejection across
@@ -230,7 +240,7 @@ for (const name of ["reserve", "release", "extend", "merge"]) {
 // These cases keep the actual private UI OPEN, with no server action at all,
 // and prove that even an unchanged null-X prop is not enough to retain it.
 for (const name of ["reserve", "release", "extend", "merge", "menu"]) {
-  for (const boundary of ["bfcache-null-X", "active-event-null-X", "event-unmount"]) {
+  for (const boundary of ["bfcache-null-X", "pagehide-null-X", "active-event-null-X", "event-unmount"]) {
     test("SEC-921 mounted SlotGrid: unsubmitted private UI " + name + " / " + boundary, async () => {
       const container = document.createElement("div");
       document.body.appendChild(container);
@@ -270,6 +280,12 @@ for (const name of ["reserve", "release", "extend", "merge", "menu"]) {
 
         await settle(() => window.dispatchEvent(new dom.window.Event("pageshow")));
         assert.ok(openUi(), "ordinary pageshow is not a restoration and must not close the UI");
+        await settle(() => {
+          const event = new dom.window.Event("pagehide");
+          Object.defineProperty(event, "persisted", { value: false });
+          window.dispatchEvent(event);
+        });
+        assert.ok(openUi(), "a non-persisted pagehide must not alter a normal navigation");
         if (name === "reserve") {
           assert.equal(container.querySelector("#reserve-display-name").value, "previous viewer private name");
         }
@@ -279,6 +295,10 @@ for (const name of ["reserve", "release", "extend", "merge", "menu"]) {
         // overlay arrives, not rely on the effect for viewerXId or slots.
         await settle(() => {
           if (boundary === "bfcache-null-X") persistedPageShow();
+          else if (boundary === "pagehide-null-X") {
+            persistedPageHide();
+            assert.equal(openUi(), null, "persisted pagehide must synchronously remove the open private UI");
+          }
           else if (boundary === "active-event-null-X") window.dispatchEvent(new dom.window.Event(activeXChanged));
           else root.render(h(SlotGrid, { key: "b", ...props(freshSlots()) }));
         });
@@ -287,9 +307,12 @@ for (const name of ["reserve", "release", "extend", "merge", "menu"]) {
         assert.equal(container.querySelector('[role="dialog"], [role="alertdialog"]'), null);
         assert.equal(requests.length, requestStart, "retirement must not submit an old action");
 
-        await settle(() => root.render(h(SlotGrid, {
-          key: boundary === "event-unmount" ? "b" : "a", ...props(freshSlots()),
-        })));
+        await settle(() => {
+          root.render(h(SlotGrid, {
+            key: boundary === "event-unmount" ? "b" : "a", ...props(freshSlots()),
+          }));
+          if (boundary === "pagehide-null-X") persistedPageShow();
+        });
         assertNoPrivateActionUi(container);
         await click(container.querySelector('button[aria-label="next-free を確保"]'), "new null-X viewer reserve");
         assert.equal(container.querySelector("#reserve-display-name").value, "", "no inherited draft");

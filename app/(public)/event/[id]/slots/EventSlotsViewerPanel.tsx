@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { flushSync } from "react-dom";
 import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
 import { SlotGrid, type SlotRow } from "@/components/event/SlotGrid";
@@ -238,22 +239,32 @@ export function EventSlotsViewerPanel({
   }, [eventId, refreshNonce, baseSlots, overlayScope]);
 
   React.useEffect(() => {
-    const refresh = () => {
+    const retirePrivateOverlay = () => {
       overlayGeneration.current += 1;
-      // Active X切替直後に旧Xの本人枠・表示名を残さない。
+      // Retire private ownership and stale GET receipts before a BFCache snapshot.
       setOverlayState({ value: EMPTY_OVERLAY, eventId: null, baseSlots: null, scope: null });
       setLoading(true);
+    };
+    const refresh = () => {
+      retirePrivateOverlay();
       setRefreshNonce((value) => value + 1);
     };
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      // React state alone may not commit before the browser freezes this document.
+      flushSync(retirePrivateOverlay);
+    };
     // A BFCache restore can revive a page whose authenticated cookie changed
-    // while it was suspended. Retire its old private overlay before re-fetching.
+    // while it was suspended. Retire again before requesting fresh viewer data.
     const onPageShow = (event: PageTransitionEvent) => {
       if (event.persisted) refresh();
     };
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+    window.addEventListener("pagehide", onPageHide);
     window.addEventListener("pageshow", onPageShow);
     return () => {
       window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+      window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("pageshow", onPageShow);
     };
   }, []);

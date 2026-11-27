@@ -113,11 +113,20 @@ test("BFCache復元時は旧viewer overlay・予約ダイアログの両方を�
   const slotGrid = await readFile(new URL("../../components/event/SlotGrid.tsx", import.meta.url), "utf8");
   // pageshow fires for a fresh page too; only history-cache restoration retires
   // already displayed private state and starts a fresh credentialed overlay GET.
+  assert.ok(panel.includes('import { flushSync } from "react-dom"'));
+  assert.ok(panel.includes('const onPageHide = (event: PageTransitionEvent) => {'));
+  assert.ok(panel.includes('flushSync(retirePrivateOverlay)'));
+  assert.ok(panel.includes('window.addEventListener("pagehide", onPageHide)'));
+  assert.ok(panel.includes('window.removeEventListener("pagehide", onPageHide)'));
   assert.match(panel, /const onPageShow = \(event: PageTransitionEvent\) => \{/);
   assert.match(panel, /if \(event\.persisted\) refresh\(\)/);
   assert.match(panel, /window\.addEventListener\("pageshow", onPageShow\)/);
   assert.match(panel, /window\.removeEventListener\("pageshow", onPageShow\)/);
   assert.match(panel, /const refresh = \(\) => \{[\s\S]*?setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null, scope: null \}\);[\s\S]*?setRefreshNonce\(/);
+  assert.ok(slotGrid.includes('import { flushSync } from "react-dom"'));
+  assert.ok(slotGrid.includes('if (event.persisted) flushSync(clearViewerPrivateUi)'));
+  assert.ok(slotGrid.includes('window.addEventListener("pagehide", onPageHide)'));
+  assert.ok(slotGrid.includes('window.removeEventListener("pagehide", onPageHide)'));
   assert.match(slotGrid, /if \(event\.persisted\) clearViewerPrivateUi\(\)/);
   assert.match(slotGrid, /window\.addEventListener\("pageshow", onPageShow\)/);
   assert.match(slotGrid, /window\.removeEventListener\("pageshow", onPageShow\)/);
@@ -130,7 +139,7 @@ test("old viewer GET is retired synchronously before Active-X or BFCache effect 
   assert.match(panel, /const overlayGeneration = React\.useRef\(0\)/);
   assert.match(panel, /const requestGeneration = overlayGeneration\.current/);
   assert.match(panel, /if \(!active \|\| !value \|\| requestGeneration !== overlayGeneration\.current\) return/);
-  assert.match(panel, /const refresh = \(\) => \{\s*overlayGeneration\.current \+= 1/);
+  assert.match(panel, /const retirePrivateOverlay = \(\) => \{\s*overlayGeneration\.current \+= 1/);
   assert.match(panel, /if \(event\.persisted\) refresh\(\)/);
   assert.match(panel, /window\.addEventListener\(ACTIVE_X_CHANGED_EVENT, refresh\)/);
 });
