@@ -86,6 +86,15 @@ test("SA-090/091 T08: review authorization allows admin and explicitly authorize
   });
   assert.deepEqual(authorizedStaff, { allowed: true, actorXUserId: "x_staff" });
 
+  // The approved X that granted permission need not be the user's selected
+  // Active X. Do not silently use this authorization evidence as the legacy
+  // CURRENT audit actor, which comes from writeGuard.activeXId instead.
+  const differentSelectedX = await authorizeXIdLinkRequestReview(db, {
+    id: "u_staff", role: "user", active_x_user_id: "x_other",
+  });
+  assert.deepEqual(differentSelectedX, { allowed: true, actorXUserId: "x_staff" });
+  assert.notEqual(differentSelectedX.actorXUserId, "x_other");
+
   const unauthorizedStaff = await authorizeXIdLinkRequestReview(db, {
     id: "u_other", role: "user", active_x_user_id: "x_other",
   });
