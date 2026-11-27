@@ -132,6 +132,12 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
   const overflowCount = JSON.stringify(Array(101).fill("reserve_slot"));
   const cases = [
     ["normal", null, null, null],
+    ["economy", null, null, null],
+    ["read_only", null, null, null],
+    ["static_only", null, null, null],
+    ["NORMAL", null, null, null],
+    ["x".repeat(100000), null, null, null],
+    ["x".repeat(100000), malformed, now + 3600, allow],
     ["normal", JSON.stringify(WRITE_FEATURE_KEYS), null, null],
     ["normal", padded, null, null],
     ["normal", duplicates, null, null],
@@ -156,6 +162,9 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
     const expected = evaluateCostGuardCore({ feature, operationMode, disabledFeaturesJson, exceptionUntil, exceptionFeaturesJson, now });
     const state = await loadTosState(app.db, "admin-1", undefined, true);
     assert.ok(state?.cost_guard_settings);
+    const expectedMode = operationMode == null || ["normal", "economy", "read_only", "static_only", "maintenance"].includes(operationMode) ? operationMode : "!";
+    assert.equal(state.cost_guard_settings.operation_mode, expectedMode);
+    assert.ok(Buffer.byteLength(state.cost_guard_settings.operation_mode ?? "") <= 11);
     for (const value of [state.cost_guard_settings.disabled_features_json, state.cost_guard_settings.cost_guard_exception_features_json]) {
       assert.ok(Buffer.byteLength(value ?? "") <= maxBytes);
     }

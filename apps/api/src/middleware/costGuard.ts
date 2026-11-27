@@ -43,6 +43,21 @@ export function compactWriteFeatureListSql(
   END`;
 }
 
+// Only these canonical mode strings are consumed by CostGuard. Preserve
+// recognized values and NULL; an unknown value remains non-allowing without
+// copying arbitrary TEXT/BLOB bytes into the request-local receipt. Compare
+// bytes explicitly so a case-insensitive collation cannot widen acceptance.
+export const COMPACT_COST_GUARD_MODE_SQL = `CASE
+  WHEN s."operation_mode" IS NULL THEN NULL
+  WHEN typeof(s."operation_mode")='text'
+    AND CAST(s."operation_mode" AS BLOB) IN (
+      CAST('normal' AS BLOB), CAST('economy' AS BLOB),
+      CAST('read_only' AS BLOB), CAST('static_only' AS BLOB),
+      CAST('maintenance' AS BLOB)
+    ) THEN s."operation_mode"
+  ELSE '!'
+END`;
+
 export type CostGuardRow = AuditSettingsRow & {
   operation_mode: string | null;
   disabled_features_json: string | null;
@@ -69,7 +84,7 @@ export async function loadCostGuardSettingsRow(
 ): Promise<CostGuardRow | null> {
   return db
     .prepare(
-      `SELECT operation_mode,
+      `SELECT ${COMPACT_COST_GUARD_MODE_SQL} AS operation_mode,
               ${compactWriteFeatureListSql('s."disabled_features_json"')} AS disabled_features_json,
               cost_guard_exception_until,
               ${compactWriteFeatureListSql('s."cost_guard_exception_features_json"')} AS cost_guard_exception_features_json,

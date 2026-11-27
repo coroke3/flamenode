@@ -33,6 +33,7 @@ import { actorSnapshotFromRow, type ActorSnapshotRow } from "@flamenode/server-c
 import { MAX_SINGLE_ROW_LIMIT } from "../lib/limits.ts";
 import {
   compactWriteFeatureListSql,
+  COMPACT_COST_GUARD_MODE_SQL,
   evaluateCostGuardSnapshot,
   loadCostGuardSettingsRow,
   type CostGuardRow,
@@ -251,7 +252,7 @@ export async function loadTosState(
   const costGuardColumns = includeCostGuardSettings
     ? `,
          s."id" AS cost_guard_settings_id,
-         s."operation_mode" AS cost_guard_operation_mode,
+         ${COMPACT_COST_GUARD_MODE_SQL} AS cost_guard_operation_mode,
          ${compactWriteFeatureListSql('s."disabled_features_json"')} AS cost_guard_disabled_features_json,
          s."cost_guard_exception_until" AS cost_guard_exception_until,
          ${compactWriteFeatureListSql('s."cost_guard_exception_features_json"')} AS cost_guard_exception_features_json,
