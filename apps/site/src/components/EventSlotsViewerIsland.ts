@@ -210,9 +210,16 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
     value: SlotViewerOverlayDto;
     baseSlots: readonly T[] | null;
     eventId: string | null;
-  }>({ value: EMPTY_OVERLAY, baseSlots: null, eventId: null });
+    scope: object | null;
+  }>({ value: EMPTY_OVERLAY, baseSlots: null, eventId: null, scope: null });
   const [loading, setLoading] = React.useState(true);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
+  // A distinct request receipt is required even if A→B→A reuses the same
+  // event ID and public array. Raw overlay fields must not revive while pending.
+  const overlayScope = React.useMemo(
+    () => ({ eventId, baseSlots, refreshNonce }),
+    [eventId, baseSlots, refreshNonce],
+  );
   const generation = React.useRef(0);
   const committedMutationScope = React.useRef<{ scope: object } | null>(null);
 
@@ -220,7 +227,7 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
     // Invalidate in-flight responses synchronously, even before React's effect cleanup.
     generation.current += 1;
     committedMutationScope.current = null;
-    setOverlayState({ value: EMPTY_OVERLAY, baseSlots: null, eventId: null });
+    setOverlayState({ value: EMPTY_OVERLAY, baseSlots: null, eventId: null, scope: null });
     setLoading(true);
     setRefreshNonce((n) => n + 1);
   }, []);
@@ -229,28 +236,37 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
     let active = true;
     const controller = new AbortController();
     const capturedBase = baseSlots;
+    const requestScope = overlayScope;
     const requestGeneration = ++generation.current;
     setLoading(true);
     void fetchSlotViewerOverlay(eventId, controller.signal).then((value) => {
       if (!active || generation.current !== requestGeneration) return;
-      setOverlayState({ value, baseSlots: capturedBase, eventId });
+      setOverlayState({ value, baseSlots: capturedBase, eventId, scope: requestScope });
       setLoading(false);
     });
     return () => {
       active = false;
       controller.abort();
     };
-  }, [eventId, baseSlots, refreshNonce]);
+  }, [eventId, baseSlots, refreshNonce, overlayScope]);
 
   React.useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) refresh();
+    };
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, [refresh]);
 
-  // Do not associate an old viewer response with a newly refreshed public slot array.
-  const current = overlayState.baseSlots === baseSlots && overlayState.eventId === eventId;
-  const value = current ? overlayState.value : EMPTY_OVERLAY;
+  // Bind the receipt to the distinct request as well as event and public data.
+  const current = overlayState.scope === overlayScope &&
+    overlayState.baseSlots === baseSlots && overlayState.eventId === eventId;
   const pending = loading || !current;
+  const value = pending ? EMPTY_OVERLAY : overlayState.value;
   const canManageOwnSlots = !pending && value.loggedIn &&
     !value.authUnavailable && !value.isBanned && !value.needsTermsAcceptance;
   const canTakeSlot = canManageOwnSlots && value.canReserveSlot &&

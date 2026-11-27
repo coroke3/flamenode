@@ -884,6 +884,167 @@ test("U03h mutation receipts expire on Active X refresh, public snapshot, event 
   }
 });
 
+
+test("U03i RH-014 overlay and mutation receipts cannot revive on pending A-B-A or persisted pageshow", async () => {
+  const React = (await import("react")).default;
+  const { JSDOM } = await import("jsdom");
+  const { useEventSlotsViewer } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const { ACTIVE_X_CHANGED_EVENT } = await import("../src/lib/client/activeXSwitchEvents.ts");
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://flamenode.net/event/e/slots" });
+  const domKeys = ["window", "document", "navigator", "HTMLElement", "Node"];
+  const previousDom = new Map(domKeys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const key of domKeys) {
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: dom.window[key] });
+  }
+  const { createRoot } = await import("react-dom/client");
+  const previousFetch = globalThis.fetch;
+  const previousAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const makeOverlay = label => ({
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: false,
+    operatorOverrideAllowed: false, viewerXId: null, viewerXIdNotice: label,
+    slots: [{ id: "s", viewer_relation: "unassigned", is_owned_by_viewer: true,
+      display_name: label, group_key: "private-" + label }],
+  });
+  const requests = [];
+  globalThis.fetch = async (url, init) => new Promise(resolve => {
+    requests.push({ url, init, resolve });
+  });
+  const original = [{ id: "s", display_name: "public" }];
+  const alternate = [{ id: "s", display_name: "public" }];
+  let baseSlots = original, eventId = "a", snapshot;
+  const frames = [];
+  const Harness = () => {
+    snapshot = useEventSlotsViewer(eventId, baseSlots, true);
+    const view = snapshot;
+    React.useLayoutEffect(() => {
+      frames.push({ eventId, baseSlots, notice: view.overlay.viewerXIdNotice,
+        rawSlots: view.overlay.slots.length, name: view.slots[0].display_name,
+        owned: view.slots[0].is_owned_by_viewer, group: view.slots[0].group_key,
+        take: view.canTakeSlot, manage: view.canManageOwnSlots,
+        receipt: view.captureMutationReceipt() !== null, loading: view.loading });
+    });
+    return React.createElement("div", null, view.overlay.viewerXIdNotice, view.slots[0].display_name);
+  };
+  const root = createRoot(dom.window.document.getElementById("root"));
+  const render = () => React.act(async () => root.render(React.createElement(Harness)));
+  const settle = (request, label) => React.act(async () => {
+    request.resolve({ ok: true, json: async () => makeOverlay(label) });
+    await new Promise(resolve => setTimeout(resolve, 10));
+  });
+  const assertHidden = start => {
+    assert.ok(frames.length > start);
+    for (const frame of frames.slice(start)) {
+      assert.equal(frame.notice, null);
+      assert.equal(frame.rawSlots, 0);
+      assert.equal(frame.name, "public");
+      assert.equal(frame.owned, false);
+      assert.equal(frame.group, null);
+      assert.equal(frame.take, false);
+      assert.equal(frame.manage, false);
+      assert.equal(frame.receipt, false);
+      assert.equal(frame.loading, true);
+    }
+    assert.equal(snapshot.captureMutationReceipt(), null);
+  };
+  const pageShow = persisted => {
+    const event = new dom.window.Event("pageshow");
+    Object.defineProperty(event, "persisted", { value: persisted });
+    dom.window.dispatchEvent(event);
+  };
+  try {
+    await render();
+    assert.equal(requests.length, 1);
+    await settle(requests[0], "old-a");
+    const first = snapshot.captureMutationReceipt();
+    assert.equal(first(), true);
+    assert.equal(snapshot.overlay.viewerXIdNotice, "old-a");
+    // A and B share the very same array; return while B is still pending.
+    let start = frames.length;
+    eventId = "b";
+    await render();
+    assertHidden(start);
+    assert.equal(first(), false);
+    const obsolete = requests[1];
+    start = frames.length;
+    eventId = "a";
+    await render();
+    assertHidden(start);
+    assert.equal(obsolete.init.signal.aborted, true);
+    assert.equal(requests.length, 3);
+    assert.equal(requests[2].url, "/api/events/a/slots/viewer-overlay");
+    await settle(obsolete, "late-b");
+    assertHidden(start);
+    await settle(requests[2], "fresh-a");
+    assert.equal(snapshot.overlay.viewerXIdNotice, "fresh-a");
+    assert.equal(snapshot.slots[0].display_name, "fresh-a");
+    const second = snapshot.captureMutationReceipt();
+    assert.equal(second(), true);
+    assert.equal(first(), false);
+
+    // The same event with a public-array A-B-A transition also retires raw data.
+    start = frames.length;
+    baseSlots = alternate;
+    await render();
+    assertHidden(start);
+    start = frames.length;
+    baseSlots = original;
+    await render();
+    assertHidden(start);
+    assert.equal(requests.length, 5);
+    assert.equal(requests[3].init.signal.aborted, true);
+    await settle(requests[3], "late-array");
+    assertHidden(start);
+    await settle(requests[4], "fresh-array");
+    const third = snapshot.captureMutationReceipt();
+    assert.equal(third(), true);
+    assert.equal(second(), false);
+
+    // Ordinary pageshow is a control; a real persisted signal retires the
+    // null-X viewer receipt synchronously even without a prop change.
+    await React.act(async () => pageShow(false));
+    assert.equal(requests.length, 5);
+    assert.equal(third(), true);
+    assert.equal(snapshot.overlay.viewerXIdNotice, "fresh-array");
+    start = frames.length;
+    await React.act(async () => {
+      pageShow(true);
+      assert.equal(third(), false);
+    });
+    assertHidden(start);
+    assert.equal(requests.length, 6);
+    await settle(requests[5], "new-owner");
+    assert.equal(snapshot.overlay.viewerXIdNotice, "new-owner");
+    const fourth = snapshot.captureMutationReceipt();
+    assert.equal(fourth(), true);
+    start = frames.length;
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+      assert.equal(fourth(), false);
+    });
+    assertHidden(start);
+    assert.equal(requests.length, 7);
+    await settle(requests[6], "new-active");
+    assert.equal(snapshot.overlay.viewerXIdNotice, "new-active");
+    const last = snapshot.captureMutationReceipt();
+    assert.equal(last(), true);
+    await React.act(async () => root.render(null));
+    assert.equal(last(), false);
+    pageShow(true);
+    assert.equal(requests.length, 7);
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of previousDom) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.fetch = previousFetch;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = previousAct;
+    dom.window.close();
+  }
+});
+
 test("U01 SSR / JS-disabled public page contains only a safe notice, never reservation controls", async () => {
   const React = (await import("react")).default;
   const { renderToString } = await import("react-dom/server");
