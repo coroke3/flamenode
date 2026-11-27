@@ -521,7 +521,7 @@ test("U12: forged public-profile flags cannot make malformed X handles into navi
 });
 
 
-test("U12 privacy: a manifest-withdrawn video is absent from stale related semantic/random/reserve cards", { skip: skipUi }, () => {
+test("U12 privacy and navigation: related cards require public targets and use their built canonical routes", { skip: skipUi }, () => {
   const withdrawn = {
     id: "withdrawn-video", title: "非公開へ変更した作品", youtube_video_id: "ZZZZZZZZZ00",
     display_name: "非公開作成者",
@@ -534,35 +534,58 @@ test("U12 privacy: a manifest-withdrawn video is absent from stale related seman
     id: "missing-video", title: "許可一覧にない作品", youtube_video_id: "XXXXXXXXX00",
     display_name: "非公開に戻した作成者",
   };
+  const noYoutube = {
+    id: "related-no-youtube", title: "動画IDを削除した関連作品",
+    youtube_video_id: "AAAAAAAAA01", display_name: "関連作成者",
+  };
+  const stable = {
+    id: "related-stable", title: "変更なしの関連作品",
+    youtube_video_id: "YYYYYYYYY00", display_name: "既存作成者",
+  };
   const r = build([
     ["vid1", payload({ top: {
-      related_videos: [withdrawn, omitted, active],
+      related_videos: [withdrawn, omitted, active, noYoutube, stable],
       related_reserve: [withdrawn, omitted],
       related_random_ids: [withdrawn.id, omitted.id],
       related_random_reserve: [omitted, withdrawn],
     } })],
-    [active.id, payload({
-      video: { id: active.id, title: active.title, youtube_video_id: active.youtube_video_id,
-        creator_display_name: active.display_name, primary_event_id: null },
-      top: { related_videos: [], related_reserve: [], related_random_reserve: [] },
-    })],
+    // The stale alias of active now belongs to stable. The no-YouTube
+    // card's old alias points to the source page itself.
+    ...[[active, "NNNNNNNNN00"], [noYoutube, null], [stable, stable.youtube_video_id]].map(([card, youtubeId]) => [
+      card.id, payload({
+        video: { id: card.id, title: card.title, youtube_video_id: youtubeId,
+          creator_display_name: card.display_name, primary_event_id: null },
+        top: { related_videos: [], related_reserve: [], related_random_reserve: [] },
+      }),
+    ]),
   ], {
     manifestOnlyVideoIds: [withdrawn.id],
     blocked: [keyOf(withdrawn.id)],
   });
   try {
     assert.equal(r.error, null, r.error ?? "");
-    const doc = dom(r, "AAAAAAAAA01/index.html");
-    const related = [...doc.querySelectorAll(".vd-related a")];
-    assert.equal(related.length, 1, "eligible public related item remains");
-    assert.equal(related[0].getAttribute("href"), "/YYYYYYYYY00");
-    assert.match(text(related[0]), /公開中の関連作品/);
-    assert.doesNotMatch(doc.body.textContent, /非公開へ変更した作品|非公開作成者|許可一覧にない作品|非公開に戻した作成者/,
-      "blocked or not-allowed title/creator cannot leak into generated HTML");
-    assert.equal(doc.querySelector('a[href="/ZZZZZZZZZ00"]'), null,
-      "no related-card link may target a deny-listed video");
-    assert.equal(doc.querySelector('a[href="/XXXXXXXXX00"]'), null,
-      "an absent public manifest entry also blocks a stale related target");
+    for (const slug of ["AAAAAAAAA01", "vid1"]) {
+      const doc = dom(r, slug + "/index.html");
+      const related = [...doc.querySelectorAll(".vd-related a")];
+      assert.deepEqual(related.map((card) => card.getAttribute("href")),
+        ["/NNNNNNNNN00", "/related-no-youtube", "/YYYYYYYYY00"],
+        "the verified target's canonical alias, including the internal fallback, wins over stale card aliases");
+      assert.deepEqual(related.map((card) => text(card.querySelector(".fn-row__title"))),
+        [active.title, noYoutube.title, stable.title], "selection and attribution are preserved");
+      assert.deepEqual(related.map((card) => card.querySelector("img")?.getAttribute("src") ?? null),
+        ["/api/youtube-thumbnail/NNNNNNNNN00/mqdefault", null, "/api/youtube-thumbnail/YYYYYYYYY00/mqdefault"]);
+      for (const [index, card] of related.entries()) {
+        const target = dom(r, card.getAttribute("href").slice(1) + "/index.html");
+        assert.equal(text(target.querySelector("main h1")), [active.title, noYoutube.title, stable.title][index],
+          "each link resolves to the same intended entity, never the stale alias owner");
+      }
+      assert.doesNotMatch(doc.body.textContent, /非公開へ変更した作品|非公開作成者|許可一覧にない作品|非公開に戻した作成者/,
+        "blocked or not-allowed title/creator cannot leak into generated HTML");
+      assert.equal(doc.querySelector('a[href="/ZZZZZZZZZ00"]'), null,
+        "no related-card link may target a deny-listed video");
+      assert.equal(doc.querySelector('a[href="/XXXXXXXXX00"]'), null,
+        "an absent public manifest entry also blocks a stale related target");
+    }
   } finally {
     clean(r);
   }

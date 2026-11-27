@@ -45,6 +45,10 @@ export type VideoPage = Readonly<{
   youtubeId: string | null;
 }>;
 
+// Keep the stable related entity IDs only in the build-stage model, not in the
+// serialized VideoDetailData passed to the browser island.
+type PreparedVideoPage = VideoPage & { relatedTargetIds: readonly string[] };
+
 const TONE = { active: "public", published: "public", scheduled: "warning", ended: "draft", private: "draft" } as const;
 
 const PUBLIC_YOUTUBE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"]);
@@ -91,7 +95,7 @@ export function buildVideoPages(
   iconMap: ReadonlyMap<string, PublicXIconEntry> = new Map(),
   relatedAllowedIds: ReadonlySet<string> | null = null,
   allowedEventIds: ReadonlySet<string> | null = null,
-): VideoPage[] {
+): PreparedVideoPage[] {
   const normalized = normalizeVideoDetailForBuild(payload);
   if (!normalized || normalized.video.visibility_status !== "public") throw new VideoPageBuildError(key);
   // Reject a valid-digest snapshot whose entity ID disagrees with its manifest-authorized key.
@@ -223,7 +227,7 @@ export function buildVideoPages(
     image: youtubeId ? youtubeThumbUrl(youtubeId, "maxresdefault") : video.creator_icon_url,
     ogType: "video.other",
   });
-  const page = { canonicalSlug, head, jsonLd, data, videoId: video.id, youtubeId };
+  const page = { canonicalSlug, head, jsonLd, data, videoId: video.id, youtubeId, relatedTargetIds: vm.relatedVideos.map((r) => r.id) };
   // CURRENT answers both the YouTube-id URL and the internal-id URL with the same page; canonical is the first.
   return [{ ...page, slug: canonicalSlug }, ...(canonicalSlug !== video.id ? [{ ...page, slug: video.id }] : [])];
 }
@@ -241,6 +245,29 @@ function publicEventDetail(payload: unknown, expectedId: string): { playlistId: 
   return { playlistId: extractYoutubePlaylistId(typeof row.youtube_playlist_id === "string" ? row.youtube_playlist_id : null) };
 }
 
+/** Resolve links and thumbnails against the actual same-generation target
+ * pages, not stale related-card YouTube aliases. Preserve selection, order,
+ * and visible attribution; no new snapshot reads or request-time lookups. */
+function finalizeRelatedLinks(pages: readonly PreparedVideoPage[]): VideoPage[] {
+  const targets = new Map(pages.filter((page) => page.slug === page.canonicalSlug)
+    .map((page) => [page.videoId, page] as const));
+  return pages.map(({ relatedTargetIds, ...page }) => ({
+    ...page,
+    data: {
+      ...page.data,
+      related: (page.data.related ?? []).flatMap((card, index) => {
+        const target = targets.get(relatedTargetIds[index]);
+        if (!target) return [];
+        return [{
+          ...card,
+          href: `/${target.canonicalSlug}`,
+          thumbnailUrl: youtubeThumbUrl(target.youtubeId, "mqdefault") || null,
+        }];
+      }),
+    },
+  }));
+}
+
 export async function loadVideoPagesForBuild(
   env: Record<string, string | undefined> = process.env,
   now: number = Math.floor(Date.now() / 1000),
@@ -256,7 +283,7 @@ export async function loadVideoPagesForBuild(
     : null;
   const eventAllowedKeys = access ? new Set(access.options.manifest!.allowedKeys) : null;
   const eventBlockedKeys = access ? new Set(access.options.manifest!.blockedKeys) : null;
-  const pages: VideoPage[] = [];
+  const pages: PreparedVideoPage[] = [];
   // Cache only the authorization outcome and playlist ID, not entire event payloads.
   // The same verified detail authorizes visible event labels and optional playlists.
   const eventDetails = new Map<string, { playlistId: string | null } | null>();
@@ -357,5 +384,5 @@ export async function loadVideoPagesForBuild(
     pages.filter((p) => p.slug === p.canonicalSlug).map((p) => ({ kind: "video" as const, id: p.videoId, slug: p.slug, aliases: p.slug !== p.videoId ? [p.videoId] : [] })),
     access?.options.generation ?? "fixture",
   );
-  return pages;
+  return finalizeRelatedLinks(pages);
 }
