@@ -71,6 +71,10 @@ manageRoutes.route("/", manageDashboardRoutes);
 
 // D1 failures: fixed code only (errors may carry bound values); the SPA shows its "unavailable" state.
 manageRoutes.onError((_error, c) => {
-  console.error("[manage] READ_FAILED");
+  try {
+    console.error("[manage] READ_FAILED");
+  } catch {
+    // A failing diagnostic sink must not interrupt the unavailable response.
+  }
   return c.json({ error: "unavailable" }, 503, { "Cache-Control": NO_STORE });
 });

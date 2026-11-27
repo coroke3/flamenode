@@ -692,6 +692,7 @@ test("SEC-558: snapshot producer read-only fence rejects CTE DML before SQLite c
     "SELECT load_extension('not-installed')",
     'SELECT "load_extension"("not-installed")',
     "SELECT writefile('x', 'y')",
+    "SELECT eval('DELETE FROM guard_rows')",
   ];
   for (const sql of unsafe) {
     assert.throws(() => guarded.prepare(sql), /only a single SELECT\/WITH/ , sql);

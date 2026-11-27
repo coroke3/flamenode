@@ -33,8 +33,8 @@
 ### MIG-0804 — Auth CPU/permission/security review
 
 - 読む: `cloudflare/PERFORMANCE_BASELINE.md`, `auth/README.md`, D1 adapter/cookie/CSRF/permissions baseline, security E2E。
-- 変更: request hot pathのD1 queries/CPU減らす。Cacheにsession secretや認可resultを混在させない。callbackでのopen redirect防止、per-request context、audit。
-- 試験: cookie tamper, expiry, CSRF, wrong host, revoked/BAN immediate effect, SSRF redirect, D1 failure fail-closed, CPU p95<9msとtail measurement、1102=0。
+- 変更: 既存 #693 の U01 計測と §2 security evidence を再開する。runtime の修正は既存 owner へ handoff し、#456 の共通 CPU harness を調整する。Cacheにsession secretや認可resultを混在させない。
+- 試験: cookie tamper, expiry, CSRF, wrong host, revoked/BAN immediate effect, SSRF redirect, D1 failure fail-closed。実 Auth.js session/csrf/signout/complete を通常・上限・不正・真正な cold 各50回以上で測り、D1 read/write と HTTP/cookie 契約を記録する。`ZERO_1102.md` の **warm 最大値 S4<=2ms / 全request S2<7ms・S3<8ms** で判定し、p95 は参考、cold は別集計、1102=0。§5 の公式非本番 `wrangler tail` `cpuTime` が DONE に必要で、local workerd は補助。Hono 内部 session probe だけでは Auth.js の検証にならない。
 - DONE: security checklist/実測値/情報漏洩テストとレビューがそろい、未解決の高リスク差分なし。
 
 ### MIG-0807 — security review of the Hono session + write guard on main
@@ -55,7 +55,7 @@
 - 読む: 0801..0805 merged PR, RH-010/011 route matrix, Auth User identity, session/CSRF results。
 - 変更: auth/cookie/session/OAuth/permission/Active X/callback/Logout全契約の証跡をPhase Gateにまとめる。
 - 試験: legacy-to-Hono session continuity, both SPA paths same-origin, no forced relogin, per-role constraints, Auth CPU tail + 1102。
-- DONE: 独立review+人間Phase Gate承認。実際の本番切替結果は操作と分離して記録し、未実施なら本番稼働済みと書かない。
+- DONE: 依存と受入証拠、独立review＋追加の独立Leadによる非本番Phase Gate承認、最終HEAD CI（2026-11-27 owner policy）。実際の本番切替結果は操作と分離して記録し、未実施なら本番稼働済みと書かない。
 
 ## Phase 9: keep rollback until observed stable
 

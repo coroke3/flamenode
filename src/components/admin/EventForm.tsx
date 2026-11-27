@@ -373,7 +373,20 @@ function FormSection({
   );
 }
 
-export function EventForm({
+export function EventForm(props: EventFormProps): React.ReactElement {
+  // Next can retain this client boundary while changing template search params.
+  // Keep each account/form owner in its own state and uncontrolled-input lifetime.
+  const draftAuthUserId = props.draftAuthUserId?.trim() || undefined;
+  const ownerKey = JSON.stringify([
+    draftAuthUserId ?? "",
+    props.mode,
+    props.initial?.id ?? null,
+    props.templateId ?? null,
+  ]);
+  return <EventFormInstance key={ownerKey} {...props} draftAuthUserId={draftAuthUserId} />;
+}
+
+function EventFormInstance({
   mode,
   initial: initialProp,
   templateId,
@@ -383,11 +396,21 @@ export function EventForm({
 }: EventFormProps): React.ReactElement {
   const isManage = variant === "manage";
   const initial = initialProp ?? EMPTY_EVENT_FORM_INITIAL;
+  const committedInitialRef = React.useRef(initial);
+  React.useLayoutEffect(() => {
+    committedInitialRef.current = initial;
+  }, [initial]);
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
   const submitInFlightRef = React.useRef(false);
+  const activeOwnerRef = React.useRef<object | null>(null);
+  const dirtyRef = React.useRef(false);
   const [busy, startTransition] = React.useTransition();
   const [dirty, setDirty] = React.useState(false);
+  const markDirty = React.useCallback(() => {
+    dirtyRef.current = true;
+    setDirty(true);
+  }, []);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<{
     message: string;
@@ -395,6 +418,9 @@ export function EventForm({
   } | null>(null);
   const [youtubeDescriptionTemplate, setYoutubeDescriptionTemplate] =
     React.useState(initial.youtube_description_template ?? "");
+  const [permissionKeysJson, setPermissionKeysJson] = React.useState(
+    initial.user_video_edit_permission_keys_json ?? "",
+  );
   const [preview, setPreview] = React.useState<EventSettingsPreviewValue>(() =>
     initialPreview(initial),
   );
@@ -505,6 +531,9 @@ export function EventForm({
     setYoutubeDescriptionTemplate(
       textValue(restored, "youtube_description_template"),
     );
+    if (restored.has("user_video_edit_permission_keys_json")) {
+      setPermissionKeysJson(textValue(restored, "user_video_edit_permission_keys_json"));
+    }
     setQuestions(
       filterImplicitEmptyStagePermissionQuestions(readQuestions(restored)),
     );
@@ -515,33 +544,51 @@ export function EventForm({
     if (generalCustomQuestionsPresent(restored)) {
       setGeneralQuestions(readGeneralCustomQuestionsFromFormData(restored));
     }
-    setPreview(formPreview(restored, initial));
+    setPreview(formPreview(restored, committedInitialRef.current));
+    // These bytes are already stored. StrictMode can replay cleanup before the
+    // restored controlled fields commit; only new user edits need a final flush.
     setDirty(true);
-  }, [initial]);
+  }, []);
   const draftSnapshot = React.useMemo(() => {
     void preview;
     void questions;
     void generalQuestions;
     void youtubeDescriptionTemplate;
     void requiredOptionalFields;
-    return formRef.current
-      ? formDataToDraftValue(new FormData(formRef.current))
-      : {};
+    if (!formRef.current) return {};
+    const formData = new FormData(formRef.current);
+    // Controlled permission edits render before the hidden input commits.
+    formData.set("user_video_edit_permission_keys_json", permissionKeysJson);
+    return formDataToDraftValue(formData);
   }, [
     preview,
     questions,
     generalQuestions,
     requiredOptionalFields,
     youtubeDescriptionTemplate,
+    permissionKeysJson,
   ]);
-  const { clearDraft } = useFormDraft<EventFormDraftValue>({
+  const { clearDraft, flushDraft } = useFormDraft<EventFormDraftValue>({
     storageKey: draftStorageKey || "fn:draft:disabled:event-form-v1",
     value: draftSnapshot,
     enabled: Boolean(draftAuthUserId?.trim()),
+    shouldSave: dirty,
     metadata: draftMetadata,
     onRestore: restoreDraft,
     onStale: handleStaleDraft,
   });
+  React.useLayoutEffect(() => {
+    const owner = {};
+    activeOwnerRef.current = owner;
+    return () => {
+      activeOwnerRef.current = null;
+      // Layout cleanup still has the old owner's DOM, including edits made
+      // before the debounce. The shared hook supplies sanitization and limits.
+      if (dirtyRef.current && formRef.current) {
+        flushDraft(formDataToDraftValue(new FormData(formRef.current)));
+      }
+    };
+  }, [flushDraft]);
   useUnsavedChangesGuard({ dirty: dirty && !busy });
 
   React.useEffect(() => {
@@ -566,7 +613,7 @@ export function EventForm({
       else next.add(field);
       return OPTIONAL_REQUIRED_VIDEO_FIELDS.filter((item) => next.has(item));
     });
-    setDirty(true);
+    markDirty();
   };
   React.useEffect(() => {
     setPreview((current) => ({
@@ -578,6 +625,8 @@ export function EventForm({
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy || submitInFlightRef.current) return;
+    const submitOwner = activeOwnerRef.current;
+    if (!submitOwner) return;
     if (canQuestions) {
       const invalidChoice = generalQuestions.find(
         (question) =>
@@ -599,23 +648,27 @@ export function EventForm({
     startTransition(async () => {
       try {
         const result =
-        mode === "create" ? await createEvent(formData) : await updateEvent(formData);
-      if (!result.ok) {
-        setError(result.message ?? "保存に失敗しました。");
-        return;
-      }
-      clearDraft();
-      setDirty(false);
-      setSuccess({
-        message: "保存しました。",
-        pendingPublicReflection: result.pendingPublicReflection,
-      });
-      if (mode === "create" && result.eventId) {
-        router.push(`/manage/events/${encodeURIComponent(result.eventId)}/edit`);
-      } else {
-        router.refresh();
+          mode === "create" ? await createEvent(formData) : await updateEvent(formData);
+        if (activeOwnerRef.current !== submitOwner) return;
+        if (!result.ok) {
+          setError(result.message ?? "保存に失敗しました。");
+          return;
+        }
+        // A following navigation must not recreate the successfully saved draft.
+        dirtyRef.current = false;
+        clearDraft();
+        setDirty(false);
+        setSuccess({
+          message: "保存しました。",
+          pendingPublicReflection: result.pendingPublicReflection,
+        });
+        if (mode === "create" && result.eventId) {
+          router.push(`/manage/events/${encodeURIComponent(result.eventId)}/edit`);
+        } else {
+          router.refresh();
         }
       } catch (submitError) {
+        if (activeOwnerRef.current !== submitOwner) return;
         console.error("[EventForm] submit failed", submitError);
         setError("保存中に予期しないエラーが発生しました。入力内容を保持したまま再試行してください。");
       } finally {
@@ -633,7 +686,7 @@ export function EventForm({
       onSubmit={submit}
       onChange={(event) =>
         (() => {
-          setDirty(true);
+          markDirty();
           setPreview(formPreview(new FormData(event.currentTarget), initial));
         })()
       }
@@ -712,7 +765,7 @@ export function EventForm({
           value={youtubeDescriptionTemplate}
           onChange={(next) => {
             setYoutubeDescriptionTemplate(next);
-            setDirty(true);
+            markDirty();
           }}
           eventTitle={preview.title}
           dynamicVariables={youtubeDescriptionDynamicVariables}
@@ -853,7 +906,11 @@ export function EventForm({
         </p>
         <PermissionKeysField
           name="user_video_edit_permission_keys_json"
-          defaultValue={initial.user_video_edit_permission_keys_json}
+          value={permissionKeysJson}
+          onChange={(value) => {
+            setPermissionKeysJson(value);
+            markDirty();
+          }}
           allowUserVideoEdits={initial.allow_user_video_edits ?? 0}
           disabled={!canQuestions}
         />
@@ -896,7 +953,7 @@ export function EventForm({
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                     disabled={!canQuestions}
                     onClick={() => {
-                      setDirty(true);
+                      markDirty();
                       setQuestions((current) => current.filter((item) => item.id !== question.id));
                     }}
                   >
@@ -937,7 +994,7 @@ export function EventForm({
           disabled={!canQuestions || questions.length >= MAX_STAGE_PERMISSION_QUESTIONS}
           onClick={() => {
             if (questions.length >= MAX_STAGE_PERMISSION_QUESTIONS) return;
-            setDirty(true);
+            markDirty();
             setQuestions((current) => [
               ...current,
               {
@@ -963,7 +1020,7 @@ export function EventForm({
           disabled={!canQuestions}
           maxQuestions={generalQuestionCap}
           onChange={(next) => {
-            setDirty(true);
+            markDirty();
             setGeneralQuestions(next);
           }}
         />

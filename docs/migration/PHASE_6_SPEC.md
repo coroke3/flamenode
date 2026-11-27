@@ -2233,6 +2233,7 @@ Phase 6 共通契約のとおり。
 - **Depends on:** MIG-0602, MIG-0631 / **Decisions:** SP-1〜SP-6 DECIDED（`work-items/MIG-0605.md`）, D-14-11
 - **Verified against:** `dde6fa8` (2026-10-25)
 #### Source snapshot
+- CURRENT failure contract verified against `1cdf95dca594282d922cfd0bd98b2f703427b09a` (2026-11-28): `POST` invokes one `applyLegacyImportPlanStep` per request before `claimed.advance`. Rollback is guaranteed only inside each uncommitted D1 batch, not across the whole import or every HTTP step: CURRENT x_users commits `ensureXUserGroup` before a separate `writeStepMarkerOnly`, and other stages can have post-commit side effects. T02 must preserve committed batches and verify their retry/recovery separately. This corrects the earlier whole-import rollback wording; it does not change runtime atomicity, preview storage or CPU budgets. The separate CURRENT preview-error repair is coordinated at [PR #478](https://github.com/coroke3/flamenode/pull/478#issuecomment-7221884402); apply error/classifier, real D1/S3 and final migration acceptance remain open.
 - CURRENT: `app/api/admin/import/legacy/route.ts`（528 行）、`src/lib/import/legacy/*`（preview store、`cpuBudget.ts`）。
 #### Owned paths
 - 新規: `+apps/api/src/routes/admin/legacyImport.ts`, `+apps/api/test/legacyImport.parity.test.mjs`
@@ -2246,7 +2247,7 @@ Phase 6 共通契約のとおり。
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | preview → commit | CURRENT と同じ行と監査 |
-| T02 | 途中失敗 | 全件ロールバック |
+| T02 | D1 batch の失敗 / 先行 batch 確定後の marker・後続処理失敗 / step 成功後の R2 進捗 CAS 失敗 | 未commitのD1 batchはそのbatchをrollbackし、既commit batch/stepは保持。step内の後続失敗では確定済みデータをゼロ扱いせず再試行・復旧を検証。step成功後の進捗CAS失敗はCURRENTのcommitted_progress_pending（committed=true / requires_repreview=false）で同じ資格情報から復旧。全インポート・全HTTP stepの原子性を前提にしない |
 | T03 | CPU budget 超過の入力 | CURRENT と同じ応答 |
 | T04 | 非 admin・別 origin | CURRENT と同じ拒否、書き込み 0 |
 #### Commands

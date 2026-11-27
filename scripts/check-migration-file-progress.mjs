@@ -132,7 +132,7 @@ export const prCommitCheck=(root,base)=>sha=>gitCommitExists(root,sha)&&isAncest
 export function changedFileInputs(base){
  return {
   changedPaths:listChangedFromBase(base),
-  baseMatrix:execFileSync("git",["show",base+":docs/migration/FILE_MIGRATION_MATRIX.md"],{cwd:ROOT,encoding:"utf8"}),
+  baseMatrix:execFileSync("git",["show",base+":docs/migration/FILE_MIGRATION_MATRIX.md"],{cwd:ROOT,encoding:"utf8",maxBuffer:64*1024*1024}),
   isPrCommit:prCommitCheck(ROOT,base),
  };
 }

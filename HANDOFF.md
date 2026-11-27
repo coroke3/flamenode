@@ -9,7 +9,7 @@
 3. [docs/migration/AGENT_PROTOCOL.md](docs/migration/AGENT_PROTOCOL.md) §Wake decision — 作業・レビュー・待機の判定
 4. [docs/migration/STATUS.md](docs/migration/STATUS.md) — **main にマージ済み**のタスク・依存・進捗だけの正本
 5. [open PR](https://github.com/coroke3/flamenode/pulls?q=is%3Apr+is%3Aopen) と、各PRブランチの `docs/migration/work-items/MIG-XXXX.md` — **未マージ**のowner・進捗・残課題の正本
-6. [docs/migration/GIT_WORKFLOW.md](docs/migration/GIT_WORKFLOW.md) — CI・独立レビュー・人間によるマージのゲート
+6. [docs/migration/GIT_WORKFLOW.md](docs/migration/GIT_WORKFLOW.md) — CI・独立レビュー・agentによるsquash mergeのゲート
 
 現在の数値、PR番号、HEAD SHA、CI結果や `MIG-XXXX` と機能の対応関係はこの文書では断定しません。必ず上記の正本を現在時点で再取得します。
 
@@ -36,7 +36,7 @@ npm run migration:next -- --model small
 
 ## マージ判断
 
-**`mergeable=true`（Git競合なし）だけではマージ可能と判定しません。** 最新HEADでの必要なCI成功、未完了unit・依存・本番安全ゲートの解消、別のレビュー担当による独立検証と承認、最新mainとの統合、必要な進捗ファイル更新が必要です。詳細な手順・例外は `AGENT_PROTOCOL.md` と `GIT_WORKFLOW.md` が優先します。
+**`mergeable=true`（Git競合なし）だけではマージ可能と判定しません。** 最新HEADでの必要なCI成功、未完了unit・依存・本番安全ゲートの解消、別のレビュー担当による独立検証と承認、最新mainとの統合、必要な進捗ファイル更新が必要です。2026-11-27 owner policyにより、通常PRは条件合格後にagentがsquash mergeして次へ進み、人間の個別承認は不要です。既存suite・fixtureを優先して余計なテストファイルを作りません。本番切替等は別途明示承認を維持します。詳細な手順・例外は `AGENT_PROTOCOL.md` と `GIT_WORKFLOW.md` が優先します。
 
 直接mainへのpush、無断自動マージ、本番CloudflareのRoute・Workers、remote D1/R2/KV、Secrets、認可・可視性の変更は、この引き継ぎメモによって許可されません。重要なテスト失敗を無視・削除してマージ可能状態を作ってはいけません。
 

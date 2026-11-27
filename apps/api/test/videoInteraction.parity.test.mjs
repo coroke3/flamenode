@@ -6,16 +6,17 @@ import { runUnderRootTsx, createSqlite } from "./support/personalHarness.mjs";
 
 if (runUnderRootTsx(import.meta.url)) {
   const { registerHooks } = await import("node:module");
+  const navigationUrl = import.meta.resolve("next/navigation.js");
   const stubs = {
     "server-only": "export {}",
     "next/cache": "export function revalidatePath() {}",
-    "next/navigation": "export function unstable_rethrow() {} export function redirect() {} export function notFound() {}",
     "@/lib/auth/writeGuard": "export async function writeGuard(o) { return globalThis.__interactionGuard(o); }",
     "@/lib/serverCore/nextPorts":
       "export const nextQueueWakeHost = { readEnv: () => globalThis.__wakeEnv(), readWaitUntil: () => null, readKv: () => null };",
   };
   registerHooks({
     resolve(specifier, context, nextResolve) {
+      if (specifier === "next/navigation") return nextResolve(navigationUrl, context);
       if (specifier in stubs) return {
         url: `data:text/javascript,${encodeURIComponent(stubs[specifier])}`, shortCircuit: true,
       };
@@ -58,7 +59,7 @@ if (runUnderRootTsx(import.meta.url)) {
       audits: w.sqlite.prepare("SELECT * FROM audit_logs ORDER BY id").all(),
     };
   }
-  async function current(w, user, videoId, kind) {
+  async function current(w, user, videoId, kind, warn = () => {}) {
     const row = w.sqlite.prepare("SELECT id, name, role, active_x_user_id FROM user WHERE id = ?").get(user);
     const wakes = [];
     globalThis.__wakeEnv = () => ({
@@ -79,7 +80,7 @@ if (runUnderRootTsx(import.meta.url)) {
     form.set("video_id", videoId);
     form.set("kind", kind);
     const original = { warn: console.warn, log: console.log, info: console.info };
-    console.warn = () => {}; console.log = () => {}; console.info = () => {};
+    console.warn = warn; console.log = () => {}; console.info = () => {};
     try {
       const result = await toggleVideoInteraction(form);
       return { result: JSON.parse(JSON.stringify(result)), wakes: wakes.length };
@@ -202,6 +203,154 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(expected.wakes, 1);
     assert.equal(b.d1.stats.batches, 1);
     assert.equal(b.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+  });
+
+  test("SEC-820: Next control-flow classification does not call provider digest accessors", async () => {
+    let reads = 0;
+    const providerError = new Error("ordinary provider failure");
+    Object.defineProperty(providerError, "digest", {
+      get() {
+        reads += 1;
+        return "ordinary provider diagnostic";
+      },
+    });
+    const w = world();
+    w.d1.batch = async () => { throw providerError; };
+
+    const { result } = await current(w, "u_owner", "v_pub", "bookmark");
+    assert.deepEqual(result, {
+      ok: false,
+      message: "操作が競合したか、保存に失敗しました。再読み込みして再試行してください。",
+    });
+    assert.equal(reads, 0);
+  });
+
+  test("SEC-820: a failure reading Next control-flow metadata leaves the like write fail-soft", async (t) => {
+    const providerError = new Error("ordinary provider failure");
+    const nextWorld = world();
+    const nextBefore = state(nextWorld);
+    nextWorld.d1.batch = async () => { throw providerError; };
+
+    // Inject only the metadata lookup failure, using an ordinary provider Error.
+    const originalGetDescriptor = Object.getOwnPropertyDescriptor;
+    let lookupFailures = 0;
+    const getDescriptor = t.mock.method(Object, "getOwnPropertyDescriptor", (object, property) => {
+      if (object === providerError && property === "digest") {
+        lookupFailures += 1;
+        throw new Error("metadata lookup failed");
+      }
+      return originalGetDescriptor(object, property);
+    });
+    const warnings = [];
+    let next;
+    try {
+      next = await current(nextWorld, "u_owner", "v_pub", "like", (...args) => warnings.push(args));
+    } finally {
+      getDescriptor.mock.restore();
+    }
+
+    const conflict = {
+      ok: false,
+      message: "操作が競合したか、保存に失敗しました。再読み込みして再試行してください。",
+    };
+    assert.equal(lookupFailures, 1, "the CURRENT catch must reach the injected metadata failure");
+    assert.deepEqual(next.result, conflict);
+    assert.deepEqual(warnings, [["[video-interaction] atomic mutation rejected"]]);
+    assert.equal(next.wakes, 0);
+    assert.deepEqual(state(nextWorld), nextBefore);
+
+    const honoWorld = world();
+    const honoBefore = state(honoWorld);
+    honoWorld.d1.batch = async () => { throw providerError; };
+    const hono = await target(honoWorld, "u_owner", "v_pub", "like");
+    assert.equal(hono.status, 409);
+    assert.deepEqual(hono.result, conflict);
+    assert.deepEqual(state(honoWorld), honoBefore);
+  });
+
+  test("SEC-820: genuine Next control signals preserve identity across the CURRENT catch", async () => {
+    const { redirect, notFound } = await import(navigationUrl);
+    const { DynamicServerError } = await import("next/dist/client/components/hooks-server-context.js");
+    const { BailoutToCSRError } = await import("next/dist/shared/lib/lazy-dynamic/bailout-to-csr.js");
+    const { unstable_postpone } = await import("next/dist/compiled/react-experimental/index.js");
+    const throwSignals = [
+      ["redirect", () => redirect("/list"), [0, 1, 16, 32]],
+      ["notFound", () => notFound(), [0, 1, 16, 32]],
+      ["dynamic server usage", () => { throw new DynamicServerError("headers"); }],
+      ["client rendering bailout", () => { throw new BailoutToCSRError("test"); }],
+      ["React postpone", () => unstable_postpone("test")],
+    ];
+    for (const [name, throwSignal, wrapperDepths = [0, 1]] of throwSignals) {
+      let signal;
+      try {
+        throwSignal();
+      } catch (error) {
+        signal = error;
+      }
+      assert.ok(signal, name);
+      for (const depth of wrapperDepths) {
+        let failure = signal;
+        for (let wraps = 0; wraps < depth; wraps += 1) {
+          failure = new Error("wrapped control flow", { cause: failure });
+        }
+        const label = `${name} through ${depth} Error.cause wrappers`;
+        const w = world();
+        const before = state(w);
+        w.d1.batch = async () => { throw failure; };
+        const warnings = [];
+        await assert.rejects(
+          current(w, "u_owner", "v_pub", "bookmark", (...args) => warnings.push(args)),
+          (error) => error === signal,
+          label,
+        );
+        assert.deepEqual(warnings, [], label);
+        assert.deepEqual(state(w), before, label);
+      }
+    }
+  });
+
+  test("SEC-820: malformed provider errors and a throwing warning sink cannot mask CURRENT/Hono write failures", async () => {
+    const errors = [
+      (() => {
+        const err = new Error("SEC820_PROVIDER_SECRET");
+        Object.defineProperty(err, "message", {
+          get() { throw new Error("SEC820_UNTRUSTED_MESSAGE_GETTER"); },
+        });
+        Object.defineProperty(err, "name", {
+          get() { throw new Error("SEC820_UNTRUSTED_NAME_GETTER"); },
+        });
+        return err;
+      })(),
+      {
+        [Symbol.toPrimitive]() { throw new Error("SEC820_UNTRUSTED_COERCION"); },
+        toString() { throw new Error("SEC820_UNTRUSTED_TOSTRING"); },
+      },
+    ];
+    const conflict = "操作が競合したか、保存に失敗しました。再読み込みして再試行してください。";
+    for (const poison of errors) {
+      const nextWorld = world();
+      const before = state(nextWorld);
+      nextWorld.d1.batch = async () => { throw poison; };
+      const calls = [];
+      const next = await current(nextWorld, "u_owner", "v_pub", "bookmark", (...args) => {
+        calls.push(args);
+        throw new Error("SEC820_UNAVAILABLE_LOG_SINK");
+      });
+      assert.deepEqual(next.result, { ok: false, message: conflict },
+        "CURRENT must return the existing stable action error");
+      assert.equal(next.wakes, 0);
+      assert.deepEqual(calls, [["[video-interaction] atomic mutation rejected"]],
+        "diagnostics must neither reveal provider details nor alter the result");
+      assert.deepEqual(state(nextWorld), before, "failed atomic batch must not mutate the database");
+
+      const honoWorld = world();
+      const honoBefore = state(honoWorld);
+      honoWorld.d1.batch = async () => { throw poison; };
+      const hono = await target(honoWorld, "u_owner", "v_pub", "bookmark");
+      assert.equal(hono.status, 409, "Hono must not turn a failed conflict classification into HTTP 500");
+      assert.deepEqual(hono.result, { ok: false, message: conflict });
+      assert.deepEqual(state(honoWorld), honoBefore, "Hono failed batch must leave data unchanged");
+    }
   });
 
   test("contract is strict on kind and preserves original action result fields", () => {
