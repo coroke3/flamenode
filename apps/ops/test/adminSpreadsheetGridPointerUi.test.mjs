@@ -1425,3 +1425,67 @@ test("MIG-0737 U01 editor copy: retired same-batch input cannot write to the cli
     else delete navigator.clipboard;
   }
 });
+
+
+test("MIG-0737 U01 editor copy: synchronous focus takeover during fallback never copies another control", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const previousExec = Object.getOwnPropertyDescriptor(document, "execCommand");
+  const selectPrototype = dom.window.HTMLTextAreaElement.prototype;
+  const previousSelect = Object.getOwnPropertyDescriptor(selectPrototype, "select");
+  const copied = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+    writeText: async () => { throw Error("denied"); },
+  } });
+  Object.defineProperty(document, "execCommand", { configurable: true, value: command => {
+    copied.push([command, document.activeElement]);
+    return true;
+  } });
+  try {
+    for (const phase of ["focus", "select"]) {
+      const ui = await mount({ allowMutations: true });
+      const outside = document.createElement("input");
+      outside.value = "Other selection";
+      document.body.append(outside);
+      let redirected = 0;
+      const redirect = () => {
+        redirected++;
+        outside.focus();
+        outside.select();
+      };
+      const onFocus = event => {
+        if (phase === "focus" && event.target.tagName === "TEXTAREA") redirect();
+      };
+      document.addEventListener("focusin", onFocus);
+      if (phase === "select") Object.defineProperty(selectPrototype, "select", {
+        ...previousSelect, value: function () {
+          previousSelect.value.call(this);
+          redirect();
+        },
+      });
+      try {
+        const input = await editTitle(ui);
+        input.setSelectionRange(1, 3, "backward");
+        const count = document.querySelectorAll("textarea").length;
+        assert.equal((await key(input, "c", { ctrlKey: true })).defaultPrevented, true);
+        assert.equal(redirected, 1);
+        assert.deepEqual(copied, []);
+        assert.equal(document.activeElement, outside);
+        assert.deepEqual([outside.selectionStart, outside.selectionEnd], [0, outside.value.length]);
+        assert.equal(document.querySelectorAll("textarea").length, count);
+        assert.equal(input.value, "Unsaved");
+        assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [1, 3, "backward"]);
+        assertNoEffects(ui);
+      } finally {
+        document.removeEventListener("focusin", onFocus);
+        Object.defineProperty(selectPrototype, "select", previousSelect);
+        outside.remove();
+        await ui.cleanup();
+      }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+    if (previousExec) Object.defineProperty(document, "execCommand", previousExec);
+    else delete document.execCommand;
+  }
+});

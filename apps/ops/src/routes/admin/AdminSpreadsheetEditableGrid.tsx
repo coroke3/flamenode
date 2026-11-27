@@ -400,8 +400,10 @@ export function AdminSpreadsheetEditableGrid({
     try {
       doc.body.appendChild(textarea);
       textarea.focus();
+      // Focus/select can synchronously hand control to another element. Never copy its selection.
+      if (!isLive() || doc.activeElement !== textarea) return;
       textarea.select();
-      if (isLive()) doc.execCommand("copy");
+      if (isLive() && doc.activeElement === textarea) doc.execCommand("copy");
     } catch {
       // Like CURRENT, the editor shortcut has no success/failure notice.
     } finally {
