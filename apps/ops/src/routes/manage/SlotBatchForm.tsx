@@ -1,4 +1,5 @@
 import * as React from "react";
+import { ConfirmDialog } from "../../components/shared/ConfirmDialog.js";
 
 /**
  * MIG-0722 U02b-1: unmounted Ops batch form. This view receives explicit
@@ -220,20 +221,22 @@ export function SlotBatchForm({
           }} disabled={busy}>空き枠を全削除</button>
       </div>
     </form>
-    {confirmClearFor === eventId && <div role="group"
-      aria-label="空き枠の全削除確認" className="manage-slot-confirm">
-      <p>空き枠（available）を全て削除します。予約・提出済みの枠は対象外です。</p>
-      <button type="button" className="fn-btn fn-btn-ghost"
-        onClick={() => setConfirmClearFor(null)} disabled={busy}>キャンセル</button>
-      <button type="button" className="fn-btn fn-btn-primary"
-        onClick={() => {
-          // A confirmation may never carry across an event transition.
-          if (contextRef.current !== context || busyRef.current === context ||
-              writeBlocked || canStartWrite?.() === false || confirmClearFor !== eventId) return;
-          setConfirmClearFor(null);
-          void perform(onClearAvailable, "空き枠を削除しました。");
-        }} disabled={busy}>全削除する</button>
-    </div>}
+    {confirmClearFor === eventId && <ConfirmDialog
+      open
+      title="空き枠を全削除しますか?"
+      message="空き枠 (available) を全て削除します。よろしいですか? 予約・提出済みの枠は対象外です。"
+      confirmLabel="全削除する"
+      tone="danger"
+      busy={busy}
+      onCancel={() => setConfirmClearFor(null)}
+      onConfirm={() => {
+        // A confirmation may never carry across an event transition.
+        if (contextRef.current !== context || busyRef.current === context ||
+            writeBlocked || canStartWrite?.() === false || confirmClearFor !== eventId) return;
+        setConfirmClearFor(null);
+        void perform(onClearAvailable, "空き枠を削除しました。");
+      }}
+    />}
   </div>;
 
   return <section aria-label="枠を追加・一括編集" data-event-id={eventId}>

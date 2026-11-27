@@ -178,9 +178,9 @@ test("MIG-0722 U02b-4: stale batch result after event change is ignored on succe
       const clear = [...dom.window.document.querySelectorAll("button")]
         .find(button => button.textContent.trim() === "空き枠を全削除");
       await React.act(async () => clear.click());
-      assert.ok(dom.window.document.querySelector('[aria-label="空き枠の全削除確認"]'));
+      assert.ok(dom.window.document.querySelector('.manage-slot-batch-form [role="alertdialog"]'));
       await React.act(async () => root.render(view("third-event")));
-      assert.equal(dom.window.document.querySelector('[aria-label="空き枠の全削除確認"]'), null);
+      assert.equal(dom.window.document.querySelector('.manage-slot-batch-form [role="alertdialog"]'), null);
       assert.equal(clears, 0, "event transition must not execute an old clear confirmation");
     } finally {
       await React.act(async () => root.unmount());
@@ -438,5 +438,99 @@ test("MIG-0722 U02b-12: switching generation modes never carries the interval in
     }
     globalThis.IS_REACT_ACT_ENVIRONMENT = prevAct;
     dom.window.close();
+  }
+});
+
+
+test("MIG-0722 U02b: batch clear uses shared danger confirmation without weakening write fences", async () => {
+  for (const totalSlots of [0, 3]) {
+    const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+      url: "https://flamenode.test/manage/events/ev1/slots",
+    });
+    const keys = ["window", "document", "Element", "HTMLElement", "Node", "navigator", "FormData"];
+    const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+    const prevAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+    for (const key of keys) Object.defineProperty(globalThis, key, {
+      configurable: true, writable: true, value: dom.window[key],
+    });
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    const { createRoot } = await import("react-dom/client");
+    const root = createRoot(dom.window.document.getElementById("root"));
+    try {
+      let clears = 0, generates = 0, refreshed = 0, settle;
+      const onGenerate = async () => { generates++; return { ok: true }; };
+      const onClearAvailable = () => {
+        clears++;
+        return new Promise(resolve => { settle = resolve; });
+      };
+      const onChanged = () => { refreshed++; };
+      const view = (writeBlocked = false) => React.createElement(SlotBatchForm, {
+        eventId: "ev1", totalSlots, onGenerate, onClearAvailable, onChanged, writeBlocked,
+      });
+      const doc = dom.window.document;
+      const opener = () => [...doc.querySelectorAll("button")]
+        .find(button => button.textContent.trim() === "空き枠を全削除");
+      const dialog = () => doc.querySelector('.manage-slot-batch-form [role="alertdialog"]');
+      const confirm = () => dialog().querySelector("button.fn-btn-danger");
+      const cancel = () => dialog().querySelector("button.fn-btn-ghost");
+      const backdrop = () => doc.querySelector(".manage-slot-batch-form .confirm-backdrop");
+      const escape = () => doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+        key: "Escape", bubbles: true,
+      }));
+      await React.act(async () => root.render(view()));
+      if (totalSlots > 0) doc.querySelector("details").open = true;
+      assert.equal(dialog(), null);
+
+      for (const dismiss of [() => cancel().click(), escape, () => backdrop().click()]) {
+        await React.act(async () => opener().click());
+        const modal = dialog();
+        assert.ok(modal);
+        assert.equal(modal.getAttribute("aria-modal"), "true");
+        assert.equal(doc.getElementById(modal.getAttribute("aria-labelledby")).textContent, "空き枠を全削除しますか?");
+        assert.equal(doc.getElementById(modal.getAttribute("aria-describedby")).textContent,
+          "空き枠 (available) を全て削除します。よろしいですか? 予約・提出済みの枠は対象外です。");
+        assert.equal(confirm().textContent, "全削除する");
+        assert.equal(doc.activeElement, confirm());
+        assert.equal(clears, 0);
+        await React.act(async () => modal.click());
+        assert.equal(dialog(), modal, "inside click must not dismiss");
+        await React.act(async () => dismiss());
+        assert.equal(dialog(), null);
+        assert.equal(clears, 0, "cancelling never dispatches");
+      }
+
+      await React.act(async () => opener().click());
+      await React.act(async () => root.render(view(true)));
+      assert.ok(dialog());
+      assert.equal(confirm().disabled, true);
+      assert.equal(cancel().disabled, true);
+      await React.act(async () => { escape(); backdrop().click(); confirm().click(); cancel().click(); });
+      assert.ok(dialog(), "blocked confirmation is not dismissible");
+      assert.equal(clears, 0);
+      await React.act(async () => root.render(view(false)));
+      await React.act(async () => {
+        const button = confirm();
+        button.click();
+        button.click();
+      });
+      assert.equal(clears, 1, "same-turn double confirmation sends exactly one clear");
+      assert.equal(dialog(), null);
+      assert.equal(opener().disabled, true);
+      assert.equal(generates, 0);
+      assert.equal(refreshed, 0);
+      await React.act(async () => settle({ ok: true, message: "空き枠だけ削除完了" }));
+      assert.equal(refreshed, 1);
+      assert.match(doc.body.textContent, /空き枠だけ削除完了/);
+      assert.equal(opener().disabled, false);
+      assert.equal(clears, 1);
+    } finally {
+      await React.act(async () => root.unmount());
+      for (const [key, descriptor] of previous) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else delete globalThis[key];
+      }
+      globalThis.IS_REACT_ACT_ENVIRONMENT = prevAct;
+      dom.window.close();
+    }
   }
 });
