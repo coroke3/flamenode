@@ -110,8 +110,22 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
     i = numberPattern.lastIndex;
     return [start, i];
   };
-  type Frame = { kind: "object" | "array"; state: string; root: boolean; key: string | null };
-  const stack: Frame[] = [];
+  // One byte per open container; only the root needs a decoded property key.
+  // Grow with actual nesting rather than allocating one object per frame.
+  const OBJECT_FIRST_KEY = 0, OBJECT_KEY = 1, OBJECT_COLON = 2,
+    OBJECT_VALUE = 3, OBJECT_AFTER = 4;
+  const ARRAY_FIRST_VALUE = 5, ARRAY_VALUE = 6, ARRAY_AFTER = 7;
+  let stack = new Uint8Array(32);
+  let depth = 0;
+  let rootKey: string | null = null;
+  const push = (state: number): void => {
+    if (depth === stack.length) {
+      const larger = new Uint8Array(Math.min(n, stack.length * 2));
+      larger.set(stack);
+      stack = larger;
+    }
+    stack[depth++] = state;
+  };
   let mode: string | null = null;
   let updatedAt = NaN;
   const value = (rootKey: string | null): void => {
@@ -119,8 +133,7 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
     const c = raw[i];
     if (c === "{" || c === "[") {
       i++;
-      stack.push({ kind: c === "{" ? "object" : "array",
-        state: c === "{" ? "firstKey" : "firstValue", root: false, key: null });
+      push(c === "{" ? OBJECT_FIRST_KEY : ARRAY_FIRST_VALUE);
       if (rootKey === "mode") mode = null;
       if (rootKey === "updated_at") updatedAt = NaN;
       return;
@@ -150,42 +163,52 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
   try {
     whitespace();
     if (raw[i++] !== "{") return null;
-    stack.push({ kind: "object", state: "firstKey", root: true, key: null });
-    while (stack.length) {
+    push(OBJECT_FIRST_KEY);
+    while (depth > 0) {
       whitespace();
-      const frame = stack[stack.length - 1];
-      if (frame.kind === "object") {
-        if (frame.state === "firstKey" || frame.state === "key") {
-          if (raw[i] === "}" && frame.state === "firstKey") { i++; stack.pop(); continue; }
+      const top = depth - 1;
+      const state = stack[top];
+      switch (state) {
+        case OBJECT_FIRST_KEY:
+        case OBJECT_KEY: {
+          if (state === OBJECT_FIRST_KEY && raw[i] === "}") {
+            i++; depth--; break;
+          }
           if (raw[i] !== '"') return null;
           const token = stringToken();
-          frame.key = frame.root ? smallString(token) : null;
-          frame.state = "colon";
-          continue;
+          if (depth === 1) rootKey = smallString(token);
+          stack[top] = OBJECT_COLON;
+          break;
         }
-        if (frame.state === "colon") {
+        case OBJECT_COLON:
           if (raw[i++] !== ":") return null;
-          frame.state = "value";
-          continue;
-        }
-        if (frame.state === "value") {
-          frame.state = "after";
-          value(frame.root ? frame.key : null);
-          continue;
-        }
-        if (raw[i] === ",") { i++; frame.state = "key"; continue; }
-        if (raw[i] === "}") { i++; stack.pop(); continue; }
-        return null;
+          stack[top] = OBJECT_VALUE;
+          break;
+        case OBJECT_VALUE:
+          stack[top] = OBJECT_AFTER;
+          value(depth === 1 ? rootKey : null);
+          break;
+        case OBJECT_AFTER:
+          if (raw[i] === ",") { i++; stack[top] = OBJECT_KEY; break; }
+          if (raw[i] === "}") { i++; depth--; break; }
+          return null;
+        case ARRAY_FIRST_VALUE:
+          if (raw[i] === "]") { i++; depth--; break; }
+          // The first element follows the same grammar as later elements.
+          stack[top] = ARRAY_AFTER;
+          value(null);
+          break;
+        case ARRAY_VALUE:
+          stack[top] = ARRAY_AFTER;
+          value(null);
+          break;
+        case ARRAY_AFTER:
+          if (raw[i] === ",") { i++; stack[top] = ARRAY_VALUE; break; }
+          if (raw[i] === "]") { i++; depth--; break; }
+          return null;
+        default:
+          return null;
       }
-      if (frame.state === "firstValue" && raw[i] === "]") { i++; stack.pop(); continue; }
-      if (frame.state === "firstValue" || frame.state === "value") {
-        frame.state = "after";
-        value(null);
-        continue;
-      }
-      if (raw[i] === ",") { i++; frame.state = "value"; continue; }
-      if (raw[i] === "]") { i++; stack.pop(); continue; }
-      return null;
     }
     whitespace();
     if (i !== n || !isOperationMode(mode) || !Number.isFinite(updatedAt)) return null;

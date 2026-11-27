@@ -646,3 +646,50 @@ test("MIG-0661 T09 / #916: dense escaped strings preserve JSON grammar across na
     assert.equal(d1.count, 0);
   }
 });
+
+test("MIG-0661 T09 / #916: compact nesting stack preserves root identity and grammar through growth", async () => {
+  const pad = "X".repeat(70 * 1024);
+  const prefix = '{"mode":"normal","updated_at":1,"reason":"' + pad + '"';
+  const nested = (depth) => '[{"mode":'.repeat(depth) + '"static_only"' + '}]'.repeat(depth);
+  const deep = nested(32768);
+  const deepArray = "[".repeat(65536) + "0" + "]".repeat(65536);
+  const cases = [
+    ...[15, 16, 17, 31, 32, 33, 63, 64, 65, 32768].map((depth) =>
+      [prefix + ',"extra":' + nested(depth) + ',"mode":"maintenance"}', "maintenance", true]),
+    [prefix + ',"extra":' + deepArray + ',"mode":"maintenance"}', "maintenance", true],
+    [prefix + ',"extra":[' + deep + ',' + deepArray + '],"mode":"read_only"}', "read_only", true],
+    [prefix + ',"mode":' + deep + ',"mode":"maintenance"}', "maintenance", true],
+    [prefix + ',"updated_at":' + deep + ',"updated_at":1,"mode":"maintenance"}', "maintenance", true],
+    [prefix + ',"mode":"maintenance","mode":' + deep + '}', null, true],
+    [prefix + ',"mode":"maintenance","updated_at":' + deepArray + '}', null, true],
+    [prefix + ',"extra":' + deep.slice(0, -1) + ',"mode":"maintenance"}', null, false],
+    [prefix + ',"extra":' + "[".repeat(32768) + "0," + "]".repeat(32768) + '}', null, false],
+    [prefix + ',"extra":' + '{"x":'.repeat(32768) + "0," + "}".repeat(32768) + '}', null, false],
+    [prefix + ',"extra":' + deep + ',"mode":"maintenance"}x', null, false],
+    [prefix + ',"extra":' + deepArray.slice(0, -1) + '}', null, false],
+    [prefix + ',"extra":[{},[],{"mode":"economy"}],"mode":"static_only"}', "static_only", true],
+  ];
+  for (const [raw, mode, syntaxValid] of cases) {
+    assert.ok(Buffer.byteLength(raw, "utf8") > 64 * 1024);
+    if (syntaxValid) {
+      const reference = JSON.parse(raw);
+      if (mode !== null) {
+        assert.equal(reference.mode, mode);
+        assert.equal(reference.updated_at, 1);
+      } else {
+        assert.ok(typeof reference.mode !== "string" || typeof reference.updated_at !== "number");
+      }
+    } else assert.throws(() => JSON.parse(raw), SyntaxError);
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const binding = kvResponse(raw, kv);
+    const env = { DB: unavailableD1(d1), KV: binding };
+    const expectedMode = mode ?? "normal";
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expectedMode);
+    assert.deepEqual(await readOperationModeKvMirror(binding), mode === null
+      ? null : { mode, updated_at: 1, reason: null });
+    assert.deepEqual(await requestWith(env), { mode: expectedMode, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
