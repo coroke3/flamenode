@@ -11,8 +11,6 @@ import {
 /** MIG-0737 U01: isolated RH-004/005/006 edit surface. NOT ROUTED until backend merge gates. */
 type Change = { table: string; page: number; pk: Record<string, string>; column: string; before: string | null; after: string | null };
 type History = { key: string; undo: Change[]; redo: Change[] };
-type SpreadsheetContextMenuAction = "edit" | "copy" | "insertRow" | "deleteRow";
-type SpreadsheetContextMenuState = { x: number; y: number; row: number; key: string };
 type CellSelection = {
   id: number; rowIndex: number; column: string; value: string; key: string;
   pk: Record<string, string>; before: string | null; invalidated?: boolean;
@@ -76,14 +74,12 @@ export function AdminSpreadsheetEditableGrid({
   const [findHint, setFindHint] = React.useState<string | null>(null);
   const [insertOpen, setInsertOpen] = React.useState(false);
   const [insertDraft, setInsertDraft] = React.useState<Record<string, string>>({});
-  const [contextMenu, setContextMenu] = React.useState<SpreadsheetContextMenuState | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [history, setHistory] = React.useState<History>({ key: "", undo: [], redo: [] });
   const [colWidths, setColWidths] = React.useState<Record<string, number>>({});
   const resizeRef = React.useRef<{ column: string; startX: number; startWidth: number } | null>(null);
   const tableRef = React.useRef<HTMLTableElement>(null);
-  const contextMenuRef = React.useRef<HTMLDivElement>(null);
   const focusedGridElement = React.useRef<HTMLElement | null>(null);
   const displayedPage = React.useRef(data);
   displayedPage.current = data;
@@ -123,20 +119,6 @@ export function AdminSpreadsheetEditableGrid({
   const visibleFocus = boundCellToPage(focusedCell);
   const focusedColumn = identityChanged ? undefined : columns[visibleFocus.col];
   const stats = computeSelectionStats();
-  const visibleContextMenu = contextMenu?.key === key && !identityChanged ? contextMenu : null;
-  const contextMenuRow = visibleContextMenu ? rows[visibleContextMenu.row] : undefined;
-  const contextMenuCanEdit = Boolean(
-    visibleContextMenu && focusedColumn && rows[visibleFocus.row] && editable &&
-    focusedColumn.editable && focusedColumn.pk === 0 && !focusedColumn.generated &&
-    primaryKey(rows[visibleFocus.row], primaryKeys) !== null && !selectionConflict
-  );
-  const contextMenuItems: Array<{ id: SpreadsheetContextMenuAction; label: string; disabled?: boolean }> =
-    visibleContextMenu ? [
-      { id: "edit", label: "編集 (F2)", disabled: !canMutate || !contextMenuCanEdit },
-      { id: "copy", label: "コピー (Ctrl+C)" },
-      { id: "insertRow", label: "行を追加…", disabled: !canMutate || !contextMenuRow || primaryKeys.length === 0 },
-      { id: "deleteRow", label: "行を削除", disabled: !canMutate || !contextMenuRow || !primaryKey(contextMenuRow, primaryKeys) },
-    ] : [];
 
   // CURRENT keeps widths and an active drag by column name across mounted page/table changes.
   React.useEffect(() => {
@@ -175,30 +157,11 @@ export function AdminSpreadsheetEditableGrid({
       (tableRef.current?.querySelector<HTMLTableCellElement>('[data-grid-cell="0:0"]') ?? tableRef.current)?.focus();
       setInsertOpen(false);
       setInsertDraft({});
-      setContextMenu(null);
       setBusy(false);
       setNotice(null);
     }
     return () => inFlight.current?.abort();
   }, [fetchFn, def.table, page, allowMutations]);
-
-  React.useEffect(() => {
-    if (!visibleContextMenu) return;
-    const closeOnOutside = (event: MouseEvent) => {
-      if (contextMenuRef.current?.contains(event.target as Node)) return;
-      setContextMenu(null);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setContextMenu(null);
-    };
-    document.addEventListener("mousedown", closeOnOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("mousedown", closeOnOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [visibleContextMenu]);
-
 
   // Keep the live draft and rendered conflict latch in sync, including after A→B→A refreshes.
   React.useEffect(() => {
@@ -542,28 +505,6 @@ export function AdminSpreadsheetEditableGrid({
     }
   }
 
-
-  function openContextMenu(event: React.MouseEvent<HTMLElement>, rowIndex: number, colIndex: number): void {
-    event.preventDefault();
-    if (identityChanged || !isCurrent() || rows.length === 0 || columns.length === 0 ||
-        currentSelection !== null || liveSelection.current !== null) return;
-    const position = boundCellToPage({ row: rowIndex, col: colIndex });
-    const insideSelection = position.row >= Math.min(visibleAnchor.row, visibleFocus.row) &&
-      position.row <= Math.max(visibleAnchor.row, visibleFocus.row) &&
-      position.col >= Math.min(visibleAnchor.col, visibleFocus.col) &&
-      position.col <= Math.max(visibleAnchor.col, visibleFocus.col);
-    if (!insideSelection) {
-      setAnchorCell(position);
-      setFocusedCell(position);
-    }
-    setContextMenu({
-      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 220)),
-      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 320)),
-      row: position.row,
-      key,
-    });
-  }
-
   async function addRow(): Promise<void> {
     if (!canMutate || !insertOpen) return;
     const row: Record<string, string> = {};
@@ -585,46 +526,16 @@ export function AdminSpreadsheetEditableGrid({
     }
   }
 
-  async function removeRow(index: number, confirmationMessage = "選択した行を削除します。元に戻せません。続行しますか？"): Promise<void> {
+  async function removeRow(index: number): Promise<void> {
     const row = rows[index];
     if (!canMutate || !row) return;
     const pk = primaryKey(row, primaryKeys);
     if (!pk) { setNotice("主キーが不足しているため削除できません。"); return; }
-    if (!confirmDelete(confirmationMessage)) return;
+    if (!confirmDelete("選択した行を削除します。元に戻せません。続行しますか？")) return;
     const ok = await runMutation(signal => deleteSpreadsheetRow(fetchFn, { table: def.table, primaryKey: pk }, signal));
     if (ok) {
       setCellEdit(null);
       setHistory({ key, undo: [], redo: [] });
-    }
-  }
-
-
-  function handleContextMenuAction(action: SpreadsheetContextMenuAction): void {
-    const menu = visibleContextMenu;
-    if (!menu) return;
-    setContextMenu(null);
-    switch (action) {
-      case "edit":
-        startCellEdit(visibleFocus.row, visibleFocus.col);
-        break;
-      case "copy":
-        void copyRange();
-        break;
-      case "insertRow": {
-        const row = contextMenuRow;
-        if (!row) return;
-        const draft: Record<string, string> = {};
-        for (const column of insertColumns) {
-          draft[column.name] = column.pk > 0 ? "" : cellValue(row[column.name]);
-        }
-        setInsertOpen(true);
-        setInsertDraft(draft);
-        setNotice(null);
-        break;
-      }
-      case "deleteRow":
-        void removeRow(menu.row, `行 ${(page - 1) * Math.max(1, limit) + menu.row + 1} を削除しますか？`);
-        break;
     }
   }
 
@@ -679,34 +590,6 @@ export function AdminSpreadsheetEditableGrid({
             --sheet-header-bg: var(--bg-elevated, #252525);
             --sheet-border: var(--border-subtle, #3c4043);
           }
-        }
-        [data-spreadsheet-context-menu] {
-          position: fixed;
-          z-index: 200;
-          min-width: 200px;
-          padding: 4px 0;
-          background: var(--bg-surface);
-          border: 1px solid var(--border-subtle);
-          border-radius: var(--radius-sm);
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-        }
-        [data-spreadsheet-context-menu] [role="menuitem"] {
-          display: block;
-          width: 100%;
-          text-align: left;
-          padding: 8px 14px;
-          font-size: 12px;
-          border: 0;
-          background: transparent;
-          color: var(--text-primary);
-          cursor: pointer;
-        }
-        [data-spreadsheet-context-menu] [role="menuitem"]:hover:not(:disabled) {
-          background: var(--bg-elevated);
-        }
-        [data-spreadsheet-context-menu] [role="menuitem"]:disabled {
-          opacity: 0.45;
-          cursor: default;
         }
       `}</style>
       <p>{editable ? "編集可能な列のみ変更できます。主キー列は変更できません。" : "読み取り専用（編集は無効です）。"}</p>
@@ -840,8 +723,7 @@ export function AdminSpreadsheetEditableGrid({
                     if (event.button !== 0 || !canSelectHeaders) return;
                     if (!event.shiftKey) setAnchorCell({ row: ri, col: 0 });
                     focusGridCell({ row: ri, col: columns.length - 1 });
-                  }}
-                  onContextMenu={event => openContextMenu(event, ri, 0)}>{(page - 1) * Math.max(1, limit) + ri + 1}</th>
+                  }}>{(page - 1) * Math.max(1, limit) + ri + 1}</th>
                 {columns.map(c => {
                 const value = cellValue(row[c.name]);
                 const findHit = !identityChanged && findQuery !== "" && value.toLowerCase().includes(findQuery.toLowerCase());
@@ -886,8 +768,7 @@ export function AdminSpreadsheetEditableGrid({
                       else setFocusedCell(position);
                       event.currentTarget.scrollIntoView?.({ block: "nearest", inline: "nearest" });
                     }}
-                    onKeyDown={(event) => handleGridKey(event, ri, columns.indexOf(c))}
-                    onContextMenu={event => openContextMenu(event, ri, columns.indexOf(c))}>{editing && currentSelection ? (
+                    onKeyDown={(event) => handleGridKey(event, ri, columns.indexOf(c))}>{editing && currentSelection ? (
                     <label>{c.name} を編集
                       <input type="text" autoFocus disabled={!canMutate} value={currentSelection.value}
                         onChange={e => {
@@ -937,15 +818,6 @@ export function AdminSpreadsheetEditableGrid({
         {stats.numericSum != null ? <span>合計 {stats.numericSum.toLocaleString()}</span> : null}
         {stats.preview ? <span data-spreadsheet-grid-status-preview="" title={stats.preview}>{stats.preview}</span> : null}
       </div>
-      {visibleContextMenu ? (
-        <div ref={contextMenuRef} data-spreadsheet-context-menu="" role="menu"
-          style={{ left: visibleContextMenu.x, top: visibleContextMenu.y }}>
-          {contextMenuItems.map(item => (
-            <button key={item.id} type="button" role="menuitem" disabled={item.disabled}
-              onClick={() => handleContextMenuAction(item.id)}>{item.label}</button>
-          ))}
-        </div>
-      ) : null}
     </section>
   );
 }
