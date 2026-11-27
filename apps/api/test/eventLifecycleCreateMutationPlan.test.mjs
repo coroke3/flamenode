@@ -1535,3 +1535,43 @@ test("MIG-0652 U03f: duplicate stage keys fail closed", async () => {
   assert.deepEqual(planStageQuestionDiff([], [makeStageQuestionDiffRow("a"), makeStageQuestionDiffRow("a")]),
     { ok: false, reason: "duplicate_next_key" });
 });
+
+test("MIG-0652 U03f: stage diff matches frozen CURRENT Map/filter algorithm across 512 distinct-key scenarios", async () => {
+  const { planStageQuestionDiff } = await import("@flamenode/server-core/event/updatePayload");
+  // CURRENT's stage block iterates obsolete rows in existing order, then changed
+  // rows in existing order, and finally inserts in submitted order.
+  const keys = ["a", "b", "c", "d", "e"];
+  const variants = [null, "label", "required", "sort_order", "description", "visibility", "updated_at"];
+  const sameDefinition = (a, b) => [
+    "question_key", "label", "description", "type", "required",
+    "options_json", "placeholder", "max_length", "sort_order", "is_active", "visibility",
+  ].every(k => a[k] === b[k]);
+  const makeExpected = (existing, next) => {
+    const nextByKey = new Map(next.map(x => [x.question_key, x]));
+    const obsolete = existing.filter(x => !nextByKey.has(x.question_key));
+    const changed = [];
+    for (const row of existing) {
+      const replacement = nextByKey.get(row.question_key);
+      if (!replacement) continue;
+      nextByKey.delete(row.question_key);
+      if (!sameDefinition(row, replacement)) changed.push({ before: row, replacement });
+    }
+    return { ok: true, obsolete, changed, inserted: [...nextByKey.values()] };
+  };
+  for (let mask = 0; mask < 512; mask++) {
+    const existing = keys.filter((_k, i) => ((mask >> i) & 1) !== 0)
+      .map((key, i) => makeStageQuestionDiffRow(key, { sort_order: i }));
+    const next = [...keys].reverse().filter((_k, i) => ((mask >> (5 + i)) & 1) !== 0 || i === (mask % 5))
+      .map((key, i) => {
+        const field = variants[(mask + i) % variants.length];
+        const overrides = { id: "new-" + key, updated_at: 100 + i };
+        if (field === "label") overrides.label = "new label";
+        if (field === "required") overrides.required = 1;
+        if (field === "sort_order") overrides.sort_order = 100 + i;
+        if (field === "description") overrides.description = "new description";
+        if (field === "visibility") overrides.visibility = "public";
+        return makeStageQuestionDiffRow(key, overrides);
+      });
+    assert.deepEqual(planStageQuestionDiff(existing, next), makeExpected(existing, next), "mask " + mask);
+  }
+});
