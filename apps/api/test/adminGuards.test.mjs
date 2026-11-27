@@ -548,7 +548,79 @@ test("approved X IDs are bounded (LIMIT 100) and oversized JSON fails closed", a
   const res = await many.post();
   assert.equal(res.status, 200);
   assert.ok((await res.json()).activeX.approvedXIds.length <= 100);
-  // byte cap before JSON.parse: a lying/huge column value -> 503
+  // Legacy IDs may contain Unicode; preserve the existing JS code-unit limit.
+  const legacy = Array.from({ length: 22 }, (_, i) => String(i).padStart(2, "0") + "\u65e5".repeat(126));
+  const seedLinked = (ids) => (s) => {
+    for (const id of ids) {
+      s.prepare("INSERT INTO x_users (id, approval_status) VALUES (?, ?)").run(id, "approved");
+      s.prepare("INSERT INTO x_user_account_links VALUES (?, ?)").run("u-1", id);
+    }
+  };
+  const captureReceipts = (app) => {
+    const receipts = [];
+    const prepare = app.db.prepare.bind(app.db);
+    app.db.prepare = (sql) => {
+      const statement = prepare(sql);
+      if (!sql.includes("AS approved_x_ids_json")) return statement;
+      return {
+        ...statement,
+        bind(...values) {
+          const bound = statement.bind(...values);
+          return {
+            ...bound,
+            first: async (...args) => {
+              const row = await bound.first(...args);
+              receipts.push(row?.approved_x_ids_json);
+              return row;
+            },
+          };
+        },
+      };
+    };
+    return receipts;
+  };
+  const unicode = guardApp({ user: U("admin", "x0"), activeX: { requireApprovedActiveXId: true }, seed: seedLinked(["x0", ...legacy]) });
+  const unicodeReceipts = captureReceipts(unicode);
+  const unicodeResponse = await unicode.post();
+  assert.equal(unicodeResponse.status, 200);
+  assert.deepEqual(new Set((await unicodeResponse.json()).activeX.approvedXIds), new Set(["x0", ...legacy]));
+  assert.equal(unicodeReceipts.length, 1);
+  assert.ok(unicodeReceipts[0].startsWith("~"));
+  assert.ok(unicodeReceipts[0].length <= 49153);
+  const unicodeReceipt = Buffer.from(unicodeReceipts[0].slice(1), "hex").toString("utf8");
+  assert.ok(Buffer.byteLength(unicodeReceipt) > 8192);
+  assert.ok(unicodeReceipt.length <= 8192);
+  assert.equal(unicode.stats.reads, 1);
+
+  const ordinary = guardApp({ user: U("admin", "x0"), activeX: { requireApprovedActiveXId: true }, seed: seedLinked(["x0", "x1"]) });
+  const ordinaryReceipts = captureReceipts(ordinary);
+  const ordinaryResponse = await ordinary.post();
+  assert.equal(ordinaryResponse.status, 200);
+  assert.equal(ordinaryReceipts.length, 1);
+  assert.deepEqual(new Set(JSON.parse(ordinaryReceipts[0])), new Set(["x0", "x1"]));
+  assert.equal(ordinary.stats.reads, 1);
+
+  // One large ID, an aggregate of medium IDs, and escaped JSON expansion
+  // fail closed without transferring an oversized JSON array.
+  const excessiveLists = [
+    ["x0", "a".repeat(100000)],
+    ["x0", "a".repeat(9000)],
+    ["x0", ...Array.from({ length: 99 }, (_, i) => String(i) + "\u65e5".repeat(500))],
+    ["x0", ...Array.from({ length: 99 }, (_, i) => String(i) + "\u0001".repeat(400))],
+  ];
+  for (const ids of excessiveLists) {
+    const oversized = guardApp({ user: U("admin", "x0"), activeX: { requireApprovedActiveXId: true }, seed: seedLinked(ids) });
+    const oversizedReceipts = captureReceipts(oversized);
+    const oversizedResponse = await oversized.post();
+    assert.equal(oversizedResponse.status, 503);
+    assert.equal((await oversizedResponse.json()).reason, "db_unavailable");
+    assert.equal(oversizedResponse.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(oversizedReceipts, ["!", "!"], "both joined and ToS fallback D1 receipts are bounded");
+    assert.equal(oversized.stats.reads, 2);
+    assert.equal(oversized.stats.batches, 0);
+  }
+
+  // Existing JS code-unit cap before JSON.parse: a lying/huge column value -> 503
   const huge = { prepare: () => ({ bind: () => ({ first: async () => ({ is_tos_accepted: 1, terms_reaccept_required: 0, discord_id: null, discord_name: null, active_x_user_id: "x1", user_image: null, x_name: null, x_icon_url: null, x_approval_status: "approved", approved_x_ids_json: JSON.stringify(["a".repeat(9000)]) }) }) }) };
   const hono = new Hono();
   const options = { loadSiteUrl: () => SITE, allowLocalPreview: () => false, activeX: { feature: "manage_event_update", requireApprovedActiveXId: true } };

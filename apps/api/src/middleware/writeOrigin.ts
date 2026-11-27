@@ -104,8 +104,43 @@ export type WriteRequiredRole = "admin" | null;
 
 /** Bounds for the approved linked X ID list folded into the user read. */
 export const MAX_APPROVED_X_IDS = 100;
-/** X IDs are <= 15 chars; 100 quoted ids + separators fit well under this. */
+/** Historical JS string-length limit (UTF-16 code units, despite the name).
+ * Keep existing acceptance for legacy Unicode IDs until their policy is coordinated. */
 export const MAX_APPROVED_X_IDS_JSON_BYTES = 8192;
+/** Valid UTF-8 uses at most 3 bytes per UTF-16 code unit. This SQL receipt cap
+ * cannot reject any JSON string that passed the existing JS length check. */
+const MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES = 3 * MAX_APPROVED_X_IDS_JSON_BYTES;
+const APPROVED_X_RECEIPT_CHUNK_BYTES = 512;
+
+/** Large SQL receipts use an ASCII hex envelope to bound replacement-character
+ * expansion during decoding. Ordinary receipts stay plain. */
+function decodeApprovedXIdsReceipt(raw: string): string {
+  if (!raw.startsWith("~")) return raw;
+  if (raw.length > 1 + 2 * MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES) {
+    throw new Error("approved_x_ids_too_large");
+  }
+  const hex = raw.slice(1);
+  if (!hex.length || hex.length % 2 !== 0 || /[^0-9A-F]/.test(hex)) {
+    throw new Error("approved_x_ids_invalid_receipt");
+  }
+  const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+  const buffer = new Uint8Array(APPROVED_X_RECEIPT_CHUNK_BYTES);
+  const parts: string[] = [];
+  let units = 0;
+  const nibble = (code: number) => code <= 57 ? code - 48 : code - 55;
+  for (let offset = 0; offset < hex.length; offset += APPROVED_X_RECEIPT_CHUNK_BYTES * 2) {
+    const n = Math.min(APPROVED_X_RECEIPT_CHUNK_BYTES, (hex.length - offset) / 2);
+    for (let i = 0; i < n; i++) {
+      buffer[i] = (nibble(hex.charCodeAt(offset + 2 * i)) << 4)
+        | nibble(hex.charCodeAt(offset + 2 * i + 1));
+    }
+    const part = decoder.decode(buffer.subarray(0, n), { stream: offset + 2 * n < hex.length });
+    units += part.length;
+    if (units > MAX_APPROVED_X_IDS_JSON_BYTES) throw new Error("approved_x_ids_too_large");
+    parts.push(part);
+  }
+  return parts.join("");
+}
 
 /** CURRENT WriteGuardOptions.requireActiveXId / requireApprovedActiveXId. */
 export type WriteActiveXOptions = {
@@ -240,13 +275,31 @@ export async function loadTosState(
          x."approval_status" AS x_approval_status${
            activeX?.requireApprovedActiveXId
              ? `,
-         (SELECT json_group_array(approved."x_user_id") FROM (
-            SELECT DISTINCT l."x_user_id" AS x_user_id
-              FROM "x_user_account_links" l
-              INNER JOIN "x_users" ax ON ax."id" = l."x_user_id"
-             WHERE l."auth_user_id" = u."id" AND ax."approval_status" = 'approved'
-             LIMIT ${MAX_APPROVED_X_IDS}
-         ) approved) AS approved_x_ids_json`
+         (WITH approved AS NOT MATERIALIZED (
+            SELECT CASE
+                     WHEN typeof(x_user_id) = 'text' AND length(CAST(x_user_id AS BLOB)) > ${MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES}
+                       THEN NULL ELSE x_user_id END AS x_user_id,
+                   CASE
+                     WHEN typeof(x_user_id) = 'text' AND length(CAST(x_user_id AS BLOB)) > ${MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES}
+                       THEN 1 ELSE 0 END AS oversized
+              FROM (SELECT DISTINCT l."x_user_id" AS x_user_id
+                      FROM "x_user_account_links" l
+                      INNER JOIN "x_users" ax ON ax."id" = l."x_user_id"
+                     WHERE l."auth_user_id" = u."id" AND ax."approval_status" = 'approved'
+                     LIMIT ${MAX_APPROVED_X_IDS})
+         ), receipt AS MATERIALIZED (SELECT CASE
+           WHEN COALESCE(MAX(receipt_bytes), 2) > ${MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES} THEN '!'
+           ELSE json_group_array(CASE WHEN receipt_bytes <= ${MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES}
+             THEN x_user_id ELSE NULL END)
+         END AS value FROM (
+           SELECT x_user_id,
+                  SUM(CASE WHEN oversized = 1 THEN ${MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES} + 1
+                    ELSE length(CAST(json_quote(x_user_id) AS BLOB)) + 1 END) OVER ()
+                    + 1 AS receipt_bytes
+             FROM approved
+         )) SELECT CASE WHEN length(CAST(value AS BLOB)) <= ${MAX_APPROVED_X_IDS_JSON_BYTES} THEN value
+              WHEN length(value) > ${MAX_APPROVED_X_IDS_JSON_BYTES} THEN '!'
+              ELSE '~' || hex(CAST(value AS BLOB)) END FROM receipt) AS approved_x_ids_json`
              : ""
          }`;
   const costGuardColumns = includeCostGuardSettings
@@ -348,12 +401,14 @@ export async function loadTosState(
   if (!row) return null;
   let approvedXIds: string[] = [];
   if (row.approved_x_ids_json) {
-    // Fail closed (caller maps a throw to 503 db_unavailable) before parsing
-    // anything larger than the bounded list can be.
-    if (row.approved_x_ids_json.length > MAX_APPROVED_X_IDS_JSON_BYTES) {
+    // The SQL marker means the receipt was already too large to be accepted.
+    // Keep the existing JS code-unit check for all other values; no legacy ID
+    // is rejected solely because its UTF-8 encoding is longer than 8192 bytes.
+    const receipt = decodeApprovedXIdsReceipt(row.approved_x_ids_json);
+    if (receipt === "!" || receipt.length > MAX_APPROVED_X_IDS_JSON_BYTES) {
       throw new Error("approved_x_ids_too_large");
     }
-    const parsed: unknown = JSON.parse(row.approved_x_ids_json);
+    const parsed: unknown = JSON.parse(receipt);
     approvedXIds = Array.isArray(parsed)
       ? parsed.filter((v): v is string => typeof v === "string")
       : [];
