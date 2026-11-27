@@ -298,3 +298,39 @@ test("resolveStaticTrendingStaleMeta: generatedAt null は stale + tooOldForHome
   assert.equal(meta.tooOldForHome, true);
   assert.equal(meta.ageSeconds, null);
 });
+
+test("SEC-837 U02: reject explicit nonpublic or malformed visibility markers; preserve legacy missing/null", () => {
+  const markers = [undefined, null, "public", "private", "draft", "unlisted", "", " public ", false, 0, [], {}];
+  const allowed = (value) => value == null || value === "public";
+  for (const status of markers) {
+    for (const visibility_status of markers) {
+      const result = normalizeStaticTrending({
+        schema_version: 1, generated_at: 100,
+        items: [{ ...sampleItem, status, visibility_status }],
+      }, 100);
+      assert.ok(result);
+      assert.equal(result.items.length, Number(allowed(status) && allowed(visibility_status)),
+        JSON.stringify({ status, visibility_status }));
+      if (result.items.length) assert.equal(result.items[0].status, "public");
+    }
+  }
+});
+
+test("SEC-837 U02: mixed ranking preserves order, rank, counts and identity of public survivors", () => {
+  const items = [
+    { ...sampleItem, id: "public-a", status: undefined, rank: 2, video_id: "public-a" },
+    { ...sampleItem, id: "hidden", visibility_status: "private", rank: 3 },
+    { ...sampleItem, id: "public-b", visibility_status: null, rank: 8, video_id: "public-b" },
+    { ...sampleItem, id: "conflict", status: "draft", visibility_status: "public" },
+    { ...sampleItem, id: "public-c", visibility_status: "public", rank: 10, video_id: "public-c" },
+  ];
+  const before = JSON.stringify(items);
+  const result = normalizeStaticTrending({ schema_version: 1, generated_at: 100, items }, 100);
+  assert.ok(result);
+  assert.deepEqual(result.items.map(x => [x.id, x.rank, x.views_7d, x.video_id]), [
+    ["public-a", 2, 25, "public-a"],
+    ["public-b", 8, 25, "public-b"],
+    ["public-c", 10, 25, "public-c"],
+  ]);
+  assert.equal(JSON.stringify(items), before);
+});

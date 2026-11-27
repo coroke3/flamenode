@@ -97,6 +97,7 @@ function normalizeTrendingItem(value: unknown): TrendingItem | null {
   }
 
   if (row.status != null && row.status !== "public") return null;
+  if (row.visibility_status != null && row.visibility_status !== "public") return null;
 
   const rank =
     row.rank !== undefined && row.rank !== null
