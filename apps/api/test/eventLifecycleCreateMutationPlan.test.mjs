@@ -1583,11 +1583,11 @@ test("MIG-0652 U03g: no-op stage reconciliation produces zero D1 mutations", asy
   assert.deepEqual(planStageQuestionMutationSteps({ existing, next, deletedAnswers: [] }),
     { ok: true, operations: [], expectedMutationChanges: [], obsoleteIds: [] });
 });
-test("MIG-0652 U03g: answer-first stage CAS ordering, exact count and six-row insert chunks", async () => {
+test("MIG-0652 U03g/U03m: stage CAS ordering within canonical four-question cap", async () => {
   const { planStageQuestionMutationSteps } = await import("@flamenode/server-core/event/updatePayload");
   const existing = ["delete2", "update2", "delete1", "update1"].map(makeStageQuestionDiffRow);
   const next = [makeStageQuestionDiffRow("update1", { required: 1 }),
-    ...Array.from({ length: 13 }, (_, index) => makeStageQuestionDiffRow("new" + index)),
+    ...Array.from({ length: 2 }, (_, index) => makeStageQuestionDiffRow("new" + index)),
     makeStageQuestionDiffRow("update2", { label: "changed" })];
   const answers = [
     { question_id: "old-delete2", video_id: "v2" },
@@ -1596,15 +1596,14 @@ test("MIG-0652 U03g: answer-first stage CAS ordering, exact count and six-row in
   const result = planStageQuestionMutationSteps({ existing, next, deletedAnswers: answers });
   assert.equal(result.ok, true);
   assert.deepEqual(result.operations.map(step => step.kind), [
-    "delete_answers", "delete_questions", "update_question", "update_question",
-    "insert_questions", "insert_questions", "insert_questions",
+    "delete_answers", "delete_questions", "update_question", "update_question", "insert_questions",
   ]);
-  assert.deepEqual(result.expectedMutationChanges, [2, 2, 1, 1, 6, 6, 1]);
+  assert.deepEqual(result.expectedMutationChanges, [2, 2, 1, 1, 2]);
   assert.deepEqual(result.obsoleteIds, ["old-delete2", "old-delete1"]);
   assert.deepEqual(result.operations[1].rows.map(row => row.question_key), ["delete2", "delete1"]);
   assert.deepEqual(result.operations.filter(step => step.kind === "update_question").map(step => step.before.question_key), ["update2", "update1"]);
   assert.deepEqual(result.operations.filter(step => step.kind === "insert_questions")
-    .flatMap(step => step.rows.map(row => row.question_key)), Array.from({ length: 13 }, (_, index) => "new" + index));
+    .flatMap(step => step.rows.map(row => row.question_key)), ["new0", "new1"]);
   assert.deepEqual(answers, [
     { question_id: "old-delete2", video_id: "v2" }, { question_id: "old-delete1", video_id: "v1" },
   ]);
@@ -1875,12 +1874,12 @@ test("MIG-0652 U03j SQLite: late strict audit rejection undoes answer and questi
 });
 
 /** U03k: stage-question insertion in the existing actual SQLite D1 audit harness.
- * Six is the CURRENT stage-question form maximum; this is not a mounted route. */
+ * Four is the CURRENT stage-question form maximum; this is not a mounted route. */
 async function stageInsertSqliteFixture() {
   const f = createAtomicCreateHarness();
   seedCreateActor(f.sqlite);
   insert(f.sqlite, "events", event);
-  const next = Array.from({ length: 6 }, (_, index) => ({
+  const next = Array.from({ length: 4 }, (_, index) => ({
     ...makeStageQuestionDiffRow("stage_permission_new_" + index, {
       id: "stage_new_" + index,
       label: "Stage question " + index,
@@ -1897,7 +1896,7 @@ async function stageInsertSqliteFixture() {
   });
   assert.equal(stage.ok, true);
   assert.deepEqual(stage.operations.map(step => step.kind), ["insert_questions"]);
-  assert.deepEqual(stage.expectedMutationChanges, [6]);
+  assert.deepEqual(stage.expectedMutationChanges, [4]);
   const statements = stage.operations.map(step => {
     assert.equal(step.kind, "insert_questions");
     return f.db.insert(schema.eventCustomQuestions).values(step.rows);
@@ -1915,17 +1914,17 @@ async function stageInsertSqliteFixture() {
   } };
 }
 
-test("MIG-0652 U03k SQLite: six stage inserts and six strict audits commit in one D1 batch", async () => {
+test("MIG-0652 U03k SQLite: four stage inserts and four strict audits commit in one D1 batch", async () => {
   const f = await stageInsertSqliteFixture();
   const auditIds = await mutateWithAudit(f.db, f.mutationPlan);
-  assert.equal(auditIds.length, 6);
+  assert.equal(auditIds.length, 4);
   assert.equal(f.d1.stats.batches, 1);
   const questions = f.sqlite.prepare(
     "SELECT id, question_key, sort_order FROM event_custom_questions ORDER BY sort_order"
   ).all();
   assert.deepEqual(questions.map(row => row.id), f.next.map(row => row.id));
   assert.deepEqual(questions.map(row => row.question_key), f.next.map(row => row.question_key));
-  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE operation = 'CREATE' AND table_name = 'event_custom_questions'").get().n, 6);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE operation = 'CREATE' AND table_name = 'event_custom_questions'").get().n, 4);
   assert.ok(f.d1.stats.maxBinds <= 100);
 });
 
@@ -2085,4 +2084,20 @@ test("MIG-0652 U03l SQLite: late mixed strict-audit failure rolls back all four 
   assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 2);
   assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 2);
   assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
+
+test("MIG-0652 U03m: stage planner enforces CURRENT four-question cap and rejects five", async () => {
+  const { MAX_STAGE_PERMISSION_QUESTIONS } = await import("@flamenode/domain/event/limits");
+  const { planStageQuestionMutationSteps } = await import("@flamenode/server-core/event/updatePayload");
+  assert.equal(MAX_STAGE_PERMISSION_QUESTIONS, 4);
+  const rows = Array.from({ length: MAX_STAGE_PERMISSION_QUESTIONS + 1 },
+    (_, index) => makeStageQuestionDiffRow("stage_permission_" + index));
+  const allowed = planStageQuestionMutationSteps({
+    existing: [], next: rows.slice(0, MAX_STAGE_PERMISSION_QUESTIONS), deletedAnswers: [],
+  });
+  assert.equal(allowed.ok, true);
+  assert.deepEqual(allowed.expectedMutationChanges, [4]);
+  assert.deepEqual(planStageQuestionMutationSteps({
+    existing: [], next: rows, deletedAnswers: [],
+  }), { ok: false, reason: "stage_limit" });
 });

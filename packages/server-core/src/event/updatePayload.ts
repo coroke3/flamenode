@@ -1,5 +1,6 @@
 /** CURRENT event update composition, shared without changing section or form semantics. */
 import type { events } from "@flamenode/db/schema";
+import { MAX_STAGE_PERMISSION_QUESTIONS } from "@flamenode/domain/event/limits";
 import {
   buildVideoFormSettingsJson,
   resolveSubmittedEventVisibility,
@@ -162,7 +163,7 @@ export type StageQuestionMutationStep<Old, New, Answer> =
   | { kind: "insert_questions"; rows: New[]; expected: number };
 
 export type StageQuestionMutationPlan<Old, New, Answer> =
-  | { ok: false; reason: "duplicate_existing_key" | "duplicate_next_key" | "answer_limit" | "unrelated_answer" }
+  | { ok: false; reason: "duplicate_existing_key" | "duplicate_next_key" | "answer_limit" | "unrelated_answer" | "stage_limit" }
   | {
       ok: true;
       operations: StageQuestionMutationStep<Old, New, Answer>[];
@@ -183,6 +184,9 @@ export function planStageQuestionMutationSteps<
 }): StageQuestionMutationPlan<Old, New, Answer> {
   const diff = planStageQuestionDiff(args.existing, args.next);
   if (!diff.ok) return diff;
+  // CURRENT permits at most four stage/permission questions, not six.
+  // The six-row SQL insert chunk limit is a different, generic D1 constraint.
+  if (args.next.length > MAX_STAGE_PERMISSION_QUESTIONS) return { ok: false, reason: "stage_limit" };
   if (args.deletedAnswers.length > 20) return { ok: false, reason: "answer_limit" };
   const obsoleteIds = diff.obsolete.map(row => row.id);
   const obsoleteIdSet = new Set(obsoleteIds);
