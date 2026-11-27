@@ -1104,9 +1104,10 @@ test("MIG-0728 U03: OpsRoutes mounts all 5 routes behind OpsGate and blocks non-
 });
 
 
-// MIG-0721 U02a: the canonical edit GET has no draft auth-user ID. These
-// read-boundary tests do not mount the form or infer its owner from Active X.
+// MIG-0721 U02a/U02b: preserve the response-bound authenticated draft owner.
+// Read boundary only; no mounted form or inference from Active X.
 const editFixture = (id = "event-1") => ({
+  draftAuthUserId: "auth-a",
   isAdmin: false, pendingCount: 0, activeXUserId: null,
   manageStaffXUserIds: ["staff-x"],
   editableSections: { basic: true, publish: false, questions: true, slots: false },
@@ -1152,6 +1153,7 @@ test("MIG-0721 U02a: edit GET preserves the canonical DTO and opaque requested e
       method: "GET", credentials: "same-origin", cache: "no-store",
       headers: { accept: "application/json" }, signal,
     });
+    assert.equal(result.data.draftAuthUserId, dto.draftAuthUserId);
     assert.equal(Object.hasOwn(result.data, "userId"), false);
   }
 });
@@ -1209,4 +1211,23 @@ test("MIG-0721 U02a: abort retires a delayed successful edit response", async ()
   controller.abort();
   resolveResponse(json(200, editFixture()));
   assert.deepEqual(await pending, { status: "unavailable" });
+});
+
+
+test("MIG-0721 U02b: edit read validates opaque draft owner and never substitutes Active X", async () => {
+  const dto = editFixture();
+  const { draftAuthUserId: _owner, ...missingOwner } = dto;
+  for (const invalid of [
+    missingOwner, { ...dto, draftAuthUserId: "" }, { ...dto, draftAuthUserId: null },
+    { ...dto, draftAuthUserId: 123 }, { ...missingOwner, userId: "auth-a", activeXUserId: "auth-a" },
+  ]) {
+    assert.deepEqual(await readManageEventEdit("event-1", async () => json(200, invalid)),
+      { status: "unavailable" });
+  }
+  for (const owner of ["auth-a", "auth-b", "auth-a", "opaque/日本語"]) {
+    const expected = { ...dto, draftAuthUserId: owner };
+    assert.equal(expected.activeXUserId, null);
+    const r = await readManageEventEdit("event-1", async () => json(200, expected));
+    assert.deepEqual(r, { status: "ok", data: expected });
+  }
 });
