@@ -819,8 +819,8 @@ function buildSpreadsheetMemberSnapshotFkReleaseLookup(
     ];
   });
   const statement = "WITH " + ctes.join(",\n") + "\n" +
-    "SELECT s.*, sc."count" AS " + quoteIdent(snapshotCountAlias) +
-    ", rc."count" AS " + quoteIdent(releaseCountAlias) + ", " +
+    'SELECT s.*, sc."count" AS ' + quoteIdent(snapshotCountAlias) +
+    ' , rc."count" AS ' + quoteIdent(releaseCountAlias) + ", " +
     [...fkSelects,
       "r.videoId AS " + quoteIdent(releaseVideoAlias),
       "r.eventId AS " + quoteIdent(releaseEventAlias),
