@@ -23,12 +23,13 @@ const data = (opts = {}) => ({
   pendingCount: 4, total: 3,
   counts: { available: 1, reserved: 1, submitted: 1 },
   slots: [
+    // Hono/SQLite order: untimed NULL first, then numeric start_time/sort_order.
+    slot("s3", { status: "submitted", start_time: null, sort_order: 3,
+      slot_label: "No.3", video_id: "vid/a?&" }),
     slot("s1", { status: "available", start_time: 1700000000, sort_order: 1 }),
     slot("s2", { status: "reserved", start_time: 1700000060, sort_order: 2,
       display_name: "User <name>", reserved_x_id_snapshot: "x_name",
       discord_display_name: "Discord Name", discord_id: "1234" }),
-    slot("s3", { status: "submitted", start_time: null, sort_order: 3,
-      slot_label: "No.3", video_id: "vid/a?&" }),
   ],
   atLimit: false, ...opts,
 });
