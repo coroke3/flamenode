@@ -119,7 +119,8 @@ const SLOT_GATE_INVALID_AUDIT_SQL = SLOT_GATE_NUMERIC_FIELDS
  * Origin and Auth.js session are still checked FIRST by existing middleware.
  * published_at=0 is a valid latest major in the existing write guard.
  */
-const SLOT_WRITE_GATE_SQL = `${TERMS_REACCEPT_REQUIRED_CTE_SQL}
+function buildSlotWriteGateSql(feature: WriteFeatureKey): string {
+  return `${TERMS_REACCEPT_REQUIRED_CTE_SQL}
  SELECT 1 AS slot_combined_write_gate,
    CASE WHEN ${invalidGateNumberSql('u."is_tos_accepted"')} THEN 1 ELSE 0 END AS invalid_identity_snapshot,
    CASE WHEN ${SLOT_GATE_INVALID_ACTOR_SQL} THEN 1 ELSE 0 END AS invalid_actor_snapshot,
@@ -164,6 +165,7 @@ const SLOT_WRITE_GATE_SQL = `${TERMS_REACCEPT_REQUIRED_CTE_SQL}
  LEFT JOIN "system_settings" settings ON settings."id" = 'default'
  WHERE u."id" = ?
  LIMIT ${MAX_SINGLE_ROW_LIMIT}`;
+}
 
 type SlotWriteGateRow = ActorSnapshotRow & AuditSettingsRow & {
   slot_combined_write_gate: number;
@@ -202,7 +204,7 @@ function slotCombinedWriteGuard(feature: WriteFeatureKey): MiddlewareHandler<App
       sessionUnavailable,
       requiredRole: null,
       loadTosState: user && db ? async () => {
-        gate.row = await db.prepare(SLOT_WRITE_GATE_SQL).bind(user.id).first<SlotWriteGateRow>();
+        gate.row = await db.prepare(buildSlotWriteGateSql(feature)).bind(user.id).first<SlotWriteGateRow>();
         return gate.row ? {
           is_tos_accepted: gate.row.is_tos_accepted === 1 ? 1 : 0,
           terms_reaccept_required: gate.row.terms_reaccept_required === 1 ? 1 : 0,
