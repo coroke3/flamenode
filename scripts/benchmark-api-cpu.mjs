@@ -1257,6 +1257,60 @@ function materializeMigrations() {
   return import("./d1-migration-compat.mjs").then((m) => m.materializeD1CompatibleMigrations(path.join(REPO_ROOT, "migrations")));
 }
 
+export function replayIdentity(value) {
+  let nodes = 0, units = 0;
+  const seen = new Set();
+  const charge = (n) => {
+    units += n;
+    if (units > 262144) throw new Error("bench replay identity too large");
+  };
+  const walk = (v, depth) => {
+    if (++nodes > 4096 || depth > 16) throw new Error("bench replay identity too complex");
+    if (v === null) return ["null"];
+    if (v === undefined) return ["undefined"];
+    if (typeof v === "string") { charge(v.length); return ["string", v]; }
+    if (typeof v === "boolean") return ["boolean", v];
+    if (typeof v === "number" && Number.isFinite(v)) return ["number", Object.is(v, -0) ? "-0" : String(v)];
+    if (typeof v === "bigint") return ["bigint", String(v)];
+    if (typeof v !== "object") throw new Error("bench unsupported replay identity");
+    if (v instanceof ArrayBuffer || ArrayBuffer.isView(v)) {
+      const bytes = v instanceof ArrayBuffer
+        ? new Uint8Array(v)
+        : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+      charge(bytes.length * 2);
+      return ["bytes", Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")];
+    }
+    if (v instanceof Date) return ["date", v.toISOString()];
+    if (seen.has(v)) throw new Error("bench cyclic replay identity");
+    seen.add(v);
+    try {
+      const own = (key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(v, key);
+        if (!descriptor || !Object.hasOwn(descriptor, "value")) {
+          throw new Error("bench unsupported replay accessor");
+        }
+        return walk(descriptor.value, depth + 1);
+      };
+      if (Array.isArray(v)) {
+        if (v.length > 4096 || Reflect.ownKeys(v).length !== v.length + 1) {
+          throw new Error("bench unsupported replay array");
+        }
+        return ["array", Array.from({ length: v.length }, (_, i) => own(String(i)))];
+      }
+      const proto = Object.getPrototypeOf(v);
+      if (proto !== Object.prototype && proto !== null) throw new Error("bench unsupported replay object");
+      const keys = Object.keys(v).sort();
+      if (Reflect.ownKeys(v).length !== keys.length || keys.length > 4096) {
+        throw new Error("bench unsupported replay keys");
+      }
+      return ["object", keys.map((key) => { charge(key.length); return [key, own(key)]; })];
+    } finally {
+      seen.delete(v);
+    }
+  };
+  return JSON.stringify(walk(value, 0));
+}
+
 // ------------------------------------------------------------ target: inproc
 export async function createInprocTarget(plan) {
   const { DatabaseSync } = await import("node:sqlite");
@@ -1276,15 +1330,35 @@ export async function createInprocTarget(plan) {
     d1PerQueryRows.push(n);
     return value;
   };
-  let rec = null; // when set, every D1/R2 result is appended in call order (replay script)
-  const keep = (v) => { if (rec) rec.push(v); return v; };
+  let rec = null;
+  let recInvalid = false;
+  const trace = (kind, args, execute) => {
+    if (!rec) return execute();
+    try {
+      const identity = replayIdentity([kind, ...args]);
+      const result = execute();
+      rec.push({ identity, result });
+      return result;
+    } catch (error) {
+      recInvalid = true;
+      throw error;
+    }
+  };
   const make = (sql, params) => ({
     _sql: sql, _params: params,
-    first: async () => keep(countD1("first", sqlite.prepare(sql).get(...params) ?? null)),
-    all: async () => keep(countD1("all", { results: sqlite.prepare(sql).all(...params) })),
-    run: async () => keep(countD1("run", { results: sqlite.prepare(sql).all(...params) })),
+    first: async (...args) => trace("d1.first", [sql, params, args], () =>
+      countD1("first", sqlite.prepare(sql).get(...params) ?? null)),
+    all: async (...args) => trace("d1.all", [sql, params, args], () =>
+      countD1("all", { results: sqlite.prepare(sql).all(...params) })),
+    run: async (...args) => trace("d1.run", [sql, params, args], () =>
+      countD1("run", { results: sqlite.prepare(sql).all(...params) })),
     // drizzle's D1 driver reads rows as arrays through raw().
-    raw: async () => { const st = sqlite.prepare(sql); st.setReturnArrays(true); try { return keep(countD1("raw", st.all(...params))); } finally { st.setReturnArrays(false); } },
+    raw: async (...args) => trace("d1.raw", [sql, params, args], () => {
+      const st = sqlite.prepare(sql);
+      st.setReturnArrays(true);
+      try { return countD1("raw", st.all(...params)); }
+      finally { st.setReturnArrays(false); }
+    }),
   });
   const db = {
     // D1 allows first()/all()/run()/raw() straight on prepare() (no bind); count a statement on either path.
@@ -1297,32 +1371,39 @@ export async function createInprocTarget(plan) {
         first: counted(unbound.first), all: counted(unbound.all), run: counted(unbound.run), raw: counted(unbound.raw),
       };
     },
-    batch: async (list) => {
+    batch: async (list) => trace("d1.batch", [list.map((s) => [s._sql, s._params])], () => {
       sqlite.exec("BEGIN");
       try {
         const out = list.map((s) => ({ results: sqlite.prepare(s._sql).all(...s._params) }));
         sqlite.exec("COMMIT");
         for (const result of out) countD1("all", result);
-        return keep(out);
+        return out;
       } catch (e) { sqlite.exec("ROLLBACK"); throw e; }
-    },
+    }),
   };
   const r2Objects = new Map();
   const bucket = {
-    put: async (key, value) => {
+    put: async (key, value, ...args) => trace("r2.put", [key, value, args], () => {
       r2Objects.set(key, Buffer.from(value).toString("base64"));
-      return keep({ etag: BENCH_ETAG });
-    },
-    delete: async (key) => {
+      return { etag: BENCH_ETAG };
+    }),
+    delete: async (key, ...args) => trace("r2.delete", [key, args], () => {
       r2Objects.delete(key);
-      return keep({ deleted: true });
-    },
-    get: async (key) => {
-      const body = r2Objects.get(key);
-      if (body == null) return keep(null);
-      const size = Buffer.byteLength(body);
-      keep({ size, text: body, etag: BENCH_ETAG });
-      return { size, etag: BENCH_ETAG, json: async () => JSON.parse(body), text: async () => body, body: null };
+      return { deleted: true };
+    }),
+    get: async (key, ...args) => {
+      const value = trace("r2.get", [key, args], () => {
+        const body = r2Objects.get(key);
+        if (body == null) return null;
+        return { size: Buffer.byteLength(body), text: body, etag: BENCH_ETAG };
+      });
+      return value && {
+        size: value.size,
+        etag: value.etag,
+        json: async () => JSON.parse(value.text),
+        text: async () => value.text,
+        body: null,
+      };
     },
   };
   const env = { DB: db, BUCKET: bucket, BUILD_COMMIT_SHA: "a".repeat(40), WORKER_ADMIN_TOKEN: plan.adminToken, NEXT_PUBLIC_SITE_URL: SITE_URL, ADMIN_SPREADSHEET_ENABLED: "1", AUTH_SECRET: "bench-auth-secret" };
@@ -1373,10 +1454,15 @@ export async function createInprocTarget(plan) {
     /** Execute once (side effects included) and capture D1/R2 results for workerd replay. */
     recordForReplay: async (spec) => {
       rec = [];
+      recInvalid = false;
       try {
         const r = await fetchOnce(spec);
+        if (recInvalid) throw new Error("bench replay recording invalid");
         return { script: rec, status: r.status, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows };
-      } finally { rec = null; }
+      } finally {
+        rec = null;
+        recInvalid = false;
+      }
     },
     close: async () => { sqlite.close(); },
   };
@@ -1425,38 +1511,70 @@ function rowCounters() {
   };
 }
 
+${replayIdentity.toString()}
+
 function replayEnv(env, script) {
-  let k = 0;
+  let k = 0, statements = 0, mismatch = false;
   const rows = rowCounters();
-  const next = () => {
-    if (k >= script.length) throw new Error("bench replay script exhausted");
-    return script[k++];
+  const next = (kind, args) => {
+    try {
+      if (k >= script.length) throw new Error("bench replay script exhausted");
+      const entry = script[k];
+      if (!entry || !Object.hasOwn(entry, "result") ||
+          entry.identity !== replayIdentity([kind, ...args])) {
+        throw new Error("bench replay operation mismatch");
+      }
+      k += 1;
+      return entry.result;
+    } catch (error) {
+      mismatch = true;
+      throw error;
+    }
   };
-  const stmt = {
-    bind: () => stmt,
-    first: async () => rows.observe("first", next()),
-    all: async () => rows.observe("all", next()),
-    run: async () => rows.observe("run", next()),
-    raw: async () => rows.observe("raw", next()),
+  const make = (sql, params, bound) => {
+    const query = (mode) => async (...args) => {
+      if (!bound) statements += 1;
+      return rows.observe(mode, next("d1." + mode, [sql, params, args]));
+    };
+    return {
+      _sql: sql,
+      _params: params,
+      ...(!bound ? { bind: (...values) => { statements += 1; return make(sql, values, true); } } : {}),
+      first: query("first"),
+      all: query("all"),
+      run: query("run"),
+      raw: query("raw"),
+    };
   };
   return [{
     ...env,
     DB: {
-      prepare: () => stmt,
-      batch: async () => {
-        const result = next();
-        if (Array.isArray(result)) {
-          for (const entry of result) rows.observe("all", entry);
+      prepare: (sql) => make(sql, [], false),
+      batch: async (list) => {
+        const result = next("d1.batch", [list.map((statement) => [statement._sql, statement._params])]);
+        if (!Array.isArray(result) || result.length !== list.length) {
+          mismatch = true;
+          throw new Error("bench replay batch size mismatch");
         }
+        for (const entry of result) rows.observe("all", entry);
         return result;
       },
     },
     BUCKET: {
-      get: async () => { const v = next(); return v && { size: v.size, etag: v.etag, json: async () => JSON.parse(v.text), text: async () => v.text, body: null }; },
-      put: async () => next(),
-      delete: async () => next(),
+      get: async (key, ...args) => {
+        const value = next("r2.get", [key, args]);
+        return value && {
+          size: value.size,
+          etag: value.etag,
+          json: async () => JSON.parse(value.text),
+          text: async () => value.text,
+          body: null,
+        };
+      },
+      put: async (key, value, ...args) => next("r2.put", [key, value, args]),
+      delete: async (key, ...args) => next("r2.delete", [key, args]),
     },
-  }, () => ({ statements: k, ...rows.totals() })];
+  }, () => ({ statements, ...rows.totals(), replayComplete: !mismatch && k === script.length })];
 }
 
 function counting(env) {
@@ -1490,7 +1608,7 @@ function counting(env) {
 async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/__bench/ping") return new Response("ok", { headers: { "x-bench-build": BUILD_ID } });
-    if (url.pathname === "/__bench/noop") return new Response("ok");
+    if (url.pathname === "/__bench/noop" && !request.headers.has("x-bench-script")) return new Response("ok");
     if (url.pathname === "/__bench/burn") {
       // Calibration only: synchronous CPU burn so the harness can check the clock is real.
       let x = 0;
@@ -1538,25 +1656,34 @@ async function handleRequest(request, env, ctx) {
       return new Response("ok");
     }
     const sid = request.headers.get("x-bench-script");
-    const script = sid ? scripts.get(sid) : null;
-    if (sid) scripts.delete(sid);
-    const [benchEnv, count] = script ? replayEnv(env, script) : counting(env);
+    const script = sid !== null ? scripts.get(sid) : null;
+    if (sid !== null) scripts.delete(sid);
+    if (sid !== null && !Array.isArray(script)) {
+      return new Response("bench replay script missing", {
+        status: 503,
+        headers: { "x-bench-replay-complete": "0" },
+      });
+    }
+    const [benchEnv, count] = sid !== null ? replayEnv(env, script) : counting(env);
+    const evidence = () => {
+      const stats = count();
+      return {
+        "x-bench-d1": String(stats.statements),
+        "x-bench-returned-rows": String(stats.rowsReturned),
+        "x-bench-query-rows": stats.perQueryRows.join(","),
+        ...(sid !== null ? { "x-bench-replay-complete": stats.replayComplete ? "1" : "0" } : {}),
+      };
+    };
+    if (url.pathname === "/__bench/noop") return new Response("ok", { headers: evidence() });
     if (url.pathname === "/__bench/session") {
       const vars = {};
       const c = { req: { url: request.url, header: (n) => request.headers.get(n) ?? undefined }, env: benchEnv, set: (k, v) => { vars[k] = v; }, header() {} };
       await sm(c, async () => {});
-      return Response.json({ state: vars.sessionState }, { headers: {
-        "x-bench-d1": String(count().statements),
-        "x-bench-returned-rows": String(count().rowsReturned),
-        "x-bench-query-rows": count().perQueryRows.join(","),
-      } });
+      return Response.json({ state: vars.sessionState }, { headers: evidence() });
     }
     const res = await app.fetch(request, benchEnv, ctx);
     const out = new Response(res.body, res);
-    const d1Stats = count();
-    out.headers.set("x-bench-d1", String(d1Stats.statements));
-    out.headers.set("x-bench-returned-rows", String(d1Stats.rowsReturned));
-    out.headers.set("x-bench-query-rows", d1Stats.perQueryRows.join(","));
+    for (const [name, value] of Object.entries(evidence())) out.headers.set(name, value);
     return out;
 }
 export default {
@@ -1579,6 +1706,22 @@ function killTree(child) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export function replayEvidenceMismatch(rec, headers) {
+  const observedStatements = headers.get("x-bench-d1");
+  const observedRows = headers.get("x-bench-returned-rows");
+  const observedVector = headers.get("x-bench-query-rows");
+  return headers.get("x-bench-replay-complete") !== "1" ||
+    observedStatements === null || observedStatements !== String(rec.d1) ||
+    observedRows === null || observedRows !== String(rec.d1RowsReturned) ||
+    observedVector === null || observedVector !== rec.d1PerQueryRows.join(",");
+}
+
+export function requireBenchmarkControl(response, operation) {
+  if (!response.ok) {
+    throw new Error("benchmark " + operation + " failed: HTTP " + response.status);
+  }
+}
 
 async function createWranglerTarget(plan, opts) {
   const require = createRequire(path.join(REPO_ROOT, "package.json"));
@@ -1734,12 +1877,13 @@ async function createWranglerTarget(plan, opts) {
     const stop = await call("Profiler.stop");
     if (stop.error) throw new Error(`Profiler.stop failed: ${json(stop.error)}`);
     return {
-      status: res.status, bytes: buf.byteLength, d1: rec ? rec.d1 : Number(res.headers.get("x-bench-d1") ?? 0),
+      status: res.status, bytes: buf.byteLength,
+      d1: res.headers.has("x-bench-d1") ? Number(res.headers.get("x-bench-d1")) : null,
       d1RowsReturned: res.headers.has("x-bench-returned-rows")
         ? Number(res.headers.get("x-bench-returned-rows")) : null,
       d1PerQueryRows: (res.headers.get("x-bench-query-rows") || "")
         .split(",").filter(Boolean).map(Number),
-      replayRowsMismatch: rec ? Number(res.headers.get("x-bench-returned-rows")) !== rec.d1RowsReturned : false,
+      replayRowsMismatch: rec ? replayEvidenceMismatch(rec, res.headers) : false,
       cacheState: res.headers.get("x-flamenode-cache"),
       bodyHash: createHash("sha256").update(Buffer.from(buf)).digest("hex"),
       cpuMs: profileBusyMs(stop.result.profile),
@@ -1794,10 +1938,15 @@ async function createWranglerTarget(plan, opts) {
     supportsCold: true,
     setR2: async (body, key = STATS_KEY) => {
       const q = `/__bench/r2?key=${encodeURIComponent(key)}`;
-      if (body == null) await post(q, undefined, "DELETE"); else await post(q, body, "PUT");
+      const response = body == null
+        ? await post(q, undefined, "DELETE")
+        : await post(q, body, "PUT");
+      requireBenchmarkControl(response, "r2");
     },
     exec,
-    clearCache: async () => { await post("/__bench/cache-clear"); },
+    clearCache: async () => {
+      requireBenchmarkControl(await post("/__bench/cache-clear"), "cache-clear");
+    },
     record: async () => null,
     run,
     runFirstRequest: async (spec, rec) => {
@@ -1929,7 +2078,7 @@ export function createReplayTarget(inproc, wr) {
     // quantum can grow from 0.1ms to several ms while requests run; keep the
     // *live* workerd resolution so warm BASELINE and budget checks fail closed.
     get resolutionMs() { return wr.resolutionMs; },
-    cpuSource: wr.cpuSource.replace("local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)", "D1/R2 stubbed with results recorded from an in-process node:sqlite run (--d1 replay): CPU = app code in workerd; local D1/R2 simulator and real D1 round-trip excluded"),
+    cpuSource: wr.cpuSource.replace("local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)", "D1/R2 stubbed with typed results recorded from in-process node:sqlite (--d1 replay); workerd CPU includes app code and benchmark replay-identity validation; local D1/R2 simulator and real D1 round-trip excluded"),
     exec: inproc.exec,
     setR2: inproc.setR2,
     record: (spec) => inproc.recordForReplay(spec),

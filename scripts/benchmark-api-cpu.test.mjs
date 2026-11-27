@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, runCold, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, summarize, workerSource,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, runCold, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {
@@ -49,9 +49,14 @@ test("MIG-0639 SA-105: replay recording captures real multipart upload and R2 cl
     const recorded = await target.recordForReplay(spec);
     assert.equal(recorded.status, 200, "real Hono upload must commit before it can be replayed");
     assert.ok(recorded.script.length > 0, "workerd replay must capture all external results");
-    const puts = recorded.script.filter((value) =>
+    const results = recorded.script.map((entry) => {
+      assert.ok(entry && typeof entry.identity === "string", "every replay operation has a typed identity");
+      assert.ok(Object.hasOwn(entry, "result"), "every replay operation stores its result separately");
+      return entry.result;
+    });
+    const puts = results.filter((value) =>
       value && typeof value === "object" && value.etag === "bench-etag" && !Object.hasOwn(value, "text"));
-    const deletes = recorded.script.filter((value) =>
+    const deletes = results.filter((value) =>
       value && typeof value === "object" && value.deleted === true);
     assert.equal(puts.length, 2, "staging and final R2 puts must be in the recorded script");
     assert.ok(deletes.length >= 1, "post-commit staging cleanup must be replayable");
@@ -330,8 +335,12 @@ test("MIG-0639: post-reload local probes cannot masquerade as isolate-first cold
 test("MIG-0639: generated cold worker seeds replay before its first fetch and counts harness requests", async () => {
   const originalFetch = globalThis.fetch;
   const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const coldScript = [{
+    identity: replayIdentity(["d1.first", "SELECT", [], []]),
+    result: { id: "cold-result" },
+  }];
   const make = async (generation) => {
-    const source = workerSource(generation, [{ id: "cold-result" }])
+    const source = workerSource(generation, coldScript)
       .replace(/^import .*;$/gm, "");
     const stubs = `const app = { fetch: async (request, env) => Response.json(await env.DB.prepare('SELECT').first()) };
       const sessionMiddleware = () => async () => {};`;
@@ -346,12 +355,17 @@ test("MIG-0639: generated cold worker seeds replay before its first fetch and co
     assert.deepEqual(await response.json(), { id: "cold-result" });
     assert.equal(response.headers.get("x-bench-build"), "fresh-first");
     assert.equal(response.headers.get("x-bench-request"), "1");
+    assert.equal(response.headers.get("x-bench-replay-complete"), "1");
+    assert.equal(response.headers.get("x-bench-d1"), "1");
+    assert.equal(response.headers.get("x-bench-returned-rows"), "1");
+    assert.equal(response.headers.get("x-bench-query-rows"), "1");
     const warmed = await make("warmed-by-ping");
     await warmed.fetch(new Request("http://bench.local/__bench/ping"), {}, {});
     const afterPing = await warmed.fetch(new Request("http://bench.local/probe", {
       headers: { "x-bench-script": "cold" },
     }), {}, {});
     assert.equal(afterPing.headers.get("x-bench-request"), "2", "a setup request invalidates cold provenance");
+    assert.equal(afterPing.headers.get("x-bench-replay-complete"), "1");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
@@ -1118,4 +1132,139 @@ test("MIG-0639: repeated X-ID and terms write scenarios stay isolated on one sha
     await target.close();
   }
   assert.deepEqual(failures, []);
+});
+
+
+test("MIG-0639: typed replay identity distinguishes SQL, bind types, methods, batch order and R2 bytes/options", () => {
+  const identity = replayIdentity;
+  assert.equal(identity(["d1.first", "SELECT ?", [1], []]), identity(["d1.first", "SELECT ?", [1], []]));
+  assert.notEqual(identity(["d1.first", "SELECT ?", [1], []]), identity(["d1.first", "SELECT ?", ["1"], []]));
+  assert.notEqual(identity(["d1.first", "SELECT ?", [1], []]), identity(["d1.all", "SELECT ?", [1], []]));
+  assert.notEqual(identity(["d1.first", "SELECT 1", [], []]), identity(["d1.first", "SELECT 2", [], []]));
+  assert.notEqual(identity(["d1.batch", [["SELECT 1", [1]], ["SELECT 2", [2]]]]),
+    identity(["d1.batch", [["SELECT 2", [2]], ["SELECT 1", [1]]]]));
+  assert.notEqual(identity(["r2.get", "expected", [{ type: "json" }]]),
+    identity(["r2.get", "actual", [{ type: "json" }]]));
+  assert.notEqual(identity(["r2.get", "expected", [{ type: "json" }]]),
+    identity(["r2.get", "expected", [{ type: "text" }]]));
+  assert.notEqual(identity(["r2.put", "asset", new Uint8Array([1, 2]), []]),
+    identity(["r2.put", "asset", new Uint8Array([1, 3]), []]));
+  assert.notEqual(identity([null]), identity([undefined]));
+  assert.notEqual(identity([-0]), identity([0]));
+  const cyclic = {};
+  cyclic.self = cyclic;
+  assert.throws(() => identity(cyclic), /cyclic/);
+  const accessor = Object.defineProperty({}, "value", { get() { throw new Error("must not execute"); } });
+  assert.throws(() => identity(accessor), /accessor/);
+  assert.throws(() => identity(Number.NaN), /unsupported/);
+  assert.throws(() => identity("x".repeat(262145)), /too large/);
+});
+
+test("MIG-0639: generated workerd replay fails closed on wrong SQL, exhausted/trailing scripts, R2 key/bytes, batch order and missing scripts", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const load = async (generation, script, body) => {
+    const source = workerSource(generation, script).replace(/^import .*;$/gm, "");
+    const stubs = [
+      "const app = { fetch: async (request, env) => {",
+      "const pathname = new URL(request.url).pathname;",
+      "try {",
+      body,
+      "} catch { return new Response('caught'); }",
+      "} };",
+      "const sessionMiddleware = () => async () => {};",
+    ].join("\n");
+    return (await import("data:text/javascript," + encodeURIComponent(stubs + source))).default;
+  };
+  const invoke = (worker, pathname, scriptId = "cold") =>
+    worker.fetch(new Request("http://bench.local" + pathname, { headers: { "x-bench-script": scriptId } }), {}, {});
+  const sqlEntry = {
+    identity: replayIdentity(["d1.first", "SELECT expected", [1], []]),
+    result: { id: "expected" },
+  };
+  try {
+    const wrongSqlWorker = await load("wrong-sql", [sqlEntry],
+      'if (pathname === "/probe") { await env.DB.prepare("SELECT actual").bind(1).first(); return new Response("unexpected"); } return new Response("unused");');
+    const wrongSql = await invoke(wrongSqlWorker, "/probe");
+    assert.equal(wrongSql.status, 200);
+    assert.equal(wrongSql.headers.get("x-bench-replay-complete"), "0");
+
+    const exhaustedWorker = await load("exhausted", [],
+      'if (pathname === "/probe") { await env.DB.prepare("SELECT expected").bind(1).first(); return new Response("unexpected"); } return new Response("unused");');
+    const exhausted = await invoke(exhaustedWorker, "/probe");
+    assert.equal(exhausted.headers.get("x-bench-replay-complete"), "0");
+
+    const trailingWorker = await load("trailing", [sqlEntry, sqlEntry],
+      'if (pathname === "/probe") { await env.DB.prepare("SELECT expected").bind(1).first(); return new Response("unexpected"); } return new Response("unused");');
+    const trailing = await invoke(trailingWorker, "/probe");
+    assert.equal(trailing.headers.get("x-bench-replay-complete"), "0");
+
+    const batchEntry = {
+      identity: replayIdentity(["d1.batch", [["SELECT two", [2]], ["SELECT one", [1]]]]),
+      result: [{ results: [] }, { results: [] }],
+    };
+    const batchWorker = await load("batch-order", [batchEntry],
+      'if (pathname === "/probe") { await env.DB.batch([env.DB.prepare("SELECT one").bind(1), env.DB.prepare("SELECT two").bind(2)]); return new Response("unexpected"); } return new Response("unused");');
+    const batch = await invoke(batchWorker, "/probe");
+    assert.equal(batch.headers.get("x-bench-replay-complete"), "0");
+
+    const r2Entry = {
+      identity: replayIdentity(["r2.get", "expected-key", [{ type: "json" }]]),
+      result: { size: 2, text: "{}", etag: "bench" },
+    };
+    const r2Worker = await load("r2-key", [r2Entry],
+      'if (pathname === "/probe") { await env.BUCKET.get("actual-key", { type: "json" }); return new Response("unexpected"); } return new Response("unused");');
+    const r2 = await invoke(r2Worker, "/probe");
+    assert.equal(r2.headers.get("x-bench-replay-complete"), "0");
+
+    const putEntry = {
+      identity: replayIdentity(["r2.put", "asset", new Uint8Array([1, 3]), [{ httpMetadata: { contentType: "image/png" } }]]),
+      result: { etag: "bench" },
+    };
+    const putWorker = await load("r2-bytes", [putEntry],
+      'if (pathname === "/probe") { await env.BUCKET.put("asset", new Uint8Array([1, 2]), { httpMetadata: { contentType: "image/png" } }); return new Response("unexpected"); } return new Response("unused");');
+    const put = await invoke(putWorker, "/probe");
+    assert.equal(put.headers.get("x-bench-replay-complete"), "0");
+
+    const missingWorker = await load("missing", null, 'return new Response("unexpected");');
+    const missing = await invoke(missingWorker, "/probe", "missing-id");
+    assert.equal(missing.status, 503);
+    assert.equal(missing.headers.get("x-bench-replay-complete"), "0");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+  }
+});
+
+test("MIG-0639: replay evidence compares actual statements, returned rows and ordered query vector", () => {
+  const rec = { d1: 2, d1RowsReturned: 3, d1PerQueryRows: [1, 2] };
+  const good = new Headers({
+    "x-bench-replay-complete": "1",
+    "x-bench-d1": "2",
+    "x-bench-returned-rows": "3",
+    "x-bench-query-rows": "1,2",
+  });
+  assert.equal(replayEvidenceMismatch(rec, good), false);
+  const wrongOrder = new Headers({
+    "x-bench-replay-complete": "1",
+    "x-bench-d1": "2",
+    "x-bench-returned-rows": "3",
+    "x-bench-query-rows": "2,1",
+  });
+  assert.equal(replayEvidenceMismatch(rec, wrongOrder), true);
+  assert.equal(replayEvidenceMismatch(rec, new Headers()), true);
+  good.set("x-bench-replay-complete", "0");
+  assert.equal(replayEvidenceMismatch(rec, good), true);
+});
+
+test("MIG-0639: failed R2/cache-clear control responses stop benchmark setup", () => {
+  assert.doesNotThrow(() => requireBenchmarkControl(new Response("ok"), "r2"));
+  assert.throws(
+    () => requireBenchmarkControl(new Response("unavailable", { status: 503 }), "cache-clear"),
+    /benchmark cache-clear failed: HTTP 503/,
+  );
+  const source = fs.readFileSync(fileURLToPath(new URL("./benchmark-api-cpu.mjs", import.meta.url)), "utf8");
+  assert.match(source, /requireBenchmarkControl\(response, "r2"\)/);
+  assert.match(source, /requireBenchmarkControl\(await post\("\/__bench\/cache-clear"\), "cache-clear"\)/);
 });
