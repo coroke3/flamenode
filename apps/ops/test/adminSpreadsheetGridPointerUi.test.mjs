@@ -2158,7 +2158,7 @@ test("MIG-0737 U01 formula navigation: pending save and Undo/Redo allow movement
     assert.equal((await key(formula, "Tab")).defaultPrevented, true);
     assert.deepEqual(selected(ui), ["2:2"]);
     assert.equal(document.activeElement, formula);
-    assert.deepEqual(requests.map(request => [request.method, JSON.parse(request.body)]), [
+    assert.deepEqual(requests.map(({ init }) => [init.method, JSON.parse(init.body)]), [
       ["PATCH", { table: "videos", primaryKey: { id: "a" }, column: "title", value: "Unsaved" }],
       ["PATCH", { table: "videos", primaryKey: { id: "a" }, column: "title", value: "Alpha" }],
       ["PATCH", { table: "videos", primaryKey: { id: "a" }, column: "title", value: "Unsaved" }],
