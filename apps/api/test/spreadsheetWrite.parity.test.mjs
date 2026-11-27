@@ -935,7 +935,7 @@ if (runUnderRootTsx(import.meta.url)) {
           resetAllCaches();
           const prior = injected;
           honoD1.prepare = sql => {
-            if (!sql.includes("WITH fk AS (") || !sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"')) return originalPrepare(sql);
+            if ((method === "POST" ? !sql.includes("WITH fk AS (") : sql.includes("WITH fk AS (")) || !sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"')) return originalPrepare(sql);
             if (fault.stage === "prepare") { injected++; throw fault.error; }
             const stmt = originalPrepare(sql);
             return {
