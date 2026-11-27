@@ -838,6 +838,159 @@ test("MIG-0736 integrity preserves CURRENT read-only header and failure card wit
   }
 });
 
+// T03: exercise actual mounted run/idle navigation and refresh cancellation.
+// A transport ignoring AbortSignal must not resurrect a cancelled receipt.
+test("MIG-0736 integrity explicit run and refresh discard obsolete receipts", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test" });
+  const keys = ["window", "document", "navigator", "HTMLElement", "Node", "ResizeObserver", "IS_REACT_ACT_ENVIRONMENT"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  try {
+    for (const key of keys) {
+      Object.defineProperty(globalThis, key, {
+        configurable: true,
+        value: key === "IS_REACT_ACT_ENVIRONMENT" ? true
+          : key === "ResizeObserver" ? class { observe() {} disconnect() {} }
+          : dom.window[key],
+      });
+    }
+    const target = dom.window.document.createElement("div");
+    dom.window.document.body.append(target);
+    const root = createRoot(target);
+    let mounted = true;
+    let navigate;
+    const pending = [];
+    const fetchFn = (url, init) => new Promise(resolve => pending.push({ url, init, resolve }));
+    function Harness() {
+      navigate = useNavigate();
+      return h(AdminIntegrity, { fetchFn });
+    }
+    const path = "/admin/health/integrity";
+    const go = async to => { await React.act(async () => { navigate(to); }); };
+    const finish = async (request, status, body) => {
+      await React.act(async () => { request.resolve(response(status, body)); });
+    };
+    const currentRequest = () => {
+      const request = pending.at(-1);
+      assert.ok(request);
+      assert.equal(request.url, "/api/admin-read/ops/integrity?run=1");
+      assert.equal(request.init.method, "GET");
+      assert.equal(request.init.cache, "no-store");
+      assert.equal(request.init.credentials, "same-origin");
+      assert.equal(request.init.signal.aborted, false);
+      return request;
+    };
+    const refreshButton = () => [...target.querySelectorAll("button")]
+      .find(node => node.textContent.trim() === "最新状態で再チェック");
+    const refresh = async () => {
+      const button = refreshButton();
+      assert.ok(button);
+      const count = pending.length;
+      await React.act(async () => { button.click(); });
+      assert.equal(pending.length, count + 1);
+      return currentRequest();
+    };
+    const assertNoResults = () => {
+      assert.doesNotMatch(target.textContent, /総検出件数|危険チェック|警告チェック|確認チェック|問題なし|private-integrity-marker/);
+      assert.equal(target.querySelectorAll("article, table, pre").length, 0);
+    };
+    const assertMessage = (role, message) => {
+      assert.ok([...target.querySelectorAll(`[role="${role}"]`)]
+        .some(node => node.textContent.includes(message)), message);
+      assertNoResults();
+    };
+    const assertIdle = () => {
+      assert.match(target.textContent, /DB整合性診断は未実行です/);
+      assert.equal(refreshButton(), undefined);
+      assert.equal(target.querySelector('[role="alert"]'), null);
+      assert.doesNotMatch(target.textContent, /診断は実行されませんでした|現在利用できません|ログインが必要|閲覧権限がありません|診断結果を取得できませんでした/);
+      assertNoResults();
+    };
+    try {
+      await React.act(async () => {
+        root.render(h(MemoryRouter, { initialEntries: [path] }, h(Harness)));
+      });
+      assert.equal(pending.length, 0);
+      assertIdle();
+      const action = [...target.querySelectorAll("a")]
+        .find(node => node.textContent.trim() === "DB整合性診断を実行");
+      assert.ok(action);
+      assert.equal(action.getAttribute("href"), path + "?run=1");
+      await React.act(async () => { action.click(); });
+      assert.equal(pending.length, 1);
+      const obsolete = currentRequest();
+      assertMessage("status", "読み込み中…");
+
+      // Browser Back and malformed duplicate run do not initiate any reads.
+      await go(-1);
+      assert.equal(obsolete.init.signal.aborted, true);
+      assert.equal(pending.length, 1);
+      assertIdle();
+      await finish(obsolete, 401, {});
+      assertIdle();
+      await go(1);
+      assert.equal(pending.length, 2);
+      const duplicateObsolete = currentRequest();
+      await go(path + "?run=1&run=1");
+      assert.equal(duplicateObsolete.init.signal.aborted, true);
+      assert.equal(pending.length, 2);
+      assertIdle();
+      await finish(duplicateObsolete, 501, {});
+      assertIdle();
+      await go(-1);
+      assert.equal(pending.length, 3);
+      await finish(currentRequest(), 501, {});
+      assertMessage("alert", "DB整合性診断は現在利用できません。");
+
+      // Newest explicit denial wins over older late responses, and each new
+      // retry gets one cancellable GET. Never display a fabricated result.
+      for (const [status, body, message] of [
+        [401, {}, "ログインが必要です。"],
+        [403, { redirect: "/dashboard" }, "閲覧権限がありません。"],
+        [404, {}, "閲覧権限がありません。"],
+        [501, {}, "DB整合性診断は現在利用できません。"],
+      ]) {
+        const stale = await refresh();
+        const active = await refresh();
+        assert.equal(stale.init.signal.aborted, true);
+        await finish(active, status, body);
+        assertMessage("alert", message);
+        await finish(stale, 200, { ran: false, results: [] });
+        assertMessage("alert", message);
+        assert.doesNotMatch(target.textContent, /診断は実行されませんでした/);
+      }
+      // A fresh key rejects a shape-invalid result with fixed error text.
+      const count = pending.length;
+      await go(path);
+      assert.equal(pending.length, count);
+      assertIdle();
+      await go(path + "?run=1");
+      assert.equal(pending.length, count + 1);
+      await finish(currentRequest(), 200, { ran: true, results: [{ id: "private-integrity-marker" }] });
+      assertMessage("alert", "診断結果を取得できませんでした。");
+      await finish(await refresh(), 200, { ran: false, results: [] });
+      assertMessage("status", "診断は実行されませんでした。");
+      assert.equal(target.querySelector('[role="alert"]'), null);
+
+      const departing = await refresh();
+      await React.act(async () => root.unmount());
+      mounted = false;
+      assert.equal(departing.init.signal.aborted, true);
+      await finish(departing, 501, {});
+      assert.equal(target.textContent, "");
+    } finally {
+      if (mounted) await React.act(async () => root.unmount());
+      target.remove();
+    }
+  } finally {
+    for (const key of keys) {
+      const descriptor = previous.get(key);
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    dom.window.close();
+  }
+});
+
 // CURRENT Next page searchParams represents repeated query keys as arrays.
 test("MIG-0736 diagnostic route query parity: duplicate keys never opt in or select a filter", async () => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test" });
