@@ -23,15 +23,15 @@ Read and follow, in order:
 
 Checkpoint policy: WORK_ITEM_ONLY.
 
-Resume one owner PR or execute at most one unclaimed dependency-ready MIG task / bounded micro-unit per invocation. Follow AGENT_PROTOCOL's Wake decision; REVIEW waits for independent review/CI and BLOCKED waits for its recorded recovery condition. While your PR waits in REVIEW, continue other dependency-independent work (one IN_PROGRESS PR per agent; REVIEW PRs may accumulate). A fresh-context subagent on a higher-tier model than the builder counts as independent review.
+Resume one owner PR or execute at most one unclaimed dependency-ready MIG task / bounded micro-unit per invocation. Follow AGENT_PROTOCOL's Wake decision; REVIEW waits for independent review/CI and BLOCKED waits for its recorded recovery condition. While your PR waits in REVIEW, continue other dependency-independent work (one IN_PROGRESS PR per agent; REVIEW PRs may accumulate). Reviewer model eligibility, including the session-scoped exception only when the user explicitly accepts the current model as the required higher tier, follows `AGENT_PROTOCOL.md` §Independent review evidence; builder/reviewer independence and fresh-context subagent review remain mandatory.
 
 Before coding, record `Owner: codex` and task scope in `docs/migration/work-items/MIG-XXXX.md` on the task branch/PR. Keep `STATUS.md` unchanged during implementation.
 For each writer wake, persist bounded checkpoint progress in your own `docs/migration/work-items/MIG-XXXX.md`. Review-only wakes record evidence in the reviewed PR without editing its branch/checkpoint; wait/no-action wakes report the gate without a checkpoint-only push. `STATUS.md` is updated only at pre-merge integration. See `GIT_WORKFLOW.md`.
 
-Do not auto-cross a Phase Gate or perform production deploy, Worker Route, Custom Domain, Remote D1, or secret changes without explicit approval.
+Non-production Phase Gates require independent Lead review and the prescribed acceptance evidence under the 2026-11-27 owner policy. Production cutover, manual production deploy, Worker Route, Custom Domain/DNS, Remote D1/data migration, secrets, and product/permission/visibility semantic changes still require separate explicit user approval.
 
 When UI redesign is involved, feature parity is mandatory: use `FUNCTION_INVENTORY.md` and do not treat visual completion as functional completion.
 
 Persist `IN_PROGRESS` when healthy units remain, `REVIEW` after all units pass, or `BLOCKED` with recovery conditions. This skill creates no scheduler; the next external wake re-reads main and live PR checkpoints.
 
-- In a GitHub environment without authenticated `gh`, use the connected GitHub MCP to list **all** open PRs and compare their owned files/domain before passing verified branch names through `--open-pr-branches`. Never claim from `--offline`. Migration loop agents stop at `Merge requested:`; human review/merge is required per `AGENT_PROTOCOL.md` and `IMPLEMENTATION_RUNBOOK.md`. A scheduler/loop requires a real host trigger.
+- In a GitHub environment without authenticated `gh`, use the connected GitHub MCP to list **all** open PRs and compare their owned files/domain before passing verified branch names through `--open-pr-branches`. Never claim from `--offline`. Under the 2026-11-27 owner policy, an eligible agent records `Merge requested:` and squash-merges with the expected final HEAD after independent APPROVE, required CI, all units/acceptance/dependencies, latest-main integration and rollback pass, without per-PR human approval; high-risk code also requires independent Lead review. Follow `AGENT_PROTOCOL.md` and `IMPLEMENTATION_RUNBOOK.md` for the final-head gates. A scheduler/loop requires a real host trigger.

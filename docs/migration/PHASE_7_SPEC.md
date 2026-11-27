@@ -1040,7 +1040,7 @@ Phase 7 共通契約のとおり。
 - **Runtime:** N
 - **Depends on:** MIG-0714 / **Decisions:** D-05 DECIDED, D-16-1, D-16-11
 - **Merge gate:** MIG-0651, MIG-0648, MIG-0650 が DONE（D-16-1）
-- **Verified against:** `232381e264a2f2ba6f3cd8982f46f2cc2550cc9d` (2026-11-27)
+- **Verified against:** `6af1c646a0a7db3e066f2f672cb056141325626e` (2026-11-27)
 #### Source snapshot
 - CURRENT: `app/(auth)/dashboard/edit/[id]/page.tsx`（`VideoForm` mode edit、`VideoEditPermissionSummary` / `VideoEditPermissionOverview`、`AdminVideoTabs`、編集可能 section の判定 `hasAnyEditableVideoFormSection`）、`src/components/video/VideoEditPermissionSummary.tsx`。
 - 読み: `GET /api/personal/edit/:id`（`EditPageResponseSchema`）、`GET /api/personal/edit/:id/form-options`（`EditFormOptionsResponseSchema`）。両 schema は `packages/contracts/src/personal/edit.ts`。
