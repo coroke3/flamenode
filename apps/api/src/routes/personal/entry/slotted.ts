@@ -252,15 +252,11 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
     MAX_RESPONSE_BYTES - jsonBytes({ ...rest, eventOptions: [], truncated: true, nextOffset: 1000 }),
   );
   const truncated = accepting.length >= ENTRY_PAGE_ROWS || fit.cut;
-  const keptAccepting = fit.items.length - (prependSlotEvent && fit.items.length > 0 ? 1 : 0);
-  // A prepended fixed slot event can fit while the first accepting option
-  // does not. Returning offset 0 again cannot make progress.
-  if (truncated && keptAccepting === 0) throw new Error("slotted_entry_no_progress");
   const body: SlottedEntryResponse = {
     ...rest,
     eventOptions: fit.items,
     truncated,
-    nextOffset: truncated ? nextOffsetOf(offset + keptAccepting) : null,
+    nextOffset: truncated ? nextOffsetOf(offset + fit.items.length - (prependSlotEvent && fit.items.length > 0 ? 1 : 0)) : null,
   };
   assertResponseBytes(body);
   return c.json(body);

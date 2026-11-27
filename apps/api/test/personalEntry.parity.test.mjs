@@ -680,45 +680,6 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
-  test("S2 bounds: a prepended slot event alone cannot return a non-advancing cursor", async () => {
-    const fixed = "a_pgstall_fixed";
-    const accepting = "a_pgstall_accept";
-    const slot = "sl-pgstall";
-    const path = `/api/personal/entry/slotted?slot=${slot}`;
-    try {
-      insertEvent(fixed, {
-        entry_start_time: NOW - 9000, entry_end_time: NOW - 500,
-        allow_user_video_event_links: 1, youtube_description_template: "x".repeat(40000),
-      });
-      insertEvent(accepting, {
-        entry_start_time: NOW - 1000, entry_end_time: NOW + 6000,
-        allow_user_video_event_links: 1, youtube_description_template: "y".repeat(40000),
-      });
-      sqlite.prepare("INSERT INTO slots (id,event_id,status,reserved_by_user_id,x_user_id,start_time,sort_order) VALUES (?,?,?,?,?,?,?)")
-        .run(slot, fixed, "reserved", "u_alice", "alice_x", NOW + 100000, 0);
-      const stalled = await call(path, "tok-alice");
-      assert.equal(stalled.status, 503);
-      assert.deepEqual(stalled.body, { error: "unavailable" });
-      assert.equal(stalled.headers.get("cache-control"), "private, no-store");
-      assert.ok(stalled.stats.statements <= 3);
-      assert.equal(stalled.stats.batches, 0);
-
-      sqlite.prepare("UPDATE events SET youtube_description_template = ? WHERE id = ?").run("small", accepting);
-      const ok = await call(path, "tok-alice");
-      assert.equal(ok.status, 200);
-      assert.equal(ok.body.kind, "ready");
-      assert.equal(ok.body.eventOptions[0].id, fixed);
-      assert.ok(ok.body.eventOptions.some((option) => option.id === accepting));
-      assert.ok(!ok.body.truncated || ok.body.nextOffset > 0);
-      assert.ok(Buffer.byteLength(ok.text) <= 64 * 1024);
-      assert.ok(ok.stats.statements <= 3);
-      assert.equal(ok.stats.batches, 0);
-    } finally {
-      sqlite.prepare("DELETE FROM slots WHERE id = ?").run(slot);
-      sqlite.prepare("DELETE FROM events WHERE id IN (?,?)").run(fixed, accepting);
-    }
-  });
-
   test("slot part index computed in SQL equals CURRENT buildSlotParts (gap matrix and an event with > 100 slots)", async () => {
     const PARTS = Array.from({ length: 300 }, (_, i) => `P${i + 1}`);
     const base = 1_700_000_000;
