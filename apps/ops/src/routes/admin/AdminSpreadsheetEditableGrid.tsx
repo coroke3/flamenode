@@ -114,7 +114,7 @@ export function AdminSpreadsheetEditableGrid({
     primaryKeys.some(name => !Object.hasOwn(currentSelection.pk, name) || selectedPk[name] !== currentSelection.pk[name]) ||
     (selectedRow[selectedColumn.name] == null ? null : cellValue(selectedRow[selectedColumn.name])) !== currentSelection.before
   );
-  const typedEntryId = currentSelection?.selectInitialText && !selectionConflict ? currentSelection.id : null;
+  const focusEditId = currentSelection && !selectionConflict ? currentSelection.id : null;
   // Keep drafts intact until CURRENT blur-save is ported; header selection does not commit or discard edits.
   const canSelectHeaders = !identityChanged && currentSelection === null && rows.length > 0 && columns.length > 0;
   const canFind = canUseFind();
@@ -193,15 +193,17 @@ export function AdminSpreadsheetEditableGrid({
     (cell ?? table).focus();
   });
 
-  // CURRENT selects the initial typed character on edit entry. Run once per draft,
-  // not per value update/render, and never act on an invalidated or replaced draft.
+  // CURRENT selects the typed character or places the caret at the end of the original value.
+  // Initialize once per draft ID, including same-cell cancel/reopen that reuses the input.
+  // Never reset a user's selection on value changes or act on an invalidated/replaced draft.
   React.useLayoutEffect(() => {
     const draft = liveSelection.current;
     const input = editorRef.current;
-    if (typedEntryId === null || draft?.id !== typedEntryId || draft.invalidated || !input || input.disabled) return;
+    if (focusEditId === null || draft?.id !== focusEditId || draft.invalidated || !input || input.disabled) return;
     input.focus();
-    input.select();
-  }, [typedEntryId]);
+    if (draft.selectInitialText) input.select();
+    else input.setSelectionRange(input.value.length, input.value.length);
+  }, [focusEditId]);
 
   React.useEffect(() => {
     if (!findHint) return;

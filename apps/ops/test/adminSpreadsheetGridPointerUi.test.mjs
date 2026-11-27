@@ -1063,6 +1063,14 @@ test("MIG-0737 U01 double click: TD, display and empty value open the original d
       const input = td.querySelector('input[type="text"]');
       assert.ok(input && document.activeElement === input);
       assert.equal(input.value, value);
+      assert.deepEqual([input.selectionStart, input.selectionEnd], [value.length, value.length]);
+      if (value.length > 0) {
+        input.setSelectionRange(0, 1);
+        await ui.render({});
+        assert.ok(document.activeElement === input);
+        assert.deepEqual([input.selectionStart, input.selectionEnd], [0, 1],
+          "same draft rerender must not move the caret");
+      }
       assert.deepEqual(selected(ui), [pos]);
       assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 1);
       await key(input, "Escape");
@@ -1188,5 +1196,41 @@ test("MIG-0737 U01 double click: pending ordinary write and history preserve mut
     assert.equal(input.value, "Beta");
     await key(input, "Escape");
     assert.equal(requests.length, 2);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 double click: same-cell batched cancel/reopen restores focus and original-value caret", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    const td = await select(ui, "1:1");
+    assert.equal((await key(td, "x")).defaultPrevented, true);
+    const typed = td.querySelector("input");
+    assert.ok(typed && document.activeElement === typed);
+    assert.equal(typed.value, "x");
+    assert.deepEqual([typed.selectionStart, typed.selectionEnd], [0, 1]);
+    const cancel = new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const reopen = mouse("dblclick", { detail: 2 });
+    await React.act(async () => { typed.dispatchEvent(cancel); td.dispatchEvent(reopen); });
+    assert.equal(cancel.defaultPrevented, true);
+    const original = td.querySelector("input");
+    assert.ok(original && document.activeElement === original);
+    assert.equal(original.value, "Beta");
+    assert.deepEqual([original.selectionStart, original.selectionEnd], [4, 4]);
+    original.setSelectionRange(1, 2);
+    await ui.render({});
+    assert.ok(document.activeElement === original);
+    assert.deepEqual([original.selectionStart, original.selectionEnd], [1, 2]);
+    const cancelAgain = new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const f2 = new dom.window.KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+    await React.act(async () => { original.dispatchEvent(cancelAgain); td.dispatchEvent(f2); });
+    assert.equal(cancelAgain.defaultPrevented, true);
+    assert.equal(f2.defaultPrevented, true);
+    const f2Input = td.querySelector("input");
+    assert.ok(f2Input && document.activeElement === f2Input);
+    assert.equal(f2Input.value, "Beta");
+    assert.deepEqual([f2Input.selectionStart, f2Input.selectionEnd], [4, 4]);
+    await key(f2Input, "Escape");
+    assert.ok(document.activeElement === td);
+    assertNoEffects(ui);
   } finally { await ui.cleanup(); }
 });
