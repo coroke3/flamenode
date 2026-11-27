@@ -69,9 +69,10 @@ test("MIG-0715 U03 forbids production loopback and permits CURRENT development o
 
 test("MIG-0715 U03 Personal build maps only the configured public origin and explicit runtime mode", () => {
   const viteConfig = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
-  assert.match(viteConfig, /__FLAMENODE_PUBLIC_SITE_URL__:\\s*JSON\\.stringify\\(process\\.env\\.NEXT_PUBLIC_SITE_URL\\s*\\?\\?\\s*""\\)/);
-  assert.match(viteConfig, /__FLAMENODE_RUNTIME_MODE__:\\s*JSON\\.stringify\\(command\\s*===\\s*"build"\\s*\\?\\s*"production"\\s*:\\s*"development"\\)/);
-  assert.doesNotMatch(viteConfig, /window\\.location|request\\.url/);
+  assert.ok(viteConfig.includes('__FLAMENODE_PUBLIC_SITE_URL__: JSON.stringify(process.env.NEXT_PUBLIC_SITE_URL ?? "")'));
+  assert.ok(viteConfig.includes('__FLAMENODE_RUNTIME_MODE__: JSON.stringify(command === "build" ? "production" : "development")'));
+  assert.equal(viteConfig.includes("window.location"), false);
+  assert.equal(viteConfig.includes("request.url"), false);
 });
 
 test("MIG-0715 U03 build-origin adapter preserves production/dev mode and fails closed when origin is missing", () => {
