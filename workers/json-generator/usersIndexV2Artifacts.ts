@@ -61,6 +61,30 @@ const USERS_INDEX_V2_R2_VERIFY_LIMIT = 40;
  */
 const USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE = 500;
 
+/** A provider error and a diagnostic sink are both untrusted. Logging is never a commit point. */
+type UsersIndexV2Diagnostic =
+  | "chunk_cleanup_manifest_read_failed"
+  | "chunk_cleanup_failed"
+  | "generation_same_skip"
+  | "manifest_invalidation_failed"
+  | "legacy_fallback";
+
+function emitUsersIndexV2Diagnostic(
+  result: UsersIndexV2Diagnostic,
+  details: { key_count?: number; gc_deleted?: number; gc_has_more?: boolean } = {},
+  level: "warn" | "error" | "info" = "warn",
+): void {
+  try {
+    const value = JSON.stringify({ service: "users-index-v2", result, ...details });
+    if (level === "error") console.error(value);
+    else if (level === "info") console.info(value);
+    else console.warn(value);
+  } catch {
+    // Diagnostics must not mask an R2 failure, change an unknown manifest
+    // into a presumed absent one, or trigger post-commit invalidation.
+  }
+}
+
 type Env = {
   DB: D1Database;
   R2: R2Bucket;
@@ -177,14 +201,8 @@ async function readCurrentManifestGeneration(
             manifest.search_bucket_count === STATIC_SEARCH_POSTINGS_BUCKET_COUNT,
         }
       : { kind: "unknown" };
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        service: "users-index-v2",
-        result: "chunk_cleanup_manifest_read_failed",
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+  } catch {
+    emitUsersIndexV2Diagnostic("chunk_cleanup_manifest_read_failed");
     return { kind: "unknown" };
   }
 }
@@ -260,15 +278,8 @@ async function cleanupFailedArtifactChunk(
   if (manifest.kind === "known" && manifest.generation === generation) return;
   try {
     await env.R2.delete(keys);
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        service: "users-index-v2",
-        result: "chunk_cleanup_failed",
-        key_count: keys.length,
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+  } catch {
+    emitUsersIndexV2Diagnostic("chunk_cleanup_failed", { key_count: keys.length });
   }
 }
 
@@ -557,15 +568,10 @@ export async function rebuildUsersIndexV2Artifacts(
   ) {
     const cleanup = await reconcileTrackedArtifacts(env, expectedLiveKeys, signal);
     const purge = await purgeDeletedArtifacts(env, expectedLiveKeys, signal);
-    console.info(
-      JSON.stringify({
-        service: "users-index-v2",
-        result: "generation_same_skip",
-        generation,
-        gc_deleted: cleanup.deleted + purge.deleted,
-        gc_has_more: cleanup.hasMore || purge.hasMore,
-      }),
-    );
+    emitUsersIndexV2Diagnostic("generation_same_skip", {
+      gc_deleted: cleanup.deleted + purge.deleted,
+      gc_has_more: cleanup.hasMore || purge.hasMore,
+    }, "info");
     return {
       liveKeys: expectedLiveKeys,
       objectCount: expectedLiveKeys.length,
@@ -763,26 +769,12 @@ export async function rebuildUsersIndexV2FromLegacyArtifact(
     if (signal?.aborted) throw error;
     try {
       await invalidateUsersIndexV2Manifest(env, signal);
-    } catch (invalidationError) {
-      console.error(
-        JSON.stringify({
-          service: "users-index-v2",
-          result: "manifest_invalidation_failed",
-          error_name:
-            invalidationError instanceof Error
-              ? invalidationError.name
-              : "UnknownError",
-        }),
-      );
+    } catch {
+      emitUsersIndexV2Diagnostic("manifest_invalidation_failed", {}, "error");
+      // The original build error remains fatal when invalidation is uncertain.
       throw error;
     }
-    console.warn(
-      JSON.stringify({
-        service: "users-index-v2",
-        result: "legacy_fallback",
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+    emitUsersIndexV2Diagnostic("legacy_fallback");
     return { liveKeys: [], objectCount: 0, hasMore: false, skipped: false };
   }
 }

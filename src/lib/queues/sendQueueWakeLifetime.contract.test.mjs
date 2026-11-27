@@ -20,9 +20,12 @@ test("binding missing telemetryはwaitUntilまたはawaitへ必ず接続する",
 
 test("Queue send失敗telemetryをfloating Promiseとして捨てない", () => {
   assert.doesNotMatch(source, /void recordQueueWakeFailureBestEffort/);
+  // The rejection handler must await its diagnostic write, but must not
+  // depend on the name or existence of a thrown provider Error object.
   assert.match(
     source,
-    /async \(error: unknown\) => \{[\s\S]*?await recordQueueWakeFailureBestEffort/,
+    /async \(\) => \{[\s\S]*?await recordQueueWakeFailureBestEffort/,
   );
+  assert.doesNotMatch(source, /error_name:\s*error\s+instanceof\s+Error/);
   assert.match(source, /waitUntil\(trackedPromise\)/);
 });

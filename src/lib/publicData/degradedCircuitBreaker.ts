@@ -201,15 +201,21 @@ async function flushMissCount(
 
   await putOpenMarkerIfNeeded(kv, nowMs);
   await kv.delete(degradedCircuitHitStreakKey());
-  console.warn(
-    JSON.stringify({
-      service: "degraded-circuit",
-      result: "opened",
-      miss_count: nextCount,
-      threshold: DEGRADED_CIRCUIT_MISS_THRESHOLD,
-      window_sec: DEGRADED_CIRCUIT_MISS_WINDOW_SEC,
-    }),
-  );
+  // KV miss count, OPEN marker and hit-streak cleanup have already committed.
+  // A diagnostic sink failure must not make the caller re-credit pending misses.
+  try {
+    console.warn(
+      JSON.stringify({
+        service: "degraded-circuit",
+        result: "opened",
+        miss_count: nextCount,
+        threshold: DEGRADED_CIRCUIT_MISS_THRESHOLD,
+        window_sec: DEGRADED_CIRCUIT_MISS_WINDOW_SEC,
+      }),
+    );
+  } catch {
+    // Diagnostics are best-effort; preserve successful KV accounting.
+  }
 }
 
 async function persistOpenMarker(kv: KVNamespace, nowMs: number): Promise<void> {
