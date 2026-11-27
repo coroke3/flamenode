@@ -392,19 +392,19 @@ function diagnosticNonNegativeSafeInteger(value: unknown): number {
  * until the changed Auth-authority receipt receives independent review.
  */
 export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthCheckResult> {
-  const rows = await db.all(sql\`
+  const rows = await db.all(sql`
     WITH observed AS MATERIALIZED (
       SELECT
         v.id AS id,
         v.app_like_count AS stored,
         (
           SELECT COUNT(*)
-          FROM \${videoInteractionsAuthTable} AS i
+          FROM ${videoInteractionsAuthTable} AS i
           WHERE i.video_id = v.id
             AND i.interaction_type = 'like'
         ) AS actual,
         typeof(v.app_like_count) AS stored_type
-      FROM \${videosTable} AS v
+      FROM ${videosTable} AS v
     ),
     validated AS MATERIALIZED (
       SELECT
@@ -414,10 +414,10 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
         CASE
           WHEN stored_type = 'integer'
             AND stored >= 0
-            AND stored <= \${MAX_SAFE_DIAGNOSTIC_INTEGER}
+            AND stored <= ${MAX_SAFE_DIAGNOSTIC_INTEGER}
             AND typeof(actual) = 'integer'
             AND actual >= 0
-            AND actual <= \${MAX_SAFE_DIAGNOSTIC_INTEGER}
+            AND actual <= ${MAX_SAFE_DIAGNOSTIC_INTEGER}
           THEN 1
           ELSE 0
         END AS valid
@@ -432,7 +432,7 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
         CASE WHEN valid = 1 THEN abs(stored - actual) END AS diff,
         CASE
           WHEN valid = 1 THEN max(
-            \${LIKE_COUNT_DRIFT_ABS},
+            ${LIKE_COUNT_DRIFT_ABS},
             actual / 20 + CASE WHEN actual % 20 = 0 THEN 0 ELSE 1 END
           )
         END AS threshold,
@@ -450,7 +450,7 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
     samples AS (
       SELECT
         CASE
-          WHEN length(CAST(id AS BLOB)) <= \${LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES}
+          WHEN length(CAST(id AS BLOB)) <= ${LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES}
           THEN id
           ELSE NULL
         END AS id,
@@ -460,7 +460,7 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
         CAST(diff AS TEXT) AS diff,
         CAST(threshold AS TEXT) AS threshold,
         CAST(ratio_threshold AS TEXT) AS ratio_threshold,
-        CASE WHEN ratio_threshold >= \${LIKE_COUNT_DRIFT_ABS} THEN 1 ELSE 0 END AS ratio_triggered
+        CASE WHEN ratio_threshold >= ${LIKE_COUNT_DRIFT_ABS} THEN 1 ELSE 0 END AS ratio_triggered
       FROM classified
       WHERE valid = 1 AND diff >= threshold
       ORDER BY id
@@ -481,7 +481,7 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
     LEFT JOIN samples ON 1 = 1
     ORDER BY samples.id
     LIMIT 5
-  \`) as unknown[];
+  `) as unknown[];
 
   if (rows.length === 0) throw new Error("missing diagnostic summary");
   const first = rows[0];
