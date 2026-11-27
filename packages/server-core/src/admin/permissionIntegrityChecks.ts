@@ -166,11 +166,18 @@ export async function buildPermissionIntegrityChecks(
   const managerIssues: IntegrityIssue[] = [];
   const invalidCustomIssues: IntegrityIssue[] = [];
 
+  // Per-ID requests must not parse custom permission JSON or build issues
+  // for checks the caller did not select. Keep the shared CURRENT query and
+  // its row limit unchanged until the SQL/coverage decision is resolved.
+  const selectedPreset = selectedId === "staff_owner_missing_permissions" ? "owner"
+    : selectedId === "staff_manager_has_dangerous_permissions" ? "manager"
+    : selectedId === "staff_custom_json_invalid" ? "custom" : null;
   for (const row of staffRows) {
+    const preset = text(row.permission_preset) as EventStaffPreset;
+    if (selectedPreset !== null && preset !== selectedPreset) continue;
     const id = text(row.id);
     const eventId = text(row.event_id);
-    const preset = text(row.permission_preset) as EventStaffPreset;
-    const customJson = row.custom_permission_keys_json ?? null;
+    const customJson = preset === "custom" ? row.custom_permission_keys_json ?? null : null;
 
     if (preset === "custom" && customJson && customJson.trim() !== "[]") {
       const parsed = safeParseCustomPermissionKeys(customJson, {

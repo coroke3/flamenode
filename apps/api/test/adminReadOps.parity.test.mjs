@@ -1854,6 +1854,51 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("MIG-0626 U05: selected staff preset diagnostics do not access unrelated custom JSON", async () => {
+    const { buildPermissionIntegrityChecks } = await import("@flamenode/server-core/admin/permissionIntegrityChecks");
+    let jsonAccesses = 0;
+    let queries = 0;
+    // Direct core probe: the existing SQL returns the same mixed 500 rows.
+    // Accessors expose unnecessary payload reads without monkey-patching JSON.parse.
+    const rows = [
+      { id: "owner", event_id: "ev1", x_user_id: "owner-x", permission_preset: "owner",
+        get custom_permission_keys_json() { throw new Error("owner JSON must not be accessed"); } },
+      { id: "manager", event_id: "ev1", x_user_id: "manager-x", permission_preset: "manager",
+        get custom_permission_keys_json() { throw new Error("manager JSON must not be accessed"); } },
+      ...Array.from({ length: 498 }, (_, i) => ({
+        id: "custom-" + i, event_id: "ev1", x_user_id: "custom-x-" + i, permission_preset: "custom",
+        get custom_permission_keys_json() { jsonAccesses++; return "{not json"; },
+      })),
+    ];
+    const db = {
+      select(columns) {
+        queries++;
+        assert.deepEqual(Object.keys(columns), ["id", "event_id", "x_user_id", "permission_preset", "custom_permission_keys_json"]);
+        return { from: () => ({ where: () => ({ limit: async (limit) => {
+          assert.equal(limit, 500, "characterizes current SQL, not an accepted S2 cap");
+          return rows;
+        } }) }) };
+      },
+    };
+    const owner = await buildPermissionIntegrityChecks(db, "staff_owner_missing_permissions");
+    assert.deepEqual(owner, []);
+    assert.equal(jsonAccesses, 0);
+    const manager = await buildPermissionIntegrityChecks(db, "staff_manager_has_dangerous_permissions");
+    assert.equal(manager.length, 1);
+    assert.equal(manager[0].count, 1);
+    assert.deepEqual(manager[0].issues, [{
+      id: "manager", title: "@manager-x", description: "危険権限: video.permissions", adminHref: "/manage/events/ev1/staff",
+    }]);
+    assert.equal(jsonAccesses, 0);
+    const custom = await buildPermissionIntegrityChecks(db, "staff_custom_json_invalid");
+    assert.equal(custom.length, 1);
+    assert.equal(custom[0].count, 498);
+    assert.equal(custom[0].issues.length, 50);
+    assert.equal(custom[0].moreCount, 448);
+    assert.equal(jsonAccesses, 498, "selected custom check still evaluates every returned custom row");
+    assert.equal(queries, 3);
+  });
+
   test("MIG-0626 U05: characterize staff permission diagnostic parsing and the remaining 500-row transfer gap", async () => {
     // Explicit characterization of CURRENT; 500 is NOT an accepted S2
     // limit or a complete database-wide integrity count.
