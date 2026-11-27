@@ -907,11 +907,11 @@ if (runUnderRootTsx(import.meta.url)) {
     const originalError = console.error;
     const validRow = { videoId: "av-pending-1", eventId: "a-open", primaryEventId: "a-ended" };
     const fkRow = { kind: "fk", value: "av-pending-1", videoId: null, eventId: null, primaryEventId: null };
-    // PATCH uses the standalone release SELECT, whereas a canonical signed
-    // import uses tagged FK + release rows. Preserve a valid FK receipt in
-    // the combined cases so the release-field faults reach their own checks.
-    const releaseRow = (combined, row = validRow) => combined ? { kind: "release", value: null, ...row } : row;
-    const receiptWithRows = (combined, rows) => ({ success: true, results: combined ? [fkRow, ...rows] : rows });
+    // Canonical video_members PATCH, DELETE and signed import all use the
+    // tagged FK + release CTE. Keep a valid FK receipt so release-field faults
+    // reach their own checks after the FK-first validation stage.
+    const releaseRow = (_combined, row = validRow) => ({ kind: "release", value: null, ...row });
+    const receiptWithRows = (_combined, rows) => ({ success: true, results: [fkRow, ...rows] });
     const invalid = [
       () => ({ success: true }),
       combined => ({ ...receiptWithRows(combined, [releaseRow(combined)]), success: false }),
@@ -936,9 +936,14 @@ if (runUnderRootTsx(import.meta.url)) {
     let injected = 0;
     try {
       console.error = (...args) => logs.push(args);
-      for (const [method, path, body] of [["PATCH", "/data", patch], ["POST", "/import", apply]]) {
-        const combined = method === "POST";
-        const expectedBinds = combined ? ["av-pending-1", "av-pending-1"] : ["av-pending-1"];
+      const deleteBody = { table: "video_members", primaryKey: { id: "vm-1" } };
+      for (const [method, path, body] of [
+        ["PATCH", "/data", patch],
+        ["DELETE", "/data", deleteBody],
+        ["POST", "/import", apply],
+      ]) {
+        const combined = true;
+        const expectedBinds = ["av-pending-1", "av-pending-1"];
         for (const fault of faults) {
           resetAllCaches();
           const prior = injected;
@@ -972,7 +977,7 @@ if (runUnderRootTsx(import.meta.url)) {
           assert.match(response.headers.get("cache-control"), /private.*no-store/);
         }
       }
-      assert.equal(injected, faults.length * 2);
+      assert.equal(injected, faults.length * 3);
       assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] WRITE_FAILED"]));
     } finally {
       honoD1.prepare = originalPrepare;
@@ -1416,7 +1421,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(dDel.reads, 4, "warm DELETE adds 1 before-image read (4 total) + 1 atomic batch");
   });
 
-  test("MIG-0638 T06: bounded member FK/release SELECT plan (#893, unmounted)", async () => {
+  test("MIG-0638 T06: bounded member FK/release SELECT plan (#893)", async () => {
     const { buildSpreadsheetMemberFkReleaseLookup } = await import("../src/routes/admin/spreadsheet/write.ts");
     const { assertSpreadsheetForeignKeyLookup } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
     const { DatabaseSync } = await import("node:sqlite");
@@ -1630,8 +1635,8 @@ if (runUnderRootTsx(import.meta.url)) {
         }
       }
 
-      // Member POST combines the canonical video FK and release lookup in one
-      // bounded statement; DELETE retains its before-image + release reads.
+      // Canonical member POST/PATCH/DELETE share the bounded tagged FK +
+      // release lookup. PATCH/DELETE retain their full before-image read.
       for (const [video, linked] of [["av-overflow", false], ["av-pending-1", true]]) {
         for (const method of ["POST", "DELETE"]) {
           for (const cold of [true, false]) {
@@ -1647,6 +1652,20 @@ if (runUnderRootTsx(import.meta.url)) {
               });
           }
         }
+      }
+
+      // A PATCH that changes video_id previously needed a separate FK read
+      // and release read. The tagged CTE keeps that to one handler read while
+      // preserving the before-image, after-image and Queue target semantics.
+      for (const cold of [true, false]) {
+        const targetVideo = cold ? "av-overflow" : "av-pending-1";
+        await crud("member PATCH FK change " + targetVideo, "PATCH", {
+          table: "video_members", primaryKey: { id: "vm-1" }, column: "video_id", value: targetVideo,
+        }, cold, 5, (body, _queue, beforeActive) => {
+          assert.equal(body.pendingPublicReflection, true);
+          assert.equal(tableRows("video_members").find(row => row.id === "vm-1").video_id, targetVideo);
+          assertQueueAdvanced(beforeActive, ["video:" + targetVideo, "users_index:global", "event_release:a-open"]);
+        });
       }
 
       // Non-enqueue cases must run with existing active targets, otherwise a
@@ -1749,8 +1768,8 @@ if (runUnderRootTsx(import.meta.url)) {
             assertQueueAdvanced(beforeActive, ["video:av-pending-1", "video:av-overflow", "users_index:global", "event_release:a-open"]);
           });
       }
-      assert.equal(reports.length, 34);
-      assert.equal(reports.filter(row => row.cold).length, 17);
+      assert.equal(reports.length, 36);
+      assert.equal(reports.filter(row => row.cold).length, 18);
       assert.ok(reports.some(row => row.overS3), "#893 remains over budget");
     } finally {
       resetAllCaches();
