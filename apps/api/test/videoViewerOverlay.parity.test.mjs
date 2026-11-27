@@ -1387,6 +1387,34 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   test("RH-031: throwing diagnostic sink preserves degraded D1 responses", async () => {
+    // R2 size access is intentionally outside readBoundedR2Json's provider
+    // catch; exercise the route's snapshot catch with a hostile size getter.
+    {
+      const { env, bucket, d1 } = setupTestEnv();
+      const originalGet = bucket.get.bind(bucket);
+      bucket.get = async (key) => {
+        const object = await originalGet(key);
+        if (key !== "videos/vid-pub.json" || !object) return object;
+        return Object.defineProperty({ ...object }, "size", {
+          get() { throw new Error("snapshot provider failure"); },
+        });
+      };
+      const originalError = console.error;
+      console.error = () => { throw new Error("diagnostic sink unavailable"); };
+      let response;
+      try {
+        response = await app.request("/api/videos/vid-pub/viewer-overlay", {}, env);
+      } finally {
+        console.error = originalError;
+      }
+      assert.equal(response.status, 503, "throwing diagnostics must not replace snapshot fail-closed response");
+      assert.equal(response.headers.get("Cache-Control"),
+        "private, no-store, no-cache, must-revalidate");
+      assert.equal(response.headers.get("Retry-After"), "3");
+      assert.deepEqual(await response.json(), { error: "viewer_overlay_unavailable" });
+      assert.equal(d1.stats.statements, 0, "snapshot failure precedes session/D1 reads");
+    }
+
     for (const [caseName, marker, expectedLoggedIn] of [
       ["first D1 projection", "'approved_x_ids'", false],
       ["second D1 projection", "AS chapters_json", true],
