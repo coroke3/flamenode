@@ -32,8 +32,8 @@ function ScopedVideoApproveActions({
   const scopeRef = React.useRef<object | null>(null);
   React.useLayoutEffect(() => {
     scopeRef.current = {};
-    inFlight.current = false;
-    setPendingMode(null);
+    // Adapter replacement retires the receipt, not the same-view write lock.
+    if (!inFlight.current) setPendingMode(null);
     setError(null);
     setSuccess(false);
     setPendingPublicReflection(false);
@@ -69,10 +69,10 @@ function ScopedVideoApproveActions({
         setError(COMMUNICATION_ERROR_MESSAGE);
         onRefresh();
       } finally {
-        // A possibly committed POST is not aborted/replayed. Old receipts must
-        // not alter another view's pending state or invoke its callbacks.
-        if (scopeRef.current === scope) {
-          inFlight.current = false;
+        // Only this mounted instance can own this lock. Adapter rotation must
+        // not start another write before the original request settles.
+        inFlight.current = false;
+        if (scopeRef.current !== null) {
           setPendingMode(null);
         }
       }

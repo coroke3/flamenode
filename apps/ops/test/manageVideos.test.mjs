@@ -266,3 +266,71 @@ test("MIG-0724 U01: same-view reordered hidden fields retain a pending receipt a
     assert.equal(ui.target.querySelector("button").disabled, false);
   } finally { await ui.cleanup(); }
 });
+
+
+test("MIG-0724 U01: adapter replacement fences receipts but cannot release the same-view write lock", async () => {
+  for (const kind of ["approve", "status", "quick"]) {
+    for (const outcome of ["success", "retryable", "denied", "reject"]) {
+      const old = deferred(), fresh = deferred(), calls = [], refreshes = [], navigations = [];
+      const first = fd => { calls.push(["A", Object.fromEntries(fd.entries())]); return old.promise; };
+      const second = fd => { calls.push(["B", Object.fromEntries(fd.entries())]); return fresh.promise; };
+      const noop = async () => ({ ok: true });
+      const node = action => {
+        const common = { videoId: "v1", hiddenFields: { event_id: "e1" }, authorizationEpoch: "A",
+          onRefresh: () => refreshes.push(true), onNavigate: href => navigations.push(href) };
+        if (kind === "approve") return h(VideoApproveActions, { ...common, currentStatus: "pending",
+          approveAction: noop, approveAndNextAction: action });
+        if (kind === "quick") return h(VideoReviewQuickApproveButton, { ...common, action });
+        return h(VideoStatusForm, { ...common, currentStatus: "pending", statuses: MANAGE_STATUS_VALUES,
+          action, formIdPrefix: "adapter-race", statusLabel: "変更", submitLabel: "保存" });
+      };
+      const ui = await mounted(node(first));
+      const press = async () => {
+        if (kind === "status") await ui.submit();
+        else await ui.click(kind === "approve" ? "承認して次へ" : "承認");
+      };
+      const assertPending = () => {
+        assert.ok(ui.target.querySelector('[aria-busy="true"]'), kind + ":" + outcome);
+        assert.ok([...ui.target.querySelectorAll("button")].every(button => button.disabled));
+      };
+      try {
+        if (kind === "status") await ui.change("public");
+        await press();
+        assertPending();
+        await ui.render(node(second));
+        assertPending();
+        await press();
+        await ui.render(node(first));
+        assertPending();
+        await press();
+        await ui.render(node(second));
+        assertPending();
+        await press();
+        assert.deepEqual(calls.map(call => call[0]), ["A"]);
+        await React.act(async () => {
+          if (outcome === "reject") old.reject(new Error("STALE_FAILURE"));
+          else old.resolve(outcome === "success"
+            ? { ok: true, nextHref: "/manage/events/e1/videos/old", pendingPublicReflection: true, message: "STALE_SUCCESS" }
+            : { ok: false, retryable: outcome === "retryable", message: "STALE_FAILURE" });
+        });
+        assert.deepEqual(refreshes, []);
+        assert.deepEqual(navigations, []);
+        assert.doesNotMatch(ui.target.textContent, /STALE_|通信エラー|承認しました|ステータスを更新しました|公開ページへの反映は/);
+        assert.equal(ui.target.querySelector('[aria-busy="true"]'), null);
+        assert.ok([...ui.target.querySelectorAll("button")].every(button => !button.disabled));
+        if (kind === "status") await ui.change("private");
+        await press();
+        assertPending();
+        assert.deepEqual(calls.map(call => call[0]), ["A", "B"]);
+        assert.deepEqual(calls[1][1], kind === "status"
+          ? { event_id: "e1", video_id: "v1", status: "private" }
+          : { event_id: "e1", video_id: "v1" });
+        await React.act(async () => fresh.resolve({ ok: true, pendingPublicReflection: true }));
+        assert.deepEqual(refreshes, [true]);
+        assert.deepEqual(navigations, []);
+        assert.equal(ui.target.querySelector('[aria-busy="true"]'), null);
+        assert.match(ui.target.textContent, /公開ページへの反映は/);
+      } finally { await ui.cleanup(); }
+    }
+  }
+});

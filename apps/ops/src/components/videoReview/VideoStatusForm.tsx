@@ -91,8 +91,8 @@ function ScopedVideoStatusForm({
   const scopeRef = React.useRef<object | null>(null);
   React.useLayoutEffect(() => {
     scopeRef.current = {};
-    inFlight.current = false;
-    setSubmitting(false);
+    // Adapter replacement retires the receipt, not the same-view write lock.
+    if (!inFlight.current) setSubmitting(false);
     setError(null);
     setSuccess(false);
     setSuccessMessage(null);
@@ -164,8 +164,10 @@ function ScopedVideoStatusForm({
           else onRefresh();
         }
       } finally {
-        if (scopeRef.current === scope) {
-          inFlight.current = false;
+        // Only this mounted instance can own this lock. Adapter rotation must
+        // not start another write before the original request settles.
+        inFlight.current = false;
+        if (scopeRef.current !== null) {
           setSubmitting(false);
         }
       }

@@ -25,8 +25,8 @@ function ScopedQuickApproveButton({
   const scopeRef = React.useRef<object | null>(null);
   React.useLayoutEffect(() => {
     scopeRef.current = {};
-    inFlight.current = false;
-    setSubmitting(false);
+    // Adapter replacement retires the receipt, not the same-view write lock.
+    if (!inFlight.current) setSubmitting(false);
     setError(null);
     setPendingPublicReflection(false);
     return () => { scopeRef.current = null; };
@@ -57,8 +57,10 @@ function ScopedQuickApproveButton({
         setError(COMMUNICATION_ERROR_MESSAGE);
         onRefresh();
       } finally {
-        if (scopeRef.current === scope) {
-          inFlight.current = false;
+        // Only this mounted instance can own this lock. Adapter rotation must
+        // not start another write before the original request settles.
+        inFlight.current = false;
+        if (scopeRef.current !== null) {
           setSubmitting(false);
         }
       }
