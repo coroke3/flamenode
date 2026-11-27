@@ -93,6 +93,8 @@ export function AdminSpreadsheetEditableGrid({
   const resizeRef = React.useRef<{ column: string; startX: number; startWidth: number } | null>(null);
   const tableRef = React.useRef<HTMLTableElement>(null);
   const editorRef = React.useRef<HTMLInputElement>(null);
+  // A formula-only navigation can change the target before React commits its new endpoint.
+  const formulaNavigationPending = React.useRef(false);
   const focusedGridElement = React.useRef<HTMLElement | null>(null);
   const displayedPage = React.useRef(data);
   displayedPage.current = data;
@@ -207,6 +209,7 @@ export function AdminSpreadsheetEditableGrid({
 
   // Reconcile after every commit: a column key replacement can remove the focused TD without changing dimensions.
   React.useLayoutEffect(() => {
+    formulaNavigationPending.current = false;
     if (identityChanged) {
       focusedGridElement.current = null;
       return;
@@ -253,6 +256,7 @@ export function AdminSpreadsheetEditableGrid({
     const row = rows[rowIndex];
     const pk = row ? primaryKey(row, primaryKeys) : null;
     if (!canMutate || inFlight.current !== null || !isCurrent() || displayedPage.current !== data ||
+        (fromFormula && formulaNavigationPending.current) ||
         liveSelection.current !== null || selectionConflict || !column || !row || !pk ||
         !column.editable || column.pk !== 0 || column.generated) return false;
     const value = cellValue(row[column.name]);
@@ -279,7 +283,15 @@ export function AdminSpreadsheetEditableGrid({
     return null;
   }
 
-  function changeFormulaValue(value: string): void {
+  function ownsFormulaFocus(input: HTMLInputElement): boolean {
+    return input.isConnected && input.ownerDocument.activeElement === input;
+  }
+
+  function changeFormulaValue(input: HTMLInputElement): void {
+    // A delayed event on the old formula surface cannot edit the new endpoint
+    // or overwrite the inline editor's live draft after focus has moved.
+    if (!ownsFormulaFocus(input)) return;
+    const value = input.value;
     const draft = liveFormulaDraft();
     if (draft) setCellEdit({ ...draft, value });
     else if (formulaCanStart && liveSelection.current === null) {
@@ -289,7 +301,8 @@ export function AdminSpreadsheetEditableGrid({
 
   function handleFormulaKey(event: React.KeyboardEvent<HTMLInputElement>): void {
     // Native IME confirmation is not a request to persist a database edit.
-    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.key === "Process") return;
+    if (!ownsFormulaFocus(event.currentTarget) || event.nativeEvent.isComposing ||
+        event.nativeEvent.keyCode === 229 || event.key === "Process") return;
     const mod = event.ctrlKey || event.metaKey;
     if (mod && event.key === "c") {
       event.preventDefault();
@@ -302,7 +315,35 @@ export function AdminSpreadsheetEditableGrid({
       return;
     }
     const draft = liveFormulaDraft();
-    if (!draft) return;
+    if (!draft) {
+      // CURRENT Enter/Tab still moves the endpoint when the formula has no edit.
+      // An invalidated/retired draft or old DOM event must not become navigation.
+      if (identityChanged || !isCurrent() || displayedPage.current !== data ||
+          currentSelection !== null || liveSelection.current !== null) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        // Until the new endpoint commits, do not return focus to the old TD.
+        if (formulaNavigationPending.current) return;
+        if (rows.length && columns.length) focusGridCell(visibleFocus);
+        else tableRef.current?.focus();
+        return;
+      }
+      if (event.key !== "Enter" && event.key !== "Tab") return;
+      if (inFlight.current !== null && historyInFlight.current === inFlight.current) return;
+      event.preventDefault();
+      if (formulaNavigationPending.current) return;
+      const navigation = event.key === "Enter" ? "Enter" : event.shiftKey ? "ShiftTab" : "Tab";
+      const next = moveSpreadsheetFocus(visibleFocus, navigation, rows.length, columns.length);
+      setAnchorCell(next);
+      setFocusedCell(next);
+      // Keep focus on the formula input, as CURRENT does without a draft.
+      if (next.row !== visibleFocus.row || next.col !== visibleFocus.col) {
+        formulaNavigationPending.current = true;
+        tableRef.current?.querySelector<HTMLTableCellElement>(`[data-grid-cell="${next.row}:${next.col}"]`)
+          ?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      }
+      return;
+    }
     const col = columns.findIndex(column => column.name === draft.column);
     if (col < 0) return;
     const position = { row: draft.rowIndex, col };
@@ -883,10 +924,12 @@ export function AdminSpreadsheetEditableGrid({
         <input data-spreadsheet-formula-value="" type="text" aria-label="セルの値"
           title={formulaValue} value={formulaValue} readOnly={!formulaCanEdit}
           placeholder={formulaCanEdit ? "" : "読み取り専用"}
-          onFocus={() => {
-            if (formulaCanStart) startCellEdit(visibleFocus.row, visibleFocus.col, undefined, true);
+          onFocus={event => {
+            if (formulaCanStart && ownsFormulaFocus(event.currentTarget)) {
+              startCellEdit(visibleFocus.row, visibleFocus.col, undefined, true);
+            }
           }}
-          onChange={event => changeFormulaValue(event.currentTarget.value)}
+          onChange={event => changeFormulaValue(event.currentTarget)}
           onKeyDown={handleFormulaKey}
           onPaste={event => event.preventDefault()}
           onCut={event => event.preventDefault()} />

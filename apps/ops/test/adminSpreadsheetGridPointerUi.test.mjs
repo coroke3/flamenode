@@ -1979,3 +1979,219 @@ test("MIG-0737 U01 formula input: focusing a multiline value and committing unch
     assert.equal(document.activeElement, cell(ui, "1:1"));
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0737 U01 formula navigation: readonly Enter/Tab/ShiftTab collapse range, clamp and keep formula focus", async () => {
+  for (const props of [{}, { allowMutations: true, data: { ...data, def: { ...data.def, mode: "readonly" } } }]) {
+    const ui = await mount(props);
+    try {
+      await select(ui, "0:0");
+      await select(ui, "1:1", { shiftKey: true });
+      const formula = formulaInput(ui);
+      await React.act(async () => formula.focus());
+      assert.equal(formula.readOnly, true);
+      assert.deepEqual(selected(ui), ["0:0", "0:1", "1:0", "1:1"]);
+      for (const [pressed, options, endpoint] of [
+        ["Enter", { shiftKey: true, ctrlKey: true }, "2:1"],
+        ["Enter", {}, "2:1"],
+        ["Tab", { altKey: true }, "2:2"],
+        ["Tab", {}, "2:2"],
+        ["Tab", { shiftKey: true, metaKey: true }, "2:1"],
+        ["Tab", { shiftKey: true }, "2:0"],
+        ["Tab", { shiftKey: true }, "2:0"],
+      ]) {
+        assert.equal((await key(formula, pressed, options)).defaultPrevented, true);
+        assert.deepEqual(selected(ui), [endpoint]);
+        assert.equal(cell(ui, endpoint).tabIndex, 0);
+        assert.equal(document.activeElement, formula);
+        assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+      }
+      assertFormula(ui, "A6 (id)", "c");
+      assert.equal((await key(formula, "Escape")).defaultPrevented, true);
+      assert.equal(document.activeElement, cell(ui, "2:0"));
+      assertNoEffects(ui);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 formula navigation: empty grid consumes movement and Escape returns to table", async () => {
+  for (const fixture of [{ ...data, rows: [] }, { ...data, columns: [] }, { ...data, rows: [], columns: [] }]) {
+    const ui = await mount({ data: fixture, allowMutations: true });
+    try {
+      const formula = formulaInput(ui);
+      await React.act(async () => formula.focus());
+      for (const pressed of ["Enter", "Tab"]) {
+        assert.equal((await key(formula, pressed)).defaultPrevented, true);
+        assert.equal(document.activeElement, formula);
+        assert.deepEqual(selected(ui), []);
+      }
+      assert.equal((await key(formula, "Escape")).defaultPrevented, true);
+      assert.equal(document.activeElement, ui.host.querySelector("table"));
+      assertNoEffects(ui);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 formula navigation: moving onto editable cell does not open a draft; change uses committed endpoint only", async () => {
+  const requests = [];
+  const ui = await mount({ allowMutations: true, fetchFn: async (_, init) => {
+    requests.push(init);
+    return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+  } });
+  try {
+    await select(ui, "0:0");
+    const formula = formulaInput(ui);
+    await React.act(async () => formula.focus());
+    assert.equal((await key(formula, "Tab")).defaultPrevented, true);
+    assertFormula(ui, "B4 (title)", "Alpha");
+    assert.equal(formula.readOnly, false);
+    assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+    await React.act(async () => {
+      formula.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      setter.call(formula, "stale input");
+      formula.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    assertFormula(ui, "B5 (title)", "Beta");
+    assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+    assert.equal(document.activeElement, formula);
+    await setInput(formula, "new Beta");
+    assert.equal(cell(ui, "1:1").querySelector("input").value, "new Beta");
+    assert.equal(cell(ui, "0:1").querySelector("input"), null);
+    await key(formula, "Enter");
+    assert.equal(requests.length, 1);
+    assert.deepEqual(JSON.parse(requests[0].body), {
+      table: "videos", primaryKey: { id: "b" }, column: "title", value: "new Beta",
+    });
+    assert.equal(document.activeElement, cell(ui, "2:1"));
+    assert.equal(ui.refreshes, 1);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula navigation: outside focus, retired draft, identity reset and IME never navigate", async () => {
+  const ui = await mount({ allowMutations: true });
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  try {
+    await select(ui, "0:0");
+    const formula = formulaInput(ui);
+    await React.act(async () => formula.focus());
+    for (const opts of [{ isComposing: true }, { keyCode: 229 }]) {
+      assert.equal((await key(formula, "Enter", opts)).defaultPrevented, false);
+      assert.deepEqual(selected(ui), ["0:0"]);
+    }
+    await React.act(async () => outside.focus());
+    assert.equal((await key(formula, "Tab")).defaultPrevented, false);
+    assert.deepEqual(selected(ui), ["0:0"]);
+    assert.equal(document.activeElement, outside);
+    await select(ui, "0:1");
+    await React.act(async () => formula.focus());
+    await setInput(formula, "Retired");
+    await ui.render({ data: { ...data, rows: [{ ...data.rows[0], title: "Changed" }, ...data.rows.slice(1)] } });
+    assert.equal((await key(formula, "Enter")).defaultPrevented, false);
+    assert.deepEqual(selected(ui), ["0:1"]);
+    assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
+    await ui.render({ data: { ...data, page: 3 } });
+    assert.equal((await key(formula, "Tab")).defaultPrevented, false);
+    assert.deepEqual(selected(ui), ["0:0"]);
+    assert.equal(document.activeElement, cell(ui, "0:0"));
+    assertNoEffects(ui);
+  } finally { outside.remove(); await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula navigation: ordinary pending save allows movement while history blocks it", async () => {
+  const requests = [];
+  const ui = await mount({ allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+  });
+  const success = () => new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+  try {
+    await editTitle(ui);
+    await React.act(async () => button(ui, "セルを保存").click());
+    assert.equal(requests.length, 1);
+    const formula = formulaInput(ui);
+    await React.act(async () => formula.focus());
+    assert.equal(formula.readOnly, true);
+    assert.equal((await key(formula, "Enter")).defaultPrevented, true);
+    assert.deepEqual(selected(ui), ["1:1"]);
+    assert.equal(document.activeElement, formula);
+    await React.act(async () => requests[0].resolve(success()));
+    await React.act(async () => button(ui, "元に戻す").click());
+    assert.equal(requests.length, 2);
+    assert.equal((await key(formula, "Tab")).defaultPrevented, false);
+    assert.deepEqual(selected(ui), ["1:1"]);
+    await React.act(async () => requests[1].resolve(success()));
+    assert.equal((await key(formula, "Tab")).defaultPrevented, true);
+    assert.deepEqual(selected(ui), ["1:2"]);
+    assert.equal(requests.length, 2);
+    assert.equal(ui.refreshes, 2);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula navigation: same-batch Escape does not focus the obsolete endpoint", async () => {
+  const ui = await mount();
+  try {
+    await select(ui, "0:0");
+    const formula = formulaInput(ui);
+    await React.act(async () => formula.focus());
+    const move = new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    const escape = new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    await React.act(async () => { formula.dispatchEvent(move); formula.dispatchEvent(escape); });
+    assert.equal(move.defaultPrevented, true);
+    assert.equal(escape.defaultPrevented, true);
+    assert.deepEqual(selected(ui), ["1:0"]);
+    assert.equal(document.activeElement, formula);
+    await key(formula, "Escape");
+    assert.equal(document.activeElement, cell(ui, "1:0"));
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula navigation: retired formula cannot replace or commit the inline editor's draft", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    const inline = await editTitle(ui);
+    const formula = formulaInput(ui);
+    assert.equal(document.activeElement, inline);
+    assert.equal(formula.value, "Unsaved");
+    await setInput(formula, "late formula value");
+    assert.equal(inline.value, "Unsaved");
+    for (const pressed of ["Enter", "Tab", "Escape"]) {
+      assert.equal((await key(formula, pressed)).defaultPrevented, false);
+      assert.equal(cell(ui, "0:1").querySelector("input"), inline);
+      assert.equal(document.activeElement, inline);
+    }
+    assertNoEffects(ui);
+    await React.act(async () => formula.focus());
+    await setInput(formula, "live formula value");
+    assert.equal(inline.value, "live formula value");
+    assert.equal((await key(formula, "Escape")).defaultPrevented, true);
+    assert.equal(document.activeElement, cell(ui, "0:1"));
+    assertFormula(ui, "B4 (title)", "Alpha");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula navigation: late input after Escape cannot open a new draft at the moved endpoint", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    await select(ui, "0:0");
+    const formula = formulaInput(ui);
+    await React.act(async () => formula.focus());
+    await key(formula, "Tab");
+    assertFormula(ui, "B4 (title)", "Alpha");
+    assert.equal(formula.readOnly, false);
+    await key(formula, "Escape");
+    assert.equal(document.activeElement, cell(ui, "0:1"));
+    await setInput(formula, "retired input");
+    assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+    assertFormula(ui, "B4 (title)", "Alpha");
+    assert.equal((await key(formula, "Enter")).defaultPrevented, false);
+    assert.deepEqual(selected(ui), ["0:1"]);
+    assertNoEffects(ui);
+    await React.act(async () => formula.focus());
+    await setInput(formula, "new legitimate edit");
+    assert.equal(cell(ui, "0:1").querySelector("input").value, "new legitimate edit");
+    await key(formula, "Escape");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
