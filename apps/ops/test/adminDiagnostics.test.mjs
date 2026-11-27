@@ -1468,3 +1468,53 @@ test("MIG-0736 Worker refresh rejects late receipts after authority loss", async
     dom.window.close();
   }
 });
+
+
+test("MIG-0736 Worker detail links are bound to their CURRENT job and pipeline identity", async () => {
+  const baseline = workerMonitoringFixture();
+  const destinations = ["/admin/notifications", "/admin/static-builds", "/admin/youtube-sync"];
+  const renderSnapshot = async snapshot => {
+    const data = await getAdminWorkers(async () => response(200, { snapshot, error: null }));
+    assert.equal(data.status, "ok");
+    const html = render(h(AdminWorkersView, { data, onRefresh: () => {} }), "/admin/workers");
+    return new JSDOM(html);
+  };
+  // Exercise every valid pair, every other allowlisted destination for that
+  // identity, and malformed paths through the actual validated read + view.
+  for (const [collection, tableIndex] of [["jobs", 0], ["pipelines", 2]]) {
+    for (const [index, row] of baseline[collection].entries()) {
+      for (const href of [...destinations, "", "/admin/health", "https://attacker.invalid/"]) {
+        const snapshot = {
+          ...baseline,
+          [collection]: baseline[collection].map((item, i) => i === index ? { ...item, detailHref: href } : item),
+        };
+        const dom = await renderSnapshot(snapshot);
+        try {
+          const tables = dom.window.document.querySelectorAll("table");
+          assert.equal(tables.length, 3, "a bad detail destination does not discard the valid monitor data");
+          for (const [key, otherTable] of [["jobs", 0], ["pipelines", 2]]) {
+            const rows = tables[otherTable].querySelectorAll("tbody tr");
+            assert.equal(rows.length, baseline[key].length);
+            for (const [i, expected] of baseline[key].entries()) {
+              const changed = key === collection && i === index;
+              const cell = rows[i].lastElementChild;
+              const anchor = cell.querySelector("a");
+              const context = [key, i, href].join(":");
+              if (changed && href !== row.detailHref) {
+                assert.equal(anchor === null, true, context);
+                assert.equal(cell.textContent, "—", context);
+              } else {
+                assert.equal(anchor?.getAttribute("href"), expected.detailHref, context);
+                assert.equal(anchor?.textContent, key === "jobs" ? "詳細" : "管理", context);
+              }
+            }
+          }
+          const queueLinks = [...tables[1].querySelectorAll("tbody tr td:last-child a")];
+          assert.deepEqual(queueLinks.map(a => a.getAttribute("href")), destinations);
+        } finally {
+          dom.window.close();
+        }
+      }
+    }
+  }
+});

@@ -56,13 +56,27 @@ const PLATFORM_LIMITS = [
   { label: "YouTube Data API", value: "10,000 units / day" },
 ] as const;
 
-// DTO validation checks structure, not URL safety. These are the fixed
-// internal destinations actually produced by the Worker monitoring backend.
-const ALLOWED_MONITOR_DETAIL_HREFS = new Set([
-  "/admin/notifications", "/admin/static-builds", "/admin/youtube-sync",
+// Fixed identity/destination pairs in both CURRENT and Hono. The same
+// registry defines the complete set of jobs and pipelines; a valid internal
+// path for another row is not a valid detail destination for this row.
+const MONITOR_JOB_DETAILS = new Map<string, string>([
+  ["fast-jobs", "/admin/notifications"],
+  ["content-jobs", "/admin/static-builds"],
+  ["sync-jobs", "/admin/youtube-sync"],
+  ["fast-jobs:slot-deadline-reminders", "/admin/notifications"],
+  ["content-jobs:cleanup", "/admin/static-builds"],
 ]);
-function MonitorDetailLink({ href, label }: { href: string; label: "詳細" | "管理" }): React.ReactElement {
-  return ALLOWED_MONITOR_DETAIL_HREFS.has(href)
+const MONITOR_PIPELINE_DETAILS = new Map<string, string>([
+  ["notifications", "/admin/notifications"],
+  ["static", "/admin/static-builds"],
+  ["youtube", "/admin/youtube-sync"],
+  ["scores", "/admin/static-builds"],
+]);
+
+function MonitorDetailLink({ href, expectedHref, label }: {
+  href: string; expectedHref: string | undefined; label: "詳細" | "管理";
+}): React.ReactElement {
+  return href === expectedHref
     ? <Link href={href} className="fn-btn fn-btn-ghost fn-btn-sm">{label}</Link>
     : <span className="fn-muted fn-text-sm">—</span>;
 }
@@ -92,23 +106,16 @@ function statusStyle(level: Exclude<MonitorLevel, "running">): React.CSSProperti
   return { background: "var(--accent-success-soft, #dcfce7)", borderColor: "var(--accent-success, #16a34a)", color: "var(--accent-success, #166534)" };
 }
 
-// Both CURRENT and Hono always produce these five Cron jobs and four pipelines.
 // Artifact history is intentionally variable and is not part of this identity check.
-const MONITOR_JOB_NAMES = [
-  "fast-jobs", "content-jobs", "sync-jobs",
-  "fast-jobs:slot-deadline-reminders", "content-jobs:cleanup",
-] as const;
-const MONITOR_PIPELINE_IDS = ["notifications", "static", "youtube", "scores"] as const;
-
 function hasCompleteMonitoringSnapshot(snapshot: Snapshot): boolean {
   const { jobs, pipelines } = snapshot;
-  if (jobs.length !== MONITOR_JOB_NAMES.length || pipelines.length !== MONITOR_PIPELINE_IDS.length) {
+  if (jobs.length !== MONITOR_JOB_DETAILS.size || pipelines.length !== MONITOR_PIPELINE_DETAILS.size) {
     return false;
   }
   const jobNames = new Set(jobs.map(job => job.jobName));
   const pipelineIds = new Set(pipelines.map(pipeline => pipeline.id));
-  if (!MONITOR_JOB_NAMES.every(name => jobNames.has(name)) ||
-      !MONITOR_PIPELINE_IDS.every(id => pipelineIds.has(id))) {
+  if (![...MONITOR_JOB_DETAILS.keys()].every(name => jobNames.has(name)) ||
+      ![...MONITOR_PIPELINE_DETAILS.keys()].every(id => pipelineIds.has(id))) {
     return false;
   }
   // The producers never emit running/unknown pipeline states. A running Cron
@@ -333,7 +340,7 @@ function WorkerRow({ job }: { job: WorkerJobStatus }): React.ReactElement {
       <td><span className={`fn-badge ${badgeClass(job.level)}`}>{levelLabel(job.level)}</span></td>
       <TimeCell value={job.lastStartedAt} /><TimeCell value={job.lastSucceededAt} /><TimeCell value={job.lastFailedAt} /><TimeCell value={job.nextExpectedAt} />
       <td style={{ maxWidth: 240, wordBreak: "break-word", fontSize: 12 }}>{job.lastErrorCode ?? "—"}</td>
-      <td><MonitorDetailLink href={job.detailHref} label="詳細" /></td>
+      <td><MonitorDetailLink href={job.detailHref} expectedHref={MONITOR_JOB_DETAILS.get(job.jobName)} label="詳細" /></td>
     </tr>
   );
 }
@@ -365,7 +372,7 @@ function PipelineRow({ pipeline }: { pipeline: PipelineSnapshot }): React.ReactE
     <tr>
       <td style={{ fontWeight: 700 }}>{pipeline.label}</td><td><span className={`fn-badge ${badgeClass(pipeline.level)}`}>{levelLabel(pipeline.level)}</span></td>
       <td>{formatCount(pipeline.backlog)}</td><td>{formatCount(pipeline.capacityPerDay)}</td><td>{durationLabel(pipeline.estimatedDrainMinutes)}</td>
-      <td className="fn-muted fn-text-sm">{pipeline.note}</td><td><MonitorDetailLink href={pipeline.detailHref} label="管理" /></td>
+      <td className="fn-muted fn-text-sm">{pipeline.note}</td><td><MonitorDetailLink href={pipeline.detailHref} expectedHref={MONITOR_PIPELINE_DETAILS.get(pipeline.id)} label="管理" /></td>
     </tr>
   );
 }
