@@ -639,6 +639,17 @@ function logicalCountSubquerySql(eventIdExpr: string, xIdExpr: string): string {
   ) m)`;
 }
 
+// normalizeXId trims ECMAScript whitespace, removes leading @, then
+// lowercases. The logical reservation reader normalizes its already
+// normalized identity again. SQLite lower() is ASCII-only, so this SQL key
+// is an optimization, never identity authority: the caller must compare
+// it to the exact JS count key before reusing the associated count.
+function pendingReservationCountKeySql(expr: string): string {
+  const whitespace = "char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)";
+  const normalize = (value: string) => `lower(ltrim(trim(${value}, ${whitespace}), '@'))`;
+  return normalize(normalize(expr));
+}
+
 type ReserveSnapshotRow = {
   event_json: string | null;
   anchor_json: string | null;
@@ -649,7 +660,7 @@ type ReserveSnapshotRow = {
   neighbors_json: string | null;
   replay_group_json: string | null;
   active_x_count: number | null;
-  single_pending_x: string | null;
+  single_pending_count_key: string | null;
   pending_x_count: number | null;
 };
 
@@ -658,7 +669,7 @@ async function loadReserveSnapshot(
   args: { eventId: string; slotId: string; userId: string; activeXId: string | null; neighborLimit: number },
 ): Promise<ReserveSnapshotRow | null> {
   const types = SLOT_RESERVATION_X_REQUEST_TYPES;
-  const normActive = args.activeXId ? normalizeXId(args.activeXId) : "";
+  const activeCountKey = normalizeXId(normalizeXId(args.activeXId));
   const neighborRowsSql = `
         SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
         FROM "slots" s, anchor a
@@ -694,14 +705,13 @@ async function loadReserveSnapshot(
       ORDER BY "requested_at" DESC, "id" DESC
       LIMIT ${MAX_PENDING_RESERVATION_REQUESTS + 1}
     ),
-    pending_distinct AS (
-      SELECT DISTINCT lower(trim(ltrim(trim("requested_x_id"), '@'))) AS "xid"
+    pending_count_keys AS (
+      SELECT DISTINCT ${pendingReservationCountKeySql('"requested_x_id"')} AS "xid"
       FROM pending_list
-      WHERE lower(trim(ltrim(trim("requested_x_id"), '@'))) <> ''
     ),
     single_pending AS (
       SELECT CASE WHEN COUNT(*) = 1 THEN MIN("xid") ELSE NULL END AS "xid"
-      FROM pending_distinct
+      FROM pending_count_keys WHERE "xid" <> ''
     )
     SELECT
       (SELECT ${eventJsonObjectSql("ev")} FROM ev) AS event_json,
@@ -724,7 +734,7 @@ async function loadReserveSnapshot(
         THEN ${logicalCountSubquerySql("(SELECT id FROM ev)", "?")}
         ELSE 0
       END AS active_x_count,
-      (SELECT "xid" FROM single_pending) AS single_pending_x,
+      (SELECT "xid" FROM single_pending) AS single_pending_count_key,
       CASE
         WHEN COALESCE((SELECT "max_slot_reservation_groups_per_xid" FROM ev), 0) > 0
           AND (SELECT "xid" FROM single_pending) IS NOT NULL
@@ -736,7 +746,7 @@ async function loadReserveSnapshot(
     .prepare(boundedFirstD1SnapshotSql(query, [
       "event_json", "anchor_json", "actor_json", "approved_x_json",
       "pending_x_json", "staff_json", "neighbors_json", "replay_group_json",
-      "active_x_count", "single_pending_x", "pending_x_count",
+      "active_x_count", "single_pending_count_key", "pending_x_count",
     ]))
     .bind(
       args.slotId,
@@ -749,10 +759,10 @@ async function loadReserveSnapshot(
       args.eventId,
       args.userId,
       args.neighborLimit,
-      normActive, // nonempty active-X guard
-      normActive, // exact snapshot match
-      normActive, // legacy snapshot exclusion predicate
-      normActive, // normalized legacy snapshot match
+      activeCountKey, // nonempty active-X count key guard
+      activeCountKey, // exact snapshot match
+      activeCountKey, // legacy snapshot exclusion predicate
+      activeCountKey, // normalized legacy snapshot match
     )
     .first<ReserveSnapshotRow>();
 }
@@ -868,14 +878,22 @@ export async function reserveSlotCore(
   const xidReservationLimit = operatorOverride
     ? 0
     : normalizeSlotReservationLimit(event.max_slot_reservation_groups_per_xid);
+  let callerQueryCount = CALLER_PRE_READS_WITH_SESSION;
   if (xidReservationLimit > 0 && identity.snapshotXId) {
-    const normActive = ctx.activeXId ? normalizeXId(ctx.activeXId) : "";
+    // Match loadLogicalReservationCountForXId's final JS normalization
+    // exactly. The SQL pending key may differ for non-ASCII case folding;
+    // never use a count for a different key or change the stored identity.
+    const countKey = normalizeXId(identity.snapshotXId);
+    const activeCountKey = normalizeXId(normalizeXId(ctx.activeXId));
     let currentReservations: number;
-    if (identity.snapshotXId === normActive) {
+    if (!countKey) {
+      currentReservations = 0;
+    } else if (countKey === activeCountKey) {
       currentReservations = Number(snapshot.active_x_count ?? 0);
-    } else if (identity.snapshotXId === snapshot.single_pending_x) {
+    } else if (countKey === snapshot.single_pending_count_key) {
       currentReservations = Number(snapshot.pending_x_count ?? 0);
     } else {
+      callerQueryCount += 1;
       currentReservations = await loadLogicalReservationCountForXId(db, {
         eventId: anchor.event_id,
         xIdSnapshot: identity.snapshotXId,
@@ -942,7 +960,7 @@ export async function reserveSlotCore(
       reason: "slot_user_reserve",
       extraStatements,
       preloaded: ctx.preloaded,
-      callerQueryCount: CALLER_PRE_READS_WITH_SESSION,
+      callerQueryCount,
       loadWakeHost: loadNoopWakeHost,
     });
   } catch (error) {

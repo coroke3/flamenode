@@ -1544,6 +1544,68 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("S3 #725: reuse pending count only for the exact CURRENT reservation count key", async () => {
+    for (const [raw, countKey, occupied, expectedReads] of [
+      ["\t@@X_Pend\u3000", "x_pend", true, 3],
+      ["@ \t@X_Pend", "x_pend", true, 3],
+      ["\t@@X_Pend\u3000", "x_pend", false, 3],
+      ["\u00c4Pend", "\u00e4pend", true, 4],
+    ]) {
+      const a = world();
+      const b = world();
+      for (const w of [a, b]) {
+        // No active identity: exercise the actual pending-only count path,
+        // rather than accidentally satisfying the active-X fast path.
+        w.sqlite.prepare("UPDATE user SET active_x_user_id = NULL WHERE id = 'u_pend'").run();
+        w.sqlite.prepare("UPDATE x_identity_requests SET requested_x_id = ? WHERE id = 'xreq_pend_1'").run(raw);
+        if (occupied) {
+          w.sqlite.prepare(
+            "UPDATE slots SET status = 'reserved', reserved_by_user_id = 'u_pend', " +
+            "x_user_id = NULL, reserved_x_id_snapshot = ?, display_name = 'Legacy pending', " +
+            "version = version + 1 WHERE id = 'lim_1' AND event_id = 'ev_limit'",
+          ).run(countKey);
+        }
+      }
+      const token = "s3-pending-count-key-session";
+      insert(b.sqlite, "session", {
+        sessionToken: token, userId: "u_pend", expires: NOW_SEC * 1000 + 60000,
+      });
+      const args = { eventId: "ev_limit", slot_id: "lim_2", display_name: "Pending count", consecutive_count: 1 };
+      const thawA = freeze();
+      let expected;
+      try {
+        expected = await runCurrent(a, "u_pend", "reserve", args);
+      } finally {
+        thawA();
+      }
+      const reads = b.d1.stats.reads;
+      const batches = b.d1.stats.batches;
+      const thawB = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev_limit/slots/lim_2/reserve", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ display_name: args.display_name, consecutive_count: 1 }),
+        }, { DB: b.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        const result = await response.json();
+        assert.equal(expected.result.ok, !occupied);
+        assert.equal(response.status, occupied ? 409 : 200);
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(result, expected.result);
+        if (occupied) assert.match(result.message, /最大1件まで枠を確保できます/);
+        assert.deepEqual(state(b), state(a), "CURRENT slot/audit/outbox/queue parity");
+        // Non-ASCII case folding mismatch remains a known S3 blocker.
+        assert.equal(b.d1.stats.reads - reads, expectedReads, JSON.stringify(raw));
+        assert.equal(b.d1.stats.batches - batches, occupied ? 0 : 1);
+      } finally {
+        thawB();
+      }
+    }
+  });
+
   test("S3 #725: tied legacy group edges preserve CURRENT neighbor and three reads", async () => {
     for (const direction of ["forward", "backward"]) {
       for (const availableBetween of [true, false]) {
