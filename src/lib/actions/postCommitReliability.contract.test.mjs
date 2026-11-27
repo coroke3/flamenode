@@ -24,11 +24,33 @@ test("critical Server Actions rethrow Next.js control-flow exceptions", () => {
       /import \{[^}]*unstable_rethrow[^}]*\} from "next\/navigation"/,
       `${file} must import unstable_rethrow`,
     );
-    assert.match(
-      source,
-      /unstable_rethrow\(error\)/,
-      `${file} must call unstable_rethrow in catch blocks`,
-    );
+    if (file === "../actions/video/interaction.ts") {
+      // SEC-820: the mutation catch must classify framework control before
+      // handling provider conflicts, without giving Next the raw error.
+      const mutationStart = source.indexOf("async function mutateVideoInteraction(");
+      const writeStart = source.indexOf("await mutateWithAudit(db, {", mutationStart);
+      assert.ok(mutationStart >= 0 && writeStart > mutationStart);
+      assert.match(
+        source.slice(writeStart),
+        /^await mutateWithAudit\(db, \{[\s\S]*?\}\);\s*\}\s*catch \(error\) \{\s*rethrowVideoInteractionFrameworkControl\(error\);\s*if \(active && isVideoInteractionAuthUniqueConstraintError\(error\)\)/,
+        "video interaction must classify control flow first in the atomic-write catch",
+      );
+
+      const helperStart = source.indexOf("function rethrowVideoInteractionFrameworkControl(");
+      const helperEnd = source.indexOf("\nfunction isVideoInteractionAuthUniqueConstraintError(", helperStart);
+      assert.ok(helperStart >= 0 && helperEnd > helperStart);
+      assert.match(
+        source.slice(helperStart, helperEnd),
+        /try \{\s*unstable_rethrow\(metadata\);\s*\} catch \(controlFlow\) \{\s*if \(controlFlow === metadata\) throw error;/,
+        "the helper must invoke Next on the metadata projection and rethrow the original signal",
+      );
+    } else {
+      assert.match(
+        source,
+        /unstable_rethrow\(error\)/,
+        `${file} must call unstable_rethrow in catch blocks`,
+      );
+    }
   }
 });
 

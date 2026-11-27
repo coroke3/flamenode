@@ -28,7 +28,10 @@ import {
   applyLegacyImportPlanStep,
   legacyApplyResultFromProgress,
 } from "@/lib/import/legacy/apply";
-import { preflightLegacyImportPlan } from "@/lib/import/legacy/preflight";
+import {
+  legacyImportPreflightValidationMessage,
+  preflightLegacyImportPlan,
+} from "@/lib/import/legacy/preflight";
 import {
   claimLegacyImportPreview,
   createLegacyImportPreview,
@@ -438,7 +441,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     preflight = await preflightLegacyImportPlan(db, plan, selectedStrategy);
   } catch (cause) {
     return error(
-      cause instanceof Error ? cause.message : "現在のDB状態へ適用できないplanです。",
+      legacyImportPreflightValidationMessage(cause) ?? "現在のDB状態へ適用できないplanです。",
       409,
       {
         mode,

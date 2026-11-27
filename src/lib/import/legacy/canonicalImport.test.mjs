@@ -1305,3 +1305,151 @@ test("X ID統合は承認申請だけを入口にし、直接Actionを残さな�
   assert.match(mergeSource, /SET active_x_user_id = \$\{target\}/);
   assert.match(mergeSource, /approval_status = 'rejected'/);
 });
+
+test("CURRENT preview preflight exposes only deliberate domain validation messages", async (t) => {
+  const { registerHooks } = await import("node:module");
+  const { register } = await import("tsx/esm/api");
+  const { getTableName } = await import("drizzle-orm");
+  const moduleUrl = (source) => `data:text/javascript,${encodeURIComponent(source)}`;
+  const accessUrl = moduleUrl(`
+    let access;
+    export function setAccess(value) { access = value; }
+    export async function requireAdminWrite() { return access; }
+  `);
+  const envUrl = moduleUrl(`
+    let env, reads = 0;
+    export class CloudflareBindingsUnavailableError extends Error {}
+    export function setEnv(value) { env = value; reads = 0; }
+    export function getEnvReads() { return reads; }
+    export function getEnv() { reads++; return env; }
+  `);
+  const stubs = new Map([
+    ["server-only", moduleUrl("export {}; ")],
+    ["@/lib/auth/writeGuard", accessUrl],
+    ["@/lib/cloudflare", envUrl],
+    ["@/lib/auth/currentUser", moduleUrl("export class CurrentUserUnavailableError extends Error {}")],
+    ["@/lib/auth/writeOriginGuard", moduleUrl("export async function requireSameOriginWrite() { return { ok: true }; }")],
+    ["@/lib/import/legacy/apply", moduleUrl(`
+      export function applyLegacyImportPlanStep() { throw Error('unexpected apply'); }
+      export function legacyApplyResultFromProgress() { throw Error('unexpected apply'); }
+      export const LEGACY_IMPORT_QUESTION_STEP_SIZE = 1;
+      export const LEGACY_IMPORT_SOFTWARE_STEP_SIZE = 1;
+      export const LEGACY_IMPORT_X_USER_STEP_SIZE = 1;
+    `)],
+  ]);
+  const hooks = registerHooks({
+    resolve(specifier, context, nextResolve) {
+      const url = stubs.get(specifier);
+      return url ? { url, shortCircuit: true } : nextResolve(specifier, context);
+    },
+  });
+  const loader = register({ namespace: "legacy-preflight-security" });
+  try {
+    const { setAccess } = await import(accessUrl);
+    const { setEnv, getEnvReads } = await import(envUrl);
+    const { preflightLegacyImportPlan, legacyImportPreflightValidationMessage } =
+      await loader.import("./preflight.ts", import.meta.url);
+    const { POST } = await loader.import("../../../../app/api/admin/import/legacy/route.ts", import.meta.url);
+    const eventId = fixturePlan().events[0].id;
+    const domainMessage = `イベント ${eventId} は既に存在します。`;
+    const fallback = "現在のDB状態へ適用できないplanです。";
+
+    function database({ existing = false, failure, fails = false } = {}) {
+      let reads = 0;
+      return {
+        get reads() { return reads; },
+        select() {
+          reads++;
+          if (fails) throw failure;
+          return {
+            from(table) {
+              return { where: async () => existing && getTableName(table) === "events" ? [{ id: eventId }] : [] };
+            },
+          };
+        },
+      };
+    }
+
+    async function preview(db) {
+      setAccess({ ok: true, db, user: { id: "admin-1" } });
+      setEnv({ BUCKET: new FakeR2Bucket() });
+      const body = new FormData();
+      body.set("files", new File([eventJson], "events.json", { type: "application/json" }));
+      const response = await POST(new Request("https://example.test/api/admin/import/legacy", { method: "POST", body }));
+      return { status: response.status, body: await response.json(), envReads: getEnvReads() };
+    }
+
+    let conflictBody;
+    await t.test("a real DB conflict keeps its message and complete HTTP envelope", async () => {
+      const db = database({ existing: true });
+      const result = await preview(db);
+      assert.equal(result.status, 409);
+      assert.equal(result.body.message, domainMessage);
+      assert.equal(result.body.mode, "preview");
+      assert.equal(result.body.requires_repreview, false);
+      assert.equal(result.body.summary.events, 1);
+      assert.equal(result.body.summary.inputRows, 1);
+      assert.equal(result.body.file_ranges.length, 1);
+      assert.ok(Array.isArray(result.body.warnings));
+      assert.equal(result.envReads, 0, "a rejected preflight must not reach R2");
+      assert.equal(db.reads, 1);
+      conflictBody = result.body;
+    });
+
+    await t.test("both deliberate throw sites preserve immutable public messages", async () => {
+      const invalid = { ...fixturePlan(), errors: ["入力の検証エラー", "次の検証エラー"] };
+      const db = database();
+      let caught;
+      try { await preflightLegacyImportPlan(db, invalid, "create_only"); } catch (error) { caught = error; }
+      assert.ok(caught instanceof Error);
+      assert.equal(legacyImportPreflightValidationMessage(caught), invalid.errors.join("\n"));
+      assert.equal(db.reads, 0);
+      caught.message = "D1_ERROR: SELECT secret FROM private_table";
+      assert.equal(legacyImportPreflightValidationMessage(caught), invalid.errors.join("\n"));
+      const impostor = Object.create(Object.getPrototypeOf(caught));
+      impostor.message = "provider detail";
+      assert.equal(legacyImportPreflightValidationMessage(impostor), undefined);
+    });
+
+    await t.test("provider, spoofed and hostile errors return only the fixed fallback", async () => {
+      let hostileReads = 0;
+      const hostile = new Proxy(new Error("private provider detail"), {
+        get() { hostileReads++; throw Error("unexpected property read"); },
+        getPrototypeOf() { hostileReads++; throw Error("unexpected prototype read"); },
+      });
+      const revoked = Proxy.revocable({}, {});
+      revoked.revoke();
+      const causes = [
+        new Error("D1_ERROR: SELECT secret FROM private_table; bind=private-value"),
+        Object.assign(new Error(domainMessage), { code: "legacy_import_preflight_validation" }),
+        { code: "legacy_import_preflight_validation", message: domainMessage },
+        hostile, revoked.proxy, null, undefined, "provider detail", 42,
+      ];
+      for (const failure of causes) {
+        const db = database({ failure, fails: true });
+        const result = await preview(db);
+        assert.equal(result.status, 409);
+        assert.deepEqual(result.body, { ...conflictBody, message: fallback });
+        assert.equal(result.envReads, 0);
+        assert.equal(db.reads, 1);
+      }
+      assert.equal(hostileReads, 0);
+    });
+
+    await t.test("a valid preview still stores its plan and returns credentials", async () => {
+      const db = database();
+      const result = await preview(db);
+      assert.equal(result.status, 200);
+      assert.equal(result.body.ok, true);
+      assert.equal(result.body.mode, "preview");
+      assert.equal(typeof result.body.preview_token, "string");
+      assert.equal(typeof result.body.plan_hash, "string");
+      assert.equal(result.body.summary.events, 1);
+      assert.equal(db.reads, 1);
+      assert.equal(result.envReads, 1);
+    });
+  } finally {
+    await loader.unregister();
+    hooks.deregister();
+  }
+});

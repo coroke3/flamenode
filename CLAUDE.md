@@ -41,11 +41,11 @@
 - 1 wake = 1 action（自PRのmicro-unit 1つ / merge統合 1件 / 他agent PRの独立レビュー 1件 / 何もしない）
 - live stateはowner PR branchの `docs/migration/work-items/MIG-XXXX.md`。`STATUS.md` はmerge直前の統合でだけ更新
 - checkpointの無い `IN_PROGRESS` を残さない
-- 独立レビューは原則として他agent（Codex / Antigravity）か人間。builderより上位のモデルをsubagentで呼べる場合（例: Sonnet/Haikuで動作中 → `model: "opus"` の `flamenode-architecture-reviewer`）はそのレビューで可、APPROVE + 最終HeadのCI greenなら統合して `Merge requested:` を記録し、人間のmergeを待つ。Opusで動作中のPRは他agentか人間のレビューを待つ
+- 独立レビューは原則として他agent（Codex / Antigravity）か人間。builderより上位のモデルをsubagentで呼べる場合（例: Sonnet/Haikuで動作中 → `model: "opus"` の `flamenode-architecture-reviewer`）はそのレビューで可、APPROVE + 最終HeadのCI greenなら統合して最終HEADの独立レビュー・必須CI・全受入条件を再確認し、証拠を記録してexpected HEAD指定でsquash mergeし次へ進む。Opusで動作中のPRは他agentか人間のレビューを待つ
 - REVIEW待ちPRは貯めたまま、依存の無い別task・他agent PRのレビュー・Work Order精緻化を進める（IN_PROGRESSは1つまで）
-- 人間承認・Phase Gate・BLOCKEDだけが残り進められる作業が無いときだけ、pollingせずloopを止めて報告
+- 本番操作/仕様変更の承認・未解消Gate・BLOCKEDだけが残り進められる作業が無いときだけ、pollingせずloopを止めて報告
 - Phase Gateを自動承認しない
-- 移行ループは自動mergeしない。PRごとに人間のmerge承認を待つ。production deploy / Worker Route / Custom Domain / Remote D1 / secret操作はその操作への明示承認まで停止
+- 2026-11-27 owner policy: 通常PRは最終HEADの独立APPROVE・必須CI・受入条件・最新main統合・rollback確認後にsquash mergeし、人間の個別承認は待たない。高リスクは独立Lead追加レビュー、非本番Gateも独立Leadで判定。本番切替・手動deploy / Worker Route / Custom Domain / Remote D1 / secret操作・仕様変更は別途明示承認。既存Workers Builds自動実行は通常mergeに含む。テストは既存suiteへの最小追加を優先し、重複ファイルや証跡だけのtest-only PRを増やさない。必要な新規ファイルのみ理由をPRに記録する。詳細はAGENT_PROTOCOL.md
 - BLOCKEDを無視して後続Phaseへ進まない
 - redesign画面をfunction parity未確認のままDONEにしない
 
