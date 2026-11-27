@@ -1712,3 +1712,39 @@ test("MIG-0737 U01 formula display: valid draft label follows its named column t
     assertNoEffects(ui);
   } finally { await ui.cleanup(); }
 });
+
+
+test("MIG-0737 U01 formula display: long references and receipts retain scoped wrapping and full text", async () => {
+  const name = "metadata_column_" + "x".repeat(160);
+  const receipt = "保存済みですが、再取得できませんでした。画面を再読み込みしてください。";
+  const value = "  " + "日本語".repeat(200) + "  ";
+  const requests = [];
+  const fixture = { ...data,
+    columns: [data.columns[0], { ...data.columns[1], name }],
+    rows: [{ id: "a", [name]: value }],
+  };
+  const ui = await mount({ data: fixture, allowMutations: true,
+    fetchFn: async (_, init) => {
+      requests.push(init);
+      return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+    },
+    onRefresh: () => { throw Error("refresh unavailable"); },
+  });
+  try {
+    await select(ui, "0:1");
+    const bar = assertFormula(ui, "B4 (" + name + ")", value);
+    const ref = bar.querySelector("[data-spreadsheet-formula-reference]");
+    const status = bar.querySelector("[data-spreadsheet-formula-status]");
+    assert.equal(window.getComputedStyle(bar).flexWrap, "wrap");
+    assert.equal(window.getComputedStyle(ref).overflowWrap, "anywhere");
+    assert.equal(window.getComputedStyle(status).overflowWrap, "anywhere");
+    assert.equal(window.getComputedStyle(status).maxWidth, "100%");
+    await doubleClickCell(cell(ui, "0:1"));
+    await setInput(cell(ui, "0:1").querySelector("input"), "Changed");
+    assertFormula(ui, "B4 (" + name + ")", "Changed");
+    await React.act(async () => button(ui, "セルを保存").click());
+    assertFormula(ui, "B4 (" + name + ")", value, receipt);
+    assert.equal(requests.length, 1);
+    assert.equal(JSON.parse(requests[0].body).column, name);
+  } finally { await ui.cleanup(); }
+});

@@ -705,6 +705,7 @@ export function AdminSpreadsheetEditableGrid({
           --sheet-bg: #ffffff;
           --sheet-border: #dadce0;
           display: flex;
+          flex-wrap: wrap;
           align-items: center;
           border-bottom: 1px solid var(--sheet-border);
           background: var(--sheet-bg);
@@ -712,7 +713,7 @@ export function AdminSpreadsheetEditableGrid({
         [data-spreadsheet-formula-reference] {
           flex-shrink: 0;
           min-width: 100px;
-          max-width: 200px;
+          max-width: min(200px, 100%);
           padding: 6px 10px;
           font: 600 12px var(--font-mono, ui-monospace, monospace);
           color: var(--text-secondary);
@@ -730,7 +731,7 @@ export function AdminSpreadsheetEditableGrid({
           user-select: none;
         }
         [data-spreadsheet-formula-value] {
-          flex: 1;
+          flex: 1 1 100px;
           min-width: 0;
           min-height: 1em;
           padding: 6px 10px;
@@ -742,8 +743,10 @@ export function AdminSpreadsheetEditableGrid({
           user-select: text;
         }
         [data-spreadsheet-formula-status] {
-          flex-shrink: 0;
+          flex-shrink: 1;
           min-width: 80px;
+          max-width: 100%;
+          overflow-wrap: anywhere;
           padding: 0 10px;
           font-size: 11px;
           color: var(--text-muted);
@@ -761,7 +764,7 @@ export function AdminSpreadsheetEditableGrid({
         }
         @media (max-width: 640px) {
           [data-spreadsheet-formula-bar] { flex-wrap: wrap; }
-          [data-spreadsheet-formula-reference] { min-width: 72px; max-width: none; flex: 0 0 auto; }
+          [data-spreadsheet-formula-reference] { min-width: 72px; max-width: 100%; flex: 0 1 auto; }
           [data-spreadsheet-formula-value] { flex: 1 1 100%; font-size: 16px; }
         }
       `}</style>
