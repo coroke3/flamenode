@@ -576,12 +576,15 @@ if (runUnderRootTsx(import.meta.url)) {
       status: "pending", requested_at: NOW, updated_at: NOW,
       ...overrides,
     });
+    const mergeRow = (id, overrides = {}) => row(id, {
+      request_type: "merge", source_x_user_id: "alice_x", target_x_user_id: "orph_x",
+      parent_request_id: null, revert_deadline_at: null, ...overrides,
+    });
     const records = [
-      row("parent-empty", { request_type: "merge", status: "done", parent_request_id: null }),
-      row("parent-bad", { request_type: "merge", status: "done", restore_snapshot_json: "{}" }),
-      row("parent-pending", { request_type: "merge", status: "pending", restore_snapshot_json: "{}" }),
-      row("wrong-kind", { request_type: "merge" }),
-      row("missing-id", { parent_request_id: null, revert_deadline_at: 0 }),
+      mergeRow("parent-empty", { status: "done" }),
+      mergeRow("parent-bad", { status: "done", restore_snapshot_json: "{}" }),
+      mergeRow("parent-pending", { restore_snapshot_json: "{}" }),
+      mergeRow("wrong-kind"),
       row("blank-id", { parent_request_id: "\u00a0\ufeff\u2003\t" }),
       row("bad-deadline", { revert_deadline_at: 0 }),
       row("fractional-deadline", { revert_deadline_at: NOW + 0.5 }),
@@ -595,6 +598,19 @@ if (runUnderRootTsx(import.meta.url)) {
     ];
     for (const side of [cur, hon]) {
       for (const record of records) insert(side.sqlite, "x_identity_requests", record);
+      // Canonical migration 0043 rejects a revert without a parent ID.
+      // Explicitly simulate that one corrupt legacy row in the isolated fixture,
+      // rather than disabling constraints for otherwise valid test data.
+      const corrupt = row("missing-id", { parent_request_id: null, revert_deadline_at: 0 });
+      assert.equal(side.sqlite.prepare("PRAGMA ignore_check_constraints").get().ignore_check_constraints, 0);
+      assert.throws(() => insert(side.sqlite, "x_identity_requests", corrupt), /x_identity_requests_shape_check/);
+      side.sqlite.exec("PRAGMA ignore_check_constraints = ON");
+      try {
+        insert(side.sqlite, "x_identity_requests", corrupt);
+      } finally {
+        side.sqlite.exec("PRAGMA ignore_check_constraints = OFF");
+      }
+      assert.equal(side.sqlite.prepare("PRAGMA ignore_check_constraints").get().ignore_check_constraints, 0);
     }
     const cases = [
       ["absent", 404], ["wrong-kind", 404], ["missing-id", 400],
@@ -663,6 +679,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const base = { requested_by_auth_user_id: "u_root", requested_at: NOW, updated_at: NOW };
     insert(side.sqlite, "x_identity_requests", {
       ...base, id: "clock-parent", request_type: "merge", status: "done",
+      source_x_user_id: "alice_x", target_x_user_id: "orph_x",
     });
     insert(side.sqlite, "x_identity_requests", {
       ...base, id: "clock-child", request_type: "revert_merge", status: "pending",
