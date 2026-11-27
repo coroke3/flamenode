@@ -804,7 +804,9 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(preview.status, 200);
     contracts.AdminSpreadsheetImportDryRunResponseSchema.parse(preview.body);
     const apply = { ...upsert, previewToken: preview.body.previewToken };
-    const rowRead = sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE "id" = ? LIMIT ');
+    // Cold eligible PATCH/DELETE now use one WITH catalog+snapshot statement; keep the legacy SELECT fallback covered too.
+    const rowRead = sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE "id" = ? LIMIT ') ||
+      (sql.startsWith("WITH catalog AS (") && sql.includes('snapshot AS (') && sql.includes('"software_catalog"'));
     const cases = [
       ["PATCH", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" }, column: "name", value: "changed" }, rowRead],
       ["DELETE", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" } }, rowRead],
@@ -1097,7 +1099,9 @@ if (runUnderRootTsx(import.meta.url)) {
     contracts.AdminSpreadsheetImportDryRunResponseSchema.parse(preview.body);
     const apply = { ...upsert, previewToken: preview.body.previewToken };
     const patch = { table: "software_catalog", primaryKey: { id: "sw-base" }, column: "name", value: "changed" };
-    const rowRead = sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE "id" = ? LIMIT ');
+    // Cold eligible PATCH/DELETE now use one WITH catalog+snapshot statement; keep the legacy SELECT fallback covered too.
+    const rowRead = sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE "id" = ? LIMIT ') ||
+      (sql.startsWith("WITH catalog AS (") && sql.includes('snapshot AS (') && sql.includes('"software_catalog"'));
     const cases = [
       ["PATCH", "/data", patch, rowRead],
       ["DELETE", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" } }, rowRead],
