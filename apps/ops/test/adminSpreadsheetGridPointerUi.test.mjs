@@ -1863,6 +1863,8 @@ test("MIG-0737 U01 formula input: IME confirmation, pending clipboard units and 
       assert.equal((await key(formula, pressed, { isComposing: true })).defaultPrevented, false);
       assert.equal(cell(ui, "0:1").querySelector("input").value, "仮入力");
     }
+    assert.equal((await key(formula, "Enter", { keyCode: 229 })).defaultPrevented, false);
+    assert.equal(cell(ui, "0:1").querySelector("input").value, "仮入力");
     for (const pressed of ["v", "x", "z", "y"]) {
       assert.equal((await key(formula, pressed, { ctrlKey: true })).defaultPrevented, true);
     }
@@ -1929,4 +1931,51 @@ test("MIG-0737 U01 formula input: Ctrl/Cmd+C uses the displayed grid range, not 
     if (previous) Object.defineProperty(navigator, "clipboard", previous);
     else delete navigator.clipboard;
   }
+});
+
+test("MIG-0737 U01 formula input: focus retains the existing rectangle and range copy/cancel use its endpoint", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const copied = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async text => copied.push(text) } });
+  const ui = await mount({ allowMutations: true });
+  try {
+    await select(ui, "0:0");
+    await select(ui, "1:1", { shiftKey: true });
+    const rectangle = ["0:0", "0:1", "1:0", "1:1"];
+    assert.deepEqual(selected(ui), rectangle);
+    const formula = formulaInput(ui);
+    await React.act(async () => formula.focus());
+    assert.deepEqual(selected(ui), rectangle);
+    assert.equal(cell(ui, "1:1").querySelector("input").value, "Beta");
+    await setInput(formula, "Unsaved endpoint");
+    assert.equal((await key(formula, "c", { ctrlKey: true })).defaultPrevented, true);
+    assert.deepEqual(copied, ["a\tAlpha\nb\tBeta"]);
+    assert.deepEqual(selected(ui), rectangle);
+    await key(formula, "Escape");
+    assert.deepEqual(selected(ui), rectangle);
+    assert.equal(document.activeElement, cell(ui, "1:1"));
+    assertNoEffects(ui);
+  } finally {
+    await ui.cleanup();
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
+
+test("MIG-0737 U01 formula input: focusing a multiline value and committing unchanged does not normalize it into a write", async () => {
+  const value = "line one\nline two\r\n";
+  const ui = await mount({ allowMutations: true, data: { ...data,
+    rows: [{ ...data.rows[0], title: value }, ...data.rows.slice(1)],
+  } });
+  try {
+    await select(ui, "0:1");
+    const formula = formulaInput(ui);
+    assert.equal(formula.value, "line oneline two");
+    assert.equal(formula.title, value);
+    await React.act(async () => formula.focus());
+    assert.equal(formula.title, value);
+    assert.equal((await key(formula, "Enter")).defaultPrevented, true);
+    assertNoEffects(ui);
+    assert.equal(document.activeElement, cell(ui, "1:1"));
+  } finally { await ui.cleanup(); }
 });

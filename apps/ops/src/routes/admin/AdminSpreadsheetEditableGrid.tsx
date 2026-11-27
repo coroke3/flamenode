@@ -258,9 +258,12 @@ export function AdminSpreadsheetEditableGrid({
     const value = cellValue(row[column.name]);
     setCellEdit({ id: ++nextEditId.current, rowIndex, column: column.name, value: initialChar ?? value, key, pk,
       before: row[column.name] == null ? null : value, selectInitialText: initialChar !== undefined && !fromFormula, fromFormula });
-    const position = { row: rowIndex, col: colIndex };
-    setAnchorCell(position);
-    setFocusedCell(position);
+    // CURRENT formula focus starts editing the existing endpoint without collapsing its range.
+    if (!fromFormula) {
+      const position = { row: rowIndex, col: colIndex };
+      setAnchorCell(position);
+      setFocusedCell(position);
+    }
     return true;
   }
 
@@ -286,7 +289,7 @@ export function AdminSpreadsheetEditableGrid({
 
   function handleFormulaKey(event: React.KeyboardEvent<HTMLInputElement>): void {
     // Native IME confirmation is not a request to persist a database edit.
-    if (event.nativeEvent.isComposing || event.key === "Process") return;
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.key === "Process") return;
     const mod = event.ctrlKey || event.metaKey;
     if (mod && event.key === "c") {
       event.preventDefault();
