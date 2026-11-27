@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
@@ -43,8 +42,8 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
   const loggerSource = fs.readFileSync(path.join(REPO_ROOT, "packages/server-core/src/audit/logger.ts"), "utf8");
   assert.match(loggerSource, /discord_id: row\.discord_id \?\? null,[\s\S]*discord_name: row\.discord_name \?\? null,[\s\S]*x_user_id: row\.active_x_user_id \?\? null,[\s\S]*x_name: row\.x_name \?\? null,[\s\S]*icon_url: row\.x_icon_url \|\| row\.user_image \|\| null/);
 
-  const require = createRequire(path.join(REPO_ROOT, "package.json"));
-  const wranglerBin = path.join(path.dirname(require.resolve("wrangler/package.json")), "bin", "wrangler.js");
+  const wranglerBin = path.join(REPO_ROOT, "node_modules", "wrangler", "bin", "wrangler.js");
+  assert.ok(fs.existsSync(wranglerBin), "wrangler CLI missing from root node_modules");
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-u04a-workerd-"));
   const stateDir = path.join(workDir, "state");
   const workerPath = path.join(workDir, "worker.mjs");
