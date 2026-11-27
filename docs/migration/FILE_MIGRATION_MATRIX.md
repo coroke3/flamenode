@@ -1898,3 +1898,6 @@ Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fix
 
 <!-- MIG-0401 #283 owns ONLY nonproduction fixture files. Unchanged planned source ownership transferred: astro.config/package -> MIG-0403, index.astro -> MIG-0506, legacy publicData loader/test -> MIG-0505, before marking MIG-0401 DONE. PR review: https://github.com/coroke3/flamenode/pull/283#pullrequestreview-5541888183 -->
 | `docs/migration/work-items/MIG-0689.md` | DOC | D-19-2 shared write admission snapshot Work Order | MIG-0689 | SAME | IN_PROGRESS | PR#901 SHA=52e54c9d512e1a6a59af573511a221d6902eecd3 (shared middleware ownership scope, failure provenance, S3/CPU gates) |
+| `docs/migration/PHASE_6_SPEC.md` | DOC | Phase 6 Work Orders | MIG-0689 | SAME | IN_PROGRESS | PR#901 SHA=52e54c9d512e1a6a59af573511a221d6902eecd3 (MIG-0689 shared write admission snapshot Work Order; D-19-2) |
+| `docs/migration/TASK_CARDS_6_7.md` | DOC | Phase 6/7 task card index | MIG-0689 | SAME | IN_PROGRESS | PR#901 SHA=52e54c9d512e1a6a59af573511a221d6902eecd3 (MIG-0689 task card only) |
+| `docs/migration/STATUS.md` | DOC | Migration task state registry | MIG-0689 | SAME | IN_PROGRESS | PR#901 SHA=52e54c9d512e1a6a59af573511a221d6902eecd3 (MIG-0689 Phase 6 row only; dependency MIG-0602) |
