@@ -5,6 +5,8 @@
 > Decision owner: user (2026-10-09, this conversation)
 > Related: [STATUS.md](STATUS.md), [DB_PACKAGE_EXTRACTION_PLAN.md](DB_PACKAGE_EXTRACTION_PLAN.md), [ACTIVE_X_MIGRATION_PLAN.md](ACTIVE_X_MIGRATION_PLAN.md), [ROUTING_AND_DEPLOY_PLAN.md](ROUTING_AND_DEPLOY_PLAN.md), [PHASE_4_5_SPEC.md](PHASE_4_5_SPEC.md), [PHASE_7_SPEC.md](PHASE_7_SPEC.md)
 
+> **2026-11-27 owner policy update:** 本文の過去の「PRごとの人間承認」「個別squash merge承認」は歴史的記録。通常コード統合・既存Workers Builds自動実行は、`AGENT_PROTOCOL.md` の最終HEAD独立レビュー、必須CI、受入条件、最新main、rollbackのゲート合格後にagentが実施する。高リスクは独立Lead追加レビュー。非本番Gateも証拠に基づく独立Leadレビューで通過可能。本番切替、手動deploy、本番DB/データ移行、Route/Secrets、仕様・権限・可視性の意味変更の明示承認は維持する。既存テストを優先し、必要性を説明できない新規テストファイルは作らない。この方針は既存の設計決定を変更しない。
+
 ## State semantics (agent MUST read)
 
 `DECIDED` = **設計方針への合意**。PoC成功、実装完了、本番反映または運用承認を表さない。
