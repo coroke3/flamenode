@@ -993,7 +993,7 @@ Phase 7 共通契約のとおり。
 ### MIG-0716: `/entry/slotted` と `/entry/unslotted` の画面（SA-086, SA-088、MIG-0703 U01 の後半）
 
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — Lead が U01a の初回読取/未登録 presenter を限定具体化。MIG-0714 の component 依存解消（D-16-11）と最新 main `232381e264a2f2ba6f3cd8982f46f2cc2550cc9d` を確認済み（読み MIG-0623 DONE）。全 open owner の事前確認・共有行の調整を行い、early Draft/postclaim scan 後に着手する。共有 `videoCollaborators` は #464 / MIG-0715 の現 owner と直列調整し、重複作成・無断編集しない。#703 の trusted TARGET route / loader / authority / refresh、U01b の authority/paging と U02/U03、MIG-0651・0648・0650 DONE の merge gate は維持。契約先行 Draft のみ許可し、partial merge 例外は付与しない。
+- **Readiness:** NEEDS_REFINEMENT — #912 の U01a 初回読取/未登録 presenter を実装し、実 source `459b178801a409f0e2c621c7cd869d28da11297f` の独立 source review と34 focused testsを確認済み。browser/final checkpointの正確な受入範囲はown work-itemに記録。MIG-0714 の component 依存解消（D-16-11）、main `232381e264a2f2ba6f3cd8982f46f2cc2550cc9d` と実early Draft/postclaim ownershipを確認（読み MIG-0623 DONE）。共有 `videoCollaborators` は #464 / MIG-0715 の現 owner と直列調整し、重複作成・無断編集しない。#703 の trusted TARGET route / loader / authority / refresh、U01b の authority/paging/outer404 layout と U02/U03、MIG-0651・0648・0650 DONE の merge gate は維持。後続unitは正式refinement後に着手し、partial merge 例外は付与しない。
 - **Recipe:** R-SCREEN
 - **Runtime:** N
 - **Depends on:** MIG-0714 / **Decisions:** D-05 DECIDED, D-16-1, D-16-11
@@ -1065,11 +1065,11 @@ file-progress は実確認した最新 main SHA を `MIGRATION_FILE_BASE_SHA` �
 
 #### Ledger updates
 
-新規5 source/style files と own checkpoint の正確な MIG-0716 row、共有 personal/2 entry suites/CSS registry/main/styles suite への限定証拠追記。既存 first-owner と CURRENT page の MIG-0703 state/provenance は保持し、U01a の未登録 target を route 全体の PARITY_VERIFIED にしない。API_MATRIX の SA-086/088 caller は実 write adapter を結線する後続 unit まで変更しない。U01a の見積りは source/test/docs 合計約1000–1450行、実 diff で確認し3000行を超える前に Leadへ戻す。全task継続分も未計測のまま cap 内と確約しない。必要な受入試験を削らず、partial merge 例外を推定しない。
+新規5 source/style files と own checkpoint の正確な MIG-0716 row、共有 personal/2 entry suites/CSS registry/main/styles suite への限定証拠追記。CURRENT StatusPanel TSX/CSSとunslotted page CSSの未登録3入力は実target/consumerを示すRETAINED行として登録し、CURRENT source自体は変更しない。既存 first-owner と CURRENT page の MIG-0703 state/provenance は保持し、U01a の未登録 target を route 全体の PARITY_VERIFIED にしない。API_MATRIX の SA-086/088 caller は実 write adapter を結線する後続 unit まで変更しない。U01a source/test/docsは最終証拠前で実測1092行（うち11 source/test filesは915行）。最終checkpointと後続unit追加時に3000行上限を再確認する。未計測の継続分をcap内と確約せず、必要な受入試験を削らず、partial merge例外を推定しない。
 
 #### DONE checklist
 
-- [ ] U01a の initial-read/presenter/source/style/native DOM/browser を受入し、未実施を PASS にしない
+- [x] U01a の initial-read/presenter/source/style/native DOM/browser を限定受入。実source S、独立review、原193 findingsと限定説明、実行scopeをown checkpointに記録し、未実施のtrusted host/writeをPASSにしない
 - [ ] U01b trusted host/authority/paging/query/route と #703 の実 TARGET route gate が完了
 - [ ] U02/U03、T01–T03 が完了し、MIG-0651/0648/0650 が DONE、client が最終 canonical schema を利用
 - [ ] query normalization の CURRENT/API drift が担当範囲で解決/正式 disposition 済み、最新 main 統合・最終 HEAD CI・独立 APPROVE
@@ -1077,6 +1077,8 @@ file-progress は実確認した最新 main SHA を `MIGRATION_FILE_BASE_SHA` �
 #### STOP
 
 CURRENT `src/lib/video/unslottedEventQuery.ts` は duplicate event_q を空へし、99 ASCII＋emoji の境界を壊さず clip する。既存 API の `.trim().slice(0,100)` / first-value query と parity reference loader は旧式である。U01a は単一 raw query を encode し server-returned eventQuery をそのまま表示し、UI で修復して差を隠さない。duplicate URL parse と実 navigation は U01b、API 差異は別 owner/正式 scope へ戻し、全 route parity 前の STOP として残す。API contract、authority、owner衝突、欠けた CURRENT 参照、diff cap に問題が出た場合も Leadへ戻す。
+
+実CURRENTのmissing-slot GETを390/1440で観測すると、root404はpersonal/auth shell・header・CostGuardを外れた `app/not-found.tsx` / EmptyStateだった（source52d0、10入力はU01a Sと同一、own checkpointにhash）。現PersonalRoutesの子へ404パネルを置くだけでは同じroute compositionにならない。U01bではouter route/layoutと実404表示を正式に所有・設計してから受入する。AuthUnavailableで代用せず、未測定の再取得失敗方針やCURRENT120候補上限・non-forward continuationを暗黙に解決済みとしない。
 
 #### Rollback
 
