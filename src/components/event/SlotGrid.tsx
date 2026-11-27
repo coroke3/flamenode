@@ -244,6 +244,8 @@ export function SlotGrid({
   const [reserveDisplayName, setReserveDisplayName] = React.useState<string>("");
   const [reserveCount, setReserveCount] = React.useState("1");
   const [savedName, setSavedName] = React.useState<string>("");
+  // Retire pending client completions after an Active X authority transition.
+  const viewerGeneration = React.useRef(0);
   const eventMaxSlots = normalizeMaxSlotsPerVideo(maxSlotsPerVideo);
   const effectiveMaxSlots = operatorOverrideAllowed
     ? MAX_SLOTS_PER_VIDEO
@@ -267,6 +269,7 @@ export function SlotGrid({
 
   React.useEffect(() => {
     const clearViewerPrivateUi = () => {
+      viewerGeneration.current += 1;
       setError(null);
       setSuccess(null);
       setReservedSlotId(null);
@@ -459,12 +462,14 @@ export function SlotGrid({
         (key, value) => window.localStorage.setItem(key, value),
       );
     }
+    const submittedGeneration = viewerGeneration.current;
     startTransition(async () => {
       const result = await runSlotAction(() => reserveSlot(fd), () => {
+        if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
       });
-      if (!result) return;
+      if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の確保に失敗しました。");
@@ -496,12 +501,14 @@ export function SlotGrid({
     setSuccess(null);
     const fd = new FormData();
     fd.set("slot_id", slotId);
+    const submittedGeneration = viewerGeneration.current;
     startTransition(async () => {
       const result = await runSlotAction(() => releaseOwnSlot(fd), () => {
+        if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
       });
-      if (!result) return;
+      if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の解放に失敗しました。");
@@ -527,12 +534,14 @@ export function SlotGrid({
     fd.set("slot_id", slotId);
     fd.set("direction", direction);
     if (operatorOverrideRequired) fd.set("operator_override", "1");
+    const submittedGeneration = viewerGeneration.current;
     startTransition(async () => {
       const result = await runSlotAction(() => extendOwnSlotGroup(fd), () => {
+        if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
       });
-      if (!result) return;
+      if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の拡張に失敗しました。");
@@ -563,12 +572,14 @@ export function SlotGrid({
     fd.set("gap_slot_id", gapSlotId);
     fd.set("display_name", displayName);
     if (operatorOverrideRequired) fd.set("operator_override", "1");
+    const submittedGeneration = viewerGeneration.current;
     startTransition(async () => {
       const result = await runSlotAction(() => mergeOwnSlotGroups(fd), () => {
+        if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
       });
-      if (!result) return;
+      if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の結合に失敗しました。");

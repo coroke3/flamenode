@@ -77,3 +77,15 @@ test("SEC-899: successful Active X switch clears even an already-open reservatio
     assert.ok(block.includes(expression), expression);
   }
 });
+
+test("SEC-899: pending slot mutations cannot resurrect private UI after Active X switch", () => {
+  const source = readFileSync(fileURLToPath(new URL("../../components/event/SlotGrid.tsx", import.meta.url)), "utf8");
+  assert.match(source, /const viewerGeneration = React\.useRef\(0\)/);
+  assert.match(source, /const clearViewerPrivateUi = \(\) => \{\s*viewerGeneration\.current \+= 1;/);
+  assert.equal((source.match(/const submittedGeneration = viewerGeneration\.current;/g) ?? []).length, 4);
+  assert.equal((source.match(/if \(submittedGeneration !== viewerGeneration\.current\) return;/g) ?? []).length, 4);
+  assert.equal((source.match(/if \(submittedGeneration !== viewerGeneration\.current \|\| !result\) return;/g) ?? []).length, 4);
+  for (const action of ["reserveSlot", "releaseOwnSlot", "extendOwnSlotGroup", "mergeOwnSlotGroups"]) {
+    assert.match(source, new RegExp("await runSlotAction\\(\\(\\) => " + action + "\\(fd\\)"));
+  }
+});
