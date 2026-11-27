@@ -337,7 +337,9 @@ export async function loadTosState(
   // Normalize the already strict numeric ToS flag in SQL; never transfer a
   // malformed large value. Reuse one latest-major row in the
   // correlated CASE; the derived SELECT avoids a materialized CTE and keeps
-  // the existing ordering and non-NULL predicate.
+  // the existing ordering and non-NULL predicate. CURRENT and Personal read
+  // treat a selected major with published_at=0 as no reaccept requirement;
+  // test after LIMIT 1 so an older negative timestamp cannot replace it.
   // actorSnapshotFromRow prefers a nonempty X icon over the user image.
   // Do not transfer a shadowed fallback image. TEXT length (rather than BLOB
   // length) conservatively keeps the fallback for leading-NUL legacy text.
@@ -347,7 +349,7 @@ export async function loadTosState(
          CASE WHEN typeof(u."is_tos_accepted") IN ('integer', 'real')
                     AND u."is_tos_accepted" = 1 THEN 1 ELSE 0 END AS is_tos_accepted,
          CASE WHEN u."is_tos_accepted" = 1 THEN COALESCE((
-           SELECT CASE WHEN NOT (
+           SELECT CASE WHEN required_major."published_at" <> 0 AND NOT (
              EXISTS (
                SELECT 1 FROM "terms_versions" accepted_terms
                WHERE accepted_terms."id" = u."accepted_terms_version_id"

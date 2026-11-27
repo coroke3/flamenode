@@ -207,6 +207,14 @@ test("shared admission reuses the latest major and projects the strict ToS flag"
     { flag: 1, mirror: "major-new", consent: null, accepted: 1, reaccept: 0, reason: null },
     { flag: 1, mirror: "minor-new", consent: null, accepted: 1, reaccept: 0, reason: null },
     { flag: 1, mirror: null, consent: "major-new", accepted: 1, reaccept: 0, reason: null },
+    // CURRENT termsReacceptRequiredCondition and the Personal read CASE treat
+    // a selected timestamp-zero major as no reaccept requirement. Do not
+    // filter it out before selecting the latest major (negative older row).
+    { flag: 1, mirror: null, consent: null, olderAt: -1, newestAt: 0, accepted: 1, reaccept: 0, reason: null },
+    { flag: 1, mirror: null, consent: null, olderAt: 0, newestAt: 0, accepted: 1, reaccept: 0, reason: null },
+    { flag: 0, mirror: null, consent: null, olderAt: -1, newestAt: 0, accepted: 0, reaccept: 0, reason: "tos_required" },
+    { flag: 1, mirror: null, consent: null, olderAt: -2, newestAt: -1, accepted: 1, reaccept: 1, reason: "tos_reaccept_required" },
+    { flag: 1, mirror: "major-old", consent: null, olderAt: 0, newestAt: 1, accepted: 1, reaccept: 1, reason: "tos_reaccept_required" },
     { flag: "x".repeat(100000), mirror: "major-new", consent: null, accepted: 0, reaccept: 0, reason: "tos_required" },
     { flag: Buffer.from([49]), mirror: "major-new", consent: null, accepted: 0, reaccept: 0, reason: "tos_required" },
   ];
@@ -215,6 +223,10 @@ test("shared admission reuses the latest major and projects the strict ToS flag"
     sqlite.exec(`INSERT INTO terms_versions VALUES
       ('major-old', 'major', 100, 1), ('major-new', 'major', 100, 2),
       ('minor-new', 'minor', 200, 3), ('unpublished', 'major', NULL, 4)`);
+    if (fixture.newestAt !== undefined) {
+      sqlite.prepare("UPDATE terms_versions SET published_at = CASE id WHEN 'major-new' THEN ? WHEN 'major-old' THEN ? END WHERE id IN ('major-new', 'major-old')")
+        .run(fixture.newestAt, fixture.olderAt);
+    }
     sqlite.prepare('UPDATE "user" SET is_tos_accepted = ?, accepted_terms_version_id = ? WHERE id = ?')
       .run(fixture.flag, fixture.mirror, ADMIN.id);
     if (fixture.consent) {
@@ -226,7 +238,9 @@ test("shared admission reuses the latest major and projects the strict ToS flag"
     assert.equal(standalone.terms_reaccept_required, fixture.reaccept);
     assert.equal(stats.reads, 1);
     const standaloneRead = reads[0];
-    assert.equal(sqlite.prepare(standaloneRead.sql).get(...standaloneRead.values).is_tos_accepted, fixture.accepted);
+    const rawStandalone = sqlite.prepare(standaloneRead.sql).get(...standaloneRead.values);
+    assert.equal(rawStandalone.is_tos_accepted, fixture.accepted);
+    assert.equal(rawStandalone.terms_reaccept_required, fixture.reaccept);
     const response = await request("POST", "/api/admin/announcements", { ...VALID, id: "tos-" + i });
     assert.equal(response.status, fixture.reason ? 403 : 200);
     assert.equal(response.headers.get("cache-control"), "private, no-store");
