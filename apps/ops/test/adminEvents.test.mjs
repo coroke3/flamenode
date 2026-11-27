@@ -441,6 +441,96 @@ test("MIG-0728 U02: template read rejects malformed and guard-denied payloads ar
   assert.deepEqual(await readAdminEventTemplates(async () => json(401, {})), { status: "anonymous" });
 });
 
+test("MIG-0721 U03c: streamed admin-read template DTOs remain readable by the Ops client", async () => {
+  const largeTemplates = {
+    guardOk: true,
+    templates: Array.from({ length: 100 }, (_, index) => ({
+      id: "stream-" + String(index + 1).padStart(3, "0"),
+      name: "あ".repeat(120),
+      description: "い".repeat(500),
+      source_event_id: null,
+      updated_at: 4102444800 - index,
+    })),
+  };
+  const largeNew = {
+    ...eventNew,
+    templateName: "テンプレート🚀",
+    templates: largeTemplates.templates,
+  };
+  assert.ok(Buffer.byteLength(JSON.stringify(largeTemplates)) > 64 * 1024);
+  assert.ok(Buffer.byteLength(JSON.stringify(largeNew)) > 64 * 1024);
+
+  const streamedResponse = value => {
+    const bytes = new TextEncoder().encode(JSON.stringify(value));
+    const needle = new TextEncoder().encode("あ");
+    let split = -1;
+    for (let index = 0; index <= bytes.length - needle.length; index += 1) {
+      if (bytes[index] === needle[0] && bytes[index + 1] === needle[1] &&
+          bytes[index + 2] === needle[2]) {
+        split = index;
+        break;
+      }
+    }
+    assert.notEqual(split, -1, "fixture contains a three-byte UTF-8 character");
+    // Force the decoder to receive the first Japanese character across three
+    // separate chunks, then keep the rest of the large response streamed.
+    const ends = [split + 1, split + 2];
+    for (let offset = split + 3 + 8192; offset < bytes.length; offset += 8192) ends.push(offset);
+    ends.push(bytes.length);
+    let start = 0;
+    const chunks = ends.map(end => {
+      const chunk = bytes.slice(start, end);
+      start = end;
+      return chunk;
+    });
+    let next = 0;
+    const response = new Response(new ReadableStream({
+      pull(controller) {
+        if (next >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunks[next++]);
+      },
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json; charset=UTF-8",
+        "cache-control": "private, no-store",
+      },
+    });
+    assert.equal(response.headers.get("content-length"), null);
+    return { response, chunkCount: chunks.length };
+  };
+
+  const listWire = streamedResponse(largeTemplates);
+  const listResult = await readAdminEventTemplates(async (path, init) => {
+    assert.equal(path, "/api/admin-read/events/templates");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.credentials, "same-origin");
+    return listWire.response;
+  });
+  assert.ok(listWire.chunkCount > 1);
+  assert.equal(listWire.response.bodyUsed, true);
+  assert.deepEqual(listResult, { status: "ok", data: largeTemplates });
+
+  const newWire = streamedResponse(largeNew);
+  const newResult = await readAdminEventNew("t1", async (path, init) => {
+    assert.equal(path, "/api/admin-read/events/new?template=t1");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.credentials, "same-origin");
+    return newWire.response;
+  });
+  const expected = await readAdminEventNew("t1", async () => json(200, largeNew));
+  assert.ok(newWire.chunkCount > 1);
+  assert.equal(newWire.response.bodyUsed, true);
+  assert.deepEqual(newResult, expected);
+  assert.equal(newResult.status, "ok");
+  assert.equal(newResult.data.templates.length, 100);
+  assert.equal(newResult.data.formProps.draftAuthUserId, "admin-account");
+  assert.equal(newResult.data.formProps.initial.explanation, "Template information");
+});
+
 test("MIG-0721 U03a: new-event read encodes selection and preserves CURRENT template defaults and owner", async () => {
   const body = { ...eventNew, templateId: "pick &/?#日" };
   const controller = new AbortController();
