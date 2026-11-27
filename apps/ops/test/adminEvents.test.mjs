@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readManageEventEdit } from "../.test-dist/apps/ops/src/api/eventLifecycle.js";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes, useLocation, createMemoryRouter, RouterProvider } from "react-router-dom";
@@ -1100,4 +1101,112 @@ test("MIG-0728 U03: OpsRoutes mounts all 5 routes behind OpsGate and blocks non-
   } finally {
     globalThis.fetch = origFetch;
   }
+});
+
+
+// MIG-0721 U02a: the canonical edit GET has no draft auth-user ID. These
+// read-boundary tests do not mount the form or infer its owner from Active X.
+const editFixture = (id = "event-1") => ({
+  isAdmin: false, pendingCount: 0, activeXUserId: null,
+  manageStaffXUserIds: ["staff-x"],
+  editableSections: { basic: true, publish: false, questions: true, slots: false },
+  initial: {
+    id, updated_at: 0, title: "Editable event", event_type: "event",
+    explanation: null, youtube_description_template: "",
+    required_video_fields_json: null, icon_url: null, img_url: null, accent_color: null,
+    start_time: 0, end_time: null, entry_start_time: null, entry_end_time: 0,
+    visibility_status: "private", allow_user_video_event_links: 0,
+    allow_unslotted_posts: null, allow_user_video_edits: 1,
+    user_video_edit_permission_keys_json: '["title"]',
+    video_form_settings_json: '{"stage_permissions":[{"id":"stage_permission_1","enabled":true,"required":false,"label":"Stage","description":"","placeholder":""}]}',
+    custom_questions: [{
+      clientId: "q-1", question_key: "q_select", label: "Choice", description: "",
+      type: "select", required: false, options: ["A", "B"], placeholder: "", enabled: true,
+    }],
+    max_slots_per_video: 0, max_slot_reservation_groups_per_xid: null,
+    slot_interval_minutes: 15, slot_part_gap_minutes: 0, slot_type: "time",
+    slot_visibility_mode: "anonymous", parts_json: null, editable_fields: null,
+    review_settings: null,
+  },
+});
+
+test("MIG-0721 U02a: edit GET preserves the canonical DTO and opaque requested event ID", async () => {
+  for (const id of ["event-1", " space /?#% 日 ", "%2e%2e"]) {
+    const dto = editFixture(id);
+    if (id !== "event-1") {
+      dto.activeXUserId = "active-x";
+      dto.pendingCount = 4;
+      dto.isAdmin = true;
+    }
+    const calls = [];
+    const signal = new AbortController().signal;
+    const result = await readManageEventEdit(id, async (path, init) => {
+      calls.push({ path, init });
+      return json(200, dto);
+    }, signal);
+    assert.deepEqual(result, { status: "ok", data: dto });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].path, "/api/manage/events/" + encodeURIComponent(id) + "/edit");
+    assert.equal(new URL(calls[0].path, "https://example.test").pathname, calls[0].path);
+    assert.deepEqual(calls[0].init, {
+      method: "GET", credentials: "same-origin", cache: "no-store",
+      headers: { accept: "application/json" }, signal,
+    });
+    assert.equal(Object.hasOwn(result.data, "userId"), false);
+  }
+});
+
+test("MIG-0721 U02a: malformed IDs and dot segments never initiate a GET", async () => {
+  let requests = 0;
+  const unexpected = async () => { requests++; throw new Error("unexpected fetch"); };
+  for (const id of ["", ".", "..", "a\0b", "\ud800", "\udc00"]) {
+    assert.deepEqual(await readManageEventEdit(id, unexpected), { status: "unavailable" });
+  }
+  assert.equal(requests, 0);
+});
+
+test("MIG-0721 U02a: wrong event, invalid schema, JSON and HTTP status fail safely", async () => {
+  const valid = editFixture();
+  for (const invalid of [
+    editFixture("another-event"), null, [],
+    { ...valid, editableSections: { ...valid.editableSections, basic: "true" } },
+    { ...valid, initial: { ...valid.initial, updated_at: null } },
+    { ...valid, initial: { ...valid.initial, custom_questions: [{ ...valid.initial.custom_questions[0], type: "unknown" }] } },
+  ]) {
+    assert.deepEqual(await readManageEventEdit("event-1", async () => json(200, invalid)),
+      { status: "unavailable" });
+  }
+  for (const [status, expected] of [
+    [401, "anonymous"], [403, "forbidden"], [404, "notFound"],
+    [501, "unsupported"], [503, "unavailable"],
+  ]) {
+    assert.deepEqual(await readManageEventEdit("event-1", async () => json(status, valid)),
+      { status: expected });
+    assert.deepEqual(await readManageEventEdit("event-1", async () => new Response("{", { status })),
+      { status: expected });
+  }
+  assert.deepEqual(await readManageEventEdit("event-1", async () => json(403, {
+    redirect: "/entry", reason: "terms_required",
+  })), { status: "forbidden", redirect: "/entry", reason: "terms_required" });
+  assert.deepEqual(await readManageEventEdit("event-1", async () => json(403, {
+    redirect: "https://other.example/private",
+  })), { status: "forbidden" });
+  assert.deepEqual(await readManageEventEdit("event-1", async () => new Response("{", { status: 200 })),
+    { status: "unavailable" });
+  assert.deepEqual(await readManageEventEdit("event-1", async () => { throw new Error("network"); }),
+    { status: "unavailable" });
+});
+
+test("MIG-0721 U02a: abort retires a delayed successful edit response", async () => {
+  const controller = new AbortController();
+  let resolveResponse;
+  let observedSignal;
+  const pending = readManageEventEdit("event-1", (_path, init) => {
+    observedSignal = init.signal;
+    return new Promise(resolve => { resolveResponse = resolve; });
+  }, controller.signal);
+  assert.equal(observedSignal, controller.signal);
+  controller.abort();
+  resolveResponse(json(200, editFixture()));
+  assert.deepEqual(await pending, { status: "unavailable" });
 });
