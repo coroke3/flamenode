@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { ServerCoreDb } from "../db.ts";
 import type { QueueWakeHostLoader } from "../ports.ts";
-import { asBatchRunnable } from "../audit/mutate.ts";
+import { asBatchRunnable, assertChanges } from "../audit/mutate.ts";
 import { staticRebuildQueue } from "@flamenode/db/schema";
 import { auditAction } from "../audit/helpers.ts";
 import { generateId } from "../id.ts";
@@ -331,7 +331,10 @@ export async function enqueueStaticRebuildMany(
     if (batch.statements.length === 0) return;
 
     await db.batch(
-      batch.statements
+      // The direct bulk consumer, unlike mutateWithAudit, does not execute
+      // expectedChanges. Assert the final singleton mark in the same batch,
+      // so a missing id=1 rolls back queue writes before any wake.
+      [...batch.statements, db.run(assertChanges(1))]
         .map((statement) => asBatchRunnable(db, statement)) as [
         BatchItem<"sqlite">,
         ...BatchItem<"sqlite">[],

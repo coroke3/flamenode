@@ -2137,6 +2137,12 @@
             "params": [
               1760000000000
             ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
           }
         ]
       },

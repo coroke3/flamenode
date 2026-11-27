@@ -306,14 +306,14 @@ test("SEC-782: bulk D1 exception and oversized plan are fail-soft with a throwin
     async batch() { batchCalls++; throw poisoned.error; },
   };
   await enqueueStaticRebuildMany(db, [item], wake.options, wake.loadHost);
-  assert.equal(planned, 2, "one queue UPSERT and one build mark");
+  assert.equal(planned, 3, "one queue UPSERT, one build mark and its assertion");
   assert.equal(batchCalls, 1);
 
   const oversized = Array.from({ length: MAX_STATIC_REBUILD_BATCH_TARGETS + 1 }, (_, n) => ({
     ...item, targetId: `too-many-${n}`,
   }));
   await enqueueStaticRebuildMany(db, oversized, wake.options, wake.loadHost);
-  assert.equal(planned, 2, "overflow must fail before any additional statement");
+  assert.equal(planned, 3, "overflow must fail before any additional statement");
   assert.equal(batchCalls, 1);
   assert.equal(poisoned.readCount(), 0);
   assert.deepEqual(warnings, [
@@ -338,12 +338,69 @@ test("SEC-782: successful single and bulk enqueue preserve wake dedupe and atomi
   try {
     await enqueueStaticRebuildMany(w.db, [item], wake.options, wake.loadHost);
     assert.equal(w.stats.batches, 1);
-    assert.equal(w.stats.statements.length, 2);
+    assert.equal(w.stats.statements.length, 3);
+    assert.match(w.stats.statements[2].sql, /WHEN changes\(\) = \? THEN 1/);
+    assert.deepEqual(w.stats.statements[2].params, [1]);
     assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
     assert.ok(w.sqlite.prepare("SELECT requested_at FROM public_build_state").get().requested_at > 0);
     assert.equal(wake.sent.length, 1);
     assert.equal(wake.sent[0].kind, "static_rebuild_available");
     assert.deepEqual([...wake.sentKinds], ["static_rebuild_available"]);
+    assert.deepEqual(warnings, []);
+  } finally { w.sqlite.close(); }
+});
+
+test("MIG-0516: direct bulk enqueue with missing singleton rolls back queue updates and inserts before wake", async (t) => {
+  const w = world();
+  const warnings = recordWarnings(t);
+  const wake = wakeFixture();
+  try {
+    await batchAt(w, [item]);
+    const before = w.sqlite.prepare("SELECT * FROM static_rebuild_queue ORDER BY id").all();
+    w.sqlite.exec("DELETE FROM public_build_state WHERE id = 1");
+    const start = w.stats.statements.length;
+    const batchStart = w.stats.batches;
+
+    await enqueueStaticRebuildMany(w.db, [], wake.options, wake.loadHost);
+    assert.equal(w.stats.batches, batchStart);
+    assert.equal(w.stats.statements.length, start);
+    assert.deepEqual(warnings, []);
+
+    await enqueueStaticRebuildMany(w.db, [
+      { ...item, reason: "changed", priority: "high" },
+      { ...item, targetId: "v2" },
+    ], wake.options, wake.loadHost);
+    assert.equal(w.stats.batches, batchStart + 1);
+    assert.equal(w.stats.statements.length, start + 3);
+    assert.match(w.stats.statements[start + 1].sql, /UPDATE public_build_state/);
+    assert.match(w.stats.statements[start + 2].sql, /WHEN changes\(\) = \? THEN 1/);
+    assert.deepEqual(w.stats.statements[start + 2].params, [1]);
+    assert.deepEqual(w.sqlite.prepare("SELECT * FROM static_rebuild_queue ORDER BY id").all(), before);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM public_build_state").get().n, 0);
+    assert.deepEqual(warnings, [["[static-rebuild]", "bulk_enqueue_failed"]]);
+    assert.equal(wake.loadCount(), 0);
+    assert.equal(wake.sent.length, 0);
+    assert.equal(wake.sentKinds.size, 0);
+  } finally { w.sqlite.close(); }
+});
+
+test("MIG-0516: full direct bulk fanout uses five statements and one wake", async (t) => {
+  const w = world();
+  const warnings = recordWarnings(t);
+  const wake = wakeFixture();
+  try {
+    const items = Array.from({ length: MAX_STATIC_REBUILD_BATCH_TARGETS }, (_, n) => ({
+      ...item, targetId: `v${n}`,
+    }));
+    await enqueueStaticRebuildMany(w.db, items, wake.options, wake.loadHost);
+    assert.equal(w.stats.batches, 1);
+    assert.equal(w.stats.statements.length, 5);
+    assert.match(w.stats.statements[3].sql, /UPDATE public_build_state/);
+    assert.match(w.stats.statements[4].sql, /WHEN changes\(\) = \? THEN 1/);
+    assert.deepEqual(w.stats.statements[4].params, [1]);
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, MAX_STATIC_REBUILD_BATCH_TARGETS);
+    assert.ok(w.sqlite.prepare("SELECT requested_at FROM public_build_state").get().requested_at > 0);
+    assert.equal(wake.sent.length, 1);
     assert.deepEqual(warnings, []);
   } finally { w.sqlite.close(); }
 });
