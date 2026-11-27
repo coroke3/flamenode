@@ -500,6 +500,56 @@ test("activeX.requireApprovedActiveXId: pending -> active_x_not_approved; approv
   assert.equal((await none.json()).reason, "active_x_required");
 });
 
+test("shared admission bounds active X approval status without changing guard decisions", async () => {
+  const { loadTosState } = await import("../src/middleware/writeOrigin.ts");
+  const { evaluateActiveXWriteAccess } = await import("@flamenode/domain/admin");
+  const cases = [
+    null, "", "approved", "rejected", "pending", "approved ", "REJECTED",
+    "approved\u0000" + "x".repeat(100000),
+    "rejected\u0000" + "x".repeat(100000),
+    "pending\u0000" + "x".repeat(100000),
+    "界".repeat(40000), Buffer.from("approved"),
+    { rawText: Buffer.alloc(9, 0xff) },
+  ];
+  for (const requireApprovedActiveXId of [false, true]) {
+    const activeX = { requireActiveXId: true, requireApprovedActiveXId };
+    const g = guardApp({
+      user: U("admin", "x1"),
+      activeX,
+      seed: (s) => s.exec("INSERT INTO x_users (id, approval_status) VALUES ('x1', 'pending'); INSERT INTO x_user_account_links VALUES ('u-1', 'x1')"),
+    });
+    const setStatus = g.sqlite.prepare("UPDATE x_users SET approval_status = ? WHERE id = 'x1'");
+    const setRawStatus = g.sqlite.prepare("UPDATE x_users SET approval_status = CAST(? AS TEXT) WHERE id = 'x1'");
+    const readStatus = g.sqlite.prepare("SELECT approval_status FROM x_users WHERE id = 'x1'");
+    const isApproved = g.sqlite.prepare("SELECT 1 AS ok FROM x_users WHERE id = 'x1' AND approval_status = 'approved'");
+    for (const value of cases) {
+      if (value?.rawText) setRawStatus.run(value.rawText);
+      else setStatus.run(value);
+      const approvalStatus = readStatus.get().approval_status;
+      const approvedXIds = requireApprovedActiveXId && isApproved.get() ? ["x1"] : [];
+      const expected = evaluateActiveXWriteAccess({ ...activeX, activeXId: "x1", approvalStatus, approvedXIds });
+      for (const joined of [false, true]) {
+        const before = g.stats.reads;
+        const state = await loadTosState(g.db, "u-1", activeX, joined);
+        assert.ok(state?.active_x);
+        const receipt = state.active_x.approvalStatus;
+        assert.ok(receipt === null || Buffer.byteLength(receipt) <= 9);
+        assert.ok(receipt === null || ["approved", "rejected", "approved\u0000", "rejected\u0000", "!"].includes(receipt));
+        assert.deepEqual(state.active_x.approvedXIds, approvedXIds);
+        assert.equal(evaluateActiveXWriteAccess({ ...activeX, ...state.active_x }), expected);
+        assert.equal(g.stats.reads - before, 1);
+      }
+      const before = g.stats.reads;
+      const response = await g.post();
+      assert.equal(response.status, expected ? 403 : 200);
+      const body = await response.json();
+      if (expected) assert.equal(body.reason, expected);
+      else assert.deepEqual(body.activeX, { activeXId: "x1", approvedXIds });
+      assert.equal(g.stats.reads - before, 1);
+    }
+  }
+});
+
 test("activeX check runs AFTER CostGuard (CURRENT order) and adds no D1 read", async () => {
   const blocked = guardApp({ user: U("admin"), activeX: { requireApprovedActiveXId: true }, settings: "maintenance" });
   const res = await blocked.post();

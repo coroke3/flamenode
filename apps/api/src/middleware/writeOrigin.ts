@@ -269,10 +269,26 @@ export async function loadTosState(
   // requireApprovedActiveXId, the approved linked X IDs as a JSON array
   // (CURRENT getApprovedXIds = x_user_account_links INNER JOIN x_users
   // WHERE approval_status = 'approved', distinct).
+  // The guard distinguishes only NULL, approved, rejected, and other values.
+  // Emit only fixed ASCII categories (no arbitrary or malformed TEXT bytes).
+  // Bound the approval receipt to 9 UTF-8 bytes. Keep a canonical status plus
+  // a NUL byte when present so drivers that truncate TEXT at NUL and drivers
+  // that preserve it both retain their existing decision semantics.
   const activeXColumns = !needActive
     ? ""
     : `,
-         x."approval_status" AS x_approval_status${
+         CASE
+           WHEN x."approval_status" IS NULL THEN NULL
+           WHEN typeof(x."approval_status") = 'text' THEN
+             CASE substr(CAST(x."approval_status" AS BLOB), 1, 9)
+               WHEN CAST('approved' AS BLOB) THEN 'approved'
+               WHEN CAST('rejected' AS BLOB) THEN 'rejected'
+               WHEN CAST('approved' || char(0) AS BLOB) THEN 'approved' || char(0)
+               WHEN CAST('rejected' || char(0) AS BLOB) THEN 'rejected' || char(0)
+               ELSE '!'
+             END
+           ELSE '!'
+         END AS x_approval_status${
            activeX?.requireApprovedActiveXId
              ? `,
          (WITH approved AS NOT MATERIALIZED (
