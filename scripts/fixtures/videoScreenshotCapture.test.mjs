@@ -55,12 +55,19 @@ test("MIG-0507 U12 captures member-present 390/1440 evidence without claiming mo
 
     let missingMembers = false;
     let redirect = false;
+    let loadingPlayer = false;
     const server = createServer((req, res) => {
-      if (req.url !== "/member-video/") { res.writeHead(404); res.end(); return; }
+      if (!["/member-video/", "/no-youtube/"].includes(req.url)) { res.writeHead(404); res.end(); return; }
       if (redirect) {
         res.writeHead(302, { Location: "https://example.com/" }); res.end(); return;
       }
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      if (req.url === "/no-youtube/") {
+        res.end('<html><main><p class="vd-player-empty">' +
+          (loadingPlayer ? "プレイヤーを読み込んでいます。" : "YouTube動画は未登録ですが、作品情報を公開しています。") +
+          '</p></main></html>');
+        return;
+      }
       res.end(missingMembers ? "<html><body>No members</body></html>" :
         '<!doctype html><html><main><div class="vd-mrow">Member</div></main></html>');
     });
@@ -84,6 +91,8 @@ test("MIG-0507 U12 captures member-present 390/1440 evidence without claiming mo
 
       const evidence = await captureVideoEvidence(origin, "member-video", output, cli);
       assert.equal(evidence.memberRows, 1);
+      assert.equal(evidence.variant, "member-present");
+      assert.ok(evidence.files.every(x => x.mockComparisonScope === "MEMBER_PRESENT"));
       assert.equal(evidence.screenshotCount, 2);
       assert.equal(evidence.visualComparison, "NOT_REVIEWED");
       assert.equal(evidence.permissionParity, "NOT_REVIEWED");
@@ -100,10 +109,37 @@ test("MIG-0507 U12 captures member-present 390/1440 evidence without claiming mo
         /empty/);
       for (const name of fs.readdirSync(output)) fs.unlinkSync(path.join(output, name));
 
+      // No-YouTube uses a separate output directory/capture, with explicit
+      // fallback proof and layout-only mock scope. Default member evidence
+      // must continue to reject pages without SSR member rows.
+      await assert.rejects(captureVideoEvidence(origin, "no-youtube", output, cli), /no rendered member rows/);
+      await assert.rejects(captureVideoEvidence(origin, "member-video", output, cli, "no-youtube"), /no rendered no-YouTube fallback/);
+      await assert.rejects(captureVideoEvidence(origin, "no-youtube", output, cli, "unknown"), /unknown video evidence variant/);
+      loadingPlayer = true;
+      await assert.rejects(captureVideoEvidence(origin, "no-youtube", output, cli, "no-youtube"), /no rendered no-YouTube fallback/);
+      loadingPlayer = false;
+      redirect = true;
+      await assert.rejects(captureVideoEvidence(origin, "no-youtube", output, cli, "no-youtube"), /without redirect/);
+      redirect = false;
+      assert.deepEqual(fs.readdirSync(output), [], "preflight failures must not record evidence");
+      const fallback = await captureVideoEvidence(origin, "no-youtube", output, cli, "no-youtube");
+      assert.equal(fallback.variant, "no-youtube");
+      assert.equal(fallback.videoSlug, "no-youtube");
+      assert.equal(fallback.memberRows, 0);
+      assert.equal(fallback.screenshotCount, 2);
+      assert.equal(fallback.visualComparison, "NOT_REVIEWED");
+      assert.equal(fallback.permissionParity, "NOT_REVIEWED");
+      assert.deepEqual(fallback.files.map(x => x.imageSize), ["390x844", "1440x900"]);
+      assert.ok(fallback.files.every(x => x.mockComparisonScope === "LAYOUT_ONLY"));
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(output, "evidence.json"), "utf8")), fallback);
+      for (const name of fs.readdirSync(output)) fs.unlinkSync(path.join(output, name));
+
       fs.writeFileSync(cli, makeStub("wrongsize"));
       await assert.rejects(captureVideoEvidence(origin, "member-video", output, cli),
         /PNG dimensions mismatch/);
       assert.deepEqual(fs.readdirSync(output), [], "partial evidence must be removed");
+      await assert.rejects(captureVideoEvidence(origin, "no-youtube", output, cli, "no-youtube"), /PNG dimensions mismatch/);
+      assert.deepEqual(fs.readdirSync(output), [], "partial no-YouTube evidence must be removed");
       fs.writeFileSync(cli, makeStub("badcrc"));
       await assert.rejects(captureVideoEvidence(origin, "member-video", output, cli),
         /invalid PNG: chunk CRC mismatch/);

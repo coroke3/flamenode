@@ -1,5 +1,5 @@
 /**
- * MIG-0507 U12: capture a member-present video detail page from a local Astro preview.
+ * MIG-0507 U12: capture a member-present or no-YouTube video detail page from a local Astro preview.
  * Screenshot collection is evidence for a later human mock comparison, NOT visual approval.
  * Requires Playwright CLI with Chromium installed; never contacts production.
  */
@@ -73,7 +73,7 @@ function validatedPngDimensions(image) {
 }
 
 const MOCK_REFERENCE = "docs/migration/mock/screenshots/VideoDetail";
-const HELP = "Usage: node scripts/fixtures/videoScreenshotCapture.mjs <http-loopback-origin> <member-video-slug> <existing-empty-absolute-output-dir>\n";
+const HELP = "Usage: node scripts/fixtures/videoScreenshotCapture.mjs <http-loopback-origin> <video-slug> <existing-empty-absolute-output-dir> [--no-youtube]\n";
 
 function localOrigin(raw) {
   let url;
@@ -95,7 +95,7 @@ function emptyOutputDirectory(dir) {
   return dir;
 }
 
-async function memberPresentHtml(url) {
+async function checkVideoHtml(url, variant) {
   // Never follow a redirect out of the local preview host.
   const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(8000) });
   if (response.status !== 200 || !response.headers.get("content-type")?.includes("text/html")) {
@@ -104,7 +104,14 @@ async function memberPresentHtml(url) {
   }
   const html = await response.text();
   const rows = [...html.matchAll(/class=["'][^"']*\bvd-mrow\b[^"']*["']/g)].length;
-  if (rows < 1) throw new Error("no rendered member rows: U12 requires a member-present Astro fixture");
+  if (variant === "member-present") {
+    if (rows < 1) throw new Error("no rendered member rows: U12 requires a member-present Astro fixture");
+  } else {
+    // Match the actual no-YouTube fallback, not the temporary loading text or
+    // an arbitrary 200 page. This is SSR preflight, not browser approval.
+    const emptyPlayer = /<p\b[^>]*\bclass=["'][^"']*\bvd-player-empty\b[^"']*["'][^>]*>\s*YouTube動画は未登録ですが、作品情報を公開しています。\s*<\/p>/u;
+    if (!emptyPlayer.test(html)) throw new Error("no rendered no-YouTube fallback: U12 requires a no-YouTube Astro fixture");
+  }
   return rows;
 }
 
@@ -127,14 +134,17 @@ function screenshot(cli, url, destination, viewport) {
   };
 }
 
-export async function captureVideoEvidence(origin, slug, dir, cli = "playwright") {
+export async function captureVideoEvidence(origin, slug, dir, cli = "playwright", variant = "member-present") {
+  if (variant !== "member-present" && variant !== "no-youtube") {
+    throw new Error("unknown video evidence variant");
+  }
   const base = localOrigin(origin);
   if (typeof slug !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(slug)) {
     throw new Error("video slug must be one safe route segment of 1–64 characters");
   }
   const output = emptyOutputDirectory(dir);
   const url = base + "/" + slug + "/";
-  const memberRows = await memberPresentHtml(url);
+  const memberRows = await checkVideoHtml(url, variant);
   const files = [];
   try {
     for (const viewport of VIEWPORTS) {
@@ -143,11 +153,14 @@ export async function captureVideoEvidence(origin, slug, dir, cli = "playwright"
       files.push({
         file, viewport: viewport.width + "x" + viewport.height, ...result,
         mockReference: MOCK_REFERENCE + "." + viewport.name + ".jpg",
+        // Only the member-present mock is registered; no-YouTube uses it as
+        // a general layout reference, never as a matching state screenshot.
+        mockComparisonScope: variant === "no-youtube" ? "LAYOUT_ONLY" : "MEMBER_PRESENT",
       });
     }
     const evidence = {
       task: "MIG-0507", unit: "U12", source: "local Astro SSR + Playwright Chromium",
-      videoSlug: slug, memberRows, screenshotCount: files.length,
+      videoSlug: slug, variant, memberRows, screenshotCount: files.length,
       visualComparison: "NOT_REVIEWED", permissionParity: "NOT_REVIEWED",
       productionSample: false, files,
     };
@@ -168,9 +181,9 @@ export async function captureVideoEvidence(origin, slug, dir, cli = "playwright"
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.length === 3 && ["--help", "-h"].includes(process.argv[2])) {
     process.stdout.write(HELP);
-  } else if (process.argv.length === 5) {
+  } else if (process.argv.length === 5 || (process.argv.length === 6 && process.argv[5] === "--no-youtube")) {
     await captureVideoEvidence(process.argv[2], process.argv[3], process.argv[4],
-      process.env.PLAYWRIGHT_CLI || "playwright");
+      process.env.PLAYWRIGHT_CLI || "playwright", process.argv[5] === "--no-youtube" ? "no-youtube" : "member-present");
   } else {
     process.stderr.write(HELP);
     process.exitCode = 2;
