@@ -340,7 +340,18 @@ adminOpsRoutes.get("/health/checks/:checkId", dbMiddleware, async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
   const result = await runHealthCheckById(c.get("db"), id);
-  return c.json({ status: "all", results: result ? [result] : [], error: null } satisfies AdminHealthResponse);
+  // Keep the S2 response bound even for oversized persisted diagnostic samples.
+  // Reject, rather than truncate actionable identifiers or misstate the result.
+  // UTF-16 units are a lower bound for escaped JSON UTF-8 bytes; reject grossly
+  // oversized input before serializing, then account for escaping and the full envelope.
+  if (result && result.samples.reduce((sum, sample) => sum + sample.length, 0) > MAX_OPS_HTTP_BYTES) {
+    return c.json({ error: "unavailable" }, 503);
+  }
+  const body: AdminHealthResponse = { status: "all", results: result ? [result] : [], error: null };
+  if (utf8Size(body) > MAX_OPS_HTTP_BYTES) {
+    return c.json({ error: "unavailable" }, 503);
+  }
+  return c.json(body);
 });
 
 // ---- /ops/integrity (health/integrity/page.tsx; src/lib/admin/integrityChecks.ts) ----

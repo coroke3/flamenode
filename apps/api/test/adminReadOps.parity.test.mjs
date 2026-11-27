@@ -1452,6 +1452,56 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(failed.text, /secret-internal/);
   });
 
+  test("MIG-0626 U06: retention diagnosis bounds the entire UTF-8 JSON response without changing samples or count", async () => {
+    const path = "/api/admin-read/ops/health/checks/audit_logs_retention_candidates";
+    const prefix = "retention-byte-bound-";
+    const ids = Array.from({ length: 5 }, (_, i) => prefix + i);
+    const encoder = new TextEncoder();
+    const size = (receipt) => encoder.encode(receipt.text).length;
+    const limit = 64 * 1024;
+    const update = sqlite.prepare("UPDATE audit_logs SET table_name = ? WHERE id = ?");
+    try {
+      for (let i = 0; i < ids.length; i++) {
+        ins("audit_logs", {
+          id: ids[i], table_name: "seed", target_id: "test", operation: "UPDATE",
+          actor_user_id: "u_carol", created_at: i + 1, retention_class: "normal",
+        });
+      }
+      const baseline = await call(path, ADMIN);
+      assert.equal(baseline.status, 200);
+      assert.deepEqual(baseline.body.results[0].samples, ids.map((id) => id + " seed"));
+      const exact = "a".repeat(limit - size(baseline) + "seed".length);
+      for (const [label, values, accepted] of [
+        ["exact limit", [exact], true],
+        ["one byte over", [exact + "a"], false],
+        ["oversized input", ["private-sample-" + "a".repeat(70_000)], false],
+        ["multibyte", ["private-sample-" + "あ".repeat(22_000)], false],
+        ["escaped controls", ["private-sample-" + "\u0001".repeat(11_000)], false],
+        ["aggregate five samples", ids.map(() => "private-sample-" + "あ".repeat(4_500)), false],
+        ["valid multibyte", ["あ".repeat(10_000)], true],
+      ]) {
+        const names = ids.map((_, i) => values[i] ?? "seed");
+        for (let i = 0; i < ids.length; i++) update.run(names[i], ids[i]);
+        const receipt = await call(path, ADMIN);
+        assert.equal(receipt.status, accepted ? 200 : 503, label);
+        assert.ok(size(receipt) <= limit, label);
+        assert.equal(receipt.headers.get("cache-control"), "private, no-store", label);
+        assert.equal(receipt.stats.statements, 3, label + ": session + settings + count/sample");
+        assert.equal(receipt.stats.writes, 0, label);
+        if (accepted) {
+          assert.equal(receipt.body.results[0].count, baseline.body.results[0].count, label);
+          assert.deepEqual(receipt.body.results[0].samples, ids.map((id, i) => id + " " + names[i]), label);
+          if (label === "exact limit") assert.equal(size(receipt), limit);
+        } else {
+          assert.deepEqual(receipt.body, { error: "unavailable" }, label);
+          assert.doesNotMatch(receipt.text, /private-sample-|retention-byte-bound-/);
+        }
+      }
+    } finally {
+      for (const id of ids) sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run(id);
+    }
+  });
+
   test("T02 integrity: idle catalog and run=1 are read-only; per-check results match full CURRENT helper", async () => {
     const { runIntegrityChecks, INTEGRITY_CHECK_IDS } = await import(
       "@flamenode/server-core/admin/integrityChecks"
