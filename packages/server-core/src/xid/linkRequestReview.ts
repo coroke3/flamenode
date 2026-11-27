@@ -315,3 +315,34 @@ export function planXIdSiblingCancellation(input: {
     } satisfies AtomicAuditMutationInput["audits"][number],
   };
 }
+
+/**
+ * SA-090 final request approval: share the strict full-row audit snapshot.
+ * The host still owns the literal approved/pending-slot update, decision
+ * metadata, pending-status CAS, expected-one assertion and batch ordering.
+ */
+export function buildXIdRequestApprovalAudit(input: {
+  request: typeof xIdentityRequests.$inferSelect;
+  update: ReturnType<typeof buildXIdentityDecisionFields> & {
+    status: "approved";
+    slot_bind_status: "pending";
+    slot_bind_updated_at: number;
+    updated_at: number;
+  };
+  actorUserId: string;
+  actorXUserId: string | null;
+}): AtomicAuditMutationInput["audits"][number] {
+  const { request, update, actorUserId, actorXUserId } = input;
+  return {
+    table_name: "x_identity_requests",
+    target_id: request.id,
+    operation: "UPDATE",
+    before: { ...request },
+    after: { ...request, ...update },
+    actor_user_id: actorUserId,
+    actor_x_user_id: actorXUserId,
+    reason: "X ID申請を承認",
+    context: "x-identity-request",
+    retention_class: "long_audit",
+  };
+}

@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation } from "@flamenode/server-core/xid/linkRequestReview";
+import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -945,24 +945,23 @@ async function approveXIdLinkRequestOnce(
     }
   }
 
-  const afterRequest = {
-    ...request,
+  const approvalUpdate = {
     status: "approved" as const,
     slot_bind_status: "pending" as const,
     slot_bind_updated_at: now,
     updated_at: now,
     ...decisionFields,
   };
+  const approvalAudit = buildXIdRequestApprovalAudit({
+    request,
+    update: approvalUpdate,
+    actorUserId: operatorAuthUserId,
+    actorXUserId: operatorActorXUserId,
+  });
   statements.push(
     db
       .update(xIdentityRequests)
-      .set({
-        status: "approved",
-        slot_bind_status: "pending",
-        slot_bind_updated_at: now,
-        updated_at: now,
-        ...decisionFields,
-      })
+      .set(approvalUpdate)
       .where(
         and(
           eq(xIdentityRequests.id, request.id),
@@ -971,18 +970,7 @@ async function approveXIdLinkRequestOnce(
       ),
   );
   expected.push(1);
-  audits.push({
-    table_name: "x_identity_requests",
-    target_id: request.id,
-    operation: "UPDATE",
-    before: { ...request },
-    after: afterRequest,
-    actor_user_id: operatorAuthUserId,
-    actor_x_user_id: operatorActorXUserId,
-    reason: "X ID申請を承認",
-    context: "x-identity-request",
-    retention_class: "long_audit",
-  });
+  audits.push(approvalAudit);
 
   const {
     buildXIdApprovedNotification,

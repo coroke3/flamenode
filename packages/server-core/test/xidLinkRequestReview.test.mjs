@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, getTableColumns } from "drizzle-orm";
-import { planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation } from "../src/xid/linkRequestReview.ts";
+import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation } from "../src/xid/linkRequestReview.ts";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { assertChanges } from "../src/audit/mutate.ts";
 import { users, xIdentityRequests, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
@@ -642,5 +642,74 @@ test("SA-090 sibling cancellation rolls back when the final request pending CAS 
         assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 1);
       }
     } finally { sqlite.close(); }
+  }
+});
+
+test("SA-090 final approval audit preserves the full CURRENT row and committed slot-bind decision", () => {
+  const reason = "X ID申請を承認";
+  const update = {
+    status: "approved", slot_bind_status: "pending", slot_bind_updated_at: 20,
+    updated_at: 20, decision_reason: reason, decided_by_auth_user_id: "reviewer",
+    decided_at: 20,
+  };
+  const check = new SQLiteSyncDialect().sqlToQuery(assertChanges(1));
+  for (const request_type of ["new_link", "existing_link", "alias"]) {
+    for (const actorXUserId of [null, "reviewer-x"]) {
+      for (const attempts of [0, 3]) {
+        const row = Object.freeze({
+          ...request, request_type,
+          source_x_user_id: null,
+          target_x_user_id: request_type === "alias" ? "target" : null,
+          parent_request_id: null, restore_snapshot_json: null, revert_deadline_at: null,
+          requested_at: 1,
+          decision_reason: attempts ? "legacy" : null,
+          decided_by_auth_user_id: attempts ? "previous" : null,
+          decided_at: attempts ? 8 : null,
+          slot_bind_status: attempts ? "pending" : "complete",
+          slot_bind_attempt_count: attempts, slot_bind_updated_at: attempts ? 9 : null,
+        });
+        assert.deepEqual(Object.keys(row).sort(), Object.keys(getTableColumns(xIdentityRequests)).sort());
+        const audit = buildXIdRequestApprovalAudit({
+          request: row, update, actorUserId: "reviewer", actorXUserId,
+        });
+        assert.deepEqual(audit, {
+          table_name: "x_identity_requests", target_id: row.id, operation: "UPDATE",
+          before: { ...row }, after: { ...row, ...update },
+          actor_user_id: "reviewer", actor_x_user_id: actorXUserId,
+          reason, context: "x-identity-request", retention_class: "long_audit",
+        });
+        assert.notStrictEqual(audit.before, row);
+        assert.notStrictEqual(audit.after, row);
+        const query = db.update(xIdentityRequests).set(update)
+          .where(and(eq(xIdentityRequests.id, row.id), eq(xIdentityRequests.status, "pending")))
+          .toSQL();
+        const sqlite = new DatabaseSync(":memory:");
+        try {
+          sqlite.exec(`CREATE TABLE x_identity_requests (
+            id TEXT PRIMARY KEY, request_type TEXT NOT NULL, requested_by_auth_user_id TEXT NOT NULL,
+            requested_x_id TEXT, source_x_user_id TEXT, target_x_user_id TEXT,
+            parent_request_id TEXT, restore_snapshot_json TEXT, revert_deadline_at INTEGER,
+            status TEXT NOT NULL, decision_reason TEXT, decided_by_auth_user_id TEXT, decided_at INTEGER,
+            slot_bind_status TEXT NOT NULL, slot_bind_attempt_count INTEGER NOT NULL, slot_bind_updated_at INTEGER,
+            requested_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+          );`);
+          const keys = Object.keys(row);
+          const insert = sqlite.prepare(`INSERT INTO x_identity_requests (${keys.join(",")}) VALUES (${keys.map(() => "?").join(",")})`);
+          insert.run(...Object.values(row));
+          insert.run(...Object.values({ ...row, id: "unrelated" }));
+          sqlite.exec("BEGIN");
+          assert.equal(Number(sqlite.prepare(query.sql).run(...query.params).changes), 1);
+          assert.doesNotThrow(() => sqlite.prepare(check.sql).get(...check.params));
+          sqlite.exec("COMMIT");
+          assert.deepEqual({ ...sqlite.prepare("SELECT * FROM x_identity_requests WHERE id=?").get(row.id) }, audit.after);
+          assert.deepEqual({ ...sqlite.prepare("SELECT * FROM x_identity_requests WHERE id=?").get("unrelated") }, { ...row, id: "unrelated" });
+          sqlite.exec("BEGIN");
+          assert.equal(Number(sqlite.prepare(query.sql).run(...query.params).changes), 0);
+          assert.throws(() => sqlite.prepare(check.sql).get(...check.params));
+          sqlite.exec("ROLLBACK");
+          assert.deepEqual({ ...sqlite.prepare("SELECT * FROM x_identity_requests WHERE id=?").get(row.id) }, audit.after);
+        } finally { sqlite.close(); }
+      }
+    }
   }
 });
