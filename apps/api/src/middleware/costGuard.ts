@@ -72,6 +72,19 @@ export const COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL = `CASE
   ELSE s."cost_guard_exception_until"
 END`;
 
+// Audit settings in admission receipts are only a preload. The audit logger
+// accepts a complete snapshot of nonnegative safe integers, otherwise its
+// existing planner/runtime charge and execute the authoritative settings read.
+// SQLite's INTEGER affinity can hold huge TEXT/BLOB values. Such values
+// cannot be valid preloads; send NULL (still invalid), never a default or a
+// numeric cast. Preserve every numeric value and the missing-row distinction.
+// This bounds these five receipt fields, not the authoritative fallback read.
+export function compactAuditSettingSql(column: keyof AuditSettingsRow): string {
+  const col = `s."${column}"`;
+  return `CASE WHEN typeof(${col}) IN ('integer', 'real', 'null')
+    THEN ${col} ELSE NULL END`;
+}
+
 export type CostGuardRow = AuditSettingsRow & {
   operation_mode: string | null;
   disabled_features_json: string | null;
@@ -102,8 +115,11 @@ export async function loadCostGuardSettingsRow(
               ${compactWriteFeatureListSql('s."disabled_features_json"')} AS disabled_features_json,
               ${COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL} AS cost_guard_exception_until,
               ${compactWriteFeatureListSql('s."cost_guard_exception_features_json"')} AS cost_guard_exception_features_json,
-              audit_normal_retention_days, audit_restorable_retention_days,
-              audit_long_retention_days, audit_max_payload_bytes, audit_compact_after_days
+              ${compactAuditSettingSql("audit_normal_retention_days")} AS audit_normal_retention_days,
+              ${compactAuditSettingSql("audit_restorable_retention_days")} AS audit_restorable_retention_days,
+              ${compactAuditSettingSql("audit_long_retention_days")} AS audit_long_retention_days,
+              ${compactAuditSettingSql("audit_max_payload_bytes")} AS audit_max_payload_bytes,
+              ${compactAuditSettingSql("audit_compact_after_days")} AS audit_compact_after_days
        FROM system_settings s WHERE s."id" = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
     )
     .bind("default")

@@ -362,6 +362,69 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
   }
 });
 
+test("MIG-0689: invalid audit settings receipts never earn a preload read credit", async () => {
+  const { isValidPreloadedAuditSettings } = await import("@flamenode/server-core/audit/logger");
+  const { mapAuditSettings } = await import("@flamenode/server-core/audit/settings");
+  const { loadCostGuardSettingsRow, evaluateCostGuardSnapshot } = await import("../src/middleware/costGuard.ts");
+  const { loadTosState } = await import("../src/middleware/writeOrigin.ts");
+  const feature = "admin_announcement_broadcast";
+  const columns = [
+    "audit_normal_retention_days", "audit_restorable_retention_days",
+    "audit_long_retention_days", "audit_max_payload_bytes", "audit_compact_after_days",
+  ];
+  const wideText = "0x1e" + " ".repeat(180_000);
+  const wideBlob = Buffer.alloc(180_000, 1);
+  for (const column of columns) {
+    for (const raw of [wideText, wideBlob]) {
+      const app = setup({ cookieSession: true });
+      app.sqlite.prepare(`UPDATE system_settings SET "${column}" = ? WHERE id = 'default'`).run(raw);
+      const authoritative = app.sqlite.prepare("SELECT * FROM system_settings WHERE id='default'").get();
+      assert.equal(isValidPreloadedAuditSettings(mapAuditSettings(authoritative)), false);
+      const state = await loadTosState(app.db, ADMIN.id, undefined, true);
+      const standalone = await loadCostGuardSettingsRow(app.db);
+      assert.ok(state?.cost_guard_settings);
+      assert.ok(standalone);
+      assert.deepEqual({ ...standalone }, state.cost_guard_settings);
+      assert.equal(standalone[column], null, column + " invalid marker, not a numeric/default value");
+      assert.ok(Buffer.byteLength(JSON.stringify(standalone), "utf8") < 2048);
+      const cost = evaluateCostGuardSnapshot({ row: standalone }, feature);
+      assert.equal(cost.denied, null);
+      assert.equal(isValidPreloadedAuditSettings(cost.auditSettings), false);
+      assert.equal(app.stats.reads, 2);
+      // An earlier denial must not trigger the authoritative audit fallback.
+      app.sqlite.exec("UPDATE system_settings SET operation_mode='maintenance'");
+      const denied = await app.request("POST", "/api/admin/announcements", VALID);
+      assert.equal(denied.status, 503);
+      assert.equal((await denied.json()).reason, "maintenance_mode");
+      assert.equal(app.stats.reads, 4);
+      assert.equal(app.stats.batches, 0);
+      assert.equal(app.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+    }
+  }
+
+  // compact_after_days is not used to build an ordinary audit row. Invalid
+  // preload data must still execute the existing authoritative settings read,
+  // retain the other settings, and never be treated as a valid cached snapshot.
+  const app = setup({ cookieSession: true });
+  app.sqlite.prepare("UPDATE system_settings SET audit_normal_retention_days=45, audit_compact_after_days=?").run(wideText);
+  const first = await app.request("POST", "/api/admin/announcements", { ...VALID, title: "Invalid preload fallback" });
+  assert.equal(first.status, 200);
+  assert.equal(app.stats.reads, 3, "session + admission + authoritative audit settings");
+  assert.equal(app.stats.batches, 1);
+  const firstAudit = app.sqlite.prepare("SELECT * FROM audit_logs").get();
+  assert.equal(firstAudit.expires_at - firstAudit.created_at, 45 * 86400);
+  assert.equal(app.sqlite.prepare("SELECT audit_compact_after_days FROM system_settings").get().audit_compact_after_days, wideText);
+
+  app.sqlite.exec("UPDATE system_settings SET audit_compact_after_days=30");
+  const second = await app.request("POST", "/api/admin/announcements", { ...VALID, title: "Fresh valid preload" });
+  assert.equal(second.status, 200);
+  assert.equal(app.stats.reads, 5, "the next request uses a fresh valid preload (two reads)");
+  assert.equal(app.stats.batches, 2);
+  const rows = app.sqlite.prepare("SELECT * FROM audit_logs").all();
+  assert.equal(rows.length, 2);
+  for (const row of rows) assert.equal(row.expires_at - row.created_at, 45 * 86400);
+});
+
 // ---------------- B3: body cap ----------------
 
 test("B3: Content-Length over 64KB -> 413 without reading", async () => {

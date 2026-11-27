@@ -35,6 +35,7 @@ import {
   compactWriteFeatureListSql,
   COMPACT_COST_GUARD_MODE_SQL,
   COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL,
+  compactAuditSettingSql,
   evaluateCostGuardSnapshot,
   loadCostGuardSettingsRow,
   type CostGuardRow,
@@ -326,11 +327,11 @@ export async function loadTosState(
          ${compactWriteFeatureListSql('s."disabled_features_json"')} AS cost_guard_disabled_features_json,
          ${COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL} AS cost_guard_exception_until,
          ${compactWriteFeatureListSql('s."cost_guard_exception_features_json"')} AS cost_guard_exception_features_json,
-         s."audit_normal_retention_days" AS cost_guard_audit_normal_retention_days,
-         s."audit_restorable_retention_days" AS cost_guard_audit_restorable_retention_days,
-         s."audit_long_retention_days" AS cost_guard_audit_long_retention_days,
-         s."audit_max_payload_bytes" AS cost_guard_audit_max_payload_bytes,
-         s."audit_compact_after_days" AS cost_guard_audit_compact_after_days`
+         ${compactAuditSettingSql("audit_normal_retention_days")} AS cost_guard_audit_normal_retention_days,
+         ${compactAuditSettingSql("audit_restorable_retention_days")} AS cost_guard_audit_restorable_retention_days,
+         ${compactAuditSettingSql("audit_long_retention_days")} AS cost_guard_audit_long_retention_days,
+         ${compactAuditSettingSql("audit_max_payload_bytes")} AS cost_guard_audit_max_payload_bytes,
+         ${compactAuditSettingSql("audit_compact_after_days")} AS cost_guard_audit_compact_after_days`
     : "";
   const costGuardJoin = includeCostGuardSettings
     ? `LEFT JOIN "system_settings" s ON s."id" = 'default'`
