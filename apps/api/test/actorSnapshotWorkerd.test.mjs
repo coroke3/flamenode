@@ -69,8 +69,16 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "async function probe(db) {",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_user (id TEXT PRIMARY KEY, discord_id TEXT, name TEXT, active_x_user_id TEXT, image TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_x_users (id TEXT PRIMARY KEY, x_name TEXT NOT NULL, icon_url TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
-    "  await run(db, 'CREATE TRIGGER IF NOT EXISTS u04a_user_version AFTER UPDATE OF discord_id, name, active_x_user_id, image ON u04a_user BEGIN UPDATE u04a_user SET actor_snapshot_version = actor_snapshot_version + 1 WHERE id = NEW.id; END');",
-    "  await run(db, 'CREATE TRIGGER IF NOT EXISTS u04a_x_version AFTER UPDATE OF x_name, icon_url ON u04a_x_users BEGIN UPDATE u04a_x_users SET actor_snapshot_version = actor_snapshot_version + 1 WHERE id = NEW.id; END');",
+    "  // Test-only monotonic allocation: row incarnation must survive DELETE/reinsert, REPLACE and PK changes.",
+    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_sequence (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL CHECK (n BETWEEN 0 AND 9007199254740991))');",
+    "  await run(db, 'INSERT OR IGNORE INTO u04a_actor_sequence VALUES (1, 0)');",
+    "  for (const [table, fields] of [['u04a_user', 'id, discord_id, name, active_x_user_id, image'], ['u04a_x_users', 'id, x_name, icon_url']]) {",
+    "    for (const [kind, event] of [['insert', 'INSERT'], ['update', 'UPDATE OF ' + fields]]) {",
+    "      await run(db, 'CREATE TRIGGER IF NOT EXISTS ' + table + '_' + kind + ' AFTER ' + event + ' ON ' + table + ' BEGIN UPDATE u04a_actor_sequence SET n = n + 1 WHERE id = 1; UPDATE ' + table + ' SET actor_snapshot_version = (SELECT n FROM u04a_actor_sequence WHERE id = 1) WHERE id = NEW.id; END');",
+    "    }",
+    "  }",
+    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_resource (id TEXT PRIMARY KEY, value TEXT NOT NULL)');",
+    "  await run(db, \"INSERT OR IGNORE INTO u04a_resource VALUES ('target', 'before')\");",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS audit_actor_snapshots_u04a (id TEXT PRIMARY KEY, discord_id, discord_name, active_x_user_id, user_image, x_name, x_icon_url, user_version INTEGER NOT NULL, x_version INTEGER NOT NULL)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS audit_actor_refs_u04a (audit_id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES audit_actor_snapshots_u04a(id))');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_forced_failure (value INTEGER NOT NULL CHECK (value = 1))');",
@@ -89,11 +97,17 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "    { label: 'invalid-utf8-blob', user: [invalidUtf8, invalidUtf8, 'u04a-x', invalidUtf8], x: [invalidUtf8, invalidUtf8] },",
     "    { label: 'nontext-active-x', user: ['d', 'n', invalidUtf8, 'image'], x: ['X name', 'https://i/x.png'] },",
     "    { label: 'large-legacy-value', user: ['d', 'n', 'u04a-x', 'u'.repeat(100000)], x: ['x', null] },",
+    "    { label: 'malformed-text', user: ['d', 'n', 'u04a-x', 'image'], x: ['x', 'icon'] },",
+    "    { label: 'bom-and-multibyte', user: ['\\uFEFF雪', '🙂', 'u04a-x', '画像'], x: ['\\uFEFFX', ''] },",
     "  ];",
     "  const casesOut = [];",
     "  for (let i = 0; i < cases.length; i++) {",
     "    const item = cases[i];",
     "    await updateUser(item.user); await updateX(item.x);",
+    "    if (item.label === 'malformed-text') {",
+    "      await run(db, \"UPDATE u04a_user SET discord_id = CAST(X'FF8000C3' AS TEXT), name = CAST(X'EFBBBF61' AS TEXT) WHERE id = 'admin-1'\");",
+    "      await run(db, \"UPDATE u04a_x_users SET x_name = CAST(X'FF8000C3' AS TEXT) WHERE id = 'u04a-x'\");",
+    "    }",
     "    const source = (await all(db, sourceSql, ['admin-1']))[0];",
     "    const versions = await getVersions();",
     "    const id = 'case-' + i;",
@@ -108,6 +122,10 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "    await run(db, 'DELETE FROM audit_actor_snapshots_u04a WHERE id = ?', [id]);",
     "  }",
     "  const blobCase = casesOut.find(x => x.label === 'invalid-utf8-blob');",
+    "  // Compare JSON1 with the SAME BLOB fixture, not the last item in the preceding loop.",
+    "  const blobFixture = cases.find(x => x.label === 'invalid-utf8-blob');",
+    "  await updateUser(blobFixture.user); await updateX(blobFixture.x);",
+    "  const blobJson1FixtureMatches = JSON.stringify(actorSnapshotFromRow((await all(db, sourceSql, ['admin-1']))[0])) === blobCase.sourceJson;",
     "  let json1 = null, json1Error = null;",
     "  try {",
     "    const rows = await all(db, \"SELECT json_object('discord_id', u.discord_id, 'discord_name', u.name, 'x_user_id', u.active_x_user_id, 'x_name', x.x_name, 'icon_url', COALESCE(NULLIF(x.icon_url, ''), u.image)) AS json FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?\", ['admin-1']);",
@@ -135,7 +153,66 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "    db.prepare('INSERT INTO audit_actor_refs_u04a (audit_id, snapshot_id) VALUES (?, ?)').bind('audit-u04a', 'kept'),",
     "  ]);",
     "  const successRef = (await all(db, \"SELECT snapshot_id FROM audit_actor_refs_u04a WHERE audit_id = 'audit-u04a'\"))[0]?.snapshot_id ?? null;",
-    "  return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef };",
+    "  // Admission token is small; capture and assert its freshness before any resource/audit mutation.",
+    "  async function resetActor() {",
+    "    await run(db, \"INSERT OR REPLACE INTO u04a_user (id, discord_id, name, active_x_user_id, image) VALUES ('admin-1', 'd', 'Before', 'u04a-x', 'user-image')\");",
+    "    await run(db, \"INSERT OR REPLACE INTO u04a_x_users (id, x_name, icon_url) VALUES ('u04a-x', 'X before', 'x-icon')\");",
+    "    await run(db, \"UPDATE u04a_resource SET value = 'before' WHERE id = 'target'\");",
+    "  }",
+    "  const userInsert = \"INSERT INTO u04a_user (id, discord_id, name, active_x_user_id, image) VALUES ('admin-1','d','After','u04a-x','user-image')\";",
+    "  const xInsert = \"INSERT INTO u04a_x_users (id, x_name, icon_url) VALUES ('u04a-x','X after','x-icon')\";",
+    "  const casesFence = [",
+    "    ['user-delete-reinsert', [\"DELETE FROM u04a_user WHERE id='admin-1'\", userInsert]],",
+    "    ['x-delete-reinsert', [\"DELETE FROM u04a_x_users WHERE id='u04a-x'\", xInsert]],",
+    "    ['user-replace', [userInsert.replace('INSERT INTO', 'INSERT OR REPLACE INTO')]],",
+    "    ['x-replace', [xInsert.replace('INSERT INTO', 'INSERT OR REPLACE INTO')]],",
+    "    ['user-pk-aba', [\"UPDATE u04a_user SET id='temp-user' WHERE id='admin-1'\", \"UPDATE u04a_user SET id='admin-1' WHERE id='temp-user'\"]],",
+    "    ['x-pk-aba', [\"UPDATE u04a_x_users SET id='temp-x' WHERE id='u04a-x'\", \"UPDATE u04a_x_users SET id='u04a-x' WHERE id='temp-x'\"]],",
+    "    ['user-update', [\"UPDATE u04a_user SET name='After' WHERE id='admin-1'\"]],",
+    "    ['x-update', [\"UPDATE u04a_x_users SET x_name='X after' WHERE id='u04a-x'\"]],",
+    "    ['user-delete', [\"DELETE FROM u04a_user WHERE id='admin-1'\"]],",
+    "    ['x-delete', [\"DELETE FROM u04a_x_users WHERE id='u04a-x'\"]],",
+    "    ['active-x-change', [\"UPDATE u04a_user SET active_x_user_id=NULL WHERE id='admin-1'\"]],",
+    "    ['missing-x-to-present', [xInsert], \"DELETE FROM u04a_x_users WHERE id='u04a-x'\"],",
+    "  ];",
+    "  const fencedBatch = (id, versions, tail = []) => [",
+    "    db.prepare(captureSql).bind(id, 'admin-1', versions.user_version, versions.x_version),",
+    "    db.prepare('INSERT INTO u04a_forced_failure(value) SELECT changes()'),",
+    "    db.prepare('DELETE FROM u04a_forced_failure'),",
+    "    db.prepare(\"UPDATE u04a_resource SET value='after' WHERE id='target'\"),",
+    "    ...tail,",
+    "    db.prepare('INSERT INTO audit_actor_refs_u04a (audit_id, snapshot_id) VALUES (?, ?)').bind(id, id),",
+    "  ];",
+    "  async function batchFailed(statements) {",
+    "    try { const results = await db.batch(statements); return Array.isArray(results) && results.some(result => result.success !== true); }",
+    "    catch { return true; }",
+    "  }",
+    "  const getResource = async () => (await all(db, \"SELECT value FROM u04a_resource WHERE id='target'\"))[0].value;",
+    "  const getSeq = async () => (await all(db, 'SELECT n FROM u04a_actor_sequence WHERE id=1'))[0].n;",
+    "  const countSnapshot = async (id) => Number((await all(db, 'SELECT COUNT(*) AS n FROM audit_actor_snapshots_u04a WHERE id=?', [id]))[0].n);",
+    "  const countRef = async (id) => Number((await all(db, 'SELECT COUNT(*) AS n FROM audit_actor_refs_u04a WHERE audit_id=?', [id]))[0].n);",
+    "  const fenceOut = [];",
+    "  for (const [label, changes, beforeAdmission] of casesFence) {",
+    "    await resetActor();",
+    "    if (beforeAdmission) await run(db, beforeAdmission);",
+    "    const admitted = await getVersions();",
+    "    for (const sql of changes) await run(db, sql);",
+    "    const after = await getVersions();",
+    "    const failed = await batchFailed(fencedBatch('fence-' + label, admitted));",
+    "    fenceOut.push({ label, versionChanged: !after || admitted.user_version !== after.user_version || admitted.x_version !== after.x_version, failed, snapshotCount: await countSnapshot('fence-' + label), refCount: await countRef('fence-' + label), resource: await getResource() });",
+    "  }",
+    "  await resetActor();",
+    "  const positiveVersions = await getVersions();",
+    "  const positiveResults = await db.batch(fencedBatch('fence-success', positiveVersions, [db.prepare(\"UPDATE u04a_x_users SET x_name='X after' WHERE id='u04a-x'\")]));",
+    "  const positive = { allSuccess: positiveResults.every(r => r.success === true), snapshotName: (await all(db, \"SELECT x_name FROM audit_actor_snapshots_u04a WHERE id='fence-success'\"))[0]?.x_name, liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, resource: await getResource(), refCount: await countRef('fence-success') };",
+    "  await resetActor();",
+    "  const beforeRollback = await getVersions();",
+    "  const seqBefore = await getSeq();",
+    "  const rollbackStatements = fencedBatch('fence-rollback', beforeRollback, [db.prepare(\"UPDATE u04a_x_users SET x_name='X after' WHERE id='u04a-x'\")]);",
+    "  rollbackStatements.push(db.prepare('INSERT INTO u04a_forced_failure(value) VALUES (2)'));",
+    "  const lateFailed = await batchFailed(rollbackStatements);",
+    "  const lateRollback = { failed: lateFailed, snapshotCount: await countSnapshot('fence-rollback'), refCount: await countRef('fence-rollback'), resource: await getResource(), beforeVersions: beforeRollback, afterVersions: await getVersions(), seqBefore, seqAfter: await getSeq(), liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name };",
+    "  return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, lateRollback };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -193,19 +270,42 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     const response = await fetch(base + "/probe");
     const body = await response.json();
     assert.equal(response.status, 200, JSON.stringify(body));
-    assert.equal(body.cases.length, 7);
+    assert.equal(body.cases.length, 9);
     for (const item of body.cases) {
       assert.equal(item.sourceJson, item.snapshotJson, item.label + " workerd canonical JSON bytes");
       assert.deepEqual(item.sourceBytes, item.snapshotBytes, item.label + " workerd raw DB bytes/storage classes");
     }
     assert.equal(body.cases.find(x => x.label === "empty-shadowed-fallback").iconUrl, "user-image");
+    assert.equal(body.blobJson1FixtureMatches, true);
     assert.ok(body.json1Error || body.json1 !== body.blobCanonicalJson, "SQL JSON1 unexpectedly matched invalid-UTF8/BLOB legacy JSON");
+    const malformed = body.cases.find(x => x.label === "malformed-text");
+    assert.equal(malformed.sourceBytes.discord_id_type, "text");
+    assert.equal(malformed.sourceBytes.discord_id_hex, "FF8000C3");
+    assert.equal(malformed.sourceBytes.x_name_type, "text");
+    assert.equal(malformed.sourceBytes.x_name_hex, "FF8000C3");
     assert.equal(body.staleChanges, 0);
     assert.equal(body.staleCount, 0);
     assert.equal(body.rollbackFailed, true);
     assert.equal(body.rollbackCount, 0);
     assert.equal(body.abandonedCount, 0);
     assert.equal(body.successRef, "kept");
+    assert.equal(body.fenceOut.length, 12);
+    for (const item of body.fenceOut) {
+      assert.equal(item.versionChanged, true, item.label);
+      assert.equal(item.failed, true, item.label);
+      assert.equal(item.snapshotCount, 0, item.label);
+      assert.equal(item.refCount, 0, item.label);
+      assert.equal(item.resource, "before", item.label);
+    }
+    assert.deepEqual(body.positive, { allSuccess: true, snapshotName: "X before", liveName: "X after", resource: "after", refCount: 1 });
+    const late = body.lateRollback;
+    assert.equal(late.failed, true);
+    assert.equal(late.snapshotCount, 0);
+    assert.equal(late.refCount, 0);
+    assert.equal(late.resource, "before");
+    assert.deepEqual(late.afterVersions, late.beforeVersions);
+    assert.equal(late.seqAfter, late.seqBefore);
+    assert.equal(late.liveName, "X before");
   } finally {
     await stopTree(child);
     try { fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 }); } catch {}
