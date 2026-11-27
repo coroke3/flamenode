@@ -1537,6 +1537,60 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(denied.stats.statements, 1, "denial occurs before the check");
   });
 
+  test("MIG-0626 U05: integrity diagnosis bounds the full UTF-8 response and preserves in-budget issues", async () => {
+    const { runIntegrityCheckById } = await import("@flamenode/server-core/admin/integrityChecks");
+    const checkId = "audit_videos_orphan";
+    const path = "/api/admin-read/ops/integrity/" + checkId;
+    const ids = Array.from({ length: 5 }, (_, i) => "integrity-byte-bound-" + i);
+    const seedTarget = "integrity-missing-target";
+    const limit = 64 * 1024;
+    const encoder = new TextEncoder();
+    const size = (receipt) => encoder.encode(receipt.text).length;
+    const update = sqlite.prepare("UPDATE audit_logs SET target_id = ? WHERE id = ?");
+    try {
+      for (const id of ids) {
+        ins("audit_logs", {
+          id, table_name: "videos", target_id: seedTarget,
+          operation: "UPDATE", actor_user_id: "u_carol", created_at: T0,
+        });
+      }
+      const baseline = await call(path, ADMIN);
+      assert.equal(baseline.status, 200);
+      assert.ok(ids.every((id) => baseline.body.results[0].issues.some((issue) => issue.id === id)),
+        "all five fixture issues must be present before testing byte limits");
+      const exact = "a".repeat(limit - size(baseline) + seedTarget.length);
+      for (const [label, values, accepted] of [
+        ["exact limit", [exact], true],
+        ["one byte over", [exact + "a"], false],
+        ["oversized ASCII", ["private-integrity-" + "a".repeat(70_000)], false],
+        ["multibyte", ["private-integrity-" + "あ".repeat(22_000)], false],
+        ["escaped controls", ["private-integrity-" + "\u0001".repeat(11_000)], false],
+        ["aggregate five issues", ids.map(() => "private-integrity-" + "あ".repeat(4_500)), false],
+        ["valid multibyte", ["あ".repeat(10_000)], true],
+      ]) {
+        for (let i = 0; i < ids.length; i++) update.run(values[i] ?? seedTarget, ids[i]);
+        const receipt = await call(path, ADMIN);
+        assert.equal(receipt.status, accepted ? 200 : 503, label);
+        assert.ok(size(receipt) <= limit, label);
+        assert.equal(receipt.headers.get("cache-control"), "private, no-store", label);
+        assert.equal(receipt.stats.statements, 2, label + ": session + one selected check");
+        assert.equal(receipt.stats.writes, 0, label);
+        if (accepted) {
+          const expected = await runIntegrityCheckById(refDb, checkId);
+          assert.deepEqual(receipt.body, canon({ ran: true, results: [expected] }), label);
+          assert.equal(receipt.body.results[0].count, baseline.body.results[0].count, label);
+          assert.equal(receipt.body.results[0].moreCount, baseline.body.results[0].moreCount, label);
+          if (label === "exact limit") assert.equal(size(receipt), limit);
+        } else {
+          assert.deepEqual(receipt.body, { error: "unavailable" }, label);
+          assert.doesNotMatch(receipt.text, /private-integrity-|integrity-byte-bound-/);
+        }
+      }
+    } finally {
+      for (const id of ids) sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run(id);
+    }
+  });
+
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {
     sqlite.exec("DELETE FROM system_settings WHERE id = 'default'");
     assert.deepEqual((await get("/ops/cost-guard")).body, await refCostGuard());

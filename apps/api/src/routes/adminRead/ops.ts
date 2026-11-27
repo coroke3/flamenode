@@ -369,7 +369,25 @@ adminOpsRoutes.get("/integrity/:checkId", dbMiddleware, async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
   const result = await runIntegrityCheckById(c.get("db"), id);
+  // The row-count limit is not a wire-size limit: issue descriptions, titles
+  // and navigation targets can contain oversized persisted values.
+  if (result) {
+    let textUnits = 0;
+    for (const issue of result.issues) {
+      for (const value of Object.values(issue)) {
+        if (typeof value === "string") textUnits += value.length;
+      }
+      if (textUnits > MAX_OPS_HTTP_BYTES) {
+        return c.json({ error: "unavailable" }, 503);
+      }
+    }
+  }
   const body: AdminIntegrityResponse = { ran: true, results: result ? [result] : [] };
+  // Account for UTF-8, JSON escaping and the entire response envelope.
+  // Do not truncate identifiers, action links or integrity counts.
+  if (utf8Size(body) > MAX_OPS_HTTP_BYTES) {
+    return c.json({ error: "unavailable" }, 503);
+  }
   return c.json(body);
 });
 
