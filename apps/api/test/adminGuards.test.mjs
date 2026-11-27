@@ -94,6 +94,100 @@ test("S3 budget: real-cookie routes use <= 3 pre-reads and exactly 1 batch", asy
   }
 });
 
+test("MIG-0689: warm real-cookie writes refresh admission and preserve CAS rollback budget", async () => {
+  const { sqlite, db, request, stats, reads } = setup({ cookieSession: true });
+  const id = "cas-1";
+  const path = "/api/admin/announcements/" + id;
+  sqlite.prepare("INSERT INTO announcements VALUES (?, 'Old', 'B', 'info', 0, NULL, NULL, 'all', 'x', 50, 100)").run(id);
+  const getRow = () => ({ ...sqlite.prepare("SELECT * FROM announcements WHERE id = ?").get(id) });
+  const effects = () => ({
+    audits: sqlite.prepare("SELECT * FROM audit_logs ORDER BY id").all(),
+    queue: sqlite.prepare("SELECT * FROM static_rebuild_queue ORDER BY id").all(),
+  });
+  const batchTrace = [];
+  let race = false;
+  const originalBatch = db.batch.bind(db);
+  db.batch = async (statements) => {
+    batchTrace.push(statements.map((s) => ({ sql: s._sql, binds: s._params })));
+    if (race) {
+      // An independent writer changes the version after the resource read,
+      // before the mutation's atomic batch (not a D1 read by this request).
+      race = false;
+      sqlite.prepare("UPDATE announcements SET updated_at = updated_at + 1 WHERE id = ?").run(id);
+    }
+    return originalBatch(statements);
+  };
+  const mark = () => ({ reads: stats.reads, traces: reads.length, batches: stats.batches, batchTraces: batchTrace.length });
+  const verify = (before, count, batches, base) => {
+    assert.equal(stats.reads - before.reads, count);
+    assert.equal(reads.length - before.traces, count);
+    assert.equal(stats.batches - before.batches, batches);
+    assert.equal(batchTrace.length - before.batchTraces, batches);
+    const trace = reads.slice(before.traces);
+    assert.match(trace[0].sql, /FROM "session" s/);
+    assert.match(trace[1].sql, /LEFT JOIN "system_settings" s/);
+    if (count === 3) assert.match(trace[2].sql, /FROM announcements/);
+    assert.deepEqual(trace.map((r) => r.values), [[SESSION_TOKEN], [ADMIN.id], ...(count === 3 ? [[id]] : [])]);
+    if (batches) {
+      const statements = batchTrace.at(-1);
+      assert.ok(count + statements.length <= 50);
+      assert.ok(statements.every((s) => Array.isArray(s.binds) && s.binds.length <= 100));
+      const update = statements.find((s) => /UPDATE announcements\s+SET/.test(s.sql));
+      assert.ok(update);
+      assert.deepEqual(update.binds.slice(-2), [id, base]);
+      assert.ok(statements.some((s) => /INSERT INTO audit_logs/i.test(s.sql)));
+    }
+  };
+  const initial = getRow();
+  const emptyEffects = effects();
+  let before = mark();
+  const stale = await request("PUT", path, { ...VALID, title: "Stale", base_updated_at: 99 });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await stale.json(), { ok: false, message: "他の操作で更新されています。再読み込みして確認してください。" });
+  verify(before, 3, 0);
+  assert.deepEqual(getRow(), initial);
+  assert.deepEqual(effects(), emptyEffects);
+
+  // Same Hono instance and same cookie: permission/config cannot be cached.
+  sqlite.exec("UPDATE system_settings SET operation_mode = 'maintenance' WHERE id = 'default'");
+  before = mark();
+  const denied = await request("PUT", path, { ...VALID, title: "Denied", base_updated_at: 100 });
+  assert.equal(denied.status, 503);
+  assert.equal(denied.headers.get("cache-control"), "private, no-store");
+  assert.equal((await denied.json()).reason, "maintenance_mode");
+  verify(before, 2, 0);
+  assert.deepEqual(getRow(), initial);
+  assert.deepEqual(effects(), emptyEffects);
+
+  sqlite.exec("UPDATE system_settings SET operation_mode = 'normal', audit_normal_retention_days = 45 WHERE id = 'default'");
+  sqlite.prepare('UPDATE "user" SET name = ? WHERE id = ?').run("Fresh actor", ADMIN.id);
+  before = mark();
+  const allowed = await request("PUT", path, { ...VALID, title: "Committed", base_updated_at: 100 });
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await allowed.json(), { ok: true, id });
+  verify(before, 3, 1, 100);
+  const committed = getRow();
+  assert.equal(committed.title, "Committed");
+  const committedEffects = effects();
+  assert.equal(committedEffects.audits.length, 1);
+  assert.equal(committedEffects.audits[0].expires_at - committedEffects.audits[0].created_at, 45 * 86400);
+  assert.equal(JSON.parse(committedEffects.audits[0].actor_snapshot_json).discord_name, "Fresh actor");
+  assert.ok(committedEffects.queue.length > 0);
+
+  before = mark();
+  race = true;
+  const raced = await request("PUT", path, { ...VALID, title: "Lost", base_updated_at: committed.updated_at });
+  assert.equal(raced.status, 500);
+  assert.equal(raced.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await raced.json(), { ok: false, message: "保存に失敗しました。再読み込みして、もう一度お試しください。" });
+  verify(before, 3, 1, committed.updated_at);
+  assert.equal(race, false, "race reached the actual atomic batch");
+  assert.deepEqual(getRow(), { ...committed, updated_at: committed.updated_at + 1 });
+  assert.deepEqual(effects(), committedEffects);
+});
+
 test("missing CostGuard settings row preserves the authenticated user and fails as maintenance", async () => {
   const { sqlite, request, stats } = setup({ cookieSession: true });
   sqlite.prepare("DELETE FROM system_settings WHERE id = 'default'").run();
