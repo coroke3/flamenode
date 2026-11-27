@@ -364,7 +364,8 @@ async function resolveSoftwareCatalogWriteContextWithSnapshot(
   if (!primaryKey || typeof primaryKey !== "object" || Array.isArray(primaryKey) ||
       Object.keys(primaryKey).length !== 1 || !Object.hasOwn(primaryKey, "id")) return null;
   const id = primaryKey.id;
-  if (typeof id !== "string" || id.trim() === "" || id.includes("\0")) return null;
+  if (typeof id !== "string" || id.trim() === "" || id.includes("\0") ||
+      id.length > SPREADSHEET_DEFAULT_MAX_CELL_CHARS) return null;
 
   const cached = writeContextCache.get(def.table);
   if (cached && now - cached.cachedAt < WRITE_CACHE_TTL_MS) return null;

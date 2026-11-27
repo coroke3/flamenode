@@ -733,9 +733,11 @@ if (runUnderRootTsx(import.meta.url)) {
       const stages = ["prepare", "bind", "all"];
       for (const fault of forged) {
         for (const stage of stages) {
-          for (const [path, body] of [
-            ["/data", { table: "software_catalog", row }],
-            ["/import", { table: "software_catalog", dryRun: true, rows: [row] }],
+          for (const [method, path, body] of [
+            ["POST", "/data", { table: "software_catalog", row }],
+            ["PATCH", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" }, column: "name", value: "Fault candidate" }],
+            ["DELETE", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" } }],
+            ["POST", "/import", { table: "software_catalog", dryRun: true, rows: [row] }],
           ]) {
             resetAllCaches();
             honoD1.prepare = (sql) => {
@@ -762,14 +764,14 @@ if (runUnderRootTsx(import.meta.url)) {
                 },
               };
             };
-            const result = await callHono("POST", path, body);
+            const result = await callHono(method, path, body);
             assert.equal(result.status, 500, stage);
             assert.deepEqual(result.body, { error: "internal_error" });
             assert.match(result.headers.get("cache-control"), /private.*no-store/);
           }
         }
       }
-      assert.equal(injected, forged.length * stages.length * 2);
+      assert.equal(injected, forged.length * stages.length * 4);
       assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] WRITE_FAILED"]));
 
       // Even a broken diagnostic sink must not replace the response.
@@ -779,7 +781,7 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(result.status, 500);
       assert.deepEqual(result.body, { error: "internal_error" });
       assert.match(result.headers.get("cache-control"), /private.*no-store/);
-      assert.equal(injected, forged.length * stages.length * 2 + 1);
+      assert.equal(injected, forged.length * stages.length * 4 + 1);
     } finally {
       honoD1.prepare = originalPrepare;
       console.error = originalError;
@@ -1437,6 +1439,45 @@ if (runUnderRootTsx(import.meta.url)) {
         curSqlite.close();
         honoSqlite.close();
       }
+    }
+  });
+
+  test("MIG-0638 U01/U02: oversized CRUD primary keys stay ahead of the cold catalog+snapshot read", async () => {
+    resetAllCaches();
+    const { curSqlite, honoSqlite, honoD1, callHono } = createFixture();
+    const originalPrepare = honoD1.prepare;
+    const preparedSql = [];
+    const oversizedId = "x".repeat(100_001);
+    try {
+      honoD1.prepare = (statement) => {
+        preparedSql.push(statement);
+        return originalPrepare(statement);
+      };
+      for (const [method, body] of [
+        ["PATCH", { table: "software_catalog", primaryKey: { id: oversizedId }, column: "name", value: "Valid name" }],
+        ["DELETE", { table: "software_catalog", primaryKey: { id: oversizedId } }],
+      ]) {
+        resetAllCaches();
+        preparedSql.length = 0;
+        const beforeRows = honoSqlite.prepare('SELECT * FROM "software_catalog" ORDER BY id').all();
+        const beforeAudits = allAudits(honoSqlite);
+        const beforeQueue = allQueueRows(honoSqlite);
+        const result = await callHono(method, "/data", body);
+        assert.equal(result.status, 400, method);
+        assert.deepEqual(result.body, { error: "value_too_long" }, method);
+        assert.ok(preparedSql.some(statement => statement.includes("FROM pragma_table_xinfo(?) AS x")), method + " still resolves the live catalog");
+        assert.ok(!preparedSql.some(statement =>
+          statement.includes('snapshot AS (') && statement.includes('"software_catalog"')
+        ), method + " rejects the key before the combined snapshot query");
+        assert.deepEqual(honoSqlite.prepare('SELECT * FROM "software_catalog" ORDER BY id').all(), beforeRows);
+        assert.deepEqual(allAudits(honoSqlite), beforeAudits);
+        assert.deepEqual(allQueueRows(honoSqlite), beforeQueue);
+      }
+    } finally {
+      honoD1.prepare = originalPrepare;
+      resetAllCaches();
+      curSqlite.close();
+      honoSqlite.close();
     }
   });
 
