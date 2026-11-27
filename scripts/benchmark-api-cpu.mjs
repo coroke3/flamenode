@@ -1368,6 +1368,107 @@ export function snapshotReplayScript(script) {
   return snapshot;
 }
 
+// Native nondeterministic inputs belong to the ordered replay trace too. Each
+// replay still performs the native call; only its app-visible value is replayed.
+// This scope is shared by all requests in a runtime, since the two host methods
+// are global. Concurrent requests invalidate the active trace and are rejected.
+export function createReplayInputScope() {
+  const cryptoHost = globalThis.crypto;
+  const dateHost = globalThis.Date;
+  const nativeUUID = cryptoHost.randomUUID;
+  const nativeNow = dateHost.now;
+  let active = null;
+  const assertIdle = () => {
+    if (active) {
+      active();
+      throw new Error("bench concurrent replay input scope");
+    }
+    if (globalThis.crypto !== cryptoHost || globalThis.Date !== dateHost ||
+        cryptoHost.randomUUID !== nativeUUID || dateHost.now !== nativeNow) {
+      throw new Error("bench replay input host changed");
+    }
+  };
+  const validate = (kind, value) => {
+    const valid = kind === "input.randomUUID"
+      ? typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+      : Number.isSafeInteger(value) && value >= 0;
+    if (!valid) throw new Error("bench invalid replay input value");
+    return value;
+  };
+  return {
+    assertIdle,
+    async run(visit, invalidate, action) {
+      try { assertIdle(); }
+      catch (error) { invalidate(); throw error; }
+      const uuidDescriptor = Object.getOwnPropertyDescriptor(cryptoHost, "randomUUID");
+      const nowDescriptor = Object.getOwnPropertyDescriptor(dateHost, "now");
+      let failed = false;
+      const fail = () => { failed = true; invalidate(); };
+      const wrap = (kind, native) => function (...args) {
+        try {
+          const actual = validate(kind, Reflect.apply(native, this, args));
+          return validate(kind, visit(kind, args, actual));
+        } catch (error) { fail(); throw error; }
+      };
+      const uuid = wrap("input.randomUUID", nativeUUID);
+      const now = wrap("input.Date.now", nativeNow);
+      active = fail;
+      let uuidInstalled = false, nowInstalled = false;
+      try {
+        if (visit === null) {
+          const result = await action();
+          if (failed) throw new Error("bench concurrent replay input scope");
+          return result;
+        }
+        Object.defineProperty(cryptoHost, "randomUUID", {
+          ...uuidDescriptor, configurable: true, writable: true, value: uuid,
+        });
+        uuidInstalled = true;
+        Object.defineProperty(dateHost, "now", { ...nowDescriptor, value: now });
+        nowInstalled = true;
+        return await action();
+      } catch (error) { fail(); throw error; }
+      finally {
+        const changed = cryptoHost.randomUUID !== (uuidInstalled ? uuid : nativeUUID) ||
+          dateHost.now !== (nowInstalled ? now : nativeNow) ||
+          globalThis.crypto !== cryptoHost || globalThis.Date !== dateHost;
+        try {
+          if (uuidInstalled) {
+            if (uuidDescriptor) Object.defineProperty(cryptoHost, "randomUUID", uuidDescriptor);
+            else if (!Reflect.deleteProperty(cryptoHost, "randomUUID")) throw new Error("bench UUID restoration failed");
+          }
+        } finally {
+          try { if (nowInstalled) Object.defineProperty(dateHost, "now", nowDescriptor); }
+          finally { active = null; }
+        }
+        if (changed) {
+          invalidate();
+          throw new Error("bench replay input host changed during request");
+        }
+      }
+    },
+  };
+}
+
+const inprocInputs = createReplayInputScope();
+let activeInprocRequest = null;
+const assertInprocIdle = () => {
+  if (activeInprocRequest) {
+    activeInprocRequest.invalid = true;
+    throw new Error("bench concurrent in-process request");
+  }
+  inprocInputs.assertIdle();
+};
+async function withInprocRequest(action) {
+  assertInprocIdle();
+  const state = activeInprocRequest = { invalid: false };
+  try {
+    const result = await action();
+    if (state.invalid) throw new Error("bench concurrent in-process request");
+    return result;
+  } finally { activeInprocRequest = null; }
+}
+
 // ------------------------------------------------------------ target: inproc
 export async function createInprocTarget(plan) {
   const { DatabaseSync } = await import("node:sqlite");
@@ -1478,7 +1579,10 @@ export async function createInprocTarget(plan) {
   const { sessionMiddleware } = await import(pathToFileURL(SESSION_PATH).href);
   const sm = sessionMiddleware();
 
-  const exec = async (list) => { for (const s of list) sqlite.prepare(s.sql).run(...s.params); };
+  const exec = async (list) => {
+    assertInprocIdle();
+    for (const s of list) sqlite.prepare(s.sql).run(...s.params);
+  };
   await exec(SEED(plan.adminToken));
 
   const fetchOnce = async (spec) => {
@@ -1489,9 +1593,14 @@ export async function createInprocTarget(plan) {
     const headers = new Headers(spec.headers ?? {});
     const before = performance.now();
     let res;
+    // Request construction is host setup, outside the app input transcript in
+    // both Node and workerd. Keep performance.now() and profiling untouched.
+    const request = spec.path.startsWith("/__bench/") ? null
+      : new Request(url, { method: spec.method, headers, body: spec.body });
     const realFetch = globalThis.fetch;
     globalThis.fetch = benchFetchStub;
     try {
+    const dispatch = async () => {
     if (spec.path.startsWith("/__bench/session")) {
       const vars = {};
       const c = { req: { url, header: (n) => headers.get(n) ?? undefined }, env, set: (k, v) => { vars[k] = v; }, header() {} };
@@ -1500,8 +1609,11 @@ export async function createInprocTarget(plan) {
     } else if (spec.path.startsWith("/__bench/noop")) {
       res = new Response("ok");
     } else {
-      res = await app.fetch(new Request(url, { method: spec.method, headers, body: spec.body }), env);
+      res = await app.fetch(request, env);
     }
+    };
+    await inprocInputs.run(rec ? (kind, args, actual) => trace(kind, [args], () => actual) : null,
+      () => { recInvalid = true; }, dispatch);
     } finally { globalThis.fetch = realFetch; }
     const cpuMs = performance.now() - before;
     const buf = await res.arrayBuffer();
@@ -1514,12 +1626,15 @@ export async function createInprocTarget(plan) {
     digits: 3,
     cpuSource: "performance.now() wall delta around app.fetch (Node/V8, node:sqlite as D1 plus result normalization/counting; WALL-TIME PROXY, not workerd CPU)",
     supportsCold: false,
-    setR2: async (body, key = STATS_KEY) => { if (body == null) r2Objects.delete(key); else r2Objects.set(key, body); },
+    setR2: async (body, key = STATS_KEY) => {
+      assertInprocIdle();
+      if (body == null) r2Objects.delete(key); else r2Objects.set(key, body);
+    },
     exec,
     record: async () => null,
-    run: async (spec) => fetchOnce(spec),
+    run: async (spec) => withInprocRequest(() => fetchOnce(spec)),
     /** Execute once (side effects included) and capture D1/R2 results for workerd replay. */
-    recordForReplay: async (spec) => {
+    recordForReplay: async (spec) => withInprocRequest(async () => {
       rec = [];
       recInvalid = false;
       try {
@@ -1530,8 +1645,8 @@ export async function createInprocTarget(plan) {
         rec = null;
         recInvalid = false;
       }
-    },
-    close: async () => { sqlite.close(); },
+    }),
+    close: async () => { assertInprocIdle(); sqlite.close(); },
   };
 }
 
@@ -1557,7 +1672,8 @@ const BENCH_PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
 globalThis.fetch = async () => new Response(BENCH_PNG, { headers: { "content-type": "image/png" } });
 
 // Replay env: D1/R2 return the results recorded by the in-process run, in call order.
-// The request profile includes app code and replay identity/counting bookkeeping,
+// The request profile includes app code, retained native UUID/Date.now calls,
+// and input-hook/transcript plus replay identity/counting bookkeeping,
 // without wrangler's local D1/R2 simulator. Registration is outside warm profiling;
 // cold parsing/validation runs at module initialization, which may precede profiling.
 function returnedRows(mode, value) {
@@ -1587,6 +1703,9 @@ function rowCounters() {
 ${replayIdentity.toString()}
 ${snapshotReplayResult.toString()}
 ${snapshotReplayScript.toString()}
+${createReplayInputScope.toString()}
+const replayInputs = createReplayInputScope();
+let activeRequest = null;
 
 function replayEnv(env, script) {
   let k = 0, statements = 0, mismatch = false;
@@ -1650,7 +1769,8 @@ function replayEnv(env, script) {
       put: async (key, value, ...args) => next("r2.put", [key, value, args]),
       delete: async (key, ...args) => next("r2.delete", [key, args]),
     },
-  }, () => ({ statements, ...rows.totals(), replayComplete: !mismatch && k === script.length })];
+  }, () => ({ statements, ...rows.totals(), replayComplete: !mismatch && k === script.length }),
+  (action) => replayInputs.run((kind, args) => next(kind, [args]), () => { mismatch = true; }, action)];
 }
 
 function counting(env) {
@@ -1750,7 +1870,7 @@ async function handleRequest(request, env, ctx) {
         headers: { "x-bench-replay-complete": "0" },
       });
     }
-    const [benchEnv, count] = sid !== null ? replayEnv(env, script) : counting(env);
+    const [benchEnv, count, withInputs] = sid !== null ? replayEnv(env, script) : counting(env);
     const evidence = () => {
       const stats = count();
       return {
@@ -1760,26 +1880,38 @@ async function handleRequest(request, env, ctx) {
         ...(sid !== null ? { "x-bench-replay-complete": stats.replayComplete ? "1" : "0" } : {}),
       };
     };
-    if (url.pathname === "/__bench/noop") return new Response("ok", { headers: evidence() });
+    const dispatch = async () => {
+    if (url.pathname === "/__bench/noop") return new Response("ok");
     if (url.pathname === "/__bench/session") {
       const vars = {};
       const c = { req: { url: request.url, header: (n) => request.headers.get(n) ?? undefined }, env: benchEnv, set: (k, v) => { vars[k] = v; }, header() {} };
       await sm(c, async () => {});
-      return Response.json({ state: vars.sessionState }, { headers: evidence() });
+      return Response.json({ state: vars.sessionState });
     }
-    const res = await app.fetch(request, benchEnv, ctx);
+    return app.fetch(request, benchEnv, ctx);
+    };
+    const res = withInputs ? await withInputs(dispatch) : await dispatch();
     const out = new Response(res.body, res);
     for (const [name, value] of Object.entries(evidence())) out.headers.set(name, value);
     return out;
 }
 export default {
   async fetch(request, env, ctx) {
-    const ordinal = ++identity.requests; // Includes every harness request.
-    const response = await handleRequest(request, env, ctx);
-    const out = new Response(response.body, response);
-    out.headers.set("x-bench-build", BUILD_ID);
-    out.headers.set("x-bench-request", String(ordinal));
-    return out;
+    const ordinal = ++identity.requests; // Includes every harness request, even rejected overlaps.
+    if (activeRequest) {
+      activeRequest.invalid = true;
+      throw new Error("bench concurrent worker request");
+    }
+    replayInputs.assertIdle();
+    const state = activeRequest = { invalid: false };
+    try {
+      const response = await handleRequest(request, env, ctx);
+      if (state.invalid) throw new Error("bench concurrent worker request");
+      const out = new Response(response.body, response);
+      out.headers.set("x-bench-build", BUILD_ID);
+      out.headers.set("x-bench-request", String(ordinal));
+      return out;
+    } finally { activeRequest = null; }
   },
 };
 `;
@@ -2164,7 +2296,7 @@ export function createReplayTarget(inproc, wr) {
     // quantum can grow from 0.1ms to several ms while requests run; keep the
     // *live* workerd resolution so warm BASELINE and budget checks fail closed.
     get resolutionMs() { return wr.resolutionMs; },
-    cpuSource: wr.cpuSource.replace("local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)", "D1/R2 stubbed with normalized results recorded from in-process node:sqlite (--d1 replay); request profiling includes app code plus replay identity/row/count bookkeeping; Node recording and warm registration excluded; cold JSON parsing/validation runs at module initialization and may precede profiling; local D1/R2 simulator and real D1 round-trip excluded"),
+    cpuSource: wr.cpuSource.replace("local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)", "D1/R2 stubbed with normalized results recorded from in-process node:sqlite (--d1 replay); request profiling includes app code, retained native UUID/Date.now calls, input-hook/transcript and replay identity/row/count bookkeeping; Node recording and warm registration excluded; cold JSON parsing/validation runs at module initialization and may precede profiling; local D1/R2 simulator and real D1 round-trip excluded"),
     exec: inproc.exec,
     setR2: inproc.setR2,
     record: (spec) => inproc.recordForReplay(spec),

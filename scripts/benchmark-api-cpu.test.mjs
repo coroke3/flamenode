@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, runCold, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
 async function loadReplayWorker(generation, script, body) {
@@ -1166,6 +1166,131 @@ test("MIG-0639: typed replay identity distinguishes SQL, bind types, methods, ba
   assert.throws(() => identity("x".repeat(262145)), /too large/);
 });
 
+test("MIG-0639: replay input scope calls native RNG and clock and restores them after success and caught errors", async () => {
+  const uuidDescriptor = Object.getOwnPropertyDescriptor(crypto, "randomUUID");
+  const nowDescriptor = Object.getOwnPropertyDescriptor(Date, "now");
+  const nativeUUID = crypto.randomUUID, nativeNow = Date.now, nativeDate = Date, nativePerf = performance.now;
+  let uuidCalls = 0, nowCalls = 0, throwUUID = false, failures = 0;
+  const recorded = [], replayNative = [];
+  const spyUUID = function (...args) {
+    uuidCalls += 1;
+    const value = Reflect.apply(nativeUUID, this, args);
+    if (throwUUID) throw new Error("native RNG failure");
+    return value;
+  };
+  const spyNow = function (...args) { nowCalls += 1; return Reflect.apply(nativeNow, this, args); };
+  Object.defineProperty(crypto, "randomUUID", { configurable: true, writable: true, value: spyUUID });
+  Object.defineProperty(Date, "now", { ...nowDescriptor, value: spyNow });
+  try {
+    const scope = createReplayInputScope();
+    const capture = (kind, args, value) => { recorded.push({ kind, args, value }); return value; };
+    const first = await scope.run(capture, () => { failures += 1; }, async () => [crypto.randomUUID(), Date.now(), crypto.randomUUID()]);
+    let at = 0;
+    const second = await scope.run((kind, args, value) => {
+      replayNative.push(value);
+      const entry = recorded[at++];
+      assert.equal(kind, entry.kind);
+      assert.deepEqual(args, entry.args);
+      return entry.value;
+    }, () => { failures += 1; }, async () => [crypto.randomUUID(), Date.now(), crypto.randomUUID()]);
+    assert.deepEqual(second, first);
+    assert.notEqual(replayNative[0], first[0], "replay still generated a fresh native UUID before returning the recorded input");
+    assert.notEqual(replayNative[2], first[2]);
+    assert.equal(uuidCalls, 4);
+    assert.equal(nowCalls, 2);
+    assert.equal(failures, 0);
+    assert.equal(crypto.randomUUID, spyUUID);
+    assert.equal(Date.now, spyNow);
+    assert.equal(Date, nativeDate);
+    assert.equal(performance.now, nativePerf);
+    throwUUID = true;
+    await scope.run(capture, () => { failures += 1; }, async () => {
+      try { crypto.randomUUID(); } catch {}
+    });
+    assert.equal(failures, 1, "a native error caught by the app must invalidate its trace");
+    assert.equal(uuidCalls, 5);
+    assert.equal(crypto.randomUUID, spyUUID);
+    assert.equal(Date.now, spyNow);
+    await assert.rejects(scope.run(capture, () => { failures += 1; }, async () => {
+      throw new Error("request failure");
+    }), /request failure/);
+    assert.equal(crypto.randomUUID, spyUUID);
+    assert.equal(Date.now, spyNow);
+    const defineProperty = Object.defineProperty;
+    Object.defineProperty = function (object, key, descriptor) {
+      if (object === Date && key === "now" && descriptor.value !== spyNow) throw new Error("clock hook installation failure");
+      return defineProperty(object, key, descriptor);
+    };
+    try {
+      await assert.rejects(scope.run(capture, () => { failures += 1; }, async () => {
+        assert.fail("request must not run after partial installation");
+      }), /clock hook installation failure/);
+    } finally { Object.defineProperty = defineProperty; }
+    assert.equal(crypto.randomUUID, spyUUID, "partial installation restores the already installed UUID method");
+    assert.equal(Date.now, spyNow);
+  } finally {
+    if (uuidDescriptor) Object.defineProperty(crypto, "randomUUID", uuidDescriptor);
+    else delete crypto.randomUUID;
+    Object.defineProperty(Date, "now", nowDescriptor);
+  }
+});
+
+test("MIG-0639: real recorded RNG and clock inputs preserve strict SQL order in warm and cold replay", async () => {
+  const { app } = await import("../apps/api/src/app.ts");
+  const originalAppFetch = app.fetch, originalFetch = globalThis.fetch;
+  const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const nativeUUID = crypto.randomUUID, nativeNow = Date.now;
+  const target = await createInprocTarget({ adminToken: "input-transcript" });
+  const probe = async (request, env) => {
+    const id = crypto.randomUUID(), now = Date.now();
+    const first = await env.DB.prepare("SELECT ? AS id, ? AS now").bind(id, now).first();
+    const later = Date.now(), other = crypto.randomUUID();
+    const batch = await env.DB.batch([env.DB.prepare("SELECT ? AS other").bind(other), env.DB.prepare("SELECT ? AS later").bind(later)]);
+    return Response.json({ first, batch });
+  };
+  let observed;
+  app.fetch = async (...args) => {
+    const response = await probe(...args);
+    observed = await response.clone().json();
+    return response;
+  };
+  try {
+    const spec = { method: "GET", path: "/inputs" };
+    const recorded = await target.recordForReplay(spec);
+    const expected = observed;
+    assert.equal(recorded.status, 200);
+    assert.equal(recorded.d1, 3);
+    assert.equal(recorded.script.length, 6, "four native inputs plus two D1 calls share one ordered transcript");
+    assert.equal(recorded.script[0].identity, replayIdentity(["input.randomUUID", []]));
+    assert.equal(recorded.script[1].identity, replayIdentity(["input.Date.now", []]));
+    assert.equal(recorded.script[2].identity, replayIdentity(["d1.first", "SELECT ? AS id, ? AS now", [expected.first.id, expected.first.now], []]));
+    for (const mode of ["warm", "cold"]) {
+      const worker = await loadReplayWorker(`inputs-${mode}`, mode === "cold" ? recorded.script : null,
+        `return (${probe.toString()})(request, env);`);
+      if (mode === "warm") {
+        const registration = await worker.fetch(new Request("http://bench.local/__bench/script", {
+          method: "POST", body: JSON.stringify({ id: mode, script: recorded.script }),
+        }), {}, {});
+        assert.equal(registration.status, 200);
+      }
+      const response = await worker.fetch(new Request("http://bench.local/inputs", { headers: { "x-bench-script": mode } }), {}, {});
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), expected);
+      assert.equal(replayEvidenceMismatch(recorded, response.headers), false);
+      assert.equal(crypto.randomUUID, nativeUUID);
+      assert.equal(Date.now, nativeNow);
+    }
+    const fresh = await target.recordForReplay(spec);
+    assert.notEqual(fresh.script[0].result, recorded.script[0].result, "later recordings generate their own inputs, never a fixed UUID");
+  } finally {
+    app.fetch = originalAppFetch;
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+    await target.close();
+  }
+});
+
 test("MIG-0639: result snapshots preserve D1 column order, BLOBs, data keys and full large fixtures", () => {
   const row = Object.create(null);
   row.z = 2;
@@ -1463,6 +1588,27 @@ test("MIG-0639: generated workerd replay fails closed on wrong SQL, exhausted/tr
     const put = await invoke(putWorker, "/probe");
     assert.equal(put.headers.get("x-bench-replay-complete"), "0");
 
+    const nativeUUID = crypto.randomUUID, nativeNow = Date.now;
+    const uuidEntry = { identity: replayIdentity(["input.randomUUID", []]), result: crypto.randomUUID() };
+    const timeEntry = { identity: replayIdentity(["input.Date.now", []]), result: Date.now() };
+    const inputCases = [
+      ["extra-input", [], 'crypto.randomUUID(); return new Response("caught input");'],
+      ["missing-input", [uuidEntry], 'return new Response("unused input");'],
+      ["input-order", [uuidEntry, timeEntry], 'Date.now(); crypto.randomUUID(); return new Response("wrong order");'],
+      ["input-d1-order", [uuidEntry, sqlEntry], 'await env.DB.prepare("SELECT expected").bind(1).first(); crypto.randomUUID(); return new Response("wrong order");'],
+      ["input-r2-order", [uuidEntry, r2Entry], 'await env.BUCKET.get("expected-key", {type:"json"}); crypto.randomUUID(); return new Response("wrong order");'],
+      ["invalid-uuid", [{ ...uuidEntry, result: "not-a-uuid" }], 'crypto.randomUUID(); return new Response("bad UUID");'],
+      ["invalid-time-type", [{ ...timeEntry, result: "123" }], 'Date.now(); return new Response("bad time");'],
+      ["invalid-time-value", [{ ...timeEntry, result: -1 }], 'Date.now(); return new Response("bad time");'],
+    ];
+    for (const [name, script, body] of inputCases) {
+      const worker = await load(name, script, body);
+      const response = await invoke(worker, "/probe");
+      assert.equal(response.headers.get("x-bench-replay-complete"), "0", name + " cannot pass even if the app catches the error");
+      assert.equal(crypto.randomUUID, nativeUUID, name + " restores crypto");
+      assert.equal(Date.now, nativeNow, name + " restores the clock");
+    }
+
     const missingWorker = await load("missing", null, 'return new Response("unexpected");');
     const missing = await invoke(missingWorker, "/probe", "missing-id");
     assert.equal(missing.status, 503);
@@ -1482,6 +1628,89 @@ test("MIG-0639: generated workerd replay fails closed on wrong SQL, exhausted/tr
     globalThis.fetch = originalFetch;
     if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
     else globalThis.__flamenodeBenchIdentity = originalIdentity;
+  }
+});
+
+test("MIG-0639: overlapping recorder, ordinary, simulator and control requests fail closed without leaking host hooks", async () => {
+  const { app } = await import("../apps/api/src/app.ts");
+  const originalAppFetch = app.fetch, originalFetch = globalThis.fetch;
+  const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const nativeUUID = crypto.randomUUID, nativeNow = Date.now;
+  const target = await createInprocTarget({ adminToken: "input-concurrency" });
+  const other = await createInprocTarget({ adminToken: "other-input-concurrency" });
+  let release, enter;
+  try {
+    for (const firstMode of ["record", "run"]) {
+      const held = new Promise((resolve) => { release = resolve; });
+      const entered = new Promise((resolve) => { enter = resolve; });
+      app.fetch = async () => {
+        crypto.randomUUID(); Date.now(); enter(); await held;
+        return new Response("first request");
+      };
+      const first = firstMode === "record"
+        ? target.recordForReplay({ method: "GET", path: "/first" })
+        : target.run({ method: "GET", path: "/first" });
+      const rejectedFirst = assert.rejects(first, /concurrent in-process request/);
+      await entered;
+      await assert.rejects(other.recordForReplay({ method: "GET", path: "/other" }), /concurrent in-process request/);
+      await assert.rejects(target.run({ method: "GET", path: "/other" }), /concurrent in-process request/);
+      await assert.rejects(other.exec([]), /concurrent in-process request/);
+      release();
+      await rejectedFirst;
+      assert.equal(crypto.randomUUID, nativeUUID);
+      assert.equal(Date.now, nativeNow);
+    }
+    // app.fetch has resolved and the native-method hooks are restored, but the
+    // recorder's counters/script still belong to the response until it drains.
+    let controller;
+    const draining = new Promise((resolve) => { enter = resolve; });
+    app.fetch = async () => new Response(new ReadableStream({
+      start(value) { controller = value; },
+      pull() { enter(); },
+    }));
+    const streamed = target.recordForReplay({ method: "GET", path: "/stream" });
+    const rejectedStream = assert.rejects(streamed, /concurrent in-process request/);
+    await draining;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(crypto.randomUUID, nativeUUID, "streaming does not extend native interception");
+    assert.equal(Date.now, nativeNow);
+    await assert.rejects(other.recordForReplay({ method: "GET", path: "/stream-overlap" }), /concurrent in-process request/);
+    await assert.rejects(target.run({ method: "GET", path: "/stream-overlap" }), /concurrent in-process request/);
+    await assert.rejects(other.setR2("fixture"), /concurrent in-process request/);
+    controller.close();
+    await rejectedStream;
+    for (const firstMode of ["replay", "sim"]) {
+      const script = [{ identity: replayIdentity(["input.randomUUID", []]), result: crypto.randomUUID() }];
+      globalThis.__flamenodeReplayBarrier = new Promise((resolve) => { release = resolve; });
+      const entered = new Promise((resolve) => { globalThis.__flamenodeReplayEntered = resolve; });
+      const worker = await loadReplayWorker("concurrent-" + firstMode, firstMode === "replay" ? script : null,
+        'crypto.randomUUID(); globalThis.__flamenodeReplayEntered(); await globalThis.__flamenodeReplayBarrier; return new Response("first");');
+      const firstRequest = new Request("http://bench.local/probe", firstMode === "replay" ? { headers: { "x-bench-script": "cold" } } : {});
+      const simRequest = new Request("http://bench.local/probe");
+      const controlRequest = new Request("http://bench.local/__bench/script", { method: "POST", body: JSON.stringify({ id: "other", script: [] }) });
+      const first = worker.fetch(firstRequest, {}, {});
+      const rejectedFirst = assert.rejects(first, /concurrent worker request/);
+      await entered;
+      await assert.rejects(worker.fetch(simRequest, {}, {}), /concurrent worker request/);
+      await assert.rejects(worker.fetch(controlRequest, {}, {}), /concurrent worker request/);
+      release();
+      await rejectedFirst;
+      assert.equal(crypto.randomUUID, nativeUUID);
+      assert.equal(Date.now, nativeNow);
+      const recovered = await worker.fetch(new Request("http://bench.local/__bench/ping"), {}, {});
+      assert.equal(recovered.status, 200);
+      assert.equal(recovered.headers.get("x-bench-request"), "4", "every fetch counts, including rejected overlaps");
+    }
+  } finally {
+    release?.();
+    delete globalThis.__flamenodeReplayBarrier;
+    delete globalThis.__flamenodeReplayEntered;
+    app.fetch = originalAppFetch;
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+    await target.close();
+    await other.close();
   }
 });
 
