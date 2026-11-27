@@ -381,3 +381,115 @@ test("SA-091 atomic rejection preserves committed outbox and rolls back CAS or l
     }
   }
 });
+
+
+// TARGET audit actor is authorization evidence, not necessarily the active X.
+// This synthetic host exercises the real middleware, shared plan and atomic
+// mutation against the migrated schema; it is not a mounted production endpoint.
+test("SA-091 authorization evidence reaches persisted audit without trusting active X alone", async () => {
+  const cases = [
+    { name: "admin with active X", id: "u_admin", role: "admin", active: "x_admin", actor: null },
+    { name: "admin without active X", id: "u_admin", role: "admin", active: null, actor: null },
+    { name: "staff active X authorizes", id: "u_staff", role: "user", active: "x_staff", actor: "x_staff" },
+    { name: "staff other linked X authorizes", id: "u_multi", role: "user", active: "x_m1", actor: "x_staff" },
+    { name: "staff no active X", id: "u_multi", role: "user", active: null, actor: "x_staff" },
+    { name: "multiple authorizing X prefer active", id: "u_multi", role: "user", active: "x_staff", both: true, actor: "x_staff" },
+    { name: "multiple authorizing X deterministic fallback", id: "u_multi", role: "user", active: null, both: true, actor: "x_m1" },
+    { name: "linked but unauthorized staff", id: "u_other", role: "user", active: "x_other", denied: 403 },
+    { name: "foreign active X cannot authorize", id: "u_other", role: "user", active: "x_staff", denied: 403 },
+    { name: "no linked X", id: "u_nox", role: "user", active: null, denied: 403 },
+    { name: "anonymous", id: null, role: null, active: null, denied: 401 },
+  ];
+  for (const scenario of cases) {
+    const sqlite = createSqlite();
+    try {
+      seedChapterWorld(sqlite);
+      sqlite.exec("UPDATE system_settings SET audit_max_payload_bytes = 90000 WHERE id = 'default'");
+      insert(sqlite, "event_staff", {
+        id: "s_xid_reviewer", event_id: "ev2", x_user_id: "x_staff",
+        display_name: "X reviewer", permission_preset: "xid_reviewer",
+      });
+      if (scenario.both) {
+        insert(sqlite, "event_staff", {
+          id: "s_xid_reviewer_second", event_id: "ev2", x_user_id: "x_m1",
+          display_name: "Second X reviewer", permission_preset: "xid_reviewer",
+        });
+      }
+      // For normal receipts mirror the selected X in the stored session fixture.
+      // The foreign-active case deliberately supplies only a synthetic session
+      // mismatch; it must not create an approved account link or any authority.
+      if (scenario.id && !scenario.denied) {
+        sqlite.prepare("UPDATE user SET active_x_user_id = ? WHERE id = ?").run(scenario.active, scenario.id);
+      }
+      insert(sqlite, "x_identity_requests", {
+        id: "actor-fixture", request_type: "new_link",
+        requested_by_auth_user_id: "u_other", requested_x_id: "candidate",
+        status: "pending", requested_at: 10, updated_at: 10,
+      });
+      const readRequest = () => sqlite.prepare("SELECT * FROM x_identity_requests WHERE id = 'actor-fixture'").get();
+      const before = readRequest();
+      const d1 = atomicD1(sqlite);
+      const db = drizzle(d1);
+      const app = new Hono();
+      let handlerCalls = 0;
+      app.use("*", async (c, next) => {
+        c.set("db", db);
+        c.set("user", scenario.id ? {
+          id: scenario.id, role: scenario.role, active_x_user_id: scenario.active,
+        } : null);
+        await next();
+      });
+      app.use("*", xidLinkRequestReviewAuthorizationMiddleware);
+      app.post("/review", async (c) => {
+        handlerCalls++;
+        const actorUserId = c.get("user").id;
+        const actorXUserId = c.get("xidLinkRequestActorXUserId");
+        const plan = planXIdLinkRejection(db, {
+          request: { ...readRequest() }, actorUserId, actorXUserId,
+          reason: "actor fixture", now: 20,
+          notificationStatements: [db.insert(notificationOutbox).values({
+            id: "actor-outbox", recipient_user_id: actorUserId,
+            type: "discord_webhook", payload_json: JSON.stringify({ operatorUserId: actorUserId }),
+            delivery_route: "channel", status: "pending", created_at: 20,
+            dedupe_key: "actor-fixture:channel",
+          }).onConflictDoNothing()],
+        });
+        await mutateWithAudit(db, plan);
+        return c.json({ ok: true });
+      });
+      const response = await app.request("/review", { method: "POST" });
+      const audits = sqlite.prepare("SELECT * FROM audit_logs WHERE table_name = 'x_identity_requests' AND target_id = 'actor-fixture'").all();
+      const outbox = sqlite.prepare("SELECT recipient_user_id, payload_json FROM notification_outbox WHERE id = 'actor-outbox'").all();
+      if (scenario.denied) {
+        assert.equal(response.status, scenario.denied, scenario.name);
+        assert.equal((await response.json()).ok, false, scenario.name);
+        assert.equal(handlerCalls, 0, scenario.name);
+        assert.equal(d1.stats.batches, 0, scenario.name);
+        assert.deepEqual(readRequest(), before, scenario.name);
+        assert.equal(audits.length, 0, scenario.name);
+        assert.equal(outbox.length, 0, scenario.name);
+      } else {
+        assert.equal(response.status, 200, scenario.name);
+        assert.deepEqual(await response.json(), { ok: true }, scenario.name);
+        assert.equal(handlerCalls, 1, scenario.name);
+        assert.equal(d1.stats.batches, 1, scenario.name);
+        const after = readRequest();
+        assert.equal(after.status, "rejected", scenario.name);
+        assert.equal(after.decided_by_auth_user_id, scenario.id, scenario.name);
+        assert.equal(after.slot_bind_status, before.slot_bind_status, scenario.name);
+        assert.equal(audits.length, 1, scenario.name);
+        assert.equal(audits[0].actor_user_id, scenario.id, scenario.name);
+        assert.equal(audits[0].actor_x_user_id, scenario.actor, scenario.name);
+        assert.equal(audits[0].operation, "UPDATE", scenario.name);
+        assert.equal(audits[0].retention_class, "long_audit", scenario.name);
+        assert.equal(JSON.parse(audits[0].before_json).status, "pending", scenario.name);
+        assert.equal(JSON.parse(audits[0].after_json).status, "rejected", scenario.name);
+        assert.equal(outbox.length, 1, scenario.name);
+        assert.equal(outbox[0].recipient_user_id, scenario.id, scenario.name);
+        assert.deepEqual(JSON.parse(outbox[0].payload_json), { operatorUserId: scenario.id }, scenario.name);
+      }
+    } finally {
+      sqlite.close();
+    }
+  }
+});
