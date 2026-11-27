@@ -1069,3 +1069,163 @@ test("identity denies win over active X denies (banned before active_x_required)
   const g = guardApp({ user: { ...U("admin"), is_banned: 1 }, activeX: { requireActiveXId: true } });
   assert.equal((await (await g.post()).json()).reason, "banned");
 });
+
+
+test("U04a prototype: version-fenced raw actor snapshot preserves SQLite bytes and legacy decoder output", async () => {
+  const { actorSnapshotFromRow } = await import("@flamenode/server-core/audit/logger");
+  const d1 = createAdminD1();
+  seedBase(d1.sqlite);
+  const sqlite = d1.sqlite;
+
+  // Test-only schema: no production migration or route is changed here.
+  sqlite.exec('ALTER TABLE "user" ADD COLUMN actor_snapshot_version INTEGER NOT NULL DEFAULT 0');
+  sqlite.exec("ALTER TABLE x_users ADD COLUMN actor_snapshot_version INTEGER NOT NULL DEFAULT 0");
+  sqlite.exec(`
+    CREATE TRIGGER u04a_user_actor_snapshot_version
+    AFTER UPDATE OF discord_id, name, active_x_user_id, image ON "user"
+    BEGIN
+      UPDATE "user" SET actor_snapshot_version = actor_snapshot_version + 1 WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER u04a_x_actor_snapshot_version
+    AFTER UPDATE OF x_name, icon_url ON x_users
+    BEGIN
+      UPDATE x_users SET actor_snapshot_version = actor_snapshot_version + 1 WHERE id = NEW.id;
+    END;
+    INSERT INTO x_users (id, x_name, icon_url, approval_status)
+    VALUES ('u04a-x', 'X name', 'https://i/x.png', 'approved');
+    CREATE TABLE audit_actor_snapshots_u04a (
+      id TEXT PRIMARY KEY NOT NULL,
+      discord_id,
+      discord_name,
+      active_x_user_id,
+      user_image,
+      x_name,
+      x_icon_url,
+      user_version INTEGER NOT NULL,
+      x_version INTEGER NOT NULL
+    );
+    CREATE TABLE audit_actor_refs_u04a (
+      audit_id TEXT PRIMARY KEY NOT NULL,
+      snapshot_id TEXT NOT NULL REFERENCES audit_actor_snapshots_u04a(id)
+    );
+    CREATE TABLE u04a_forced_failure (value INTEGER NOT NULL CHECK (value = 1));
+  `);
+
+  const updateUser = sqlite.prepare(
+    'UPDATE "user" SET discord_id = ?, name = ?, active_x_user_id = ?, image = ? WHERE id = ?',
+  );
+  const updateX = sqlite.prepare(
+    "UPDATE x_users SET x_name = ?, icon_url = ? WHERE id = 'u04a-x'",
+  );
+  const sourceSql = sqlite.prepare(`
+    SELECT u.discord_id AS discord_id, u.name AS discord_name,
+           u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url
+    FROM "user" u LEFT JOIN x_users x ON x.id = u.active_x_user_id
+    WHERE u.id = ?
+  `);
+  const versionsSql = sqlite.prepare(`
+    SELECT u.actor_snapshot_version AS user_version,
+           COALESCE(x.actor_snapshot_version, -1) AS x_version
+    FROM "user" u LEFT JOIN x_users x ON x.id = u.active_x_user_id
+    WHERE u.id = ?
+  `);
+  const captureSql = sqlite.prepare(`
+    INSERT INTO audit_actor_snapshots_u04a (
+      id, discord_id, discord_name, active_x_user_id, user_image, x_name, x_icon_url,
+      user_version, x_version
+    )
+    SELECT ?, u.discord_id, u.name, u.active_x_user_id, u.image, x.x_name, x.icon_url,
+           u.actor_snapshot_version, COALESCE(x.actor_snapshot_version, -1)
+    FROM "user" u LEFT JOIN x_users x ON x.id = u.active_x_user_id
+    WHERE u.id = ?
+      AND u.actor_snapshot_version = ?
+      AND COALESCE(x.actor_snapshot_version, -1) = ?
+  `);
+  const sourceBytesSql = sqlite.prepare(`
+    SELECT typeof(u.discord_id) AS discord_id_type, hex(CAST(u.discord_id AS BLOB)) AS discord_id_hex,
+           typeof(u.name) AS discord_name_type, hex(CAST(u.name AS BLOB)) AS discord_name_hex,
+           typeof(u.active_x_user_id) AS active_x_user_id_type, hex(CAST(u.active_x_user_id AS BLOB)) AS active_x_user_id_hex,
+           typeof(u.image) AS user_image_type, hex(CAST(u.image AS BLOB)) AS user_image_hex,
+           typeof(x.x_name) AS x_name_type, hex(CAST(x.x_name AS BLOB)) AS x_name_hex,
+           typeof(x.icon_url) AS x_icon_url_type, hex(CAST(x.icon_url AS BLOB)) AS x_icon_url_hex
+    FROM "user" u LEFT JOIN x_users x ON x.id = u.active_x_user_id
+    WHERE u.id = ?
+  `);
+  const snapshotBytesSql = sqlite.prepare(`
+    SELECT typeof(discord_id) AS discord_id_type, hex(CAST(discord_id AS BLOB)) AS discord_id_hex,
+           typeof(discord_name) AS discord_name_type, hex(CAST(discord_name AS BLOB)) AS discord_name_hex,
+           typeof(active_x_user_id) AS active_x_user_id_type, hex(CAST(active_x_user_id AS BLOB)) AS active_x_user_id_hex,
+           typeof(user_image) AS user_image_type, hex(CAST(user_image AS BLOB)) AS user_image_hex,
+           typeof(x_name) AS x_name_type, hex(CAST(x_name AS BLOB)) AS x_name_hex,
+           typeof(x_icon_url) AS x_icon_url_type, hex(CAST(x_icon_url AS BLOB)) AS x_icon_url_hex
+    FROM audit_actor_snapshots_u04a WHERE id = ?
+  `);
+
+  const invalidUtf8 = new Uint8Array([0xff, 0x80, 0x00, 0xc3]);
+  const cases = [
+    { label: "null-and-no-active-x", discordId: null, discordName: null, activeX: null, userImage: null, xName: "X name", xIcon: null },
+    { label: "empty-and-shadowed-fallback", discordId: "", discordName: "", activeX: "u04a-x", userImage: "user-image", xName: "", xIcon: "" },
+    { label: "unicode", discordId: "雪🙂", discordName: "名前🙂", activeX: "u04a-x", userImage: "画像", xName: "X雪", xIcon: "https://i/雪.png" },
+    { label: "embedded-nul", discordId: "d\\u0000id", discordName: "n\\u0000ame", activeX: "u04a-x", userImage: "img\\u0000tail", xName: "x\\u0000name", xIcon: "icon\\u0000tail" },
+    { label: "invalid-utf8-blob", discordId: invalidUtf8, discordName: invalidUtf8, activeX: "u04a-x", userImage: invalidUtf8, xName: invalidUtf8, xIcon: invalidUtf8 },
+    { label: "large-legacy-value", discordId: "d", discordName: "n", activeX: "u04a-x", userImage: "u".repeat(100_000), xName: "x", xIcon: null },
+  ];
+
+  for (let index = 0; index < cases.length; index++) {
+    const item = cases[index];
+    updateUser.run(item.discordId, item.discordName, item.activeX, item.userImage, "admin-1");
+    updateX.run(item.xName, item.xIcon);
+    const source = sourceSql.get("admin-1");
+    const versions = versionsSql.get("admin-1");
+    const snapshotId = "case-" + index;
+    assert.equal(Number(captureSql.run(
+      snapshotId, "admin-1", versions.user_version, versions.x_version,
+    ).changes), 1, item.label);
+    const snapshot = sqlite.prepare(
+      "SELECT discord_id, discord_name, active_x_user_id, user_image, x_name, x_icon_url FROM audit_actor_snapshots_u04a WHERE id = ?",
+    ).get(snapshotId);
+    assert.equal(
+      JSON.stringify(actorSnapshotFromRow(snapshot)),
+      JSON.stringify(actorSnapshotFromRow(source)),
+      item.label + " canonical five-field JSON",
+    );
+    assert.deepEqual(snapshotBytesSql.get(snapshotId), sourceBytesSql.get("admin-1"), item.label + " raw storage classes/bytes");
+    if (item.label === "empty-and-shadowed-fallback") {
+      assert.equal(actorSnapshotFromRow(snapshot).icon_url, "user-image");
+    }
+    sqlite.prepare("DELETE FROM audit_actor_snapshots_u04a WHERE id = ?").run(snapshotId);
+  }
+
+  // A concurrent actor-field change invalidates the guard-time revision and
+  // cannot create a snapshot row or proceed to resource DML.
+  updateUser.run("before", "Before", "u04a-x", "https://i/before.png", "admin-1");
+  updateX.run("X before", "https://i/before.png");
+  const stale = versionsSql.get("admin-1");
+  updateX.run("X after", "https://i/after.png");
+  assert.equal(Number(captureSql.run(
+    "stale", "admin-1", stale.user_version, stale.x_version,
+  ).changes), 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_actor_snapshots_u04a WHERE id = 'stale'").get().n, 0);
+
+  // The snapshot is inserted inside the same transaction as the audit
+  // reference/resource mutation: a later failure rolls it back. An abandoned
+  // request that never enters the batch leaves no staging row.
+  const current = versionsSql.get("admin-1");
+  sqlite.exec("BEGIN");
+  assert.equal(Number(captureSql.run(
+    "rolled-back", "admin-1", current.user_version, current.x_version,
+  ).changes), 1);
+  assert.throws(() => sqlite.prepare("INSERT INTO u04a_forced_failure VALUES (2)").run());
+  sqlite.exec("ROLLBACK");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_actor_snapshots_u04a WHERE id = 'rolled-back'").get().n, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_actor_snapshots_u04a WHERE id = 'abandoned'").get().n, 0);
+
+  const successVersions = versionsSql.get("admin-1");
+  sqlite.exec("BEGIN");
+  assert.equal(Number(captureSql.run(
+    "kept", "admin-1", successVersions.user_version, successVersions.x_version,
+  ).changes), 1);
+  sqlite.prepare("INSERT INTO audit_actor_refs_u04a (audit_id, snapshot_id) VALUES (?, ?)").run("audit-u04a", "kept");
+  sqlite.exec("COMMIT");
+  assert.equal(sqlite.prepare("SELECT snapshot_id FROM audit_actor_refs_u04a WHERE audit_id = 'audit-u04a'").get().snapshot_id, "kept");
+});
