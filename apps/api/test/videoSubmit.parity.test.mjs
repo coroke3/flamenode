@@ -1212,6 +1212,72 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("U03a SA-088: receipt authorization and late group validation preserve CURRENT order", async () => {
+    const { validateSlotSubmissionAnchor, validateSlotSubmissionGroup } = await import("../src/routes/videos/submit.ts");
+    const { sortSlotsChronologically } = await import("../../../src/lib/utils/slotGroupingCore.ts");
+    const actor = { authUserId: "u_owner", activeXId: "x_owner", approvedXIds: ["x_owner"] };
+    const row = (index, override = {}) => ({
+      id: "preflight_" + index, event_id: "ev_closed", reservation_group_id: "group_submit",
+      reserved_by_user_id: "u_owner", x_user_id: "x_owner", reserved_x_id_snapshot: "x_owner",
+      display_name: "Owner", slot_label: null, start_time: 1000 + 100 * index, sort_order: index,
+      status: "reserved", video_id: null, updated_at: 100, version: 1, ...override,
+    });
+    const receipt = (rows) => ({
+      anchor: rows[0],
+      group: rows.length > 20 ? { kind: "overflow" } : { kind: "ready", rows },
+    });
+    const hidden = "枠が見つかりません。";
+    const stale = "投稿画面を開いた後にActive X IDが変更されました。最新の活動名義を確認してからもう一度投稿してください。";
+    const inconsistent = "連続枠の予約者情報が不整合です。運営へ連絡してください。";
+    const discontinuous = "連続していない枠をまとめて提出できません。";
+    const good = receipt([row(0), row(1)]);
+    const early = [
+      [null, actor, "x_other", { ok: false, message: hidden }],
+      [receipt([row(0, { reserved_by_user_id: "u_notos", x_user_id: "x_notos" })]), actor, "x_other", { ok: false, message: hidden }],
+      [good, actor, "x_other", { ok: false, message: stale }],
+      [good, { ...actor, approvedXIds: [] }, "x_owner", { ok: false, message: "承認済みのX IDを選択してください。" }],
+      [good, actor, " @X_OWNER ", { ok: true, activeXId: "x_owner" }],
+      [receipt([row(0, { reserved_by_user_id: "u_notos" })]), actor, "x_owner", { ok: true, activeXId: "x_owner" }],
+      [receipt(Array.from({ length: 21 }, (_, i) => row(i))), actor, "x_other", { ok: false, message: stale }],
+    ];
+    for (const [r, a, snap, expected] of early) assert.deepEqual(validateSlotSubmissionAnchor(r, a, snap), expected);
+    const cfg = { slot_part_gap_minutes: 15 };
+    const late = [
+      [good, null, "イベントが見つかりません。"],
+      [receipt(Array.from({ length: 21 }, (_, i) => row(i))), cfg, "連続枠の件数が上限を超えています。"],
+      [receipt([row(0), row(1, { reserved_x_id_snapshot: "x_notos", reserved_by_user_id: "u_notos" })]), cfg, "予約グループのX IDスナップショットが一致しません。"],
+      [receipt([row(0), row(1, { reserved_by_user_id: "u_notos" })]), cfg, inconsistent],
+      [receipt([row(0), row(1, { x_user_id: null })]), cfg, inconsistent],
+      [receipt([row(0), row(1, { display_name: "Other" })]), cfg, inconsistent],
+      [receipt([row(0), row(1, { status: "submitted", video_id: "v_other" })]), cfg, "予約中でない枠を含む連続枠は提出できません。"],
+      [receipt([row(0), row(1, { video_id: "v_other" })]), cfg, "連続枠に別の作品が紐づいています。"],
+      [receipt([row(0), row(1, { start_time: 1901 })]), cfg, discontinuous],
+      [receipt([row(0, { start_time: 53999 }), row(1, { start_time: 54000 })]), cfg, discontinuous],
+      [receipt([row(0, { start_time: null }), row(1, { start_time: null, sort_order: 2 })]), cfg, discontinuous],
+      [receipt([row(0), row(1, { start_time: null })]), cfg, discontinuous],
+      [receipt([row(0, { reservation_group_id: null, status: "submitted" })]), cfg, "予約中の枠だけ作品を提出できます。"],
+      [receipt([row(0), row(1, { start_time: 1900 })]), cfg, null],
+      [receipt(Array.from({ length: 20 }, (_, i) => row(i)).reverse()), cfg, null],
+      [receipt([row(0, { start_time: null }), row(1, { start_time: null })]), cfg, null],
+      [receipt([row(0, { reserved_by_user_id: "u_notos" }), row(1, { reserved_by_user_id: "u_notos" })]), cfg, null],
+      [receipt([row(0, { x_user_id: null, reserved_x_id_snapshot: null }), row(1, { x_user_id: null, reserved_x_id_snapshot: null })]), cfg, null],
+      [receipt([row(0, { reservation_group_id: "" })]), cfg, null],
+      [receipt([row(0, { id: "z", start_time: 1000, sort_order: 0 }), row(1, { id: "ä", start_time: 1000, sort_order: 0 }), row(2, { id: "a", start_time: 1000, sort_order: 0 })]), cfg, null],
+    ];
+    for (const [r, e, message] of late) {
+      const before = structuredClone(r);
+      const actual = validateSlotSubmissionGroup(r, actor, e);
+      if (message !== null) assert.deepEqual(actual, { ok: false, message });
+      else {
+        assert.equal(actual.ok, true);
+        assert.deepEqual(actual.rows, sortSlotsChronologically(r.group.rows));
+        assert.equal(actual.groupIdentity.targetXId, "x_owner");
+        assert.equal(actual.groupIdentity.adoptNullRows, r.group.rows.some((x) => x.x_user_id === null));
+      }
+      assert.deepEqual(r, before);
+    }
+  });
+
   test("U03a SA-088: CURRENT reservation group denial order and absolute cap, no writes (including preflight)", async () => {
     const { submitSlotVideo } = await import("../../../src/lib/actions/video/submitSlotVideo.ts");
     const inconsistent = "連続枠の予約者情報が不整合です。運営へ連絡してください。";

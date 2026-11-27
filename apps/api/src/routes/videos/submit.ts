@@ -19,6 +19,8 @@
 import type { VideoSubmitResult } from "@flamenode/contracts";
 import type { slots } from "@flamenode/db/schema";
 import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
+import { canActAsSlotSubmitter, resolveSlotGroupIdentity, resolveSlotSubmissionRelation } from "@flamenode/domain/slots/slotIdentity";
+import { resolveSlotReservationSubject } from "@flamenode/domain/slots/reservationGroups";
 import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@flamenode/domain/video/atomicLimits";
 import { normalizeSoftwareLabels } from "@flamenode/domain/software/labels";
 import {
@@ -237,6 +239,242 @@ export function buildSlotSubmissionReceiptAssertions(receipt: SlotSubmissionRece
     `));
   }
   return assertions;
+}
+
+const SLOT_SUBMIT_REJECT_MESSAGE = "枠が見つかりません。";
+const SLOT_GROUP_REJECT_MESSAGE =
+  "この枠は現在とは別の活動名義で確保されています。Active X IDを切り替えてから操作してください。";
+
+type SlotSubmissionActor = {
+  authUserId: string;
+  activeXId: string | null;
+  approvedXIds: readonly string[];
+};
+
+/** SA-088 early authorization, before form validation and late group errors.
+ * The caller has already run the trusted write guard and resolved slotId.
+ * No receipt field grants permission on its own. No route is mounted here.
+ */
+export function validateSlotSubmissionAnchor(
+  receipt: SlotSubmissionReceipt | null,
+  actor: SlotSubmissionActor,
+  submittedSnapshot: string | null,
+): { ok: true; activeXId: string } | { ok: false; message: string } {
+  if (!receipt) return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
+  const slotRow = receipt.anchor;
+  const relation = resolveSlotSubmissionRelation({
+    reservedByUserId: slotRow.reserved_by_user_id,
+    slotXUserId: slotRow.x_user_id,
+    authUserId: actor.authUserId,
+    activeXId: actor.activeXId,
+  });
+  if (!canActAsSlotSubmitter(relation)) {
+    return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
+  }
+  const snapshot = validateActiveXSnapshot({
+    submittedSnapshot,
+    currentActiveXId: actor.activeXId,
+  });
+  if (!snapshot.ok) return { ok: false, message: snapshot.message };
+  if (!actor.activeXId || !actor.approvedXIds.includes(actor.activeXId)) {
+    return { ok: false, message: "承認済みのX IDを選択してください。" };
+  }
+  return { ok: true, activeXId: actor.activeXId };
+}
+
+const SLOT_SUBMISSION_JST_OFFSET_SEC = 9 * 60 * 60;
+
+function slotSubmissionJstDayBucket(unixSec: number | null): number | null {
+  return unixSec == null || !Number.isFinite(unixSec)
+    ? null
+    : Math.floor((unixSec + SLOT_SUBMISSION_JST_OFFSET_SEC) / (24 * 60 * 60));
+}
+
+function normalizeSlotSubmissionGapSec(gapSec: number): number {
+  return Number.isFinite(gapSec) && gapSec >= 0 ? gapSec : 15 * 60;
+}
+
+// Treat malformed provider timestamps as untimed without mutating source rows.
+function finiteSlotSubmissionStartTime(value: number | null | undefined): number | null {
+  return value != null && Number.isFinite(value) ? value : null;
+}
+
+function sortSlotSubmissionRows<
+  T extends {
+    id?: string | null;
+    start_time: number | null;
+    sort_order?: number | null;
+  },
+>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    // Malformed timestamps must not bypass the order/id tie-breaker via NaN.
+    const aStart = finiteSlotSubmissionStartTime(a.start_time);
+    const bStart = finiteSlotSubmissionStartTime(b.start_time);
+    const aTimed = aStart !== null;
+    const bTimed = bStart !== null;
+    if (aTimed !== bTimed) return aTimed ? -1 : 1;
+    const startDiff = (aStart ?? 0) - (bStart ?? 0);
+    if (startDiff !== 0) return startDiff;
+    const aOrder = a.sort_order != null && Number.isSafeInteger(a.sort_order)
+      ? a.sort_order
+      : 0;
+    const bOrder = b.sort_order != null && Number.isSafeInteger(b.sort_order)
+      ? b.sort_order
+      : 0;
+    const orderDiff = aOrder - bOrder;
+    return orderDiff || (a.id ?? "").localeCompare(b.id ?? "");
+  });
+}
+
+function areSubmissionSlotsInSamePart<
+  T extends { start_time: number | null; sort_order?: number | null },
+>(prev: T, next: T, gapSec = 15 * 60): boolean {
+  if (prev.start_time != null && next.start_time != null) {
+    if (next.start_time < prev.start_time) return false;
+    if (slotSubmissionJstDayBucket(prev.start_time) !== slotSubmissionJstDayBucket(next.start_time)) return false;
+    return next.start_time - prev.start_time <= normalizeSlotSubmissionGapSec(gapSec);
+  }
+  if (prev.start_time == null && next.start_time == null) {
+    return (
+      prev.sort_order != null &&
+      next.sort_order != null &&
+      Number.isSafeInteger(prev.sort_order) &&
+      Number.isSafeInteger(next.sort_order) &&
+      next.sort_order === prev.sort_order + 1
+    );
+  }
+  return false;
+}
+
+/** SA-088 late group preflight: call only AFTER anchor authorization,
+ * form, duplicate/member/event/stage/general-answer/required-field validation.
+ * CURRENT comparator is kept verbatim (local names only) pending coordinated
+ * extraction of the shared slot UI helper; no import across the Next boundary.
+ * Never apply a new deadline or configured max-slots policy to this step.
+ */
+export function validateSlotSubmissionGroup(
+  receipt: SlotSubmissionReceipt,
+  guard: SlotSubmissionActor & { activeXId: string },
+  eventConfig: { slot_part_gap_minutes: number | null } | null,
+): { ok: true; rows: SlotSubmissionReceiptRow[]; groupIdentity: Extract<ReturnType<typeof resolveSlotGroupIdentity>, { ok: true }> } | { ok: false; message: string } {
+  if (!eventConfig) return { ok: false, message: "イベントが見つかりません。" };
+  const slotRow = receipt.anchor;
+  const userId = guard.authUserId;
+  const activeX = guard.activeXId;
+  let submittedSlots: SlotSubmissionReceiptRow[];
+  if (slotRow.reservation_group_id) {
+    if (receipt.group.kind === "overflow") {
+      return { ok: false, message: "連続枠の件数が上限を超えています。" };
+    }
+    const groupRows = sortSlotSubmissionRows(receipt.group.rows);
+    if (groupRows.length > MAX_SLOTS_PER_VIDEO) {
+      return { ok: false, message: "連続枠の件数が上限を超えています。" };
+    }
+    if (!groupRows.some((row) => row.id === slotRow.id)) {
+      return {
+        ok: false,
+        message: "連続枠の予約者情報が不整合です。運営へ連絡してください。",
+      };
+    }
+    const groupSnapshotXId = groupRows[0]?.reserved_x_id_snapshot ?? null;
+    if (
+      groupRows.some(
+        (candidate) => candidate.reserved_x_id_snapshot !== groupSnapshotXId,
+      )
+    ) {
+      return {
+        ok: false,
+        message: "予約グループのX IDスナップショットが一致しません。",
+      };
+    }
+    const subjectResult = resolveSlotReservationSubject(groupRows);
+    if (!subjectResult.ok) {
+      return {
+        ok: false,
+        message: "連続枠の予約者情報が不整合です。運営へ連絡してください。",
+      };
+    }
+    const subject = subjectResult.subject;
+    const subjectRelation = resolveSlotSubmissionRelation({
+      reservedByUserId: subject.reservedByUserId,
+      slotXUserId: subject.xUserId,
+      authUserId: userId,
+      activeXId: activeX,
+    });
+    if (!canActAsSlotSubmitter(subjectRelation)) {
+      return { ok: false, message: "枠が見つかりません。" };
+    }
+    if (subject.xUserId) {
+      if (!guard.approvedXIds.includes(subject.xUserId)) {
+        return { ok: false, message: "承認済みのX IDを選択してください。" };
+      }
+      if (activeX && subject.xUserId !== activeX) {
+        return {
+          ok: false,
+          message: "投稿主体のX IDは予約時のIDに固定されています。",
+        };
+      }
+    }
+    if (groupRows.some((row) => row.status !== "reserved")) {
+      return { ok: false, message: "予約中でない枠を含む連続枠は提出できません。" };
+    }
+    if (!groupRows.every((row) => row.id === slotRow.id || row.video_id === slotRow.video_id)) {
+      return { ok: false, message: "連続枠に別の作品が紐づいています。" };
+    }
+    submittedSlots = groupRows;
+  } else {
+    submittedSlots = [slotRow];
+  }
+
+  if (submittedSlots.length === 0 || submittedSlots.length > MAX_SLOTS_PER_VIDEO) {
+    return { ok: false, message: "同時に更新する枠数が上限を超えています。" };
+  }
+  if (submittedSlots.some((row) => row.status !== "reserved")) {
+    return { ok: false, message: "予約中の枠だけ作品を提出できます。" };
+  }
+  const slotGapSec = (eventConfig.slot_part_gap_minutes ?? 15) * 60;
+  const orderedSubmittedSlots = sortSlotSubmissionRows(submittedSlots);
+  for (let index = 1; index < orderedSubmittedSlots.length; index += 1) {
+    if (
+      !areSubmissionSlotsInSamePart(
+        orderedSubmittedSlots[index - 1],
+        orderedSubmittedSlots[index],
+        slotGapSec,
+      )
+    ) {
+      return { ok: false, message: "連続していない枠をまとめて提出できません。" };
+    }
+  }
+
+  const groupIdentity = resolveSlotGroupIdentity({
+    reservedByUserIds: submittedSlots.map((row) => row.reserved_by_user_id),
+    slotXUserIds: submittedSlots.map((row) => row.x_user_id),
+    authUserId: userId,
+    activeXId: guard.activeXId,
+    allowAuthMismatchWhenXIdMatches: true,
+  });
+  if (!groupIdentity.ok) {
+    if (
+      groupIdentity.reason === "mixed_non_null_x" ||
+      groupIdentity.reason === "different_active_x"
+    ) {
+      return { ok: false, message: SLOT_GROUP_REJECT_MESSAGE };
+    }
+    return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
+  }
+  for (const row of submittedSlots) {
+    const relation = resolveSlotSubmissionRelation({
+      reservedByUserId: row.reserved_by_user_id,
+      slotXUserId: row.x_user_id,
+      authUserId: userId,
+      activeXId: guard.activeXId,
+    });
+    if (!canActAsSlotSubmitter(relation)) {
+      return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
+    }
+  }
+
+  return { ok: true, rows: submittedSlots, groupIdentity };
 }
 
 type DbReadPreflightInternalResult =
