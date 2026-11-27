@@ -44,8 +44,8 @@ async function loadGuard(
          s.cost_guard_exception_until AS cost_guard_exception_until,
          s.cost_guard_exception_features_json AS cost_guard_exception_features_json,
          CASE WHEN s.id IS NULL THEN 0 ELSE 1 END AS has_settings,
-         t.name AS tpl_name, CASE WHEN length(t.settings_json) <= ? THEN t.settings_json END AS tpl_settings,
-         length(t.settings_json) AS tpl_size
+         t.name AS tpl_name, CASE WHEN length(CAST(t.settings_json AS BLOB)) <= ? THEN t.settings_json END AS tpl_settings,
+         length(CAST(t.settings_json AS BLOB)) AS tpl_size
        FROM "user" u
        LEFT JOIN system_settings s ON s.id = 'default'
        LEFT JOIN event_templates t ON t.id = ? AND ? <> ''

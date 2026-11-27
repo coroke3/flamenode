@@ -692,6 +692,39 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(unknown.body.templateName, null);
     assert.equal(unknown.body.templateSettingsJson, null);
     assert.equal((await get("/api/admin-read/events/new?template=tpl-big", "root")).body.templateSettingsJson, null, "> 64 KiB not returned");
+    // #924: SQLite length(TEXT) counts codepoints and stops at raw NUL.
+    // Verify the raw snapshot's UTF-8 boundary through the mounted GET, not
+    // only the response parser. The template name and list guard are unchanged.
+    const limit = 64 * 1024;
+    const originalSettings = sqlite.prepare("SELECT settings_json FROM event_templates WHERE id = ?").get("tpl2").settings_json;
+    const setTemplateSettings = sqlite.prepare("UPDATE event_templates SET settings_json = ? WHERE id = ?");
+    try {
+      const prefix = '{"v":"';
+      const suffix = '"}';
+      const overhead = Buffer.byteLength(prefix + suffix, "utf8");
+      const cases = [];
+      for (const unit of ["x", "é", "あ", "🚀"]) {
+        for (const size of [limit - 1, limit, limit + 1]) {
+          const padding = size - overhead;
+          const width = Buffer.byteLength(unit, "utf8");
+          const raw = prefix + unit.repeat(Math.floor(padding / width)) + "x".repeat(padding % width) + suffix;
+          assert.equal(Buffer.byteLength(raw, "utf8"), size);
+          cases.push([raw, size <= limit ? raw : null]);
+        }
+      }
+      cases.push(['{"v":"\\u0000"}', '{"v":"\\u0000"}']);
+      cases.push(["\u0000" + "x".repeat(limit), null]);
+      for (const [raw, expected] of cases) {
+        setTemplateSettings.run(raw, "tpl2");
+        const result = await get("/api/admin-read/events/new?template=tpl2", "root");
+        assert.equal(result.body.guardOk, true);
+        assert.equal(result.body.templateName, "Template 2");
+        assert.equal(result.body.templateSettingsJson, expected, `snapshot bytes=${Buffer.byteLength(raw, "utf8")}`);
+        assert.equal(result.stats.statements, 3);
+      }
+    } finally {
+      setTemplateSettings.run(originalSettings, "tpl2");
+    }
     assert.equal((await get("/api/admin-read/events/new", "root")).body.templateId, "");
     try {
       for (const [sets, expected] of [
