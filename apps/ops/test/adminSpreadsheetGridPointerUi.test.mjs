@@ -2195,3 +2195,43 @@ test("MIG-0737 U01 formula navigation: late input after Escape cannot open a new
     assertNoEffects(ui);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0737 U01 formula navigation: batched range copy waits for the committed selection, including a clamped collapse", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const copied = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true,
+    value: { writeText: async text => copied.push(text) },
+  });
+  try {
+    for (const [endpoint, pressed, expected, expectedValue] of [
+      ["1:1", "Enter", "2:1", "Gamma"],
+      ["2:1", "Enter", "2:1", "Gamma"],
+      ["1:1", "Tab", "1:2", "two"],
+      ["1:2", "Tab", "1:2", "two"],
+    ]) {
+      const ui = await mount();
+      try {
+        copied.length = 0;
+        await select(ui, "0:0");
+        await select(ui, endpoint, { shiftKey: true });
+        assert.ok(selected(ui).length > 1);
+        const formula = formulaInput(ui);
+        await React.act(async () => formula.focus());
+        const move = new dom.window.KeyboardEvent("keydown", { key: pressed, bubbles: true, cancelable: true });
+        const copy = new dom.window.KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true });
+        await React.act(async () => { formula.dispatchEvent(move); formula.dispatchEvent(copy); });
+        assert.equal(move.defaultPrevented, true);
+        assert.equal(copy.defaultPrevented, true);
+        assert.deepEqual(copied, [], "obsolete range must not reach clipboard");
+        assert.deepEqual(selected(ui), [expected]);
+        assert.equal(document.activeElement, formula);
+        assert.equal((await key(formula, "c", { metaKey: true })).defaultPrevented, true);
+        assert.deepEqual(copied, [expectedValue]);
+        assertNoEffects(ui);
+      } finally { await ui.cleanup(); }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});

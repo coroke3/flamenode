@@ -306,7 +306,8 @@ export function AdminSpreadsheetEditableGrid({
     const mod = event.ctrlKey || event.metaKey;
     if (mod && event.key === "c") {
       event.preventDefault();
-      if (isCurrent() && displayedPage.current === data) void copyRange();
+      // The previous rectangle is no longer authoritative until navigation commits.
+      if (!formulaNavigationPending.current && isCurrent() && displayedPage.current === data) void copyRange();
       return;
     }
     // Bulk paste/cut and history need the separate CURRENT lifecycle and API gates.
@@ -334,11 +335,15 @@ export function AdminSpreadsheetEditableGrid({
       if (formulaNavigationPending.current) return;
       const navigation = event.key === "Enter" ? "Enter" : event.shiftKey ? "ShiftTab" : "Tab";
       const next = moveSpreadsheetFocus(visibleFocus, navigation, rows.length, columns.length);
+      const moved = next.row !== visibleFocus.row || next.col !== visibleFocus.col;
+      // A boundary-clamped movement can still collapse a multi-cell rectangle.
+      if (moved || next.row !== visibleAnchor.row || next.col !== visibleAnchor.col) {
+        formulaNavigationPending.current = true;
+      }
       setAnchorCell(next);
       setFocusedCell(next);
       // Keep focus on the formula input, as CURRENT does without a draft.
-      if (next.row !== visibleFocus.row || next.col !== visibleFocus.col) {
-        formulaNavigationPending.current = true;
+      if (moved) {
         tableRef.current?.querySelector<HTMLTableCellElement>(`[data-grid-cell="${next.row}:${next.col}"]`)
           ?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
       }
