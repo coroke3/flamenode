@@ -7,7 +7,7 @@ import { JSDOM } from "jsdom";
 import { DeleteEventTemplateButton } from "../.test-dist/apps/ops/src/routes/admin/DeleteEventTemplateButton.js";
 import {
   deleteAdminEventTemplate, eventDisplayState, eventIndexQuery, formatEventUnix,
-  readAdminEvents, readAdminEventTemplates,
+  readAdminEvents, readAdminEventTemplates, readAdminEventNew,
 } from "../.test-dist/apps/ops/src/api/adminEvents.js";
 import {
   addEventsToGroup,
@@ -48,6 +48,21 @@ const templates = {
     id: "t1", name: "Example", description: null, source_event_id: null,
     updated_at: 100,
   }],
+};
+const eventNew = {
+  ...templates, userId: "admin-account", templateId: "t1", templateName: "Example",
+  templateSettingsJson: JSON.stringify({
+    event_type: "collabo", slot_type: "time", slot_visibility_mode: "anonymous",
+    explanation: "Template information", youtube_description_template: "  First\r\nSecond  ",
+    allow_user_video_edits: 1, user_video_edit_permission_keys_json: '["title"]',
+    custom_question_definitions: [
+      { question_key: "q_template", label: "Choice", type: "select", required: true,
+        options_json: '[" A ","B","A"]', is_active: true, visibility: "review" },
+      { question_key: "stage_permission_1", label: "Stage", type: "textarea", required: false,
+        options_json: null, is_active: true, visibility: "private" },
+    ],
+  }),
+  formInitial: "deferred",
 };
 
 async function withDom(url, fn) {
@@ -145,6 +160,106 @@ test("MIG-0728 U02: template read rejects malformed and guard-denied payloads ar
   assert.deepEqual(await readAdminEventTemplates(async () => json(200, { guardOk: false, templates: [] })),
     { status: "ok", data: { guardOk: false, templates: [] } });
   assert.deepEqual(await readAdminEventTemplates(async () => json(401, {})), { status: "anonymous" });
+});
+
+test("MIG-0721 U03a: new-event read encodes selection and preserves CURRENT template defaults and owner", async () => {
+  const body = { ...eventNew, templateId: "pick &/?#日" };
+  const controller = new AbortController();
+  const seen = [];
+  const result = await readAdminEventNew(" \tpick &/?#日\n", async (path, init) => {
+    seen.push([path, init]);
+    return json(200, body);
+  }, controller.signal);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0][0], "/api/admin-read/events/new?template=pick+%26%2F%3F%23%E6%97%A5");
+  assert.equal(seen[0][1].method, "GET");
+  assert.equal(seen[0][1].credentials, "same-origin");
+  assert.equal(seen[0][1].cache, "no-store");
+  assert.equal(seen[0][1].headers.accept, "application/json");
+  assert.equal(seen[0][1].signal, controller.signal);
+  assert.equal(result.status, "ok");
+  const { formProps, ...dto } = result.data;
+  assert.deepEqual(dto, body, "retain the validated read DTO, including the deferred marker");
+  assert.equal(formProps.templateId, body.templateId);
+  assert.equal(formProps.draftAuthUserId, "admin-account");
+  assert.equal(formProps.initial.event_type, "collabo");
+  assert.equal(formProps.initial.explanation, "Template information");
+  assert.equal(formProps.initial.youtube_description_template, "First\nSecond");
+  assert.equal(formProps.initial.user_video_edit_permission_keys_json, '["title"]');
+  assert.equal(formProps.initial.slot_visibility_mode, "anonymous");
+  assert.equal(formProps.initial.visibility_status, "private");
+  for (const key of ["start_time", "end_time", "entry_start_time", "entry_end_time"]) {
+    assert.equal(formProps.initial[key], null);
+  }
+  assert.deepEqual(formProps.initial.custom_questions, [{
+    clientId: "q_template", question_key: "q_template", label: "Choice", description: "",
+    type: "select", required: true, options: ["A", "B"], placeholder: "", enabled: true,
+  }], "the canonical helper filters stage-permission questions and normalizes choices");
+});
+
+test("MIG-0721 U03a: missing, unknown and invalid snapshots retain selection metadata without initial values", async () => {
+  const cases = [
+    [null, "", null, null],
+    [" \t ", "", null, null],
+    [" missing ", "missing", null, null],
+    ["t1", "t1", "Unavailable settings", null],
+    ["t1", "t1", "Malformed settings", "{"],
+    ["t1", "t1", "Invalid snapshot", '{"event_type":"unknown","slot_type":"time"}'],
+  ];
+  for (const [selection, templateId, templateName, templateSettingsJson] of cases) {
+    const body = { ...eventNew, templateId, templateName, templateSettingsJson };
+    const result = await readAdminEventNew(selection, async (path) => {
+      assert.equal(path, "/api/admin-read/events/new" + (templateId ? "?template=" + templateId : ""));
+      return json(200, body);
+    });
+    assert.deepEqual(result, { status: "ok", data: {
+      ...body, formProps: {
+        initial: undefined, templateId: templateId || undefined, draftAuthUserId: "admin-account",
+      },
+    } });
+  }
+});
+
+test("MIG-0721 U03a: guard-denied template lists keep selected settings and server draft ownership", async () => {
+  const body = { ...eventNew, guardOk: false, templates: [], userId: "other-admin" };
+  const result = await readAdminEventNew("t1", async () => json(200, body));
+  assert.equal(result.status, "ok", "the list guard is not an HTTP authorization failure");
+  const { formProps, ...dto } = result.data;
+  assert.deepEqual(dto, body);
+  assert.equal(formProps.templateId, "t1");
+  assert.equal(formProps.draftAuthUserId, "other-admin");
+  assert.equal(formProps.initial.event_type, "collabo");
+  assert.equal(formProps.initial.visibility_status, "private");
+});
+
+test("MIG-0721 U03a: HTTP denial, malformed DTOs and aborted reads never yield form props", async () => {
+  let unauthorizedBodyReads = 0;
+  const unauthorized = json(401, eventNew);
+  unauthorized.json = async () => { unauthorizedBodyReads += 1; return eventNew; };
+  assert.deepEqual(await readAdminEventNew("t1", async () => unauthorized), { status: "anonymous" });
+  assert.equal(unauthorizedBodyReads, 0);
+  for (const [response, expected] of [
+    [json(403, { ...eventNew, redirect: "/dashboard", reason: "admin_required" }),
+      { status: "forbidden", redirect: "/dashboard", reason: "admin_required" }],
+    [json(403, { ...eventNew, redirect: "https://example.test" }), { status: "forbidden" }],
+    [new Response("{", { status: 403 }), { status: "forbidden" }],
+    [json(404, eventNew), { status: "notFound" }],
+    [json(501, eventNew), { status: "unsupported" }],
+    [json(503, eventNew), { status: "unavailable" }],
+    [new Response("{", { status: 200 }), { status: "unavailable" }],
+    [json(200, { ...eventNew, userId: null }), { status: "unavailable" }],
+    [json(200, { ...eventNew, formInitial: {} }), { status: "unavailable" }],
+    [json(200, { ...eventNew, templateSettingsJson: {} }), { status: "unavailable" }],
+  ]) {
+    assert.deepEqual(await readAdminEventNew("t1", async () => response), expected);
+  }
+  assert.deepEqual(await readAdminEventNew("t1", async () => { throw new Error("offline"); }),
+    { status: "unavailable" });
+  const controller = new AbortController();
+  const late = json(200, eventNew);
+  late.json = async () => { controller.abort(); return eventNew; };
+  assert.deepEqual(await readAdminEventNew("t1", async () => late, controller.signal),
+    { status: "unavailable" }, "an abort during JSON decoding cannot expose a completed form model");
 });
 
 test("MIG-0728 U02: delete enforces HTTP authentication, encoded ID, and strict success", async () => {

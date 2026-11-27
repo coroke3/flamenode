@@ -6,9 +6,12 @@
 import {
   AdminEventsResponseSchema,
   AdminEventTemplatesResponseSchema,
+  AdminEventNewResponseSchema,
   type AdminEventsResponse,
   type AdminEventTemplatesResponse,
+  type AdminEventNewResponse,
 } from "@flamenode/contracts";
+import { parseEventTemplateSnapshot, snapshotToFormInitial } from "@flamenode/domain/eventTemplates";
 import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 
 type Parser<T> = { safeParse(input: unknown): { success: true; data: T } | { success: false } };
@@ -49,6 +52,38 @@ export function readAdminEventTemplates(
   signal?: AbortSignal,
 ): Promise<OpsResult<AdminEventTemplatesResponse>> {
   return readAdmin<AdminEventTemplatesResponse>("events/templates", AdminEventTemplatesResponseSchema, fetchFn, signal);
+}
+
+/** MIG-0721 U03a: existing admin new-event read with CURRENT template defaults. */
+export async function readAdminEventNew(
+  template: string | null = null,
+  fetchFn: OpsFetch = defaultFetch,
+  signal?: AbortSignal,
+): Promise<OpsResult<AdminEventNewResponse & {
+  formProps: {
+    initial: ReturnType<typeof snapshotToFormInitial> | undefined;
+    templateId: string | undefined;
+    draftAuthUserId: string;
+  };
+}>> {
+  const templateId = typeof template === "string" ? template.trim() : "";
+  const query = templateId ? "?" + new URLSearchParams({ template: templateId }) : "";
+  const response = await readAdmin<AdminEventNewResponse>(
+    "events/new" + query, AdminEventNewResponseSchema, fetchFn, signal,
+  );
+  if (response.status !== "ok") return response;
+  const data = response.data;
+  // CURRENT gates the list, not the separately selected template, on guardOk.
+  const snapshot = data.templateId && data.templateSettingsJson !== null
+    ? parseEventTemplateSnapshot(data.templateSettingsJson) : null;
+  return { status: "ok", data: {
+    ...data,
+    formProps: {
+      initial: snapshot ? snapshotToFormInitial(snapshot) : undefined,
+      templateId: data.templateId || undefined,
+      draftAuthUserId: data.userId,
+    },
+  } };
 }
 
 export type TemplateDeleteResult =
