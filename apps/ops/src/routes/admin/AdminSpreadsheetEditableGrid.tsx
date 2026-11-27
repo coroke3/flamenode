@@ -205,7 +205,8 @@ export function AdminSpreadsheetEditableGrid({
     const column = columns[colIndex];
     const row = rows[rowIndex];
     const pk = row ? primaryKey(row, primaryKeys) : null;
-    if (!canMutate || inFlight.current !== null || !isCurrent() || selectionConflict || !column || !row || !pk ||
+    if (!canMutate || inFlight.current !== null || !isCurrent() || displayedPage.current !== data ||
+        liveSelection.current !== null || selectionConflict || !column || !row || !pk ||
         !column.editable || column.pk !== 0 || column.generated) return false;
     const value = cellValue(row[column.name]);
     setCellEdit({ id: ++nextEditId.current, rowIndex, column: column.name, value, key, pk,
@@ -809,7 +810,7 @@ export function AdminSpreadsheetEditableGrid({
                       textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280,
                       fontFamily: "var(--font-mono, ui-monospace, monospace)", wordBreak: "break-word",
                     }}>{value}</span>{canEdit ? (
-                      <button type="button" disabled={!canMutate || selectionConflict} aria-label={String(ri + 1) + "行 " + c.name + " を編集"}
+                      <button type="button" disabled={!canMutate || currentSelection !== null || selectionConflict} aria-label={String(ri + 1) + "行 " + c.name + " を編集"}
                         onClick={() => startCellEdit(ri, columns.indexOf(c))}>編集</button>
                     ) : null}</>
                   )}</td>

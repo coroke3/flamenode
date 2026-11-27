@@ -1733,3 +1733,44 @@ test("MIG-0737 U01 F2: pending ordinary write cannot open a second editor and hi
     assert.equal(requests.length, 2);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0737 U01 F2: mixed keyboard and edit-button entry cannot retarget a live draft", async () => {
+  const requests = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: async (_, init) => { requests.push(init); return successfulWrite(); },
+    onRefresh: () => {} });
+  try {
+    const firstCell = await selectCell(ui, "1:1");
+    const secondCell = gridCell(ui, "2:1");
+    const secondButton = secondCell.querySelector("button");
+    assert.ok(secondButton && !secondButton.disabled);
+    const f2 = new dom.window.KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+    await React.act(async () => { firstCell.dispatchEvent(f2); secondButton.click(); });
+    assert.equal(f2.defaultPrevented, true);
+    const editor = firstCell.querySelector("input");
+    assert.ok(editor && document.activeElement === editor);
+    assert.equal(editor.value, "Beta");
+    assert.deepEqual(selectedCells(ui), ["1:1"]);
+    assert.equal(secondCell.querySelector("input"), null);
+    assert.equal(secondCell.querySelector("button").disabled, true);
+    await React.act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(editor, "Kept draft");
+      editor.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      secondCell.querySelector("button").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(editor.value, "Kept draft");
+    assert.ok(document.activeElement === editor);
+    assert.equal(secondCell.querySelector("input"), null);
+    assert.equal(requests.length, 0);
+    await clickButton(ui, "セルを保存");
+    await flush();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[0].body).primaryKey, { id: "b2" });
+    assert.equal(JSON.parse(requests[0].body).value, "Kept draft");
+    await selectCell(ui, "2:1");
+    await openCellEditor(secondCell);
+    assert.equal(secondCell.querySelector("input").value, "Gamma");
+    assert.equal(requests.length, 1);
+  } finally { await ui.cleanup(); }
+});
