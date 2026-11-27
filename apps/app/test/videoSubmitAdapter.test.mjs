@@ -911,3 +911,37 @@ test("MIG-0714 B03R: confirmation and side preview preserve CURRENT summaries, c
   const source = readFileSync(new URL("../src/components/forms/VideoFormReviewPanels.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\bfetch\s*\(|localStorage|indexedDB|from\s+["']next(?:\/|["'])|@\/lib\/actions/);
 });
+
+test("MIG-0714 B04: complete form preserves all-mode native controls, hidden wizard fields and repeated event answers", async () => {
+  const React = await import("react"), { renderToStaticMarkup } = await import("react-dom/server");
+  const { MemoryRouter } = await import("react-router-dom"), { JSDOM } = await import("jsdom");
+  const { VideoForm } = await import("../.test-dist/apps/app/src/components/forms/VideoForm.js");
+  const members = videoSectionDefaults().members;
+  const question = { id: "choice", question_key: "choice", label: "Choice", type: "checkbox", options: ["A", "B"], required: false };
+  const events = ["event-a", "event-b"].map(id => ({ id, title: id, parts_json: '["Part A"]', custom_questions: [question], video_form_settings_json: '{"stage_permission_fields":[{"id":"rights","label":"Rights","required":false}]}' }));
+  for (const mode of ["free", "slot", "edit"]) {
+    const initial = { display_name: "Alice", creator_x_user_id: "alice", title: "Native title", youtube_url: "https://youtu.be/dQw4w9WgXcQ", updated_at: 42,
+      intro_comment: "Native introduction", is_collab: true, members, event_ids: events.map(event => event.id), part: "Part A",
+      custom_answers: { "event-a:choice": ["A", "B", "orphan"], "event-b:choice": ["B"] } };
+    const markup = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(VideoForm, {
+      mode, initial, activeXId: "@ALICE", activeXSnapshot: "@Snapshot", eventOptions: events,
+      slotId: mode === "slot" ? "slot-1" : undefined, videoId: mode === "edit" ? "video-1" : undefined, editPrivilegeMode: "admin",
+      submit: async () => assert.fail("render does not submit"), onRefresh: () => assert.fail("render does not refresh"),
+      searchXUsers: async () => assert.fail("render does not search"), applyPermissionBatch: async () => assert.fail("render does not change permissions"),
+    })));
+    const dom = new JSDOM(markup);
+    try {
+      const form = dom.window.document.querySelector("form"), data = new dom.window.FormData(form);
+      assert.equal(dom.window.document.querySelectorAll("form").length, 1);
+      assert.equal(form.noValidate, mode !== "edit"); assert.equal(form.querySelectorAll("[hidden].vform-stepPanel").length, mode === "edit" ? 0 : 3);
+      assert.equal(data.get("title"), initial.title); assert.equal(data.get("intro_comment"), initial.intro_comment);
+      assert.equal(data.get("event_ids"), "event-a,event-b"); assert.equal(data.get("part"), "Part A");
+      assert.deepEqual(JSON.parse(data.get("members_json")), members); assert.deepEqual(data.getAll("is_collab"), ["false", "true"]);
+      assert.deepEqual(data.getAll("custom_answer:event-a:choice"), ["A", "B"]); assert.deepEqual(data.getAll("custom_answer:event-b:choice"), ["B"]);
+      assert.equal(data.get("active_x_snapshot"), mode === "edit" ? null : "snapshot");
+      assert.equal(data.get("revision"), mode === "edit" ? "42" : null);
+      assert.equal(data.get("edit_privilege_mode"), mode === "edit" ? "admin" : null);
+      assert.equal(data.get("slot_id"), mode === "slot" ? "slot-1" : null); assert.equal(data.get("video_id"), mode === "edit" ? "video-1" : null);
+    } finally { dom.window.close(); }
+  }
+});
