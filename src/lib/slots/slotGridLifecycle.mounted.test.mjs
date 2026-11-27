@@ -28,6 +28,8 @@ const h = React.createElement;
 const requests = [];
 const refreshes = [];
 const redirects = [];
+const controlErrors = new WeakSet();
+const controlRethrows = [];
 const router = { refresh() { refreshes.push("refresh"); } };
 const action = name => fd => {
   let resolve, reject;
@@ -42,7 +44,15 @@ const mocks = {
   "react-dom": ReactDOM,
   "react/jsx-runtime": jsxRuntime,
   "next/link": ({ children, ...props }) => h("a", props, children),
-  "next/navigation": { unstable_rethrow() {}, usePathname: () => "/event/a/slots", useRouter: () => router },
+  "next/navigation": {
+    unstable_rethrow(error) {
+      if (controlErrors.has(error)) {
+        controlRethrows.push(error);
+        throw error;
+      }
+    },
+    usePathname: () => "/event/a/slots", useRouter: () => router,
+  },
   "@/components/ui/Icon": { Icon: visual },
   "@/components/ui/ConfirmDialog": {
     ConfirmDialog: ({ open, title, confirmLabel, onConfirm, onCancel }) =>
@@ -74,7 +84,8 @@ const mocks = {
   "./SlotGrid.module.css": {},
 };
 const source = await readFile(new URL("../../components/event/SlotGrid.tsx", import.meta.url), "utf8");
-const compiled = ts.transpileModule(source, {
+// Expose the real private helper only in this isolated test module.
+const compiled = ts.transpileModule(source + "\nexport { runSlotAction };\n", {
   fileName: "SlotGrid.tsx",
   compilerOptions: {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
@@ -94,7 +105,34 @@ vm.runInNewContext(compiled.outputText, {
   Node: dom.window.Node, CustomEvent: dom.window.CustomEvent,
   FormData, console, setInterval, clearInterval, setTimeout, clearTimeout,
 }, { filename: "SlotGrid.cjs" });
-const { SlotGrid } = exported.exports;
+const { SlotGrid, runSlotAction } = exported.exports;
+
+test("SEC-921: retired control exceptions stop before unstable_rethrow, current control exceptions preserve identity", async () => {
+  for (const kind of ["NEXT_REDIRECT", "NEXT_NOT_FOUND", "NEXT_FORBIDDEN", "NEXT_UNAUTHORIZED", "transport"]) {
+    for (const retired of [false, true]) {
+      const error = new Error(kind);
+      if (kind !== "transport") controlErrors.add(error);
+      const start = controlRethrows.length;
+      let active = true, communicationErrors = 0, reject;
+      const result = runSlotAction(
+        () => new Promise((_resolve, no) => { reject = no; }),
+        () => { communicationErrors++; },
+        () => active,
+      );
+      if (retired) active = false;
+      reject(error);
+      if (!retired && kind !== "transport") {
+        await assert.rejects(result, (received) => received === error);
+        assert.equal(controlRethrows.length, start + 1);
+      } else {
+        assert.equal(await result, null);
+        assert.equal(controlRethrows.length, start);
+      }
+      assert.equal(communicationErrors, !retired && kind === "transport" ? 1 : 0);
+    }
+  }
+  assert.equal(await runSlotAction(async () => "current", () => assert.fail("unexpected error"), () => true), "current");
+});
 
 function slot(id, sort_order, owned = false) {
   return {
@@ -170,12 +208,16 @@ function assertNoPrivateActionUi(container) {
 }
 
 for (const name of ["reserve", "release", "extend", "merge"]) {
-  for (const boundary of ["bfcache-null-X", "pagehide-null-X", "active-X", "event-unmount", "current-control"]) {
+  for (const boundary of [
+    "bfcache-null-X", "pagehide-null-X", "active-X", "event-unmount", "current-control",
+    "control-bfcache", "control-event-unmount", "control-prop-only",
+  ]) {
     test("SEC-921 mounted SlotGrid: " + name + " / " + boundary, async () => {
       const container = document.createElement("div");
       document.body.appendChild(container);
       const root = createRoot(container);
       const start = requests.length, refreshStart = refreshes.length, redirectStart = redirects.length;
+      const controlStart = controlRethrows.length;
       const storage = dom.window.localStorage;
       storage.clear();
       storage.setItem("fn:lastSlotDisplayName", "legacy private");
@@ -200,7 +242,7 @@ for (const name of ["reserve", "release", "extend", "merge"]) {
           // event plus replacement props model the client observation of that
           // transition, not the actual Auth.js or browser navigation itself.
           await settle(() => {
-            if (boundary === "bfcache-null-X") persistedPageShow();
+            if (boundary === "bfcache-null-X" || boundary === "control-bfcache") persistedPageShow();
             if (boundary === "pagehide-null-X") {
               persistedPageHide();
               // The isolated child still receives old slot props. The parent
@@ -209,8 +251,8 @@ for (const name of ["reserve", "release", "extend", "merge"]) {
             }
             if (boundary === "active-X") window.dispatchEvent(new dom.window.Event(activeXChanged));
             root.render(h(SlotGrid, {
-              key: boundary === "event-unmount" ? "b" : "a",
-              ...props(freshSlots(), boundary === "active-X" ? "new-x" : null),
+              key: boundary === "event-unmount" || boundary === "control-event-unmount" ? "b" : "a",
+              ...props(freshSlots(), boundary === "active-X" || boundary === "control-prop-only" ? "new-x" : null),
             }));
             if (boundary === "pagehide-null-X") persistedPageShow();
           });
@@ -220,12 +262,18 @@ for (const name of ["reserve", "release", "extend", "merge"]) {
           await settle(() => {
             if (boundary === "bfcache-null-X") pending.resolve({ ok: true, slotId: "free", groupSize: 1 });
             else if (boundary === "active-X") pending.resolve({ ok: false, reason: "guard", message: "previous viewer private name" });
-            else pending.reject(new Error("previous viewer transport error"));
+            else if (boundary.startsWith("control-")) {
+              // Only the JS action rejection is modeled, not the Next transport.
+              const control = new Error("NEXT_REDIRECT");
+              controlErrors.add(control);
+              pending.reject(control);
+            } else pending.reject(new Error("previous viewer transport error"));
           });
           pending = null;
           assertNoPrivateActionUi(container);
           assert.equal(refreshes.length, refreshStart, "retired callback must not refresh successor");
           assert.equal(redirects.length, redirectStart, "retired callback must not navigate successor");
+          assert.equal(controlRethrows.length, controlStart, "retired JS action rejection must not reach unstable_rethrow");
           await click(container.querySelector('button[aria-label="next-free を確保"]'), "new viewer reserve");
           assert.equal(container.querySelector("#reserve-display-name").value, "", "new viewer must not inherit name");
         }

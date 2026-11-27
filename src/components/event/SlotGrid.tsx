@@ -121,10 +121,13 @@ const COMMUNICATION_ERROR_MESSAGE =
 async function runSlotAction<T>(
   action: () => Promise<T>,
   onCommunicationError: () => void,
+  isCurrent: () => boolean,
 ): Promise<T | null> {
   try {
     return await action();
   } catch (error) {
+    // An obsolete action must not rethrow a control exception into the successor.
+    if (!isCurrent()) return null;
     // NEXT_REDIRECT / notFound / forbidden / unauthorized など Next の制御例外は再 throw する。
     unstable_rethrow(error);
     onCommunicationError();
@@ -268,7 +271,9 @@ export function SlotGrid({
     [router],
   );
 
-  React.useEffect(() => {
+  // Retire the previous committed viewer before the next paint, including
+  // a keyed unmount. Passive cleanup alone leaves a commit-to-effect gap.
+  React.useLayoutEffect(() => {
     const clearViewerPrivateUi = () => {
       viewerGeneration.current += 1;
       setError(null);
@@ -487,7 +492,7 @@ export function SlotGrid({
         if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
-      });
+      }, () => submittedGeneration === viewerGeneration.current);
       if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
@@ -526,7 +531,7 @@ export function SlotGrid({
         if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
-      });
+      }, () => submittedGeneration === viewerGeneration.current);
       if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
@@ -559,7 +564,7 @@ export function SlotGrid({
         if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
-      });
+      }, () => submittedGeneration === viewerGeneration.current);
       if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
@@ -597,7 +602,7 @@ export function SlotGrid({
         if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
-      });
+      }, () => submittedGeneration === viewerGeneration.current);
       if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
