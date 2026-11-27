@@ -124,11 +124,11 @@ function buildSlotWriteGateSql(feature: WriteFeatureKey): string {
  SELECT 1 AS slot_combined_write_gate,
    CASE WHEN ${invalidGateNumberSql('u."is_tos_accepted"')} THEN 1 ELSE 0 END AS invalid_identity_snapshot,
    CASE WHEN ${SLOT_GATE_INVALID_ACTOR_SQL} THEN 1 ELSE 0 END AS invalid_actor_snapshot,
-   CASE WHEN ${invalidGateNumberSql('settings."cost_guard_exception_until')}
+   CASE WHEN ${invalidGateNumberSql('settings."cost_guard_exception_until"')}
         THEN 1 ELSE 0 END AS invalid_exception_until,
-   ${featureListStateSql('settings."cost_guard_exception_features_json', feature)} AS exception_feature_state,
+   ${featureListStateSql('settings."cost_guard_exception_features_json"', feature)} AS exception_feature_state,
    CASE WHEN ${invalidGateTextSql('settings."operation_mode"', 128)} THEN 1 ELSE 0 END AS invalid_operation_mode,
-   ${featureListStateSql('settings."disabled_features_json', feature)} AS disabled_feature_state,
+   ${featureListStateSql('settings."disabled_features_json"', feature)} AS disabled_feature_state,
    CASE WHEN ${SLOT_GATE_INVALID_AUDIT_SQL} THEN 1 ELSE 0 END AS invalid_audit_settings,
    ${boundedGateNumberSql('u."is_tos_accepted"')} AS is_tos_accepted,
    CASE WHEN u."is_tos_accepted" = 1
