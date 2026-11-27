@@ -245,9 +245,14 @@ adminOpsRoutes.get("/notifications", async (c) => {
 // Deep requests only return the allowlisted check catalog, without running unbounded checks.
 // Each selected diagnostic is requested separately by /ops/health/checks/:checkId.
 adminOpsRoutes.get("/health", async (c) => {
-  const statusQ = c.req.query("status");
+  // CURRENT Next searchParams supplies arrays for repeated keys. Only a
+  // single scalar value selects a filter or explicitly opts in to a deep run.
+  const statuses = c.req.queries("status");
+  const statusQ = statuses?.length === 1 ? statuses[0] : undefined;
   const status = statusQ === "warn" || statusQ === "info" || statusQ === "ok" ? statusQ : "all";
-  if (c.req.query("deep") === "1" || c.req.query("run") === "1") {
+  const deep = c.req.queries("deep");
+  const run = c.req.queries("run");
+  if ((deep?.length === 1 && deep[0] === "1") || (run?.length === 1 && run[0] === "1")) {
     return c.json({ status, results: [], error: null, checkIds: [...HEALTH_CHECK_IDS] } satisfies AdminHealthResponse);
   }
   const now = Math.floor(Date.now() / 1000);

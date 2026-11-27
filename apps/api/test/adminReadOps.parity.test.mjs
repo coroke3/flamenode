@@ -1317,6 +1317,33 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(deep.stats.statements, 1, "catalog only performs the session lookup");
     assert.deepEqual((await call("/api/admin-read/ops/health?run=1", ADMIN)).body, deep.body);
     assert.equal(new Set(HEALTH_CHECK_IDS).size, 22);
+    // Next treats repeated query keys as arrays; a repeated value is not a
+    // scalar opt-in or filter. The other valid alias remains independent.
+    for (const [query, expectedStatus, expectedDeep] of [
+      ["deep=1&deep=1", "all", false],
+      ["deep=1&deep=0", "all", false],
+      ["deep=0&deep=1", "all", false],
+      ["run=1&run=1", "all", false],
+      ["run=1&run=0", "all", false],
+      ["run=0&run=1", "all", false],
+      ["deep=1&deep=1&run=1&run=1", "all", false],
+      ["deep=1&deep=0&run=1", "all", true],
+      ["run=1&run=0&deep=1", "all", true],
+      ["deep=01&run=0", "all", false],
+      ["status=warn&status=warn", "all", false],
+      ["status=warn&status=ok", "all", false],
+      ["status=ok&status=warn&deep=1", "all", true],
+      ["status=info&deep=1&deep=0", "info", false],
+      ["status=warn&run=1", "warn", true],
+      ["status=ok&deep=1", "ok", true],
+    ]) {
+      const receipt = await call("/api/admin-read/ops/health?" + query, ADMIN);
+      assert.equal(receipt.status, 200, query);
+      assert.deepEqual(receipt.body, { ...(expectedDeep ? deep.body : r.body), status: expectedStatus }, query);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store", query);
+      assert.equal(receipt.stats.statements, expectedDeep ? 1 : 2, query);
+      assert.equal(receipt.stats.writes, 0, query);
+    }
     // More than the 10 returned samples: window COUNT must still reflect all
     // eligible rows, not just the LIMIT 10 subset or the 5 UI samples.
     for (let i = 0; i < 12; i++) {
