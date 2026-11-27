@@ -775,7 +775,7 @@ PR を revert（まだどの route からも使われない）。
 
 ### MIG-0714: Personal SPA の投稿 form その C: `VideoForm` と `UnslottedPostForm` の移植（MIG-0703）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-16-11 / D-19-5: MIG-0712・MIG-0713・MIG-0738 の部品を使う）。submit は props の adapter にして API を待たない（純粋 helper 群と `ErrorCallout` / `PublicReflectionDelayNotice` は MIG-0738 へ分離し 3000 行超過を抑える）
+- **Readiness:** NEEDS_REFINEMENT — 依存 MIG-0712・MIG-0713・MIG-0738 は DONE。Nov 27 決定により #696 Part A の直列partial merge後、下記 Part B01 は Lead が着手可能。各PR3000行以内、親READY維持、共有CSS登録は #464/#683 と調整する。submit は props の adapter にして API を待たない
 - **Recipe:** R-UI
 - **Runtime:** N
 - **Depends on:** MIG-0712, MIG-0713, MIG-0738 / **Decisions:** D-16-4, D-16-11, D-19-5
@@ -792,6 +792,8 @@ PR を revert（まだどの route からも使われない）。
 - 変更: `apps/app/scripts/portCssModule.mjs`, `apps/app/src/main.tsx`, `docs/migration/FILE_MIGRATION_MATRIX.md`
 - 触らない: `src/components/**`, `src/lib/**`, MIG-0712 / 0713 / 0738 の部品（import だけ）
 #### Micro-units
+- **Serial Part A boundary (#696)**: `apps/app/src/components/forms/{videoSubmitAdapter.ts,videoFormDraftFields.ts,UnslottedPostShell.tsx}` と既存2 suite は unmounted の独立単位。統合後も親 READY、0716/0717 BLOCKED。残る B/C は host authority・full form/CSS・description/native/controlled restoration 結線・T01–T04・全form browserを完了する。詳細と再claim条件は MIG-0714 work-item の current decision。
+- **Serial Part B01（次の着手単位）**: CURRENT `VideoForm.tsx` の独立した約192行の `EditSubmitterField` と `XIdOption` を `apps/app/src/components/forms/EditSubmitterField.tsx` へ未mountで移植する。React・`@flamenode/domain/xid`・既存 `Icon` のみ、fn-* class/inline styleを保持し共有CSS登録を触らない。既存 `videoSubmitAdapter.test.mjs` でreadonly/解錠不可、管理者の解錠→X変更→profile keep/copy_default→取消→再解錠と実FormDataをCURRENT対照で検証する。追加所有は同file・既存suite・MIG-0714 checkpoint・該当matrix行のみ。#696 merge後に最新main/全open PRの所有を再確認して直列claimする。権限意味変更やhost authority切替の新仕様が必要ならSTOP。親READY/0716・0717 BLOCKED、実form結線/#703/full browserはB/Cに残す。
 - **U01 lib**: MIG-0738 へ分離済み（D-19-5）。
 - **U02 adapter**: `VideoForm` の props に `submit(mode: "free" | "slot" | "update", fd: FormData): Promise<VideoActionResult>` を足し、`createFreeVideo` / `submitSlotVideo` / `updateVideo` の直呼びを置き換える。`VideoMembersField` の 2 adapter（MIG-0713）は `VideoForm` の props から渡す。
 - **U03 移植**: `VideoForm.tsx` と `UnslottedPostForm.tsx` と `video-form.css` を移植（wizard の手順・必須 field の検査・下書き・文言を変えない）。`next/link` は `<a>`、`useRouter` は `useNavigate`。
