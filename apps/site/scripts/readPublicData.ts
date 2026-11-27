@@ -340,10 +340,12 @@ export async function openLocalSqliteD1(file: string): Promise<{ db: D1Like; clo
 
 /**
  * Option A (approved 2026-10-18): read D1 over the Cloudflare REST API with a token that
- * has only the "D1 Read" permission on this account. Build time only. Every statement
- * must be a single read (SELECT / WITH); anything else is refused before any request,
- * so a mis-scoped token can still not be used to write. At most MAX_D1_HTTP_STATEMENTS
- * requests per run; the token is never logged or put in an error message.
+ * has only the "D1 Read" permission on this account. Build time only. This reader
+ * applies a conservative lexical defense-in-depth policy to the fixed SELECT/WITH
+ * producer queries, including known extension-function side-effect calls. It is not a
+ * general SQLite read-only proof; independently verify the D1 Read-only token scope.
+ * At most MAX_D1_HTTP_STATEMENTS requests per run; the token is never logged or put
+ * in an error message.
  */
 export const MAX_D1_HTTP_STATEMENTS = 19;
 // The batched snapshot producer uses up to 200 D1 reads per build. Keep this
