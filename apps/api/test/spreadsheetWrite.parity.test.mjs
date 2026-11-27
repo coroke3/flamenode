@@ -1794,6 +1794,70 @@ if (runUnderRootTsx(import.meta.url)) {
   // #893: characterization only. These expectations deliberately record the
   // CURRENT TARGET costs, including over-budget requests. Do not interpret
   // a green test as compliance with the <=3 pre-read S3 gate.
+
+  test("MIG-0638 U02: video_members UPSERT snapshot receipt fails closed before nonce or DML", async () => {
+    resetAllCaches();
+    const { curSqlite, honoSqlite, honoD1, callHono } = createFixture();
+    const input = {
+      table: "video_members",
+      mode: "upsert",
+      rows: [{ id: "vm-1", video_id: "av-pending-1", name: "forged-import" }],
+    };
+    const preview = await callHono("POST", "/import", { ...input, dryRun: true });
+    assert.equal(preview.status, 200);
+    const nonce = honoSqlite.prepare(
+      "SELECT nonce, consumed_at FROM spreadsheet_import_runs ORDER BY rowid DESC LIMIT 1",
+    ).get();
+    assert.ok(nonce);
+    const beforeRows = honoSqlite.prepare('SELECT * FROM "video_members" ORDER BY id').all();
+    const beforeAudits = allAudits(honoSqlite);
+    const beforeQueue = allQueueRows(honoSqlite);
+    const beforeWrites = honoD1.stats.writes;
+    const beforeBatches = honoD1.stats.batches;
+    const originalPrepare = honoD1.prepare;
+    let injected = 0;
+    try {
+      honoD1.prepare = statement => {
+        const stmt = originalPrepare(statement);
+        if (!statement.startsWith("WITH requested (") ||
+            !statement.includes('JOIN "video_members"')) return stmt;
+        return { ...stmt, bind(...params) {
+          const bound = stmt.bind(...params);
+          return { ...bound, async all() {
+            injected++;
+            const receipt = await bound.all();
+            return {
+              ...receipt,
+              results: receipt.results.map(row =>
+                row.kind === "snapshot" ? { ...row, snapshotCount: 2 } : row,
+              ),
+            };
+          } };
+        } };
+      };
+      const applied = await callHono("POST", "/import", {
+        ...input,
+        previewToken: preview.body.previewToken,
+      });
+      assert.equal(injected, 1);
+      assert.equal(applied.status, 500);
+      assert.deepEqual(applied.body, { error: "internal_error" });
+    } finally {
+      honoD1.prepare = originalPrepare;
+      resetAllCaches();
+    }
+    assert.equal(honoD1.stats.writes, beforeWrites);
+    assert.equal(honoD1.stats.batches, beforeBatches);
+    assert.deepEqual(honoSqlite.prepare('SELECT * FROM "video_members" ORDER BY id').all(), beforeRows);
+    assert.deepEqual(allAudits(honoSqlite), beforeAudits);
+    assert.deepEqual(allQueueRows(honoSqlite), beforeQueue);
+    assert.equal(honoSqlite.prepare(
+      "SELECT consumed_at FROM spreadsheet_import_runs WHERE nonce = ?",
+    ).get(nonce.nonce).consumed_at, null);
+    curSqlite.close();
+    honoSqlite.close();
+  });
+
   test("MIG-0638 T06: cold/warm CRUD, FK, release and signed import read accounting (#893)", async (t) => {
     resetAllCaches();
     const { curSqlite, honoSqlite, honoD1, callHono } = createFixture();
@@ -2016,10 +2080,10 @@ if (runUnderRootTsx(import.meta.url)) {
         const suffix = cold ? "-import-cold" : "-import-warm";
         const rows = [
           { id: "vm-1", video_id: "av-pending-1", name: "linked" + suffix },
-          { id: "vm-ov-0", video_id: "av-overflow", name: "unlinked" + suffix },
+          { id: "vm-import-new", video_id: "av-overflow", name: "unlinked" + suffix },
         ];
-        // one shared PK read + one combined FK/release CTE read
-        await importPair("member FK upsert " + suffix, { table: "video_members", mode: "upsert", rows }, cold, 5, [0, 2, 0],
+        // one combined snapshot + FK + release CTE read
+        await importPair("member FK upsert " + suffix, { table: "video_members", mode: "upsert", rows }, cold, 4, [1, 1, 0],
           (body, _queue, beforeActive) => {
             assert.equal(body.pendingPublicReflection, true);
             for (const row of rows) assert.equal(tableRows("video_members").find(saved => saved.id === row.id).name, row.name);

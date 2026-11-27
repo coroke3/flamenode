@@ -43,7 +43,10 @@ import {
   countingRawDb,
   deriveSpreadsheetQueueTargets,
   buildSpreadsheetMemberFkReleaseLookup,
+  buildSpreadsheetMemberImportSnapshotFkReleaseLookup,
   validateSpreadsheetMemberFkReleaseLookupReceipt,
+  validateSpreadsheetMemberImportFkReleaseLookupReceipt,
+  validateSpreadsheetMemberImportSnapshotReceipt,
   spreadsheetMemberForeignKeyRowFromAudit,
   loadSpreadsheetVideoReleaseEvents,
   NOOP_WAKE_HOST,
@@ -308,23 +311,47 @@ async function handleImportPost(c: Context<AppEnv>): Promise<Response> {
     if (SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES < upsertReads) {
       throw new Error("batch_too_large");
     }
-    const existing =
-      upsertReads > 0
-        ? await fetchSpreadsheetExistingImportRows(
-            countedDb,
-            ctx,
-            prepared,
-            SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
-          )
-        : null;
+    let existing: Map<string, Record<string, unknown>> | null = null;
+    let memberImportLookup: ReturnType<typeof buildSpreadsheetMemberImportSnapshotFkReleaseLookup> = null;
+    let memberImportSnapshot: ReturnType<typeof validateSpreadsheetMemberImportSnapshotReceipt> | null = null;
+    if (upsertReads > 0) {
+      if (ctx.def.table === "video_members") {
+        memberImportLookup = buildSpreadsheetMemberImportSnapshotFkReleaseLookup(ctx, foreignKeys, prepared);
+        if (memberImportLookup) {
+          const receipt = await countedDb.prepare(memberImportLookup.statement)
+            .bind(...memberImportLookup.binds).all<unknown>();
+          memberImportSnapshot = validateSpreadsheetMemberImportSnapshotReceipt(
+            ctx, memberImportLookup, receipt,
+          );
+          existing = memberImportSnapshot.existingRowsByPk;
+        } else {
+          existing = await fetchSpreadsheetExistingImportRows(
+            countedDb, ctx, prepared, SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+          );
+        }
+      } else {
+        existing = await fetchSpreadsheetExistingImportRows(
+          countedDb, ctx, prepared, SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+        );
+      }
+    }
     const planned = planSpreadsheetImportMutations(ctx, prepared, mode, existing, user.id);
     const remainingReadBudget = SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES - upsertReads;
     let eventIdsByVideo: Map<string, string[]>;
     let videoReads = 0;
-    if (ctx.def.table === "video_members" && planned.mutations.length > 0) {
-      // Run existing structural/identity/audit-after-image checks first.
-      // Empty FK list suppresses only the separate FK SELECT; the tagged CTE
-      // below performs the same FK proof together with release lookup.
+    if (ctx.def.table === "video_members" && memberImportLookup && memberImportSnapshot) {
+      // The combined UPSERT CTE already captured all before-images, supplied
+      // UPDATE FK values, effective INSERT defaults and release rows. Keep the
+      // planner's structural/audit checks before applying FK error precedence.
+      await validateSpreadsheetPlannedImportForeignKeys(
+        countedDb, ctx, [], prepared, planned, remainingReadBudget,
+      );
+      eventIdsByVideo = validateSpreadsheetMemberImportFkReleaseLookupReceipt(
+        ctx, foreignKeys, memberImportLookup, memberImportSnapshot, planned,
+      );
+    } else if (ctx.def.table === "video_members" && planned.mutations.length > 0) {
+      // INSERT mode and unsupported dynamic-default schemas retain the
+      // existing bounded FK/release CTE and safe fallback.
       await validateSpreadsheetPlannedImportForeignKeys(
         countedDb, ctx, [], prepared, planned, remainingReadBudget,
       );
