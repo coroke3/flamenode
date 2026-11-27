@@ -109,7 +109,8 @@ export function invalidateSpreadsheetWriteCaches(): void {
 const TABLE_WRITE_COLUMNS_SQL = `SELECT x.name AS name, x.type AS type, x."notnull" AS not_null, x.pk AS pk,
        x.dflt_value AS dflt_value, x.hidden AS hidden,
        (SELECT json_group_array(json_object('column', fk."from", 'referencedTable', fk."table", 'referencedColumn', fk."to"))
-        FROM pragma_foreign_key_list(?) AS fk) AS foreign_keys_json
+        FROM pragma_foreign_key_list(?) AS fk) AS foreign_keys_json,
+       (SELECT json_group_array(name) FROM (SELECT name FROM pragma_table_info(?) WHERE pk > 0 ORDER BY pk)) AS primary_keys_json
 FROM pragma_table_xinfo(?) AS x
 WHERE EXISTS (
   SELECT 1 FROM sqlite_master m
@@ -129,6 +130,7 @@ type WriteColumnRow = {
   dflt_value: string | null;
   hidden: number | null;
   foreign_keys_json: string | null;
+  primary_keys_json: string;
 };
 
 // Snapshot catalog rows before exposing schema facts to the write planners.
@@ -140,37 +142,46 @@ function snapshotSpreadsheetWriteCatalog(rows: unknown): {
   if (!Array.isArray(rows)) throw new Error("invalid_snapshot");
   const columns: WriteColumnRow[] = [];
   const names = new Set<string>();
-  const pkOrdinals = new Set<number>();
+  const pkNames = new Map<number, string>();
   let fkJson: string | undefined;
+  let pkJson: string | undefined;
   const count = rows.length;
   for (let i = 0; i < count; i++) {
     const row = rows[i];
     if (!row || typeof row !== "object" || Array.isArray(row) ||
-        !["name", "type", "not_null", "pk", "dflt_value", "hidden", "foreign_keys_json"]
+        !["name", "type", "not_null", "pk", "dflt_value", "hidden", "foreign_keys_json", "primary_keys_json"]
           .every(key => Object.hasOwn(row, key))) {
       throw new Error("invalid_snapshot");
     }
-    const { name, type, not_null, pk, dflt_value, hidden, foreign_keys_json } = row;
+    const { name, type, not_null, pk, dflt_value, hidden, foreign_keys_json, primary_keys_json } = row;
     if (typeof name !== "string" || !isValidSqliteTableName(name) || names.has(name) ||
         (type !== null && typeof type !== "string") ||
         (not_null !== 0 && not_null !== 1) ||
-        (!Number.isSafeInteger(pk) || pk < 0 || (pk > 0 && pkOrdinals.has(pk))) ||
+        (!Number.isSafeInteger(pk) || pk < 0 || (pk > 0 && pkNames.has(pk))) ||
         (dflt_value !== null && typeof dflt_value !== "string") ||
         (hidden !== null && (!Number.isSafeInteger(hidden) || hidden < 0 || hidden > 3)) ||
         typeof foreign_keys_json !== "string" ||
-        (fkJson !== undefined && foreign_keys_json !== fkJson)) {
+        (fkJson !== undefined && foreign_keys_json !== fkJson) ||
+        typeof primary_keys_json !== "string" ||
+        (pkJson !== undefined && primary_keys_json !== pkJson)) {
       throw new Error("invalid_snapshot");
     }
     names.add(name);
-    if (pk > 0) pkOrdinals.add(pk);
+    if (pk > 0) pkNames.set(pk, name);
     fkJson = foreign_keys_json;
-    columns.push({ name, type, not_null, pk, dflt_value, hidden, foreign_keys_json });
+    pkJson = primary_keys_json;
+    columns.push({ name, type, not_null, pk, dflt_value, hidden, foreign_keys_json, primary_keys_json });
   }
-  // The SELECT excludes tables without a primary key. Nonempty catalog
-  // results must therefore contain each ordinal 1..N exactly once.
-  if (columns.length > 0 && pkOrdinals.size === 0) throw new Error("invalid_snapshot");
-  for (let ordinal = 1; ordinal <= pkOrdinals.size; ordinal++) {
-    if (!pkOrdinals.has(ordinal)) throw new Error("invalid_snapshot");
+  // Check the ordered key list from pragma_table_info against the xinfo
+  // rows in the same D1 receipt. A valid-looking 1..N prefix is not proof
+  // of a complete composite key: the last ordinal could be missing or zero.
+  if (pkJson !== undefined) {
+    const expected: unknown = JSON.parse(pkJson);
+    if (!Array.isArray(expected) || expected.length === 0 ||
+        expected.length !== pkNames.size || expected.some((name, i) =>
+          typeof name !== "string" || pkNames.get(i + 1) !== name)) {
+      throw new Error("invalid_snapshot");
+    }
   }
   const foreignKeys: SpreadsheetForeignKey[] = [];
   if (fkJson !== undefined) {
@@ -223,7 +234,7 @@ export async function resolveSpreadsheetWriteTableContext(
   try {
     const result = await db
       .prepare(TABLE_WRITE_COLUMNS_SQL)
-      .bind(def.table, def.table, def.table)
+      .bind(def.table, def.table, def.table, def.table)
       .all<WriteColumnRow>();
     if (result.success !== true) throw new Error("invalid_snapshot");
     catalog = snapshotSpreadsheetWriteCatalog(result.results);

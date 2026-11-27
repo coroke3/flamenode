@@ -1199,6 +1199,109 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(honoD1.stats.batches, beforeBatches + 1);
   });
 
+  test("MIG-0638 U01/U02: composite key catalog completeness protects exact row identity and import nonce", async () => {
+    for (const extra of [false, true]) {
+      resetAllCaches();
+      const { curSqlite, honoSqlite, honoD1, callHono } = createFixture();
+      const originalPrepare = honoD1.prepare;
+      const originalError = console.error;
+      try {
+        const video = "av-pending-1";
+        const missing = { table: "video_events", primaryKey: { video_id: video, event_id: "a-point" } };
+        if (extra) insert(honoSqlite, "video_events", { video_id: video, event_id: "a-ended" });
+        const links = () => honoSqlite.prepare("SELECT event_id FROM video_events WHERE video_id = ? ORDER BY event_id").all(video).map(row => row.event_id);
+        const originalLinks = extra ? ["a-ended", "a-open"] : ["a-open"];
+        assert.deepEqual(links(), originalLinks);
+        const input = { table: "video_events", mode: "insert", rows: [{ video_id: video, event_id: "a-point" }] };
+        const preview = await callHono("POST", "/import", { ...input, dryRun: true });
+        assert.equal(preview.status, 200);
+        contracts.AdminSpreadsheetImportDryRunResponseSchema.parse(preview.body);
+        const apply = { ...input, previewToken: preview.body.previewToken };
+        const snapshot = () => ({
+          links: honoSqlite.prepare("SELECT * FROM video_events ORDER BY video_id, event_id").all(),
+          audits: allAudits(honoSqlite),
+          queue: allQueueRows(honoSqlite),
+          nonces: honoSqlite.prepare("SELECT * FROM spreadsheet_import_runs ORDER BY nonce").all(),
+        });
+        const before = snapshot();
+        const beforeWrites = honoD1.stats.writes;
+        const beforeBatches = honoD1.stats.batches;
+        const setKeyList = (rows, value) => rows.map(row => ({ ...row, primary_keys_json: value }));
+        const faults = [
+          rows => rows.map(row => row.pk === 2 ? { ...row, pk: 0 } : row),
+          rows => rows.filter(row => row.pk !== 2),
+          rows => rows.map(row => ({ ...row, pk: 3 - row.pk })),
+          rows => setKeyList(rows, '["video_id"]'),
+          rows => setKeyList(rows, '["event_id","video_id"]'),
+          rows => setKeyList(rows, '["video_id","video_id"]'),
+          rows => setKeyList(rows, "["),
+          rows => rows.map((row, i) => i === 1 ? { ...row, primary_keys_json: "[]" } : row),
+          rows => rows.map(({ primary_keys_json: _missing, ...row }) => row),
+        ];
+        const logs = [];
+        let injected = 0;
+        console.error = (...args) => logs.push(args);
+        for (const [method, path, body] of [["DELETE", "/data", missing], ["POST", "/import", apply]]) {
+          for (const fault of faults) {
+            resetAllCaches();
+            const prior = injected;
+            honoD1.prepare = sql => {
+              const stmt = originalPrepare(sql);
+              if (!sql.includes("FROM pragma_table_xinfo(?) AS x")) return stmt;
+              return { ...stmt, bind(...params) {
+                const bound = stmt.bind(...params);
+                if (!params.every(value => value === "video_events")) return bound;
+                return { ...bound, async all() {
+                  const receipt = await bound.all();
+                  injected++;
+                  return { ...receipt, results: fault(receipt.results) };
+                } };
+              } };
+            };
+            const result = await callHono(method, path, body);
+            assert.equal(injected, prior + 1);
+            assert.equal(result.status, 500, method + " extra=" + extra);
+            assert.deepEqual(result.body, { error: "internal_error" });
+            assert.match(result.headers.get("cache-control"), /private.*no-store/);
+          }
+        }
+        assert.equal(injected, faults.length * 2);
+        assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] WRITE_FAILED"]));
+        assert.equal(honoD1.stats.writes, beforeWrites);
+        assert.equal(honoD1.stats.batches, beforeBatches);
+        assert.deepEqual(snapshot(), before);
+
+        // No cache reset: a failed projection must not replace the healthy key.
+        // A full-key miss is 404 even when one or several prefix rows exist.
+        honoD1.prepare = originalPrepare;
+        console.error = originalError;
+        const absent = await callHono("DELETE", "/data", missing);
+        assert.equal(absent.status, 404);
+        assert.deepEqual(absent.body, { error: "row_not_found" });
+        assert.deepEqual(snapshot(), before);
+        const recovered = await callHono("POST", "/import", apply);
+        assert.equal(recovered.status, 200);
+        contracts.AdminSpreadsheetImportApplyResponseSchema.parse(recovered.body);
+        assert.equal(recovered.body.inserted, 1);
+        assert.deepEqual(links(), [...originalLinks, "a-point"]);
+        const deleted = await callHono("DELETE", "/data", missing);
+        assert.equal(deleted.status, 200);
+        assert.deepEqual(links(), originalLinks);
+        const audit = latestAudit(honoSqlite);
+        assert.equal(audit.table_name, "video_events");
+        assert.equal(audit.operation, "DELETE");
+        assert.deepEqual(JSON.parse(audit.before_json), { video_id: video, event_id: "a-point" });
+        assert.equal(honoD1.stats.batches, beforeBatches + 2);
+      } finally {
+        honoD1.prepare = originalPrepare;
+        console.error = originalError;
+        resetAllCaches();
+        curSqlite.close();
+        honoSqlite.close();
+      }
+    }
+  });
+
   test("MIG-0638 T06: D1 statement budget (S2 reads <= 3, S3 writes pre-reads + 1 atomic batch)", async () => {
     resetAllCaches();
     const { honoD1, callHono } = createFixture();
