@@ -121,6 +121,19 @@ function casUpdate(c: Context<AppEnv>, before: TermsRow, patch: Record<string, u
   `);
 }
 
+/**
+ * Diagnostic logging must not change the result of an already failed audited
+ * mutation. Keep provider errors out of logs, and preserve the fixed 409 reply
+ * even when a runtime diagnostic sink throws.
+ */
+function logTermsMutationFailure(): void {
+  try {
+    console.error("[rules] atomic mutation failed");
+  } catch {
+    // Best-effort diagnostics; the caller still sends its fixed failure result.
+  }
+}
+
 async function commit(
   c: Context<AppEnv>,
   input: {
@@ -139,7 +152,7 @@ async function commit(
     return true;
   } catch {
     // Do not log provider exception text (may carry SQL or secrets).
-    console.error("[rules] atomic mutation failed");
+    logTermsMutationFailure();
     return false;
   }
 }
@@ -207,7 +220,7 @@ adminTermsRoutes.post("/", async (c) => {
       ],
     });
   } catch {
-    console.error("[rules] atomic mutation failed");
+    logTermsMutationFailure();
     return respond(c, 409, { ok: false, message: TERMS_CONFLICT_MESSAGE });
   }
   return respond(c, 200, { ok: true, id });
@@ -298,7 +311,7 @@ adminTermsRoutes.post("/:id/publish", async (c) => {
       audits,
     });
   } catch {
-    console.error("[rules] atomic mutation failed");
+    logTermsMutationFailure();
   }
   if (!ok) return respond(c, 409, { ok: false, message: TERMS_CONFLICT_MESSAGE });
   return respond(c, 200, { ok: true, id, pendingPublicReflection: true });
@@ -434,7 +447,7 @@ adminTermsRoutes.post("/:id/archive", async (c) => {
       audits: [termsAudit(c, before, { ...before, ...patch }, "admin_terms_archive", "規約版のアーカイブ")],
     });
   } catch {
-    console.error("[rules] atomic mutation failed");
+    logTermsMutationFailure();
   }
   if (!ok) return respond(c, 409, { ok: false, message: TERMS_CONFLICT_MESSAGE });
   return respond(c, 200, wasPublished ? { ok: true, id, pendingPublicReflection: true } : { ok: true, id });

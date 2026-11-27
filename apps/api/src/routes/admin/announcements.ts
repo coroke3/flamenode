@@ -93,6 +93,15 @@ function failure(
   return c.json(body, status);
 }
 
+/** Best-effort, fixed-only diagnostics; D1/Drizzle error objects may carry SQL binds. */
+export function logAnnouncementFailure(): void {
+  try {
+    console.error("[announcement] atomic mutation failed");
+  } catch {
+    // Diagnostic sink failure must not mask the stable HTTP 500 result.
+  }
+}
+
 export const announcementRoutes = new Hono<AppEnv>();
 announcementRoutes.use("*", onlyMutating(costGuardMiddleware("admin_announcement_broadcast")));
 
@@ -150,8 +159,8 @@ announcementRoutes.post("/", async (c) => {
         },
       ],
     });
-  } catch (error) {
-    console.error("[announcement] atomic mutation failed", error);
+  } catch {
+    logAnnouncementFailure();
     return failure(c, 500, ANNOUNCEMENT_FAILURE_MESSAGE);
   }
   const body: AnnouncementResult = { ok: true, id };
@@ -174,8 +183,8 @@ announcementRoutes.put("/:id", async (c) => {
   let existing: AnnouncementRow | null;
   try {
     existing = await loadAnnouncement(c.env.DB, id);
-  } catch (error) {
-    console.error("[announcement] atomic mutation failed", error);
+  } catch {
+    logAnnouncementFailure();
     return failure(c, 500, ANNOUNCEMENT_FAILURE_MESSAGE);
   }
   if (!existing) return failure(c, 404, "対象のお知らせが見つかりません。");
@@ -226,8 +235,8 @@ announcementRoutes.put("/:id", async (c) => {
         },
       ],
     });
-  } catch (error) {
-    console.error("[announcement] atomic mutation failed", error);
+  } catch {
+    logAnnouncementFailure();
     return failure(c, 500, ANNOUNCEMENT_FAILURE_MESSAGE);
   }
   const body: AnnouncementResult = { ok: true, id };
@@ -244,8 +253,8 @@ announcementRoutes.delete("/:id", async (c) => {
   let existing: AnnouncementRow | null;
   try {
     existing = await loadAnnouncement(c.env.DB, id);
-  } catch (error) {
-    console.error("[announcement] atomic mutation failed", error);
+  } catch {
+    logAnnouncementFailure();
     return failure(c, 500, ANNOUNCEMENT_FAILURE_MESSAGE);
   }
   if (!existing) return failure(c, 404, "対象のお知らせが見つかりません。");
@@ -276,8 +285,8 @@ announcementRoutes.delete("/:id", async (c) => {
         },
       ],
     });
-  } catch (error) {
-    console.error("[announcement] atomic mutation failed", error);
+  } catch {
+    logAnnouncementFailure();
     return failure(c, 500, ANNOUNCEMENT_FAILURE_MESSAGE);
   }
   const body: AnnouncementResult = { ok: true };
