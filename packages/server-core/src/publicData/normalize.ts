@@ -19,11 +19,22 @@ export function normalizeCoercedString(value: unknown): string | null {
   return String(value);
 }
 
+function normalizeFiniteNumericValue(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const decimal = value.trim();
+  // Keep decimal fractions and exponent notation, but reject JS radix prefixes.
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(decimal)) {
+    return null;
+  }
+  const normalized = Number(decimal);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
 export function normalizeNullableUnix(value: unknown): number | null {
   if (value == null || value === "") return null;
-
-  const normalized = Number(value);
-  if (!Number.isFinite(normalized)) return null;
+  const normalized = normalizeFiniteNumericValue(value);
+  if (normalized == null) return null;
   const unix = Math.floor(normalized);
   const ms = unix * 1000;
   if (!Number.isFinite(ms) || Math.abs(unix) > 8.64e12) return null;
@@ -38,12 +49,11 @@ export function normalizeUnixDate(value: unknown): Date | null {
 }
 
 export function normalizeNumericUnix(value: unknown): number | null {
-  const normalized =
-    typeof value === "number" ? value : Number(value);
-
-  return Number.isFinite(normalized)
-    ? Math.floor(normalized)
-    : null;
+  // Preserve legacy null/empty defaults (Number(null) and Number("") were 0)
+  // while rejecting other non-string/non-number coercions.
+  if (value === null || value === "") return 0;
+  const normalized = normalizeFiniteNumericValue(value);
+  return normalized == null ? null : Math.floor(normalized);
 }
 
 export function normalizeCount(value: unknown): number | null {

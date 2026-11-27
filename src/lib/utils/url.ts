@@ -10,9 +10,15 @@ export function normalizeHttpUrl(
   raw: string | null | undefined,
   options: { maxLength?: number } = {},
 ): string | null {
-  const s = String(raw ?? "").trim();
+  const original = String(raw ?? "");
+  // WHATWG URL silently strips leading/trailing C0 controls (including NUL),
+  // while trim() also hides CR/LF/TAB. Reject control characters before either step.
+  if (/[\x00-\x1f\x7f\\]/.test(original)) return null;
+  const s = original.trim();
   if (!s) return null;
   const maxLength = options.maxLength ?? 500;
+  // Non-finite limits bypass numeric comparisons and silently disable the cap.
+  if (!Number.isSafeInteger(maxLength) || maxLength < 0) return null;
   if (s.length > maxLength) return null;
 
   try {

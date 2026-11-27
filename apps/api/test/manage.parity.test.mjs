@@ -582,6 +582,35 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  for (const path of ["/api/manage", "/api/manage/events/evA"]) {
+    test(`SEC-811: ${path} keeps its private 503 when the diagnostic sink throws`, async () => {
+      const local = createSqlite();
+      const previousError = console.error;
+      const messages = [];
+      try {
+        seed(local);
+        const d1 = firstNotificationReadFault(local, new Error("synthetic temporary provider failure"));
+        console.error = (...args) => {
+          messages.push(args);
+          throw new Error("SEC811_LOGGER_FAILED");
+        };
+
+        const r = await call(path, "tok-owner", { d1 });
+        assert.equal(r.status, 503);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(r.body, { error: "unavailable" });
+        assert.deepEqual(messages, [["[manage] READ_FAILED"]]);
+        assert.equal(d1.faults, 1);
+        assert.equal(d1.retryProbes, 1);
+        assert.equal(d1.stats.writes, 0);
+        assert.equal(d1.stats.batches, 0);
+      } finally {
+        console.error = previousError;
+        local.close();
+      }
+    });
+  }
+
   test("SEC-811: completely missing notification_outbox is not misreported as old event_id-only schema", async () => {
     for (const route of ["/api/manage", "/api/manage/events/evA"]) {
       const local = createSqlite();

@@ -52,6 +52,18 @@ function idsFromManifest(manifest: SnapshotManifest, pattern: RegExp): string[] 
 /** Missing / non-public objects mean "no page"; any other failure (hash, generation, envelope, json, source) fails the build. */
 const SKIPPABLE = new Set(["NOT_PUBLIC", "SNAPSHOT_MISSING"]);
 
+/**
+ * Skippable or non-public snapshots should never become build failures solely
+ * because the diagnostic sink is unavailable. Non-skippable failures still throw.
+ */
+function warnSkippedEvent(message: string): void {
+  try {
+    console.warn(message);
+  } catch {
+    // Logging is best-effort; missing/private snapshots remain unrendered.
+  }
+}
+
 function describe(error: unknown): string {
   return error instanceof SnapshotBuildError ? error.code : error instanceof Error ? error.message : "UNKNOWN";
 }
@@ -72,7 +84,7 @@ export function buildEventDataFromPayloads(input: {
       : null;
     // The key names the page; the payload must describe the same public event.
     if (detail && detail.event.id === id) details.set(id, detail);
-    else console.warn(`[event] no page for ${id}: not a public event detail`);
+    else warnSkippedEvent(`[event] no page for ${id}: not a public event detail`);
   }
   const releases = new Map<string, StaticEventRelease>();
   for (const [id, payload] of Object.entries(input.releases)) {
@@ -80,7 +92,7 @@ export function buildEventDataFromPayloads(input: {
       ? normalizeStaticEventRelease(payload as Parameters<typeof normalizeStaticEventRelease>[0])
       : null;
     if (release && release.event.id === id) releases.set(id, release);
-    else console.warn(`[event] no release page for ${id}: not a public event release`);
+    else warnSkippedEvent(`[event] no release page for ${id}: not a public event release`);
   }
   return { source: input.source, index, details, releases };
 }
@@ -110,7 +122,7 @@ export async function loadEventBuildData(
     indexPayload = await loadEventPayloadSnapshot(source, EVENT_INDEX_KEY, options);
   } catch (error) {
     if (!(error instanceof SnapshotBuildError && SKIPPABLE.has(error.code))) throw error;
-    console.warn(`[event] index unavailable: ${describe(error)}`);
+    warnSkippedEvent(`[event] index unavailable: ${describe(error)}`);
   }
   const read = async (ids: string[], key: (id: string) => string): Promise<Record<string, unknown>> => {
     const out: Record<string, unknown> = {};
@@ -119,7 +131,7 @@ export async function loadEventBuildData(
         out[id] = await loadEventPayloadSnapshot(source, key(id), options);
       } catch (error) {
         if (!(error instanceof SnapshotBuildError && SKIPPABLE.has(error.code))) throw error;
-        console.warn(`[event] no page for ${id}: ${describe(error)}`);
+        warnSkippedEvent(`[event] no page for ${id}: ${describe(error)}`);
       }
     }
     return out;
