@@ -8,10 +8,15 @@ import { dom, flush, ok } from "./helpers.mjs";
 const { getEditPermissions } = await import("../.test-dist/apps/app/src/api/videoCollaborators.js");
 const { Permissions } = await import("../.test-dist/apps/app/src/routes/dashboard/edit/Permissions.js");
 const { ACTIVE_X_CHANGED_EVENT } = await import("../.test-dist/apps/app/src/lib/activeXSwitchEvents.js");
+const { getVideoPermissionNotificationUrlEnv } = await import("../.test-dist/apps/app/src/lib/videoPermissionNotification.js");
+const managerHostForTest = {
+  authorityKey: "document-test-epoch-1",
+  notificationUrlEnv: getVideoPermissionNotificationUrlEnv(),
+};
 
 const res = (status, body = null) => ({ status, json: async () => body });
 
-async function mountPermissions(path, load, reload = () => {}, managerEnabled = false) {
+async function mountPermissions(path, load, reload = () => {}, hostAdapterForTest) {
   const container = dom.window.document.createElement("div");
   const root = createRoot(container);
   await act(async () => {
@@ -19,7 +24,7 @@ async function mountPermissions(path, load, reload = () => {}, managerEnabled = 
       React.createElement(Routes, null,
         React.createElement(Route, {
           path: "/dashboard/edit/:id/permissions",
-          element: React.createElement(Permissions, { load, reload, managerEnabled }),
+          element: React.createElement(Permissions, { load, reload, hostAdapterForTest }),
         }))));
   });
   await flush();
@@ -115,7 +120,7 @@ test("truncated collaborator data shows a warning and never provides write contr
       x_user_id: "coauthor", user_id: null, display_name: "共同作者", can_edit: 1,
       is_public_member: 1, has_discord_link: false, can_notify: false,
     }], publicMembers: [], truncated: true,
-  }), undefined, true);
+  }), undefined, managerHostForTest);
   assert.match(m.container.textContent, /共同作者/);
   assert.match(m.container.textContent, /一部省略されています/);
   assert.equal(m.container.querySelector("#video-collab-perms"), null);
@@ -312,7 +317,7 @@ test("MIG-0715 U01: resource and exact privilege tuple own the committed read vi
         React.createElement(React.Fragment, null,
           React.createElement(Routes, null, React.createElement(Route, {
             path: "/dashboard/edit/:id/permissions",
-            element: React.createElement(Permissions, { load, managerEnabled: false }),
+            element: React.createElement(Permissions, { load }),
           })),
           React.createElement(Probe))));
     });
@@ -439,7 +444,7 @@ test("MIG-0715 U03: admin menu retires before passive effects on resource and mo
       React.createElement(React.Fragment, null,
         React.createElement(Routes, null, React.createElement(Route, {
           path: "/dashboard/edit/:id/permissions",
-          element: React.createElement(Permissions, { load, managerEnabled: false }),
+          element: React.createElement(Permissions, { load }),
         })),
         React.createElement(Probe)))));
     await flush();
@@ -518,12 +523,25 @@ test("MIG-0715 U03b: Active X change and BFCache restore hard-remount the permis
 });
 
 
+test("MIG-0715 U03b manager remains unmounted without an explicit host adapter", async () => {
+  const m = await mountPermissions(
+    "/dashboard/edit/A/permissions",
+    async () => ok(permissionReceipt("A", "no-host")),
+  );
+  try {
+    assert.equal(m.container.querySelector("#video-collab-perms"), null);
+    assert.equal(m.container.querySelectorAll("button,input,form").length, 0);
+  } finally {
+    await m.unmount();
+  }
+});
+
 test("MIG-0715 U03b host mounts the manager only for a complete authorized receipt", async () => {
   const m = await mountPermissions(
     "/dashboard/edit/A/permissions",
     async () => ok(permissionReceipt("A", "host")),
     undefined,
-    true,
+    managerHostForTest,
   );
   try {
     assert.ok(m.container.querySelector("#video-collab-perms"));
@@ -548,7 +566,7 @@ test("MIG-0715 U03b post-write refresh keeps the read view visible without LOADI
     ok: true,
     message: "解除しました。",
   }), { status: 200 });
-  const m = await mountPermissions("/dashboard/edit/A/permissions", load, undefined, true);
+  const m = await mountPermissions("/dashboard/edit/A/permissions", load, undefined, managerHostForTest);
   try {
     assert.ok(m.container.querySelector("#video-collab-perms"));
     await press(m.container, "変更");
@@ -581,7 +599,7 @@ test("MIG-0715 U03b failed post-write refresh keeps only a read-only stale inven
     ok: true,
     message: "解除しました。",
   }), { status: 200 });
-  const m = await mountPermissions("/dashboard/edit/A/permissions", load, undefined, true);
+  const m = await mountPermissions("/dashboard/edit/A/permissions", load, undefined, managerHostForTest);
   try {
     assert.ok(m.container.querySelector("#video-collab-perms"));
     await press(m.container, "変更");

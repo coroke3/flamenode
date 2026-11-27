@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import type { EditPermissionsResponse } from "@flamenode/contracts";
 import { getEditPermissions, type EditPermissionsReadResult } from "../../../api/videoCollaborators.js";
 import { VideoCollabPermsManager } from "../../../components/VideoCollabPermsManager.js";
-import { getVideoPermissionNotificationUrlEnv } from "../../../lib/videoPermissionNotification.js";
+import type { NotificationUrlEnv, NotificationRuntimeMode } from "../../../lib/videoPermissionNotification.js";
 import { AuthUnavailable, BannedNotice, LoginRequired, SessionLoading } from "../../guard.js";
 import { AppLink, useDocumentTitle } from "../../ui/AppLink.js";
 import { Icon } from "../../ui/Icon.js";
@@ -11,24 +11,24 @@ import { ACTIVE_X_CHANGED_EVENT } from "../../../lib/activeXSwitchEvents.js";
 import { videoPageHref } from "../../../lib/youtubeId.js";
 
 type LoadState = { status: "loading" } | EditPermissionsReadResult;
-type ManagerHost = {
+type ManagerHostInput = {
   authorityKey: string;
-  notificationUrlEnv: ReturnType<typeof getVideoPermissionNotificationUrlEnv>;
-  onRefresh: () => void;
+  notificationUrlEnv: NotificationUrlEnv & { NODE_ENV: NotificationRuntimeMode };
 };
+type ManagerHost = ManagerHostInput & { onRefresh: () => void };
 
 const reloadDocument = () => window.location.reload();
 
-/** MIG-0715: host composition stays unregistered until the MIG-0650 merge gate is DONE. */
+/** MIG-0715: route remains unregistered until MIG-0650 is DONE; no live host adapter is supplied yet. */
 export function Permissions({
   load = getEditPermissions,
   reload = reloadDocument,
-  managerEnabled = true,
+  hostAdapterForTest,
 }: {
   load?: typeof getEditPermissions;
   reload?: () => void;
-  /** Test seam only; the production route keeps the host manager enabled. */
-  managerEnabled?: boolean;
+  /** Explicit test-only host fixture; never supplied by the live router. */
+  hostAdapterForTest?: ManagerHostInput;
 }): React.ReactElement {
   useDocumentTitle("編集権限の管理");
   const { id } = useParams<{ id: string }>();
@@ -38,15 +38,15 @@ export function Permissions({
   // Resource and exact ordered query tuple own the whole read lifecycle. A
   // new resource/mode must render loading before any passive-effect cleanup.
   // JSON encoding distinguishes duplicate values and embedded separators.
-  return <PermissionsForResource key={JSON.stringify([id, modes])} id={id} modes={modes} load={load} reload={reload} managerEnabled={managerEnabled} />;
+  return <PermissionsForResource key={JSON.stringify([id, modes])} id={id} modes={modes} load={load} reload={reload} hostAdapterForTest={hostAdapterForTest} />;
 }
 
-function PermissionsForResource({ id, modes, load, reload, managerEnabled }: {
+function PermissionsForResource({ id, modes, load, reload, hostAdapterForTest }: {
   id: string;
   modes: readonly string[];
   load: typeof getEditPermissions;
   reload: () => void;
-  managerEnabled: boolean;
+  hostAdapterForTest?: ManagerHostInput;
 }): React.ReactElement {
   const queryKey = JSON.stringify(modes);
   const [snapshot, setSnapshot] = React.useState<{ loader: typeof load; result: LoadState }>({
@@ -57,10 +57,6 @@ function PermissionsForResource({ id, modes, load, reload, managerEnabled }: {
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [refreshing, setRefreshing] = React.useState(false);
   const [refreshFailed, setRefreshFailed] = React.useState(false);
-  // A document generation marker only: never identity, authorization or a token.
-  // Auth/Active-X changes below retire the whole document and therefore this key.
-  const [authorityKey] = React.useState(() => String(window.performance?.timeOrigin ?? Date.now()));
-  const notificationUrlEnv = React.useMemo(() => getVideoPermissionNotificationUrlEnv(), []);
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
     setRefreshFailed(false);
@@ -132,8 +128,9 @@ function PermissionsForResource({ id, modes, load, reload, managerEnabled }: {
   if (state.status === "banned") return <BannedNotice />;
   if (state.status === "unavailable") return <AuthUnavailable />;
   if (state.status === "not_found") return <NotFound />;
-  const managerHost: ManagerHost | undefined = managerEnabled
-    ? { authorityKey, notificationUrlEnv, onRefresh }
+  // The live route does not pass this adapter until MIG-0650 is DONE.
+  const managerHost: ManagerHost | undefined = hostAdapterForTest
+    ? { ...hostAdapterForTest, onRefresh }
     : undefined;
   return (
     <PermissionsReadView
