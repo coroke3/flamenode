@@ -59,9 +59,11 @@ test("MIG-0652 U01: midnight UTC boundary is correctly evaluated in Asia/Tokyo",
   assert.equal(result.entry_end_time, result.entry_start_time + 1);
 });
 
-test("MIG-0652 U01: CURRENT adapter delegates publish fields only after visibility normalization and permission gate", async () => {
-  const current = await readFile(new URL("../../../src/lib/event/eventPayload.ts", import.meta.url), "utf8");
+test("MIG-0652 U01: shared composer delegates publish fields only after visibility normalization and permission gate", async () => {
+  const bridge = await readFile(new URL("../../../src/lib/event/eventPayload.ts", import.meta.url), "utf8");
+  const current = await readFile(new URL("../../server-core/src/event/updatePayload.ts", import.meta.url), "utf8");
   const core = await readFile(new URL("../src/event/publishUpdateFields.ts", import.meta.url), "utf8");
+  assert.match(bridge, /export \{ buildEventUpdatePayload, type EventUpdatePayload \} from "@flamenode\/server-core\/event\/updatePayload";/);
   assert.match(current, /if \(permissions\.publish\) \{\s*const visibilityStatus = resolveSubmittedEventVisibility\(data\)/);
   assert.match(current, /Object\.assign\(updatePayload, buildPublishEventUpdateFields\(\{/);
   assert.match(current, /changedByPermission\.publish = EVENT_SECTION_PERMISSION_KEYS\.publish/);

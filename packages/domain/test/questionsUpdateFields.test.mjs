@@ -106,9 +106,11 @@ test("MIG-0652 U01: CURRENT numeric edit flags and previous nulls are preserved"
   }
 });
 
-test("MIG-0652 U01: CURRENT questions adapter still handles serializers and permission/audit state", async () => {
-  const current = await readFile(new URL("../../../src/lib/event/eventPayload.ts", import.meta.url), "utf8");
+test("MIG-0652 U01: shared questions composer keeps serializers and permission/audit state", async () => {
+  const bridge = await readFile(new URL("../../../src/lib/event/eventPayload.ts", import.meta.url), "utf8");
+  const current = await readFile(new URL("../../server-core/src/event/updatePayload.ts", import.meta.url), "utf8");
   const core = await readFile(new URL("../src/event/questionsUpdateFields.ts", import.meta.url), "utf8");
+  assert.match(bridge, /export \{ buildEventUpdatePayload, type EventUpdatePayload \} from "@flamenode\/server-core\/event\/updatePayload";/);
   assert.match(current, /if \(permissions\.questions\) \{\s*videoFormSettingsJson = buildVideoFormSettingsJson\(formData\)/);
   assert.match(current, /const requiredVideoFieldsJson = serializeRequiredVideoFieldsFromForm\(formData\)/);
   assert.match(current, /Object\.assign\(updatePayload, buildQuestionsEventUpdateFields\(\{/);

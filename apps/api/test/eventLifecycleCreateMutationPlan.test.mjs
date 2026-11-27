@@ -9,6 +9,7 @@ import {
   buildEventCreateOwnerStaffRow,
   buildEventCreateStageQuestionRows,
   eventIdRenameCleanupTargets,
+  parseDateInput,
   planEventCreateQuestionBatch,
 } from "@flamenode/domain/event";
 import {
@@ -29,6 +30,9 @@ import {
 import { PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY } from "@flamenode/server-core/visibility/manifestCore";
 import { readVisibilityManifestObject, putVisibilityManifestWithCas } from "@flamenode/server-core/visibility/manifestR2";
 import { resolveEventEditPermissions } from "@flamenode/server-core/event/editPermissions";
+import { buildEventUpdatePayload, EVENT_SECTION_PERMISSION_KEYS } from "@flamenode/server-core/event/updatePayload";
+import * as currentEventPayload from "../../../src/lib/event/eventPayload.ts";
+import * as currentEventSections from "../../../src/lib/admin/eventSectionFields.ts";
 
 const db = drizzle(createD1(createSqlite()), { schema });
 const now = 1794115200;
@@ -1344,4 +1348,139 @@ test("MIG-0652 update permissions: approved-link and staff D1 failures propagate
     assert.equal(f.d1.stats.batches, 0);
     assert.equal(f.sqlite.prepare("SELECT total_changes() AS n").get().n, changes);
   }
+});
+
+const UPDATE_SECTIONS = ["basic", "publish", "questions", "slots"];
+const UPDATE_DATA = Object.freeze({
+  title: " Revised event ", event_type: "collabo", explanation: "Updated explanation",
+  youtube_description_template: "New template", icon_url: "https://example.test/icon.png",
+  img_url: "https://example.test/banner.png", accent_color: "#123456",
+  start_time: "2026-11-08T12:34", end_time: "2026-11-08T15:00:30",
+  visibility_status: "public", entry_start_time: "2026-11-01T09:00", entry_end_time: "2026-11-07T23:59",
+  allow_user_video_event_links: 1, allow_unslotted_posts: 1, allow_user_video_edits: 1,
+  user_video_edit_permission_keys_json: '["video.basics"]', editable_fields: '["title"]', review_settings: '{"next":true}',
+  max_slots_per_video: 4, max_slot_reservation_groups_per_xid: 3, slot_interval_minutes: 15,
+  slot_part_gap_minutes: 5, slot_type: "count", slot_visibility_mode: "anonymous", parts_text: " Opening \nOpening\r\nFinale ",
+});
+const UPDATE_BEFORE = Object.freeze({ ...event, updated_at: now - 1, youtube_description_template: "Previous template",
+  required_video_fields_json: '["music"]', editable_fields: '["description"]', review_settings: '{"old":true}',
+});
+const UPDATE_EXPECTED_SECTIONS = {
+  basic: {
+    title: " Revised event ", event_type: "collabo", explanation: "Updated explanation",
+    youtube_description_template: "New template", icon_url: "https://example.test/icon.png",
+    img_url: "https://example.test/banner.png", accent_color: "#123456",
+    start_time: Date.parse("2026-11-08T03:34:00Z") / 1000, end_time: Date.parse("2026-11-08T06:00:30Z") / 1000,
+  },
+  publish: {
+    visibility_status: "public", entry_start_time: Date.parse("2026-11-01T00:00:00Z") / 1000,
+    entry_end_time: Date.parse("2026-11-07T14:59:00Z") / 1000, allow_user_video_event_links: 1, allow_unslotted_posts: 1,
+  },
+  questions: {
+    allow_user_video_edits: 1, user_video_edit_permission_keys_json: '["video.basics"]',
+    required_video_fields_json: '["icon_url"]', editable_fields: '["title"]', review_settings: '{"next":true}',
+  },
+  slots: {
+    max_slots_per_video: 4, max_slot_reservation_groups_per_xid: 3, slot_interval_minutes: 15,
+    slot_part_gap_minutes: 5, slot_type: "count", slot_visibility_mode: "anonymous", parts_json: '["Opening","Finale"]',
+  },
+};
+
+test("MIG-0652 update payload: all 16 permission masks preserve fields, ordering and gated form reads", () => {
+  for (let mask = 0; mask < 16; mask++) {
+    const permissions = Object.freeze(Object.fromEntries(UPDATE_SECTIONS.map((section, index) => [section, Boolean(mask & (1 << index))])));
+    const formData = new FormData();
+    for (const [key, value] of Object.entries({
+      youtube_description_template: "New template", required_video_fields_present: "1", required_video_fields_json: '["icon_url"]',
+      custom_questions_present: "1", custom_question_id: "stage_permission_alpha", custom_question_enabled: "1",
+      custom_question_required: "1", custom_question_label: " Updated stage ",
+      custom_question_description: " Requirements ", custom_question_placeholder: " answer ",
+    })) formData.append(key, value);
+    const formBefore = [...formData];
+    const dataBefore = structuredClone(UPDATE_DATA);
+    const before = structuredClone(UPDATE_BEFORE);
+    const reads = [];
+    for (const method of ["get", "getAll", "has"]) {
+      const original = formData[method].bind(formData);
+      formData[method] = key => { reads.push(method + ":" + key); return original(key); };
+    }
+    const actual = buildEventUpdatePayload({ data: UPDATE_DATA, before: UPDATE_BEFORE, formData, permissions, now });
+    const sections = UPDATE_SECTIONS.filter(section => permissions[section]);
+    const payload = { updated_at: now };
+    for (const section of sections) Object.assign(payload, UPDATE_EXPECTED_SECTIONS[section]);
+    assert.deepEqual(actual, {
+      payload, updatedSections: sections,
+      changedByPermission: Object.fromEntries(sections.map(section => [section, "event." + section])),
+      videoFormSettingsJson: permissions.questions ? JSON.stringify({ stage_permissions: [{
+        id: "stage_permission_alpha", enabled: true, required: true, label: "Updated stage",
+        description: "Requirements", placeholder: "answer",
+      }] }) : null,
+    }, "permission mask " + mask);
+    assert.deepEqual(Object.keys(actual), ["payload", "updatedSections", "changedByPermission", "videoFormSettingsJson"]);
+    assert.deepEqual(Object.keys(actual.payload), Object.keys(payload));
+    assert.deepEqual(Object.keys(actual.changedByPermission), sections);
+    assert.deepEqual(reads, [
+      ...(permissions.basic ? ["has:youtube_description_template"] : []),
+      ...(permissions.questions ? [
+        "getAll:custom_question_id", "getAll:custom_question_enabled", "getAll:custom_question_required",
+        "getAll:custom_question_label", "getAll:custom_question_description", "getAll:custom_question_placeholder",
+        "get:custom_questions_present", "get:required_video_fields_present", "has:required_video_fields_json", "get:required_video_fields_json",
+      ] : []),
+    ], "stage serializer runs before required-fields serializer, only for an allowed questions section");
+    assert.deepEqual([...formData], formBefore);
+    assert.deepEqual(UPDATE_DATA, dataBefore);
+    assert.deepEqual(UPDATE_BEFORE, before);
+  }
+});
+
+test("MIG-0652 update payload: omitted and explicit-clear controls preserve CURRENT null and fallback semantics", () => {
+  const cases = [
+    { name: "omitted controls", controls: [], template: "ignored", expected: ["Previous template", '["music"]', '["description"]', '{"old":true}'] },
+    { name: "explicit clear", controls: [["youtube_description_template", ""], ["required_video_fields_present", "1"], ["required_video_fields_json", "[]"]],
+      template: null, editable: "", review: "", expected: [null, null, "", ""] },
+    { name: "present undefined template", controls: [["youtube_description_template", ""]],
+      expected: [null, '["music"]', '["description"]', '{"old":true}'] },
+    { name: "noncanonical presence flag", controls: [["required_video_fields_present", "true"], ["required_video_fields_json", "[]"]],
+      expected: ["Previous template", '["music"]', '["description"]', '{"old":true}'] },
+    { name: "checkbox values", controls: [["required_video_fields_present", "1"], ["required_video_fields", "icon_url"]],
+      expected: ["Previous template", '["icon_url"]', '["description"]', '{"old":true}'] },
+    { name: "nullable previous fields", controls: [], previous: null, expected: [null, null, null, null] },
+  ];
+  for (const item of cases) {
+    const formData = new FormData();
+    for (const [key, value] of item.controls) formData.append(key, value);
+    const before = item.previous === null ? { ...UPDATE_BEFORE, youtube_description_template: null,
+      required_video_fields_json: null, editable_fields: null, review_settings: null } : UPDATE_BEFORE;
+    const actual = buildEventUpdatePayload({
+      data: { ...UPDATE_DATA, youtube_description_template: item.template, editable_fields: item.editable, review_settings: item.review ?? null },
+      before, formData, permissions: { basic: true, publish: false, questions: true, slots: false }, now,
+    });
+    assert.deepEqual([actual.payload.youtube_description_template, actual.payload.required_video_fields_json,
+      actual.payload.editable_fields, actual.payload.review_settings], item.expected, item.name);
+    assert.equal(actual.videoFormSettingsJson, '{"stage_permissions":[]}', "questions permission keeps stage reconciliation enabled: " + item.name);
+  }
+});
+
+test("MIG-0652 update payload: publish normalization and empty slot inputs remain permission-gated", () => {
+  const formData = new FormData();
+  for (const method of ["get", "getAll", "has"]) formData[method] = () => { throw new Error("denied sections must not inspect controls"); };
+  const actual = buildEventUpdatePayload({
+    data: { ...UPDATE_DATA, visibility_status: "archived", entry_start_time: "not-a-date", entry_end_time: "",
+      slot_interval_minutes: undefined, parts_text: "\n \r\n" },
+    before: UPDATE_BEFORE, formData, permissions: { basic: false, publish: true, questions: false, slots: true }, now,
+  });
+  assert.deepEqual(actual, {
+    payload: { updated_at: now, ...UPDATE_EXPECTED_SECTIONS.publish, visibility_status: "private", entry_start_time: null, entry_end_time: null,
+      ...UPDATE_EXPECTED_SECTIONS.slots, slot_interval_minutes: null, parts_json: null },
+    updatedSections: ["publish", "slots"], changedByPermission: { publish: "event.publish", slots: "event.slots" }, videoFormSettingsJson: null,
+  });
+});
+
+test("MIG-0652 update payload: CURRENT runtime exports and admin section constants keep canonical identity", () => {
+  assert.deepEqual(Object.keys(currentEventPayload).sort(), ["buildEventUpdatePayload", "parseDateInput"]);
+  assert.equal(currentEventPayload.buildEventUpdatePayload, buildEventUpdatePayload);
+  assert.equal(currentEventPayload.parseDateInput, parseDateInput);
+  assert.deepEqual(Object.keys(currentEventSections).sort(), ["EVENT_SECTION_PERMISSION_KEYS", "snapshotEventSection"]);
+  assert.equal(currentEventSections.EVENT_SECTION_PERMISSION_KEYS, EVENT_SECTION_PERMISSION_KEYS);
+  assert.deepEqual(EVENT_SECTION_PERMISSION_KEYS, { basic: "event.basic", publish: "event.publish", questions: "event.questions", slots: "event.slots" });
 });

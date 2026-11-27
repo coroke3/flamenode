@@ -61,9 +61,11 @@ test("MIG-0652 U01: empty and whitespace-only dates map to null but valid midnig
   assert.equal(build(data({start_time:" ",end_time:null})).start_time, null);
 });
 
-test("MIG-0652 U01: CURRENT eventPayload delegates only basic fields and retains section guard and audit metadata", async () => {
-  const source = await readFile(new URL("../../../src/lib/event/eventPayload.ts", import.meta.url), "utf8");
+test("MIG-0652 U01: shared eventPayload retains the basic section guard, metadata and CURRENT bridge", async () => {
+  const bridge = await readFile(new URL("../../../src/lib/event/eventPayload.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../server-core/src/event/updatePayload.ts", import.meta.url), "utf8");
   const core = await readFile(new URL("../src/event/basicUpdateFields.ts", import.meta.url), "utf8");
+  assert.match(bridge, /export \{ buildEventUpdatePayload, type EventUpdatePayload \} from "@flamenode\/server-core\/event\/updatePayload";/);
   assert.match(source, /if \(permissions\.basic\) \{\s*Object\.assign\(updatePayload, buildBasicEventUpdateFields\(\{/);
   assert.match(source, /hasYoutubeDescriptionTemplateField: formData\.has\("youtube_description_template"\)/);
   assert.match(source, /changedByPermission\.basic = EVENT_SECTION_PERMISSION_KEYS\.basic/);

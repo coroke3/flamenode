@@ -71,9 +71,11 @@ test("MIG-0652 U01 slots: slot variant and numeric flags remain scalar and uncha
   assert.equal(build({ slot_visibility_mode: "anonymous" }).slot_visibility_mode, "anonymous");
 });
 
-test("MIG-0652 U01 slots: CURRENT guards sections while domain has no Next/DB imports", async () => {
-  const current = await readFile(new URL("../../../src/lib/event/eventPayload.ts", import.meta.url), "utf8");
+test("MIG-0652 U01 slots: shared composer guards sections while domain has no Next/DB imports", async () => {
+  const bridge = await readFile(new URL("../../../src/lib/event/eventPayload.ts", import.meta.url), "utf8");
+  const current = await readFile(new URL("../../server-core/src/event/updatePayload.ts", import.meta.url), "utf8");
   const core = await readFile(new URL("../src/event/slotsUpdateFields.ts", import.meta.url), "utf8");
+  assert.match(bridge, /export \{ buildEventUpdatePayload, type EventUpdatePayload \} from "@flamenode\/server-core\/event\/updatePayload";/);
   assert.match(current, /if \(permissions\.slots\) \{\s*Object\.assign\(updatePayload, buildSlotsEventUpdateFields\(data\)\)/);
   assert.match(current, /changedByPermission\.slots = EVENT_SECTION_PERMISSION_KEYS\.slots/);
   for (const section of ["basic", "publish", "questions"]) {
