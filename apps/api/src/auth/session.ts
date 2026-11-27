@@ -334,10 +334,20 @@ export async function resolveSessionUser(
       return null;
     }
 
+    // D1 replaces malformed UTF-8 TEXT with U+FFFD, so SQLite length(TEXT)
+    // can undercount the returned codepoints. Recheck the decoded value,
+    // without normalizing its spelling. 128 decoded Unicode codepoints also
+    // bound UTF-8 to 512 bytes; stop after the first excess codepoint.
+    let activeXCodepoints = 0;
+    for (const _ of row.user_active_x_user_id ?? "") {
+      if (++activeXCodepoints > MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS) break;
+    }
+
     // The invalid marker must never become a successful session with null Active X.
     // Keep the success path inside the D1 catch, but handle the marker after it
     // so provider exceptions need not be inspected or mistaken for our own error.
-    if (row.user_active_x_id_invalid !== 1) {
+    if (row.user_active_x_id_invalid !== 1 &&
+        activeXCodepoints <= MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS) {
       const role =
         row.user_role === "admin" || row.user_role === "moderator"
           ? row.user_role

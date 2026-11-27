@@ -99,6 +99,7 @@ function createTestD1() {
       queryCount = 0;
     },
     setActiveX: (userId, xId) => sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?').run(xId, userId),
+    setActiveXTextBytes: (userId, bytes) => sqlite.prepare('UPDATE "user" SET active_x_user_id = CAST(? AS TEXT) WHERE id = ?').run(bytes, userId),
     close: () => sqlite.close(),
   };
 
@@ -271,7 +272,7 @@ test("T01: valid Next session cookie resolves to the same user", async (t) => {
   assert.equal(user.active_x_user_id, USERS.valid.active_x_user_id);
 });
 
-test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changing normal sessions", async (t) => {
+test("SEC-713: legacy Active X storage and decoded identity are bounded, without changing normal sessions", async (t) => {
   const d1 = createTestD1();
   t.after(() => d1.close());
 
@@ -322,6 +323,9 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
     ["43 Japanese (129 bytes)", "あ".repeat(43)],
     ["128 Japanese (384 bytes)", "あ".repeat(bound)],
     ["128 emoji (512 bytes)", "🌀".repeat(bound)],
+    ["128 valid replacement characters (384 bytes)", "\uFFFD".repeat(bound)],
+    ["unchanged legacy spelling", "@" + "C".repeat(bound - 1)],
+    ["empty persisted selection", ""],
   ]) {
     assert.ok(Array.from(accepted).length <= bound, label);
     assert.ok(Buffer.byteLength(accepted, "utf8") <= byteBound, label);
@@ -332,6 +336,31 @@ test("SEC-713: legacy Active X ID is bounded in the first D1 row, without changi
     assert.equal(valid?.active_x_user_id, accepted, label + " survives session resolution");
     assert.equal(projected.at(-1).user_active_x_id_invalid, 0, label);
     assert.equal(d1.getQueryCount(), 1, label);
+  }
+
+  // SQLite length(TEXT) can count one malformed UTF-8 sequence while D1
+  // decodes several replacement characters. The decoded identity must also
+  // meet the limit, without rejecting genuine U+FFFD or rewriting spelling.
+  for (const [label, hex, decodedCodepoints] of [
+    ["surrogate sequence", "eda080".repeat(43), 129],
+    ["overlong sequence", "c080".repeat(65), 130],
+    ["out-of-range sequence", "f4908080".repeat(128), 512],
+  ]) {
+    d1.setActiveXTextBytes(USERS.valid.id, Buffer.from(hex, "hex"));
+    projected.length = 0;
+    d1.resetQueryCount();
+    await assert.rejects(
+      () => resolveSessionUser(inspectingD1, token, opts),
+      (error) => error.name === "SessionUnavailableError" && error.code === "database_unavailable",
+      label + " must not grant a session with an oversized decoded identity",
+    );
+    assert.equal(d1.getQueryCount(), 1, label);
+    assert.equal(projected.length, 1, label);
+    const row = projected[0];
+    assert.equal(row.user_active_x_id_invalid, 0, label + " passes the SQL storage bounds");
+    assert.equal(Array.from(row.user_active_x_user_id).length, decodedCodepoints, label);
+    assert.ok(decodedCodepoints > bound, label);
+    assert.ok(Buffer.from(hex, "hex").length <= byteBound, label);
   }
 
   // length(TEXT) counts Unicode codepoints but stops at the first embedded
@@ -512,13 +541,16 @@ test("SEC-713: throwing diagnostics cannot replace mounted private authenticatio
     }, env);
 
   try {
-    d1.setActiveX(USERS.valid.id, "x".repeat(129));
-    for (const [label, env, code, expectedReads] of [
-      ["invalid identity", { DB: d1 }, "INVALID_ACTIVE_X_ID_VALUE", 1],
+    for (const [label, env, code, expectedReads, prepare] of [
+      ["invalid identity", { DB: d1 }, "INVALID_ACTIVE_X_ID_VALUE", 1,
+        () => d1.setActiveX(USERS.valid.id, "x".repeat(129))],
+      ["oversized decoded identity", { DB: d1 }, "INVALID_ACTIVE_X_ID_VALUE", 1,
+        () => d1.setActiveXTextBytes(USERS.valid.id, Buffer.from("eda080".repeat(43), "hex"))],
       ["rejected lookup", { DB: failingDb }, "D1_LOOKUP_FAILED", 0],
       ["missing binding", {}, "D1_BINDING_MISSING", 0],
       ["throwing binding", brokenBinding, "D1_BINDING_FAILED", 0],
     ]) {
+      prepare?.();
       logs.length = 0;
       d1.resetQueryCount();
       const response = await request(SESSIONS.valid.sessionToken, env);
