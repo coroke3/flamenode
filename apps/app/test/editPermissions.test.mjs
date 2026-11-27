@@ -262,8 +262,11 @@ test("MIG-0715 U01: injected wrong-video receipt never renders private subjects"
     async () => ok(permissionReceipt("B", "wrong-video")));
   try {
     assert.match(m.container.textContent, /画面の表示中に問題が発生しました/);
-    assert.doesNotMatch(m.container.textContent, /wrong-video/);
-    assert.equal(m.container.querySelectorAll("button,form").length, 0);
+    assert.doesNotMatch(m.container.textContent, /wrong-video|共同編集者/);
+    assert.equal(m.container.querySelectorAll("form").length, 0);
+    // AuthUnavailable deliberately preserves CURRENT's safe reload control.
+    // Permit exactly that button, never permission-changing controls.
+    assert.deepEqual([...m.container.querySelectorAll("button")].map(b => b.textContent.trim()), ["再読み込み"]);
   } finally {
     await m.unmount();
   }
