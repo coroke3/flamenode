@@ -239,3 +239,35 @@ test("RH-002 U02 security: throwing classifier after committed D1 retains recove
   assert.equal(response.body.attempt, 3);
   assert.equal(response.body.progress.index, 1);
 });
+
+test("RH-002 U02: failed R2 finalization after complete progress retains committed recovery", async () => {
+  for (const setup of [{ completed: true, stage: "events" }, { completed: false, stage: "complete" }]) {
+    const { args, calls, claim } = harness(setup);
+    claim.complete = async () => { calls.push("R2-complete"); throw new Error("nontransient CAS"); };
+    const response = await runLegacyImportApplyPipeline(args);
+    assert.deepEqual(calls, ["R2-claim", "R2-complete", "R2-release"]);
+    assert.equal(response.status, 409);
+    assert.equal(response.body.kind, "committed_progress_pending");
+    assert.equal(response.body.committed, true);
+    assert.equal(response.body.retryable, true);
+    assert.equal(response.body.requires_repreview, false);
+    assert.equal(response.body.plan_hash, "hash");
+    assert.equal(response.body.attempt, 3);
+    assert.equal(response.body.result.complete, true);
+    assert.equal(response.body.progress.stage, setup.stage);
+  }
+});
+
+test("RH-002 U02: throwing classifier on R2 finalization retains committed recovery", async () => {
+  const { args, calls, claim } = harness({ stage: "complete" });
+  claim.complete = async () => { calls.push("R2-complete"); throw new Error("provider SQL params private"); };
+  args.isTransientApplyFailure = () => { throw new Error("classifier failure"); };
+  const response = await runLegacyImportApplyPipeline(args);
+  assert.deepEqual(calls, ["R2-claim", "R2-complete", "R2-release"]);
+  assert.equal(response.status, 409);
+  assert.equal(response.body.kind, "committed_progress_pending");
+  assert.equal(response.body.committed, true);
+  assert.equal(response.body.requires_repreview, false);
+  assert.equal(response.body.result.complete, true);
+  assert.equal(JSON.stringify(response.body).includes("provider SQL params private"), false);
+});

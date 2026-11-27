@@ -76,7 +76,15 @@ export async function runLegacyImportApplyPipeline<Progress extends LegacyImport
       return success(claim.progress, true, expiresAt);
     } catch (cause) {
       await claim.release().catch(() => undefined);
-      return applyFailure(cause);
+      // The D1 steps were committed in earlier requests. An R2 completion
+      // failure is a recovery problem, never an uncommitted-plan failure.
+      return legacyImportCommittedProgressPending({
+        retryable: classifyTransient(cause),
+        planHash: claim.planHash,
+        attempt: claim.attempt,
+        progress: progressSummary(claim.progress),
+        result: result(claim.progress, true),
+      });
     }
   }
 
