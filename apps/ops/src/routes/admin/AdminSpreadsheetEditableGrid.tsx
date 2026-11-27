@@ -134,10 +134,16 @@ export function AdminSpreadsheetEditableGrid({
   const stats = computeSelectionStats();
   // CURRENT formula bar projection. Keep this display-only until the shared edit/blur lifecycle is ported.
   const focusedRow = identityChanged ? undefined : rows[visibleFocus.row];
-  const formulaReference = focusedColumn
-    ? `${columnIndexToLetter(visibleFocus.col)}${(page - 1) * Math.max(1, limit) + visibleFocus.row + 1} (${focusedColumn.name})`
+  // A valid draft is identified by row/column name, not by the old visual column index.
+  const formulaDraft = currentSelection && !selectionConflict ? currentSelection : null;
+  const formulaFocus = formulaDraft
+    ? { row: formulaDraft.rowIndex, col: columns.findIndex(c => c.name === formulaDraft.column) }
+    : visibleFocus;
+  const formulaColumn = identityChanged ? undefined : columns[formulaFocus.col];
+  const formulaReference = formulaColumn
+    ? `${columnIndexToLetter(formulaFocus.col)}${(page - 1) * Math.max(1, limit) + formulaFocus.row + 1} (${formulaColumn.name})`
     : "—";
-  const formulaValue = currentSelection && !selectionConflict ? currentSelection.value
+  const formulaValue = formulaDraft ? formulaDraft.value
     : focusedRow && focusedColumn ? cellValue(focusedRow[focusedColumn.name]) : "";
   const formulaStatusText = identityChanged ? ""
     : inFlight.current !== null && historyInFlight.current === inFlight.current ? "履歴を適用中…"

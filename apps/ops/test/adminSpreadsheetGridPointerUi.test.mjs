@@ -1684,3 +1684,31 @@ test("MIG-0737 U01 formula display: live copy and readonly projection share the 
     else delete navigator.clipboard;
   }
 });
+
+
+test("MIG-0737 U01 formula display: valid draft label follows its named column through reorder and removal", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    const input = await editTitle(ui);
+    const bar = assertFormula(ui, "B4 (title)", "Unsaved");
+    input.setSelectionRange(1, 3, "backward");
+    const reordered = { ...data, columns: [data.columns[2], data.columns[0], data.columns[1]] };
+    await ui.render({ data: reordered });
+    assert.ok(assertFormula(ui, "C4 (title)", "Unsaved") === bar);
+    assert.ok(cell(ui, "0:2").querySelector("input") === input);
+    assert.equal(input.value, "Unsaved");
+    assertNoEffects(ui);
+    const shrunk = { ...reordered, columns: [data.columns[1], data.columns[0]] };
+    await ui.render({ data: shrunk });
+    assertFormula(ui, "A4 (title)", "Unsaved");
+    assert.ok(cell(ui, "0:0").querySelector("input") === input);
+    assertNoEffects(ui);
+    await ui.render({ data: { ...shrunk, columns: [data.columns[2], data.columns[0]] } });
+    assertFormula(ui, "B4 (id)", "a");
+    assert.equal(ui.host.querySelector("input"), null);
+    assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
+    await React.act(async () => button(ui, "編集を破棄").click());
+    assertFormula(ui, "B4 (id)", "a");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
