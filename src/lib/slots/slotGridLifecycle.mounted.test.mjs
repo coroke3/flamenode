@@ -13,7 +13,7 @@ import { JSDOM } from "jsdom";
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "https://flamenode.test/event/a/slots", pretendToBeVisual: true,
 });
-for (const key of ["window", "document", "navigator", "HTMLElement", "Node"]) {
+for (const key of ["window", "document", "navigator", "HTMLElement", "Node", "FormData"]) {
   Object.defineProperty(globalThis, key, {
     configurable: true, value: key === "window" ? dom.window : dom.window[key],
   });
@@ -159,10 +159,13 @@ function persistedPageHide() {
   Object.defineProperty(event, "persisted", { value: true });
   window.dispatchEvent(event);
 }
-function assertNoPrivateActionUi(container) {
+function assertNoLocalActionUi(container) {
   assert.equal(container.querySelector('[role="dialog"], [role="alertdialog"]'), null);
   assert.equal(document.querySelector('[role="menu"]'), null);
   assert.equal(container.querySelector('[role="status"], [role="alert"]'), null);
+}
+function assertNoPrivateActionUi(container) {
+  assertNoLocalActionUi(container);
   assert.doesNotMatch(container.textContent, /previous viewer private name/);
 }
 
@@ -200,7 +203,9 @@ for (const name of ["reserve", "release", "extend", "merge"]) {
             if (boundary === "bfcache-null-X") persistedPageShow();
             if (boundary === "pagehide-null-X") {
               persistedPageHide();
-              assertNoPrivateActionUi(container);
+              // The isolated child still receives old slot props. The parent
+              // owns overlay-derived row data; check child UI synchronously.
+              assertNoLocalActionUi(container);
             }
             if (boundary === "active-X") window.dispatchEvent(new dom.window.Event(activeXChanged));
             root.render(h(SlotGrid, {
@@ -328,4 +333,107 @@ for (const name of ["reserve", "release", "extend", "merge", "menu"]) {
       }
     });
   }
+}
+
+
+// Mount the actual parent and child together. Verify overlay-derived rows,
+// child action UI and completions at the same synchronous pagehide boundary.
+const panelSource = await readFile(
+  new URL("../../../app/(public)/event/[id]/slots/EventSlotsViewerPanel.tsx", import.meta.url), "utf8",
+);
+const panelCompiled = ts.transpileModule(panelSource, {
+  fileName: "EventSlotsViewerPanel.tsx",
+  compilerOptions: {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
+    jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
+  },
+  reportDiagnostics: true,
+});
+assert.deepEqual(panelCompiled.diagnostics ?? [], []);
+const overlayRequests = [];
+const panelExport = { exports: {} };
+const panelMocks = {
+  ...mocks,
+  "@/components/event/SlotGrid": { SlotGrid },
+  "@/components/event/SlotStatusBoard": { SlotStatusBoard: visual },
+  "./page.module.css": {},
+};
+vm.runInNewContext(panelCompiled.outputText, {
+  module: panelExport, exports: panelExport.exports,
+  require(id) {
+    if (!Object.hasOwn(panelMocks, id)) throw new Error("Unexpected panel import: " + id);
+    return panelMocks[id];
+  },
+  window: dom.window, document: dom.window.document, console, AbortController,
+  fetch(url, init) {
+    let resolve;
+    const promise = new Promise(yes => { resolve = yes; });
+    overlayRequests.push({ url, init, resolve });
+    return promise;
+  },
+}, { filename: "EventSlotsViewerPanel.cjs" });
+const { EventSlotsViewerPanel } = panelExport.exports;
+const overlayResponse = slots => ({
+  ok: true, json: async () => ({
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: false,
+    operatorOverrideAllowed: false, viewerXId: null, viewerXIdNotice: null, slots,
+  }),
+});
+for (const name of ["reserve", "release", "extend", "merge"]) {
+  test("SEC-921 mounted real panel + grid: " + name + " / synchronous BFCache privacy boundary", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const start = requests.length, getStart = overlayRequests.length;
+    const refreshStart = refreshes.length, redirectStart = redirects.length;
+    const privateSlots = slotsFor(name);
+    const baseSlots = privateSlots.map(s => ({
+      ...s, display_name: null, is_owned_by_viewer: false, viewer_relation: "none",
+    }));
+    const patches = privateSlots.filter(s => s.is_owned_by_viewer).map(s => ({
+      id: s.id, display_name: s.display_name, is_owned_by_viewer: true,
+      viewer_relation: "unassigned", group_key: null,
+    }));
+    let pending;
+    try {
+      await settle(() => root.render(h(EventSlotsViewerPanel, {
+        eventId: "a", eventTitle: "a", baseSlots, accepting: true,
+        eventStatus: "active", slotType: "count", maxSlotsPerVideo: 3,
+        maxSlotReservationsPerXId: 3, slotIntervalSec: null, slotPartGapSec: 0,
+        parts: [], entryEndTime: null,
+      })));
+      assert.equal(overlayRequests.length, getStart + 1);
+      await settle(() => overlayRequests[getStart].resolve(overlayResponse(patches)));
+      if (patches.length) assert.match(container.textContent, /previous viewer private name/);
+      await startAction(container, name);
+      assert.equal(requests.length, start + 1);
+      pending = requests[start];
+      assert.equal(pending.name, name);
+      await settle(() => {
+        persistedPageHide();
+        assertNoPrivateActionUi(container);
+        assert.equal(container.querySelector("#slot-edit-left"), null,
+          "real parent must retire private row ownership before pagehide returns");
+      });
+      assert.equal(overlayRequests.length, getStart + 1, "pagehide must not refetch");
+      await settle(() => pending.resolve({ ok: true, slotId: "free", groupSize: 1 }));
+      pending = null;
+      assertNoPrivateActionUi(container);
+      assert.equal(refreshes.length, refreshStart);
+      assert.equal(redirects.length, redirectStart);
+      await settle(persistedPageShow);
+      assert.equal(overlayRequests.length, getStart + 2);
+      assertNoPrivateActionUi(container);
+      await settle(() => overlayRequests[getStart + 1].resolve(overlayResponse([])));
+      assertNoPrivateActionUi(container);
+      assert.equal(container.querySelector("#slot-edit-left"), null);
+      assert.equal(refreshes.length, refreshStart);
+      assert.equal(redirects.length, redirectStart);
+    } finally {
+      await settle(() => root.unmount());
+      if (pending) await settle(() => pending.resolve({ ok: false }));
+      container.remove();
+    }
+  });
 }

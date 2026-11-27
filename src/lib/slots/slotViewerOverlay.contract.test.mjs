@@ -122,7 +122,8 @@ test("BFCache復元時は旧viewer overlay・予約ダイアログの両方を�
   assert.match(panel, /if \(event\.persisted\) refresh\(\)/);
   assert.match(panel, /window\.addEventListener\("pageshow", onPageShow\)/);
   assert.match(panel, /window\.removeEventListener\("pageshow", onPageShow\)/);
-  assert.match(panel, /const refresh = \(\) => \{[\s\S]*?setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null, scope: null \}\);[\s\S]*?setRefreshNonce\(/);
+  assert.match(panel, /const retirePrivateOverlay = \(\) => \{\s*overlayGeneration\.current \+= 1;[\s\S]*?setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null, scope: null \}\);[\s\S]*?setLoading\(true\);/);
+  assert.match(panel, /const refresh = \(\) => \{\s*retirePrivateOverlay\(\);\s*setRefreshNonce\(/);
   assert.ok(slotGrid.includes('import { flushSync } from "react-dom"'));
   assert.ok(slotGrid.includes('if (event.persisted) flushSync(clearViewerPrivateUi)'));
   assert.ok(slotGrid.includes('window.addEventListener("pagehide", onPageHide)'));

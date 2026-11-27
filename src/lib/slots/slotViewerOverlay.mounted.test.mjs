@@ -180,23 +180,24 @@ test("mounted overlay: reused baseSlots event change retires delayed old GET and
   const container = dom.window.document.createElement("div");
   dom.window.document.body.appendChild(container);
   const root = createRoot(container);
+  const start = requests.length, mountStart = mounted, unmountStart = unmounted;
   try {
     await settle(() => root.render(React.createElement(EventSlotsViewerPanel, props("a"))));
-    assert.equal(requests.length, 1);
-    assert.match(requests[0].url, /\/event(s)?\/a\/slots\/viewer-overlay$/);
+    assert.equal(requests.length, start + 1);
+    assert.match(requests[start + 0].url, /\/event(s)?\/a\/slots\/viewer-overlay$/);
     assert.equal(read(container).slots[0].owned, false);
 
     // Simulate client route transition while A's credentialed request remains in flight.
     await settle(() => root.render(React.createElement(EventSlotsViewerPanel, props("b"))));
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, start + 2);
     assert.equal(read(container).slots[0].owned, false);
-    assert.equal(unmounted, 1, "old SlotGrid must unmount when event id changes");
+    assert.equal(unmounted, unmountStart + 1, "old SlotGrid must unmount when event id changes");
 
-    await settle(() => requests[0].resolve(response(overlay("A private"))));
+    await settle(() => requests[start + 0].resolve(response(overlay("A private"))));
     assert.equal(read(container).slots[0].owned, false, "late event A overlay cannot publish into B");
     assert.equal(read(container).slots[0].name, null);
 
-    await settle(() => requests[1].resolve(response(overlay("B private"))));
+    await settle(() => requests[start + 1].resolve(response(overlay("B private"))));
     assert.equal(read(container).slots[0].owned, true);
     assert.equal(read(container).slots[0].name, "B private");
 
@@ -207,21 +208,21 @@ test("mounted overlay: reused baseSlots event change retires delayed old GET and
       Object.defineProperty(event, "persisted", { value: true });
       dom.window.dispatchEvent(event);
     });
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, start + 3);
     assert.equal(read(container).slots[0].owned, false);
     assert.equal(read(container).slots[0].name, null);
 
-    await settle(() => requests[2].resolve(response(overlay("new B"))));
+    await settle(() => requests[start + 2].resolve(response(overlay("new B"))));
     assert.equal(read(container).slots[0].name, "new B");
 
     // Revisit A with the identical baseSlots object; never reuse B's overlay.
     await settle(() => root.render(React.createElement(EventSlotsViewerPanel, props("a"))));
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, start + 4);
     assert.equal(read(container).slots[0].owned, false);
-    assert.equal(unmounted, 2);
-    await settle(() => requests[3].resolve(response(overlay("new A"))));
+    assert.equal(unmounted, unmountStart + 2);
+    await settle(() => requests[start + 3].resolve(response(overlay("new A"))));
     assert.equal(read(container).slots[0].name, "new A");
-    assert.equal(mounted, 3);
+    assert.equal(mounted, mountStart + 3);
   } finally {
     await settle(() => root.unmount());
     container.remove();
