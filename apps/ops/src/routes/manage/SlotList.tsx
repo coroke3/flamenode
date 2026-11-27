@@ -2,6 +2,7 @@ import * as React from "react";
 import { Link } from "react-router-dom";
 import type { ManageSlotRow } from "@flamenode/contracts";
 import { partLabels } from "./slotParts.js";
+import { ConfirmDialog } from "../../components/shared/ConfirmDialog.js";
 
 const STATUS_LABELS = Object.freeze({
   available: "空き",
@@ -317,18 +318,28 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
         })}</tbody>
       </table>
     </div>
-    {onAction && pending && <div role="group" aria-label="枠操作の確認"
-      className="manage-slot-confirm">
-      <p>{pending.operation.kind === "release-submitted-video"
+    {onAction && pending && <ConfirmDialog
+      open
+      title={pending.operation.kind === "release-submitted-video"
+        ? "作品の提出を解除しますか？"
+        : pending.operation.kind === "force-release-submitted"
+          ? "提出済み枠を強制解放しますか？"
+          : "枠操作を実行しますか？"}
+      message={pending.operation.kind === "release-submitted-video"
         ? "枠の確保状態は維持したまま、現在提出されている作品を枠から外します。利用者はこの枠へ別の作品を再度提出できます。" +
           (releaseIncludesGroup ? "同じ提出グループの連続枠もまとめて未提出状態へ戻します。" : "")
         : pending.operation.kind === "force-release-submitted"
           ? "作品は削除せず、提出済み枠との紐付けだけを解除して空き状態に戻します。連続枠の場合は同じ提出グループをまとめて解放します。"
-          : "選択した枠の変更を実行します。よろしいですか？"}</p>
-      <button type="button" className="fn-btn fn-btn-ghost" disabled={busy}
-        onClick={() => setPending(null)}>キャンセル</button>
-      <button type="button" className="fn-btn fn-btn-primary" disabled={busy}
-        onClick={() => void runConfirmed()}>実行する</button>
-    </div>}
+          : "選択した枠の状態を変更します。"}
+      confirmLabel={pending.operation.kind === "release-submitted-video"
+        ? "作品のみ解放"
+        : pending.operation.kind === "force-release-submitted"
+          ? "強制解放する"
+          : "実行する"}
+      tone="danger"
+      busy={busy}
+      onCancel={() => setPending(null)}
+      onConfirm={() => void runConfirmed()}
+    />}
   </div>;
 }

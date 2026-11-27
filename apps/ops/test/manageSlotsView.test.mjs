@@ -247,7 +247,7 @@ test("MIG-0722 U02b-2: injected handler alone enables selection and confirmation
   assert.match(safe, /操作/);
   assert.match(safe, /解放/);
   assert.match(safe, /削除/);
-  assert.doesNotMatch(safe, /強制解放|作品のみ解放|枠操作の確認/);
+  assert.doesNotMatch(safe, /強制解放|作品のみ解放|alertdialog/);
   assert.equal(writes, 0);
   const admin = render(React.createElement(SlotList, {
     eventId: "ev id", slots: sample.slots,
@@ -310,10 +310,10 @@ test("MIG-0722 U02b-2: actual UI confirms before callback, cancels and blocks >3
       .find(button => button.textContent.trim() === text);
     await React.act(async () => findButton("削除").click());
     assert.equal(calls.length, 0, "clicking a destructive row operation must only open confirmation");
-    assert.ok(dom.window.document.querySelector('[aria-label="枠操作の確認"]'));
+    assert.ok(dom.window.document.querySelector('.manage-slot-list [role="alertdialog"]'));
     await React.act(async () => findButton("キャンセル").click());
     assert.equal(calls.length, 0);
-    assert.equal(dom.window.document.querySelector('[aria-label="枠操作の確認"]'), null);
+    assert.equal(dom.window.document.querySelector('.manage-slot-list [role="alertdialog"]'), null);
     await React.act(async () => findButton("削除").click());
     await React.act(async () => findButton("実行する").click());
     assert.deepEqual(calls, [{ kind: "delete", slotId: "a0" }]);
@@ -346,11 +346,11 @@ test("MIG-0722 U02b-2: filter and event changes discard stale selections and pen
     const deleteButton = [...dom.window.document.querySelectorAll("button")]
       .find(button => button.textContent.trim() === "削除");
     await React.act(async () => deleteButton.click());
-    assert.ok(dom.window.document.querySelector('[aria-label="枠操作の確認"]'));
+    assert.ok(dom.window.document.querySelector('.manage-slot-list [role="alertdialog"]'));
 
     // Simulate a status filter response reusing the same mounted component.
     await React.act(async () => root.render(renderList("ev id", [b])));
-    assert.equal(dom.window.document.querySelector('[aria-label="枠操作の確認"]'), null);
+    assert.equal(dom.window.document.querySelector('.manage-slot-list [role="alertdialog"]'), null);
     assert.doesNotMatch(dom.window.document.body.textContent, /1件選択中/);
     await React.act(async () => root.render(renderList("ev id", [a, b])));
     const fresh = dom.window.document.querySelector('input[aria-label="枠 a を選択"]');
@@ -389,13 +389,13 @@ test("MIG-0722 U02b: old in-flight slot mutation must not display on a different
       const findButton = label => [...dom.window.document.querySelectorAll("button")]
         .find(button => button.textContent.trim() === label);
       await React.act(async () => findButton("削除").click());
-      assert.ok(dom.window.document.querySelector('[aria-label="枠操作の確認"]'));
+      assert.ok(dom.window.document.querySelector('.manage-slot-list [role="alertdialog"]'));
       await React.act(async () => findButton("実行する").click());
       assert.deepEqual(calls, [{ kind: "delete", slotId: "shared" }]);
       assert.equal(changed, 0);
       const second = [slot("shared", { event_id: "new-event", status: "available" })];
       await React.act(async () => root.render(view("new-event", second)));
-      assert.equal(dom.window.document.querySelector('[aria-label="枠操作の確認"]'), null);
+      assert.equal(dom.window.document.querySelector('.manage-slot-list [role="alertdialog"]'), null);
       await React.act(async () => {
         if (outcome === "success") settle({ ok: true, message: "OLD-SUCCESS" });
         else settle(new Error("OLD-ERROR"));
@@ -529,16 +529,16 @@ test("MIG-0722 U02b-9: submitted-slot capability revocation invalidates pending 
     await React.act(async () => root.render(view(true)));
     assert.ok(button("強制解放"), "authorized event.slots staff has submitted actions");
     await React.act(async () => button("強制解放").click());
-    assert.ok(dom.window.document.querySelector('[aria-label="枠操作の確認"]'));
+    assert.ok(dom.window.document.querySelector('.manage-slot-list [role="alertdialog"]'));
     await React.act(async () => root.render(view(false)));
-    assert.equal(dom.window.document.querySelector('[aria-label="枠操作の確認"]'), null,
+    assert.equal(dom.window.document.querySelector('.manage-slot-list [role="alertdialog"]'), null,
       "revoking permission invalidates an unconfirmed destructive action");
     assert.equal(button("強制解放"), undefined);
     assert.equal(calls.length, 0, "unconfirmed operation was never issued");
 
     await React.act(async () => root.render(view(true)));
     await React.act(async () => button("強制解放").click());
-    await React.act(async () => button("実行する").click());
+    await React.act(async () => button("強制解放する").click());
     assert.deepEqual(calls, [{ kind: "force-release-submitted", slotId: "submitted" }]);
     assert.equal(typeof settle, "function");
     await React.act(async () => root.render(view(false)));
@@ -577,7 +577,7 @@ test("MIG-0722 U02b-10: new list operations own their lock after event or capabi
           .find(el => el.textContent.trim() === label);
         await React.act(async () => root.render(view("A", rowsA, a, true)));
         await React.act(async () => button(scenario === "capability" ? "強制解放" : "削除").click());
-        await React.act(async () => button("実行する").click());
+        await React.act(async () => button(scenario === "capability" ? "強制解放する" : "実行する").click());
         assert.equal(calls.length, 1);
         assert.equal(button("削除").disabled, true);
 
@@ -1112,25 +1112,95 @@ test("MIG-0722 U02b: submitted release confirmation preserves CURRENT group-impa
         const label = kind === "release-submitted-video" ? "作品のみ解放" : "強制解放";
         const row = [...doc.querySelectorAll("tbody tr")][1];
         const action = [...row.querySelectorAll("button")].find(button => button.textContent.trim() === label);
-        const dialog = () => doc.querySelector('[aria-label="枠操作の確認"]');
+        const dialog = () => doc.querySelector('.manage-slot-list [role="alertdialog"]');
         const button = text => [...dialog().querySelectorAll("button")]
           .find(element => element.textContent.trim() === text);
         const expected = kind === "release-submitted-video"
           ? releaseText + (grouped ? groupText : "") : forceText;
+        const expectedTitle = kind === "release-submitted-video"
+          ? "作品の提出を解除しますか？" : "提出済み枠を強制解放しますか？";
+        const confirmLabel = kind === "release-submitted-video" ? "作品のみ解放" : "強制解放する";
+        const verifyDialog = () => {
+          const modal = dialog();
+          assert.ok(modal);
+          assert.equal(modal.getAttribute("aria-modal"), "true");
+          assert.equal(doc.getElementById(modal.getAttribute("aria-labelledby")).textContent, expectedTitle);
+          assert.equal(doc.getElementById(modal.getAttribute("aria-describedby")).textContent, expected);
+          assert.ok(button(confirmLabel).classList.contains("fn-btn-danger"));
+        };
 
         await React.act(async () => action.click());
-        assert.equal(dialog().querySelector("p").textContent, expected);
+        verifyDialog();
         assert.deepEqual(calls, [], "opening a confirmation never dispatches");
         await React.act(async () => button("キャンセル").click());
         assert.equal(dialog(), null);
         assert.deepEqual(calls, [], "cancel never dispatches");
 
         await React.act(async () => action.click());
-        assert.equal(dialog().querySelector("p").textContent, expected);
-        await React.act(async () => button("実行する").click());
+        verifyDialog();
+        await React.act(async () => button(confirmLabel).click());
         assert.deepEqual(calls, [{ kind, slotId: "target" }]);
         assert.equal(dialog(), null);
       });
     }
   }
+});
+
+
+test("MIG-0722 U02b: shared slot confirmation uses CURRENT danger dialog and cancels on Escape or backdrop", async () => {
+  await withSlotDom(async (dom, root) => {
+    const calls = [];
+    const rows = [slot("a")];
+    const onAction = async operation => { calls.push(operation); return { ok: true }; };
+    const view = writeBlocked => React.createElement(MemoryRouter, null,
+      React.createElement(SlotList, { eventId: "ev id", slots: rows, partGapMinutes: 15,
+        parts: [], onAction, writeBlocked }));
+    const doc = dom.window.document;
+    const modal = () => doc.querySelector('.manage-slot-list [role="alertdialog"]');
+    const clickDelete = () => [...doc.querySelectorAll("button")]
+      .find(element => element.textContent.trim() === "削除").click();
+    const escape = () => doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+      key: "Escape", bubbles: true,
+    }));
+    const backdrop = () => doc.querySelector(".manage-slot-list .confirm-backdrop");
+    await React.act(async () => root.render(view(false)));
+
+    for (const cancel of [escape, () => backdrop().click()]) {
+      await React.act(async () => clickDelete());
+      const dialog = modal();
+      assert.ok(dialog);
+      assert.equal(dialog.getAttribute("aria-modal"), "true");
+      assert.equal(doc.getElementById(dialog.getAttribute("aria-labelledby")).textContent, "枠操作を実行しますか？");
+      assert.equal(doc.getElementById(dialog.getAttribute("aria-describedby")).textContent, "選択した枠の状態を変更します。");
+      const confirm = dialog.querySelector("button.fn-btn-danger");
+      assert.ok(confirm);
+      assert.equal(confirm.textContent, "実行する");
+      assert.equal(doc.activeElement, confirm);
+      await React.act(async () => dialog.click());
+      assert.equal(modal(), dialog, "click inside does not dismiss");
+      await React.act(async () => cancel());
+      assert.equal(modal(), null);
+      assert.deepEqual(calls, []);
+    }
+
+    await React.act(async () => clickDelete());
+    await React.act(async () => root.render(view(true)));
+    const blocked = modal();
+    assert.ok(blocked);
+    const buttons = [...blocked.querySelectorAll("button")];
+    assert.equal(buttons.length, 2);
+    assert.ok(buttons.every(button => button.disabled));
+    await React.act(async () => { escape(); backdrop().click(); buttons.forEach(button => button.click()); });
+    assert.equal(modal(), blocked, "busy confirmation cannot dismiss or dispatch");
+    assert.deepEqual(calls, []);
+    await React.act(async () => root.render(view(false)));
+    await React.act(async () => escape());
+    assert.equal(modal(), null);
+    assert.deepEqual(calls, []);
+
+    await React.act(async () => clickDelete());
+    await React.act(async () => modal().querySelector("button.fn-btn-danger").click());
+    assert.deepEqual(calls, [{ kind: "delete", slotId: "a" }]);
+    assert.equal(modal(), null);
+  });
 });
