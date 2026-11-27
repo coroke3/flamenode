@@ -1608,7 +1608,7 @@ function counting(env) {
 async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/__bench/ping") return new Response("ok", { headers: { "x-bench-build": BUILD_ID } });
-    if (url.pathname === "/__bench/noop" && !request.headers.has("x-bench-script")) return new Response("ok");
+
     if (url.pathname === "/__bench/burn") {
       // Calibration only: synchronous CPU burn so the harness can check the clock is real.
       let x = 0;
