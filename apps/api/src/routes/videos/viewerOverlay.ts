@@ -56,6 +56,75 @@ const INVALID_LINKED_X_ID_SQL = `(
   length(CAST(a."id" AS BLOB)) > ${MAX_APPROVED_X_ID_PROJECTION_BYTES}
 )`;
 
+// SEC #715: event_staff values are embedded in video_json's first D1 row.
+// Bound each scalar before json_object and bound the escaped aggregate before
+// the outer json_object embeds the aggregate as TEXT. A NULL sentinel is
+// handled as an authorization failure in the route; never filter a bad row.
+const MAX_STAFF_EVENT_ID_BYTES = 512;
+const MAX_STAFF_PERMISSION_PRESET_BYTES = 64;
+const MAX_STAFF_CUSTOM_KEYS_BYTES = 4096;
+const MAX_STAFF_JSON_ESCAPED_BYTES = 24 * 1024;
+function invalidRequiredStaffTextSql(column: string, maxBytes: number): string {
+  return `(typeof(${column}) != 'text' OR instr(${column}, char(0)) > 0 OR
+    length(CAST(${column} AS BLOB)) > ${maxBytes})`;
+}
+function invalidNullableStaffTextSql(column: string, maxBytes: number): string {
+  return `(${column} IS NOT NULL AND ${invalidRequiredStaffTextSql(column, maxBytes)})`;
+}
+function boundedViewerStaffJsonSql(): string {
+  const invalid = [
+    invalidRequiredStaffTextSql('q."event_id"', MAX_STAFF_EVENT_ID_BYTES),
+    invalidNullableStaffTextSql('q."permission_preset"', MAX_STAFF_PERMISSION_PRESET_BYTES),
+    invalidNullableStaffTextSql('q."custom_permission_keys_json"', MAX_STAFF_CUSTOM_KEYS_BYTES),
+  ].join(" OR ");
+  return `(WITH staff_entries AS MATERIALIZED (
+    SELECT es."event_id" AS "event_id",
+           es."permission_preset" AS "permission_preset",
+           es."custom_permission_keys_json" AS "custom_permission_keys_json"
+    FROM "event_staff" es
+    WHERE es."x_user_id" IN (
+      SELECT x."id" FROM "x_user_account_links" l
+      INNER JOIN "x_users" x ON x."id" = l."x_user_id"
+      WHERE l."auth_user_id" = ? AND x."approval_status" = 'approved'
+    )
+      AND (es."event_id" = v."primary_event_id" OR
+           es."event_id" IN (SELECT "event_id" FROM "video_events" WHERE "video_id" = v."id" LIMIT 4))
+    LIMIT 101
+  ),
+  row_json AS MATERIALIZED (
+    SELECT CASE WHEN ${invalid} THEN NULL ELSE json_object(
+      'event_id', q."event_id",
+      'permission_preset', q."permission_preset",
+      'custom_permission_keys_json', q."custom_permission_keys_json"
+    ) END AS "item"
+    FROM staff_entries q
+  ),
+  staff_stats AS MATERIALIZED (
+    SELECT count(*) AS "row_count",
+           count("item") AS "valid_count",
+           coalesce(sum(length(CAST(json_quote("item") AS BLOB)) - 2), 0) AS "escaped_bytes"
+    FROM row_json
+  )
+  SELECT CASE
+    WHEN "row_count" != "valid_count" OR
+         "escaped_bytes" + max("row_count" - 1, 0) + 2 > ${MAX_STAFF_JSON_ESCAPED_BYTES}
+      THEN NULL
+    ELSE (SELECT coalesce(json_group_array(json("item")), '[]') FROM row_json)
+  END FROM staff_stats)`;
+}
+
+function parseBoundedViewerStaffRows(value: unknown): unknown[] | null {
+  if (typeof value !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.some((row) =>
+      !row || typeof row !== "object" || Array.isArray(row))) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 const UNAVAILABLE_HEADERS = {
   ...PRIVATE_HEADERS,
   "Retry-After": "3",
@@ -342,15 +411,7 @@ SELECT
       'primary_event_id', v."primary_event_id",
       'visibility_status', v."visibility_status",
       've_json', (SELECT coalesce(json_group_array(ve."event_id"), '[]') FROM (SELECT "event_id" FROM "video_events" WHERE "video_id" = v."id" ORDER BY "event_id" LIMIT 4) ve),
-      'staff_json', (SELECT coalesce(json_group_array(json_object('event_id', s."event_id", 'permission_preset', s."permission_preset", 'custom_permission_keys_json', s."custom_permission_keys_json")), '[]')
-                       FROM (SELECT es."event_id", es."permission_preset", es."custom_permission_keys_json" FROM "event_staff" es
-                              WHERE es."x_user_id" IN (
-                                SELECT x."id" FROM "x_user_account_links" l
-                                INNER JOIN "x_users" x ON x."id" = l."x_user_id"
-                                WHERE l."auth_user_id" = ? AND x."approval_status" = 'approved'
-                              )
-                                AND (es."event_id" = v."primary_event_id" OR es."event_id" IN (SELECT "event_id" FROM "video_events" WHERE "video_id" = v."id" LIMIT 4))
-                              LIMIT 100) s)
+      'staff_json', ${boundedViewerStaffJsonSql()}
    )
    FROM "videos" v
    WHERE v."id" = ? OR v."youtube_video_id" = ?
@@ -445,9 +506,16 @@ SELECT
           // A stale R2 artifact must not grant public chapter editing after
           // the canonical D1 video has been made private.
           matchesPublicD1Video = videoData.visibility_status === "public";
+          const boundedStaffRows = parseBoundedViewerStaffRows(videoData.staff_json);
+          if (!boundedStaffRows) {
+            // SQL returns NULL when any staff row or the escaped aggregate is
+            // invalid/oversized. Fail closed for every role, including admin;
+            // never let parseAccessFacts turn a sentinel into an empty grant set.
+            return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
+          }
           viewerCanEditChapters = canAdministerChapters(viewer.role, approvedXIds, {
             primary_event_id: videoData.primary_event_id,
-            access: parseAccessFacts(videoData.ve_json, videoData.staff_json),
+            access: parseAccessFacts(videoData.ve_json, JSON.stringify(boundedStaffRows)),
           });
         }
       }
