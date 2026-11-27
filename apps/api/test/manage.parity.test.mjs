@@ -59,6 +59,40 @@ if (runUnderRootTsx(import.meta.url)) {
     return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : null, stats: d1.stats, bytes: Buffer.byteLength(text) };
   }
 
+
+  // Simulate only the first notification-inclusive D1 read failing, while
+  // keeping a real migrated node:sqlite DB and every subsequent statement.
+  function firstNotificationReadFault(sqlite, failure) {
+    const backing = createD1(sqlite);
+    let faults = 0;
+    let retryProbes = 0;
+    return {
+      ...backing,
+      get faults() { return faults; },
+      get retryProbes() { return retryProbes; },
+      prepare(sql) {
+        const original = backing.prepare(sql);
+        return {
+          ...original,
+          bind(...values) {
+            const bound = original.bind(...values);
+            return {
+              ...bound,
+              async first() {
+                if (sql.includes("pragma_table_info('notification_outbox')")) retryProbes++;
+                if (faults === 0 && sql.includes("FROM notification_outbox")) {
+                  faults++;
+                  throw failure;
+                }
+                return bound.first();
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
   // ---------- CURRENT reference loaders ----------
   async function refSnapshot(name) {
     const id = `u_${name}`;
@@ -474,6 +508,225 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(r.body.failedNotificationCount, 0);
     assert.ok(r.body.events.length > 0 && r.body.inbox.length > 0);
     assert.equal(r.stats.statements, 4, "session + staff + failed data + retry data");
+  });
+
+
+  test("SEC-809: manage dashboard legacy notification fallback ignores a throwing warning sink", async () => {
+    const old = createSqlite();
+    seed(old);
+    old.exec("DROP INDEX IF EXISTS notification_outbox_event_idx");
+    old.exec("ALTER TABLE notification_outbox DROP COLUMN event_id");
+    const previousWarn = console.warn;
+    const warnings = [];
+    console.warn = (code) => {
+      warnings.push(code);
+      throw new Error("SEC809_LOGGER_FAILED");
+    };
+    try {
+      const r = await call("/api/manage", "tok-owner", { sqlite: old });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.notificationSchemaMissing, true);
+      assert.deepEqual(r.body.notifications, []);
+      assert.equal(r.body.failedNotificationCount, 0);
+      assert.ok(r.body.events.length > 0 && r.body.inbox.length > 0);
+      assert.equal(r.stats.statements, 4, "session, staff, failed read, retry read");
+      assert.deepEqual(warnings, ["[manage] notification_outbox.event_id unavailable"]);
+    } finally {
+      console.warn = previousWarn;
+      old.close();
+    }
+  });
+
+
+  test("SEC-811: healthy notification schema and an initial transient D1 fault never return a misleading dashboard 200", async () => {
+    const local = createSqlite();
+    seed(local);
+    const d1 = firstNotificationReadFault(local, new Error("synthetic temporary provider failure"));
+    try {
+      const r = await call("/api/manage", "tok-owner", { d1 });
+      assert.equal(d1.faults, 1);
+      assert.equal(d1.retryProbes, 1, "schema verification shares the retry SELECT");
+      assert.equal(r.status, 503);
+      assert.equal(r.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(r.body, { error: "unavailable" });
+      assert.equal(d1.stats.writes, 0);
+    } finally {
+      local.close();
+    }
+  });
+
+  test("SEC-811: healthy notification schema and a hostile provider error never return a misleading event-overview 200", async () => {
+    const local = createSqlite();
+    seed(local);
+    const providerError = new Error("private SQL and params must not be printed");
+    Object.defineProperty(providerError, "message", {
+      configurable: true,
+      get() { throw new Error("SECRET_GETTER_MUST_NOT_RUN"); },
+    });
+    const d1 = firstNotificationReadFault(local, providerError);
+    const previousError = console.error;
+    const messages = [];
+    console.error = (...args) => { messages.push(args); };
+    try {
+      const r = await call("/api/manage/events/evA", "tok-owner", { d1 });
+      assert.equal(d1.faults, 1);
+      assert.equal(d1.retryProbes, 1);
+      assert.equal(r.status, 503);
+      assert.equal(r.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(r.body, { error: "unavailable" });
+      assert.deepEqual(messages, [["[manage] READ_FAILED"]], "no untrusted exception details in logs");
+      assert.equal(d1.stats.writes, 0);
+    } finally {
+      console.error = previousError;
+      local.close();
+    }
+  });
+
+  for (const path of ["/api/manage", "/api/manage/events/evA"]) {
+    test(`SEC-811: ${path} keeps its private 503 when the diagnostic sink throws`, async () => {
+      const local = createSqlite();
+      const previousError = console.error;
+      const messages = [];
+      try {
+        seed(local);
+        const d1 = firstNotificationReadFault(local, new Error("synthetic temporary provider failure"));
+        console.error = (...args) => {
+          messages.push(args);
+          throw new Error("SEC811_LOGGER_FAILED");
+        };
+
+        const r = await call(path, "tok-owner", { d1 });
+        assert.equal(r.status, 503);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(r.body, { error: "unavailable" });
+        assert.deepEqual(messages, [["[manage] READ_FAILED"]]);
+        assert.equal(d1.faults, 1);
+        assert.equal(d1.retryProbes, 1);
+        assert.equal(d1.stats.writes, 0);
+        assert.equal(d1.stats.batches, 0);
+      } finally {
+        console.error = previousError;
+        local.close();
+      }
+    });
+  }
+
+  test("SEC-811: completely missing notification_outbox is not misreported as old event_id-only schema", async () => {
+    for (const route of ["/api/manage", "/api/manage/events/evA"]) {
+      const local = createSqlite();
+      seed(local);
+      local.exec("DROP TABLE notification_outbox");
+      try {
+        const r = await call(route, "tok-owner", { sqlite: local });
+        assert.equal(r.status, 503, route);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(r.body, { error: "unavailable" });
+        assert.equal(r.stats.writes, 0);
+      } finally {
+        local.close();
+      }
+    }
+  });
+
+
+  function corruptFirstNotificationJson(sqlite, column, invalid) {
+    const base = createD1(sqlite);
+    let corrupted = 0;
+    let schemaProbes = 0;
+    return {
+      ...base,
+      get corrupted() { return corrupted; },
+      get schemaProbes() { return schemaProbes; },
+      prepare(sql) {
+        // Metadata access is not needed after a successful fused SELECT.
+        // Simulate a provider that rejects schema introspection.
+        if (sql.includes("pragma_table_info('notification_outbox')")) {
+          schemaProbes++;
+          throw new Error("SYNTHETIC_SCHEMA_PROBE_UNAVAILABLE");
+        }
+        const original = base.prepare(sql);
+        return {
+          ...original,
+          bind(...values) {
+            const bound = original.bind(...values);
+            return {
+              ...bound,
+              async first() {
+                const row = await bound.first();
+                if (!corrupted && sql.includes("FROM notification_outbox") &&
+                    row && Object.prototype.hasOwnProperty.call(row, column)) {
+                  corrupted++;
+                  return { ...row, [column]: invalid };
+                }
+                return row;
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
+  test("SEC-811: CURRENT notification-only malformed/oversized JSON still degrades 200 without hiding events", async () => {
+    const cases = [
+      ["/api/manage", "notifications", "{bad-json"],
+      ["/api/manage/events/evA", "notif_counts", "{bad-json"],
+      ["/api/manage/events/evA", "notifications", "x".repeat(65_537)],
+    ];
+    for (const [path, column, invalid] of cases) {
+      const local = createSqlite();
+      seed(local);
+      const d1 = corruptFirstNotificationJson(local, column, invalid);
+      const previousWarn = console.warn;
+      const warnings = [];
+      console.warn = (message) => { warnings.push(message); };
+      try {
+        const r = await call(path, "tok-owner", { d1 });
+        assert.equal(d1.corrupted, 1, path + " corruption injected into a real SQL result");
+        assert.equal(d1.schemaProbes, 0, path + " notification-only fallback must not query schema metadata");
+        assert.equal(r.status, 200, path + " must preserve CURRENT notification-only degradation");
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.equal(r.body.notificationSchemaMissing, true);
+        assert.deepEqual(r.body.notifications, []);
+        assert.ok(path === "/api/manage" ? r.body.events.length > 0 && r.body.inbox.length > 0 :
+          r.body.event.id === "evA" && r.body.notifCounts.all === 0);
+        assert.deepEqual(warnings, ["[manage] notification_json_invalid"]);
+        assert.equal(d1.stats.writes, 0);
+        assert.ok(d1.stats.statements <= 4);
+      } finally {
+        console.warn = previousWarn;
+        local.close();
+      }
+    }
+  });
+
+  test("SEC-811: synchronous D1 prepare exception against a current schema also fails closed", async () => {
+    for (const path of ["/api/manage", "/api/manage/events/evA"]) {
+      const local = createSqlite();
+      seed(local);
+      const backing = createD1(local);
+      let rejected = 0;
+      const d1 = {
+        ...backing,
+        prepare(sql) {
+          if (!rejected && sql.includes("FROM notification_outbox")) {
+            rejected++;
+            throw new Error("SYNTHETIC_SYNC_D1_PREPARE_FAILURE");
+          }
+          return backing.prepare(sql);
+        },
+      };
+      try {
+        const r = await call(path, "tok-owner", { d1 });
+        assert.equal(rejected, 1);
+        assert.equal(r.status, 503);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(r.body, { error: "unavailable" });
+        assert.equal(d1.stats.writes, 0);
+      } finally {
+        local.close();
+      }
+    }
   });
 
   // ---------------- staff ----------------
@@ -1140,6 +1393,32 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(degraded.body.notificationSchemaMissing, true);
     assert.deepEqual(degraded.body.notifications, []);
     assert.equal(degraded.body.notifCounts.all, 0);
+  });
+
+
+  test("SEC-809: manage event overview legacy notification fallback ignores a throwing warning sink", async () => {
+    const old = createSqlite();
+    seed(old);
+    old.exec("DROP INDEX IF EXISTS notification_outbox_event_idx");
+    old.exec("ALTER TABLE notification_outbox DROP COLUMN event_id");
+    const previousWarn = console.warn;
+    const warnings = [];
+    console.warn = (code) => {
+      warnings.push(code);
+      throw new Error("SEC809_LOGGER_FAILED");
+    };
+    try {
+      const r = await call("/api/manage/events/evA", "tok-owner", { sqlite: old });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.notificationSchemaMissing, true);
+      assert.deepEqual(r.body.notifications, []);
+      assert.equal(r.body.notifCounts.all, 0);
+      assert.equal(r.body.event.id, "evA");
+      assert.deepEqual(warnings, ["[manage] notification_outbox.event_id unavailable"]);
+    } finally {
+      console.warn = previousWarn;
+      old.close();
+    }
   });
 
   test("T-center: notification center equals CURRENT for every user and filter", async () => {
