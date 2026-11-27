@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, encodeColdRecorderBody, decodeColdRecorderBody, recordFreshInprocTarget, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
 async function loadReplayWorker(generation, script, body) {
@@ -2019,6 +2019,87 @@ test("MIG-0639: warm/cold samples reject body mismatches and cold requests reapp
   const cold = await runCold(target, scenarios, { coldSamples: 2 });
   assert.deepEqual(visited, ["A", "B", "A", "B"]);
   assert.ok([...cold.values()].flat().every((sample) => sample.unexpected));
+});
+
+test("MIG-0639: fresh cold recorder body transport preserves multipart, URL-encoded and byte bodies", async () => {
+  const form = new FormData();
+  form.append("title", "playlist proof");
+  form.append("file", new Blob(["fixture bytes"], { type: "text/plain" }), "proof.txt");
+  const restoredForm = decodeColdRecorderBody(structuredClone(encodeColdRecorderBody(form)));
+  assert.equal(restoredForm.get("title"), "playlist proof");
+  const originalFile = form.get("file");
+  const restoredFile = restoredForm.get("file");
+  assert.equal(restoredFile.name, originalFile.name);
+  assert.equal(restoredFile.type, originalFile.type);
+  assert.equal(restoredFile.lastModified, originalFile.lastModified);
+  assert.equal(await restoredFile.text(), "fixture bytes");
+
+  const params = new URLSearchParams([["mode", "one"], ["mode", "two"]]);
+  assert.deepEqual([...decodeColdRecorderBody(structuredClone(encodeColdRecorderBody(params))).entries()], [...params.entries()]);
+  const bytes = new Uint8Array([0, 1, 127, 255]);
+  assert.deepEqual([...decodeColdRecorderBody(structuredClone(encodeColdRecorderBody(bytes)))], [...bytes]);
+  assert.equal(decodeColdRecorderBody(encodeColdRecorderBody(undefined)), undefined);
+  assert.equal(decodeColdRecorderBody(encodeColdRecorderBody(null)), null);
+  assert.throws(() => encodeColdRecorderBody(new ReadableStream()), /unsupported cold recorder request body/);
+});
+
+test("MIG-0639: each cold replay recording gets a fresh app module graph and first-request input order", async () => {
+  const plan = { adminToken: "cold-module-isolation" };
+  const scenario = buildScenarios(plan, { includeEventPlaylist: true }).find((item) => item.id === "RH-031-PLAYLIST");
+  const spec = scenario.kinds.normal(0, "cold-module");
+  const fresh = await recordFreshInprocTarget(plan, spec, scenario.prepareKind.normal);
+  const target = await createInprocTarget(plan);
+  const { resetOperationModeCachesForTests } = await import("../apps/api/src/routes/live/operationMode.ts");
+  try {
+    const prepared = scenario.prepareKind.normal;
+    if (prepared.r2 !== undefined) await target.setR2(prepared.r2);
+    for (const [key, value] of Object.entries(prepared.r2Objects ?? {})) await target.setR2(value, key);
+    await target.exec(spec.setup);
+    resetOperationModeCachesForTests();
+    const first = await target.recordForReplay(spec);
+    const steady = await target.recordForReplay(spec);
+    const clockIdentity = replayIdentity(["input.Date.now", []]);
+    const clockCount = (recorded) => recorded.script.filter((entry) => entry.identity === clockIdentity).length;
+
+    assert.equal(fresh.status, 200);
+    assert.equal(first.status, 200);
+    assert.equal(steady.status, 200);
+    assert.equal(fresh.responseBodyMismatch, false);
+    assert.equal(first.responseBodyMismatch, false);
+    assert.equal(steady.responseBodyMismatch, false);
+    assert.equal(clockCount(fresh), 3, "fresh module graph captures the first-request operation-mode path");
+    assert.equal(clockCount(first), 3, "reset main graph reproduces the fresh first-request path");
+    assert.equal(clockCount(steady), 2, "the next request uses the steady module cache");
+    assert.equal(fresh.d1, first.d1);
+    assert.deepEqual(fresh.d1PerQueryRows, first.d1PerQueryRows);
+  } finally {
+    await target.close();
+  }
+});
+
+test("MIG-0639: runCold uses the fresh recorder hook and does not reuse the warm target setup", async () => {
+  const scenario = {
+    id: "COLD-HOOK",
+    prepareKind: { normal: { r2: "default-r2", r2Objects: { manifest: "fixture-A" } } },
+    kinds: { normal: () => ({ method: "GET", path: "/cold", setup: [{ sql: "fixture", params: [] }], marker: "A", expect: [200] }) },
+  };
+  const seen = [];
+  const target = {
+    async recordCold(spec, prepareKind) { seen.push({ spec, prepareKind }); return { script: [] }; },
+    async setR2() { throw new Error("warm target R2 must not seed fresh recorder"); },
+    async exec() { throw new Error("warm target D1 must not seed fresh recorder"); },
+    async record() { throw new Error("warm target recorder must not record cold"); },
+    async runFirstRequest() {
+      return { status: 200, cpuMs: 1, bytes: 1, d1: 0, d1RowsReturned: 0, d1PerQueryRows: [], isFirstIsolateRequest: true, requestOrdinal: 1 };
+    },
+  };
+  const cold = await runCold(target, [scenario], { coldSamples: 2 });
+  assert.equal(seen.length, 2);
+  assert.ok(seen.every((entry) => entry.spec.marker === "A"));
+  assert.ok(seen.every((entry) => entry.prepareKind.r2 === "default-r2"));
+  assert.ok(seen.every((entry) => entry.prepareKind.r2Objects.manifest === "fixture-A"));
+  assert.ok(seen.every((entry) => entry.spec.setup[0].sql === "fixture"));
+  assert.ok([...cold.values()].flat().every((sample) => !sample.unexpected));
 });
 
 test("MIG-0639: ordered GET/playlist/HEAD replay preserves changed or missing ETags for a fail-closed consumer", async () => {
