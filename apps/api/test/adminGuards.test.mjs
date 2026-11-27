@@ -1166,7 +1166,7 @@ test("U04a prototype: version-fenced raw actor snapshot preserves SQLite bytes a
     { label: "null-and-no-active-x", discordId: null, discordName: null, activeX: null, userImage: null, xName: "X name", xIcon: null },
     { label: "empty-and-shadowed-fallback", discordId: "", discordName: "", activeX: "u04a-x", userImage: "user-image", xName: "", xIcon: "" },
     { label: "unicode", discordId: "雪🙂", discordName: "名前🙂", activeX: "u04a-x", userImage: "画像", xName: "X雪", xIcon: "https://i/雪.png" },
-    { label: "embedded-nul", discordId: "d\\u0000id", discordName: "n\\u0000ame", activeX: "u04a-x", userImage: "img\\u0000tail", xName: "x\\u0000name", xIcon: "icon\\u0000tail" },
+    { label: "embedded-nul", discordId: "d\u0000id", discordName: "n\u0000ame", activeX: "u04a-x", userImage: "img\u0000tail", xName: "x\u0000name", xIcon: "icon\u0000tail" },
     { label: "invalid-utf8-blob", discordId: invalidUtf8, discordName: invalidUtf8, activeX: "u04a-x", userImage: invalidUtf8, xName: invalidUtf8, xIcon: invalidUtf8 },
     { label: "large-legacy-value", discordId: "d", discordName: "n", activeX: "u04a-x", userImage: "u".repeat(100_000), xName: "x", xIcon: null },
   ];
