@@ -18,6 +18,7 @@ export async function readManageXLinkRequests(
 
 /** Provisional SA-090/091 result; matches MIG-0605's strict XIdLinkReviewResultSchema. */
 export type XIdLinkReviewResult = { ok: boolean; message?: string };
+export type XIdLinkReviewWriteResult = OpsWriteResult<XIdLinkReviewResult> | { status: "forbidden" };
 
 function isReviewResult(value: unknown): value is XIdLinkReviewResult {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
@@ -38,7 +39,7 @@ async function reviewXIdLinkRequest(
   requestId: string,
   action: "approve" | "reject",
   reason?: string,
-): Promise<OpsWriteResult<XIdLinkReviewResult>> {
+): Promise<XIdLinkReviewWriteResult> {
   const id = requestId.trim();
   if (!id) return { status: "ok", data: { ok: false, message: "申請 ID がありません。" } };
   // Literal dot segments are normalized by URL parsers, even when percent-encoded.
@@ -46,7 +47,19 @@ async function reviewXIdLinkRequest(
   try {
     const path = "/api/xid/link-requests/" + encodeURIComponent(id) + "/" + action;
     const body = action === "approve" ? {} : { reason: (reason ?? "").trim().slice(0, 500) };
-    const result = await send<XIdLinkReviewResult>(fetchFn, "POST", path, body);
+    // Keep shared D-17-3 send() unchanged. For this privileged queue a 403
+    // requires revalidation, irrespective of its body or provider message.
+    let forbidden = false;
+    const result = await send<XIdLinkReviewResult>(async (url, init) => {
+      const response = await fetchFn(url, init);
+      if (response.status === 403) {
+        forbidden = true;
+        // Never parse or wait for the original forbidden response body.
+        return new Response(null, { status: 403 });
+      }
+      return response;
+    }, "POST", path, body);
+    if (forbidden) return { status: "forbidden" };
     if (result.status !== "ok") return result;
     if (!isReviewResult(result.data)) return { status: "unavailable" };
     return { status: "ok", data: { ok: result.data.ok, ...(result.data.message === undefined ? {} : { message: result.data.message }) } };
@@ -57,12 +70,12 @@ async function reviewXIdLinkRequest(
 
 export function approveXIdLinkRequest(
   fetchFn: OpsFetch, requestId: string,
-): Promise<OpsWriteResult<XIdLinkReviewResult>> {
+): Promise<XIdLinkReviewWriteResult> {
   return reviewXIdLinkRequest(fetchFn, requestId, "approve");
 }
 
 export function rejectXIdLinkRequest(
   fetchFn: OpsFetch, requestId: string, reason?: string,
-): Promise<OpsWriteResult<XIdLinkReviewResult>> {
+): Promise<XIdLinkReviewWriteResult> {
   return reviewXIdLinkRequest(fetchFn, requestId, "reject", reason);
 }

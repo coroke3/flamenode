@@ -130,6 +130,7 @@ const reviewAdapter = (overrides = {}) => ({
   reject: async () => success,
   onRefresh: () => {},
   onAnonymous: () => {},
+  onForbidden: () => {},
   ...overrides,
 });
 
@@ -473,4 +474,50 @@ test("U03c a delayed refresh lease cannot publish into a replacement authority",
     assert.deepEqual(started, ["test-authority-1", "test-authority-2"]);
     assert.deepEqual(accepted, ["test-authority-2"]);
   });
+});
+
+test("U03c write 403 hides private queue until a fresh authority GET, not ordinary refresh", async () => {
+  for (const action of ["approve", "reject"]) {
+    const receipt = deferred();
+    const calls = [];
+    let forbidden = 0;
+    let anonymous = 0;
+    let refreshes = 0;
+    const adapter = reviewAdapter({
+      [action]: (id) => { calls.push(id); return receipt.promise; },
+      onForbidden: () => { forbidden++; },
+      onAnonymous: () => { anonymous++; },
+      onRefresh: () => { refreshes++; },
+    });
+    await withReviewBody(adapter, async ({ node, draw }) => {
+      if (action === "reject") await React.act(async () => button(node, "却下").click());
+      await React.act(async () => {
+        button(node, action === "approve" ? "承認" : "理由を添えて却下").click();
+        button(node, "承認", 1).click();
+      });
+      assert.deepEqual(calls, ["req/1"]);
+      await React.act(async () => receipt.resolve({ status: "forbidden" }));
+      const hidden = () => {
+        assert.doesNotMatch(node.textContent, /Discord Staff|account1|req\/1/);
+        assert.equal(node.querySelectorAll("button").length, 0);
+        assert.equal(node.querySelector("textarea"), null);
+      };
+      hidden();
+      assert.match(node.querySelector('[role="alert"]').textContent, /権限を再確認/);
+      assert.equal(forbidden, 1);
+      assert.equal(anonymous, 0);
+      assert.equal(refreshes, 0);
+      await draw(adapter);
+      hidden();
+      adapter.authorizationEpoch = "test-authority-2";
+      await draw(adapter, undefined, queueReceipt("test-authority-1", [row]));
+      hidden();
+      const fresh = { ...row, id: "fresh/2", discord_name: "New authorized row", requested_by_auth_user_id: "account2" };
+      await draw(adapter, undefined, queueReceipt(adapter.authorizationEpoch, [fresh]));
+      assert.match(node.textContent, /New authorized row/);
+      assert.doesNotMatch(node.textContent, /Discord Staff|account1|req\/1/);
+      assert.equal(button(node, "承認").disabled, false);
+      assert.deepEqual(calls, ["req/1"]);
+    });
+  }
 });

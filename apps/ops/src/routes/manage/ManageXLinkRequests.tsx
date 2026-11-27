@@ -2,8 +2,7 @@
 import * as React from "react";
 import type { ManageXLinkRequest, ManageXLinkRequestsResponse } from "@flamenode/contracts";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
-import { readManageXLinkRequests, type XIdLinkReviewResult } from "../../api/manageXLinkRequests.js";
-import type { OpsWriteResult } from "../../api/write.js";
+import { readManageXLinkRequests, type XIdLinkReviewWriteResult } from "../../api/manageXLinkRequests.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { ManageXIcon } from "../../components/shared/ManageXIcon.js";
 import { FnTable } from "../../components/shared/FnTable.js";
@@ -92,11 +91,13 @@ type ReviewActions = {
   // Opaque, nonempty host-verified authorization generation. Never reuse a
   // retired value after reauthentication, authority change, or adapter absence.
   authorizationEpoch: string;
-  approve: (requestId: string) => Promise<OpsWriteResult<XIdLinkReviewResult>>;
-  reject: (requestId: string, reason: string) => Promise<OpsWriteResult<XIdLinkReviewResult>>;
+  approve: (requestId: string) => Promise<XIdLinkReviewWriteResult>;
+  reject: (requestId: string, reason: string) => Promise<XIdLinkReviewWriteResult>;
   // The host must check the supplied lease before publishing an async refresh.
   onRefresh: (authorizationEpoch: string, isCurrent: () => boolean) => void | Promise<void>;
   onAnonymous: () => void;
+  // Host revalidates authority; do not treat a forbidden result as sign-out.
+  onForbidden: () => void;
 };
 
 // Host supplies this only from a GET associated with the stated generation.
@@ -140,7 +141,7 @@ export function ManageXLinkRequestsBody({ data: readOnlyData, reviewActions: pro
   const [message, setMessage] = React.useState<string | null>(null);
   const [rejectingId, setRejectingId] = React.useState<string | null>(null);
   const [reason, setReason] = React.useState("");
-  const [authLost, setAuthLost] = React.useState(false);
+  const [authLost, setAuthLost] = React.useState<"anonymous" | "forbidden" | null>(null);
   const [acknowledged, setAcknowledged] = React.useState<ReadonlySet<string>>(() => new Set());
   const acknowledgedRef = React.useRef(new Set<string>());
   const [quarantined, setQuarantined] = React.useState<ReadonlySet<string>>(() => new Set());
@@ -178,10 +179,10 @@ export function ManageXLinkRequestsBody({ data: readOnlyData, reviewActions: pro
     setRejectingId(null);
     setReason("");
     if (reviewActions && epoch !== undefined && epoch !== lastAuthorizedEpoch.current) {
-      // Only a new authority AND its successful GET may clear a prior 401.
+      // Only a new authority AND its successful GET may clear a denial.
       lastAuthorizedEpoch.current = epoch;
       denied.current = false;
-      setAuthLost(false);
+      setAuthLost(null);
       // Retain no-replay protection for previously acknowledged global IDs,
       // without carrying their success messages into the next generation.
       for (const id of acknowledgedRef.current) quarantinedRef.current.add(id);
@@ -224,10 +225,13 @@ export function ManageXLinkRequestsBody({ data: readOnlyData, reviewActions: pro
         ? await adapter.approve(row.id)
         : await adapter.reject(row.id, reason.trim().slice(0, 500));
       if (!isCurrent()) return;
-      if (result.status === "anonymous") {
+      if (result.status === "anonymous" || result.status === "forbidden") {
+        // A private queue must not survive an authoritative write denial.
+        // Latch before notifying the host, and never reuse the rejected epoch.
         denied.current = true;
-        setAuthLost(true);
-        adapter.onAnonymous();
+        setAuthLost(result.status);
+        if (result.status === "anonymous") adapter.onAnonymous();
+        else adapter.onForbidden();
         return;
       }
       if (result.status !== "ok") {
@@ -257,6 +261,9 @@ export function ManageXLinkRequestsBody({ data: readOnlyData, reviewActions: pro
     }
   }
 
+  if (authLost === "forbidden") {
+    return <div role="alert">X ID連携申請を処理できませんでした。権限を再確認してください。</div>;
+  }
   if (authLost || (reviewMode && queueData === null)) {
     return <div role="status" aria-busy="true">読み込み中...</div>;
   }

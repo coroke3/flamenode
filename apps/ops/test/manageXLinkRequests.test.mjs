@@ -113,13 +113,13 @@ test("U03c SA-090/091: blank and unsafe dot-segment or malformed Unicode IDs nev
   }
 });
 
-test("U03c D-17-3: 401 wins over JSON and non-401 denial messages retain CURRENT result", async () => {
+test("U03c D-17-3: 401 wins over JSON and non-auth failure messages retain CURRENT result", async () => {
   for (const mutate of [approveXIdLinkRequest, rejectXIdLinkRequest]) {
     for (const payload of [{ ok: false, message: "ログインが必要です。" }, { ok: true }, null]) {
       assert.deepEqual(await mutate(async () => response(401, payload), "req1"), { status: "anonymous" });
     }
     assert.deepEqual(await mutate(async () => new Response("not json", { status: 401 }), "req1"), { status: "anonymous" });
-    for (const status of [400, 403, 404, 409, 413, 503]) {
+    for (const status of [400, 404, 409, 413, 503]) {
       const denial = { ok: false, message: "処理できません。" };
       assert.deepEqual(await mutate(async () => response(status, denial), "req1"), { status: "ok", data: denial });
       assert.deepEqual(await mutate(async () => response(status, { ok: true }), "req1"), { status: "unavailable" });
@@ -135,5 +135,33 @@ test("U03c strict provisional result: unknown fields, malformed messages and tra
     assert.deepEqual(await mutate(async () => new Response("not json", { status: 200 }), "req1"), { status: "unavailable" });
     assert.deepEqual(await mutate(async () => { throw new Error("private provider detail"); }, "req1"), { status: "unavailable" });
     assert.deepEqual(await mutate(async () => response(200, { ok: true }), "req1"), { status: "ok", data: { ok: true } });
+  }
+});
+
+test("U03c privileged 403 is authoritative before body parsing for both review operations", async () => {
+  for (const mutate of [approveXIdLinkRequest, rejectXIdLinkRequest]) {
+    for (const payload of [{ ok: false, message: "private denial" }, { ok: true }, null]) {
+      assert.deepEqual(await mutate(async () => response(403, payload), "req1"), { status: "forbidden" });
+    }
+    for (const status of [401, 403]) {
+      let calls = 0;
+      let bodyReads = 0;
+      const denied = new Response("denied", { status });
+      denied.json = () => { bodyReads++; throw new Error("private body"); };
+      const got = await mutate(async (path, init) => {
+        calls++;
+        assert.match(path, /^\/api\/xid\/link-requests\/req1\/(?:approve|reject)$/);
+        assert.equal(init.credentials, "same-origin");
+        assert.equal(init.cache, "no-store");
+        return denied;
+      }, "req1");
+      assert.deepEqual(got, { status: status === 401 ? "anonymous" : "forbidden" });
+      assert.equal(calls, 1);
+      assert.equal(bodyReads, 0);
+    }
+    assert.deepEqual(await mutate(async () => new Response("malformed", { status: 403 }), "req1"),
+      { status: "forbidden" });
+    assert.deepEqual(await mutate(async () => response(409, { ok: false, message: "conflict" }), "req1"),
+      { status: "ok", data: { ok: false, message: "conflict" } });
   }
 });
