@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { xIdentityRequests, xUsers } from "@flamenode/db/schema";
+import { users, xIdentityRequests, xUsers } from "@flamenode/db/schema";
 import { buildXIdentityDecisionFields } from "@flamenode/domain/xid";
 import type { ServerCoreDb } from "../db.ts";
 import type { AtomicAuditMutationInput } from "../audit/mutate.ts";
@@ -184,6 +184,55 @@ export function planXIdCanonicalApproval(
       reason: "既存X名義の連携申請を承認",
       context: "x-identity-request",
       retention_class: "long_audit",
+    },
+  };
+}
+
+/**
+ * SA-090 initial Active X selection: preserve the CURRENT full-row CAS and
+ * notification actor overlay. A missing user or existing selection is a no-op.
+ * The host owns all authorization, account linking and batch execution.
+ */
+export function planXIdInitialActiveSelection(
+  db: ServerCoreDb,
+  input: {
+    authUser: typeof users.$inferSelect | null;
+    effectiveXUserId: string;
+    requestedAuthUserId: string;
+    xName: string | null;
+    actorUserId: string;
+    actorXUserId: string | null;
+  },
+): {
+  statement: BatchItem<"sqlite">;
+  expectedChanges: 1;
+  audit: AtomicAuditMutationInput["audits"][number];
+  notificationActiveX: { activeXId: string; activeXName: string | null };
+} | null {
+  const { authUser, effectiveXUserId, requestedAuthUserId, xName, actorUserId, actorXUserId } = input;
+  if (!authUser || authUser.active_x_user_id) return null;
+  const afterUser = { ...authUser, active_x_user_id: effectiveXUserId };
+  return {
+    statement: db
+      .update(users)
+      .set({ active_x_user_id: effectiveXUserId })
+      .where(expectedRowCondition({ expectedCurrent: authUser })),
+    expectedChanges: 1,
+    audit: {
+      table_name: "user",
+      target_id: requestedAuthUserId,
+      operation: "UPDATE",
+      before: { ...authUser },
+      after: afterUser,
+      actor_user_id: actorUserId,
+      actor_x_user_id: actorXUserId,
+      reason: "初回連携X名義をアクティブに設定",
+      context: "x-identity-request",
+      retention_class: "normal",
+    },
+    notificationActiveX: {
+      activeXId: effectiveXUserId,
+      activeXName: xName ?? `@${effectiveXUserId}`,
     },
   };
 }

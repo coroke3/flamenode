@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { planXIdAliasApproval, planXIdCanonicalApproval, planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
+import { planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -30,7 +30,6 @@ import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
-import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import {
@@ -900,31 +899,19 @@ async function approveXIdLinkRequestOnce(
     const authUser = (
       await db.select().from(users).where(eq(users.id, requestedAuthUserId)).limit(1)
     )[0];
-    if (authUser && !authUser.active_x_user_id) {
-      requesterPostApprovalActiveX = {
-        activeXId: effectiveXUserId,
-        activeXName: xUser?.x_name ?? `@${effectiveXUserId}`,
-      };
-      const afterUser = { ...authUser, active_x_user_id: effectiveXUserId };
-      statements.push(
-        db
-          .update(users)
-          .set({ active_x_user_id: effectiveXUserId })
-          .where(expectedRowCondition({ expectedCurrent: authUser })),
-      );
-      expected.push(1);
-      audits.push({
-        table_name: "user",
-        target_id: requestedAuthUserId,
-        operation: "UPDATE",
-        before: { ...authUser },
-        after: afterUser,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "初回連携X名義をアクティブに設定",
-        context: "x-identity-request",
-        retention_class: "normal",
-      });
+    const activeXPlan = planXIdInitialActiveSelection(db, {
+      authUser: authUser ?? null,
+      effectiveXUserId,
+      requestedAuthUserId,
+      xName: xUser?.x_name ?? null,
+      actorUserId: operatorAuthUserId,
+      actorXUserId: operatorActorXUserId,
+    });
+    if (activeXPlan) {
+      requesterPostApprovalActiveX = activeXPlan.notificationActiveX;
+      statements.push(activeXPlan.statement);
+      expected.push(activeXPlan.expectedChanges);
+      audits.push(activeXPlan.audit);
     }
     notificationXUserId = effectiveXUserId;
 

@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/d1";
-import { planXIdAliasApproval, planXIdCanonicalApproval, planXIdLinkRejection } from "../src/xid/linkRequestReview.ts";
+import { getTableColumns } from "drizzle-orm";
+import { planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection } from "../src/xid/linkRequestReview.ts";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { assertChanges } from "../src/audit/mutate.ts";
-import { xUsers } from "@flamenode/db/schema";
+import { users, xUsers } from "@flamenode/db/schema";
 import { expectedRowCondition } from "../src/audit/expectedRowCondition.ts";
 
 // No D1 methods should run during planning; only the generated UPDATE is
@@ -240,6 +241,152 @@ test("SA-090 canonical approval CAS preserves newer rows and rolls back precedin
         assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 0, label);
       }
       assert.equal(sqlite.prepare("SELECT approval_status FROM x_users WHERE id='other'").get().approval_status, "rejected");
+    } finally { sqlite.close(); }
+  }
+});
+
+const initialSelection = (authUser, overrides = {}) => planXIdInitialActiveSelection(db, {
+  authUser, effectiveXUserId: "candidate", requestedAuthUserId: "applicant",
+  xName: null, actorUserId: "reviewer", actorXUserId: null, ...overrides,
+});
+
+test("SA-090 initial Active X preserves exact CURRENT full-row audit and notification overlay", () => {
+  const row = { id: "applicant", active_x_user_id: null, name: "Original",
+    emailVerified: new Date(1700000000123), is_banned: 0 };
+  const before = { ...row };
+  assert.equal(initialSelection(null), null);
+  assert.equal(initialSelection({ ...row, active_x_user_id: "existing" }), null);
+  for (const selected of [null, ""]) {
+    const current = { ...row, active_x_user_id: selected };
+    for (const [xName, actorXUserId] of [[null, null], ["", "reviewer-x"], ["Display", null]]) {
+      const plan = initialSelection(current, { xName, actorXUserId });
+      assert.equal(plan.expectedChanges, 1);
+      assert.deepEqual(plan.statement.toSQL(), db.update(users).set({ active_x_user_id: "candidate" })
+        .where(expectedRowCondition({ expectedCurrent: current })).toSQL());
+      assert.deepEqual(plan.audit, {
+        table_name: "user", target_id: "applicant", operation: "UPDATE",
+        before: current, after: { ...current, active_x_user_id: "candidate" },
+        actor_user_id: "reviewer", actor_x_user_id: actorXUserId,
+        reason: "初回連携X名義をアクティブに設定", context: "x-identity-request",
+        retention_class: "normal",
+      });
+      assert.deepEqual(plan.notificationActiveX, { activeXId: "candidate", activeXName: xName ?? "@candidate" });
+      assert.notStrictEqual(plan.audit.before, current);
+      assert.equal(current.active_x_user_id, selected);
+    }
+  }
+  assert.deepEqual(row, before);
+});
+
+test("SA-090 initial Active X CAS cannot overwrite a changed user or commit a preceding mutation", () => {
+  const row = { id: "applicant", name: "Original", active_x_user_id: null,
+    emailVerified: new Date(1700000000123), is_banned: 0 };
+  const plan = initialSelection(row);
+  const q = plan.statement.toSQL();
+  const check = new SQLiteSyncDialect().sqlToQuery(assertChanges(plan.expectedChanges));
+  for (const [label, race, expected] of [
+    ["stable", null, 1],
+    ["selected elsewhere", "UPDATE user SET active_x_user_id='other-x' WHERE id='applicant'", 0],
+    ["changed name", "UPDATE user SET name='Newer' WHERE id='applicant'", 0],
+    ["changed verification", "UPDATE user SET emailVerified=1700000000456 WHERE id='applicant'", 0],
+    ["changed BAN", "UPDATE user SET is_banned=1 WHERE id='applicant'", 0],
+    ["deleted", "DELETE FROM user WHERE id='applicant'", 0],
+  ]) {
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      sqlite.exec(`CREATE TABLE user (id TEXT PRIMARY KEY, name TEXT, active_x_user_id TEXT,
+          emailVerified INTEGER, is_banned INTEGER);
+        CREATE TABLE marker (n INTEGER NOT NULL);
+        INSERT INTO user VALUES ('applicant','Original',NULL,1700000000123,0),
+          ('other','Original',NULL,1700000000123,0);
+        INSERT INTO marker VALUES (0);`);
+      if (race) sqlite.exec(race);
+      const before = sqlite.prepare("SELECT * FROM user ORDER BY id").all();
+      sqlite.exec("BEGIN");
+      sqlite.exec("UPDATE marker SET n=1");
+      assert.equal(Number(sqlite.prepare(q.sql).run(...q.params).changes), expected, label);
+      if (expected) {
+        assert.doesNotThrow(() => sqlite.prepare(check.sql).get(...check.params), label);
+        sqlite.exec("COMMIT");
+        assert.equal(sqlite.prepare("SELECT active_x_user_id FROM user WHERE id='applicant'").get().active_x_user_id, "candidate");
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 1);
+        assert.equal(Number(sqlite.prepare(q.sql).run(...q.params).changes), 0, "stale replay must not update");
+      } else {
+        assert.throws(() => sqlite.prepare(check.sql).get(...check.params), label);
+        sqlite.exec("ROLLBACK");
+        assert.deepEqual(sqlite.prepare("SELECT * FROM user ORDER BY id").all(), before, label);
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 0, label);
+      }
+      assert.equal(sqlite.prepare("SELECT active_x_user_id FROM user WHERE id='other'").get().active_x_user_id, null);
+    } finally { sqlite.close(); }
+  }
+});
+
+test("SA-090 initial Active X CAS checks every user schema column and fails closed for unsupported snapshots", () => {
+  // Full current schema shape, not a hand-picked projection of the SELECT row.
+  const row = {
+    id: "applicant", name: "Original", email: "original@example.invalid",
+    emailVerified: new Date(1700000000123), image: null, discord_id: "123456",
+    role: "user", can_create_events: 0, is_tos_accepted: 1,
+    accepted_terms_version_id: "v1", terms_reaccept_required: 0,
+    is_banned: 0, is_notification_enabled: 1, active_x_user_id: null,
+    onboarding_completed_at: 1700000000, last_guild_check: null, created_at: 1690000000,
+  };
+  assert.deepEqual(Object.keys(row).sort(), Object.keys(getTableColumns(users)).sort());
+  const stored = Object.fromEntries(Object.entries(row).map(([key, value]) =>
+    [key, value instanceof Date ? value.getTime() : value]));
+  const columns = Object.keys(stored);
+  const integers = new Set(["emailVerified", "can_create_events", "is_tos_accepted",
+    "terms_reaccept_required", "is_banned", "is_notification_enabled",
+    "onboarding_completed_at", "last_guild_check", "created_at"]);
+  const plan = initialSelection(row);
+  const q = plan.statement.toSQL();
+  const check = new SQLiteSyncDialect().sqlToQuery(assertChanges(plan.expectedChanges));
+  const races = Object.entries(stored).map(([key, value]) => ({
+    label: `changed ${key}`, key,
+    value: value === null ? (integers.has(key) ? 1700000001 : "changed")
+      : typeof value === "number" ? value + 1 : key === "role" ? "admin" : `${value}-changed`,
+  }));
+  const scenarios = [
+    { label: "stable" }, ...races, { label: "deleted" },
+    { label: "unsupported value", snapshot: { ...row, unsupported: {} } },
+    { label: "empty snapshot", snapshot: {} },
+    { label: "invalid Date", snapshot: { ...row, emailVerified: new Date(NaN) } },
+  ];
+  for (const scenario of scenarios) {
+    const { label, key, value, snapshot } = scenario;
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      const definitions = columns.map((column) =>
+        `"${column}" ${integers.has(column) ? "INTEGER" : "TEXT"}${column === "id" ? " PRIMARY KEY" : ""}`);
+      sqlite.exec(`CREATE TABLE user (${definitions.join(", ")});
+        CREATE TABLE marker (n INTEGER NOT NULL);
+        INSERT INTO marker VALUES (0);`);
+      const insert = sqlite.prepare(`INSERT INTO user VALUES (${columns.map(() => "?").join(", ")})`);
+      insert.run(...Object.values(stored));
+      insert.run(...Object.values({ ...stored, id: "other" }));
+      if (key) sqlite.prepare(`UPDATE user SET "${key}"=? WHERE id='applicant'`).run(value);
+      if (label === "deleted") sqlite.exec("DELETE FROM user WHERE id='applicant'");
+      const before = sqlite.prepare("SELECT * FROM user ORDER BY id").all();
+      const query = snapshot ? initialSelection(snapshot).statement.toSQL() : q;
+      sqlite.exec("BEGIN; UPDATE marker SET n=1;");
+      const changes = Number(sqlite.prepare(query.sql).run(...query.params).changes);
+      if (label === "stable") {
+        assert.equal(changes, 1);
+        assert.doesNotThrow(() => sqlite.prepare(check.sql).get(...check.params));
+        sqlite.exec("COMMIT");
+        assert.deepEqual(sqlite.prepare("SELECT * FROM user WHERE id='applicant'").get(),
+          Object.assign(Object.create(null), stored, { active_x_user_id: "candidate" }));
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 1);
+        assert.equal(Number(sqlite.prepare(q.sql).run(...q.params).changes), 0, "stale replay");
+      } else {
+        assert.equal(changes, 0, label);
+        assert.throws(() => sqlite.prepare(check.sql).get(...check.params), label);
+        sqlite.exec("ROLLBACK");
+        assert.deepEqual(sqlite.prepare("SELECT * FROM user ORDER BY id").all(), before, label);
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 0, label);
+      }
+      assert.equal(sqlite.prepare("SELECT active_x_user_id FROM user WHERE id='other'").get().active_x_user_id, null);
     } finally { sqlite.close(); }
   }
 });
