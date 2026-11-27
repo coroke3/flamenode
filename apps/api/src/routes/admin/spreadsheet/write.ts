@@ -60,6 +60,7 @@ import {
   parseSpreadsheetCrudBody,
   planSpreadsheetAtomicAuditedCrud,
   planSpreadsheetGuardedCrud,
+  validateSpreadsheetForeignKeys,
   SPREADSHEET_ATOMIC_MAX_REBUILD_TARGETS,
   SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
   SPREADSHEET_IMPORT_APPLY_MAX_ROWS,
@@ -968,6 +969,24 @@ async function buildCrudAtomicBatch(
   return input;
 }
 
+function spreadsheetMemberForeignKeyRowFromAudit(
+  audit: SpreadsheetReleaseAudit,
+  foreignKeys: readonly SpreadsheetForeignKey[],
+): Record<string, string | null> {
+  const inserted = audit.after;
+  if (!inserted) throw new Error("invalid_snapshot");
+  const cells: Array<[string, string | null]> = [];
+  for (const foreignKey of foreignKeys) {
+    if (!Object.hasOwn(inserted, foreignKey.column)) throw new Error("invalid_snapshot");
+    const value = inserted[foreignKey.column];
+    if (value == null || value === "") cells.push([foreignKey.column, null]);
+    else if (typeof value === "string") cells.push([foreignKey.column, value]);
+    else if (typeof value === "number" && Number.isFinite(value)) cells.push([foreignKey.column, String(value)]);
+    else throw new Error("invalid_snapshot");
+  }
+  return Object.freeze(Object.fromEntries(cells));
+}
+
 async function handleCrudWrite(
   c: Context<AppEnv>,
   method: SpreadsheetCrudMethod,
@@ -989,17 +1008,42 @@ async function handleCrudWrite(
       countedDb,
       crudBody.table,
     );
+    const memberPost = crudBody.method === "POST" && crudBody.table === "video_members";
     const plan = await planSpreadsheetGuardedCrud(
       countedDb,
       ctx,
       crudBody,
-      foreignKeys,
+      memberPost ? [] : foreignKeys,
       user.id,
       SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
     );
-    const { eventIdsByVideo, reads: videoReads } = await loadSpreadsheetVideoReleaseEvents(rawDb, [
-      plan.audit,
-    ]);
+    let eventIdsByVideo: Map<string, string[]>;
+    let videoReads = 0;
+    if (memberPost) {
+      // The combined read is eligible only for the canonical single video_id FK.
+      // Keep the completed INSERT/audit after-image as the source of FK values.
+      const fkRow = spreadsheetMemberForeignKeyRowFromAudit(plan.audit, foreignKeys);
+      const combined = buildSpreadsheetMemberFkReleaseLookup(foreignKeys, [fkRow], [plan.audit]);
+      if (combined) {
+        const receipt = await countedDb.prepare(combined.statement).bind(...combined.binds).all<unknown>();
+        eventIdsByVideo = validateSpreadsheetMemberFkReleaseLookupReceipt(combined, receipt);
+      } else {
+        // Other FK plans retain the original FK-first preflight and release lookup.
+        await validateSpreadsheetForeignKeys(
+          countedDb,
+          foreignKeys,
+          [fkRow],
+          SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+        );
+        const loaded = await loadSpreadsheetVideoReleaseEvents(rawDb, [plan.audit]);
+        eventIdsByVideo = loaded.eventIdsByVideo;
+        videoReads = loaded.reads;
+      }
+    } else {
+      const loaded = await loadSpreadsheetVideoReleaseEvents(rawDb, [plan.audit]);
+      eventIdsByVideo = loaded.eventIdsByVideo;
+      videoReads = loaded.reads;
+    }
     const queueTargets = deriveSpreadsheetQueueTargets([plan.audit], eventIdsByVideo);
     const callerQueryCount = 3 + readCounter.reads + videoReads;
 

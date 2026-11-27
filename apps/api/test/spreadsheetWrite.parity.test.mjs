@@ -1619,8 +1619,8 @@ if (runUnderRootTsx(import.meta.url)) {
         }
       }
 
-      // New members exercise a default-completed INSERT (one video FK read)
-      // and exact-PK DELETE (one before-image), each with one release lookup.
+      // Member POST combines the canonical video FK and release lookup in one
+      // bounded statement; DELETE retains its before-image + release reads.
       for (const [video, linked] of [["av-overflow", false], ["av-pending-1", true]]) {
         for (const method of ["POST", "DELETE"]) {
           for (const cold of [true, false]) {
@@ -1628,7 +1628,7 @@ if (runUnderRootTsx(import.meta.url)) {
             const payload = method === "POST"
               ? { table: "video_members", row: { id, video_id: video, name: id } }
               : { table: "video_members", primaryKey: { id } };
-            await crud("member " + method + " " + id, method, payload, cold, 5,
+            await crud("member " + method + " " + id, method, payload, cold, method === "POST" ? 4 : 5,
               (body, _queue, beforeActive) => {
                 assert.equal(body.pendingPublicReflection, true);
                 assert.equal(tableRows("video_members").some(row => row.id === id), method === "POST");
