@@ -47,9 +47,11 @@ import {
 } from "./catalog.ts";
 import {
   buildSpreadsheetTableDefs,
+  getSpreadsheetColumnPolicy,
   isSpreadsheetColumnEditable,
   isValidSqliteTableName,
   primaryKeysFromColumns,
+  SPREADSHEET_DEFAULT_MAX_CELL_CHARS,
 } from "./registry.ts";
 import { SPREADSHEET_COLUMN_ENUMS, SPREADSHEET_SCHEMA_TABLES } from "./schemaCatalog.ts";
 import { SpreadsheetImportColumnError } from "./importPrepCore.ts";
@@ -341,22 +343,29 @@ async function resolveSoftwareCatalogWriteContextWithSnapshot(
 } | null> {
   if (body.table.trim() !== "software_catalog" ||
       (body.method !== "PATCH" && body.method !== "DELETE")) return null;
+  const def = buildSpreadsheetTableDefs(["software_catalog"], SPREADSHEET_SCHEMA_TABLES)[0];
+  if (!def || def.mode !== "editable") return null;
 
   // Keep this optimization deliberately narrower than the general CRUD
   // parser: these are the existing valid software_catalog PATCH/DELETE shapes.
-  // Other columns, empty/null values, composite keys and unusual schemas use
-  // the original catalog -> validation -> before-image path.
-  if (body.method === "PATCH" &&
-      (body.column !== "name" || typeof body.value !== "string" ||
-       body.value.length === 0 || body.value.includes("\0"))) return null;
+  // Other columns, empty/null values, overlength/special-policy values,
+  // composite keys and unusual schemas use the original guarded path.
+  if (body.method === "PATCH") {
+    if (!isSpreadsheetColumnEditable(def, "name") ||
+        body.column !== "name" || typeof body.value !== "string" ||
+        body.value.length === 0 || body.value.includes("\0")) return null;
+    const namePolicy = getSpreadsheetColumnPolicy(
+      def.table, "name", SPREADSHEET_COLUMN_ENUMS[`${def.table}.name`],
+    );
+    if (namePolicy.enum || namePolicy.json || namePolicy.url ||
+        body.value.length > (namePolicy.maxLength ?? SPREADSHEET_DEFAULT_MAX_CELL_CHARS)) return null;
+  }
   const primaryKey = body.primaryKey as unknown as Record<string, unknown>;
   if (!primaryKey || typeof primaryKey !== "object" || Array.isArray(primaryKey) ||
       Object.keys(primaryKey).length !== 1 || !Object.hasOwn(primaryKey, "id")) return null;
   const id = primaryKey.id;
   if (typeof id !== "string" || id.trim() === "" || id.includes("\0")) return null;
 
-  const def = buildSpreadsheetTableDefs(["software_catalog"], SPREADSHEET_SCHEMA_TABLES)[0];
-  if (!def) return null;
   const cached = writeContextCache.get(def.table);
   if (cached && now - cached.cachedAt < WRITE_CACHE_TTL_MS) return null;
 
