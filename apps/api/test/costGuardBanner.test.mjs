@@ -1,5 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import vm from "node:vm";
+import * as ts from "typescript";
+import { Hono } from "hono";
+import { createAdminRoutes } from "../src/routes/admin/index.ts";
+import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 import { app } from "../src/app.ts";
 import { CostGuardBannerResponseSchema } from "@flamenode/contracts";
 import { readOperationModeKvMirror, resetOperationModeCachesForTests, resolvePublicOperationMode } from "../src/routes/live/operationMode.ts";
@@ -776,4 +782,239 @@ test("MIG-0661 T09 / #916: nested object scalar batches never skip root mode or 
     assert.equal(kv.count, 1);
     assert.equal(d1.count, 0);
   }
+});
+
+
+const COST_GUARD_SITE = "https://app.flamenode.example";
+const COST_GUARD_ADMIN = {
+  id: "admin-1", name: "Admin", email: null, image: null,
+  role: "admin", is_banned: 0, is_tos_accepted: 1, active_x_user_id: null,
+};
+
+function setupCostGuardMirrorWriter({ settings = "normal", failKvPut = false } = {}) {
+  const { db, sqlite, stats } = createAdminD1();
+  seedBase(sqlite, { role: "admin", settings });
+  const kvPuts = [];
+  const hono = new Hono();
+  hono.route("/api/admin", createAdminRoutes({ session: async (c, next) => {
+    c.set("user", COST_GUARD_ADMIN);
+    c.set("sessionState", "user");
+    await next();
+  } }));
+  const env = {
+    DB: db,
+    NEXT_PUBLIC_SITE_URL: COST_GUARD_SITE,
+    KV: {
+      put: async (key, value) => {
+        if (failKvPut) throw new Error("private KV failure must not escape");
+        kvPuts.push([key, value]);
+      },
+    },
+  };
+  const request = (path, body) => hono.request("/api/admin" + path, {
+    method: "POST",
+    headers: { "content-type": "application/json", Origin: COST_GUARD_SITE },
+    body: JSON.stringify(body),
+  }, env);
+  return { sqlite, stats, kvPuts, request };
+}
+
+async function loadCurrentKvMirrorModule({ failPut = false } = {}) {
+  const mirrorSource = await readFile(new URL("../../../src/lib/operationMode/kvMirror.ts", import.meta.url), "utf8");
+  const coreSource = await readFile(new URL("../../../src/lib/operationMode/kvMirrorCore.ts", import.meta.url), "utf8");
+  const actionSource = await readFile(new URL("../../../src/lib/actions/cost-guard.ts", import.meta.url), "utf8");
+  const state = { puts: [], gets: 0, getOptions: [], raw: null, failGet: false };
+  let now = 1_800_000_000_000;
+  class ClockDate extends Date {
+    static now() { return now; }
+  }
+  const compile = (source) => ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const coreModule = { exports: {} };
+  vm.runInNewContext(compile(coreSource), {
+    module: coreModule,
+    exports: coreModule.exports,
+    require: (id) => {
+      if (id === "./resolve.ts") return {
+        isOperationMode: (mode) => ["normal", "economy", "read_only", "static_only"].includes(mode),
+      };
+      throw new Error("unexpected kvMirrorCore dependency: " + id);
+    },
+  }, { timeout: 1_000 });
+  const env = {
+    KV: {
+      put: async (key, value) => {
+        if (failPut) throw new Error("private KV put failure");
+        state.puts.push([key, value]);
+      },
+      get: async (key, options) => {
+        state.gets += 1;
+        state.getOptions.push({ key, ...options });
+        if (state.failGet) throw new Error("private KV get failure");
+        return state.raw;
+      },
+    },
+  };
+  const mirrorModule = { exports: {} };
+  vm.runInNewContext(compile(mirrorSource), {
+    module: mirrorModule,
+    exports: mirrorModule.exports,
+    Date: ClockDate,
+    require: (id) => {
+      if (id === "server-only") return {};
+      if (id === "@/lib/cloudflare") return { getEnv: () => env };
+      if (id === "./kvMirrorCore") return coreModule.exports;
+      throw new Error("unexpected kvMirror dependency: " + id);
+    },
+  }, { timeout: 1_000 });
+  return {
+    module: mirrorModule.exports,
+    state,
+    actionSource,
+    setNow: (value) => { now = value; },
+    getNow: () => now,
+  };
+}
+
+test("MIG-0661 SA-016: Hono writer captures bounded KV PUT bytes for every mode and 500 UTF-16-unit reason edge", async () => {
+  const x = setupCostGuardMirrorWriter();
+  const reasons = [
+    ["control", "\u0001".repeat(500)],
+    ["lone-surrogate", "\ud800".repeat(500)],
+    ["japanese", "日".repeat(500)],
+    ["astral", "💩".repeat(250)],
+    ["backslash", "\\".repeat(500)],
+  ];
+  try {
+    for (const mode of ["normal", "economy", "read_only", "static_only"]) {
+      for (const [label, reason] of reasons) {
+        const response = await x.request("/cost-guard/mode", { mode, reason });
+        assert.equal(response.status, 200, mode + "/" + label);
+        const [key, raw] = x.kvPuts.at(-1);
+        const parsed = JSON.parse(raw);
+        assert.equal(key, "operation_mode:mirror");
+        assert.deepEqual(Object.keys(parsed), ["mode", "reason", "updated_at"],
+          "Hono writer keeps its established mode/reason/updated_at byte order");
+        assert.equal(parsed.mode, mode);
+        assert.equal(parsed.reason, reason);
+        assert.ok(Number.isSafeInteger(parsed.updated_at));
+        assert.ok(Buffer.byteLength(raw, "utf8") < 64 * 1024);
+      }
+    }
+    const beforeRejected = x.kvPuts.length;
+    const rejected = await x.request("/cost-guard/mode", {
+      mode: "economy", reason: "\u0001".repeat(501),
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal(x.kvPuts.length, beforeRejected, "501 UTF-16 units are rejected before the KV mirror write");
+  } finally {
+    x.sqlite.close();
+  }
+});
+
+test("MIG-0661 SA-017: maintenance enable/disable preserves non-maintenance modes in the mirror", async () => {
+  const cases = [
+    { settings: "normal", value: "1", expected: "maintenance", reason: "保守開始" },
+    { settings: "maintenance", value: "0", expected: "normal", reason: "保守解除" },
+    { settings: "economy", value: "0", expected: "economy", reason: "節約維持" },
+    { settings: "read_only", value: "0", expected: "read_only", reason: "読取専用維持" },
+    { settings: "static_only", value: "0", expected: "static_only", reason: "静的配信維持" },
+  ];
+  for (const item of cases) {
+    const x = setupCostGuardMirrorWriter({ settings: item.settings });
+    try {
+      const response = await x.request("/cost-guard/maintenance", {
+        is_maintenance_mode: item.value, reason: "  " + item.reason + "  ",
+      });
+      assert.equal(response.status, 200, JSON.stringify(item));
+      const [key, raw] = x.kvPuts[0];
+      const parsed = JSON.parse(raw);
+      assert.equal(key, "operation_mode:mirror");
+      assert.deepEqual(Object.keys(parsed), ["mode", "reason", "updated_at"]);
+      assert.equal(parsed.mode, item.expected);
+      assert.equal(parsed.reason, item.reason, "writer receives the trimmed canonical reason");
+      assert.ok(Number.isSafeInteger(parsed.updated_at));
+    } finally {
+      x.sqlite.close();
+    }
+  }
+});
+
+test("MIG-0661 SA-016: failed Hono KV PUT remains best-effort after the D1 commit", async () => {
+  const x = setupCostGuardMirrorWriter({ failKvPut: true });
+  try {
+    const response = await x.request("/cost-guard/mode", { mode: "economy", reason: "writer failure" });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.ok, true);
+    assert.match(body.warning, /KV複製の更新に失敗/);
+    const row = x.sqlite.prepare("SELECT operation_mode, cost_guard_reason FROM system_settings WHERE id = 'default'").get();
+    assert.equal(row.operation_mode, "economy");
+    assert.equal(row.cost_guard_reason, "writer failure");
+  } finally {
+    x.sqlite.close();
+  }
+});
+
+test("MIG-0661 CURRENT SA-016/017: actual mirror module serializes its own key order and cache miss/warm/expiry/error TTL", async () => {
+  const current = await loadCurrentKvMirrorModule();
+  const mirror = {
+    mode: "economy",
+    updated_at: 1_800_000_000,
+    reason: "\ud800".repeat(500),
+  };
+  await current.module.writeOperationModeKvMirror(mirror);
+  assert.equal(current.state.puts.length, 1);
+  const [key, raw] = current.state.puts[0];
+  assert.equal(key, "operation_mode:mirror");
+  assert.deepEqual(Object.keys(JSON.parse(raw)), ["mode", "updated_at", "reason"],
+    "CURRENT writer keeps its established mode/updated_at/reason byte order");
+  assert.deepEqual(JSON.parse(raw), mirror);
+  assert.ok(Buffer.byteLength(raw, "utf8") < 64 * 1024);
+
+  assert.deepEqual(await current.module.readOperationModeKvMirror(), mirror,
+    "a successful write warms the isolate-local mirror cache");
+  assert.equal(current.state.gets, 0);
+
+  const base = current.getNow();
+  const expired = { mode: "read_only", updated_at: 1_800_000_030, reason: "KV after expiry" };
+  current.state.raw = JSON.stringify(expired);
+  current.setNow(base + 30_001);
+  assert.deepEqual(await current.module.readOperationModeKvMirror(), expired,
+    "cache expiry performs one KV read and accepts the current writer key order");
+  assert.deepEqual(current.state.getOptions[0], { key: "operation_mode:mirror", cacheTtl: 30 });
+  assert.equal(current.state.gets, 1);
+  assert.deepEqual(await current.module.readOperationModeKvMirror(), expired,
+    "the successful miss read warms the cache");
+  assert.equal(current.state.gets, 1);
+
+  current.state.failGet = true;
+  current.setNow(base + 60_002);
+  assert.equal(await current.module.readOperationModeKvMirror(), null);
+  assert.equal(current.state.gets, 2);
+  assert.equal(await current.module.readOperationModeKvMirror(), null,
+    "failed KV read is cached for the shorter error TTL");
+  assert.equal(current.state.gets, 2);
+
+  current.state.failGet = false;
+  const recovered = { mode: "static_only", updated_at: 1_800_000_036, reason: "recovered" };
+  current.state.raw = JSON.stringify(recovered);
+  current.setNow(base + 65_003);
+  assert.deepEqual(await current.module.readOperationModeKvMirror(), recovered,
+    "error TTL expiry retries the KV read");
+  assert.equal(current.state.gets, 3);
+
+  const action = current.actionSource;
+  assert.match(action, /export async function setCostGuardMode[\s\S]*?syncOperationModeKvMirrorBestEffort\(\{ mode, reason, updatedAt: now \}\)/);
+  assert.match(action, /export async function setMaintenanceMode[\s\S]*?syncOperationModeKvMirrorBestEffort\(\{ mode: nextMode, reason, updatedAt: now \}\)/);
+  assert.match(action, /writeOperationModeKvMirror\(\{\s*mode: input\.mode,\s*updated_at: input\.updatedAt,\s*reason: input\.reason,/);
+});
+
+test("MIG-0661 CURRENT SA-016/017: mirror writer propagates KV PUT failure for the best-effort action wrapper", async () => {
+  const current = await loadCurrentKvMirrorModule({ failPut: true });
+  await assert.rejects(
+    current.module.writeOperationModeKvMirror({ mode: "normal", updated_at: 1, reason: "failure" }),
+    /private KV put failure/,
+  );
 });
