@@ -84,3 +84,25 @@ test("RH-002 stage progress: CURRENT and Hono share identical canonical function
   assert.deepEqual(legacyImportApplyProgressSummary(plan, claimProgress),
     shared(plan, claimProgress));
 });
+
+
+test("MIG-0645 U02r: shared receipt fingerprint matches CURRENT frozen UTF-16 vectors", async () => {
+  const { legacyImportSkipSnapshotFingerprint: fingerprint } = await import(
+    "@flamenode/server-core/legacyImport/progress"
+  );
+  const cases = [
+    [[], "0:cbf29ce484222325"],
+    [["x1"], "1:08f10707b58d70c2"],
+    [["x2", "x1"], "2:0ac1b4ac630a2998"],
+    [["x1", "x2"], "2:0ac1b4ac630a2998"],
+    [["x1", "x1"], "2:0ac1b7ac630a2eb1"],
+    [["é", "𠮷", "あ"], "3:19317cbf0b65d3b9"],
+  ];
+  for (const [ids, expected] of cases) assert.equal(fingerprint(ids), expected);
+  const source = await readFile(new URL("../../../src/lib/import/legacy/apply.ts", import.meta.url), "utf8");
+  assert.match(source, /legacyImportSkipSnapshotFingerprint as skipSnapshotFingerprint/);
+  assert.doesNotMatch(source, /function skipSnapshotFingerprint\(/,
+    "CURRENT must use the shared fingerprint to avoid audit replay drift");
+  assert.equal(fingerprint(["x1", "x2"]), fingerprint(["x2", "x1"]));
+  assert.notEqual(fingerprint(["x1"]), fingerprint(["x1", "x1"]));
+});

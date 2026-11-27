@@ -51,3 +51,19 @@ export function legacyImportApplyProgressSummary(
         .reduce((sum, stage) => sum + sizes[stage], 0) + progress.index;
   return { stage: progress.stage, index: progress.index, completed, total };
 }
+
+/**
+ * RH-002 durable audit-marker fingerprint. Keep byte-for-byte parity with the
+ * legacy CURRENT algorithm: JS UTF-16 code units, sorted input, NUL separator,
+ * FNV-1a 64-bit wrap after each code unit; the prefix counts original IDs,
+ * including duplicates. Do not normalize Unicode, deduplicate or change hash.
+ */
+export function legacyImportSkipSnapshotFingerprint(ids: readonly string[]): string {
+  let hash = 0xcbf29ce484222325n;
+  const canonical = [...ids].sort().join("\u0000");
+  for (let index = 0; index < canonical.length; index += 1) {
+    hash ^= BigInt(canonical.charCodeAt(index));
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return `${ids.length}:${hash.toString(16).padStart(16, "0")}`;
+}

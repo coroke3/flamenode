@@ -36,6 +36,7 @@ import type {
   LegacyImportApplyStage,
 } from "./previewStore";
 import { legacyImportRebuildQueueId } from "./rebuildQueueCore";
+import { legacyImportSkipSnapshotFingerprint as skipSnapshotFingerprint } from "@flamenode/server-core/legacyImport/progress";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
@@ -209,15 +210,6 @@ function cloneProgress(progress: LegacyImportApplyProgress): LegacyImportApplyPr
   };
 }
 
-function skipSnapshotFingerprint(ids: readonly string[]): string {
-  let hash = 0xcbf29ce484222325n;
-  const canonical = [...ids].sort().join("\u0000");
-  for (let index = 0; index < canonical.length; index += 1) {
-    hash ^= BigInt(canonical.charCodeAt(index));
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-  }
-  return `${ids.length}:${hash.toString(16).padStart(16, "0")}`;
-}
 
 async function snapshotDigest(value: unknown): Promise<string> {
   return sha256Hex(JSON.stringify(value));
