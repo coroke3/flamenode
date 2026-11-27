@@ -31,7 +31,8 @@ if (runUnderRootTsx(import.meta.url)) {
   const { drizzle } = await import("drizzle-orm/d1");
   const { Hono } = await import("hono");
   const { createVideosRoutes } = await import("../src/routes/videos/index.ts");
-  const { NOOP_SA086_WAKE_HOST } = await import("../src/routes/videos/submit.ts");
+  const { NOOP_SA086_WAKE_HOST, validateFreeVideoDbReadPreflight } = await import("../src/routes/videos/submit.ts");
+  const { UnslottedEventSyncError } = await import("@flamenode/domain/video");
   const { atomicD1, SITE, SESSION_USER } = await import("./support/chapterSeed.mjs");
   const { createFreeVideo } = await import("../../../src/lib/actions/video/createFreeVideo.ts");
   const { QUEUE_BINDING_NAMES, QUEUE_FEATURE_FLAG_NAMES } = await import("../../../packages/server-core/src/queues/wakeBudget.ts");
@@ -829,6 +830,81 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.deepEqual(w.bucket.deletes, [uploadedKey], label);
         assert.equal(w.bucket.objects.size, 1, label);
         assert.equal(w.bucket.objects.get(unrelatedKey), unrelated, label);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
+  test("T02 SEC: event-read exception classification fails closed before any write", async () => {
+    const temporary = "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。";
+    const invalidSelection = "枠なし投稿で所属できるイベントは1件までです。";
+    const notAllowed = "選択したイベントは枠なし投稿を受け付けていません。公開状態・終了日時・イベント設定を確認してください。";
+    const revoked = Proxy.revocable(new Error("SYNTHETIC_REVOKED"), {});
+    revoked.revoke();
+    const poisonedCode = Object.defineProperty(
+      new UnslottedEventSyncError("unslotted_event_not_allowed"), "code", {
+        get() { throw new Error("SYNTHETIC_CODE_ACCESS"); },
+      },
+    );
+    const cases = [
+      ["revoked proxy", revoked.proxy, temporary],
+      ["throwing prototype", new Proxy({}, {
+        getPrototypeOf() { throw new Error("SYNTHETIC_PROTOTYPE_ACCESS"); },
+      }), temporary],
+      ["throwing typed code accessor", poisonedCode, temporary],
+      ["unknown typed code", Object.defineProperty(new UnslottedEventSyncError("unslotted_event_not_allowed"), "code", { value: 7 }), temporary],
+      ["ordinary provider error", new Error("SYNTHETIC_PROVIDER_FAILURE"), temporary],
+      ["plain object imitating domain error", { code: "unslotted_event_not_allowed" }, temporary],
+      ["non-Error rejection", "SYNTHETIC_PROVIDER_FAILURE", temporary],
+      ["typed invalid selection", new UnslottedEventSyncError("unslotted_event_selection_invalid"), invalidSelection],
+      ["typed not allowed", new UnslottedEventSyncError("unslotted_event_not_allowed"), notAllowed],
+    ];
+    // Exercise the real read helper at the exact throwing DB boundary without
+    // relying on driver-specific wrapping/coercion of a rejected exception.
+    for (const [label, error, message] of cases) {
+      let selections = 0;
+      const db = { select() { selections++; throw error; } };
+      const result = await validateFreeVideoDbReadPreflight(db, {
+        requestedEventId: "ev_open",
+        videoForm: { youtube_url: "https://youtu.be/dQw4w9WgXcQ" },
+      }, 1_800_000_000, true);
+      assert.deepEqual(result, { ok: false, message }, label);
+      assert.equal(selections, 1, label);
+    }
+
+    // Mounted HTTP path: fail only the combined event/required fields/duplicate
+    // projection at D1 prepare; preserve the real guard and route/SQLite fixture.
+    for (const [label, error] of cases.filter((entry) => entry[2] === temporary)) {
+      const w = seedWorld();
+      const before = snapshotDb(w.sqlite);
+      const originalPrepare = w.d1.prepare;
+      const wakes = [];
+      let attempted = 0;
+      w.d1.prepare = (sql) => {
+        if (sql.includes("required_video_fields_json") && sql.includes("json_group_array") &&
+            sql.includes("youtube_video_id") && sql.includes("event_custom_questions")) {
+          attempted++;
+          throw error;
+        }
+        return originalPrepare(sql);
+      };
+      try {
+        const fd = baseForm({ eventId: "ev_open" });
+        fd.set("music", "Track");
+        fd.set("custom_answer:ev_open:reason", "Accepted");
+        fd.set("icon_mode", "upload");
+        fd.set("icon_file", new File([buildPng()], "icon.png", { type: "image/png" }));
+        const res = await submitApp(w.d1, "u_owner", w.bucket, wakes)(fd);
+        assert.equal(attempted, 1, label);
+        assert.equal(res.status, 503, label);
+        assert.equal(res.headers.get("cache-control"), "private, no-store", label);
+        assert.deepEqual(await res.json(), { ok: false, message: temporary }, label);
+        assert.equal(w.d1.stats.batches, 0, label);
+        assert.deepEqual(snapshotDb(w.sqlite), before, label);
+        assert.deepEqual(w.bucket.puts, [], label);
+        assert.deepEqual(w.bucket.deletes, [], label);
+        assert.deepEqual(wakes, [], label);
       } finally {
         w.sqlite.close();
       }

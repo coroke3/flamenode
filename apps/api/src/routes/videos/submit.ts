@@ -193,22 +193,29 @@ async function validateFreeVideoDbReadPreflightInternal(
       includeEventTitle,
     );
   } catch (error) {
-    if (error instanceof UnslottedEventSyncError) {
-      if (error.code === "unslotted_event_selection_invalid") {
-        return {
-          ok: false,
-          message: "枠なし投稿で所属できるイベントは1件までです。",
-          failureKind: "validation",
-        };
+    // Provider exceptions can have throwing prototype/code accessors. Keep
+    // typed domain denials, but fail closed if classification itself fails.
+    try {
+      if (error instanceof UnslottedEventSyncError) {
+        const code = error.code;
+        if (code === "unslotted_event_selection_invalid") {
+          return {
+            ok: false,
+            message: "枠なし投稿で所属できるイベントは1件までです。",
+            failureKind: "validation",
+          };
+        }
+        if (code === "unslotted_event_not_allowed") {
+          return {
+            ok: false,
+            message:
+              "選択したイベントは枠なし投稿を受け付けていません。公開状態・終了日時・イベント設定を確認してください。",
+            failureKind: "validation",
+          };
+        }
       }
-      if (error.code === "unslotted_event_not_allowed") {
-        return {
-          ok: false,
-          message:
-            "選択したイベントは枠なし投稿を受け付けていません。公開状態・終了日時・イベント設定を確認してください。",
-          failureKind: "validation",
-        };
-      }
+    } catch {
+      // Fall through to the same sanitized temporary failure below.
     }
     return {
       ok: false,
