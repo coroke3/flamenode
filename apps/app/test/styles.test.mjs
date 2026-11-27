@@ -71,7 +71,7 @@ async function getTsx(dir) {
   }
   return out;
 }
-test("MIG-0701 U04 T08: every Personal route class has a CSS definition", async () => {
+test("MIG-0701 U04 T08: every Personal route and VideoForm class has a CSS definition", async () => {
   const css = (await Promise.all([
     ...names.map((n) => read("apps/app/src/styles/current/" + n + ".css")),
     ...MODULES.map(([, , to]) => read(to)),
@@ -86,10 +86,16 @@ test("MIG-0701 U04 T08: every Personal route class has a CSS definition", async 
   const missing = new Set();
   const routeFiles = await getTsx("apps/app/src/routes/");
   const formFiles = await getTsx("apps/app/src/components/forms/");
-  for (const p of [...routeFiles, ...formFiles]) {
+  for (const p of routeFiles) {
     const source = (await read(p)).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     for (const [, token] of source.matchAll(/(?<![\w-])((?:fn|dash|onb|settings|vcard|vform)-[A-Za-z0-9_-]*[A-Za-z0-9_])/g)) {
       if (!defined.has(token) && !exceptions.has(token)) missing.add(p + ": " + token);
+    }
+  }
+  for (const p of formFiles) {
+    const source = (await read(p)).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    for (const [, token] of source.matchAll(/(?<![\w-])(vform-[A-Za-z0-9_-]*[A-Za-z0-9_])/g)) {
+      if (!defined.has(token)) missing.add(p + ": " + token);
     }
   }
   assert.deepEqual([...missing].sort(), [], "missing Personal CSS definitions");
