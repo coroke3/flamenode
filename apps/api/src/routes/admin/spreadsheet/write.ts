@@ -1046,6 +1046,8 @@ function buildSpreadsheetMemberSnapshotFkReleaseLookup(
  * Combine a fresh single-key CRUD before-image and every effective FK lookup
  * into one bounded read. Release-bearing tables keep their dedicated planner.
  */
+const SPREADSHEET_SNAPSHOT_FK_MAX_GROUPS = 8;
+
 export function buildSpreadsheetSnapshotFkLookup(
   ctx: SpreadsheetWriteTableContext,
   foreignKeys: readonly SpreadsheetForeignKey[],
@@ -1057,7 +1059,7 @@ export function buildSpreadsheetSnapshotFkLookup(
       ctx.def.table === "videos" ||
       ctx.primaryKeys.length !== 1 ||
       foreignKeys.length < 1 ||
-      foreignKeys.length > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES ||
+      foreignKeys.length > SPREADSHEET_SNAPSHOT_FK_MAX_GROUPS ||
       ctx.columns.length < 1) {
     return null;
   }
@@ -1225,7 +1227,13 @@ export function validateSpreadsheetSnapshotFkLookupReceipt(
     throw new Error("invalid_snapshot");
   }
 
-  if (snapshotCount === 0) throw new Error("row_not_found");
+  if (snapshotCount === 0) {
+    if (fkStates.some(state => !state ||
+        state.expected !== null || state.count !== 0 || state.found !== null)) {
+      throw new Error("invalid_snapshot");
+    }
+    throw new Error("row_not_found");
+  }
   if (snapshotCount !== 1 || !snapshotValues) throw new Error("invalid_snapshot");
 
   const before = snapshotSpreadsheetRawRow(

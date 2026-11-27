@@ -813,7 +813,7 @@ if (runUnderRootTsx(import.meta.url)) {
       ["PATCH", "/data", { table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: "a-open" },
         sql => sql.startsWith('SELECT "id" AS value FROM "events" WHERE "id" IN (') ||
         (sql.startsWith("WITH snapshot AS (") &&
-          sql.includes('fk_0 AS (SELECT "id" AS value FROM "events"'))],
+          /fk_\d+ AS \(SELECT "id" AS value FROM "events"/.test(sql))],
       ["POST", "/import", apply, sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE ("id" = ?) LIMIT ')],
     ];
     const snapshot = () => ({
@@ -1110,7 +1110,7 @@ if (runUnderRootTsx(import.meta.url)) {
       ["PATCH", "/data", { table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: "a-open" },
         sql => sql.startsWith('SELECT "id" AS value FROM "events" WHERE "id" IN (') ||
         (sql.startsWith("WITH snapshot AS (") &&
-          sql.includes('fk_0 AS (SELECT "id" AS value FROM "events"'))],
+          /fk_\d+ AS \(SELECT "id" AS value FROM "events"/.test(sql))],
       ["POST", "/import", apply, sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE ("id" = ?) LIMIT ')],
       ["PATCH", "/data", patch, sql => sql.includes("FROM pragma_table_xinfo(?) AS x")],
     ];
@@ -1212,6 +1212,76 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(fkMissing.status, 400);
     assert.deepEqual(fkMissing.body, { error: "foreign_key_violation" });
     assert.equal(honoD1.stats.batches, beforeBatches + 1);
+  });
+
+
+  test("MIG-0638 U01/U02: missing snapshot cannot be forged by inconsistent FK receipt", async () => {
+    resetAllCaches();
+    const { honoSqlite, honoD1, callHono } = createFixture();
+    const snapshot = () => ({
+      slots: honoSqlite.prepare("SELECT * FROM slots ORDER BY id").all(),
+      audits: allAudits(honoSqlite),
+      queue: allQueueRows(honoSqlite),
+    });
+    const before = snapshot();
+    const beforeWrites = honoD1.stats.writes;
+    const beforeBatches = honoD1.stats.batches;
+    const originalPrepare = honoD1.prepare;
+    let injected = 0;
+    try {
+      honoD1.prepare = sql => {
+        const stmt = originalPrepare(sql);
+        if (!sql.startsWith("WITH snapshot AS (") || !sql.includes('FROM "slots"')) return stmt;
+        return { ...stmt, bind(...params) {
+          const bound = stmt.bind(...params);
+          return { ...bound, async all() {
+            injected++;
+            const receipt = await bound.all();
+            return {
+              ...receipt,
+              results: receipt.results.map(row => {
+                const forged = { ...row, __mig0638_snapshot_count: 0 };
+                for (const key of Object.keys(forged)) {
+                  if (!key.startsWith("__mig0638_")) forged[key] = null;
+                }
+                for (let index = 0; index < 8; index++) {
+                  forged["__mig0638_fk_" + index + "_expected"] = "forged";
+                  forged["__mig0638_fk_" + index + "_count"] = 1;
+                  forged["__mig0638_fk_" + index + "_found"] = "a-open";
+                }
+                return forged;
+              }),
+            };
+          } };
+        } };
+      };
+      const forged = await callHono("PATCH", "/data", {
+        table: "slots",
+        primaryKey: { id: "slot-base" },
+        column: "event_id",
+        value: "a-open",
+      });
+      assert.equal(injected, 1);
+      assert.equal(forged.status, 500);
+      assert.deepEqual(forged.body, { error: "internal_error" });
+    } finally {
+      honoD1.prepare = originalPrepare;
+    }
+    assert.equal(honoD1.stats.writes, beforeWrites);
+    assert.equal(honoD1.stats.batches, beforeBatches);
+    assert.deepEqual(snapshot(), before);
+
+    resetAllCaches();
+    const missing = await callHono("PATCH", "/data", {
+      table: "slots",
+      primaryKey: { id: "slot-missing" },
+      column: "event_id",
+      value: "a-open",
+    });
+    assert.equal(missing.status, 404);
+    assert.deepEqual(missing.body, { error: "row_not_found" });
+    assert.equal(honoD1.stats.writes, beforeWrites);
+    assert.equal(honoD1.stats.batches, beforeBatches);
   });
 
   test("MIG-0638 U01/U02: migrated editable catalog preserves real PRAGMA column and explicit FK facts", async () => {
