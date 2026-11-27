@@ -257,7 +257,7 @@ test("combined admission read fallback preserves ToS and CostGuard failure class
     const app = new Hono();
     app.use("*", originGuardMiddleware(options));
     app.use("*", async (c, next) => {
-      c.set("user", { ...ADMIN });
+      c.set("user", { ...ADMIN, is_banned: failure === "banned" ? 1 : 0 });
       c.set("sessionState", "user");
       await next();
     });
@@ -281,6 +281,11 @@ test("combined admission read fallback preserves ToS and CostGuard failure class
   assert.equal(costFailure.response.status, 503);
   assert.equal((await costFailure.response.json()).reason, "cost_guard_blocked");
   assert.equal(costFailure.reads, 1);
+
+  const identityFailure = await run("banned");
+  assert.equal(identityFailure.response.status, 403);
+  assert.equal((await identityFailure.response.json()).reason, "banned");
+  assert.equal(identityFailure.reads, 1, "CostGuard fallback is not read after identity denial");
 });
 
 test("requiredRole default is admin (moderator denied); null allows any authenticated user", async () => {
