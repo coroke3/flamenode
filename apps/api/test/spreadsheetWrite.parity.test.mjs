@@ -1414,7 +1414,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const reports = [];
     const tableRows = table => honoSqlite.prepare('SELECT * FROM "' + table + '" ORDER BY id').all();
     const nonces = () => honoSqlite.prepare("SELECT * FROM spreadsheet_import_runs ORDER BY rowid").all();
-    const queueKeys = () => allQueueRows(honoSqlite).map(row => row.target_type + ":" + row.target_id);
+    const queueSnapshot = () => honoSqlite.prepare("SELECT * FROM static_rebuild_queue ORDER BY rowid").all();
     const activeQueue = () => new Map(honoSqlite.prepare(
       "SELECT target_type, target_id, updated_at FROM static_rebuild_queue WHERE status IN ('pending', 'processing')"
     ).all().map(row => [row.target_type + ":" + row.target_id, row.updated_at]));
@@ -1424,16 +1424,13 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.ok(after.has(key), key);
         if (before.has(key)) assert.ok(after.get(key) > before.get(key), key + " generation must advance");
       }
-      return after;
+      // An unrelated existing target must not be coalesced or added.
+      const unrelated = map => [...map].filter(([key]) => !keys.includes(key));
+      assert.deepEqual(new Map(unrelated(after)), new Map(unrelated(before)));
     }
     function assertMemberQueue(before, video, linked) {
       const expected = ["video:" + video, "users_index:global", ...(linked ? ["event_release:a-open"] : [])];
-      const after = assertQueueAdvanced(before, expected);
-      // Existing coalesced release rows must remain untouched for an unlinked video.
-      if (!linked) {
-        const releases = map => [...map].filter(([key]) => key.startsWith("event_release:")).sort();
-        assert.deepEqual(releases(after), releases(before));
-      }
+      assertQueueAdvanced(before, expected);
     }
     async function measure(label, method, path, payload, { cold, reads, writes = 0, batches = 1 }) {
       if (cold) resetAllCaches();
@@ -1463,7 +1460,7 @@ if (runUnderRootTsx(import.meta.url)) {
     async function crud(label, method, payload, cold, reads, check) {
       const beforeAudit = allAudits(honoSqlite).length;
       const beforeNonces = nonces();
-      const beforeQueue = queueKeys();
+      const beforeQueue = queueSnapshot();
       const beforeActive = activeQueue();
       const body = await measure(label, method, "/data", payload, { cold, reads });
       contracts.AdminSpreadsheetMutationResponseSchema.parse(body);
@@ -1477,35 +1474,6 @@ if (runUnderRootTsx(import.meta.url)) {
     }
     try {
       const catalogRow = id => ({ id, name: id, normalized_name: id, created_at: "1", updated_at: "1" });
-      // Each cold request clears both schema caches. The immediately following
-      // request to the same table measures the warm context with a new mutation.
-      for (const cold of [true, false]) {
-        const id = cold ? "s3-cold" : "s3-warm";
-        await crud("catalog POST " + id, "POST", { table: "software_catalog", row: catalogRow(id) }, cold, 3,
-          (body, queue) => {
-            assert.equal(body.pendingPublicReflection, false);
-            assert.ok(tableRows("software_catalog").some(row => row.id === id));
-            assert.deepEqual(queueKeys(), queue);
-          });
-      }
-      for (const cold of [true, false]) {
-        const id = cold ? "s3-cold" : "s3-warm";
-        await crud("catalog PATCH " + id, "PATCH", { table: "software_catalog", primaryKey: { id }, column: "name", value: id + "-updated" }, cold, 4,
-          (body, queue) => {
-            assert.equal(body.pendingPublicReflection, false);
-            assert.equal(tableRows("software_catalog").find(row => row.id === id).name, id + "-updated");
-            assert.deepEqual(queueKeys(), queue);
-          });
-      }
-      for (const cold of [true, false]) {
-        const id = cold ? "s3-cold" : "s3-warm";
-        await crud("catalog DELETE " + id, "DELETE", { table: "software_catalog", primaryKey: { id } }, cold, 4,
-          (body, queue) => {
-            assert.equal(body.pendingPublicReflection, false);
-            assert.ok(!tableRows("software_catalog").some(row => row.id === id));
-            assert.deepEqual(queueKeys(), queue);
-          });
-      }
       for (const cold of [true, false]) {
         const event = cold ? "a-ended" : "a-open";
         await crud("slots FK PATCH " + event, "PATCH", { table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: event }, cold, 5,
@@ -1556,10 +1524,44 @@ if (runUnderRootTsx(import.meta.url)) {
         }
       }
 
+      // Non-enqueue cases must run with existing active targets, otherwise a
+      // spurious coalescing UPDATE could not be distinguished from no enqueue.
+      assert.ok(activeQueue().has("video:av-pending-1"));
+      assert.ok(activeQueue().has("event_release:a-open"));
+      // Each cold request clears both schema caches. The immediately following
+      // request to the same table measures the warm context with a new mutation.
+      for (const cold of [true, false]) {
+        const id = cold ? "s3-cold" : "s3-warm";
+        await crud("catalog POST " + id, "POST", { table: "software_catalog", row: catalogRow(id) }, cold, 3,
+          (body, queue) => {
+            assert.equal(body.pendingPublicReflection, false);
+            assert.ok(tableRows("software_catalog").some(row => row.id === id));
+            assert.deepEqual(queueSnapshot(), queue);
+          });
+      }
+      for (const cold of [true, false]) {
+        const id = cold ? "s3-cold" : "s3-warm";
+        await crud("catalog PATCH " + id, "PATCH", { table: "software_catalog", primaryKey: { id }, column: "name", value: id + "-updated" }, cold, 4,
+          (body, queue) => {
+            assert.equal(body.pendingPublicReflection, false);
+            assert.equal(tableRows("software_catalog").find(row => row.id === id).name, id + "-updated");
+            assert.deepEqual(queueSnapshot(), queue);
+          });
+      }
+      for (const cold of [true, false]) {
+        const id = cold ? "s3-cold" : "s3-warm";
+        await crud("catalog DELETE " + id, "DELETE", { table: "software_catalog", primaryKey: { id } }, cold, 4,
+          (body, queue) => {
+            assert.equal(body.pendingPublicReflection, false);
+            assert.ok(!tableRows("software_catalog").some(row => row.id === id));
+            assert.deepEqual(queueSnapshot(), queue);
+          });
+      }
+
       async function importPair(label, input, cold, reads, counts, check) {
         const beforeRows = tableRows(input.table);
         const beforeAudit = allAudits(honoSqlite).length;
-        const beforeQueue = queueKeys();
+        const beforeQueue = queueSnapshot();
         const beforeActive = activeQueue();
         const beforeNonces = nonces();
         const preview = await measure(label + " preview", "POST", "/import", { ...input, dryRun: true },
@@ -1568,7 +1570,7 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(preview.rowCount, input.rows.length);
         assert.deepEqual(tableRows(input.table), beforeRows, label + " preview must not mutate rows");
         assert.equal(allAudits(honoSqlite).length, beforeAudit, label + " preview must not audit mutations");
-        assert.deepEqual(queueKeys(), beforeQueue, label + " preview must not enqueue");
+        assert.deepEqual(queueSnapshot(), beforeQueue, label + " preview must not enqueue");
         const issued = nonces();
         assert.equal(issued.length, beforeNonces.length + 1);
         assert.equal(issued.at(-1).consumed_at, null);
@@ -1594,7 +1596,7 @@ if (runUnderRootTsx(import.meta.url)) {
           (body, queue) => {
             assert.equal(body.pendingPublicReflection, false);
             assert.ok(rows.every(row => tableRows("software_catalog").some(saved => saved.id === row.id)));
-            assert.deepEqual(queueKeys(), queue);
+            assert.deepEqual(queueSnapshot(), queue);
           });
       }
       for (const cold of [true, false]) {
@@ -1605,7 +1607,7 @@ if (runUnderRootTsx(import.meta.url)) {
             assert.equal(body.pendingPublicReflection, false);
             assert.equal(tableRows("software_catalog").find(row => row.id === id + "-1").name, id + "-updated");
             assert.ok(tableRows("software_catalog").some(row => row.id === id + "-3"));
-            assert.deepEqual(queueKeys(), queue);
+            assert.deepEqual(queueSnapshot(), queue);
           });
       }
       for (const cold of [true, false]) {
