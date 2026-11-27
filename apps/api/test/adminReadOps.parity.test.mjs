@@ -1672,6 +1672,90 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(denied.stats.statements, 1, "denial occurs before the check");
   });
 
+  test("MIG-0626 U05/U06: every allowlisted diagnostic rejects D1 failures and unauthorized callers without leaking details", async () => {
+    const { HEALTH_CHECK_IDS } = await import("@flamenode/server-core/admin/healthChecks");
+    const { INTEGRITY_CHECK_IDS } = await import("@flamenode/server-core/admin/integrityChecks");
+    const secret = "synthetic-private-provider-error tok-carol";
+    const catalogs = [
+      ["/api/admin-read/ops/health/checks/", HEALTH_CHECK_IDS],
+      ["/api/admin-read/ops/integrity/", INTEGRITY_CHECK_IDS],
+    ];
+    // Count actual prepare attempts separately from successful harness reads.
+    // The first prepared statement is the real session lookup. Fail the
+    // requested diagnostic on execution (including Drizzle's raw() path).
+    function faultAt(failAt, duringPrepare = false) {
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare;
+      let attempts = 0;
+      let failures = 0;
+      d1.prepare = (sql) => {
+        attempts++;
+        if (attempts !== failAt) return prepare(sql);
+        const fail = () => {
+          failures++;
+          throw new Error(secret + " " + sql);
+        };
+        if (duringPrepare) return fail();
+        const wrap = (stmt) => ({
+          ...stmt,
+          bind: (...args) => wrap(stmt.bind(...args)),
+          async raw() { return fail(); },
+          async all() { return fail(); },
+          async first() { return fail(); },
+        });
+        return wrap(prepare(sql));
+      };
+      return { d1, attempts: () => attempts, failures: () => failures };
+    }
+    const noStore = (receipt) => {
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+      assert.equal(receipt.stats.writes, 0);
+      assert.doesNotMatch(receipt.text, /synthetic-private-provider-error|tok-carol|SELECT\b/);
+    };
+    const unavailable = (receipt, fault, failAt, context) => {
+      assert.equal(receipt.status, 503, context);
+      assert.deepEqual(receipt.body, { error: "unavailable" }, context);
+      assert.equal(fault.attempts(), failAt, context);
+      assert.equal(fault.failures(), 1, context);
+      assert.equal(receipt.stats.statements, failAt - 1, context);
+      noStore(receipt);
+    };
+    assert.equal(HEALTH_CHECK_IDS.length, 22);
+    assert.equal(INTEGRITY_CHECK_IDS.length, 36);
+    const deniedTokens = ["tok-alice", "tok-mod", "tok-banned", "tok-expired", "tok-nope", null];
+    for (const [prefix, ids] of catalogs) {
+      for (const [index, id] of ids.entries()) {
+        const path = prefix + encodeURIComponent(id);
+        const fault = faultAt(2, index % 2 === 0);
+        unavailable(await call(path, ADMIN, { d1: fault.d1 }), fault, 2, id);
+        const token = deniedTokens[index % deniedTokens.length];
+        const deniedFault = faultAt(2);
+        const denied = await call(path, token, { d1: deniedFault.d1 });
+        assert.equal(denied.status, index % deniedTokens.length < 3 ? 403 : 401, id);
+        assert.equal(deniedFault.failures(), 0, id);
+        assert.equal(deniedFault.attempts(), token === null ? 0 : 1, id);
+        assert.equal(denied.stats.statements, token === null ? 0 : 1, id);
+        noStore(denied);
+      }
+      for (const id of ["constructor", "__proto__", "toString", "hasOwnProperty", "not_a_check", "like_count_drift/extra"]) {
+        const fault = faultAt(2);
+        const receipt = await call(prefix + encodeURIComponent(id), ADMIN, { d1: fault.d1 });
+        assert.equal(receipt.status, 404, id);
+        assert.deepEqual(receipt.body, { error: "not_found" }, id);
+        assert.equal(fault.attempts(), 1, id);
+        assert.equal(fault.failures(), 0, id);
+        assert.equal(receipt.stats.statements, 1, id);
+        noStore(receipt);
+      }
+    }
+    // Retention performs a settings read before the combined count/sample
+    // statement; the later failure must not return partial or healthy data.
+    const retention = faultAt(3);
+    unavailable(await call("/api/admin-read/ops/health/checks/audit_logs_retention_candidates", ADMIN, {
+      d1: retention.d1,
+    }), retention, 3, "retention second diagnostic read");
+  });
+
   test("MIG-0626 U06: operational health and security bound the entire multi-check diagnostic response", async () => {
     // Execute the actual read statements and inject synthetic oversized values
     // at the D1 result boundary. No persistent fixture or SQL is changed.
