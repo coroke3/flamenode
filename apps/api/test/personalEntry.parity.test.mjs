@@ -708,8 +708,9 @@ if (runUnderRootTsx(import.meta.url)) {
       const second = await call(`${path}&offset=${first.body.nextOffset}`, "tok-alice");
       assert.equal(second.status, 200);
       const ids = [...first.body.eventOptions, ...second.body.eventOptions].map((option) => option.id);
-      assert.equal(ids.length, 150);
-      assert.equal(new Set(ids).size, 150);
+      const fixtureIds = ids.filter((id) => id.startsWith(prefix));
+      assert.deepEqual([...fixtureIds].sort(), [...eventIds].sort(), "all 150 fixture events are returned exactly once");
+      assert.equal(new Set(ids).size, ids.length, "unrelated seeded events are not repeated either");
       assert.equal(ids.filter((id) => id === fixed).length, 1);
       assert.equal(second.body.eventOptions.some((option) => option.id === fixed), false);
       assert.equal(second.body.nextOffset, null);
@@ -757,6 +758,38 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("S2 bounds: an in-page fixed slot event cut by the byte envelope fails closed", async () => {
+    const preceding = "a_pgcut_first";
+    const fixed = "a_pgcut_fixed";
+    const slot = "sl-pgcut";
+    const path = "/api/personal/entry/slotted?slot=" + slot;
+    try {
+      insertEvent(preceding, {
+        entry_start_time: NOW - 1000,
+        entry_end_time: NOW + 6000,
+        allow_user_video_event_links: 1,
+        youtube_description_template: "x".repeat(40_000),
+      });
+      insertEvent(fixed, {
+        entry_start_time: NOW - 1000,
+        entry_end_time: NOW + 6000,
+        allow_user_video_event_links: 1,
+        youtube_description_template: "y".repeat(30_000),
+      });
+      sqlite.prepare("INSERT INTO slots (id,event_id,status,reserved_by_user_id,x_user_id,start_time,sort_order) VALUES (?,?,?,?,?,?,?)")
+        .run(slot, fixed, "reserved", "u_alice", "alice_x", NOW + 100000, 0);
+
+      const r = await call(path, "tok-alice");
+      assert.equal(r.status, 503);
+      assert.deepEqual(r.body, { error: "unavailable" });
+      assert.equal(r.headers.get("cache-control"), "private, no-store");
+      assert.ok(r.stats.statements <= 3);
+      assert.equal(r.stats.batches, 0);
+    } finally {
+      sqlite.prepare("DELETE FROM slots WHERE id = ?").run(slot);
+      sqlite.prepare("DELETE FROM events WHERE id IN (?,?)").run(preceding, fixed);
+    }
+  });
   test("S2 bounds: a prepended slot event alone cannot return a non-advancing cursor", async () => {
     const fixed = "a_pgstall_fixed";
     const accepting = "a_pgstall_accept";

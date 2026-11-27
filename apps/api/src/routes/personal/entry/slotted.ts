@@ -248,13 +248,17 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
     slotPart,
   };
   // Options are cut by bytes (after the row page) so the whole response stays <= 64 KiB; nextOffset continues from the cut
-  // (counted in accepting rows: the prepended slot event is not one).
+  // (counted in accepting rows other than the fixed slot event, wherever it appears).
   const fit = takeWithinBytes(
     allOptions,
     MAX_RESPONSE_BYTES - jsonBytes({ ...rest, eventOptions: [], truncated: true, nextOffset: 1000 }),
   );
   const truncated = accepting.length >= ENTRY_PAGE_ROWS || fit.cut;
   const slotEventIncluded = fit.items.some((option) => option.id === ev.id);
+  if (offset === 0 && !slotEventIncluded) {
+    // Do not silently omit the fixed slot event when the byte budget cuts before its ordered position.
+    throw new Error("slotted_entry_slot_event_not_returned");
+  }
   const keptAccepting = fit.items.length - (slotEventIncluded ? 1 : 0);
   // A fixed slot event can fit while no accepting option fits. Returning the
   // same cursor would make the client loop forever, so fail closed.
