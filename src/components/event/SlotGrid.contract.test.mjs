@@ -28,7 +28,7 @@ test("SlotGrid catches rejected slot server actions", () => {
 });
 
 const viewerPanelSource = await readFile(
-  new URL("../../app/(public)/event/[id]/slots/EventSlotsViewerPanel.tsx", import.meta.url),
+  new URL("../../../app/(public)/event/[id]/slots/EventSlotsViewerPanel.tsx", import.meta.url),
   "utf8",
 );
 
