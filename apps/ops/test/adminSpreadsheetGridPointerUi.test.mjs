@@ -1034,3 +1034,159 @@ test("MIG-0737 U01 status: fallback and preview declarations preserve full text 
     else document.documentElement.setAttribute("data-theme", previous);
   }
 });
+
+async function doubleClickCell(node, options = {}) {
+  const event = mouse("dblclick", { detail: 2, ...options });
+  await React.act(async () => node.dispatchEvent(event));
+  return event;
+}
+
+test("MIG-0737 U01 double click: TD, display and empty value open the original draft and collapse a range", async () => {
+  const fixture = { ...data, rows: [data.rows[0], data.rows[1], { ...data.rows[2], title: null }] };
+  const ui = await mount({ data: fixture, allowMutations: true });
+  try {
+    for (const [pos, wrapped, value, options] of [
+      ["1:1", false, "Beta", {}], ["0:1", true, "Alpha", { shiftKey: true }],
+      ["2:1", true, "", { ctrlKey: true, altKey: true, metaKey: true }],
+    ]) {
+      await select(ui, "0:0");
+      await select(ui, "2:2", { shiftKey: true });
+      const td = cell(ui, pos);
+      const surface = wrapped ? td.querySelector("[data-grid-cell-content]") : td;
+      for (const detail of [1, 2]) {
+        await down(surface, { ...options, detail });
+        await up(surface, options);
+        await terminalClick(surface, { ...options, detail });
+        assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+      }
+      assert.equal((await doubleClickCell(surface, options)).defaultPrevented, false);
+      const input = td.querySelector('input[type="text"]');
+      assert.ok(input && document.activeElement === input);
+      assert.equal(input.value, value);
+      assert.deepEqual(selected(ui), [pos]);
+      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 1);
+      await key(input, "Escape");
+      assert.equal(td.querySelector("input"), null);
+      assert.ok(document.activeElement === td);
+    }
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 double click: denied cells, opt-in, generated and missing PK do not start an edit", async () => {
+  for (const [fixture, allowMutations, positions] of [
+    [data, false, ["1:1"]],
+    [{ ...data, def: { ...data.def, mode: "readonly" } }, true, ["1:1"]],
+    [data, true, ["1:0", "1:2"]],
+    [{ ...data, columns: data.columns.map(c => c.name === "title" ? { ...c, generated: true } : c) }, true, ["1:1"]],
+    [{ ...data, rows: [data.rows[0], { ...data.rows[1], id: null }, data.rows[2]] }, true, ["1:1"]],
+  ]) {
+    const ui = await mount({ data: fixture, allowMutations });
+    try {
+      for (const pos of positions) {
+        const td = await select(ui, pos);
+        await doubleClickCell(td);
+        await doubleClickCell(td.querySelector("[data-grid-cell-content]"));
+        assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+        assert.deepEqual(selected(ui), [pos]);
+        assert.ok(document.activeElement === td);
+      }
+      assertNoEffects(ui);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 double click: child and nonprimary gestures do not enter or replace a draft", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    const td = await select(ui, "1:1");
+    const display = td.querySelector("[data-grid-cell-content]");
+    const edit = button(ui, "2行 title を編集");
+    for (const target of [td, display]) {
+      for (const button of [1, 2]) await doubleClickCell(target, { button });
+    }
+    await doubleClickCell(edit);
+    assert.equal(td.querySelector("input"), null);
+    await doubleClickCell(display);
+    const input = td.querySelector("input");
+    assert.ok(input && document.activeElement === input);
+    await setInput(input, "Unsaved");
+    await doubleClickCell(input);
+    await doubleClickCell(button(ui, "セルを保存"));
+    await doubleClickCell(button(ui, "キャンセル"));
+    await doubleClickCell(cell(ui, "0:1").querySelector("[data-grid-cell-content]"));
+    assert.ok(td.querySelector("input") === input);
+    assert.equal(input.value, "Unsaved");
+    assert.deepEqual(selected(ui), ["1:1"]);
+    assert.ok(document.activeElement === input);
+    await key(input, "Escape");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 double click: mixed same-batch entry keeps the first draft and invalidation fences reopen", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    const first = await select(ui, "0:1");
+    const second = cell(ui, "1:1");
+    const other = button(ui, "2行 title を編集");
+    const f2 = new dom.window.KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+    await React.act(async () => {
+      first.dispatchEvent(f2);
+      second.dispatchEvent(mouse("dblclick", { detail: 2 }));
+      other.click();
+    });
+    assert.equal(f2.defaultPrevented, true);
+    const input = first.querySelector("input");
+    assert.ok(input);
+    assert.equal(input.value, "Alpha");
+    assert.equal(second.querySelector("input"), null);
+    await setInput(input, "Unsaved");
+    await ui.render({ data: { ...data, rows: [{ ...data.rows[0], title: "Server change" }, ...data.rows.slice(1)] } });
+    assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
+    await doubleClickCell(second);
+    assert.equal(second.querySelector("input"), null);
+    await React.act(async () => button(ui, "編集を破棄").click());
+    await doubleClickCell(second);
+    const reopened = second.querySelector("input");
+    assert.ok(reopened && document.activeElement === reopened);
+    assert.equal(reopened.value, "Beta");
+    await key(reopened, "Escape");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 double click: pending ordinary write and history preserve mutation ownership", async () => {
+  const requests = [];
+  let refreshes = 0;
+  const ui = await mount({ allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+    onRefresh: () => { refreshes++; },
+  });
+  const success = () => new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+  try {
+    await editTitle(ui);
+    await React.act(async () => button(ui, "セルを保存").click());
+    assert.equal(requests.length, 1);
+    const other = await select(ui, "1:1");
+    await doubleClickCell(other);
+    assert.equal(other.querySelector("input"), null);
+    assert.equal(requests[0].init.signal.aborted, false);
+    assert.equal(requests.length, 1);
+    await React.act(async () => requests[0].resolve(success()));
+    assert.equal(refreshes, 1);
+    await key(other, "z", { ctrlKey: true });
+    assert.equal(requests.length, 2);
+    await doubleClickCell(other);
+    assert.equal(other.querySelector("input"), null);
+    assert.equal(requests[1].init.signal.aborted, false);
+    await React.act(async () => requests[1].resolve(success()));
+    assert.equal(refreshes, 2);
+    await doubleClickCell(other);
+    const input = other.querySelector("input");
+    assert.ok(input);
+    assert.equal(input.value, "Beta");
+    await key(input, "Escape");
+    assert.equal(requests.length, 2);
+  } finally { await ui.cleanup(); }
+});

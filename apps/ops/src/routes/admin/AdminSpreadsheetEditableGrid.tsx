@@ -230,6 +230,15 @@ export function AdminSpreadsheetEditableGrid({
     return true;
   }
 
+  function handleCellDoubleClick(event: React.MouseEvent<HTMLTableCellElement>, rowIndex: number, colIndex: number): void {
+    // Only the data surface owns double-click entry; child controls/editor keep their own gestures.
+    if (event.button !== 0 || (event.target !== event.currentTarget &&
+        !(event.target instanceof HTMLElement && event.target.parentElement === event.currentTarget &&
+          event.target.hasAttribute("data-grid-cell-content")))) return;
+    // CURRENT opens the original display value. Retain the isolated live-draft and write-authority fence.
+    startCellEdit(rowIndex, colIndex);
+  }
+
   function cancelCellEdit(editId: number, position: GridCell): void {
     if (liveSelection.current?.id !== editId) return;
     setCellEdit(null);
@@ -798,6 +807,7 @@ export function AdminSpreadsheetEditableGrid({
                       else setFocusedCell(position);
                       event.currentTarget.scrollIntoView?.({ block: "nearest", inline: "nearest" });
                     }}
+                    onDoubleClick={(event) => handleCellDoubleClick(event, ri, columns.indexOf(c))}
                     onKeyDown={(event) => handleGridKey(event, ri, columns.indexOf(c))}>{editing && currentSelection ? (
                     <label>{c.name} を編集
                       <input ref={editorRef} type="text" autoFocus disabled={!canMutate} value={currentSelection.value}
