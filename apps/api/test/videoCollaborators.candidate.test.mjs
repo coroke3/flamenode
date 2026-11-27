@@ -162,7 +162,7 @@ import { Hono } from "hono";
 import { createSqlite } from "./support/personalHarness.mjs";
 import { atomicD1, seedChapterWorld, SESSION_USER, SITE } from "./support/chapterSeed.mjs";
 
-function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false, queueEnabled = false, beforeBatch } = {}) {
+function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false, queueEnabled = false, beforeBatch, observeErrors = false } = {}) {
   const sqlite = createSqlite();
   seedChapterWorld(sqlite);
   sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'").run(mode);
@@ -214,6 +214,11 @@ function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false,
     },
   };
   const app = new Hono();
+  let errorCalls = 0;
+  if (observeErrors) app.onError((_error, c) => {
+    errorCalls++;
+    return c.json({ ok: false, message: "unexpected Hono error" }, 500);
+  });
   app.route("/api/videos", createVideoCollaboratorRoutes(host));
   const send = (method, path, data, headers = { Origin: SITE }) =>
     app.request(path, {
@@ -221,8 +226,56 @@ function integration({ as = "u_admin", mode = "normal", wakeHostRejects = false,
       body: data === undefined ? undefined : JSON.stringify(data),
     }, env);
   const count = (table) => sqlite.prepare('SELECT COUNT(*) AS n FROM "' + table + '"').get().n;
-  return { sqlite, d1, send, count, wakeLoads: () => wakeLoadCount, queueMessages };
+  const sendRaw = request => app.request(request, undefined, env);
+  return { sqlite, d1, send, sendRaw, count, errorCalls: () => errorCalls,
+    wakeLoads: () => wakeLoadCount, queueMessages };
 }
+
+test("SA-082/083/084 interrupted and locked request bodies return fixed 400 without reaching Hono error or mutation", async () => {
+  const s = integration({ observeErrors: true });
+  try {
+    const tables = ["video_members", "audit_logs", "static_rebuild_queue", "notification_outbox"];
+    const before = tables.map(table => s.count(table));
+    for (const [method, path] of [
+      ["PUT", "/api/videos/v_pub/collaborators/x_other"],
+      ["DELETE", "/api/videos/v_pub/collaborators/x_other"],
+      ["POST", "/api/videos/v_pub/collaborators/batch"],
+    ]) {
+      const headers = { Origin: SITE, "content-type": "application/json" };
+      let emitted = false;
+      const stream = new ReadableStream({
+        pull(controller) {
+          if (!emitted) {
+            emitted = true;
+            controller.enqueue(new TextEncoder().encode('{"video_id":"v_pub",'));
+          } else {
+            controller.error(new Error("synthetic private body-reader diagnostic"));
+          }
+        },
+      });
+      const interrupted = new Request(new URL(path, SITE), {
+        method, headers, body: stream, duplex: "half",
+      });
+      const locked = new Request(new URL(path, SITE), {
+        method, headers, body: "{}",
+      });
+      const reader = locked.body.getReader();
+      try {
+        for (const req of [interrupted, locked]) {
+          const res = await s.sendRaw(req);
+          assert.equal(res.status, 400, method);
+          assert.equal(res.headers.get("cache-control"), "private, no-store");
+          assert.deepEqual(await res.json(), { ok: false, message: "入力エラー" });
+          assert.equal(s.errorCalls(), 0, "body failure never reaches generic Hono diagnostics");
+          assert.equal(s.d1.stats.batches, 0);
+          assert.deepEqual(tables.map(table => s.count(table)), before);
+          assert.equal(s.wakeLoads(), 0);
+          assert.equal(s.queueMessages.length, 0);
+        }
+      } finally { reader.releaseLock(); }
+    }
+  } finally { s.sqlite.close(); }
+});
 
 test("SA-084 authenticated middleware + real SQLite D1: permission, strict audit and rebuild queue commit together", async () => {
   const s = integration();

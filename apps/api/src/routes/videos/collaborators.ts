@@ -291,7 +291,14 @@ async function executePermissionWrite(
 }
 
 async function parseBody(c: Ctx) {
-  const read = await readAdminJsonBody(c.req.raw);
+  let read: Awaited<ReturnType<typeof readAdminJsonBody>>;
+  try {
+    read = await readAdminJsonBody(c.req.raw);
+  } catch {
+    // An interrupted/locked request body is invalid input, not a provider
+    // diagnostic. Keep the exception out of Hono's generic error handler.
+    return { ok: false as const, response: failure(c, 400, "入力エラー") };
+  }
   if (read.kind === "too_large") {
     return { ok: false as const, response: failure(c, 413, BODY_TOO_LARGE_MESSAGE) };
   }
