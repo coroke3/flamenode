@@ -107,3 +107,20 @@ test("TOS/BAN/auth unavailableでは本人枠のwrite ownershipだけを無効�
   assert.match(panel, /is_owned_by_viewer: false/);
   assert.match(panel, /canManageOwnSlots\s*\? mergedSlots/);
 });
+
+test("BFCache復元時は旧viewer overlay・予約ダイアログの両方を破棄する", async () => {
+  const slotGrid = await readFile(new URL("../../components/event/SlotGrid.tsx", import.meta.url), "utf8");
+  // pageshow fires for a fresh page too; only history-cache restoration retires
+  // already displayed private state and starts a fresh credentialed overlay GET.
+  assert.match(panel, /const onPageShow = \(event: PageTransitionEvent\) => \{/);
+  assert.match(panel, /if \(event\.persisted\) refresh\(\)/);
+  assert.match(panel, /window\.addEventListener\("pageshow", onPageShow\)/);
+  assert.match(panel, /window\.removeEventListener\("pageshow", onPageShow\)/);
+  assert.match(panel, /const refresh = \(\) => \{[\s\S]*?setOverlayState\(\{ value: EMPTY_OVERLAY, baseSlots: null \}\);[\s\S]*?setRefreshNonce\(/);
+  assert.match(slotGrid, /if \(event\.persisted\) clearViewerPrivateUi\(\)/);
+  assert.match(slotGrid, /window\.addEventListener\("pageshow", onPageShow\)/);
+  assert.match(slotGrid, /window\.removeEventListener\("pageshow", onPageShow\)/);
+  assert.match(slotGrid, /const clearViewerPrivateUi = \(\) => \{[\s\S]*?viewerGeneration\.current \+= 1;/);
+  assert.match(slotGrid, /setReserveTarget\(null\)/);
+  assert.match(slotGrid, /setConfirmMerge\(null\)/);
+});

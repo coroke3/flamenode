@@ -287,8 +287,17 @@ export function SlotGrid({
     setSavedName(readSavedSlotDisplayName(viewerXId));
     // A successful Active X switch must clear an already-open dialog even
     // before the parent overlay supplies a different viewerXId.
+    // BFCache can restore a pre-logout dialog without a React remount.
+    // Retire the former viewer's in-flight mutation callbacks and private UI.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) clearViewerPrivateUi();
+    };
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
-    return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, [viewerXId]);
 
   React.useEffect(() => {

@@ -219,8 +219,17 @@ export function EventSlotsViewerPanel({
       setLoading(true);
       setRefreshNonce((value) => value + 1);
     };
+    // A BFCache restore can revive a page whose authenticated cookie changed
+    // while it was suspended. Retire its old private overlay before re-fetching.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) refresh();
+    };
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, []);
 
   const mergedSlots = React.useMemo(
