@@ -775,7 +775,7 @@ PR を revert（まだどの route からも使われない）。
 
 ### MIG-0714: Personal SPA の投稿 form その C: `VideoForm` と `UnslottedPostForm` の移植（MIG-0703）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — 親の最終受入は未完。Part A #696、B01/B02 #903、B03/B03R #906、B04 #907 は main に統合済み。検証済み開始main `203263eb94e55c6784fbf51ec4387ac4385ae5dc`。B05はOpen Draft #909 / branch `migration/mig-0714-form-css-20261127`、code commit `aa904dd880daaf054ea9482b0adf6b6892ffc25a` で実装中。postclaim 42-open-PR scanで重複writerなし。Actions #46004451933は進行中、独立source reviewと全form browser390/1440は未実施。各PR3000行以内。親のcomponent-only DONEはB05実受入・最終HEAD CI/独立review後に判断し、#703 trusted-route gateは後続routeに残す。
+- **Readiness:** NEEDS_REFINEMENT — 親の最終受入は未完。Part A #696、B01/B02 #903、B03/B03R #906、B04 #907 は main に統合済み。検証済み開始main `203263eb94e55c6784fbf51ec4387ac4385ae5dc`。B05はOpen Draft #909 / branch `migration/mig-0714-form-css-20261127`、code commit `5dc040ce9e58bfd16f17daba0eec7d89f2d3ee6f` で実装中。postclaim 42-open-PR scanで重複writerなし。Actions #46005685624は進行中、独立source reviewと全form browser390/1440は未実施。各PR3000行以内。親のcomponent-only DONEはB05実受入・最終HEAD CI/独立review後に判断し、#703 trusted-route gateは後続routeに残す。
 - **Recipe:** R-UI
 - **Runtime:** N
 - **Depends on:** MIG-0712, MIG-0713, MIG-0738 / **Decisions:** D-16-4, D-16-11, D-19-5
