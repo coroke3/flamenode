@@ -55,6 +55,7 @@ import { SPREADSHEET_COLUMN_ENUMS, SPREADSHEET_SCHEMA_TABLES } from "./schemaCat
 import { SpreadsheetImportColumnError } from "./importPrepCore.ts";
 import { readSpreadsheetJsonBody } from "./writeBody.ts";
 import {
+  assertSpreadsheetForeignKeyLookup,
   buildSpreadsheetForeignKeyLookups,
   parseSpreadsheetCrudBody,
   planSpreadsheetAtomicAuditedCrud,
@@ -670,6 +671,79 @@ LIMIT ${fkLookup.values.length + 1 + SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1
     fkLookup: Object.freeze({ ...fkLookup, binds: Object.freeze([...fkLookup.binds]), values: Object.freeze([...fkLookup.values]) }),
     releaseIds: Object.freeze(releaseIds),
   };
+}
+
+/**
+ * Validate the tagged result of the bounded member FK/release CTE.
+ * FK validation deliberately precedes release overflow/row validation so a
+ * missing FK retains CURRENT's error precedence over an oversized release set.
+ */
+export function validateSpreadsheetMemberFkReleaseLookupReceipt(
+  plan: { fkLookup: SpreadsheetForeignKeyLookup; releaseIds: readonly string[] },
+  result: { success: boolean; results: unknown[] },
+): { eventIdsByVideo: Map<string, string[]> } {
+  if (!plan || !plan.fkLookup || !Array.isArray(plan.releaseIds) ||
+      !result || result.success !== true || !Array.isArray(result.results) ||
+      result.results.length > plan.fkLookup.values.length + 1 + SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1) {
+    throw new Error("invalid_snapshot");
+  }
+  const fkRows: Array<{ value: string | number | null }> = [];
+  const releaseRows: unknown[] = [];
+  for (const row of result.results) {
+    if (!row || typeof row !== "object" || Array.isArray(row) ||
+        !Object.hasOwn(row, "kind") || typeof (row as { kind?: unknown }).kind !== "string") {
+      throw new Error("invalid_snapshot");
+    }
+    const kind = (row as { kind: string }).kind;
+    if (kind === "fk") {
+      if (!Object.hasOwn(row, "value") || !Object.hasOwn(row, "videoId") ||
+          !Object.hasOwn(row, "eventId") || !Object.hasOwn(row, "primaryEventId") ||
+          (row as { videoId: unknown }).videoId !== null ||
+          (row as { eventId: unknown }).eventId !== null ||
+          (row as { primaryEventId: unknown }).primaryEventId !== null) {
+        throw new Error("invalid_snapshot");
+      }
+      fkRows.push({ value: (row as { value: string | number | null }).value });
+    } else if (kind === "release") {
+      releaseRows.push(row);
+    } else {
+      throw new Error("invalid_snapshot");
+    }
+  }
+  // Preserve old two-query ordering: FK violations precede release overflow.
+  assertSpreadsheetForeignKeyLookup(plan.fkLookup, fkRows);
+  if (releaseRows.length > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+    throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+  }
+  const requested = new Set(plan.releaseIds);
+  const eventIdsByVideo = new Map<string, Set<string>>();
+  const linkedEventIds = new Set<string>();
+  for (const candidate of releaseRows) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new Error("invalid_snapshot");
+    }
+    const row = candidate as Record<string, unknown>;
+    if (!Object.hasOwn(row, "value") || !Object.hasOwn(row, "videoId") ||
+        !Object.hasOwn(row, "eventId") || !Object.hasOwn(row, "primaryEventId") ||
+        row.value !== null || typeof row.videoId !== "string" || !requested.has(row.videoId) ||
+        (row.eventId !== null && typeof row.eventId !== "string") ||
+        (row.primaryEventId !== null && typeof row.primaryEventId !== "string")) {
+      throw new Error("invalid_snapshot");
+    }
+    const eventIds = eventIdsByVideo.get(row.videoId) ?? new Set<string>();
+    for (const linkedId of [row.eventId, row.primaryEventId]) {
+      const normalized = (linkedId as string | null)?.trim();
+      if (normalized) {
+        eventIds.add(normalized);
+        linkedEventIds.add(normalized);
+      }
+    }
+    if (linkedEventIds.size > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+      throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+    }
+    eventIdsByVideo.set(row.videoId, eventIds);
+  }
+  return { eventIdsByVideo: new Map([...eventIdsByVideo].map(([id, ids]) => [id, [...ids]])) };
 }
 
 export async function loadSpreadsheetVideoReleaseEvents(

@@ -1473,6 +1473,42 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("MIG-0638 T06: bounded member FK/release receipt fails closed and preserves FK precedence", async () => {
+    const { validateSpreadsheetMemberFkReleaseLookupReceipt } = await import("../src/routes/admin/spreadsheet/write.ts");
+    const plan = {
+      fkLookup: { statement: "SELECT ?", binds: ["video-1"], values: ["video-1"] },
+      releaseIds: ["video-1", "video-old"],
+    };
+    const fk = { kind: "fk", value: "video-1", videoId: null, eventId: null, primaryEventId: null };
+    const release = (videoId, eventId = null, primaryEventId = null) => ({
+      kind: "release", value: null, videoId, eventId, primaryEventId,
+    });
+    const valid = validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: [fk, release("video-1", " event-1 ", "event-2"), release("video-old")],
+    });
+    assert.deepEqual(valid.eventIdsByVideo.get("video-1"), ["event-1", "event-2"]);
+    assert.deepEqual(valid.eventIdsByVideo.get("video-old"), []);
+    const overflowRows = Array.from({ length: 257 }, (_, i) => release("video-1", "event-" + i));
+    assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: overflowRows,
+    }), /foreign_key_violation/);
+    assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: [fk, ...overflowRows],
+    }), /静的再生成対象が多すぎます/);
+    assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: [fk, { ...release("video-1"), kind: "unknown" }],
+    }), /invalid_snapshot/);
+    assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: [fk, release("not-requested")],
+    }), /invalid_snapshot/);
+    assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: [fk, release("video-1", 42)],
+    }), /invalid_snapshot/);
+    assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: false, results: [fk],
+    }), /invalid_snapshot/);
+  });
+
   // #893: characterization only. These expectations deliberately record the
   // CURRENT TARGET costs, including over-budget requests. Do not interpret
   // a green test as compliance with the <=3 pre-read S3 gate.
