@@ -565,3 +565,17 @@ test("MIG-0610 T00: caught mismatch permanently invalidates replay and recorded 
   try { recorder.db.batch([{}]); } catch { /* job may swallow the exception */ }
   assert.throws(() => recorder.snapshot(), /incomplete or failed/);
 });
+
+test("MIG-0610 T00 replay snapshots caller trace before any measured operations", async () => {
+  const trace = [{ request: { op: "first", sql: "SELECT ? AS n",
+    binds: [["num", 2]], args: [] }, result: { n: 2 } }];
+  const replay = createStrictD1TraceReplay(trace);
+  trace[0].request.sql = "SELECT 99";
+  trace[0].result.n = 99;
+  trace.push({ request: { op: "exec", sql: "DROP TABLE fixture" }, result: {} });
+  assert.deepEqual(await replay.db.prepare("SELECT ? AS n").bind(2).first(), { n: 2 });
+  replay.assertExhausted();
+  const hostile = [{ request: { op: "first", sql: "SELECT 1", binds: [], args: [] },
+    result: { value: 1, nonCloneable() {} } }];
+  assert.throws(() => createStrictD1TraceReplay(hostile), /invalid D1 replay trace/);
+});

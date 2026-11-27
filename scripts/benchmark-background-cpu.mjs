@@ -348,6 +348,12 @@ export const jobById = id => JOBS.find(j => j.id === id);
  */
 export function createStrictD1TraceReplay(trace) {
   if (!Array.isArray(trace) || trace.length > 2000) throw Error("invalid D1 replay trace");
+  // Never read the caller-owned trace during a measured replay. Otherwise a
+  // mutation after construction can silently change expected SQL or results.
+  let immutableInput;
+  try { immutableInput = structuredClone(trace); }
+  catch { throw Error("invalid D1 replay trace"); }
+  trace = immutableInput;
   let cursor = 0;
   let invalid = false;
   const reject = message => { invalid = true; throw Error(message); };
