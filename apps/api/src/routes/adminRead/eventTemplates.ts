@@ -113,8 +113,10 @@ function boundedTemplateSettings(value: unknown): string | null {
 }
 
 export const adminEventNewRoutes = new Hono<AppEnv>().get("/", async (c) => {
-  const raw = c.req.query("template");
-  const templateId = typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : "";
+  // CURRENT Next passes repeated search parameters as an array, not a string.
+  // Match the Ops new-event reader: only a single template value selects a row.
+  const raw = c.req.queries("template");
+  const templateId = raw?.length === 1 ? raw[0]!.trim() : "";
   const guard = await loadGuard(c, templateId);
   const templates = guard.ok ? await listTemplates(c.env.DB) : [];
   const row = guard.row;

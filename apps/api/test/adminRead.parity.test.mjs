@@ -775,7 +775,38 @@ if (runUnderRootTsx(import.meta.url)) {
     } finally {
       setTemplateSettings.run(originalSettings, "tpl2");
     }
-    assert.equal((await get("/api/admin-read/events/new", "root")).body.templateId, "");
+    // CURRENT Next treats repeated searchParams.template as an array; Ops
+    // EventNew uses getAll as well. Never apply an ambiguous template snapshot.
+    for (const query of [
+      "", "?template", "?template=", "?template=%20%09",
+      "?template=tpl2&template=tpl1", "?template=tpl2&template=tpl2",
+      "?template=&template=tpl2", "?template=tpl2&template=",
+      "?template=tpl2&other=1&template=tpl1", "?template=tpl2&%74emplate=tpl1",
+      "?template%5B%5D=tpl2",
+    ]) {
+      const result = await get("/api/admin-read/events/new" + query, "root");
+      assert.equal(result.body.templateId, "", query);
+      assert.equal(result.body.templateName, null, query);
+      assert.equal(result.body.templateSettingsJson, null, query);
+      assert.equal(result.body.guardOk, true, query);
+      assert.deepEqual(result.body.templates, expectedList, query);
+      assert.equal(result.stats.statements, 3, query);
+    }
+    for (const query of ["?template=%20tpl2%20", "?%74emplate=tpl2", "?template=tpl2&other=1"]) {
+      const result = await get("/api/admin-read/events/new" + query, "root");
+      assert.equal(result.body.templateId, "tpl2", query);
+      assert.equal(result.body.templateName, "Template 2", query);
+      assert.equal(result.body.templateSettingsJson, originalSettings, query);
+      assert.equal(result.body.guardOk, true, query);
+      assert.deepEqual(result.body.templates, expectedList, query);
+      assert.equal(result.stats.statements, 3, query);
+    }
+    const ambiguousDenied = await get("/api/admin-read/events/new?template=tpl2&template=tpl1", "carol");
+    assert.equal(ambiguousDenied.body.guardOk, false);
+    assert.deepEqual(ambiguousDenied.body.templates, []);
+    assert.equal(ambiguousDenied.body.templateId, "");
+    assert.equal(ambiguousDenied.body.templateName, null);
+    assert.equal(ambiguousDenied.body.templateSettingsJson, null);
     try {
       for (const [sets, expected] of [
         ["operation_mode = 'read_only'", false],
