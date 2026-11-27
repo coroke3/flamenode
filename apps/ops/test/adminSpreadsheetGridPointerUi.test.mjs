@@ -1865,7 +1865,7 @@ test("MIG-0737 U01 formula input: IME confirmation, pending clipboard units and 
     }
     assert.equal((await key(formula, "Enter", { keyCode: 229 })).defaultPrevented, false);
     assert.equal(cell(ui, "0:1").querySelector("input").value, "仮入力");
-    for (const pressed of ["v", "x", "z", "y"]) {
+    for (const pressed of ["v", "x"]) {
       assert.equal((await key(formula, pressed, { ctrlKey: true })).defaultPrevented, true);
     }
     for (const type of ["paste", "cut"]) {
@@ -2274,4 +2274,94 @@ test("MIG-0737 U01 formula navigation: batched range copy waits for the committe
     if (previous) Object.defineProperty(navigator, "clipboard", previous);
     else delete navigator.clipboard;
   }
+});
+
+test("MIG-0737 U01 formula history: CURRENT shortcut cancels a live draft even with empty history", async () => {
+  for (const [pressed, options] of [["z", { ctrlKey: true }], ["z", { metaKey: true, shiftKey: true }], ["y", { ctrlKey: true }]]) {
+    const ui = await mount({ allowMutations: true });
+    try {
+      await select(ui, "0:1");
+      const formula = formulaInput(ui);
+      await React.act(async () => formula.focus());
+      await setInput(formula, "discard this draft");
+      assert.ok(cell(ui, "0:1").querySelector("input"));
+      assert.equal((await key(formula, pressed, options)).defaultPrevented, true);
+      assert.equal(cell(ui, "0:1").querySelector("input"), null);
+      assert.equal(document.activeElement, cell(ui, "0:1"));
+      assertFormula(ui, "B4 (title)", "Alpha");
+      assertNoEffects(ui);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 formula history: Undo and both Redo shortcuts replay only committed entries", async () => {
+  for (const [redoKey, redoOptions] of [["y", { ctrlKey: true }], ["z", { metaKey: true, shiftKey: true }]]) {
+    const requests = [];
+    const ui = await mount({ allowMutations: true,
+      fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+    });
+    const success = () => new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+    try {
+      await editTitle(ui);
+      await React.act(async () => button(ui, "セルを保存").click());
+      assert.equal(requests.length, 1);
+      await React.act(async () => requests[0].resolve(success()));
+      const formula = formulaInput(ui);
+      await React.act(async () => formula.focus());
+      await setInput(formula, "not a history entry");
+      const undo = new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true });
+      const duplicate = new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true });
+      await React.act(async () => { formula.dispatchEvent(undo); formula.dispatchEvent(duplicate); });
+      assert.equal(undo.defaultPrevented, true);
+      assert.equal(duplicate.defaultPrevented, false);
+      assert.equal(requests.length, 2);
+      assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+      assert.equal(document.activeElement, cell(ui, "0:1"));
+      await React.act(async () => formula.focus());
+      assert.equal(formula.readOnly, true);
+      assert.equal((await key(formula, redoKey, redoOptions)).defaultPrevented, true);
+      assert.equal(requests.length, 2);
+      await React.act(async () => requests[1].resolve(success()));
+      await React.act(async () => formula.focus());
+      await setInput(formula, "discard before redo");
+      assert.equal((await key(formula, redoKey, redoOptions)).defaultPrevented, true);
+      assert.equal(requests.length, 3);
+      assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+      await React.act(async () => requests[2].resolve(success()));
+      assert.deepEqual(requests.map(({ init }) => [init.method, JSON.parse(init.body)]), [
+        ["PATCH", { table: "videos", primaryKey: { id: "a" }, column: "title", value: "Unsaved" }],
+        ["PATCH", { table: "videos", primaryKey: { id: "a" }, column: "title", value: "Alpha" }],
+        ["PATCH", { table: "videos", primaryKey: { id: "a" }, column: "title", value: "Unsaved" }],
+      ]);
+      assert.equal(ui.refreshes, 3);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 formula history: stale focus, IME, invalidated draft and default-off cannot replay", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    const inline = await editTitle(ui);
+    const formula = formulaInput(ui);
+    assert.equal((await key(formula, "z", { ctrlKey: true })).defaultPrevented, false);
+    assert.equal(inline.value, "Unsaved");
+    await React.act(async () => formula.focus());
+    assert.equal((await key(formula, "z", { ctrlKey: true, isComposing: true })).defaultPrevented, false);
+    assert.equal(inline.value, "Unsaved");
+    await ui.render({ data: { ...data, rows: [{ ...data.rows[0], title: "changed remotely" }, ...data.rows.slice(1)] } });
+    assert.equal(formula.readOnly, true);
+    await React.act(async () => formula.focus());
+    assert.equal((await key(formula, "z", { ctrlKey: true })).defaultPrevented, true);
+    assert.ok(button(ui, "編集を破棄"));
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+  const readonly = await mount();
+  try {
+    await select(readonly, "0:1");
+    const formula = formulaInput(readonly);
+    await React.act(async () => formula.focus());
+    assert.equal((await key(formula, "y", { metaKey: true })).defaultPrevented, true);
+    assert.equal(document.activeElement, cell(readonly, "0:1"));
+    assertNoEffects(readonly);
+  } finally { await readonly.cleanup(); }
 });

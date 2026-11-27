@@ -310,7 +310,30 @@ export function AdminSpreadsheetEditableGrid({
       if (!formulaNavigationPending.current && isCurrent() && displayedPage.current === data) void copyRange();
       return;
     }
-    // Bulk paste/cut and history need the separate CURRENT lifecycle and API gates.
+    // CURRENT cancels the draft before requesting Undo/Redo, even with empty history.
+    // Reuse the existing replay authority/serialization gate; never save the discarded draft.
+    if (mod && (event.key === "z" || event.key === "y")) {
+      event.preventDefault();
+      if (identityChanged || !isCurrent() || displayedPage.current !== data ||
+          formulaNavigationPending.current) return;
+      const historyDraft = liveFormulaDraft();
+      if (liveSelection.current !== null || currentSelection !== null) {
+        if (!historyDraft) return; // Retired/invalidated drafts require explicit discard.
+        const col = columns.findIndex(column => column.name === historyDraft.column);
+        if (col < 0) return;
+        cancelCellEdit(historyDraft.id, { row: historyDraft.rowIndex, col });
+      } else if (rows.length && columns.length) {
+        focusGridCell(visibleFocus);
+      } else {
+        tableRef.current?.focus();
+      }
+      if (isCurrent() && displayedPage.current === data) {
+        void replay(event.key === "y" || event.shiftKey ? "redo" : "undo");
+      }
+      return;
+    }
+    // Bulk paste/cut still need the separate CURRENT lifecycle and API gates.
+    // Keep non-CURRENT uppercase history spellings suppressed rather than invoking native input history.
     if (mod && ["v", "x", "z", "y"].includes(event.key.toLowerCase())) {
       event.preventDefault();
       return;
