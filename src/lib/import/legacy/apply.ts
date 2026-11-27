@@ -36,7 +36,7 @@ import type {
   LegacyImportApplyStage,
 } from "./previewStore";
 import { legacyImportRebuildQueueId } from "./rebuildQueueCore";
-import { legacyImportSkipSnapshotFingerprint as skipSnapshotFingerprint } from "@flamenode/server-core/legacyImport/progress";
+import { legacyImportReceiptMatchesProgress, legacyImportSkipSnapshotFingerprint as skipSnapshotFingerprint } from "@flamenode/server-core/legacyImport/progress";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
@@ -477,17 +477,7 @@ async function recoveredStepMarker(
       }
     : recovered.outcome;
   const expectedProgress = nextStageProgress(plan, progress, recoveredOutcome);
-  if (
-    recovered.runDigest !== identity.runDigest ||
-    recovered.planHash !== identity.planHash ||
-    recovered.stage !== identity.stage ||
-    recovered.index !== identity.index ||
-    recovered.nextStage !== expectedProgress.stage ||
-    recovered.nextIndex !== expectedProgress.index ||
-    JSON.stringify(recovered.nextCounts) !== JSON.stringify(expectedProgress.counts) ||
-    recovered.skipEventSnapshotFingerprint !== skipSnapshotFingerprint(expectedProgress.skipExistingEventIds) ||
-    recovered.skipVideoSnapshotFingerprint !== skipSnapshotFingerprint(expectedProgress.skipExistingVideoIds)
-  ) {
+  if (!legacyImportReceiptMatchesProgress(recovered, identity, expectedProgress)) {
     throw new Error("旧形式インポートのステップ監査と進捗が一致しません。");
   }
   return expectedProgress;

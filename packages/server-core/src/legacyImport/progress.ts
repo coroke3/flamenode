@@ -67,3 +67,34 @@ export function legacyImportSkipSnapshotFingerprint(ids: readonly string[]): str
   }
   return `${ids.length}:${hash.toString(16).padStart(16, "0")}`;
 }
+
+/**
+ * RH-002 strict CURRENT replay equality contract, exported for the Hono D1
+ * writer. This compares a parsed persisted audit receipt against the caller's
+ * run identity and the *recomputed* next progress. Never trust next counts or
+ * skip sets carried by R2/audit rows without independently deriving progress.
+ * JSON.stringify on counts intentionally matches the CURRENT key-order check.
+ * The caller must separately validate receipt shape, outcome and uniqueness.
+ */
+export function legacyImportReceiptMatchesProgress(
+  receipt: {
+    runDigest: string; planHash: string; stage: string; index: number;
+    nextStage: string; nextIndex: number; nextCounts: unknown;
+    skipEventSnapshotFingerprint: string; skipVideoSnapshotFingerprint: string;
+  },
+  identity: { runDigest: string; planHash: string; stage: string; index: number },
+  expected: {
+    stage: string; index: number; counts: unknown;
+    skipExistingEventIds: readonly string[]; skipExistingVideoIds: readonly string[];
+  },
+): boolean {
+  return receipt.runDigest === identity.runDigest &&
+    receipt.planHash === identity.planHash &&
+    receipt.stage === identity.stage &&
+    receipt.index === identity.index &&
+    receipt.nextStage === expected.stage &&
+    receipt.nextIndex === expected.index &&
+    JSON.stringify(receipt.nextCounts) === JSON.stringify(expected.counts) &&
+    receipt.skipEventSnapshotFingerprint === legacyImportSkipSnapshotFingerprint(expected.skipExistingEventIds) &&
+    receipt.skipVideoSnapshotFingerprint === legacyImportSkipSnapshotFingerprint(expected.skipExistingVideoIds);
+}
