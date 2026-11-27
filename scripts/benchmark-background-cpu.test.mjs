@@ -421,15 +421,16 @@ test("MIG-0610 T00a: D1 replay rejects tampered SQL/binds/operation, missing bat
     db => db.batch([db.prepare("SELECT ?").bind(1)]),
   ]) {
     const replay = createStrictD1TraceReplay([entry]);
-    await assert.rejects(() => invoke(replay.db), /D1 replay trace mismatch/);
+    await assert.rejects(async () => invoke(replay.db), /D1 replay trace mismatch/);
     assert.equal(replay.consumed(), 0);
     assert.throws(() => replay.assertExhausted(), /unconsumed D1 replay trace/);
   }
   const replay = createStrictD1TraceReplay([entry]);
   assert.deepEqual(await replay.db.prepare("SELECT ?").bind(1).first(), { x: 1 });
-  await assert.rejects(() => replay.db.prepare("SELECT ?").bind(1).first(), /mismatch/);
+  await assert.rejects(async () => replay.db.prepare("SELECT ?").bind(1).first(), /mismatch/);
   replay.assertExhausted();
-  assert.throws(() => createStrictD1TraceReplay([{ request: entry.request }]), /./, "missing result must not be accepted silently");
+  const missingResult = createStrictD1TraceReplay([{ request: entry.request }]);
+  await assert.rejects(async () => missingResult.db.prepare("SELECT ?").bind(1).first(), /mismatch/);
 });
 
 test("MIG-0610 T00a: malformed and unsupported D1 replay operations are not silently approximated", async () => {
