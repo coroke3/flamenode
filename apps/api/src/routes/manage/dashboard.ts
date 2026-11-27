@@ -5,6 +5,7 @@ import { resolveActiveXUserId } from "../personal/context.ts";
 import { accessOf, loadManageSnapshot, manageGate } from "./access.ts";
 import { compareEventsByUpcomingPriority, isAcceptingEntries } from "./eventOrder.ts";
 import { loadManageData, type ManageData } from "./events.ts";
+import { LEGACY_NOTIFICATION_EVENT_ID_SQL, isLegacyNotificationSchema } from "./notificationLegacySchema.ts";
 
 // CURRENT: app/(manage)/manage/page.tsx (ManageTopPage).
 // D1 (S2, 3 statements incl. the session lookup): staff snapshot (admins skip it), then one JSON-sections statement.
@@ -20,16 +21,45 @@ export const manageDashboardRoutes = new Hono<AppEnv>().get("/", async (c) => {
 
   let data: ManageData;
   let notificationSchemaMissing = false;
+  let initial: ManageData | null = null;
   try {
-    data = await loadManageData(db, user, snapshot, { inbox: true, notifications: true, linked: true });
+    initial = await loadManageData(db, user, snapshot, {
+      inbox: true, notifications: true, linked: true,
+      reportNotificationJsonInvalid: true,
+    });
   } catch {
+    // The first fused D1 read (or a non-notification JSON section) failed.
+    // Do not assume this means the old notification event_id column is absent.
+  }
+  if (initial && !initial.notificationJsonInvalid) {
+    data = initial;
+  } else {
+    const fallback = await loadManageData(db, user, snapshot, {
+      inbox: true,
+      linked: true,
+      // A successfully read but malformed notification section does not
+      // require access to schema metadata to recover.
+      extra: initial ? {} : {
+        legacyNotificationSchema: {
+          sql: `json_object('legacy', ${LEGACY_NOTIFICATION_EVENT_ID_SQL})`,
+          params: [],
+        },
+      },
+    });
+    // A malformed notification JSON section is an established CURRENT
+    // 200/degraded case; only database failures need the schema proof.
+    if (!initial && !isLegacyNotificationSchema(fallback.extra.legacyNotificationSchema)) {
+      throw new Error("manage_notification_schema_not_legacy");
+    }
     try {
-      console.warn("[manage] notification_outbox.event_id unavailable");
+      console.warn(initial
+        ? "[manage] notification_json_invalid"
+        : "[manage] notification_outbox.event_id unavailable");
     } catch {
-      // Diagnostic sinks are best-effort; preserve the legacy-schema fallback.
+      // Diagnostic sinks cannot break a confirmed degraded response.
     }
     notificationSchemaMissing = true;
-    data = await loadManageData(db, user, snapshot, { inbox: true, linked: true });
+    data = fallback;
   }
 
   const isAdmin = snapshot.isAdmin;

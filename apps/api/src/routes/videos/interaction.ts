@@ -39,8 +39,16 @@ function fail(c: Context<AppEnv>, message: string, status: 400 | 403 | 404 | 409
 }
 
 function isUniqueConflict(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /UNIQUE constraint failed/i.test(message) && /video_interactions_auth/i.test(message);
+  // The provider's error may have hostile getters or coercion. Keep a failed
+  // atomic mutation a stable 409 instead of throwing a secondary exception.
+  try {
+    const message = error instanceof Error ? error.message : String(error);
+    return typeof message === "string" &&
+      /UNIQUE constraint failed/i.test(message) &&
+      /video_interactions_auth/i.test(message);
+  } catch {
+    return false;
+  }
 }
 
 /**

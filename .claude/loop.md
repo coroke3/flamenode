@@ -8,5 +8,5 @@ Invoke the `flamenode-migration` skill once. 1 wake = at most one action from th
 
 - Writer wakes save live state only in their own PR's `docs/migration/work-items/MIG-XXXX.md`; `STATUS.md` changes only at pre-merge integration. Review-only wakes leave evidence in the reviewed PR without branch/checkpoint edits; wait/no-action wakes report the gate without a checkpoint-only push.
 - Do not stall on your own PRs in `REVIEW`: keep them queued and continue with dependency-independent work (review another agent's PR, claim another unowned READY task, refine a Work Order).
-- Pace the next wake per the protocol's Pacing rules. Stop the loop and report only when everything left needs a human (Phase Gate, high-risk approval, `BLOCKED`) and nothing else can progress.
+- Pace the next wake per the protocol's Pacing rules. Stop the loop and report only when only actual production/semantic-change approvals or unresolved gates/`BLOCKED` remain and nothing else can progress. Under the 2026-11-27 owner policy, squash-merge eligible PRs after independent final-head review and required CI without per-PR human approval; prefer existing test suites and avoid redundant test files.
 - Never perform production deploy, Worker Route / Custom Domain, Remote D1 or secret changes, and never auto-cross a Phase Gate.
