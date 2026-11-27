@@ -46,7 +46,7 @@ test("S3 budget: every successful route uses <= 3 pre-reads and exactly 1 batch"
   const cases = [
     ["POST", "/api/admin/announcements", { ...VALID, id: "a-b" }, null, 1],
     ["PUT", "/api/admin/announcements/a-b", { ...VALID, title: "N", base_updated_at: 100 }, (s) => s.prepare("INSERT INTO announcements VALUES ('a-b','O','B','info',0,NULL,NULL,'all','x',50,100)").run(), 2],
-    ["DELETE", "/api/admin/announcements/a-b", undefined, (s) => s.prepare("INSERT INTO announcements VALUES ('a-b','O','B','info',0,NULL,NULL,'all','x',50,100)").run(), 3],
+    ["DELETE", "/api/admin/announcements/a-b", undefined, (s) => s.prepare("INSERT INTO announcements VALUES ('a-b','O','B','info',0,NULL,NULL,'all','x',50,100)").run(), 2],
     ["POST", "/api/admin/api-endpoints", { event_id: "ev-1" }, (s) => seedEvent(s), 2],
     ["PATCH", "/api/admin/api-endpoints/ev-1", { public_api_enabled: false }, (s) => seedEvent(s, { public_api_enabled: 1 }), 2],
   ];
