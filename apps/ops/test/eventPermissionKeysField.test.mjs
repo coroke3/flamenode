@@ -15,7 +15,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 function staticField(value, allowUserVideoEdits = 1, disabled = false) {
   const html = renderToStaticMarkup(React.createElement(PermissionKeysField, {
-    name: "user_video_edit_permission_keys_json", defaultValue: value,
+    name: "user_video_edit_permission_keys_json", value: value ?? "", onChange() {},
     allowUserVideoEdits, disabled,
   }));
   return new JSDOM(html).window.document;
@@ -25,11 +25,21 @@ async function mountedField(value, allowUserVideoEdits = 1, disabled = false) {
   const rootNode = document.createElement("div");
   document.body.append(rootNode);
   const root = createRoot(rootNode);
-  await React.act(async () => root.render(React.createElement(PermissionKeysField, {
-    name: "permissions", defaultValue: value, allowUserVideoEdits, disabled,
-  })));
+  const changes = [];
+  let setValue;
+  function ControlledField() {
+    const [current, setCurrent] = React.useState(value ?? "");
+    setValue = setCurrent;
+    return React.createElement(PermissionKeysField, {
+      name: "permissions", value: current, allowUserVideoEdits, disabled,
+      onChange(next) { changes.push(next); setCurrent(next); },
+    });
+  }
+  await React.act(async () => root.render(React.createElement(ControlledField)));
   return {
     node: rootNode,
+    changes,
+    async setValue(next) { await React.act(async () => setValue(next)); },
     async close() { await React.act(async () => root.unmount()); rootNode.remove(); },
   };
 }
@@ -79,6 +89,14 @@ test("MIG-0721 U01b-2: one bulk edit serializes explicit v2 states and preserves
     const next = JSON.parse(hidden.value);
     assert.deepEqual(next.allow, []);
     assert.deepEqual(next.inherit, [...GENERAL_EDITABLE_FIELD_KEYS]);
+    assert.equal(ui.changes.length, 2);
+    assert.equal(ui.changes[1], hidden.value);
+    const restored = JSON.stringify({ version: 2, fallback: "deny", allow: ["title"], deny: [], inherit: [] });
+    await ui.setValue(restored);
+    assert.equal(hidden.value, restored);
+    assert.equal(ui.node.querySelector('select[aria-label="タイトル policy"]').value, "allow");
+    assert.equal(ui.node.querySelector('select[aria-label="YouTube URL policy"]').value, "deny");
+    assert.equal(ui.changes.length, 2, "parent restore does not emit an edit");
   } finally { await ui.close(); }
 });
 
@@ -94,5 +112,6 @@ test("MIG-0721 U01b-2: disabled editor is non-mutating and submits the original 
     assert.equal(buttons.every(b => b.disabled), true);
     await React.act(async () => buttons[0].click());
     assert.equal(hidden.value, raw);
+    assert.equal(ui.changes.length, 0);
   } finally { await ui.close(); }
 });

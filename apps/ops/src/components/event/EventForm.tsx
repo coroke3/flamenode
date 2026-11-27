@@ -382,6 +382,9 @@ export function EventForm({
   } | null>(null);
   const [youtubeDescriptionTemplate, setYoutubeDescriptionTemplate] =
     React.useState(initial.youtube_description_template ?? "");
+  const [permissionKeysJson, setPermissionKeysJson] = React.useState(
+    initial.user_video_edit_permission_keys_json ?? "",
+  );
   const [preview, setPreview] = React.useState<EventSettingsPreviewValue>(() =>
     initialPreview(initial),
   );
@@ -492,6 +495,9 @@ export function EventForm({
     setYoutubeDescriptionTemplate(
       textValue(restored, "youtube_description_template"),
     );
+    if (restored.has("user_video_edit_permission_keys_json")) {
+      setPermissionKeysJson(textValue(restored, "user_video_edit_permission_keys_json"));
+    }
     setQuestions(
       filterImplicitEmptyStagePermissionQuestions(readQuestions(restored)),
     );
@@ -511,20 +517,24 @@ export function EventForm({
     void generalQuestions;
     void youtubeDescriptionTemplate;
     void requiredOptionalFields;
-    return formRef.current
-      ? formDataToDraftValue(new FormData(formRef.current))
-      : {};
+    if (!formRef.current) return {};
+    const formData = new FormData(formRef.current);
+    // Controlled permission edits render before the hidden input commits.
+    formData.set("user_video_edit_permission_keys_json", permissionKeysJson);
+    return formDataToDraftValue(formData);
   }, [
     preview,
     questions,
     generalQuestions,
     requiredOptionalFields,
     youtubeDescriptionTemplate,
+    permissionKeysJson,
   ]);
   const { clearDraft } = useFormDraft<EventFormDraftValue>({
     storageKey: draftStorageKey || "fn:draft:disabled:event-form-v1",
     value: draftSnapshot,
     enabled: Boolean(draftAuthUserId?.trim()),
+    shouldSave: dirty,
     metadata: draftMetadata,
     onRestore: restoreDraft,
     onStale: handleStaleDraft,
@@ -841,7 +851,11 @@ export function EventForm({
         </p>
         <PermissionKeysField
           name="user_video_edit_permission_keys_json"
-          defaultValue={initial.user_video_edit_permission_keys_json}
+          value={permissionKeysJson}
+          onChange={(value) => {
+            setPermissionKeysJson(value);
+            setDirty(true);
+          }}
           allowUserVideoEdits={initial.allow_user_video_edits ?? 0}
           disabled={!canQuestions}
         />
