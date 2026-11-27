@@ -681,7 +681,15 @@ function buildFreeVideoNotifications(args: {
 }
 
 function isMemberValidationError(error: unknown): boolean {
-  return error instanceof Error && error.message.startsWith("free_video_new_member_");
+  // Provider errors are untrusted. A throwing prototype/message accessor or
+  // malformed message must not mask the original failed mutation response.
+  try {
+    if (!(error instanceof Error)) return false;
+    const message = error.message;
+    return typeof message === "string" && message.startsWith("free_video_new_member_");
+  } catch {
+    return false;
+  }
 }
 
 /**

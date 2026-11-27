@@ -776,6 +776,65 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("T04 SEC: hostile failed-batch error classification preserves SA-086 response and compensates upload", async () => {
+    const genericConflict = "イベント設定が変更されたか、保存内容が競合しました。入力内容を確認して再試行してください。";
+    const duplicateMessage = "このYouTube動画は既に登録されています。";
+    const memberMessage = "合作メンバーの入力内容を確認してください。";
+    const revoked = Proxy.revocable(new Error("synthetic"), {});
+    revoked.revoke();
+    const cases = [
+      ["throwing message getter", Object.defineProperty(new Error(), "message", {
+        get() { throw new Error("SYNTHETIC_MESSAGE_ACCESS"); },
+      }), 409, genericConflict],
+      ["non-string message", Object.defineProperty(new Error(), "message", { value: 7 }), 409, genericConflict],
+      ["revoked proxy", revoked.proxy, 409, genericConflict],
+      ["throwing prototype lookup", new Proxy({}, {
+        getPrototypeOf() { throw new Error("SYNTHETIC_PROTOTYPE_ACCESS"); },
+      }), 409, genericConflict],
+      ["ordinary failure", new Error("SYNTHETIC_BATCH_FAILURE"), 409, genericConflict],
+      ["member error", new Error("free_video_new_member_invalid"), 400, memberMessage],
+      ["YouTube unique error", new Error("UNIQUE constraint failed: videos.youtube_video_id"), 409, duplicateMessage],
+      ["non-Error duplicate string", "UNIQUE constraint failed: videos.youtube_video_id", 409, duplicateMessage],
+      ["non-Error member string remains generic", "free_video_new_member_invalid", 409, genericConflict],
+    ];
+    for (const [label, error, status, message] of cases) {
+      const w = seedWorld();
+      const wakes = [];
+      const before = snapshotDb(w.sqlite);
+      let attemptedBatches = 0;
+      const unrelatedKey = "video-icons/x_other/v_unrelated/keep.png";
+      const unrelated = { bytes: new Uint8Array([1, 2, 3]) };
+      w.bucket.objects.set(unrelatedKey, unrelated);
+      // Reject at the D1 port before SQLite executes any statement. This
+      // exercises actual route error handling, not an ambiguous commit.
+      w.d1.batch = async () => {
+        attemptedBatches++;
+        throw error;
+      };
+      try {
+        const fd = baseForm();
+        fd.set("icon_mode", "upload");
+        fd.set("icon_file", new File([buildPng()], "icon.png", { type: "image/png" }));
+        const res = await submitApp(w.d1, "u_owner", w.bucket, wakes)(fd);
+        assert.equal(res.status, status, label);
+        assert.equal(res.headers.get("cache-control"), "private, no-store", label);
+        assert.deepEqual(await res.json(), { ok: false, message }, label);
+        assert.equal(attemptedBatches, 1, label);
+        assert.equal(w.d1.stats.batches, 0, label);
+        assert.deepEqual(snapshotDb(w.sqlite), before, label);
+        assert.deepEqual(wakes, [], label);
+        assert.equal(w.bucket.puts.length, 1, label);
+        const uploadedKey = w.bucket.puts[0].key;
+        assert.match(uploadedKey, /^video-icons\/x_owner\/v_/);
+        assert.deepEqual(w.bucket.deletes, [uploadedKey], label);
+        assert.equal(w.bucket.objects.size, 1, label);
+        assert.equal(w.bucket.objects.get(unrelatedKey), unrelated, label);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
   test("T05: icon_mode='existing' validates /api/media/... candidate ownership", async () => {
     const w = seedWorld();
     try {
