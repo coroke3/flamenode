@@ -134,7 +134,7 @@ export function AdminSpreadsheetEditableGrid({
     visibleContextMenu ? [
       { id: "edit", label: "編集 (F2)", disabled: !canMutate || !contextMenuCanEdit },
       { id: "copy", label: "コピー (Ctrl+C)" },
-      { id: "insertRow", label: "行を追加…", disabled: !canMutate || primaryKeys.length === 0 },
+      { id: "insertRow", label: "行を追加…", disabled: !canMutate || !contextMenuRow || primaryKeys.length === 0 },
       { id: "deleteRow", label: "行を削除", disabled: !canMutate || !contextMenuRow || !primaryKey(contextMenuRow, primaryKeys) },
     ] : [];
 
@@ -585,12 +585,12 @@ export function AdminSpreadsheetEditableGrid({
     }
   }
 
-  async function removeRow(index: number): Promise<void> {
+  async function removeRow(index: number, confirmationMessage = "選択した行を削除します。元に戻せません。続行しますか？"): Promise<void> {
     const row = rows[index];
     if (!canMutate || !row) return;
     const pk = primaryKey(row, primaryKeys);
     if (!pk) { setNotice("主キーが不足しているため削除できません。"); return; }
-    if (!confirmDelete("選択した行を削除します。元に戻せません。続行しますか？")) return;
+    if (!confirmDelete(confirmationMessage)) return;
     const ok = await runMutation(signal => deleteSpreadsheetRow(fetchFn, { table: def.table, primaryKey: pk }, signal));
     if (ok) {
       setCellEdit(null);
@@ -610,13 +610,20 @@ export function AdminSpreadsheetEditableGrid({
       case "copy":
         void copyRange();
         break;
-      case "insertRow":
+      case "insertRow": {
+        const row = contextMenuRow;
+        if (!row) return;
+        const draft: Record<string, string> = {};
+        for (const column of insertColumns) {
+          draft[column.name] = column.pk > 0 ? "" : cellValue(row[column.name]);
+        }
         setInsertOpen(true);
-        setInsertDraft({});
+        setInsertDraft(draft);
         setNotice(null);
         break;
+      }
       case "deleteRow":
-        void removeRow(menu.row);
+        void removeRow(menu.row, `行 ${(page - 1) * Math.max(1, limit) + menu.row + 1} を削除しますか？`);
         break;
     }
   }

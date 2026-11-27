@@ -699,7 +699,9 @@ test("MIG-0737 U01 context menu: edit and add-row actions reuse guarded grid con
     assert.equal(contextMenuItems(ui)[0].disabled, true);
     await click(ui, "行を追加…");
     assert.equal(ui.host.querySelector('[data-spreadsheet-context-menu]'), null);
-    assert.equal(ui.host.querySelectorAll('[aria-label="新規行フォーム"] input').length, 2);
+    const insertInputs = [...ui.host.querySelectorAll('[aria-label="新規行フォーム"] input')];
+    assert.equal(insertInputs.length, 2);
+    assert.deepEqual(insertInputs.map(field => field.value), ["", "<unsafe>"]);
   } finally { await ui.cleanup(); }
 });
 
@@ -711,6 +713,7 @@ test("MIG-0737 U01 context menu: copy uses the current selected range and delete
   });
   let approved = false;
   let prompts = 0;
+  const deleteMessages = [];
   let refreshes = 0;
   const requests = [];
   const data = fixture("videos", "editable", 1, [
@@ -718,7 +721,7 @@ test("MIG-0737 U01 context menu: copy uses the current selected range and delete
     { id: "v2", title: "Beta", secret: "second" },
   ]);
   const ui = await mount({ data, allowMutations: true, onRefresh: () => { refreshes++; },
-    confirmDelete: message => { prompts++; assert.match(message, /削除/); return approved; },
+    confirmDelete: message => { prompts++; deleteMessages.push(message); assert.match(message, /削除/); return approved; },
     fetchFn: async (_, init) => { requests.push({ method: init.method, body: JSON.parse(init.body) }); return saveResponse(); },
   });
   try {
@@ -730,12 +733,14 @@ test("MIG-0737 U01 context menu: copy uses the current selected range and delete
     await openContextMenu(ui, '[data-grid-cell="1:1"]', 20, 30);
     await click(ui, "行を削除");
     assert.equal(prompts, 1);
+    assert.deepEqual(deleteMessages, ["行 2 を削除しますか？"]);
     assert.equal(requests.length, 0);
     assert.equal(refreshes, 0);
     approved = true;
     await openContextMenu(ui, '[data-grid-cell="1:1"]', 20, 30);
     await click(ui, "行を削除");
     assert.equal(prompts, 2);
+    assert.deepEqual(deleteMessages, ["行 2 を削除しますか？", "行 2 を削除しますか？"]);
     assert.deepEqual(requests, [{ method: "DELETE", body: { table: "videos", primaryKey: { id: "v2" } } }]);
     assert.equal(refreshes, 1);
     assert.equal(ui.host.querySelector('[data-spreadsheet-context-menu]'), null);
