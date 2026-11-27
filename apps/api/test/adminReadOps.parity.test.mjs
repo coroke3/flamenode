@@ -1537,6 +1537,104 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(denied.stats.statements, 1, "denial occurs before the check");
   });
 
+  test("MIG-0626 U06: operational health and security bound the entire multi-check diagnostic response", async () => {
+    // Execute the actual read statements and inject synthetic oversized values
+    // at the D1 result boundary. No persistent fixture or SQL is changed.
+    function withSamples(overrides) {
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare;
+      d1.prepare = (sql) => {
+        const selected = Object.entries(overrides).filter(([id]) => sql.includes("'" + id + "'"));
+        const wrap = (statement) => {
+          if (!selected.length) return statement;
+          return {
+            ...statement,
+            bind: (...values) => wrap(statement.bind(...values)),
+            async all() {
+              const receipt = await statement.all();
+              return {
+                ...receipt,
+                results: [
+                  ...receipt.results.filter((row) => !selected.some(([id]) => id === row.check_id)),
+                  ...selected.map(([id, value]) => ({
+                    check_id: id, total_count: 1, a: value, b: "seed-ref", c: null,
+                  })),
+                ],
+              };
+            },
+          };
+        };
+        return wrap(prepare(sql));
+      };
+      return d1;
+    }
+    const encoder = new TextEncoder();
+    const limit = 64 * 1024;
+    const size = (receipt) => encoder.encode(receipt.text).length;
+    const configs = [
+      {
+        path: "/api/admin-read/ops/health", idle: "?deep=1", statements: 2,
+        first: "notification_failed_volume", second: "open_moderation_cases_overdue",
+        firstSample: (value) => value + " (seed-ref)",
+        secondSample: (value) => value + " video:seed-ref",
+      },
+      {
+        path: "/api/admin-read/ops/security", query: "?run=1", idle: "?run=1&run=1", statements: 3,
+        first: "rejected_xid_active", second: "banned_user_videos",
+        firstSample: (value) => "user:" + value + " x:seed-ref",
+        secondSample: (value) => "video:" + value + " submitter:seed-ref",
+      },
+    ];
+    for (const config of configs) {
+      const request = (first, second) => call(config.path + (config.query ?? ""), ADMIN, {
+        d1: withSamples({ [config.first]: first, [config.second]: second }),
+      });
+      const baseline = await request("seed", "seed");
+      assert.equal(baseline.status, 200, config.path);
+      assert.deepEqual(baseline.body.results.find((r) => r.id === config.first).samples, [config.firstSample("seed")]);
+      assert.deepEqual(baseline.body.results.find((r) => r.id === config.second).samples, [config.secondSample("seed")]);
+      const exact = "a".repeat(limit - size(baseline) + "seed".length);
+      for (const [label, first, second, accepted] of [
+        ["exact limit", exact, "seed", true],
+        ["one byte over", exact + "a", "seed", false],
+        ["oversized ASCII", "private-diagnostic-" + "a".repeat(70_000), "seed", false],
+        ["multibyte", "private-diagnostic-" + "あ".repeat(22_000), "seed", false],
+        ["escaped controls", "private-diagnostic-" + "\u0001".repeat(11_000), "seed", false],
+        ["aggregate across checks", "private-diagnostic-" + "あ".repeat(11_000), "あ".repeat(11_000), false],
+        ["valid multibyte", "あ".repeat(10_000), "seed", true],
+      ]) {
+        const receipt = await request(first, second);
+        const context = config.path + " " + label;
+        assert.equal(receipt.status, accepted ? 200 : 503, context);
+        assert.ok(size(receipt) <= limit, context);
+        assert.equal(receipt.headers.get("cache-control"), "private, no-store", context);
+        assert.equal(receipt.stats.statements, config.statements, context);
+        assert.equal(receipt.stats.writes, 0, context);
+        if (accepted) {
+          const expected = {
+            ...baseline.body,
+            results: baseline.body.results.map((r) => r.id === config.first
+              ? { ...r, samples: [config.firstSample(first)] }
+              : r.id === config.second ? { ...r, samples: [config.secondSample(second)] } : r),
+          };
+          assert.deepEqual(receipt.body, expected, context);
+          if (label === "exact limit") assert.equal(size(receipt), limit, context);
+        } else {
+          assert.deepEqual(receipt.body, { error: "unavailable" }, context);
+          assert.doesNotMatch(receipt.text, /private-diagnostic-|seed-ref/);
+        }
+      }
+      const idle = await call(config.path + config.idle, ADMIN, {
+        d1: withSamples({ [config.first]: "a".repeat(70_000) }),
+      });
+      assert.equal(idle.status, 200, config.path + " idle");
+      assert.deepEqual(idle.body.results, []);
+      assert.equal(idle.stats.statements, 1);
+      assert.equal(idle.stats.writes, 0);
+      assert.equal(idle.headers.get("cache-control"), "private, no-store");
+    }
+  });
+
   test("MIG-0626 U05: integrity diagnosis bounds the full UTF-8 response and preserves in-budget issues", async () => {
     const { runIntegrityCheckById } = await import("@flamenode/server-core/admin/integrityChecks");
     const checkId = "audit_videos_orphan";

@@ -58,6 +58,20 @@ function utf8Size(value: unknown): number {
   return utf8Encoder.encode(JSON.stringify(value)).length;
 }
 
+/** Diagnostic samples may contain large persisted identifiers. Reject grossly
+ * oversized input before serializing, then check the complete escaped JSON
+ * UTF-8 envelope. Do not truncate identifiers or misstate diagnostic counts. */
+function diagnosticResponseFits(body: { results: readonly { samples: readonly string[] }[] }): boolean {
+  let textUnits = 0;
+  for (const result of body.results) {
+    for (const sample of result.samples) {
+      textUnits += sample.length;
+      if (textUnits > MAX_OPS_HTTP_BYTES) return false;
+    }
+  }
+  return utf8Size(body) <= MAX_OPS_HTTP_BYTES;
+}
+
 const TERMINAL_FAILURE_STATUSES = ["failed", "dead_letter"];
 const NOTIFICATION_STATUSES = ["pending", "processing", "sent", "failed", "cancelled"];
 const NOTIFICATION_CATEGORIES = [
@@ -330,6 +344,9 @@ adminOpsRoutes.get("/health", async (c) => {
     results = [];
   }
   const body: AdminHealthResponse = { status, results, error };
+  if (!diagnosticResponseFits(body)) {
+    return c.json({ error: "unavailable" }, 503);
+  }
   return c.json(body);
 });
 
@@ -340,15 +357,8 @@ adminOpsRoutes.get("/health/checks/:checkId", dbMiddleware, async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
   const result = await runHealthCheckById(c.get("db"), id);
-  // Keep the S2 response bound even for oversized persisted diagnostic samples.
-  // Reject, rather than truncate actionable identifiers or misstate the result.
-  // UTF-16 units are a lower bound for escaped JSON UTF-8 bytes; reject grossly
-  // oversized input before serializing, then account for escaping and the full envelope.
-  if (result && result.samples.reduce((sum, sample) => sum + sample.length, 0) > MAX_OPS_HTTP_BYTES) {
-    return c.json({ error: "unavailable" }, 503);
-  }
   const body: AdminHealthResponse = { status: "all", results: result ? [result] : [], error: null };
-  if (utf8Size(body) > MAX_OPS_HTTP_BYTES) {
+  if (!diagnosticResponseFits(body)) {
     return c.json({ error: "unavailable" }, 503);
   }
   return c.json(body);
@@ -759,6 +769,9 @@ adminOpsRoutes.get("/security", async (c) => {
     },
   ];
   const body: AdminSecurityResponse = { status, ran: true, results, error: null };
+  if (!diagnosticResponseFits(body)) {
+    return c.json({ error: "unavailable" }, 503);
+  }
   return c.json(body);
 });
 
