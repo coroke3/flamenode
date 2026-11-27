@@ -1,6 +1,7 @@
 // MIG-0645: intentionally test-only mounted apply HTTP adapter.
 // The real D1 audited apply adapter is NOT wired, and production has no mount.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { normalizeLegacyFiles } from "@flamenode/server-core/legacyImport/normalize";
@@ -10,6 +11,8 @@ import { createLegacyImportApplyRoutes } from "../src/routes/admin/legacyImportA
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
+// Test-only durable receipt fingerprint; never persist a bearer preview token in audit rows.
+const previewFingerprint = (token) => createHash("sha256").update(token).digest("hex");
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "admin", is_banned: 0, active_x_user_id: null };
 
@@ -304,7 +307,7 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
       assert.equal(input.previewToken, credential.previewToken);
       assert.equal(input.planHash, credential.planHash);
       assert.equal(input.progress.stage, "system_user");
-      const target = "hono-step:" + credential.previewToken;
+      const target = "hono-step:" + previewFingerprint(credential.previewToken);
       const receipts = sqlite.prepare(
         "SELECT after_json FROM audit_logs WHERE table_name = 'legacy_import_steps' AND target_id = ? AND context = 'legacy_import:step'",
       ).all(target);
@@ -312,7 +315,7 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
       if (receipts.length === 1) {
         const receipt = JSON.parse(receipts[0].after_json);
         assert.deepEqual(receipt, {
-          token: credential.previewToken, plan_hash: credential.planHash,
+          preview_fingerprint: previewFingerprint(credential.previewToken), plan_hash: credential.planHash,
           actor: ADMIN.id, stage: "system_user", next_stage: "x_users",
         }, "a replay must validate the durable marker identity");
       } else {
@@ -333,7 +336,7 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
               retention_class: "long_audit", restore_strategy: "none" },
             { table_name: "legacy_import_steps", target_id: target,
               operation: "SYSTEM", before: null,
-              after: { token: credential.previewToken, plan_hash: credential.planHash,
+              after: { preview_fingerprint: previewFingerprint(credential.previewToken), plan_hash: credential.planHash,
                 actor: ADMIN.id, stage: "system_user", next_stage: "x_users" },
               actor_user_id: ADMIN.id, context: "legacy_import:step",
               retention_class: "long_audit", restore_strategy: "none" },
@@ -358,14 +361,18 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
     // A committed receipt with hostile/mismatched identity is never evidence
     // that this request may advance R2. Reject, release and preserve D1.
     const auditRow = sqlite.prepare(
-      "SELECT id, after_json FROM audit_logs WHERE table_name = 'legacy_import_steps'",
+      "SELECT id, target_id, after_json FROM audit_logs WHERE table_name = 'legacy_import_steps'",
     ).get();
     assert.ok(auditRow);
     const originalReceipt = auditRow.after_json;
+    assert.ok(!auditRow.target_id.includes(credential.previewToken), "raw preview token must not be an audit target");
+    assert.ok(!originalReceipt.includes(credential.previewToken), "audit sanitization must not store the bearer token");
     const expected = JSON.parse(originalReceipt);
+    assert.equal(expected.preview_fingerprint, previewFingerprint(credential.previewToken),
+      "stored fingerprint must be replay-verifiable after audit sanitization");
     const unsafeMarkers = [
       ["plan_hash mismatch", JSON.stringify({ ...expected, plan_hash: "0".repeat(64) })],
-      ["preview token mismatch", JSON.stringify({ ...expected, token: "0".repeat(32) })],
+      ["preview fingerprint mismatch", JSON.stringify({ ...expected, preview_fingerprint: "0".repeat(64) })],
       ["actor mismatch", JSON.stringify({ ...expected, actor: "different-admin" })],
       ["stage mismatch", JSON.stringify({ ...expected, stage: "videos" })],
       ["next stage mismatch", JSON.stringify({ ...expected, next_stage: "complete" })],
