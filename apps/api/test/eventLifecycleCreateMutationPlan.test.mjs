@@ -8,6 +8,7 @@ import {
   buildEventCreateFields,
   buildEventCreateOwnerStaffRow,
   buildEventCreateStageQuestionRows,
+  eventIdRenameCleanupTargets,
   planEventCreateQuestionBatch,
 } from "@flamenode/domain/event";
 import {
@@ -21,6 +22,12 @@ import { createSqlite, createD1, insert } from "./support/personalHarness.mjs";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { eventCreateRoutes } from "../src/eventLifecycle/createRoute.ts";
 import { snapshotFromEvent } from "@flamenode/domain/eventTemplates";
+import {
+  preCommitEventIdReuse,
+  compensateEventIdReuseOnD1Failure,
+} from "@flamenode/server-core/visibility/eventIdReuse";
+import { PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY } from "@flamenode/server-core/visibility/manifestCore";
+import { readVisibilityManifestObject, putVisibilityManifestWithCas } from "@flamenode/server-core/visibility/manifestR2";
 
 const db = drizzle(createD1(createSqlite()), { schema });
 const now = 1794115200;
@@ -932,4 +939,281 @@ test("MIG-0652 U03: preflight provider failure is private, redacted, and perform
   assert.doesNotMatch(await response.text(), /private-provider-secret|SELECT|events/);
   assertNoCreatedRows(sqlite);
   assert.equal(d1.stats.batches, 0);
+});
+
+// Exact CURRENT reuse extraction only. The Hono caller above still refuses
+// every old-ID tombstone. Known unsafe legacy outcomes below are evidence for
+// the separately owned follow-up, never permission to enable that route.
+const REUSE_TOMBSTONE = {
+  fence_token: "reuse-token", state: "blocked",
+  reason: "event_id_rename_old_cleanup", blocked_at: now - 86400,
+};
+const REUSE_ENTRY = {
+  entity_type: "event", entity_id: "ev_create", fence_token: REUSE_TOMBSTONE.fence_token,
+  reason: REUSE_TOMBSTONE.reason, blocked_at: REUSE_TOMBSTONE.blocked_at,
+};
+const REUSE_OTHER = { entity_type: "video", entity_id: "other", fence_token: "other-token", blocked_at: 1, reason: null };
+const REUSE_KEYS = [
+  "events/ev_create.json", "events/ev_create/base.v1.json", "events/ev_create/slots.v1.json",
+  "events/ev_create/release.v1.json", "events/ev_create/playlist.v1.json",
+];
+
+/** Reuse the migrated SQLite harness and the actual shared manifest R2 codec. */
+function createReuseFixture({ entries = [REUSE_ENTRY, REUSE_OTHER], beforeRead } = {}) {
+  const timeline = [];
+  const harness = createAtomicCreateHarness({ beforeRead(sqlite, sql, count) {
+    timeline.push(sql.includes('"static_rebuild_queue"') ? "d1:cleanup" : "d1:artifacts");
+    beforeRead?.(sqlite, sql, count);
+  } });
+  for (const [index, target] of eventIdRenameCleanupTargets("ev_create").entries()) {
+    insert(harness.sqlite, "static_rebuild_queue", {
+      id: "reuse_cleanup_" + index, target_type: target.targetType, target_id: target.targetId,
+      reason: REUSE_TOMBSTONE.reason, status: "done", created_at: now - 1, updated_at: now - 1,
+    });
+  }
+  insert(harness.sqlite, "public_visibility_fences", {
+    ...REUSE_TOMBSTONE, entity_type: "event", entity_id: "ev_create", updated_at: now - 86400,
+  });
+  let stored = { schema_version: 1, revision: 1, generated_at: now, entities: structuredClone(entries) };
+  let etag = "v1";
+  let version = 1;
+  const objects = new Set();
+  const bucket = {
+    async head(key) { timeline.push("head:" + key); return objects.has(key) ? { key } : null; },
+    async get(key) {
+      assert.equal(key, PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY);
+      timeline.push("r2:get");
+      if (stored === null) return null;
+      const body = JSON.stringify(stored);
+      return { etag, size: Buffer.byteLength(body), text: async () => { timeline.push("r2:text"); return body; } };
+    },
+    async put(key, body, options) {
+      assert.equal(key, PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY);
+      assert.equal(options?.httpMetadata?.cacheControl, "no-store");
+      timeline.push("r2:put");
+      if (options.onlyIf instanceof Headers) {
+        assert.equal(options.onlyIf.get("If-None-Match"), "*");
+        if (stored !== null) return null;
+      } else {
+        assert.equal(typeof options.onlyIf?.etagMatches, "string", "reuse never makes an unconditional PUT");
+        if (options.onlyIf.etagMatches !== etag) return null;
+      }
+      stored = JSON.parse(body);
+      etag = "v" + ++version;
+      return { etag };
+    },
+  };
+  const host = {
+    requireBucket() { timeline.push("host:bucket"); return bucket; },
+    readManifest(candidate) {
+      assert.equal(candidate, bucket);
+      timeline.push("host:read");
+      return readVisibilityManifestObject(candidate);
+    },
+    writeManifest(manifest, options) {
+      assert.equal(options.bucket, bucket);
+      timeline.push("host:write");
+      return putVisibilityManifestWithCas(options.bucket, manifest, options.ifMatchEtag);
+    },
+  };
+  return {
+    ...harness, bucket, host, timeline, objects,
+    prepare: (overrides = {}) => preCommitEventIdReuse({
+      db: harness.db, eventId: "ev_create", tombstone: REUSE_TOMBSTONE, now, ...overrides,
+    }, host),
+    manifest: () => structuredClone(stored),
+    replaceEntries(value) {
+      stored = value === null ? null : { schema_version: 1, revision: ++version, generated_at: now, entities: structuredClone(value) };
+      etag = stored === null ? null : "v" + version;
+    },
+  };
+}
+
+function assertReuseDidNotMutateD1(fixture) {
+  assert.equal(fixture.d1.stats.batches, 0);
+  assert.equal(fixture.sqlite.prepare("SELECT fence_token FROM public_visibility_fences").get().fence_token, "reuse-token");
+  for (const table of ["events", "event_staff", "event_custom_questions", "audit_logs"]) {
+    assert.equal(fixture.sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0);
+  }
+}
+
+test("MIG-0652 reuse extraction: exact lazy D1/HEAD/manifest order, receipt and compensation", async () => {
+  const f = createReuseFixture();
+  const result = await f.prepare();
+  assert.deepEqual(result, { ok: true, precommit: {
+    eventId: "ev_create", fenceToken: "reuse-token", previousEntry: REUSE_ENTRY,
+  } });
+  assert.deepEqual(f.timeline, [
+    "d1:cleanup", "d1:artifacts", "host:bucket", ...REUSE_KEYS.map(key => "head:" + key),
+    "host:read", "r2:get", "r2:text", "host:write", "r2:put", "host:read", "r2:get", "r2:text",
+  ]);
+  assert.equal(f.d1.stats.reads, 2);
+  assert.deepEqual(f.manifest().entities, [REUSE_OTHER]);
+  assertReuseDidNotMutateD1(f);
+  f.timeline.length = 0;
+  await compensateEventIdReuseOnD1Failure(result.precommit, f.host);
+  assert.deepEqual(f.timeline, ["host:bucket", "host:read", "r2:get", "r2:text", "host:write", "r2:put"]);
+  assert.deepEqual(f.manifest().entities, [REUSE_OTHER, REUSE_ENTRY]);
+  assertReuseDidNotMutateD1(f);
+});
+
+test("MIG-0652 reuse extraction: validation and D1 denials do not resolve the bucket", async () => {
+  const cases = [
+    { tombstone: { ...REUSE_TOMBSTONE, state: "release_pending" }, reads: 0, reason: "event_id_reuse_fence_state_invalid" },
+    { tombstone: { ...REUSE_TOMBSTONE, blocked_at: now - 86399 }, reads: 0, reason: "event_id_reuse_retention_active" },
+    { tombstone: { ...REUSE_TOMBSTONE, blocked_at: null }, reads: 0, reason: "event_id_reuse_retention_active" },
+    { setup: sqlite => sqlite.prepare("DELETE FROM static_rebuild_queue WHERE id = 'reuse_cleanup_0'").run(), reads: 1, reason: "event_id_reuse_cleanup_pending" },
+    { setup: sqlite => insert(sqlite, "static_rebuild_queue", {
+      id: "same_second_pending", target_type: "event", target_id: "ev_create", reason: REUSE_TOMBSTONE.reason,
+      status: "pending", created_at: now - 1, updated_at: now - 1,
+    }), reads: 1, reason: "event_id_reuse_cleanup_pending" },
+    { setup: sqlite => insert(sqlite, "static_artifacts", {
+      id: "still_live", target_type: "event_playlist", target_id: "ev_create", object_key: REUSE_KEYS[4],
+      content_hash: "old", schema_version: 1, generated_at: now - 1,
+    }), reads: 2, reason: "event_id_reuse_artifact_tracking_pending" },
+  ];
+  for (const item of cases) {
+    const f = createReuseFixture();
+    item.setup?.(f.sqlite);
+    assert.deepEqual(await f.prepare(item.tombstone ? { tombstone: item.tombstone } : {}), { ok: false, reason: item.reason });
+    assert.equal(f.d1.stats.reads, item.reads);
+    assert.ok(f.timeline.every(op => op.startsWith("d1:")));
+    assertReuseDidNotMutateD1(f);
+  }
+  for (const table of ["static_rebuild_queue", "static_artifacts"]) {
+    const failure = new Error("injected read failure");
+    const f = createReuseFixture({ beforeRead(_sqlite, sql) { if (sql.includes('"' + table + '"')) throw failure; } });
+    await assert.rejects(f.prepare(), error => error.cause === failure, "CURRENT Drizzle D1 failure escapes, unlike storage notReady results");
+    assert.ok(f.timeline.every(op => op.startsWith("d1:")));
+    assertReuseDidNotMutateD1(f);
+  }
+});
+
+test("MIG-0652 reuse extraction: all five canonical objects use HEAD and block reuse", async () => {
+  for (const key of REUSE_KEYS) {
+    const f = createReuseFixture();
+    f.objects.add(key);
+    assert.deepEqual(await f.prepare(), { ok: false, reason: "event_id_reuse_r2_cleanup_pending" });
+    assert.deepEqual(f.timeline.slice(3), REUSE_KEYS.map(value => "head:" + value));
+    assertReuseDidNotMutateD1(f);
+  }
+  for (const operation of ["requireBucket", "head", "get"]) {
+    const f = createReuseFixture();
+    (operation === "requireBucket" ? f.host : f.bucket)[operation] = () => { throw new Error("injected storage failure"); };
+    assert.deepEqual(await f.prepare(), { ok: false, reason: operation === "get"
+      ? "event_id_reuse_manifest_unavailable" : "event_id_reuse_storage_unavailable" });
+    assertReuseDidNotMutateD1(f);
+  }
+});
+
+test("MIG-0652 reuse extraction: foreign token, missing ETag and failed CAS preserve the manifest", async () => {
+  const foreign = { ...REUSE_ENTRY, fence_token: "foreign" };
+  const f = createReuseFixture({ entries: [foreign, REUSE_OTHER] });
+  assert.deepEqual(await f.prepare(), { ok: false, reason: "event_id_reuse_fence_token_mismatch" });
+  assert.deepEqual(f.manifest().entities, [foreign, REUSE_OTHER]);
+  assert.ok(!f.timeline.includes("host:write"));
+  const noEtag = createReuseFixture();
+  const read = noEtag.host.readManifest;
+  noEtag.host.readManifest = async bucket => ({ ...await read(bucket), etag: null });
+  assert.deepEqual(await noEtag.prepare(), { ok: false, reason: "event_id_reuse_manifest_cas_unavailable" });
+  assert.ok(!noEtag.timeline.includes("host:write"));
+  const lostCas = createReuseFixture();
+  let puts = 0;
+  lostCas.bucket.put = async () => { puts++; return null; };
+  assert.deepEqual(await lostCas.prepare(), { ok: false, reason: "event_id_reuse_manifest_release_failed" });
+  assert.equal(puts, 3, "actual shared manifest codec retries the same conditional write three times");
+  assert.deepEqual(lostCas.manifest().entities, [REUSE_ENTRY, REUSE_OTHER]);
+  for (const fixture of [f, noEtag, lostCas]) assertReuseDidNotMutateD1(fixture);
+});
+
+test("MIG-0652 reuse extraction: compensation stays lazy and forwards the host wrappers unchanged", async () => {
+  const f = createReuseFixture({ entries: [] });
+  f.replaceEntries(null);
+  const result = await f.prepare();
+  assert.deepEqual(result, { ok: true, precommit: { eventId: "ev_create", fenceToken: "reuse-token", previousEntry: null } });
+  let calls = 0;
+  await compensateEventIdReuseOnD1Failure(result.precommit, {
+    requireBucket() { calls++; throw new Error("must remain lazy"); },
+    readManifest() { calls++; throw new Error("must remain lazy"); },
+    writeManifest() { calls++; throw new Error("must remain lazy"); },
+  });
+  assert.equal(calls, 0);
+  for (const bucket of [undefined, null]) {
+    const trace = [];
+    await compensateEventIdReuseOnD1Failure({ ...result.precommit, previousEntry: REUSE_ENTRY }, {
+      requireBucket() { trace.push("bucket"); return bucket; },
+      async readManifest(received) {
+        assert.equal(received, bucket, "CURRENT wrapper, not a new core policy, handles missing bindings");
+        trace.push("read");
+        return { manifest: { schema_version: 1, revision: 0, generated_at: now, entities: [] }, etag: null };
+      },
+      async writeManifest(_manifest, options) {
+        assert.equal(options.bucket, bucket);
+        assert.equal(options.ifMatchEtag, null);
+        trace.push("write");
+        throw new Error("injected wrapper failure");
+      },
+    });
+    assert.deepEqual(trace, ["bucket", "read", "write", "read", "write", "read", "write"]);
+  }
+});
+
+test("MIG-0652 reuse CURRENT characterization: mixed-token first-match deletion remains a #679 blocker", async () => {
+  const foreign = { ...REUSE_ENTRY, fence_token: "foreign" };
+  const ownFirst = createReuseFixture({ entries: [REUSE_ENTRY, foreign, REUSE_OTHER] });
+  assert.equal((await ownFirst.prepare()).ok, true);
+  assert.deepEqual(ownFirst.manifest().entities, [REUSE_OTHER], "KNOWN CURRENT defect: both same-key entries are removed");
+  const foreignFirst = createReuseFixture({ entries: [foreign, REUSE_ENTRY, REUSE_OTHER] });
+  assert.deepEqual(await foreignFirst.prepare(), { ok: false, reason: "event_id_reuse_fence_token_mismatch" });
+  assert.deepEqual(foreignFirst.manifest().entities, [foreign, REUSE_ENTRY, REUSE_OTHER]);
+});
+
+test("MIG-0652 reuse CURRENT characterization: partial PUT and foreign confirmation keep their existing outcomes", async () => {
+  const partial = createReuseFixture();
+  const get = partial.bucket.get;
+  let reads = 0;
+  partial.bucket.get = async key => { if (++reads === 2) throw new Error("lost confirmation"); return get(key); };
+  assert.deepEqual(await partial.prepare(), { ok: false, reason: "event_id_reuse_manifest_release_failed" });
+  assert.deepEqual(partial.manifest().entities, [REUSE_OTHER], "KNOWN CURRENT: removed entry has no returned compensation receipt");
+  assertReuseDidNotMutateD1(partial);
+  const foreign = { ...REUSE_ENTRY, fence_token: "new-owner" };
+  const raced = createReuseFixture();
+  const put = raced.bucket.put;
+  raced.bucket.put = async (...args) => {
+    const result = await put(...args);
+    raced.replaceEntries([REUSE_OTHER, foreign]);
+    return result;
+  };
+  const result = await raced.prepare();
+  assert.equal(result.ok, true, "CURRENT confirmation only rejects the old token still being present");
+  const writes = raced.timeline.filter(op => op === "host:write").length;
+  await compensateEventIdReuseOnD1Failure(result.precommit, raced.host);
+  assert.equal(raced.timeline.filter(op => op === "host:write").length, writes);
+  assert.deepEqual(raced.manifest().entities, [REUSE_OTHER, foreign]);
+});
+
+test("MIG-0652 reuse CURRENT characterization: prior-cycle cleanup is accepted without a tombstone generation filter", async () => {
+  const f = createReuseFixture();
+  f.sqlite.prepare("UPDATE static_rebuild_queue SET updated_at = ?").run(now - 172800);
+  assert.equal((await f.prepare()).ok, true, "CURRENT checks latest target status, not the tombstone generation");
+  assertReuseDidNotMutateD1(f);
+});
+
+test("MIG-0652 reuse CURRENT characterization: failed creator compensation can restore an old block after another creator", async () => {
+  const f = createReuseFixture();
+  const first = await f.prepare();
+  const second = await f.prepare();
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(second.precommit.previousEntry, null);
+  // Model the other creator's completed D1 ownership change. The extracted
+  // precommit/compensator itself never commits D1 and cannot inspect a winner.
+  f.sqlite.prepare("DELETE FROM public_visibility_fences WHERE fence_token = ?").run("reuse-token");
+  insert(f.sqlite, "events", event);
+  const reads = f.d1.stats.reads;
+  await compensateEventIdReuseOnD1Failure(first.precommit, f.host);
+  assert.equal(f.d1.stats.reads, reads, "CURRENT compensation has no D1 dependency");
+  assert.deepEqual(f.manifest().entities, [REUSE_OTHER, REUSE_ENTRY], "KNOWN CURRENT availability defect; not safe reuse acceptance");
+  assert.equal(f.sqlite.prepare("SELECT id FROM events").get().id, "ev_create");
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM public_visibility_fences").get().n, 0);
 });

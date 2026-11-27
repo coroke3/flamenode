@@ -61,6 +61,7 @@
     "./visibility/compensationLog": "./src/visibility/compensationLog.ts",
     "./visibility/fenceTransition": "./src/visibility/fenceTransition.ts",
     "./visibility/eventTransition": "./src/visibility/eventTransition.ts",
+    "./visibility/eventIdReuse": "./src/visibility/eventIdReuse.ts",
     "./visibility/xUserTransition": "./src/visibility/xUserTransition.ts",
     "./moderation/openCases": "./src/moderation/openCases.ts",
     "./publicCache/delete": "./src/publicCache/delete.ts",
