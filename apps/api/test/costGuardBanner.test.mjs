@@ -8,6 +8,7 @@ import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 import { app } from "../src/app.ts";
 import { CostGuardBannerResponseSchema } from "@flamenode/contracts";
+import { isOperationMode } from "@flamenode/domain/admin";
 import { readOperationModeKvMirror, resetOperationModeCachesForTests, resolvePublicOperationMode } from "../src/routes/live/operationMode.ts";
 import { cookie, createD1, createSqlite } from "./support/personalHarness.mjs";
 import { seed as seedAdminRead } from "./support/adminReadSeed.mjs";
@@ -836,9 +837,7 @@ async function loadCurrentKvMirrorModule({ failPut = false } = {}) {
     module: coreModule,
     exports: coreModule.exports,
     require: (id) => {
-      if (id === "./resolve.ts") return {
-        isOperationMode: (mode) => ["normal", "economy", "read_only", "static_only"].includes(mode),
-      };
+      if (id === "./resolve.ts") return { isOperationMode };
       throw new Error("unexpected kvMirrorCore dependency: " + id);
     },
   }, { timeout: 1_000 });
@@ -981,11 +980,17 @@ test("MIG-0661 CURRENT SA-016/017: actual mirror module serializes its own key o
   const expired = { mode: "read_only", updated_at: 1_800_000_030, reason: "KV after expiry" };
   current.state.raw = JSON.stringify(expired);
   current.setNow(base + 30_001);
-  assert.deepEqual(await current.module.readOperationModeKvMirror(), expired,
+  // The parser constructs its result inside a separate vm realm. Compare
+  // its own fields in this realm, retaining strict value/key assertions.
+  const expiredRead = await current.module.readOperationModeKvMirror();
+  assert.ok(expiredRead);
+  assert.deepEqual({ ...expiredRead }, expired,
     "cache expiry performs one KV read and accepts the current writer key order");
   assert.deepEqual(current.state.getOptions[0], { key: "operation_mode:mirror", cacheTtl: 30 });
   assert.equal(current.state.gets, 1);
-  assert.deepEqual(await current.module.readOperationModeKvMirror(), expired,
+  const warmRead = await current.module.readOperationModeKvMirror();
+  assert.equal(warmRead, expiredRead, "warm cache reuses the parsed receipt");
+  assert.deepEqual({ ...warmRead }, expired,
     "the successful miss read warms the cache");
   assert.equal(current.state.gets, 1);
 
@@ -998,11 +1003,13 @@ test("MIG-0661 CURRENT SA-016/017: actual mirror module serializes its own key o
   assert.equal(current.state.gets, 2);
 
   current.state.failGet = false;
-  const recovered = { mode: "static_only", updated_at: 1_800_000_036, reason: "recovered" };
+  const recovered = { mode: "maintenance", updated_at: 1_800_000_036, reason: "recovered" };
   current.state.raw = JSON.stringify(recovered);
   current.setNow(base + 65_003);
-  assert.deepEqual(await current.module.readOperationModeKvMirror(), recovered,
-    "error TTL expiry retries the KV read");
+  const recoveredRead = await current.module.readOperationModeKvMirror();
+  assert.ok(recoveredRead);
+  assert.deepEqual({ ...recoveredRead }, recovered,
+    "error TTL expiry retries the KV read and preserves maintenance mode");
   assert.equal(current.state.gets, 3);
 
   const action = current.actionSource;
