@@ -25,6 +25,16 @@ function clampColumnWidth(width: number): number {
   return Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, width));
 }
 
+function columnIndexToLetter(index: number): string {
+  let n = index;
+  let result = "";
+  while (n >= 0) {
+    result = String.fromCharCode(65 + (n % 26)) + result;
+    n = Math.floor(n / 26) - 1;
+  }
+  return result;
+}
+
 function cellValue(raw: unknown): string {
   if (raw == null) return "";
   if (typeof raw === "object") return JSON.stringify(raw);
@@ -122,6 +132,16 @@ export function AdminSpreadsheetEditableGrid({
   const visibleFocus = boundCellToPage(focusedCell);
   const focusedColumn = identityChanged ? undefined : columns[visibleFocus.col];
   const stats = computeSelectionStats();
+  // CURRENT formula bar projection. Keep this display-only until the shared edit/blur lifecycle is ported.
+  const focusedRow = identityChanged ? undefined : rows[visibleFocus.row];
+  const formulaReference = focusedColumn
+    ? `${columnIndexToLetter(visibleFocus.col)}${(page - 1) * Math.max(1, limit) + visibleFocus.row + 1} (${focusedColumn.name})`
+    : "—";
+  const formulaValue = currentSelection && !selectionConflict ? currentSelection.value
+    : focusedRow && focusedColumn ? cellValue(focusedRow[focusedColumn.name]) : "";
+  const formulaStatusText = identityChanged ? ""
+    : inFlight.current !== null && historyInFlight.current === inFlight.current ? "履歴を適用中…"
+    : busy ? "保存中…" : findHint || notice || (stats.cells > 1 ? `${stats.cells} セル` : "");
 
   // CURRENT keeps widths and an active drag by column name across mounted page/table changes.
   React.useEffect(() => {
@@ -156,6 +176,7 @@ export function AdminSpreadsheetEditableGrid({
       setFocusedCell({ row: 0, col: 0 });
       setFindOpen(false);
       setFindQuery("");
+      setFindHint(null);
       // CURRENT returns keyboard focus to the reset grid after a context replacement.
       (tableRef.current?.querySelector<HTMLTableCellElement>('[data-grid-cell="0:0"]') ?? tableRef.current)?.focus();
       setInsertOpen(false);
@@ -674,6 +695,69 @@ export function AdminSpreadsheetEditableGrid({
             --sheet-border: var(--border-subtle, #3c4043);
           }
         }
+        [data-spreadsheet-formula-bar] {
+          --sheet-bg: #ffffff;
+          --sheet-border: #dadce0;
+          display: flex;
+          align-items: center;
+          border-bottom: 1px solid var(--sheet-border);
+          background: var(--sheet-bg);
+        }
+        [data-spreadsheet-formula-reference] {
+          flex-shrink: 0;
+          min-width: 100px;
+          max-width: 200px;
+          padding: 6px 10px;
+          font: 600 12px var(--font-mono, ui-monospace, monospace);
+          color: var(--text-secondary);
+          border-right: 1px solid var(--sheet-border);
+          text-align: center;
+          overflow-wrap: anywhere;
+        }
+        [data-spreadsheet-formula-fx] {
+          flex-shrink: 0;
+          padding: 6px 8px;
+          font-size: 11px;
+          font-style: italic;
+          color: var(--text-muted);
+          border-right: 1px solid var(--sheet-border);
+          user-select: none;
+        }
+        [data-spreadsheet-formula-value] {
+          flex: 1;
+          min-width: 0;
+          min-height: 1em;
+          padding: 6px 10px;
+          font: 13px var(--font-mono, ui-monospace, monospace);
+          color: var(--text-primary);
+          white-space: pre;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          user-select: text;
+        }
+        [data-spreadsheet-formula-status] {
+          flex-shrink: 0;
+          min-width: 80px;
+          padding: 0 10px;
+          font-size: 11px;
+          color: var(--text-muted);
+          text-align: right;
+        }
+        :root[data-theme="dark"] [data-spreadsheet-formula-bar] {
+          --sheet-bg: var(--bg-base, #1a1a1a);
+          --sheet-border: var(--border-subtle, #3c4043);
+        }
+        @media (prefers-color-scheme: dark) {
+          :root:not([data-theme="light"]):not([data-theme="dark"]) [data-spreadsheet-formula-bar] {
+            --sheet-bg: var(--bg-base, #1a1a1a);
+            --sheet-border: var(--border-subtle, #3c4043);
+          }
+        }
+        @media (max-width: 640px) {
+          [data-spreadsheet-formula-bar] { flex-wrap: wrap; }
+          [data-spreadsheet-formula-reference] { min-width: 72px; max-width: none; flex: 0 0 auto; }
+          [data-spreadsheet-formula-value] { flex: 1 1 100%; font-size: 16px; }
+        }
       `}</style>
       <p>{editable ? "編集可能な列のみ変更できます。主キー列は変更できません。" : "読み取り専用（編集は無効です）。"}</p>
       {notice ? <p role="status">{notice}</p> : null}
@@ -723,6 +807,12 @@ export function AdminSpreadsheetEditableGrid({
       ) : currentSelection && !selectionConflict ? (
         <p>見出しで選択する前に、セルを保存するかキャンセルしてください。</p>
       ) : null}
+      <div data-spreadsheet-formula-bar="" role="group" aria-label="数式バー（表示専用）">
+        <div data-spreadsheet-formula-reference="" aria-live="polite" title="セル参照">{formulaReference}</div>
+        <span data-spreadsheet-formula-fx="" aria-hidden="true">fx</span>
+        <span data-spreadsheet-formula-value="" title={formulaValue}>{formulaValue}</span>
+        <span data-spreadsheet-formula-status="">{formulaStatusText}</span>
+      </div>
       <div data-spreadsheet-grid-viewport="" style={{ overflowX: "auto" }}>
         <table ref={tableRef} tabIndex={rows.length === 0 || columns.length === 0 ? 0 : -1}
           style={{ borderCollapse: "separate", borderSpacing: 0, fontSize: 12, minWidth: "max-content", width: "100%" }}
@@ -754,12 +844,7 @@ export function AdminSpreadsheetEditableGrid({
                 else setFocusedCell(end);
               }} />
             {columns.map((c, ci) => {
-              let index = ci;
-              let letter = "";
-              while (index >= 0) {
-                letter = String.fromCharCode(65 + (index % 26)) + letter;
-                index = Math.floor(index / 26) - 1;
-              }
+              const letter = columnIndexToLetter(ci);
               // Label, selection and resize stay on the same header to preserve event propagation.
               return (
               <th key={c.name} scope="col" data-grid-column-header={ci} title={`${c.name} (${c.type})`}

@@ -1489,3 +1489,198 @@ test("MIG-0737 U01 editor copy: synchronous focus takeover during fallback never
     else delete document.execCommand;
   }
 });
+
+function assertFormula(ui, reference, value, status = "") {
+  const bar = ui.host.querySelector("[data-spreadsheet-formula-bar]");
+  assert.ok(bar);
+  assert.equal(bar.getAttribute("aria-label"), "数式バー（表示専用）");
+  assert.equal(bar.querySelector("[data-spreadsheet-formula-reference]").textContent, reference);
+  assert.equal(bar.querySelector("[data-spreadsheet-formula-reference]").getAttribute("aria-live"), "polite");
+  assert.equal(bar.querySelector("[data-spreadsheet-formula-fx]").textContent, "fx");
+  const display = bar.querySelector("[data-spreadsheet-formula-value]");
+  assert.equal(display.textContent, value);
+  assert.equal(display.title, value);
+  assert.equal(bar.querySelector("[data-spreadsheet-formula-status]").textContent, status);
+  assert.equal(bar.querySelector("input,textarea,button,[contenteditable]"), null);
+  return bar;
+}
+
+test("MIG-0737 U01 formula display: page-relative A1 reference, endpoint value and range summary", async () => {
+  const ui = await mount();
+  try {
+    assertFormula(ui, "A4 (id)", "a");
+    const td = await select(ui, "1:1");
+    const bar = assertFormula(ui, "B5 (title)", "Beta");
+    assert.ok(document.activeElement === td);
+    await select(ui, "0:0");
+    await select(ui, "2:2", { shiftKey: true });
+    assertFormula(ui, "C6 (note)", "", "9 セル");
+    assert.ok(ui.host.querySelector("[data-spreadsheet-formula-bar]") === bar);
+    assert.ok(document.activeElement === cell(ui, "2:2"));
+    await key(document.activeElement, "ArrowLeft");
+    assertFormula(ui, "B6 (title)", "Gamma");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula display: column letters beyond Z, escaped values and empty dimensions", async () => {
+  const columns = Array.from({ length: 28 }, (_, i) => ({
+    name: "col" + i, type: "TEXT", editable: false, pk: 0, notNull: false,
+  }));
+  const long = "  <b> & value  ";
+  const fixture = { ...data, columns, rows: [{ col0: null, col26: { nested: true }, col27: long }], primaryKeys: [], page: 3, limit: 10 };
+  const ui = await mount({ data: fixture });
+  try {
+    assertFormula(ui, "A21 (col0)", "");
+    await select(ui, "0:26");
+    assertFormula(ui, "AA21 (col26)", '{"nested":true}');
+    await select(ui, "0:27");
+    const bar = assertFormula(ui, "AB21 (col27)", long);
+    assert.equal(bar.querySelector("b"), null, "value is text, not markup");
+    await ui.render({ data: { ...fixture, rows: [] } });
+    assertFormula(ui, "AB21 (col27)", "");
+    await ui.render({ data: { ...fixture, rows: [], columns: [] } });
+    assertFormula(ui, "—", "");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula display: mirrors live draft without writes and hides invalidated draft", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    const td = await select(ui, "1:1");
+    await key(td, "x");
+    const input = td.querySelector("input");
+    assert.ok(input && document.activeElement === input);
+    assertFormula(ui, "B5 (title)", "x");
+    await setInput(input, "  Unsaved  ");
+    const bar = assertFormula(ui, "B5 (title)", "  Unsaved  ");
+    assert.ok(document.activeElement === input);
+    await React.act(async () => bar.querySelector("[data-spreadsheet-formula-value]").dispatchEvent(mouse("dblclick", { detail: 2 })));
+    assert.equal(input.value, "  Unsaved  ");
+    assertNoEffects(ui);
+    await ui.render({ data: { ...data, rows: [data.rows[0], { ...data.rows[1], title: "Server change" }, data.rows[2]] } });
+    assertFormula(ui, "B5 (title)", "Server change");
+    assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
+    await React.act(async () => button(ui, "編集を破棄").click());
+    assertFormula(ui, "B5 (title)", "Server change");
+    await select(ui, "0:1");
+    await doubleClickCell(cell(ui, "0:1"));
+    const newInput = cell(ui, "0:1").querySelector("input");
+    await setInput(newInput, "Discard me");
+    assertFormula(ui, "B4 (title)", "Discard me");
+    await key(newInput, "Escape");
+    assertFormula(ui, "B4 (title)", "Alpha");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula display: Find and context resets use the current displayed endpoint", async () => {
+  const ui = await mount();
+  try {
+    await select(ui, "0:1");
+    await key(document.activeElement, "f", { ctrlKey: true });
+    const search = ui.host.querySelector('input[type="search"]');
+    await setInput(search, "Beta");
+    await key(search, "Enter");
+    assertFormula(ui, "B5 (title)", "Beta");
+    assert.ok(document.activeElement === search);
+    await setInput(search, "no matching cell");
+    await key(search, "Enter");
+    assertFormula(ui, "B5 (title)", "Beta", "見つかりません");
+    await ui.render({ data: { ...data, page: 3, rows: [{ id: "new", title: "Fresh", note: "" }] } });
+    assertFormula(ui, "A7 (id)", "new");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula display: save and history busy precedence with no duplicate request", async () => {
+  const requests = [];
+  let refreshes = 0;
+  const ui = await mount({ allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+    onRefresh: () => { refreshes++; },
+  });
+  const success = () => new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+  try {
+    await editTitle(ui);
+    assertFormula(ui, "B4 (title)", "Unsaved");
+    await React.act(async () => button(ui, "セルを保存").click());
+    assertFormula(ui, "B4 (title)", "Alpha", "保存中…");
+    assert.equal(requests.length, 1);
+    await select(ui, "1:1");
+    assertFormula(ui, "B5 (title)", "Beta", "保存中…");
+    await React.act(async () => requests[0].resolve(success()));
+    assertFormula(ui, "B5 (title)", "Beta", "保存しました。");
+    await key(document.activeElement, "z", { ctrlKey: true });
+    assertFormula(ui, "B5 (title)", "Beta", "履歴を適用中…");
+    assert.equal(requests.length, 2);
+    await React.act(async () => requests[1].resolve(success()));
+    assertFormula(ui, "B5 (title)", "Beta", "保存しました。");
+    assert.equal(refreshes, 2);
+    assert.equal(requests.length, 2);
+    assert.ok(requests.every(r => !r.init.signal.aborted));
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula display: theme switching preserves node, draft and scoped declarations", async () => {
+  const previous = document.documentElement.getAttribute("data-theme");
+  const ui = await mount({ allowMutations: true });
+  const outside = document.createElement("div");
+  document.body.append(outside);
+  try {
+    await editTitle(ui);
+    const input = cell(ui, "0:1").querySelector("input");
+    const bar = assertFormula(ui, "B4 (title)", "Unsaved");
+    for (const [theme, bg, border] of [
+      ["light", "#ffffff", "#dadce0"],
+      ["dark", "var(--bg-base, #1a1a1a)", "var(--border-subtle, #3c4043)"],
+      ["light", "#ffffff", "#dadce0"],
+    ]) {
+      await React.act(async () => document.documentElement.setAttribute("data-theme", theme));
+      assert.ok(assertFormula(ui, "B4 (title)", "Unsaved") === bar);
+      assert.ok(document.activeElement === input);
+      const computed = window.getComputedStyle(bar);
+      assert.equal(computed.getPropertyValue("--sheet-bg").trim(), bg);
+      assert.equal(computed.getPropertyValue("--sheet-border").trim(), border);
+      assert.equal(window.getComputedStyle(outside).getPropertyValue("--sheet-bg").trim(), "");
+    }
+    assertNoEffects(ui);
+  } finally {
+    outside.remove();
+    await ui.cleanup();
+    if (previous === null) document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", previous);
+  }
+});
+
+
+test("MIG-0737 U01 formula display: live copy and readonly projection share the same draft without saving", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const copied = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+    writeText: async value => { copied.push(value); },
+  } });
+  const ui = await mount({ allowMutations: true });
+  try {
+    const input = await editTitle(ui);
+    const value = "  日本語 <draft>  ";
+    await setInput(input, value);
+    const bar = assertFormula(ui, "B4 (title)", value);
+    input.setSelectionRange(2, 5, "backward");
+    assert.equal((await key(input, "c", { ctrlKey: true })).defaultPrevented, true);
+    assert.deepEqual(copied, [value]);
+    assert.ok(assertFormula(ui, "B4 (title)", value) === bar);
+    assert.ok(document.activeElement === input);
+    assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [2, 5, "backward"]);
+    assertNoEffects(ui);
+    await key(input, "Escape");
+    assertFormula(ui, "B4 (title)", "Alpha");
+    assert.deepEqual(copied, [value]);
+    assertNoEffects(ui);
+  } finally {
+    await ui.cleanup();
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
