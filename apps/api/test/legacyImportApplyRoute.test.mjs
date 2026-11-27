@@ -140,6 +140,7 @@ function previewBucket({ failAdvanceOnce = false, failCompleteOnce = false } = {
       async delete(key) { objects.delete(key); },
     },
     record: () => JSON.parse([...objects.values()][0].data),
+    writes: () => version,
     // Model a previous HTTP request that committed the last D1 step while its
     // R2 receipt is still in the "ready / complete" position. No D1 write here.
     markProgressComplete: () => {
@@ -245,7 +246,7 @@ test("MIG-0645 U02 apply Hono: advance CAS failure reports committed pending and
 });
 
 test("MIG-0645 U02 apply Hono: finalization CAS failure keeps committed receipt and retries without D1 replay", async () => {
-  const { bucket, record, markProgressComplete } = previewBucket({ failCompleteOnce: true });
+  const { bucket, record, markProgressComplete, writes } = previewBucket({ failCompleteOnce: true });
   const { form } = await createApplyCredential(bucket);
   markProgressComplete();
   const { request, stats, getD1ApplyCalls } = setup({ bucket });
@@ -274,5 +275,17 @@ test("MIG-0645 U02 apply Hono: finalization CAS failure keeps committed receipt 
   assert.equal(next.attempt, 2);
   assert.equal(record().status, "completed");
   assert.equal(getD1ApplyCalls(), 0, "R2-only recovery must never replay D1");
+  assert.equal(stats.batches, 0);
+
+  const completedWrites = writes();
+  const repeated = await request(form());
+  assert.equal(repeated.status, 200, JSON.stringify(await repeated.clone().json()));
+  const idempotent = await repeated.json();
+  assert.equal(idempotent.continuation_required, false);
+  assert.equal(idempotent.result.complete, true);
+  assert.equal(idempotent.attempt, 2, "repeated completed token is not reclaimed");
+  assert.equal(writes(), completedWrites, "repeated completed token does not rewrite R2");
+  assert.equal(record().status, "completed");
+  assert.equal(getD1ApplyCalls(), 0, "completed replay must never execute D1");
   assert.equal(stats.batches, 0);
 });
