@@ -1327,7 +1327,7 @@ test("Issue #653: GA4 failure preserves fully public last-good R2 without extra 
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test("Issue #653: GA4-disabled repair canonicalizes all four non-integer R2 view counters", async () => {
+test("Issue #653: GA4-disabled repair canonicalizes supported legacy counters and clears rejected ones", async () => {
   const canonicalItem = {
     id: "video-a", title: "A", youtube_video_id: "yt-a",
     display_name: "creator", icon_url: null,
@@ -1339,8 +1339,14 @@ test("Issue #653: GA4-disabled repair canonicalizes all four non-integer R2 view
   const cases = [
     ["views_2d", null, 0],
     ["views_5d", "2", 2],
-    ["views_7d", false, 0],
+    ["views_7d", "3", 3],
     ["views_30d", 4.5, 4],
+    // Main now rejects nonnumeric coercion; never revive it in repair.
+    ["views_2d", true, null],
+    ["views_5d", [], null],
+    ["views_7d", false, null],
+    ["views_30d", { value: 4 }, null],
+    ["views_30d", "0x4", null],
   ];
   const originalLog = console.log;
   try {
@@ -1373,11 +1379,16 @@ test("Issue #653: GA4-disabled repair canonicalizes all four non-integer R2 view
       assert.equal(gets, 1, "one existing R2 read");
       assert.equal(writes.length, 1,
         `${field}=${String(malformed)} must not preserve noncanonical raw R2`);
-      assert.deepEqual(writes[0].items.map((item) => item.id), ["video-a"]);
-      assert.equal(writes[0].items[0][field], expected);
-      assert.equal(typeof writes[0].items[0][field], "number");
-      assert.equal(writes[0].generated_at, 1_700_000_000,
-        "reused GA4 view counts must not be advertised as freshly sampled");
+      if (expected === null) {
+        // Invalid old rows must be replaced, not normalized into invented views.
+        assert.deepEqual(writes[0].items, [], `${field}: rejected wire value must clear the old artifact`);
+      } else {
+        assert.deepEqual(writes[0].items.map((item) => item.id), ["video-a"]);
+        assert.equal(writes[0].items[0][field], expected);
+        assert.equal(typeof writes[0].items[0][field], "number");
+        assert.equal(writes[0].generated_at, 1_700_000_000,
+          "reused GA4 view counts must not be advertised as freshly sampled");
+      }
     }
   } finally {
     console.log = originalLog;

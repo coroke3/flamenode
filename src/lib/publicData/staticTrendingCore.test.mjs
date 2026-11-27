@@ -334,3 +334,27 @@ test("SEC-837 U02: mixed ranking preserves order, rank, counts and identity of p
   ]);
   assert.equal(JSON.stringify(items), before);
 });
+
+test("SEC-653 main numeric hardening: legacy decimal counters survive, nonnumeric coercion is rejected", () => {
+  const now = 100;
+  for (const [field, value, expected] of [
+    ["views_2d", null, 0], ["views_5d", "2", 2],
+    ["views_7d", "3", 3], ["views_30d", 4.5, 4],
+  ]) {
+    const data = normalizeStaticTrending({
+      schema_version: 1, generated_at: now, items: [{ ...sampleItem, [field]: value }],
+    }, now);
+    assert.ok(data);
+    assert.equal(data.items.length, 1);
+    assert.equal(data.items[0][field], expected);
+  }
+  for (const field of ["views_2d", "views_5d", "views_7d", "views_30d"]) {
+    for (const value of [true, false, [], {}, "0x4", "NaN"]) {
+      const data = normalizeStaticTrending({
+        schema_version: 1, generated_at: now, items: [{ ...sampleItem, [field]: value }],
+      }, now);
+      assert.ok(data);
+      assert.deepEqual(data.items, [], field + ": " + JSON.stringify(value));
+    }
+  }
+});
