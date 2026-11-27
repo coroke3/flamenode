@@ -225,6 +225,49 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(reads, 0);
   });
 
+  test("SEC-820: a failure reading Next control-flow metadata leaves the like write fail-soft", async (t) => {
+    const providerError = new Error("ordinary provider failure");
+    const nextWorld = world();
+    const nextBefore = state(nextWorld);
+    nextWorld.d1.batch = async () => { throw providerError; };
+
+    // Inject only the metadata lookup failure, using an ordinary provider Error.
+    const originalGetDescriptor = Object.getOwnPropertyDescriptor;
+    let lookupFailures = 0;
+    const getDescriptor = t.mock.method(Object, "getOwnPropertyDescriptor", (object, property) => {
+      if (object === providerError && property === "digest") {
+        lookupFailures += 1;
+        throw new Error("metadata lookup failed");
+      }
+      return originalGetDescriptor(object, property);
+    });
+    const warnings = [];
+    let next;
+    try {
+      next = await current(nextWorld, "u_owner", "v_pub", "like", (...args) => warnings.push(args));
+    } finally {
+      getDescriptor.mock.restore();
+    }
+
+    const conflict = {
+      ok: false,
+      message: "操作が競合したか、保存に失敗しました。再読み込みして再試行してください。",
+    };
+    assert.equal(lookupFailures, 1, "the CURRENT catch must reach the injected metadata failure");
+    assert.deepEqual(next.result, conflict);
+    assert.deepEqual(warnings, [["[video-interaction] atomic mutation rejected"]]);
+    assert.equal(next.wakes, 0);
+    assert.deepEqual(state(nextWorld), nextBefore);
+
+    const honoWorld = world();
+    const honoBefore = state(honoWorld);
+    honoWorld.d1.batch = async () => { throw providerError; };
+    const hono = await target(honoWorld, "u_owner", "v_pub", "like");
+    assert.equal(hono.status, 409);
+    assert.deepEqual(hono.result, conflict);
+    assert.deepEqual(state(honoWorld), honoBefore);
+  });
+
   test("SEC-820: genuine Next control signals preserve identity across the CURRENT catch", async () => {
     const { redirect, notFound } = await import(navigationUrl);
     const { DynamicServerError } = await import("next/dist/client/components/hooks-server-context.js");
