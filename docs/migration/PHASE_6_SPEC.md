@@ -3306,6 +3306,82 @@ npm run check:public-api-leaks
 #### Rollback
 PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・旧 Next は変わらない。
 
+### MIG-0689: shared request-local write admission snapshot (D-19-2, #893 prerequisite)
+- **Model:** lead
+- **Readiness:** DECIDED (D-19-2 implementation direction approved); implementation/evidence still IN_PROGRESS
+- **Recipe:** R-API
+- **Runtime:** S3
+- **Depends on:** MIG-0602 / **Decisions:** D-19-2 (2026-11-27)
+- **Coordinates with:** MIG-0638 (#519), MIG-0657 (#512), MIG-0644 (#522), MIG-0603 (#523), MIG-0662 (#690); resource owners retain their own handlers
+- **Verified against:** `86608709455937e6512bc6f413f04f7271f5f440` (2026-11-27)
+
+#### Source snapshot
+- `apps/api/src/middleware/writeOrigin.ts`: `loadTosState` performs fresh ToS/actor/active-X lookup; write guard preserves Origin → session → ToS/identity → CostGuard → active-X order.
+- `apps/api/src/middleware/costGuard.ts`: CostGuard reads default `system_settings`, evaluates `evaluateCostGuardCore`, and supplies audit retention settings.
+- `apps/api/test/adminGuards.test.mjs`: existing Hono/D1 guard budget, failure, and audit parity suite.
+- #714 owns `apps/api/src/auth/session.ts`; this Work Order must not edit it.
+
+#### Owned paths
+- `apps/api/src/middleware/writeOrigin.ts`
+- `apps/api/src/middleware/costGuard.ts`
+- `apps/api/test/adminGuards.test.mjs`
+- `docs/migration/work-items/MIG-0689.md`
+- `docs/migration/PHASE_6_SPEC.md` (MIG-0689 section only)
+- `docs/migration/TASK_CARDS_6_7.md` (MIG-0689 card only)
+- `docs/migration/FILE_MIGRATION_MATRIX.md` (MIG-0689 rows only)
+- `docs/migration/STATUS.md` (MIG-0689 row only)
+
+#### Micro-units
+- **U01 joined admission snapshot:** after Origin and session resolution, join the user ToS/actor/active-X projection with the unique `system_settings.id='default'` row. Successful request uses one fresh request-local admission read. No global/cross-request authorization cache.
+- **U02 failure provenance:** on joined-query failure, retry canonical ToS first; preserve `503 db_unavailable` if it fails. Only after identity succeeds, retry CostGuard independently; preserve `503 cost_guard_blocked` if that read fails. Missing settings row remains `maintenance_mode`, not unauthenticated. Active-X is checked only after CostGuard.
+- **U03 dependent-route acceptance:** coordinate with resource owners and verify actual full route read/bind/batch accounting; this task's shared read reduction is not itself S3 acceptance.
+
+#### Test cases
+| ID | Input/operation | Expected |
+| --- | --- | --- |
+| T01 | Normal guarded write with settings row | One admission pre-read; same ToS, actor, active-X and audit settings |
+| T02 | Missing default settings row | Authenticated user remains identified; CostGuard returns `maintenance_mode` |
+| T03 | Joined query fails, ToS fallback fails | `503 db_unavailable`; handler not reached |
+| T04 | Joined query fails, ToS succeeds, CostGuard fallback fails | `503 cost_guard_blocked`; handler not reached |
+| T05 | Joined query fails and user is banned / ToS-denied | Identity denial precedes CostGuard fallback; no CostGuard retry |
+| T06 | Active-X guarded write | CostGuard precedes active-X; no second settings read |
+| T07 | Audit mutation | Audit bytes and actor/settings snapshot equal the CURRENT-derived preloaded path |
+| T08 | Allowed/denied/provider-failure real-cookie Hono matrix | Count session + admission + resource reads, binds and atomic batch; no semantic drift |
+
+#### Commands
+```bash
+npm run test --workspace=@flamenode/api
+npm run build --workspace=@flamenode/api
+npm run typecheck
+npm run test:critical
+node scripts/check-migration-work-items.mjs --fetch-pr-history
+npm run check:project-docs
+```
+
+#### Ledger updates
+- Add MIG-0689 to `STATUS.md` as IN_PROGRESS, dependent only on MIG-0602.
+- Add this Work Order and the MIG-0689 task card.
+- Update only MIG-0689 rows in `FILE_MIGRATION_MATRIX.md`; do not rewrite or reformat other owners' rows.
+
+#### DONE checklist
+- [ ] Exact-head `migration-contract` and `migration-workspaces` both PASS.
+- [ ] Focused API guard suite, full API workspace tests, typecheck and project-docs pass.
+- [ ] One-read success path, missing-settings semantics, ToS/CostGuard failure provenance, identity and active-X order pass.
+- [ ] Real-cookie Hono read/bind/batch accounting is recorded for allowed, denied, provider-failure and CAS paths.
+- [ ] Each dependent S3 route independently meets <=3 pre-reads + one atomic audited batch; this task alone cannot mark #893 DONE.
+- [ ] Non-production `wrangler tail cpuTime` samples meet ZERO_1102 §5 (normal/limit/invalid/true-cold, >=50 each, warm max <8 ms).
+- [ ] Qualified independent review of the final exact SHA.
+
+#### STOP
+- Do not edit `apps/api/src/auth/session.ts` while #714 owns it.
+- Do not bypass Origin, session, ToS, active-X membership, CostGuard, actor attribution, audit, CAS, nonce, Queue or rollback.
+- Do not convert missing settings into allow or unauthenticated.
+- Do not treat this shared guard reduction as complete S3 evidence for spreadsheet CRUD/import or any other resource handler.
+- No S3 waiver, production DB/Worker/Route/R2/Queue/secret or deployment changes.
+
+#### Rollback
+Revert the MIG-0689 source/test commits or close the Draft PR. The change is request-local middleware behavior only; no persisted data or production resource mutation is part of this Work Order.
+
 ### MIG-0607: Phase 6 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
