@@ -4,9 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { spawnSync } from "node:child_process";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, encodeColdRecorderBody, decodeColdRecorderBody, recordFreshInprocTarget, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
 async function loadReplayWorker(generation, script, body) {
@@ -101,6 +102,177 @@ test("local migrated D1 records per-query result rows and carries them into repl
   } finally {
     await target.close();
   }
+});
+
+test("MIG-0639: cold recorder has a fresh application module graph after parent warm requests", async () => {
+  const plan = { adminToken: "cold-module-graph" };
+  const scenario = buildScenarios(plan).find((candidate) => candidate.id === "RH-031");
+  const target = await createInprocTarget(plan);
+  const countClocks = (record) => record.script.filter((entry) => entry.identity.includes("input.Date.now")).length;
+  try {
+    const spec = scenario.kinds.normal(0, "cold-module-graph");
+    const fixture = scenario.prepareKind.normal;
+    for (const [key, body] of Object.entries(fixture.r2Objects)) await target.setR2(body, key);
+    if (spec.setup) await target.exec(spec.setup);
+    await target.recordForReplay(spec);
+    const warm = await target.recordForReplay(spec);
+    assert.equal(warm.status, 200);
+    const first = await target.recordFirstRequest(spec, fixture);
+    const second = await target.recordFirstRequest(spec, fixture);
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(countClocks(warm), 3, "video-only parent uses the steady operation-mode cache");
+    assert.equal(countClocks(first), 4, "fresh recorder retains every native first-request clock input");
+    assert.equal(countClocks(second), 4, "creating a second recorder must not reuse the first module graph");
+    assert.equal(first.coldRecorder.requestOrdinal, 1);
+    assert.equal(second.coldRecorder.requestOrdinal, 1);
+    assert.notEqual(first.coldRecorder.threadId, second.coldRecorder.threadId);
+    assert.equal(target.requestOrdinal, 2, "cold recordings do not dispatch in the warmed parent");
+    assert.deepEqual(first.d1PerQueryRows, second.d1PerQueryRows);
+    assert.equal(first.d1, second.d1);
+    await assert.rejects(target.recordFirstRequest({ ...spec, setup: [{ sql: "SELECT * FROM missing_fixture_table", params: [] }] }, fixture),
+      /bench cold recorder failed:.*missing_fixture_table/);
+    const recovered = await target.recordFirstRequest(spec, fixture);
+    assert.equal(recovered.status, 200);
+    assert.equal(recovered.coldRecorder.requestOrdinal, 1, "failed setup terminates its context and releases the parent guard");
+  } finally { await target.close(); }
+});
+
+test("MIG-0639: cold multipart recording preserves the exact wire headers/body used by workerd", async () => {
+  const plan = { adminToken: "cold-multipart" };
+  const scenario = buildScenarios(plan).find((candidate) => candidate.id === "SA-105");
+  const target = await createInprocTarget(plan);
+  try {
+    const spec = scenario.kinds.normal(0, "cold-wire");
+    const originalEntries = [...spec.body.entries()];
+    const record = await target.recordFirstRequest(spec, scenario.prepareKind?.normal);
+    assert.equal(record.status, 200, "the real cold Hono upload executes its authorization and writes");
+    assert.equal(record.coldRecorder.requestOrdinal, 1);
+    assert.ok(record.coldRequest.body instanceof Uint8Array);
+    const headers = new Headers(record.coldRequest.headers);
+    assert.match(headers.get("content-type"), /^multipart\/form-data; boundary=/);
+    const wire = new Request("http://bench.local" + record.coldRequest.path, {
+      method: record.coldRequest.method, headers, body: record.coldRequest.body,
+    });
+    const actualEntries = [...(await wire.formData()).entries()];
+    assert.equal(actualEntries.length, originalEntries.length);
+    for (let i = 0; i < originalEntries.length; i += 1) {
+      const [name, original] = originalEntries[i];
+      const [actualName, actual] = actualEntries[i];
+      assert.equal(actualName, name);
+      if (typeof original === "string") assert.equal(actual, original);
+      else {
+        assert.equal(actual.name, original.name);
+        assert.equal(actual.type, original.type);
+        assert.deepEqual(new Uint8Array(await actual.arrayBuffer()), new Uint8Array(await original.arrayBuffer()));
+      }
+    }
+    assert.ok(record.script.some((entry) => entry.identity.includes("r2.put")));
+    assert.ok(record.script.some((entry) => entry.identity.includes("input.randomUUID")));
+  } finally { await target.close(); }
+});
+
+test("MIG-0639: cold worker retains module loaders but excludes parent eval/input-type flags", () => {
+  const moduleUrl = new URL("./benchmark-api-cpu.mjs", import.meta.url).href;
+  const preload = "data:text/javascript," + encodeURIComponent(`
+    import { isMainThread, threadId } from "node:worker_threads";
+    if (!isMainThread) console.log("BENCH_COLD_ARGV " + JSON.stringify({ threadId, args: process.execArgv }));
+  `);
+  const loaderArgs = ["--import", preload, "--conditions=flamenode-cold-regression", "--experimental-strip-types", "--enable-source-maps"];
+  const program = `
+    const { createInprocTarget } = await import(${JSON.stringify(moduleUrl)});
+    const target = await createInprocTarget({ adminToken: "cold-cli-regression" });
+    try {
+      const result = await target.recordFirstRequest({ method: "GET", path: "/api/health", expect: [200] });
+      console.log("BENCH_COLD_RESULT " + JSON.stringify({ status: result.status, recorder: result.coldRecorder }));
+    } finally { await target.close(); }
+  `;
+  const child = spawnSync(process.execPath, [...loaderArgs, "--input-type=module", "--eval", program], {
+    encoding: "utf8", timeout: 45_000,
+  });
+  assert.equal(child.error, undefined, child.error?.message);
+  assert.equal(child.status, 0, child.stderr);
+  const line = (prefix) => JSON.parse(child.stdout.split(/\r?\n/).find((value) => value.startsWith(prefix))?.slice(prefix.length) ?? "null");
+  const result = line("BENCH_COLD_RESULT ");
+  const worker = line("BENCH_COLD_ARGV ");
+  assert.equal(result?.status, 200, "the real fresh recorder must run when its parent uses --input-type=module");
+  assert.equal(result?.recorder.requestOrdinal, 1);
+  assert.equal(worker?.threadId, result.recorder.threadId, "the retained preload executes inside the actual recorder");
+  assert.deepEqual(worker?.args, loaderArgs, "loader/runtime flags survive, while parent-only eval and input-type flags do not");
+});
+
+test("MIG-0639: cold wire preserves URLSearchParams, Blob, File and offset byte bodies and rejects streams", async () => {
+  const plan = { adminToken: "cold-wire-body-kinds" };
+  const scenario = buildScenarios(plan).find((candidate) => candidate.id === "SA-004");
+  const base = scenario.kinds.normal(0, "wire-body-kinds");
+  const jsonBody = JSON.stringify({ ...JSON.parse(base.body), title: "cold-wire-body 日本語" });
+  const bytes = new TextEncoder().encode(jsonBody);
+  const backing = new Uint8Array(bytes.length + 4);
+  backing.fill(255);
+  backing.set(bytes, 2);
+  const params = new URLSearchParams([["title", "日本語 + space"], ["title", "duplicate"], ["body", "a&b"]]);
+  const cases = [
+    { name: "string", body: jsonBody, expected: bytes, type: "text/plain;charset=UTF-8", status: 200 },
+    { name: "Blob", body: new Blob([bytes], { type: "application/json" }), expected: bytes, type: "application/json", status: 200 },
+    { name: "File", body: new File([bytes], "fixture.json", { type: "application/json" }), expected: bytes, type: "application/json", status: 200 },
+    { name: "ArrayBuffer", body: bytes.buffer, expected: bytes, type: null, status: 200 },
+    { name: "offset Uint8Array", body: backing.subarray(2, 2 + bytes.length), expected: bytes, type: null, status: 200 },
+    { name: "offset DataView", body: new DataView(backing.buffer, 2, bytes.length), expected: bytes, type: null, status: 200 },
+    { name: "URLSearchParams", body: params, expected: new TextEncoder().encode(params.toString()), type: "application/x-www-form-urlencoded;charset=UTF-8", status: 400 },
+    { name: "undefined", body: undefined, expected: undefined, type: null, status: 400 },
+    { name: "null", body: null, expected: undefined, type: null, status: 400 },
+  ];
+  const headers = { ...base.headers };
+  delete headers["content-type"];
+  const target = await createInprocTarget(plan);
+  try {
+    for (const item of cases) {
+      const result = await target.recordFirstRequest({ ...base, headers, body: item.body });
+      assert.equal(result.status, item.status, item.name + " reaches the real JSON handler without changing its body");
+      assert.equal(result.coldRecorder.requestOrdinal, 1);
+      assert.deepEqual(result.coldRequest.body, item.expected, item.name + " keeps exactly its standard Request bytes");
+      assert.equal(new Headers(result.coldRequest.headers).get("content-type"), item.type, item.name + " preserves the inferred content type");
+      if (item.status === 200) assert.ok(result.script.some((entry) => entry.identity.includes("cold-wire-body 日本語")), item.name + " reaches actual D1 binds");
+    }
+    await assert.rejects(target.recordFirstRequest({ ...base, body: new ReadableStream() }), /duplex option is required/);
+    const recovered = await target.recordFirstRequest(base);
+    assert.equal(recovered.status, 200, "unsupported stream rejection releases the parent request guard");
+    assert.equal(recovered.coldRecorder.requestOrdinal, 1);
+    assert.equal(target.requestOrdinal, 0, "all successful recordings stay out of the parent app graph");
+  } finally { await target.close(); }
+});
+
+test("MIG-0639: RH-013 cold recording restores all 500-video/50000-member fixtures after warm seeding", async () => {
+  const plan = { adminToken: "cold-rh013-complete-fixture" };
+  const scenario = buildScenarios(plan).find((candidate) => candidate.id === "RH-013");
+  const target = await createInprocTarget(plan);
+  const expectedRows = [1, 500, 0, 50_000, 0, 0, 0, 0];
+  try {
+    const initial = scenario.kinds.normal(0, "warm-initial");
+    assert.equal(initial.setup.length, 3, "normal generation supplies its one-time event/video/member seed");
+    await target.exec(initial.setup);
+    const warm = await target.recordForReplay(initial);
+    assert.equal(warm.status, 200);
+    assert.deepEqual(warm.d1PerQueryRows, expectedRows);
+    const afterWarm = scenario.kinds.normal(1, "after-warm");
+    assert.deepEqual(afterWarm.setup, [], "the warm generator retains its seed-once behavior");
+    const first = await target.recordFirstRequest(afterWarm, scenario.prepareKind?.normal);
+    const afterFirstCold = scenario.kinds.normal(2, "after-first-cold");
+    assert.deepEqual(afterFirstCold.setup, []);
+    const second = await target.recordFirstRequest(afterFirstCold, scenario.prepareKind?.normal);
+    for (const cold of [first, second]) {
+      assert.equal(cold.status, 200, "each fresh application/DB must receive the complete scenario fixture after the parent is seeded");
+      assert.equal(cold.d1, 8);
+      assert.deepEqual(cold.d1PerQueryRows, expectedRows, "each cold must exercise 500 videos and 50,000 members, not an empty 404 path");
+      assert.equal(cold.coldRecorder.requestOrdinal, 1);
+    }
+    assert.notEqual(first.coldRecorder.threadId, second.coldRecorder.threadId);
+    assert.deepEqual(scenario.prepareKind.normal.coldSetup, initial.setup, "same SQL and counts, without a smaller cold workload");
+    assert.deepEqual(scenario.prepareKind.limit.coldSetup, initial.setup, "explicit first-limit diagnostics also retain the complete fixture");
+    assert.equal(first.coldRequest.path, afterWarm.path);
+    assert.equal(second.coldRequest.path, afterFirstCold.path);
+    assert.deepEqual(scenario.kinds.normal(3, "still-warm").setup, [], "cold recording never resets the parent seed flag");
+  } finally { await target.close(); }
 });
 
 test("percentile uses nearest rank on an ascending array", () => {
@@ -377,6 +549,35 @@ test("MIG-0639: generated cold worker seeds replay before its first fetch and co
     if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
     else globalThis.__flamenodeBenchIdentity = originalIdentity;
   }
+});
+
+test("MIG-0639: cold runner uses the isolated recorder fixture and identical serialized request", async () => {
+  const fixture = { r2Objects: { "selected.json": "selected fixture" } };
+  const spec = { method: "POST", path: "/cold", expect: [200], setup: [{ sql: "fixture SQL", params: [] }], body: "input", clearCache: true };
+  const coldRequest = { ...spec, body: new Uint8Array([105, 110, 112, 117, 116]), headers: [["content-type", "text/plain;charset=UTF-8"]] };
+  const record = { script: [], coldRequest, coldRecorder: { threadId: 123, requestOrdinal: 1 } };
+  let cacheCleared = 0;
+  const unexpected = async () => { throw new Error("warmed recorder/setup must not serve a cold replay"); };
+  const inproc = { exec: unexpected, setR2: unexpected, recordForReplay: unexpected,
+    recordFirstRequest: async (actualSpec, actualFixture) => {
+      assert.equal(cacheCleared, 1, "persistent Cache API data is cleared through the previous worker before recording");
+      assert.equal(actualSpec, spec);
+      assert.equal(actualFixture, fixture);
+      return record;
+    }, close: async () => {},
+  };
+  const wr = { cpuSource: "local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)", close: async () => {}, clearCache: async () => { cacheCleared += 1; },
+    runFirstRequest: async (actualSpec, actualRecord) => {
+      assert.equal(actualSpec, coldRequest);
+      assert.equal(actualRecord, record);
+      return { status: 200, cpuMs: 1, bytes: 2, isFirstIsolateRequest: true, requestOrdinal: 1 };
+    },
+  };
+  const samples = await runCold(createReplayTarget(inproc, wr), [{ id: "fixture", prepareKind: { normal: fixture }, kinds: { normal: () => spec } }], { coldSamples: 1 });
+  const result = samples.get("fixture")[0];
+  assert.equal(result.unexpected, false);
+  assert.deepEqual(result.coldRecorder, record.coldRecorder);
+  assert.deepEqual(aggregate([result], { runtimeClass: "S2", resolutionMs: 0.1 }).kinds.cold.coldStarts[0].recorder, record.coldRecorder);
 });
 
 test("MIG-0639: replay target preserves live workerd CPU profiler quantum", async () => {
@@ -1806,6 +2007,77 @@ test("MIG-0639: R2 HEAD records metadata/null without a GET and replays warm/col
   }
 });
 
+test("MIG-0639: recorded R2 PUT preserves JSON and binary bytes through GET/HEAD and strict replay", async () => {
+  const { app } = await import("../apps/api/src/app.ts");
+  const originalAppFetch = app.fetch, originalFetch = globalThis.fetch;
+  const originalIdentity = globalThis.__flamenodeBenchIdentity;
+  const target = await createInprocTarget({ adminToken: "r2-byte-fidelity" });
+  const probe = async (request, env) => {
+    const json = JSON.stringify({ message: "日本語🙂" });
+    await env.BUCKET.put("roundtrip.json", json);
+    const object = await env.BUCKET.get("roundtrip.json");
+    const jsonHead = await env.BUCKET.head("roundtrip.json");
+    const input = new Uint8Array([9, 0, 255, 128, 65, 0, 9]);
+    await env.BUCKET.put("binary", input.subarray(1, 6));
+    input.fill(7); // The provider must retain the bytes as written.
+    const binary = await env.BUCKET.get("binary");
+    const binaryHead = await env.BUCKET.head("binary");
+    await env.BUCKET.put("empty", "");
+    const empty = await env.BUCKET.get("empty");
+    return Response.json({
+      json: await object.json(), text: await object.text(), size: object.size, headSize: jsonHead.size,
+      jsonBytes: [...new Uint8Array(await object.arrayBuffer())],
+      binary: [...new Uint8Array(await binary.arrayBuffer())], binaryText: await binary.text(),
+      binarySize: binary.size, binaryHeadSize: binaryHead.size,
+      empty: { size: empty.size, text: await empty.text(), bytes: (await empty.arrayBuffer()).byteLength },
+    });
+  };
+  let observed;
+  app.fetch = async (...args) => {
+    const response = await probe(...args);
+    observed = await response.clone().json();
+    return response;
+  };
+  try {
+    const recorded = await target.recordForReplay({ method: "GET", path: "/r2-roundtrip" });
+    const expectedText = JSON.stringify({ message: "日本語🙂" });
+    assert.deepEqual(observed.json, { message: "日本語🙂" });
+    assert.equal(observed.text, expectedText);
+    assert.equal(observed.size, Buffer.byteLength(expectedText));
+    assert.equal(observed.headSize, observed.size);
+    assert.deepEqual(observed.jsonBytes, [...Buffer.from(expectedText)]);
+    assert.deepEqual(observed.binary, [0, 255, 128, 65, 0]);
+    assert.equal(observed.binaryText, new TextDecoder().decode(new Uint8Array([0, 255, 128, 65, 0])));
+    assert.equal(observed.binarySize, 5);
+    assert.equal(observed.binaryHeadSize, 5);
+    assert.deepEqual(observed.empty, { size: 0, text: "", bytes: 0 });
+    assert.equal(recorded.d1, 0);
+    assert.equal(recorded.script.find((entry) => entry.identity === replayIdentity(["r2.get", "roundtrip.json", []])).result.bodyBase64,
+      undefined, "existing UTF-8 GET transcript representation is retained");
+    for (const mode of ["warm", "cold"]) {
+      const worker = await loadReplayWorker(`r2-bytes-${mode}`, mode === "cold" ? recorded.script : null,
+        `return (${probe.toString()})(request, env);`);
+      if (mode === "warm") {
+        const registered = await worker.fetch(new Request("http://bench.local/__bench/script", {
+          method: "POST", body: JSON.stringify({ id: mode, script: recorded.script }),
+        }), {}, {});
+        assert.equal(registered.status, 200);
+      }
+      const response = await worker.fetch(new Request("http://bench.local/r2-roundtrip", {
+        headers: { "x-bench-script": mode },
+      }), {}, {});
+      assert.deepEqual(await response.json(), observed);
+      assert.equal(replayEvidenceMismatch(recorded, response.headers), false);
+    }
+  } finally {
+    app.fetch = originalAppFetch;
+    globalThis.fetch = originalFetch;
+    if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
+    else globalThis.__flamenodeBenchIdentity = originalIdentity;
+    await target.close();
+  }
+});
+
 test("MIG-0639: HEAD replay retains strict key/options/method/order identity and sticky caught failures", async () => {
   const originalFetch = globalThis.fetch, originalIdentity = globalThis.__flamenodeBenchIdentity;
   const entry = { identity: replayIdentity(["r2.head", "manifest", [{ onlyIf: { etagMatches: "A" } }]]), result: { size: 12, etag: "A" } };
@@ -2019,87 +2291,6 @@ test("MIG-0639: warm/cold samples reject body mismatches and cold requests reapp
   const cold = await runCold(target, scenarios, { coldSamples: 2 });
   assert.deepEqual(visited, ["A", "B", "A", "B"]);
   assert.ok([...cold.values()].flat().every((sample) => sample.unexpected));
-});
-
-test("MIG-0639: fresh cold recorder body transport preserves multipart, URL-encoded and byte bodies", async () => {
-  const form = new FormData();
-  form.append("title", "playlist proof");
-  form.append("file", new Blob(["fixture bytes"], { type: "text/plain" }), "proof.txt");
-  const restoredForm = decodeColdRecorderBody(structuredClone(encodeColdRecorderBody(form)));
-  assert.equal(restoredForm.get("title"), "playlist proof");
-  const originalFile = form.get("file");
-  const restoredFile = restoredForm.get("file");
-  assert.equal(restoredFile.name, originalFile.name);
-  assert.equal(restoredFile.type, originalFile.type);
-  assert.equal(restoredFile.lastModified, originalFile.lastModified);
-  assert.equal(await restoredFile.text(), "fixture bytes");
-
-  const params = new URLSearchParams([["mode", "one"], ["mode", "two"]]);
-  assert.deepEqual([...decodeColdRecorderBody(structuredClone(encodeColdRecorderBody(params))).entries()], [...params.entries()]);
-  const bytes = new Uint8Array([0, 1, 127, 255]);
-  assert.deepEqual([...decodeColdRecorderBody(structuredClone(encodeColdRecorderBody(bytes)))], [...bytes]);
-  assert.equal(decodeColdRecorderBody(encodeColdRecorderBody(undefined)), undefined);
-  assert.equal(decodeColdRecorderBody(encodeColdRecorderBody(null)), null);
-  assert.throws(() => encodeColdRecorderBody(new ReadableStream()), /unsupported cold recorder request body/);
-});
-
-test("MIG-0639: each cold replay recording gets a fresh app module graph and first-request input order", async () => {
-  const plan = { adminToken: "cold-module-isolation" };
-  const scenario = buildScenarios(plan, { includeEventPlaylist: true }).find((item) => item.id === "RH-031-PLAYLIST");
-  const spec = scenario.kinds.normal(0, "cold-module");
-  const fresh = await recordFreshInprocTarget(plan, spec, scenario.prepareKind.normal);
-  const target = await createInprocTarget(plan);
-  const { resetOperationModeCachesForTests } = await import("../apps/api/src/routes/live/operationMode.ts");
-  try {
-    const prepared = scenario.prepareKind.normal;
-    if (prepared.r2 !== undefined) await target.setR2(prepared.r2);
-    for (const [key, value] of Object.entries(prepared.r2Objects ?? {})) await target.setR2(value, key);
-    await target.exec(spec.setup);
-    resetOperationModeCachesForTests();
-    const first = await target.recordForReplay(spec);
-    const steady = await target.recordForReplay(spec);
-    const clockIdentity = replayIdentity(["input.Date.now", []]);
-    const clockCount = (recorded) => recorded.script.filter((entry) => entry.identity === clockIdentity).length;
-
-    assert.equal(fresh.status, 200);
-    assert.equal(first.status, 200);
-    assert.equal(steady.status, 200);
-    assert.equal(fresh.responseBodyMismatch, false);
-    assert.equal(first.responseBodyMismatch, false);
-    assert.equal(steady.responseBodyMismatch, false);
-    assert.equal(clockCount(fresh), 3, "fresh module graph captures the first-request operation-mode path");
-    assert.equal(clockCount(first), 3, "reset main graph reproduces the fresh first-request path");
-    assert.equal(clockCount(steady), 2, "the next request uses the steady module cache");
-    assert.equal(fresh.d1, first.d1);
-    assert.deepEqual(fresh.d1PerQueryRows, first.d1PerQueryRows);
-  } finally {
-    await target.close();
-  }
-});
-
-test("MIG-0639: runCold uses the fresh recorder hook and does not reuse the warm target setup", async () => {
-  const scenario = {
-    id: "COLD-HOOK",
-    prepareKind: { normal: { r2: "default-r2", r2Objects: { manifest: "fixture-A" } } },
-    kinds: { normal: () => ({ method: "GET", path: "/cold", setup: [{ sql: "fixture", params: [] }], marker: "A", expect: [200] }) },
-  };
-  const seen = [];
-  const target = {
-    async recordCold(spec, prepareKind) { seen.push({ spec, prepareKind }); return { script: [] }; },
-    async setR2() { throw new Error("warm target R2 must not seed fresh recorder"); },
-    async exec() { throw new Error("warm target D1 must not seed fresh recorder"); },
-    async record() { throw new Error("warm target recorder must not record cold"); },
-    async runFirstRequest() {
-      return { status: 200, cpuMs: 1, bytes: 1, d1: 0, d1RowsReturned: 0, d1PerQueryRows: [], isFirstIsolateRequest: true, requestOrdinal: 1 };
-    },
-  };
-  const cold = await runCold(target, [scenario], { coldSamples: 2 });
-  assert.equal(seen.length, 2);
-  assert.ok(seen.every((entry) => entry.spec.marker === "A"));
-  assert.ok(seen.every((entry) => entry.prepareKind.r2 === "default-r2"));
-  assert.ok(seen.every((entry) => entry.prepareKind.r2Objects.manifest === "fixture-A"));
-  assert.ok(seen.every((entry) => entry.spec.setup[0].sql === "fixture"));
-  assert.ok([...cold.values()].flat().every((sample) => !sample.unexpected));
 });
 
 test("MIG-0639: ordered GET/playlist/HEAD replay preserves changed or missing ETags for a fail-closed consumer", async () => {

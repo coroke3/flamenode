@@ -27,7 +27,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Worker } from "node:worker_threads";
+import { isMainThread, parentPort, threadId, Worker, workerData } from "node:worker_threads";
 
 // ---------------------------------------------------------------- pure logic
 export const BUDGETS_MS = Object.freeze({ S2: 7, S3: 8, S4: 2 });
@@ -130,6 +130,7 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
       coldStarts: kind === "cold" ? rows.map((r) => ({
         generation: r.coldGeneration ?? null, processId: r.coldProcessId ?? null,
         requestOrdinal: r.requestOrdinal ?? null, verified: r.isFirstIsolateRequest === true,
+        recorder: r.coldRecorder ?? null,
       })) : undefined,
       maxBytes: rows.reduce((m, r) => Math.max(m, r.bytes ?? 0), 0),
       maxD1Statements: rows.reduce((m, r) => Math.max(m, r.d1 ?? 0), 0),
@@ -341,6 +342,11 @@ const rh013Ip = () => { rh013IpSeq += 1; return { "cf-connecting-ip": `10.13.${(
 function rh013Seed() {
   if (rh013Seeded) return [];
   rh013Seeded = true;
+  return rh013Fixture();
+}
+
+/** Complete fixture for a new database, independent of the parent seed flag. */
+function rh013Fixture() {
   return [
     { sql: `INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, max_slots_per_video, public_api_enabled) VALUES (?, 'bench export event', 'event', 'public', 1000, 2000, 10, 20, 1, 1)`, params: [RH013_EVENT_ID] },
     {
@@ -481,6 +487,12 @@ export function buildScenarios(ctx, { includePending = false, includeEventPlayli
       // cache would otherwise turn warm samples into cheap hits). Seeding is idempotent and
       // done once per target through a single recursive-CTE statement per table.
       id: "RH-013", title: "GET /api/event-endpoints/:id (500 videos x 100 members)", runtimeClass: "S2",
+      // Warm requests reuse their database and the seed-once generator below.
+      // Each cold recorder has a fresh DB and needs all three unchanged seeds.
+      prepareKind: {
+        normal: { coldSetup: rh013Fixture() },
+        limit: { coldSetup: rh013Fixture() },
+      },
       // Warm-path measurements are separate from the scheduled full-rebuild control.
       warmModes: {
         "scheduled-warm": { path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=scheduled&refresh=15`, expectCache: "HIT", verifyBodyReuse: true },
@@ -1551,6 +1563,103 @@ async function withInprocRequest(action) {
   } finally { activeInprocRequest = null; }
 }
 
+/** Preserve module-loading flags without inheriting parent-only eval/input modes. */
+function coldRecorderExecArgv() {
+  const args = process.execArgv;
+  const result = [];
+  const withValue = new Set(["--import", "--loader", "--experimental-loader", "--require", "-r", "--conditions"]);
+  const flags = new Set([
+    "--experimental-strip-types", "--experimental-transform-types",
+    "--enable-source-maps", "--preserve-symlinks", "--preserve-symlinks-main",
+  ]);
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (withValue.has(arg)) {
+      if (args[i + 1] !== undefined) result.push(arg, args[++i]);
+    } else if (
+      flags.has(arg) ||
+      /^--(?:import|loader|experimental-loader|require|conditions)=/.test(arg)
+    ) {
+      result.push(arg);
+    }
+  }
+  return result;
+}
+
+/**
+ * A new SQLite handle in the parent would still share imported application
+ * caches. One short-lived Node worker gives each cold recording a fresh module
+ * graph and the same explicit seed/setup/R2 fixture, before workerd starts.
+ * Serialize the request once so multipart boundaries and body bytes also match
+ * the measured request. None of this setup is included in request profiling.
+ */
+async function recordFreshColdRequest(plan, spec, fixture) {
+  const request = new Request(`http://bench.local${spec.path}`, {
+    method: spec.method, headers: spec.headers, body: spec.body,
+  });
+  const coldRequest = {
+    ...spec, headers: [...request.headers],
+    body: request.body == null ? undefined : new Uint8Array(await request.arrayBuffer()),
+  };
+  const worker = new Worker(new URL(import.meta.url), {
+    workerData: { kind: "flamenode-cold-recorder", plan, spec: coldRequest, fixture },
+    execArgv: coldRecorderExecArgv(),
+  });
+  const expectedThreadId = worker.threadId;
+  let exited = false, timeout;
+  try {
+    return await new Promise((resolve, reject) => {
+      let received;
+      timeout = setTimeout(() => reject(new Error("bench cold recorder timed out")), 30_000);
+      worker.on("message", (message) => { received = message; });
+      worker.once("error", reject);
+      worker.once("exit", (code) => {
+        exited = true;
+        if (code !== 0 || !received?.ok) {
+          reject(new Error(`bench cold recorder failed: ${received?.error ?? `exit ${code}`}`));
+          return;
+        }
+        const record = received.record;
+        if (record?.coldRecorder?.threadId !== expectedThreadId || record.coldRecorder.requestOrdinal !== 1) {
+          reject(new Error("bench cold recorder first-request proof missing"));
+          return;
+        }
+        resolve({ ...record, coldRequest });
+      });
+    });
+  } finally {
+    clearTimeout(timeout);
+    // Do not leave a recorder alive while the next worker is measured, even
+    // after a thrown setup/dispatch, a timeout or an abnormal worker exit.
+    if (!exited) await worker.terminate();
+  }
+}
+
+async function runColdRecorderWorker() {
+  let target;
+  try {
+    target = await createInprocTarget(workerData.plan);
+    const { fixture, spec } = workerData;
+    if (fixture?.r2 !== undefined) await target.setR2(fixture.r2);
+    for (const [key, body] of Object.entries(fixture?.r2Objects ?? {})) await target.setR2(body, key);
+    // A scenario may omit its already-applied warm seed from later specs.
+    // coldSetup is its complete replacement for the new recorder database.
+    const setup = fixture?.coldSetup ?? spec.setup;
+    if (setup) await target.exec(setup);
+    const record = await target.recordForReplay(spec);
+    if (target.requestOrdinal !== 1) throw new Error("bench cold recorder was already used");
+    record.coldRecorder = { threadId, requestOrdinal: target.requestOrdinal };
+    await target.close();
+    target = null;
+    parentPort.postMessage({ ok: true, record });
+  } catch (error) {
+    parentPort.postMessage({ ok: false, error: error?.message ?? "unknown recorder error" });
+  } finally {
+    if (target) await target.close();
+    parentPort.close();
+  }
+}
+
 // ------------------------------------------------------------ target: inproc
 export async function createInprocTarget(plan) {
   const { DatabaseSync } = await import("node:sqlite");
@@ -1562,6 +1671,7 @@ export async function createInprocTarget(plan) {
   fs.rmSync(mig.workspace, { recursive: true, force: true });
 
   let stmts = 0;
+  let requestOrdinal = 0;
   let d1RowsReturned = 0;
   let d1PerQueryRows = [];
   const countD1 = (mode, value) => {
@@ -1632,10 +1742,20 @@ export async function createInprocTarget(plan) {
     },
   };
   const r2Objects = new Map();
-  const r2Metadata = (body) => ({ size: Buffer.byteLength(body), etag: BENCH_ETAG });
+  // Store detached bytes, like R2. Base64 is a transcript transport format,
+  // never the object's text or its byte length after a PUT.
+  const r2Bytes = (value) => {
+    if (typeof value === "string") return Buffer.from(value);
+    if (value instanceof ArrayBuffer) return Buffer.from(new Uint8Array(value));
+    if (ArrayBuffer.isView(value)) {
+      return Buffer.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    }
+    throw new Error("bench unsupported R2 body");
+  };
+  const r2Metadata = (body) => ({ size: body.byteLength, etag: BENCH_ETAG });
   const bucket = {
     put: async (key, value, ...args) => trace("r2.put", [key, value, args], () => {
-      r2Objects.set(key, Buffer.from(value).toString("base64"));
+      r2Objects.set(key, r2Bytes(value));
       return { etag: BENCH_ETAG };
     }),
     delete: async (key, ...args) => trace("r2.delete", [key, args], () => {
@@ -1651,13 +1771,20 @@ export async function createInprocTarget(plan) {
         const body = r2Objects.get(key);
         if (body == null) return null;
         const metadata = r2Metadata(body);
-        return { size: metadata.size, text: body, etag: metadata.etag };
+        const text = body.toString("utf8");
+        // Keep the existing JSON/text transcript shape. Invalid UTF-8 needs
+        // lossless bytes as well, because text() intentionally decodes it.
+        const binary = body.equals(Buffer.from(text)) ? {} : { bodyBase64: body.toString("base64") };
+        return { size: metadata.size, text, etag: metadata.etag, ...binary };
       });
       return value && {
         size: value.size,
         etag: value.etag,
         json: async () => JSON.parse(value.text),
         text: async () => value.text,
+        arrayBuffer: async () => Uint8Array.from(Buffer.from(
+          value.bodyBase64 ?? value.text, value.bodyBase64 == null ? "utf8" : "base64",
+        )).buffer,
         body: null,
       };
     },
@@ -1674,6 +1801,7 @@ export async function createInprocTarget(plan) {
   await exec(SEED(plan.adminToken));
 
   const fetchOnce = async (spec) => {
+    requestOrdinal += 1;
     const url = `http://bench.local${spec.path}`;
     stmts = 0;
     d1RowsReturned = 0;
@@ -1711,13 +1839,14 @@ export async function createInprocTarget(plan) {
 
   return {
     name: "inproc",
+    get requestOrdinal() { return requestOrdinal; },
     resolutionMs: 0.001,
     digits: 3,
     cpuSource: "performance.now() wall delta around app.fetch (Node/V8, node:sqlite as D1 plus result normalization/counting; WALL-TIME PROXY, not workerd CPU)",
     supportsCold: false,
     setR2: async (body, key = STATS_KEY) => {
       assertInprocIdle();
-      if (body == null) r2Objects.delete(key); else r2Objects.set(key, body);
+      if (body == null) r2Objects.delete(key); else r2Objects.set(key, r2Bytes(body));
     },
     exec,
     record: async () => null,
@@ -1735,191 +1864,9 @@ export async function createInprocTarget(plan) {
         recInvalid = false;
       }
     }),
+    recordFirstRequest: (spec, fixture) => withInprocRequest(() => recordFreshColdRequest(plan, spec, fixture)),
     close: async () => { assertInprocIdle(); sqlite.close(); },
   };
-}
-
-/**
- * Preserve request bodies across the fresh Node recorder worker. FormData itself
- * is not relied on as a structured-clone type; each entry is copied explicitly.
- * Unsupported streams fail closed instead of silently changing the request.
- */
-export function encodeColdRecorderBody(body) {
-  if (body === undefined) return { kind: "undefined" };
-  if (body === null || typeof body === "string") return { kind: "scalar", value: body };
-  if (typeof FormData === "function" && body instanceof FormData) {
-    return {
-      kind: "form-data",
-      entries: [...body.entries()].map(([name, value]) => typeof value === "string"
-        ? { name, kind: "text", value }
-        : {
-          name, kind: "file", value,
-          filename: typeof value.name === "string" ? value.name : "blob",
-          type: value.type || "",
-          lastModified: Number.isSafeInteger(value.lastModified) ? value.lastModified : 0,
-        }),
-    };
-  }
-  if (typeof URLSearchParams === "function" && body instanceof URLSearchParams) {
-    return { kind: "url-search-params", value: body.toString() };
-  }
-  if (typeof Blob === "function" && body instanceof Blob) {
-    return {
-      kind: "blob", value: body,
-      filename: typeof body.name === "string" ? body.name : null,
-      type: body.type || "",
-      lastModified: Number.isSafeInteger(body.lastModified) ? body.lastModified : 0,
-    };
-  }
-  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
-    const bytes = body instanceof ArrayBuffer
-      ? new Uint8Array(body)
-      : new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-    return { kind: "bytes", value: Uint8Array.from(bytes) };
-  }
-  throw new Error("bench unsupported cold recorder request body");
-}
-
-export function decodeColdRecorderBody(encoded) {
-  if (!encoded || typeof encoded.kind !== "string") throw new Error("bench invalid cold recorder body");
-  switch (encoded.kind) {
-    case "undefined": return undefined;
-    case "scalar": return encoded.value;
-    case "url-search-params": return new URLSearchParams(encoded.value);
-    case "bytes": return Uint8Array.from(encoded.value);
-    case "blob":
-      if (encoded.filename !== null && typeof File === "function") {
-        return new File([encoded.value], encoded.filename, {
-          type: encoded.type, lastModified: encoded.lastModified,
-        });
-      }
-      return encoded.value;
-    case "form-data": {
-      const form = new FormData();
-      for (const entry of encoded.entries) {
-        if (entry.kind === "text") {
-          form.append(entry.name, entry.value);
-        } else if (entry.kind === "file") {
-          const file = typeof File === "function"
-            ? new File([entry.value], entry.filename, {
-              type: entry.type, lastModified: entry.lastModified,
-            })
-            : entry.value;
-          form.append(entry.name, file, entry.filename);
-        } else {
-          throw new Error("bench invalid cold recorder form entry");
-        }
-      }
-      return form;
-    }
-    default: throw new Error("bench unsupported cold recorder body kind");
-  }
-}
-
-function coldRecorderExecArgv() {
-  const args = process.execArgv;
-  const result = [];
-  const withValue = new Set(["--import", "--loader", "--experimental-loader", "--require", "-r", "--conditions"]);
-  const flags = new Set([
-    "--experimental-strip-types", "--experimental-transform-types",
-    "--enable-source-maps", "--preserve-symlinks", "--preserve-symlinks-main",
-  ]);
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    if (withValue.has(arg)) {
-      if (args[i + 1] !== undefined) result.push(arg, args[++i]);
-    } else if (
-      flags.has(arg) ||
-      /^--(?:import|loader|experimental-loader|require|conditions)=/.test(arg)
-    ) {
-      result.push(arg);
-    }
-  }
-  return result;
-}
-
-/**
- * Record one cold replay input in a fresh Node worker-thread module graph.
- * A new SQLite target alone is insufficient: imported Hono modules retain
- * module-level caches in the parent process. The worker mirrors fresh isolate
- * initialization, seeds the selected fixture, then records the first request.
- */
-export async function recordFreshInprocTarget(plan, spec, prepareKind = {}) {
-  if (!plan || typeof plan.adminToken !== "string" || !plan.adminToken) {
-    throw new Error("bench cold recorder requires a synthetic admin token");
-  }
-  const hasBody = Object.hasOwn(spec, "body");
-  const body = hasBody ? encodeColdRecorderBody(spec.body) : null;
-  const workerSpec = { ...spec };
-  delete workerSpec.body;
-  const workerData = {
-    moduleUrl: import.meta.url,
-    adminToken: plan.adminToken,
-    spec: workerSpec,
-    hasBody,
-    body,
-    prepareKind: {
-      hasR2: prepareKind?.r2 !== undefined,
-      r2: prepareKind?.r2,
-      r2Objects: prepareKind?.r2Objects ?? {},
-    },
-  };
-  const source = [
-    'const { parentPort, workerData } = require("node:worker_threads");',
-    'process.argv[1] = "__flamenode_cold_recorder_worker__";',
-    '(async () => {',
-    '  let target = null;',
-    '  try {',
-    '    const mod = await import(workerData.moduleUrl);',
-    '    target = await mod.createInprocTarget({ adminToken: workerData.adminToken });',
-    '    const prepared = workerData.prepareKind;',
-    '    if (prepared.hasR2) await target.setR2(prepared.r2);',
-    '    for (const [key, value] of Object.entries(prepared.r2Objects)) await target.setR2(value, key);',
-    '    if (Array.isArray(workerData.spec.setup) && workerData.spec.setup.length) await target.exec(workerData.spec.setup);',
-    '    const spec = { ...workerData.spec };',
-    '    if (workerData.hasBody) spec.body = mod.decodeColdRecorderBody(workerData.body);',
-    '    const recorded = await target.recordForReplay(spec);',
-    '    await target.close();',
-    '    target = null;',
-    '    parentPort.postMessage({ ok: true, recorded });',
-    '  } catch (error) {',
-    '    try { await target?.close(); } catch {}',
-    '    parentPort.postMessage({ ok: false, message: error instanceof Error ? error.message : "cold recorder failed" });',
-    '  } finally {',
-    '    parentPort.close();',
-    '  }',
-    '})();',
-  ].join("\n");
-  const worker = new Worker(source, {
-    eval: true,
-    workerData,
-    execArgv: coldRecorderExecArgv(),
-  });
-  let payload;
-  try {
-    payload = await new Promise((resolve, reject) => {
-      let message;
-      let gotMessage = false;
-      let gotExit = false;
-      let exitCode = null;
-      const finish = () => {
-        if (!gotExit) return;
-        if (exitCode !== 0) return reject(new Error("bench cold recorder worker exited " + exitCode));
-        if (!gotMessage) return reject(new Error("bench cold recorder worker exited without receipt"));
-        resolve(message);
-      };
-      worker.once("message", (value) => { message = value; gotMessage = true; finish(); });
-      worker.once("error", reject);
-      worker.once("exit", (code) => { gotExit = true; exitCode = code; finish(); });
-    });
-  } catch (error) {
-    try { await worker.terminate(); } catch {}
-    throw error;
-  }
-  if (!payload || payload.ok !== true) {
-    throw new Error(payload?.message || "bench cold recorder failed");
-  }
-  return payload.recorded;
 }
 
 // ---------------------------------------------------------- target: wrangler
@@ -2040,6 +1987,9 @@ function replayEnv(env, script) {
           etag: value.etag,
           json: async () => JSON.parse(value.text),
           text: async () => value.text,
+          arrayBuffer: async () => value.bodyBase64 == null
+            ? new TextEncoder().encode(value.text).buffer
+            : Uint8Array.from(atob(value.bodyBase64), (char) => char.charCodeAt(0)).buffer,
           body: null,
         };
       },
@@ -2544,49 +2494,49 @@ export async function runCold(target, scenarios, opts) {
     for (const sc of live) {
       const pk = sc.prepareKind?.normal;
       const spec = sc.kinds.normal(round, tag(`c${sc.id.replace(/[^A-Za-z0-9]/g, "")}`, round));
+      // Cache API storage can survive the measured process restart. Clear it
+      // through the old worker before recording/starting its fresh replacement.
+      if (spec.clearCache) await target.clearCache?.();
       let rec;
-      if (typeof target.recordCold === "function") {
-        // Replay mode records in a fresh Node module graph as well as measuring
-        // in a fresh workerd process. Reusing the warm parent graph changes
-        // module-level first-request inputs such as operation-mode Date.now calls.
-        if (spec.clearCache) await target.clearCache?.();
-        rec = await target.recordCold(spec, pk);
+      if (target.recordFirstRequest) {
+        rec = await target.recordFirstRequest(spec, pk);
       } else {
         if (pk?.r2 !== undefined) await target.setR2(pk.r2);
         for (const [key, body] of Object.entries(pk?.r2Objects ?? {})) await target.setR2(body, key);
         if (spec.setup) await target.exec(spec.setup);
-        if (spec.clearCache) await target.clearCache?.();
         rec = await target.record(spec);
       }
+      const measuredSpec = rec?.coldRequest ?? spec;
       const r = target.runFirstRequest
-        ? await target.runFirstRequest(spec, rec)
-        : (await target.reload(), await target.run(spec, rec));
+        ? await target.runFirstRequest(measuredSpec, rec)
+        : (await target.reload(), await target.run(measuredSpec, rec));
       coldSamples.get(sc.id).push({ kind: "cold",
         isFirstIsolateRequest: Boolean(target.runFirstRequest) && r.isFirstIsolateRequest === true,
         coldGeneration: r.coldGeneration ?? null, coldProcessId: r.coldProcessId ?? null,
+        coldRecorder: rec?.coldRecorder ?? null,
         requestOrdinal: r.requestOrdinal ?? null,
         cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows,
         unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || r.responseBodyMismatch === true || (spec.expectPlaylist != null && r.responseBodyMismatch !== false) });
     }
-    process.stderr.write("cold round " + (round + 1) + "/" + opts.coldSamples + "\r");
+    process.stderr.write(`cold round ${round + 1}/${opts.coldSamples}\r`);
   }
   process.stderr.write("\n");
   return coldSamples;
 }
 
 /** Replay: setup/record on the in-process sqlite, measure on workerd with D1/R2 stubbed. */
-export function createReplayTarget(inproc, wr, plan = null) {
+export function createReplayTarget(inproc, wr) {
   return {
     ...wr,
     // Object spread evaluates a getter into a fixed value. The V8 sampling
     // quantum can grow from 0.1ms to several ms while requests run; keep the
     // *live* workerd resolution so warm BASELINE and budget checks fail closed.
     get resolutionMs() { return wr.resolutionMs; },
-    cpuSource: wr.cpuSource.replace("local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)", "D1/R2 stubbed with normalized results recorded from in-process node:sqlite (--d1 replay); request profiling includes app code, retained native UUID/Date.now calls, input-hook/transcript and replay identity/row/count bookkeeping; Node recording (including the fresh-module cold recorder worker) and warm registration excluded; cold JSON parsing/validation runs at module initialization and may precede profiling; local D1/R2 simulator and real D1 round-trip excluded"),
+    cpuSource: wr.cpuSource.replace("local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim)", "D1/R2 stubbed with normalized results recorded from in-process node:sqlite (--d1 replay); request profiling includes app code, retained native UUID/Date.now calls, input-hook/transcript and replay identity/row/count bookkeeping; Node recording and warm registration excluded; cold JSON parsing/validation runs at module initialization and may precede profiling; local D1/R2 simulator and real D1 round-trip excluded"),
     exec: inproc.exec,
     setR2: inproc.setR2,
     record: (spec) => inproc.recordForReplay(spec),
-    recordCold: plan ? (spec, prepareKind) => recordFreshInprocTarget(plan, spec, prepareKind) : undefined,
+    recordFirstRequest: inproc.recordFirstRequest,
     close: async () => { await wr.close(); await inproc.close(); },
   };
 }
@@ -2610,7 +2560,7 @@ export async function main(argv) {
   let target;
   if (opts.mode === "inproc") target = await createInprocTarget(plan);
   else if (opts.d1 === "sim") target = await createWranglerTarget(plan, opts);
-  else target = createReplayTarget(await createInprocTarget(plan), await createWranglerTarget(plan, opts), plan);
+  else target = createReplayTarget(await createInprocTarget(plan), await createWranglerTarget(plan, opts));
   const startedAt = new Date().toISOString();
   const results = [];
   let baselineEvidence = null;
@@ -2663,6 +2613,8 @@ export async function main(argv) {
   }
 }
 
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+if (!isMainThread && workerData?.kind === "flamenode-cold-recorder") {
+  await runColdRecorderWorker();
+} else if (isMainThread && process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   main(process.argv.slice(2)).catch((e) => { console.error(e.message ?? e); process.exit(1); });
 }
