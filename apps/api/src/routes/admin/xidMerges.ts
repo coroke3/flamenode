@@ -238,46 +238,85 @@ LIMIT 2`;
 
 type RevertRequestPairRow = MergeRequestRow & { row_kind: "request" | "parent" };
 
+function unavailableReceipt(): Error {
+  return new Error("x_identity_receipt_unavailable");
+}
+
+function ownReceiptValue(candidate: unknown, key: PropertyKey): unknown {
+  if (!candidate || typeof candidate !== "object") throw unavailableReceipt();
+  const field = Object.getOwnPropertyDescriptor(candidate, key);
+  if (!field || !Object.hasOwn(field, "value")) throw unavailableReceipt();
+  return field.value;
+}
+
+function snapshotReceiptRows(result: unknown): unknown[] {
+  if (ownReceiptValue(result, "success") !== true) throw unavailableReceipt();
+  const rows = ownReceiptValue(result, "results");
+  if (!Array.isArray(rows)) throw unavailableReceipt();
+  const length = ownReceiptValue(rows, "length");
+  if (typeof length !== "number" || !Number.isInteger(length) || length < 0 || length > 2) {
+    throw unavailableReceipt();
+  }
+  // No iteration or indexed access on untrusted provider arrays.
+  const copy: unknown[] = [];
+  for (let i = 0; i < length; i++) copy.push(ownReceiptValue(rows, String(i)));
+  return copy;
+}
+
+function snapshotXIdentityRequestRow(candidate: unknown): MergeRequestRow {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    throw unavailableReceipt();
+  }
+  // Project only SQL-selected scalar fields, preserving legacy scalar values.
+  const entries = X_IDENTITY_REQUEST_COLUMNS.map((column) => {
+    const value = ownReceiptValue(candidate, column);
+    if (value !== null && typeof value !== "string" && typeof value !== "number") {
+      throw unavailableReceipt();
+    }
+    return [column, value] as const;
+  });
+  const row = Object.fromEntries(entries) as MergeRequestRow;
+  if (typeof row.id !== "string") throw unavailableReceipt();
+  return row;
+}
+
 function snapshotRevertRequestPair(
-  result: { success: boolean; results: unknown[] },
+  result: unknown,
   id: string,
 ): { request: MergeRequestRow | null; parentRequest: MergeRequestRow | null } {
-  const unavailable = () => new Error("revert_request_pair_unavailable");
-  if (!result || result.success !== true) throw unavailable();
-  const rows = result.results;
-  if (!Array.isArray(rows) || rows.length > 2) throw unavailable();
-
-  // SQL projects exactly these columns. Copy only own scalar data values,
-  // never invoke row getters or let extra adapter properties enter audit/CAS.
-  // Preserve legacy scalar values as-is; CURRENT's domain checks still decide
-  // request shape, deadline, status and snapshot semantics.
   let request: MergeRequestRow | null = null;
   let parentRequest: MergeRequestRow | null = null;
-  for (const candidate of rows) {
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-      throw unavailable();
-    }
-    const kind = Object.getOwnPropertyDescriptor(candidate, "row_kind");
-    if (!kind || !Object.hasOwn(kind, "value")) throw unavailable();
-    const entries = X_IDENTITY_REQUEST_COLUMNS.map((column) => {
-      const field = Object.getOwnPropertyDescriptor(candidate, column);
-      if (!field || !Object.hasOwn(field, "value")) throw unavailable();
-      const value: unknown = field.value;
-      if (value !== null && typeof value !== "string" && typeof value !== "number") {
-        throw unavailable();
-      }
-      return [column, value] as const;
-    });
-    const row = Object.fromEntries(entries) as MergeRequestRow;
-    if (typeof row.id !== "string") throw unavailable();
-    if (kind.value === "request" && request === null && row.id === id) request = row;
-    else if (kind.value === "parent" && parentRequest === null) parentRequest = row;
-    else throw unavailable();
+  for (const candidate of snapshotReceiptRows(result)) {
+    const kind = ownReceiptValue(candidate, "row_kind");
+    const row = snapshotXIdentityRequestRow(candidate);
+    if (kind === "request" && request === null && row.id === id) request = row;
+    else if (kind === "parent" && parentRequest === null) parentRequest = row;
+    else throw unavailableReceipt();
   }
   if (parentRequest && (!request || parentRequest.id !== request.parent_request_id)) {
-    throw unavailable();
+    throw unavailableReceipt();
   }
   return { request, parentRequest };
+}
+
+function snapshotSingleRequest(candidate: unknown, id: string): MergeRequestRow | null {
+  if (candidate === null) return null;
+  const row = snapshotXIdentityRequestRow(candidate);
+  if (row.id !== id) throw unavailableReceipt();
+  return row;
+}
+
+function snapshotXIdentityIds(result: unknown, source: string, target: string): Set<string> {
+  const ids = new Set<string>();
+  for (const candidate of snapshotReceiptRows(result)) {
+    if (Array.isArray(candidate)) throw unavailableReceipt();
+    const id = ownReceiptValue(candidate, "id");
+    if (typeof id !== "string" || (id !== source && id !== target) || ids.has(id)) {
+      throw unavailableReceipt();
+    }
+    ids.add(id);
+  }
+  return ids;
 }
 
 async function loadRevertRequestPair(
@@ -301,7 +340,7 @@ async function loadXIdentityRequest(
     .prepare(X_IDENTITY_REQUEST_SELECT_SQL)
     .bind(id)
     .first<MergeRequestRow>();
-  return row ?? null;
+  return snapshotSingleRequest(row, id);
 }
 
 async function handleRequestDecision(
@@ -425,7 +464,7 @@ adminXIdMergeRoutes.post("/", async (c) => {
     .prepare("SELECT id FROM x_users WHERE id IN (?, ?) LIMIT 2")
     .bind(sourceXUserId, targetXUserId)
     .all<{ id: string }>();
-  const existingIds = new Set((existingResult.results ?? []).map((row) => row.id));
+  const existingIds = snapshotXIdentityIds(existingResult, sourceXUserId, targetXUserId);
   if (!existingIds.has(sourceXUserId)) {
     return fail(c, 404, `統合元 @${sourceXUserId} が見つかりません。`);
   }

@@ -691,6 +691,10 @@ if (runUnderRootTsx(import.meta.url)) {
       (r) => ({ ...r, success: false }),
       (r) => ({ ...r, success: 1 }),
       (r) => ({ results: r.results }),
+      (r) => Object.defineProperty({ ...r }, "success", { get() { getterCalls += 1; throw new Error("PAIR_CANARY"); } }),
+      (r) => Object.defineProperty({ ...r }, "results", { get() { getterCalls += 1; throw new Error("PAIR_CANARY"); } }),
+      (r) => ({ ...r, results: Object.defineProperty([...r.results], "0", { get() { getterCalls += 1; throw new Error("PAIR_CANARY"); } }) }),
+      (r) => ({ ...r, results: new Array(2) }),
       (r) => ({ ...r, results: null }),
       (r, child, parent) => ({ ...r, results: [child, parent, child] }),
       (r, child) => ({ ...r, results: [child, child] }),
@@ -769,6 +773,101 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(healthy.status, 400);
       assert.equal(healthy.body.message, "親統合申請に差し戻し用snapshotがありません。");
       assert.deepEqual(state(), before);
+    } finally {
+      side.d1.prepare = originalPrepare;
+      side.sqlite.close();
+    }
+  });
+
+  test("MIG-0644: single request and X identity receipts reject malformed provider data", async () => {
+    const side = createSide();
+    seedMergeScenario(side.sqlite);
+    const originalPrepare = side.d1.prepare;
+    let getterCalls = 0;
+    const getter = (object, key) => Object.defineProperty(object, key, {
+      get() { getterCalls += 1; throw new Error("RECEIPT_PRIVATE_CANARY"); },
+    });
+    try {
+      const createBody = { from_x_user_id: "src_x", to_x_user_id: "tgt_x" };
+      const created = await callHono(side, "", createBody);
+      assert.equal(created.status, 200);
+      const id = created.body.id;
+      const state = () => ({
+        requests: side.sqlite.prepare("SELECT * FROM x_identity_requests ORDER BY id").all(),
+        audits: side.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,
+        bucket: [...side.bucket.store.entries()],
+        wakes: [...side.queueWakes],
+        writes: side.d1.stats.writes,
+        batches: side.d1.stats.batches,
+      });
+      const before = state();
+      const singleFaults = [
+        () => undefined,
+        row => ({ ...row, id: "different-request" }),
+        row => Object.create(row),
+        row => { const { restore_snapshot_json, ...partial } = row; return partial; },
+        row => ({ ...row, status: { invalid: true } }),
+        row => getter({ ...row }, "restore_snapshot_json"),
+      ];
+      const allFaults = [
+        r => ({ ...r, success: false }),
+        r => getter({ ...r }, "success"),
+        r => getter({ ...r }, "results"),
+        r => Object.create(r),
+        r => ({ ...r, results: [r.results[0], r.results[0]] }),
+        r => ({ ...r, results: [{ id: "unexpected" }, r.results[1]] }),
+        r => ({ ...r, results: [getter({ ...r.results[0] }, "id"), r.results[1]] }),
+        r => ({ ...r, results: getter([...r.results], "0") }),
+        r => ({ ...r, results: new Array(2) }),
+      ];
+      for (const [method, sqlPrefix, path, body, faults] of [
+        ["all", "SELECT id FROM x_users WHERE id IN", "", createBody, allFaults],
+        ["first", "SELECT id, request_type, requested_by_auth_user_id", "/" + id + "/approve", {}, singleFaults],
+        ["first", "SELECT id, request_type, requested_by_auth_user_id", "/" + id + "/execute", { confirm: "MERGE" }, singleFaults],
+      ]) {
+        for (const fault of faults) {
+          let attempts = 0;
+          side.d1.prepare = sqlText => {
+            const prepared = originalPrepare(sqlText);
+            if (!sqlText.startsWith(sqlPrefix)) return prepared;
+            return {
+              ...prepared,
+              bind(...params) {
+                const bound = prepared.bind(...params);
+                return {
+                  ...bound,
+                  async [method]() {
+                    const result = await bound[method]();
+                    attempts += 1;
+                    assert.ok(result);
+                    return fault(result);
+                  },
+                };
+              },
+            };
+          };
+          const reads = side.d1.stats.reads;
+          const response = await callHono(side, path, body);
+          assert.equal(attempts, 1);
+          assert.equal(response.status, 503);
+          assert.equal(response.headers.get("cache-control"), "private, no-store");
+          assert.deepEqual(response.body, {
+            ok: false, message: "管理操作を処理できませんでした。再度お試しください。",
+          });
+          assert.equal(side.d1.stats.reads - reads, 4);
+          assert.deepEqual(state(), before);
+        }
+      }
+      assert.equal(getterCalls, 0);
+      side.d1.prepare = originalPrepare;
+      const missing = await callHono(side, "/missing/approve", {});
+      assert.equal(missing.status, 404);
+      const missingX = await callHono(side, "", { ...createBody, to_x_user_id: "missing_x" });
+      assert.equal(missingX.status, 404);
+      assert.deepEqual(state(), before);
+      const approved = await callHono(side, "/" + id + "/approve", {});
+      assert.equal(approved.status, 200);
+      assert.equal(side.sqlite.prepare("SELECT status FROM x_identity_requests WHERE id=?").get(id).status, "approved");
     } finally {
       side.d1.prepare = originalPrepare;
       side.sqlite.close();
