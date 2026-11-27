@@ -60,3 +60,423 @@ test("HTML clipboard fallback does not double-decode escaped entities", () => {
     ["&#128640;", "&#x1F680;", "&lt;", "&amp;", "🚀"],
   ]);
 });
+
+test("HTML clipboard fallback preserves HTML cell line breaks, including attributed br tags", () => {
+  const html = '<table><tr><td>first<br>second</td><td>A<br class="line-break" />B</td></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(html), [["first\nsecond", "A\nB"]]);
+  assert.deepEqual(parseClipboardContent("", html), [["first\nsecond", "A\nB"]]);
+});
+
+test("HTML clipboard DOMParser path preserves br text separators inside nested formatting", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  const text = (nodeValue) => ({ nodeType: 3, nodeValue });
+  const element = (tagName, childNodes) => ({ nodeType: 1, tagName, childNodes });
+  const cell = element("TD", [
+    text("first"),
+    element("BR", []),
+    element("STRONG", [text("second\u00a0line")]),
+  ]);
+  try {
+    Object.defineProperty(globalThis, "DOMParser", {
+      configurable: true,
+      value: class DOMParserStub {
+        parseFromString() {
+          return {
+            querySelector: (selector) => selector === "table" ? {
+              querySelector: () => null,
+              querySelectorAll: (name) => name === "tr" ? [{
+                querySelectorAll: (cells) => cells === "td, th" ? [cell] : [],
+              }] : [],
+            } : null,
+          };
+        }
+      },
+    });
+    assert.deepEqual(
+      parseHtmlClipboardTable("<table><tr><td>first<br><strong>second&nbsp;line</strong></td></tr></table>"),
+      [["first\nsecond line"]],
+    );
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
+
+test("HTML clipboard fallback declines nested tables and preserves plain TSV fallback", () => {
+  const nested = "<table><tr><td>A<table><tr><td>B</td></tr></table></td><td>C</td></tr></table>";
+  assert.deepEqual(parseHtmlClipboardTable(nested), []);
+  assert.deepEqual(parseClipboardContent("", nested), []);
+  assert.deepEqual(parseClipboardContent("A\tC", nested), [["A", "C"]]);
+});
+
+test("HTML clipboard DOMParser path declines nested tables without reading descendant rows", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  const html = "<table><tr><td>A<table><tr><td>B</td></tr></table></td><td>C</td></tr></table>";
+  let reads = 0;
+  try {
+    Object.defineProperty(globalThis, "DOMParser", {
+      configurable: true,
+      value: class DOMParserStub {
+        parseFromString() {
+          return {
+            querySelector: () => ({
+              querySelector: (selector) => selector === "table" ? {} : null,
+              querySelectorAll: () => { reads++; return []; },
+            }),
+          };
+        }
+      },
+    });
+    assert.deepEqual(parseHtmlClipboardTable(html), []);
+    assert.equal(reads, 0);
+    assert.deepEqual(parseClipboardContent("A\tC", html), [["A", "C"]]);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
+
+test("HTML clipboard fallback does not mistake comments or table attributes for nested table tags", () => {
+  assert.deepEqual(
+    parseHtmlClipboardTable('<table title="<table>"><!-- <table> --><tr><td>A</td><td>B</td></tr></table>'),
+    [["A", "B"]],
+  );
+});
+
+test("HTML clipboard fallback treats only actual br tags as breaks and handles quoted delimiters", () => {
+  const html = '<table><tr><td>A<br-widget></br-widget>B</td><td>A<br title="x>y">B</td><td>A<BR class="line-break" />B</td></tr></table>';
+  const expected = [["AB", "A\nB", "A\nB"]];
+  assert.deepEqual(parseHtmlClipboardTable(html), expected);
+  assert.deepEqual(parseClipboardContent("", html), expected);
+});
+
+test("HTML clipboard fallback strips whole quoted inline tags and comments without inventing breaks", () => {
+  const html = "<table><tr><td>A<strong title='x>y'>B</strong>C</td><td>A<span title='<br>'>B</span></td><td>A<!-- <br> -->B</td></tr></table>";
+  const expected = [["ABC", "AB", "AB"]];
+  assert.deepEqual(parseHtmlClipboardTable(html), expected);
+  assert.deepEqual(parseClipboardContent("", html), expected);
+});
+
+test("HTML clipboard fallback preserves explicit br separators at both cell edges", () => {
+  const html = '<table><tr><td><br>A</td><td>A<br></td><td><br><br></td><td>B</td></tr></table>';
+  const expected = [["\nA", "A\n", "\n\n", "B"]];
+  assert.deepEqual(parseHtmlClipboardTable(html), expected);
+  assert.deepEqual(parseClipboardContent("", html), expected);
+});
+
+test("HTML clipboard fallback retains legacy whitespace trimming and single blank row filtering", () => {
+  const html = '<table><tr><td><br><br></td></tr><tr><td>  A&nbsp;  </td><td>  <br>B</td><td>C<br>  </td></tr></table>';
+  const expected = [["A", "\nB", "C\n"]];
+  assert.deepEqual(parseHtmlClipboardTable(html), expected);
+  assert.deepEqual(parseClipboardContent("", html), expected);
+  assert.deepEqual(parseHtmlClipboardTable("<table><tr><td><br></td></tr></table>"), []);
+});
+
+test("HTML clipboard fallback ignores fake table structure in comments and quoted attributes", () => {
+  const fixtures = [
+    '<table><!-- <tr><td>FAKE</td></tr> --><tr><td>A</td><td>B</td></tr></table>',
+    '<table title="<tr><td>FAKE</td></tr>"><tr><td>A</td><td>B</td></tr></table>',
+  ];
+  for (const html of fixtures) {
+    assert.deepEqual(parseHtmlClipboardTable(html), [["A", "B"]]);
+    assert.deepEqual(parseClipboardContent("", html), [["A", "B"]]);
+    assert.deepEqual(parseClipboardContent("A\tB", html), [["A", "B"]]);
+  }
+});
+
+test("HTML clipboard fallback uses actual cell boundaries despite quoted delimiters and comments", () => {
+  const fixtures = [
+    ["<table><tr><td title='x>y'>A</td><td>B</td></tr></table>", [["A", "B"]]],
+    ['<table><tr><td>A<span title="</td><td>FAKE">B</span>C</td><td>D</td></tr></table>', [["ABC", "D"]]],
+    '<table><tr><td>A<!-- </td><td>FAKE -->B</td><td>C</td></tr></table>',
+  ];
+  assert.deepEqual(parseHtmlClipboardTable(fixtures[0][0]), fixtures[0][1]);
+  assert.deepEqual(parseClipboardContent("", fixtures[0][0]), fixtures[0][1]);
+  assert.deepEqual(parseHtmlClipboardTable(fixtures[1][0]), fixtures[1][1]);
+  assert.deepEqual(parseClipboardContent("", fixtures[1][0]), fixtures[1][1]);
+  assert.deepEqual(parseHtmlClipboardTable(fixtures[2]), [["AB", "C"]]);
+  assert.deepEqual(parseClipboardContent("", fixtures[2]), [["AB", "C"]]);
+});
+
+test("HTML clipboard fallback refuses unbalanced cells rather than pasting partial HTML data", () => {
+  const html = '<table><tr><td>A</td><td>B</th></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(html), []);
+  assert.deepEqual(parseClipboardContent("", html), []);
+  assert.deepEqual(parseClipboardContent("A\tB", html), [["A", "B"]]);
+});
+
+test("HTML clipboard fallback declines inert and unsupported raw-text table contexts", () => {
+  const ghost = '<table><tr><td>GHOST</td><td>ROW</td></tr></table>';
+  const fixtures = [
+    `<!-- ${ghost} -->`,
+    `<template>${ghost}</template>`,
+    `<script>const html = '${ghost}';</script>`,
+    `<textarea>${ghost}</textarea>`,
+    `<style>${ghost}</style>`,
+    `<title>${ghost}</title>`,
+    `<plaintext>${ghost}`,
+    `<table><tr><td> </td></tr><!-- <tr><td>GHOST</td><td>ROW</td></tr> --></table>`,
+  ];
+  for (const html of fixtures) {
+    assert.deepEqual(parseHtmlClipboardTable(html), []);
+    assert.deepEqual(parseClipboardContent("KEEP", html), [["KEEP"]]);
+    assert.equal(looksLikeTabularClipboard("KEEP", html), false);
+  }
+  const normal = '<html><head><title>Sheet</title><style>td { color: red; }</style></head><body><table title="<template>"><tr><td>A</td><td>B</td></tr></table></body></html>';
+  assert.deepEqual(parseHtmlClipboardTable(normal), [["A", "B"]]);
+  assert.deepEqual(parseHtmlClipboardTable(normal.replace("td { color: red; }", "<!-- td { color: red; } -->")), [["A", "B"]]);
+});
+
+test("HTML clipboard DOMParser empty results are authoritative, not a trigger for regex fallback", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  const ghost = '<table><tr><td>GHOST</td><td>ROW</td></tr></table>';
+  const fixtures = [
+    ['<tr><td>GHOST</td><td>ROW</td></tr>', null],
+    ['<table><tr><td> </td></tr></table>' + ghost, {
+      querySelector: () => null,
+      querySelectorAll: () => [{ querySelectorAll: () => [{ childNodes: [{ nodeType: 3, nodeValue: " " }] }] }],
+    }],
+  ];
+  try {
+    for (const [html, table] of fixtures) {
+      Object.defineProperty(globalThis, "DOMParser", {
+        configurable: true,
+        value: class DOMParserStub {
+          parseFromString() { return { querySelector: () => table }; }
+        },
+      });
+      assert.deepEqual(parseHtmlClipboardTable(html), []);
+      assert.deepEqual(parseClipboardContent("KEEP", html), [["KEEP"]]);
+      assert.equal(looksLikeTabularClipboard("KEEP", html), false);
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
+
+test("HTML clipboard DOMParser exception retains the bounded fallback", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  try {
+    Object.defineProperty(globalThis, "DOMParser", {
+      configurable: true,
+      value: class DOMParserStub {
+        parseFromString() { throw new Error("parser unavailable"); }
+      },
+    });
+    const html = '<table><tr><td>A<br>B</td><td>C</td></tr></table>';
+    assert.deepEqual(parseHtmlClipboardTable(html), [["A\nB", "C"]]);
+    assert.deepEqual(parseClipboardContent("KEEP", `<template>${html}</template>`), [["KEEP"]]);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
+
+test("HTML clipboard fallback uses only the first explicit table", () => {
+  const first = '<table><tr><td>A</td></tr></table>';
+  const ghost = '<tr><td>GHOST</td><td>ROW</td></tr>';
+  for (const html of [first + '<table>' + ghost + '</table>', ghost + first, first + ghost]) {
+    assert.deepEqual(parseHtmlClipboardTable(html), [["A"]]);
+    assert.deepEqual(parseClipboardContent("A", html), [["A"]]);
+    assert.equal(looksLikeTabularClipboard("A", html), false);
+  }
+  const blank = '<table><tr><td> </td></tr></table>' + '<table>' + ghost + '</table>';
+  assert.deepEqual(parseHtmlClipboardTable(blank), []);
+  assert.deepEqual(parseClipboardContent("KEEP", blank), [["KEEP"]]);
+  assert.equal(looksLikeTabularClipboard("KEEP", blank), false);
+});
+
+test("HTML clipboard fallback preserves supported standalone row fragments and first-table cell breaks", () => {
+  const fragment = '<tr><td>A<br>B</td><td>C</td></tr>';
+  assert.deepEqual(parseHtmlClipboardTable(fragment), [["A\nB", "C"]]);
+  assert.deepEqual(parseClipboardContent("", fragment), [["A\nB", "C"]]);
+  assert.equal(looksLikeTabularClipboard("", fragment), true);
+  const html = '<table>' + fragment + '</table><table><tr><td>extra</td></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(html), [["A\nB", "C"]]);
+  assert.deepEqual(parseClipboardContent("", html), [["A\nB", "C"]]);
+  assert.equal(looksLikeTabularClipboard("", html), true);
+});
+
+test("HTML clipboard fallback declines skipped malformed markup before or inside a table", () => {
+  const ghost = '<table><tr><td>GHOST</td><td>ROW</td></tr></table>';
+  const fixtures = [
+    '<!-- ' + ghost,
+    '<div title="' + ghost,
+    "<div title='" + ghost,
+    '<table><tr><td>A<!-- </td><td>GHOST</td></tr></table>',
+    '<tr><td>GHOST</td><td>ROW</td></tr><!-- unfinished',
+    '<tr><td>GHOST</td><td>ROW</td></tr><div title="unfinished',
+  ];
+  for (const html of fixtures) {
+    assert.deepEqual(parseHtmlClipboardTable(html), [], html);
+    assert.deepEqual(parseClipboardContent("KEEP", html), [["KEEP"]], html);
+    assert.deepEqual(parseClipboardContent("", html), [], html);
+    assert.equal(looksLikeTabularClipboard("KEEP", html), false, html);
+  }
+});
+
+test("HTML clipboard fallback keeps complete first tables and valid text/markup boundaries", () => {
+  const row = '<tr><td>A<br>B</td><td>1 < 3 &amp; &lt;tag&gt;</td></tr>';
+  const expected = [["A\nB", "1 < 3 & <tag>"]];
+  const table = '<table>' + row + '</table>';
+  for (const html of [row, table, table + '<!-- unfinished', table + '<div title="unfinished', '<!DOCTYPE html><html><head><style><!-- td { color: red; } --></style></head><body>' + table + '</body></html>']) {
+    assert.deepEqual(parseHtmlClipboardTable(html), expected, html);
+    assert.deepEqual(parseClipboardContent("", html), expected, html);
+    assert.equal(looksLikeTabularClipboard("", html), true, html);
+  }
+  const balanced = '<table><tr><td>A<!-- <tr><td>FAKE</td></tr> --><span title="<br>">B</span></td><td>C</td></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(balanced), [["AB", "C"]]);
+});
+
+test("HTML clipboard fallback after a DOMParser exception still declines malformed markup", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  try {
+    Object.defineProperty(globalThis, "DOMParser", {
+      configurable: true,
+      value: class DOMParserStub {
+        parseFromString() { throw new Error("parser unavailable"); }
+      },
+    });
+    const html = '<!-- <table><tr><td>GHOST</td><td>ROW</td></tr></table>';
+    assert.deepEqual(parseClipboardContent("KEEP", html), [["KEEP"]]);
+    assert.equal(looksLikeTabularClipboard("KEEP", html), false);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
+
+test("HTML clipboard fallback declines ambiguous declaration and processing instruction boundaries", () => {
+  const ghost = '<table><tr><td>GHOST</td><td>ROW</td></tr></table>';
+  const fixtures = [
+    '<!bogus ' + ghost,
+    '<?xml ' + ghost,
+    '<![CDATA[' + ghost + ']]>',
+    '<table><tr><td>A<!bogus </td><td>GHOST</td></tr></table>',
+    '<table><tr><td>A<?xml </td><td>GHOST</td></tr></table>',
+    '<tr><td>GHOST</td><td>ROW</td></tr><!unfinished',
+    '<tr><td>GHOST</td><td>ROW</td></tr><?unfinished',
+    '<tr><td>GHOST</td><td>ROW</td></tr><!-- unfinished >',
+  ];
+  for (const html of fixtures) {
+    assert.deepEqual(parseHtmlClipboardTable(html), [], html);
+    assert.deepEqual(parseClipboardContent("KEEP", html), [["KEEP"]], html);
+    assert.deepEqual(parseClipboardContent("", html), [], html);
+    assert.equal(looksLikeTabularClipboard("KEEP", html), false, html);
+  }
+});
+
+test("HTML clipboard fallback retains simple declarations, escaped text and the complete first table", () => {
+  const table = '<table><tr><td>A<br>B</td><td>&lt;!bogus &lt;?xml</td></tr></table>';
+  const expected = [["A\nB", "<!bogus <?xml"]];
+  for (const html of [table, '<!DOCTYPE html>' + table, '<!bogus ok>' + table,
+    '<?xml version="1.0"?>' + table, '<!-- <!bogus <table> -->' + table,
+    table + '<!bogus <table>', table + '<?unfinished']) {
+    assert.deepEqual(parseHtmlClipboardTable(html), expected, html);
+    assert.deepEqual(parseClipboardContent("", html), expected, html);
+    assert.equal(looksLikeTabularClipboard("", html), true, html);
+  }
+  const simple = '<table><tr><td>A<!bogus ok>B<?xml ok>C<br>D</td><td>E</td></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(simple), [["ABC\nD", "E"]]);
+});
+
+test("HTML clipboard fallback declines ambiguous declarations after a DOMParser exception", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  try {
+    Object.defineProperty(globalThis, "DOMParser", {
+      configurable: true,
+      value: class DOMParserStub {
+        parseFromString() { throw new Error("parser unavailable"); }
+      },
+    });
+    const html = '<?xml <table><tr><td>GHOST</td><td>ROW</td></tr></table>';
+    assert.deepEqual(parseClipboardContent("KEEP", html), [["KEEP"]]);
+    assert.equal(looksLikeTabularClipboard("KEEP", html), false);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
+
+test("HTML clipboard fallback never synthesizes a character reference across markup boundaries", () => {
+  const fixtures = [
+    ["&am<span></span>p;", "&amp;"],
+    ["&<!--note-->amp;", "&amp;"],
+    ["&#<span></span>128640;", "&#128640;"],
+    ["&#x<!--note-->1f680;", "&#x1f680;"],
+    ["&amp;", "&"],
+    ["&amp;#128640;", "&#128640;"],
+    ["&#128640;", "\u{1f680}"],
+    ["&#x1f680;", "\u{1f680}"],
+    ["A<br>B", "A\nB"],
+    ["&lt;<b>x</b>&gt;", "<x>"],
+    ["A&nbsp;<b>B</b>", "A B"],
+    ["<br>A<br>", "\nA\n"],
+    ["&lt;<!--note-->&amp;", "<&"],
+  ];
+  for (const [cell, expectedCell] of fixtures) {
+    const html = "<table><tr><td>" + cell + "</td><td>END</td></tr></table>";
+    const expected = [[expectedCell, "END"]];
+    assert.deepEqual(parseHtmlClipboardTable(html), expected, html);
+    assert.deepEqual(parseClipboardContent("", html), expected, html);
+    assert.equal(looksLikeTabularClipboard("", html), true, html);
+  }
+});
+
+test("HTML clipboard fallback never reinterprets decoded character-reference text", () => {
+  const fixtures = [
+    ["&#38;amp;", "&amp;"], ["&#x26;amp;", "&amp;"], ["&#38;am&#112;;", "&amp;"],
+    ["&#38;lt;", "&lt;"], ["&#38;quot;", "&quot;"], ["&#38;nbsp;", "&nbsp;"],
+    ["&#38;#128640;", "&#128640;"], ["&#x26;#x1F680;", "&#x1F680;"],
+    ["&amp;amp;", "&amp;"], ["&amp;#38;", "&#38;"], ["&#38;", "&"], ["&amp;", "&"],
+    ["&#128640;", "\u{1f680}"], ["&#X1f680;", "\u{1f680}"], ["&#0;", "\uFFFD"],
+    ["&#55296;", "\uFFFD"], ["&#x110000;", "\uFFFD"], ["A&NBSP;B", "A B"],
+    ["&lt;&gt;&quot;", '<>"'],
+    // Preserve the existing bounded fallback vocabulary and case handling.
+    ["&LT;&AMP;&copy;", "&LT;&AMP;&copy;"],
+  ];
+  for (const [cell, expectedCell] of fixtures) {
+    const html = "<table><tr><td>" + cell + "</td><td>END</td></tr></table>";
+    const expected = [[expectedCell, "END"]];
+    assert.deepEqual(parseHtmlClipboardTable(html), expected, html);
+    assert.deepEqual(parseClipboardContent("", html), expected, html);
+    assert.equal(looksLikeTabularClipboard("", html), true, html);
+    assert.deepEqual(parseClipboardContent("PLAIN\tEND", html), [["PLAIN", "END"]], html);
+  }
+});
+
+test("HTML clipboard fallback preserves cell and row boundaries after recovered comments", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  try {
+    for (const mode of ["absent", "throws"]) {
+      if (mode === "absent") delete globalThis.DOMParser;
+      else Object.defineProperty(globalThis, "DOMParser", {
+        configurable: true,
+        value: class DOMParserStub {
+          parseFromString() { throw new Error("parser unavailable"); }
+        },
+      });
+      for (const comment of ["<!-- x --!>", "<!-->", "<!--->", "<!-- x -->"]) {
+        const fixtures = [
+          ["<table><tr><td>A" + comment + "B<!-- y -->C</td><td>END</td></tr></table>", [["ABC", "END"]]],
+          ["<table><tr><td>A" + comment + "</td><td>B<!-- y -->C</td><td>D</td></tr></table>", [["A", "BC", "D"]]],
+          ["<table><tr><td>A" + comment + "</td><td>B</td></tr><tr><td>C<!-- y -->D</td><td>E</td></tr></table>", [["A", "B"], ["CD", "E"]]],
+          ["<table><tr><td>A" + comment + "B<br>C</td><td>END</td></tr></table>", [["AB\nC", "END"]]],
+        ];
+        for (const [html, expected] of fixtures) {
+          const message = mode + ": " + html;
+          const plain = expected.map(row => row.map((_, i) => "PLAIN" + i));
+          assert.deepEqual(parseHtmlClipboardTable(html), expected, message);
+          assert.deepEqual(parseClipboardContent("", html), expected, message);
+          assert.deepEqual(parseClipboardContent("KEEP", html), expected, message);
+          assert.equal(looksLikeTabularClipboard("", html), true, message);
+          assert.deepEqual(parseClipboardContent(plain.map(row => row.join("\t")).join("\n"), html), plain, message);
+        }
+      }
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
