@@ -852,3 +852,89 @@ test("MIG-0729 U02: same-key invalid detail refresh evicts private content and c
     });
   }
 });
+
+
+test("MIG-0729 U01: CURRENT list status badges and review-only event detail navigation", async () => {
+  const saved = { window: globalThis.window, document: globalThis.document,
+    act: globalThis.IS_REACT_ACT_ENVIRONMENT };
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+    url: "https://flamenode.invalid/admin/videos",
+  });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  const cases = [
+    ["", "pending", "event/1", "審査待ち", "warning", false],
+    ["public", "public", "event/1", "公開", "accent", false],
+    ["private", "private", "event/1", "非公開", "soft", false],
+    ["closed", "voided", "event/1", "無効化", "danger", false],
+    ["voided", "voided", "event/1", "無効化", "danger", false],
+    ["review", "pending", "event/1", "審査待ち", "warning", true],
+    ["pending", "pending", "event/1", "審査待ち", "warning", true],
+    ["review", "pending", "", "審査待ち", "warning", true],
+    ["", "constructor", "event/1", "constructor", "soft", false],
+  ];
+  function LocationProbe() {
+    const location = useLocation();
+    return React.createElement("output", { id: "current-path" }, location.pathname + location.search);
+  }
+  try {
+    for (const [filter, status, event, label, badge, review] of cases) {
+      const query = new URLSearchParams();
+      if (filter) query.set("status", filter);
+      if (event) query.set("event", event);
+      const search = query.toString();
+      const listPath = "/admin/videos" + (search ? "?" + search : "");
+      query.set("page", "1");
+      const requests = [];
+      const fetchFn = async (path, init) => {
+        requests.push([path, init?.method]);
+        return json(200, {
+          q: "", status: filter, event, paging: { page: 1, pageSize: 50, total: 1 },
+          videos: [{ id: "video-1", title: "Test", source_type: "youtube",
+            youtube_video_id: null, display_name: "Creator", status,
+            created_at: 1_700_000_000,
+            ...(review ? { review: { stage_permission_summary: "pending",
+              required_unanswered_count: 2 } } : {}) }],
+          events: event ? [{ id: event, title: "Event" }] : [],
+          reviewSummaries: review ? "included" : "not_requested", degraded: false,
+        });
+      };
+      await React.act(async () => root.render(React.createElement(MemoryRouter, {
+        key: filter + ":" + event + ":" + status, initialEntries: [listPath],
+      }, React.createElement(LocationProbe), React.createElement(Routes, null,
+        React.createElement(Route, { path: "/admin/videos",
+          element: React.createElement(AdminVideos, { fetchFn }) }),
+        React.createElement(Route, { path: "/admin/videos/:id",
+          element: React.createElement("p", null, "detail route") }),
+      ))));
+      const row = dom.window.document.querySelector("tbody tr");
+      assert.ok(row, listPath);
+      const chip = row.querySelector("td:nth-child(3) .fn-badge");
+      assert.equal(chip?.textContent, label, listPath);
+      assert.ok(chip.classList.contains("fn-badge-" + badge), listPath);
+      const links = Object.fromEntries([...row.querySelectorAll("a")]
+        .map(link => [link.textContent.trim(), link.getAttribute("href")]));
+      const target = "/admin/videos/video-1" +
+        (review && event ? "?event=" + encodeURIComponent(event) : "");
+      assert.deepEqual(links, { "詳細": target, "参加者": "/admin/videos/video-1/members",
+        "監査": "/admin/audit?table=videos&record=video-1" }, listPath);
+      const detailLink = [...row.querySelectorAll("a")].find(link => link.textContent.trim() === "詳細");
+      await React.act(async () => detailLink.dispatchEvent(new dom.window.MouseEvent("click", {
+        bubbles: true, cancelable: true, button: 0,
+      })));
+      assert.equal(dom.window.document.getElementById("current-path").textContent, target, listPath);
+      assert.deepEqual(requests, [["/api/admin-read/videos?" + query.toString(), "GET"]], listPath);
+    }
+  } finally {
+    await React.act(async () => root.unmount());
+    dom.window.close();
+    if (saved.window === undefined) delete globalThis.window;
+    else globalThis.window = saved.window;
+    if (saved.document === undefined) delete globalThis.document;
+    else globalThis.document = saved.document;
+    if (saved.act === undefined) delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+    else globalThis.IS_REACT_ACT_ENVIRONMENT = saved.act;
+  }
+});

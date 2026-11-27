@@ -23,15 +23,13 @@ const VIDEO_GROUPS = [
   { status: "private", label: "非公開", icon: "pause" },
   { status: "closed", label: "無効", icon: "warning" },
 ] as const;
-const VISIBILITY_LABELS: Record<string, string> = {
-  pending: "審査待ち",
-  public: "公開",
-  private: "非公開",
-  voided: "無効化",
+// CURRENT videoVisibilityLabels: label and badge must describe the same state.
+const VISIBILITY_DISPLAY: Record<string, { label: string; badge: string }> = {
+  pending: { label: "審査待ち", badge: "fn-badge-warning" },
+  public: { label: "公開", badge: "fn-badge-accent" },
+  private: { label: "非公開", badge: "fn-badge-soft" },
+  voided: { label: "無効化", badge: "fn-badge-danger" },
 };
-function visibilityLabel(status: string): string {
-  return Object.hasOwn(VISIBILITY_LABELS, status) ? VISIBILITY_LABELS[status]! : status;
-}
 function detailHref(videoId: string, event: string): string {
   const path = `/admin/videos/${encodeURIComponent(videoId)}`;
   return event ? `${path}?event=${encodeURIComponent(event)}` : path;
@@ -41,6 +39,11 @@ function VideoRow({ video, event, isReview }: {
   event: string;
   isReview: boolean;
 }): React.ReactElement {
+  const visibility = Object.hasOwn(VISIBILITY_DISPLAY, video.status)
+    ? VISIBILITY_DISPLAY[video.status]!
+    : { label: video.status, badge: "fn-badge-soft" };
+  // CURRENT only scopes the review queue's detail navigation by event.
+  const href = detailHref(video.id, isReview ? event : "");
   const thumbnailId = video.youtube_video_id?.trim();
   const thumbnail = thumbnailId && /^[a-zA-Z0-9_-]{11}$/.test(thumbnailId)
     ? `https://i.ytimg.com/vi/${thumbnailId}/default.jpg` : null;
@@ -58,10 +61,10 @@ function VideoRow({ video, event, isReview }: {
           </div>
         ) : null}
       </td>
-      <td>{visibilityLabel(video.status)}</td>
+      <td><span className={`fn-badge ${visibility.badge}`}>{visibility.label}</span></td>
       <td>{adminVideoRelativeLabel(video.created_at)}</td>
       <td>
-        <OpsLink className="fn-btn fn-btn-ghost fn-btn-sm" href={detailHref(video.id, event)}>詳細</OpsLink>{" "}
+        <OpsLink className="fn-btn fn-btn-ghost fn-btn-sm" href={href}>詳細</OpsLink>{" "}
         <OpsLink className="fn-btn fn-btn-ghost fn-btn-sm" href={`/admin/videos/${encodeURIComponent(video.id)}/members`}>参加者</OpsLink>{" "}
         <OpsLink className="fn-btn fn-btn-ghost fn-btn-sm" href={`/admin/audit?table=videos&record=${encodeURIComponent(video.id)}`}>監査</OpsLink>
       </td>
