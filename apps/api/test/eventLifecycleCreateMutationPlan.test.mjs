@@ -1873,3 +1873,72 @@ test("MIG-0652 U03j SQLite: late strict audit rejection undoes answer and questi
   assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 1);
   assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
 });
+
+/** U03k: stage-question insertion in the existing actual SQLite D1 audit harness.
+ * Six is the CURRENT stage-question form maximum; this is not a mounted route. */
+async function stageInsertSqliteFixture() {
+  const f = createAtomicCreateHarness();
+  seedCreateActor(f.sqlite);
+  insert(f.sqlite, "events", event);
+  const next = Array.from({ length: 6 }, (_, index) => ({
+    ...makeStageQuestionDiffRow("stage_permission_new_" + index, {
+      id: "stage_new_" + index,
+      label: "Stage question " + index,
+      sort_order: index,
+      updated_at: now,
+    }),
+    event_id: event.id,
+    created_at: now,
+  }));
+  const { planStageQuestionMutationSteps } =
+    await import("@flamenode/server-core/event/updatePayload");
+  const stage = planStageQuestionMutationSteps({
+    existing: [], next, deletedAnswers: [],
+  });
+  assert.equal(stage.ok, true);
+  assert.deepEqual(stage.operations.map(step => step.kind), ["insert_questions"]);
+  assert.deepEqual(stage.expectedMutationChanges, [6]);
+  const statements = stage.operations.map(step => {
+    assert.equal(step.kind, "insert_questions");
+    return f.db.insert(schema.eventCustomQuestions).values(step.rows);
+  });
+  const audits = next.map(row => ({
+    table_name: "event_custom_questions", target_id: row.id,
+    operation: "CREATE", before: null, after: row,
+    actor_user_id: "u_admin", context: "event-update:stage-question",
+    retention_class: "normal", strict: true,
+  }));
+  return { ...f, next, mutationPlan: {
+    mutationStatements: statements,
+    expectedMutationChanges: stage.expectedMutationChanges,
+    audits,
+  } };
+}
+
+test("MIG-0652 U03k SQLite: six stage inserts and six strict audits commit in one D1 batch", async () => {
+  const f = await stageInsertSqliteFixture();
+  const auditIds = await mutateWithAudit(f.db, f.mutationPlan);
+  assert.equal(auditIds.length, 6);
+  assert.equal(f.d1.stats.batches, 1);
+  const questions = f.sqlite.prepare(
+    "SELECT id, question_key, sort_order FROM event_custom_questions ORDER BY sort_order"
+  ).all();
+  assert.deepEqual(questions.map(row => row.id), f.next.map(row => row.id));
+  assert.deepEqual(questions.map(row => row.question_key), f.next.map(row => row.question_key));
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE operation = 'CREATE' AND table_name = 'event_custom_questions'").get().n, 6);
+  assert.ok(f.d1.stats.maxBinds <= 100);
+});
+
+test("MIG-0652 U03k SQLite: conflicting stage insert aborts all new question/audit writes", async () => {
+  const f = await stageInsertSqliteFixture();
+  // The first row can be inserted, but the second collides on event + question_key.
+  // The real unique constraint must reject the entire D1 batch atomically.
+  insert(f.sqlite, "event_custom_questions", {
+    ...f.next[1], id: "preexisting_conflict", created_at: now - 10,
+  });
+  await assert.rejects(mutateWithAudit(f.db, f.mutationPlan));
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 1);
+  assert.equal(f.sqlite.prepare("SELECT id FROM event_custom_questions").get().id, "preexisting_conflict");
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
