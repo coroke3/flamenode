@@ -606,3 +606,43 @@ test("MIG-0661 T09 / #916: long whitespace and numeric tokens retain JSON gramma
     assert.equal(d1.count, 0);
   }
 });
+
+test("MIG-0661 T09 / #916: dense escaped strings preserve JSON grammar across native batch boundaries", async () => {
+  const large = "X".repeat(70 * 1024);
+  const unicodeEscape = "\\u0061";
+  const simpleEscape = "\\n";
+  const dense = unicodeEscape.repeat(12000);
+  const boundary = simpleEscape.repeat(256);
+  const prefix = '{"mode":"normal","updated_at":1,"reason":"' + large;
+  const suffix = '","\\u006dode":"\\u006daintenance"}';
+  const cases = [
+    [dense, true],
+    ['\\"'.repeat(34000), true],
+    ["\\\\\\/\\b\\f\\n\\r\\t\\uD800\\uDC00".repeat(4000), true],
+    [simpleEscape + large, true],
+    ...[255, 256, 257].flatMap((count) =>
+      [16, 17].map((pad) => [(simpleEscape + "a".repeat(pad)).repeat(count), true])),
+    [boundary + "\\x", false],
+    [boundary + "\\u000Z", false],
+    [boundary + "\\u00", false],
+    [boundary + "\u0001", false],
+    [dense + "\\x", false],
+  ];
+  for (const [contents, valid] of cases) {
+    const raw = prefix + contents + suffix;
+    assert.ok(Buffer.byteLength(raw, "utf8") > 64 * 1024);
+    if (valid) assert.equal(JSON.parse(raw).mode, "maintenance");
+    else assert.throws(() => JSON.parse(raw), SyntaxError);
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const binding = kvResponse(raw, kv);
+    const env = { DB: unavailableD1(d1), KV: binding };
+    const expectedMode = valid ? "maintenance" : "normal";
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expectedMode);
+    assert.deepEqual(await readOperationModeKvMirror(binding), valid
+      ? { mode: "maintenance", updated_at: 1, reason: null } : null);
+    assert.deepEqual(await requestWith(env), { mode: expectedMode, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});

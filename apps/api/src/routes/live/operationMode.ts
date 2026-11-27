@@ -76,9 +76,12 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
     whitespaceRun.lastIndex = i;
     if (whitespaceRun.test(raw)) i = whitespaceRun.lastIndex;
   };
-  // Scan long legacy reason values with the engine's native regex search.
-  // Only quote, escape and control characters require per-character handling.
+  // Keep the fast native search for ordinary text. At an escape, consume
+  // bounded batches of valid escapes and short plain runs; this avoids one
+  // JS iteration per escape in legacy mirrors without an unbounded regex
+  // repetition stack. Longer plain runs use stringSpecial again.
   const stringSpecial = /["\\\u0000-\u001f]/g;
+  const escapedRun = /(?:\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})[^"\\\u0000-\u001f]{0,16}){1,256}/y;
   const stringToken = (): [number, number] => {
     const start = i;
     if (raw[i++] !== '"') throw new Error("quote");
@@ -87,16 +90,11 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
       const match = stringSpecial.exec(raw);
       if (!match) throw new Error("unterminated string");
       i = stringSpecial.lastIndex;
-      const c = match[0];
-      if (c === '"') return [start, i];
-      if (c !== "\\") throw new Error("control");
-      if (i >= n) throw new Error("escape");
-      const e = raw[i++];
-      if (e === "u") {
-        for (let k = 0; k < 4; k++) {
-          if (i >= n || !/[0-9a-fA-F]/.test(raw[i++])) throw new Error("unicode");
-        }
-      } else if (!'"\\/bfnrt'.includes(e)) throw new Error("escape");
+      if (match[0] === '"') return [start, i];
+      if (match[0] !== "\\") throw new Error("control");
+      escapedRun.lastIndex = i - 1;
+      if (!escapedRun.test(raw)) throw new Error("invalid escape");
+      i = escapedRun.lastIndex;
       stringSpecial.lastIndex = i;
     }
   };
