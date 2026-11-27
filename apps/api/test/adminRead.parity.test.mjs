@@ -825,6 +825,86 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("#924: template list and selected raw snapshot keep exact JSON bytes across bounded response chunks", async () => {
+    const local = createSqlite();
+    seed(local);
+    const cap = 64 * 1024;
+    const list = local.prepare("SELECT id, name, description, source_event_id, updated_at FROM event_templates ORDER BY updated_at DESC LIMIT 100");
+    const insert = local.prepare("INSERT INTO event_templates (id, name, description, source_event_id, settings_json, created_by_user_id, updated_at) VALUES (?, ?, ?, NULL, ?, 'u_root', ?)");
+    const set = local.prepare("UPDATE event_templates SET settings_json = ? WHERE id = ?");
+    const selected = "stream-100";
+    const prefix = '{"v":"', suffix = '"}';
+    const escape = '\\' + '"';
+    const raw = prefix + escape.repeat((cap - Buffer.byteLength(prefix + suffix)) / 2) + suffix;
+    assert.equal(Buffer.byteLength(raw), cap);
+    const dto = (templates, templateName, settings, guardOk = true) => ({
+      guardOk, templates, userId: guardOk ? "u_root" : "u_carol", templateId: selected,
+      templateName, templateSettingsJson: settings, formInitial: "deferred",
+    });
+    async function verify(path, token, expected, large) {
+      const d1 = createD1(local);
+      const res = await app.request(path, { headers: cookie("tok-" + token) }, { DB: d1, AUTH_SECRET: SECRET });
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get("content-type"), /^application\/json(?:;|$)/i);
+      assert.equal(res.headers.get("cache-control"), "private, no-store");
+      assert.equal(d1.stats.statements, token === "root" ? 3 : 2);
+      const before = { ...d1.stats };
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const chunks = [];
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+        assert.ok(next.value.byteLength > 0 && next.value.byteLength <= cap, "bounded response chunk");
+        chunks.push(next.value);
+      }
+      const actual = Buffer.concat(chunks);
+      const wire = JSON.stringify(expected);
+      assert.equal(actual.toString("utf8"), wire, path + " exact JSON wire");
+      assert.deepEqual(JSON.parse(actual.toString("utf8")), expected);
+      assert.equal(actual.byteLength > cap, large);
+      if (large) assert.ok(chunks.length > 1, "large response is actually streamed");
+      assert.deepEqual(d1.stats, before, "no D1 work during stream consumption");
+      assert.equal(d1.stats.writes, 0);
+      assert.equal(d1.stats.batches, 0);
+      assert.ok(d1.stats.maxBinds <= 100);
+    }
+    try {
+      await verify("/api/admin-read/events/templates", "root", { guardOk: true, templates: canon(list.all()) }, false);
+      for (const unit of ["a", "é", "あ", "🚀", "\u0001", '"\\']) {
+        local.exec("DELETE FROM event_templates WHERE id GLOB 'stream-*'");
+        const fill = (size) => unit.repeat(Math.floor(size / unit.length)) + "x".repeat(size % unit.length);
+        const name = "N" + fill(118) + "N";
+        const description = "D" + fill(498) + "D";
+        assert.equal(name.length, 120);
+        assert.equal(description.length, 500);
+        for (let i = 0; i <= 100; i++) {
+          const id = "stream-" + String(i).padStart(3, "0");
+          insert.run(id, name, description, id === selected ? raw : '{"v":1}', 4_000_000_000 + i);
+        }
+        const templates = canon(list.all());
+        assert.equal(templates.length, 100);
+        assert.equal(templates[0].id, selected);
+        assert.equal(templates.at(-1).id, "stream-001");
+        const listBody = { guardOk: true, templates };
+        assert.ok(Buffer.byteLength(JSON.stringify(listBody)) > cap);
+        await verify("/api/admin-read/events/templates", "root", listBody, true);
+        await verify("/api/admin-read/events/new?template=" + selected, "root", dto(templates, name, raw), true);
+        // The list guard does not suppress the independently selected snapshot.
+        await verify("/api/admin-read/events/new?template=" + selected, "carol", dto([], name, raw, false), true);
+      }
+      // Place an astral character across the 8192-unit serialization boundary.
+      const head = prefix + "x".repeat(8191 - prefix.length) + "🚀";
+      const split = head + "x".repeat(cap - Buffer.byteLength(head + suffix)) + suffix;
+      assert.equal(Buffer.byteLength(split), cap);
+      set.run(split, selected);
+      const templates = canon(list.all());
+      await verify("/api/admin-read/events/new?template=" + selected, "root", dto(templates, templates[0].name, split), true);
+    } finally {
+      local.close();
+    }
+  });
+
   test("T01 event groups: list filters/counts and edit detail (members, first option page) equal CURRENT", async () => {
     const { queryEventGroupEventOptions } = await import("../../../src/lib/admin/eventGroupEventOptions.ts");
     for (const query of ["", "?visibility=public", "?visibility=private", "?visibility=archived", "?type=series", "?type=other&visibility=archived", "?type=bogus", "?visibility=zzz"]) {

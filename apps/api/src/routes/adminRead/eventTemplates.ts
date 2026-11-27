@@ -93,13 +93,112 @@ async function listTemplates(db: D1Database): Promise<AdminEventTemplateRow[]> {
   return results;
 }
 
+// One stringify of a string slice costs at most 6 bytes per UTF-16 code unit
+// (well-formed JSON escapes), plus two quotes. Never split a surrogate pair.
+const TEMPLATE_JSON_STRING_SLICE = 8192;
+const TEMPLATE_JSON_CHUNK_TARGET = 4096;
+
+// The DTO consists of fixed records, a bounded row array and D1 scalar values.
+// Count a conservative wire-byte upper bound without encoding large strings.
+function fitsTemplateJsonBuffer(value: unknown): boolean {
+  let remaining = MAX_JSON_COLUMN_BYTES;
+  const spend = (bytes: number) => (remaining -= bytes) >= 0;
+  const fits = (item: unknown): boolean => {
+    if (typeof item === "string") return spend(2 + 6 * item.length);
+    if (item === null || item === undefined) return spend(4);
+    if (typeof item === "boolean") return spend(5);
+    if (typeof item === "number") return spend(32);
+    if (typeof item !== "object" || !spend(2)) return false;
+    if (Array.isArray(item)) {
+      for (const entry of item) if (!spend(1) || !fits(entry)) return false;
+      return true;
+    }
+    for (const [key, entry] of Object.entries(item)) {
+      if (!spend(2) || !fits(key) || !fits(entry)) return false;
+    }
+    return true;
+  };
+  return fits(value);
+}
+
+function* templateJsonFragments(value: unknown): Generator<string, void, unknown> {
+  if (typeof value === "string") {
+    if (value.length <= TEMPLATE_JSON_STRING_SLICE) {
+      yield JSON.stringify(value);
+      return;
+    }
+    yield '"';
+    for (let start = 0; start < value.length;) {
+      let end = Math.min(start + TEMPLATE_JSON_STRING_SLICE, value.length);
+      if (end < value.length && value.charCodeAt(end - 1) >= 0xd800 && value.charCodeAt(end - 1) <= 0xdbff &&
+          value.charCodeAt(end) >= 0xdc00 && value.charCodeAt(end) <= 0xdfff) end--;
+      yield JSON.stringify(value.slice(start, end)).slice(1, -1);
+      start = end;
+    }
+    yield '"';
+    return;
+  }
+  if (value === null || typeof value !== "object") {
+    yield JSON.stringify(value) ?? "null";
+    return;
+  }
+  if (Array.isArray(value)) {
+    yield "[";
+    let first = true;
+    for (const entry of value) {
+      if (!first) yield ",";
+      first = false;
+      yield* templateJsonFragments(entry);
+    }
+    yield "]";
+    return;
+  }
+  yield "{";
+  let first = true;
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry === undefined || typeof entry === "function" || typeof entry === "symbol") continue;
+    if (!first) yield ",";
+    first = false;
+    yield* templateJsonFragments(key);
+    yield ":";
+    yield* templateJsonFragments(entry);
+  }
+  yield "}";
+}
+
+// Preserve the exact JSON shape and small-response fast path. For a large
+// DTO, the iterator owns only already-read data: no D1 work after headers.
+// Each pull holds <4096 code units plus one <=49154-byte fragment, so even
+// a maximally escaped string cannot create a >64 KiB encoded chunk.
+function templateJsonBody(body: AdminEventTemplatesResponse | AdminEventNewResponse): string | ReadableStream<Uint8Array> {
+  if (fitsTemplateJsonBuffer(body)) return JSON.stringify(body);
+  const fragments = templateJsonFragments(body);
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      let chunk = "";
+      while (chunk.length < TEMPLATE_JSON_CHUNK_TARGET) {
+        const next = fragments.next();
+        if (next.done) {
+          if (chunk) controller.enqueue(encoder.encode(chunk));
+          controller.close();
+          return;
+        }
+        chunk += next.value;
+      }
+      controller.enqueue(encoder.encode(chunk));
+    },
+    cancel() { fragments.return(undefined); },
+  });
+}
+
 export const adminEventTemplatesRoutes = new Hono<AppEnv>().get("/", async (c) => {
   const guard = await loadGuard(c, "");
   const body: AdminEventTemplatesResponse = {
     guardOk: guard.ok,
     templates: guard.ok ? await listTemplates(c.env.DB) : [],
   };
-  return c.json(body);
+  return c.body(templateJsonBody(body), 200, { "Content-Type": "application/json; charset=UTF-8" });
 });
 
 /** The SQL projection bounds stored TEXT bytes; a provider can expand malformed UTF-8 on decode.
@@ -129,5 +228,5 @@ export const adminEventNewRoutes = new Hono<AppEnv>().get("/", async (c) => {
     templateSettingsJson: templateId && row ? boundedTemplateSettings(row.tpl_settings) : null,
     formInitial: "deferred",
   };
-  return c.json(body);
+  return c.body(templateJsonBody(body), 200, { "Content-Type": "application/json; charset=UTF-8" });
 });
