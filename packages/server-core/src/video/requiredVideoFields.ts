@@ -1,5 +1,8 @@
 import { and, eq, getTableColumns, inArray, sql, type SQL } from "drizzle-orm";
-import { eventCustomQuestions, events, slots, videos } from "@flamenode/db/schema";
+import { eventCustomQuestions, eventStaff, events, slots, videos } from "@flamenode/db/schema";
+import { MAX_ATOMIC_VIDEO_EVENTS } from "@flamenode/domain/video/atomicLimits";
+import { resolveStaffPermissionKeys } from "@flamenode/domain/auth/permissions/resolver";
+import { approvedXIdsWhere } from "../auth/approvedXPredicate.ts";
 import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
 import { assertCondition } from "../audit/mutate.ts";
 import { expectedRowCondition } from "../audit/expectedRowCondition.ts";
@@ -311,4 +314,131 @@ export function validateSlotSubmissionRequiredFields(
     existing_icon_url: existingIconUrl,
   });
   return missing ? { ok: false, message: missingRequiredVideoFieldMessage(missing) } : { ok: true };
+}
+
+export type SlotSubmissionEventSelectionReceipt = {
+  current: string[];
+  eventPolicies: { id: string; allow: number }[];
+  staffPolicies: { event_id: string; permission_preset: string; custom_permission_keys_json: string | null }[];
+};
+
+/** SA-088 event link selection, distinct from SA-086 unslotted eligibility.
+ * The receipt is server-owned; its staff rows are already restricted to the
+ * approved-X membership predicate. No client-supplied policy or role.
+ * Retain CURRENT raw universe cap, trim/dedupe ordering and admin exception.
+ */
+export function resolveSlotSubmissionEventSelection(
+  receipt: SlotSubmissionEventSelectionReceipt,
+  requested: readonly string[],
+  anchorEventId: string,
+  isAdmin: boolean,
+): string[] {
+  if (receipt.current.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    throw new Error("video_event_existing_atomic_limit_exceeded");
+  }
+  const universe = Array.from(new Set([...receipt.current, ...requested, anchorEventId]));
+  if (!isAdmin && universe.length > MAX_ATOMIC_VIDEO_EVENTS) {
+    throw new Error("video_event_atomic_limit_exceeded");
+  }
+  const unique = (values: readonly string[]): string[] =>
+    Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+  const alwaysInclude = unique([anchorEventId]);
+  const requestedIds = unique(requested);
+  if (isAdmin) return unique([...alwaysInclude, ...requestedIds]);
+
+  // CURRENT getEditableEventIds counts candidate staff rows before resolving
+  // presets/custom keys, even if the event's public allow flag is already 1.
+  const candidateIds = universe.filter(Boolean);
+  if (receipt.staffPolicies.length > candidateIds.length * 4) {
+    throw new Error("editable_event_staff_read_limit_exceeded");
+  }
+  const allowMap = new Map(receipt.eventPolicies.map((row) => [row.id, row.allow]));
+  const editable = new Set(receipt.staffPolicies
+    .filter((row) => resolveStaffPermissionKeys(row).size > 0)
+    .map((row) => row.event_id));
+  const modifiable = new Set(universe.filter((id) => allowMap.get(id) === 1 || editable.has(id)));
+  const requestedSet = new Set(requestedIds);
+  const target = new Set(alwaysInclude);
+  for (const id of unique(receipt.current)) {
+    if (!modifiable.has(id) || requestedSet.has(id)) target.add(id);
+  }
+  for (const id of requestedIds) {
+    if (modifiable.has(id)) target.add(id);
+  }
+  return Array.from(target);
+}
+
+/** One-statement SA-088 event-link receipt candidate.
+ * requested must come from CURRENT parseEventIdsFromForm; videoId is the
+ * authorized existing ID or generated new ID. approvedXIds must be trusted,
+ * and the eventual atomic plan must reassert membership/policy/role freshness.
+ * This does NOT replace that assertion, or add an allowed pre-batch read.
+ * At most 5 existing links, 4 policies and 17 staff rows; no usable partial
+ * success on overflow. Staff policy text bytes are not bounded by row count.
+ */
+export async function readSlotSubmissionEventSelection(
+  db: Pick<ServerCoreDb, "all">,
+  input: {
+    videoId: string;
+    requested: readonly string[];
+    anchorEventId: string;
+    isAdmin: boolean;
+    approvedXIds: readonly string[];
+  },
+): Promise<{ receipt: SlotSubmissionEventSelectionReceipt; targetEventIds: string[] }> {
+  const receipt: SlotSubmissionEventSelectionReceipt = { current: [], eventPolicies: [], staffPolicies: [] };
+  if (input.isAdmin) {
+    // CURRENT admin preflight skips event/staff reads and only checks the
+    // existing count. Later write-plan limits still apply to the target.
+    const rows = await db.all<{ event_id: string }>(sql`
+      SELECT event_id FROM video_events WHERE video_id = ${input.videoId}
+      LIMIT ${MAX_ATOMIC_VIDEO_EVENTS + 1}`);
+    receipt.current = rows.map((row) => row.event_id);
+  } else {
+    // Distinct raw IDs only; 5 proves an oversized universe without
+    // serializing the entire input. Always include the anchor before slicing.
+    const requestIds = Array.from(new Set([input.anchorEventId, ...input.requested]))
+      .slice(0, MAX_ATOMIC_VIDEO_EVENTS + 1);
+    const rows = await db.all<{
+      receipt_kind: number; id: string; allow: number | null;
+      permission_preset: string | null; custom_permission_keys_json: string | null;
+    }>(sql`WITH current_rows AS (
+      SELECT event_id FROM video_events WHERE video_id = ${input.videoId}
+      LIMIT ${MAX_ATOMIC_VIDEO_EVENTS + 1}
+    ), universe AS (
+      SELECT event_id AS id FROM current_rows
+      UNION
+      SELECT CAST(value AS TEXT) AS id FROM json_each(${JSON.stringify(requestIds)})
+    ), event_rows AS (
+      SELECT events.id, events.allow_user_video_event_links AS allow
+      FROM events WHERE id IN (SELECT id FROM universe)
+        AND (SELECT COUNT(*) FROM universe) <= ${MAX_ATOMIC_VIDEO_EVENTS}
+      LIMIT ${MAX_ATOMIC_VIDEO_EVENTS}
+    ), staff_rows AS (
+      SELECT event_id, permission_preset, custom_permission_keys_json
+      FROM event_staff
+      WHERE event_id IN (SELECT id FROM universe WHERE id <> '')
+        AND (SELECT COUNT(*) FROM universe) <= ${MAX_ATOMIC_VIDEO_EVENTS}
+        AND ${approvedXIdsWhere(eventStaff.x_user_id, input.approvedXIds)}
+      LIMIT ${MAX_ATOMIC_VIDEO_EVENTS * 4 + 1}
+    )
+    SELECT 0 AS receipt_kind, event_id AS id, NULL AS allow,
+      NULL AS permission_preset, NULL AS custom_permission_keys_json FROM current_rows
+    UNION ALL
+    SELECT 1, id, allow, NULL, NULL FROM event_rows
+    UNION ALL
+    SELECT 2, event_id, NULL, permission_preset, custom_permission_keys_json FROM staff_rows`);
+    for (const row of rows) {
+      if (row.receipt_kind === 0) receipt.current.push(row.id);
+      else if (row.receipt_kind === 1 && typeof row.allow === "number") {
+        receipt.eventPolicies.push({ id: row.id, allow: row.allow });
+      } else if (row.receipt_kind === 2 && typeof row.permission_preset === "string") {
+        receipt.staffPolicies.push({ event_id: row.id, permission_preset: row.permission_preset,
+          custom_permission_keys_json: row.custom_permission_keys_json });
+      } else throw new Error("slot_submission_event_selection_receipt_invalid");
+    }
+  }
+  return { receipt, targetEventIds: resolveSlotSubmissionEventSelection(
+    receipt, input.requested, input.anchorEventId, input.isAdmin,
+  ) };
 }

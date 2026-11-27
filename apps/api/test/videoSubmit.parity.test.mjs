@@ -1364,6 +1364,76 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("U03a SA-088: event link selection receipt preserves CURRENT caps and ordering", async () => {
+    const { readSlotSubmissionEventSelection } = await import("@flamenode/server-core/video/requiredVideoFields");
+    const { resolveVideoEventSyncTargetIds } = await import("../../../src/lib/video/syncVideoEvents.ts");
+    const scenarios = [
+      { name: "new video", current: [], requested: [], expected: ["ev_closed"] },
+      { name: "ordinary cannot add locked event", requested: ["ev_open"], expected: ["ev_closed"] },
+      { name: "allow flag, not unslotted flag", requested: ["ev_open"], allow: ["ev_open"], expected: ["ev_closed","ev_open"] },
+      { name: "retain existing locked link", current: ["ev_open"], requested: [], expected: ["ev_closed","ev_open"] },
+      { name: "remove existing allowed link", current: ["ev_open"], requested: [], allow: ["ev_open"], expected: ["ev_closed"] },
+      { name: "staff can link private event", requested: ["ev_open"], staff: [{ event: "ev_open", preset: "reviewer" }], expected: ["ev_closed","ev_open"] },
+      { name: "public staff has no permission", requested: ["ev_open"], staff: [{ event: "ev_open", preset: "public_staff" }], expected: ["ev_closed"] },
+      { name: "malformed custom preset", requested: ["ev_open"], staff: [{ event: "ev_open", preset: "custom", json: "{" }], expected: ["ev_closed"] },
+      { name: "unapproved other actor cannot link", requested: ["ev_open"], staff: [{ event: "ev_open", preset: "owner", x: "x_notos" }], expected: ["ev_closed"] },
+      { name: "nonactive approved X staff", requested: ["ev_open"], staff: [{ event: "ev_open", preset: "manager", x: "x_canon" }], linkCanon: true, expected: ["ev_closed","ev_open"] },
+      { name: "duplicate IDs dedupe", requested: ["ev_open","ev_open","ev_closed"], allow: ["ev_open"], expected: ["ev_closed","ev_open"] },
+      { name: "unknown event not granted", requested: ["unknown"], expected: ["ev_closed"] },
+      { name: "exact four universe", requested: ["ev_open","ev_2","ev_3"], allow: ["ev_open","ev_2","ev_3"], expected: ["ev_closed","ev_open","ev_2","ev_3"] },
+      { name: "five universe rejected", requested: ["ev_open","ev_2","ev_3","ev_4"], error: "video_event_atomic_limit_exceeded" },
+      { name: "existing five rejected for admin too", current: ["ev_closed","ev_open","ev_2","ev_3","ev_4"], admin: true, error: "video_event_existing_atomic_limit_exceeded" },
+      { name: "admin retains anchor, may request unknown", current: ["ev_open"], requested: ["unknown","ev_3"], admin: true, expected: ["ev_closed","unknown","ev_3"] },
+      { name: "admin target cap deferred to write plan", requested: ["ev_open","ev_2","ev_3","ev_4","ev_5"], admin: true, expected: ["ev_closed","ev_open","ev_2","ev_3","ev_4","ev_5"] },
+    ];
+    for (const scenario of scenarios) {
+      const w = seedWorld();
+      try {
+        for (let i=2;i<=5;i++) insert(w.sqlite,"events",{id:"ev_"+i,title:"Extra "+i});
+        w.sqlite.prepare("UPDATE events SET visibility_status='private',end_time=1,allow_unslotted_posts=1").run();
+        w.sqlite.prepare("UPDATE events SET allow_user_video_event_links=0").run();
+        for (const id of scenario.allow ?? []) w.sqlite.prepare("UPDATE events SET allow_user_video_event_links=1 WHERE id=?").run(id);
+        if (scenario.linkCanon) insert(w.sqlite,"x_user_account_links",{auth_user_id:"u_owner",x_user_id:"x_canon",link_role:"manager"});
+        for (const [i,s] of (scenario.staff??[]).entries()) insert(w.sqlite,"event_staff",{
+          id:"staff_"+i,event_id:s.event,x_user_id:s.x??"x_owner",display_name:"Staff",permission_preset:s.preset,
+          custom_permission_keys_json:s.json??null,
+        });
+        if ((scenario.current??[]).length) {
+          insert(w.sqlite,"videos",{id:"v_link",submitted_by_user_id:"u_owner",creator_x_user_id:"x_owner",creator_display_name:"Owner",title:"Linked"});
+          for (const id of scenario.current) insert(w.sqlite,"video_events",{video_id:"v_link",event_id:id});
+        }
+        const before = snapshotDb(w.sqlite);
+        const db = drizzle(w.d1);
+        const requested = scenario.requested ?? [];
+        const role = scenario.admin ? "admin" : "user";
+        const input = { videoId:"v_link", requested, anchorEventId:"ev_closed",isAdmin:!!scenario.admin,
+          approvedXIds:scenario.linkCanon?["x_owner","x_canon"]:["x_owner"] };
+        const current = () => resolveVideoEventSyncTargetIds(db,"v_link",{requested,alwaysInclude:["ev_closed"],user:{id:"u_owner",role}});
+        const candidate = () => readSlotSubmissionEventSelection(db,input);
+        if (scenario.error) {
+          await assert.rejects(current, new RegExp(scenario.error), scenario.name);
+          const reads = w.d1.stats.reads;
+          await assert.rejects(candidate, new RegExp(scenario.error), scenario.name);
+          assert.equal(w.d1.stats.reads-reads,1,scenario.name);
+        } else {
+          const oracle = await current();
+          const reads = w.d1.stats.reads;
+          const actual = await candidate();
+          assert.deepEqual(actual.targetEventIds,oracle,scenario.name);
+          assert.deepEqual(actual.targetEventIds,scenario.expected,scenario.name);
+          assert.equal(w.d1.stats.reads-reads,1,scenario.name);
+          assert.ok(actual.receipt.current.length<=4);
+          assert.ok(actual.receipt.staffPolicies.length<=16);
+        }
+        assert.ok(w.d1.stats.maxBinds<=100,scenario.name);
+        assert.equal(w.d1.stats.batches,0,scenario.name);
+        assert.deepEqual(snapshotDb(w.sqlite),before,scenario.name);
+        assert.deepEqual(w.bucket.puts,[]);
+        assert.deepEqual(w.bucket.deletes,[]);
+      } finally { w.sqlite.close(); }
+    }
+  });
+
   test("U03a SA-088: CURRENT reservation group denial order and absolute cap, no writes (including preflight)", async () => {
     const { submitSlotVideo } = await import("../../../src/lib/actions/video/submitSlotVideo.ts");
     const inconsistent = "連続枠の予約者情報が不整合です。運営へ連絡してください。";
