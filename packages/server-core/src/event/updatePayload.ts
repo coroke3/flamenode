@@ -255,7 +255,7 @@ export function buildStageQuestionD1MutationBatch(input: {
   /** Actual logical queries already spent in this request before mutateWithAudit. */
   callerQueryCount: number;
 }):
-  | { ok: false; reason: Exclude<StageQuestionMutationPlan<never, never, never>, { ok: true }>["reason"] | "event_scope" | "query_budget" }
+  | { ok: false; reason: Exclude<StageQuestionMutationPlan<never, never, never>, { ok: true }>["reason"] | "event_scope" | "query_budget" | "snapshot_limit" | "duplicate_identity" | "actor_identity" }
   | {
       ok: true;
       mutationStatements: BatchItem<"sqlite">[];
@@ -274,6 +274,25 @@ export function buildStageQuestionD1MutationBatch(input: {
       input.next.some(row => row.event_id !== input.eventId) ||
       input.deletedAnswers.some(row => row.event_id !== input.eventId)) {
     return { ok: false, reason: "event_scope" };
+  }
+  // A scoped SELECT must have used LIMIT 19 for the CURRENT 18-row cap.
+  // Never turn a truncated or oversized server snapshot into a mutation plan.
+  if (input.existing.length > 18) return { ok: false, reason: "snapshot_limit" };
+  if (!input.actorUserId.trim()) return { ok: false, reason: "actor_identity" };
+  // The source primary keys must be unique before creating composite CAS ORs
+  // and one strict audit per row. Duplicate key entries would otherwise make
+  // expected changes() and audit cardinalities disagree.
+  const oldIds = new Set<string>();
+  for (const row of input.existing) {
+    if (!row.id || oldIds.has(row.id)) return { ok: false, reason: "duplicate_identity" };
+    oldIds.add(row.id);
+  }
+  const answerIds = new Set<string>();
+  for (const row of input.deletedAnswers) {
+    if (!row.video_id || !row.question_id) return { ok: false, reason: "duplicate_identity" };
+    const key = JSON.stringify([row.video_id, row.event_id, row.question_id]);
+    if (answerIds.has(key)) return { ok: false, reason: "duplicate_identity" };
+    answerIds.add(key);
   }
   const stage = planStageQuestionMutationSteps(input);
   if (!stage.ok) return stage;

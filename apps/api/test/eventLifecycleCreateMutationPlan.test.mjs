@@ -2105,3 +2105,33 @@ test("MIG-0652 U03p: shared stage D1 budget rejects missing, invalid and exhaust
   assert.equal(good.budget.mutationAssertionCount, good.expectedMutationChanges.length);
   assert.equal(f.d1.stats.batches, 0);
 });
+
+test("MIG-0652 U03q: shared stage D1 builder rejects truncated/duplicate server snapshots before SQL", async () => {
+  const { buildStageQuestionD1MutationBatch } =
+    await import("@flamenode/server-core/event/updatePayload");
+  const f = stageUpdateSqliteFixture();
+  const makeExisting = index => ({
+    ...f.before, id: "old_stage_" + index,
+    question_key: "stage_permission_old_" + index,
+  });
+  const answer = { video_id: "v1", event_id: event.id, question_id: f.before.id,
+    answer_text: "before", answer_json: null, created_at: now, updated_at: now };
+  const base = { db: f.db, eventId: event.id, callerQueryCount: 18,
+    actorUserId: "u_admin", existing: [f.before], next: [], deletedAnswers: [answer] };
+  const reject = (input, reason) => assert.deepEqual(buildStageQuestionD1MutationBatch(input),
+    { ok: false, reason });
+  reject({ ...base, existing: Array.from({ length: 19 }, (_, i) => makeExisting(i)),
+    deletedAnswers: [] }, "snapshot_limit");
+  reject({ ...base, existing: [f.before, { ...f.before, question_key: "different_key" }],
+    deletedAnswers: [] }, "duplicate_identity");
+  reject({ ...base, existing: [{ ...f.before, id: "" }], deletedAnswers: [] },
+    "duplicate_identity");
+  reject({ ...base, deletedAnswers: [answer, { ...answer, updated_at: answer.updated_at + 1 }] },
+    "duplicate_identity");
+  reject({ ...base, deletedAnswers: [{ ...answer, video_id: "" }] }, "duplicate_identity");
+  reject({ ...base, actorUserId: "  " }, "actor_identity");
+  const accepted = buildStageQuestionD1MutationBatch(base);
+  assert.equal(accepted.ok, true);
+  assert.deepEqual(accepted.expectedMutationChanges, [1, 1]);
+  assert.equal(f.d1.stats.batches, 0);
+});
