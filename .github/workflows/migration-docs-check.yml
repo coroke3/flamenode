@@ -154,3 +154,52 @@ jobs:
       - name: MIG-0409 U07 non-production CPU probe auth and error regression
         run: node --test --experimental-strip-types apps/site/scripts/queue-cpu-probe/worker.test.mjs
 
+
+  # Temporary, PR-456-only local Linux workerd measurement lane. No remote bindings or deploy.
+  migration-api-benchmark:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 456
+    needs:
+      - migration-contract
+      - migration-workspaces
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build API benchmark dependencies
+        run: |
+          npm run build --workspace=@flamenode/contracts
+          npm run build --workspace=@flamenode/domain
+          npm run typecheck --workspace=@flamenode/server-core
+          npm run build --workspace=@flamenode/api
+      - name: Run full MIG-0639 Linux local workerd benchmark
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -o pipefail
+          node scripts/benchmark-api-cpu.mjs \
+            --mode wrangler \
+            --d1 replay \
+            --samples 50 \
+            --cold-samples 50 \
+            --warmup 10 \
+            --sampling-us 100 \
+            --out "$RUNNER_TEMP/mig-0639-api-cpu.json" \
+            2>&1 | tee "$RUNNER_TEMP/mig-0639-api-cpu.log"
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mig-0639-api-cpu-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/mig-0639-api-cpu.json
+            ${{ runner.temp }}/mig-0639-api-cpu.log
+          if-no-files-found: warn
+          retention-days: 14
