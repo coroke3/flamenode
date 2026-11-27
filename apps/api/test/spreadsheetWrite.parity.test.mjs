@@ -1066,6 +1066,43 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(honoD1.stats.batches, beforeBatches + 1);
   });
 
+  test("MIG-0638 U01/U02: migrated editable catalog preserves real PRAGMA column and explicit FK facts", async () => {
+    resetAllCaches();
+    const sqlite = createSqlite();
+    try {
+      const { resolveSpreadsheetWriteTableContext } = await import("../src/routes/admin/spreadsheet/write.ts");
+      const { buildSpreadsheetTableDefs } = await import("../src/routes/admin/spreadsheet/registry.ts");
+      const { SPREADSHEET_SCHEMA_TABLES } = await import("../src/routes/admin/spreadsheet/schemaCatalog.ts");
+      const names = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(row => row.name);
+      const eligible = buildSpreadsheetTableDefs(names, SPREADSHEET_SCHEMA_TABLES).filter(def => def.mode === "editable");
+      const d1 = createAtomicD1(sqlite);
+      const verified = [];
+      for (const def of eligible) {
+        const columns = sqlite.prepare("SELECT * FROM pragma_table_xinfo(?) ORDER BY cid").all(def.table);
+        // Preserve the existing UNKNOWN_TABLE contract for generated/no-PK tables.
+        if (!columns.some(column => column.pk > 0) || columns.some(column => column.hidden !== 0)) continue;
+        const fks = sqlite.prepare('SELECT "from" AS column, "table" AS referencedTable, "to" AS referencedColumn FROM pragma_foreign_key_list(?)').all(def.table).map(row => ({ ...row }));
+        const before = d1.stats.reads;
+        const resolved = await resolveSpreadsheetWriteTableContext(d1, def.table);
+        assert.equal(resolved.fromCache, false, def.table);
+        assert.equal(d1.stats.reads - before, 1, def.table);
+        assert.deepEqual(resolved.ctx.columnNames, columns.map(column => column.name), def.table);
+        assert.deepEqual(resolved.ctx.primaryKeys, columns.filter(column => column.pk > 0).sort((a, b) => a.pk - b.pk).map(column => column.name), def.table);
+        const ordered = values => values.map(value => JSON.stringify(value)).sort();
+        assert.deepEqual(ordered(resolved.foreignKeys), ordered(fks), def.table);
+        assert.equal((await resolveSpreadsheetWriteTableContext(d1, def.table)).fromCache, true, def.table);
+        assert.equal(d1.stats.reads - before, 1, def.table + " cache");
+        verified.push(def.table);
+      }
+      assert.ok(verified.includes("slots") && verified.includes("software_catalog"));
+      assert.equal(d1.stats.writes, 0);
+      assert.equal(d1.stats.batches, 0);
+    } finally {
+      invalidateSpreadsheetWriteCaches();
+      sqlite.close();
+    }
+  });
+
   test("MIG-0638 U01/U02: malformed catalog projections never become cached schema or absent foreign keys", async () => {
     resetAllCaches();
     const { honoSqlite, honoD1, callHono } = createFixture();
