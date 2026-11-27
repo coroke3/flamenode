@@ -253,3 +253,121 @@ test("SA-090/091 T08 middleware carries the exact authorizing X identity and den
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM x_identity_requests").get().count, 0);
   sqlite.close();
 });
+
+import { notificationOutbox } from "@flamenode/db/schema";
+import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
+
+// Exercise the actual shared plan and atomic audit implementation against the
+// migrated schema. These are deliberately synthetic outbox envelopes: payload
+// rendering, transport authorization, and Queue delivery have separate gates.
+test("SA-091 atomic rejection preserves committed outbox and rolls back CAS or late failures", async () => {
+  const cases = [
+    { name: "no notifications", routes: [], commit: true, actorX: null },
+    { name: "both notifications", routes: ["dm", "channel"], commit: true, actorX: "x_staff" },
+    { name: "duplicate DM is idempotent", routes: ["dm", "channel"], duplicate: true, commit: true, actorX: "x_staff" },
+    { name: "concurrent approval", routes: ["dm", "channel"], race: "approved", commit: false, actorX: "x_staff" },
+    { name: "missing request", routes: ["dm", "channel"], race: "missing", commit: false, actorX: "x_staff" },
+    { name: "late channel insert failure", routes: ["dm", "channel"], fault: "channel", commit: false, actorX: "x_staff" },
+    { name: "late strict audit failure", routes: ["dm", "channel"], fault: "audit", commit: false, actorX: "x_staff" },
+  ];
+  for (const scenario of cases) {
+    const sqlite = createSqlite();
+    try {
+      seedChapterWorld(sqlite);
+      sqlite.exec("UPDATE system_settings SET audit_max_payload_bytes = 90000 WHERE id = 'default'");
+      insert(sqlite, "x_identity_requests", {
+        id: "reject-fixture", request_type: "new_link",
+        requested_by_auth_user_id: "u_other", requested_x_id: "candidate",
+        status: "pending", requested_at: 10, updated_at: 10,
+      });
+      insert(sqlite, "x_identity_requests", {
+        id: "unrelated-fixture", request_type: "new_link",
+        requested_by_auth_user_id: "u_other", requested_x_id: "unrelated",
+        status: "pending", requested_at: 11, updated_at: 11,
+      });
+      const readRequest = () => sqlite.prepare("SELECT * FROM x_identity_requests WHERE id = 'reject-fixture'").get();
+      const readOutbox = () => sqlite.prepare("SELECT id, delivery_route, dedupe_key, payload_json FROM notification_outbox ORDER BY id").all();
+      const readAudits = () => sqlite.prepare("SELECT * FROM audit_logs WHERE table_name = 'x_identity_requests' ORDER BY id").all();
+      const request = { ...readRequest() };
+      const d1 = atomicD1(sqlite);
+      const db = drizzle(d1);
+      const actorUserId = scenario.actorX === null ? "u_admin" : "u_staff";
+      const envelope = (route, id = route + "-fixture") => ({
+        id, recipient_user_id: route === "dm" ? "u_other" : actorUserId,
+        type: route === "dm" ? "x_id_rejected" : "discord_webhook",
+        payload_json: JSON.stringify({ fixture: route }),
+        delivery_route: route, status: "pending", created_at: 20,
+        dedupe_key: "reject-fixture:" + route,
+      });
+      if (scenario.duplicate) insert(sqlite, "notification_outbox", envelope("dm", "original-dm"));
+      const plan = planXIdLinkRejection(db, {
+        request, actorUserId, actorXUserId: scenario.actorX,
+        reason: "manual decision", now: 20,
+        notificationStatements: scenario.routes.map((route) =>
+          db.insert(notificationOutbox).values(envelope(route)).onConflictDoNothing()),
+      });
+      if (scenario.race === "approved") {
+        sqlite.exec("UPDATE x_identity_requests SET status='approved', updated_at=30 WHERE id='reject-fixture'");
+      } else if (scenario.race === "missing") {
+        sqlite.exec("DELETE FROM x_identity_requests WHERE id='reject-fixture'");
+      }
+      if (scenario.fault === "channel") {
+        sqlite.exec("CREATE TRIGGER fail_channel BEFORE INSERT ON notification_outbox WHEN NEW.delivery_route='channel' BEGIN SELECT RAISE(ABORT, 'fixture channel failure'); END");
+      } else if (scenario.fault === "audit") {
+        sqlite.exec("CREATE TRIGGER fail_audit BEFORE INSERT ON audit_logs WHEN NEW.table_name='x_identity_requests' BEGIN SELECT RAISE(ABORT, 'fixture audit failure'); END");
+      }
+      const beforeRequest = readRequest();
+      const beforeOutbox = readOutbox();
+      const beforeAudits = readAudits();
+      const beforeUnrelated = sqlite.prepare("SELECT * FROM x_identity_requests WHERE id='unrelated-fixture'").get();
+      if (scenario.commit) {
+        const ids = await mutateWithAudit(db, plan);
+        assert.equal(ids.length, 1, scenario.name);
+        const after = readRequest();
+        assert.equal(after.status, "rejected", scenario.name);
+        assert.equal(after.updated_at, 20, scenario.name);
+        assert.equal(after.decided_at, 20, scenario.name);
+        assert.equal(after.decided_by_auth_user_id, actorUserId, scenario.name);
+        assert.equal(after.decision_reason, "manual decision", scenario.name);
+        assert.equal(after.slot_bind_status, request.slot_bind_status, scenario.name);
+        const rows = readOutbox();
+        assert.equal(rows.length, scenario.routes.length, scenario.name);
+        for (const route of scenario.routes) {
+          const row = rows.find((item) => item.delivery_route === route);
+          assert.equal(row?.id, route === "dm" && scenario.duplicate ? "original-dm" : route + "-fixture", scenario.name);
+          assert.equal(row?.dedupe_key, "reject-fixture:" + route, scenario.name);
+          assert.deepEqual(JSON.parse(row.payload_json), { fixture: route }, scenario.name);
+        }
+        const audits = readAudits();
+        assert.equal(audits.length, 1, scenario.name);
+        const audit = audits[0];
+        assert.equal(audit.id, ids[0], scenario.name);
+        assert.equal(audit.actor_user_id, actorUserId, scenario.name);
+        assert.equal(audit.actor_x_user_id, scenario.actorX, scenario.name);
+        assert.equal(audit.target_id, request.id, scenario.name);
+        assert.equal(audit.operation, "UPDATE", scenario.name);
+        assert.equal(audit.retention_class, "long_audit", scenario.name);
+        assert.equal(audit.reason, "manual decision", scenario.name);
+        assert.equal(JSON.parse(audit.before_json).status, "pending", scenario.name);
+        assert.equal(JSON.parse(audit.after_json).status, "rejected", scenario.name);
+        assert.equal(JSON.parse(audit.after_json).decided_by_auth_user_id, actorUserId, scenario.name);
+        // A replay of the stale plan must not append another audit or outbox row.
+        await assert.rejects(() => mutateWithAudit(db, plan), scenario.name);
+        assert.deepEqual(readRequest(), after, scenario.name);
+        assert.deepEqual(readOutbox(), rows, scenario.name);
+        assert.deepEqual(readAudits(), audits, scenario.name);
+        assert.equal(d1.stats.batches, 2, scenario.name);
+      } else {
+        await assert.rejects(() => mutateWithAudit(db, plan), scenario.name);
+        assert.deepEqual(readRequest(), beforeRequest, scenario.name);
+        assert.deepEqual(readOutbox(), beforeOutbox, scenario.name);
+        assert.deepEqual(readAudits(), beforeAudits, scenario.name);
+        assert.equal(d1.stats.batches, 1, scenario.name);
+      }
+      assert.deepEqual(sqlite.prepare("SELECT * FROM x_identity_requests WHERE id='unrelated-fixture'").get(), beforeUnrelated, scenario.name);
+    } finally {
+      sqlite.close();
+    }
+  }
+});
