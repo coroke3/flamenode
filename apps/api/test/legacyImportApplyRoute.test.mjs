@@ -289,3 +289,85 @@ test("MIG-0645 U02 apply Hono: finalization CAS failure keeps committed receipt 
   assert.equal(getD1ApplyCalls(), 0, "completed replay must never execute D1");
   assert.equal(stats.batches, 0);
 });
+
+
+test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS failure", async () => {
+  const { sql } = await import("drizzle-orm");
+  const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+  const { bucket, record } = previewBucket({ failAdvanceOnce: true });
+  const { credential, form } = await createApplyCredential(bucket);
+  let durableWrites = 0;
+  const { request, sqlite, stats, getD1ApplyCalls } = setup({
+    bucket,
+    applyStep: async (input) => {
+      assert.equal(input.actorAuthUserId, ADMIN.id);
+      assert.equal(input.previewToken, credential.previewToken);
+      assert.equal(input.planHash, credential.planHash);
+      assert.equal(input.progress.stage, "system_user");
+      const target = "hono-step:" + credential.previewToken;
+      const receipts = sqlite.prepare(
+        "SELECT after_json FROM audit_logs WHERE table_name = 'legacy_import_steps' AND target_id = ? AND context = 'legacy_import:step'",
+      ).all(target);
+      assert.ok(receipts.length <= 1, "a duplicate or conflicting marker must fail closed");
+      if (receipts.length === 1) {
+        const receipt = JSON.parse(receipts[0].after_json);
+        assert.deepEqual(receipt, {
+          token: credential.previewToken, plan_hash: credential.planHash,
+          actor: ADMIN.id, stage: "system_user", next_stage: "x_users",
+        }, "a replay must validate the durable marker identity");
+      } else {
+        await mutateWithAudit(input.db, {
+          mutationStatements: [
+            input.db.run(sql.raw(
+              "INSERT INTO x_users (id, x_name, approval_status) VALUES ('legacy_x_hono', 'Hono X', 'imported')",
+            )),
+            input.db.run(sql.raw(
+              "INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, priority, status) VALUES ('rebuild-x-hono', 'users_index', 'global', 'legacy_import_x_users', 'low', 'pending')",
+            )),
+          ],
+          expectedMutationChanges: [1, 1],
+          audits: [
+            { table_name: "x_users_import_batch", target_id: "legacy_x_hono",
+              operation: "CREATE", before: null, after: { ids: ["legacy_x_hono"] },
+              actor_user_id: ADMIN.id, context: "legacy_import",
+              retention_class: "long_audit", restore_strategy: "none" },
+            { table_name: "legacy_import_steps", target_id: target,
+              operation: "SYSTEM", before: null,
+              after: { token: credential.previewToken, plan_hash: credential.planHash,
+                actor: ADMIN.id, stage: "system_user", next_stage: "x_users" },
+              actor_user_id: ADMIN.id, context: "legacy_import:step",
+              retention_class: "long_audit", restore_strategy: "none" },
+          ],
+        });
+        durableWrites++;
+      }
+      return { progress: { ...input.progress, stage: "x_users", index: 0 }, complete: false };
+    },
+  });
+  try {
+    const first = await request(form());
+    assert.equal(first.status, 503, JSON.stringify(await first.clone().json()));
+    const failed = await first.json();
+    assert.equal(failed.kind, "committed_progress_pending");
+    assert.equal(failed.committed, true);
+    assert.equal(failed.requires_repreview, false);
+    assert.equal(record().status, "ready");
+    assert.equal(record().progress.stage, "system_user", "R2 still points to the committed step");
+    assert.equal(stats.batches, 1);
+    assert.equal(durableWrites, 1);
+    const second = await request(form());
+    assert.equal(second.status, 200, JSON.stringify(await second.clone().json()));
+    const recovered = await second.json();
+    assert.equal(recovered.progress.stage, "x_users");
+    assert.equal(recovered.attempt, 2);
+    assert.equal(record().progress.stage, "x_users");
+    assert.equal(getD1ApplyCalls(), 2, "the adapter may be re-entered for marker replay");
+    assert.equal(stats.batches, 1, "replaying a committed D1 audit must never write another batch");
+    assert.equal(durableWrites, 1);
+    for (const [table, count] of [["x_users", 1], ["static_rebuild_queue", 1], ["audit_logs", 2]]) {
+      assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM "' + table + '"').get().n, count, table);
+    }
+  } finally {
+    sqlite.close();
+  }
+});
