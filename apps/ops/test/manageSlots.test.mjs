@@ -280,3 +280,58 @@ test("MIG-0722 U01: cancelled fetch cannot return successful final-page data", a
   assert.deepEqual(result, { status: "unavailable" });
   assert.equal(calls, 1);
 });
+
+
+test("MIG-0722 U01: each delivered status stays within the first snapshot's counts", async () => {
+  const available = n => Array(n).fill("available");
+  const scenarios = [
+    { label: "wrong bucket on a complete first page", counts: { reserved: 1 },
+      statuses: ["available"], expected: "unavailable", calls: 1 },
+    { label: "zero-count bucket", counts: { available: 0, submitted: 1 },
+      statuses: ["available"], expected: "unavailable", calls: 1 },
+    { label: "inherited property is not a declared count", counts: { available: 1 },
+      statuses: ["constructor"], expected: "unavailable", calls: 1 },
+    { label: "same total and counts across pages, but excess available",
+      counts: { available: 100, reserved: 1 },
+      statuses: available(101), expected: "unavailable", calls: 2 },
+    { label: "excess in truncated fifth page despite valid total",
+      counts: { available: 499, reserved: 2 },
+      statuses: available(500), expected: "unavailable", calls: 5 },
+    { label: "healthy full mixed-status snapshot",
+      counts: { available: 100, reserved: 1, submitted: 1 },
+      statuses: [...available(100), "reserved", "submitted"], expected: "ok", calls: 2 },
+    { label: "healthy capped snapshot leaves one reserved row unseen",
+      counts: { available: 499, reserved: 2 },
+      statuses: [...available(499), "reserved"], expected: "ok", calls: 5 },
+    { label: "healthy filtered read ignores other undelivered buckets",
+      filter: "reserved", counts: { available: 15, reserved: 1 },
+      statuses: ["reserved"], expected: "ok", calls: 1 },
+    { label: "legacy unknown status explicitly counted",
+      counts: { available: 1, legacy: 1 }, statuses: ["available", "legacy"],
+      expected: "ok", calls: 1 },
+    { label: "legacy unknown status missing its count",
+      counts: { available: 2 }, statuses: ["available", "legacy"],
+      expected: "unavailable", calls: 1 },
+  ];
+  for (const scenario of scenarios) {
+    let calls = 0;
+    const filter = scenario.filter ?? "all";
+    const total = Object.values(scenario.counts).reduce((sum, count) => sum + count, 0);
+    const result = await listSlots("ev1", filter, async path => {
+      const offset = 100 * calls++;
+      assert.equal(path, "/api/manage/events/ev1/slots?status=" + filter + "&offset=" + offset);
+      return json(200, page(offset, scenario.statuses.slice(offset, offset + 100)
+        .map((status, index) => slot(offset + index, { status })),
+      { total, counts: scenario.counts, statusFilter: filter }));
+    });
+    assert.equal(calls, scenario.calls, scenario.label);
+    assert.equal(result.status, scenario.expected, scenario.label);
+    if (scenario.expected === "ok") {
+      assert.deepEqual(result.data.slots.map(row => row.status), scenario.statuses, scenario.label);
+      assert.deepEqual(result.data.counts, scenario.counts, scenario.label);
+      assert.equal(result.data.atLimit, scenario.statuses.length === 500, scenario.label);
+    } else {
+      assert.deepEqual(result, { status: "unavailable" }, scenario.label);
+    }
+  }
+});

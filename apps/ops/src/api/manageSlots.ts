@@ -41,6 +41,7 @@ export async function listSlots(
   const filter = normalizeSlotFilter(status);
   const rows: ManageSlotRow[] = [];
   const seen = new Set<string>();
+  const observedCounts = new Map<string, number>();
   let first: ManageSlotsResponse | null = null;
 
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -82,6 +83,15 @@ export async function listSlots(
     }
     for (const slot of data.slots) {
       if (seen.has(slot.id)) return { status: "unavailable" };
+      // A stable total can hide status drift between pages. Every delivered
+      // status bucket must be a subset of the first snapshot's counts, even
+      // for a capped all-status list. Keep unknown legacy status keys when
+      // explicitly present; never read an inherited object property.
+      const observed = (observedCounts.get(slot.status) ?? 0) + 1;
+      const expected = Object.prototype.hasOwnProperty.call(first.counts, slot.status)
+        ? first.counts[slot.status] ?? 0 : 0;
+      if (observed > expected) return { status: "unavailable" };
+      observedCounts.set(slot.status, observed);
       seen.add(slot.id);
       rows.push(slot);
     }
