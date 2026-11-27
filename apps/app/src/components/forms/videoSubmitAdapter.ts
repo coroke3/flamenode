@@ -12,7 +12,7 @@ export type VideoSubmitAdapter = (
   formData: FormData,
 ) => Promise<VideoActionResult>;
 
-export function mapVideoSubmitMode(mode: VideoFormMode): VideoSubmitMode {
+function mapVideoSubmitMode(mode: VideoFormMode): VideoSubmitMode {
   switch (mode) {
     case "free":
       return "free";
@@ -54,15 +54,3 @@ export type VideoMemberAdapters = Pick<
 export type VideoFormPorts = VideoMemberAdapters & {
   submit: VideoSubmitAdapter;
 };
-
-/**
- * Forward both member ports unchanged. Do not wrap the AbortSignal, rewrite
- * a privileged permission intent, or invent a fallback permission mode: the
- * existing member component and Hono guard own those contracts.
- */
-export function videoMemberAdapterProps(ports: VideoFormPorts): VideoMemberAdapters {
-  return {
-    searchXUsers: ports.searchXUsers,
-    applyPermissionBatch: ports.applyPermissionBatch,
-  };
-}
