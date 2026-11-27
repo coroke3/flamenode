@@ -423,12 +423,12 @@ test("MIG-0610 T00a: D1 replay rejects tampered SQL/binds/operation, missing bat
     const replay = createStrictD1TraceReplay([entry]);
     await assert.rejects(async () => invoke(replay.db), /D1 replay trace mismatch/);
     assert.equal(replay.consumed(), 0);
-    assert.throws(() => replay.assertExhausted(), /unconsumed D1 replay trace/);
+    assert.throws(() => replay.assertExhausted(), /D1 replay invalidated/);
   }
   const replay = createStrictD1TraceReplay([entry]);
   assert.deepEqual(await replay.db.prepare("SELECT ?").bind(1).first(), { x: 1 });
   await assert.rejects(async () => replay.db.prepare("SELECT ?").bind(1).first(), /mismatch/);
-  replay.assertExhausted();
+  assert.throws(() => replay.assertExhausted(), /D1 replay invalidated/);
   const missingResult = createStrictD1TraceReplay([{ request: entry.request }]);
   await assert.rejects(async () => missingResult.db.prepare("SELECT ?").bind(1).first(), /mismatch/);
 });
@@ -442,7 +442,7 @@ test("MIG-0610 T00a: malformed and unsupported D1 replay operations are not sile
   assert.throws(() => replay.db.batch([]), /invalid/);
   assert.throws(() => replay.db.batch([{}]), /invalid/);
   assert.equal(replay.db.withSession, undefined, "unsupported D1 APIs must not fall back to real DB");
-  replay.assertExhausted();
+  assert.throws(() => replay.assertExhausted(), /D1 replay invalidated/);
 });
 
 
@@ -514,11 +514,17 @@ test("MIG-0610 T00b1: in-flight, rejected, unsupported, and tampered recordings 
   const trace = recorder.snapshot();
   const strict = createStrictD1TraceReplay(trace);
   await assert.rejects(async () => strict.db.prepare("SELECT 2").first(), /mismatch/);
-  assert.throws(() => recorder.db.prepare("SELECT 1").bind({ nonD1: 1 }), /unsupported/);
-  assert.throws(() => recorder.db.batch([{}]), /invalid/);
+  assert.throws(() => strict.assertExhausted(), /invalidated/);
   assert.equal(recorder.db.withSession, undefined);
-  await assert.rejects(async () => recorder.db.prepare("SELECT 2").all(), /simulated D1 failure/);
-  assert.throws(() => recorder.snapshot(), /incomplete or failed/);
+  const badBind = createStrictD1TraceRecorder(db);
+  assert.throws(() => badBind.db.prepare("SELECT 1").bind({ nonD1: 1 }), /unsupported/);
+  assert.throws(() => badBind.snapshot(), /incomplete or failed/);
+  const badBatch = createStrictD1TraceRecorder(db);
+  assert.throws(() => badBatch.db.batch([{}]), /invalid/);
+  assert.throws(() => badBatch.snapshot(), /incomplete or failed/);
+  const failedOperation = createStrictD1TraceRecorder(db);
+  await assert.rejects(async () => failedOperation.db.prepare("SELECT 2").all(), /simulated D1 failure/);
+  assert.throws(() => failedOperation.snapshot(), /incomplete or failed/);
   assert.throws(() => createStrictD1TraceRecorder({}), /invalid/);
 });
 
@@ -542,4 +548,20 @@ test("MIG-0610 T00b1: trace order follows D1 call dispatch even if responses set
   assert.deepEqual(await replay.db.prepare("SELECT 1").all(), { results: [1] });
   assert.deepEqual(await replay.db.prepare("SELECT 2").all(), { results: [2] });
   replay.assertExhausted();
+});
+
+test("MIG-0610 T00: caught mismatch permanently invalidates replay and recorded trace", async () => {
+  const trace = [{ request: { op: "first", sql: "SELECT ?", binds: [["num", 1]], args: [] }, result: { x: 1 } }];
+  const replay = createStrictD1TraceReplay(trace);
+  await assert.rejects(async () => replay.db.prepare("SELECT ?").bind(2).first(), /mismatch/);
+  await assert.rejects(async () => replay.db.prepare("SELECT ?").bind(1).first(), /previously invalidated/);
+  assert.throws(() => replay.assertExhausted(), /invalidated/);
+  const recorder = createStrictD1TraceRecorder({
+    prepare: () => ({ bind() { return this; }, async first() { return { x: 1 }; } }),
+    batch: async () => [], exec: async () => ({}),
+  });
+  await recorder.db.prepare("SELECT ?").first();
+  assert.equal(recorder.snapshot().length, 1);
+  try { recorder.db.batch([{}]); } catch { /* job may swallow the exception */ }
+  assert.throws(() => recorder.snapshot(), /incomplete or failed/);
 });

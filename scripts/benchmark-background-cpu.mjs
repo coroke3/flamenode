@@ -349,6 +349,8 @@ export const jobById = id => JOBS.find(j => j.id === id);
 export function createStrictD1TraceReplay(trace) {
   if (!Array.isArray(trace) || trace.length > 2000) throw Error("invalid D1 replay trace");
   let cursor = 0;
+  let invalid = false;
+  const reject = message => { invalid = true; throw Error(message); };
   const stmtMark = Symbol("D1 replay prepared");
   const normalized = value => {
     if (value === null) return ["null"];
@@ -357,22 +359,24 @@ export function createStrictD1TraceReplay(trace) {
     if (typeof value === "number" && Number.isFinite(value)) return ["num", value];
     if (value instanceof Uint8Array) return ["bytes", [...value]];
     if (value instanceof ArrayBuffer) return ["bytes", [...new Uint8Array(value)]];
-    throw Error("unsupported D1 replay bind type");
+    return reject("unsupported D1 replay bind type");
   };
   const binds = values => values.map(normalized);
   const encoded = value => JSON.stringify(value);
   const step = signature => {
+    if (invalid) return reject("D1 replay previously invalidated");
     const item = trace[cursor];
     if (!item || !Object.hasOwn(item, "result") ||
         encoded(item.request) !== encoded(signature)) {
-      throw Error("D1 replay trace mismatch at step " + cursor);
+      return reject("D1 replay trace mismatch at step " + cursor);
     }
     cursor++;
     // No trace result may be mutated by a consumer and reused as a future response.
-    return structuredClone(item.result);
+    try { return structuredClone(item.result); }
+    catch (error) { invalid = true; throw error; }
   };
   const prepared = (sql, values = []) => {
-    if (typeof sql !== "string" || !sql) throw Error("invalid D1 replay SQL");
+    if (typeof sql !== "string" || !sql) return reject("invalid D1 replay SQL");
     const desc = { sql, binds: binds(values) };
     const invoke = (method, args = []) => Promise.resolve(step({ op: method, ...desc, args }));
     const stmt = {
@@ -389,13 +393,13 @@ export function createStrictD1TraceReplay(trace) {
     prepare: sql => prepared(sql),
     batch: statements => {
       if (!Array.isArray(statements) || statements.length === 0 ||
-          statements.some(s => !s || !s[stmtMark])) throw Error("invalid D1 replay batch");
+          statements.some(s => !s || !s[stmtMark])) return reject("invalid D1 replay batch");
       return Promise.resolve(step({
         op: "batch", statements: statements.map(s => s[stmtMark]),
       }));
     },
     exec: sql => {
-      if (typeof sql !== "string" || !sql) throw Error("invalid D1 replay exec SQL");
+      if (typeof sql !== "string" || !sql) return reject("invalid D1 replay exec SQL");
       return Promise.resolve(step({ op: "exec", sql }));
     },
   });
@@ -403,7 +407,8 @@ export function createStrictD1TraceReplay(trace) {
     db,
     consumed: () => cursor,
     assertExhausted() {
-      if (cursor !== trace.length) throw Error("unconsumed D1 replay trace: " + (trace.length - cursor));
+      if (invalid) throw Error("D1 replay invalidated");
+      if (cursor !== trace.length) return reject("unconsumed D1 replay trace: " + (trace.length - cursor));
     },
   });
 }
@@ -424,6 +429,7 @@ export function createStrictD1TraceRecorder(realDb) {
   const stmtMark = Symbol("D1 trace original statement");
   let pending = 0;
   let failed = false;
+  const invalidate = message => { failed = true; throw Error(message); };
   const normalized = value => {
     if (value === null) return ["null"];
     if (typeof value === "string") return ["str", value];
@@ -431,11 +437,14 @@ export function createStrictD1TraceRecorder(realDb) {
     if (typeof value === "number" && Number.isFinite(value)) return ["num", value];
     if (value instanceof Uint8Array) return ["bytes", [...value]];
     if (value instanceof ArrayBuffer) return ["bytes", [...new Uint8Array(value)]];
-    throw Error("unsupported D1 replay bind type");
+    return invalidate("unsupported D1 replay bind type");
   };
   const record = (request, call) => {
-    if (failed || trace.length >= 2000) throw Error("D1 trace recording invalid or exhausted");
-    const entry = { request: structuredClone(request) };
+    if (failed) throw Error("D1 trace recording already invalid");
+    if (trace.length >= 2000) return invalidate("D1 trace recording exhausted");
+    let entry;
+    try { entry = { request: structuredClone(request) }; }
+    catch (error) { failed = true; throw error; }
     trace.push(entry);
     pending++;
     let operation;
@@ -463,19 +472,19 @@ export function createStrictD1TraceRecorder(realDb) {
     });
   };
   const prepared = (sql, args, original) => {
-    if (typeof sql !== "string" || !sql) throw Error("invalid D1 replay SQL");
+    if (typeof sql !== "string" || !sql) return invalidate("invalid D1 replay SQL");
     const descriptor = { sql, binds: args.map(normalized) };
     const invoke = (method, methodArgs = []) => {
-      if (typeof original[method] !== "function") throw Error("unsupported D1 trace method " + method);
+      if (typeof original[method] !== "function") return invalidate("unsupported D1 trace method " + method);
       return record({ op: method, ...descriptor, args: methodArgs },
         () => original[method](...methodArgs));
     };
     return Object.freeze({
       [stmtMark]: { descriptor, original },
       bind(...values) {
-        const next = values.map(normalized); // reject unsupported values before real DB I/O
-        void next;
-        return prepared(sql, values, original.bind(...values));
+        values.map(normalized); // reject unsupported values before real DB I/O
+        try { return prepared(sql, values, original.bind(...values)); }
+        catch (error) { failed = true; throw error; }
       },
       first(column) { return invoke("first", column === undefined ? [] : [column]); },
       all() { return invoke("all"); },
@@ -485,18 +494,19 @@ export function createStrictD1TraceRecorder(realDb) {
   };
   const db = Object.freeze({
     prepare(sql) {
-      if (typeof sql !== "string" || !sql) throw Error("invalid D1 replay SQL");
-      return prepared(sql, [], realDb.prepare(sql));
+      if (typeof sql !== "string" || !sql) return invalidate("invalid D1 replay SQL");
+      try { return prepared(sql, [], realDb.prepare(sql)); }
+      catch (error) { failed = true; throw error; }
     },
     batch(statements) {
       if (!Array.isArray(statements) || statements.length === 0 ||
-          statements.some(s => !s?.[stmtMark])) throw Error("invalid D1 trace batch");
+          statements.some(s => !s?.[stmtMark])) return invalidate("invalid D1 trace batch");
       const wrapped = statements.map(s => s[stmtMark]);
       return record({ op: "batch", statements: wrapped.map(s => s.descriptor) },
         () => realDb.batch(wrapped.map(s => s.original)));
     },
     exec(sql) {
-      if (typeof sql !== "string" || !sql) throw Error("invalid D1 replay exec SQL");
+      if (typeof sql !== "string" || !sql) return invalidate("invalid D1 replay exec SQL");
       return record({ op: "exec", sql }, () => realDb.exec(sql));
     },
   });
