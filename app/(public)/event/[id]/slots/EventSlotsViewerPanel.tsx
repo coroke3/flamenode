@@ -349,6 +349,7 @@ export function EventSlotsViewerPanel({
       <div className={styles.layout}>
         <div className={styles.main}>
           <SlotGrid
+            key={eventId}
             slots={slots}
             viewerXId={viewerOverlay.viewerXId}
             isAuthenticated={

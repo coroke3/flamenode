@@ -146,3 +146,10 @@ test("eventId change with an identical baseSlots reference cannot authorize an o
   assert.match(panel, /const viewerLoading = loading \|\| !overlayIsCurrent/);
   assert.match(panel, /\[eventId, refreshNonce, baseSlots\]/);
 });
+
+test("event route change resets mounted slot dialogs and in-flight mutation UI even for null-X viewers", () => {
+  // React key replacement unmounts the prior SlotGrid, retiring its local
+  // reserve/release/extend/merge dialogs and completion state on event changes.
+  assert.match(panel, /<SlotGrid\s+key=\{eventId\}\s+slots=\{slots\}/);
+  assert.match(panel, /overlayState\.eventId === eventId && overlayState\.baseSlots === baseSlots/);
+});
