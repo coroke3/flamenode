@@ -947,6 +947,43 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(idle.body, { status: "warn", ran: false, results: [], error: null });
     assert.equal(idle.stats.statements, 1, "no run -> no query");
 
+    // Next receives repeated searchParams as arrays, not scalar opt-ins.
+    for (const [query, expectedStatus, expectedRun] of [
+      ["", "all", false],
+      ["run=1&run=1", "all", false],
+      ["run=1&run=0", "all", false],
+      ["run=0&run=1", "all", false],
+      ["run=1&run=", "all", false],
+      ["run=&run=1", "all", false],
+      ["run=1&%72un=1", "all", false],
+      ["run=01", "all", false],
+      ["run=true", "all", false],
+      ["run=", "all", false],
+      ["status=warn&status=warn", "all", false],
+      ["status=warn&status=ok", "all", false],
+      ["status=ok&status=warn&run=1", "all", true],
+      ["status=info&run=1&run=0", "info", false],
+      ["status=warn&run=1", "warn", true],
+      ["status=info&run=1", "info", true],
+      ["status=ok&run=1", "ok", true],
+      ["status=bad&run=1", "all", true],
+      ["status=&run=1", "all", true],
+      ["run=%31&status=%77arn", "warn", true],
+    ]) {
+      const receipt = await call("/api/admin-read/ops/security" + (query ? "?" + query : ""), ADMIN);
+      assert.equal(receipt.status, 200, query);
+      assert.deepEqual(receipt.body, {
+        status: expectedStatus,
+        ran: expectedRun,
+        results: expectedRun ? ref : [],
+        error: null,
+      }, query);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store", query);
+      assert.equal(receipt.stats.statements, expectedRun ? 3 : 1, query);
+      assert.equal(receipt.stats.writes, 0, query);
+      assert.doesNotMatch(receipt.text, /super-secret-token-value/, query);
+    }
+
     // a failing group degrades to CURRENT's per-check failure result (warn, count 1) for its checks only
     const d1 = createD1(sqlite);
     const prepare = d1.prepare;

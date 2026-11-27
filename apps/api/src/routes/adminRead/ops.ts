@@ -668,9 +668,12 @@ function securityResult(id: SecurityCheckId, rows: Array<{ total_count: number |
 }
 
 adminOpsRoutes.get("/security", async (c) => {
-  const statusQ = c.req.query("status");
+  // CURRENT Next searchParams rejects array-valued opt-ins and status filters.
+  const statuses = c.req.queries("status");
+  const statusQ = statuses?.length === 1 ? statuses[0] : undefined;
   const status = statusQ === "warn" || statusQ === "info" || statusQ === "ok" ? statusQ : "all";
-  const shouldRun = c.req.query("run") === "1";
+  const run = c.req.queries("run");
+  const shouldRun = run?.length === 1 && run[0] === "1";
   if (!shouldRun) {
     const idle: AdminSecurityResponse = { status, ran: false, results: [], error: null };
     return c.json(idle);
