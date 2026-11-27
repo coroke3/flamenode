@@ -7,9 +7,8 @@
  * - Same notification_outbox + static_rebuild_queue rows, 0 Queue wakes (D-13-41)
  * - No Next revalidatePath; no ambient env/global access (D-10)
  */
-import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { slots } from "@flamenode/db/schema";
+import type { slots } from "@flamenode/db/schema";
 import { expandPermissionAliases } from "@flamenode/domain/auth/permissions";
 import { staffRowHasPermissionKey, type StaffPermissionRow } from "@flamenode/domain/auth/permissions/resolver";
 import { isAcceptingEntries } from "@flamenode/domain/event/status";
@@ -598,41 +597,31 @@ function mapMutationError(error: unknown): SlotMutationOutcome {
   return failOutcome(409, GENERIC_MUTATION_ERROR_MESSAGE);
 }
 
-function orderConditionDrizzle(row: SlotRow, direction: "forward" | "backward"): SQL {
-  const sortOrder = row.sort_order ?? 0;
-  if (row.start_time != null) {
-    return direction === "forward"
-      ? sql`${slots.start_time} IS NOT NULL AND (${slots.start_time} > ${row.start_time} OR (${slots.start_time} = ${row.start_time} AND (COALESCE(${slots.sort_order}, 0) > ${sortOrder} OR (COALESCE(${slots.sort_order}, 0) = ${sortOrder} AND ${slots.id} > ${row.id}))))`
-      : sql`${slots.start_time} IS NOT NULL AND (${slots.start_time} < ${row.start_time} OR (${slots.start_time} = ${row.start_time} AND (COALESCE(${slots.sort_order}, 0) < ${sortOrder} OR (COALESCE(${slots.sort_order}, 0) = ${sortOrder} AND ${slots.id} < ${row.id}))))`;
-  }
-  return direction === "forward"
-    ? sql`${slots.start_time} IS NULL AND (COALESCE(${slots.sort_order}, 0) > ${sortOrder} OR (COALESCE(${slots.sort_order}, 0) = ${sortOrder} AND ${slots.id} > ${row.id}))`
-    : sql`${slots.start_time} IS NULL AND (COALESCE(${slots.sort_order}, 0) < ${sortOrder} OR (COALESCE(${slots.sort_order}, 0) = ${sortOrder} AND ${slots.id} < ${row.id}))`;
-}
-
+// SEC #716: the optional tied-edge projection may be omitted. The
+// compatibility fallback must obey the same D1 wire bounds, not select raw
+// legacy slot rows. Keep the exact SQL neighbor ordering and captured edge.
 async function loadOrderedNeighborFallback(
-  db: ServerCoreDb,
+  rawDb: SlotD1Like,
   row: SlotRow,
   direction: "forward" | "backward",
-): Promise<SlotRow | undefined> {
-  const query = db
-    .select()
-    .from(slots)
-    .where(and(eq(slots.event_id, row.event_id), orderConditionDrizzle(row, direction))!);
-  if (row.start_time != null) {
-    return (
-      await (direction === "forward"
-        ? query.orderBy(asc(slots.start_time), asc(sql`COALESCE(${slots.sort_order}, 0)`), asc(slots.id))
-        : query.orderBy(desc(slots.start_time), desc(sql`COALESCE(${slots.sort_order}, 0)`), desc(slots.id))
-      ).limit(1)
-    )[0];
-  }
-  return (
-    await (direction === "forward"
-      ? query.orderBy(asc(sql`COALESCE(${slots.sort_order}, 0)`), asc(slots.id))
-      : query.orderBy(desc(sql`COALESCE(${slots.sort_order}, 0)`), desc(slots.id))
-    ).limit(1)
-  )[0];
+): Promise<{ ok: true; candidate: SlotRow | undefined } | { ok: false }> {
+  const query = `
+    WITH fallback_edge("id", "event_id", "start_time", "sort_order") AS (VALUES (?, ?, ?, ?))
+    SELECT (SELECT ${slotJsonObjectSql("n")}
+      FROM "slots" n CROSS JOIN fallback_edge e
+      WHERE n."event_id" = e."event_id" AND ${neighborConditionSql("n", "e", direction)}
+      ORDER BY ${neighborOrderSql("n", direction)}
+      LIMIT 1) AS neighbor_json
+  `;
+  const snapshot = await rawDb
+    .prepare(boundedFirstD1SnapshotSql(query, ["neighbor_json"]))
+    .bind(row.id, row.event_id, row.start_time, row.sort_order)
+    .first<{ neighbor_json: string | null; invalid_snapshot: number }>();
+  if (!snapshot || invalidJsonSnapshot(snapshot)) return { ok: false };
+  return {
+    ok: true,
+    candidate: parseJsonOrThrow<SlotRow | null>(snapshot.neighbor_json, null) ?? undefined,
+  };
 }
 
 function logicalCountSubquerySql(eventIdExpr: string, xIdExpr: string): string {
@@ -1217,6 +1206,7 @@ export async function extendSlotGroupCore(
 
   const edge = input.direction === "backward" ? groupRows[0]! : groupRows[groupRows.length - 1]!;
   let candidate: SlotRow | undefined;
+  let callerQueryCount = CALLER_PRE_READS_WITH_SESSION;
   if (edge.id === snapshot.cte_edge_id) {
     candidate = parseJsonOrThrow<SlotRow | null>(snapshot.neighbor_json, null) ?? undefined;
   } else {
@@ -1227,9 +1217,14 @@ export async function extendSlotGroupCore(
     // A present null neighbor is authoritative. If the optional projection
     // did not fit, retain CURRENT's lookup rather than change valid behavior.
     // The remaining fallback is still an S3 gate, not a budget waiver.
-    candidate = alternate
-      ? alternate.neighbor ?? undefined
-      : await loadOrderedNeighborFallback(db, edge, input.direction);
+    if (alternate) {
+      candidate = alternate.neighbor ?? undefined;
+    } else {
+      callerQueryCount += 1;
+      const fallback = await loadOrderedNeighborFallback(rawDb, edge, input.direction);
+      if (!fallback.ok) return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+      candidate = fallback.candidate;
+    }
   }
   if (!candidate || candidate.status !== "available") {
     return failOutcome(409, "拡張可能な隣接空き枠がありません。");
@@ -1271,7 +1266,7 @@ export async function extendSlotGroupCore(
       actorUserId: ctx.authUserId,
       reason: "slot_user_extend",
       preloaded: ctx.preloaded,
-      callerQueryCount: CALLER_PRE_READS_WITH_SESSION,
+      callerQueryCount,
       loadWakeHost: loadNoopWakeHost,
     });
   } catch (error) {

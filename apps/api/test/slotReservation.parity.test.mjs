@@ -1607,6 +1607,89 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("SEC #716: tied-edge fallback bounds its D1 row before mutation", async () => {
+    for (const direction of ["forward", "backward"]) {
+      for (const label of ["x".repeat(180_000), "legacy\u0000label"]) {
+        const w = world();
+        const group = {
+          event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+          status: "reserved", reserved_by_user_id: "u_owner", x_user_id: "x_owner",
+          reserved_x_id_snapshot: "x_owner", reservation_group_id: "legacy_tied_group",
+          display_name: "Legacy", updated_at: 100, version: 1,
+        };
+        for (const id of ["tie_A", "tie_a"]) {
+          insert(w.sqlite, "slots", { ...group, id, slot_label: id });
+        }
+        insert(w.sqlite, "slots", {
+          id: "tie_Z", event_id: "ev1", start_time: NOW_SEC + 1100,
+          sort_order: 0, status: "available", slot_label: label, updated_at: 100, version: 1,
+        });
+        const token = "s3-tied-fallback-session";
+        insert(w.sqlite, "session", {
+          sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+        });
+        let fallbackReads = 0;
+        const prepare = w.d1.prepare.bind(w.d1);
+        w.d1.prepare = sql => {
+          const stmt = prepare(sql);
+          if (!sql.includes("WITH fallback_edge")) return stmt;
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...values) => {
+            assert.equal(values.length, 4);
+            const bound = bind(...values);
+            const first = bound.first.bind(bound);
+            bound.first = async () => {
+              const row = await first();
+              fallbackReads++;
+              assert.equal(row.invalid_snapshot, 0);
+              assert.deepEqual(JSON.parse(row.neighbor_json), { __invalid_projection: 1 });
+              assert.equal(row.neighbor_json.includes(label), false);
+              assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024);
+              return row;
+            };
+            return bound;
+          };
+          return stmt;
+        };
+        const before = state(w);
+        const reads = w.d1.stats.reads;
+        const batches = w.d1.stats.batches;
+        const wakes = [];
+        const thaw = freeze();
+        try {
+          const response = await app.request(SITE + "/api/events/ev1/slots/tie_A/extend", {
+            method: "POST",
+            headers: {
+              Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ direction }),
+          }, {
+            DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE,
+            [QUEUE_FEATURE_FLAG_NAMES.dispatch]: "1",
+            [QUEUE_BINDING_NAMES.notificationWake]: { send: async p => wakes.push(p) },
+            [QUEUE_BINDING_NAMES.staticRebuildWake]: { send: async p => wakes.push(p) },
+          });
+          assert.equal(response.status, 503, direction);
+          assert.equal(response.headers.get("cache-control"), "private, no-store");
+          const result = await response.json();
+          assert.deepEqual(result, {
+            ok: false,
+            message: "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
+          });
+          assert.equal(fallbackReads, 1, "exercise the actual bounded alternate lookup");
+          // Characterize the residual S3 violation; do not claim it meets 3.
+          assert.equal(w.d1.stats.reads - reads, 4, "session + gate + snapshot + fallback");
+          assert.equal(w.d1.stats.batches - batches, 0);
+          assert.deepEqual(state(w), before);
+          assert.deepEqual(wakes, []);
+        } finally {
+          thaw();
+        }
+      }
+    }
+  });
+
   test("S3 #725: real HTTPS cookie checks latest major ToS and recovery without stale acceptance", async () => {
     const w = world();
     insert(w.sqlite, "session", {
