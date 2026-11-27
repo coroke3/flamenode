@@ -1035,23 +1035,26 @@ Phase 7 共通契約のとおり。
 
 ### MIG-0717: `/dashboard/edit/:id` の画面（SA-089、MIG-0703 U02 の前半）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0714 の component 依存は解消（D-16-11）。Lead は着手時に最新 CURRENT・既存 read client・MIG-0716 と共有する adapter / router 等の live owner を確認し、最小の契約先行 unit を具体化して着手可（読み MIG-0630 DONE）。#703 の trusted TARGET route / loader / authority / refresh 受入と、MIG-0651・0648・0650 DONE の merge gate は維持。
+- **Readiness:** NEEDS_REFINEMENT — MIG-0714 と読み MIG-0630 は DONE。Draft #913 で未登録の read screen と permission summary を進める。MIG-0716 #912 が所有する共有 client / CSS entry / registry / order test は変更前に引き継ぎを確認する。#703 の trusted TARGET route / loader / authority / refresh 受入を維持する。
 - **Recipe:** R-SCREEN
 - **Runtime:** N
 - **Depends on:** MIG-0714 / **Decisions:** D-05 DECIDED, D-16-1, D-16-11
 - **Merge gate:** MIG-0651, MIG-0648, MIG-0650 が DONE（D-16-1）
-- **Verified against:** `c2a6ecb` (2026-10-26)
+- **Verified against:** `232381e264a2f2ba6f3cd8982f46f2cc2550cc9d` (2026-11-27)
 #### Source snapshot
-- CURRENT: `app/(auth)/dashboard/edit/[id]/page.tsx`（813 行。`VideoForm` mode edit、`VideoEditPermissionSummary` / `VideoEditPermissionOverview`、`AdminVideoTabs`、編集可能 section の判定 `hasAnyEditableVideoFormSection`）。
-- 読み: `GET /api/personal/edit/:id`（`EditPageResponseSchema` `packages/contracts/src/personal/edit.ts:125`）、`GET /api/personal/edit/:id/form-options`（`EditFormOptionsResponseSchema` :220）。
+- CURRENT: `app/(auth)/dashboard/edit/[id]/page.tsx`（`VideoForm` mode edit、`VideoEditPermissionSummary` / `VideoEditPermissionOverview`、`AdminVideoTabs`、編集可能 section の判定 `hasAnyEditableVideoFormSection`）、`src/components/video/VideoEditPermissionSummary.tsx`。
+- 読み: `GET /api/personal/edit/:id`（`EditPageResponseSchema`）、`GET /api/personal/edit/:id/form-options`（`EditFormOptionsResponseSchema`）。両 schema は `packages/contracts/src/personal/edit.ts`。
 - API（D-16-1）: SA-089 `PATCH /api/videos/:videoId`（MIG-0651、multipart）、RH-019（MIG-0648）、SA-084（MIG-0650）。
 #### Owned paths
-- 新規: `+apps/app/src/routes/dashboard/edit/Edit.tsx`, `+apps/app/src/components/permission/{VideoEditPermissionSummary,VideoEditPermissionOverview}.tsx`, `+apps/app/test/editPage.test.mjs`
-- 変更: `apps/app/src/routes/router.tsx`, `apps/app/src/api/personal.ts`, `apps/app/src/api/videoSubmit.ts`（MIG-0716 の client。無ければ MIG-0716 U02 の内容で作る）
-- 触らない: `app/(auth)/**`, `src/components/**`, `apps/api/**`
+- U01a / U02a: `apps/app/src/api/videoEdit.ts`, `apps/app/src/routes/dashboard/edit/Edit.tsx`, `apps/app/src/components/permission/VideoEditPermissionSummary.tsx`, `apps/app/test/editPage.test.mjs`。#912 と独立した domain client を `Edit` が使用する。
+- 後続: `+apps/app/src/components/permission/VideoEditPermissionOverview.tsx` と対応 CSS、`apps/app/src/routes/router.tsx`、`apps/app/src/api/videoSubmit.ts`（MIG-0716 の client）。共有ファイルの変更は所有権調整と該当 unit の受入後。
+- CURRENT の `app/(auth)/**` / `src/components/**` と `apps/api/**` は範囲外。
 #### Micro-units
-- **U01 読み**: 2 つの読みと `kind` ごとの表示（not found / 権限なし / 編集可能 section なし / 通常）。
-- **U02 画面**: 権限 summary / overview の移植と `VideoForm`（mode edit）。
+- **U01a 読み**: 2 つの canonical GET と初回 options 条件、`kind` ごとの表示。重複 `privileged` は通常、401 / 403 / canonical 404 / unavailable は別表示。依頼元の identity key・動画・mode の変更で中断し、古い応答を破棄する。欠落・途中打ち切りは既存の取得失敗表示へ戻す。
+- **U01b options 継続**: `offset` と全ページの custom answers を扱う。byte cutoff で offset の増分が 1 の場合もあるため、安全な取得予算と identity / authority 条件を Lead が確定する。完全な入力が確認できる場合に限り、後続の form へ渡す。
+- **U02a summary**: 完了した edit 読みの `permissionSummary` を表示し、現在の resolved mode を permissions リンクへ引き継ぐ。D1 canonical DTO の management card を使用する。
+- **U02b overview**: 共有 CSS の引き継ぎ後に権限 overview と edit shell の CURRENT 表示を移植する。
+- **U02c form**: U01b の完全な snapshot と MIG-0714 の `VideoForm`（mode edit）を接続し、#703 の trusted authority と draft refresh を検証する。
 - **U03 merge 直前**（D-16-1 の 5）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
@@ -1059,6 +1062,8 @@ Phase 7 共通契約のとおり。
 | T01 | 編集中の再読込 | 下書きが CURRENT と同じに戻る |
 | T02 | 編集できない section | CURRENT と同じ lock 表示、送らない |
 | T03 | `{ok:false, message}` | CURRENT と同じ表示 |
+| T04 | 読みの認証失敗、権限なし、切替専用、古い・別動画・不完全な応答 | 対応する read state を表示し、前の private header / summary を破棄する |
+| T05 | 完全な edit 読みと permission summary | CURRENT の件数、名前、警告、権限モード付き管理リンクを表示する |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/app
@@ -1067,9 +1072,9 @@ npm run typecheck
 npm run check:project-docs
 ```
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md` の edit ページ行を IN_PROGRESS（移植先）。`API_MATRIX.md` の SA-089 に SPA の呼び出し元。
+`FILE_MIGRATION_MATRIX.md` の edit ページと追加ファイルを IN_PROGRESS とし、CURRENT 行の first owner を維持する。SA-089 の SPA 呼び出し元は write 接続時に `API_MATRIX.md` に記録する。
 #### DONE checklist
-- [ ] U01〜U03 が DONE、T01〜T03 が PASS
+- [ ] U01〜U03 が DONE、T01〜T05 が PASS
 - [ ] MIG-0651 / 0648 / 0650 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
 #### STOP
 - 編集可能 section を SPA 側で決める必要が出たら止める（読みの API が正）。
