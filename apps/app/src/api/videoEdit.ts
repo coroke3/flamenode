@@ -9,7 +9,7 @@ import type { ApiResult } from "./personal.js";
 
 type PrivilegeMode = EditAccess["privilegeMode"];
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
-type EditReadScope = { videoId: string; mode: PrivilegeMode; signal: AbortSignal };
+type EditReadScope = { videoId: string; mode: PrivilegeMode; signal: AbortSignal; optionsSnapshotAt?: number };
 type OptionsPage = Extract<EditFormOptionsResponse, { kind: "ready" }>;
 type TraversedFormOptions = OptionsPage & { truncated: false; nextOffset: null; customAnswersTruncated: false; attachedOptionsTruncated: false };
 type CustomAnswer = OptionsPage["customAnswers"][string];
@@ -31,7 +31,7 @@ async function read<T>(
   request: EditReadScope & { formOptionsOffset?: number; readScope?: string },
   parse: (value: unknown) => { success: true; data: T } | { success: false },
 ): Promise<VideoEditResult<T>> {
-  const { videoId, mode, formOptionsOffset, readScope, signal } = request;
+  const { videoId, mode, formOptionsOffset, readScope, optionsSnapshotAt, signal } = request;
   // encodeURIComponent leaves dot segments intact, so the browser would resolve those outside the video route.
   if (signal.aborted || !videoId || videoId === "." || videoId === "..") return UNAVAILABLE;
   try {
@@ -41,6 +41,7 @@ async function read<T>(
     if (formOptionsOffset !== undefined && formOptionsOffset > 0) {
       query.set("offset", String(formOptionsOffset));
       if (readScope) query.set("readScope", readScope);
+      if (optionsSnapshotAt !== undefined) query.set("optionsSnapshotAt", String(optionsSnapshotAt));
     }
     const suffix = formOptionsOffset === undefined ? "" : "/form-options";
     const search = query.size > 0 ? `?${query}` : "";
@@ -83,16 +84,25 @@ async function readFormOptions(fetchFn: FetchLike, scope: EditReadScope & { read
   const eventOptions = new Map<string, OptionsPage["eventOptions"][number]>();
   const customAnswers = new Map<string, CustomAnswer>();
   let firstPage: OptionsPage | undefined;
+  let optionsSnapshotAt: number | undefined;
   let offset = 0;
 
   while (!scope.signal.aborted) {
-    const result = await read(fetchFn, { ...scope, formOptionsOffset: offset, readScope: offset === 0 ? undefined : scope.readScope }, EditFormOptionsResponseSchema.safeParse);
+    const result = await read(fetchFn, {
+      ...scope,
+      formOptionsOffset: offset,
+      readScope: offset === 0 ? undefined : scope.readScope,
+      optionsSnapshotAt: offset === 0 ? undefined : optionsSnapshotAt,
+    }, EditFormOptionsResponseSchema.safeParse);
     if (scope.signal.aborted) return UNAVAILABLE;
     if (result.status !== "ok") return result;
     const page = result.data;
-    if (page.kind !== "ready" || page.customAnswersTruncated || page.attachedOptionsTruncated || page.readScope !== scope.readScope) return UNAVAILABLE;
+    if (page.kind !== "ready" || page.customAnswersTruncated || page.attachedOptionsTruncated ||
+        page.readScope !== scope.readScope ||
+        (firstPage !== undefined && page.optionsSnapshotAt !== firstPage.optionsSnapshotAt)) return UNAVAILABLE;
 
     firstPage ??= page;
+    optionsSnapshotAt ??= page.optionsSnapshotAt;
     for (const event of page.eventOptions) {
       if (eventOptions.has(event.id)) return UNAVAILABLE;
       eventOptions.set(event.id, event);

@@ -196,7 +196,18 @@ export const personalEditFormOptionsRoutes = new Hono<AppEnv>().get("/:id/form-o
   const user = ctx.user;
   const approvedXIds = approvedXIdsOf(ctx.linkedRows);
   const offset = parseOffset(c.req.query("offset"));
-  const now = Math.floor(Date.now() / 1000);
+  const snapshotValues = c.req.queries("optionsSnapshotAt");
+  const snapshotRaw = snapshotValues?.length === 1 ? snapshotValues[0] : undefined;
+  const snapshotAt = offset === 0
+    ? Math.floor(Date.now() / 1000)
+    : snapshotRaw && /^(0|[1-9][0-9]*)$/.test(snapshotRaw)
+      ? Number(snapshotRaw)
+      : Number.NaN;
+  if (!Number.isSafeInteger(snapshotAt) || snapshotAt < 0) {
+    c.header("Cache-Control", "private, no-store");
+    return c.json({ error: "read_scope_changed" }, 409);
+  }
+  const now = snapshotAt;
 
   const { results } = await db
     .prepare(editStatementSql("form", formExtra()))
@@ -269,6 +280,7 @@ export const personalEditFormOptionsRoutes = new Hono<AppEnv>().get("/:id/form-o
   const rest = {
     kind: "ready" as const,
     readScope,
+    optionsSnapshotAt: now,
     attachedOptionsTruncated,
     customAnswers: customAnswersOf(answerRows.slice(0, MAX_FORM_CUSTOM_ANSWERS)),
     customAnswersTruncated: answerRows.length > MAX_FORM_CUSTOM_ANSWERS,

@@ -216,8 +216,11 @@ export const EditPermissionsResponseSchema = z.discriminatedUnion("kind", [
  * answers are incomplete and the SPA must not save them.
  * Paging contract: `readScope` is computed from the authenticated user, resolved active X ID, video ID / updated_at, access flags
  * and ordered attached/primary event IDs already loaded by the edit read. Every continuation page must present the same token; a
- * missing, repeated or changed token is 409 `read_scope_changed` with private/no-store headers. This is a deterministic drift guard,
- * not an atomic D1 snapshot. `attachedOptionsTruncated` is authoritative on page zero only; it is true when a 101st attached event
+ * missing, repeated or changed token is 409 `read_scope_changed` with private/no-store headers. This is a deterministic drift guard.
+ * The first page also returns `optionsSnapshotAt`, a server-selected Unix-second timestamp used for every accepting-event time
+ * predicate; the SPA reuses it unchanged on continuation pages. This prevents time-window membership from shifting between OFFSET
+ * pages, but does not freeze mutable event/question/answer rows or claim an atomic D1 snapshot. `attachedOptionsTruncated` is authoritative
+ * on page zero only; it is true when a 101st attached event
  * exists, while the API still returns at most 100 attached options. The SPA must reject that incomplete first page.
  * `stagePermissionAnswers`, `softwareSuggestions`, `iconCandidates` and `channelCandidates` are authoritative on the FIRST page
  * (offset 0) only (later pages repeat them; ignore). `customAnswers` of a page covers that page's events (including stray answers on
@@ -230,6 +233,8 @@ export const EditFormOptionsResponseSchema = z.discriminatedUnion("kind", [
     kind: z.literal("ready"),
     /** Same scope as the edit page; continuation pages must match it. */
     readScope: z.string().regex(/^[a-f0-9]{64}$/),
+    /** Server-selected Unix-second accepting-event time anchor from page zero; reused by all continuation pages. */
+    optionsSnapshotAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     /** True only on page zero when the attached-event sentinel found more than 100 attached events. */
     attachedOptionsTruncated: z.boolean(),
     eventOptions: z.array(SlottedEventOptionSchema),

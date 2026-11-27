@@ -8,6 +8,7 @@ import { Edit } from "../.test-dist/apps/app/src/routes/dashboard/edit/Edit.js";
 const { flushSync } = await import("react-dom");
 const { createRoot } = await import("react-dom/client");
 const READ_SCOPE = "a".repeat(64);
+const OPTIONS_SNAPSHOT_AT = 1_700_000_000;
 const { MemoryRouter } = await import("react-router-dom");
 
 const access = (over = {}) => ({
@@ -31,7 +32,7 @@ const editPage = (over = {}) => ({
   permissionSummary: null, collabTruncated: false, ...over,
 });
 const options = (over = {}) => ({
-  kind: "ready", readScope: READ_SCOPE, attachedOptionsTruncated: false, eventOptions: [], truncated: false, nextOffset: null, customAnswers: {},
+  kind: "ready", readScope: READ_SCOPE, optionsSnapshotAt: OPTIONS_SNAPSHOT_AT, attachedOptionsTruncated: false, eventOptions: [], truncated: false, nextOffset: null, customAnswers: {},
   customAnswersTruncated: false, stagePermissionAnswers: null, softwareSuggestions: [], iconCandidates: [],
   channelCandidates: [], ...over,
 });
@@ -160,8 +161,8 @@ test("options aggregate cursors 0, 1 and 101 in order, including an empty page a
   });
   assert.deepEqual(calls, [
     ["/api/personal/edit/video-1/form-options?privileged=event", signal],
-    [`/api/personal/edit/video-1/form-options?privileged=event&offset=1&readScope=${READ_SCOPE}`, signal],
-    [`/api/personal/edit/video-1/form-options?privileged=event&offset=101&readScope=${READ_SCOPE}`, signal],
+    [`/api/personal/edit/video-1/form-options?privileged=event&offset=1&readScope=${READ_SCOPE}&optionsSnapshotAt=${OPTIONS_SNAPSHOT_AT}`, signal],
+    [`/api/personal/edit/video-1/form-options?privileged=event&offset=101&readScope=${READ_SCOPE}&optionsSnapshotAt=${OPTIONS_SNAPSHOT_AT}`, signal],
   ]);
 });
 
@@ -240,7 +241,22 @@ test("form-options traversal binds every page to the edit-page scope and rejects
   assert.deepEqual(await changedContinuation.getFormOptions("video-1", "normal", READ_SCOPE, signal), { status: "unavailable" });
   assert.deepEqual(paths, [
     "/api/personal/edit/video-1/form-options",
-    `/api/personal/edit/video-1/form-options?offset=1&readScope=${READ_SCOPE}`,
+    `/api/personal/edit/video-1/form-options?offset=1&readScope=${READ_SCOPE}&optionsSnapshotAt=${OPTIONS_SNAPSHOT_AT}`,
+  ]);
+});
+
+test("options continuation rejects a changed accepting-time anchor", async () => {
+  const paths = [];
+  const api = createVideoEditApi(async (path) => {
+    paths.push(path);
+    return json(offsetOf(path) === 0
+      ? options({ truncated: true, nextOffset: 1 })
+      : options({ optionsSnapshotAt: OPTIONS_SNAPSHOT_AT + 1 }));
+  });
+  assert.deepEqual(await api.getFormOptions("video-1", "normal", READ_SCOPE, new AbortController().signal), { status: "unavailable" });
+  assert.deepEqual(paths, [
+    "/api/personal/edit/video-1/form-options",
+    "/api/personal/edit/video-1/form-options?offset=1&readScope=" + READ_SCOPE + "&optionsSnapshotAt=" + OPTIONS_SNAPSHOT_AT,
   ]);
 });
 
@@ -295,7 +311,7 @@ test("edit pages keep the same requested mode through options continuation befor
   const { container, render } = await mountEdit(t, api, { search: "?privileged=event&ignored=1" });
   assert.deepEqual(calls.map(([path]) => path), [
     "/api/personal/edit/video-1?privileged=event", "/api/personal/edit/video-1/form-options?privileged=event",
-    `/api/personal/edit/video-1/form-options?privileged=event&offset=100&readScope=${READ_SCOPE}`,
+    `/api/personal/edit/video-1/form-options?privileged=event&offset=100&readScope=${READ_SCOPE}&optionsSnapshotAt=${OPTIONS_SNAPSHOT_AT}`,
   ]);
   assert.ok(calls.every(([, signal]) => signal === calls[0][1]));
   assert.equal(container.querySelector("h1").textContent, "既存作品");
@@ -589,7 +605,7 @@ test("identity, video, mode and client changes hide snapshots and stop stale rea
   assert.equal(calls.length, 5, "the next options request waits for the first response");
   await resolve(4, options({ truncated: true, nextOffset: 1 }));
   loading();
-  assert.equal(calls[5].path, `/api/personal/edit/video-2/form-options?offset=1&readScope=${READ_SCOPE}`);
+  assert.equal(calls[5].path, `/api/personal/edit/video-2/form-options?offset=1&readScope=${READ_SCOPE}&optionsSnapshotAt=${OPTIONS_SNAPSHOT_AT}`);
   await render({ search: "?privileged=event" }, () => {
     loading();
     assert.equal(calls[5].signal.aborted, true, "abort before the mode commit's passive effects");
@@ -605,7 +621,7 @@ test("identity, video, mode and client changes hide snapshots and stop stale rea
   assert.equal(calls[7].signal.aborted, true);
   await resolve(8, second);
   await resolve(9, options({ truncated: true, nextOffset: 1 }));
-  assert.equal(calls[10].path, `/api/personal/edit/video-2/form-options?privileged=event&offset=1&readScope=${READ_SCOPE}`);
+  assert.equal(calls[10].path, `/api/personal/edit/video-2/form-options?privileged=event&offset=1&readScope=${READ_SCOPE}&optionsSnapshotAt=${OPTIONS_SNAPSHOT_AT}`);
   await render({ api: createVideoEditApi(() => new Promise(() => {})) }, () => {
     loading();
     assert.equal(calls[10].signal.aborted, true, "abort before the client commit's passive effects");
