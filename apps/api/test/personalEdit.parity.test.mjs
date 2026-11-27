@@ -55,7 +55,14 @@ if (runUnderRootTsx(import.meta.url)) {
     return { rows: method === "get" ? rows[0] : rows };
   });
 
-  const canon = (value) => JSON.parse(JSON.stringify(value ?? null));
+  const canon = (value) => {
+    const copy = JSON.parse(JSON.stringify(value ?? null));
+    if (copy && typeof copy === "object" && !Array.isArray(copy)) {
+      delete copy.readScope;
+      delete copy.attachedOptionsTruncated;
+    }
+    return copy;
+  };
   const USERS = ["alice", "frank", "ivy", "bob", "carol", "erin", "many", "hank", "dave", "gina"];
   const stats = {};
   const MATRIX_VIDEOS = [...EDIT_VIDEOS.filter((id) => !BIG_VIDEOS.includes(id)), "no-such-video"];
@@ -544,8 +551,12 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   // ---------------- U02b: GET /api/personal/edit/:id/form-options ----------------
-  const formUrl = (id, mode, offset) => {
-    const query = [mode === undefined ? null : `privileged=${mode}`, offset === undefined ? null : `offset=${offset}`].filter(Boolean).join("&");
+  const formUrl = (id, mode, offset, readScope) => {
+    const query = [
+      mode === undefined ? null : `privileged=${mode}`,
+      offset === undefined ? null : `offset=${offset}`,
+      readScope === undefined ? null : `readScope=${encodeURIComponent(readScope)}`,
+    ].filter(Boolean).join("&");
     return `/api/personal/edit/${encodeURIComponent(id)}/form-options${query ? `?${query}` : ""}`;
   };
 
@@ -677,7 +688,7 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(first.body.nextOffset, 100);
       assert.equal(first.body.eventOptions[0].id, "ee1");
       assert.equal(first.body.eventOptions.length, 101);
-      const second = await call(formUrl("ed-own1", undefined, 100), "tok-alice");
+      const second = await call(formUrl("ed-own1", undefined, 100, first.body.readScope), "tok-alice");
       assert.equal(second.body.truncated, false);
       assert.equal(second.body.nextOffset, null);
       assert.equal(second.body.eventOptions.length, 33);
@@ -685,10 +696,10 @@ if (runUnderRootTsx(import.meta.url)) {
       const seen = [...first.body.eventOptions, ...second.body.eventOptions].map((o) => o.id);
       assert.equal(new Set(seen).size, seen.length);
       assert.equal(seen.length, 134);
-      const clamped = await call(formUrl("ed-own1", undefined, 99999), "tok-alice");
+      const clamped = await call(formUrl("ed-own1", undefined, 99999, first.body.readScope), "tok-alice");
       assert.equal(clamped.status, 200);
       assert.equal(clamped.body.eventOptions.length, 0);
-      const edge = await call(formUrl("ed-own1", undefined, 900), "tok-alice");
+      const edge = await call(formUrl("ed-own1", undefined, 900, first.body.readScope), "tok-alice");
       assert.equal(edge.status, 200);
       assert.deepEqual([edge.body.eventOptions.length, edge.body.truncated, edge.body.nextOffset], [0, false, null]);
       for (const r of [first, second]) EditFormOptionsResponseSchema.parse(r.body);
@@ -707,7 +718,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const kept = first.body.eventOptions.filter((o) => o.id.startsWith("zb")).length;
       assert.ok(kept > 0 && kept < 6);
       assert.equal(first.body.nextOffset, first.body.eventOptions.length - 1, "ee1 (attached only) is not counted");
-      const rest = await call(formUrl("ed-own1", undefined, first.body.nextOffset), "tok-alice");
+      const rest = await call(formUrl("ed-own1", undefined, first.body.nextOffset, first.body.readScope), "tok-alice");
       assert.equal(rest.status, 200);
       const all = [...first.body.eventOptions, ...rest.body.eventOptions].filter((o) => o.id.startsWith("zb")).map((o) => o.id);
       assert.deepEqual([...new Set(all)], ["zb0", "zb1", "zb2", "zb3", "zb4", "zb5"]);
@@ -730,7 +741,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const pages = [];
       let offset = 0;
       for (let guard = 0; guard < 20; guard += 1) {
-        const r = await call(formUrl("ed-own2", undefined, offset), "tok-alice");
+        const r = await call(formUrl("ed-own2", undefined, offset, pages[0]?.readScope), "tok-alice");
         assert.equal(r.status, 200, `offset ${offset}`);
         assert.ok(Buffer.byteLength(r.text) <= 64 * 1024);
         pages.push(r.body);
@@ -762,6 +773,115 @@ if (runUnderRootTsx(import.meta.url)) {
     const ok = await call(formUrl("ed-own-ee5"), "tok-alice");
     assert.equal(ok.status, 200);
     assert.equal(ok.body.kind, "ready");
+  });
+
+  test("U01b2a read scope: edit and options share a token; continuation requires the same scope", async () => {
+    const page = await call(url("ed-own1", ""), "tok-alice");
+    const first = await call(formUrl("ed-own1"), "tok-alice");
+    assert.equal(page.status, 200);
+    assert.equal(page.body.kind, "edit");
+    assert.match(page.body.readScope, /^[a-f0-9]{64}$/);
+    assert.equal(first.status, 200);
+    assert.equal(first.body.readScope, page.body.readScope);
+    assert.equal(first.body.attachedOptionsTruncated, false);
+
+    const missing = await call(formUrl("ed-own1", undefined, 100), "tok-alice");
+    assert.equal(missing.status, 409);
+    assert.deepEqual(missing.body, { error: "read_scope_changed" });
+    assert.equal(missing.headers.get("cache-control"), "private, no-store");
+
+    const scope = first.body.readScope;
+    const valid = await call(formUrl("ed-own1", undefined, 100, scope), "tok-alice");
+    assert.equal(valid.status, 200);
+    assert.equal(valid.body.readScope, scope);
+    assert.equal(valid.body.attachedOptionsTruncated, false);
+
+    const duplicate = await call(`${formUrl("ed-own1", undefined, 100, scope)}&readScope=${scope}`, "tok-alice");
+    assert.equal(duplicate.status, 409, "duplicate continuation scope is ambiguous and fails closed");
+    const eventPage = await call(url("ed-staff", "", "event"), "tok-frank");
+    const eventOptions = await call(formUrl("ed-staff", "event"), "tok-frank");
+    assert.equal(eventPage.body.kind, "edit");
+    assert.equal(eventOptions.body.kind, "ready");
+    assert.equal(eventOptions.body.readScope, eventPage.body.readScope,
+      "event-title labels are intentionally excluded from the shared access-scope fingerprint");
+  });
+
+  test("U01b2a continuation scope changes fail closed for active X, video version and attached-event identity", async () => {
+    const originalActiveX = sqlite.prepare(`SELECT active_x_user_id FROM "user" WHERE id = 'u_alice'`).get().active_x_user_id;
+    const originalUpdatedAt = sqlite.prepare("SELECT updated_at FROM videos WHERE id = 'ed-own1'").get().updated_at;
+    const staleAfter = async (label, mutate, restore) => {
+      const first = await call(formUrl("ed-own1"), "tok-alice");
+      assert.equal(first.status, 200, label);
+      const scope = first.body.readScope;
+      try {
+        mutate();
+        const next = await call(formUrl("ed-own1", undefined, 100, scope), "tok-alice");
+        assert.equal(next.status, 409, label);
+        assert.deepEqual(next.body, { error: "read_scope_changed" }, label);
+        assert.equal(next.headers.get("cache-control"), "private, no-store", label);
+      } finally {
+        restore();
+      }
+    };
+
+    await staleAfter(
+      "active X identity",
+      () => sqlite.prepare(`UPDATE "user" SET active_x_user_id = 'alice_y' WHERE id = 'u_alice'`).run(),
+      () => sqlite.prepare(`UPDATE "user" SET active_x_user_id = ? WHERE id = 'u_alice'`).run(originalActiveX),
+    );
+    await staleAfter(
+      "video updated_at",
+      () => sqlite.prepare("UPDATE videos SET updated_at = ? WHERE id = 'ed-own1'").run(originalUpdatedAt + 1),
+      () => sqlite.prepare("UPDATE videos SET updated_at = ? WHERE id = 'ed-own1'").run(originalUpdatedAt),
+    );
+    await staleAfter(
+      "attached event identity",
+      () => sqlite.prepare("INSERT INTO video_events (video_id, event_id) VALUES ('ed-own1', 'ee2')").run(),
+      () => sqlite.prepare("DELETE FROM video_events WHERE video_id = 'ed-own1' AND event_id = 'ee2'").run(),
+    );
+  });
+
+  test("U01b2a attached-event sentinel distinguishes exactly 100 from 101 and never returns more than 100", async () => {
+    const originalPrimary = sqlite.prepare("SELECT primary_event_id FROM videos WHERE id = 'ed-own1'").get().primary_event_id;
+    const originalLinks = sqlite.prepare("SELECT event_id FROM video_events WHERE video_id = 'ed-own1' ORDER BY event_id").all().map((row) => row.event_id);
+    const ids = Array.from({ length: 101 }, (_, index) => `uatt${String(index).padStart(3, "0")}`);
+    for (const id of ids) {
+      sqlite.prepare("INSERT INTO events (id, title, visibility_status, allow_user_video_event_links) VALUES (?, ?, 'private', 0)")
+        .run(id, `Attached ${id}`);
+    }
+    const setAttachedCount = (count) => {
+      sqlite.prepare("DELETE FROM video_events WHERE video_id = 'ed-own1'").run();
+      sqlite.prepare("UPDATE videos SET primary_event_id = NULL WHERE id = 'ed-own1'").run();
+      for (const id of ids.slice(0, count)) {
+        sqlite.prepare("INSERT INTO video_events (video_id, event_id) VALUES ('ed-own1', ?)").run(id);
+      }
+    };
+    try {
+      setAttachedCount(100);
+      const exactly100 = await call(formUrl("ed-own1"), "tok-alice");
+      assert.equal(exactly100.status, 200);
+      assert.equal(exactly100.body.attachedOptionsTruncated, false);
+      assert.equal(exactly100.body.eventOptions.filter((option) => ids.includes(option.id)).length, 100);
+      assert.match(exactly100.body.readScope, /^[a-f0-9]{64}$/);
+      const later = await call(formUrl("ed-own1", undefined, 100, exactly100.body.readScope), "tok-alice");
+      assert.equal(later.status, 200);
+      assert.equal(later.body.attachedOptionsTruncated, false);
+      assert.equal(later.body.readScope, exactly100.body.readScope);
+
+      setAttachedCount(101);
+      const moreThan100 = await call(formUrl("ed-own1"), "tok-alice");
+      assert.equal(moreThan100.status, 200);
+      assert.equal(moreThan100.body.attachedOptionsTruncated, true);
+      assert.equal(moreThan100.body.eventOptions.filter((option) => ids.includes(option.id)).length, 100);
+      assert.equal(moreThan100.body.eventOptions.some((option) => option.id === ids[100]), false);
+    } finally {
+      sqlite.prepare("DELETE FROM video_events WHERE video_id = 'ed-own1'").run();
+      sqlite.prepare("UPDATE videos SET primary_event_id = ? WHERE id = 'ed-own1'").run(originalPrimary);
+      for (const eventId of originalLinks) {
+        sqlite.prepare("INSERT INTO video_events (video_id, event_id) VALUES ('ed-own1', ?)").run(eventId);
+      }
+      sqlite.prepare("DELETE FROM events WHERE id LIKE 'uatt%'").run();
+    }
   });
 
   test("read-only: no D1 write and no cookie on any edit endpoint; response summary (informational)", () => {

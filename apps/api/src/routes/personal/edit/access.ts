@@ -38,6 +38,56 @@ export function pageEventIds(video: VideoRow, videoEventIds: readonly string[]):
   return ids;
 }
 
+/**
+ * A deterministic continuation guard, not an authorization token or an atomic D1 snapshot.
+ * It binds the authenticated/active-X identity, video version, resolved access flags and ordered loaded event IDs.
+ * Event titles are deliberately excluded: the form-options access projection does not load them.
+ */
+export async function editReadScopeOf(args: {
+  userId: string;
+  activeXId: string | null;
+  video: Pick<VideoRow, "id" | "updated_at">;
+  access: EditAccess;
+  eventIds: readonly string[];
+}): Promise<string> {
+  const { access } = args;
+  const payload = JSON.stringify({
+    version: 1,
+    userId: args.userId,
+    activeXId: args.activeXId,
+    video: [args.video.id, args.video.updated_at],
+    privilegeMode: access.privilegeMode,
+    ownership: [
+      access.ownership.isCreatorOwner,
+      access.ownership.isCollaboratorOwner,
+      access.ownership.isOwner,
+    ],
+    canOfferAdminMode: access.canOfferAdminMode,
+    canOfferEventMode: access.canOfferEventMode,
+    membershipHint: access.membershipHint,
+    sections: [
+      access.sections.identity,
+      access.sections.basics,
+      access.sections.youtube,
+      access.sections.credits,
+      access.sections.descriptions,
+      access.sections.members,
+      access.sections.memberChapters,
+      access.sections.primaryEvent,
+      access.sections.visibility,
+      access.sections.permissions,
+    ],
+    sectionEventSources: access.sectionEventSources
+      ? Object.entries(access.sectionEventSources).map(([section, source]) => [section, source.eventId])
+      : null,
+    eventId: access.eventId,
+    canEditAnySection: access.canEditAnySection,
+    eventIds: [...args.eventIds],
+  });
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 /** CURRENT loadEffectiveOwnerEditableFieldSet / loadGeneralEditableFieldSet over the rows the data statement read. */
 export function ownerEditableFields(video: VideoRow, data: EditData): Set<GeneralEditableFieldKey> {
   const globalFields = (): Set<GeneralEditableFieldKey> => {

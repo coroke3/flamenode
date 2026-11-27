@@ -23,7 +23,7 @@ import {
   type ArmRows,
 } from "../entry/rows.ts";
 import { candidateArms, customQuestionArm, softwareArms, stageQuestionArm } from "../entry/sql.ts";
-import { buildAccessContext, decideEditPage, normalizePrivilegeMode, pageEventIds } from "./access.ts";
+import { buildAccessContext, decideEditPage, editReadScopeOf, normalizePrivilegeMode, pageEventIds } from "./access.ts";
 import { approvedIdsJson, editDataOf, editStatementSql, parseDataRows, type VideoRow } from "./data.ts";
 
 // CURRENT: app/(auth)/dashboard/edit/[id]/page.tsx (the part that feeds VideoForm besides the video's own values):
@@ -37,13 +37,13 @@ import { approvedIdsJson, editDataOf, editStatementSql, parseDataRows, type Vide
 const MAX_STAGE_ANSWER_ROWS = 4;
 /** Custom answer rows of the video (CURRENT: one row per question, unbounded). One extra row detects a cut. */
 export const MAX_FORM_CUSTOM_ANSWERS = 100;
-/** Attached events listed with the options (CURRENT: unbounded; same cap as MAX_EDIT_EVENTS). */
+/** Attached events listed with the options (CURRENT: unbounded). One extra sentinel row detects overflow. */
 const MAX_FORM_ATTACHED_EVENTS = 100;
 /**
  * Every arm is bounded: access arms 204 (video 1, vevent 100, staff 100, mine 1, pol 2) + accepting 100 + attached 100
- * + questions 200 + stage settings 200 + answers 101 + stage question / answer rows 10 + software 160 + icon 49 + channel 49.
+ * + questions 200 + stage settings 200 + answers 101 + stage question / answer rows 10 + software 160 + icon 49 + channel 49 + one overflow receipt.
  */
-const MAX_FORM_ROWS = 1200;
+const MAX_FORM_ROWS = 1201;
 
 interface OptionRow {
   id: string;
@@ -77,7 +77,7 @@ const optionObject = (alias: string) =>
 /**
  * The form-only part of the data statement (see editStatementSql("form")).
  * acc = acceptingEntriesWhere(now) AND allow_user_video_event_links = 1 (CURRENT has no ORDER BY; id makes the page deterministic).
- * att = the events the video is attached to (video_events + primary), whatever their status; first page only.
+ * att_probe = up to 101 attached events (video_events + primary), whatever their status; att returns the first 100 only.
  * stq = CURRENT readStagePermissionCustomAnswers' stage questions of the attached events (limit 4 + 1 to detect the throw).
  */
 function formExtra() {
@@ -96,11 +96,12 @@ function formExtra() {
           AND events.allow_user_video_event_links = 1
         ORDER BY events.id
         LIMIT ${ENTRY_PAGE_ROWS} OFFSET ?4),
-      att AS (
+      att_probe AS (
         SELECT ${OPTION_COLUMNS} FROM events
         WHERE ?4 = 0 AND events.id IN (SELECT event_id FROM ev)
         ORDER BY events.id
-        LIMIT ${MAX_FORM_ATTACHED_EVENTS}),
+        LIMIT ${MAX_FORM_ATTACHED_EVENTS + 1}),
+      att AS (SELECT * FROM att_probe LIMIT ${MAX_FORM_ATTACHED_EVENTS}),
       opt AS (SELECT id FROM acc UNION SELECT id FROM att),
       stq AS (
         SELECT id, event_id, question_key, label, sort_order, is_active FROM event_custom_questions
@@ -110,6 +111,7 @@ function formExtra() {
     arms: [
       `SELECT 'acc' AS k, json_patch(${optionObject("acc")}, json_object('is_att', acc.is_att)) AS j FROM acc`,
       `SELECT 'att' AS k, ${optionObject("att")} AS j FROM att`,
+      `SELECT 'att_overflow' AS k, json_object('truncated', EXISTS (SELECT 1 FROM att_probe LIMIT 1 OFFSET ${MAX_FORM_ATTACHED_EVENTS})) AS j`,
       questions.sql,
       stage.sql,
       // initialCustomAnswers: the video's answers to the active general questions of the option events
@@ -218,6 +220,28 @@ export const personalEditFormOptionsRoutes = new Hono<AppEnv>().get("/:id/form-o
     return c.json({ kind: "no_access" } satisfies EditFormOptionsResponse);
   }
 
+  const eventIds = pageEventIds(video, data.videoEventIds);
+  const readScope = await editReadScopeOf({
+    userId: user.id,
+    activeXId: user.active_x_user_id,
+    video,
+    access: decision.access,
+    eventIds,
+  });
+  if (offset > 0) {
+    const requestedScopes = c.req.queries("readScope");
+    if (requestedScopes?.length !== 1 || requestedScopes[0] !== readScope) {
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ error: "read_scope_changed" }, 409);
+    }
+  }
+
+  const overflowRows = armOf<{ truncated: number }>(arms, "att_overflow");
+  if (overflowRows.length !== 1 || (overflowRows[0].truncated !== 0 && overflowRows[0].truncated !== 1)) {
+    throw new Error("form_attached_overflow_invalid");
+  }
+  const attachedOptionsTruncated = offset === 0 && overflowRows[0].truncated === 1;
+
   const accepting = armOf<OptionRow>(arms, "acc");
   // ALL attached events come first on page 0 (so a byte cut never drops them), each exactly once. Accepting rows that are
   // attached are skipped on every page (they are on page 0 already), so no page repeats them and offset accounting has no gaps.
@@ -244,6 +268,8 @@ export const personalEditFormOptionsRoutes = new Hono<AppEnv>().get("/:id/form-o
   const hasCreatorX = Boolean(video.creator_x_user_id);
   const rest = {
     kind: "ready" as const,
+    readScope,
+    attachedOptionsTruncated,
     customAnswers: customAnswersOf(answerRows.slice(0, MAX_FORM_CUSTOM_ANSWERS)),
     customAnswersTruncated: answerRows.length > MAX_FORM_CUSTOM_ANSWERS,
     stagePermissionAnswers: stagePermissionInitialOf(video, data.videoEventIds, arms),

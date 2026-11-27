@@ -46,7 +46,7 @@ async function readEdit({ api, videoId, mode, signal }: {
   if (page.membersTruncated || page.collabTruncated) return UNAVAILABLE;
 
   // The unregistered shell uses completed options traversal as a read gate.
-  const optionsResult = await api.getFormOptions(videoId, mode, signal);
+  const optionsResult = await api.getFormOptions(videoId, mode, page.readScope, signal);
   return optionsResult.status === "ok" ? result : optionsResult;
 }
 
