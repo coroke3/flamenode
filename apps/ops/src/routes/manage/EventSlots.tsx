@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { EmptyState } from "../../components/shared/EmptyState.js";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
 import { listSlots, normalizeSlotFilter, type ManageSlotsList } from "../../api/manageSlots.js";
 import { SlotList, type SlotListOperation, type SlotListActionResult } from "./SlotList.js";
@@ -66,12 +67,14 @@ export function EventSlotsView({ eventId, status, data, writeActions, onChanged,
       onChanged={onChanged} writeBlocked={writeBlocked} canStartWrite={canStartWrite} />}
     <section className="manage-section" aria-label="枠一覧">
       <h2 className="fn-console-eyebrow">{`枠一覧 (${data.slots.length})`}</h2>
-      <SlotList eventId={eventId} slots={data.slots}
-        partGapMinutes={data.event.slot_part_gap_minutes} parts={data.event.parts}
-        onAction={writes?.onAction} onChanged={onChanged} onClearFailure={onClearFailure}
-        writeBlocked={writeBlocked} canStartWrite={canStartWrite}
-        canManageSubmittedSlots={Boolean(writes?.canManageSubmittedSlots)} />
-      {data.total === 0 && !writes && <p>枠の追加機能は移行中です。</p>}
+      {data.total === 0 ? <EmptyState tone="warning" title="枠はまだありません"
+        description={writes ? "上のフォームから作成してください。" : "枠の追加機能は移行中です。"}
+        actions={[{ href: url, label: "イベント概要へ", variant: "ghost" }]} />
+        : <SlotList eventId={eventId} slots={data.slots}
+          partGapMinutes={data.event.slot_part_gap_minutes} parts={data.event.parts}
+          onAction={writes?.onAction} onChanged={onChanged} onClearFailure={onClearFailure}
+          writeBlocked={writeBlocked} canStartWrite={canStartWrite}
+          canManageSubmittedSlots={Boolean(writes?.canManageSubmittedSlots)} />}
     </section>
   </div>;
 }

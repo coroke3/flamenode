@@ -1232,3 +1232,58 @@ test("MIG-0722 U02a D-17-7: 500-row cap retains CURRENT description without a ne
     assert.doesNotMatch(html, /最大500件まで表示しています|条件を絞り込んでください/);
   }
 });
+
+test("MIG-0722 U02a: CURRENT zero-total empty state is distinct from an empty filter", () => {
+  let invoked = 0;
+  const call = async () => { invoked++; return { ok: true }; };
+  const complete = { onGenerate: call, onClearAvailable: call, onAction: call };
+  for (const status of ["all", "available", "reserved", "submitted"]) {
+    for (const writeActions of [undefined, { onAction: call }, complete]) {
+      const html = render(React.createElement(EventSlotsView, {
+        eventId: "ev id", status, writeActions,
+        data: data({ statusFilter: status, total: 0, slots: [],
+          counts: { available: 0, reserved: 0, submitted: 0 } }),
+      }));
+      const dom = new JSDOM(html);
+      try {
+        const doc = dom.window.document;
+        const section = doc.querySelector('section[aria-label="枠一覧"]');
+        assert.ok(section);
+        assert.match(section.textContent, /枠一覧 \(0\)/);
+        const empty = section.querySelector(".fn-empty-state.empty-tone-warning");
+        assert.ok(empty);
+        assert.equal(empty.querySelector(".empty-title")?.textContent, "枠はまだありません");
+        assert.equal(empty.querySelector(".empty-description")?.textContent,
+          writeActions === complete ? "上のフォームから作成してください。" : "枠の追加機能は移行中です。");
+        const back = empty.querySelector("a.fn-btn-ghost");
+        assert.equal(back?.getAttribute("href"), "/manage/events/ev%20id");
+        assert.equal(back?.textContent, "イベント概要へ");
+        assert.equal(Boolean(doc.querySelector('section[aria-label="枠を追加・一括編集"]')),
+          writeActions === complete);
+        assert.equal(section.querySelector("table"), null);
+        assert.equal(section.querySelector("button"), null);
+      } finally {
+        dom.window.close();
+      }
+    }
+  }
+  for (const writeActions of [undefined, complete]) {
+    const html = render(React.createElement(EventSlotsView, {
+      eventId: "ev id", status: "available", writeActions,
+      data: data({ statusFilter: "available", total: 3, slots: [],
+        counts: { available: 0, reserved: 2, submitted: 1 } }),
+    }));
+    const dom = new JSDOM(html);
+    try {
+      const section = dom.window.document.querySelector('section[aria-label="枠一覧"]');
+      assert.ok(section);
+      assert.match(section.textContent, /枠一覧 \(0\)/);
+      assert.match(section.textContent, /枠はまだありません。/);
+      assert.equal(section.querySelector(".fn-empty-state"), null);
+      assert.doesNotMatch(section.textContent, /上のフォームから作成してください|枠の追加機能は移行中/);
+    } finally {
+      dom.window.close();
+    }
+  }
+  assert.equal(invoked, 0, "render must not dispatch any write");
+});
