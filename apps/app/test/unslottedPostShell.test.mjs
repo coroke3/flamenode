@@ -1600,3 +1600,64 @@ test("U03a ISSUE-703: one-shot flush registration during rapid event selections"
     dom.window.localStorage.clear();
   }
 });
+
+
+// Exercise the owner-history bound through actual committed React mounts and
+// browser-local storage. Other identities are pristine and must not create drafts.
+for (const interveningOwners of [63, 64]) {
+  test("U03a ISSUE-703: departed draft owner after " + interveningOwners + " distinct committed owners", async () => {
+    dom.window.localStorage.clear();
+    const user = "owner-bound-" + interveningOwners;
+    const key = buildFormDraftStorageKey({
+      authUserId: user, formId: "unslotted-shell:alice", schemaVersion: "unslotted-shell-v1",
+    });
+    const container = dom.window.document.createElement("div");
+    dom.window.document.body.append(container);
+    const root = createRoot(container);
+    let latestSuccess;
+    const renderVideoForm = args => {
+      latestSuccess = args.onSubmitSuccess;
+      return renderStub(args);
+    };
+    const render = authUserId => React.createElement(UnslottedPostShell,
+      props({ draftAuthUserId: authUserId, renderVideoForm }));
+    try {
+      await act(async () => root.render(render(user)));
+      await act(async () => selected(container, "none").click());
+      const departedSuccess = latestSuccess;
+      assert.equal(typeof departedSuccess, "function");
+
+      for (let i = 0; i < interveningOwners; i++) {
+        await act(async () => root.render(render(user + "-other-" + i)));
+        assert.equal(container.querySelector("form"), null, "pristine identity has no child");
+      }
+      const before = dom.window.localStorage.getItem(key);
+      assert.ok(before, "dirty departed shell flushed its draft");
+      assert.deepEqual(JSON.parse(before).value, { affiliation: "none", selectedEventId: "" });
+      assert.equal(dom.window.localStorage.length, 1, "pristine identities wrote no drafts");
+
+      await act(async () => departedSuccess());
+      if (interveningOwners === 63) {
+        assert.equal(dom.window.localStorage.getItem(key), null,
+          "the oldest retained owner may still clear its own draft");
+      } else {
+        assert.equal(dom.window.localStorage.getItem(key), before,
+          "evicted ownership must preserve the draft rather than delete it");
+        await act(async () => root.render(render(user)));
+        assert.equal(selected(container, "none").checked, true, "returning identity restores its draft");
+        const returnedSuccess = latestSuccess;
+        assert.notEqual(returnedSuccess, departedSuccess);
+        await act(async () => departedSuccess());
+        assert.equal(dom.window.localStorage.getItem(key), before,
+          "the old owner remains fenced after its key is registered again");
+        await act(async () => returnedSuccess());
+        assert.equal(dom.window.localStorage.getItem(key), null,
+          "the new committed owner may clear its own draft");
+      }
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      dom.window.localStorage.clear();
+    }
+  });
+}
