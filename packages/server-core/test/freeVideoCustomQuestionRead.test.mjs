@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
-import { loadGeneralCustomQuestionsForFreeVideo, decodeGeneralCustomQuestionPolicyProjection, MAX_VIDEO_CUSTOM_QUESTIONS_READ } from "../src/video/freeVideoCustomQuestionRead.ts";
+import { loadGeneralCustomQuestionsForFreeVideo, loadGeneralCustomQuestionsForSlotSubmission, decodeGeneralCustomQuestionPolicyProjection, MAX_VIDEO_CUSTOM_QUESTIONS_READ } from "../src/video/freeVideoCustomQuestionRead.ts";
 import { loadEligibleUnslottedVideoRequiredFields } from "../src/video/requiredVideoFields.ts";
 
 function setup() {
@@ -123,4 +123,86 @@ test("MIG-0651 SA-086: malformed, foreign and oversized custom policy projection
         "id", "ev-one", "key", "label", "text", 0, null, null, 0, "review", 100,
       ])), "ev-one",
     ), /video_custom_question_projection_limit_or_shape_invalid/);
+});
+
+test("MIG-0651 SA-088 general questions: complete multi-event order and per-event limits", async () => {
+  const { sqlite, db, statements } = setup();
+  try {
+    for (const id of ["ev-a", "ev-b", "ev-c", "ev-d", "ev-other"]) {
+      insert(sqlite, "events", { id, title: id });
+    }
+    const put = (event, id, extra = {}) => insert(sqlite, "event_custom_questions", {
+      id, event_id: event, question_key: id, label: id,
+      type: "text", required: 0, is_active: 1, sort_order: 1, ...extra,
+    });
+    put("ev-a", "a-last", { sort_order: 9 });
+    put("ev-a", "a-first", { sort_order: 0, required: 1 });
+    put("ev-b", "b-first", { type: "checkbox", options_json: '[" A ","B","A"]' });
+    put("ev-c", "c-first", { max_length: 12 });
+    put("ev-d", "d-first");
+    put("ev-b", "b-stage", { question_key: "stage_permission" });
+    put("ev-b", "b-stage2", { question_key: "stage_permission_extra" });
+    put("ev-b", "b-not-stage", { question_key: "stage_permissionX" });
+    put("ev-b", "b-inactive", { is_active: 0 });
+    put("ev-other", "other");
+    const ids = ["ev-d", "ev-b", "", "ev-a", "ev-c", "ev-b"];
+    const rows = await loadGeneralCustomQuestionsForSlotSubmission(db, ids);
+    assert.deepEqual(rows.map(r => r.id), ["a-first","a-last","b-first","b-not-stage","c-first","d-first"]);
+    assert.deepEqual(rows.find(r => r.id === "b-first").options, ["A", "B"]);
+    assert.equal(rows[0].required, true);
+    assert.equal(rows[4].max_length, 12);
+    assert.equal(statements.length, 1);
+    assert.ok(statements[0].params.includes(73));
+    assert.ok(statements[0].params.length <= 9);
+    const expected = [];
+    for (const id of ["ev-a","ev-b","ev-c","ev-d"]) expected.push(...await loadGeneralCustomQuestionsForFreeVideo(db, id));
+    assert.deepEqual(rows, expected);
+
+    // A sparse second event cannot hide overflow in the first event.
+    for (let i=0; i<16; i++) put("ev-a", "extra_"+i);
+    statements.length = 0;
+    const exact = await loadGeneralCustomQuestionsForSlotSubmission(db, ids);
+    assert.equal(exact.filter(r => r.event_id === "ev-a").length,18);
+    assert.equal(statements.length,1);
+    put("ev-a", "overflow");
+    statements.length=0;
+    await assert.rejects(loadGeneralCustomQuestionsForSlotSubmission(db, ids), /video_custom_question_read_limit_exceeded/);
+    assert.equal(statements.length,1);
+    sqlite.prepare("DELETE FROM event_custom_questions WHERE id='overflow'").run();
+    for (const event of ["ev-b","ev-c","ev-d"]) {
+      const n = exact.filter(r => r.event_id===event).length;
+      for (let i=n;i<18;i++) put(event,event+"_extra_"+i);
+    }
+    const full = await loadGeneralCustomQuestionsForSlotSubmission(db, ids);
+    assert.equal(full.length,72);
+    put("ev-d","global-overflow");
+    await assert.rejects(loadGeneralCustomQuestionsForSlotSubmission(db, ids), /video_custom_question_read_limit_exceeded/);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 SA-088 general questions: no IDs means no reads and >80 preserves CURRENT chunk ordering", async () => {
+  const { sqlite, db, statements } = setup();
+  try {
+    assert.deepEqual(await loadGeneralCustomQuestionsForSlotSubmission(db, ["",""]), []);
+    assert.equal(statements.length,0);
+    const ids = Array.from({length:82},(_,i)=>"ev-"+String(81-i).padStart(2,"0"));
+    for (const id of ids) {
+      insert(sqlite,"events",{id,title:id});
+      insert(sqlite,"event_custom_questions",{id:"q-"+id,event_id:id,question_key:"q",label:id,type:"text",is_active:1});
+    }
+    const rows = await loadGeneralCustomQuestionsForSlotSubmission(db,[...ids,ids[0],""]);
+    const expected = [...ids.slice(0,80).sort(),...ids.slice(80).sort()];
+    assert.deepEqual(rows.map(r=>r.event_id),expected);
+    assert.equal(statements.length,2);
+    assert.ok(statements[0].params.includes(1441));
+    assert.ok(statements[1].params.includes(37));
+    assert.ok(statements.every(s=>s.params.length<=85));
+    // Overflow in the later chunk must reject the entire read, not return the first.
+    for(let i=0;i<18;i++) insert(sqlite,"event_custom_questions",{
+      id:"extra-"+i,event_id:ids[80],question_key:"extra-"+i,label:"Extra",type:"text",is_active:1,
+    });
+    statements.length=0;
+    await assert.rejects(loadGeneralCustomQuestionsForSlotSubmission(db,ids),/video_custom_question_read_limit_exceeded/);
+    assert.equal(statements.length,2);
+  } finally { sqlite.close(); }
 });

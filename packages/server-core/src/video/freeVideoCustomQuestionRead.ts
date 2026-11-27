@@ -1,4 +1,4 @@
-import { and, asc, eq, not, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, not, sql } from "drizzle-orm";
 import { eventCustomQuestions } from "@flamenode/db/schema";
 import {
   parseSubmissionQuestionOptionsJson,
@@ -100,17 +100,8 @@ export function decodeGeneralCustomQuestionPolicyProjection(
 const STAGE_KEY = "stage_permission";
 const STAGE_PREFIX = "stage_permission_";
 
-/**
- * Unmounted SA-086 candidate. Matches CURRENT's active, non-stage general
- * question predicate and deterministic event/sort/id ordering. One bounded D1
- * read, and fail-closed if legacy rows exceed the approved per-event cap.
- */
-export async function loadGeneralCustomQuestionsForFreeVideo(
-  db: ServerCoreDb,
-  eventId: string | null,
-): Promise<LoadedGeneralCustomQuestion[]> {
-  if (!eventId) return [];
-  const rows = await db.select({
+async function readGeneralQuestionRows(db: ServerCoreDb, ids: readonly string[]) {
+  return db.select({
     id: eventCustomQuestions.id,
     event_id: eventCustomQuestions.event_id,
     question_key: eventCustomQuestions.question_key,
@@ -126,7 +117,7 @@ export async function loadGeneralCustomQuestionsForFreeVideo(
   })
     .from(eventCustomQuestions)
     .where(and(
-      eq(eventCustomQuestions.event_id, eventId),
+      ids.length === 1 ? eq(eventCustomQuestions.event_id, ids[0]) : inArray(eventCustomQuestions.event_id, [...ids]),
       eq(eventCustomQuestions.is_active, 1),
       not(sql`(
         ${eventCustomQuestions.question_key} = ${STAGE_KEY}
@@ -138,10 +129,12 @@ export async function loadGeneralCustomQuestionsForFreeVideo(
       asc(eventCustomQuestions.sort_order),
       asc(eventCustomQuestions.id),
     )
-    .limit(MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1);
-  if (rows.length > MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
-    throw new Error("video_custom_question_read_limit_exceeded");
-  }
+    .limit(ids.length * MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1);
+}
+
+type GeneralQuestionRow = Awaited<ReturnType<typeof readGeneralQuestionRows>>[number];
+
+function normalizeGeneralQuestionRows(rows: readonly GeneralQuestionRow[]): LoadedGeneralCustomQuestion[] {
   return rows.map((row) => ({
     id: row.id,
     event_id: row.event_id,
@@ -160,4 +153,45 @@ export async function loadGeneralCustomQuestionsForFreeVideo(
       updated_at: row.updated_at,
     },
   }));
+}
+
+/** CURRENT's chunk size, not a new event-selection cap. Normal SA-088
+ * selections of <=4 events produce one SELECT with LIMIT <=73. The admin
+ * compatibility path can exceed four during preflight; preserve CURRENT's
+ * chunk order and do not silently truncate or reject it here.
+ * Unmounted: the final S3 path needs a fused receipt and same-batch CAS.
+ */
+const GENERAL_QUESTION_EVENT_CHUNK_SIZE = 80;
+
+export async function loadGeneralCustomQuestionsForSlotSubmission(
+  db: ServerCoreDb,
+  eventIds: readonly string[],
+): Promise<LoadedGeneralCustomQuestion[]> {
+  const ids = Array.from(new Set(eventIds.filter(Boolean)));
+  const out: LoadedGeneralCustomQuestion[] = [];
+  for (let i = 0; i < ids.length; i += GENERAL_QUESTION_EVENT_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + GENERAL_QUESTION_EVENT_CHUNK_SIZE);
+    const rows = await readGeneralQuestionRows(db, chunk);
+    if (rows.length > chunk.length * MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
+      throw new Error("video_custom_question_read_limit_exceeded");
+    }
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const count = (counts.get(row.event_id) ?? 0) + 1;
+      if (count > MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
+        throw new Error("video_custom_question_read_limit_exceeded");
+      }
+      counts.set(row.event_id, count);
+    }
+    out.push(...normalizeGeneralQuestionRows(rows));
+  }
+  return out;
+}
+
+/** SA-086 retains its existing single-event semantics and exact predicate. */
+export async function loadGeneralCustomQuestionsForFreeVideo(
+  db: ServerCoreDb,
+  eventId: string | null,
+): Promise<LoadedGeneralCustomQuestion[]> {
+  return loadGeneralCustomQuestionsForSlotSubmission(db, eventId ? [eventId] : []);
 }
