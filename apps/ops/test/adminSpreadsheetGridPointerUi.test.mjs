@@ -1286,3 +1286,142 @@ test("MIG-0737 U01 double click: explicit save, undo and redo retain opened row 
     } finally { await ui.cleanup(); }
   }
 });
+
+
+test("MIG-0737 U01 editor copy: delivered lower-case Ctrl/Cmd+C copies the whole live draft, not the selected substring", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const copied = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+    writeText: async value => { copied.push(value); },
+  } });
+  const ui = await mount({ allowMutations: true });
+  try {
+    const input = await editTitle(ui);
+    const value = 'Draft <>& "日本語"';
+    await setInput(input, value);
+    input.setSelectionRange(1, 3, "backward");
+    for (let mask = 0; mask < 16; mask++) {
+      const modifiers = { ctrlKey: Boolean(mask & 1), metaKey: Boolean(mask & 2),
+        altKey: Boolean(mask & 4), shiftKey: Boolean(mask & 8) };
+      for (const character of ["c", "C", "x"]) {
+        const before = copied.length;
+        const expected = character === "c" && (modifiers.ctrlKey || modifiers.metaKey);
+        assert.equal((await key(input, character, modifiers)).defaultPrevented, expected);
+        assert.deepEqual(copied.slice(before), expected ? [value] : []);
+        assert.equal(input.value, value);
+        assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [1, 3, "backward"]);
+        assert.ok(document.activeElement === input);
+      }
+    }
+    await setInput(input, "");
+    assert.equal((await key(input, "c", { metaKey: true })).defaultPrevented, true);
+    assert.equal(copied.at(-1), "");
+    assert.deepEqual(selected(ui), ["0:1"]);
+    assertNoEffects(ui);
+  } finally {
+    await ui.cleanup();
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
+
+test("MIG-0737 U01 editor copy: unavailable/rejected Clipboard API falls back and always removes the temporary textarea", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const previousExec = Object.getOwnPropertyDescriptor(document, "execCommand");
+  try {
+    for (const mode of ["unavailable", "reject", "throw"]) {
+      const calls = [];
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: mode === "unavailable"
+        ? undefined : { writeText: async () => { throw Error("denied"); } } });
+      Object.defineProperty(document, "execCommand", { configurable: true, value: command => {
+        const textarea = document.activeElement;
+        calls.push([command, textarea.tagName, textarea.value, textarea.hasAttribute("readonly"),
+          textarea.selectionStart, textarea.selectionEnd]);
+        if (mode === "throw") throw Error("fallback denied");
+        return true;
+      } });
+      const ui = await mount({ allowMutations: true });
+      try {
+        const input = await editTitle(ui);
+        input.setSelectionRange(1, 3, "backward");
+        const before = document.querySelectorAll("textarea").length;
+        assert.equal((await key(input, "c", { ctrlKey: true })).defaultPrevented, true);
+        assert.deepEqual(calls, [["copy", "TEXTAREA", "Unsaved", true, 0, 7]]);
+        assert.equal(document.querySelectorAll("textarea").length, before);
+        assert.ok(document.activeElement === input);
+        assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [1, 3, "backward"]);
+        assert.equal(input.value, "Unsaved");
+        assertNoEffects(ui);
+      } finally { await ui.cleanup(); }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+    if (previousExec) Object.defineProperty(document, "execCommand", previousExec);
+    else delete document.execCommand;
+  }
+});
+
+test("MIG-0737 U01 editor copy: late clipboard rejection cannot retry after draft, page or focus changes", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const previousExec = Object.getOwnPropertyDescriptor(document, "execCommand");
+  let fallbackCalls = 0;
+  Object.defineProperty(document, "execCommand", { configurable: true, value: () => { fallbackCalls++; return true; } });
+  try {
+    for (const mode of ["value", "reopen", "page", "focus", "context"]) {
+      let rejectCopy;
+      const copied = [];
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: value => { copied.push(value); return new Promise((_, reject) => { rejectCopy = reject; }); },
+      } });
+      const ui = await mount({ allowMutations: true });
+      const external = document.createElement("button");
+      document.body.append(external);
+      try {
+        const input = await editTitle(ui);
+        assert.equal((await key(input, "c", { ctrlKey: true })).defaultPrevented, true);
+        assert.deepEqual(copied, ["Unsaved"]);
+        if (mode === "value") await setInput(input, "New draft");
+        else if (mode === "reopen") {
+          await key(input, "Escape");
+          await doubleClickCell(cell(ui, "0:1"));
+          assert.equal(cell(ui, "0:1").querySelector("input").value, "Alpha");
+        } else if (mode === "page") await ui.render({ data: { ...data } });
+        else if (mode === "focus") external.focus();
+        else await ui.render({ data: { ...data, page: data.page + 1 } });
+        await React.act(async () => rejectCopy(Error("late denial")));
+        assert.equal(fallbackCalls, 0);
+        if (mode === "focus") assert.ok(document.activeElement === external);
+        if (mode === "value") assert.equal(input.value, "New draft");
+        assertNoEffects(ui);
+      } finally { await ui.cleanup(); external.remove(); }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+    if (previousExec) Object.defineProperty(document, "execCommand", previousExec);
+    else delete document.execCommand;
+  }
+});
+
+test("MIG-0737 U01 editor copy: retired same-batch input cannot write to the clipboard", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const copied = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async value => { copied.push(value); } } });
+  const ui = await mount({ allowMutations: true });
+  try {
+    const input = await editTitle(ui);
+    const cancel = new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const copy = new dom.window.KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true });
+    await React.act(async () => { input.dispatchEvent(cancel); input.dispatchEvent(copy); });
+    assert.equal(cancel.defaultPrevented, true);
+    assert.equal(copy.defaultPrevented, true);
+    assert.deepEqual(copied, []);
+    assert.equal(cell(ui, "0:1").querySelector("input"), null);
+    assertNoEffects(ui);
+  } finally {
+    await ui.cleanup();
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});

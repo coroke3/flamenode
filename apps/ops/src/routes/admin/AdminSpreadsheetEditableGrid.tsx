@@ -374,6 +374,46 @@ export function AdminSpreadsheetEditableGrid({
     }
   }
 
+  async function copyEditorValue(editId: number, input: HTMLInputElement): Promise<void> {
+    const draft = liveSelection.current;
+    if (!draft || draft.id !== editId) return;
+    const doc = input.ownerDocument;
+    const isLive = () => liveSelection.current === draft && !draft.invalidated && !selectionConflict &&
+      isCurrent() && displayedPage.current === data && editorRef.current === input &&
+      input.isConnected && !input.disabled;
+    if (!isLive()) return;
+    try {
+      await navigator.clipboard.writeText(draft.value);
+      return;
+    } catch {
+      // CURRENT falls back to a temporary textarea. Never retry a retired or changed draft.
+    }
+    if (!isLive() || doc.activeElement !== input || typeof doc.execCommand !== "function") return;
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const direction = input.selectionDirection;
+    const textarea = doc.createElement("textarea");
+    textarea.value = draft.value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    try {
+      doc.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      if (isLive()) doc.execCommand("copy");
+    } catch {
+      // Like CURRENT, the editor shortcut has no success/failure notice.
+    } finally {
+      const restore = doc.activeElement === textarea || doc.activeElement === input;
+      textarea.remove();
+      if (restore && isLive()) {
+        input.focus();
+        if (start !== null && end !== null) input.setSelectionRange(start, end, direction ?? "none");
+      }
+    }
+  }
+
   function focusGridCell(focus: GridCell): void {
     setFocusedCell(focus);
     // The next key originates from the selected endpoint, including after whole-row/column selection.
@@ -818,6 +858,11 @@ export function AdminSpreadsheetEditableGrid({
                           if (draft?.id === currentSelection.id && !draft.invalidated) setCellEdit({ ...draft, value: e.target.value });
                         }}
                         onKeyDown={event => {
+                          if ((event.ctrlKey || event.metaKey) && event.key === "c") {
+                            event.preventDefault();
+                            void copyEditorValue(currentSelection.id, event.currentTarget);
+                            return;
+                          }
                           if (event.key === "Escape") {
                             event.preventDefault();
                             cancelCellEdit(currentSelection.id, { row: ri, col: columns.indexOf(c) });
